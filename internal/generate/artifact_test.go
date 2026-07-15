@@ -25,6 +25,10 @@ func TestGenerateWarnOnlyReachesRemainingStubs(t *testing.T) { // V17
 	for _, provider := range []ir.Provider{
 		ir.ProviderVapi, ir.ProviderDeepgram,
 	} {
+	// LiveKit, Pipecat, and ElevenLabs are real drivers now; Vapi and Deepgram
+	// are still stubs.
+	// LiveKit, Pipecat, and ElevenLabs are real drivers now; only these are stubs.
+	for _, provider := range []ir.Provider{ir.ProviderVapi, ir.ProviderDeepgram} {
 		t.Run(string(provider), func(t *testing.T) {
 			artifact, err := Generate(agent, compilerTarget(agent, provider), target.Default())
 			if err == nil || !strings.Contains(err.Error(), string(provider)+" driver is not implemented") {

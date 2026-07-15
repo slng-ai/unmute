@@ -362,6 +362,109 @@ if __name__ == "__main__":
     "OPENAI_API_KEY",
     "SLNG_API_KEY"
   ],
+  "bindings": [
+    {
+      "target": "pipecat-dev",
+      "role": "listen",
+      "binding": {
+        "provider": "deepgram",
+        "model": "nova-3"
+      }
+    },
+    {
+      "target": "pipecat-dev",
+      "role": "turn",
+      "binding": {
+        "provider": "local",
+        "model": "silero"
+      }
+    },
+    {
+      "target": "pipecat-dev",
+      "role": "speak",
+      "profile": "front_desk",
+      "binding": {
+        "provider": "slng",
+        "model": "slng/deepgram/aura:2-en",
+        "voice": "aura-2-thalia-en"
+      }
+    },
+    {
+      "target": "pipecat-dev",
+      "role": "speak",
+      "profile": "specialist",
+      "binding": {
+        "provider": "slng",
+        "model": "slng/deepgram/aura:2-en",
+        "voice": "aura-2-orion-en"
+      }
+    },
+    {
+      "target": "pipecat-dev",
+      "role": "reason",
+      "profile": "careful_reasoning",
+      "binding": {
+        "provider": "openai",
+        "model": "gpt-4o"
+      }
+    },
+    {
+      "target": "pipecat-dev",
+      "role": "reason",
+      "profile": "fast_reasoning",
+      "binding": {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "params": {
+          "temperature": 0.4
+        }
+      }
+    }
+  ],
+  "sizing": [
+    {
+      "target": "pipecat-dev",
+      "metric": "workers",
+      "value": "60",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+    },
+    {
+      "target": "pipecat-dev",
+      "metric": "gpus",
+      "value": "0",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+    },
+    {
+      "target": "pipecat-dev",
+      "metric": "provider_concurrency_quota.realtime_audio",
+      "value": "40",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+    },
+    {
+      "target": "pipecat-dev",
+      "metric": "provider_session_time_quota.realtime_audio",
+      "value": "4h0m0s",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+    },
+    {
+      "target": "pipecat-dev",
+      "metric": "provider_concurrency_quota.telephony",
+      "value": "40",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+    },
+    {
+      "target": "pipecat-dev",
+      "metric": "provider_session_time_quota.telephony",
+      "value": "4h0m0s",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+    }
+  ],
   "notes": [
     "interruption ignore_phrases emitted as IGNORE_PHRASES; short phrases are also suppressed by the min-words turn-start strategy",
     "turn role lowers to on-device VAD (Silero); its binding is advisory"
