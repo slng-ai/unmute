@@ -10,3 +10,4 @@ my-test-agent/
 build/
 __pycache__/
 *.pyc
+examples/pipecat/
