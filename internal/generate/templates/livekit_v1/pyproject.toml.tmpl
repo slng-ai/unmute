@@ -1,0 +1,10 @@
+[project]
+name = {{pyq .Project}}
+version = "0.1.0"
+description = "Generated LiveKit Agents project (unmute livekit driver)"
+requires-python = ">=3.10"
+dependencies = [
+{{- range .Deps}}
+    {{pyq .}},
+{{- end}}
+]
