@@ -225,7 +225,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 
 // GeneratePipecat lowers a validated agent + pipecat target into a project.
 // The socket runs Validate(caps) first (V17), so this reads only agent+target.
-func GeneratePipecat(agent *ir.Agent, target ir.Target) (Artifact, error) {
+func GeneratePipecat(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedBinding, sizing []ir.Sizing) (Artifact, error) {
 	if err := checkPipecatVersion(target.Version); err != nil {
 		return Artifact{}, err
 	}
@@ -238,7 +238,7 @@ func GeneratePipecat(agent *ir.Agent, target ir.Target) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, err
 	}
-	report, err := pipecatReport(data, files)
+	report, err := pipecatReport(data, files, bindings, sizing)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -311,17 +311,19 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 func pyQuote(s string) string { return strconv.Quote(s) }
 
 type pipecatReportJSON struct {
-	Target      string   `json:"target"`
-	Provider    string   `json:"provider"`
-	Version     string   `json:"version"`
-	EntryAgent  string   `json:"entry_agent"`
-	Agents      []string `json:"agents"`
-	Files       []string `json:"generated_files"`
-	RequiredEnv []string `json:"required_env"`
-	Notes       []string `json:"notes,omitempty"`
+	Target      string                `json:"target"`
+	Provider    string                `json:"provider"`
+	Version     string                `json:"version"`
+	EntryAgent  string                `json:"entry_agent"`
+	Agents      []string              `json:"agents"`
+	Files       []string              `json:"generated_files"`
+	RequiredEnv []string              `json:"required_env"`
+	Bindings    []ir.ForwardedBinding `json:"bindings,omitempty"`
+	Sizing      []ir.Sizing           `json:"sizing,omitempty"`
+	Notes       []string              `json:"notes,omitempty"`
 }
 
-func pipecatReport(data pipecatData, files []File) ([]byte, error) {
+func pipecatReport(data pipecatData, files []File, bindings []ir.ForwardedBinding, sizing []ir.Sizing) ([]byte, error) {
 	generated := make([]string, 0, len(files)+1)
 	for _, file := range files {
 		generated = append(generated, file.Path)
@@ -334,7 +336,8 @@ func pipecatReport(data pipecatData, files []File) ([]byte, error) {
 	}
 	out, err := json.MarshalIndent(pipecatReportJSON{
 		Target: data.Project, Provider: "pipecat", Version: data.Version, EntryAgent: data.EntryAgent,
-		Agents: agents, Files: generated, RequiredEnv: data.RequiredEnv, Notes: data.Notes,
+		Agents: agents, Files: generated, RequiredEnv: data.RequiredEnv,
+		Bindings: bindings, Sizing: sizing, Notes: data.Notes,
 	}, "", "  ")
 	if err != nil {
 		return nil, err

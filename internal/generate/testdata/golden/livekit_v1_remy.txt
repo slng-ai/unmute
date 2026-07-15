@@ -368,6 +368,86 @@ if __name__ == "__main__":
     "SEND_CONFIRMATION_URL",
     "SLNG_API_KEY"
   ],
+  "bindings": [
+    {
+      "target": "livekit-dev",
+      "role": "listen",
+      "binding": {
+        "provider": "slng",
+        "model": "slng/deepgram/nova:3-en"
+      }
+    },
+    {
+      "target": "livekit-dev",
+      "role": "turn",
+      "binding": {
+        "provider": "livekit",
+        "model": "turn-detector-mini"
+      }
+    },
+    {
+      "target": "livekit-dev",
+      "role": "speak",
+      "profile": "desk",
+      "binding": {
+        "provider": "slng",
+        "model": "slng/deepgram/aura:2-en",
+        "voice": "aura-2-orion-en"
+      }
+    },
+    {
+      "target": "livekit-dev",
+      "role": "speak",
+      "profile": "host",
+      "binding": {
+        "provider": "slng",
+        "model": "slng/deepgram/aura:2-en",
+        "voice": "aura-2-thalia-en"
+      }
+    },
+    {
+      "target": "livekit-dev",
+      "role": "reason",
+      "profile": "reasoning",
+      "binding": {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "params": {
+          "temperature": 0.4
+        }
+      }
+    }
+  ],
+  "sizing": [
+    {
+      "target": "livekit-dev",
+      "metric": "workers",
+      "value": "40",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    },
+    {
+      "target": "livekit-dev",
+      "metric": "gpus",
+      "value": "0",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    },
+    {
+      "target": "livekit-dev",
+      "metric": "provider_concurrency_quota.realtime_audio",
+      "value": "20",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    },
+    {
+      "target": "livekit-dev",
+      "metric": "provider_session_time_quota.realtime_audio",
+      "value": "1h20m0s",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    }
+  ],
   "notes": [
     "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory",
     "conversation.inactivity is not emitted yet",

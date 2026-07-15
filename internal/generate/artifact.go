@@ -3,6 +3,7 @@ package generate
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/target"
@@ -51,6 +52,11 @@ type GenerateReport struct {
 func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact, error) {
 	report, err := ir.Validate(agent, []ir.Target{resolved}, caps)
 	if err != nil {
+		// Surface the provider-vocabulary diagnostics, not just the failure count:
+		// compile must show what validate shows (SCHEMA.md §6.2, rule 12).
+		if diag := targetDiagnostics(report); diag != "" {
+			return Artifact{}, fmt.Errorf("generate %s: %w (%s)", resolved.Name, err, diag)
+		}
 		return Artifact{}, fmt.Errorf("generate %s: %w", resolved.Name, err)
 	}
 	artifact := Artifact{Kind: artifactKind(resolved.Provider)}
@@ -61,7 +67,7 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 	}
 	switch resolved.Provider {
 	case ir.ProviderLiveKit:
-		emitted, err := GenerateLiveKit(agent, resolved)
+		emitted, err := GenerateLiveKit(agent, resolved, report.ForwardedBindings, report.Sizing)
 		if err != nil {
 			return Artifact{}, fmt.Errorf("generate %s livekit: %w", resolved.Name, err)
 		}
@@ -70,7 +76,7 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
 		return artifact, nil
 	case ir.ProviderPipecat:
-		emitted, err := GeneratePipecat(agent, resolved)
+		emitted, err := GeneratePipecat(agent, resolved, report.ForwardedBindings, report.Sizing)
 		if err != nil {
 			return Artifact{}, fmt.Errorf("generate %s pipecat: %w", resolved.Name, err)
 		}
@@ -94,6 +100,18 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 	default:
 		return Artifact{}, fmt.Errorf("unsupported provider %q", resolved.Provider)
 	}
+}
+
+// targetDiagnostics joins the per-target validation errors so the compile path
+// prints the same provider-vocabulary diagnostic that validate does.
+func targetDiagnostics(report ir.ValidateReport) string {
+	var msgs []string
+	for _, row := range report.PerTarget {
+		for _, e := range row.Errors {
+			msgs = append(msgs, fmt.Sprintf("%s: %s", row.Name, e))
+		}
+	}
+	return strings.Join(msgs, "; ")
 }
 
 func artifactKind(provider ir.Provider) ArtifactKind {
