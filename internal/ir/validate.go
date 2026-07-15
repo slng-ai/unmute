@@ -651,7 +651,9 @@ func validateHumanTransfer(control *HumanTransfer, resolved Target, provider tar
 	case BriefingSummary:
 		applyCapability(caps, targetcap.FieldBriefingSummary, provider, row)
 	case BriefingMessage:
-		applyCapability(caps, targetcap.FieldBriefingMessage, provider, row)
+		// V8: the message-briefing gate is carrier-conditional on ElevenLabs
+		// (native Twilio only); CapabilityForValue is a no-op where no condition exists.
+		applyCapabilityValue(caps.CapabilityForValue(targetcap.FieldBriefingMessage, provider, resolved.Carrier), string(targetcap.FieldBriefingMessage), provider, row)
 	case BriefingWait:
 		applyCapability(caps, targetcap.FieldBriefingWait, provider, row)
 	default:

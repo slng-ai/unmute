@@ -60,6 +60,23 @@ func TestValidateWarnsWhenElevenLabsTaskReturns(t *testing.T) {
 	}
 }
 
+func TestValidateElevenLabsBriefingMessageIsTwilioOnly(t *testing.T) { // driver-elevenlabs V8
+	warm := &HumanTransfer{Kind: ControlHumanTransfer, Destination: "billing_line", Mode: TransferWarm, Briefing: BriefingMessage}
+	sip := targetFor(safeAgent(t), ProviderElevenLabs) // no carrier -> SIP-style transfer
+	twilio := targetFor(safeAgent(t), ProviderElevenLabs)
+	twilio.Carrier = "twilio"
+
+	agent := safeAgent(t)
+	agent.Controls["to_human"] = warm
+	report, err := Validate(agent, []Target{sip}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "native Twilio integration") {
+		t.Fatalf("expected SIP briefing:message gate; err=%v report=%#v", err, report.PerTarget)
+	}
+	if report, err := Validate(agent, []Target{twilio}, targetcap.Default()); err != nil {
+		t.Fatalf("carrier twilio must pass briefing:message; err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
 func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
 	agent := safeAgent(t)
 	agent.Models["group_only_summarizer"] = ModelProfile{Placement: PlacementAPI}
