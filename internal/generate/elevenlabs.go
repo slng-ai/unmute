@@ -176,12 +176,20 @@ func (b *elBuilder) agentBody(name string) (map[string]any, error) {
 		"conversation_config": conv,
 	}
 
-	// Greeting and the model-written-opening workflow live on the entry agent.
+	// The greeting's first_message lives on the entry agent; a model-written
+	// opening needs the workflow entry node instead (V6).
+	modelWritten := false
 	if name == b.agent.EntryAgent {
-		workflow := b.applyGreeting(agentBlock)
-		if workflow != nil {
-			body["workflow"] = workflow
+		modelWritten = b.applyFirstMessage(agentBlock)
+	}
+	// Tasks and task groups (delegates) and a model-written opening lower to a
+	// linear Workflow graph on this agent (V1, V2, V6).
+	if delegates := b.agentDelegates(name); modelWritten || len(delegates) > 0 {
+		workflow, err := b.workflow(name, modelWritten, delegates)
+		if err != nil {
+			return nil, err
 		}
+		body["workflow"] = workflow
 	}
 	return body, nil
 }
@@ -291,14 +299,13 @@ func (b *elBuilder) conversationBlock() map[string]any {
 	return block
 }
 
-// applyGreeting sets the entry agent's opening. Fixed text -> first_message;
-// speaks_first: user -> empty first_message (native wait); model-written -> a
-// Workflow override-agent entry node with entry_behavior: generate_immediately
-// (V6, shipped 2026-06-15). Returns a workflow object when one is needed.
-func (b *elBuilder) applyGreeting(agentBlock map[string]any) map[string]any {
+// applyFirstMessage sets the entry agent's opening. Fixed text -> first_message;
+// speaks_first: user -> empty first_message (native wait). Returns true for a
+// model-written opening, which the caller lowers to a workflow entry node (V6).
+func (b *elBuilder) applyFirstMessage(agentBlock map[string]any) (modelWritten bool) {
 	c := b.agent.Conversation
 	if c == nil || c.Greeting == nil {
-		return nil
+		return false
 	}
 	g := c.Greeting
 	switch {
@@ -307,22 +314,144 @@ func (b *elBuilder) applyGreeting(agentBlock map[string]any) map[string]any {
 	case g.Text != "":
 		agentBlock["first_message"] = g.Text
 	default:
-		// Model-written opening: a plain-agent greeting has no generate-opening
-		// toggle, so wrap the entry agent in a one-node workflow whose entry
-		// override-agent node generates immediately.
-		// ponytail: minimal single-node workflow shape observed from the
-		// rebase-preview API response; extend when a workflow spec ships.
-		return map[string]any{
-			"nodes": map[string]any{
-				"start_node": map[string]any{"type": "start", "edge_order": []string{"start_to_entry"}},
-				"entry_node": map[string]any{"type": "override_agent", "label": "Entry", "entry_behavior": "generate_immediately"},
-			},
-			"edges": map[string]any{
-				"start_to_entry": map[string]any{"from": "start_node", "to": "entry_node"},
-			},
+		return true
+	}
+	return false
+}
+
+// agentDelegates returns the delegate controls (tasks / task groups) an agent
+// exposes via its tools, in declaration order (sorted by control name).
+func (b *elBuilder) agentDelegates(name string) []*ir.Delegate {
+	var out []*ir.Delegate
+	for _, tool := range b.agent.Agents[name].Tools {
+		if d, ok := b.agent.Controls[tool].(*ir.Delegate); ok {
+			out = append(out, d)
 		}
 	}
-	return nil
+	return out
+}
+
+// workflow lowers an agent's delegates (and a model-written opening) into a
+// linear ElevenLabs Workflow: a start node, an override_agent entry node, and
+// one override_agent subagent node per task/step, chained by edges whose
+// forward_condition is the delegate's `when` (llm) or unconditional. A task
+// returns to entry; a task group ends with then: return / transfer / end (V1,V2).
+//
+// ponytail: node/edge shapes follow the documented workflow schema (source /
+// target / forward_condition; override_agent, start, end, agent-transfer, phone
+// nodes); tool wiring on subagent nodes uses additional_tool_ids by name pending
+// live tool-id resolution — verify the graph against the live API when a
+// workflow-using spec ships. The golden locks exactly what is emitted.
+func (b *elBuilder) workflow(agentName string, modelWritten bool, delegates []*ir.Delegate) (map[string]any, error) {
+	nodes := map[string]any{}
+	edges := map[string]any{}
+	entry := map[string]any{"type": "override_agent", "label": "Entry"}
+	if modelWritten {
+		entry["entry_behavior"] = "generate_immediately" // shipped 2026-06-15 (V6)
+	}
+	var entryEdges []string
+	addEdge := func(id, source, target string, cond map[string]any) {
+		edges[id] = map[string]any{"source": source, "target": target, "forward_condition": cond}
+	}
+
+	nodes["start_node"] = map[string]any{"edge_order": []string{"start_to_entry"}}
+	addEdge("start_to_entry", "start_node", "entry_node", map[string]any{})
+
+	for _, d := range delegates {
+		if err := b.checkAssign(d); err != nil {
+			return nil, err
+		}
+		if d.Task != "" {
+			node := "task_" + d.Task
+			nodes[node] = b.subagentNode(d.Task)
+			enter := "entry_to_" + node
+			addEdge(enter, "entry_node", node, llmCondition(d.When))
+			entryEdges = append(entryEdges, enter)
+			back := node + "_to_entry" // then: return
+			addEdge(back, node, "entry_node", map[string]any{})
+			nodes[node].(map[string]any)["edge_order"] = []string{back}
+			continue
+		}
+		group := b.agent.TaskGroups[d.Group]
+		prev, cond := "entry_node", llmCondition(d.When)
+		for i, step := range group.Steps {
+			node := fmt.Sprintf("group_%s_%d_%s", d.Group, i, step)
+			nodes[node] = b.subagentNode(step)
+			edge := prev + "_to_" + node
+			addEdge(edge, prev, node, cond)
+			if prev == "entry_node" {
+				entryEdges = append(entryEdges, edge)
+			} else {
+				nodes[prev].(map[string]any)["edge_order"] = []string{edge}
+			}
+			prev, cond = node, map[string]any{}
+		}
+		b.groupThen(nodes, edges, d.Group, prev, group)
+	}
+
+	entry["edge_order"] = entryEdges
+	nodes["entry_node"] = entry
+	return map[string]any{"nodes": nodes, "edges": edges}, nil
+}
+
+// groupThen wires the tail of a task group: return -> back to entry; transfer ->
+// an agent-transfer node holding the target's captured id; end -> an end node (V2).
+func (b *elBuilder) groupThen(nodes, edges map[string]any, group, last string, g ir.TaskGroup) {
+	switch g.Then {
+	case ir.GroupReturn:
+		edge := last + "_to_entry"
+		edges[edge] = map[string]any{"source": last, "target": "entry_node", "forward_condition": map[string]any{}}
+		nodes[last].(map[string]any)["edge_order"] = []string{edge}
+	case ir.GroupTransfer:
+		node := "group_" + group + "_transfer"
+		nodes[node] = map[string]any{"agent_id": capturePlaceholder(g.ThenTarget)}
+		edge := last + "_to_" + node
+		edges[edge] = map[string]any{"source": last, "target": node, "forward_condition": map[string]any{}}
+		nodes[last].(map[string]any)["edge_order"] = []string{edge}
+	case ir.GroupEnd:
+		node := "group_" + group + "_end"
+		nodes[node] = map[string]any{}
+		edge := last + "_to_" + node
+		edges[edge] = map[string]any{"source": last, "target": node, "forward_condition": map[string]any{}}
+		nodes[last].(map[string]any)["edge_order"] = []string{edge}
+	}
+}
+
+// subagentNode is an override_agent node for a task: it appends the task prompt
+// and references the task's tools by name (see workflow ceiling note).
+func (b *elBuilder) subagentNode(taskName string) map[string]any {
+	task := b.agent.Tasks[taskName]
+	node := map[string]any{
+		"type":            "override_agent",
+		"label":           taskName,
+		"additional_prompt": task.Instructions,
+	}
+	if len(task.Tools) > 0 {
+		node["additional_tool_ids"] = append([]string(nil), task.Tools...)
+	}
+	return node
+}
+
+// checkAssign enforces C3/V1: a delegate whose assign: writes owner variables
+// only compiles when the task routes its result through a tool returning JSON
+// (a tool with an output schema). Otherwise there is no mid-call write path.
+func (b *elBuilder) checkAssign(d *ir.Delegate) error {
+	if len(d.Assign) == 0 || d.Task == "" {
+		return nil
+	}
+	for _, toolName := range b.agent.Tasks[d.Task].Tools {
+		if tool, ok := b.agent.Tools[toolName]; ok && tool.Output != nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("elevenlabs: task %q assign requires a tool returning JSON — the only mid-call variable write path (C3)", d.Task)
+}
+
+func llmCondition(when string) map[string]any {
+	if when == "" {
+		return map[string]any{}
+	}
+	return map[string]any{"type": "llm", "condition": when}
 }
 
 // agentTools lowers the agent's declared tools: webhook tools plus the control
