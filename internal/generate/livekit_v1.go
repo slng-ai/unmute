@@ -85,13 +85,16 @@ type livekitTransfer struct {
 	TargetClass string
 }
 
-// livekitDelegate builds a TaskGroup, awaits it, and returns a cue to the owner.
+// livekitDelegate builds a TaskGroup, awaits it, and hands control on per the
+// group's `then`: return the typed results to the owner (merge: results),
+// transfer to another agent, or end the call. N13: the flow's own turns never
+// land in the owner's context regardless of which path is taken.
 type livekitDelegate struct {
-	Method           string
-	When             string
-	Steps            []livekitStep
-	Cue              string
-	SummarizeChatCtx bool // False for merge: results (C3)
+	Method    string
+	When      string
+	Steps     []livekitStep
+	Then      string // "return" | "transfer" | "end"
+	ThenClass string // target Agent class, set only for then: transfer
 }
 
 type livekitStep struct {

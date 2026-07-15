@@ -99,6 +99,65 @@ func TestLiveKitV1EmitsSlngPlugin(t *testing.T) {
 	}
 }
 
+// TestLiveKitV1DelegateThenTransferAndEnd covers the two non-return `then`
+// lowerings (SCHEMA §4.7, N13): the delegate must not return to the owner, so it
+// emits a handoff (transfer) or session shutdown (end) instead of the typed
+// results, and its tool description must say control does not come back. Reuses
+// the Remy package and rewrites its two groups' `then` in-memory.
+func TestLiveKitV1DelegateThenTransferAndEnd(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// do_reserve -> reserve_group (transfer to the greeter); do_event -> events_group (end).
+	reserve := agent.TaskGroups["reserve_group"]
+	reserve.Then, reserve.ThenTarget = ir.GroupTransfer, "greeter"
+	agent.TaskGroups["reserve_group"] = reserve
+	events := agent.TaskGroups["events_group"]
+	events.Then, events.ThenTarget = ir.GroupEnd, ""
+	agent.TaskGroups["events_group"] = events
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	var botpy string
+	for _, file := range artifact.Files {
+		if file.Path == "agent.py" {
+			botpy = string(file.Content)
+		}
+	}
+	if botpy == "" {
+		t.Fatal("agent.py not emitted")
+	}
+
+	for _, want := range []string{
+		// transfer: hands off to the target, does not return; no typed-result return.
+		"async def do_reserve(self, ctx: RunContext):",
+		"return Greeter(chat_ctx=owner_ctx)",
+		"when it finishes the caller is handed to the greeter.",
+		// end: shuts the session down, does not return.
+		"self.session.shutdown()",
+		"when it finishes the call ends.",
+		"does not return to you",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	// Neither non-return path may hand back the typed results (N13/§4.7), and a
+	// transfer/end delegate is not typed `-> dict`.
+	for _, forbidden := range []string{"return result.task_results", "async def do_reserve(self, ctx: RunContext) -> dict:"} {
+		if strings.Contains(botpy, forbidden) {
+			t.Errorf("agent.py must not contain %q for a non-return delegate", forbidden)
+		}
+	}
+}
+
 // TestCheckLiveKitVersion pins the template-compatible range (>=1.5, <2.0):
 // beta.workflows TaskGroup + AgentTask + inference are present from 1.5.x.
 func TestCheckLiveKitVersion(t *testing.T) {

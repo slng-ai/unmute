@@ -195,10 +195,19 @@ func buildLiveKitDelegate(agent *ir.Agent, ref string, c *ir.Delegate) (livekitD
 	if group.ContextScope == ir.ContextIsolated {
 		return livekitDelegate{}, fmt.Errorf("delegate %q group %q: livekit driver emits shared task groups only; isolated not emitted yet", ref, c.Group)
 	}
-	delegate := livekitDelegate{
-		Method: ref, When: delegateWhen(c),
-		Cue:              "This flow is complete. Move to the closing and ask if there is anything else.",
-		SummarizeChatCtx: group.Merge != ir.GroupMergeResults,
+	delegate := livekitDelegate{Method: ref, When: delegateWhen(c), Then: string(group.Then)}
+	// N13/§4.7: return hands the owner the typed results; transfer and end do not
+	// return, so the tool description must say so (the model must not wait for a
+	// result that never comes). The lowerings themselves live in the template.
+	switch group.Then {
+	case ir.GroupReturn:
+	case ir.GroupTransfer:
+		delegate.ThenClass = pyName(group.ThenTarget)
+		delegate.When += " This flow does not return to you: when it finishes the caller is handed to the " + group.ThenTarget + "."
+	case ir.GroupEnd:
+		delegate.When += " This flow does not return to you: when it finishes the call ends."
+	default:
+		return livekitDelegate{}, fmt.Errorf("delegate %q group %q: livekit driver cannot lower then %q", ref, c.Group, group.Then)
 	}
 	for _, step := range group.Steps {
 		delegate.Steps = append(delegate.Steps, livekitStep{Class: pyName(step), ID: step, Desc: humanize(step)})
