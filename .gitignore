@@ -4,3 +4,9 @@ docs/
 voice-agent-prompting/
 my-test-agent/
 .firecrawl/
+
+# build output + OS/python cruft
+.DS_Store
+build/
+__pycache__/
+*.pyc
