@@ -456,9 +456,10 @@ func validateContext(context TaskContext, provider targetcap.Provider, caps targ
 		return
 	}
 	support := caps.HistorySupport(targetcap.History(context.History), provider)
-	if support.Kind == "" {
+	switch support.Kind {
+	case "":
 		row.Errors = add(row.Errors, fmt.Sprintf("unknown context history %q", context.History))
-	} else if support.Kind == targetcap.HistoryFail {
+	case targetcap.HistoryFail:
 		row.Errors = add(row.Errors, support.Note)
 	}
 	if context.IncludeToolCalls != nil && !*context.IncludeToolCalls {
@@ -620,6 +621,9 @@ func validateFallbacks(agent *Agent, resolved Target, caps targetcap.Table, row 
 	for name := range models {
 		profile := agent.Models[name]
 		primary := resolved.Models.Reason[name]
+		if len(profile.Fallback) > 0 {
+			applyCapability(caps, targetcap.FieldFallback, targetcap.Provider(resolved.Provider), row)
+		}
 		for _, fallbackName := range profile.Fallback {
 			fallback := agent.Models[fallbackName]
 			if fallback.Placement != profile.Placement {

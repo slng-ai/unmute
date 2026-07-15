@@ -330,6 +330,57 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 	}
 }
 
+func TestValidatePipecatMaturityGates(t *testing.T) { // driver-pipecat T1, C9
+	tests := []struct {
+		name   string
+		mutate func(*Agent)
+		want   string
+	}{
+		{"fallback", func(a *Agent) {
+			profile := a.Models["fast_reasoning"]
+			profile.Fallback = []string{"careful_reasoning"}
+			a.Models["fast_reasoning"] = profile
+		}, "does not emit generated fallback yet"},
+		{"thinking_audio", func(a *Agent) { a.Conversation.ThinkingAudio = ThinkingSubtle }, "does not emit thinking audio yet"},
+		{"local_tool", func(a *Agent) {
+			tool := a.Tools["lookup_customer"]
+			tool.Execution, tool.URLEnv, tool.Handler = ToolLocal, "", "tools/lookup_customer.py"
+			a.Tools["lookup_customer"] = tool
+		}, "does not emit local tool handlers yet"},
+		{"mcp_tool", func(a *Agent) {
+			tool := a.Tools["lookup_customer"]
+			tool.Execution, tool.URLEnv = ToolMCP, ""
+			a.Tools["lookup_customer"] = tool
+		}, "does not emit MCP tools yet"},
+		{"outbound", func(a *Agent) {
+			phone := a.Channels["phone"]
+			outbound := true
+			phone.Outbound, phone.OnVoicemail = &outbound, VoicemailLeaveMessage
+			a.Channels["phone"] = phone
+		}, "does not emit outbound calling yet"},
+		{"transfer_history", func(a *Agent) {
+			a.Controls["to_billing"].(*AgentTransfer).Context.History = HistoryMessages
+		}, "history: full only"},
+		{"transfer_variable_subset", func(a *Agent) {
+			a.Controls["to_billing"].(*AgentTransfer).Context.Variables = VariableSelection{Names: []string{"customer_id"}}
+		}, "variables subset"},
+		{"transfer_no_tool_calls", func(a *Agent) {
+			no := false
+			a.Controls["to_billing"].(*AgentTransfer).Context.IncludeToolCalls = &no
+		}, "include_tool_calls"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			agent := safeAgent(t)
+			test.mutate(agent)
+			report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+			if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), test.want) {
+				t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+			}
+		})
+	}
+}
+
 func safeAgent(t *testing.T) *Agent {
 	t.Helper()
 	agent, err := Build(loadSafeCore(t))
