@@ -106,6 +106,36 @@ func TestValidateOutboundRequiresSatisfiableVariablesAndWarnsOnDeepgram(t *testi
 	}
 }
 
+func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { // V15
+	agent := safeAgent(t)
+	report, err := Validate(agent, allTargets(agent), targetcap.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.ForwardedBindings) != 27 {
+		t.Fatalf("forwarded bindings = %d", len(report.ForwardedBindings))
+	}
+	foundTemperature := false
+	for _, binding := range report.ForwardedBindings {
+		for _, param := range binding.Params {
+			if binding.Role == "reason" && binding.Profile == "fast_reasoning" && param.Name == "temperature" {
+				foundTemperature = true
+			}
+		}
+	}
+	if !foundTemperature {
+		t.Fatal("forwarded temperature param is missing")
+	}
+	if len(report.Sizing) != 15 {
+		t.Fatalf("sizing lines = %d", len(report.Sizing))
+	}
+	for _, line := range report.Sizing {
+		if line.Status != "unbenchmarked" || line.Basis == "" {
+			t.Fatalf("sizing line = %#v", line)
+		}
+	}
+}
+
 func safeAgent(t *testing.T) *Agent {
 	t.Helper()
 	agent, err := Build(loadSafeCore(t))

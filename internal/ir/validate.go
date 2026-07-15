@@ -28,6 +28,12 @@ type ForwardedBinding struct {
 	Role    string
 	Profile string
 	Binding Binding
+	Params  []ForwardedParam
+}
+
+type ForwardedParam struct {
+	Name  string
+	Value any
 }
 
 type Sizing struct {
@@ -35,6 +41,7 @@ type Sizing struct {
 	Metric string
 	Value  string
 	Status string
+	Basis  string
 }
 
 // Validate checks structure and every selected target without short-circuiting.
@@ -51,6 +58,8 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	for _, resolved := range targets {
 		row := TargetValidation{Name: resolved.Name, Provider: resolved.Provider, Errors: append([]string(nil), global...)}
 		validateTarget(agent, resolved, caps, &row)
+		report.ForwardedBindings = append(report.ForwardedBindings, forwardedBindings(resolved)...)
+		report.Sizing = append(report.Sizing, sizing(agent, resolved)...)
 		if len(row.Errors) > 0 {
 			failed++
 		}
@@ -60,6 +69,58 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 		return report, fmt.Errorf("validation failed for %d target(s)", failed)
 	}
 	return report, nil
+}
+
+func forwardedBindings(resolved Target) []ForwardedBinding {
+	var result []ForwardedBinding
+	appendBinding := func(role, profile string, binding *Binding) {
+		if binding == nil {
+			return
+		}
+		params := make([]ForwardedParam, 0, len(binding.Params))
+		for _, name := range slices.Sorted(maps.Keys(binding.Params)) {
+			params = append(params, ForwardedParam{Name: name, Value: binding.Params[name]})
+		}
+		result = append(result, ForwardedBinding{
+			Target: resolved.Name, Role: role, Profile: profile, Binding: *binding, Params: params,
+		})
+	}
+	appendBinding("listen", "", resolved.Models.Listen)
+	appendBinding("turn", "", resolved.Models.Turn)
+	for _, name := range slices.Sorted(maps.Keys(resolved.Models.Speak)) {
+		binding := resolved.Models.Speak[name]
+		appendBinding("speak", name, &binding)
+	}
+	for _, name := range slices.Sorted(maps.Keys(resolved.Models.Reason)) {
+		binding := resolved.Models.Reason[name]
+		appendBinding("reason", name, &binding)
+	}
+	return result
+}
+
+func sizing(agent *Agent, resolved Target) []Sizing {
+	if agent.Capacity == nil {
+		return nil
+	}
+	// ponytail: conservative 1 session per worker/GPU; replace with dated benchmark coefficients when measured.
+	workers := 0
+	if targetcap.IsCode(targetcap.Provider(resolved.Provider)) {
+		workers = agent.Capacity.MaxSessions
+	}
+	local := agent.Pipeline.Listen.Placement == PlacementLocal || agent.Pipeline.Speak.Placement == PlacementLocal
+	for _, profile := range agent.Models {
+		local = local || profile.Placement == PlacementLocal
+	}
+	gpus := 0
+	if local && targetcap.IsCode(targetcap.Provider(resolved.Provider)) {
+		gpus = agent.Capacity.MaxSessions
+	}
+	const basis = "2026-07-15 conservative 1 session per worker/GPU"
+	return []Sizing{
+		{Target: resolved.Name, Metric: "workers", Value: fmt.Sprint(workers), Status: "unbenchmarked", Basis: basis},
+		{Target: resolved.Name, Metric: "gpus", Value: fmt.Sprint(gpus), Status: "unbenchmarked", Basis: basis},
+		{Target: resolved.Name, Metric: "provider_concurrency_quota", Value: fmt.Sprint(agent.Capacity.PeakSessions), Status: "unbenchmarked", Basis: basis},
+	}
 }
 
 func validateStructure(agent *Agent) []string {
