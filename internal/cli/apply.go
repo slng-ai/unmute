@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/slng/unmute/internal/generate"
@@ -17,12 +17,32 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// providerBaseURL is the config-plane base for each managed provider. A package
-// var so the apply integration test can point it at an httptest server.
+// providerBaseURL is the default config-plane base for each managed provider. A
+// package var so the apply integration test can point it at an httptest server.
 // ponytail: only ElevenLabs is wired today; add a row when the next managed
 // driver (Vapi) lands.
 var providerBaseURL = map[ir.Provider]string{
 	ir.ProviderElevenLabs: "https://api.elevenlabs.io",
+}
+
+// elevenLabsResidencyBase maps a target's region to the regional base that a
+// residency API key must authenticate against (verified against the ElevenLabs
+// OpenAPI servers list, 2026-07-15). The empty region uses the default base.
+func elevenLabsResidencyBase(region string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(region)) {
+	case "", "global", "default":
+		return providerBaseURL[ir.ProviderElevenLabs], true
+	case "us":
+		return "https://api.us.elevenlabs.io", true
+	case "eu", "europe":
+		return "https://api.eu.residency.elevenlabs.io", true
+	case "in", "india":
+		return "https://api.in.residency.elevenlabs.io", true
+	case "sg", "singapore":
+		return "https://api.sg.residency.elevenlabs.io", true
+	default:
+		return "", false
+	}
 }
 
 var (
@@ -77,9 +97,25 @@ func applyPlan(cmd *cobra.Command, resolved ir.Target, artifact generate.Artifac
 	if !ok {
 		return fmt.Errorf("no config-plane base URL for provider %q", resolved.Provider)
 	}
+	// Residency: a regional API key authenticates against a regional base, so a
+	// target's region picks the base URL. Unknown region -> warn, don't silently
+	// ignore it (the default base would 401 a residency key).
+	if resolved.Provider == ir.ProviderElevenLabs && strings.TrimSpace(resolved.Region) != "" {
+		if regional, known := elevenLabsResidencyBase(resolved.Region); known {
+			base = regional
+		} else {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s: unknown elevenlabs region %q; authenticating against default base %s\n", resolved.Name, resolved.Region, base)
+		}
+	}
 	credential := os.Getenv(plan.CredentialEnv)
 	if credential == "" {
 		return fmt.Errorf("credential env %s is not set", plan.CredentialEnv)
+	}
+
+	// Surface managed-target warnings here too; compile and validate print them,
+	// and apply is the command that actually mutates the provider (V10).
+	for _, w := range artifact.Notes.Warnings {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s: %s\n", resolved.Name, w)
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -96,9 +132,6 @@ func applyPlan(cmd *cobra.Command, resolved ir.Target, artifact generate.Artifac
 			return err
 		}
 		endpointURL := base + endpoint
-		if step.Branch != "" {
-			endpointURL += "?" + url.Values{"branch_id": {step.Branch}}.Encode()
-		}
 		req, err := http.NewRequest(step.Method, endpointURL, bytes.NewReader([]byte(body)))
 		if err != nil {
 			return err
@@ -116,17 +149,13 @@ func applyPlan(cmd *cobra.Command, resolved ir.Target, artifact generate.Artifac
 			return fmt.Errorf("step %d %s %s: %s: %s", i+1, step.Method, endpoint, resp.Status, string(payload))
 		}
 		if step.CaptureID != "" {
-			id, err := captureAgentID(payload)
+			id, err := captureResourceID(payload)
 			if err != nil {
 				return fmt.Errorf("step %d capture %q: %w", i+1, step.CaptureID, err)
 			}
 			captured[step.CaptureID] = id
 		}
-		branchNote := ""
-		if step.Branch != "" {
-			branchNote = " [branch=" + step.Branch + "]"
-		}
-		fmt.Fprintf(out, "%s step %d: %s %s%s ok\n", resolved.Name, i+1, step.Method, endpoint, branchNote)
+		fmt.Fprintf(out, "%s step %d: %s %s ok\n", resolved.Name, i+1, step.Method, endpoint)
 	}
 
 	// Report what was forwarded and the reconcile choices; never judge values (V10).
@@ -173,15 +202,21 @@ func substitute(s string, captured map[string]string) (string, error) {
 	return s, nil
 }
 
-func captureAgentID(payload []byte) (string, error) {
+// captureResourceID pulls the created resource id from a create response: agents
+// return agent_id, workspace tools return id.
+func captureResourceID(payload []byte) (string, error) {
 	var body struct {
 		AgentID string `json:"agent_id"`
+		ID      string `json:"id"`
 	}
 	if err := json.Unmarshal(payload, &body); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
 	}
-	if body.AgentID == "" {
-		return "", fmt.Errorf("response has no agent_id")
+	if body.AgentID != "" {
+		return body.AgentID, nil
 	}
-	return body.AgentID, nil
+	if body.ID != "" {
+		return body.ID, nil
+	}
+	return "", fmt.Errorf("response has no agent_id or id")
 }

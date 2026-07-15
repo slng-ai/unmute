@@ -1,40 +1,69 @@
 credential_env: ELEVENLABS_API_KEY
-note: elevenlabs: 2 agent(s) created in order billing, intake (entry: intake)
-note: apply targets the agent's main branch (partial PATCH preserves dashboard-authored fields Unmute does not model); override with target pin branch_id
+note: elevenlabs: 2 tool(s) then 2 agent(s) created in order billing, intake (entry: intake)
+note: apply targets the agent's live config (partial PATCH preserves dashboard-authored fields Unmute does not model); branch/draft targeting is not supported
 note: reconcile comparison: modeled fields diffed normally; forwarded params compared byte-equal after JSON normalization; inert provider fields are reported, never judged
 
-=== step 1: POST /v1/convai/agents (capture=billing) ===
+=== step 1: POST /v1/convai/tools (capture=tool:get_invoice) ===
+{
+  "tool_config": {
+    "api_schema": {
+      "method": "POST",
+      "request_body_schema": {
+        "properties": {
+          "customer_id": {
+            "description": "The customer id from lookup_customer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "customer_id"
+        ],
+        "type": "object"
+      },
+      "url": "{{env:GET_INVOICE_URL}}"
+    },
+    "description": "Fetch the most recent invoice for a customer id. Returns the invoice total and status.",
+    "name": "get_invoice",
+    "type": "webhook"
+  }
+}
+
+=== step 2: POST /v1/convai/tools (capture=tool:lookup_customer) ===
+{
+  "tool_config": {
+    "api_schema": {
+      "method": "POST",
+      "request_body_schema": {
+        "properties": {
+          "email": {
+            "description": "Caller email address",
+            "type": "string"
+          },
+          "phone": {
+            "description": "Caller phone number in E.164 form",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "url": "{{env:LOOKUP_CUSTOMER_URL}}"
+    },
+    "description": "Look up a customer record by phone number or email. Returns the customer id and name.",
+    "name": "lookup_customer",
+    "type": "webhook"
+  }
+}
+
+=== step 3: POST /v1/convai/agents/create (capture=billing) ===
 {
   "conversation_config": {
     "agent": {
       "prompt": {
-        "llm": "claude-sonnet-4-5",
-        "prompt": "# Billing agent (placeholder prompt)\n\nYou are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.\n\n- The caller was handed to you because they have a billing question. The conversation so far is in your context.\n- Use `get_invoice` to look up invoices for customer `{{customer_id}}`.\n- Explain charges calmly and clearly, one item at a time.\n- If the caller is not satisfied or asks for a person, transfer them with `to_human`.\n",
-        "temperature": 0,
-        "tools": [
-          {
-            "api_schema": {
-              "url": "{{env:GET_INVOICE_URL}}"
-            },
-            "description": "Fetch the most recent invoice for a customer id. Returns the invoice total and status.",
-            "input_json_schema": {
-              "properties": {
-                "customer_id": {
-                  "description": "The customer id from lookup_customer",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "customer_id"
-              ],
-              "type": "object"
-            },
-            "name": "get_invoice",
-            "type": "webhook"
-          },
-          {
+        "built_in_tools": {
+          "transfer_to_number": {
             "name": "transfer_to_number",
             "params": {
+              "system_tool_type": "transfer_to_number",
               "transfers": [
                 {
                   "condition": "",
@@ -48,6 +77,12 @@ note: reconcile comparison: modeled fields diffed normally; forwarded params com
             },
             "type": "system"
           }
+        },
+        "llm": "claude-sonnet-4-5",
+        "prompt": "# Billing agent (placeholder prompt)\n\nYou are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.\n\n- The caller was handed to you because they have a billing question. The conversation so far is in your context.\n- Use `get_invoice` to look up invoices for customer `{{customer_id}}`.\n- Explain charges calmly and clearly, one item at a time.\n- If the caller is not satisfied or asks for a person, transfer them with `to_human`.\n",
+        "temperature": 0,
+        "tool_ids": [
+          "{{capture:tool:get_invoice}}"
         ]
       }
     },
@@ -55,8 +90,7 @@ note: reconcile comparison: modeled fields diffed normally; forwarded params com
       "user_input_audio_format": "ulaw_8000"
     },
     "conversation": {
-      "max_duration_seconds": 1200,
-      "silence_end_call_timeout": 45
+      "max_duration_seconds": 1200
     },
     "tts": {
       "voice_id": "EXAVITQu4vr4xnSDxMaL"
@@ -66,46 +100,24 @@ note: reconcile comparison: modeled fields diffed normally; forwarded params com
         "okay",
         "right",
         "uh-huh"
-      ]
+      ],
+      "silence_end_call_timeout": 45
     }
   },
   "name": "elevenlabs-prod-billing"
 }
 
-=== step 2: POST /v1/convai/agents (capture=intake) ===
+=== step 4: POST /v1/convai/agents/create (capture=intake) ===
 {
   "conversation_config": {
     "agent": {
       "first_message": "Hi, you have reached Acme Support. How can I help you today?",
       "prompt": {
-        "llm": "gemini-2.5-flash",
-        "prompt": "# Intake agent (placeholder prompt)\n\nYou are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.\n\n- Greet the caller and find out what they need.\n- When they give a phone number or email, use `lookup_customer` to find their record.\n- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.\n- Never guess account details. If you cannot find the customer, say so and ask again.\n",
-        "temperature": 0,
-        "tools": [
-          {
-            "api_schema": {
-              "url": "{{env:LOOKUP_CUSTOMER_URL}}"
-            },
-            "description": "Look up a customer record by phone number or email. Returns the customer id and name.",
-            "input_json_schema": {
-              "properties": {
-                "email": {
-                  "description": "Caller email address",
-                  "type": "string"
-                },
-                "phone": {
-                  "description": "Caller phone number in E.164 form",
-                  "type": "string"
-                }
-              },
-              "type": "object"
-            },
-            "name": "lookup_customer",
-            "type": "webhook"
-          },
-          {
+        "built_in_tools": {
+          "transfer_to_agent": {
             "name": "transfer_to_agent",
             "params": {
+              "system_tool_type": "transfer_to_agent",
               "transfers": [
                 {
                   "agent_id": "{{capture:billing}}",
@@ -115,6 +127,12 @@ note: reconcile comparison: modeled fields diffed normally; forwarded params com
             },
             "type": "system"
           }
+        },
+        "llm": "gemini-2.5-flash",
+        "prompt": "# Intake agent (placeholder prompt)\n\nYou are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.\n\n- Greet the caller and find out what they need.\n- When they give a phone number or email, use `lookup_customer` to find their record.\n- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.\n- Never guess account details. If you cannot find the customer, say so and ask again.\n",
+        "temperature": 0,
+        "tool_ids": [
+          "{{capture:tool:lookup_customer}}"
         ]
       }
     },
@@ -122,8 +140,7 @@ note: reconcile comparison: modeled fields diffed normally; forwarded params com
       "user_input_audio_format": "ulaw_8000"
     },
     "conversation": {
-      "max_duration_seconds": 1200,
-      "silence_end_call_timeout": 45
+      "max_duration_seconds": 1200
     },
     "tts": {
       "voice_id": "cgSgspJ2msm6clMCkdW9"
@@ -133,7 +150,8 @@ note: reconcile comparison: modeled fields diffed normally; forwarded params com
         "okay",
         "right",
         "uh-huh"
-      ]
+      ],
+      "silence_end_call_timeout": 45
     }
   },
   "name": "elevenlabs-prod-intake"
