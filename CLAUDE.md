@@ -19,7 +19,7 @@ We own **Go only**. Python is *emitted* by our `text/template` files and *shelle
 - `SilenceUsage` + `SilenceErrors` on the root. Exit codes: `0` ok, `1` error — add more only when a consumer actually reads them. Warnings → stderr + exit 0 (never a silent downgrade).
 
 ## IR
-Go structs in `internal/ir` are the single source of truth; `google/jsonschema-go` derives the schema from them — **do not hand-author `.json` schema files**. Flow: `spec.Load` → `ir.Build` → `ir.Validate` → `generate.Artifact`.
+Go structs in `internal/ir` are the single source of truth; `google/jsonschema-go` derives the schema from them — **do not hand-author `.json` schema files**. Flow: `spec.Load` → `ir.Build` → `ir.Validate` → `generate.Generate`.
 
 ## Testing
 `go test ./...` runs L1–L3 and needs **zero Python**:

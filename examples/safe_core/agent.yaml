@@ -7,7 +7,7 @@
 #   - history other than `full`: fails on ElevenLabs
 #   - requires:, fallback:, thinking_audio:, warm transfer: each fails
 #     on at least one of the five
-#   - outbound calls: blocked until voicemail behavior is verified
+#   - outbound calls: omitted; Deepgram's carrier-conditional lowering warns
 
 version: 1
 entry_agent: intake
@@ -59,7 +59,7 @@ controls:
   to_human:
     kind: human_transfer
     destination: billing_line   # resolved per target in targets.yaml
-    mode: cold                  # warm fails on Pipecat, so the safe core is cold
+    mode: cold                  # warm is not emitted by every driver yet
 
 tools: [lookup_customer, get_invoice]
 
@@ -68,7 +68,7 @@ conversation:
     speaks_first: agent
     # Fixed opening: same words every call, works on all five targets.
     # Leave `text` out to let the model write the opening from the prompt;
-    # that fails on ElevenLabs and Deepgram for now (SCHEMA.md 4.8).
+    # that is conditional on ElevenLabs and warns on Deepgram (SCHEMA.md 4.8).
     text: "Hi, you have reached Acme Support. How can I help you today?"
   interruption:
     enabled: true
