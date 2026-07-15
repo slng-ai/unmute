@@ -1,7 +1,7 @@
-// Package scaffold renders the files `unmute init` writes. Templates live in
-// templates/ and are embedded into the binary; each is run through
-// text/template (with [[ ]] delimiters so the voice-agent {{ }} variable syntax
-// passes through verbatim), then written under the target directory.
+// Package scaffold renders the files `unmute init` writes: a v1 agent package
+// (agent.yaml + instructions.md + targets.yaml). Templates live in templates/
+// and are embedded; each runs through text/template with [[ ]] delimiters, so
+// the voice-agent {{ }} variable syntax in prompts passes through verbatim.
 package scaffold
 
 import (
@@ -19,7 +19,7 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-//go:embed templates templates/.env.local.tmpl templates/.gitignore.tmpl
+//go:embed templates
 var templates embed.FS
 
 // ErrExists is returned when the target directory already exists and is not
@@ -27,50 +27,30 @@ var templates embed.FS
 var ErrExists = errors.New("directory already exists and is not empty")
 
 const (
-	DefaultGreeting = "Hi, thanks for calling. How can I help you today?"
-	DefaultLanguage = "en"
-	DefaultLLMModel = "openai/gpt-4.1"
-	DefaultSTTModel = "slng/deepgram/nova:3-en"
-	DefaultTTSModel = "cartesia/sonic:3"
-	DefaultTTSVoice = "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"
+	DefaultGreeting     = "Hi, thanks for calling. How can I help you today?"
+	DefaultInstructions = "You are a helpful voice assistant. This is a phone call, so keep every answer to one or two short sentences."
 )
 
-// Data is the basic agent configuration rendered by the scaffold templates.
+// Data is the v1 agent configuration rendered by the scaffold templates.
 type Data struct {
-	Name     string
-	Greeting string
-	Language string
-	LLMModel string
-	STTModel string
-	TTSModel string
-	TTSVoice string
+	Name         string
+	Greeting     string
+	Instructions string
 }
 
 func (d Data) withDefaults() Data {
 	if d.Greeting == "" {
 		d.Greeting = DefaultGreeting
 	}
-	if d.Language == "" {
-		d.Language = DefaultLanguage
-	}
-	if d.LLMModel == "" {
-		d.LLMModel = DefaultLLMModel
-	}
-	if d.STTModel == "" {
-		d.STTModel = DefaultSTTModel
-	}
-	if d.TTSModel == "" {
-		d.TTSModel = DefaultTTSModel
-	}
-	if d.TTSVoice == "" {
-		d.TTSVoice = DefaultTTSVoice
+	if d.Instructions == "" {
+		d.Instructions = DefaultInstructions
 	}
 	return d
 }
 
-// Write renders every embedded template into dir/, substituting the agent name.
-// Returns the created file paths in deterministic (lexical) order. Refuses if
-// dir already exists and is non-empty (no overwrite, no partial write).
+// Write renders every embedded template into dir/. Returns the created file
+// paths in deterministic (lexical) order. Refuses if dir already exists and is
+// non-empty (no overwrite, no partial write).
 func Write(dir string, d Data) ([]string, error) {
 	if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
 		return nil, fmt.Errorf("%s: %w", dir, ErrExists)
@@ -79,22 +59,25 @@ func Write(dir string, d Data) ([]string, error) {
 	var created []string
 	d = d.withDefaults()
 
-	// WalkDir visits in lexical order → deterministic output (V4).
+	// WalkDir visits in lexical order → deterministic output.
 	err := fs.WalkDir(templates, "templates", func(p string, e fs.DirEntry, err error) error {
 		if err != nil || e.IsDir() {
 			return err
 		}
 		rel := strings.TrimSuffix(strings.TrimPrefix(p, "templates/"), ".tmpl")
+		if rel == "env.example" {
+			rel = ".env.example" // dotfiles can't be embedded templates
+		}
 		out := filepath.Join(dir, rel)
 
-		b, err := templates.ReadFile(p)
+		raw, err := templates.ReadFile(p)
 		if err != nil {
 			return err
 		}
 		tmpl, err := template.New(rel).Funcs(template.FuncMap{
 			"quote": strconv.Quote,
 			"yaml":  yamlScalar,
-		}).Delims("[[", "]]").Parse(string(b))
+		}).Delims("[[", "]]").Parse(string(raw))
 		if err != nil {
 			return err
 		}

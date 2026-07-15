@@ -1,3 +1,5 @@
+version: "2"
+
 run:
   timeout: 2m
 
@@ -8,3 +10,12 @@ linters:
     - staticcheck
     - ineffassign
     - unused
+  settings:
+    errcheck:
+      # Writes to a terminal/buffer/log carry no error worth acting on; the
+      # commands write user output through these. Cleanup Close()s are handled
+      # explicitly in code where a flush error would matter.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln

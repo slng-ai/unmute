@@ -72,7 +72,7 @@ T8|x|golden fixtures — safe_core validates clean on all five (V14); representa
 T9|.|**phased** migration — keep old `project.yaml` emitters + their commands working until ≥1 new driver `case` is real, THEN retire old readers/structs in `internal/{spec,ir}` and rewire `compile`/`apply`/`dev`; safe_core is the fixture|C7
 T10|x|generation socket in `internal/generate` — `Artifact` with `Kind` discriminant, `Generate` switch on `target.Provider`, multi-step branch-aware `ApplyPlan`, `GenerateReport` distinct from `ValidateReport`, Validate-before-emit gate (V17); each provider `case` a stub until its driver spec lands|I.generate.Generate,V17
 T11|.|rebuild `init`/`internal/scaffold` to emit the v1 package layout (agent.yaml + instructions.md + agents/ + tasks/ + tools/ + targets.yaml); otherwise the interactive init + huh wizard are stranded by T9|C7
-T12|.|table↔emitter agreement test — assert every `generate.Generate` provider `case` implements exactly its `internal/target` supported rows (no validate-green / generate-broken drift)|V19
+T12|x|table↔emitter agreement test — `TestPipecatEmitterMatchesCapabilityTable` asserts the pipecat emitter's declared `pipecatEmittedFields` equals its `internal/target` non-gated rows (no validate-green / generate-broken drift); extends to each driver as it lands|V19
 
 Dependency order: T1, T2, T3 → T4 → T5 → T6; T7 with T5; T8 last; T10 after T3+T5 (socket for the driver specs); T9 only after ≥1 driver `case` is real (phased); T11 with T9; T12 after the first driver lands.
 

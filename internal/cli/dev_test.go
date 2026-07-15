@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/slng/unmute/internal/ir"
 )
 
 func TestParseDotenv(t *testing.T) {
@@ -44,33 +42,25 @@ func TestParseDotenv(t *testing.T) {
 	}
 }
 
-func TestDevChildEnv_mapsSecrets(t *testing.T) {
+func TestDevChildEnv_readsDotenv(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".env.local"), []byte("MY_SLNG=sk-secret\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("SLNG_API_KEY=sk-secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	secrets := ir.EnvSecrets{
-		Local:   ir.LocalEnvConfig{EnvFile: ".env.local"},
-		Secrets: map[string]ir.SecretRef{"SLNG_API_KEY": {LocalKey: "MY_SLNG"}},
-	}
-
-	env, err := devChildEnv(dir, secrets, &bytes.Buffer{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	env := devChildEnv(dir, &bytes.Buffer{})
 	if !contains(env, "SLNG_API_KEY=sk-secret") {
-		t.Errorf("runtime env name not mapped from dotenv local key; env = %v", env)
+		t.Errorf(".env value not passed to the child env; env = %v", env)
 	}
 }
 
-func TestDevChildEnv_missingFileWarns(t *testing.T) {
+func TestDevChildEnv_missingFileIsFine(t *testing.T) {
 	var warn bytes.Buffer
-	secrets := ir.EnvSecrets{Local: ir.LocalEnvConfig{EnvFile: ".env.local"}}
-	if _, err := devChildEnv(t.TempDir(), secrets, &warn); err != nil {
-		t.Fatalf("missing dotenv must not be a hard error: %v", err)
+	env := devChildEnv(t.TempDir(), &warn) // no .env present
+	if len(env) == 0 {
+		t.Fatal("expected the ambient environment when .env is absent")
 	}
-	if !strings.Contains(warn.String(), "not found") {
-		t.Errorf("expected a warning about the missing dotenv, got %q", warn.String())
+	if warn.Len() != 0 {
+		t.Errorf("a missing .env must not warn; got %q", warn.String())
 	}
 }
 

@@ -233,7 +233,7 @@ func Default() Table {
 				warn(ElevenLabs, "ElevenLabs semantic endpointing is forwarded as a preference"),
 				warn(Deepgram, "Deepgram semantic endpointing depends on the bound listen model"),
 			),
-			FieldFallback: field(),
+			FieldFallback: field(deny(Pipecat, "the Pipecat driver does not emit generated fallback yet")),
 			FieldTask: field(
 				deny(Vapi, "Vapi return-to-prior-assistant is unverified"),
 				warn(ElevenLabs, "ElevenLabs keeps task turns in the owner's running transcript"),
@@ -257,10 +257,12 @@ func Default() Table {
 				deny(ElevenLabs, "ElevenLabs has no machine-checked transfer guard"),
 			),
 			FieldContextNoToolCalls: field(
+				deny(Pipecat, "the Pipecat driver does not shape transfer context (include_tool_calls) yet"),
 				deny(Vapi, "Vapi cannot exclude tool calls from transfer context"),
 				deny(ElevenLabs, "ElevenLabs always keeps the full transcript"),
 			),
 			FieldContextVariableSubset: field(
+				deny(Pipecat, "the Pipecat driver does not shape transfer context (variables subset) yet"),
 				deny(Vapi, "Vapi accepts transfer variables: all only"),
 				deny(ElevenLabs, "ElevenLabs accepts transfer variables: all only"),
 			),
@@ -315,6 +317,7 @@ func Default() Table {
 				warn(Deepgram, "Deepgram driver must verify a max-duration cap"),
 			),
 			FieldThinkingAudio: field(
+				deny(Pipecat, "the Pipecat driver does not emit thinking audio yet"),
 				deny(Vapi, "Vapi has no faithful thinking-audio lowering"),
 				deny(Deepgram, "Deepgram has no faithful thinking-audio lowering"),
 			),
@@ -323,10 +326,14 @@ func Default() Table {
 				warn(ElevenLabs, "ElevenLabs cannot enforce tool output schemas"),
 			),
 			FieldToolLocal: field(
+				deny(Pipecat, "the Pipecat driver does not emit local tool handlers yet"),
 				deny(Vapi, "Vapi cannot host local tool code"),
 				deny(ElevenLabs, "ElevenLabs cannot host local tool code"),
 			),
-			FieldToolMCP: field(deny(Deepgram, "Deepgram has no runtime MCP client")),
+			FieldToolMCP: field(
+				deny(Pipecat, "the Pipecat driver does not emit MCP tools yet"),
+				deny(Deepgram, "Deepgram has no runtime MCP client"),
+			),
 			FieldToolClient: field(
 				deny(LiveKit, "LiveKit client tools are not proven by its driver"),
 				deny(Pipecat, "Pipecat client tools are not proven by its driver"),
@@ -353,9 +360,11 @@ func Default() Table {
 				warn(ElevenLabs, "ElevenLabs uses provider-default tool interruption"),
 			),
 			FieldOutbound: field(
+				deny(Pipecat, "the Pipecat driver does not emit outbound calling yet"),
 				warn(Deepgram, "Deepgram outbound calling uses carrier-conditional generated AMD"),
 			),
 			FieldVoicemail: field(
+				deny(Pipecat, "the Pipecat driver does not emit voicemail handling yet"),
 				warn(Deepgram, "Deepgram voicemail handling uses carrier-conditional generated AMD"),
 			),
 			FieldFutureProvisional: provisional(),
@@ -404,11 +413,14 @@ func Default() Table {
 			},
 		},
 		History: map[History]map[Provider]HistorySupport{
+			// Pipecat driver v1 emits history: full only; other values are a
+			// maturity gate (the workers handoff carries the running context and
+			// fine-grained shaping is not emitted yet, C9).
 			HistoryFull:     history(HistoryOK, HistoryOK, HistoryOK, HistoryOK, HistoryOK),
-			HistoryMessages: history(HistoryOK, HistoryOK, HistoryOK, HistoryFail, HistoryOK),
-			HistoryLastN:    history(HistoryOK, HistoryOK, HistoryOK, HistoryFail, HistoryOK),
-			HistorySummary:  history(HistoryGenerated, HistoryGenerated, HistoryFail, HistoryFail, HistoryGenerated),
-			HistoryReset:    history(HistoryOK, HistoryOK, HistoryOK, HistoryFail, HistoryOK),
+			HistoryMessages: history(HistoryOK, HistoryFail, HistoryOK, HistoryFail, HistoryOK),
+			HistoryLastN:    history(HistoryOK, HistoryFail, HistoryOK, HistoryFail, HistoryOK),
+			HistorySummary:  history(HistoryGenerated, HistoryFail, HistoryFail, HistoryFail, HistoryGenerated),
+			HistoryReset:    history(HistoryOK, HistoryFail, HistoryOK, HistoryFail, HistoryOK),
 		},
 		FallbackSlots: map[Provider]FallbackSlot{
 			LiveKit: FallbackComponent, Pipecat: FallbackGenerated, Vapi: FallbackSameProvider,
@@ -487,6 +499,11 @@ func history(livekit, pipecat, vapi, elevenlabs, deepgram HistoryKind) map[Provi
 	values := map[Provider]HistorySupport{
 		LiveKit: {Kind: livekit}, Pipecat: {Kind: pipecat}, Vapi: {Kind: vapi},
 		ElevenLabs: {Kind: elevenlabs}, Deepgram: {Kind: deepgram},
+	}
+	if pipecat == HistoryFail {
+		value := values[Pipecat]
+		value.Note = "the Pipecat driver emits history: full only; other values are not shaped yet"
+		values[Pipecat] = value
 	}
 	if elevenlabs == HistoryFail {
 		value := values[ElevenLabs]

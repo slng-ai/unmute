@@ -1,4 +1,4 @@
-// Package tui gathers the basic configuration for local agent scaffolds.
+// Package tui gathers the basic configuration for a new v1 agent scaffold.
 package tui
 
 import (
@@ -7,134 +7,91 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/huh"
-	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/scaffold"
 )
 
 const (
-	otherLLM      = "other (type route)"
 	actionCreate  = "create"
 	actionQuit    = "quit"
 	actionBack    = ":back"
 	agentNameHelp = "Choose a unique name for your agent. This name is also used for its local directory."
 )
 
-// Agent is the editable basic configuration loaded by the CLI.
+// Agent is the basic configuration for a scaffold.
 type Agent struct {
-	Path   string
-	Data   scaffold.Data
-	Prompt string
+	Path string
+	Data scaffold.Data
 }
 
-// Result is one confirmed create/edit action. A zero Result means Quit.
+// Result is one confirmed create action. A zero Result means Quit.
 type Result struct {
 	Agent     Agent
-	Original  Agent
 	Create    bool
 	Compile   bool
-	Targets   []string
 	Confirmed bool
 }
 
-// Run displays the home and agent menus without reading or writing files.
-func Run(in io.Reader, out io.Writer, accessible bool, targets []string, agents []Agent) (Result, error) {
+// Run displays the create wizard without reading or writing files.
+func Run(in io.Reader, out io.Writer, accessible bool) (Result, error) {
 	runner := newRunner(in, out, accessible)
 	for {
 		choice := actionCreate
-		options := []huh.Option[string]{huh.NewOption("Create a new agent", actionCreate)}
-		for index, agent := range agents {
-			label := fmt.Sprintf("%s  (%s)", agent.Data.Name, filepath.Base(agent.Path))
-			options = append(options, huh.NewOption(label, "edit:"+strconv.Itoa(index)))
-		}
-		options = append(options, huh.NewOption("Quit", actionQuit))
 		if _, err := runner.run(huh.NewSelect[string]().
 			Title("What would you like to do?").
-			Options(options...).
+			Options(
+				huh.NewOption("Create a new agent", actionCreate),
+				huh.NewOption("Quit", actionQuit),
+			).
 			Value(&choice), false); err != nil {
 			return Result{}, err
 		}
-
-		switch {
-		case choice == actionQuit:
+		if choice == actionQuit {
 			return Result{}, nil
-		case choice == actionCreate:
-			path := ""
-			back, err := runner.input("Agent name", agentNameHelp, &path, validateName)
-			if err != nil {
-				return Result{}, err
-			}
-			if back {
-				continue
-			}
-			agent := Agent{
-				Path: path,
-				Data: scaffold.Data{
-					Name:     filepath.Base(filepath.Clean(path)),
-					Greeting: scaffold.DefaultGreeting,
-					Language: scaffold.DefaultLanguage,
-					LLMModel: scaffold.DefaultLLMModel,
-					STTModel: scaffold.DefaultSTTModel,
-					TTSModel: scaffold.DefaultTTSModel,
-					TTSVoice: scaffold.DefaultTTSVoice,
-				},
-			}
-			result, back, err := editAgent(runner, agent, true, targets)
-			if err != nil {
-				return Result{}, err
-			}
-			if !back {
-				return result, nil
-			}
-		case strings.HasPrefix(choice, "edit:"):
-			index, _ := strconv.Atoi(strings.TrimPrefix(choice, "edit:"))
-			result, back, err := editAgent(runner, agents[index], false, targets)
-			if err != nil {
-				return Result{}, err
-			}
-			if !back {
-				return result, nil
-			}
+		}
+		path := ""
+		back, err := runner.input("Agent name", agentNameHelp, &path, validateName)
+		if err != nil {
+			return Result{}, err
+		}
+		if back {
+			continue
+		}
+		agent := Agent{Path: path, Data: scaffold.Data{
+			Name:         filepath.Base(filepath.Clean(path)),
+			Greeting:     scaffold.DefaultGreeting,
+			Instructions: scaffold.DefaultInstructions,
+		}}
+		result, back, err := editAgent(runner, agent)
+		if err != nil {
+			return Result{}, err
+		}
+		if !back {
+			return result, nil
 		}
 	}
 }
 
-func editAgent(runner *fieldRunner, agent Agent, create bool, targets []string) (Result, bool, error) {
-	result := Result{Agent: agent, Original: agent, Create: create}
+func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
+	result := Result{Agent: agent, Create: true}
 	for {
 		choice := "prompt"
-		options := []huh.Option[string]{
-			huh.NewOption("Agent prompt", "prompt"),
-			huh.NewOption("LLM  ·  "+result.Agent.Data.LLMModel, "llm"),
-			huh.NewOption("TTS  ·  "+result.Agent.Data.TTSModel+" / "+result.Agent.Data.TTSVoice, "tts"),
-			huh.NewOption("STT  ·  "+result.Agent.Data.STTModel, "stt"),
-			huh.NewOption("Greeting  ·  "+result.Agent.Data.Greeting, "greeting"),
-			huh.NewOption("Language  ·  "+result.Agent.Data.Language, "language"),
+		compile := "off"
+		if result.Compile {
+			compile = "on"
 		}
-		if create {
-			compile := "off"
-			if result.Compile {
-				compile = strings.Join(result.Targets, ", ")
-			}
-			options = append(options, huh.NewOption("Compile after create  ·  "+compile, "compile"))
-		}
-		action := "Save changes"
-		if create {
-			action = "Create agent"
-		}
-		options = append(options,
-			huh.NewOption(action, "save"),
-			huh.NewOption("← Back", actionBack),
-		)
-
 		back, err := runner.run(huh.NewSelect[string]().
 			Title(result.Agent.Data.Name).
-			Description("Choose a section; changes stay in memory until "+action+".").
-			Options(options...).
+			Description("Choose a section; changes stay in memory until Create agent.").
+			Options(
+				huh.NewOption("Instructions (prompt)", "prompt"),
+				huh.NewOption("Greeting  ·  "+result.Agent.Data.Greeting, "greeting"),
+				huh.NewOption("Compile after create  ·  "+compile, "compile"),
+				huh.NewOption("Create agent", "save"),
+				huh.NewOption("← Back", actionBack),
+			).
 			Value(&choice), true)
 		if err != nil {
 			return Result{}, false, err
@@ -142,40 +99,17 @@ func editAgent(runner *fieldRunner, agent Agent, create bool, targets []string) 
 		if back || choice == actionBack {
 			return Result{}, true, nil
 		}
-
 		switch choice {
 		case "prompt":
-			description := "Edit agent/prompt/identity.md."
-			if create {
-				description = "Blank keeps the generated identity prompt."
-			}
-			if _, err := runner.text("Agent prompt", description, &result.Agent.Prompt); err != nil {
-				return Result{}, false, err
-			}
-		case "llm":
-			if err := editLLM(runner, &result.Agent.Data.LLMModel); err != nil {
-				return Result{}, false, err
-			}
-		case "tts":
-			if err := editTTS(runner, &result.Agent.Data); err != nil {
-				return Result{}, false, err
-			}
-		case "stt":
-			if _, err := runner.input("STT model route", "", &result.Agent.Data.STTModel, validateBasic); err != nil {
+			if _, err := runner.text("Instructions", "Blank keeps the generated default.", &result.Agent.Data.Instructions); err != nil {
 				return Result{}, false, err
 			}
 		case "greeting":
 			if _, err := runner.input("Greeting", "", &result.Agent.Data.Greeting, validateBasic); err != nil {
 				return Result{}, false, err
 			}
-		case "language":
-			if _, err := runner.input("Language", "", &result.Agent.Data.Language, validateBasic); err != nil {
-				return Result{}, false, err
-			}
 		case "compile":
-			if err := editCompile(runner, &result, targets); err != nil {
-				return Result{}, false, err
-			}
+			result.Compile = !result.Compile
 		case "save":
 			confirmed := true
 			back, err := runner.run(huh.NewConfirm().Title(summary(result)).Value(&confirmed), true)
@@ -190,137 +124,12 @@ func editAgent(runner *fieldRunner, agent Agent, create bool, targets []string) 
 	}
 }
 
-func editLLM(runner *fieldRunner, model *string) error {
-	for {
-		selected := *model
-		if !slices.Contains(ir.LLMCatalogModels(), selected) {
-			selected = otherLLM
-		}
-		options := append(llmOptions(), huh.NewOption("← Back", actionBack))
-		back, err := runner.run(huh.NewSelect[string]().
-			Title("LLM model").
-			Options(options...).
-			Value(&selected), true)
-		if err != nil {
-			return err
-		}
-		if back || selected == actionBack {
-			return nil
-		}
-		if selected != otherLLM {
-			*model = selected
-			return nil
-		}
-		route := *model
-		back, err = runner.input("LLM route", "", &route, validateRequired)
-		if err != nil {
-			return err
-		}
-		if !back {
-			*model = route
-			return nil
-		}
+func summary(result Result) string {
+	compile := "no"
+	if result.Compile {
+		compile = "yes (all targets)"
 	}
-}
-
-func editTTS(runner *fieldRunner, data *scaffold.Data) error {
-	for {
-		choice := "model"
-		back, err := runner.run(huh.NewSelect[string]().
-			Title("TTS").
-			Options(
-				huh.NewOption("Model  ·  "+data.TTSModel, "model"),
-				huh.NewOption("Voice  ·  "+data.TTSVoice, "voice"),
-				huh.NewOption("← Back", actionBack),
-			).
-			Value(&choice), true)
-		if err != nil {
-			return err
-		}
-		if back || choice == actionBack {
-			return nil
-		}
-		if choice == "model" {
-			if _, err := runner.input("TTS model route", "", &data.TTSModel, validateBasic); err != nil {
-				return err
-			}
-		} else if _, err := runner.input("TTS voice", "", &data.TTSVoice, validateBasic); err != nil {
-			return err
-		}
-	}
-}
-
-func editCompile(runner *fieldRunner, result *Result, targets []string) error {
-	for {
-		choice := "disabled"
-		if result.Compile {
-			choice = "enabled"
-		}
-		back, err := runner.run(huh.NewSelect[string]().
-			Title("Compile after create?").
-			Options(
-				huh.NewOption("No", "disabled"),
-				huh.NewOption("Yes", "enabled"),
-				huh.NewOption("← Back", actionBack),
-			).
-			Value(&choice), true)
-		if err != nil {
-			return err
-		}
-		if back || choice == actionBack {
-			return nil
-		}
-		if choice == "disabled" {
-			result.Compile = false
-			result.Targets = nil
-			return nil
-		}
-
-		selected := append([]string(nil), result.Targets...)
-		if len(selected) == 0 {
-			selected = append(selected, targets...)
-		}
-		options := make([]huh.Option[string], 0, len(targets)+1)
-		for _, target := range targets {
-			options = append(options, huh.NewOption(target, target).Selected(slices.Contains(selected, target)))
-		}
-		options = append(options, huh.NewOption("← Back", actionBack))
-		back, err = runner.run(huh.NewMultiSelect[string]().
-			Title("Compile targets").
-			Options(options...).
-			Value(&selected).
-			Validate(func(selected []string) error {
-				if slices.Contains(selected, actionBack) {
-					return nil
-				}
-				if len(selected) == 0 {
-					return errors.New("select at least one target")
-				}
-				return nil
-			}), true)
-		if err != nil {
-			return err
-		}
-		if back || slices.Contains(selected, actionBack) {
-			continue
-		}
-		result.Compile = true
-		result.Targets = selected
-		return nil
-	}
-}
-
-func llmModels() []string {
-	return append(ir.LLMCatalogModels(), otherLLM)
-}
-
-func llmOptions() []huh.Option[string] {
-	models := llmModels()
-	options := make([]huh.Option[string], 0, len(models))
-	for _, model := range models {
-		options = append(options, huh.NewOption(model, model))
-	}
-	return options
+	return fmt.Sprintf("Create %s?\nGreeting: %s\nCompile: %s", result.Agent.Data.Name, result.Agent.Data.Greeting, compile)
 }
 
 func validateName(name string) error {
@@ -346,43 +155,6 @@ func validateBasic(value string) error {
 		return errors.New(`value must not contain quotes or newlines`)
 	}
 	return nil
-}
-
-func validateRequired(value string) error {
-	if strings.TrimSpace(value) == "" {
-		return errors.New("value must not be empty")
-	}
-	return validateBasic(value)
-}
-
-func summary(result Result) string {
-	action := "Save changes to"
-	if result.Create {
-		action = "Create"
-	}
-	compile := "no"
-	if result.Compile {
-		compile = strings.Join(result.Targets, ", ")
-	}
-	prompt := "current"
-	if result.Create && result.Agent.Prompt == "" {
-		prompt = "generated default"
-	} else if result.Agent.Prompt != result.Original.Prompt {
-		prompt = "edited"
-	}
-	return fmt.Sprintf(
-		"%s %s?\nPrompt: %s\nGreeting: %s\nLanguage: %s\nLLM: %s\nSTT: %s\nTTS: %s / %s\nCompile: %s",
-		action,
-		result.Agent.Data.Name,
-		prompt,
-		result.Agent.Data.Greeting,
-		result.Agent.Data.Language,
-		result.Agent.Data.LLMModel,
-		result.Agent.Data.STTModel,
-		result.Agent.Data.TTSModel,
-		result.Agent.Data.TTSVoice,
-		compile,
-	)
 }
 
 type fieldRunner struct {
@@ -430,7 +202,6 @@ func backKeyMap() *huh.KeyMap {
 	keymap.Input.Submit.SetHelp("esc back • enter", "submit")
 	keymap.Text.Submit.SetHelp("esc back • enter", "submit")
 	keymap.Select.Submit.SetHelp("esc back • enter", "select")
-	keymap.MultiSelect.Submit.SetHelp("esc back • enter", "confirm")
 	keymap.Confirm.Submit.SetHelp("esc back • enter", "submit")
 	return keymap
 }

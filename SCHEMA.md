@@ -131,7 +131,7 @@ Model profiles are abstract on purpose. Concrete names bind per target (section 
 |---|---|---|---|---|
 | `description` | no | text | core | For humans only. |
 | `placement` | yes | `api \| local` | gated | `local` reason fails on managed targets, with one exception: a documented custom LLM endpoint (ElevenLabs has one; Vapi unverified, fails there for now). On Deepgram a custom reason endpoint is fine. |
-| `fallback` | no | ordered list of profile names | gated | Cycle-checked. Every profile in a chain must land in the same slot kind and placement on the resolved target. All five verified 2026-07-15. Deepgram: native (`agent.think` as an ordered provider array; mixed providers, per-entry params). LiveKit: native (`llm.FallbackAdapter`; STT/TTS adapters exist too). Pipecat: generated. ElevenLabs: native (`backup_llm_config.preference: override` with ordered `order`, `cascade_timeout_seconds` 2-15s); entries are model IDs only, so fallback profiles whose bindings carry `params` warn there. Vapi: native (`model.fallbackModels`); entries are same-provider model IDs, so a **cross-provider chain fails on Vapi**; verified on OpenAI model schemas, others unverified. |
+| `fallback` | no | ordered list of profile names | gated | Cycle-checked. Every profile in a chain must land in the same slot kind and placement on the resolved target. All five verified 2026-07-15. Deepgram: native (`agent.think` as an ordered provider array; mixed providers, per-entry params). LiveKit: native (`llm.FallbackAdapter`; STT/TTS adapters exist too). Pipecat: generated (the Pipecat driver v1 does not emit fallback yet — a maturity gate, not a platform limit; lifts when driver §T lands). ElevenLabs: native (`backup_llm_config.preference: override` with ordered `order`, `cascade_timeout_seconds` 2-15s); entries are model IDs only, so fallback profiles whose bindings carry `params` warn there. Vapi: native (`model.fallbackModels`); entries are same-provider model IDs, so a **cross-provider chain fails on Vapi**; verified on OpenAI model schemas, others unverified. |
 
 A voice profile carries only `description`. Same pattern: abstract here, bound per target as `speak.<profile>`.
 
@@ -228,7 +228,7 @@ Transfer history support per target (Vapi and ElevenLabs columns verified agains
 | `summary` | ok (generated) | ok (generated) | fails | fails | ok (generated) |
 | `reset` | ok | ok | ok | fails | ok |
 
-ElevenLabs always keeps the full transcript, for tasks too. `reset` never promises a literally empty context; on LiveKit a handoff marker still lands in the new context.
+ElevenLabs always keeps the full transcript, for tasks too. `reset` never promises a literally empty context; on LiveKit a handoff marker still lands in the new context. The Pipecat driver v1 emits `history: full` only — the other values (and `context.variables` subset, `include_tool_calls: false`) are a maturity gate (§9); the workers handoff carries the running context.
 
 Vapi lowering, literal spellings verified 2026-07-15: `contextEngineeringPlan` is one of `all` (their default; ours is no default, D7), `userAndAssistantMessages`, `lastNMessages` plus `maxMessages`, `none`; no summary mode exists; `previousAssistantMessages` stays unexposed. For tasks this table collapses: code targets support all five values (generated), ElevenLabs supports `full` only, and Vapi is n/a while single tasks fail there.
 
@@ -253,7 +253,7 @@ Outcomes, not provider knobs. All lifecycle fields are gated per target.
 | `interruption.ignore_phrases` | no | list of text | warn | Native on ElevenLabs and Vapi. Generated on LiveKit and Pipecat. Dropped with a warning on Deepgram. |
 | `inactivity.nudge_after`, `inactivity.end_after` | no | durations | warn | Range-checked per target by the driver. |
 | `max_duration` | no | duration | warn | Some providers have no cap knob; the driver gates and documents it. |
-| `thinking_audio` | no | `none \| subtle` | gated | Native on LiveKit, Pipecat, ElevenLabs. **Fails on Deepgram and Vapi** (no faithful lowering). |
+| `thinking_audio` | no | `none \| subtle` | gated | Native on LiveKit, Pipecat, ElevenLabs. **Fails on Deepgram and Vapi** (no faithful lowering). The Pipecat driver v1 does not emit thinking_audio yet (a maturity gate). |
 
 The three greeting combinations:
 
@@ -268,7 +268,7 @@ If the `greeting` block is absent, the target's own default applies and the driv
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
 | `kind` | yes | `realtime_audio \| telephony` | core | |
-| `inbound`, `outbound` | yes, telephony only | bool | gated | `outbound: true` requires `on_voicemail` and all `source: call_start` variables satisfiable. Verified on LiveKit, Pipecat, Vapi, ElevenLabs (N6); **generated with a warning on Deepgram** (review-corrected 2026-07-15: Deepgram ships an official AMD-bridge outbound reference impl — carrier AMD in the bridge — so the lowering is proven, carrier-conditional). |
+| `inbound`, `outbound` | yes, telephony only | bool | gated | `outbound: true` requires `on_voicemail` and all `source: call_start` variables satisfiable. Verified on LiveKit, Pipecat, Vapi, ElevenLabs (N6); the Pipecat driver v1 does not emit `outbound`/`on_voicemail` yet (a maturity gate); **generated with a warning on Deepgram** (review-corrected 2026-07-15: Deepgram ships an official AMD-bridge outbound reference impl — carrier AMD in the bridge — so the lowering is proven, carrier-conditional). |
 | `required_controls` | no | list from the control vocabulary | gated | Vocabulary: `cold_transfer, warm_transfer, dtmf_send, dtmf_receive, hold, hangup, voicemail_detection, ivr_navigation`. Resolved against the target's carrier and transport, never the provider brand alone. |
 | `on_voicemail` | iff `outbound: true` | `hangup \| leave_message` | gated | Both values verified 2026-07-15 on LiveKit (`AMD`), Pipecat (`VoicemailDetector`), Vapi (`voicemailDetection` + `voicemailMessage`), ElevenLabs (`voicemail_detection` system tool + `voicemail_message`). **Generated with a warning on Deepgram** (review-corrected 2026-07-15: official AMD-bridge reference impl covers both values, carrier-conditional). |
 
@@ -307,6 +307,8 @@ Execution gating across the five:
 - `local`: code targets only.
 - `mcp`: **fails on Deepgram** (no runtime MCP client). On LiveKit it requires SDK language Python.
 - `client`, `provider_hosted`, `builtin`: gated per driver; each driver documents what it can host. Not part of the safe core yet.
+
+The Pipecat driver v1 emits `webhook` tools only; `local` and `mcp` are maturity-gated there until the driver emits them.
 
 ---
 
@@ -378,17 +380,17 @@ Feature by feature:
 | task | ok | ok | unverified | conditional | ok |
 | task_group, `then: transfer\|end` | warn | ok | ok | ok | ok |
 | task_group, `then: return` | warn | ok | fail | ok | ok |
-| history `messages` / `last_n` / `reset` | ok | ok | ok | fail | ok |
-| history `summary` | ok | ok | fail | fail | ok |
+| history `messages` / `last_n` / `reset` | ok | gated (v1) | ok | fail | ok |
+| history `summary` | ok | gated (v1) | fail | fail | ok |
 | `requires:` | ok | ok | fail | fail | ok |
-| `fallback:` | ok | ok | conditional | ok | ok |
+| `fallback:` | ok | gated (v1) | conditional | ok | ok |
 | human_transfer cold | ok | Daily SIP only | ok | ok | carrier-conditional |
 | human_transfer warm | native (Node stable, Python Beta) | ships, not emitted yet | Twilio only (stable path) | ok | carrier-conditional |
-| `thinking_audio` | ok | ok | fail | ok | fail |
+| `thinking_audio` | ok | gated (v1) | fail | ok | fail |
 | `placement: local` (listen/speak) | ok | ok | fail | fail | fail |
 | webhook tools | ok | ok | ok | ok | ok |
-| mcp tools | Python only | ok | ok | ok | fail |
-| outbound + `on_voicemail` | ok | ok | ok | ok | generated (warn) |
+| mcp tools | Python only | gated (v1) | ok | ok | fail |
+| outbound + `on_voicemail` | ok | gated (v1) | ok | ok | generated (warn) |
 
 ---
 
@@ -430,3 +432,9 @@ Still open:
 | Deepgram voicemail: bridge plus carrier AMD lowering | `on_voicemail`, `outbound` on Deepgram | **review-resolved 2026-07-15**: Deepgram publishes an official AMD-bridge outbound reference impl (Twilio async AMD → hangup + leave-message); generated, carrier-conditional (warn) |
 | In-flight tool calls on barge-in, managed targets: Vapi and ElevenLabs docs both silent (ElevenLabs documents prevention via per-tool `interruption_mode`, not cancellation) | `interruption` | `provider_default` only |
 | Vapi `fallbackModels` on non-OpenAI model schemas | `fallback` on Vapi | conditional, same-provider chains |
+
+**Driver maturity gates (tags tightened until a driver emits the feature).** A code target may support a feature at the schema level while its first driver has not emitted the lowering yet. Like warm transfer (§4.7), these are gates on the driver, not the platform, and lift when the matching driver §T task lands:
+
+| Driver | Gated until emitted | Where |
+|---|---|---|
+| Pipecat v1 | `models.fallback`, `thinking_audio`, `outbound` + `on_voicemail`, `local` tools, `mcp` tools, warm transfer; transfer/task context shaping beyond the safe-core defaults — `history` other than `full`, `context.variables` subset, `include_tool_calls: false` (the workers handoff carries the running context; fine-grained shaping is not emitted yet) | [docs/spec/driver-pipecat.md](docs/spec/driver-pipecat.md) §T. Emitted: single agent, `agent_transfer` (+ `requires` guard), `tasks`, `task_groups` with `context_scope` (shared/isolated), per-task model, `then` return/transfer/end. |

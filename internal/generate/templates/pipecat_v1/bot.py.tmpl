@@ -1,0 +1,290 @@
+"""Generated Pipecat agent for {{.Project}}.
+
+Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
+graph are baked in from the spec. Secret values are read from the environment
+and never written here. The agency model uses the Pipecat workers API: a main
+PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
+LLM and voice, and agent_transfer is activate_worker().
+"""
+
+from __future__ import annotations
+
+{{if .NeedsAsyncio}}import asyncio
+{{end}}import os
+{{if .Tasks}}import json
+{{end}}{{if .Variables}}from dataclasses import asdict, dataclass
+{{end}}{{if .NeedsHTTPX}}
+import httpx
+{{end}}{{if .Tasks}}from openai import AsyncOpenAI
+{{end}}from dotenv import load_dotenv
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.bus import BusBridgeProcessor
+{{if and .NeedsEndFrame .NeedsAppendFrame}}from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
+{{else if .NeedsEndFrame}}from pipecat.frames.frames import EndFrame
+{{else if .NeedsAppendFrame}}from pipecat.frames.frames import LLMMessagesAppendFrame
+{{end}}from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+{{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
+{{end}}from pipecat.transports.base_transport import BaseTransport, TransportParams
+{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
+from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
+{{end}}from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
+from pipecat.workers.runner import WorkerRunner
+{{if .Tasks}}from pipecat.bus.messages import BusJobRequestMessage
+from pipecat.pipeline.job_decorator import job
+from pipecat.workers.base_worker import BaseWorker
+{{end}}{{range .Imports}}{{.}}
+{{end}}
+load_dotenv()
+
+MAIN_NAME = {{pyq .MainName}}
+REQUIRED_ENV = [
+{{range .RequiredEnv}}    {{pyq .}},
+{{end}}]
+{{if .Interrupt}}{{if .Interrupt.IgnorePhrase}}IGNORE_PHRASES = [{{range $i, $p := .Interrupt.IgnorePhrase}}{{if $i}}, {{end}}{{pyq $p}}{{end}}]
+{{end}}{{end}}{{if .HasColdTransfer}}
+# Set once the transport exists, so an agent's cold-transfer @tool can reach it.
+_TRANSPORT: BaseTransport | None = None
+{{end}}
+
+def require_env() -> None:
+    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+{{if .Variables}}
+@dataclass
+class State:
+    """Typed call variables (SCHEMA 4.4), shared across agents."""
+{{range .Variables}}    {{.Name}}: {{.PyType}} = {{.Default}}
+{{end}}
+
+STATE = State()
+{{end}}{{if gt .MaxDurationSecs 0}}
+async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
+    await asyncio.sleep(timeout_secs)
+    await worker.queue_frame(EndFrame())
+{{end}}
+# --- agents -----------------------------------------------------------------
+{{range .Agents}}
+
+def build_{{.Name}}_llm():
+    return {{.LLM.Class}}(
+        api_key=os.environ[{{pyq .LLM.APIKeyEnv}}],
+{{if .LLM.BaseURL}}        base_url=os.environ[{{pyq .LLM.BaseURL}}],
+{{end}}        settings={{.LLM.Class}}.Settings(
+            model={{pyq .LLM.Model}},
+            system_instruction={{pyq .Prompt}},
+{{range .LLM.Params}}            {{.Key}}={{.Value}},
+{{end}}        ),
+    )
+
+
+def build_{{.Name}}_tts():
+    return {{.TTS.Class}}(
+        api_key=os.environ[{{pyq .TTS.APIKeyEnv}}],
+{{if .TTS.BaseURL}}        base_url=os.environ[{{pyq .TTS.BaseURL}}],
+{{end}}{{if .TTS.Voice}}{{if eq .TTS.Class "ElevenLabsTTSService"}}        voice_id={{pyq .TTS.Voice}},
+{{else}}        voice={{pyq .TTS.Voice}},
+{{end}}{{end}}{{if .TTS.Model}}        model={{pyq .TTS.Model}},
+{{end}}{{range .TTS.Params}}        {{.Key}}={{.Value}},
+{{end}}    )
+
+
+class {{.Class}}(LLMWorker):
+    """Agent: {{.Name}}."""
+
+    def __init__(self) -> None:
+        llm = build_{{.Name}}_llm()
+        super().__init__({{pyq .Name}}, llm=llm, pipeline=Pipeline([llm, build_{{.Name}}_tts()]), bridged=())
+{{range .Transfers}}
+    @tool(cancel_on_interruption=False)
+    async def {{.MethodName}}(self, params: FunctionCallParams):
+        """{{.When}}"""
+{{if .Requires}}        missing = [name for name in [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}] if getattr(STATE, name, None) in (None, "")]
+        if missing:
+            await params.result_callback({"refused": f"Cannot transfer yet; still need: {', '.join(missing)}"})
+            return
+{{end}}        await self.activate_worker(
+            {{pyq .To}},
+            args=LLMWorkerActivationArgs(
+                messages=[{"role": "developer", "content": {{pyq .Reason}}}],
+                run_llm=True,
+            ),
+            deactivate_self=True,
+            result_callback=params.result_callback,
+        )
+{{end}}{{range .Tools}}
+    @tool({{if eq .Interruption "cancel"}}cancel_on_interruption=True{{else if eq .Interruption "continue"}}cancel_on_interruption=False{{end}})
+    async def {{.MethodName}}(self, params: FunctionCallParams{{range .Args}}, {{.Name}}: str{{if not .Required}} = ""{{end}}{{end}}):
+        """{{.Description}}"""
+{{if .ColdDestination}}        await params.llm.push_frame(
+            LLMMessagesAppendFrame(
+                [{"role": "developer", "content": "Tell the caller you are connecting them now, then wait."}],
+                run_llm=True,
+            )
+        )
+        if _TRANSPORT is not None:
+            await _TRANSPORT.sip_call_transfer({"toEndPoint": {{pyq .ColdDestination}}})
+        await params.result_callback({"transferred": True})
+{{else}}        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                os.environ[{{pyq .URLEnv}}],
+                json={ {{range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}} },
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            await params.result_callback(response.json())
+{{if .EndsCall}}        await params.llm.push_frame(EndFrame())
+{{end}}{{end}}{{end}}{{range .Delegates}}
+    @tool()
+    async def {{.MethodName}}(self, params: FunctionCallParams):
+        """{{.When}}"""
+{{if .Task}}        async with self.job({{pyq .Task}}, name={{pyq .Task}}, payload={{if $.Variables}}asdict(STATE){{else}}{}{{end}}) as job_ctx:
+            result = job_ctx.response
+{{range .Assign}}        STATE.{{.Var}} = result[{{pyq .Field}}]
+{{end}}        await params.result_callback(result)
+{{else}}        results: dict = {}
+        payload = {{if $.Variables}}dict(asdict(STATE)){{else}}{}{{end}}
+{{$isolated := .Isolated}}{{range .Steps}}        async with self.job({{pyq .}}, name={{pyq .}}, payload=payload) as job_ctx:
+            results[{{pyq .}}] = job_ctx.response
+{{if not $isolated}}        payload = {**payload, {{pyq .}}: results[{{pyq .}}]}
+{{end}}{{end}}{{if eq .Then "transfer"}}        await self.activate_worker(
+            {{pyq .ThenTarget}},
+            args=LLMWorkerActivationArgs(
+                messages=[{"role": "developer", "content": "Continue with the results so far."}],
+                run_llm=True,
+            ),
+            deactivate_self=True,
+            result_callback=params.result_callback,
+        )
+{{else if eq .Then "end"}}        await params.result_callback(results)
+        await params.llm.push_frame(EndFrame())
+{{else}}        await params.result_callback(results)
+{{end}}{{end}}{{end}}
+{{end}}{{range .Tasks}}
+class {{.Class}}(BaseWorker):
+    """Task worker: {{.Name}} (delegate-and-return, structured result)."""
+
+    @job(name={{pyq .Name}})
+    async def run(self, message: BusJobRequestMessage):
+        client = AsyncOpenAI(api_key=os.environ[{{pyq .LLM.APIKeyEnv}}]{{if .LLM.BaseURL}}, base_url=os.environ[{{pyq .LLM.BaseURL}}]{{end}})
+        completion = await client.chat.completions.create(
+            model={{pyq .LLM.Model}},
+            messages=[
+                {"role": "system", "content": {{pyq .Prompt}}},
+                {"role": "user", "content": json.dumps(message.payload or {})},
+            ],
+            response_format={{.ResultSchema}},
+        )
+        result = json.loads(completion.choices[0].message.content)
+        await self.send_job_response(message.job_id, result)
+{{end}}
+# --- transport & run --------------------------------------------------------
+transport_params: dict = {
+    "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+    "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+}
+
+AGENTS = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(){{end}}]
+{{if .Tasks}}TASK_WORKERS = [{{range $i, $t := .Tasks}}{{if $i}}, {{end}}{{$t.Class}}(){{end}}]
+{{end}}
+
+
+def build_stt():
+    return {{.STT.Class}}(
+        api_key=os.environ[{{pyq .STT.APIKeyEnv}}],
+{{if .STT.BaseURL}}        base_url=os.environ[{{pyq .STT.BaseURL}}],
+{{end}}{{if .STT.Model}}        model={{pyq .STT.Model}},
+{{end}}{{range .STT.Params}}        {{.Key}}={{.Value}},
+{{end}}    )
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
+    require_env()
+{{if .HasColdTransfer}}    global _TRANSPORT
+    _TRANSPORT = transport
+{{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
+    # key, no network hop; the turn binding in targets.yaml is advisory.
+    context = LLMContext()
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(),
+{{if .Interrupt}}{{if gt .Interrupt.MinWords 0}}            user_turn_strategies=UserTurnStrategies(
+                start=[MinWordsUserTurnStartStrategy(min_words={{.Interrupt.MinWords}})],
+                stop=[SpeechTimeoutUserTurnStopStrategy()],
+            ),
+{{end}}{{end}}{{if .Inactivity}}            user_idle_timeout={{.Inactivity.NudgeSecs}},
+{{end}}        ),
+    )
+    bridge = BusBridgeProcessor(bus=runner.bus, worker_name=MAIN_NAME, name=f"{MAIN_NAME}::BusBridge")
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            build_stt(),
+            user_aggregator,
+            bridge,
+            transport.output(),
+            assistant_aggregator,
+        ]
+    )
+    main = PipelineWorker(
+        pipeline,
+        name=MAIN_NAME,
+        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+    )
+{{if .Inactivity}}
+    @user_aggregator.event_handler("on_user_turn_idle")
+    async def on_user_turn_idle(aggregator):
+        await aggregator.push_frame(
+            LLMMessagesAppendFrame(
+                [{"role": "developer", "content": "The caller has gone quiet. Politely check if they are still there."}],
+                run_llm=True,
+            )
+        )
+{{end}}{{if .HasColdTransfer}}
+    @transport.event_handler("on_dialout_answered")
+    async def on_dialout_answered(transport, data):
+        # Cold transfer: the human answered, so the bot leaves the call.
+        await main.queue_frame(EndFrame())
+{{end}}
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        await main.activate_worker(
+            {{pyq .EntryAgent}},
+{{if .GreetingInstruction}}            args=LLMWorkerActivationArgs(
+                messages=[{"role": "developer", "content": {{pyq .GreetingInstruction}}}],
+                run_llm={{.GreetingRunLLM}},
+            ),
+{{else}}            args=LLMWorkerActivationArgs(run_llm={{.GreetingRunLLM}}),
+{{end}}        )
+{{if gt .MaxDurationSecs 0}}        asyncio.create_task(_end_after(main, {{.MaxDurationSecs}}))
+{{end}}
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        await runner.cancel()
+
+    await runner.add_workers(main, *AGENTS{{if .Tasks}}, *TASK_WORKERS{{end}})
+    await runner.run()
+
+
+async def bot(runner_args: RunnerArguments) -> None:
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()
