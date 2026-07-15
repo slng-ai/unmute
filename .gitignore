@@ -1,4 +1,5 @@
-docs/
+docs/*
+!docs/user/
 .env
 .env.local
 voice-agent-prompting/
