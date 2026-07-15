@@ -398,6 +398,12 @@ func Default() Table {
 			FieldReasonLocal: {
 				ElevenLabs: {NonEmpty: true, Note: "ElevenLabs local reason models require a custom endpoint"},
 			},
+			// V8: a warm-transfer briefing message is read to the operator only for
+			// numbers imported via the native Twilio integration; SIP transfers do
+			// not support it (verified against ElevenLabs docs 2026-07-15).
+			FieldBriefingMessage: {
+				ElevenLabs: {Value: "twilio", Note: "ElevenLabs warm-transfer briefing messages require carrier twilio (native Twilio integration); SIP transfers do not support them"},
+			},
 		},
 		Roles: map[Role]map[Provider]RoleKind{
 			Listen: role(Open, Open, Open, Integrated, Open),

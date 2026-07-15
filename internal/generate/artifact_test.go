@@ -23,6 +23,7 @@ func TestGenerateWarnOnlyReachesRemainingStubs(t *testing.T) { // V17
 	agent := loadCompilerAgent(t)
 	// LiveKit and Pipecat are real drivers now; these three are still stubs.
 	for _, provider := range []ir.Provider{
+		ir.ProviderLiveKit, ir.ProviderVapi, ir.ProviderDeepgram,
 		ir.ProviderVapi, ir.ProviderElevenLabs, ir.ProviderDeepgram,
 	} {
 		t.Run(string(provider), func(t *testing.T) {
