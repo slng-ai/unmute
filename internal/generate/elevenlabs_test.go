@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
@@ -109,6 +110,161 @@ func TestElevenLabsAssignNeedsJSONTool(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "assign requires a tool returning JSON") {
 		t.Fatalf("expected assign-without-json-tool gate, got %v", err)
 	}
+}
+
+// elBody generates the elevenlabs artifact and returns the create-step body for
+// one agent as a decoded map.
+func elBody(t *testing.T, agent *ir.Agent, tgt ir.Target, capture string) map[string]any {
+	t.Helper()
+	art, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	for _, step := range art.Apply.Steps {
+		if step.CaptureID == capture {
+			var body map[string]any
+			if err := json.Unmarshal(step.Body, &body); err != nil {
+				t.Fatalf("unmarshal %s body: %v", capture, err)
+			}
+			return body
+		}
+	}
+	t.Fatalf("no step captured %q", capture)
+	return nil
+}
+
+// promptOf digs conversation_config.agent.prompt out of an agent body.
+func promptOf(t *testing.T, body map[string]any) map[string]any {
+	t.Helper()
+	cc, _ := body["conversation_config"].(map[string]any)
+	ab, _ := cc["agent"].(map[string]any)
+	p, ok := ab["prompt"].(map[string]any)
+	if !ok {
+		t.Fatalf("no prompt in body %v", body)
+	}
+	return p
+}
+
+func TestElevenLabsFallbackBackupLLM(t *testing.T) { // V5
+	agent := elWorkAgent(t)
+	profile := agent.Models["fast_reasoning"]
+	profile.Fallback = []string{"careful_reasoning"}
+	agent.Models["fast_reasoning"] = profile
+
+	prompt := promptOf(t, elBody(t, agent, targetByProvider(t, agent, ir.ProviderElevenLabs), "intake"))
+	backup, ok := prompt["backup_llm_config"].(map[string]any)
+	if !ok || backup["preference"] != "override" {
+		t.Fatalf("backup_llm_config = %v", prompt["backup_llm_config"])
+	}
+	order, _ := backup["order"].([]any)
+	if len(order) != 1 || order[0] != "claude-sonnet-4-5" {
+		t.Fatalf("order = %v", backup["order"])
+	}
+	if prompt["cascade_timeout_seconds"] != float64(elCascadeTimeoutDefault) {
+		t.Fatalf("cascade_timeout_seconds = %v", prompt["cascade_timeout_seconds"])
+	}
+}
+
+func TestElevenLabsUserSpeaksFirst(t *testing.T) { // V6
+	agent := elWorkAgent(t)
+	agent.Conversation.Greeting = &ir.Greeting{SpeaksFirst: ir.SpeaksFirstUser}
+	body := elBody(t, agent, targetByProvider(t, agent, ir.ProviderElevenLabs), "intake")
+	cc := body["conversation_config"].(map[string]any)
+	ab := cc["agent"].(map[string]any)
+	if fm, ok := ab["first_message"]; !ok || fm != "" {
+		t.Fatalf("expected empty first_message (native wait), got %v (present=%v)", fm, ok)
+	}
+}
+
+func TestElevenLabsCustomLLMEndpoint(t *testing.T) { // V9/C1
+	agent := elWorkAgent(t)
+	profile := agent.Models["fast_reasoning"]
+	profile.Placement = ir.PlacementLocal
+	agent.Models["fast_reasoning"] = profile
+	tgt := targetByProvider(t, agent, ir.ProviderElevenLabs)
+	binding := tgt.Models.Reason["fast_reasoning"]
+	binding.Placement = ir.PlacementLocal
+	binding.EndpointEnv = "CUSTOM_LLM_URL"
+	tgt.Models.Reason["fast_reasoning"] = binding
+
+	prompt := promptOf(t, elBody(t, agent, tgt, "intake"))
+	custom, ok := prompt["custom_llm"].(map[string]any)
+	if !ok || custom["url"] != "{{env:CUSTOM_LLM_URL}}" {
+		t.Fatalf("custom_llm = %v", prompt["custom_llm"])
+	}
+	if _, hasLLM := prompt["llm"]; hasLLM {
+		t.Fatalf("custom-LLM prompt must not also set llm: %v", prompt)
+	}
+}
+
+func TestElevenLabsVoicemailLeaveMessage(t *testing.T) { // V7
+	agent := elWorkAgent(t)
+	yes := true
+	agent.Channels["phone"] = ir.Channel{
+		Kind: ir.ChannelTelephony, Inbound: &yes, Outbound: &yes, OnVoicemail: ir.VoicemailLeaveMessage,
+	}
+	tools := toolsOf(t, elBody(t, agent, targetByProvider(t, agent, ir.ProviderElevenLabs), "intake"))
+	vm := systemToolNamed(tools, "voicemail_detection")
+	if vm == nil {
+		t.Fatal("voicemail_detection tool not emitted")
+	}
+	params, _ := vm["params"].(map[string]any)
+	if _, ok := params["voicemail_message"]; !ok {
+		t.Fatalf("leave_message must set voicemail_message: %v", params)
+	}
+}
+
+func TestElevenLabsHumanTransferWarmBriefing(t *testing.T) { // V8
+	agent := elWorkAgent(t)
+	agent.Controls["to_human"] = &ir.HumanTransfer{
+		Kind: ir.ControlHumanTransfer, Destination: "billing_line", Mode: ir.TransferWarm,
+		Briefing: ir.BriefingMessage, When: "Read this to the operator.",
+	}
+	tgt := targetByProvider(t, agent, ir.ProviderElevenLabs)
+	tgt.Carrier = "twilio" // briefing:message is native-Twilio only (V8)
+
+	tools := toolsOf(t, elBody(t, agent, tgt, "billing"))
+	xfer := systemToolNamed(tools, "transfer_to_number")
+	if xfer == nil {
+		t.Fatal("transfer_to_number not emitted")
+	}
+	rule := xfer["params"].(map[string]any)["transfers"].([]any)[0].(map[string]any)
+	if rule["transfer_type"] != "conference" {
+		t.Fatalf("warm transfer must be conference, got %v", rule["transfer_type"])
+	}
+	if rule["agent_message"] != "Read this to the operator." {
+		t.Fatalf("briefing:message must set agent_message, got %v", rule["agent_message"])
+	}
+}
+
+func toolsOf(t *testing.T, body map[string]any) []any {
+	t.Helper()
+	tools, _ := promptOf(t, body)["tools"].([]any)
+	return tools
+}
+
+func systemToolNamed(tools []any, name string) map[string]any {
+	for _, raw := range tools {
+		tool, _ := raw.(map[string]any)
+		if tool["type"] == "system" && tool["name"] == name {
+			return tool
+		}
+	}
+	return nil
+}
+
+// elWorkAgent is safe_core built for in-code mutation by the T5 unit tests.
+func elWorkAgent(t *testing.T) *ir.Agent {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return agent
 }
 
 func renderApply(a Artifact) string {

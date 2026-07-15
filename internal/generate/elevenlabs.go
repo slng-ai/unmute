@@ -493,8 +493,11 @@ func (b *elBuilder) agentTools(name string) ([]any, error) {
 	if len(numberTransfers) > 0 {
 		tools = append(tools, systemTool("transfer_to_number", map[string]any{"transfers": numberTransfers}))
 	}
-	if vm := b.voicemailTool(); vm != nil {
-		tools = append(tools, vm)
+	// Voicemail detection rides the entry agent, which answers the outbound call.
+	if name == b.agent.EntryAgent {
+		if vm := b.voicemailTool(); vm != nil {
+			tools = append(tools, vm)
+		}
 	}
 	return tools, nil
 }
