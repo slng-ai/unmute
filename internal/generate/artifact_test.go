@@ -19,10 +19,10 @@ func TestGenerateValidatesBeforeProviderDispatch(t *testing.T) { // V17
 	}
 }
 
-func TestGenerateWarnOnlyReachesEveryProviderStub(t *testing.T) { // V17
+func TestGenerateWarnOnlyReachesRemainingStubs(t *testing.T) { // V17
 	agent := loadCompilerAgent(t)
 	for _, provider := range []ir.Provider{
-		ir.ProviderLiveKit, ir.ProviderPipecat, ir.ProviderVapi, ir.ProviderElevenLabs, ir.ProviderDeepgram,
+		ir.ProviderLiveKit, ir.ProviderVapi, ir.ProviderElevenLabs, ir.ProviderDeepgram,
 	} {
 		t.Run(string(provider), func(t *testing.T) {
 			artifact, err := Generate(agent, compilerTarget(agent, provider), target.Default())
@@ -33,6 +33,31 @@ func TestGenerateWarnOnlyReachesEveryProviderStub(t *testing.T) { // V17
 				t.Fatalf("warn-only validation was discarded: %#v", artifact)
 			}
 		})
+	}
+}
+
+func TestGeneratePipecatEmitsProject(t *testing.T) { // driver-pipecat T2, V17
+	agent := loadCompilerAgent(t)
+	artifact, err := Generate(agent, compilerTarget(agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatalf("pipecat generate: %v", err)
+	}
+	if artifact.Kind != CodeTarget {
+		t.Fatalf("kind = %q", artifact.Kind)
+	}
+	want := map[string]bool{"bot.py": false, "pyproject.toml": false, "compile-report.json": false}
+	for _, file := range artifact.Files {
+		if _, ok := want[file.Path]; ok {
+			want[file.Path] = true
+		}
+	}
+	for path, found := range want {
+		if !found {
+			t.Errorf("missing generated file %q", path)
+		}
+	}
+	if len(artifact.Notes.ForwardedBindings) == 0 || len(artifact.Notes.Sizing) == 0 {
+		t.Fatalf("validate-derived notes were discarded: %#v", artifact.Notes)
 	}
 }
 

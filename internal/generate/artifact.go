@@ -63,7 +63,14 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 	case ir.ProviderLiveKit:
 		return artifact, fmt.Errorf("livekit driver is not implemented")
 	case ir.ProviderPipecat:
-		return artifact, fmt.Errorf("pipecat driver is not implemented")
+		emitted, err := generatePipecat(agent, resolved)
+		if err != nil {
+			return Artifact{}, fmt.Errorf("generate %s pipecat: %w", resolved.Name, err)
+		}
+		artifact.Files = emitted.Files
+		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
+		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
+		return artifact, nil
 	case ir.ProviderVapi:
 		return artifact, fmt.Errorf("vapi driver is not implemented")
 	case ir.ProviderElevenLabs:

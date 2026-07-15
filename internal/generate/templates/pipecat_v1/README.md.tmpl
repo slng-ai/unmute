@@ -1,0 +1,25 @@
+# {{.Project}}
+
+Generated Pipecat voice agent. Compiled by `unmute` from a declarative spec — do
+not edit by hand; regenerate instead.
+
+## Agents
+
+{{range .Agents}}- `{{.Name}}`
+{{end}}
+Entry agent: `{{.EntryAgent}}`.
+
+## Run locally
+
+```sh
+uv run bot.py
+```
+
+`unmute dev` wraps this with a WebRTC dev client.
+
+## Required environment
+
+Set these before running (values are never written into the project):
+
+{{range .RequiredEnv}}- `{{.}}`
+{{end}}
