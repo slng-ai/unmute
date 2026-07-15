@@ -21,8 +21,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/slng/unmute/internal/generate"
 	"github.com/slng/unmute/internal/ir"
-	spec "github.com/slng/unmute/internal/legacyspec"
+	"github.com/slng/unmute/internal/target"
 	"github.com/slng/unmute/internal/web"
 	"github.com/spf13/cobra"
 )
@@ -38,23 +39,13 @@ func newDevCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := args[0]
 
-			result, outDir, err := compilePipecat(root)
+			outDir, err := compilePipecatForDev(cmd, root)
 			if err != nil {
 				return err
 			}
-			for _, warning := range result.Warnings {
-				fmt.Fprintln(cmd.ErrOrStderr(), "warning:", warning)
-			}
 			fmt.Fprintf(cmd.OutOrStdout(), "compiled %s\n", outDir)
 
-			secrets, err := spec.LoadEnvSecrets(root)
-			if err != nil {
-				return fmt.Errorf("dev %s: %w", root, err)
-			}
-			childEnv, err := devChildEnv(root, secrets, cmd.ErrOrStderr())
-			if err != nil {
-				return fmt.Errorf("dev %s: %w", root, err)
-			}
+			childEnv := devChildEnv(root, cmd.ErrOrStderr())
 			if _, err := exec.LookPath("uv"); err != nil {
 				return fmt.Errorf("dev %s: uv not found on PATH; install uv to run the agent locally (https://docs.astral.sh/uv/)", root)
 			}
@@ -67,7 +58,7 @@ func newDevCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("dev %s: open log: %w", root, err)
 			}
-			defer logFile.Close()
+			defer func() { _ = logFile.Close() }()
 			var botOut io.Writer = logFile
 			if verbose {
 				botOut = io.MultiWriter(logFile, cmd.ErrOrStderr())
@@ -197,25 +188,56 @@ func isTTY(w io.Writer) bool {
 	return st.Mode()&os.ModeCharDevice != 0
 }
 
-// devChildEnv maps env/secrets.yaml runtime names to their .env.local values for
-// the bot subprocess. Values stay in the child's environment, never on disk.
-func devChildEnv(root string, secrets ir.EnvSecrets, warn io.Writer) ([]string, error) {
-	envPath := filepath.Join(root, secrets.Local.EnvFile)
-	vals, err := parseDotenv(envPath)
+// compilePipecatForDev builds the first declared pipecat target into build/<name>
+// and returns its output dir. `dev` runs the emitted bot.py from there.
+func compilePipecatForDev(cmd *cobra.Command, root string) (string, error) {
+	agent, targets, err := loadPackage(root, nil)
+	if err != nil {
+		return "", fmt.Errorf("dev %s: %w", root, err)
+	}
+	var resolved ir.Target
+	found := false
+	for _, candidate := range targets {
+		if candidate.Provider == ir.ProviderPipecat {
+			resolved, found = candidate, true
+			break
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("dev %s: no pipecat target declared in targets.yaml", root)
+	}
+	artifact, err := generate.Generate(agent, resolved, target.Default())
+	if err != nil {
+		return "", fmt.Errorf("dev %s: %w", root, err)
+	}
+	for _, warning := range artifact.Notes.Warnings {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
+	}
+	outDir := filepath.Join(root, "build", resolved.Name)
+	if err := writeArtifactFiles(outDir, artifact.Files); err != nil {
+		return "", fmt.Errorf("dev %s: %w", root, err)
+	}
+	return outDir, nil
+}
+
+// devChildEnv builds the bot subprocess environment: the ambient env plus any
+// KEY=VALUE pairs from a .env at the package root. The bot also calls
+// load_dotenv(), and its require_env() fails loudly if a value is missing.
+func devChildEnv(root string, warn io.Writer) []string {
+	env := os.Environ()
+	vals, err := parseDotenv(filepath.Join(root, ".env"))
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			return nil, err
+			fmt.Fprintf(warn, "warning: reading .env: %v\n", err)
 		}
-		fmt.Fprintf(warn, "warning: %s not found; relying on the ambient environment\n", secrets.Local.EnvFile)
-		vals = map[string]string{}
+		return env
 	}
-	env := os.Environ()
-	for name, ref := range secrets.Secrets {
-		if v, ok := vals[ref.LocalKey]; ok && v != "" {
-			env = append(env, name+"="+v)
+	for name, value := range vals {
+		if value != "" {
+			env = append(env, name+"="+value)
 		}
 	}
-	return env, nil
+	return env
 }
 
 // parseDotenv reads a minimal KEY=VALUE dotenv file. It is not a full dotenv
@@ -225,7 +247,7 @@ func parseDotenv(path string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	out := map[string]string{}
 	sc := bufio.NewScanner(f)
@@ -263,7 +285,7 @@ func waitPort(ctx context.Context, addr string, botDone <-chan error, timeout ti
 	defer ticker.Stop()
 	for {
 		if conn, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
-			conn.Close()
+			_ = conn.Close()
 			return nil
 		}
 		select {

@@ -206,9 +206,9 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolInterruption:      true, // cancel_on_interruption
 }
 
-// generatePipecat lowers a validated agent + pipecat target into a project.
+// GeneratePipecat lowers a validated agent + pipecat target into a project.
 // The socket runs Validate(caps) first (V17), so this reads only agent+target.
-func generatePipecat(agent *ir.Agent, target ir.Target) (Artifact, error) {
+func GeneratePipecat(agent *ir.Agent, target ir.Target) (Artifact, error) {
 	if err := checkPipecatVersion(target.Version); err != nil {
 		return Artifact{}, err
 	}

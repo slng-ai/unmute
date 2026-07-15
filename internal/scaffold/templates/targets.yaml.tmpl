@@ -1,0 +1,15 @@
+# One instance per target. The same portable agent.yaml compiles to each.
+# Model names, voice ids, and params are forwarded to the provider as-is and
+# never validated. Secrets and URLs are env var names only.
+targets:
+  pipecat-dev:
+    provider: pipecat
+    version: "1.0.3"
+    transport: daily-sip
+    models:
+      listen: { provider: deepgram, model: nova-3 }
+      turn:   { provider: local, model: smart-turn }
+      speak:
+        assistant_voice: { provider: openai, voice: alloy }
+      reason:
+        assistant_model: { provider: openai, model: gpt-4o-mini }
