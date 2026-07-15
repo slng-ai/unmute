@@ -113,7 +113,7 @@ func loadPipecatInput(t *testing.T, dir string) PipecatInput {
 	}
 }
 
-func manifest(artifacts []Artifact) []byte {
+func manifest(artifacts []File) []byte {
 	var b bytes.Buffer
 	for _, artifact := range artifacts {
 		b.WriteString("=== " + artifact.Path + " ===\n")

@@ -188,7 +188,7 @@ func loadSLNGInput(root string) (generate.SLNGInput, error) {
 	}, nil
 }
 
-func writeGenerated(outDir string, artifacts []generate.Artifact) error {
+func writeGenerated(outDir string, artifacts []generate.File) error {
 	entries, err := os.ReadDir(outDir)
 	if err == nil && len(entries) > 0 {
 		hasSentinel := false

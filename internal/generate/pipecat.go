@@ -30,13 +30,8 @@ type PipecatInput struct {
 	Tools     []ir.ToolFile
 }
 
-type Artifact struct {
-	Path    string
-	Content []byte
-}
-
 type PipecatResult struct {
-	Artifacts    []Artifact
+	Artifacts    []File
 	Warnings     []string
 	OmittedTools []string
 }
@@ -81,13 +76,13 @@ func GeneratePipecat(input PipecatInput) (PipecatResult, error) {
 		"pcc-deploy.toml",
 		"pyproject.toml",
 	}
-	var artifacts []Artifact
+	var artifacts []File
 	for _, path := range paths {
 		content, err := renderPipecatTemplate(path, data)
 		if err != nil {
 			return PipecatResult{}, err
 		}
-		artifacts = append(artifacts, Artifact{Path: path, Content: content})
+		artifacts = append(artifacts, File{Path: path, Content: content})
 	}
 
 	generatedFiles := append([]string(nil), paths...)
@@ -106,8 +101,8 @@ func GeneratePipecat(input PipecatInput) (PipecatResult, error) {
 		return PipecatResult{}, err
 	}
 	reportJSON = append(reportJSON, '\n')
-	artifacts = append(artifacts, Artifact{Path: "compile-report.json", Content: reportJSON})
-	slices.SortFunc(artifacts, func(a, b Artifact) int {
+	artifacts = append(artifacts, File{Path: "compile-report.json", Content: reportJSON})
+	slices.SortFunc(artifacts, func(a, b File) int {
 		return strings.Compare(a.Path, b.Path)
 	})
 
