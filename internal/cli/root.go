@@ -16,7 +16,7 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true, // a failed command must not reprint --help
 		SilenceErrors: true, // Execute owns error printing
 	}
-	root.AddCommand(newInitCmd(), newCompileCmd(), newApplyCmd(), newDevCmd())
+	root.AddCommand(newInitCmd(), newCompileCmd(), newApplyCmd(), newDevCmd(), newValidateCmd())
 	return root
 }
 
