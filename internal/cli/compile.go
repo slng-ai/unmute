@@ -2,8 +2,10 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/slng/unmute/internal/generate"
 	"github.com/slng/unmute/internal/ir"
@@ -31,6 +33,9 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 	if err != nil {
 		return fmt.Errorf("compile %s: %w", dir, err)
 	}
+	if len(targets) == 0 {
+		return fmt.Errorf("compile %s: no targets selected", dir)
+	}
 	caps := target.Default()
 	for _, resolved := range targets {
 		artifact, err := generate.Generate(agent, resolved, caps)
@@ -52,8 +57,42 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 		case generate.ManagedTarget:
 			fmt.Fprintf(cmd.OutOrStdout(), "%s: managed target — run `unmute apply %s --target %s`\n", resolved.Name, dir, resolved.Name)
 		}
+		printContract(cmd.OutOrStdout(), resolved.Name, artifact.Notes)
 	}
 	return nil
+}
+
+// printContract prints every forwarded binding/param and derived sizing line.
+// SCHEMA.md §6.2 rule 6 and §5.1 call this report "the contract": what was sent
+// is always inspectable, and no value here is validated (relayed verbatim).
+func printContract(out io.Writer, name string, notes generate.GenerateReport) {
+	for _, fb := range notes.ForwardedBindings {
+		role := fb.Role
+		if fb.Profile != "" {
+			role += "." + fb.Profile
+		}
+		fmt.Fprintf(out, "%s: binding %s %s (forwarded as-is, not validated)\n", name, role, bindingSummary(fb.Binding))
+		for _, p := range fb.Params {
+			fmt.Fprintf(out, "%s:   param %s=%v\n", name, p.Name, p.Value)
+		}
+	}
+	for _, s := range notes.Sizing {
+		fmt.Fprintf(out, "%s: sizing %s=%s [%s] (%s)\n", name, s.Metric, s.Value, s.Status, s.Basis)
+	}
+}
+
+// bindingSummary renders the set identity fields of a binding for stdout.
+func bindingSummary(b ir.Binding) string {
+	var parts []string
+	for _, kv := range []struct{ k, v string }{
+		{"provider", b.Provider}, {"model", b.Model}, {"voice", b.Voice},
+		{"voice_id", b.VoiceID}, {"endpoint_env", b.EndpointEnv}, {"placement", string(b.Placement)},
+	} {
+		if kv.v != "" {
+			parts = append(parts, kv.k+"="+kv.v)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // loadPackage loads, builds, and selects target instances — the shared front of

@@ -27,11 +27,11 @@ type TargetValidation struct {
 }
 
 type ForwardedBinding struct {
-	Target  string
-	Role    string
-	Profile string
-	Binding Binding
-	Params  []ForwardedParam
+	Target  string           `json:"target"`
+	Role    string           `json:"role"`
+	Profile string           `json:"profile,omitempty"`
+	Binding Binding          `json:"binding"`
+	Params  []ForwardedParam `json:"-"` // sorted view for stdout; binding.params carries the same data in the report
 }
 
 type ForwardedParam struct {
@@ -40,11 +40,11 @@ type ForwardedParam struct {
 }
 
 type Sizing struct {
-	Target string
-	Metric string
-	Value  string
-	Status string
-	Basis  string
+	Target string `json:"target"`
+	Metric string `json:"metric"`
+	Value  string `json:"value"`
+	Status string `json:"status"`
+	Basis  string `json:"basis"`
 }
 
 // Validate checks structure and every selected target without short-circuiting.
