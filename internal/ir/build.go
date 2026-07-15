@@ -1,0 +1,519 @@
+package ir
+
+import (
+	"fmt"
+	"maps"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+
+	packagespec "github.com/slng/unmute/internal/spec"
+)
+
+var namePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
+
+// Build resolves a decoded package into the target-independent IR.
+func Build(pkg *packagespec.Package) (*Agent, error) {
+	if pkg == nil {
+		return nil, fmt.Errorf("build: nil package")
+	}
+	if err := checkNames(pkg); err != nil {
+		return nil, err
+	}
+	if _, ok := pkg.Agent.Agents[pkg.Agent.EntryAgent]; !ok {
+		return nil, missing(pkg, "agent.yaml", "entry_agent", pkg.Agent.EntryAgent)
+	}
+
+	models, err := buildModels(pkg)
+	if err != nil {
+		return nil, err
+	}
+	out := &Agent{
+		Version:      pkg.Agent.Version,
+		EntryAgent:   pkg.Agent.EntryAgent,
+		Pipeline:     buildPipeline(pkg.Agent.Pipeline),
+		Models:       models,
+		Voices:       make(map[string]VoiceProfile, len(pkg.Agent.Voices)),
+		Variables:    make(map[string]Variable, len(pkg.Agent.Variables)),
+		Agents:       make(map[string]AgentDef, len(pkg.Agent.Agents)),
+		Tasks:        make(map[string]Task, len(pkg.Agent.Tasks)),
+		TaskGroups:   make(map[string]TaskGroup, len(pkg.Agent.TaskGroups)),
+		Controls:     make(map[string]Control, len(pkg.Agent.Controls)),
+		Tools:        make(map[string]Tool, len(pkg.Tools)),
+		Conversation: buildConversation(pkg.Agent.Conversation),
+		Channels:     make(map[string]Channel, len(pkg.Agent.Channels)),
+		Targets:      make(map[string]Target, len(pkg.Targets)),
+	}
+	for name, voice := range pkg.Agent.Voices {
+		out.Voices[name] = VoiceProfile{Description: voice.Description}
+	}
+	for name, variable := range pkg.Agent.Variables {
+		out.Variables[name] = Variable{Type: PrimitiveType(variable.Type), Default: variable.Default, Source: VariableSource(variable.Source)}
+	}
+	for name, tool := range pkg.Tools {
+		out.Tools[name] = buildTool(name, tool)
+	}
+	for name, channel := range pkg.Agent.Channels {
+		out.Channels[name] = Channel{
+			Kind: ChannelKind(channel.Kind), Inbound: channel.Inbound, Outbound: channel.Outbound,
+			RequiredControls: channel.RequiredControls, OnVoicemail: VoicemailAction(channel.OnVoicemail),
+		}
+	}
+	if pkg.Agent.Capacity != nil {
+		out.Capacity = &Capacity{
+			PeakSessions: pkg.Agent.Capacity.PeakSessions, MaxSessions: pkg.Agent.Capacity.MaxSessions,
+			AvgSessionDuration: Duration(pkg.Agent.Capacity.AvgSessionDuration),
+		}
+	}
+
+	for _, name := range sortedKeys(pkg.Agent.Agents) {
+		raw := pkg.Agent.Agents[name]
+		if _, ok := out.Models[raw.Model]; !ok {
+			return nil, missing(pkg, "agent.yaml", "model", raw.Model)
+		}
+		if _, ok := out.Voices[raw.Voice]; !ok {
+			return nil, missing(pkg, "agent.yaml", "voice", raw.Voice)
+		}
+		if err := checkToolRefs(pkg, raw.Tools); err != nil {
+			return nil, err
+		}
+		instructions, ok := pkg.Markdown[raw.Instructions]
+		if !ok {
+			return nil, missing(pkg, "agent.yaml", "instructions", raw.Instructions)
+		}
+		out.Agents[name] = AgentDef{Instructions: instructions, Model: raw.Model, Voice: raw.Voice, Tools: raw.Tools}
+	}
+
+	for _, name := range sortedKeys(pkg.Agent.Tasks) {
+		raw := pkg.Agent.Tasks[name]
+		if raw.Model != "" {
+			if _, ok := out.Models[raw.Model]; !ok {
+				return nil, missing(pkg, "agent.yaml", "model", raw.Model)
+			}
+		}
+		if err := checkToolRefs(pkg, raw.Tools); err != nil {
+			return nil, err
+		}
+		if raw.Context.Summarizer != "" {
+			if _, ok := out.Models[raw.Context.Summarizer]; !ok {
+				return nil, missing(pkg, "agent.yaml", "summarizer", raw.Context.Summarizer)
+			}
+		}
+		instructions, ok := pkg.Markdown[raw.Instructions]
+		if !ok {
+			return nil, missing(pkg, "agent.yaml", "instructions", raw.Instructions)
+		}
+		result, err := buildResult(raw.Result)
+		if err != nil {
+			return nil, fmt.Errorf("%s: task %q: %w", pkg.Location("agent.yaml", name), name, err)
+		}
+		out.Tasks[name] = Task{
+			Instructions: instructions, Tools: raw.Tools, Model: raw.Model, Result: result,
+			Context: buildTaskContext(raw.Context),
+		}
+	}
+
+	for _, name := range sortedKeys(pkg.Agent.TaskGroups) {
+		raw := pkg.Agent.TaskGroups[name]
+		for _, step := range raw.Steps {
+			if _, ok := out.Tasks[step]; !ok {
+				return nil, missing(pkg, "agent.yaml", "task", step)
+			}
+		}
+		if raw.ThenTarget != "" {
+			if _, ok := out.Agents[raw.ThenTarget]; !ok {
+				return nil, missing(pkg, "agent.yaml", "then_target", raw.ThenTarget)
+			}
+		}
+		merge := GroupMerge(raw.Merge)
+		if merge == "" {
+			merge = GroupMergeResults
+		}
+		out.TaskGroups[name] = TaskGroup{
+			Steps: raw.Steps, ContextScope: ContextScope(raw.ContextScope), Then: GroupThen(raw.Then),
+			ThenTarget: raw.ThenTarget, Merge: merge,
+		}
+	}
+
+	for _, name := range sortedKeys(pkg.Targets) {
+		target, err := buildTarget(pkg, name, pkg.Targets[name], out.Models, out.Voices)
+		if err != nil {
+			return nil, err
+		}
+		out.Targets[name] = target
+	}
+	for _, name := range sortedKeys(pkg.Agent.Controls) {
+		control, err := buildControl(pkg, pkg.Agent.Controls[name], out)
+		if err != nil {
+			return nil, fmt.Errorf("%s: control %q: %w", pkg.Location("agent.yaml", name), name, err)
+		}
+		out.Controls[name] = control
+	}
+	return out, nil
+}
+
+func checkNames(pkg *packagespec.Package) error {
+	sets := []struct {
+		kind  string
+		names []string
+	}{
+		{"model", sortedKeys(pkg.Agent.Models)}, {"voice", sortedKeys(pkg.Agent.Voices)},
+		{"variable", sortedKeys(pkg.Agent.Variables)}, {"agent", sortedKeys(pkg.Agent.Agents)},
+		{"task", sortedKeys(pkg.Agent.Tasks)}, {"task group", sortedKeys(pkg.Agent.TaskGroups)},
+		{"control", sortedKeys(pkg.Agent.Controls)}, {"tool", sortedKeys(pkg.Tools)},
+	}
+	for _, set := range sets {
+		for _, name := range set.names {
+			if !namePattern.MatchString(name) {
+				return fmt.Errorf("%s: %s name %q must be lowercase snake_case and cannot start with underscore", pkg.Location("agent.yaml", name), set.kind, name)
+			}
+		}
+	}
+	for name := range pkg.Agent.Controls {
+		if _, ok := pkg.Tools[name]; ok {
+			return fmt.Errorf("%s: tool and control name %q collide", pkg.Location("agent.yaml", name), name)
+		}
+	}
+	for _, raw := range pkg.Targets {
+		for name := range raw.Destinations {
+			if !namePattern.MatchString(name) {
+				return fmt.Errorf("%s: destination name %q must be lowercase snake_case and cannot start with underscore", pkg.Location("targets.yaml", name), name)
+			}
+		}
+	}
+	return nil
+}
+
+func buildModels(pkg *packagespec.Package) (map[string]ModelProfile, error) {
+	result := make(map[string]ModelProfile, len(pkg.Agent.Models))
+	memo := make(map[string][]string)
+	for _, name := range sortedKeys(pkg.Agent.Models) {
+		fallback, err := flattenFallback(pkg, name, nil, memo)
+		if err != nil {
+			return nil, err
+		}
+		raw := pkg.Agent.Models[name]
+		result[name] = ModelProfile{Description: raw.Description, Placement: Placement(raw.Placement), Fallback: fallback}
+	}
+	return result, nil
+}
+
+func flattenFallback(pkg *packagespec.Package, name string, stack []string, memo map[string][]string) ([]string, error) {
+	if value, ok := memo[name]; ok {
+		return value, nil
+	}
+	if slices.Contains(stack, name) {
+		return nil, fmt.Errorf("%s: fallback cycle: %s", pkg.Location("agent.yaml", name), strings.Join(append(stack, name), " -> "))
+	}
+	raw, ok := pkg.Agent.Models[name]
+	if !ok {
+		return nil, missing(pkg, "agent.yaml", "fallback", name)
+	}
+	stack = append(stack, name)
+	seen := make(map[string]bool)
+	var flat []string
+	for _, next := range raw.Fallback {
+		if _, ok := pkg.Agent.Models[next]; !ok {
+			return nil, missing(pkg, "agent.yaml", "fallback", next)
+		}
+		if !seen[next] {
+			flat = append(flat, next)
+			seen[next] = true
+		}
+		children, err := flattenFallback(pkg, next, stack, memo)
+		if err != nil {
+			return nil, err
+		}
+		for _, child := range children {
+			if !seen[child] {
+				flat = append(flat, child)
+				seen[child] = true
+			}
+		}
+	}
+	memo[name] = flat
+	return flat, nil
+}
+
+func buildPipeline(raw packagespec.Pipeline) Pipeline {
+	pipeline := Pipeline{
+		Listen: PipelineRole{Placement: Placement(raw.Listen.Placement)},
+		Speak:  PipelineRole{Placement: Placement(raw.Speak.Placement)},
+	}
+	if raw.Turn != nil {
+		pipeline.Turn = &TurnRole{
+			Placement: Placement(raw.Turn.Placement), SemanticEndpointing: SemanticEndpointing(raw.Turn.SemanticEndpointing),
+		}
+	}
+	return pipeline
+}
+
+func buildTool(name string, raw packagespec.Tool) Tool {
+	handler := raw.Handler
+	if raw.Execution == string(ToolLocal) && handler == "" {
+		handler = filepath.Join("tools", name+".py")
+	}
+	interruption := ToolInterruption(raw.Interruption)
+	if interruption == "" {
+		interruption = ToolProviderDefault
+	}
+	effect := ToolEffect(raw.Effect)
+	if effect == "" {
+		effect = ToolReturnsData
+	}
+	return Tool{
+		Description: raw.Description, Input: raw.Input, Output: raw.Output, Execution: ToolExecution(raw.Execution),
+		Handler: handler, URLEnv: raw.URLEnv, Interruption: interruption, Effect: effect,
+	}
+}
+
+func buildResult(raw map[string]any) (map[string]ResultField, error) {
+	result := make(map[string]ResultField, len(raw))
+	for name, value := range raw {
+		switch value := value.(type) {
+		case string:
+			result[name] = ResultField{Type: PrimitiveType(value)}
+		case map[string]any:
+			if enumValue, ok := value["enum"]; ok && len(value) == 1 {
+				values, err := stringSlice(enumValue)
+				if err != nil {
+					return nil, fmt.Errorf("result %q enum: %w", name, err)
+				}
+				result[name] = ResultField{Type: PrimitiveString, Enum: values}
+			} else {
+				result[name] = ResultField{Schema: value}
+			}
+		default:
+			return nil, fmt.Errorf("result %q must be a primitive type, enum, or JSON Schema object", name)
+		}
+	}
+	return result, nil
+}
+
+func buildTaskContext(raw packagespec.TaskContext) TaskContext {
+	return TaskContext{
+		History: History(raw.History), MaxMessages: raw.MaxMessages, Summarizer: raw.Summarizer,
+		IncludeToolCalls: raw.IncludeToolCalls,
+	}
+}
+
+func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agent) (Control, error) {
+	switch ControlKind(raw.Kind) {
+	case ControlDelegate:
+		if (raw.Task == "") == (raw.Group == "") {
+			return nil, fmt.Errorf("delegate needs exactly one of task or group")
+		}
+		if raw.Task != "" {
+			if _, ok := agent.Tasks[raw.Task]; !ok {
+				return nil, missing(pkg, "agent.yaml", "task", raw.Task)
+			}
+		} else {
+			if _, ok := agent.TaskGroups[raw.Group]; !ok {
+				return nil, missing(pkg, "agent.yaml", "group", raw.Group)
+			}
+			if len(raw.Assign) > 0 {
+				return nil, fmt.Errorf("assign is legal on task delegates only")
+			}
+		}
+		if err := checkAssignments(raw, agent); err != nil {
+			return nil, err
+		}
+		return &Delegate{Kind: ControlDelegate, When: raw.When, Task: raw.Task, Group: raw.Group, Assign: raw.Assign}, nil
+	case ControlAgentTransfer:
+		if _, ok := agent.Agents[raw.To]; !ok {
+			return nil, missing(pkg, "agent.yaml", "to", raw.To)
+		}
+		for _, name := range raw.Requires {
+			if _, ok := agent.Variables[name]; !ok {
+				return nil, missing(pkg, "agent.yaml", "requires", name)
+			}
+		}
+		context, err := buildTransferContext(pkg, raw.Context, agent)
+		if err != nil {
+			return nil, err
+		}
+		return &AgentTransfer{Kind: ControlAgentTransfer, When: raw.When, To: raw.To, Requires: raw.Requires, Context: context}, nil
+	case ControlHumanTransfer:
+		for name, target := range agent.Targets {
+			if _, ok := target.Destinations[raw.Destination]; !ok {
+				return nil, fmt.Errorf("destination %q is missing from target %q", raw.Destination, name)
+			}
+		}
+		return &HumanTransfer{
+			Kind: ControlHumanTransfer, When: raw.When, Destination: raw.Destination,
+			Mode: TransferMode(raw.Mode), Briefing: Briefing(raw.Briefing),
+		}, nil
+	default:
+		return nil, fmt.Errorf("unknown control kind %q", raw.Kind)
+	}
+}
+
+func checkAssignments(raw packagespec.Control, agent *Agent) error {
+	if raw.Task == "" {
+		return nil
+	}
+	task := agent.Tasks[raw.Task]
+	for variable, path := range raw.Assign {
+		want, ok := agent.Variables[variable]
+		if !ok {
+			return fmt.Errorf("assign variable %q does not resolve", variable)
+		}
+		fieldName, ok := strings.CutPrefix(path, "result.")
+		if !ok {
+			return fmt.Errorf("assign %q must use result.<field>", path)
+		}
+		field, ok := task.Result[fieldName]
+		if !ok {
+			return fmt.Errorf("assign result field %q does not resolve", fieldName)
+		}
+		if field.Schema != nil || field.Type != want.Type {
+			return fmt.Errorf("assign result %q type does not match variable %q", fieldName, variable)
+		}
+	}
+	return nil
+}
+
+func buildTransferContext(pkg *packagespec.Package, raw *packagespec.TransferContext, agent *Agent) (TransferContext, error) {
+	if raw == nil {
+		return TransferContext{}, nil
+	}
+	if raw.Summarizer != "" {
+		if _, ok := agent.Models[raw.Summarizer]; !ok {
+			return TransferContext{}, missing(pkg, "agent.yaml", "summarizer", raw.Summarizer)
+		}
+	}
+	selection, err := buildVariableSelection(raw.Variables)
+	if err != nil {
+		return TransferContext{}, err
+	}
+	for _, name := range selection.Names {
+		if _, ok := agent.Variables[name]; !ok {
+			return TransferContext{}, missing(pkg, "agent.yaml", "variable", name)
+		}
+	}
+	return TransferContext{
+		TaskContext: TaskContext{
+			History: History(raw.History), MaxMessages: raw.MaxMessages, Summarizer: raw.Summarizer,
+			IncludeToolCalls: raw.IncludeToolCalls,
+		},
+		Variables: selection,
+	}, nil
+}
+
+func buildVariableSelection(value any) (VariableSelection, error) {
+	if value == "all" {
+		return VariableSelection{All: true}, nil
+	}
+	values, err := stringSlice(value)
+	if err != nil {
+		return VariableSelection{}, fmt.Errorf("context variables must be all or a list of names")
+	}
+	return VariableSelection{Names: values}, nil
+}
+
+func stringSlice(value any) ([]string, error) {
+	switch values := value.(type) {
+	case []string:
+		return values, nil
+	case []any:
+		result := make([]string, len(values))
+		for i, value := range values {
+			text, ok := value.(string)
+			if !ok {
+				return nil, fmt.Errorf("item %d is not a string", i)
+			}
+			result[i] = text
+		}
+		return result, nil
+	default:
+		return nil, fmt.Errorf("not a string list")
+	}
+}
+
+func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, models map[string]ModelProfile, voices map[string]VoiceProfile) (Target, error) {
+	for profile := range raw.Models.Reason {
+		if _, ok := models[profile]; !ok {
+			return Target{}, missing(pkg, "targets.yaml", "model", profile)
+		}
+	}
+	for profile := range raw.Models.Speak {
+		if _, ok := voices[profile]; !ok {
+			return Target{}, missing(pkg, "targets.yaml", "voice", profile)
+		}
+	}
+	return Target{
+		Name: name, Provider: Provider(raw.Provider), Version: raw.Version, Pins: raw.Pins,
+		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier,
+		Region: raw.Region, Edition: raw.Edition, Models: buildBindings(raw.Models), Destinations: raw.Destinations,
+	}, nil
+}
+
+func buildBindings(raw packagespec.Bindings) Bindings {
+	bindings := Bindings{Speak: make(map[string]Binding, len(raw.Speak)), Reason: make(map[string]Binding, len(raw.Reason))}
+	if raw.Listen != nil {
+		value := buildBinding(*raw.Listen)
+		bindings.Listen = &value
+	}
+	if raw.Turn != nil {
+		value := buildBinding(*raw.Turn)
+		bindings.Turn = &value
+	}
+	for name, raw := range raw.Speak {
+		bindings.Speak[name] = buildBinding(raw)
+	}
+	for name, raw := range raw.Reason {
+		bindings.Reason[name] = buildBinding(raw)
+	}
+	return bindings
+}
+
+func buildBinding(raw packagespec.Binding) Binding {
+	return Binding{
+		Provider: raw.Provider, Model: raw.Model, Voice: raw.Voice, VoiceID: raw.VoiceID,
+		EndpointEnv: raw.EndpointEnv, Placement: Placement(raw.Placement), Params: raw.Params,
+	}
+}
+
+func buildConversation(raw *packagespec.Conversation) *Conversation {
+	if raw == nil {
+		return nil
+	}
+	conversation := &Conversation{MaxDuration: Duration(raw.MaxDuration), ThinkingAudio: ThinkingAudio(raw.ThinkingAudio)}
+	if raw.Greeting != nil {
+		conversation.Greeting = &Greeting{SpeaksFirst: SpeaksFirst(raw.Greeting.SpeaksFirst), Text: raw.Greeting.Text}
+	}
+	if raw.Interruption != nil {
+		conversation.Interruption = &Interruption{
+			Enabled: raw.Interruption.Enabled, MinimumWords: raw.Interruption.MinimumWords,
+			IgnorePhrases: raw.Interruption.IgnorePhrases,
+		}
+	}
+	if raw.Inactivity != nil {
+		conversation.Inactivity = &Inactivity{
+			NudgeAfter: Duration(raw.Inactivity.NudgeAfter), EndAfter: Duration(raw.Inactivity.EndAfter),
+		}
+	}
+	return conversation
+}
+
+func checkToolRefs(pkg *packagespec.Package, names []string) error {
+	for _, name := range names {
+		if _, tool := pkg.Tools[name]; tool {
+			continue
+		}
+		if _, control := pkg.Agent.Controls[name]; control {
+			continue
+		}
+		return missing(pkg, "agent.yaml", "tool or control", name)
+	}
+	return nil
+}
+
+func missing(pkg *packagespec.Package, file, kind, name string) error {
+	return fmt.Errorf("%s: %s %q does not resolve", pkg.Location(file, name), kind, name)
+}
+
+func sortedKeys[V any](values map[string]V) []string {
+	return slices.Sorted(maps.Keys(values))
+}

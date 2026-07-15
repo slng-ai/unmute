@@ -36,6 +36,7 @@ const (
 	FieldFallback              Field = "models.fallback"
 	FieldTask                  Field = "tasks"
 	FieldTaskModel             Field = "tasks.model"
+	FieldTaskNestedResult      Field = "tasks.result.nested"
 	FieldTaskGroup             Field = "task_groups"
 	FieldTaskGroupReturn       Field = "task_groups.then.return"
 	FieldContextIsolated       Field = "task_groups.context_scope.isolated"
@@ -170,6 +171,10 @@ func Default() Table {
 			FieldFallback:  field(),
 			FieldTask:      field(deny(Vapi, "Vapi return-to-prior-assistant is unverified")),
 			FieldTaskModel: field(),
+			FieldTaskNestedResult: field(
+				deny(Vapi, "Vapi cannot enforce nested task results"),
+				deny(ElevenLabs, "ElevenLabs cannot enforce nested task results"),
+			),
 			FieldTaskGroup: field(warn(LiveKit, "LiveKit TaskGroup is experimental")),
 			FieldTaskGroupReturn: field(
 				deny(Vapi, "Vapi state-preserving Squad return is unverified"),

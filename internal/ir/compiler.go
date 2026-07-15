@@ -95,8 +95,9 @@ type Task struct {
 }
 
 type ResultField struct {
-	Type PrimitiveType `json:"type" yaml:"type"`
-	Enum []string      `json:"enum,omitempty" yaml:"enum,omitempty"`
+	Type   PrimitiveType  `json:"type" yaml:"type"`
+	Enum   []string       `json:"enum,omitempty" yaml:"enum,omitempty"`
+	Schema map[string]any `json:"schema,omitempty" yaml:"schema,omitempty"`
 }
 
 type TaskGroup struct {
