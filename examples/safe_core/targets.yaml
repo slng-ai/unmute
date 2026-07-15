@@ -78,6 +78,7 @@ targets:
 
   deepgram-dev:
     provider: deepgram
+    version: "1"
     carrier: twilio             # the generated bridge resolves phone controls
                                 # against the carrier
     models:

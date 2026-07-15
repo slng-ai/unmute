@@ -65,7 +65,7 @@ T1|x|define v1 IR structs in `internal/ir` covering SCHEMA.md §4 + §5 tools (i
 T2|x|`internal/spec` `Load(dir)` — goccy strict decode of every package file, filename+line:col errors, tool-name-from-filename, markdown-by-path; raw structs, no resolution; table tests + safe_core loads clean|I.spec.Load,C3,V3,V14
 T3|x|capability table in **`internal/target`** leaf package — typed matrices (tag / role open-vs-integrated / history-value / fallback-slot), machine form of SCHEMA §4–7; one place; imported by both `ir` and `generate`|I.capability,C4,C6,C8
 T4|x|`ir.Build(pkg)` — resolve all names to name-refs (V1), flatten+cycle-check fallback (V10), compose prompt paths, snake_case + reserved-underscore + shared-namespace checks (V7); unit tests + safe_core builds|I.ir.Build,V1,V7,V10
-T5|.|`ir.Validate(agent, targets, caps)` — structural (rules 1–3,9,12), tier gating (rule 4 via table, V11), context policy (rule 5, V8), bindings completeness+structure (V9), capacity (V12), outbound/voicemail (V13); fail-loud provider vocab (V4), warn (V5), provisional (V6); returns per-target `ValidateReport` (V18)|I.ir.Validate,V4,V5,V6,V8,V9,V11,V12,V13,V18
+T5|x|`ir.Validate(agent, targets, caps)` — structural (rules 1–3,9,12), tier gating (rule 4 via table, V11), context policy (rule 5, V8), bindings completeness+structure (V9), capacity (V12), outbound/voicemail (V13); fail-loud provider vocab (V4), warn (V5), provisional (V6); returns per-target `ValidateReport` (V18)|I.ir.Validate,V4,V5,V6,V8,V9,V11,V12,V13,V18
 T6|.|`unmute validate <dir> [--target ...]` cobra command — Load→Build→Validate, print per-target matrix, exit codes; L2 in-process tests, no Python|I.cli.validate,C5,V16,V18
 T7|.|report lists forwarded bindings + params, sizing lines marked `unbenchmarked`|I.ir.Validate,V15,C11,C12
 T8|.|golden fixtures — safe_core validates clean on all five (V14); representative gated cases fail with correct provider vocab per target (then:return→Vapi, history:messages→ElevenLabs, placement:local→managed, mcp→Deepgram, thinking_audio→Vapi/Deepgram); `-update` regen; zero Python|V4,V11,V14
@@ -79,3 +79,4 @@ Dependency order: T1, T2, T3 → T4 → T5 → T6; T7 with T5; T8 last; T10 afte
 ## §B bugs
 id|date|cause|fix
 B1|2026-07-15|`safe_core` voice descriptions used unquoted commas, so strict YAML decoded the trailing words as unknown fields|V3,V14
+B2|2026-07-15|`safe_core` omitted required `version` on Deepgram even though Deepgram is a code target|V9,V14
