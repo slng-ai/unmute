@@ -42,6 +42,53 @@ func TestValidateUsesProviderVocabularyForGates(t *testing.T) { // V4, V11
 			t.Errorf("missing %q in %q", want, text)
 		}
 	}
+	if strings.Contains(text, "return-to-prior-assistant") {
+		t.Fatalf("task-group steps must not trigger the single-task gate: %q", text)
+	}
+}
+
+func TestValidateWarnsWhenElevenLabsTaskReturns(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Tasks["collect"] = Task{
+		Instructions: "collect", Result: map[string]ResultField{"done": {Type: PrimitiveBoolean}},
+		Context: TaskContext{History: HistoryFull},
+	}
+	agent.Controls["collect"] = &Delegate{Kind: ControlDelegate, Task: "collect"}
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderElevenLabs)}, targetcap.Default())
+	if err != nil || !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), "running transcript") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Models["group_only_summarizer"] = ModelProfile{Placement: PlacementAPI}
+	agent.Tasks["collect"] = Task{
+		Instructions: "collect", Result: map[string]ResultField{"done": {Type: PrimitiveBoolean}},
+		Context: TaskContext{History: HistorySummary, Summarizer: "group_only_summarizer"},
+	}
+	agent.TaskGroups["collect_then_end"] = TaskGroup{
+		Steps: []string{"collect"}, ContextScope: ContextShared, Then: GroupEnd, Merge: GroupMergeResults,
+	}
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderElevenLabs)}, targetcap.Default())
+	if err != nil || strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "missing reason binding") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateWarnsWhenElevenLabsTaskGroupReturns(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Tasks["collect"] = Task{
+		Instructions: "collect", Result: map[string]ResultField{"done": {Type: PrimitiveBoolean}},
+		Context: TaskContext{History: HistoryFull},
+	}
+	agent.TaskGroups["collect_then_return"] = TaskGroup{
+		Steps: []string{"collect"}, ContextScope: ContextShared, Then: GroupReturn, Merge: GroupMergeResults,
+	}
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderElevenLabs)}, targetcap.Default())
+	if err != nil || !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), "task-group turns") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
 }
 
 func TestValidateProvisionalFailsEveryTarget(t *testing.T) { // V6
@@ -75,6 +122,36 @@ func TestValidateRequiresCompleteBindings(t *testing.T) { // V9
 	}
 }
 
+func TestValidateOpenTurnBindingIsIndependentOfPipelineBlock(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Pipeline.Turn = nil
+	target := targetFor(agent, ProviderLiveKit)
+	target.Models.Turn = nil
+	report, err := Validate(agent, []Target{target}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "missing open turn binding") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateSpeakProviderAndEndpointSlots(t *testing.T) {
+	agent := safeAgent(t)
+	target := targetFor(agent, ProviderElevenLabs)
+	binding := target.Models.Speak["front_desk"]
+	binding.Provider = "cartesia"
+	binding.EndpointEnv = "CUSTOM_TTS_URL"
+	target.Models.Speak["front_desk"] = binding
+	report, err := Validate(agent, []Target{target}, targetcap.Default())
+	if err == nil {
+		t.Fatal("expected speak slot errors")
+	}
+	errors := strings.Join(report.PerTarget[0].Errors, "\n")
+	for _, want := range []string{"custom speak endpoints have no slot", `speak binding provider "cartesia" has no slot`} {
+		if !strings.Contains(errors, want) {
+			t.Errorf("missing %q in %q", want, errors)
+		}
+	}
+}
+
 func TestValidateCapacity(t *testing.T) { // V12
 	agent := safeAgent(t)
 	agent.Capacity.PeakSessions = agent.Capacity.MaxSessions + 1
@@ -104,6 +181,103 @@ func TestValidateOutboundRequiresSatisfiableVariablesAndWarnsOnDeepgram(t *testi
 	if err != nil || !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), "carrier-conditional") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}
+	target.Carrier = ""
+	report, err = Validate(agent, []Target{target}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "carrier Twilio AMD") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateRejectsVoicemailPolicyWithoutOutbound(t *testing.T) {
+	agent := safeAgent(t)
+	phone := agent.Channels["phone"]
+	phone.OnVoicemail = VoicemailHangup
+	agent.Channels["phone"] = phone
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "on_voicemail requires outbound: true") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateRequiresInterruptionEnabled(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Conversation.Interruption.Enabled = nil
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "interruption.enabled is required") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateResolvesRequiredControlsAgainstTargetRoute(t *testing.T) {
+	agent := safeAgent(t)
+	phone := agent.Channels["phone"]
+	phone.RequiredControls = append(phone.RequiredControls, "dtmf_send")
+	agent.Channels["phone"] = phone
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "proven only for carrier Twilio") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateRejectsLiteralWebhookURL(t *testing.T) {
+	agent := safeAgent(t)
+	tool := agent.Tools["lookup_customer"]
+	tool.Execution = ToolWebhook
+	tool.Handler = ""
+	tool.URLEnv = "https://example.com/hook"
+	agent.Tools["lookup_customer"] = tool
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "environment variable name") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateNestedResultChecksEveryConfiguredTarget(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Tasks["nested"] = Task{
+		Instructions: "nested", Result: map[string]ResultField{"payload": {Schema: map[string]any{"type": "object"}}},
+		Context: TaskContext{History: HistoryFull},
+	}
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `configured target "vapi-prod"`) {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateNestedResultRejectsUnknownConfiguredProvider(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Tasks["nested"] = Task{
+		Instructions: "nested", Result: map[string]ResultField{"payload": {Schema: map[string]any{"type": "object"}}},
+		Context: TaskContext{History: HistoryFull},
+	}
+	livekit := targetFor(agent, ProviderLiveKit)
+	agent.Targets = map[string]Target{"unknown": {Name: "unknown", Provider: "other"}}
+	report, err := Validate(agent, []Target{livekit}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `configured target "unknown" has unknown provider "other"`) {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateFallbackUsesConfiguredSlotKind(t *testing.T) {
+	agent := safeAgent(t)
+	profile := agent.Models["fast_reasoning"]
+	profile.Fallback = []string{"careful_reasoning"}
+	agent.Models["fast_reasoning"] = profile
+	target := targetFor(agent, ProviderVapi)
+	binding := target.Models.Reason["careful_reasoning"]
+	binding.Provider = "anthropic"
+	target.Models.Reason["careful_reasoning"] = binding
+
+	caps := targetcap.Default()
+	report, err := Validate(agent, []Target{target}, caps)
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "stay within one provider") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+	caps.FallbackSlots[targetcap.Vapi] = targetcap.FallbackProvider
+	report, err = Validate(agent, []Target{target}, caps)
+	if err != nil || strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "stay within one provider") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
 }
 
 func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { // V15
@@ -126,12 +300,32 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 	if !foundTemperature {
 		t.Fatal("forwarded temperature param is missing")
 	}
-	if len(report.Sizing) != 15 {
+	if len(report.Sizing) != 30 {
 		t.Fatalf("sizing lines = %d", len(report.Sizing))
 	}
 	for _, line := range report.Sizing {
-		if line.Status != "unbenchmarked" || line.Basis == "" {
+		if line.Status != "unbenchmarked" || !strings.Contains(line.Basis, "channels=realtime_audio,telephony") {
 			t.Fatalf("sizing line = %#v", line)
+		}
+	}
+	usageValue := ""
+	for _, line := range report.Sizing {
+		if line.Metric == "provider_session_time_quota.telephony" {
+			usageValue = line.Value
+			break
+		}
+	}
+	if usageValue != "4h0m0s" {
+		t.Fatalf("telephony session-time quota = %q", usageValue)
+	}
+	delete(agent.Channels, "web")
+	report, err = Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err != nil || len(report.Sizing) != 4 {
+		t.Fatalf("telephony-only sizing: err=%v lines=%#v", err, report.Sizing)
+	}
+	for _, line := range report.Sizing {
+		if strings.Contains(line.Metric, "realtime_audio") {
+			t.Fatalf("telephony-only sizing includes realtime audio: %#v", line)
 		}
 	}
 }

@@ -12,9 +12,46 @@ func Schema() (*jsonschema.Schema, error) {
 	if err != nil {
 		return nil, err
 	}
+	resultField, err := resultFieldSchema()
+	if err != nil {
+		return nil, err
+	}
 	options := enumOptions()
 	options.TypeSchemas[reflect.TypeFor[Control]()] = controls
+	options.TypeSchemas[reflect.TypeFor[ResultField]()] = resultField
 	return jsonschema.For[Agent](options)
+}
+
+type primitiveResultFieldSchema struct {
+	Type PrimitiveType `json:"type"`
+}
+
+type enumResultFieldSchema struct {
+	Type PrimitiveType `json:"type"`
+	Enum []string      `json:"enum"`
+}
+
+type nestedResultFieldSchema struct {
+	Schema map[string]any `json:"schema"`
+}
+
+func resultFieldSchema() (*jsonschema.Schema, error) {
+	options := enumOptions()
+	primitive, err := jsonschema.For[primitiveResultFieldSchema](options)
+	if err != nil {
+		return nil, err
+	}
+	enumResult, err := jsonschema.For[enumResultFieldSchema](options)
+	if err != nil {
+		return nil, err
+	}
+	nested, err := jsonschema.For[nestedResultFieldSchema](options)
+	if err != nil {
+		return nil, err
+	}
+	value := any(PrimitiveString)
+	enumResult.Properties["type"] = &jsonschema.Schema{Type: "string", Const: &value}
+	return &jsonschema.Schema{OneOf: []*jsonschema.Schema{primitive, enumResult, nested}}, nil
 }
 
 func controlSchema() (*jsonschema.Schema, error) {

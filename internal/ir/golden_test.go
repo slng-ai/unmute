@@ -26,7 +26,10 @@ func TestCompilerGolden(t *testing.T) { // V4, V11, V14
 	}
 
 	var output strings.Builder
-	for _, test := range tests {
+	for i, test := range tests {
+		if i > 0 {
+			output.WriteByte('\n')
+		}
 		report, err := Validate(test.agent, test.targets, targetcap.Default())
 		if (err != nil) != test.wantFail {
 			t.Fatalf("%s: err=%v report=%#v", test.name, err, report.PerTarget)
@@ -49,7 +52,6 @@ func TestCompilerGolden(t *testing.T) { // V4, V11, V14
 				fmt.Fprintf(&output, "  error: %s\n", validationError)
 			}
 		}
-		output.WriteByte('\n')
 	}
 
 	path := filepath.Join("testdata", "golden", "compiler.txt")

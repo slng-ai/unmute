@@ -54,7 +54,8 @@ func TestBuildRejectsBadAndCollidingNames(t *testing.T) { // V7
 		{
 			name: "tool control collision",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Controls["lookup_customer"] = packagespec.Control{Kind: "human_transfer", Destination: "billing_line", Mode: "cold"}
+				destination, mode := "billing_line", "cold"
+				pkg.Agent.Controls["lookup_customer"] = packagespec.Control{Kind: "human_transfer", Destination: &destination, Mode: &mode}
 			},
 			want: "collide",
 		},
@@ -68,6 +69,17 @@ func TestBuildRejectsBadAndCollidingNames(t *testing.T) { // V7
 				t.Fatalf("got %v", err)
 			}
 		})
+	}
+}
+
+func TestBuildRejectsFieldsFromAnotherControlKind(t *testing.T) { // V3
+	pkg := loadSafeCore(t)
+	control := pkg.Agent.Controls["to_billing"]
+	control.Task = new(string)
+	pkg.Agent.Controls["to_billing"] = control
+	_, err := Build(pkg)
+	if err == nil || !strings.Contains(err.Error(), `field "task" is illegal with control kind "agent_transfer"`) {
+		t.Fatalf("got %v", err)
 	}
 }
 
@@ -89,6 +101,33 @@ func TestBuildFlattensAndRejectsFallbackCycles(t *testing.T) { // V10
 	pkg.Agent.Models["careful_reasoning"] = careful
 	_, err = Build(pkg)
 	if err == nil || !strings.Contains(err.Error(), "fallback cycle") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestBuildValidatesDestinationValues(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		valid bool
+	}{
+		{"+14155550123", true},
+		{"sip:billing@example.com", true},
+		{"sips:billing@example.com", true},
+		{"", false},
+		{"billing@example.com", false},
+		{"not-a-phone", false},
+	} {
+		if got := validDestination(test.value); got != test.valid {
+			t.Errorf("validDestination(%q) = %t", test.value, got)
+		}
+	}
+
+	pkg := loadSafeCore(t)
+	target := pkg.Targets["livekit-dev"]
+	target.Destinations["billing_line"] = ""
+	pkg.Targets["livekit-dev"] = target
+	_, err := Build(pkg)
+	if err == nil || !strings.Contains(err.Error(), "E.164 phone number or SIP URI") {
 		t.Fatalf("got %v", err)
 	}
 }

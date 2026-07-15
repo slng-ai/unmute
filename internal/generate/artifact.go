@@ -41,27 +41,47 @@ type ApplyStep struct {
 }
 
 type GenerateReport struct {
-	Warnings []string
-	Notes    []string
+	Warnings          []string
+	Notes             []string
+	ForwardedBindings []ir.ForwardedBinding
+	Sizing            []ir.Sizing
 }
 
 // Generate validates once, then dispatches to exactly one provider driver.
 func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact, error) {
-	if _, err := ir.Validate(agent, []ir.Target{resolved}, caps); err != nil {
+	report, err := ir.Validate(agent, []ir.Target{resolved}, caps)
+	if err != nil {
 		return Artifact{}, fmt.Errorf("generate %s: %w", resolved.Name, err)
+	}
+	artifact := Artifact{Kind: artifactKind(resolved.Provider)}
+	artifact.Notes.ForwardedBindings = report.ForwardedBindings
+	artifact.Notes.Sizing = report.Sizing
+	for _, row := range report.PerTarget {
+		artifact.Notes.Warnings = append(artifact.Notes.Warnings, row.Warnings...)
 	}
 	switch resolved.Provider {
 	case ir.ProviderLiveKit:
-		return Artifact{}, fmt.Errorf("livekit driver is not implemented")
+		return artifact, fmt.Errorf("livekit driver is not implemented")
 	case ir.ProviderPipecat:
-		return Artifact{}, fmt.Errorf("pipecat driver is not implemented")
+		return artifact, fmt.Errorf("pipecat driver is not implemented")
 	case ir.ProviderVapi:
-		return Artifact{}, fmt.Errorf("vapi driver is not implemented")
+		return artifact, fmt.Errorf("vapi driver is not implemented")
 	case ir.ProviderElevenLabs:
-		return Artifact{}, fmt.Errorf("elevenlabs driver is not implemented")
+		return artifact, fmt.Errorf("elevenlabs driver is not implemented")
 	case ir.ProviderDeepgram:
-		return Artifact{}, fmt.Errorf("deepgram driver is not implemented")
+		return artifact, fmt.Errorf("deepgram driver is not implemented")
 	default:
 		return Artifact{}, fmt.Errorf("unsupported provider %q", resolved.Provider)
+	}
+}
+
+func artifactKind(provider ir.Provider) ArtifactKind {
+	switch provider {
+	case ir.ProviderLiveKit, ir.ProviderPipecat, ir.ProviderDeepgram:
+		return CodeTarget
+	case ir.ProviderVapi, ir.ProviderElevenLabs:
+		return ManagedTarget
+	default:
+		return ""
 	}
 }

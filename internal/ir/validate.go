@@ -3,12 +3,15 @@ package ir
 import (
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	targetcap "github.com/slng/unmute/internal/target"
 )
+
+var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type ValidateReport struct {
 	PerTarget         []TargetValidation
@@ -53,6 +56,7 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 		return ValidateReport{}, fmt.Errorf("validate: no targets selected")
 	}
 	global := validateStructure(agent)
+	global = append(global, validateConfiguredTargets(agent, caps)...)
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
 	failed := 0
 	for _, resolved := range targets {
@@ -115,12 +119,55 @@ func sizing(agent *Agent, resolved Target) []Sizing {
 	if local && targetcap.IsCode(targetcap.Provider(resolved.Provider)) {
 		gpus = agent.Capacity.MaxSessions
 	}
-	const basis = "2026-07-15 conservative 1 session per worker/GPU"
-	return []Sizing{
+	channelKinds := make(map[string]bool)
+	for _, channel := range agent.Channels {
+		channelKinds[string(channel.Kind)] = true
+	}
+	basis := "2026-07-15 conservative 1 session per worker/GPU; channels=" + strings.Join(slices.Sorted(maps.Keys(channelKinds)), ",")
+	result := []Sizing{
 		{Target: resolved.Name, Metric: "workers", Value: fmt.Sprint(workers), Status: "unbenchmarked", Basis: basis},
 		{Target: resolved.Name, Metric: "gpus", Value: fmt.Sprint(gpus), Status: "unbenchmarked", Basis: basis},
-		{Target: resolved.Name, Metric: "provider_concurrency_quota", Value: fmt.Sprint(agent.Capacity.PeakSessions), Status: "unbenchmarked", Basis: basis},
 	}
+	average, averageErr := time.ParseDuration(string(agent.Capacity.AvgSessionDuration))
+	for _, kind := range slices.Sorted(maps.Keys(channelKinds)) {
+		result = append(result, Sizing{
+			Target: resolved.Name, Metric: "provider_concurrency_quota." + kind,
+			Value: fmt.Sprint(agent.Capacity.PeakSessions), Status: "unbenchmarked", Basis: basis,
+		})
+		if averageErr == nil && average > 0 {
+			result = append(result, Sizing{
+				Target: resolved.Name, Metric: "provider_session_time_quota." + kind,
+				Value: (time.Duration(agent.Capacity.PeakSessions) * average).String(), Status: "unbenchmarked", Basis: basis,
+			})
+		}
+	}
+	return result
+}
+
+func validateConfiguredTargets(agent *Agent, caps targetcap.Table) []string {
+	hasNestedResult := false
+	for _, task := range agent.Tasks {
+		for _, field := range task.Result {
+			hasNestedResult = hasNestedResult || field.Schema != nil
+		}
+	}
+	if !hasNestedResult {
+		return nil
+	}
+	var errors []string
+	for _, name := range slices.Sorted(maps.Keys(agent.Targets)) {
+		resolved := agent.Targets[name]
+		provider := targetcap.Provider(resolved.Provider)
+		if !slices.Contains(targetcap.Providers, provider) {
+			errors = add(errors, fmt.Sprintf("configured target %q has unknown provider %q", name, resolved.Provider))
+			continue
+		}
+		capability := caps.Capability(targetcap.FieldTaskNestedResult, provider)
+		if capability.Tag == targetcap.Gated || capability.Tag == targetcap.Provisional {
+			errors = add(errors, fmt.Sprintf("configured target %q: %s", name, capability.Note))
+		}
+	}
+	return errors
 }
 
 func validateStructure(agent *Agent) []string {
@@ -249,6 +296,8 @@ func validateStructure(agent *Agent) []string {
 		case ToolWebhook:
 			if tool.URLEnv == "" {
 				errors = add(errors, fmt.Sprintf("tool %q url_env is required for webhook execution", name))
+			} else if !envNamePattern.MatchString(tool.URLEnv) {
+				errors = add(errors, fmt.Sprintf("tool %q url_env must be an environment variable name", name))
 			}
 			if tool.Handler != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler is legal for local execution only", name))
@@ -279,12 +328,18 @@ func validateStructure(agent *Agent) []string {
 		}
 		switch channel.Kind {
 		case ChannelRealtimeAudio:
-			if channel.Inbound != nil || channel.Outbound != nil || channel.OnVoicemail != "" {
+			if channel.Inbound != nil || channel.Outbound != nil || len(channel.RequiredControls) > 0 || channel.OnVoicemail != "" {
 				errors = add(errors, fmt.Sprintf("channel %q telephony fields require kind telephony", name))
 			}
 		case ChannelTelephony:
 			if channel.Inbound == nil || channel.Outbound == nil {
 				errors = add(errors, fmt.Sprintf("channel %q inbound and outbound are required", name))
+			}
+			if channel.OnVoicemail != "" && (channel.Outbound == nil || !*channel.Outbound) {
+				errors = add(errors, fmt.Sprintf("channel %q on_voicemail requires outbound: true", name))
+			}
+			if channel.OnVoicemail != "" && channel.OnVoicemail != VoicemailHangup && channel.OnVoicemail != VoicemailLeaveMessage {
+				errors = add(errors, fmt.Sprintf("channel %q on_voicemail must be hangup or leave_message", name))
 			}
 		default:
 			errors = add(errors, fmt.Sprintf("channel %q kind must be realtime_audio or telephony", name))
@@ -315,6 +370,9 @@ func validateStructure(agent *Agent) []string {
 				errors = append(errors, validateDuration("conversation.inactivity.end_after", inactivity.EndAfter)...)
 			}
 		}
+		if interruption := agent.Conversation.Interruption; interruption != nil && interruption.Enabled == nil {
+			errors = add(errors, "conversation.interruption.enabled is required")
+		}
 	}
 	return errors
 }
@@ -340,27 +398,23 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 			applyCapability(caps, targetcap.FieldSemanticEndpointing, provider, row)
 		}
 	}
-	for _, profile := range agent.Models {
+	for name, profile := range agent.Models {
 		if profile.Placement == PlacementLocal {
-			applyCapability(caps, targetcap.FieldReasonLocal, provider, row)
+			binding := resolved.Models.Reason[name]
+			applyCapabilityValue(caps.CapabilityForValue(targetcap.FieldReasonLocal, provider, binding.EndpointEnv), string(targetcap.FieldReasonLocal), provider, row)
 		}
 	}
 	validateBindings(agent, resolved, caps, row)
-	validateFallbacks(agent, resolved, row)
+	validateFallbacks(agent, resolved, caps, row)
 
-	if len(agent.Tasks) > 0 {
-		applyCapability(caps, targetcap.FieldTask, provider, row)
-	}
-	for _, task := range agent.Tasks {
+	taskContexts := taskContextUsage(agent)
+	for name, task := range agent.Tasks {
 		if task.Model != "" {
 			applyCapability(caps, targetcap.FieldTaskModel, provider, row)
 		}
-		for _, field := range task.Result {
-			if field.Schema != nil {
-				applyCapability(caps, targetcap.FieldTaskNestedResult, provider, row)
-			}
+		if taskContexts[name] {
+			validateContext(task.Context, provider, caps, row)
 		}
-		validateContext(task.Context, false, provider, caps, row)
 	}
 	if len(agent.TaskGroups) > 0 {
 		applyCapability(caps, targetcap.FieldTaskGroup, provider, row)
@@ -375,11 +429,15 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	}
 	for _, control := range agent.Controls {
 		switch control := control.(type) {
+		case *Delegate:
+			if control.Task != "" {
+				applyCapability(caps, targetcap.FieldTask, provider, row)
+			}
 		case *AgentTransfer:
 			if len(control.Requires) > 0 {
 				applyCapability(caps, targetcap.FieldTransferRequires, provider, row)
 			}
-			validateContext(control.Context.TaskContext, true, provider, caps, row)
+			validateContext(control.Context.TaskContext, provider, caps, row)
 			if !control.Context.Variables.All {
 				applyCapability(caps, targetcap.FieldContextVariableSubset, provider, row)
 			}
@@ -390,10 +448,10 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	validateTools(agent, resolved, provider, caps, row)
 	validateConversation(agent.Conversation, provider, caps, row)
 	validateCapacity(agent, provider, row)
-	validateChannels(agent, provider, caps, row)
+	validateChannels(agent, resolved, provider, caps, row)
 }
 
-func validateContext(context TaskContext, transfer bool, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
+func validateContext(context TaskContext, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
 	if context.History == "" {
 		return
 	}
@@ -409,15 +467,16 @@ func validateContext(context TaskContext, transfer bool, provider targetcap.Prov
 	if context.History == HistorySummary && context.Summarizer == "" {
 		row.Errors = add(row.Errors, "context history summary requires a summarizer profile")
 	}
-	if transfer && context.History == HistorySummary && provider == targetcap.Vapi {
-		row.Errors = add(row.Errors, "Vapi has no summary context mode")
-	}
 }
 
 func validateContextShape(owner string, context TaskContext) []string {
 	var errors []string
-	if context.History == "" {
+	switch context.History {
+	case HistoryFull, HistoryMessages, HistoryLastN, HistorySummary, HistoryReset:
+	case "":
 		errors = add(errors, fmt.Sprintf("%q context.history is required", owner))
+	default:
+		errors = add(errors, fmt.Sprintf("%q context.history must be full, messages, last_n, summary, or reset", owner))
 	}
 	if context.History == HistoryLastN {
 		if context.MaxMessages <= 0 {
@@ -435,11 +494,11 @@ func validateContextShape(owner string, context TaskContext) []string {
 func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *TargetValidation) {
 	provider := targetcap.Provider(resolved.Provider)
 	validateRoleBinding("listen", caps.Role(targetcap.Listen, provider), resolved.Models.Listen, agent.Pipeline.Listen.Placement, row)
+	turnPlacement := Placement("")
 	if agent.Pipeline.Turn != nil {
-		validateRoleBinding("turn", caps.Role(targetcap.Turn, provider), resolved.Models.Turn, agent.Pipeline.Turn.Placement, row)
-	} else if caps.Role(targetcap.Turn, provider) == targetcap.Integrated && bindingHasIdentity(resolved.Models.Turn) {
-		row.Errors = add(row.Errors, fmt.Sprintf("%s integrated turn binding may carry settings only", resolved.Provider))
+		turnPlacement = agent.Pipeline.Turn.Placement
 	}
+	validateRoleBinding("turn", caps.Role(targetcap.Turn, provider), resolved.Models.Turn, turnPlacement, row)
 
 	models, voices := usedProfiles(agent)
 	for _, name := range slices.Sorted(maps.Keys(voices)) {
@@ -449,6 +508,10 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 			continue
 		}
 		validatePlacement("speak."+name, &binding, agent.Pipeline.Speak.Placement, row)
+		if binding.EndpointEnv != "" {
+			applyCapability(caps, targetcap.FieldSpeakEndpoint, provider, row)
+		}
+		validateRoleProvider("speak", binding.Provider, caps.RoleProvider(targetcap.Speak, provider), resolved, row)
 	}
 	for _, name := range slices.Sorted(maps.Keys(models)) {
 		binding, ok := resolved.Models.Reason[name]
@@ -457,12 +520,15 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 			continue
 		}
 		validatePlacement("reason."+name, &binding, agent.Models[name].Placement, row)
-		if provider == targetcap.ElevenLabs && agent.Models[name].Placement == PlacementLocal && binding.EndpointEnv == "" {
-			row.Errors = add(row.Errors, fmt.Sprintf("ElevenLabs local reason model %q requires a custom endpoint", name))
-		}
 	}
-	if provider == targetcap.Deepgram && resolved.Models.Listen != nil && resolved.Models.Listen.Provider != "" && resolved.Models.Listen.Provider != string(ProviderDeepgram) {
-		row.Errors = add(row.Errors, "Deepgram listen binding must name a Deepgram model")
+	if resolved.Models.Listen != nil {
+		validateRoleProvider("listen", resolved.Models.Listen.Provider, caps.RoleProvider(targetcap.Listen, provider), resolved, row)
+	}
+}
+
+func validateRoleProvider(role, bindingProvider string, allowed []string, resolved Target, row *TargetValidation) {
+	if bindingProvider != "" && len(allowed) > 0 && !slices.Contains(allowed, bindingProvider) {
+		row.Errors = add(row.Errors, fmt.Sprintf("%s %s binding provider %q has no slot", resolved.Provider, role, bindingProvider))
 	}
 }
 
@@ -481,8 +547,11 @@ func validateRoleBinding(role string, kind targetcap.RoleKind, binding *Binding,
 }
 
 func validatePlacement(role string, binding *Binding, placement Placement, row *TargetValidation) {
-	if binding.Placement != "" && binding.Placement != placement {
+	if placement != "" && binding.Placement != "" && binding.Placement != placement {
 		row.Errors = add(row.Errors, fmt.Sprintf("%s binding placement %q disagrees with %q", role, binding.Placement, placement))
+	}
+	if binding.EndpointEnv != "" && !envNamePattern.MatchString(binding.EndpointEnv) {
+		row.Errors = add(row.Errors, fmt.Sprintf("%s endpoint_env must be an environment variable name", role))
 	}
 }
 
@@ -497,15 +566,16 @@ func bindingHasVoice(binding *Binding) bool {
 func usedProfiles(agent *Agent) (map[string]bool, map[string]bool) {
 	models := make(map[string]bool)
 	voices := make(map[string]bool)
+	taskContexts := taskContextUsage(agent)
 	for _, definition := range agent.Agents {
 		models[definition.Model] = true
 		voices[definition.Voice] = true
 	}
-	for _, task := range agent.Tasks {
+	for name, task := range agent.Tasks {
 		if task.Model != "" {
 			models[task.Model] = true
 		}
-		if task.Context.Summarizer != "" {
+		if taskContexts[name] && task.Context.Summarizer != "" {
 			models[task.Context.Summarizer] = true
 		}
 	}
@@ -522,8 +592,31 @@ func usedProfiles(agent *Agent) (map[string]bool, map[string]bool) {
 	return models, voices
 }
 
-func validateFallbacks(agent *Agent, resolved Target, row *TargetValidation) {
+func taskContextUsage(agent *Agent) map[string]bool {
+	usesOwnContext := make(map[string]bool, len(agent.Tasks))
+	for name := range agent.Tasks {
+		usesOwnContext[name] = true
+	}
+	for _, group := range agent.TaskGroups {
+		for _, task := range group.Steps {
+			usesOwnContext[task] = false
+		}
+	}
+	for _, control := range agent.Controls {
+		if delegate, ok := control.(*Delegate); ok && delegate.Task != "" {
+			usesOwnContext[delegate.Task] = true
+		}
+	}
+	return usesOwnContext
+}
+
+func validateFallbacks(agent *Agent, resolved Target, caps targetcap.Table, row *TargetValidation) {
 	models, _ := usedProfiles(agent)
+	slot := caps.FallbackSlots[targetcap.Provider(resolved.Provider)]
+	if slot == "" {
+		row.Errors = add(row.Errors, fmt.Sprintf("%s target has no fallback slot kind", resolved.Provider))
+		return
+	}
 	for name := range models {
 		profile := agent.Models[name]
 		primary := resolved.Models.Reason[name]
@@ -533,10 +626,10 @@ func validateFallbacks(agent *Agent, resolved Target, row *TargetValidation) {
 				row.Errors = add(row.Errors, fmt.Sprintf("fallback %q placement differs from %q", fallbackName, name))
 			}
 			binding := resolved.Models.Reason[fallbackName]
-			if resolved.Provider == ProviderVapi && primary.Provider != "" && binding.Provider != "" && primary.Provider != binding.Provider {
+			if slot == targetcap.FallbackSameProvider && primary.Provider != "" && binding.Provider != "" && primary.Provider != binding.Provider {
 				row.Errors = add(row.Errors, "Vapi fallbackModels must stay within one provider")
 			}
-			if resolved.Provider == ProviderElevenLabs && len(binding.Params) > 0 {
+			if slot == targetcap.FallbackModelID && len(binding.Params) > 0 {
 				row.Warnings = add(row.Warnings, "ElevenLabs fallback entries accept model IDs only; per-entry params are not forwarded")
 			}
 		}
@@ -544,20 +637,11 @@ func validateFallbacks(agent *Agent, resolved Target, row *TargetValidation) {
 }
 
 func validateHumanTransfer(control *HumanTransfer, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
-	field := targetcap.FieldHumanCold
+	required := targetcap.ColdTransfer
 	if control.Mode == TransferWarm {
-		field = targetcap.FieldHumanWarm
+		required = targetcap.WarmTransfer
 	}
-	applyCapability(caps, field, provider, row)
-	if provider == targetcap.Pipecat && control.Mode == TransferCold && resolved.Transport != "daily-sip" {
-		row.Errors = add(row.Errors, "Pipecat cold transfer requires Daily SIP transport")
-	}
-	if provider == targetcap.Vapi && control.Mode == TransferWarm && resolved.Carrier != "twilio" {
-		row.Errors = add(row.Errors, "Vapi warm transfer requires carrier Twilio")
-	}
-	if provider == targetcap.Deepgram && resolved.Carrier == "" {
-		row.Errors = add(row.Errors, "Deepgram transfer requires a carrier in the generated bridge")
-	}
+	applyResolvedCapability(caps.Control(required, provider, resolved.Transport, resolved.Carrier), required, provider, row)
 	switch control.Briefing {
 	case "":
 	case BriefingSummary:
@@ -580,10 +664,7 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 		case ToolLocal:
 			applyCapability(caps, targetcap.FieldToolLocal, provider, row)
 		case ToolMCP:
-			applyCapability(caps, targetcap.FieldToolMCP, provider, row)
-			if provider == targetcap.LiveKit && resolved.SDKLanguage != "python" {
-				row.Errors = add(row.Errors, "LiveKit MCP tools require sdk_language: python")
-			}
+			applyCapabilityValue(caps.CapabilityForValue(targetcap.FieldToolMCP, provider, resolved.SDKLanguage), string(targetcap.FieldToolMCP), provider, row)
 		case ToolClient:
 			applyCapability(caps, targetcap.FieldToolClient, provider, row)
 		case ToolProviderHosted:
@@ -649,15 +730,20 @@ func validateCapacity(agent *Agent, provider targetcap.Provider, row *TargetVali
 	}
 }
 
-func validateChannels(agent *Agent, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
+func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
 	for _, channel := range agent.Channels {
+		for _, control := range channel.RequiredControls {
+			if !validRequiredControl(control) {
+				continue
+			}
+			name := targetcap.TelephonyControl(control)
+			applyResolvedCapability(caps.Control(name, provider, resolved.Transport, resolved.Carrier), name, provider, row)
+		}
 		if channel.Kind != ChannelTelephony || channel.Outbound == nil || !*channel.Outbound {
 			continue
 		}
 		if channel.OnVoicemail == "" {
 			row.Errors = add(row.Errors, "outbound telephony requires on_voicemail")
-		} else if channel.OnVoicemail != VoicemailHangup && channel.OnVoicemail != VoicemailLeaveMessage {
-			row.Errors = add(row.Errors, "on_voicemail must be hangup or leave_message")
 		}
 		for name, variable := range agent.Variables {
 			if variable.Source == VariableSourceCallStart && variable.Default == nil {
@@ -667,23 +753,29 @@ func validateChannels(agent *Agent, provider targetcap.Provider, caps targetcap.
 		applyCapability(caps, targetcap.FieldOutbound, provider, row)
 		if channel.OnVoicemail != "" {
 			applyCapability(caps, targetcap.FieldVoicemail, provider, row)
+			applyResolvedCapability(caps.Control(targetcap.VoicemailDetection, provider, resolved.Transport, resolved.Carrier), targetcap.VoicemailDetection, provider, row)
 		}
 	}
 }
 
-func applyCapability(caps targetcap.Table, field targetcap.Field, provider targetcap.Provider, row *TargetValidation) {
-	capability := caps.Capability(field, provider)
+func applyResolvedCapability(capability targetcap.Capability, control targetcap.TelephonyControl, provider targetcap.Provider, row *TargetValidation) {
+	applyCapabilityValue(capability, string(control), provider, row)
+}
+
+func applyCapabilityValue(capability targetcap.Capability, name string, provider targetcap.Provider, row *TargetValidation) {
 	switch capability.Tag {
 	case targetcap.Core:
 	case targetcap.Warn:
 		row.Warnings = add(row.Warnings, capability.Note)
-	case targetcap.Gated:
-		row.Errors = add(row.Errors, capability.Note)
-	case targetcap.Provisional:
+	case targetcap.Gated, targetcap.Provisional:
 		row.Errors = add(row.Errors, capability.Note)
 	default:
-		row.Errors = add(row.Errors, fmt.Sprintf("capability %q has no %s tag", field, provider))
+		row.Errors = add(row.Errors, fmt.Sprintf("capability %q has no %s tag", name, provider))
 	}
+}
+
+func applyCapability(caps targetcap.Table, field targetcap.Field, provider targetcap.Provider, row *TargetValidation) {
+	applyCapabilityValue(caps.Capability(field, provider), string(field), provider, row)
 }
 
 func validateDuration(name string, value Duration) []string {

@@ -30,6 +30,7 @@ type Field string
 const (
 	FieldListenLocal           Field = "pipeline.listen.placement.local"
 	FieldSpeakLocal            Field = "pipeline.speak.placement.local"
+	FieldSpeakEndpoint         Field = "bindings.speak.endpoint_env"
 	FieldReasonLocal           Field = "models.placement.local"
 	FieldTurnPlacement         Field = "pipeline.turn.placement"
 	FieldSemanticEndpointing   Field = "pipeline.turn.semantic_endpointing"
@@ -43,8 +44,6 @@ const (
 	FieldTransferRequires      Field = "controls.agent_transfer.requires"
 	FieldContextNoToolCalls    Field = "context.include_tool_calls.false"
 	FieldContextVariableSubset Field = "context.variables.list"
-	FieldHumanCold             Field = "controls.human_transfer.cold"
-	FieldHumanWarm             Field = "controls.human_transfer.warm"
 	FieldBriefingSummary       Field = "controls.human_transfer.briefing.summary"
 	FieldBriefingMessage       Field = "controls.human_transfer.briefing.message"
 	FieldBriefingWait          Field = "controls.human_transfer.briefing.wait"
@@ -71,6 +70,32 @@ const (
 type Capability struct {
 	Tag  Tag
 	Note string
+}
+
+type TelephonyControl string
+
+const (
+	ColdTransfer       TelephonyControl = "cold_transfer"
+	WarmTransfer       TelephonyControl = "warm_transfer"
+	DTMFSend           TelephonyControl = "dtmf_send"
+	DTMFReceive        TelephonyControl = "dtmf_receive"
+	Hold               TelephonyControl = "hold"
+	Hangup             TelephonyControl = "hangup"
+	VoicemailDetection TelephonyControl = "voicemail_detection"
+	IVRNavigation      TelephonyControl = "ivr_navigation"
+)
+
+type ControlCapability struct {
+	Capability
+	Carrier       string
+	Transport     string
+	ConditionNote string
+}
+
+type ValueCondition struct {
+	Value    string
+	NonEmpty bool
+	Note     string
 }
 
 type Role string
@@ -124,7 +149,10 @@ const (
 
 type Table struct {
 	Fields        map[Field]map[Provider]Capability
+	Controls      map[TelephonyControl]map[Provider]ControlCapability
+	Conditions    map[Field]map[Provider]ValueCondition
 	Roles         map[Role]map[Provider]RoleKind
+	RoleProviders map[Role]map[Provider][]string
 	History       map[History]map[Provider]HistorySupport
 	FallbackSlots map[Provider]FallbackSlot
 }
@@ -133,8 +161,42 @@ func (t Table) Capability(field Field, provider Provider) Capability {
 	return t.Fields[field][provider]
 }
 
+func (t Table) Control(control TelephonyControl, provider Provider, transport, carrier string) Capability {
+	support := t.Controls[control][provider]
+	if support.Tag == Gated || support.Tag == Provisional {
+		return support.Capability
+	}
+	conditionFailed := false
+	switch {
+	case support.Carrier != "" && support.Transport != "":
+		conditionFailed = support.Carrier != carrier && support.Transport != transport
+	case support.Carrier != "":
+		conditionFailed = support.Carrier != carrier
+	case support.Transport != "":
+		conditionFailed = support.Transport != transport
+	}
+	if conditionFailed {
+		return Capability{Tag: Gated, Note: support.ConditionNote}
+	}
+	return support.Capability
+}
+
+func (t Table) CapabilityForValue(field Field, provider Provider, value string) Capability {
+	capability := t.Capability(field, provider)
+	condition := t.Conditions[field][provider]
+	conditionFailed := condition.Value != "" && condition.Value != value || condition.NonEmpty && value == ""
+	if (capability.Tag == Core || capability.Tag == Warn) && conditionFailed {
+		return Capability{Tag: Gated, Note: condition.Note}
+	}
+	return capability
+}
+
 func (t Table) Role(role Role, provider Provider) RoleKind {
 	return t.Roles[role][provider]
+}
+
+func (t Table) RoleProvider(role Role, provider Provider) []string {
+	return t.RoleProviders[role][provider]
 }
 
 func (t Table) HistorySupport(history History, provider Provider) HistorySupport {
@@ -154,6 +216,9 @@ func Default() Table {
 				deny(ElevenLabs, "ElevenLabs cannot run a local voice model"),
 				deny(Deepgram, "Deepgram cannot run a local voice model"),
 			),
+			FieldSpeakEndpoint: field(
+				deny(ElevenLabs, "ElevenLabs custom speak endpoints have no slot"),
+			),
 			FieldReasonLocal: field(deny(Vapi, "Vapi custom local LLM endpoints are unverified")),
 			FieldTurnPlacement: field(
 				warn(LiveKit, "LiveKit turn placement is a preference"),
@@ -168,8 +233,11 @@ func Default() Table {
 				warn(ElevenLabs, "ElevenLabs semantic endpointing is forwarded as a preference"),
 				warn(Deepgram, "Deepgram semantic endpointing depends on the bound listen model"),
 			),
-			FieldFallback:  field(),
-			FieldTask:      field(deny(Vapi, "Vapi return-to-prior-assistant is unverified")),
+			FieldFallback: field(),
+			FieldTask: field(
+				deny(Vapi, "Vapi return-to-prior-assistant is unverified"),
+				warn(ElevenLabs, "ElevenLabs keeps task turns in the owner's running transcript"),
+			),
 			FieldTaskModel: field(),
 			FieldTaskNestedResult: field(
 				deny(Vapi, "Vapi cannot enforce nested task results"),
@@ -178,6 +246,7 @@ func Default() Table {
 			FieldTaskGroup: field(warn(LiveKit, "LiveKit TaskGroup is experimental")),
 			FieldTaskGroupReturn: field(
 				deny(Vapi, "Vapi state-preserving Squad return is unverified"),
+				warn(ElevenLabs, "ElevenLabs keeps task-group turns in the owner's running transcript"),
 			),
 			FieldContextIsolated: field(
 				deny(Vapi, "Vapi cannot isolate task-group context"),
@@ -194,10 +263,6 @@ func Default() Table {
 			FieldContextVariableSubset: field(
 				deny(Vapi, "Vapi accepts transfer variables: all only"),
 				deny(ElevenLabs, "ElevenLabs accepts transfer variables: all only"),
-			),
-			FieldHumanCold: field(),
-			FieldHumanWarm: field(
-				deny(Pipecat, "Pipecat warm transfer ships upstream but this driver does not emit it yet"),
 			),
 			FieldBriefingSummary: field(
 				deny(Pipecat, "Pipecat has no summary briefing lowering"),
@@ -235,8 +300,20 @@ func Default() Table {
 			FieldInterruptionIgnore: field(
 				warn(Deepgram, "Deepgram drops interruption ignore phrases"),
 			),
-			FieldInactivity:  field(),
-			FieldMaxDuration: field(),
+			FieldInactivity: field(
+				warn(LiveKit, "LiveKit driver must range-check inactivity durations"),
+				warn(Pipecat, "Pipecat driver must range-check inactivity durations"),
+				warn(Vapi, "Vapi driver must range-check inactivity durations"),
+				warn(ElevenLabs, "ElevenLabs driver must range-check inactivity durations"),
+				warn(Deepgram, "Deepgram driver must range-check inactivity durations"),
+			),
+			FieldMaxDuration: field(
+				warn(LiveKit, "LiveKit driver must verify a max-duration cap"),
+				warn(Pipecat, "Pipecat driver must verify a max-duration cap"),
+				warn(Vapi, "Vapi driver must verify a max-duration cap"),
+				warn(ElevenLabs, "ElevenLabs driver must verify a max-duration cap"),
+				warn(Deepgram, "Deepgram driver must verify a max-duration cap"),
+			),
 			FieldThinkingAudio: field(
 				deny(Vapi, "Vapi has no faithful thinking-audio lowering"),
 				deny(Deepgram, "Deepgram has no faithful thinking-audio lowering"),
@@ -283,11 +360,48 @@ func Default() Table {
 			),
 			FieldFutureProvisional: provisional(),
 		},
+		Controls: map[TelephonyControl]map[Provider]ControlCapability{
+			ColdTransfer: controls(
+				control(),
+				controlTransport("daily-sip", "Pipecat cold transfer requires Daily SIP transport"),
+				control(),
+				control(),
+				controlNamedCarrier("twilio", "Deepgram transfer requires carrier Twilio in the generated bridge"),
+			),
+			WarmTransfer: controls(
+				control(),
+				controlDeny("Pipecat warm transfer ships upstream but this driver does not emit it yet"),
+				controlNamedCarrier("twilio", "Vapi warm transfer requires carrier Twilio"),
+				control(),
+				controlNamedCarrier("twilio", "Deepgram transfer requires carrier Twilio in the generated bridge"),
+			),
+			DTMFSend:           routedControls("dtmf_send"),
+			DTMFReceive:        routedControls("dtmf_receive"),
+			Hold:               routedControls("hold"),
+			Hangup:             controls(control(), control(), control(), control(), control()),
+			VoicemailDetection: controls(control(), control(), control(), control(), controlNamedCarrier("twilio", "Deepgram voicemail detection requires carrier Twilio AMD in the generated bridge")),
+			IVRNavigation:      routedControls("ivr_navigation"),
+		},
+		Conditions: map[Field]map[Provider]ValueCondition{
+			FieldToolMCP: {
+				LiveKit: {Value: "python", Note: "LiveKit MCP tools require sdk_language: python"},
+			},
+			FieldReasonLocal: {
+				ElevenLabs: {NonEmpty: true, Note: "ElevenLabs local reason models require a custom endpoint"},
+			},
+		},
 		Roles: map[Role]map[Provider]RoleKind{
 			Listen: role(Open, Open, Open, Integrated, Open),
 			Turn:   role(Open, Open, Integrated, Integrated, Integrated),
 			Speak:  role(Open, Open, Open, Open, Open),
 			Reason: role(Open, Open, Open, Open, Open),
+		},
+		RoleProviders: map[Role]map[Provider][]string{
+			Listen: {Deepgram: {"deepgram"}},
+			Speak: {
+				ElevenLabs: {"elevenlabs", "eleven_labs"},
+				Deepgram:   {"deepgram", "eleven_labs", "cartesia", "open_ai", "aws_polly"},
+			},
 		},
 		History: map[History]map[Provider]HistorySupport{
 			HistoryFull:     history(HistoryOK, HistoryOK, HistoryOK, HistoryOK, HistoryOK),
@@ -300,6 +414,34 @@ func Default() Table {
 			LiveKit: FallbackComponent, Pipecat: FallbackGenerated, Vapi: FallbackSameProvider,
 			ElevenLabs: FallbackModelID, Deepgram: FallbackProvider,
 		},
+	}
+}
+
+func control() ControlCapability {
+	return ControlCapability{Capability: Capability{Tag: Core}}
+}
+
+func controlDeny(note string) ControlCapability {
+	return ControlCapability{Capability: Capability{Tag: Gated, Note: note}}
+}
+
+func controlTransport(transport, note string) ControlCapability {
+	return ControlCapability{Capability: Capability{Tag: Core}, Transport: transport, ConditionNote: note}
+}
+
+func controlNamedCarrier(carrier, note string) ControlCapability {
+	return ControlCapability{Capability: Capability{Tag: Core}, Carrier: carrier, ConditionNote: note}
+}
+
+func routedControls(name string) map[Provider]ControlCapability {
+	note := "required control " + name + " is proven only for carrier Twilio or transport Daily SIP"
+	value := ControlCapability{Capability: Capability{Tag: Core}, Carrier: "twilio", Transport: "daily-sip", ConditionNote: note}
+	return controls(value, value, value, value, value)
+}
+
+func controls(livekit, pipecat, vapi, elevenlabs, deepgram ControlCapability) map[Provider]ControlCapability {
+	return map[Provider]ControlCapability{
+		LiveKit: livekit, Pipecat: pipecat, Vapi: vapi, ElevenLabs: elevenlabs, Deepgram: deepgram,
 	}
 }
 

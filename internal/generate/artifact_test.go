@@ -25,9 +25,12 @@ func TestGenerateWarnOnlyReachesEveryProviderStub(t *testing.T) { // V17
 		ir.ProviderLiveKit, ir.ProviderPipecat, ir.ProviderVapi, ir.ProviderElevenLabs, ir.ProviderDeepgram,
 	} {
 		t.Run(string(provider), func(t *testing.T) {
-			_, err := Generate(agent, compilerTarget(agent, provider), target.Default())
+			artifact, err := Generate(agent, compilerTarget(agent, provider), target.Default())
 			if err == nil || !strings.Contains(err.Error(), string(provider)+" driver is not implemented") {
 				t.Fatalf("got %v", err)
+			}
+			if artifact.Kind == "" || len(artifact.Notes.Warnings) == 0 || len(artifact.Notes.ForwardedBindings) == 0 || len(artifact.Notes.Sizing) == 0 {
+				t.Fatalf("warn-only validation was discarded: %#v", artifact)
 			}
 		})
 	}

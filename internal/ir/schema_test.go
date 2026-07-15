@@ -30,3 +30,23 @@ func TestSchemaDerivesUnionEnumsAndNameReferences(t *testing.T) { // V2
 		}
 	}
 }
+
+func TestResultFieldSchemaAcceptsEveryResultShape(t *testing.T) {
+	schema, err := resultFieldSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := schema.Resolve(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []any{
+		map[string]any{"type": "boolean"},
+		map[string]any{"type": "string", "enum": []any{"a", "b"}},
+		map[string]any{"schema": map[string]any{"type": "object"}},
+	} {
+		if err := resolved.Validate(value); err != nil {
+			t.Errorf("%v: %v", value, err)
+		}
+	}
+}

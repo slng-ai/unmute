@@ -116,15 +116,15 @@ type TransferContext struct {
 type Control struct {
 	Kind        string            `json:"kind" yaml:"kind"`
 	When        string            `json:"when,omitempty" yaml:"when,omitempty"`
-	Task        string            `json:"task,omitempty" yaml:"task,omitempty"`
-	Group       string            `json:"group,omitempty" yaml:"group,omitempty"`
+	Task        *string           `json:"task,omitempty" yaml:"task,omitempty"`
+	Group       *string           `json:"group,omitempty" yaml:"group,omitempty"`
 	Assign      map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
-	To          string            `json:"to,omitempty" yaml:"to,omitempty"`
+	To          *string           `json:"to,omitempty" yaml:"to,omitempty"`
 	Requires    []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
 	Context     *TransferContext  `json:"context,omitempty" yaml:"context,omitempty"`
-	Destination string            `json:"destination,omitempty" yaml:"destination,omitempty"`
-	Mode        string            `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Briefing    string            `json:"briefing,omitempty" yaml:"briefing,omitempty"`
+	Destination *string           `json:"destination,omitempty" yaml:"destination,omitempty"`
+	Mode        *string           `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Briefing    *string           `json:"briefing,omitempty" yaml:"briefing,omitempty"`
 }
 
 type Tool struct {
@@ -152,7 +152,7 @@ type Greeting struct {
 }
 
 type Interruption struct {
-	Enabled       bool     `json:"enabled" yaml:"enabled"`
+	Enabled       *bool    `json:"enabled" yaml:"enabled"`
 	MinimumWords  int      `json:"minimum_words,omitempty" yaml:"minimum_words,omitempty"`
 	IgnorePhrases []string `json:"ignore_phrases,omitempty" yaml:"ignore_phrases,omitempty"`
 }

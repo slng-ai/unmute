@@ -95,7 +95,7 @@ type Task struct {
 }
 
 type ResultField struct {
-	Type   PrimitiveType  `json:"type" yaml:"type"`
+	Type   PrimitiveType  `json:"type,omitempty" yaml:"type,omitempty"`
 	Enum   []string       `json:"enum,omitempty" yaml:"enum,omitempty"`
 	Schema map[string]any `json:"schema,omitempty" yaml:"schema,omitempty"`
 }
@@ -269,7 +269,7 @@ const (
 )
 
 type Interruption struct {
-	Enabled       bool     `json:"enabled" yaml:"enabled"`
+	Enabled       *bool    `json:"enabled" yaml:"enabled"`
 	MinimumWords  int      `json:"minimum_words,omitempty" yaml:"minimum_words,omitempty"`
 	IgnorePhrases []string `json:"ignore_phrases,omitempty" yaml:"ignore_phrases,omitempty"`
 }

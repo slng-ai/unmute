@@ -11,7 +11,11 @@ import (
 	packagespec "github.com/slng/unmute/internal/spec"
 )
 
-var namePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
+var (
+	namePattern        = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
+	e164Pattern        = regexp.MustCompile(`^\+[1-9][0-9]{6,14}$`)
+	sipDestinationPath = regexp.MustCompile(`^sips?:[^@\s]+@[^@\s]+$`)
+)
 
 // Build resolves a decoded package into the target-independent IR.
 func Build(pkg *packagespec.Package) (*Agent, error) {
@@ -299,18 +303,25 @@ func buildTaskContext(raw packagespec.TaskContext) TaskContext {
 }
 
 func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agent) (Control, error) {
-	switch ControlKind(raw.Kind) {
+	kind := ControlKind(raw.Kind)
+	if field := unexpectedControlField(raw, kind); field != "" {
+		return nil, fmt.Errorf("field %q is illegal with control kind %q", field, raw.Kind)
+	}
+	task, group := stringValue(raw.Task), stringValue(raw.Group)
+	to, destination := stringValue(raw.To), stringValue(raw.Destination)
+	mode, briefing := stringValue(raw.Mode), stringValue(raw.Briefing)
+	switch kind {
 	case ControlDelegate:
-		if (raw.Task == "") == (raw.Group == "") {
+		if (task == "") == (group == "") {
 			return nil, fmt.Errorf("delegate needs exactly one of task or group")
 		}
-		if raw.Task != "" {
-			if _, ok := agent.Tasks[raw.Task]; !ok {
-				return nil, missing(pkg, "agent.yaml", "task", raw.Task)
+		if task != "" {
+			if _, ok := agent.Tasks[task]; !ok {
+				return nil, missing(pkg, "agent.yaml", "task", task)
 			}
 		} else {
-			if _, ok := agent.TaskGroups[raw.Group]; !ok {
-				return nil, missing(pkg, "agent.yaml", "group", raw.Group)
+			if _, ok := agent.TaskGroups[group]; !ok {
+				return nil, missing(pkg, "agent.yaml", "group", group)
 			}
 			if len(raw.Assign) > 0 {
 				return nil, fmt.Errorf("assign is legal on task delegates only")
@@ -319,10 +330,10 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 		if err := checkAssignments(raw, agent); err != nil {
 			return nil, err
 		}
-		return &Delegate{Kind: ControlDelegate, When: raw.When, Task: raw.Task, Group: raw.Group, Assign: raw.Assign}, nil
+		return &Delegate{Kind: ControlDelegate, When: raw.When, Task: task, Group: group, Assign: raw.Assign}, nil
 	case ControlAgentTransfer:
-		if _, ok := agent.Agents[raw.To]; !ok {
-			return nil, missing(pkg, "agent.yaml", "to", raw.To)
+		if _, ok := agent.Agents[to]; !ok {
+			return nil, missing(pkg, "agent.yaml", "to", to)
 		}
 		for _, name := range raw.Requires {
 			if _, ok := agent.Variables[name]; !ok {
@@ -333,27 +344,47 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 		if err != nil {
 			return nil, err
 		}
-		return &AgentTransfer{Kind: ControlAgentTransfer, When: raw.When, To: raw.To, Requires: raw.Requires, Context: context}, nil
+		return &AgentTransfer{Kind: ControlAgentTransfer, When: raw.When, To: to, Requires: raw.Requires, Context: context}, nil
 	case ControlHumanTransfer:
 		for name, target := range agent.Targets {
-			if _, ok := target.Destinations[raw.Destination]; !ok {
-				return nil, fmt.Errorf("destination %q is missing from target %q", raw.Destination, name)
+			if _, ok := target.Destinations[destination]; !ok {
+				return nil, fmt.Errorf("destination %q is missing from target %q", destination, name)
 			}
 		}
 		return &HumanTransfer{
-			Kind: ControlHumanTransfer, When: raw.When, Destination: raw.Destination,
-			Mode: TransferMode(raw.Mode), Briefing: Briefing(raw.Briefing),
+			Kind: ControlHumanTransfer, When: raw.When, Destination: destination,
+			Mode: TransferMode(mode), Briefing: Briefing(briefing),
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown control kind %q", raw.Kind)
 	}
 }
 
+func unexpectedControlField(raw packagespec.Control, kind ControlKind) string {
+	fields := map[string]bool{
+		"task": raw.Task != nil, "group": raw.Group != nil, "assign": raw.Assign != nil,
+		"to": raw.To != nil, "requires": raw.Requires != nil, "context": raw.Context != nil,
+		"destination": raw.Destination != nil, "mode": raw.Mode != nil, "briefing": raw.Briefing != nil,
+	}
+	allowed := map[ControlKind]map[string]bool{
+		ControlDelegate:      {"task": true, "group": true, "assign": true},
+		ControlAgentTransfer: {"to": true, "requires": true, "context": true},
+		ControlHumanTransfer: {"destination": true, "mode": true, "briefing": true},
+	}[kind]
+	for _, field := range slices.Sorted(maps.Keys(fields)) {
+		if fields[field] && !allowed[field] {
+			return field
+		}
+	}
+	return ""
+}
+
 func checkAssignments(raw packagespec.Control, agent *Agent) error {
-	if raw.Task == "" {
+	taskName := stringValue(raw.Task)
+	if taskName == "" {
 		return nil
 	}
-	task := agent.Tasks[raw.Task]
+	task := agent.Tasks[taskName]
 	for variable, path := range raw.Assign {
 		want, ok := agent.Variables[variable]
 		if !ok {
@@ -372,6 +403,13 @@ func checkAssignments(raw packagespec.Control, agent *Agent) error {
 		}
 	}
 	return nil
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func buildTransferContext(pkg *packagespec.Package, raw *packagespec.TransferContext, agent *Agent) (TransferContext, error) {
@@ -442,11 +480,20 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 			return Target{}, missing(pkg, "targets.yaml", "voice", profile)
 		}
 	}
+	for destination, value := range raw.Destinations {
+		if !validDestination(value) {
+			return Target{}, fmt.Errorf("%s: destination %q must be an E.164 phone number or SIP URI", pkg.Location("targets.yaml", destination), destination)
+		}
+	}
 	return Target{
 		Name: name, Provider: Provider(raw.Provider), Version: raw.Version, Pins: raw.Pins,
 		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier,
 		Region: raw.Region, Edition: raw.Edition, Models: buildBindings(raw.Models), Destinations: raw.Destinations,
 	}, nil
+}
+
+func validDestination(value string) bool {
+	return e164Pattern.MatchString(value) || sipDestinationPath.MatchString(value)
 }
 
 func buildBindings(raw packagespec.Bindings) Bindings {
