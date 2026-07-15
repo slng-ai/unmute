@@ -111,7 +111,7 @@ func applyPlan(cmd *cobra.Command, resolved ir.Target, artifact generate.Artifac
 			return fmt.Errorf("step %d %s %s: %w", i+1, step.Method, endpoint, err)
 		}
 		payload, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode >= 300 {
 			return fmt.Errorf("step %d %s %s: %s: %s", i+1, step.Method, endpoint, resp.Status, string(payload))
 		}
