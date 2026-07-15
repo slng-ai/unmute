@@ -22,7 +22,7 @@ func TestGenerateValidatesBeforeProviderDispatch(t *testing.T) { // V17
 func TestGenerateWarnOnlyReachesRemainingStubs(t *testing.T) { // V17
 	agent := loadCompilerAgent(t)
 	for _, provider := range []ir.Provider{
-		ir.ProviderLiveKit, ir.ProviderVapi, ir.ProviderElevenLabs, ir.ProviderDeepgram,
+		ir.ProviderLiveKit, ir.ProviderVapi, ir.ProviderDeepgram,
 	} {
 		t.Run(string(provider), func(t *testing.T) {
 			artifact, err := Generate(agent, compilerTarget(agent, provider), target.Default())
