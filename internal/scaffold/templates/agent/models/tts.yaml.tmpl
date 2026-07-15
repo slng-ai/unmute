@@ -1,0 +1,19 @@
+# TTS route through the SLNG Execution Layer. Prefer SLNG-hosted TTS routes
+# when available; proxied provider routes remain valid user choices.
+# Local authoring does not validate live catalog membership; resolve/deploy does.
+model: [[yaml .TTSModel]]
+voice: [[yaml .TTSVoice]]
+
+# Optional Unmute bridge config. Fill only what this model route supports.
+# Rime arcana does not support a speed field, so this example omits it.
+config: {}
+# Example:
+# config:
+#   sample_rate: 24000
+#   encoding: pcm
+#   language: en
+
+# Optional runtime routing controls.
+fallbacks: []
+# first_audio_timeout_s: 2.0
+# failure_audio_enabled: true

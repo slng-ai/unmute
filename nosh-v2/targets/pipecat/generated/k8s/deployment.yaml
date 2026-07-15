@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nosh-v2
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nosh-v2
+  template:
+    metadata:
+      labels:
+        app: nosh-v2
+    spec:
+      containers:
+        - name: bot
+          image: nosh-v2:latest
+          env:
+            - name: SLNG_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nosh-v2-secrets
+                  key: SLNG_API_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nosh-v2-secrets
+                  key: OPENAI_API_KEY
+

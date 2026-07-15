@@ -1,0 +1,3 @@
+# Region posture for routing. Runtime/deploy checks enforce this at routing
+# time; calls fail rather than route outside region.
+region: ap-south

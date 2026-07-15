@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{.Profile.PCC.AgentName}}
+  namespace: {{.Profile.Kubernetes.Namespace}}
+spec:
+  replicas: {{.Profile.Kubernetes.Replicas}}
+  selector:
+    matchLabels:
+      app: {{.Profile.PCC.AgentName}}
+  template:
+    metadata:
+      labels:
+        app: {{.Profile.PCC.AgentName}}
+    spec:
+      containers:
+        - name: bot
+          image: {{.Profile.Docker.Image}}:{{.Profile.Docker.Tag}}
+          env:
+{{range .RequiredSecrets}}            - name: {{.}}
+              valueFrom:
+                secretKeyRef:
+                  name: {{$.Profile.Kubernetes.SecretName}}
+                  key: {{.}}
+{{end}}
