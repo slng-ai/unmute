@@ -27,8 +27,8 @@ models:
     placement: api
 
 voices:
-  front_desk: { description: warm, concise }
-  specialist: { description: slower, more deliberate }
+  front_desk: { description: "warm, concise" }
+  specialist: { description: "slower, more deliberate" }
 
 variables:
   customer_id: { type: string }

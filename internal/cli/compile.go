@@ -9,7 +9,7 @@ import (
 
 	"github.com/slng/unmute/internal/generate"
 	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/spec"
+	spec "github.com/slng/unmute/internal/legacyspec"
 	"github.com/spf13/cobra"
 )
 

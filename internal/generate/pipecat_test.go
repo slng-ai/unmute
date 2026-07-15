@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/slng/unmute/internal/ir"
+	spec "github.com/slng/unmute/internal/legacyspec"
 	"github.com/slng/unmute/internal/scaffold"
-	"github.com/slng/unmute/internal/spec"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")

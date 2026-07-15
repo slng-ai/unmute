@@ -13,8 +13,8 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/slng/unmute/internal/ir"
+	spec "github.com/slng/unmute/internal/legacyspec"
 	"github.com/slng/unmute/internal/scaffold"
-	"github.com/slng/unmute/internal/spec"
 	"github.com/spf13/cobra"
 )
 

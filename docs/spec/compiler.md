@@ -62,7 +62,7 @@ Compile the SCHEMA.md v1 package (`agent.yaml` + `instructions.md` + `agents/` +
 ## §T tasks
 id|status|desc|cites
 T1|x|define v1 IR structs in `internal/ir` covering SCHEMA.md §4 + §5 tools (incl. `description`/`handler`/`url_env`) + §6 targets/bindings (incl. `destinations`); cross-refs as **names not pointers** (acyclic); jsonschema-go derivation with `TypeSchemas` for the `Control` union + enum result types; unit test proves derivation|I.ir.types,C2,V2
-T2|.|`internal/spec` `Load(dir)` — goccy strict decode of every package file, filename+line:col errors, tool-name-from-filename, markdown-by-path; raw structs, no resolution; table tests + safe_core loads clean|I.spec.Load,C3,V3,V14
+T2|x|`internal/spec` `Load(dir)` — goccy strict decode of every package file, filename+line:col errors, tool-name-from-filename, markdown-by-path; raw structs, no resolution; table tests + safe_core loads clean|I.spec.Load,C3,V3,V14
 T3|.|capability table in **`internal/target`** leaf package — typed matrices (tag / role open-vs-integrated / history-value / fallback-slot), machine form of SCHEMA §4–7; one place; imported by both `ir` and `generate`|I.capability,C4,C6,C8
 T4|.|`ir.Build(pkg)` — resolve all names to name-refs (V1), flatten+cycle-check fallback (V10), compose prompt paths, snake_case + reserved-underscore + shared-namespace checks (V7); unit tests + safe_core builds|I.ir.Build,V1,V7,V10
 T5|.|`ir.Validate(agent, targets, caps)` — structural (rules 1–3,9,12), tier gating (rule 4 via table, V11), context policy (rule 5, V8), bindings completeness+structure (V9), capacity (V12), outbound/voicemail (V13); fail-loud provider vocab (V4), warn (V5), provisional (V6); returns per-target `ValidateReport` (V18)|I.ir.Validate,V4,V5,V6,V8,V9,V11,V12,V13,V18
@@ -78,3 +78,4 @@ Dependency order: T1, T2, T3 → T4 → T5 → T6; T7 with T5; T8 last; T10 afte
 
 ## §B bugs
 id|date|cause|fix
+B1|2026-07-15|`safe_core` voice descriptions used unquoted commas, so strict YAML decoded the trailing words as unknown fields|V3,V14

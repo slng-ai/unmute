@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/spec"
+	spec "github.com/slng/unmute/internal/legacyspec"
 	"github.com/slng/unmute/internal/web"
 	"github.com/spf13/cobra"
 )

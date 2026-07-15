@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/slng/unmute/internal/ir"
+	spec "github.com/slng/unmute/internal/legacyspec"
 	"github.com/slng/unmute/internal/scaffold"
-	"github.com/slng/unmute/internal/spec"
 )
 
 func TestGenerateSLNG_golden(t *testing.T) { // V47, V48, V50, V51, V53, V54
