@@ -1,3 +1,0 @@
-# WebRTC channel — in-app / browser web session. `unmute dev` talks to the
-# agent over this channel. Fill it in to activate; delete this file to remove
-# the channel. An agent needs at least one channel to receive calls.

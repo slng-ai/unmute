@@ -1,6 +1,0 @@
-# SIP channel — telephony surface for PSTN calls.
-# Trunk provider is Twilio; provider auth/config lives in
-# agent/connections/twilio.yaml. This scaffold is trunk-only: dial-in and
-# dial-out behavior are compile/deploy concerns added later.
-provider: twilio
-connection: twilio
