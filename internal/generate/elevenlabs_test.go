@@ -112,6 +112,18 @@ func TestElevenLabsAssignNeedsJSONTool(t *testing.T) {
 	}
 }
 
+// TestElevenLabsBranchPinGated refuses a branch_id pin loudly: branch/draft
+// targeting needs the drafts/branches API, not an invented query param (item 3).
+func TestElevenLabsBranchPinGated(t *testing.T) {
+	agent := elWorkAgent(t)
+	tgt := targetByProvider(t, agent, ir.ProviderElevenLabs)
+	tgt.Pins = map[string]string{"branch_id": "preview"}
+	_, err := Generate(agent, tgt, target.Default())
+	if err == nil || !strings.Contains(err.Error(), "branch") {
+		t.Fatalf("expected branch_id pin to be gated, got %v", err)
+	}
+}
+
 // elBody generates the elevenlabs artifact and returns the create-step body for
 // one agent as a decoded map.
 func elBody(t *testing.T, agent *ir.Agent, tgt ir.Target, capture string) map[string]any {
@@ -203,14 +215,17 @@ func TestElevenLabsVoicemailLeaveMessage(t *testing.T) { // V7
 	agent.Channels["phone"] = ir.Channel{
 		Kind: ir.ChannelTelephony, Inbound: &yes, Outbound: &yes, OnVoicemail: ir.VoicemailLeaveMessage,
 	}
-	tools := toolsOf(t, elBody(t, agent, targetByProvider(t, agent, ir.ProviderElevenLabs), "intake"))
-	vm := systemToolNamed(tools, "voicemail_detection")
+	body := elBody(t, agent, targetByProvider(t, agent, ir.ProviderElevenLabs), "intake")
+	vm := builtInToolNamed(t, body, "voicemail_detection")
 	if vm == nil {
 		t.Fatal("voicemail_detection tool not emitted")
 	}
 	params, _ := vm["params"].(map[string]any)
 	if _, ok := params["voicemail_message"]; !ok {
 		t.Fatalf("leave_message must set voicemail_message: %v", params)
+	}
+	if params["system_tool_type"] != "voicemail_detection" {
+		t.Fatalf("built_in_tools entry missing system_tool_type: %v", params)
 	}
 }
 
@@ -223,8 +238,8 @@ func TestElevenLabsHumanTransferWarmBriefing(t *testing.T) { // V8
 	tgt := targetByProvider(t, agent, ir.ProviderElevenLabs)
 	tgt.Carrier = "twilio" // briefing:message is native-Twilio only (V8)
 
-	tools := toolsOf(t, elBody(t, agent, tgt, "billing"))
-	xfer := systemToolNamed(tools, "transfer_to_number")
+	body := elBody(t, agent, tgt, "billing")
+	xfer := builtInToolNamed(t, body, "transfer_to_number")
 	if xfer == nil {
 		t.Fatal("transfer_to_number not emitted")
 	}
@@ -237,20 +252,12 @@ func TestElevenLabsHumanTransferWarmBriefing(t *testing.T) { // V8
 	}
 }
 
-func toolsOf(t *testing.T, body map[string]any) []any {
+// builtInToolNamed digs a system tool out of prompt.built_in_tools by name.
+func builtInToolNamed(t *testing.T, body map[string]any, name string) map[string]any {
 	t.Helper()
-	tools, _ := promptOf(t, body)["tools"].([]any)
-	return tools
-}
-
-func systemToolNamed(tools []any, name string) map[string]any {
-	for _, raw := range tools {
-		tool, _ := raw.(map[string]any)
-		if tool["type"] == "system" && tool["name"] == name {
-			return tool
-		}
-	}
-	return nil
+	bi, _ := promptOf(t, body)["built_in_tools"].(map[string]any)
+	tool, _ := bi[name].(map[string]any)
+	return tool
 }
 
 // elWorkAgent is safe_core built for in-code mutation by the T5 unit tests.
@@ -277,9 +284,6 @@ func renderApply(a Artifact) string {
 		out.WriteString("\n=== step ")
 		out.WriteByte(byte('1' + i))
 		out.WriteString(": " + step.Method + " " + step.Endpoint)
-		if step.Branch != "" {
-			out.WriteString(" [branch=" + step.Branch + "]")
-		}
 		if step.CaptureID != "" {
 			out.WriteString(" (capture=" + step.CaptureID + ")")
 		}

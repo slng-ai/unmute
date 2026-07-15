@@ -21,6 +21,10 @@ func TestGenerateValidatesBeforeProviderDispatch(t *testing.T) { // V17
 
 func TestGenerateWarnOnlyReachesRemainingStubs(t *testing.T) { // V17
 	agent := loadCompilerAgent(t)
+	// LiveKit, Pipecat, and ElevenLabs are real drivers now; these two are still stubs.
+	for _, provider := range []ir.Provider{
+		ir.ProviderVapi, ir.ProviderDeepgram,
+	} {
 	// LiveKit, Pipecat, and ElevenLabs are real drivers now; Vapi and Deepgram
 	// are still stubs.
 	// LiveKit, Pipecat, and ElevenLabs are real drivers now; only these are stubs.
@@ -62,12 +66,12 @@ func TestGeneratePipecatEmitsProject(t *testing.T) { // driver-pipecat T2, V17
 	}
 }
 
-func TestApplyPlanIsOrderedAndBranchAware(t *testing.T) {
+func TestApplyPlanIsOrdered(t *testing.T) {
 	plan := ApplyPlan{Steps: []ApplyStep{
 		{Method: "POST", Endpoint: "/assistants", CaptureID: "assistant"},
-		{Method: "POST", Endpoint: "/squads", Branch: "preview"},
+		{Method: "POST", Endpoint: "/squads"},
 	}}
-	if plan.Steps[0].CaptureID != "assistant" || plan.Steps[1].Branch != "preview" {
+	if plan.Steps[0].CaptureID != "assistant" || plan.Steps[1].Endpoint != "/squads" {
 		t.Fatalf("plan = %#v", plan)
 	}
 }

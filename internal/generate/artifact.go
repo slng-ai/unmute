@@ -38,7 +38,6 @@ type ApplyStep struct {
 	Endpoint  string
 	Body      json.RawMessage
 	CaptureID string
-	Branch    string
 }
 
 type GenerateReport struct {
