@@ -37,11 +37,11 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
 from pipecat.bus.messages import BusJobRequestMessage
-from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.pipeline.job_decorator import job
+from pipecat.workers.base_worker import BaseWorker
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.openai.tts import OpenAITTSService
+from pipecat_slng import SlngTTSService
 
 load_dotenv()
 
@@ -53,7 +53,6 @@ REQUIRED_ENV = [
     "LOOKUP_CUSTOMER_URL",
     "OPENAI_API_KEY",
     "SLNG_API_KEY",
-    "SLNG_TTS_URL",
 ]
 IGNORE_PHRASES = ["okay", "right", "uh-huh"]
 
@@ -94,10 +93,10 @@ def build_billing_llm():
 
 
 def build_billing_tts():
-    return OpenAITTSService(
+    return SlngTTSService(
         api_key=os.environ["SLNG_API_KEY"],
-        base_url=os.environ["SLNG_TTS_URL"],
-        voice="marco",
+        voice="aura-2-orion-en",
+        model="slng/deepgram/aura:2-en",
     )
 
 
@@ -147,10 +146,10 @@ def build_intake_llm():
 
 
 def build_intake_tts():
-    return OpenAITTSService(
+    return SlngTTSService(
         api_key=os.environ["SLNG_API_KEY"],
-        base_url=os.environ["SLNG_TTS_URL"],
-        voice="nova-it",
+        voice="aura-2-thalia-en",
+        model="slng/deepgram/aura:2-en",
     )
 
 
@@ -245,6 +244,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     _TRANSPORT = transport
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
+    # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
+    # key, no network hop; the turn binding in targets.yaml is advisory.
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,

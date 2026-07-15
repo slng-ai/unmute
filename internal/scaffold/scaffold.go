@@ -65,6 +65,9 @@ func Write(dir string, d Data) ([]string, error) {
 			return err
 		}
 		rel := strings.TrimSuffix(strings.TrimPrefix(p, "templates/"), ".tmpl")
+		if rel == "env.example" {
+			rel = ".env.example" // dotfiles can't be embedded templates
+		}
 		out := filepath.Join(dir, rel)
 
 		raw, err := templates.ReadFile(p)

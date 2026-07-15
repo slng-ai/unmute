@@ -24,10 +24,13 @@ import (
 //go:embed templates/pipecat_v1/*.tmpl
 var pipecatV1Templates embed.FS
 
-// pipecatVersionMajor is the framework major this driver's templates target.
-// The workers API (LLMWorker/activate_worker) and Flows-in-core are 1.x.
-// ponytail: single-major check, tighten to a real range once benchmarked.
-const pipecatVersionMajor = 1
+// The driver's templates target the Pipecat workers model (LLMWorker /
+// activate_worker / @job) + Flows-in-core, which landed in 1.5.0 — the first
+// 1.x release (versions jump 0.0.108 → 1.5.0). Range: >=1.5.0, <2.0.0.
+const (
+	pipecatVersionMajor    = 1
+	pipecatVersionMinMinor = 5
+)
 
 var pipecatVersionPattern = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
 
@@ -152,18 +155,32 @@ type pipecatData struct {
 	Transport           string
 	Imports             []string
 	Extras              []string
+	Deps                []string // standalone pip deps for plugin services (e.g. pipecat-slng)
 	RequiredEnv         []string
 	Notes               []string
+
+	// Import needs: keep bot.py free of unused imports (only what a given spec
+	// actually exercises), so the emitted pipeline reads clean.
+	NeedsAsyncio        bool // _end_after max-duration timer
+	NeedsHTTPX          bool // any webhook tool
+	NeedsFunctionCalls  bool // any @tool/transfer/delegate (FunctionCallParams)
+	NeedsTurnStrategies bool // interruption min-words strategy
+	NeedsEndFrame       bool
+	NeedsAppendFrame    bool
 }
 
-// serviceInfo maps a Pipecat service class to its import line and pyproject extra.
-var serviceInfo = map[string]struct{ Import, Extra string }{
-	"DeepgramSTTService":   {"from pipecat.services.deepgram.stt import DeepgramSTTService", "deepgram"},
-	"OpenAISTTService":     {"from pipecat.services.openai.stt import OpenAISTTService", "openai"},
-	"OpenAILLMService":     {"from pipecat.services.openai.llm import OpenAILLMService", "openai"},
-	"OpenAITTSService":     {"from pipecat.services.openai.tts import OpenAITTSService", "openai"},
-	"ElevenLabsTTSService": {"from pipecat.services.elevenlabs.tts import ElevenLabsTTSService", "elevenlabs"},
-	"CartesiaTTSService":   {"from pipecat.services.cartesia.tts import CartesiaTTSService", "cartesia"},
+// serviceInfo maps a Pipecat service class to its import line and either a
+// pipecat-ai extra (native services) or a standalone pip Dep (plugins). Slng
+// STT/TTS ship in the separate `pipecat-slng` package, not pipecat-ai.
+var serviceInfo = map[string]struct{ Import, Extra, Dep string }{
+	"DeepgramSTTService":   {"from pipecat.services.deepgram.stt import DeepgramSTTService", "deepgram", ""},
+	"OpenAISTTService":     {"from pipecat.services.openai.stt import OpenAISTTService", "openai", ""},
+	"OpenAILLMService":     {"from pipecat.services.openai.llm import OpenAILLMService", "openai", ""},
+	"OpenAITTSService":     {"from pipecat.services.openai.tts import OpenAITTSService", "openai", ""},
+	"ElevenLabsTTSService": {"from pipecat.services.elevenlabs.tts import ElevenLabsTTSService", "elevenlabs", ""},
+	"CartesiaTTSService":   {"from pipecat.services.cartesia.tts import CartesiaTTSService", "cartesia", ""},
+	"SlngSTTService":       {"from pipecat_slng import SlngSTTService", "", "pipecat-slng>=0.4.0"},
+	"SlngTTSService":       {"from pipecat_slng import SlngTTSService", "", "pipecat-slng>=0.4.0"},
 }
 
 type pipecatInterrupt struct {
@@ -245,21 +262,31 @@ func checkPipecatVersion(version string) error {
 		return fmt.Errorf("pipecat version %q is not a semantic version", version)
 	}
 	major, _ := strconv.Atoi(match[1])
-	if major != pipecatVersionMajor {
-		return fmt.Errorf("pipecat version %q is outside the driver's template-compatible range (>=%d.0, <%d.0)", version, pipecatVersionMajor, pipecatVersionMajor+1)
+	minor, _ := strconv.Atoi(match[2])
+	if major != pipecatVersionMajor || minor < pipecatVersionMinMinor {
+		return fmt.Errorf("pipecat version %q is outside the driver's template-compatible range (>=%d.%d, <%d.0)", version, pipecatVersionMajor, pipecatVersionMinMinor, pipecatVersionMajor+1)
 	}
 	return nil
 }
 
 func renderPipecatFiles(data pipecatData) ([]File, error) {
-	names := []string{"bot.py", "pyproject.toml", "Dockerfile", "README.md", "pcc-deploy.toml"}
+	// tmpl → output path (decoupled so .env.example can't be a dotfile template,
+	// which Go's embed would skip).
+	outputs := []struct{ tmpl, path string }{
+		{"bot.py", "bot.py"},
+		{"pyproject.toml", "pyproject.toml"},
+		{"Dockerfile", "Dockerfile"},
+		{"README.md", "README.md"},
+		{"pcc-deploy.toml", "pcc-deploy.toml"},
+		{"env.example", ".env.example"},
+	}
 	var files []File
-	for _, name := range names {
-		content, err := renderPipecatV1(name, data)
+	for _, o := range outputs {
+		content, err := renderPipecatV1(o.tmpl, data)
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, File{Path: name, Content: content})
+		files = append(files, File{Path: o.path, Content: content})
 	}
 	return files, nil
 }

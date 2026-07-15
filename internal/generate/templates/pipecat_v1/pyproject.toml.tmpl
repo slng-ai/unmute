@@ -2,12 +2,13 @@
 name = {{pyq .Project}}
 version = "0.1.0"
 description = "Generated Pipecat voice agent (compiled by unmute)."
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "pipecat-ai[{{join .Extras ","}}]=={{.Version}}",
-    "python-dotenv>=1.0",
-    "httpx>=0.27",
-]
+{{range .Deps}}    "{{.}}",
+{{end}}    "python-dotenv>=1.0",
+{{if .NeedsHTTPX}}    "httpx>=0.27",
+{{end}}]
 
 [tool.uv]
 package = false

@@ -26,14 +26,14 @@ targets:
 
   pipecat-dev:
     provider: pipecat
-    version: "1.0.3"
+    version: "1.5.0"
     transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat
     models:                     # all four roles are open on Pipecat
       listen: { provider: deepgram, model: nova-3 }
-      turn:   { provider: local, model: smart-turn }
+      turn:   { provider: local, model: silero }  # on-device VAD; advisory (not emitted as a service)
       speak:
-        front_desk: { provider: slng, voice: nova-it, endpoint_env: SLNG_TTS_URL }
-        specialist: { provider: slng, voice: marco,   endpoint_env: SLNG_TTS_URL }
+        front_desk: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
+        specialist: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-orion-en" }
       reason:
         fast_reasoning:
           provider: openai

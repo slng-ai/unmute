@@ -131,6 +131,59 @@ func TestPipecatEmitterMatchesCapabilityTable(t *testing.T) {
 	}
 }
 
+// TestServiceInfoCoversEveryMappedClass guards the provider→service mapping: any
+// class the sttService/llmService/ttsService switches can emit MUST have a
+// serviceInfo entry, or collectImportsExtras silently drops its import and the
+// emitted bot.py won't run. (This is the gap that let `provider: slng` fall
+// through to OpenAITTSService with no real SlngTTSService import.)
+func TestServiceInfoCoversEveryMappedClass(t *testing.T) {
+	mapped := []string{
+		"DeepgramSTTService", "OpenAISTTService", "SlngSTTService",
+		"OpenAILLMService",
+		"ElevenLabsTTSService", "CartesiaTTSService", "SlngTTSService", "OpenAITTSService",
+	}
+	for _, class := range mapped {
+		info, ok := serviceInfo[class]
+		if !ok {
+			t.Errorf("service class %q has no serviceInfo entry (no import → broken bot.py)", class)
+			continue
+		}
+		if info.Import == "" {
+			t.Errorf("service class %q has an empty import line", class)
+		}
+		if (info.Extra == "") == (info.Dep == "") {
+			t.Errorf("service class %q must set exactly one of Extra (pipecat-ai) or Dep (plugin), got extra=%q dep=%q", class, info.Extra, info.Dep)
+		}
+	}
+}
+
+// TestCheckPipecatVersion pins the template-compatible range. The workers model
+// + Flows-in-core landed in 1.5.0 (the first 1.x release), so anything below is
+// rejected at compile time — this is the guard that the bogus `1.0.3` pin
+// (which never existed on PyPI) slipped past before.
+func TestCheckPipecatVersion(t *testing.T) {
+	for _, tc := range []struct {
+		version string
+		ok      bool
+	}{
+		{"1.5.0", true},
+		{"1.5.3", true},
+		{"1.6.0", true},
+		{"1.0.3", false}, // never existed on PyPI; workers API not present
+		{"1.4.9", false},
+		{"1", false}, // too vague / pre-1.5
+		{"0.0.108", false},
+		{"2.0.0", false},
+		{"", false},
+		{"latest", false},
+	} {
+		err := checkPipecatVersion(tc.version)
+		if (err == nil) != tc.ok {
+			t.Errorf("checkPipecatVersion(%q): ok=%v, err=%v", tc.version, tc.ok, err)
+		}
+	}
+}
+
 func targetByProvider(t *testing.T, agent *ir.Agent, provider ir.Provider) ir.Target {
 	t.Helper()
 	for _, resolved := range agent.Targets {

@@ -9,18 +9,20 @@ LLM and voice, and agent_transfer is activate_worker().
 
 from __future__ import annotations
 
-import asyncio
-import os
+{{if .NeedsAsyncio}}import asyncio
+{{end}}import os
 {{if .Tasks}}import json
 {{end}}{{if .Variables}}from dataclasses import asdict, dataclass
-{{end}}
+{{end}}{{if .NeedsHTTPX}}
 import httpx
-{{if .Tasks}}from openai import AsyncOpenAI
+{{end}}{{if .Tasks}}from openai import AsyncOpenAI
 {{end}}from dotenv import load_dotenv
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
-from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
-from pipecat.pipeline.pipeline import Pipeline
+{{if and .NeedsEndFrame .NeedsAppendFrame}}from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
+{{else if .NeedsEndFrame}}from pipecat.frames.frames import EndFrame
+{{else if .NeedsAppendFrame}}from pipecat.frames.frames import LLMMessagesAppendFrame
+{{end}}from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
@@ -29,16 +31,16 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.llm_service import FunctionCallParams
-from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
+{{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
+{{end}}from pipecat.transports.base_transport import BaseTransport, TransportParams
+{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
-from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
+{{end}}from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
 from pipecat.workers.runner import WorkerRunner
 {{if .Tasks}}from pipecat.bus.messages import BusJobRequestMessage
-from pipecat.pipeline.base_worker import BaseWorker
 from pipecat.pipeline.job_decorator import job
+from pipecat.workers.base_worker import BaseWorker
 {{end}}{{range .Imports}}{{.}}
 {{end}}
 load_dotenv()
@@ -212,6 +214,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     _TRANSPORT = transport
 {{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
+    # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
+    # key, no network hop; the turn binding in targets.yaml is advisory.
     context = LLMContext()
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,

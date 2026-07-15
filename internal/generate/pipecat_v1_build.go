@@ -71,32 +71,67 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 
 	applyConversation(agent.Conversation, &data)
 	if agent.Pipeline.Turn != nil {
-		data.Notes = append(data.Notes, "turn role lowers to VAD + smart-turn analyzers; its binding is advisory")
+		data.Notes = append(data.Notes, "turn role lowers to on-device VAD (Silero); its binding is advisory")
 	}
-	for _, a := range data.Agents {
-		for _, tool := range a.Tools {
-			if tool.ColdDestination != "" {
-				data.HasColdTransfer = true
-			}
-		}
-	}
-	data.Imports, data.Extras = collectImportsExtras(data)
+	setImportNeeds(&data)
+	data.Imports, data.Extras, data.Deps = collectImportsExtras(data)
 	data.RequiredEnv = env.sorted()
 	return data, nil
 }
 
-// collectImportsExtras returns the deduped, sorted service imports for bot.py and
-// the pyproject extras for pipecat-ai, so only used services are pulled in.
-func collectImportsExtras(data pipecatData) ([]string, []string) {
-	imports := map[string]bool{}
-	extras := map[string]bool{"silero": true, "webrtc": true}
+// setImportNeeds inspects the built model so bot.py imports only what this spec
+// exercises (no dead imports in the emitted pipeline).
+func setImportNeeds(data *pipecatData) {
+	data.NeedsAsyncio = data.MaxDurationSecs > 0
+	data.NeedsTurnStrategies = data.Interrupt != nil && data.Interrupt.MinWords > 0
+	data.NeedsAppendFrame = data.Inactivity != nil
+	data.NeedsEndFrame = data.MaxDurationSecs > 0
+	for _, a := range data.Agents {
+		if len(a.Tools)+len(a.Transfers)+len(a.Delegates) > 0 {
+			data.NeedsFunctionCalls = true
+		}
+		for _, t := range a.Tools {
+			if t.ColdDestination != "" {
+				data.HasColdTransfer = true
+				data.NeedsAppendFrame = true // cold transfer prompts the caller
+				data.NeedsEndFrame = true    // on_dialout_answered ends the call
+				continue
+			}
+			data.NeedsHTTPX = true // webhook tool POSTs with httpx
+			if t.EndsCall {
+				data.NeedsEndFrame = true
+			}
+		}
+		for _, d := range a.Delegates {
+			if d.Then == "end" {
+				data.NeedsEndFrame = true
+			}
+		}
+	}
+}
+
+// collectImportsExtras returns the deduped, sorted service imports for bot.py,
+// the pipecat-ai extras, and the standalone pip deps for plugin services (e.g.
+// pipecat-slng), so only used services are pulled in.
+func collectImportsExtras(data pipecatData) (imports, extras, deps []string) {
+	importSet := map[string]bool{}
+	// Always-on extras: every bot.py uses the runner (create_transport,
+	// RunnerArguments, pipecat.runner.run.main → needs fastapi/uvicorn via
+	// [runner]), a local VAD (silero), and the WebRTC dev transport (webrtc).
+	extraSet := map[string]bool{"runner": true, "silero": true, "webrtc": true}
+	depSet := map[string]bool{}
 	if data.Transport == "daily-sip" {
-		extras["daily"] = true
+		extraSet["daily"] = true
 	}
 	note := func(class string) {
 		if info, ok := serviceInfo[class]; ok {
-			imports[info.Import] = true
-			extras[info.Extra] = true
+			importSet[info.Import] = true
+			if info.Extra != "" {
+				extraSet[info.Extra] = true
+			}
+			if info.Dep != "" {
+				depSet[info.Dep] = true
+			}
 		}
 	}
 	note(data.STT.Class)
@@ -105,9 +140,9 @@ func collectImportsExtras(data pipecatData) ([]string, []string) {
 		note(a.TTS.Class)
 	}
 	if len(data.Tasks) > 0 {
-		extras["openai"] = true // task job-workers use the OpenAI SDK directly
+		extraSet["openai"] = true // task job-workers use the OpenAI SDK directly
 	}
-	return sortedKeys(imports), sortedKeys(extras)
+	return sortedKeys(importSet), sortedKeys(extraSet), sortedKeys(depSet)
 }
 
 func sortedKeys(set map[string]bool) []string {
@@ -387,12 +422,16 @@ func sttService(binding *ir.Binding, env *envSet) (pipecatService, error) {
 	switch binding.Provider {
 	case "deepgram":
 		svc.Class = "DeepgramSTTService"
+	case "slng":
+		svc.Class = "SlngSTTService" // pipecat-slng plugin: api_key + slng-format model
 	case "openai", "":
 		svc.Class = "OpenAISTTService"
 	default:
 		svc.Class = "OpenAISTTService" // OpenAI-compatible fallthrough (custom endpoint)
 	}
-	if binding.EndpointEnv != "" {
+	// Slng routes by api_key + region params, not a base_url; only the
+	// OpenAI-compatible services take an endpoint override.
+	if binding.EndpointEnv != "" && binding.Provider != "slng" {
 		svc.BaseURL = binding.EndpointEnv
 		env.add(binding.EndpointEnv)
 	}
@@ -422,12 +461,15 @@ func ttsService(binding ir.Binding, env *envSet) (pipecatService, error) {
 		svc.Class = "ElevenLabsTTSService"
 	case "cartesia":
 		svc.Class = "CartesiaTTSService"
+	case "slng":
+		svc.Class = "SlngTTSService" // pipecat-slng plugin: api_key + slng-format model + voice
 	case "openai", "":
 		svc.Class = "OpenAITTSService"
 	default:
 		svc.Class = "OpenAITTSService" // OpenAI-compatible custom endpoint
 	}
-	if binding.EndpointEnv != "" {
+	// Slng routes by api_key + region params, not a base_url (see sttService).
+	if binding.EndpointEnv != "" && binding.Provider != "slng" {
 		svc.BaseURL = binding.EndpointEnv
 		env.add(binding.EndpointEnv)
 	}
