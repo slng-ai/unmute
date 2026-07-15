@@ -5,3 +5,6 @@ docs/*
 voice-agent-prompting/
 my-test-agent/
 .firecrawl/
+
+# Compiled target projects (reproducible via `unmute compile`; goldens are the tracked form)
+examples/*/build/
