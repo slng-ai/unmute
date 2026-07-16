@@ -95,11 +95,20 @@ type Variable struct {
 type Tool struct {
 	Name        string
 	Description string
+	Execution   string
+	Handler     string
 	URLEnv      string
 	Input       string // JSON Schema object
 	Output      string // optional JSON Schema object
 	AttachTo    []string
 	AttachTasks []string
+}
+
+func (t Tool) ExecutionKind() string {
+	if t.Execution == "" {
+		return "webhook"
+	}
+	return t.Execution
 }
 
 type Agent struct {
@@ -286,7 +295,7 @@ func (d Data) AgentTools(name string) []string {
 	seen := map[string]bool{}
 	for _, tool := range d.Tools {
 		attach := tool.AttachTo
-		if len(attach) == 0 {
+		if attach == nil {
 			attach = []string{"assistant"}
 		}
 		for _, agent := range attach {

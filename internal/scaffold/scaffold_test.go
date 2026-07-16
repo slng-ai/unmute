@@ -210,6 +210,31 @@ func TestWriteVariablesAndTools(t *testing.T) {
 	}
 }
 
+func TestWriteLocalToolManifest(t *testing.T) {
+	data := Data{Name: "agent", Tools: []Tool{{
+		Name: "lookup_customer", Description: "Look up the caller", Execution: "local",
+		Handler: "tools/lookup_customer.py", Input: `{"type":"object"}`,
+	}}}
+	data.SetTarget("pipecat")
+	dir := filepath.Join(t.TempDir(), "agent")
+	if _, err := Write(dir, data); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "tools", "lookup_customer.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := string(raw)
+	for _, want := range []string{"execution: local", "handler: tools/lookup_customer.py"} {
+		if !strings.Contains(manifest, want) {
+			t.Errorf("local tool manifest missing %q:\n%s", want, manifest)
+		}
+	}
+	if strings.Contains(manifest, "url_env:") {
+		t.Errorf("local tool manifest contains webhook URL:\n%s", manifest)
+	}
+}
+
 func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
 	for _, provider := range []string{"pipecat", "livekit", "elevenlabs"} {
 		t.Run(provider, func(t *testing.T) {
