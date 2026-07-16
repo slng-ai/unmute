@@ -43,6 +43,7 @@ docs/user/
 │   ├── our-take-on-orchestrators.md  # why one source, code vs managed targets, the pattern rule
 │   ├── tags-and-gating.md       # core / warn / gated / provisional, fail loud, never average
 │   ├── profiles-and-bindings.md # abstract in agent.yaml, concrete in targets.yaml, forwarded verbatim
+│   ├── how-targets-run-your-agent.md  # what handoffs, tasks, and groups become on LiveKit vs Pipecat
 │   └── tiers.md                 # T0 one agent, T1 tasks, T2 handoff, what each costs in portability
 │
 ├── reference/                   # every field, every allowed value, every target outcome

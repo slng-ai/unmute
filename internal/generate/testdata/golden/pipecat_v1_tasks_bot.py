@@ -4,7 +4,10 @@ Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
 graph are baked in from the spec. Secret values are read from the environment
 and never written here. The agency model uses the Pipecat workers API: a main
 PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
-LLM and voice, and agent_transfer is activate_worker().
+LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
+run as Pipecat Flows on the owning agent: a delegate tool snapshots the shared
+context, a FlowManager walks the steps as nodes, and control returns with only
+the typed results.
 """
 
 from __future__ import annotations
@@ -15,10 +18,10 @@ import json
 from dataclasses import asdict, dataclass
 
 import httpx
-from openai import AsyncOpenAI
 from dotenv import load_dotenv
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
+from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, FlowsFunctionSchema, NodeConfig
 from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -36,9 +39,6 @@ from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
-from pipecat.bus.messages import BusJobRequestMessage
-from pipecat.pipeline.job_decorator import job
-from pipecat.workers.base_worker import BaseWorker
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat_slng import SlngTTSService
@@ -58,6 +58,9 @@ IGNORE_PHRASES = ["okay", "right", "uh-huh"]
 
 # Set once the transport exists, so an agent's cold-transfer @tool can reach it.
 _TRANSPORT: BaseTransport | None = None
+
+# Set once the shared context exists, so delegate flows can snapshot/restore it.
+_CONTEXT: LLMContext | None = None
 
 
 def require_env() -> None:
@@ -188,37 +191,118 @@ class IntakeAgent(LLMWorker):
     @tool()
     async def run_collect(self, params: FunctionCallParams):
         """Collect the caller's account details."""
-        async with self.job("collect", name="collect", payload=asdict(STATE)) as job_ctx:
-            result = job_ctx.response
-        STATE.verified = result["verified_flag"]
-        await params.result_callback(result)
+        self._run_collect_results = {}
+        # Snapshot the owner's context; the flow rewrites it per node and the
+        # final step restores it (merge: results, N13).
+        self._run_collect_snapshot = ([dict(m) for m in _CONTEXT.get_messages()], _CONTEXT.tools)
+        flow = FlowManager(
+            llm=self.llm,
+            context_aggregator=LLMContextAggregatorPair(_CONTEXT),
+            worker=self,
+        )
+        await flow.initialize(self._run_collect_node_collect())
+        return {"status": "running the collect task"}
+
+    def _run_collect_node_collect(self) -> NodeConfig:
+        return NodeConfig(
+            name="collect",
+            task_messages=[{"role": "system", "content": "Ask for the caller's email, look them up, and confirm their account tier."}],
+            functions=[
+                FlowsFunctionSchema(
+                    name="lookup_customer",
+                    description="Look up a customer record by phone number or email. Returns the customer id and name.",
+                    properties={"email": {"description": "Caller email address", "type": "string"}, "phone": {"description": "Caller phone number in E.164 form", "type": "string"}},
+                    required=[],
+                    handler=_flow_tool_lookup_customer,
+                ),
+                FlowsFunctionSchema(
+                    name="finish_run_collect_collect",
+                    description="Record the result of this step and finish.",
+                    properties={"tier": {"enum": ["free", "pro"], "type": "string"}, "verified_flag": {"type": "boolean"}},
+                    required=["tier", "verified_flag"],
+                    handler=self._run_collect_finish_collect,
+                ),
+            ],
+            respond_immediately=True,
+        )
+
+    async def _run_collect_finish_collect(self, args, flow_manager):
+        self._run_collect_results["collect"] = dict(args)
+        STATE.verified = self._run_collect_results["collect"]["verified_flag"]
+        # then: return — restore the owner's pre-flow context (messages and
+        # tools); only the typed results cross back (merge: results, N13).
+        messages, tools = self._run_collect_snapshot
+        _CONTEXT.set_messages(messages + [{
+            "role": "developer",
+            "content": "Task results: " + json.dumps(self._run_collect_results) + " Continue with the caller in one short line.",
+        }])
+        _CONTEXT.set_tools(tools)
+        return {"status": "ok"}, None
 
     @tool()
     async def run_triage(self, params: FunctionCallParams):
         """Run the triage group."""
-        results: dict = {}
-        payload = dict(asdict(STATE))
-        async with self.job("collect", name="collect", payload=payload) as job_ctx:
-            results["collect"] = job_ctx.response
-        await params.result_callback(results)
-
-
-class CollectTask(BaseWorker):
-    """Task worker: collect (delegate-and-return, structured result)."""
-
-    @job(name="collect")
-    async def run(self, message: BusJobRequestMessage):
-        client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
-        completion = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "Collect the caller's account tier from the conversation so far."},
-                {"role": "user", "content": json.dumps(message.payload or {})},
-            ],
-            response_format={"json_schema": {"name": "result", "schema": {"additionalProperties": False, "properties": {"tier": {"enum": ["free", "pro"], "type": "string"}, "verified_flag": {"type": "boolean"}}, "required": ["tier", "verified_flag"], "type": "object"}, "strict": True}, "type": "json_schema"},
+        self._run_triage_results = {}
+        # Snapshot the owner's context; the flow rewrites it per node and the
+        # final step restores it (merge: results, N13).
+        self._run_triage_snapshot = ([dict(m) for m in _CONTEXT.get_messages()], _CONTEXT.tools)
+        flow = FlowManager(
+            llm=self.llm,
+            context_aggregator=LLMContextAggregatorPair(_CONTEXT),
+            worker=self,
         )
-        result = json.loads(completion.choices[0].message.content)
-        await self.send_job_response(message.job_id, result)
+        await flow.initialize(self._run_triage_node_collect())
+        return {"status": "running the triage flow"}
+
+    def _run_triage_node_collect(self) -> NodeConfig:
+        return NodeConfig(
+            name="collect",
+            task_messages=[{"role": "system", "content": "Ask for the caller's email, look them up, and confirm their account tier."}],
+            functions=[
+                FlowsFunctionSchema(
+                    name="lookup_customer",
+                    description="Look up a customer record by phone number or email. Returns the customer id and name.",
+                    properties={"email": {"description": "Caller email address", "type": "string"}, "phone": {"description": "Caller phone number in E.164 form", "type": "string"}},
+                    required=[],
+                    handler=_flow_tool_lookup_customer,
+                ),
+                FlowsFunctionSchema(
+                    name="finish_run_triage_collect",
+                    description="Record the result of this step and finish.",
+                    properties={"tier": {"enum": ["free", "pro"], "type": "string"}, "verified_flag": {"type": "boolean"}},
+                    required=["tier", "verified_flag"],
+                    handler=self._run_triage_finish_collect,
+                ),
+            ],
+            context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
+            respond_immediately=True,
+        )
+
+    async def _run_triage_finish_collect(self, args, flow_manager):
+        self._run_triage_results["collect"] = dict(args)
+        # then: return — restore the owner's pre-flow context (messages and
+        # tools); only the typed results cross back (merge: results, N13).
+        messages, tools = self._run_triage_snapshot
+        _CONTEXT.set_messages(messages + [{
+            "role": "developer",
+            "content": "Task results: " + json.dumps(self._run_triage_results) + " Continue with the caller in one short line.",
+        }])
+        _CONTEXT.set_tools(tools)
+        return {"status": "ok"}, None
+
+
+# --- task tools (flows handlers) ----------------------------------------------
+# Webhook tools available inside task steps; stable module-level handlers so a
+# re-registered function name always resolves to the same callable.
+
+
+async def _flow_tool_lookup_customer(args, flow_manager):
+    """Look up a customer record by phone number or email. Returns the customer id and name."""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(os.environ["LOOKUP_CUSTOMER_URL"], json=dict(args), timeout=30.0)
+        response.raise_for_status()
+        return response.json()
+
 
 # --- transport & run --------------------------------------------------------
 transport_params: dict = {
@@ -227,7 +311,6 @@ transport_params: dict = {
 }
 
 AGENTS = [BillingAgent(), IntakeAgent()]
-TASK_WORKERS = [CollectTask()]
 
 
 
@@ -247,6 +330,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
     # key, no network hop; the turn binding in targets.yaml is advisory.
     context = LLMContext()
+    global _CONTEXT
+    _CONTEXT = context
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -304,7 +389,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     async def on_client_disconnected(transport, client):
         await runner.cancel()
 
-    await runner.add_workers(main, *AGENTS, *TASK_WORKERS)
+    await runner.add_workers(main, *AGENTS)
     await runner.run()
 
 

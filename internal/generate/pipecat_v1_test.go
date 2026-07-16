@@ -67,8 +67,11 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	}
 
 	agent.Tasks["collect"] = ir.Task{
-		Instructions: "Collect the caller's account tier from the conversation so far.",
-		Model:        "careful_reasoning", // per-task model override
+		// A guided conversational step: it talks to the caller and uses a tool
+		// (B6 — the old @job lowering could do neither). Per-task model stays
+		// out: it is gated on Pipecat (no LLMSwitcher inside an LLMWorker).
+		Instructions: "Ask for the caller's email, look them up, and confirm their account tier.",
+		Tools:        []string{"lookup_customer"},
 		Result: map[string]ir.ResultField{
 			"verified_flag": {Type: ir.PrimitiveBoolean},
 			"tier":          {Type: ir.PrimitiveString, Enum: []string{"free", "pro"}},

@@ -40,25 +40,22 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		data.Agents = append(data.Agents, built)
 	}
 
-	// Build a task-worker for every task any delegate reaches (single or group step).
-	usedTasks := map[string]bool{}
+	// Task tools appear inside Flow nodes as module-level flows handlers; emit
+	// each webhook handler once no matter how many steps reference it.
+	seenFlowTools := map[string]bool{}
 	for _, a := range data.Agents {
 		for _, d := range a.Delegates {
-			if d.Task != "" {
-				usedTasks[d.Task] = true
-			}
-			for _, step := range d.Steps {
-				usedTasks[step] = true
+			for _, step := range d.StepTasks {
+				for _, tool := range step.Tools {
+					if !seenFlowTools[tool.Name] {
+						seenFlowTools[tool.Name] = true
+						data.FlowTools = append(data.FlowTools, tool)
+					}
+				}
 			}
 		}
 	}
-	for _, name := range sortedKeys(usedTasks) {
-		task, err := buildTask(agent, target, name, agent.Tasks[name], env)
-		if err != nil {
-			return pipecatData{}, err
-		}
-		data.Tasks = append(data.Tasks, task)
-	}
+	sort.Slice(data.FlowTools, func(i, j int) bool { return data.FlowTools[i].Name < data.FlowTools[j].Name })
 
 	for _, name := range sortedVarNames(agent) {
 		v := agent.Variables[name]
@@ -103,8 +100,17 @@ func setImportNeeds(data *pipecatData) {
 			}
 		}
 		for _, d := range a.Delegates {
+			data.HasFlows = true // tasks run as Flows on the owning worker (C8)
 			if d.Then == "end" {
 				data.NeedsEndFrame = true
+			}
+			if d.Isolated {
+				data.HasIsolated = true
+			}
+			for _, step := range d.StepTasks {
+				if len(step.Tools) > 0 {
+					data.NeedsHTTPX = true // flows tool handlers POST with httpx
+				}
 			}
 		}
 	}
@@ -138,9 +144,6 @@ func collectImportsExtras(data pipecatData) (imports, extras, deps []string) {
 	for _, a := range data.Agents {
 		note(a.LLM.Class)
 		note(a.TTS.Class)
-	}
-	if len(data.Tasks) > 0 {
-		extraSet["openai"] = true // task job-workers use the OpenAI SDK directly
 	}
 	return sortedKeys(importSet), sortedKeys(extraSet), sortedKeys(depSet)
 }
@@ -189,54 +192,74 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 			}
 			built.Tools = append(built.Tools, tool)
 		case *ir.Delegate:
-			built.Delegates = append(built.Delegates, buildDelegate(agent, ref, c))
+			delegate, err := buildDelegate(agent, ref, c, env)
+			if err != nil {
+				return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
+			}
+			built.Delegates = append(built.Delegates, delegate)
 		}
 	}
 	return built, nil
 }
 
-// buildDelegate lowers a delegate control to a single-task or group dispatch.
-func buildDelegate(agent *ir.Agent, ref string, c *ir.Delegate) pipecatDelegate {
+// buildDelegate lowers a delegate control to a Flow run on the owning worker
+// (C8): a single task is a one-node flow, a group a linear chain. Each step is
+// resolved here so the template emits its node inline.
+func buildDelegate(agent *ir.Agent, ref string, c *ir.Delegate, env *envSet) (pipecatDelegate, error) {
 	delegate := pipecatDelegate{MethodName: ref, When: c.When}
+	steps := []string{c.Task}
 	if c.Task != "" {
 		delegate.Task = c.Task
+		delegate.Then = "return" // a single task always returns (SCHEMA 4.7)
 		for variable, path := range c.Assign {
 			delegate.Assign = append(delegate.Assign, pipecatAssign{Var: variable, Field: strings.TrimPrefix(path, "result.")})
 		}
 		sort.Slice(delegate.Assign, func(i, j int) bool { return delegate.Assign[i].Var < delegate.Assign[j].Var })
-		return delegate
+	} else {
+		group := agent.TaskGroups[c.Group]
+		delegate.Group = c.Group
+		delegate.Then = string(group.Then)
+		delegate.ThenTarget = group.ThenTarget
+		delegate.Isolated = group.ContextScope == ir.ContextIsolated
+		steps = group.Steps
 	}
-	group := agent.TaskGroups[c.Group]
-	delegate.Group = c.Group
-	delegate.Steps = group.Steps
-	delegate.Then = string(group.Then)
-	delegate.ThenTarget = group.ThenTarget
-	delegate.Isolated = group.ContextScope == ir.ContextIsolated
-	return delegate
+	for _, step := range steps {
+		task, err := buildTask(agent, step, agent.Tasks[step], env)
+		if err != nil {
+			return pipecatDelegate{}, err
+		}
+		task.FinishName = "finish_" + ref + "_" + step
+		delegate.StepTasks = append(delegate.StepTasks, task)
+	}
+	for i := range delegate.StepTasks[:len(delegate.StepTasks)-1] {
+		delegate.StepTasks[i].NextName = delegate.StepTasks[i+1].Name
+	}
+	return delegate, nil
 }
 
-// buildTask lowers a task to a job-worker. The per-task model (or the entry
-// agent's model when omitted) picks the OpenAI-compatible route the @job uses.
-func buildTask(agent *ir.Agent, target ir.Target, name string, task ir.Task, env *envSet) (pipecatTask, error) {
-	profile := task.Model
-	if profile == "" {
-		profile = agent.Agents[agent.EntryAgent].Model
+// buildTask lowers a task to a Flow-node model: instructions, tools, and the
+// finish-function schema derived from the typed result (V1). The node runs on
+// the owning agent's LLM; per-task model is gated (no LLMSwitcher, B6).
+func buildTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (pipecatTask, error) {
+	built := pipecatTask{
+		Name: name, Prompt: task.Instructions,
+		ResultProps:    pyLiteral(resultProperties(task.Result)),
+		ResultRequired: pyLiteral(anyStrings(sortedResultNames(task.Result))),
 	}
-	llm, err := llmService(target.Models.Reason[profile], agent.Models[profile], env)
-	if err != nil {
-		return pipecatTask{}, fmt.Errorf("task %q: %w", name, err)
+	for _, ref := range task.Tools {
+		tool, ok := agent.Tools[ref]
+		if !ok {
+			return pipecatTask{}, fmt.Errorf("task %q references unknown tool %q", name, ref)
+		}
+		built.Tools = append(built.Tools, buildTool(ref, tool, env))
 	}
-	return pipecatTask{
-		Name: name, Class: pyName(name) + "Task", Prompt: task.Instructions,
-		LLM: llm, ResultSchema: pyLiteral(resultResponseFormat(task.Result)),
-	}, nil
+	return built, nil
 }
 
-// resultResponseFormat builds an OpenAI structured-output response_format from a
+// resultProperties builds the finish function's JSON-schema properties from a
 // task's typed result. Forwarded verbatim for nested schemas (C11).
-func resultResponseFormat(result map[string]ir.ResultField) map[string]any {
+func resultProperties(result map[string]ir.ResultField) map[string]any {
 	properties := map[string]any{}
-	required := make([]any, 0, len(result))
 	for _, name := range sortedResultNames(result) {
 		field := result[name]
 		switch {
@@ -251,18 +274,17 @@ func resultResponseFormat(result map[string]ir.ResultField) map[string]any {
 		default:
 			properties[name] = map[string]any{"type": jsonType(field.Type)}
 		}
-		required = append(required, name)
 	}
-	return map[string]any{
-		"type": "json_schema",
-		"json_schema": map[string]any{
-			"name": "result", "strict": true,
-			"schema": map[string]any{
-				"type": "object", "properties": properties,
-				"required": required, "additionalProperties": false,
-			},
-		},
+	return properties
+}
+
+// anyStrings widens a string slice for pyLiteral rendering.
+func anyStrings(values []string) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = v
 	}
+	return out
 }
 
 func sortedResultNames(result map[string]ir.ResultField) []string {
@@ -316,6 +338,12 @@ func buildTool(name string, tool ir.Tool, env *envSet) pipecatTool {
 		EndsCall: tool.Effect == ir.ToolEndsConversation, Interruption: interruptionValue(tool.Interruption),
 	}
 	built.Args = append(built.Args, inputFields(tool.Input)...)
+	// Flow nodes advertise the tool via a FlowsFunctionSchema, which takes the
+	// input schema verbatim rather than a Python signature.
+	props, _ := tool.Input["properties"].(map[string]any)
+	built.InputProps = pyLiteral(props)
+	requiredList, _ := tool.Input["required"].([]any)
+	built.InputRequired = pyLiteral(requiredList)
 	return built
 }
 

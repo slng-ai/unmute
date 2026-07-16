@@ -16,16 +16,18 @@ import (
 	targetcap "github.com/slng/unmute/internal/target"
 )
 
-// The Pipecat driver lowers the resolved IR into a runnable project via the
-// workers model (pipecat.workers): a main PipelineWorker owns transport + STT,
-// each agent is an LLMWorker with its own LLM + TTS, and agent_transfer is
-// activate_worker(). Python is emitted only through these templates (C1/ADR-0002).
+// The Pipecat driver lowers the resolved IR into a runnable project via two
+// mechanisms, each on Pipecat's recommended path (C8): a main PipelineWorker
+// owns transport + STT, each agent is an LLMWorker with its own LLM + TTS,
+// agent_transfer is activate_worker(), and tasks/task_groups run as Pipecat
+// Flows (FlowManager) on the owning worker. Python is emitted only through
+// these templates (C1/ADR-0002).
 //
 //go:embed templates/pipecat_v1/*.tmpl
 var pipecatV1Templates embed.FS
 
 // The driver's templates target the Pipecat workers model (LLMWorker /
-// activate_worker / @job) + Flows-in-core, which landed in 1.5.0 — the first
+// activate_worker) + Flows-in-core, which landed in 1.5.0 — the first
 // 1.x release (versions jump 0.0.108 → 1.5.0). Range: >=1.5.0, <2.0.0.
 const (
 	pipecatVersionMajor    = 1
@@ -75,28 +77,31 @@ type pipecatAgent struct {
 	Delegates []pipecatDelegate
 }
 
-// pipecatTask is a delegate-and-return task lowered to a BaseWorker with a @job
-// handler doing a structured OpenAI completion (non-voice, returns a typed result).
+// pipecatTask is one guided conversational step lowered to a Flow node (C8, B6):
+// its instructions, tools, and a uniquely named finish function derived from the
+// result schema (V1). Nodes are emitted inline in the owning delegate's methods.
 type pipecatTask struct {
-	Name         string // worker + job name (the task's snake_case id)
-	Class        string
-	Prompt       string
-	LLM          pipecatService
-	ResultSchema string // Python literal: an OpenAI response_format json_schema
+	Name           string // node id (the task's snake_case id)
+	FinishName     string // LLM-visible "finish_<delegate>_<task>" — unique so a sticky handler registration can never run a stale step (V1)
+	NextName       string // next step's node in this delegate's chain; "" on the last step
+	Prompt         string
+	Tools          []pipecatTool
+	ResultProps    string // Python literal: JSON-schema properties for finish args
+	ResultRequired string // Python literal: list of required finish arg names
 }
 
-// pipecatDelegate is a delegate control: dispatch a task or an ordered group of
-// tasks via @job, then return / transfer / end.
+// pipecatDelegate is a delegate control: run a task or an ordered group of tasks
+// as a Flow on the owning worker, then return / transfer / end (C8, V2).
 type pipecatDelegate struct {
 	MethodName string
 	When       string
 	Task       string          // single-task delegate; "" if a group
 	Assign     []pipecatAssign // result.<field> -> variable
 	Group      string          // group delegate; "" if a single task
-	Steps      []string        // ordered task/job names for a group
+	StepTasks  []pipecatTask   // resolved ordered steps (a single task is one step)
 	Then       string          // "return" | "transfer" | "end"
 	ThenTarget string          // target agent for then: transfer
-	Isolated   bool            // context_scope: isolated (fresh payload per step)
+	Isolated   bool            // context_scope: isolated (per-node context RESET)
 }
 
 type pipecatAssign struct {
@@ -105,12 +110,16 @@ type pipecatAssign struct {
 }
 
 // pipecatTool is a webhook tool exposed as an @tool method that POSTs to url_env.
+// Inside a Flow node the same tool is instead a module-level flows handler; the
+// InputProps/InputRequired literals carry its schema onto the FlowsFunctionSchema.
 type pipecatTool struct {
 	Name            string
 	MethodName      string
 	Description     string
 	URLEnv          string
 	Args            []pipecatArg
+	InputProps      string // Python literal: the input schema's properties object
+	InputRequired   string // Python literal: the input schema's required list
 	EndsCall        bool
 	Interruption    string // "cancel" | "continue" | "" (provider default)
 	ColdDestination string // set for a cold human_transfer: the resolved number/SIP URI
@@ -144,7 +153,7 @@ type pipecatData struct {
 	EntryClass          string
 	STT                 pipecatService
 	Agents              []pipecatAgent
-	Tasks               []pipecatTask
+	FlowTools           []pipecatTool // deduped task tools, emitted as module-level flows handlers
 	Variables           []pipecatVariable
 	GreetingInstruction string
 	GreetingRunLLM      string // "True" or "False"
@@ -162,11 +171,13 @@ type pipecatData struct {
 	// Import needs: keep bot.py free of unused imports (only what a given spec
 	// actually exercises), so the emitted pipeline reads clean.
 	NeedsAsyncio        bool // _end_after max-duration timer
-	NeedsHTTPX          bool // any webhook tool
+	NeedsHTTPX          bool // any webhook tool (agent @tool or flows handler)
 	NeedsFunctionCalls  bool // any @tool/transfer/delegate (FunctionCallParams)
 	NeedsTurnStrategies bool // interruption min-words strategy
 	NeedsEndFrame       bool
 	NeedsAppendFrame    bool
+	HasFlows            bool // any delegate (tasks run as Flows on the owner, C8)
+	HasIsolated         bool // any isolated group (ContextStrategy RESET import)
 }
 
 // serviceInfo maps a Pipecat service class to its import line and either a
@@ -232,12 +243,11 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldSpeakEndpoint:        true, // base_url on the TTS service
 	targetcap.FieldTurnPlacement:        true, // advisory (VAD/smart-turn supplied)
 	targetcap.FieldSemanticEndpointing:  true, // advisory
-	targetcap.FieldTask:                 true, // @job task-worker
-	targetcap.FieldTaskModel:            true, // task-worker's own LLM
-	targetcap.FieldTaskNestedResult:     true, // forwarded json_schema
-	targetcap.FieldTaskGroup:            true, // sequential job dispatch
-	targetcap.FieldTaskGroupReturn:      true,
-	targetcap.FieldContextIsolated:      true, // fresh vs accumulated payload
+	targetcap.FieldTask:                 true, // Flow node on the owning worker (C8)
+	targetcap.FieldTaskNestedResult:     true, // forwarded json_schema properties
+	targetcap.FieldTaskGroup:            true, // linear dynamic-flow chain
+	targetcap.FieldTaskGroupReturn:      true, // snapshot/restore + results injection
+	targetcap.FieldContextIsolated:      true, // per-node ContextStrategy RESET
 	targetcap.FieldTransferRequires:     true, // guard before activate_worker
 	targetcap.FieldGreetingUserFirst:    true,
 	targetcap.FieldGreetingModelWritten: true,

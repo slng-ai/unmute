@@ -50,33 +50,34 @@ One difference from a single task: a group delegate has no `assign`. Single task
 
 ## What Pipecat generates
 
-The group becomes a method that runs each step's job in order, then does the `then`. For our `triage` group (one step, isolated, then return):
+The group runs as a **Pipecat Flow** on the agent that delegated it, the same way a single task does ([05](05-tasks.md)), just with more than one step. The delegate method saves the agent's context and starts the flow at the first step:
 
 ```python
 @tool()
 async def run_triage(self, params: FunctionCallParams):
     """Run the triage steps before helping the caller."""
-    results: dict = {}
-    payload = dict(asdict(STATE))
-    async with self.job("collect", name="collect", payload=payload) as job_ctx:
-        results["collect"] = job_ctx.response
-    await params.result_callback(results)
+    self._run_triage_results = {}
+    self._run_triage_snapshot = ([dict(m) for m in _CONTEXT.get_messages()], _CONTEXT.tools)
+    flow = FlowManager(llm=self.llm, context_aggregator=LLMContextAggregatorPair(_CONTEXT), worker=self)
+    await flow.initialize(self._run_triage_node_collect())
+    return {"status": "running the triage flow"}
 ```
 
-With more than one step, the ordering and the `context_scope` show up directly. A `shared` group threads each step's result into the next step's input:
+The ordering lives in the `finish` functions: each step's handler records its result, then returns the *next* step's configuration, so the agent walks the chain one step at a time:
 
 ```python
-# shared: the payload grows as steps complete
-payload = dict(asdict(STATE))
-async with self.job("collect", ...) as job_ctx:
-    results["collect"] = job_ctx.response
-payload = {**payload, "collect": results["collect"]}   # step 2 sees step 1
-async with self.job("classify", ...) as job_ctx:
-    results["classify"] = job_ctx.response
-await params.result_callback(results)
+async def _run_triage_finish_collect(self, args, flow_manager):
+    self._run_triage_results["collect"] = dict(args)
+    return {"status": "ok"}, self._run_triage_node_classify()   # step 2 comes next
 ```
 
-An `isolated` group omits that middle line, so every step gets the same starting `payload`. And `then: transfer` or `then: end` replace the final `result_callback` with a worker activation or an end-of-call frame. You never write any of this; it follows from the four fields above.
+`context_scope` shows up on each step's configuration. A `shared` group lets every step see the conversation so far, including the earlier steps' turns. An `isolated` group starts each step from a clean context:
+
+```python
+context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),   # isolated only
+```
+
+The last step's `finish` does the `then`. For `then: return` it restores the agent's saved prompt and tools and hands back only the typed results. For `then: transfer` it activates the target worker instead, and for `then: end` it ends the call. You never write any of this; it follows from the four fields above. (LiveKit compiles the same yaml to completely different machinery with the same behavior; see [how targets run your agent](../concepts/how-targets-run-your-agent.md).)
 
 ## What just got harder
 

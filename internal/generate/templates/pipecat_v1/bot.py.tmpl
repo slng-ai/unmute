@@ -4,22 +4,25 @@ Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
 graph are baked in from the spec. Secret values are read from the environment
 and never written here. The agency model uses the Pipecat workers API: a main
 PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
-LLM and voice, and agent_transfer is activate_worker().
+LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
+run as Pipecat Flows on the owning agent: a delegate tool snapshots the shared
+context, a FlowManager walks the steps as nodes, and control returns with only
+the typed results.
 """
 
 from __future__ import annotations
 
 {{if .NeedsAsyncio}}import asyncio
 {{end}}import os
-{{if .Tasks}}import json
+{{if .HasFlows}}import json
 {{end}}{{if .Variables}}from dataclasses import asdict, dataclass
 {{end}}{{if .NeedsHTTPX}}
 import httpx
-{{end}}{{if .Tasks}}from openai import AsyncOpenAI
 {{end}}from dotenv import load_dotenv
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
-{{if and .NeedsEndFrame .NeedsAppendFrame}}from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
+{{if .HasFlows}}from pipecat.flows import {{if .HasIsolated}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig
+{{end}}{{if and .NeedsEndFrame .NeedsAppendFrame}}from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
 {{else if .NeedsEndFrame}}from pipecat.frames.frames import EndFrame
 {{else if .NeedsAppendFrame}}from pipecat.frames.frames import LLMMessagesAppendFrame
 {{end}}from pipecat.pipeline.pipeline import Pipeline
@@ -38,10 +41,7 @@ from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 {{end}}from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
 from pipecat.workers.runner import WorkerRunner
-{{if .Tasks}}from pipecat.bus.messages import BusJobRequestMessage
-from pipecat.pipeline.job_decorator import job
-from pipecat.workers.base_worker import BaseWorker
-{{end}}{{range .Imports}}{{.}}
+{{range .Imports}}{{.}}
 {{end}}
 load_dotenv()
 
@@ -53,6 +53,9 @@ REQUIRED_ENV = [
 {{end}}{{end}}{{if .HasColdTransfer}}
 # Set once the transport exists, so an agent's cold-transfer @tool can reach it.
 _TRANSPORT: BaseTransport | None = None
+{{end}}{{if .HasFlows}}
+# Set once the shared context exists, so delegate flows can snapshot/restore it.
+_CONTEXT: LLMContext | None = None
 {{end}}
 
 def require_env() -> None:
@@ -144,49 +147,85 @@ class {{.Class}}(LLMWorker):
             response.raise_for_status()
             await params.result_callback(response.json())
 {{if .EndsCall}}        await params.llm.push_frame(EndFrame())
-{{end}}{{end}}{{end}}{{range .Delegates}}
+{{end}}{{end}}{{end}}{{range $d := .Delegates}}
     @tool()
-    async def {{.MethodName}}(self, params: FunctionCallParams):
-        """{{.When}}"""
-{{if .Task}}        async with self.job({{pyq .Task}}, name={{pyq .Task}}, payload={{if $.Variables}}asdict(STATE){{else}}{}{{end}}) as job_ctx:
-            result = job_ctx.response
-{{range .Assign}}        STATE.{{.Var}} = result[{{pyq .Field}}]
-{{end}}        await params.result_callback(result)
-{{else}}        results: dict = {}
-        payload = {{if $.Variables}}dict(asdict(STATE)){{else}}{}{{end}}
-{{$isolated := .Isolated}}{{range .Steps}}        async with self.job({{pyq .}}, name={{pyq .}}, payload=payload) as job_ctx:
-            results[{{pyq .}}] = job_ctx.response
-{{if not $isolated}}        payload = {**payload, {{pyq .}}: results[{{pyq .}}]}
-{{end}}{{end}}{{if eq .Then "transfer"}}        await self.activate_worker(
-            {{pyq .ThenTarget}},
+    async def {{$d.MethodName}}(self, params: FunctionCallParams):
+        """{{$d.When}}"""
+        self._{{$d.MethodName}}_results = {}
+        # Snapshot the owner's context; the flow rewrites it per node and the
+        # final step restores it (merge: results, N13).
+        self._{{$d.MethodName}}_snapshot = ([dict(m) for m in _CONTEXT.get_messages()], _CONTEXT.tools)
+        flow = FlowManager(
+            llm=self.llm,
+            context_aggregator=LLMContextAggregatorPair(_CONTEXT),
+            worker=self,
+        )
+        await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
+        return {"status": "running the {{if $d.Task}}{{$d.Task}} task{{else}}{{$d.Group}} flow{{end}}"}
+{{range $t := $d.StepTasks}}
+    def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
+        return NodeConfig(
+            name={{pyq $t.Name}},
+            task_messages=[{"role": "system", "content": {{pyq $t.Prompt}}}],
+            functions=[
+{{range $t.Tools}}                FlowsFunctionSchema(
+                    name={{pyq .Name}},
+                    description={{pyq .Description}},
+                    properties={{.InputProps}},
+                    required={{.InputRequired}},
+                    handler=_flow_tool_{{.Name}},
+                ),
+{{end}}                FlowsFunctionSchema(
+                    name={{pyq $t.FinishName}},
+                    description="Record the result of this step and finish.",
+                    properties={{$t.ResultProps}},
+                    required={{$t.ResultRequired}},
+                    handler=self._{{$d.MethodName}}_finish_{{$t.Name}},
+                ),
+            ],
+{{if $d.Isolated}}            context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
+{{end}}            respond_immediately=True,
+        )
+
+    async def _{{$d.MethodName}}_finish_{{$t.Name}}(self, args, flow_manager):
+        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
+{{if $t.NextName}}        return {"status": "ok"}, self._{{$d.MethodName}}_node_{{$t.NextName}}()
+{{else}}{{range $d.Assign}}        STATE.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
+{{end}}{{if eq $d.Then "end"}}        await self.queue_frame(EndFrame())
+        return {"status": "ok"}, None
+{{else}}        # then: {{$d.Then}} — restore the owner's pre-flow context (messages and
+        # tools); only the typed results cross back (merge: results, N13).
+        messages, tools = self._{{$d.MethodName}}_snapshot
+{{if eq $d.Then "transfer"}}        _CONTEXT.set_messages(messages)
+        _CONTEXT.set_tools(tools)
+        await self.activate_worker(
+            {{pyq $d.ThenTarget}},
             args=LLMWorkerActivationArgs(
-                messages=[{"role": "developer", "content": "Continue with the results so far."}],
+                messages=[{"role": "developer", "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + " Continue with the caller in one short line."}],
                 run_llm=True,
             ),
             deactivate_self=True,
-            result_callback=params.result_callback,
         )
-{{else if eq .Then "end"}}        await params.result_callback(results)
-        await params.llm.push_frame(EndFrame())
-{{else}}        await params.result_callback(results)
-{{end}}{{end}}{{end}}
-{{end}}{{range .Tasks}}
-class {{.Class}}(BaseWorker):
-    """Task worker: {{.Name}} (delegate-and-return, structured result)."""
+{{else}}        _CONTEXT.set_messages(messages + [{
+            "role": "developer",
+            "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + " Continue with the caller in one short line.",
+        }])
+        _CONTEXT.set_tools(tools)
+{{end}}        return {"status": "ok"}, None
+{{end}}{{end}}{{end}}{{end}}
+{{end}}{{if .FlowTools}}
+# --- task tools (flows handlers) ----------------------------------------------
+# Webhook tools available inside task steps; stable module-level handlers so a
+# re-registered function name always resolves to the same callable.
+{{range .FlowTools}}
 
-    @job(name={{pyq .Name}})
-    async def run(self, message: BusJobRequestMessage):
-        client = AsyncOpenAI(api_key=os.environ[{{pyq .LLM.APIKeyEnv}}]{{if .LLM.BaseURL}}, base_url=os.environ[{{pyq .LLM.BaseURL}}]{{end}})
-        completion = await client.chat.completions.create(
-            model={{pyq .LLM.Model}},
-            messages=[
-                {"role": "system", "content": {{pyq .Prompt}}},
-                {"role": "user", "content": json.dumps(message.payload or {})},
-            ],
-            response_format={{.ResultSchema}},
-        )
-        result = json.loads(completion.choices[0].message.content)
-        await self.send_job_response(message.job_id, result)
+async def _flow_tool_{{.Name}}(args, flow_manager):
+    """{{.Description}}"""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(os.environ[{{pyq .URLEnv}}], json=dict(args), timeout=30.0)
+        response.raise_for_status()
+        return response.json()
+{{end}}
 {{end}}
 # --- transport & run --------------------------------------------------------
 transport_params: dict = {
@@ -195,8 +234,7 @@ transport_params: dict = {
 }
 
 AGENTS = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(){{end}}]
-{{if .Tasks}}TASK_WORKERS = [{{range $i, $t := .Tasks}}{{if $i}}, {{end}}{{$t.Class}}(){{end}}]
-{{end}}
+
 
 
 def build_stt():
@@ -217,7 +255,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
     # key, no network hop; the turn binding in targets.yaml is advisory.
     context = LLMContext()
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+{{if .HasFlows}}    global _CONTEXT
+    _CONTEXT = context
+{{end}}    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
@@ -275,7 +315,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     async def on_client_disconnected(transport, client):
         await runner.cancel()
 
-    await runner.add_workers(main, *AGENTS{{if .Tasks}}, *TASK_WORKERS{{end}})
+    await runner.add_workers(main, *AGENTS)
     await runner.run()
 
 

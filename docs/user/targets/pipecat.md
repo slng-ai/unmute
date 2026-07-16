@@ -22,9 +22,9 @@ Everything Unmute generates for Pipecat is built on Pipecat's **workers** model.
 - A single **main worker** owns the transport and the listen (speech-to-text) step. It hears the caller.
 - **Each agent is its own worker**, with its own reasoning model and its own voice. Only one agent is active at a time.
 - **A handoff** (`agent_transfer`) is one worker activating another and stepping aside.
-- **A task** is a separate worker that runs one structured completion off to the side and returns a typed result.
+- **A task or task group** runs as a Pipecat Flow on the agent that delegated it: the agent's prompt and tools are swapped for the step's, then restored when the step finishes with its typed result. No extra worker is involved.
 
-So a two-agent, one-task spec becomes a main worker plus two agent workers plus one task worker, wired together. You never edit this; you change the spec and recompile.
+So a two-agent, one-task spec becomes a main worker plus two agent workers, wired together, with the task living inside its delegating agent. You never edit this; you change the spec and recompile. (For how the same yaml lowers on LiveKit, see [how targets run your agent](../concepts/how-targets-run-your-agent.md).)
 
 ## What gets generated
 
@@ -32,7 +32,7 @@ So a two-agent, one-task spec becomes a main worker plus two agent workers plus 
 
 | File | What it is |
 |---|---|
-| `bot.py` | The whole agent: the pipeline, every agent worker, every task worker, tools, handoffs. |
+| `bot.py` | The whole agent: the pipeline, every agent worker, every task flow, tools, handoffs. |
 | `pyproject.toml` | Pinned dependencies. Only the services your spec uses are included. |
 | `Dockerfile` | A container image for deployment. |
 | `pcc-deploy.toml` | Pipecat Cloud deploy config. |
@@ -115,7 +115,7 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | webhook tools | ok |
 | tool `output` schema, `interruption`, `effect` | ok |
 | task (delegate and return) | ok |
-| per-task `model` | ok |
+| per-task `model` | not yet (driver gate) |
 | task group, any `then` (return / transfer / end) | ok |
 | task group `context_scope` (shared / isolated) | ok |
 | handoff guard (`requires`) | ok |
@@ -125,13 +125,14 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | `placement: local` for listen and speak | ok |
 | cold human transfer | ok, needs `transport: daily-sip` |
 
-Pipecat has no `fail` in the schema. Everything in the [learn pages](../learn/01-one-agent.md), including the guarded handoff, the task, and the task group, runs here.
+Everything in the [learn pages](../learn/01-one-agent.md), including the guarded handoff, the task, and the task group, runs here. The one hard `fail` is the per-task `model:` override; it sits with the driver gates below.
 
 ## What the driver does not emit yet
 
 Some features are in the schema and Pipecat itself supports them, but this first version of the driver does not write them yet. These are **maturity gates on the driver, not limits of Pipecat.** Using one fails the compile today, and the gate lifts when the driver adds it. Right now these are not emitted:
 
 - **Model fallback** (`fallback` on a model profile).
+- **Per-task `model:`.** Pipecat's mechanism for switching models mid-call stalls the conversation in the current release, so there is nothing safe to emit yet. Drop the override and the task runs on the delegating agent's model.
 - **`thinking_audio`.**
 - **Outbound calls and voicemail** (`outbound: true`, `on_voicemail`).
 - **`local` Python-handler tools and `mcp` tools.** Use `webhook` tools, which are emitted.

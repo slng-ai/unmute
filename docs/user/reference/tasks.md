@@ -25,7 +25,7 @@ Tier support for a single task across the five:
 | Target | What happens | Tag |
 |---|---|---|
 | LiveKit | native (`AgentTask`) | gated (T1) |
-| Pipecat | works (a task worker running a structured completion) | gated (T1) |
+| Pipecat | works (a Flow step on the delegating agent) | gated (T1) |
 | Vapi | fails: returning to the previous assistant is unverified | gated (T1) |
 | ElevenLabs | conditional: a workflow node, `assign` via a tool, `history: full` only | gated (T1) |
 | Deepgram | generated, works | gated (T1) |
@@ -46,7 +46,7 @@ Required: no. Values: a list of names. Default: none.
 
 A per-task model override. Omit it and the task uses the entry agent's model.
 
-Required: no. Values: a model profile name. Default: the entry agent's model. Tag: gated. On Pipecat it lowers through per-node model switching, both standalone and inside a task group step.
+Required: no. Values: a model profile name. Default: the entry agent's model. Tag: gated. **Fails on Pipecat**: the framework's mid-call model switch stalls the conversation in the current release, so the driver refuses it until a working lowering exists. Works on LiveKit.
 
 ### result
 
