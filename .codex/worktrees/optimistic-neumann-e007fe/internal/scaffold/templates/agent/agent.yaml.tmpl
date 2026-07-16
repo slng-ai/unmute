@@ -1,0 +1,8 @@
+# Voice runtime config. The greeting is the agent's spoken first turn.
+# voice-agent-prompting: a first turn should end with a question or an
+# invitation to speak.
+greeting: [[quote .Greeting]]
+
+# Primary spoken language for prompts, fillers, and model-route examples.
+# Provider-specific language knobs stay in agent/models/* config blocks.
+language: [[yaml .Language]]

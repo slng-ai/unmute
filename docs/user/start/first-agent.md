@@ -1,131 +1,133 @@
-# Your first agent
+# Build your first YAML package
 
-This page gets one agent talking, in your browser, in a few minutes. Three commands: `init`, `validate`, `dev`. At the end, the same agent compiles for LiveKit too, so you can see one description become two different projects.
+This page introduces the smallest useful Unmute package. You will define one
+portable agent in `agent.yaml` and bind it to LiveKit in `targets.yaml`, without
+starting from command-line behavior or generated code.
 
-You need `unmute` built (see [Install](install.md)) and `uv` installed. You also need two API keys, explained below.
+## Create the package structure
 
-## 1. Create the package
-
-An agent is a small folder of files. Unmute calls it a **package**. Create one with `init`:
-
-```sh
-unmute init support-bot
-```
-
-This writes a ready-to-run package:
+Keep portable behavior, provider bindings, and long-form instructions in
+separate files.
 
 ```text
-support-bot/
-├── agent.yaml          # what the agent is
-├── instructions.md     # the agent's prompt
-├── targets.yaml        # one block per platform you compile to
-└── .env.example        # the keys this agent needs
+support-agent/
+├── agent.yaml
+├── targets.yaml
+└── instructions.md
 ```
 
-Open `agent.yaml` and you will see the same shape from [What is Unmute](what-is-unmute.md): a version, one agent named `assistant`, a greeting, a web channel, and a capacity block. Open `instructions.md` and you will see the agent's prompt, a single plain sentence you can edit.
+`agent.yaml` and `targets.yaml` are the two configuration files. The Markdown
+file contains the prompt referenced by the agent definition.
 
-`targets.yaml` already has one target ready to go, named `pipecat-dev`:
+## Describe the agent
+
+Start with one entry agent, one model profile, one voice profile, and one audio
+channel in `agent.yaml`.
+
+```yaml
+version: 1
+language: en
+entry_agent: assistant
+
+pipeline:
+  listen: { placement: api }
+  turn: { placement: local, semantic_endpointing: preferred }
+  speak: { placement: api }
+
+models:
+  assistant_model:
+    description: Fast reasoning for general support
+    placement: api
+
+voices:
+  assistant_voice:
+    description: Warm and concise
+
+agents:
+  assistant:
+    instructions: instructions.md
+    model: assistant_model
+    voice: assistant_voice
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, you have reached Acme Support. How can I help?"
+  interruption:
+    enabled: true
+
+channels:
+  web: { kind: realtime_audio }
+
+capacity:
+  peak_sessions: 20
+  max_sessions: 40
+  avg_session_duration: 4m
+```
+
+Read this file from top to bottom as a behavior graph:
+
+1. `pipeline` describes where listening, turn detection, and speech happen.
+2. `models` and `voices` declare portable profiles, not provider model IDs.
+3. `agents` assigns those profiles and an instruction file to the entry agent.
+4. `conversation` and `channels` describe what the caller experiences.
+5. `capacity` declares the expected concurrency for a code target.
+
+## Bind the profiles to LiveKit
+
+Use `targets.yaml` to choose the concrete integrations for every open pipeline
+role and every profile used by the agent.
 
 ```yaml
 targets:
-  pipecat-dev:
-    provider: pipecat
-    version: "1.5.0"
-    transport: daily-sip
-    models:
-      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
-      turn:   { provider: local, model: silero }
-      speak:
-        assistant_voice: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
-      reason:
-        assistant_model: { provider: openai, model: "gpt-4.1-mini" }
-```
-
-This says: hear the caller with a SLNG-hosted speech-to-text model, detect end-of-turn on your own machine, speak with a SLNG-hosted voice, and think with OpenAI's `gpt-4.1-mini`. You will learn what every line means later. For now it works as is.
-
-## 2. Add your keys
-
-The scaffold tells you which keys this target needs, in `.env.example`:
-
-```text
-DAILY_API_KEY=
-SLNG_API_KEY=
-OPENAI_API_KEY=
-```
-
-`DAILY_API_KEY` covers the scaffold's `daily-sip` transport, `SLNG_API_KEY` covers hosted speech-to-text and voice, and `OPENAI_API_KEY` covers the reasoning model. Copy the file to `.env` and fill in your values:
-
-```sh
-cd support-bot
-cp .env.example .env
-# edit .env and paste your two keys
-```
-
-Keys live only in `.env`, never in the spec files, and `.env` should never be committed.
-
-## 3. Validate
-
-Before running anything, check that the agent is valid for its target:
-
-```sh
-unmute validate support-bot
-```
-
-You get one line per target:
-
-```text
-TARGET        PROVIDER  RESULT
-pipecat-dev   pipecat   pass
-```
-
-If something is wrong (a missing binding, a feature the target cannot do), `validate` prints an `error:` line explaining exactly what and why, and exits non-zero. This is the fail-loud rule: you find out here, not when a caller is on the line. See [tags and gating](../concepts/tags-and-gating.md) for how these checks are decided.
-
-## 4. Talk to it
-
-```sh
-unmute dev support-bot
-```
-
-This compiles the agent to a Pipecat project, starts it, and opens a page in your browser. Click to connect your microphone, and say hello. The agent greets you with the line from `agent.yaml` and answers using your prompt.
-
-Under the hood `dev` does three things:
-
-- Compiles the first Pipecat target into `support-bot/build/pipecat-dev/`.
-- Runs that project with `uv run bot.py`.
-- Serves a small web client and proxies your browser's audio to it.
-
-Press `ctrl-c` to stop. Agent logs are written to `build/pipecat-dev/bot.log`; add `--verbose` to also stream them to your terminal.
-
-## 5. The same agent, compiled for LiveKit
-
-Nothing about your agent is Pipecat-specific. To prove it, add a second target to `targets.yaml`. Only the bindings change; `agent.yaml` and `instructions.md` stay untouched:
-
-```yaml
   livekit-dev:
     provider: livekit
     version: "1.5.2"
+    sdk_language: python
     models:
-      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
-      turn:   { provider: livekit, model: turn-detector-mini }
+      listen:
+        provider: slng
+        model: "slng/deepgram/nova:3-en"
+      turn:
+        provider: livekit
+        model: turn-detector-mini
       speak:
-        assistant_voice: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
+        assistant_voice:
+          provider: slng
+          model: "slng/deepgram/aura:2-en"
+          voice: "aura-2-thalia-en"
       reason:
-        assistant_model: { provider: openai, model: "gpt-4.1-mini" }
+        assistant_model:
+          provider: openai
+          model: gpt-4o-mini
+          params: { temperature: 0.4 }
 ```
 
-Validate again (now two `pass` lines), then compile:
+The names under `speak` and `reason` match the profile names in `agent.yaml`.
+Changing a provider binding doesn't change the agent's behavior or prompt.
 
-```sh
-unmute validate support-bot
-unmute compile support-bot --target livekit-dev
-```
+## Keep the boundary clear
 
-Open `support-bot/build/livekit-dev/` and look around. Where Pipecat got a `bot.py` full of workers, LiveKit got an `agent.py` with one session and an `Agent` class. Same agent, different machinery, and you wrote neither.
+The two YAML files answer different questions. Keeping that split intact makes
+the agent portable.
 
-Running the LiveKit project needs a free LiveKit Cloud project for its `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`. The generated `README.md` in the build folder has the three-line quickstart; the [LiveKit target page](../targets/livekit.md) has the full story.
+| Question | File |
+|---|---|
+| What does the caller experience? | `agent.yaml` |
+| Which agents, tasks, and tools exist? | `agent.yaml` |
+| Which model and voice profiles do they use? | `agent.yaml` |
+| Which provider and model ID implement each profile? | `targets.yaml` |
+| Which framework version and plugin pins apply? | `targets.yaml` |
+| Where do secrets go? | Environment variables, never YAML values |
 
-## What you just built
+## Expand the same package
 
-One agent, one greeting, one prompt, running on a real Pipecat pipeline, and compiled for LiveKit from the same files. That is the smallest useful thing. From here the [learn pages](../learn/01-one-agent.md) add one feature at a time: tools, shared state, a second agent with a handoff, and delegated tasks, until you have a full customer service agent.
+Add features to these files instead of replacing the initial structure. The
+following pages continue from this boundary.
 
-Start with [learn/01: one agent](../learn/01-one-agent.md), which walks through every line of the spec you just ran. When you want to know exactly what the compiler wrote and why, read the two target pages: [Pipecat](../targets/pipecat.md) and [LiveKit](../targets/livekit.md).
+- [Add a tool](../learn/02-add-a-tool.md) with a file in `tools/`.
+- [Add shared variables](../learn/03-variables.md) to carry typed call state.
+- [Add another agent](../learn/04-two-agents.md) and a guarded handoff.
+- [Add a task](../learn/05-tasks.md) or an ordered
+  [task group](../learn/06-task-groups.md).
+- [Configure LiveKit](../targets/livekit.md) for the full LiveKit YAML surface.

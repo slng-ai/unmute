@@ -1,0 +1,104 @@
+# Remy (task groups only): a restaurant-group phone concierge. A sibling of the
+# `remy` example that drops agent handoff entirely — one agent, no transfers.
+#
+# A single concierge greets, works out what the caller wants, then delegates to
+# one of two task groups (delegate control): a reserve flow or an events flow.
+# Each group runs its guided steps, then returns control to the same concierge
+# (then: return), which closes the call. No agent_transfer anywhere.
+#
+# Targeted at LiveKit only: task groups and delegate-return are code-target
+# features (they fail on Vapi). Same SLNG-routed models as `remy`.
+
+version: 1
+entry_agent: concierge
+
+pipeline:
+  listen: { placement: api }
+  turn:   { placement: local, semantic_endpointing: preferred }  # a preference on LiveKit
+  speak:  { placement: api }
+
+models:
+  reasoning:
+    description: greeting and the booking tasks
+    placement: api
+
+voices:
+  host: { description: "warm, precise concierge voice" }
+
+agents:
+  concierge:
+    instructions: instructions.md
+    model: reasoning
+    voice: host
+    tools: [do_reserve, do_event]
+
+tasks:
+  find_slot:
+    instructions: tasks/find_slot.md
+    tools: [check_availability]
+    result:
+      date: string
+      time: string
+      party_size: integer
+    context:
+      history: full
+
+  qualify_event:
+    instructions: tasks/qualify_event.md
+    result:
+      occasion: string
+      headcount: integer
+      date: string
+    context:
+      history: full
+
+  confirm_booking:
+    instructions: tasks/confirm_booking.md
+    tools: [send_confirmation]
+    result:
+      sent: boolean
+    context:
+      history: full
+
+task_groups:
+  reserve_group:
+    steps: [find_slot, confirm_booking]
+    context_scope: shared      # each step sees the group context; on LiveKit -> TaskGroup (warns, experimental)
+    then: return               # control comes back to the concierge
+    merge: results
+
+  events_group:
+    steps: [qualify_event, confirm_booking]
+    context_scope: shared
+    then: return
+    merge: results
+
+controls:
+  do_reserve:
+    kind: delegate
+    group: reserve_group
+    when: The caller wants to book a normal table; run the reservation flow.
+
+  do_event:
+    kind: delegate
+    group: events_group
+    when: The caller wants to plan a private event or large group; run the events flow.
+
+tools: [check_availability, send_confirmation]
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is Remy at Fern and Oak. Are you booking a table, or planning a private event?"
+  interruption:
+    enabled: true
+  inactivity: { nudge_after: 15s, end_after: 45s }
+  max_duration: 20m
+
+channels:
+  web: { kind: realtime_audio }
+
+capacity:
+  peak_sessions: 20
+  max_sessions: 40
+  avg_session_duration: 4m

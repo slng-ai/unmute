@@ -1,0 +1,20 @@
+# Pipecat target profile. This is target-specific deploy/runtime config, not
+# the portable agent spec.
+docker:
+  image: [[yaml .Name]]
+  tag: latest
+
+pcc:
+  agent_name: [[yaml .Name]]
+  secret_set: [[yaml (printf "%s-local" .Name)]]
+  agent_profile: voice-agent
+  scaling:
+    min_agents: 1
+
+kubernetes:
+  namespace: default
+  secret_name: [[yaml (printf "%s-secrets" .Name)]]
+  replicas: 1
+
+local:
+  env_file: .env.local

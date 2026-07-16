@@ -1,0 +1,319 @@
+{{- /* svc renders any resolved ServiceCall: flat kwargs, then the nested
+Class.Settings(...) block for settings-style services (see the provider
+catalogue, internal/target/catalog_pipecat.go). */ -}}
+{{define "svc"}}{{.Class}}(
+{{range .Args}}        {{.Key}}={{.Value}},
+{{end}}{{if .SettingsArgs}}        settings={{.Class}}.Settings(
+{{range .SettingsArgs}}            {{.Key}}={{.Value}},
+{{end}}        ),
+{{end}}    ){{end -}}
+"""Generated Pipecat agent for {{.Project}}.
+
+Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
+graph are baked in from the spec. Secret values are read from the environment
+and never written here. The agency model uses the Pipecat workers API: a main
+PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
+LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
+run as Pipecat Flows on the owning agent: a delegate tool snapshots the shared
+context, a FlowManager walks the steps as nodes, and control returns with only
+the typed results.
+"""
+
+from __future__ import annotations
+
+{{if .NeedsAsyncio}}import asyncio
+{{end}}import os
+{{if .HasFlows}}import json
+{{end}}{{if .Variables}}from dataclasses import asdict, dataclass
+{{end}}{{if .NeedsHTTPX}}
+import httpx
+{{end}}from dotenv import load_dotenv
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.bus import BusBridgeProcessor
+{{if .HasFlows}}from pipecat.flows import {{if .HasIsolated}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig
+{{end}}{{if and .NeedsEndFrame .NeedsAppendFrame}}from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
+{{else if .NeedsEndFrame}}from pipecat.frames.frames import EndFrame
+{{else if .NeedsAppendFrame}}from pipecat.frames.frames import LLMMessagesAppendFrame
+{{end}}from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+{{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
+{{end}}from pipecat.transports.base_transport import BaseTransport, TransportParams
+{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
+from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
+from pipecat.turns.user_turn_strategies import UserTurnStrategies
+{{end}}from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
+from pipecat.workers.runner import WorkerRunner
+{{range .Imports}}{{.}}
+{{end}}
+load_dotenv()
+
+MAIN_NAME = {{pyq .MainName}}
+REQUIRED_ENV = [
+{{range .RequiredEnv}}    {{pyq .}},
+{{end}}]
+{{if .Interrupt}}{{if .Interrupt.IgnorePhrase}}IGNORE_PHRASES = [{{range $i, $p := .Interrupt.IgnorePhrase}}{{if $i}}, {{end}}{{pyq $p}}{{end}}]
+{{end}}{{end}}{{if .HasColdTransfer}}
+# Set once the transport exists, so an agent's cold-transfer @tool can reach it.
+_TRANSPORT: BaseTransport | None = None
+{{end}}{{if .HasFlows}}
+# Set once the shared context exists, so delegate flows can snapshot/restore it.
+_CONTEXT: LLMContext | None = None
+{{end}}
+
+def require_env() -> None:
+    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+{{if .Variables}}
+@dataclass
+class State:
+    """Typed call variables (SCHEMA 4.4), shared across agents."""
+{{range .Variables}}    {{.Name}}: {{.PyType}} = {{.Default}}
+{{end}}
+
+STATE = State()
+{{end}}{{if gt .MaxDurationSecs 0}}
+async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
+    await asyncio.sleep(timeout_secs)
+    await worker.queue_frame(EndFrame())
+{{end}}
+# --- agents -----------------------------------------------------------------
+{{range .Agents}}
+
+def build_{{.Name}}_llm():
+    return {{template "svc" .LLM.Call}}
+
+
+def build_{{.Name}}_tts():
+    return {{template "svc" .TTS.Call}}
+
+
+class {{.Class}}(LLMWorker):
+    """Agent: {{.Name}}."""
+
+    def __init__(self) -> None:
+        llm = build_{{.Name}}_llm()
+        super().__init__({{pyq .Name}}, llm=llm, pipeline=Pipeline([llm, build_{{.Name}}_tts()]), bridged=())
+{{range .Transfers}}
+    @tool(cancel_on_interruption=False)
+    async def {{.MethodName}}(self, params: FunctionCallParams):
+        """{{.When}}"""
+{{if .Requires}}        missing = [name for name in [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}] if getattr(STATE, name, None) in (None, "")]
+        if missing:
+            await params.result_callback({"refused": f"Cannot transfer yet; still need: {', '.join(missing)}"})
+            return
+{{end}}        await self.activate_worker(
+            {{pyq .To}},
+            args=LLMWorkerActivationArgs(
+                messages=[{"role": "developer", "content": {{pyq .Reason}}}],
+                run_llm=True,
+            ),
+            deactivate_self=True,
+            result_callback=params.result_callback,
+        )
+{{end}}{{range .Tools}}
+    @tool({{if eq .Interruption "cancel"}}cancel_on_interruption=True{{else if eq .Interruption "continue"}}cancel_on_interruption=False{{end}})
+    async def {{.MethodName}}(self, params: FunctionCallParams{{range .Args}}, {{.Name}}: str{{if not .Required}} = ""{{end}}{{end}}):
+        """{{.Description}}"""
+{{if .ColdDestination}}        await params.llm.push_frame(
+            LLMMessagesAppendFrame(
+                [{"role": "developer", "content": "Tell the caller you are connecting them now, then wait."}],
+                run_llm=True,
+            )
+        )
+        if _TRANSPORT is not None:
+            await _TRANSPORT.sip_call_transfer({"toEndPoint": {{pyq .ColdDestination}}})
+        await params.result_callback({"transferred": True})
+{{else}}        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                os.environ[{{pyq .URLEnv}}],
+                json={ {{range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}} },
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            await params.result_callback(response.json())
+{{if .EndsCall}}        await params.llm.push_frame(EndFrame())
+{{end}}{{end}}{{end}}{{range $d := .Delegates}}
+    @tool()
+    async def {{$d.MethodName}}(self, params: FunctionCallParams):
+        """{{$d.When}}"""
+        self._{{$d.MethodName}}_results = {}
+        # Snapshot the owner's context; the flow rewrites it per node and the
+        # final step restores it (merge: results, N13).
+        self._{{$d.MethodName}}_snapshot = ([dict(m) for m in _CONTEXT.get_messages()], _CONTEXT.tools)
+        flow = FlowManager(
+            llm=self.llm,
+            context_aggregator=LLMContextAggregatorPair(_CONTEXT),
+            worker=self,
+        )
+        await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
+        return {"status": "running the {{if $d.Task}}{{$d.Task}} task{{else}}{{$d.Group}} flow{{end}}"}
+{{range $t := $d.StepTasks}}
+    def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
+        return NodeConfig(
+            name={{pyq $t.Name}},
+            task_messages=[{"role": "system", "content": {{pyq $t.Prompt}}}],
+            functions=[
+{{range $t.Tools}}                FlowsFunctionSchema(
+                    name={{pyq .Name}},
+                    description={{pyq .Description}},
+                    properties={{.InputProps}},
+                    required={{.InputRequired}},
+                    handler=_flow_tool_{{.Name}},
+                ),
+{{end}}                FlowsFunctionSchema(
+                    name={{pyq $t.FinishName}},
+                    description="Record the result of this step and finish.",
+                    properties={{$t.ResultProps}},
+                    required={{$t.ResultRequired}},
+                    handler=self._{{$d.MethodName}}_finish_{{$t.Name}},
+                ),
+            ],
+{{if $d.Isolated}}            context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
+{{end}}            respond_immediately=True,
+        )
+
+    async def _{{$d.MethodName}}_finish_{{$t.Name}}(self, args, flow_manager):
+        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
+{{if $t.NextName}}        return {"status": "ok"}, self._{{$d.MethodName}}_node_{{$t.NextName}}()
+{{else}}{{range $d.Assign}}        STATE.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
+{{end}}{{if eq $d.Then "end"}}        await self.queue_frame(EndFrame())
+        return {"status": "ok"}, None
+{{else}}        # then: {{$d.Then}} — restore the owner's pre-flow context (messages and
+        # tools); only the typed results cross back (merge: results, N13).
+        messages, tools = self._{{$d.MethodName}}_snapshot
+{{if eq $d.Then "transfer"}}        _CONTEXT.set_messages(messages)
+        _CONTEXT.set_tools(tools)
+        await self.activate_worker(
+            {{pyq $d.ThenTarget}},
+            args=LLMWorkerActivationArgs(
+                messages=[{"role": "developer", "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + " Continue with the caller in one short line."}],
+                run_llm=True,
+            ),
+            deactivate_self=True,
+        )
+{{else}}        _CONTEXT.set_messages(messages + [{
+            "role": "developer",
+            "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + " Continue with the caller in one short line.",
+        }])
+        _CONTEXT.set_tools(tools)
+{{end}}        return {"status": "ok"}, None
+{{end}}{{end}}{{end}}{{end}}
+{{end}}{{if .FlowTools}}
+# --- task tools (flows handlers) ----------------------------------------------
+# Webhook tools available inside task steps; stable module-level handlers so a
+# re-registered function name always resolves to the same callable.
+{{range .FlowTools}}
+
+async def _flow_tool_{{.Name}}(args, flow_manager):
+    """{{.Description}}"""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(os.environ[{{pyq .URLEnv}}], json=dict(args), timeout=30.0)
+        response.raise_for_status()
+        return response.json()
+{{end}}
+{{end}}
+# --- transport & run --------------------------------------------------------
+transport_params: dict = {
+    "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+    "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+}
+
+AGENTS = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(){{end}}]
+
+
+
+def build_stt():
+    return {{template "svc" .STT.Call}}
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
+    require_env()
+{{if .HasColdTransfer}}    global _TRANSPORT
+    _TRANSPORT = transport
+{{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+
+    # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
+    # key, no network hop; the turn binding in targets.yaml is advisory.
+    context = LLMContext()
+{{if .HasFlows}}    global _CONTEXT
+    _CONTEXT = context
+{{end}}    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(),
+{{if .Interrupt}}{{if gt .Interrupt.MinWords 0}}            user_turn_strategies=UserTurnStrategies(
+                start=[MinWordsUserTurnStartStrategy(min_words={{.Interrupt.MinWords}})],
+                stop=[SpeechTimeoutUserTurnStopStrategy()],
+            ),
+{{end}}{{end}}{{if .Inactivity}}            user_idle_timeout={{.Inactivity.NudgeSecs}},
+{{end}}        ),
+    )
+    bridge = BusBridgeProcessor(bus=runner.bus, worker_name=MAIN_NAME, name=f"{MAIN_NAME}::BusBridge")
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            build_stt(),
+            user_aggregator,
+            bridge,
+            transport.output(),
+            assistant_aggregator,
+        ]
+    )
+    main = PipelineWorker(
+        pipeline,
+        name=MAIN_NAME,
+        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+    )
+{{if .Inactivity}}
+    @user_aggregator.event_handler("on_user_turn_idle")
+    async def on_user_turn_idle(aggregator):
+        await aggregator.push_frame(
+            LLMMessagesAppendFrame(
+                [{"role": "developer", "content": "The caller has gone quiet. Politely check if they are still there."}],
+                run_llm=True,
+            )
+        )
+{{end}}{{if .HasColdTransfer}}
+    @transport.event_handler("on_dialout_answered")
+    async def on_dialout_answered(transport, data):
+        # Cold transfer: the human answered, so the bot leaves the call.
+        await main.queue_frame(EndFrame())
+{{end}}
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        await main.activate_worker(
+            {{pyq .EntryAgent}},
+{{if .GreetingInstruction}}            args=LLMWorkerActivationArgs(
+                messages=[{"role": "developer", "content": {{pyq .GreetingInstruction}}}],
+                run_llm={{.GreetingRunLLM}},
+            ),
+{{else}}            args=LLMWorkerActivationArgs(run_llm={{.GreetingRunLLM}}),
+{{end}}        )
+{{if gt .MaxDurationSecs 0}}        asyncio.create_task(_end_after(main, {{.MaxDurationSecs}}))
+{{end}}
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        await runner.cancel()
+
+    await runner.add_workers(main, *AGENTS)
+    await runner.run()
+
+
+async def bot(runner_args: RunnerArguments) -> None:
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

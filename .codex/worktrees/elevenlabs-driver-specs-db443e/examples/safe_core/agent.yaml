@@ -1,0 +1,91 @@
+# Safe-core example: runs on all five primary targets
+# (LiveKit, Pipecat, Vapi, ElevenLabs, Deepgram) with warnings only,
+# no failures. It follows SCHEMA.md section 7 exactly.
+#
+# What it deliberately avoids, and why:
+#   - tasks / task_groups: delegate-and-return is unverified on Vapi
+#   - history other than `full`: fails on ElevenLabs
+#   - requires:, fallback:, thinking_audio:, warm transfer: each fails
+#     on at least one of the five
+#   - outbound calls: omitted; Deepgram's carrier-conditional lowering warns
+
+version: 1
+entry_agent: intake
+
+pipeline:
+  listen: { placement: api }
+  turn:   { placement: local, semantic_endpointing: preferred }  # a preference,
+                                                                 # not a promise
+  speak:  { placement: api }
+
+models:
+  fast_reasoning:
+    description: cheap and quick, greeting and routing
+    placement: api
+  careful_reasoning:
+    description: slower and careful, billing work
+    placement: api
+
+voices:
+  front_desk: { description: "warm, concise" }
+  specialist: { description: "slower, more deliberate" }
+
+variables:
+  customer_id: { type: string }
+  verified:    { type: boolean, default: false }
+
+agents:
+  intake:
+    instructions: instructions.md
+    model: fast_reasoning
+    voice: front_desk
+    tools: [lookup_customer, to_billing]
+
+  billing:
+    instructions: agents/billing.md
+    model: careful_reasoning
+    voice: specialist
+    tools: [get_invoice, to_human]
+
+controls:
+  to_billing:
+    kind: agent_transfer
+    to: billing
+    when: Caller asks about billing, an invoice, or a refund.
+    context:
+      history: full       # the only history value ElevenLabs accepts
+      variables: all      # the only variables value managed targets accept
+
+  to_human:
+    kind: human_transfer
+    destination: billing_line   # resolved per target in targets.yaml
+    mode: cold                  # warm is not emitted by every driver yet
+
+tools: [lookup_customer, get_invoice]
+
+conversation:
+  greeting:
+    speaks_first: agent
+    # Fixed opening: same words every call, works on all five targets.
+    # Leave `text` out to let the model write the opening from the prompt;
+    # that is conditional on ElevenLabs and warns on Deepgram (SCHEMA.md 4.8).
+    text: "Hi, you have reached Acme Support. How can I help you today?"
+  interruption:
+    enabled: true
+    minimum_words: 2                        # warns on ElevenLabs (no such knob)
+    ignore_phrases: [okay, right, uh-huh]   # warns on Deepgram (dropped)
+  inactivity: { nudge_after: 15s, end_after: 45s }
+  max_duration: 20m
+
+channels:
+  web: { kind: realtime_audio }
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: false
+    required_controls: [cold_transfer, hangup]
+
+capacity:
+  peak_sessions: 40
+  max_sessions: 60
+  avg_session_duration: 6m

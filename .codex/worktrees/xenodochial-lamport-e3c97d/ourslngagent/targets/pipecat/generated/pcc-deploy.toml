@@ -1,0 +1,7 @@
+agent_name = "ourslngagent"
+image = "ourslngagent:latest"
+secret_set = "ourslngagent-local"
+agent_profile = "voice-agent"
+
+[scaling]
+min_agents = 1

@@ -1,0 +1,8 @@
+# Idle nudge behavior for silent callers.
+enabled: true
+first_nudge_delay_seconds: 15
+second_nudge_delay_seconds: 30
+hangup_delay_seconds: 15
+first_nudge_text: "Are you still there?"
+second_nudge_text: "I'm still here. If you need a moment, just let me know."
+final_hangup_text: "I'll end the call now. Please feel free to call back when you're ready."

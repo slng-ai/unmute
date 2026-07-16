@@ -1,0 +1,22 @@
+# The file name is the tool name: check_availability (SCHEMA.md, N4).
+description: Find open table times for a date and party size. Returns the available time slots.
+
+input:
+  type: object
+  properties:
+    date:       { type: string, description: The requested date, e.g. 2026-08-14 }
+    party_size: { type: integer, description: Number of people }
+  required: [date, party_size]
+
+# Output schemas are enforced on code targets only (SCHEMA.md, section 5).
+output:
+  type: object
+  properties:
+    slots:
+      type: array
+      items: { type: string }
+
+execution: webhook              # the only execution kind proven on all five
+url_env: CHECK_AVAILABILITY_URL # env var name, never a value
+interruption: provider_default
+effect: returns_data

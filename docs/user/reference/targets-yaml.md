@@ -26,7 +26,7 @@ targets:
 | `provider` | yes | `livekit \| pipecat \| vapi \| elevenlabs \| deepgram` |
 | `version` | code targets | framework pin; the driver checks it against the range its templates support |
 | `pins` | no | independently versioned packages (for example LiveKit plugins) get their own entries |
-| `sdk_language` | no | on LiveKit, warm transfer and MCP need `python` |
+| `sdk_language` | no | the LiveKit driver currently accepts `python` only |
 | `transport`, `carrier` | no | driver vocabulary; telephony controls resolve against these, never the brand alone |
 | `region`, `edition` | no | provider vocabulary; declared, never derived |
 | `models` | yes | the binding block, below |

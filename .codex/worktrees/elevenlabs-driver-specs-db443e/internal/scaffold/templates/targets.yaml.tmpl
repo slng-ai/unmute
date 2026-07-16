@@ -1,0 +1,17 @@
+# One instance per target. The same portable agent.yaml compiles to each.
+# Model names, voice ids, and params are forwarded to the provider as-is and
+# never validated. Secrets and URLs are env var names only.
+targets:
+  pipecat-dev:
+    provider: pipecat
+    version: "1.5.0"
+    transport: daily-sip
+    models:
+      # Speech in/out via SLNG (one SLNG_API_KEY, hosted STT + TTS); the LLM is
+      # OpenAI. See https://github.com/slng-ai/pipecat-slng for model ids.
+      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
+      turn:   { provider: local, model: silero }   # on-device turn detection (Silero VAD); no API key
+      speak:
+        assistant_voice: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
+      reason:
+        assistant_model: { provider: openai, model: "gpt-4.1-mini" }

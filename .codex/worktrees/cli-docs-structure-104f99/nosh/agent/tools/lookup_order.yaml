@@ -1,0 +1,32 @@
+# Example tool — declares a function the model can call. The filename IS the
+# tool name (this one is "lookup_order"); there is no name field inside. One
+# tool per file. Delete this file if your agent needs no tools.
+
+# What the tool does, in the model's words. This is the only thing the model
+# reads when deciding whether to call it — write it for the model, not as docs.
+description: Look up an order by its ID and return the current status.
+
+# Call arguments as JSON Schema; the model fills these in. You author this — it
+# is plain spec data, not a schema we derive.
+parameters:
+  type: object
+  properties:
+    order_id:
+      type: string
+      description: The customer's order ID, e.g. "A1234".
+  required: [order_id]
+
+# true → the call pauses for human approval before it runs. (Mid-call approval
+# semantics are still being defined — see ARCHITECTURE.md §13.)
+needs_approval: false
+
+# The handler is a REFERENCE, not inline code (ADR-0003): a portable spec can't
+# carry executable code. Kinds:
+#   mcp    — an MCP server you run; ref names the connection.    (portable)
+#   http   — an HTTP endpoint you run; ref names the connection. (portable)
+#   python — an inline sibling lookup_order.py; runs ONLY on the SLNG managed
+#            fleet and binds the agent to a Python orchestrator. Avoid unless
+#            you need it.
+handler:
+  type: http
+  ref: orders

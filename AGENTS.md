@@ -28,3 +28,72 @@ Go structs are the schema source for their own surface: `internal/spec` derives 
 
 ## Layout
 `internal/` not `pkg/`. One file per command in `internal/cli/`. Hand-write cobra commands — **no `cobra-cli` generator**.
+
+<skills_system priority="1">
+
+## Available Skills
+
+<!-- SKILLS_TABLE_START -->
+<usage>
+When users ask you to perform tasks, check if any of the available skills below can help complete the task more effectively. Skills provide specialized capabilities and domain knowledge.
+
+How to use skills:
+- Invoke: `npx openskills read <skill-name>` (run in your shell)
+  - For multiple: `npx openskills read skill-one,skill-two`
+- The skill content will load with detailed instructions on how to complete the task
+- Base directory provided in output for resolving bundled resources (references/, scripts/, assets/)
+
+Usage notes:
+- Only use skills listed in <available_skills> below
+- Do not invoke a skill that is already loaded in your context
+- Each skill invocation is stateless
+</usage>
+
+<available_skills>
+
+<skill>
+<name>agent-tui</name>
+<description>></description>
+<location>project</location>
+</skill>
+
+<skill>
+<name>code-reviewer</name>
+<description>Use this skill to review code. It supports both local changes (staged or working tree)</description>
+<location>project</location>
+</skill>
+
+<skill>
+<name>critique</name>
+<description>Expertise in auditing and fixing repository scripts and GitHub Actions workflows to ensure technical robustness and security.</description>
+<location>project</location>
+</skill>
+
+<skill>
+<name>docs-changelog</name>
+<description>>-</description>
+<location>project</location>
+</skill>
+
+<skill>
+<name>docs-writer</name>
+<description>Always use this skill when the task involves writing, reviewing, or editing</description>
+<location>project</location>
+</skill>
+
+<skill>
+<name>string-reviewer</name>
+<description>></description>
+<location>project</location>
+</skill>
+
+<skill>
+<name>tui-tester</name>
+<description>Expert guidance for testing Gemini CLI behavior and visual output using terminal automation.</description>
+<location>project</location>
+</skill>
+
+</available_skills>
+<!-- SKILLS_TABLE_END -->
+
+</skills_system>

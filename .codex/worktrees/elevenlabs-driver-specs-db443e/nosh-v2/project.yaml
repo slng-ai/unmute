@@ -1,0 +1,5 @@
+# Project metadata. Target-specific deploy/runtime knobs live under targets/
+# so the portable agent spec stays clean.
+name: nosh-v2
+version: 0.1.0
+# owner: your-slng-account

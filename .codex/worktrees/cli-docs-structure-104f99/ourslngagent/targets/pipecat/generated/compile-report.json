@@ -1,0 +1,25 @@
+{
+  "target": "pipecat",
+  "output_dir": "targets/pipecat/generated",
+  "generated_files": [
+    ".unmute-generated",
+    "Dockerfile",
+    "README.md",
+    "bot.py",
+    "compile-report.json",
+    "k8s/deployment.yaml",
+    "k8s/secret.yaml",
+    "pcc-deploy.toml",
+    "pyproject.toml"
+  ],
+  "required_secrets": [
+    "SLNG_API_KEY",
+    "OPENAI_API_KEY"
+  ],
+  "warnings": [
+    "tool \"lookup_order\" uses http handler and is omitted: Pipecat HTTP tool invocation is not implemented yet"
+  ],
+  "omitted_tools": [
+    "lookup_order"
+  ]
+}

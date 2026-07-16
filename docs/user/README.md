@@ -1,53 +1,83 @@
-# Unmute docs
+# Unmute documentation
 
-You describe a voice agent once, in a few small YAML files. Unmute compiles that description into a real project for the platform you pick. Today that means a runnable Python project for **Pipecat** or **LiveKit** (code targets, both drivers complete), and provider config for ElevenLabs (managed target). If a platform cannot do something you asked for, Unmute tells you before anything runs, in that platform's own words. It never quietly drops a feature.
+Start with the YAML package, understand how its files relate, and then add
+features one at a time. The authoring path in these docs doesn't require you to
+learn the command-line interface or the generated runtime first.
 
-## Start here
+## Follow the YAML-first path
 
-New to Unmute? Three short pages, in order:
+The shortest path starts with one agent and expands the same files as your
+agent grows.
 
-1. [What is Unmute](start/what-is-unmute.md): the idea in plain words.
-2. [Install](start/install.md): one binary, plus `uv` for running agents locally.
-3. [Your first agent](start/first-agent.md): `init`, `validate`, `dev`. An agent talking in your browser in a few minutes, then the same agent compiled for LiveKit.
+1. [Build your first YAML package](start/first-agent.md) to learn the package
+   boundary and the difference between portable behavior and target bindings.
+2. Follow the [learn series](learn/01-one-agent.md) to add tools, variables,
+   agents, tasks, task groups, and phone calls.
+3. Read the [LiveKit YAML guide](targets/livekit.md) when LiveKit is one of your
+   targets. It collects the current LiveKit-specific choices in one place.
 
-Then grow it one feature at a time with the [learn pages](learn/01-one-agent.md): a tool, shared state, a second agent, tasks, task groups, phone calls, going live.
+## Understand the package boundary
 
-## How your code gets generated
-
-The heart of Unmute is the compile step: `agent.yaml` in, a readable project out. Two pages explain it end to end, one per target:
-
-- [Pipecat](targets/pipecat.md): a bus of workers. Each agent is a worker with its own model and voice; tasks re-program the active agent step by step.
-- [LiveKit](targets/livekit.md): one session. Agents are classes that take turns holding the conversation; tasks are awaited objects with typed results.
-
-Same YAML, same behavior for the caller, genuinely different machinery. [How targets run your agent](concepts/how-targets-run-your-agent.md) puts the two side by side with the actual generated code.
-
-## The map
+An Unmute package separates what the agent does from where it runs. Most
+changes belong in one of three YAML surfaces.
 
 ```text
-docs/user/
-├── start/        # zero to a running agent, fast
-├── learn/        # one skill per page, simple to complex, in order
-├── concepts/     # the ideas behind the fields, read when curious or confused
-├── reference/    # every field, every allowed value, every target outcome
-└── targets/      # one page per provider: how your YAML lands there
+your-agent/
+├── agent.yaml          # portable behavior
+├── targets.yaml        # target-specific bindings
+├── tools/
+│   └── lookup_order.yaml
+├── instructions.md     # entry-agent instructions
+├── agents/             # additional agent instructions
+└── tasks/              # delegated-task instructions
 ```
 
-Common questions and where they are answered:
+The files have distinct responsibilities:
 
-- "Why did validate fail?": [tags and gating](concepts/tags-and-gating.md), then the failing field's reference page.
-- "Does X work on Y?": the feature table in targets/<y>.md, or the field's reference table.
-- "What exactly gets sent to the provider?": [profiles and bindings](concepts/profiles-and-bindings.md), then `compile-report.json` after a compile.
-- Migrating between providers: [safe core](reference/safe-core.md) first, then both target pages.
+- `agent.yaml` describes the pipeline, profiles, agents, tasks, controls,
+  conversation behavior, channels, and capacity.
+- `tools/*.yaml` describes each tool contract and where the tool executes.
+- `targets.yaml` binds the portable profiles to LiveKit, Pipecat, or a managed
+  target.
+- Markdown files contain instructions. YAML points to them by path, which keeps
+  long prompts out of the structural configuration.
 
-## Rules for writing these docs
+## Choose the right section
 
-Source of truth for facts is [SCHEMA.md](../../SCHEMA.md) and the driver specs; docs never contradict them, and when they do, the doc is the bug. Every page follows the same rules:
+The documentation is organized around what you are trying to understand, not
+around implementation packages.
 
-1. Simple words. Short sentences. One idea per sentence.
-2. Explain a term the first time it appears, or link to the concepts page that does.
-3. Show YAML before prose. An example first, then the explanation.
-4. Every provider claim traces back to SCHEMA.md. No new provider facts invented in docs.
-5. Never hide a limitation. If a field fails on a target, the docs say so as loudly as the CLI does.
-6. No em or en dashes as punctuation. Use commas, colons, or separate sentences.
+- **Start** introduces the package and its YAML files.
+- **Learn** changes one part of the package at a time, from a single agent to
+  telephony.
+- **Concepts** explains profiles, bindings, portability, tiers, and feature
+  gates.
+- **Reference** defines every YAML field and its target-specific behavior.
+- **Targets** gathers the YAML choices and limitations for one platform.
 
-Reference pages use one fixed template per field: meaning, required, values, default, then a five-target table of what happens on each platform, then a short YAML example. A reference or target page ships only for behavior the compiler actually has; unshipped drivers get a one-line "driver in progress" note, never speculative tables.
+## Find the LiveKit features
+
+The LiveKit driver covers model routing, tools, tasks, conversation shaping,
+and telephony. Use these pages when you need one exact field rather than the
+full guide.
+
+- [Models and voices](reference/models-and-voices.md) covers fallback chains.
+- [Targets YAML](reference/targets-yaml.md) and
+  [providers](reference/providers.md) cover model bindings, plugin pins, and
+  provider choices.
+- [Tools YAML](reference/tools.md) covers webhook, local, and MCP tools.
+- [Tasks](reference/tasks.md) and [controls](reference/controls.md) cover
+  delegates, task models, task groups, handoffs, and human transfers.
+- [Conversation](reference/conversation.md) covers interruption, inactivity,
+  maximum duration, and thinking audio.
+- [Channels and capacity](reference/channels-and-capacity.md) covers outbound
+  calls and voicemail handling.
+
+## Documentation contract
+
+Examples show YAML before explanation and keep target-specific facts in the
+target and reference pages. [SCHEMA.md](../../SCHEMA.md) and the driver specs
+remain the source of truth when a user page and the implementation disagree.
+
+The docs never hide a target limitation. If a YAML field cannot map faithfully
+to a target, its reference page says so and names the supported alternatives.

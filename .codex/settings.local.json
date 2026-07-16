@@ -1,0 +1,22 @@
+{
+  "skillOverrides": {
+    "langfuse": "name-only",
+    "livekit-agents": "name-only",
+    "n8n-expression-syntax": "name-only",
+    "n8n-node-configuration": "name-only",
+    "n8n-validation-expert": "name-only",
+    "n8n-workflow-patterns": "name-only",
+    "obsidian-vault": "off",
+    "prototype": "off",
+    "qa": "off",
+    "request-refactor-plan": "off",
+    "scaffold-exercises": "off",
+    "setup-matt-pocock-skills": "off",
+    "setup-pre-commit": "off",
+    "zoom-out": "off",
+    "writing-shape": "off",
+    "writing-fragments": "off",
+    "writing-beats": "off",
+    "write-a-skill": "off"
+  }
+}

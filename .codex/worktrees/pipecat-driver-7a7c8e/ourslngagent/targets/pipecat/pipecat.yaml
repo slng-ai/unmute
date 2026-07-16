@@ -1,0 +1,20 @@
+# Pipecat target profile. This is target-specific deploy/runtime config, not
+# the portable agent spec.
+docker:
+  image: ourslngagent
+  tag: latest
+
+pcc:
+  agent_name: ourslngagent
+  secret_set: ourslngagent-local
+  agent_profile: voice-agent
+  scaling:
+    min_agents: 1
+
+kubernetes:
+  namespace: default
+  secret_name: ourslngagent-secrets
+  replicas: 1
+
+local:
+  env_file: .env.local

@@ -1,0 +1,7 @@
+{
+  "source": "google-gemini/gemini-cli",
+  "sourceType": "git",
+  "repoUrl": "https://github.com/google-gemini/gemini-cli",
+  "subpath": ".gemini/skills/tui-tester",
+  "installedAt": "2026-07-16T15:13:51.285Z"
+}

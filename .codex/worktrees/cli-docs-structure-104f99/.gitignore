@@ -1,0 +1,7 @@
+docs/*
+!docs/user/
+.env
+.env.local
+voice-agent-prompting/
+my-test-agent/
+.firecrawl/

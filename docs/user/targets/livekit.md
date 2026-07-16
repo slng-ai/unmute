@@ -1,172 +1,457 @@
-# LiveKit
+# Configure LiveKit in YAML
 
-LiveKit is a code target with a complete driver. This page shows what kind of target it is, what your spec turns into, how to bind models to it, which features it emits, and how to run and deploy the result. It is the LiveKit twin of the [Pipecat page](pipecat.md); the two are worth reading side by side.
+LiveKit is a code target with a complete Python driver. This guide covers its
+YAML surface: provider bindings, fallback models, tools, tasks, context
+shaping, conversation controls, and telephony.
 
-## What kind of target
+## Start with the package boundary
 
-LiveKit is a **code target.** Unmute writes a real Python project on the LiveKit Agents framework, and you host it. This is the opposite of a managed target like Vapi, where the provider runs the agent and you only get an API.
+Portable behavior stays in `agent.yaml` and `tools/*.yaml`. LiveKit-specific
+model bindings, versions, pins, and destinations stay in `targets.yaml`.
 
-Being a code target is why LiveKit can do the whole schema. When a feature is not a built-in LiveKit setting, like a handoff guard or an ignore-phrase filter, Unmute writes the Python for it. There is a project to put the code in. This is [the pattern rule](../concepts/our-take-on-orchestrators.md) working in your favor.
+```text
+your-agent/
+├── agent.yaml
+├── targets.yaml
+├── tools/
+│   ├── lookup_order.yaml
+│   └── search_knowledge.yaml
+├── instructions.md
+├── agents/
+└── tasks/
+```
 
-What it means for you:
+This boundary lets you add or replace a target without rewriting the agents,
+tasks, controls, or conversation outcomes.
 
-- You get a folder of code you can read, run, and deploy without Unmute present.
-- You host it yourself, with a free LiveKit Cloud project carrying the media.
-- You need LiveKit Cloud credentials plus the keys for whichever providers your bindings use.
-- Because you host it, `capacity` in `agent.yaml` is required: Unmute uses it to size the deployment.
+## Bind models and voices
 
-## The agency model: one session, agents take turns
-
-Everything Unmute generates for LiveKit is built on one `AgentSession`. Knowing the shape helps you read the generated `agent.py`:
-
-- The **session** owns the microphone, the speech-to-text, the default reasoning model, and the default voice. There is exactly one.
-- **Each agent is an `Agent` class.** Only one holds the conversation at a time. An agent with its own model or voice profile carries its own `llm=` or `tts=` override; the rest ride the session defaults.
-- **A handoff** (`agent_transfer`) is a tool that returns the next agent object. The session sees the return value and swaps speakers.
-- **A task** is an `AgentTask` class with a typed `finish` tool. The delegating agent awaits it and receives only the typed result.
-- **A task group** with `context_scope: shared` is a `TaskGroup` that runs the steps in order. With `isolated`, each step runs as a standalone `AgentTask` starting fresh, because `TaskGroup` always shares context.
-- **Shared state** (`variables`) is a generated `Userdata` dataclass on the session. Task `assign` writes into it, handoff `requires` guards read from it.
-
-So a two-agent, one-task spec becomes one session, two agent classes, and one task class. You never edit this; you change the spec and recompile. (For how the same yaml lowers on Pipecat, see [how targets run your agent](../concepts/how-targets-run-your-agent.md).)
-
-## What gets generated
-
-`unmute compile acme --target livekit-dev` writes a complete project to `acme/build/livekit-dev/`:
-
-| File | What it is |
-|---|---|
-| `agent.py` | The whole agent: session wiring, every agent and task class, tools, handoffs, guards, telephony. |
-| `pyproject.toml` | Pinned dependencies. Only the plugins your bindings use are included. |
-| `Dockerfile` | A container image for deployment. |
-| `livekit.toml` | LiveKit Cloud agent config for `lk agent create`. |
-| `tools/` | Only when you use `local` tools: your handler files, copied verbatim. |
-| `README.md` | A quickstart for the generated project. |
-| `.env.example` | The exact environment variables this spec needs, ready to copy to `.env.local`. |
-| `compile-report.json` | A machine-readable record: target, version, agents, required env, forwarded bindings, notes. |
-
-The output folder is rewritten from scratch on every compile, so never edit it by hand. `agent.py` carries only the imports and code your spec exercises: no tasks means no `AgentTask` import, no variables means no `Userdata` class. The `compile-report.json` lists every forwarded binding, which matters because bindings are [never validated](../concepts/profiles-and-bindings.md).
-
-## Binding models on LiveKit
-
-All four roles are **open** on LiveKit. The accepted `provider:` values per role, their key envs, and what each choice installs are in the [providers reference](../reference/providers.md). A full binding block:
+Declare profiles by purpose in `agent.yaml`, then bind every used profile to a
+LiveKit integration in `targets.yaml`.
 
 ```yaml
+# agent.yaml
+models:
+  primary_reasoning:
+    description: Main conversation model
+    placement: api
+    fallback: [backup_reasoning]
+  backup_reasoning:
+    description: Backup conversation model
+    placement: api
+
+voices:
+  front_desk:
+    description: Warm and concise
+  specialist:
+    description: Calm and deliberate
+
+agents:
+  assistant:
+    instructions: instructions.md
+    model: primary_reasoning
+    voice: front_desk
+```
+
+The fallback list is ordered. On LiveKit, every profile in the chain must have
+a `reason` binding and use the same placement.
+
+```yaml
+# targets.yaml
 targets:
   livekit-dev:
     provider: livekit
     version: "1.5.2"
-    models:
-      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
-      turn:   { provider: livekit, model: turn-detector-mini }
-      speak:
-        front_desk: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
-        specialist: { provider: elevenlabs, voice: EXAVITQu4vr4xnSDxMaL }
-      reason:
-        fast_reasoning: { provider: openai, model: gpt-4o-mini, params: { temperature: 0.4 } }
-```
-
-### Which provider maps to which service
-
-| Role | `provider` | Service used | Key needed |
-|---|---|---|---|
-| listen | `slng` | `slng.STT` (the `livekit-plugins-slng` package) | `SLNG_API_KEY` |
-| listen | `deepgram` | `deepgram.STT` | `DEEPGRAM_API_KEY` |
-| speak | `slng` | `slng.TTS` | `SLNG_API_KEY` |
-| speak | `elevenlabs` | `elevenlabs.TTS` | `ELEVEN_API_KEY` |
-| speak | `cartesia` | `cartesia.TTS` | `CARTESIA_API_KEY` |
-| reason | any `provider/model` pair | `inference.LLM` (LiveKit Inference) | none, billed through LiveKit Cloud |
-
-Two things to notice. First, the SLNG route form: on LiveKit the plugin takes the bare route, so `slng/deepgram/nova:3-en` in your binding is emitted as `model="deepgram/nova:3-en"`. Second, key names are per integration, not a convention: LiveKit's ElevenLabs plugin reads `ELEVEN_API_KEY`, while Pipecat's reads `ELEVENLABS_API_KEY`. You never guess: `.env.example` and the compile report list the exact set.
-
-### Reasoning on LiveKit Inference
-
-The `reason` role lowers to `inference.LLM`, LiveKit's hosted model gateway. Any `provider/model` pair the gateway serves works, you carry no provider API key, and usage bills through your LiveKit Cloud project. `params` forward as `extra_kwargs`. Model fallback chains lower to the native `llm.FallbackAdapter`.
-
-### The turn role
-
-Turn detection lowers to `inference.TurnDetector` plus a Silero voice-activity detector. The turn binding is **advisory**: it records intent, and the compile report notes it.
-
-### Version and pins
-
-`version` is required and must be **`>= 1.5` and `< 2.0`**, the range the driver's templates support. Plugin packages version independently; a `pins:` entry raises that plugin's floor in `pyproject.toml`:
-
-```yaml
+    sdk_language: python
     pins:
       livekit-plugins-slng: "1.7.0"
+    models:
+      listen:
+        provider: slng
+        model: "slng/deepgram/nova:3-en"
+      turn:
+        provider: livekit
+        model: turn-detector-mini
+      speak:
+        front_desk:
+          provider: elevenlabs
+          voice: cgSgspJ2msm6clMCkdW9
+        specialist:
+          provider: cartesia
+          model: sonic-3
+          voice: f786b574-daa5-4673-aa0c-cbe3e8534c02
+      reason:
+        primary_reasoning:
+          provider: openai
+          model: gpt-4o-mini
+          params: { temperature: 0.4 }
+        backup_reasoning:
+          provider: openai
+          model: gpt-4o
 ```
 
-A pin below the known floor, or a pin for a package Unmute does not emit, fails the compile with a clear message. `sdk_language` must be `python` (or omitted): the driver has Python templates only today, and anything else fails loud rather than emitting a wrong project.
+LiveKit accepts the following provider choices through its provider catalogue.
 
-## Feature support on LiveKit
+| Role | `provider` | Required environment |
+|---|---|---|
+| `listen` | `deepgram` | `DEEPGRAM_API_KEY` |
+| `listen` | `slng` | `SLNG_API_KEY` |
+| `speak` | `cartesia` | `CARTESIA_API_KEY` |
+| `speak` | `elevenlabs` | `ELEVEN_API_KEY` |
+| `speak` | `slng` | `SLNG_API_KEY` |
+| `reason` | Any LiveKit Inference provider | LiveKit Cloud credentials |
+| `turn` | `livekit` | LiveKit Cloud credentials |
 
-This is LiveKit's column from the Unmute schema. `ok` means it works, with no failures. Everything below is emitted by the driver today; a parity test in the repository keeps this table honest.
+SLNG remains the default route, not the only route. Its model value keeps the
+`slng/<vendor>/<model>` form in YAML. The LiveKit integration removes the
+leading `slng/` when it uses the route.
 
-| Feature | LiveKit |
+The `turn` binding expresses intent rather than selecting a replaceable
+service. Its placement and `semantic_endpointing` values remain preferences on
+LiveKit.
+
+The driver accepts `livekit-agents` versions from `1.5` up to, but not
+including, `2.0`. It currently accepts `sdk_language: python` only. A plugin
+pin can raise a known package floor, but it cannot lower the catalogue floor
+or name a package the target doesn't use.
+
+## Attach tools to agents and tasks
+
+Each tool is a YAML contract in `tools/`. Add its file name to the top-level
+`tools` manifest, then list the same name on every agent or task that can call
+it.
+
+### Use a webhook tool
+
+A webhook tool sends JSON to the URL stored in the named environment variable.
+The YAML contains the variable name, never the URL or secret value.
+
+```yaml
+# tools/lookup_order.yaml
+description: Look up an order by its reference number.
+
+input:
+  type: object
+  properties:
+    order_id: { type: string }
+  required: [order_id]
+
+output:
+  type: object
+  properties:
+    status: { type: string }
+
+execution: webhook
+url_env: LOOKUP_ORDER_URL
+interruption: provider_default
+effect: returns_data
+```
+
+### Use a local tool
+
+A local tool names a handler file in the package. The YAML still defines the
+input, output, interruption policy, and conversation effect.
+
+```yaml
+# tools/load_account_notes.yaml
+description: Load the caller's saved account notes.
+
+input:
+  type: object
+  properties:
+    topic: { type: string }
+  required: [topic]
+
+output:
+  type: object
+  properties:
+    notes:
+      type: array
+      items: { type: string }
+
+execution: local
+handler: tools/load_account_notes.py
+interruption: provider_default
+effect: returns_data
+```
+
+### Use an MCP tool
+
+An MCP tool names the environment variable that contains the MCP server
+address. LiveKit exposes only the tool names assigned to the current agent.
+
+```yaml
+# tools/search_knowledge.yaml
+description: Search the support knowledge base.
+
+input:
+  type: object
+  properties:
+    query: { type: string }
+  required: [query]
+
+execution: mcp
+url_env: SUPPORT_MCP_URL
+interruption: provider_default
+effect: returns_data
+```
+
+Attach the declared tools in `agent.yaml`.
+
+```yaml
+agents:
+  assistant:
+    instructions: instructions.md
+    model: primary_reasoning
+    voice: front_desk
+    tools: [lookup_order, load_account_notes, search_knowledge]
+
+tools: [lookup_order, load_account_notes, search_knowledge]
+```
+
+LiveKit runs tool calls to completion. A non-default `interruption` value is
+accepted with a warning because LiveKit cannot honor cancellation or
+continuation as a per-tool preference. `effect: ends_conversation` ends the
+session after a successful tool call.
+
+## Delegate focused work
+
+A task has its own instructions, tools, optional model, context, and typed
+result. A delegate control makes that task available to an agent.
+
+```yaml
+# agent.yaml
+models:
+  careful_reasoning:
+    description: Careful account verification
+    placement: api
+
+variables:
+  customer_id: { type: string }
+  verified: { type: boolean, default: false }
+
+tasks:
+  verify_customer:
+    instructions: tasks/verify_customer.md
+    tools: [lookup_order]
+    model: careful_reasoning
+    result:
+      customer_id: string
+      verified: boolean
+    context:
+      history: messages
+
+controls:
+  run_verification:
+    kind: delegate
+    task: verify_customer
+    when: Verify the caller before discussing an order.
+    assign:
+      customer_id: result.customer_id
+      verified: result.verified
+```
+
+Bind the task model under the same profile name in `targets.yaml`.
+
+```yaml
+targets:
+  livekit-dev:
+    models:
+      reason:
+        careful_reasoning:
+          provider: openai
+          model: gpt-4o
+```
+
+LiveKit gives a task with `model` its own reasoning binding. If you omit the
+field, the task uses the entry agent's model.
+
+LiveKit also accepts nested task results when every configured target is a code
+target. Wrap the JSON Schema value in `schema`.
+
+```yaml
+tasks:
+  collect_shipping_address:
+    instructions: tasks/collect_shipping_address.md
+    result:
+      address:
+        schema:
+          type: object
+          properties:
+            city: { type: string }
+            postal_code: { type: string }
+          required: [city, postal_code]
+    context:
+      history: full
+```
+
+## Sequence tasks with a group
+
+A task group runs named tasks in order. `context_scope` decides whether the
+steps share conversation history, and `then` decides what happens afterward.
+
+```yaml
+task_groups:
+  booking_flow:
+    steps: [find_slot, confirm_booking]
+    context_scope: shared
+    then: return
+    merge: results
+
+  private_intake:
+    steps: [collect_identity, collect_request]
+    context_scope: isolated
+    then: transfer
+    then_target: specialist
+    merge: results
+```
+
+On LiveKit, `shared` uses the native task-group flow. `isolated` runs the steps
+as standalone tasks so each starts with a fresh context. In both cases,
+`merge: results` returns typed results without appending the tasks' turns to
+the owning agent's conversation.
+
+`then` accepts `return`, `transfer`, or `end`. Any LiveKit task group currently
+produces an experimental-feature warning.
+
+## Shape agent handoffs
+
+An agent transfer can guard the handoff, select conversation history, exclude
+tool calls, and carry all or a subset of shared variables.
+
+```yaml
+models:
+  summary_model:
+    description: Compact handoff summaries
+    placement: api
+
+controls:
+  to_specialist:
+    kind: agent_transfer
+    to: specialist
+    when: The verified caller needs specialist help.
+    requires: [verified]
+    context:
+      history: summary
+      summarizer: summary_model
+      include_tool_calls: false
+      variables: [customer_id, verified]
+```
+
+LiveKit supports `full`, `messages`, `last_n`, `summary`, and `reset` history.
+Use `max_messages` with `last_n`, and bind the `summarizer` profile when you use
+`summary`. A failed `requires` guard names the missing variables instead of
+performing the transfer.
+
+## Shape the conversation
+
+Conversation YAML describes caller-visible outcomes rather than LiveKit
+settings. LiveKit supports the full block below.
+
+```yaml
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, you have reached Acme Support. How can I help?"
+  interruption:
+    enabled: true
+    minimum_words: 2
+    ignore_phrases: [okay, right, uh-huh]
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
+  max_duration: 20m
+  thinking_audio: subtle
+```
+
+Remove `greeting.text` to let the model write the opening, or set
+`speaks_first: user` to wait for the caller. `thinking_audio` accepts `none` or
+`subtle`. If you omit the entire `greeting` block, LiveKit uses its target
+default and reports a warning because target defaults differ.
+
+## Configure phone calls and human transfers
+
+Telephony uses three parts of the YAML: a control in `agent.yaml`, a channel in
+`agent.yaml`, and the symbolic destination mapping in `targets.yaml`.
+
+```yaml
+# agent.yaml
+agents:
+  assistant:
+    instructions: instructions.md
+    model: primary_reasoning
+    voice: front_desk
+    tools: [to_human]
+
+controls:
+  to_human:
+    kind: human_transfer
+    destination: support_line
+    mode: warm
+    briefing: summary
+
+channels:
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: true
+    required_controls:
+      - warm_transfer
+      - voicemail_detection
+      - hangup
+    on_voicemail: leave_message
+```
+
+Resolve the symbolic destination for each LiveKit target.
+
+```yaml
+# targets.yaml
+targets:
+  livekit-dev:
+    destinations:
+      support_line: "+14155550123"
+```
+
+Use `mode: cold` for a direct transfer. LiveKit warm transfer accepts
+`briefing: summary`; `message` and `wait` don't have faithful LiveKit mappings.
+Warm transfer is Beta in the Python SDK. Outbound calls support
+`on_voicemail: hangup` and `on_voicemail: leave_message`, and require the
+LiveKit outbound SIP trunk environment setting.
+
+## Know the LiveKit boundaries
+
+The driver covers every LiveKit capability that passes target validation. The
+remaining boundaries are explicit YAML choices, not silent omissions.
+
+| YAML choice | LiveKit behavior |
 |---|---|
-| single agent (T0) | ok |
-| agent handoff, any `history`, `variables` all or subset | ok |
-| handoff guard (`requires`) | ok, generated check |
-| history `summary` | ok, generated with your `summarizer` profile |
-| fixed opening line (`greeting.text`) | ok |
-| model-written opening (no `text`) | ok (generated) |
-| user speaks first | ok |
-| webhook tools, on agents and tasks | ok |
-| `local` tools (your Python handler, copied into the project) | ok |
-| `mcp` tools (server address from the tool's `url_env`) | ok |
-| tool `interruption` other than default | warn: tools run to completion |
-| task (delegate and return, `assign` into variables) | ok |
-| per-task `model` | ok, the task gets its own `llm=` |
-| task group, any `then` (return / transfer / end) | ok (warn: TaskGroup is experimental) |
-| task group `context_scope` (shared / isolated) | ok |
-| model `fallback` | ok, native `FallbackAdapter` |
-| interruption `minimum_words` and `ignore_phrases` | ok |
-| `inactivity` nudge and end | ok |
-| `max_duration` | ok |
-| `thinking_audio` | ok, native background audio |
-| `placement: local` for listen and speak | ok |
-| cold human transfer | ok, SIP transfer |
-| warm human transfer, `briefing: summary` | ok (note: Beta on Python) |
-| outbound calls and voicemail (`on_voicemail`) | ok, native answering-machine detection |
+| `sdk_language: python` | Supported and currently required |
+| `models.*.fallback` | Native ordered fallback |
+| Per-task `model` | Uses the task-specific reason binding |
+| Nested task result | Supported when every target is a code target |
+| `context_scope: shared` or `isolated` | Both supported |
+| All five handoff history modes | Supported |
+| Handoff `requires` and variable subsets | Supported |
+| Webhook, local, and MCP tools | Supported |
+| Non-default tool `interruption` | Warns; tools run to completion |
+| Conversation shaping block | Supported |
+| Cold and warm human transfer | Supported; warm summary is Beta |
+| Outbound calls and voicemail | Supported |
+| Pipeline or reasoning `placement: local` | Supported |
+| `speak.endpoint_env` | Rejected; no LiveKit integration slot |
+| Warm `briefing: message` or `wait` | Rejected; use `summary` |
 
-Two things do not compile here, by structure rather than by gate: a custom `endpoint_env` on a `speak` binding (no catalogued slot takes it), and a warm-transfer `briefing` of `message` or `wait` (LiveKit supports `summary` only). The error names the reason.
+## Next steps
 
-## Warnings and notes
+Use the focused reference pages when you need the full value set or want to
+compare LiveKit with another target.
 
-Same split as everywhere: **validation warnings** go to standard error and pass with exit 0, **notes** land in `compile-report.json`. Typical warnings on LiveKit:
-
-```text
-warning: livekit-dev: LiveKit TaskGroup is experimental
-warning: livekit-dev: LiveKit runs tool executions to completion; a per-tool interruption preference is not enforced
-```
-
-And a typical note, for a spec with a warm transfer:
-
-```json
-"notes": [
-  "human_transfer warm uses livekit-agents beta.workflows on Python (Beta)"
-]
-```
-
-Read both, then test the exact behavior they point at.
-
-## Running and deploying
-
-The browser test client of `unmute dev` is Pipecat only for now. On LiveKit you compile, then run the generated project directly:
-
-```sh
-unmute compile acme --target livekit-dev
-cd acme/build/livekit-dev
-uv sync
-cp .env.example .env.local    # LiveKit Cloud creds + your provider keys
-python agent.py dev
-```
-
-`LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` come from a LiveKit Cloud project (free tier is fine). `dev` mode connects the agent to your project; talk to it with any LiveKit client, for example the Agents Playground. Telephony features (transfers, outbound, voicemail) additionally need a SIP trunk; outbound and warm transfer read its id from `LIVEKIT_SIP_OUTBOUND_TRUNK`.
-
-For hosting, the project ships a `Dockerfile` and a `livekit.toml`, so `lk agent create` deploys it to LiveKit Cloud, and any place that runs Python runs it too.
-
-## Where to go next
-
-- Build the agent step by step: the [learn pages](../learn/01-one-agent.md), 01 through 07.
-- The same machinery explained side by side with Pipecat: [how targets run your agent](../concepts/how-targets-run-your-agent.md).
-- Understand the binding split: [profiles and bindings](../concepts/profiles-and-bindings.md).
-- The exact per-target contract for every field: `SCHEMA.md` in the repository.
+- [Targets YAML](../reference/targets-yaml.md) defines target instances and
+  binding rules.
+- [Providers](../reference/providers.md) lists the accepted LiveKit provider
+  names and required environment variables.
+- [Tools](../reference/tools.md), [tasks](../reference/tasks.md), and
+  [controls](../reference/controls.md) define their complete YAML fields.
+- [Conversation](../reference/conversation.md) and
+  [channels and capacity](../reference/channels-and-capacity.md) define the
+  call-lifecycle fields.

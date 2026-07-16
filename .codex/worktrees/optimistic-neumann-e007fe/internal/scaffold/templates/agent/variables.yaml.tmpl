@@ -1,0 +1,21 @@
+# Variables declare the {{variable}} placeholders this agent may use in
+# prompts, greetings, and runtime-safe tool fields. Values do not live here:
+# user variables come from author defaults or call/session arguments; system
+# variables come from runtime session context.
+
+user:
+  user_name:
+    description: Preferred name supplied by the dispatcher or caller.
+    default: "Axel"
+    required: false
+  case_id:
+    description: External case, account, or order ID for this session.
+    required: false
+
+system:
+  call_id:
+    source: call_id
+    description: Unique runtime call or web-session ID.
+  current_datetime:
+    source: current_datetime
+    description: Current date and time in the session context.

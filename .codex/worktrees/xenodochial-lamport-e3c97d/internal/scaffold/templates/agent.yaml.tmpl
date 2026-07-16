@@ -1,0 +1,125 @@
+# Portable voice-agent spec (SCHEMA.md v1). Edit this, then `unmute validate .`
+# and `unmute compile .`. Nothing here is provider-specific — that lives in
+# targets.yaml.
+version: 1
+language: [[ yaml .Language ]]
+entry_agent: [[.EntryAgent]]
+
+pipeline:
+  listen: { placement: api }
+  turn:   { placement: local }
+  speak:  { placement: api }
+
+models:
+[[range .AllAgents]]  [[.ModelProfile]]:
+    description: [[.ModelDescription]]
+    placement: api
+[[$fallbacks := $.FallbacksFor .ModelProfile]][[if $fallbacks]]    fallback:
+[[range $fallbacks]]      - [[.]]
+[[end]][[end]][[end]][[range .Fallbacks]]  [[.Name]]:
+    description: fallback reasoning model
+    placement: api
+[[end]]
+voices:
+[[range .AllAgents]]  [[.VoiceProfile]]: { description: [[.VoiceDescription]] }
+[[end]]
+[[if .Variables]]variables:
+[[range .Variables]]  [[.Name]]:
+    type: [[.Type]]
+[[if .Default]]    default: [[.Default]]
+[[end]][[if .Source]]    source: [[.Source]]
+[[end]][[end]]
+[[end]]agents:
+[[range .AllAgents]]  [[.Name]]:
+    instructions: [[.PromptPath]]
+    model: [[.ModelProfile]]
+    voice: [[.VoiceProfile]]
+[[$tools := $.AgentTools .Name]][[if $tools]]    tools:
+[[range $tools]]      - [[.]]
+[[end]][[end]]
+[[end]][[if .Tasks]]tasks:
+[[range .Tasks]]  [[.Name]]:
+    instructions: [[.PromptPath]]
+[[$tools := $.TaskTools .Name]][[if $tools]]    tools:
+[[range $tools]]      - [[.]]
+[[end]][[end]][[if .Model]]    model: [[.Model]]
+[[end]]    result: [[.Result]]
+    context:
+      history: [[.History]]
+[[if .MaxMessages]]      max_messages: [[.MaxMessages]]
+[[end]][[if .Summarizer]]      summarizer: [[.Summarizer]]
+[[end]][[if .IncludeToolCalls]]      include_tool_calls: [[boolValue .IncludeToolCalls]]
+[[end]][[end]]
+[[end]][[if .TaskGroups]]task_groups:
+[[range .TaskGroups]]  [[.Name]]:
+    steps:
+[[range .Steps]]      - [[.]]
+[[end]]    context_scope: [[.ContextScope]]
+    then: [[.Then]]
+[[if .ThenTarget]]    then_target: [[.ThenTarget]]
+[[end]]    merge: results
+[[end]]
+[[end]][[if or .Handoffs .Tasks .TaskGroups .HumanTransfers]]controls:
+[[range .Handoffs]]  [[.Name]]:
+    kind: agent_transfer
+    to: [[.To]]
+    when: [[quote .When]]
+[[if .Requires]]    requires:
+[[range .Requires]]      - [[.]]
+[[end]][[end]]    context:
+      history: [[.History]]
+[[if .MaxMessages]]      max_messages: [[.MaxMessages]]
+[[end]][[if .Summarizer]]      summarizer: [[.Summarizer]]
+[[end]][[if .IncludeToolCalls]]      include_tool_calls: [[boolValue .IncludeToolCalls]]
+[[end]][[if .AllVariables]]      variables: all
+[[else]]      variables:
+[[range .Variables]]        - [[.]]
+[[end]][[end]]
+[[end]][[range .Tasks]]  [[.RunName]]:
+    kind: delegate
+    task: [[.Name]]
+    when: [[quote .When]]
+[[if .Assign]]    assign: [[.Assign]]
+[[end]][[end]][[range .TaskGroups]]  [[.RunName]]:
+    kind: delegate
+    group: [[.Name]]
+    when: [[quote .When]]
+[[end]][[range .HumanTransfers]]  [[.Name]]:
+    kind: human_transfer
+    destination: [[.Destination]]
+    mode: [[.Mode]]
+[[if .When]]    when: [[quote .When]]
+[[end]][[if .Briefing]]    briefing: [[.Briefing]]
+[[end]][[end]][[end]][[if .Tools]]tools:
+[[range .Tools]]  - [[.Name]]
+[[end]]
+[[end]]conversation:
+  greeting:
+    speaks_first: [[.SpeaksFirst]]
+[[if .Greeting]]    text: [[ quote .Greeting ]]
+[[end]][[if .Interruption]]  interruption:
+    enabled: [[boolValue .Interruption]]
+[[if .MinimumWords]]    minimum_words: [[.MinimumWords]]
+[[end]][[if .IgnorePhrases]]    ignore_phrases:
+[[range .IgnorePhrases]]      - [[quote .]]
+[[end]][[end]][[end]][[if or .NudgeAfter .EndAfter]]  inactivity:
+[[if .NudgeAfter]]    nudge_after: [[.NudgeAfter]]
+[[end]][[if .EndAfter]]    end_after: [[.EndAfter]]
+[[end]][[end]][[if .MaxDuration]]  max_duration: [[.MaxDuration]]
+[[end]][[if .ThinkingAudio]]  thinking_audio: [[.ThinkingAudio]]
+[[end]]
+channels:
+[[range .AllChannels]][[if eq .Kind "realtime_audio"]]  [[.Name]]: { kind: realtime_audio }
+[[else]]  [[.Name]]:
+    kind: telephony
+    inbound: [[.Inbound]]
+    outbound: [[.Outbound]]
+[[if .RequiredControls]]    required_controls:
+[[range .RequiredControls]]      - [[.]]
+[[end]][[end]][[if .OnVoicemail]]    on_voicemail: [[.OnVoicemail]]
+[[end]][[end]][[end]]
+[[with .EffectiveCapacity]]capacity:
+  peak_sessions: [[.PeakSessions]]
+  max_sessions: [[.MaxSessions]]
+  avg_session_duration: [[.AvgSessionDuration]]
+[[end -]]

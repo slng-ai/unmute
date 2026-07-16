@@ -1,0 +1,24 @@
+# One LiveKit instance. listen and speak route through the SLNG Execution Layer
+# (provider: slng, slng/... routes) — the scaffold default, so the emitted
+# project uses slng.STT / slng.TTS from livekit-plugins-slng. Any catalogued
+# provider binds instead with a one-line change (driver-livekit C8 as amended;
+# docs/user/reference/providers.md). reason lowers to LiveKit Inference; turn
+# to the LiveKit turn model. Model names, voices, and params are forwarded to
+# the provider as-is (D10); secrets and URLs are env var names only.
+
+targets:
+  livekit-dev:
+    provider: livekit
+    version: "1.5.2"            # framework pin; the driver checks its range (>=1.5, <2.0)
+    sdk_language: python
+    models:                     # all four roles are open on LiveKit
+      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
+      turn:   { provider: livekit, model: turn-detector-mini }
+      speak:
+        host: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
+        desk: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-orion-en" }
+      reason:
+        reasoning:
+          provider: openai
+          model: gpt-4o-mini
+          params: { temperature: 0.4 }
