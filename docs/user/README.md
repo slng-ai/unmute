@@ -1,131 +1,53 @@
-# Unmute docs, structure and plan
+# Unmute docs
 
-This folder is the user-facing documentation for the Unmute CLI. This file is the map: what pages exist, what each one is for, and the rules every page follows. Source of truth for facts stays [SCHEMA.md](../../SCHEMA.md) and [ORCHESTRATOR_SHARED_CONFIGURATION.md](../../ORCHESTRATOR_SHARED_CONFIGURATION.md). Docs never contradict them; when they do, fix the doc.
+You describe a voice agent once, in a few small YAML files. Unmute compiles that description into a real project for the platform you pick. Today that means a runnable Python project for **Pipecat** or **LiveKit** (code targets, both drivers complete), and provider config for ElevenLabs (managed target). If a platform cannot do something you asked for, Unmute tells you before anything runs, in that platform's own words. It never quietly drops a feature.
 
-## Who we write for
+## Start here
 
-Someone who has never seen Unmute. They may have never used LiveKit, Pipecat, Vapi, ElevenLabs, or Deepgram either. They want to build a voice agent, not learn five platforms. Every page assumes zero prior knowledge unless it links to a page that covers it.
+New to Unmute? Three short pages, in order:
 
-## Writing rules (every page)
+1. [What is Unmute](start/what-is-unmute.md): the idea in plain words.
+2. [Install](start/install.md): one binary, plus `uv` for running agents locally.
+3. [Your first agent](start/first-agent.md): `init`, `validate`, `dev`. An agent talking in your browser in a few minutes, then the same agent compiled for LiveKit.
 
-1. Simple words. Short sentences. One idea per sentence. If a 12-year-old cannot follow the sentence, rewrite it.
-2. Explain a term the first time it appears, or link to the concepts page that does.
-3. Show YAML before prose. An example first, then the explanation.
-4. Every claim about a provider must trace back to SCHEMA.md or the shared configuration doc. No new provider facts invented in docs.
-5. Never hide a limitation. If a field fails on a target, the docs say so as loudly as the CLI does. Fail-loud is the product; the docs follow it.
-6. No em or en dashes as punctuation. Use commas, colons, or separate sentences.
+Then grow it one feature at a time with the [learn pages](learn/01-one-agent.md): a tool, shared state, a second agent, tasks, task groups, phone calls, going live.
 
-## The four sections
+## How your code gets generated
 
-Classic split: learn by doing (start, learn), understand (concepts), look up (reference, targets).
+The heart of Unmute is the compile step: `agent.yaml` in, a readable project out. Two pages explain it end to end, one per target:
+
+- [Pipecat](targets/pipecat.md): a bus of workers. Each agent is a worker with its own model and voice; tasks re-program the active agent step by step.
+- [LiveKit](targets/livekit.md): one session. Agents are classes that take turns holding the conversation; tasks are awaited objects with typed results.
+
+Same YAML, same behavior for the caller, genuinely different machinery. [How targets run your agent](concepts/how-targets-run-your-agent.md) puts the two side by side with the actual generated code.
+
+## The map
 
 ```text
 docs/user/
-├── README.md                    # this file: the map and the rules
-│
-├── start/                       # zero to a running agent, fast
-│   ├── what-is-unmute.md        # the pitch and our take on orchestrators
-│   ├── install.md               # get the binary, check it works
-│   └── first-agent.md           # init, validate, run: one agent talking in minutes
-│
-├── learn/                       # one skill per page, simple to complex, in order
-│   ├── 01-one-agent.md          # anatomy of the package: agent.yaml, instructions.md, targets.yaml
-│   ├── 02-add-a-tool.md         # webhook tool: declare, describe, give to the agent
-│   ├── 03-variables.md          # typed shared state, defaults, call_start
-│   ├── 04-two-agents.md         # agent_transfer, context history, the handoff
-│   ├── 05-tasks.md              # delegate and return with a typed result
-│   ├── 06-task-groups.md        # ordered steps, then: return | transfer | end
-│   ├── 07-phone-calls.md        # telephony channel, human transfer, outbound and voicemail
-│   └── 08-going-live.md         # multiple targets, capacity, the sizing report, secrets
-│
-├── concepts/                    # the ideas behind the fields, read when curious or confused
-│   ├── how-unmute-works.md      # compile, don't interpret: package -> validate -> generate
-│   ├── our-take-on-orchestrators.md  # why one source, code vs managed targets, the pattern rule
-│   ├── tags-and-gating.md       # core / warn / gated / provisional, fail loud, never average
-│   ├── profiles-and-bindings.md # abstract in agent.yaml, concrete in targets.yaml, forwarded verbatim
-│   ├── how-targets-run-your-agent.md  # what handoffs, tasks, and groups become on LiveKit vs Pipecat
-│   └── tiers.md                 # T0 one agent, T1 tasks, T2 handoff, what each costs in portability
-│
-├── reference/                   # every field, every allowed value, every target outcome
-│   ├── agent-yaml.md            # top level: version, entry_agent, and links to each block
-│   ├── pipeline.md              # listen / turn / speak, placement, semantic_endpointing
-│   ├── models-and-voices.md     # profiles, placement, fallback chains
-│   ├── variables.md             # type, default, source
-│   ├── agents.md                # instructions, model, voice, tools
-│   ├── tasks.md                 # tasks and task_groups, result maps, context_scope, then
-│   ├── controls.md              # delegate, agent_transfer, human_transfer, context blocks
-│   ├── conversation.md          # greeting, interruption, inactivity, max_duration, thinking_audio
-│   ├── channels-and-capacity.md # realtime_audio, telephony, on_voicemail, peak/max sessions
-│   ├── tools.md                 # tools/*.yaml: input, output, execution, interruption, effect
-│   ├── targets-yaml.md          # instances, pins, bindings, params, destinations
-│   ├── safe-core.md             # the subset that runs on all five targets, verbatim from SCHEMA §7
-│   └── cli.md                   # every command: validate, compile, apply, dev, init
-│
-└── targets/                     # one page per provider: how your YAML lands there
-    ├── livekit.md
-    ├── pipecat.md
-    ├── vapi.md
-    ├── elevenlabs.md
-    └── deepgram.md
+├── start/        # zero to a running agent, fast
+├── learn/        # one skill per page, simple to complex, in order
+├── concepts/     # the ideas behind the fields, read when curious or confused
+├── reference/    # every field, every allowed value, every target outcome
+└── targets/      # one page per provider: how your YAML lands there
 ```
 
-## What each section must do
+Common questions and where they are answered:
 
-### start/
+- "Why did validate fail?": [tags and gating](concepts/tags-and-gating.md), then the failing field's reference page.
+- "Does X work on Y?": the feature table in targets/<y>.md, or the field's reference table.
+- "What exactly gets sent to the provider?": [profiles and bindings](concepts/profiles-and-bindings.md), then `compile-report.json` after a compile.
+- Migrating between providers: [safe core](reference/safe-core.md) first, then both target pages.
 
-Goal: a working agent before the reader understands everything. `what-is-unmute.md` carries the core message in plain words: you describe what the agent should do, once. Unmute compiles it for the platform you pick. If a platform cannot do something you asked for, Unmute tells you before anything runs, in that platform's own words. It never quietly drops a feature.
+## Rules for writing these docs
 
-### learn/
+Source of truth for facts is [SCHEMA.md](../../SCHEMA.md) and the driver specs; docs never contradict them, and when they do, the doc is the bug. Every page follows the same rules:
 
-A single running example (a small customer service agent) grows one page at a time. Page 01 is the safe core with one agent. Every page after it adds exactly one construct and shows the full diff of `agent.yaml`. Each page ends with "what just got harder": which targets now warn or fail, and why. This is where simple-to-complex lives, and where gating stops being abstract.
+1. Simple words. Short sentences. One idea per sentence.
+2. Explain a term the first time it appears, or link to the concepts page that does.
+3. Show YAML before prose. An example first, then the explanation.
+4. Every provider claim traces back to SCHEMA.md. No new provider facts invented in docs.
+5. Never hide a limitation. If a field fails on a target, the docs say so as loudly as the CLI does.
+6. No em or en dashes as punctuation. Use commas, colons, or separate sentences.
 
-### concepts/
-
-The reasoning. `our-take-on-orchestrators.md` is the flagship page: five platforms, one description; code targets (LiveKit, Pipecat, Deepgram) where Unmute writes the code and can build missing features; managed targets (Vapi, ElevenLabs) where only the provider API surface exists; the pattern rule that decides what compiles where. `tags-and-gating.md` explains core / warn / gated / provisional once, so reference pages can just use the words.
-
-### reference/
-
-The contract pages. One page per `agent.yaml` block, plus tools, targets.yaml, providers (which STT/TTS/LLM integrations each target accepts and what each emits), safe core, and the CLI. Every field gets the same fixed template, no exceptions:
-
-```markdown
-### field_name
-
-What it means, in one or two plain sentences.
-
-Required: yes / no / conditional (say the condition)
-Values: the exact allowed values or type
-Default: value, or "none: you must choose" (D7 fields have no default on purpose)
-
-| Target | What happens | Tag |
-|---|---|---|
-| LiveKit | how it translates there (native API name if useful) | core |
-| Pipecat | ... | core |
-| Vapi | ... | gated: fails, provider-vocabulary reason |
-| ElevenLabs | ... | warn: what the warning says |
-| Deepgram | ... | core |
-
-One short YAML example.
-```
-
-The five-target table on every single field is the promise the user asked for: for each option, the allowed values and how it translates in every framework. The rows come from SCHEMA.md sections 4 to 7; the reference never invents a row.
-
-### targets/
-
-The same information pivoted by provider, for the reader who thinks "I deploy on Vapi, what do I get?". Each page: what kind of target it is (code or managed), what that means for you, the full feature table for this provider (its column from SCHEMA §7), what its bindings look like in `targets.yaml` with a real example, its known conditions (carrier, SDK language, version pins), and its warnings explained.
-
-## Reading paths
-
-- Never seen it: start/ in order, then learn/01 to 04.
-- "Why did validate fail?": concepts/tags-and-gating.md, then the reference page of the failing field.
-- "Does X work on Y?": targets/<y>.md feature table, or the field's reference table.
-- Migrating between providers: reference/safe-core.md first, then both target pages.
-
-## Build order (not all at once)
-
-1. start/ (all three) and concepts/our-take-on-orchestrators.md: the front door.
-2. reference/ pages for the blocks the compiler already validates today, template above.
-3. learn/01 to 04 (the T0 + T2 safe-core arc).
-4. targets/pipecat.md, targets/livekit.md, and targets/elevenlabs.md (drivers shipped); vapi and deepgram as their drivers land.
-5. learn/05 to 08 and the remaining concepts pages.
-
-A reference or target page ships only for behavior the compiler actually has. Docs for unshipped drivers get a one-line "driver in progress" page, never speculative tables.
+Reference pages use one fixed template per field: meaning, required, values, default, then a five-target table of what happens on each platform, then a short YAML example. A reference or target page ships only for behavior the compiler actually has; unshipped drivers get a one-line "driver in progress" note, never speculative tables.

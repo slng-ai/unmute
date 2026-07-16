@@ -1,6 +1,6 @@
 # Your first agent
 
-This page gets one agent talking, in your browser, in a few minutes. Three commands: `init`, `validate`, `dev`.
+This page gets one agent talking, in your browser, in a few minutes. Three commands: `init`, `validate`, `dev`. At the end, the same agent compiles for LiveKit too, so you can see one description become two different projects.
 
 You need `unmute` built (see [Install](install.md)) and `uv` installed. You also need two API keys, explained below.
 
@@ -96,8 +96,36 @@ Under the hood `dev` does three things:
 
 Press `ctrl-c` to stop. Agent logs are written to `build/pipecat-dev/bot.log`; add `--verbose` to also stream them to your terminal.
 
+## 5. The same agent, compiled for LiveKit
+
+Nothing about your agent is Pipecat-specific. To prove it, add a second target to `targets.yaml`. Only the bindings change; `agent.yaml` and `instructions.md` stay untouched:
+
+```yaml
+  livekit-dev:
+    provider: livekit
+    version: "1.5.2"
+    models:
+      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
+      turn:   { provider: livekit, model: turn-detector-mini }
+      speak:
+        assistant_voice: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
+      reason:
+        assistant_model: { provider: openai, model: "gpt-4.1-mini" }
+```
+
+Validate again (now two `pass` lines), then compile:
+
+```sh
+unmute validate support-bot
+unmute compile support-bot --target livekit-dev
+```
+
+Open `support-bot/build/livekit-dev/` and look around. Where Pipecat got a `bot.py` full of workers, LiveKit got an `agent.py` with one session and an `Agent` class. Same agent, different machinery, and you wrote neither.
+
+Running the LiveKit project needs a free LiveKit Cloud project for its `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`. The generated `README.md` in the build folder has the three-line quickstart; the [LiveKit target page](../targets/livekit.md) has the full story.
+
 ## What you just built
 
-One agent, one greeting, one prompt, running on a real Pipecat pipeline. That is the smallest useful thing. From here the [learn pages](../learn/01-one-agent.md) add one feature at a time: tools, shared state, a second agent with a handoff, and delegated tasks, until you have a full customer service agent.
+One agent, one greeting, one prompt, running on a real Pipecat pipeline, and compiled for LiveKit from the same files. That is the smallest useful thing. From here the [learn pages](../learn/01-one-agent.md) add one feature at a time: tools, shared state, a second agent with a handoff, and delegated tasks, until you have a full customer service agent.
 
-Start with [learn/01: one agent](../learn/01-one-agent.md), which walks through every line of the spec you just ran.
+Start with [learn/01: one agent](../learn/01-one-agent.md), which walks through every line of the spec you just ran. When you want to know exactly what the compiler wrote and why, read the two target pages: [Pipecat](../targets/pipecat.md) and [LiveKit](../targets/livekit.md).
