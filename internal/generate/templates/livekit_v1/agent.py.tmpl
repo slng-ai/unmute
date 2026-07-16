@@ -99,6 +99,27 @@ class {{.Class}}(Agent):
         # C4/N13: the task's turns are not propagated back; the typed result is
         # the only return.
         return result
+{{- else if .Isolated}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{end}}:
+        {{triple .When}}
+        # context_scope: isolated — each step is a standalone AgentTask starting
+        # fresh (C3/C4); the grouped form always shares context, so it is not used.
+        task_results: dict = {}
+{{- range .Steps}}
+        task_results[{{pyq .ID}}] = await {{.Class}}()
+{{- end}}
+{{- if eq .Then "return"}}
+        # N13: standalone tasks never merge their turns back; hand the owner the
+        # typed results only (merge: results).
+        return task_results
+{{- else if eq .Then "transfer"}}
+        # then: transfer — control moves on and does not return here.
+        return {{.ThenClass}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
+{{- else}}
+        # then: end — the flow is the last thing on the call; this does not return.
+        self.session.shutdown()
+{{- end}}
 {{- else}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{end}}:

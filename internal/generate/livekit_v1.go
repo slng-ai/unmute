@@ -83,6 +83,7 @@ type livekitDelegate struct {
 	When      string
 	Task      *livekitSingleTask // set for a single-task delegate; Steps empty
 	Steps     []livekitStep
+	Isolated  bool   // context_scope: isolated — standalone-AgentTask sequence, no TaskGroup (C3)
 	Then      string // "return" | "transfer" | "end"
 	ThenClass string // target Agent class, set only for then: transfer
 }

@@ -261,6 +261,58 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	}
 }
 
+// TestLiveKitV1IsolatedGroup covers the T13 lowering (V2/C3): an isolated
+// task_group compiles to a sequence of standalone AgentTasks, each starting
+// with a fresh context — never a TaskGroup, which always shares context.
+func TestLiveKitV1IsolatedGroup(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reserve := agent.TaskGroups["reserve_group"]
+	reserve.ContextScope = ir.ContextIsolated
+	agent.TaskGroups["reserve_group"] = reserve
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		// the isolated flow: fresh AgentTasks, results dict, typed return
+		"async def do_reserve(self, ctx: RunContext) -> dict:",
+		`task_results["find_slot"] = await FindSlot()`,
+		`task_results["confirm_booking"] = await ConfirmBooking()`,
+		"return task_results",
+		// events_group stays shared, so TaskGroup is still imported and used
+		"from livekit.agents.beta.workflows import TaskGroup",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	if strings.Contains(botpy, `group.add(\n            lambda: FindSlot`) {
+		t.Error("isolated group must not lower to TaskGroup.add")
+	}
+
+	// With every group isolated, the TaskGroup import must disappear.
+	events := agent.TaskGroups["events_group"]
+	events.ContextScope = ir.ContextIsolated
+	agent.TaskGroups["events_group"] = events
+	artifact, err = Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate all-isolated: %v", err)
+	}
+	botpy = artifactFile(t, artifact, "agent.py")
+	if strings.Contains(botpy, "TaskGroup") {
+		t.Error("all-isolated project must not import or use TaskGroup")
+	}
+}
+
 // TestCheckLiveKitVersion pins the template-compatible range (>=1.5, <2.0):
 // beta.workflows TaskGroup + AgentTask + inference are present from 1.5.x.
 func TestCheckLiveKitVersion(t *testing.T) {

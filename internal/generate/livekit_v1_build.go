@@ -65,7 +65,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			for _, s := range d.Steps {
 				used[s.ID] = true
 			}
-			if len(d.Steps) > 0 {
+			if len(d.Steps) > 0 && !d.Isolated {
 				data.NeedsTaskGroups = true
 			}
 		}
@@ -271,10 +271,12 @@ func buildLiveKitDelegate(agent *ir.Agent, ref string, c *ir.Delegate) (livekitD
 	if !ok {
 		return livekitDelegate{}, fmt.Errorf("delegate %q references unknown task_group %q", ref, c.Group)
 	}
-	if group.ContextScope == ir.ContextIsolated {
-		return livekitDelegate{}, fmt.Errorf("delegate %q group %q: livekit driver emits shared task groups only; isolated not emitted yet", ref, c.Group)
+	// C3: TaskGroup always shares context, so `isolated` lowers to a generated
+	// sequence of standalone AgentTasks (each starts fresh, C4) instead.
+	delegate := livekitDelegate{
+		Method: ref, When: delegateWhen(c), Then: string(group.Then),
+		Isolated: group.ContextScope == ir.ContextIsolated,
 	}
-	delegate := livekitDelegate{Method: ref, When: delegateWhen(c), Then: string(group.Then)}
 	// N13/§4.7: return hands the owner the typed results; transfer and end do not
 	// return, so the tool description must say so (the model must not wait for a
 	// result that never comes). The lowerings themselves live in the template.
