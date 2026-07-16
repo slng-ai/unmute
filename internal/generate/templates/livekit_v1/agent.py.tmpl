@@ -25,7 +25,7 @@ from livekit.agents import (
 from livekit.agents.beta.workflows import TaskGroup
 {{- end}}
 from livekit.agents.voice import MetricsCollectedEvent
-from livekit.plugins import silero, slng
+from livekit.plugins import {{join .PluginModules ", "}}
 
 logger = logging.getLogger({{pyq .Project}})
 logger.setLevel(logging.INFO)
@@ -45,10 +45,10 @@ class {{.Class}}(Agent):
             instructions={{.PromptConst}},
             chat_ctx=chat_ctx,
 {{- if .LLM}}
-            llm=inference.LLM(model={{pyq .LLM.Model}}{{if .LLM.Params}}, extra_kwargs={ {{- range $i, $p := .LLM.Params}}{{if $i}}, {{end}}{{pyq $p.Key}}: {{$p.Value}}{{end -}} }{{end}}),
+            llm={{.LLM.Ctor}},
 {{- end}}
 {{- if .TTS}}
-            tts=slng.TTS(api_key=os.environ.get({{pyq .TTS.APIKeyEnv}}), model={{pyq .TTS.Model}}, voice={{pyq .TTS.Voice}}{{range .TTS.Params}}, {{.Key}}={{.Value}}{{end}}),
+            tts={{.TTS.Ctor}},
 {{- end}}
         )
 
@@ -149,9 +149,9 @@ server.setup_fnc = prewarm
 @server.rtc_session(agent_name={{pyq .AgentName}})
 async def entrypoint(ctx: JobContext) -> None:
     session = AgentSession(
-        stt=slng.STT(api_key=os.environ.get({{pyq .STT.APIKeyEnv}}), model={{pyq .STT.Model}}{{range .STT.Params}}, {{.Key}}={{.Value}}{{end}}),
-        llm=inference.LLM(model={{pyq .SessionLLM.Model}}{{if .SessionLLM.Params}}, extra_kwargs={ {{- range $i, $p := .SessionLLM.Params}}{{if $i}}, {{end}}{{pyq $p.Key}}: {{$p.Value}}{{end -}} }{{end}}),
-        tts=slng.TTS(api_key=os.environ.get({{pyq .SessionTTS.APIKeyEnv}}), model={{pyq .SessionTTS.Model}}, voice={{pyq .SessionTTS.Voice}}{{range .SessionTTS.Params}}, {{.Key}}={{.Value}}{{end}}),
+        stt={{.STT.Ctor}},
+        llm={{.SessionLLM.Ctor}},
+        tts={{.SessionTTS.Ctor}},
         turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector(version={{pyq .TurnVersion}})),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
