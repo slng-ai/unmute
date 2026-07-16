@@ -28,6 +28,7 @@ func (p *Package) Location(file, token string) string {
 
 type AgentFile struct {
 	Version      int                     `json:"version" yaml:"version"`
+	Language     string                  `json:"language,omitempty" yaml:"language,omitempty"`
 	EntryAgent   string                  `json:"entry_agent" yaml:"entry_agent"`
 	Pipeline     Pipeline                `json:"pipeline" yaml:"pipeline"`
 	Models       map[string]ModelProfile `json:"models" yaml:"models"`

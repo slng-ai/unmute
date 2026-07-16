@@ -8,6 +8,15 @@ import (
 	"testing"
 )
 
+func TestV23WordmarkHasNoBackgroundColor(t *testing.T) {
+	if strings.Contains(slngWordmark, "48;") {
+		t.Fatalf("wordmark still paints a background: %q", slngWordmark)
+	}
+	if !strings.Contains(slngWordmark, "38;2;245;201;110m") {
+		t.Fatalf("wordmark lost the SLNG foreground color: %q", slngWordmark)
+	}
+}
+
 // run executes a fresh command tree (rule 1) and returns captured output + err.
 func run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
@@ -72,12 +81,23 @@ func TestInit_refusesExistingDir(t *testing.T) {
 
 func TestInit_wizardScaffoldsFromScriptedInput(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// 1=create, name, 4=Create agent, confirm.
-	out, err := runWithInput(t, "1\nwiz-agent\n4\n\n", "init")
+	// 1=create, name, 16=Create agent, confirm.
+	out, err := runWithInput(t, "1\nwiz-agent\n16\n\n", "init")
 	if err != nil {
 		t.Fatalf("init wizard: %v\n%s", err, out)
 	}
 	if _, err := os.Stat(filepath.Join("wiz-agent", "agent.yaml")); err != nil {
 		t.Fatalf("wizard did not scaffold agent.yaml: %v\n%s", err, out)
+	}
+}
+
+func TestInitWizardDeclineWritesNothing(t *testing.T) {
+	t.Chdir(t.TempDir())
+	// Decline review, back out of the editor, then quit the create menu.
+	if _, err := runWithInput(t, "1\nagent\n16\nn\n17\n2\n", "init"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat("agent"); !os.IsNotExist(err) {
+		t.Fatalf("declined wizard wrote destination: %v", err)
 	}
 }

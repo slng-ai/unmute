@@ -1,17 +1,58 @@
-# One instance per target. The same portable agent.yaml compiles to each.
+# One selected target. Add more instances later if this package needs them.
 # Model names, voice ids, and params are forwarded to the provider as-is and
 # never validated. Secrets and URLs are env var names only.
 targets:
-  pipecat-dev:
+[[if eq .Target "pipecat"]]  pipecat-dev:
     provider: pipecat
-    version: "1.5.0"
-    transport: daily-sip
-    models:
-      # Speech in/out via SLNG (one SLNG_API_KEY, hosted STT + TTS); the LLM is
-      # OpenAI. See https://github.com/slng-ai/pipecat-slng for model ids.
-      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
-      turn:   { provider: local, model: silero }   # on-device turn detection (Silero VAD); no API key
+[[if .TargetVersion]]    version: [[quote .TargetVersion]]
+[[end]][[if .SDKLanguage]]    sdk_language: [[.SDKLanguage]]
+[[end]][[if .Region]]    region: [[yaml .Region]]
+[[end]][[if .Edition]]    edition: [[yaml .Edition]]
+[[end]][[if .Pins]]    pins: [[.Pins]]
+[[end]][[if .Transport]]    transport: [[.Transport]]
+[[end]][[if .Carrier]]    carrier: [[.Carrier]]
+[[end]]    models:
+      # Speech in/out via the selected catalogue integrations. Model and voice
+      # identities are forwarded; the default remains SLNG + OpenAI.
+      listen: { provider: [[.Listen.Provider]], model: [[quote .Listen.Model]][[if .Listen.Params]], params: [[.Listen.Params]][[end]] }
+      turn:   { provider: local, model: silero }
       speak:
-        assistant_voice: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
-      reason:
-        assistant_model: { provider: openai, model: "gpt-4.1-mini" }
+[[range .AllAgents]]        [[.VoiceProfile]]: { provider: [[.Speak.Provider]][[if .Speak.Model]], model: [[quote .Speak.Model]][[end]], voice: [[quote .Speak.Voice]][[if .Speak.Params]], params: [[.Speak.Params]][[end]] }
+[[end]]      reason:
+[[range .AllAgents]]        [[.ModelProfile]]: {[[if .Reason.Provider]] provider: [[.Reason.Provider]],[[end]] model: [[quote .Reason.Model]][[if .Reason.Params]], params: [[.Reason.Params]][[end]] }
+[[end]][[range .Fallbacks]]        [[.Name]]: {[[if .Binding.Provider]] provider: [[.Binding.Provider]],[[end]] model: [[quote .Binding.Model]][[if .Binding.Params]], params: [[.Binding.Params]][[end]] }
+[[end]][[else if eq .Target "livekit"]]  livekit-dev:
+    provider: livekit
+[[if .TargetVersion]]    version: [[quote .TargetVersion]]
+[[end]][[if .SDKLanguage]]    sdk_language: [[.SDKLanguage]]
+[[end]][[if .Region]]    region: [[yaml .Region]]
+[[end]][[if .Edition]]    edition: [[yaml .Edition]]
+[[end]][[if .Pins]]    pins: [[.Pins]]
+[[end]][[if .Transport]]    transport: [[.Transport]]
+[[end]][[if .Carrier]]    carrier: [[.Carrier]]
+[[end]]    models:
+      listen: { provider: [[.Listen.Provider]], model: [[quote .Listen.Model]][[if .Listen.Params]], params: [[.Listen.Params]][[end]] }
+      turn:   { provider: livekit, model: turn-detector-mini }
+      speak:
+[[range .AllAgents]]        [[.VoiceProfile]]: { provider: [[.Speak.Provider]][[if .Speak.Model]], model: [[quote .Speak.Model]][[end]], voice: [[quote .Speak.Voice]][[if .Speak.Params]], params: [[.Speak.Params]][[end]] }
+[[end]]      reason:
+[[range .AllAgents]]        [[.ModelProfile]]: {[[if .Reason.Provider]] provider: [[.Reason.Provider]],[[end]] model: [[quote .Reason.Model]][[if .Reason.Params]], params: [[.Reason.Params]][[end]] }
+[[end]][[range .Fallbacks]]        [[.Name]]: {[[if .Binding.Provider]] provider: [[.Binding.Provider]],[[end]] model: [[quote .Binding.Model]][[if .Binding.Params]], params: [[.Binding.Params]][[end]] }
+[[end]][[else]]  elevenlabs-dev:
+    provider: elevenlabs
+[[if .TargetVersion]]    version: [[quote .TargetVersion]]
+[[end]][[if .SDKLanguage]]    sdk_language: [[.SDKLanguage]]
+[[end]][[if .Region]]    region: [[yaml .Region]]
+[[end]][[if .Edition]]    edition: [[yaml .Edition]]
+[[end]][[if .Pins]]    pins: [[.Pins]]
+[[end]][[if .Transport]]    transport: [[.Transport]]
+[[end]][[if .Carrier]]    carrier: [[.Carrier]]
+[[end]]    models:
+      speak:
+[[range .AllAgents]]        [[.VoiceProfile]]: { provider: elevenlabs, voice_id: [[quote .Speak.Voice]][[if .Speak.Params]], params: [[.Speak.Params]][[end]] }
+[[end]]      reason:
+[[range .AllAgents]]        [[.ModelProfile]]: { model: [[quote .Reason.Model]][[if .Reason.Params]], params: [[.Reason.Params]][[end]] }
+[[end]][[range .Fallbacks]]        [[.Name]]: { model: [[quote .Binding.Model]][[if .Binding.Params]], params: [[.Binding.Params]][[end]] }
+[[end]][[end]][[if .HumanTransfers]]    destinations:
+[[range .Destinations]]      [[.Destination]]: [[quote .Value]]
+[[end]][[end -]]

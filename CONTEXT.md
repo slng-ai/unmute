@@ -1,6 +1,6 @@
 # Unmute
 
-Unmute is a portable voice-agent framework: define the agent once as a directory of declarative files, **compile** it to any **Orchestrator**, deploy it to any **Region** on any **Runtime**, and move it wherever you want. SLNG's **Execution Layer** sits underneath the model calls regardless of target — which is precisely what makes cross-orchestrator portability tractable. Inspired by Vercel Eve's directory conventions, with voice-native primitives on top.
+Unmute is SLNG's portable voice-agent framework: define the agent once as a directory of declarative YAML, **compile** it to any **Orchestrator**, deploy it to any **Region** on any **Runtime**, and move it wherever you want. The portability is the product: one plain-YAML spec that makes every orchestration layer easy to write, read, and swap. SLNG's **Execution Layer** is the default model route — `unmute init` scaffolds SLNG credentials and routes unless asked otherwise — and a binding can name any provider the framework itself integrates; the provider catalogue maps those (PROVIDER_CATALOG.md, 2026-07-15). Inspired by Vercel Eve's directory conventions, with voice-native primitives on top.
 
 ## Language
 
@@ -65,7 +65,7 @@ _Avoid_: env source, config source, provider source
 ### The two deploy axes
 
 **Orchestrator**:
-The voice pipeline engine an agent compiles to and whose turn loop runs it — Pipecat, LiveKit, Daily, etc. The *compile target*, chosen per deployment because clients are opinionated. SLNG ships a plugin for each (`pipecat-slng`, `livekit-plugins-slng`), so an orchestrator's STT/TTS always flows through the Execution Layer. Orchestrators differ only in *pipeline mechanics* (VAD, turn-taking, tool API, transport) — never in the model layer.
+The voice pipeline engine an agent compiles to and whose turn loop runs it — Pipecat, LiveKit, Daily, etc. The *compile target*, chosen per deployment because clients are opinionated. SLNG ships a plugin for each (`pipecat-slng`, `livekit-plugins-slng`), so an orchestrator's STT/TTS flows through the Execution Layer by default; a binding may instead name any provider the orchestrator integrates, resolved through the provider catalogue (2026-07-15). Orchestrators differ in *pipeline mechanics* (VAD, turn-taking, tool API, transport); the model layer is a binding choice.
 _Avoid_: framework (when you mean the compile target), engine, runtime
 
 **Compile**:
@@ -103,7 +103,7 @@ _Avoid_: apply (config plane), ship, release
 ### What SLNG owns (underneath)
 
 **Execution Layer**:
-SLNG's owned middleware between frameworks and model providers: STT routing, tiered decisioning (full-LLM vs cheap path vs cached turn), output assembly / TTS caching, adaptive execution, regions, BYOK. The source of SLNG's cost and latency advantage. Always present regardless of Framework or Runtime.
+SLNG's owned middleware between frameworks and model providers: STT routing, tiered decisioning (full-LLM vs cheap path vs cached turn), output assembly / TTS caching, adaptive execution, regions, BYOK. The source of SLNG's cost and latency advantage. Underneath every SLNG-routed model call regardless of Framework or Runtime (the default route; not the only bindable one, 2026-07-15).
 
 **Gateway**:
 The single unified endpoint fronting every STT/TTS provider, with `provider/model:variant` path routing. Its STT/TTS protocol is the **Unmute bridge** (hence the CLI's name). BYOK and region pinning are request-header concerns here.

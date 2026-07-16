@@ -150,6 +150,7 @@ def build_billing_tts():
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-orion-en",
         model="slng/deepgram/aura:2-en",
+        language="en",
     )
 
 
@@ -203,6 +204,7 @@ def build_intake_tts():
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-thalia-en",
         model="slng/deepgram/aura:2-en",
+        language="en",
     )
 
 
@@ -252,7 +254,10 @@ AGENTS = [BillingAgent(), IntakeAgent()]
 def build_stt():
     return DeepgramSTTService(
         api_key=os.environ["DEEPGRAM_API_KEY"],
-        model="nova-3",
+        settings=DeepgramSTTService.Settings(
+            model="nova-3",
+            language="en",
+        ),
     )
 
 
@@ -467,6 +472,9 @@ if __name__ == "__main__":
   ],
   "notes": [
     "interruption ignore_phrases emitted as IGNORE_PHRASES; short phrases are also suppressed by the min-words turn-start strategy",
+    "listen: deepgram via DeepgramSTTService (pipecat-ai[deepgram], verified 2026-07-15)",
+    "reason: openai via OpenAILLMService (pipecat-ai[openai], verified 2026-07-15)",
+    "speak: slng via SlngTTSService (pipecat-slng\u003e=0.4.0, verified 2026-07-15)",
     "turn role lowers to on-device VAD (Silero); its binding is advisory"
   ]
 }

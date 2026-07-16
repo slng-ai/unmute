@@ -48,11 +48,12 @@ This says: hear the caller with a SLNG-hosted speech-to-text model, detect end-o
 The scaffold tells you which keys this target needs, in `.env.example`:
 
 ```text
+DAILY_API_KEY=
 SLNG_API_KEY=
 OPENAI_API_KEY=
 ```
 
-`SLNG_API_KEY` covers the hosted speech-to-text and voice. `OPENAI_API_KEY` covers the reasoning model. Copy the file to `.env` and fill in your values:
+`DAILY_API_KEY` covers the scaffold's `daily-sip` transport, `SLNG_API_KEY` covers hosted speech-to-text and voice, and `OPENAI_API_KEY` covers the reasoning model. Copy the file to `.env` and fill in your values:
 
 ```sh
 cd support-bot

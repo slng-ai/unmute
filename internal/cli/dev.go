@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/slng/unmute/internal/generate"
 	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/target"
@@ -29,7 +30,7 @@ import (
 )
 
 func newDevCmd() *cobra.Command {
-	var uiPort, botPort string
+	var uiPort, botPort, targetName string
 	var noOpen, verbose bool
 
 	cmd := &cobra.Command{
@@ -39,7 +40,11 @@ func newDevCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := args[0]
 
-			outDir, err := compilePipecatForDev(cmd, root)
+			selected, err := selectDevTarget(cmd, root, targetName)
+			if err != nil {
+				return err
+			}
+			outDir, err := compileTargetForDev(cmd, root, selected)
 			if err != nil {
 				return err
 			}
@@ -131,6 +136,7 @@ func newDevCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&uiPort, "port", "8765", "port for the local dev UI")
 	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "port the Pipecat runner listens on")
+	cmd.Flags().StringVar(&targetName, "target", "", "target instance name (required without a TTY when multiple exist)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open the browser automatically")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "stream agent logs to stderr (default: write to bot.log only)")
 	return cmd
@@ -188,23 +194,60 @@ func isTTY(w io.Writer) bool {
 	return st.Mode()&os.ModeCharDevice != 0
 }
 
-// compilePipecatForDev builds the first declared pipecat target into build/<name>
-// and returns its output dir. `dev` runs the emitted bot.py from there.
-func compilePipecatForDev(cmd *cobra.Command, root string) (string, error) {
-	agent, targets, err := loadPackage(root, nil)
+// selectDevTarget chooses by exact instance name. A single target needs no
+// prompt; multiple targets never fall back to map or provider ordering.
+func selectDevTarget(cmd *cobra.Command, root, requested string) (string, error) {
+	names := []string(nil)
+	if requested != "" {
+		names = []string{requested}
+	}
+	_, targets, err := loadPackage(root, names)
 	if err != nil {
 		return "", fmt.Errorf("dev %s: %w", root, err)
 	}
-	var resolved ir.Target
-	found := false
-	for _, candidate := range targets {
-		if candidate.Provider == ir.ProviderPipecat {
-			resolved, found = candidate, true
-			break
-		}
+	if len(targets) == 0 {
+		return "", fmt.Errorf("dev %s: no targets declared in targets.yaml", root)
 	}
-	if !found {
-		return "", fmt.Errorf("dev %s: no pipecat target declared in targets.yaml", root)
+	if requested != "" || len(targets) == 1 {
+		return targets[0].Name, nil
+	}
+	if !isCharDevice(cmd.InOrStdin()) || !isCharDevice(cmd.OutOrStdout()) {
+		choices := make([]string, 0, len(targets))
+		for _, candidate := range targets {
+			choices = append(choices, fmt.Sprintf("%s (%s)", candidate.Name, candidate.Provider))
+		}
+		return "", fmt.Errorf("dev %s: multiple targets declared; pass --target <name>: %s", root, strings.Join(choices, ", "))
+	}
+	selected := targets[0].Name
+	options := make([]huh.Option[string], 0, len(targets))
+	for _, candidate := range targets {
+		options = append(options, huh.NewOption(fmt.Sprintf("%s  ·  %s", candidate.Name, candidate.Provider), candidate.Name))
+	}
+	if err := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Target to run").Options(options...).Value(&selected))).
+		WithInput(cmd.InOrStdin()).WithOutput(cmd.OutOrStdout()).Run(); err != nil {
+		return "", fmt.Errorf("dev %s: select target: %w", root, err)
+	}
+	return selected, nil
+}
+
+// compileTargetForDev dispatches the chosen instance. The bundled browser
+// runner speaks Pipecat WebRTC today; other shipped targets fail with their
+// specific next command instead of being silently replaced.
+func compileTargetForDev(cmd *cobra.Command, root, targetName string) (string, error) {
+	agent, targets, err := loadPackage(root, []string{targetName})
+	if err != nil {
+		return "", fmt.Errorf("dev %s: %w", root, err)
+	}
+	resolved := targets[0]
+	if resolved.Provider != ir.ProviderPipecat {
+		switch resolved.Provider {
+		case ir.ProviderLiveKit:
+			return "", fmt.Errorf("dev %s: target %q uses livekit; no LiveKit local browser runner is shipped—use `unmute compile %s --target %s`", root, resolved.Name, root, resolved.Name)
+		case ir.ProviderElevenLabs:
+			return "", fmt.Errorf("dev %s: target %q uses managed ElevenLabs; no local runner exists—use `unmute apply %s --target %s`", root, resolved.Name, root, resolved.Name)
+		default:
+			return "", fmt.Errorf("dev %s: target %q uses %s; its dev runner is not implemented", root, resolved.Name, resolved.Provider)
+		}
 	}
 	artifact, err := generate.Generate(agent, resolved, target.Default())
 	if err != nil {

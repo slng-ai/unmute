@@ -58,6 +58,7 @@ note: reconcile comparison: modeled fields diffed normally; forwarded params com
 {
   "conversation_config": {
     "agent": {
+      "language": "en",
       "prompt": {
         "built_in_tools": {
           "transfer_to_number": {
@@ -112,6 +113,7 @@ note: reconcile comparison: modeled fields diffed normally; forwarded params com
   "conversation_config": {
     "agent": {
       "first_message": "Hi, you have reached Acme Support. How can I help you today?",
+      "language": "en",
       "prompt": {
         "built_in_tools": {
           "transfer_to_agent": {

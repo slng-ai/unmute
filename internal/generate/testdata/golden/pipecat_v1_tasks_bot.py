@@ -97,6 +97,7 @@ def build_billing_tts():
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-orion-en",
         model="slng/deepgram/aura:2-en",
+        language="en",
     )
 
 
@@ -150,6 +151,7 @@ def build_intake_tts():
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-thalia-en",
         model="slng/deepgram/aura:2-en",
+        language="en",
     )
 
 
@@ -234,7 +236,10 @@ TASK_WORKERS = [CollectTask()]
 def build_stt():
     return DeepgramSTTService(
         api_key=os.environ["DEEPGRAM_API_KEY"],
-        model="nova-3",
+        settings=DeepgramSTTService.Settings(
+            model="nova-3",
+            language="en",
+        ),
     )
 
 

@@ -74,6 +74,7 @@ note: reconcile comparison: modeled fields diffed normally; forwarded params com
 {
   "conversation_config": {
     "agent": {
+      "language": "en",
       "prompt": {
         "built_in_tools": {
           "transfer_to_number": {
@@ -127,6 +128,7 @@ note: reconcile comparison: modeled fields diffed normally; forwarded params com
 {
   "conversation_config": {
     "agent": {
+      "language": "en",
       "prompt": {
         "built_in_tools": {
           "transfer_to_agent": {

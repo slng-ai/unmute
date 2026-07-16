@@ -1,3 +1,12 @@
+{{- /* svc renders any resolved ServiceCall: flat kwargs, then the nested
+Class.Settings(...) block for settings-style services (see the provider
+catalogue, internal/target/catalog_pipecat.go). */ -}}
+{{define "svc"}}{{.Class}}(
+{{range .Args}}        {{.Key}}={{.Value}},
+{{end}}{{if .SettingsArgs}}        settings={{.Class}}.Settings(
+{{range .SettingsArgs}}            {{.Key}}={{.Value}},
+{{end}}        ),
+{{end}}    ){{end -}}
 """Generated Pipecat agent for {{.Project}}.
 
 Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
@@ -77,26 +86,11 @@ async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
 {{range .Agents}}
 
 def build_{{.Name}}_llm():
-    return {{.LLM.Class}}(
-        api_key=os.environ[{{pyq .LLM.APIKeyEnv}}],
-{{if .LLM.BaseURL}}        base_url=os.environ[{{pyq .LLM.BaseURL}}],
-{{end}}        settings={{.LLM.Class}}.Settings(
-            model={{pyq .LLM.Model}},
-            system_instruction={{pyq .Prompt}},
-{{range .LLM.Params}}            {{.Key}}={{.Value}},
-{{end}}        ),
-    )
+    return {{template "svc" .LLM.Call}}
 
 
 def build_{{.Name}}_tts():
-    return {{.TTS.Class}}(
-        api_key=os.environ[{{pyq .TTS.APIKeyEnv}}],
-{{if .TTS.BaseURL}}        base_url=os.environ[{{pyq .TTS.BaseURL}}],
-{{end}}{{if .TTS.Voice}}{{if eq .TTS.Class "ElevenLabsTTSService"}}        voice_id={{pyq .TTS.Voice}},
-{{else}}        voice={{pyq .TTS.Voice}},
-{{end}}{{end}}{{if .TTS.Model}}        model={{pyq .TTS.Model}},
-{{end}}{{range .TTS.Params}}        {{.Key}}={{.Value}},
-{{end}}    )
+    return {{template "svc" .TTS.Call}}
 
 
 class {{.Class}}(LLMWorker):
@@ -200,12 +194,7 @@ AGENTS = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(){{end}}]
 
 
 def build_stt():
-    return {{.STT.Class}}(
-        api_key=os.environ[{{pyq .STT.APIKeyEnv}}],
-{{if .STT.BaseURL}}        base_url=os.environ[{{pyq .STT.BaseURL}}],
-{{end}}{{if .STT.Model}}        model={{pyq .STT.Model}},
-{{end}}{{range .STT.Params}}        {{.Key}}={{.Value}},
-{{end}}    )
+    return {{template "svc" .STT.Call}}
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:

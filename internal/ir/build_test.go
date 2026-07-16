@@ -16,6 +16,9 @@ func TestBuildSafeCore(t *testing.T) {
 	if agent.EntryAgent != "intake" || len(agent.Targets) != 5 {
 		t.Fatalf("unexpected IR: entry=%q targets=%d", agent.EntryAgent, len(agent.Targets))
 	}
+	if agent.Language != "en" {
+		t.Fatalf("language = %q", agent.Language)
+	}
 	if !strings.Contains(agent.Agents["intake"].Instructions, "front desk") {
 		t.Fatal("prompt path was not composed")
 	}
@@ -24,6 +27,18 @@ func TestBuildSafeCore(t *testing.T) {
 	}
 	if agent.Tools["lookup_customer"].Effect != ToolReturnsData {
 		t.Fatal("tool defaults were not applied")
+	}
+}
+
+func TestBuildDefaultsLanguage(t *testing.T) {
+	pkg := loadSafeCore(t)
+	pkg.Agent.Language = ""
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Language != "en" {
+		t.Fatalf("language = %q", agent.Language)
 	}
 }
 

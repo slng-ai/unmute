@@ -131,33 +131,57 @@ func TestPipecatEmitterMatchesCapabilityTable(t *testing.T) {
 	}
 }
 
-// TestServiceInfoCoversEveryMappedClass guards the provider→service mapping: any
-// class the sttService/llmService/ttsService switches can emit MUST have a
-// serviceInfo entry, or collectImportsExtras silently drops its import and the
-// emitted bot.py won't run. (This is the gap that let `provider: slng` fall
-// through to OpenAITTSService with no real SlngTTSService import.)
-func TestServiceInfoCoversEveryMappedClass(t *testing.T) {
-	mapped := []string{
-		"DeepgramSTTService", "OpenAISTTService", "AssemblyAISTTService", "CartesiaSTTService",
-		"ElevenLabsSTTService", "GradiumSTTService", "SonioxSTTService", "SpeechmaticsSTTService", "SlngSTTService",
-		"OpenAILLMService", "AnthropicLLMService", "GoogleLLMService", "GroqLLMService",
-		"MistralLLMService", "DeepSeekLLMService", "OpenRouterLLMService", "QwenLLMService",
-		"ElevenLabsTTSService", "CartesiaTTSService", "DeepgramTTSService", "GradiumTTSService",
-		"InworldTTSService", "RimeTTSService", "SarvamHttpTTSService", "SonioxTTSService",
-		"SpeechmaticsTTSService", "OpenAITTSService", "SlngTTSService",
+// The serviceInfo coverage test (driver-pipecat V11) is superseded: class,
+// import, and install now travel together on one catalogue entry, so an
+// emitted class structurally cannot lose its import (TestCatalogInvariants in
+// internal/target). TestPipecatUnknownProviderFailsClosed keeps B1's failure
+// mode (a silent OpenAI-compatible substitution) explicitly covered.
+func TestPipecatUnknownProviderFailsClosed(t *testing.T) {
+	env := newEnvSet()
+	_, err := ttsService(ir.Binding{Provider: "acme", Model: "m", Voice: "v"}, "en", env)
+	if err == nil || !strings.Contains(err.Error(), "endpoint_env") {
+		t.Fatalf("unknown provider without endpoint_env must fail closed, got %v", err)
 	}
-	for _, class := range mapped {
-		info, ok := serviceInfo[class]
-		if !ok {
-			t.Errorf("service class %q has no serviceInfo entry (no import → broken bot.py)", class)
-			continue
+	svc, err := ttsService(ir.Binding{Provider: "acme", Model: "m", Voice: "v", EndpointEnv: "ACME_URL"}, "en", env)
+	if err != nil {
+		t.Fatalf("OpenAI-compatible endpoint path: %v", err)
+	}
+	if svc.Call.Class != "OpenAITTSService" || svc.APIKeyEnv != "ACME_API_KEY" {
+		t.Fatalf("wildcard resolution = %+v", svc)
+	}
+}
+
+// TestPipecatListenAssemblyAI is the new-provider recipe, proven end to end:
+// the assemblyai catalogue entry (added in the catalogue pilot) turns a
+// listen binding into the Settings-style constructor, its import, its extra,
+// and its env — with no driver or template change.
+func TestPipecatListenAssemblyAI(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tgt := targetByProvider(t, agent, ir.ProviderPipecat)
+	tgt.Models.Listen = &ir.Binding{Provider: "assemblyai", Model: "universal-3-5-pro"}
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"from pipecat.services.assemblyai.stt import AssemblyAISTTService",
+		"settings=AssemblyAISTTService.Settings(\n            model=\"universal-3-5-pro\",",
+		"api_key=os.environ[\"ASSEMBLYAI_API_KEY\"],",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing %q", want)
 		}
-		if info.Import == "" {
-			t.Errorf("service class %q has an empty import line", class)
-		}
-		if (info.Extra == "") == (info.Dep == "") {
-			t.Errorf("service class %q must set exactly one of Extra (pipecat-ai) or Dep (plugin), got extra=%q dep=%q", class, info.Extra, info.Dep)
-		}
+	}
+	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, "assemblyai") {
+		t.Error("pyproject.toml missing the assemblyai extra")
 	}
 }
 

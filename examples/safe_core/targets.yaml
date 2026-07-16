@@ -5,7 +5,7 @@
 targets:
   livekit-dev:
     provider: livekit
-    version: "1.2"              # framework pin; the driver checks its range
+    version: "1.5.2"            # framework pin; the driver checks its range (>=1.5, <2.0)
     sdk_language: python
     models:                     # all four roles are open on LiveKit
       listen: { provider: deepgram, model: nova-3 }

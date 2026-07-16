@@ -1,15 +1,17 @@
 === .env.example ===
-# Starter keys for the default target. Copy to `.env`, fill in, then run
+# Starter keys for the selected target. Copy to `.env`, fill in, then run
 # `unmute dev support-bot`. `unmute compile` writes an exact per-target
 # build/<target>/.env.example from your spec.
-SLNG_API_KEY=
+DAILY_API_KEY=
 OPENAI_API_KEY=
+SLNG_API_KEY=
 
 === agent.yaml ===
 # Portable voice-agent spec (SCHEMA.md v1). Edit this, then `unmute validate .`
 # and `unmute compile .`. Nothing here is provider-specific — that lives in
 # targets.yaml.
 version: 1
+language: en
 entry_agent: assistant
 
 pipeline:
@@ -48,7 +50,7 @@ capacity:
 You are a helpful voice assistant. This is a phone call, so keep every answer to one or two short sentences.
 
 === targets.yaml ===
-# One instance per target. The same portable agent.yaml compiles to each.
+# One selected target. Add more instances later if this package needs them.
 # Model names, voice ids, and params are forwarded to the provider as-is and
 # never validated. Secrets and URLs are env var names only.
 targets:
@@ -57,10 +59,10 @@ targets:
     version: "1.5.0"
     transport: daily-sip
     models:
-      # Speech in/out via SLNG (one SLNG_API_KEY, hosted STT + TTS); the LLM is
-      # OpenAI. See https://github.com/slng-ai/pipecat-slng for model ids.
+      # Speech in/out via the selected catalogue integrations. Model and voice
+      # identities are forwarded; the default remains SLNG + OpenAI.
       listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
-      turn:   { provider: local, model: silero }   # on-device turn detection (Silero VAD); no API key
+      turn:   { provider: local, model: silero }
       speak:
         assistant_voice: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
       reason:

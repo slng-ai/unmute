@@ -6,3 +6,4 @@ my-test-agent/
 
 # Compiled target projects (reproducible via `unmute compile`; goldens are the tracked form)
 examples/*/build/
+SPEC.md

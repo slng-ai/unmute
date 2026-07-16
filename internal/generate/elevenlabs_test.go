@@ -188,6 +188,17 @@ func TestElevenLabsUserSpeaksFirst(t *testing.T) { // V6
 	}
 }
 
+func TestElevenLabsLanguage(t *testing.T) {
+	agent := elWorkAgent(t)
+	agent.Language = "es-MX"
+	body := elBody(t, agent, targetByProvider(t, agent, ir.ProviderElevenLabs), "intake")
+	cc := body["conversation_config"].(map[string]any)
+	ab := cc["agent"].(map[string]any)
+	if ab["language"] != "es-MX" {
+		t.Fatalf("language = %v", ab["language"])
+	}
+}
+
 func TestElevenLabsCustomLLMEndpoint(t *testing.T) { // V9/C1
 	agent := elWorkAgent(t)
 	profile := agent.Models["fast_reasoning"]

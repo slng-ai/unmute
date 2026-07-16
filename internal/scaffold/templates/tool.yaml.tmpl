@@ -1,0 +1,9 @@
+description: [[quote .Description]]
+input: [[.Input]]
+[[if .Output]]output: [[.Output]]
+[[end]]execution: [[.ExecutionKind]]
+[[if .Handler]]handler: [[.Handler]]
+[[end]][[if .URLEnv]]url_env: [[.URLEnv]]
+[[end]]
+interruption: provider_default
+effect: returns_data
