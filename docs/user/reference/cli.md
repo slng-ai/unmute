@@ -58,13 +58,17 @@ For **managed** targets: reconcile the provider's live config to your spec. Run 
 ## dev
 
 ```sh
-unmute dev <agent-dir> [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
+unmute dev <agent-dir> [--target <name>] [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
 ```
 
-The fastest loop: compiles the **first Pipecat target** in the package to `build/<name>/`, runs it with `uv run bot.py`, serves a small web client, and opens it in your browser so you can talk to the agent.
+The fastest loop for a Pipecat instance: compiles the selected target to `build/<name>/`, runs it with `uv run bot.py`, serves a small web client, and opens it in your browser so you can talk to the agent.
+
+- With exactly one declared target, `dev` selects it automatically.
+- With multiple targets on an interactive terminal, `dev` always asks which instance to test and shows both instance name and provider. In a noninteractive shell, pass `--target <name>`; it never picks by YAML/map order or by preferring Pipecat.
+- `--target` dispatches that exact instance. The local browser runner is currently Pipecat-only: a selected LiveKit target points to `unmute compile`, a selected ElevenLabs target points to `unmute apply`, and unshipped providers report their own missing dev runner.
 
 - Requires `uv` on your `PATH` (see [install](../start/install.md)). Reads keys from a `.env` at the package root.
 - `--port` sets the dev UI port (default 8765); `--bot-port` sets the port the Pipecat runner listens on (default 7860).
 - `--no-open` skips opening the browser; `--verbose` streams agent logs to your terminal.
 - Agent logs are written to `build/<name>/bot.log`. Press `ctrl-c` to stop.
-- Fails clearly if no Pipecat target is declared, or if `uv` is not installed.
+- Fails clearly if no target is declared, the selected provider has no local runner, or `uv` is not installed.
