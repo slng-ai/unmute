@@ -422,6 +422,18 @@ func sttService(binding *ir.Binding, env *envSet) (pipecatService, error) {
 	switch binding.Provider {
 	case "deepgram":
 		svc.Class = "DeepgramSTTService"
+	case "assemblyai":
+		svc.Class = "AssemblyAISTTService"
+	case "cartesia":
+		svc.Class = "CartesiaSTTService"
+	case "elevenlabs", "eleven_labs":
+		svc.Class = "ElevenLabsSTTService"
+	case "gradium":
+		svc.Class = "GradiumSTTService"
+	case "soniox":
+		svc.Class = "SonioxSTTService"
+	case "speechmatics":
+		svc.Class = "SpeechmaticsSTTService"
 	case "slng":
 		svc.Class = "SlngSTTService" // pipecat-slng plugin: api_key + slng-format model
 	case "openai", "":
@@ -444,7 +456,27 @@ func llmService(binding ir.Binding, profile ir.ModelProfile, env *envSet) (pipec
 	if binding.Model == "" {
 		return pipecatService{}, fmt.Errorf("reason binding is missing a model")
 	}
-	svc := pipecatService{Class: "OpenAILLMService", Model: binding.Model, Params: forwardParams(binding.Params)}
+	svc := pipecatService{Model: binding.Model, Params: forwardParams(binding.Params)}
+	switch binding.Provider {
+	case "anthropic":
+		svc.Class = "AnthropicLLMService"
+	case "google":
+		svc.Class = "GoogleLLMService" // Gemini GenAI backend (GOOGLE_API_KEY)
+	case "groq":
+		svc.Class = "GroqLLMService"
+	case "mistral":
+		svc.Class = "MistralLLMService"
+	case "deepseek":
+		svc.Class = "DeepSeekLLMService"
+	case "openrouter":
+		svc.Class = "OpenRouterLLMService"
+	case "qwen":
+		svc.Class = "QwenLLMService"
+	case "openai", "":
+		svc.Class = "OpenAILLMService"
+	default:
+		svc.Class = "OpenAILLMService" // OpenAI-compatible custom endpoint
+	}
 	if binding.EndpointEnv != "" {
 		svc.BaseURL = binding.EndpointEnv
 		env.add(binding.EndpointEnv)
@@ -461,6 +493,20 @@ func ttsService(binding ir.Binding, env *envSet) (pipecatService, error) {
 		svc.Class = "ElevenLabsTTSService"
 	case "cartesia":
 		svc.Class = "CartesiaTTSService"
+	case "deepgram":
+		svc.Class = "DeepgramTTSService"
+	case "gradium":
+		svc.Class = "GradiumTTSService"
+	case "inworld":
+		svc.Class = "InworldTTSService"
+	case "rime":
+		svc.Class = "RimeTTSService"
+	case "sarvam":
+		svc.Class = "SarvamHttpTTSService"
+	case "soniox":
+		svc.Class = "SonioxTTSService"
+	case "speechmatics":
+		svc.Class = "SpeechmaticsTTSService"
 	case "slng":
 		svc.Class = "SlngTTSService" // pipecat-slng plugin: api_key + slng-format model + voice
 	case "openai", "":

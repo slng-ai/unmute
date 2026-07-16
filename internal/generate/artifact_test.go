@@ -21,13 +21,7 @@ func TestGenerateValidatesBeforeProviderDispatch(t *testing.T) { // V17
 
 func TestGenerateWarnOnlyReachesRemainingStubs(t *testing.T) { // V17
 	agent := loadCompilerAgent(t)
-	// LiveKit, Pipecat, and ElevenLabs are real drivers now; these two are still stubs.
-	for _, provider := range []ir.Provider{
-		ir.ProviderVapi, ir.ProviderDeepgram,
-	} {
-	// LiveKit, Pipecat, and ElevenLabs are real drivers now; Vapi and Deepgram
-	// are still stubs.
-	// LiveKit, Pipecat, and ElevenLabs are real drivers now; only these are stubs.
+	// LiveKit, Pipecat, and ElevenLabs are real drivers now; Vapi and Deepgram are still stubs.
 	for _, provider := range []ir.Provider{ir.ProviderVapi, ir.ProviderDeepgram} {
 		t.Run(string(provider), func(t *testing.T) {
 			artifact, err := Generate(agent, compilerTarget(agent, provider), target.Default())

@@ -138,9 +138,13 @@ func TestPipecatEmitterMatchesCapabilityTable(t *testing.T) {
 // through to OpenAITTSService with no real SlngTTSService import.)
 func TestServiceInfoCoversEveryMappedClass(t *testing.T) {
 	mapped := []string{
-		"DeepgramSTTService", "OpenAISTTService", "SlngSTTService",
-		"OpenAILLMService",
-		"ElevenLabsTTSService", "CartesiaTTSService", "SlngTTSService", "OpenAITTSService",
+		"DeepgramSTTService", "OpenAISTTService", "AssemblyAISTTService", "CartesiaSTTService",
+		"ElevenLabsSTTService", "GradiumSTTService", "SonioxSTTService", "SpeechmaticsSTTService", "SlngSTTService",
+		"OpenAILLMService", "AnthropicLLMService", "GoogleLLMService", "GroqLLMService",
+		"MistralLLMService", "DeepSeekLLMService", "OpenRouterLLMService", "QwenLLMService",
+		"ElevenLabsTTSService", "CartesiaTTSService", "DeepgramTTSService", "GradiumTTSService",
+		"InworldTTSService", "RimeTTSService", "SarvamHttpTTSService", "SonioxTTSService",
+		"SpeechmaticsTTSService", "OpenAITTSService", "SlngTTSService",
 	}
 	for _, class := range mapped {
 		info, ok := serviceInfo[class]
