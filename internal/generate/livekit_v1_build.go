@@ -55,12 +55,18 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.Agents = append(data.Agents, built)
 	}
 
-	// Tasks reached by any delegate (each group step).
+	// Tasks reached by any delegate: single tasks and each group step.
 	used := map[string]bool{}
 	for _, a := range data.Agents {
 		for _, d := range a.Delegates {
+			if d.Task != nil {
+				used[d.Task.ID] = true
+			}
 			for _, s := range d.Steps {
 				used[s.ID] = true
+			}
+			if len(d.Steps) > 0 {
+				data.NeedsTaskGroups = true
 			}
 		}
 	}
@@ -76,6 +82,18 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.Tasks = append(data.Tasks, built)
 	}
 	data.NeedsTasks = len(data.Tasks) > 0
+
+	// Typed shared state (SCHEMA 4.4): variables lower to a Userdata dataclass
+	// on the session; `assign` and `requires` read and write its fields.
+	for _, name := range sortedVarNames(agent) {
+		v := agent.Variables[name]
+		def := "None"
+		if v.Default != nil {
+			def = pyLiteral(v.Default)
+		}
+		data.Vars = append(data.Vars, livekitVar{Name: name, PyType: pyType(v.Type), Default: def})
+	}
+	data.HasVars = len(data.Vars) > 0
 
 	// Prompt constants, ordered agents-then-tasks for a stable file.
 	for _, a := range data.Agents {
@@ -237,7 +255,17 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 
 func buildLiveKitDelegate(agent *ir.Agent, ref string, c *ir.Delegate) (livekitDelegate, error) {
 	if c.Task != "" {
-		return livekitDelegate{}, fmt.Errorf("delegate %q: livekit driver emits task-group delegates only for now", ref)
+		if _, ok := agent.Tasks[c.Task]; !ok {
+			return livekitDelegate{}, fmt.Errorf("delegate %q references unknown task %q", ref, c.Task)
+		}
+		single := &livekitSingleTask{Class: pyName(c.Task), ID: c.Task}
+		for variable, path := range c.Assign {
+			single.Assign = append(single.Assign, livekitAssign{Var: variable, Field: strings.TrimPrefix(path, "result.")})
+		}
+		sort.Slice(single.Assign, func(i, j int) bool { return single.Assign[i].Var < single.Assign[j].Var })
+		// A single task always returns to the owner (SCHEMA 4.7); the AgentTask
+		// hands back the typed result only (C4/N13).
+		return livekitDelegate{Method: ref, When: delegateWhen(c), Task: single, Then: "return"}, nil
 	}
 	group, ok := agent.TaskGroups[c.Group]
 	if !ok {

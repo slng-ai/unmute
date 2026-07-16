@@ -297,12 +297,9 @@ func TestPreflightTaskAndOrderedGroup(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(dir, "tasks", "collect.md")); err != nil {
 				t.Fatal(err)
 			}
-			_, err = Preflight(data)
-			if provider == "livekit" {
-				if err == nil || !strings.Contains(err.Error(), "emits task-group delegates only") {
-					t.Fatalf("Preflight() error = %v", err)
-				}
-			} else if err != nil {
+			// Single-task delegates compile on every scaffolded target since
+			// driver-livekit T12 lifted the group-only refusal.
+			if _, err := Preflight(data); err != nil {
 				t.Fatalf("Preflight() = %v", err)
 			}
 		})

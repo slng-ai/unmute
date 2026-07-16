@@ -72,16 +72,40 @@ type livekitTransfer struct {
 	TargetClass string
 }
 
-// livekitDelegate builds a TaskGroup, awaits it, and hands control on per the
-// group's `then`: return the typed results to the owner (merge: results),
-// transfer to another agent, or end the call. N13: the flow's own turns never
-// land in the owner's context regardless of which path is taken.
+// livekitDelegate lowers a delegate control. A single task awaits its
+// AgentTask directly (typed-result-only return, C4) and applies `assign`; a
+// group builds a TaskGroup, awaits it, and hands control on per the group's
+// `then`: return the typed results to the owner (merge: results), transfer to
+// another agent, or end the call. N13: the flow's own turns never land in the
+// owner's context regardless of which path is taken.
 type livekitDelegate struct {
 	Method    string
 	When      string
+	Task      *livekitSingleTask // set for a single-task delegate; Steps empty
 	Steps     []livekitStep
 	Then      string // "return" | "transfer" | "end"
 	ThenClass string // target Agent class, set only for then: transfer
+}
+
+// livekitSingleTask is the task side of a single-task delegate: the AgentTask
+// class to await plus the `assign` writes into the typed userdata (N5).
+type livekitSingleTask struct {
+	Class  string
+	ID     string
+	Assign []livekitAssign
+}
+
+type livekitAssign struct {
+	Var   string
+	Field string
+}
+
+// livekitVar is one typed shared-state field on the generated Userdata
+// dataclass (SCHEMA 4.4; LiveKit session userdata).
+type livekitVar struct {
+	Name    string
+	PyType  string
+	Default string // Python literal; "None" when the spec declares none
 }
 
 type livekitStep struct {
@@ -127,14 +151,17 @@ type livekitData struct {
 	TurnVersion   string
 	Agents        []livekitAgent
 	Tasks         []livekitTask
+	Vars          []livekitVar
 	Prompts       []livekitPrompt
 	PluginModules []string // merged `from livekit.plugins import ...` names
 	Deps          []string
 	RequiredEnv   []string
 	Notes         []string
 
-	NeedsTasks bool // AgentTask / TaskGroup imports
-	NeedsHTTPX bool // any webhook tool
+	NeedsTasks      bool // AgentTask import
+	NeedsTaskGroups bool // beta.workflows TaskGroup import
+	NeedsHTTPX      bool // any webhook tool
+	HasVars         bool // Userdata dataclass + session userdata
 }
 
 // GenerateLiveKit lowers a validated agent + livekit target into a project. The

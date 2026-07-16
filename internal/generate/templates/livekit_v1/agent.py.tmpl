@@ -4,7 +4,8 @@ Classes, kwargs, and model-route forms come from the provider catalogue
 {{define "svc"}}{{.Class}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Key}}={{$a.Value}}{{end}}){{end -}}
 import logging
 import os
-{{if .NeedsHTTPX}}import httpx
+{{if .HasVars}}from dataclasses import dataclass
+{{end}}{{if .NeedsHTTPX}}import httpx
 {{end}}from dotenv import load_dotenv
 from livekit.agents import (
     NOT_GIVEN,
@@ -25,7 +26,7 @@ from livekit.agents import (
     llm,
     metrics,
 )
-{{- if .NeedsTasks}}
+{{- if .NeedsTaskGroups}}
 from livekit.agents.beta.workflows import TaskGroup
 {{- end}}
 from livekit.agents.voice import MetricsCollectedEvent
@@ -40,6 +41,16 @@ load_dotenv(".env.local")
 # --- prompts ---------------------------------------------------------------
 {{range .Prompts}}
 {{.Const}} = {{triple .Body}}
+{{end}}
+{{- if .HasVars}}
+# --- shared state ------------------------------------------------------------
+# Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
+@dataclass
+class Userdata:
+{{- range .Vars}}
+    {{.Name}}: {{.PyType}} | None = {{.Default}}
+{{- end}}
+
 {{end}}
 # --- agents ----------------------------------------------------------------
 {{range .Agents}}
@@ -77,6 +88,18 @@ class {{.Class}}(Agent):
         return {{.TargetClass}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
 {{end}}
 {{- range .Delegates}}
+{{- if .Task}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext) -> dict:
+        {{triple .When}}
+        result = await {{.Task.Class}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
+{{- range .Task.Assign}}
+        ctx.userdata.{{.Var}} = result[{{pyq .Field}}]
+{{- end}}
+        # C4/N13: the task's turns are not propagated back; the typed result is
+        # the only return.
+        return result
+{{- else}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{end}}:
         {{triple .When}}
@@ -109,6 +132,7 @@ class {{.Class}}(Agent):
         await group
         # then: end — the flow is the last thing on the call; this does not return.
         self.session.shutdown()
+{{- end}}
 {{- end}}
 {{end}}
 {{end}}
@@ -152,7 +176,10 @@ server.setup_fnc = prewarm
 
 @server.rtc_session(agent_name={{pyq .AgentName}})
 async def entrypoint(ctx: JobContext) -> None:
-    session = AgentSession(
+    session = AgentSession{{if .HasVars}}[Userdata]{{end}}(
+{{- if .HasVars}}
+        userdata=Userdata(),
+{{- end}}
         stt={{template "svc" .STT.Call}},
         llm={{template "svc" .SessionLLM.Call}},
         tts={{template "svc" .SessionTTS.Call}},

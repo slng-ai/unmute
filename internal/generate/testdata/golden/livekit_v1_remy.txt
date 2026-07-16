@@ -25,6 +25,7 @@ the spec and recompile.
 === agent.py ===
 import logging
 import os
+from dataclasses import dataclass
 import httpx
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -131,6 +132,13 @@ When you have all three, record them and finish. Do not quote prices, menus, or 
 
 
 When this step is complete, call `finish` with: date, headcount, occasion."""
+
+# --- shared state ------------------------------------------------------------
+# Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
+@dataclass
+class Userdata:
+    caller_phone: str | None = None
+
 
 # --- agents ----------------------------------------------------------------
 
@@ -318,7 +326,8 @@ server.setup_fnc = prewarm
 
 @server.rtc_session(agent_name="livekit-dev")
 async def entrypoint(ctx: JobContext) -> None:
-    session = AgentSession(
+    session = AgentSession[Userdata](
+        userdata=Userdata(),
         stt=slng.STT(api_key=os.environ.get("SLNG_API_KEY"), model="deepgram/nova:3-en", language="en"),
         llm=inference.LLM(model="openai/gpt-4o-mini", extra_kwargs={"temperature": 0.4}),
         tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-thalia-en", model="deepgram/aura:2-en", language="en"),

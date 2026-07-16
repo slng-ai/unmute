@@ -220,6 +220,47 @@ func TestLiveKitV1DelegateThenTransferAndEnd(t *testing.T) {
 	}
 }
 
+// TestLiveKitV1SingleTaskDelegate covers the T12 lowering (V1/V3): a delegate
+// with `task:` awaits the AgentTask directly, applies `assign` into the typed
+// userdata, and returns the typed result to the owner — no TaskGroup involved.
+func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Controls["do_find"] = &ir.Delegate{
+		Kind: ir.ControlDelegate, Task: "find_slot",
+		When:   "The caller only wants to check for a slot, not book yet.",
+		Assign: map[string]string{"caller_phone": "result.date"},
+	}
+	def := agent.Agents["reservations"]
+	def.Tools = append(def.Tools, "do_find")
+	agent.Agents["reservations"] = def
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		"async def do_find(self, ctx: RunContext) -> dict:",
+		"result = await FindSlot(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))",
+		`ctx.userdata.caller_phone = result["date"]`,
+		"@dataclass\nclass Userdata:",
+		"caller_phone: str | None = None",
+		"session = AgentSession[Userdata](",
+		"userdata=Userdata(),",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+}
+
 // TestCheckLiveKitVersion pins the template-compatible range (>=1.5, <2.0):
 // beta.workflows TaskGroup + AgentTask + inference are present from 1.5.x.
 func TestCheckLiveKitVersion(t *testing.T) {
