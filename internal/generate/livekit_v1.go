@@ -46,12 +46,23 @@ type livekitService struct {
 	Vendor string
 }
 
+// livekitLLM is a reason profile's resolved model plus its fallback chain
+// (V4): a non-empty Chain renders as llm.FallbackAdapter(llm=[...]).
+type livekitLLM struct {
+	Primary livekitService
+	Chain   []livekitService
+}
+
+func (l livekitLLM) services() []livekitService {
+	return append([]livekitService{l.Primary}, l.Chain...)
+}
+
 type livekitAgent struct {
 	Name        string
 	Class       string
 	PromptConst string
 	IsEntry     bool
-	LLM         *livekitService // set only when it differs from the session default
+	LLM         *livekitLLM     // set only when it differs from the session default
 	TTS         *livekitService // set only when it differs from the session default
 	Greeting    *livekitGreeting
 	Transfers   []livekitTransfer
@@ -66,10 +77,17 @@ type livekitGreeting struct {
 	Silent bool
 }
 
+// livekitTransfer carries the shaped context of an agent_transfer (V5): a
+// prebuilt Python expression for the handed-over ChatContext ("" = history:
+// reset, the target starts fresh), an optional generated summarizer, and the
+// userdata fields the transfer does not carry (context.variables subset).
 type livekitTransfer struct {
 	Method      string
 	When        string
 	TargetClass string
+	CtxExpr     string      // Python expr for chat_ctx=; "" = reset
+	Summary     *livekitLLM // set for history: summary — _summarize before handoff
+	ResetVars   []livekitVar
 }
 
 // livekitDelegate lowers a delegate control. A single task awaits its
@@ -89,11 +107,14 @@ type livekitDelegate struct {
 }
 
 // livekitSingleTask is the task side of a single-task delegate: the AgentTask
-// class to await plus the `assign` writes into the typed userdata (N5).
+// class to await plus the `assign` writes into the typed userdata (N5). The
+// task's own context (N12) shapes what the AgentTask sees on entry.
 type livekitSingleTask struct {
-	Class  string
-	ID     string
-	Assign []livekitAssign
+	Class   string
+	ID      string
+	Assign  []livekitAssign
+	CtxExpr string      // Python expr for chat_ctx=; "" = reset (fresh task)
+	Summary *livekitLLM // set for history: summary
 }
 
 type livekitAssign struct {
@@ -119,8 +140,8 @@ type livekitTask struct {
 	Name        string
 	Class       string
 	PromptConst string
-	LLM         *livekitService // per-task model override (B1); nil = session LLM
-	Result      []livekitArg    // finish() args + the completed result dict
+	LLM         *livekitLLM  // per-task model override (B1); nil = session LLM
+	Result      []livekitArg // finish() args + the completed result dict
 	Tools       []livekitTool
 }
 
@@ -148,7 +169,7 @@ type livekitData struct {
 	AgentName     string
 	EntryClass    string
 	STT           livekitService
-	SessionLLM    livekitService
+	SessionLLM    livekitLLM
 	SessionTTS    livekitService
 	TurnVersion   string
 	Agents        []livekitAgent
@@ -164,6 +185,8 @@ type livekitData struct {
 	NeedsTaskGroups bool // beta.workflows TaskGroup import
 	NeedsHTTPX      bool // any webhook tool
 	HasVars         bool // Userdata dataclass + session userdata
+	NeedsLastN      bool // the _last_n history helper
+	NeedsSummarize  bool // the _summarize history helper
 }
 
 // GenerateLiveKit lowers a validated agent + livekit target into a project. The

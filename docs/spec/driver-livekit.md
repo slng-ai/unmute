@@ -45,7 +45,7 @@ T1|x|LiveKit capability rows in the core table: TaskGroup→warn(Python only), w
 T2|x|`GenerateLiveKit` skeleton wired into the `generate.Artifact` switch|I.emit
 T3|~|`templates/livekit_v1/*.tmpl` — entrypoint, agents (handoff), pipeline roles (SLNG recipe), webhook tools, greeting done; channels/telephony + deploy files (Dockerfile/pcc) not emitted yet|I.templates,C2
 T4|~|`AgentTask` class + group-step path (typed result via `finish`) + task_group shared → TaskGroup(`summarize_chat_ctx=False`)+N13 snapshot/restore done; single-task delegate path refused today (→T12); isolated → standalone-AgentTask sequence not emitted yet (guarded, →T13)|V1,V2,V3,C3,C4
-T5|.|native `FallbackAdapter` fallback; `ChatContext` history for all five values + summarizer|V4,V5
+T5|x|native `FallbackAdapter` fallback; `ChatContext` history for all five values + summarizer|V4,V5
 T6|.|human_transfer cold/warm(python+Beta)/briefing summary; requires guards; voicemail AMD|V6,V7,V8
 T7|~|framework version range check done (>=1.5,<2.0); `sdk_language` mcp/node gate + per-SDK-language plugin `pins:` range check not done yet|C1,C7,V9
 T8|~|golden test done (Remy, byte-for-byte) + emitted agent.py passes `py_compile`; L4 smoke (build-tag, real import) not wired yet; safe_core→livekit needs human_transfer (T6)|V10

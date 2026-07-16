@@ -347,6 +347,97 @@ func TestLiveKitV1PerTaskModel(t *testing.T) {
 	}
 }
 
+// TestLiveKitV1HistoryShapingAndFallback covers the T5 lowerings (V4/V5):
+// every history value compiles, include_tool_calls and variables subsets
+// shape the handoff, and a fallback chain lowers to llm.FallbackAdapter.
+func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fallback chain on the session profile.
+	profile := agent.Models["reasoning"]
+	profile.Fallback = []string{"backup"}
+	agent.Models["reasoning"] = profile
+	agent.Models["backup"] = ir.ModelProfile{Placement: ir.PlacementAPI}
+	// Shape each transfer differently.
+	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
+	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
+	toRes.Context.History = ir.HistoryMessages
+	toRes.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}} // visit_count not carried
+	toEvents := agent.Controls["to_events"].(*ir.AgentTransfer)
+	toEvents.Context.History = ir.HistoryLastN
+	toEvents.Context.MaxMessages = 6
+	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
+	back.Context.History = ir.HistorySummary
+	back.Context.Summarizer = "backup"
+
+	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+	tgt.Models.Reason["backup"] = ir.Binding{Model: "openai/gpt-4o"}
+
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		// V4: native adapter around the chain, everywhere the profile binds.
+		`llm=llm.FallbackAdapter(llm=[inference.LLM(model="openai/gpt-4o-mini", extra_kwargs={"temperature": 0.4}), inference.LLM(model="openai/gpt-4o")])`,
+		// V5: messages / last_n / summary shaping.
+		`return Reservations(chat_ctx=llm.ChatContext(items=[m for m in self.chat_ctx.messages() if m.role in ("user", "assistant")]))`,
+		`return Events(chat_ctx=_last_n(self.chat_ctx, 6))`,
+		"def _last_n(source: llm.ChatContext",
+		`summary_ctx = await _summarize(self.chat_ctx, inference.LLM(model="openai/gpt-4o"))`,
+		"return Greeter(chat_ctx=summary_ctx)",
+		"async def _summarize(source: llm.ChatContext",
+		// D7: an uncarried variable resets on the transfer.
+		"ctx.userdata.visit_count = None  # context.variables: not carried on this transfer",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+}
+
+// TestLiveKitV1HistoryResetAndToolCallShaping covers reset transfers and
+// include_tool_calls: false (V5): reset hands the target a fresh context;
+// exclude_function_call strips tool traffic from a full handoff.
+func TestLiveKitV1HistoryResetAndToolCallShaping(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noCalls := false
+	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
+	toRes.Context.History = ir.HistoryFull
+	toRes.Context.IncludeToolCalls = &noCalls
+	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
+	back.Context.History = ir.HistoryReset
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		`return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True))`,
+		"# history: reset — the target starts fresh (a handoff marker still lands).",
+		"return Greeter()",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+}
+
 // TestCheckLiveKitVersion pins the template-compatible range (>=1.5, <2.0):
 // beta.workflows TaskGroup + AgentTask + inference are present from 1.5.x.
 func TestCheckLiveKitVersion(t *testing.T) {

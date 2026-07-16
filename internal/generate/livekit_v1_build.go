@@ -38,7 +38,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		return livekitData{}, err
 	}
 	data.STT = stt
-	data.SessionLLM, err = livekitLLMService(tgt.Models.Reason[entry.Model], env)
+	data.SessionLLM, err = livekitReasonLLM(agent, tgt, entry.Model, env)
 	if err != nil {
 		return livekitData{}, fmt.Errorf("entry agent %q: %w", agent.EntryAgent, err)
 	}
@@ -82,6 +82,20 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.Tasks = append(data.Tasks, built)
 	}
 	data.NeedsTasks = len(data.Tasks) > 0
+
+	// History-shaping helpers emit only when a transfer or task uses them (V5).
+	for _, a := range data.Agents {
+		for _, tr := range a.Transfers {
+			data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(tr.CtxExpr, "_last_n(")
+			data.NeedsSummarize = data.NeedsSummarize || tr.Summary != nil
+		}
+		for _, d := range a.Delegates {
+			if d.Task != nil {
+				data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(d.Task.CtxExpr, "_last_n(")
+				data.NeedsSummarize = data.NeedsSummarize || d.Task.Summary != nil
+			}
+		}
+	}
 
 	// Typed shared state (SCHEMA 4.4): variables lower to a Userdata dataclass
 	// on the session; `assign` and `requires` read and write its fields.
@@ -129,18 +143,29 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 
 // livekitServices lists every resolved service in the template model.
 func livekitServices(data livekitData) []livekitService {
-	services := []livekitService{data.STT, data.SessionLLM, data.SessionTTS}
+	services := []livekitService{data.STT, data.SessionTTS}
+	services = append(services, data.SessionLLM.services()...)
 	for _, a := range data.Agents {
 		if a.LLM != nil {
-			services = append(services, *a.LLM)
+			services = append(services, a.LLM.services()...)
 		}
 		if a.TTS != nil {
 			services = append(services, *a.TTS)
 		}
+		for _, tr := range a.Transfers {
+			if tr.Summary != nil {
+				services = append(services, tr.Summary.services()...)
+			}
+		}
+		for _, d := range a.Delegates {
+			if d.Task != nil && d.Task.Summary != nil {
+				services = append(services, d.Task.Summary.services()...)
+			}
+		}
 	}
 	for _, t := range data.Tasks {
 		if t.LLM != nil {
-			services = append(services, *t.LLM)
+			services = append(services, t.LLM.services()...)
 		}
 	}
 	return services
@@ -176,11 +201,6 @@ func livekitServiceNotes(data livekitData) []string {
 // livekitGuards fails loud on features the driver does not emit yet, so a spec
 // that validates green never silently loses behavior on LiveKit.
 func livekitGuards(agent *ir.Agent) error {
-	for name, mp := range agent.Models {
-		if len(mp.Fallback) > 0 {
-			return fmt.Errorf("livekit driver does not emit model fallback yet (model %q)", name)
-		}
-	}
 	if c := agent.Conversation; c != nil {
 		if c.ThinkingAudio != "" {
 			return fmt.Errorf("livekit driver does not emit thinking_audio yet")
@@ -203,7 +223,7 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 		IsEntry: name == agent.EntryAgent,
 	}
 	if def.Model != entry.Model {
-		llm, err := livekitLLMService(tgt.Models.Reason[def.Model], env)
+		llm, err := livekitReasonLLM(agent, tgt, def.Model, env)
 		if err != nil {
 			return livekitAgent{}, fmt.Errorf("agent %q: %w", name, err)
 		}
@@ -232,16 +252,42 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 			if len(c.Requires) > 0 {
 				return livekitAgent{}, fmt.Errorf("agent %q transfer %q: livekit driver does not emit transfer requires yet", name, ref)
 			}
-			if c.Context.History != ir.HistoryFull {
-				return livekitAgent{}, fmt.Errorf("agent %q transfer %q: livekit driver emits transfer history: full only for now", name, ref)
-			}
-			built.Transfers = append(built.Transfers, livekitTransfer{
+			transfer := livekitTransfer{
 				Method: ref, When: transferWhen(c), TargetClass: pyName(c.To),
-			})
+			}
+			if c.Context.History == ir.HistorySummary {
+				summarizer, err := livekitReasonLLM(agent, tgt, c.Context.Summarizer, env)
+				if err != nil {
+					return livekitAgent{}, fmt.Errorf("agent %q transfer %q summarizer: %w", name, ref, err)
+				}
+				transfer.Summary = &summarizer
+			} else {
+				transfer.CtxExpr, _ = livekitCtxExpr(c.Context.TaskContext)
+			}
+			// context.variables (D7): a subset resets the fields the transfer
+			// does not carry; `all` carries the userdata untouched.
+			if !c.Context.Variables.All {
+				carried := map[string]bool{}
+				for _, n := range c.Context.Variables.Names {
+					carried[n] = true
+				}
+				for _, vname := range sortedVarNames(agent) {
+					if carried[vname] {
+						continue
+					}
+					v := agent.Variables[vname]
+					def := "None"
+					if v.Default != nil {
+						def = pyLiteral(v.Default)
+					}
+					transfer.ResetVars = append(transfer.ResetVars, livekitVar{Name: vname, PyType: pyType(v.Type), Default: def})
+				}
+			}
+			built.Transfers = append(built.Transfers, transfer)
 		case *ir.HumanTransfer:
 			return livekitAgent{}, fmt.Errorf("agent %q: livekit driver does not emit human_transfer yet (%q)", name, ref)
 		case *ir.Delegate:
-			delegate, err := buildLiveKitDelegate(agent, ref, c)
+			delegate, err := buildLiveKitDelegate(agent, tgt, ref, c, env)
 			if err != nil {
 				return livekitAgent{}, fmt.Errorf("agent %q: %w", name, err)
 			}
@@ -251,12 +297,24 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 	return built, nil
 }
 
-func buildLiveKitDelegate(agent *ir.Agent, ref string, c *ir.Delegate) (livekitDelegate, error) {
+func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, env *envSet) (livekitDelegate, error) {
 	if c.Task != "" {
-		if _, ok := agent.Tasks[c.Task]; !ok {
+		task, ok := agent.Tasks[c.Task]
+		if !ok {
 			return livekitDelegate{}, fmt.Errorf("delegate %q references unknown task %q", ref, c.Task)
 		}
 		single := &livekitSingleTask{Class: pyName(c.Task), ID: c.Task}
+		// The task's own context (N12) shapes its entry; group steps instead
+		// take the group's scope (SCHEMA 4.6), handled in the group path.
+		if task.Context.History == ir.HistorySummary {
+			summarizer, err := livekitReasonLLM(agent, tgt, task.Context.Summarizer, env)
+			if err != nil {
+				return livekitDelegate{}, fmt.Errorf("delegate %q task %q summarizer: %w", ref, c.Task, err)
+			}
+			single.Summary = &summarizer
+		} else {
+			single.CtxExpr, _ = livekitCtxExpr(task.Context)
+		}
 		for variable, path := range c.Assign {
 			single.Assign = append(single.Assign, livekitAssign{Var: variable, Field: strings.TrimPrefix(path, "result.")})
 		}
@@ -295,19 +353,16 @@ func buildLiveKitDelegate(agent *ir.Agent, ref string, c *ir.Delegate) (livekitD
 }
 
 func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *envSet) (livekitTask, error) {
-	if task.Context.History != ir.HistoryFull {
-		return livekitTask{}, fmt.Errorf("task %q: livekit driver emits history: full only for now", name)
-	}
 	built := livekitTask{Name: name, Class: pyName(name), PromptConst: promptConst(name)}
 	// Per-task model (B1): AgentTask takes its own llm=, resolved through the
 	// catalogue like any per-agent override. Same profile as the entry agent =
 	// the session default, no kwarg.
 	if task.Model != "" && task.Model != agent.Agents[agent.EntryAgent].Model {
-		svc, err := livekitLLMService(tgt.Models.Reason[task.Model], env)
+		taskLLM, err := livekitReasonLLM(agent, tgt, task.Model, env)
 		if err != nil {
 			return livekitTask{}, fmt.Errorf("task %q model %q: %w", name, task.Model, err)
 		}
-		built.LLM = &svc
+		built.LLM = &taskLLM
 	}
 	for _, fname := range sortedResultNames(task.Result) {
 		field := task.Result[fname]
@@ -364,6 +419,49 @@ func livekitTTSService(binding ir.Binding, language string, env *envSet) (liveki
 
 func livekitLLMService(binding ir.Binding, env *envSet) (livekitService, error) {
 	return resolveLiveKitService(targetcap.Reason, binding, "", env)
+}
+
+// livekitReasonLLM resolves a reason profile plus its fallback chain (V4).
+// Every profile in the chain must carry its own reason binding; validation
+// has already checked slot kind, placement, and cycles.
+func livekitReasonLLM(agent *ir.Agent, tgt ir.Target, profile string, env *envSet) (livekitLLM, error) {
+	primary, err := livekitLLMService(tgt.Models.Reason[profile], env)
+	if err != nil {
+		return livekitLLM{}, fmt.Errorf("model %q: %w", profile, err)
+	}
+	out := livekitLLM{Primary: primary}
+	for _, fb := range agent.Models[profile].Fallback {
+		svc, err := livekitLLMService(tgt.Models.Reason[fb], env)
+		if err != nil {
+			return livekitLLM{}, fmt.Errorf("model %q fallback %q: %w", profile, fb, err)
+		}
+		out.Chain = append(out.Chain, svc)
+	}
+	return out, nil
+}
+
+// livekitCtxExpr lowers a context block's history shaping (V5) to a Python
+// expression for the handed-over ChatContext. "" means history: reset — the
+// receiver starts fresh. history: summary is handled by the caller (it needs
+// an await, not an expression). needsLastN reports use of the _last_n helper.
+func livekitCtxExpr(c ir.TaskContext) (expr string, needsLastN bool) {
+	excludeCalls := c.IncludeToolCalls != nil && !*c.IncludeToolCalls
+	switch c.History {
+	case ir.HistoryReset:
+		return "", false
+	case ir.HistoryMessages:
+		return `llm.ChatContext(items=[m for m in self.chat_ctx.messages() if m.role in ("user", "assistant")])`, false
+	case ir.HistoryLastN:
+		if excludeCalls {
+			return fmt.Sprintf("_last_n(self.chat_ctx, %d, exclude_function_call=True)", c.MaxMessages), true
+		}
+		return fmt.Sprintf("_last_n(self.chat_ctx, %d)", c.MaxMessages), true
+	default: // full
+		if excludeCalls {
+			return "self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True)", false
+		}
+		return "self.chat_ctx.copy(exclude_instructions=True)", false
+	}
 }
 
 // --- small helpers ---------------------------------------------------------

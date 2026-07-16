@@ -2,6 +2,9 @@
 Classes, kwargs, and model-route forms come from the provider catalogue
 (internal/target/catalog_livekit.go). */ -}}
 {{define "svc"}}{{.Class}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Key}}={{$a.Value}}{{end}}){{end -}}
+{{- /* llmexpr renders a reason profile: bare service, or the native
+llm.FallbackAdapter around its fallback chain (V4). */ -}}
+{{define "llmexpr"}}{{if .Chain}}llm.FallbackAdapter(llm=[{{template "svc" .Primary.Call}}{{range .Chain}}, {{template "svc" .Call}}{{end}}]){{else}}{{template "svc" .Primary.Call}}{{end}}{{end -}}
 import logging
 import os
 {{if .HasVars}}from dataclasses import dataclass
@@ -42,6 +45,37 @@ load_dotenv(".env.local")
 {{range .Prompts}}
 {{.Const}} = {{triple .Body}}
 {{end}}
+{{- if or .NeedsLastN .NeedsSummarize}}
+# --- context shaping ---------------------------------------------------------
+{{- if .NeedsLastN}}
+def _last_n(source: llm.ChatContext, n: int, *, exclude_function_call: bool = False) -> llm.ChatContext:
+    """history: last_n — the newest n items; truncate() keeps call/output pairs."""
+    ctx = source.copy(exclude_instructions=True, exclude_function_call=exclude_function_call)
+    ctx.truncate(max_items=n)
+    return ctx
+{{end}}
+{{- if .NeedsSummarize}}
+async def _summarize(source: llm.ChatContext, summarizer: llm.LLM) -> llm.ChatContext:
+    """history: summary — one summarizer turn replaces the running transcript."""
+    transcript = "\n".join(
+        f"{m.role}: {m.text_content}" for m in source.messages() if m.text_content
+    )
+    prompt = llm.ChatContext()
+    prompt.add_message(
+        role="system",
+        content="Summarize this conversation for the agent taking over. Keep names, facts, and open commitments. Reply with the summary only.",
+    )
+    prompt.add_message(role="user", content=transcript)
+    parts: list[str] = []
+    async with summarizer.chat(chat_ctx=prompt) as stream:
+        async for chunk in stream:
+            if chunk.delta and chunk.delta.content:
+                parts.append(chunk.delta.content)
+    out = llm.ChatContext()
+    out.add_message(role="assistant", content="Summary of the conversation so far: " + "".join(parts))
+    return out
+{{end}}
+{{end}}
 {{- if .HasVars}}
 # --- shared state ------------------------------------------------------------
 # Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
@@ -60,7 +94,7 @@ class {{.Class}}(Agent):
             instructions={{.PromptConst}},
             chat_ctx=chat_ctx,
 {{- if .LLM}}
-            llm={{template "svc" .LLM.Call}},
+            llm={{template "llmexpr" .LLM}},
 {{- end}}
 {{- if .TTS}}
             tts={{template "svc" .TTS.Call}},
@@ -85,14 +119,32 @@ class {{.Class}}(Agent):
     @function_tool
     async def {{.Method}}(self, ctx: RunContext):
         {{triple .When}}
-        return {{.TargetClass}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
+{{- range .ResetVars}}
+        ctx.userdata.{{.Name}} = {{.Default}}  # context.variables: not carried on this transfer
+{{- end}}
+{{- if .Summary}}
+        summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Summary}})
+        return {{.TargetClass}}(chat_ctx=summary_ctx)
+{{- else if .CtxExpr}}
+        return {{.TargetClass}}(chat_ctx={{.CtxExpr}})
+{{- else}}
+        # history: reset — the target starts fresh (a handoff marker still lands).
+        return {{.TargetClass}}()
+{{- end}}
 {{end}}
 {{- range .Delegates}}
 {{- if .Task}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext) -> dict:
         {{triple .When}}
-        result = await {{.Task.Class}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
+{{- if .Task.Summary}}
+        summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Task.Summary}})
+        result = await {{.Task.Class}}(chat_ctx=summary_ctx)
+{{- else if .Task.CtxExpr}}
+        result = await {{.Task.Class}}(chat_ctx={{.Task.CtxExpr}})
+{{- else}}
+        result = await {{.Task.Class}}()  # history: reset — the task starts fresh
+{{- end}}
 {{- range .Task.Assign}}
         ctx.userdata.{{.Var}} = result[{{pyq .Field}}]
 {{- end}}
@@ -162,7 +214,7 @@ class {{.Class}}(Agent):
 {{range .Tasks}}
 class {{.Class}}(AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
-        super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "svc" .LLM.Call}}{{end}})
+        super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}})
 
     async def on_enter(self) -> None:
         self.session.generate_reply(instructions="Begin this step.")
@@ -202,7 +254,7 @@ async def entrypoint(ctx: JobContext) -> None:
         userdata=Userdata(),
 {{- end}}
         stt={{template "svc" .STT.Call}},
-        llm={{template "svc" .SessionLLM.Call}},
+        llm={{template "llmexpr" .SessionLLM}},
         tts={{template "svc" .SessionTTS.Call}},
         turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector(version={{pyq .TurnVersion}})),
         vad=ctx.proc.userdata["vad"],
