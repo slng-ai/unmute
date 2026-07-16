@@ -62,7 +62,10 @@ Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
 graph are baked in from the spec. Secret values are read from the environment
 and never written here. The agency model uses the Pipecat workers API: a main
 PipelineWorker owns the transport + STT, each agent is an LLMWorker with its own
-LLM and voice, and agent_transfer is activate_worker().
+LLM and voice, and agent_transfer is activate_worker(). Tasks and task groups
+run as Pipecat Flows on the owning agent: a delegate tool snapshots the shared
+context, a FlowManager walks the steps as nodes, and control returns with only
+the typed results.
 """
 
 from __future__ import annotations

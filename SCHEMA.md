@@ -172,7 +172,7 @@ A `task` is delegate-and-return: control comes back to the owning agent with a t
 |---|---|---|---|---|
 | `instructions` | yes | path | | |
 | `tools` | no | list of names | | |
-| `model` | no | model profile name | gated | Per-task override. On Pipecat it lowers via `LLMSwitcher` (per-node model switching, `llm_switching.py`), both standalone and inside a task_group step (review-corrected 2026-07-15: was gated inside a group on the false premise that a Flow chain stays on one LLM service). |
+| `model` | no | model profile name | gated | Per-task override. **Fails on Pipecat** — a maturity gate, not a platform limit (runtime-verified 2026-07-16: an `LLMSwitcher` inside an `LLMWorker` pipeline stalls all flow frames on pipecat-ai 1.5.0, so the driver has no working lowering; driver-pipecat B7. Review-corrected 2026-07-15 the other way on docs alone — the spike overrode it). |
 | `result` | yes | flat map: name to `string \| number \| boolean \| integer \| {enum: [a, b]}` | core shape | Nested schemas only when every configured target is a code target. |
 | `context` | yes | transfer context block without `variables` (N12), `history` required | gated | See 4.7 and the history table. |
 

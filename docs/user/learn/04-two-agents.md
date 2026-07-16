@@ -97,7 +97,7 @@ controls:
 
 ## What Pipecat generates
 
-Each agent is its own worker with its own model and voice. The transfer becomes a method that activates the target worker and steps the current one aside:
+Each agent is its own worker with its own model and voice. The transfer becomes a method that activates the target worker and steps the current one aside (LiveKit does the same thing with different machinery; see [how targets run your agent](../concepts/how-targets-run-your-agent.md)):
 
 ```python
 @tool(cancel_on_interruption=False)

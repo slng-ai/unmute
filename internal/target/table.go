@@ -235,7 +235,10 @@ func Default() Table {
 				deny(Vapi, "Vapi return-to-prior-assistant is unverified"),
 				warn(ElevenLabs, "ElevenLabs keeps task turns in the owner's running transcript"),
 			),
-			FieldTaskModel: field(),
+			// Verified 2026-07-16: an LLMSwitcher inside an LLMWorker pipeline
+			// stalls all flow frames on pipecat-ai 1.5.0, so per-task model has
+			// no working lowering there yet (driver-pipecat B7 spike).
+			FieldTaskModel: field(deny(Pipecat, "the Pipecat driver does not emit per-task model yet (LLMSwitcher stalls inside an LLMWorker)")),
 			FieldTaskNestedResult: field(
 				deny(Vapi, "Vapi cannot enforce nested task results"),
 				deny(ElevenLabs, "ElevenLabs cannot enforce nested task results"),
