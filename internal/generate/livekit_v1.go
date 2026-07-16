@@ -119,7 +119,8 @@ type livekitTask struct {
 	Name        string
 	Class       string
 	PromptConst string
-	Result      []livekitArg // finish() args + the completed result dict
+	LLM         *livekitService // per-task model override (B1); nil = session LLM
+	Result      []livekitArg    // finish() args + the completed result dict
 	Tools       []livekitTool
 }
 

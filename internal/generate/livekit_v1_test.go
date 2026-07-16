@@ -313,6 +313,40 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 	}
 }
 
+// TestLiveKitV1PerTaskModel covers the T14 lowering (B1/V1/V15): a task with
+// its own model profile gets llm= on the AgentTask, resolved through the
+// catalogue; a task on the entry agent's profile stays on the session LLM.
+func TestLiveKitV1PerTaskModel(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Models["fast"] = ir.ModelProfile{Placement: ir.PlacementAPI}
+	task := agent.Tasks["find_slot"]
+	task.Model = "fast"
+	agent.Tasks["find_slot"] = task
+	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+	tgt.Models.Reason["fast"] = ir.Binding{Model: "openai/gpt-4o-mini"}
+
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	want := `super().__init__(instructions=FIND_SLOT_PROMPT, chat_ctx=chat_ctx, llm=inference.LLM(model="openai/gpt-4o-mini"))`
+	if !strings.Contains(botpy, want) {
+		t.Errorf("agent.py missing per-task llm override %q", want)
+	}
+	// The other tasks keep the session LLM: no stray llm= kwarg.
+	if !strings.Contains(botpy, "super().__init__(instructions=CONFIRM_BOOKING_PROMPT, chat_ctx=chat_ctx)") {
+		t.Error("confirm_booking must stay on the session LLM")
+	}
+}
+
 // TestCheckLiveKitVersion pins the template-compatible range (>=1.5, <2.0):
 // beta.workflows TaskGroup + AgentTask + inference are present from 1.5.x.
 func TestCheckLiveKitVersion(t *testing.T) {

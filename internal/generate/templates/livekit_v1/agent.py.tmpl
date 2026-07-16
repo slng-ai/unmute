@@ -162,7 +162,7 @@ class {{.Class}}(Agent):
 {{range .Tasks}}
 class {{.Class}}(AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
-        super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx)
+        super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "svc" .LLM.Call}}{{end}})
 
     async def on_enter(self) -> None:
         self.session.generate_reply(instructions="Begin this step.")

@@ -75,7 +75,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		if !ok {
 			return livekitData{}, fmt.Errorf("task group step %q is not a task", name)
 		}
-		built, err := buildLiveKitTask(agent, name, task, env)
+		built, err := buildLiveKitTask(agent, tgt, name, task, env)
 		if err != nil {
 			return livekitData{}, err
 		}
@@ -138,6 +138,11 @@ func livekitServices(data livekitData) []livekitService {
 			services = append(services, *a.TTS)
 		}
 	}
+	for _, t := range data.Tasks {
+		if t.LLM != nil {
+			services = append(services, *t.LLM)
+		}
+	}
 	return services
 }
 
@@ -174,13 +179,6 @@ func livekitGuards(agent *ir.Agent) error {
 	for name, mp := range agent.Models {
 		if len(mp.Fallback) > 0 {
 			return fmt.Errorf("livekit driver does not emit model fallback yet (model %q)", name)
-		}
-	}
-	// B1 interim: fail loud instead of silently running the task on the session
-	// LLM. T14 replaces this with the AgentTask(llm=...) lowering.
-	for name, task := range agent.Tasks {
-		if task.Model != "" {
-			return fmt.Errorf("livekit driver does not emit per-task model yet (task %q)", name)
 		}
 	}
 	if c := agent.Conversation; c != nil {
@@ -296,11 +294,21 @@ func buildLiveKitDelegate(agent *ir.Agent, ref string, c *ir.Delegate) (livekitD
 	return delegate, nil
 }
 
-func buildLiveKitTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (livekitTask, error) {
+func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *envSet) (livekitTask, error) {
 	if task.Context.History != ir.HistoryFull {
 		return livekitTask{}, fmt.Errorf("task %q: livekit driver emits history: full only for now", name)
 	}
 	built := livekitTask{Name: name, Class: pyName(name), PromptConst: promptConst(name)}
+	// Per-task model (B1): AgentTask takes its own llm=, resolved through the
+	// catalogue like any per-agent override. Same profile as the entry agent =
+	// the session default, no kwarg.
+	if task.Model != "" && task.Model != agent.Agents[agent.EntryAgent].Model {
+		svc, err := livekitLLMService(tgt.Models.Reason[task.Model], env)
+		if err != nil {
+			return livekitTask{}, fmt.Errorf("task %q model %q: %w", name, task.Model, err)
+		}
+		built.LLM = &svc
+	}
 	for _, fname := range sortedResultNames(task.Result) {
 		field := task.Result[fname]
 		if field.Schema != nil {
