@@ -215,10 +215,11 @@ func (d *Data) SetTarget(provider string) {
 	d.Region = ""
 	d.Edition = ""
 	d.Pins = ""
-	if provider == "pipecat" {
+	switch provider {
+	case "pipecat":
 		d.Transport = "daily-sip"
 		d.TargetVersion = "1.5.0"
-	} else if provider == "livekit" {
+	case "livekit":
 		d.TargetVersion = "1.5.2"
 		d.SDKLanguage = "python"
 	}
