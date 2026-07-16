@@ -98,6 +98,8 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 				huh.NewOption("Models  ·  "+modelsLabel(result.Agent.Data), "models"),
 				huh.NewOption("Instructions (prompt)", "prompt"),
 				huh.NewOption("Greeting  ·  "+result.Agent.Data.Greeting, "greeting"),
+				huh.NewOption(fmt.Sprintf("Variables  ·  %d", len(result.Agent.Data.Variables)), "variables"),
+				huh.NewOption(fmt.Sprintf("Webhook tools  ·  %d", len(result.Agent.Data.Tools)), "tools"),
 				huh.NewOption("Compile after create  ·  "+compile, "compile"),
 				huh.NewOption("Create agent", "save"),
 				huh.NewOption("← Back", actionBack),
@@ -142,6 +144,14 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			}
 		case "greeting":
 			if _, err := runner.input("Greeting", "", &result.Agent.Data.Greeting, validateBasic); err != nil {
+				return Result{}, false, err
+			}
+		case "variables":
+			if err := editVariables(runner, &result.Agent.Data); err != nil {
+				return Result{}, false, err
+			}
+		case "tools":
+			if err := editTools(runner, &result.Agent.Data); err != nil {
 				return Result{}, false, err
 			}
 		case "compile":
@@ -350,6 +360,113 @@ func providerOptions(framework targetcap.Provider, role targetcap.Role) []huh.Op
 	return options
 }
 
+func editVariables(runner *fieldRunner, data *scaffold.Data) error {
+	for {
+		choice := actionBack
+		_, err := runner.run(huh.NewSelect[string]().Title("Variables").Options(
+			huh.NewOption("Add variable", "add"),
+			huh.NewOption("← Back", actionBack),
+		).Value(&choice), true)
+		if err != nil || choice == actionBack {
+			return err
+		}
+		variable := scaffold.Variable{Type: "string"}
+		back, err := runner.input("Variable name", "Lowercase snake_case.", &variable.Name, func(value string) error {
+			if err := validateIdentifier(value); err != nil {
+				return err
+			}
+			for _, existing := range data.Variables {
+				if existing.Name == value {
+					return errors.New("variable already exists")
+				}
+			}
+			return nil
+		})
+		if err != nil || back {
+			continue
+		}
+		back, err = runner.run(huh.NewSelect[string]().Title("Variable type").Options(
+			huh.NewOption("string", "string"), huh.NewOption("number", "number"),
+			huh.NewOption("boolean", "boolean"), huh.NewOption("integer", "integer"),
+			huh.NewOption("← Back", actionBack),
+		).Value(&variable.Type), true)
+		if err != nil {
+			return err
+		}
+		if back || variable.Type == actionBack {
+			continue
+		}
+		back, err = runner.input("Default (optional JSON value)", `Examples: "guest", false, 42. Blank means no default.`, &variable.Default, func(value string) error {
+			return validateVariableDefault(variable.Type, value)
+		})
+		if err != nil || back {
+			continue
+		}
+		source := "none"
+		back, err = runner.run(huh.NewSelect[string]().Title("Value source").Options(
+			huh.NewOption("No external source", "none"),
+			huh.NewOption("Required at call start", "call_start"),
+			huh.NewOption("← Back", actionBack),
+		).Value(&source), true)
+		if err != nil {
+			return err
+		}
+		if back || source == actionBack {
+			continue
+		}
+		if source != "none" {
+			variable.Source = source
+		}
+		data.Variables = append(data.Variables, variable)
+	}
+}
+
+func editTools(runner *fieldRunner, data *scaffold.Data) error {
+	if data.Target == string(targetcap.LiveKit) {
+		fmt.Fprintln(runner.out, "Webhook tools on agents are unavailable for LiveKit: its current driver emits webhook tools on tasks only.")
+		return nil
+	}
+	for {
+		choice := actionBack
+		_, err := runner.run(huh.NewSelect[string]().
+			Title("Webhook tools").
+			Description(runner.describe("New tools attach to the current entry agent.")).
+			Options(huh.NewOption("Add webhook tool", "add"), huh.NewOption("← Back", actionBack)).
+			Value(&choice), true)
+		if err != nil || choice == actionBack {
+			return err
+		}
+		tool := scaffold.Tool{Input: `{"type":"object","properties":{}}`}
+		back, err := runner.input("Tool name", "Lowercase snake_case.", &tool.Name, func(value string) error {
+			if err := validateIdentifier(value); err != nil {
+				return err
+			}
+			for _, existing := range data.Tools {
+				if existing.Name == value {
+					return errors.New("tool already exists")
+				}
+			}
+			return nil
+		})
+		if err != nil || back {
+			continue
+		}
+		if back, err = runner.input("Description", "What the model sees.", &tool.Description, validateRequiredText); err != nil || back {
+			continue
+		}
+		if back, err = runner.input("Webhook URL env", "Environment variable containing the URL; never the URL itself.", &tool.URLEnv, validateEnvName); err != nil || back {
+			continue
+		}
+		if back, err = runner.input("Input JSON Schema", "JSON object.", &tool.Input, validateRequiredObject); err != nil || back {
+			continue
+		}
+		if back, err = runner.input("Output JSON Schema (optional)", "Blank leaves provider output unconstrained.", &tool.Output, validateParams); err != nil || back {
+			continue
+		}
+		data.Tools = append(data.Tools, tool)
+	}
+}
+
 func validateName(name string) error {
 	if filepath.IsAbs(name) {
 		return errors.New("agent directory must be relative")
@@ -382,11 +499,69 @@ func validateRequiredBasic(value string) error {
 	return validateBasic(value)
 }
 
-var languagePattern = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`)
+var (
+	languagePattern   = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`)
+	identifierPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
+	envNamePattern    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+)
 
 func validateLanguage(value string) error {
 	if !languagePattern.MatchString(value) {
 		return errors.New("language must be a BCP-47 tag such as en or en-US")
+	}
+	return nil
+}
+
+func validateIdentifier(value string) error {
+	if !identifierPattern.MatchString(value) {
+		return errors.New("name must be lowercase snake_case")
+	}
+	return nil
+}
+
+func validateRequiredText(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return errors.New("value is required")
+	}
+	return nil
+}
+
+func validateEnvName(value string) error {
+	if !envNamePattern.MatchString(value) {
+		return errors.New("value must be an environment variable name")
+	}
+	return nil
+}
+
+func validateRequiredObject(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return errors.New("JSON object is required")
+	}
+	return validateParams(value)
+}
+
+func validateVariableDefault(variableType, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+		return errors.New("default must be a JSON value")
+	}
+	valid := false
+	switch variableType {
+	case "string":
+		_, valid = decoded.(string)
+	case "boolean":
+		_, valid = decoded.(bool)
+	case "number":
+		_, valid = decoded.(float64)
+	case "integer":
+		number, ok := decoded.(float64)
+		valid = ok && number == float64(int64(number))
+	}
+	if !valid {
+		return fmt.Errorf("default must match type %s", variableType)
 	}
 	return nil
 }

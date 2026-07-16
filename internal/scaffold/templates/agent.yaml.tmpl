@@ -18,13 +18,26 @@ models:
 voices:
   assistant_voice: { description: default voice }
 
-agents:
+[[if .Variables]]variables:
+[[range .Variables]]  [[.Name]]:
+    type: [[.Type]]
+[[if .Default]]    default: [[.Default]]
+[[end]][[if .Source]]    source: [[.Source]]
+[[end]][[end]]
+[[end]]agents:
   assistant:
     instructions: instructions.md
     model: assistant_model
     voice: assistant_voice
+[[if .Tools]]    tools:
+[[range .Tools]]      - [[.Name]]
+[[end]]
+[[end]]
+[[if .Tools]]tools:
+[[range .Tools]]  - [[.Name]]
+[[end]]
 
-conversation:
+[[end]]conversation:
   greeting:
     speaks_first: agent
     text: [[ quote .Greeting ]]

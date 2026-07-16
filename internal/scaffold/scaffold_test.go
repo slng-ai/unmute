@@ -147,6 +147,47 @@ func TestWrite_targetChoices(t *testing.T) {
 	}
 }
 
+func TestWriteVariablesAndTools(t *testing.T) {
+	data := Data{
+		Name:     "agent",
+		Language: "en",
+		Channel:  "web",
+		Variables: []Variable{{
+			Name: "customer_id", Type: "string", Default: `"guest"`, Source: "call_start",
+		}},
+		Tools: []Tool{{
+			Name: "lookup_customer", Description: "Look up the caller", URLEnv: "LOOKUP_URL", Input: `{"type":"object"}`,
+		}},
+	}
+	data.SetTarget("pipecat")
+	dir := filepath.Join(t.TempDir(), "agent")
+	if _, err := Write(dir, data); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"customer_id:", "source: call_start", "- lookup_customer"} {
+		if !strings.Contains(string(agent), want) {
+			t.Errorf("agent.yaml missing %q:\n%s", want, agent)
+		}
+	}
+	tool, err := os.ReadFile(filepath.Join(dir, "tools", "lookup_customer.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`description: "Look up the caller"`, "url_env: LOOKUP_URL"} {
+		if !strings.Contains(string(tool), want) {
+			t.Errorf("tool manifest missing %q:\n%s", want, tool)
+		}
+	}
+	if _, err := Preflight(data); err != nil {
+		t.Fatalf("Preflight() = %v", err)
+	}
+}
+
 func TestPreflightShippedTargets(t *testing.T) {
 	for _, provider := range []string{"pipecat", "livekit", "elevenlabs"} {
 		t.Run(provider, func(t *testing.T) {

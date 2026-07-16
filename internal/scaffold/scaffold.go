@@ -47,6 +47,8 @@ type Data struct {
 	Listen       Binding
 	Reason       Binding
 	Speak        Binding
+	Variables    []Variable
+	Tools        []Tool
 }
 
 // Binding is one concrete role choice collected by the wizard. Params is an
@@ -56,6 +58,21 @@ type Binding struct {
 	Model    string
 	Voice    string
 	Params   string
+}
+
+type Variable struct {
+	Name    string
+	Type    string
+	Default string // optional JSON primitive, rendered verbatim
+	Source  string
+}
+
+type Tool struct {
+	Name        string
+	Description string
+	URLEnv      string
+	Input       string // JSON Schema object
+	Output      string // optional JSON Schema object
 }
 
 // SetTarget selects an orchestrator and resets its target-dependent defaults.
@@ -124,6 +141,11 @@ func (d Data) RequiredEnv() []string {
 			set[name] = true
 		}
 	}
+	for _, tool := range d.Tools {
+		if tool.URLEnv != "" {
+			set[tool.URLEnv] = true
+		}
+	}
 	names := make([]string, 0, len(set))
 	for name := range set {
 		names = append(names, name)
@@ -149,6 +171,9 @@ func Write(dir string, d Data) ([]string, error) {
 			return err
 		}
 		rel := strings.TrimSuffix(strings.TrimPrefix(p, "templates/"), ".tmpl")
+		if rel == "tool.yaml" {
+			return nil // rendered once per Data.Tool below
+		}
 		if rel == "env.example" {
 			rel = ".env.example" // dotfiles can't be embedded templates
 		}
@@ -158,10 +183,7 @@ func Write(dir string, d Data) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		tmpl, err := template.New(rel).Funcs(template.FuncMap{
-			"quote": strconv.Quote,
-			"yaml":  yamlScalar,
-		}).Delims("[[", "]]").Parse(string(raw))
+		tmpl, err := parseTemplate(rel, raw)
 		if err != nil {
 			return err
 		}
@@ -181,7 +203,38 @@ func Write(dir string, d Data) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("scaffold: %w", err)
 	}
+	raw, err := templates.ReadFile("templates/tool.yaml.tmpl")
+	if err != nil {
+		return nil, fmt.Errorf("scaffold: %w", err)
+	}
+	tmpl, err := parseTemplate("tool.yaml", raw)
+	if err != nil {
+		return nil, fmt.Errorf("scaffold: %w", err)
+	}
+	tools := append([]Tool(nil), d.Tools...)
+	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
+	for _, tool := range tools {
+		out := filepath.Join(dir, "tools", tool.Name+".yaml")
+		var buf bytes.Buffer
+		if err := tmpl.Execute(&buf, tool); err != nil {
+			return nil, fmt.Errorf("scaffold: %w", err)
+		}
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, fmt.Errorf("scaffold: %w", err)
+		}
+		if err := os.WriteFile(out, buf.Bytes(), 0o644); err != nil {
+			return nil, fmt.Errorf("scaffold: %w", err)
+		}
+		created = append(created, out)
+	}
 	return created, nil
+}
+
+func parseTemplate(name string, raw []byte) (*template.Template, error) {
+	return template.New(name).Funcs(template.FuncMap{
+		"quote": strconv.Quote,
+		"yaml":  yamlScalar,
+	}).Delims("[[", "]]").Parse(string(raw))
 }
 
 func yamlScalar(value string) (string, error) {
