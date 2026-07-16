@@ -13,16 +13,17 @@ import (
 	"text/template"
 
 	"github.com/slng/unmute/internal/ir"
+	targetcap "github.com/slng/unmute/internal/target"
 )
 
 // The LiveKit driver lowers the resolved IR into a runnable LiveKit Agents
 // project (Python). Each agent is a livekit.agents.Agent; agent_transfer is a
 // @function_tool returning the next Agent (native handoff); a task is an
 // AgentTask[dict]; a task_group is a beta.workflows.TaskGroup. listen/speak
-// default to the SLNG Execution Layer (livekit-plugins-slng) and reason to
-// LiveKit Inference; a binding whose provider names a catalogued vendor instead
-// lowers to that native livekit.plugins.<vendor> plugin (driver-livekit C8/V11/
-// V13). Python is emitted only through these templates (C1/ADR-0002).
+// resolve through the provider catalogue (internal/target/catalog_livekit.go):
+// SLNG is the scaffold default, per-vendor plugins bind when the user picks
+// them; reason lowers to LiveKit Inference. Python is emitted only through
+// these templates (C1/ADR-0002).
 //
 //go:embed templates/livekit_v1/*.tmpl
 var livekitV1Templates embed.FS
@@ -37,24 +38,21 @@ const (
 
 var livekitVersionPattern = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
 
-// livekitSTT / livekitTTS / livekitLLM each carry a fully-rendered Python
-// constructor expression: `slng.STT(...)` / a native `deepgram.STT(...)` for
-// listen, the SLNG or a native vendor TTS for speak, `inference.LLM(...)` or a
-// native `anthropic.LLM(...)` for reason. The per-provider shape (module,
-// kwargs, api-key env, version) lives in the plugin catalogue
-// (livekit_v1_build.go); the template just emits the Ctor. Agent-level overrides
-// use pointer fields (nil when the agent matches the session default).
-type livekitSTT struct{ Ctor string }
-type livekitTTS struct{ Ctor string }
-type livekitLLM struct{ Ctor string }
+// livekitService is one resolved binding: the rendered constructor plus its
+// catalogue entry (imports/deps) and vendor (report labeling).
+type livekitService struct {
+	Call   ServiceCall
+	Entry  targetcap.Entry
+	Vendor string
+}
 
 type livekitAgent struct {
 	Name        string
 	Class       string
 	PromptConst string
 	IsEntry     bool
-	LLM         *livekitLLM // set only when it differs from the session default
-	TTS         *livekitTTS // set only when it differs from the session default
+	LLM         *livekitService // set only when it differs from the session default
+	TTS         *livekitService // set only when it differs from the session default
 	Greeting    *livekitGreeting
 	Transfers   []livekitTransfer
 	Delegates   []livekitDelegate
@@ -123,14 +121,14 @@ type livekitData struct {
 	Version       string
 	AgentName     string
 	EntryClass    string
-	STT           livekitSTT
-	SessionLLM    livekitLLM
-	SessionTTS    livekitTTS
+	STT           livekitService
+	SessionLLM    livekitService
+	SessionTTS    livekitService
 	TurnVersion   string
 	Agents        []livekitAgent
 	Tasks         []livekitTask
 	Prompts       []livekitPrompt
-	PluginModules []string // livekit.plugins submodules to import (sorted; always includes silero)
+	PluginModules []string // merged `from livekit.plugins import ...` names
 	Deps          []string
 	RequiredEnv   []string
 	Notes         []string

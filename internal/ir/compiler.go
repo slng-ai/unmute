@@ -4,6 +4,7 @@ package ir
 // acyclic and schema derivation does not recurse through agent handoffs.
 type Agent struct {
 	Version      int                     `json:"version" yaml:"version"`
+	Language     string                  `json:"language" yaml:"language"`
 	EntryAgent   string                  `json:"entry_agent" yaml:"entry_agent"`
 	Pipeline     Pipeline                `json:"pipeline" yaml:"pipeline"`
 	Models       map[string]ModelProfile `json:"models" yaml:"models"`

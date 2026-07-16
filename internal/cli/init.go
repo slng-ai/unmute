@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const slngWordmark = "\x1b[38;2;0;0;0;48;2;245;201;110m" +
+const slngWordmark = "\x1b[1;38;2;245;201;110m" +
 	"  ____  _     _   _  ____       //  // \n" +
 	" / ___|| |   | \\ | |/ ___|     //  //  \n" +
 	" \\___ \\| |   |  \\| | |  _     //  //   \n" +
@@ -75,6 +75,9 @@ func writeHeader(out io.Writer, tty bool) {
 }
 
 func writeScaffold(cmd *cobra.Command, dir string, data scaffold.Data) error {
+	if _, err := scaffold.Preflight(data); err != nil {
+		return fmt.Errorf("init %s: preflight: %w", dir, err)
+	}
 	created, err := scaffold.Write(dir, data)
 	if err != nil {
 		return fmt.Errorf("init %s: %w", dir, err)

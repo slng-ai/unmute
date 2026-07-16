@@ -12,6 +12,7 @@ import (
 )
 
 var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var languagePattern = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`)
 
 type ValidateReport struct {
 	PerTarget         []TargetValidation
@@ -174,6 +175,9 @@ func validateStructure(agent *Agent) []string {
 	var errors []string
 	if agent.Version != 1 {
 		errors = add(errors, "version must be 1")
+	}
+	if agent.Language != "" && !languagePattern.MatchString(agent.Language) {
+		errors = add(errors, "language must be a BCP-47 language tag such as en or en-US")
 	}
 	if len(agent.Models) == 0 {
 		errors = add(errors, "models must contain at least one profile")
@@ -494,12 +498,27 @@ func validateContextShape(owner string, context TaskContext) []string {
 
 func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *TargetValidation) {
 	provider := targetcap.Provider(resolved.Provider)
+	// The provider catalogue is the vendor/endpoint matrix; the same
+	// CheckVendor rulebook backs driver resolution, so a binding that
+	// validates green cannot fail provider selection at generate time.
+	// (Becomes a parameter when the providers.yaml overlay loader lands.)
+	catalog := targetcap.DefaultCatalog()
+	checkVendor := func(role targetcap.Role, binding *Binding) {
+		if binding == nil {
+			return
+		}
+		if err := catalog.CheckVendor(provider, role, binding.Provider, binding.EndpointEnv != ""); err != nil {
+			row.Errors = add(row.Errors, err.Error())
+		}
+	}
 	validateRoleBinding("listen", caps.Role(targetcap.Listen, provider), resolved.Models.Listen, agent.Pipeline.Listen.Placement, row)
+	checkVendor(targetcap.Listen, resolved.Models.Listen)
 	turnPlacement := Placement("")
 	if agent.Pipeline.Turn != nil {
 		turnPlacement = agent.Pipeline.Turn.Placement
 	}
 	validateRoleBinding("turn", caps.Role(targetcap.Turn, provider), resolved.Models.Turn, turnPlacement, row)
+	checkVendor(targetcap.Turn, resolved.Models.Turn)
 
 	models, voices := usedProfiles(agent)
 	for _, name := range slices.Sorted(maps.Keys(voices)) {
@@ -512,7 +531,8 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 		if binding.EndpointEnv != "" {
 			applyCapability(caps, targetcap.FieldSpeakEndpoint, provider, row)
 		}
-		validateRoleProvider("speak", binding.Provider, caps.RoleProvider(targetcap.Speak, provider), resolved, row)
+		checkVendor(targetcap.Speak, &binding)
+		checkSpeakRequiredFields(catalog, provider, name, binding, row)
 	}
 	for _, name := range slices.Sorted(maps.Keys(models)) {
 		binding, ok := resolved.Models.Reason[name]
@@ -521,15 +541,28 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 			continue
 		}
 		validatePlacement("reason."+name, &binding, agent.Models[name].Placement, row)
-	}
-	if resolved.Models.Listen != nil {
-		validateRoleProvider("listen", resolved.Models.Listen.Provider, caps.RoleProvider(targetcap.Listen, provider), resolved, row)
+		checkVendor(targetcap.Reason, &binding)
 	}
 }
 
-func validateRoleProvider(role, bindingProvider string, allowed []string, resolved Target, row *TargetValidation) {
-	if bindingProvider != "" && len(allowed) > 0 && !slices.Contains(allowed, bindingProvider) {
-		row.Errors = add(row.Errors, fmt.Sprintf("%s %s binding provider %q has no slot", resolved.Provider, role, bindingProvider))
+// checkSpeakRequiredFields enforces entry-declared field arity at validate
+// time (a voice-less ElevenLabs binding, a model-less SLNG one), so a spec
+// that validates green cannot fail speak resolution at generate. Listen and
+// reason model presence is already covered by the open-role rules above;
+// speak's has-voice-or-model floor alone lets these slip through.
+func checkSpeakRequiredFields(catalog targetcap.Catalog, provider targetcap.Provider, profile string, binding Binding, row *TargetValidation) {
+	if binding.Provider == "" {
+		return
+	}
+	entry, ok := catalog.Lookup(provider, targetcap.Speak, binding.Provider)
+	if !ok {
+		return
+	}
+	if entry.VoiceRequired() && binding.Voice == "" && binding.VoiceID == "" {
+		row.Errors = add(row.Errors, fmt.Sprintf("%s speak.%s binding provider %q is missing a voice", provider, profile, binding.Provider))
+	}
+	if entry.ModelRequired() && binding.Model == "" {
+		row.Errors = add(row.Errors, fmt.Sprintf("%s speak.%s binding provider %q is missing a model", provider, profile, binding.Provider))
 	}
 }
 

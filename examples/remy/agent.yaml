@@ -11,6 +11,7 @@
 # features (they fail on Vapi), and this is the LiveKit first-run example.
 
 version: 1
+language: en
 entry_agent: greeter
 
 pipeline:

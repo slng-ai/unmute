@@ -47,16 +47,17 @@ func pyName(name string) string {
 	return strings.Join(parts, "")
 }
 
-// pipecatService is a resolved provider binding ready for the template: the
-// Pipecat service class, its api-key env, and any base_url env for a custom
-// OpenAI-compatible endpoint. Model/voice/params are forwarded verbatim (C11).
+// pipecatService is a resolved provider binding: the rendered constructor
+// (Call) plus its catalogue entry (imports/install), and the raw identity the
+// task job-workers need to drive the OpenAI SDK directly. Model/voice/params
+// are forwarded verbatim (C11); the catalogue only picks the code slot.
 type pipecatService struct {
-	Class     string
+	Call      ServiceCall
+	Entry     targetcap.Entry
+	Vendor    string // resolved binding provider (report labeling)
 	APIKeyEnv string
 	BaseURL   string // env var name for base_url, empty if native
 	Model     string
-	Voice     string
-	Params    []pyKV
 }
 
 type pyKV struct {
@@ -77,7 +78,7 @@ type pipecatAgent struct {
 	Delegates []pipecatDelegate
 }
 
-// pipecatTask is one guided conversational step lowered to a Flow node (C8, B6):
+// pipecatTask is one guided conversational step lowered to a Flow node (C8, B7):
 // its instructions, tools, and a uniquely named finish function derived from the
 // result schema (V1). Nodes are emitted inline in the owning delegate's methods.
 type pipecatTask struct {
@@ -180,46 +181,10 @@ type pipecatData struct {
 	HasIsolated         bool // any isolated group (ContextStrategy RESET import)
 }
 
-// serviceInfo maps a Pipecat service class to its import line and either a
-// pipecat-ai extra (native services) or a standalone pip Dep (plugins). Slng
-// STT/TTS ship in the separate `pipecat-slng` package, not pipecat-ai.
-var serviceInfo = map[string]struct{ Import, Extra, Dep string }{
-	// LLM (reason)
-	"OpenAILLMService":     {"from pipecat.services.openai.llm import OpenAILLMService", "openai", ""},
-	"AnthropicLLMService":  {"from pipecat.services.anthropic.llm import AnthropicLLMService", "anthropic", ""},
-	"GoogleLLMService":     {"from pipecat.services.google.llm import GoogleLLMService", "google", ""},
-	"GroqLLMService":       {"from pipecat.services.groq.llm import GroqLLMService", "groq", ""},
-	"MistralLLMService":    {"from pipecat.services.mistral.llm import MistralLLMService", "mistral", ""},
-	"DeepSeekLLMService":   {"from pipecat.services.deepseek.llm import DeepSeekLLMService", "deepseek", ""},
-	"OpenRouterLLMService": {"from pipecat.services.openrouter.llm import OpenRouterLLMService", "openrouter", ""},
-	"QwenLLMService":       {"from pipecat.services.qwen.llm import QwenLLMService", "qwen", ""},
-
-	// STT (listen)
-	"DeepgramSTTService":     {"from pipecat.services.deepgram.stt import DeepgramSTTService", "deepgram", ""},
-	"OpenAISTTService":       {"from pipecat.services.openai.stt import OpenAISTTService", "openai", ""},
-	"AssemblyAISTTService":   {"from pipecat.services.assemblyai.stt import AssemblyAISTTService", "assemblyai", ""},
-	"CartesiaSTTService":     {"from pipecat.services.cartesia.stt import CartesiaSTTService", "cartesia", ""},
-	"ElevenLabsSTTService":   {"from pipecat.services.elevenlabs.stt import ElevenLabsSTTService", "elevenlabs", ""},
-	"GradiumSTTService":      {"from pipecat.services.gradium.stt import GradiumSTTService", "gradium", ""},
-	"SonioxSTTService":       {"from pipecat.services.soniox.stt import SonioxSTTService", "soniox", ""},
-	"SpeechmaticsSTTService": {"from pipecat.services.speechmatics.stt import SpeechmaticsSTTService", "speechmatics", ""},
-
-	// TTS (speak)
-	"OpenAITTSService":       {"from pipecat.services.openai.tts import OpenAITTSService", "openai", ""},
-	"ElevenLabsTTSService":   {"from pipecat.services.elevenlabs.tts import ElevenLabsTTSService", "elevenlabs", ""},
-	"CartesiaTTSService":     {"from pipecat.services.cartesia.tts import CartesiaTTSService", "cartesia", ""},
-	"DeepgramTTSService":     {"from pipecat.services.deepgram.tts import DeepgramTTSService", "deepgram", ""},
-	"GradiumTTSService":      {"from pipecat.services.gradium.tts import GradiumTTSService", "gradium", ""},
-	"InworldTTSService":      {"from pipecat.services.inworld.tts import InworldTTSService", "inworld", ""},
-	"RimeTTSService":         {"from pipecat.services.rime.tts import RimeTTSService", "rime", ""},
-	"SarvamHttpTTSService":   {"from pipecat.services.sarvam.tts import SarvamHttpTTSService", "sarvam", ""},
-	"SonioxTTSService":       {"from pipecat.services.soniox.tts import SonioxTTSService", "soniox", ""},
-	"SpeechmaticsTTSService": {"from pipecat.services.speechmatics.tts import SpeechmaticsTTSService", "speechmatics", ""},
-
-	// Plugins (standalone pip dep, not a pipecat-ai extra)
-	"SlngSTTService": {"from pipecat_slng import SlngSTTService", "", "pipecat-slng>=0.4.0"},
-	"SlngTTSService": {"from pipecat_slng import SlngTTSService", "", "pipecat-slng>=0.4.0"},
-}
+// Provider → service facts (class, import, extra/dep, key env, constructor
+// shape) live in the provider catalogue (internal/target/catalog_pipecat.go).
+// V11's exactly-one-install and import-per-class rules are catalogue
+// invariants now (TestCatalogInvariants).
 
 type pipecatInterrupt struct {
 	Enabled      bool

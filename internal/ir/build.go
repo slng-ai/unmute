@@ -33,8 +33,13 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	language := pkg.Agent.Language
+	if language == "" {
+		language = "en"
+	}
 	out := &Agent{
 		Version:      pkg.Agent.Version,
+		Language:     language,
 		EntryAgent:   pkg.Agent.EntryAgent,
 		Pipeline:     buildPipeline(pkg.Agent.Pipeline),
 		Models:       models,

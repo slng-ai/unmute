@@ -85,7 +85,7 @@ The reasoning. `our-take-on-orchestrators.md` is the flagship page: five platfor
 
 ### reference/
 
-The contract pages. One page per `agent.yaml` block, plus tools, targets.yaml, safe core, and the CLI. Every field gets the same fixed template, no exceptions:
+The contract pages. One page per `agent.yaml` block, plus tools, targets.yaml, providers (which STT/TTS/LLM integrations each target accepts and what each emits), safe core, and the CLI. Every field gets the same fixed template, no exceptions:
 
 ```markdown
 ### field_name
@@ -125,7 +125,7 @@ The same information pivoted by provider, for the reader who thinks "I deploy on
 1. start/ (all three) and concepts/our-take-on-orchestrators.md: the front door.
 2. reference/ pages for the blocks the compiler already validates today, template above.
 3. learn/01 to 04 (the T0 + T2 safe-core arc).
-4. targets/pipecat.md first (driver in progress), then the other four as drivers land.
+4. targets/pipecat.md, targets/livekit.md, and targets/elevenlabs.md (drivers shipped); vapi and deepgram as their drivers land.
 5. learn/05 to 08 and the remaining concepts pages.
 
 A reference or target page ships only for behavior the compiler actually has. Docs for unshipped drivers get a one-line "driver in progress" page, never speculative tables.

@@ -60,6 +60,7 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
 - **N11.** `greeting` is a block, not a scalar: `speaks_first: agent | user` plus an optional `text`. With `text`, the agent opens with those exact words every call. Without it, the model writes the opening from the prompt. This replaces the scalar `greeting: agent_first | user_first` spelling in the source document, which could not express a fixed opening line.
 - **N12.** Task `context` is the transfer context block without `variables`. Within one session the state store is already shared on all five primaries (LiveKit `userdata`, Pipecat flow state, Vapi Squad variables), so a task has nothing to filter; `context.variables` exists only on transfers.
 - **N13.** The return path is part of the contract: when a task or a `then: return` group completes, the owner receives the typed result only; the task's conversation turns are not appended to the owner's context. This is LiveKit's native `AgentTask` behavior (verified against LiveKit docs 2026-07-15: a task starts with an empty chat context and its turns are not propagated back). `TaskGroup` is different, and `summarize_chat_ctx=False` alone does not honor this: a `TaskGroup` is itself an `AgentTask`, so when it completes LiveKit merges the group's turns into the owner's context on handoff regardless of that flag (verified against the livekit-agents source 2026-07-15: `voice/agent.py` merges `old_agent.chat_ctx` with the task context on completion; `summarize_chat_ctx` only controls a separate summarization pass, not the merge). To keep the group's turns out of the owner the driver must snapshot the owner's chat context before awaiting the group and restore it afterward, returning only the typed results; it still passes `summarize_chat_ctx=False` to skip the wasteful summarization call. Generated on Pipecat and Deepgram. On ElevenLabs the single running transcript makes task turns visible to the owner; the driver warns. Vapi is n/a while single tasks fail there.
+- **N14.** `language` is the agent's primary spoken language, written as a BCP-47 tag and defaulting to `en`. It does not rewrite model routes. Pipecat and LiveKit lower it only through each catalogue entry's explicit `CallSpec.Language` slot: Pipecat official services place it in `Settings`, while SLNG and LiveKit plugins use constructor kwargs. An existing target `params.language` is an explicit per-integration override. ElevenLabs lowers it once to `conversation_config.agent.language`, which governs its integrated ASR and TTS. Vapi and Deepgram stay unavailable in `unmute init` until their generators ship; no generic parameter injection is invented for them. Verified against Pipecat, SLNG, LiveKit, and ElevenLabs provider docs 2026-07-16.
 
 ---
 
@@ -93,6 +94,7 @@ Named maps instead of lists, so every item has a stable identity and diffs stay 
 | Field | Required | Type | Tag |
 |---|---|---|---|
 | `version` | yes | int, must be `1` | core |
+| `language` | no, defaults to `en` | BCP-47 tag, for example `en` or `es-MX` | gated (N14) |
 | `entry_agent` | yes | name of an agent | core |
 | `pipeline` | yes | block, see 4.2 | core |
 | `models` | yes, at least one | map of profiles, see 4.3 | core |
@@ -106,6 +108,8 @@ Named maps instead of lists, so every item has a stable identity and diffs stay 
 | `conversation` | no | block, see 4.8 | mixed |
 | `channels` | yes, at least one | map, see 4.9 | core |
 | `capacity` | see 4.10 | block | core |
+
+`language` is lowered by the shipped Pipecat, LiveKit, and ElevenLabs generators. Vapi and Deepgram remain unavailable in `unmute init` until their generators ship.
 
 Top-level `tools` is the load manifest: only listed tool files are compiled into the package. Which agents and tasks can call a tool is decided by their own `tools:` lists (D8), never here.
 
@@ -168,7 +172,7 @@ A `task` is delegate-and-return: control comes back to the owning agent with a t
 |---|---|---|---|---|
 | `instructions` | yes | path | | |
 | `tools` | no | list of names | | |
-| `model` | no | model profile name | gated | Per-task override. **Fails on Pipecat** — a maturity gate, not a platform limit (runtime-verified 2026-07-16: an `LLMSwitcher` inside an `LLMWorker` pipeline stalls all flow frames on pipecat-ai 1.5.0, so the driver has no working lowering; driver-pipecat B6. Review-corrected 2026-07-15 the other way on docs alone — the spike overrode it). |
+| `model` | no | model profile name | gated | Per-task override. **Fails on Pipecat** — a maturity gate, not a platform limit (runtime-verified 2026-07-16: an `LLMSwitcher` inside an `LLMWorker` pipeline stalls all flow frames on pipecat-ai 1.5.0, so the driver has no working lowering; driver-pipecat B7. Review-corrected 2026-07-15 the other way on docs alone — the spike overrode it). |
 | `result` | yes | flat map: name to `string \| number \| boolean \| integer \| {enum: [a, b]}` | core shape | Nested schemas only when every configured target is a code target. |
 | `context` | yes | transfer context block without `variables` (N12), `history` required | gated | See 4.7 and the history table. |
 
@@ -418,7 +422,7 @@ Resolved by the 2026-07-15 research pass (context7 plus official docs; exact fie
 - `speaks_first: user` on ElevenLabs: an empty `first_message` is documented as "the agent waits for the user to start the discussion". Native.
 - Voicemail on LiveKit (`AMD`), Pipecat (`VoicemailDetector`), Vapi (`voicemailDetection` + `voicemailMessage`), ElevenLabs (`voicemail_detection` system tool + `voicemail_message`): both `hangup` and `leave_message`. Outbound unblocked (N6).
 - Generation param slots: Vapi `assistant.model.temperature` and `maxTokens`; ElevenLabs `conversation_config.agent.prompt.temperature` (default 0) and `max_tokens`; Deepgram `agent.think.provider.temperature` (**no max-tokens slot exists**, do not forward one). Forwarded-verbatim stance unchanged.
-- Pipecat custom STT/TTS: `OpenAISTTService` and `OpenAITTSService` take a documented `base_url` override for OpenAI-compatible endpoints, so SLNG STT/TTS is a config forward there; service subclassing only for other protocols.
+- Pipecat custom STT/TTS: `OpenAISTTService` and `OpenAITTSService` take a documented `base_url` override for OpenAI-compatible endpoints; service subclassing only for other protocols. (Later same day: SLNG STT/TTS ships first-class as `pipecat-slng` / `livekit-plugins-slng`, mapped by the provider catalogue, so the `base_url` path serves generic custom endpoints, not SLNG.)
 - Pipecat Flows: ships inside core `pipecat-ai` (`pipecat.flows`) since 1.5.0; the standalone `pipecat-ai-flows` package (last 1.4.0) is deprecated and never used.
 - Deepgram reusable agent configurations: exist and are immutable (delete and recreate to change; referenced as a UUID string in place of the `agent` object). Decision stands: compile to inline `Settings`; immutability makes reusable configs create-per-change churn with no compile-time benefit.
 

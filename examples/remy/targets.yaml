@@ -1,11 +1,10 @@
 # One LiveKit instance. listen and speak route through the SLNG Execution Layer
-# (provider: slng, slng/... routes), so the emitted project uses slng.STT /
-# slng.TTS from livekit-plugins-slng rather than a per-vendor plugin — the
-# default recipe (a binding could instead name a vendor like deepgram/cartesia
-# for a native plugin; driver-livekit C8, V11, V13). reason lowers to LiveKit
-# Inference; turn to the LiveKit turn model.
-# Model names, voices, and params are forwarded to the provider as-is (D10);
-# secrets and URLs are env var names only.
+# (provider: slng, slng/... routes) — the scaffold default, so the emitted
+# project uses slng.STT / slng.TTS from livekit-plugins-slng. Any catalogued
+# provider binds instead with a one-line change (driver-livekit C8 as amended;
+# docs/user/reference/providers.md). reason lowers to LiveKit Inference; turn
+# to the LiveKit turn model. Model names, voices, and params are forwarded to
+# the provider as-is (D10); secrets and URLs are env var names only.
 
 targets:
   livekit-dev:

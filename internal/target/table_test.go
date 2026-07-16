@@ -21,8 +21,8 @@ func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	if table.Role(Listen, ElevenLabs) != Integrated {
 		t.Fatal("ElevenLabs listen role must be integrated")
 	}
-	if got := table.RoleProvider(Speak, ElevenLabs); len(got) == 0 || got[0] != "elevenlabs" {
-		t.Fatalf("ElevenLabs speak providers = %v", got)
+	if err := DefaultCatalog().CheckVendor(ElevenLabs, Speak, "elevenlabs", false); err != nil {
+		t.Fatalf("ElevenLabs speak provider elevenlabs must validate: %v", err)
 	}
 	if got := table.HistorySupport(HistoryMessages, ElevenLabs); got.Kind != HistoryFail || got.Note == "" {
 		t.Fatalf("ElevenLabs messages history = %#v", got)

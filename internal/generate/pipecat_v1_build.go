@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/slng/unmute/internal/ir"
+	targetcap "github.com/slng/unmute/internal/target"
 )
 
 // buildPipecatData lowers the resolved IR + target into the template model.
@@ -25,7 +26,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	}
 	env := newEnvSet()
 
-	stt, err := sttService(target.Models.Listen, env)
+	stt, err := sttService(target.Models.Listen, agent.Language, env)
 	if err != nil {
 		return pipecatData{}, err
 	}
@@ -67,6 +68,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	}
 
 	applyConversation(agent.Conversation, &data)
+	data.Notes = append(data.Notes, serviceNotes(data)...)
 	if agent.Pipeline.Turn != nil {
 		data.Notes = append(data.Notes, "turn role lowers to on-device VAD (Silero); its binding is advisory")
 	}
@@ -118,7 +120,9 @@ func setImportNeeds(data *pipecatData) {
 
 // collectImportsExtras returns the deduped, sorted service imports for bot.py,
 // the pipecat-ai extras, and the standalone pip deps for plugin services (e.g.
-// pipecat-slng), so only used services are pulled in.
+// pipecat-slng), so only used services are pulled in. All three come off the
+// used services' catalogue entries, so an emitted class can never lose its
+// import or its install (the structural form of driver-pipecat V11).
 func collectImportsExtras(data pipecatData) (imports, extras, deps []string) {
 	importSet := map[string]bool{}
 	// Always-on extras: every bot.py uses the runner (create_transport,
@@ -129,23 +133,57 @@ func collectImportsExtras(data pipecatData) (imports, extras, deps []string) {
 	if data.Transport == "daily-sip" {
 		extraSet["daily"] = true
 	}
-	note := func(class string) {
-		if info, ok := serviceInfo[class]; ok {
-			importSet[info.Import] = true
-			if info.Extra != "" {
-				extraSet[info.Extra] = true
-			}
-			if info.Dep != "" {
-				depSet[info.Dep] = true
-			}
+	note := func(entry targetcap.Entry) {
+		if entry.Import != "" {
+			importSet[entry.Import] = true
+		}
+		if entry.Install.Extra != "" {
+			extraSet[entry.Install.Extra] = true
+		}
+		if entry.Install.Package != "" {
+			depSet[entry.Install.Package+entry.Install.Constraint] = true
 		}
 	}
-	note(data.STT.Class)
+	note(data.STT.Entry)
 	for _, a := range data.Agents {
-		note(a.LLM.Class)
-		note(a.TTS.Class)
+		note(a.LLM.Entry)
+		note(a.TTS.Entry)
 	}
 	return sortedKeys(importSet), sortedKeys(extraSet), sortedKeys(depSet)
+}
+
+// serviceNotes lists every used catalogue entry in the compile report, so
+// what was selected (and from which install path) is always inspectable.
+func serviceNotes(data pipecatData) []string {
+	set := map[string]bool{}
+	note := func(svc pipecatService) {
+		if svc.Entry.Call == nil {
+			return
+		}
+		set[fmt.Sprintf("%s: %s via %s (%s, verified %s)",
+			svc.Entry.Role, svc.Vendor, svc.Entry.Call.Class, installLabel(svc.Entry), svc.Entry.Verified)] = true
+	}
+	note(data.STT)
+	for _, a := range data.Agents {
+		note(a.LLM)
+		note(a.TTS)
+	}
+	return sortedKeys(set)
+}
+
+func installLabel(entry targetcap.Entry) string {
+	host := "pipecat-ai"
+	if entry.Framework == targetcap.LiveKit {
+		host = "livekit-agents"
+	}
+	switch {
+	case entry.Install.Extra != "":
+		return host + "[" + entry.Install.Extra + "]"
+	case entry.Install.Package != "":
+		return entry.Install.Package + entry.Install.Constraint
+	default:
+		return "ships with the framework"
+	}
 }
 
 func sortedKeys(set map[string]bool) []string {
@@ -158,11 +196,11 @@ func sortedKeys(set map[string]bool) []string {
 }
 
 func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.AgentDef, env *envSet) (pipecatAgent, error) {
-	llm, err := llmService(target.Models.Reason[def.Model], agent.Models[def.Model], env)
+	llm, err := agentLLMService(target.Models.Reason[def.Model], def.Instructions, env)
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
-	tts, err := ttsService(target.Models.Speak[def.Voice], env)
+	tts, err := ttsService(target.Models.Speak[def.Voice], agent.Language, env)
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
@@ -239,7 +277,7 @@ func buildDelegate(agent *ir.Agent, ref string, c *ir.Delegate, env *envSet) (pi
 
 // buildTask lowers a task to a Flow-node model: instructions, tools, and the
 // finish-function schema derived from the typed result (V1). The node runs on
-// the owning agent's LLM; per-task model is gated (no LLMSwitcher, B6).
+// the owning agent's LLM; per-task model is gated (no LLMSwitcher, B7).
 func buildTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (pipecatTask, error) {
 	built := pipecatTask{
 		Name: name, Prompt: task.Instructions,
@@ -437,126 +475,51 @@ func durationSecs(d ir.Duration) int {
 }
 
 // --- provider → service mapping -------------------------------------------
+// The catalogue (internal/target) picks the class, import, install path, and
+// constructor shape; this file only adapts its output to the driver's structs.
 
 func apiKeyEnv(provider string) string {
 	return strings.ToUpper(strings.ReplaceAll(provider, "-", "_")) + "_API_KEY"
 }
 
-func sttService(binding *ir.Binding, env *envSet) (pipecatService, error) {
-	if binding == nil || binding.Model == "" {
+// pipecatEnvRef renders the driver's environment-lookup idiom.
+func pipecatEnvRef(name string) string { return "os.environ[" + pyQuote(name) + "]" }
+
+// resolvePipecatService resolves one binding through the catalogue.
+// extraSettings are nested Settings args the driver injects (the agents'
+// system_instruction); the task job-workers use the raw identity fields.
+func resolvePipecatService(role targetcap.Role, binding ir.Binding, language string, env *envSet, extraSettings ...pyKV) (pipecatService, error) {
+	call, entry, err := resolveService(defaultCatalog, targetcap.Pipecat, role, binding, language, pipecatEnvRef, env, extraSettings...)
+	if err != nil {
+		return pipecatService{}, err
+	}
+	svc := pipecatService{Call: call, Entry: entry, Model: binding.Model, BaseURL: binding.EndpointEnv,
+		Vendor: firstNonEmpty(binding.Provider, "openai")}
+	if spec := entry.Call; spec.APIKeyArg != "" {
+		svc.APIKeyEnv = spec.APIKeyEnv
+		if svc.APIKeyEnv == "" {
+			svc.APIKeyEnv = apiKeyEnv(firstNonEmpty(binding.Provider, "openai"))
+		}
+	}
+	return svc, nil
+}
+
+func sttService(binding *ir.Binding, language string, env *envSet) (pipecatService, error) {
+	if binding == nil {
 		return pipecatService{}, fmt.Errorf("pipecat listen binding is missing a model")
 	}
-	svc := pipecatService{Model: binding.Model, Params: forwardParams(binding.Params)}
-	switch binding.Provider {
-	case "deepgram":
-		svc.Class = "DeepgramSTTService"
-	case "assemblyai":
-		svc.Class = "AssemblyAISTTService"
-	case "cartesia":
-		svc.Class = "CartesiaSTTService"
-	case "elevenlabs", "eleven_labs":
-		svc.Class = "ElevenLabsSTTService"
-	case "gradium":
-		svc.Class = "GradiumSTTService"
-	case "soniox":
-		svc.Class = "SonioxSTTService"
-	case "speechmatics":
-		svc.Class = "SpeechmaticsSTTService"
-	case "slng":
-		svc.Class = "SlngSTTService" // pipecat-slng plugin: api_key + slng-format model
-	case "openai", "":
-		svc.Class = "OpenAISTTService"
-	default:
-		svc.Class = "OpenAISTTService" // OpenAI-compatible fallthrough (custom endpoint)
-	}
-	// Slng routes by api_key + region params, not a base_url; only the
-	// OpenAI-compatible services take an endpoint override.
-	if binding.EndpointEnv != "" && binding.Provider != "slng" {
-		svc.BaseURL = binding.EndpointEnv
-		env.add(binding.EndpointEnv)
-	}
-	svc.APIKeyEnv = apiKeyEnv(defaultProvider(binding.Provider))
-	env.add(svc.APIKeyEnv)
-	return svc, nil
+	return resolvePipecatService(targetcap.Listen, *binding, language, env)
 }
 
-func llmService(binding ir.Binding, profile ir.ModelProfile, env *envSet) (pipecatService, error) {
-	if binding.Model == "" {
-		return pipecatService{}, fmt.Errorf("reason binding is missing a model")
-	}
-	svc := pipecatService{Model: binding.Model, Params: forwardParams(binding.Params)}
-	switch binding.Provider {
-	case "anthropic":
-		svc.Class = "AnthropicLLMService"
-	case "google":
-		svc.Class = "GoogleLLMService" // Gemini GenAI backend (GOOGLE_API_KEY)
-	case "groq":
-		svc.Class = "GroqLLMService"
-	case "mistral":
-		svc.Class = "MistralLLMService"
-	case "deepseek":
-		svc.Class = "DeepSeekLLMService"
-	case "openrouter":
-		svc.Class = "OpenRouterLLMService"
-	case "qwen":
-		svc.Class = "QwenLLMService"
-	case "openai", "":
-		svc.Class = "OpenAILLMService"
-	default:
-		svc.Class = "OpenAILLMService" // OpenAI-compatible custom endpoint
-	}
-	if binding.EndpointEnv != "" {
-		svc.BaseURL = binding.EndpointEnv
-		env.add(binding.EndpointEnv)
-	}
-	svc.APIKeyEnv = apiKeyEnv(defaultProvider(binding.Provider))
-	env.add(svc.APIKeyEnv)
-	return svc, nil
+// agentLLMService builds an agent's LLM; the prompt nests into Settings as
+// system_instruction (the workers-model shape, driver-pipecat C2).
+func agentLLMService(binding ir.Binding, prompt string, env *envSet) (pipecatService, error) {
+	return resolvePipecatService(targetcap.Reason, binding, "", env,
+		pyKV{Key: "system_instruction", Value: pyQuote(prompt)})
 }
 
-func ttsService(binding ir.Binding, env *envSet) (pipecatService, error) {
-	svc := pipecatService{Model: binding.Model, Voice: firstNonEmpty(binding.Voice, binding.VoiceID), Params: forwardParams(binding.Params)}
-	switch binding.Provider {
-	case "elevenlabs", "eleven_labs":
-		svc.Class = "ElevenLabsTTSService"
-	case "cartesia":
-		svc.Class = "CartesiaTTSService"
-	case "deepgram":
-		svc.Class = "DeepgramTTSService"
-	case "gradium":
-		svc.Class = "GradiumTTSService"
-	case "inworld":
-		svc.Class = "InworldTTSService"
-	case "rime":
-		svc.Class = "RimeTTSService"
-	case "sarvam":
-		svc.Class = "SarvamHttpTTSService"
-	case "soniox":
-		svc.Class = "SonioxTTSService"
-	case "speechmatics":
-		svc.Class = "SpeechmaticsTTSService"
-	case "slng":
-		svc.Class = "SlngTTSService" // pipecat-slng plugin: api_key + slng-format model + voice
-	case "openai", "":
-		svc.Class = "OpenAITTSService"
-	default:
-		svc.Class = "OpenAITTSService" // OpenAI-compatible custom endpoint
-	}
-	// Slng routes by api_key + region params, not a base_url (see sttService).
-	if binding.EndpointEnv != "" && binding.Provider != "slng" {
-		svc.BaseURL = binding.EndpointEnv
-		env.add(binding.EndpointEnv)
-	}
-	svc.APIKeyEnv = apiKeyEnv(defaultProvider(binding.Provider))
-	env.add(svc.APIKeyEnv)
-	return svc, nil
-}
-
-func defaultProvider(provider string) string {
-	if provider == "" {
-		return "openai"
-	}
-	return provider
+func ttsService(binding ir.Binding, language string, env *envSet) (pipecatService, error) {
+	return resolvePipecatService(targetcap.Speak, binding, language, env)
 }
 
 func forwardParams(params map[string]any) []pyKV {

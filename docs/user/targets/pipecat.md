@@ -46,7 +46,7 @@ The `compile-report.json` is worth reading after a compile. It lists every requi
 
 ## Binding models on Pipecat
 
-All four roles are **open** on Pipecat: you choose the listen model, the voice, and the reasoning model freely, and the turn role runs on your machine. A full binding block:
+All four roles are **open** on Pipecat: you choose the listen model, the voice, and the reasoning model freely, and the turn role runs on your machine. The accepted `provider:` values per role, their key envs, and what each choice installs and emits are in the [providers reference](../reference/providers.md). A full binding block:
 
 ```yaml
 targets:
