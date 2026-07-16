@@ -61,7 +61,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		out.Variables[name] = Variable{Type: PrimitiveType(variable.Type), Default: variable.Default, Source: VariableSource(variable.Source)}
 	}
 	for name, tool := range pkg.Tools {
-		out.Tools[name] = buildTool(name, tool)
+		built := buildTool(name, tool)
+		built.HandlerSource = pkg.Handlers[built.Handler]
+		out.Tools[name] = built
 	}
 	for name, channel := range pkg.Agent.Channels {
 		out.Channels[name] = Channel{

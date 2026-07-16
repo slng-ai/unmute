@@ -301,7 +301,7 @@ The file name is the tool name (N4). Four parts plus a description. Which agents
 | `output` | no | JSON Schema object | warn | Enforced by generated code on code targets. Managed targets have no slot for it: warns there. |
 | `execution` | yes | `local \| client \| webhook \| provider_hosted \| builtin \| mcp` | see below | |
 | `handler` | iff `execution: local` | path, default `<name>.py` | | Code targets only. |
-| `url_env` | iff `execution: webhook` | env var name | core | Reference only, never a URL value. |
+| `url_env` | iff `execution: webhook` or `mcp` | env var name | core | Reference only, never a URL value. For `mcp` it names the MCP server address (driver-livekit B3, 2026-07-16: code targets have no other slot for it; managed targets may configure the server provider-side and ignore it). |
 | `interruption` | no, default `provider_default` | `continue \| cancel \| provider_default` | warn | Honored on code targets. On managed targets only `provider_default` means anything; other values warn. |
 | `effect` | no, default `returns_data` | `returns_data \| ends_conversation` | core | |
 
@@ -309,7 +309,7 @@ Execution gating across the five:
 
 - `webhook`: works everywhere. **This is the safe choice.**
 - `local`: code targets only.
-- `mcp`: **fails on Deepgram** (no runtime MCP client). On LiveKit it requires SDK language Python.
+- `mcp`: **fails on Deepgram** (no runtime MCP client). On LiveKit it requires SDK language Python; code targets read the server address from `url_env` (B3, 2026-07-16).
 - `client`, `provider_hosted`, `builtin`: gated per driver; each driver documents what it can host. Not part of the safe core yet.
 
 The Pipecat driver v1 emits `webhook` tools only; `local` and `mcp` are maturity-gated there until the driver emits them.

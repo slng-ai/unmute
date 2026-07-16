@@ -87,6 +87,30 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 	data.NeedsTasks = len(data.Tasks) > 0
 
+	// Local handler files ride the artifact (tools/<name>.py); mcp mounts and
+	// local wrappers pull their imports.
+	seenLocal := map[string]bool{}
+	collectTools := func(tools []livekitTool, servers []livekitMCPServer) {
+		data.NeedsMCP = data.NeedsMCP || len(servers) > 0
+		for _, tool := range tools {
+			if !tool.Local || seenLocal[tool.Method] {
+				continue
+			}
+			seenLocal[tool.Method] = true
+			data.NeedsInspect = true
+			data.LocalTools = append(data.LocalTools, livekitLocalTool{
+				Name: tool.Method, Source: agent.Tools[tool.Method].HandlerSource,
+			})
+		}
+	}
+	for _, a := range data.Agents {
+		collectTools(a.Tools, a.MCPServers)
+	}
+	for _, t := range data.Tasks {
+		collectTools(t.Tools, t.MCPServers)
+	}
+	sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
+
 	// History-shaping helpers emit only when a transfer or task uses them (V5).
 	for _, a := range data.Agents {
 		for _, tr := range a.Transfers {
@@ -274,8 +298,14 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 	if built.IsEntry {
 		built.Greeting = livekitGreetingFor(agent.Conversation)
 	}
+	mcpByEnv := map[string][]string{}
 	for _, ref := range def.Tools {
 		if tool, ok := agent.Tools[ref]; ok {
+			if tool.Execution == ir.ToolMCP {
+				env.add(tool.URLEnv)
+				mcpByEnv[tool.URLEnv] = append(mcpByEnv[tool.URLEnv], ref)
+				continue
+			}
 			lowered, err := buildLiveKitTool(ref, tool, env)
 			if err != nil {
 				return livekitAgent{}, fmt.Errorf("agent %q: %w", name, err)
@@ -344,7 +374,24 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 			built.Delegates = append(built.Delegates, delegate)
 		}
 	}
+	built.MCPServers = livekitMCPServers(mcpByEnv)
 	return built, nil
+}
+
+// livekitMCPServers collapses mcp tools by server env into sorted mounts.
+func livekitMCPServers(byEnv map[string][]string) []livekitMCPServer {
+	envs := make([]string, 0, len(byEnv))
+	for e := range byEnv {
+		envs = append(envs, e)
+	}
+	sort.Strings(envs)
+	servers := make([]livekitMCPServer, 0, len(envs))
+	for _, e := range envs {
+		tools := byEnv[e]
+		sort.Strings(tools)
+		servers = append(servers, livekitMCPServer{URLEnv: e, Tools: tools})
+	}
+	return servers
 }
 
 func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, env *envSet) (livekitDelegate, error) {
@@ -417,10 +464,16 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 	for _, fname := range sortedResultNames(task.Result) {
 		built.Result = append(built.Result, livekitArg{Name: fname, PyType: resultPyType(task.Result[fname]), Required: true})
 	}
+	mcpByEnv := map[string][]string{}
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
 		if !ok {
 			return livekitTask{}, fmt.Errorf("task %q references unknown tool %q", name, ref)
+		}
+		if tool.Execution == ir.ToolMCP {
+			env.add(tool.URLEnv)
+			mcpByEnv[tool.URLEnv] = append(mcpByEnv[tool.URLEnv], ref)
+			continue
 		}
 		lowered, err := buildLiveKitTool(ref, tool, env)
 		if err != nil {
@@ -428,24 +481,31 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 		}
 		built.Tools = append(built.Tools, lowered)
 	}
+	built.MCPServers = livekitMCPServers(mcpByEnv)
 	return built, nil
 }
 
-// buildLiveKitTool lowers a webhook tool to a @function_tool method (agents
-// and tasks share the shape). local/mcp arrive with T16's sweep; until then
-// they fail loud here.
+// buildLiveKitTool lowers a webhook or local tool to a @function_tool method
+// (agents and tasks share the shape); mcp tools mount as servers upstream.
+// client/provider_hosted/builtin are table-denied and cannot validate green.
 func buildLiveKitTool(name string, tool ir.Tool, env *envSet) (livekitTool, error) {
-	if tool.Execution != ir.ToolWebhook {
-		return livekitTool{}, fmt.Errorf("tool %q: livekit driver emits webhook tools only for now (got %q)", name, tool.Execution)
-	}
-	if tool.URLEnv != "" {
+	switch tool.Execution {
+	case ir.ToolWebhook:
 		env.add(tool.URLEnv)
+		return livekitTool{
+			Method: name, Description: tool.Description, URLEnv: tool.URLEnv,
+			Args:             livekitToolArgs(tool.Input),
+			EndsConversation: tool.Effect == ir.ToolEndsConversation,
+		}, nil
+	case ir.ToolLocal:
+		return livekitTool{
+			Method: name, Description: tool.Description, Local: true,
+			Args:             livekitToolArgs(tool.Input),
+			EndsConversation: tool.Effect == ir.ToolEndsConversation,
+		}, nil
+	default:
+		return livekitTool{}, fmt.Errorf("tool %q: execution %q has no livekit lowering", name, tool.Execution)
 	}
-	return livekitTool{
-		Method: name, Description: tool.Description, URLEnv: tool.URLEnv,
-		Args:             livekitToolArgs(tool.Input),
-		EndsConversation: tool.Effect == ir.ToolEndsConversation,
-	}, nil
 }
 
 // --- binding → call mapping ------------------------------------------------

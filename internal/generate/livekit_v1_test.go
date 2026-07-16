@@ -638,6 +638,62 @@ func TestLiveKitV1PinsAndSDKLanguage(t *testing.T) {
 	}
 }
 
+// TestLiveKitV1LocalAndMCPTools covers the tool executions beyond webhook:
+// local copies the package handler into tools/<name>.py and wraps it (SCHEMA
+// §5, code targets); mcp mounts MCPServerHTTP off url_env with allowed_tools
+// (B3/D8). The local handler rides spec.Load like instructions do.
+func TestLiveKitV1LocalAndMCPTools(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tools["fetch_notes"] = ir.Tool{
+		Description: "Fetch the caller's saved notes.",
+		Input:       map[string]any{"type": "object", "properties": map[string]any{"topic": map[string]any{"type": "string"}}, "required": []any{"topic"}},
+		Execution:   ir.ToolLocal, Handler: "tools/fetch_notes.py",
+		HandlerSource: "def fetch_notes(topic):\n    return {\"notes\": []}\n",
+		Interruption:  ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+	}
+	agent.Tools["book_table"] = ir.Tool{
+		Description: "Book the table through the bookings MCP server.",
+		Input:       map[string]any{"type": "object"},
+		Execution:   ir.ToolMCP, URLEnv: "BOOKINGS_MCP_URL",
+		Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+	}
+	def := agent.Agents["greeter"]
+	def.Tools = append(def.Tools, "fetch_notes", "book_table")
+	agent.Agents["greeter"] = def
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		"import inspect",
+		"import tools.fetch_notes",
+		"async def fetch_notes(self, ctx: RunContext, topic: str) -> dict:",
+		"result = tools.fetch_notes.fetch_notes(topic=topic)",
+		"if inspect.isawaitable(result):",
+		`mcp_servers=[mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], allowed_tools=["book_table"])],`,
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	if handler := artifactFile(t, artifact, "tools/fetch_notes.py"); !strings.Contains(handler, "def fetch_notes(topic):") {
+		t.Errorf("handler not copied verbatim:\n%s", handler)
+	}
+	artifactFile(t, artifact, "tools/__init__.py")
+	if env := artifactFile(t, artifact, ".env.example"); !strings.Contains(env, "BOOKINGS_MCP_URL") {
+		t.Error(".env.example missing the MCP server env")
+	}
+}
+
 // TestCheckLiveKitVersion pins the template-compatible range (>=1.5, <2.0):
 // beta.workflows TaskGroup + AgentTask + inference are present from 1.5.x.
 func TestCheckLiveKitVersion(t *testing.T) {

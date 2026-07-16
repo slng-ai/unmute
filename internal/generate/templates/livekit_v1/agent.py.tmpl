@@ -22,12 +22,33 @@ agents and tasks share the shape (T15). */ -}}
 {{- end}}
             return resp.json()
 {{end -}}
+{{- /* local_tool calls the handler copied from the source package (SCHEMA §5:
+the file defines a callable named like the tool; sync or async). */ -}}
+{{define "local_tool"}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.PyType}}{{end}}) -> dict:
+        {{triple .Description}}
+        result = tools.{{.Method}}.{{.Method}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Name}}={{$a.Name}}{{end}})
+        if inspect.isawaitable(result):
+            result = await result
+{{- if .EndsConversation}}
+        self.session.shutdown()  # effect: ends_conversation
+{{- end}}
+        return result
+{{end -}}
+{{- /* method_tool dispatches on execution. */ -}}
+{{define "method_tool"}}{{if .Local}}{{template "local_tool" .}}{{else}}{{template "webhook_tool" .}}{{end}}{{end -}}
+{{- /* mcp_mounts renders an agent's/task's MCP servers (B3): one server per
+url_env, allowed_tools keeping D8 visibility. */ -}}
+{{define "mcp_mounts"}}mcp_servers=[{{range $i, $s := .}}{{if $i}}, {{end}}mcp.MCPServerHTTP(url=os.environ[{{pyq $s.URLEnv}}], allowed_tools=[{{range $j, $t := $s.Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]){{end}}]{{end -}}
 {{if .NeedsAsyncio}}import asyncio
+{{end}}{{if .NeedsInspect}}import inspect
 {{end}}{{if .Outbound}}import json
 {{end}}import logging
 import os
 {{if .HasVars}}from dataclasses import dataclass
 {{end}}{{if .NeedsHTTPX}}import httpx
+{{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
 {{if .Outbound}}from livekit import api
 {{end}}from livekit.agents import (
@@ -57,6 +78,9 @@ import os
 {{- end}}
     inference,
     llm,
+{{- if .NeedsMCP}}
+    mcp,
+{{- end}}
     metrics,
 {{- if .IgnorePhrases}}
     stt,
@@ -155,6 +179,9 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- if .TTS}}
             tts={{template "svc" .TTS.Call}},
 {{- end}}
+{{- if .MCPServers}}
+            {{template "mcp_mounts" .MCPServers}},
+{{- end}}
         )
 
     async def on_enter(self) -> None:
@@ -171,7 +198,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
             instructions="You are now handling this. Continue in one short line; do not greet again."
         )
 {{- end}}
-{{- range .Tools}}{{template "webhook_tool" .}}{{end}}
+{{- range .Tools}}{{template "method_tool" .}}{{end}}
 {{range .Transfers}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext):
@@ -294,11 +321,11 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{range .Tasks}}
 class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
-        super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}})
+        super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if .MCPServers}}, {{template "mcp_mounts" .MCPServers}}{{end}})
 
     async def on_enter(self) -> None:
         self.session.generate_reply(instructions="Begin this step.")
-{{range .Tools}}{{template "webhook_tool" .}}{{end}}
+{{range .Tools}}{{template "method_tool" .}}{{end}}
     @function_tool
     async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.PyType}}{{end}}) -> str:
         """Record the result of this step and finish."""

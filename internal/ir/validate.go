@@ -306,7 +306,17 @@ func validateStructure(agent *Agent) []string {
 			if tool.Handler != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler is legal for local execution only", name))
 			}
-		case ToolClient, ToolProviderHosted, ToolBuiltin, ToolMCP:
+		case ToolMCP:
+			// B3 (SCHEMA §5, 2026-07-16): url_env names the MCP server address.
+			if tool.URLEnv == "" {
+				errors = add(errors, fmt.Sprintf("tool %q url_env is required for mcp execution (the MCP server address env)", name))
+			} else if !envNamePattern.MatchString(tool.URLEnv) {
+				errors = add(errors, fmt.Sprintf("tool %q url_env must be an environment variable name", name))
+			}
+			if tool.Handler != "" {
+				errors = add(errors, fmt.Sprintf("tool %q handler is legal for local execution only", name))
+			}
+		case ToolClient, ToolProviderHosted, ToolBuiltin:
 			if tool.Handler != "" || tool.URLEnv != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler/url_env does not match execution %q", name, tool.Execution))
 			}

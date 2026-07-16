@@ -66,6 +66,7 @@ type livekitAgent struct {
 	TTS         *livekitService // set only when it differs from the session default
 	Greeting       *livekitGreeting
 	Tools          []livekitTool
+	MCPServers     []livekitMCPServer
 	Transfers      []livekitTransfer
 	HumanTransfers []livekitHumanTransfer
 	Delegates      []livekitDelegate
@@ -162,6 +163,7 @@ type livekitTask struct {
 	LLM         *livekitLLM  // per-task model override (B1); nil = session LLM
 	Result      []livekitArg // finish() args + the completed result dict
 	Tools       []livekitTool
+	MCPServers  []livekitMCPServer
 }
 
 type livekitTool struct {
@@ -169,7 +171,21 @@ type livekitTool struct {
 	Description      string
 	URLEnv           string
 	Args             []livekitArg
+	Local            bool // execution: local — call the copied handler module
 	EndsConversation bool // effect: ends_conversation — shutdown after the call
+}
+
+// livekitMCPServer is one MCP server an agent or task mounts (B3): the tools
+// sharing a url_env collapse to one MCPServerHTTP with allowed_tools (D8).
+type livekitMCPServer struct {
+	URLEnv string
+	Tools  []string
+}
+
+// livekitLocalTool is a copied handler file: tools/<name>.py in the project.
+type livekitLocalTool struct {
+	Name   string
+	Source string
 }
 
 // livekitInterruption is the conversation.interruption block (V16): enabled
@@ -203,7 +219,8 @@ type livekitData struct {
 	Agents        []livekitAgent
 	Tasks         []livekitTask
 	Vars          []livekitVar
-	Pins          map[string]string // plugin pins (C6): raise dep floors
+	LocalTools    []livekitLocalTool // copied handler files (tools/<name>.py)
+	Pins          map[string]string  // plugin pins (C6): raise dep floors
 	Prompts       []livekitPrompt
 	PluginModules []string // merged `from livekit.plugins import ...` names
 	Deps          []string
@@ -217,6 +234,8 @@ type livekitData struct {
 	NeedsLastN      bool // the _last_n history helper
 	NeedsSummarize  bool // the _summarize history helper
 	NeedsAsyncio    bool // inactivity end / max_duration timers
+	NeedsInspect    bool // local tool wrappers (isawaitable)
+	NeedsMCP        bool // mcp import (MCPServerHTTP)
 	HasColdTransfer bool // get_job_context import
 	HasWarmTransfer bool // WarmTransferTask import + trunk env
 	Outbound        *livekitOutbound
@@ -348,6 +367,14 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 			return nil, err
 		}
 		files = append(files, File{Path: o.path, Content: content})
+	}
+	// Local tool handlers are copied verbatim from the source package (SCHEMA
+	// §5: code targets host the handler).
+	if len(data.LocalTools) > 0 {
+		files = append(files, File{Path: "tools/__init__.py", Content: []byte("")})
+		for _, lt := range data.LocalTools {
+			files = append(files, File{Path: "tools/" + lt.Name + ".py", Content: []byte(lt.Source)})
+		}
 	}
 	return files, nil
 }
