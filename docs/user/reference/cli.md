@@ -10,10 +10,14 @@
 unmute init [name]
 ```
 
-Scaffolds a new v1 package: `agent.yaml`, `instructions.md`, `targets.yaml`, and `.env.example`, with a ready-to-run `pipecat-dev` target. The scaffold binds speech in and out to SLNG (one `SLNG_API_KEY` covers hosted STT and TTS) unless you rebind afterwards; any provider in the [providers reference](providers.md) is a one-line change. Prints a `created <path>` line for each file.
+Scaffolds a new v1 package. The noninteractive default is exactly `agent.yaml`, `instructions.md`, `targets.yaml`, and `.env.example`, with a ready-to-run `pipecat-dev` target. Extra agents, tasks, and tools add their prompt or manifest files. Prints a `created <path>` line for each file.
 
 - With a `name`, writes the package to that directory.
-- With no argument on an interactive terminal, opens a menu to set the prompt, models, greeting, and language before writing. Nothing is written until you confirm.
+- With no argument on an interactive terminal, opens the creation wizard. Start with target, language, STT/LLM/TTS bindings, prompt, and greeting; optionally add variables, webhook tools, agents, directional handoffs, typed tasks, ordered task groups, web/phone channels, and human transfers. Advanced conversation, fallback, capacity, and target settings stay under **Customize**.
+- Provider choices come from the selected target's catalogue. Model ids, voice ids, and provider params remain forwarded text; the wizard does not invent an allowlist for them.
+- Handoffs stay unavailable until two agents exist. Task groups stay unavailable until a task exists. Telephony declares required behavior and target transport/carrier only—it does not provision a phone number, SIP trunk, room, or carrier account.
+- Before the review screen, the candidate is rendered in a temporary directory and sent through the real load, build, and selected-target generator. The review shows target warnings, required env names, and forwarded bindings. A failing candidate is not written. Nothing reaches the destination until final confirmation.
+- **Back** preserves earlier edits. In accessible mode, enter `:back`; in the keyboard UI, press Esc.
 - It refuses to write into a directory that already exists and is non-empty, rather than overwrite an agent.
 
 ## validate
