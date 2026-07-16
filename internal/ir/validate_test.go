@@ -169,6 +169,29 @@ func TestValidateSpeakProviderAndEndpointSlots(t *testing.T) {
 	}
 }
 
+// TestValidateSpeakRequiredFieldsFromCatalog: entry-declared arity fires at
+// validate time — an ElevenLabs speak binding needs a voice, an SLNG one a
+// model — matching what generate-time resolution would reject anyway.
+func TestValidateSpeakRequiredFieldsFromCatalog(t *testing.T) {
+	agent := safeAgent(t)
+	target := targetFor(agent, ProviderLiveKit)
+	target.Models.Speak["front_desk"] = Binding{Provider: "elevenlabs", Model: "eleven_multilingual_v2"} // voice missing
+	target.Models.Speak["specialist"] = Binding{Provider: "slng", Voice: "aura-2-orion-en"}              // model missing
+	report, err := Validate(agent, []Target{target}, targetcap.Default())
+	if err == nil {
+		t.Fatal("expected speak required-field errors")
+	}
+	errors := strings.Join(report.PerTarget[0].Errors, "\n")
+	for _, want := range []string{
+		`speak.front_desk binding provider "elevenlabs" is missing a voice`,
+		`speak.specialist binding provider "slng" is missing a model`,
+	} {
+		if !strings.Contains(errors, want) {
+			t.Errorf("missing %q in %q", want, errors)
+		}
+	}
+}
+
 func TestValidateCapacity(t *testing.T) { // V12
 	agent := safeAgent(t)
 	agent.Capacity.PeakSessions = agent.Capacity.MaxSessions + 1

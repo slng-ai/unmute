@@ -55,10 +55,10 @@ func TestLiveKitV1RemyGolden(t *testing.T) {
 	}
 }
 
-// TestLiveKitV1EmitsSlngPlugin asserts the emitted entrypoint routes STT/TTS
-// through the SLNG plugin and reason through LiveKit Inference, never a
-// per-vendor plugin (driver-livekit V11). This is the guard that keeps a first
-// generation a real SLNG agent, not a random plugin pick.
+// TestLiveKitV1EmitsSlngPlugin asserts the scaffold example (Remy, all-SLNG
+// bindings) emits the SLNG plugin and LiveKit Inference: the first generation
+// stays a real SLNG agent (driver-livekit V12). Since the C8 amendment SLNG is
+// the default, not the only route; TestLiveKitV1MultiVendor covers the rest.
 func TestLiveKitV1EmitsSlngPlugin(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
 	if err != nil {
@@ -72,15 +72,7 @@ func TestLiveKitV1EmitsSlngPlugin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	var botpy string
-	for _, file := range artifact.Files {
-		if file.Path == "agent.py" {
-			botpy = string(file.Content)
-		}
-	}
-	if botpy == "" {
-		t.Fatal("agent.py not emitted")
-	}
+	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		"from livekit.plugins import silero, slng",
 		"slng.STT(",
@@ -92,11 +84,81 @@ func TestLiveKitV1EmitsSlngPlugin(t *testing.T) {
 			t.Errorf("agent.py missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"DeepgramSTTService", "deepgram.STT(", "cartesia.TTS(", "elevenlabs.TTS("} {
-		if strings.Contains(botpy, forbidden) {
-			t.Errorf("agent.py routes through a per-vendor plugin %q; must use the SLNG plugin (V11)", forbidden)
+}
+
+// TestLiveKitV1MultiVendor proves the catalogue path end to end: the safe_core
+// livekit target binds Deepgram listen and ElevenLabs speak (per-vendor
+// plugins), one voice is rebound to Cartesia in-code, and the emitted project
+// carries the right constructors, merged plugin import, extras dep, and env.
+func TestLiveKitV1MultiVendor(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Provider resolution is the subject here; interruption shaping, agent
+	// tools, and human transfer are separate livekit maturity gates.
+	agent.Conversation.Interruption = nil
+	for name, def := range agent.Agents {
+		var kept []string
+		for _, ref := range def.Tools {
+			if _, ok := agent.Controls[ref].(*ir.AgentTransfer); ok {
+				kept = append(kept, ref)
+			}
+		}
+		def.Tools = kept
+		agent.Agents[name] = def
+	}
+	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+	tgt.Models.Speak["specialist"] = ir.Binding{
+		Provider: "cartesia", Model: "sonic-3", Voice: "f786b574-daa5-4673-aa0c-cbe3e8534c02",
+	}
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		"from livekit.plugins import cartesia, deepgram, elevenlabs, silero",
+		`stt=deepgram.STT(api_key=os.environ.get("DEEPGRAM_API_KEY"), model="nova-3")`,
+		`tts=elevenlabs.TTS(api_key=os.environ.get("ELEVEN_API_KEY"), voice_id="cgSgspJ2msm6clMCkdW9")`,
+		`tts=cartesia.TTS(api_key=os.environ.get("CARTESIA_API_KEY"), voice="f786b574-daa5-4673-aa0c-cbe3e8534c02", model="sonic-3")`,
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
 		}
 	}
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !strings.Contains(pyproject, `"livekit-agents[cartesia,deepgram,elevenlabs]>=1.5"`) {
+		t.Errorf("pyproject.toml missing merged extras dep:\n%s", pyproject)
+	}
+	if strings.Contains(pyproject, "livekit-plugins-slng") {
+		t.Error("pyproject.toml pulls the slng plugin without an slng binding")
+	}
+}
+
+// TestLiveKitV1UnknownVendorFailsWithMatrix asserts the no-slot diagnostic
+// quotes the support matrix instead of guessing a substitute service.
+func TestLiveKitV1UnknownVendorFailsWithMatrix(t *testing.T) {
+	env := newEnvSet()
+	_, err := livekitSTTService(&ir.Binding{Provider: "acme", Model: "m"}, env)
+	if err == nil || !strings.Contains(err.Error(), "listen providers on livekit: deepgram, slng") {
+		t.Fatalf("want a matrix-quoting error, got %v", err)
+	}
+}
+
+func artifactFile(t *testing.T, artifact Artifact, path string) string {
+	t.Helper()
+	for _, file := range artifact.Files {
+		if file.Path == path {
+			return string(file.Content)
+		}
+	}
+	t.Fatalf("%s not emitted", path)
+	return ""
 }
 
 // TestCheckLiveKitVersion pins the template-compatible range (>=1.5, <2.0):

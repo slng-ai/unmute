@@ -139,7 +139,7 @@ class Events(Agent):
         super().__init__(
             instructions=EVENTS_PROMPT,
             chat_ctx=chat_ctx,
-            tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), model="deepgram/aura:2-en", voice="aura-2-orion-en"),
+            tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-orion-en", model="deepgram/aura:2-en"),
         )
 
     async def on_enter(self) -> None:
@@ -199,7 +199,7 @@ class Reservations(Agent):
         super().__init__(
             instructions=RESERVATIONS_PROMPT,
             chat_ctx=chat_ctx,
-            tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), model="deepgram/aura:2-en", voice="aura-2-orion-en"),
+            tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-orion-en", model="deepgram/aura:2-en"),
         )
 
     async def on_enter(self) -> None:
@@ -311,7 +311,7 @@ async def entrypoint(ctx: JobContext) -> None:
     session = AgentSession(
         stt=slng.STT(api_key=os.environ.get("SLNG_API_KEY"), model="deepgram/nova:3-en"),
         llm=inference.LLM(model="openai/gpt-4o-mini", extra_kwargs={"temperature": 0.4}),
-        tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), model="deepgram/aura:2-en", voice="aura-2-thalia-en"),
+        tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-thalia-en", model="deepgram/aura:2-en"),
         turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector(version="v1")),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
@@ -359,6 +359,9 @@ if __name__ == "__main__":
     "SLNG_API_KEY"
   ],
   "notes": [
+    "listen: slng via slng.STT (livekit-plugins-slng\u003e=1.6.1, verified 2026-07-15)",
+    "reason: openai via inference.LLM (ships with the framework, verified 2026-07-15)",
+    "speak: slng via slng.TTS (livekit-plugins-slng\u003e=1.6.1, verified 2026-07-15)",
     "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory",
     "conversation.inactivity is not emitted yet",
     "conversation.max_duration is not emitted yet"

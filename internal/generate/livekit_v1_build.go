@@ -6,10 +6,12 @@ import (
 	"strings"
 
 	"github.com/slng/unmute/internal/ir"
+	targetcap "github.com/slng/unmute/internal/target"
 )
 
 // buildLiveKitData lowers the resolved IR + target into the template model.
-// listen/speak MUST route through SLNG (V11); reason lowers to LiveKit Inference.
+// listen/speak resolve through the provider catalogue (SLNG default, any
+// entry binds); reason lowers to LiveKit Inference (the role's wildcard row).
 // Features the driver does not emit yet fail loud here rather than emitting
 // broken code (no validate-green / generate-broken drift, compiler V19 in spirit).
 func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
@@ -32,16 +34,16 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 
 	entry := agent.Agents[agent.EntryAgent]
-	stt, err := livekitSlngSTT(tgt.Models.Listen, env)
+	stt, err := livekitSTTService(tgt.Models.Listen, env)
 	if err != nil {
 		return livekitData{}, err
 	}
 	data.STT = stt
-	data.SessionLLM, err = livekitInferenceLLM(tgt.Models.Reason[entry.Model])
+	data.SessionLLM, err = livekitLLMService(tgt.Models.Reason[entry.Model], env)
 	if err != nil {
 		return livekitData{}, fmt.Errorf("entry agent %q: %w", agent.EntryAgent, err)
 	}
-	data.SessionTTS, err = livekitSlngTTS(tgt.Models.Speak[entry.Voice], env)
+	data.SessionTTS, err = livekitTTSService(tgt.Models.Speak[entry.Voice], env)
 	if err != nil {
 		return livekitData{}, fmt.Errorf("entry agent %q: %w", agent.EntryAgent, err)
 	}
@@ -89,6 +91,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		}
 	}
 
+	data.Notes = append(data.Notes, livekitServiceNotes(data)...)
 	if agent.Pipeline.Turn != nil {
 		data.Notes = append(data.Notes, "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory")
 	}
@@ -101,9 +104,51 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		}
 	}
 
+	data.PluginModules = collectLiveKitPlugins(data)
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
 	return data, nil
+}
+
+// livekitServices lists every resolved service in the template model.
+func livekitServices(data livekitData) []livekitService {
+	services := []livekitService{data.STT, data.SessionLLM, data.SessionTTS}
+	for _, a := range data.Agents {
+		if a.LLM != nil {
+			services = append(services, *a.LLM)
+		}
+		if a.TTS != nil {
+			services = append(services, *a.TTS)
+		}
+	}
+	return services
+}
+
+// collectLiveKitPlugins merges the used entries' plugin imports into one
+// sorted `from livekit.plugins import ...` module list. Silero is always
+// present (the session VAD).
+func collectLiveKitPlugins(data livekitData) []string {
+	const prefix = "from livekit.plugins import "
+	set := map[string]bool{"silero": true}
+	for _, svc := range livekitServices(data) {
+		if strings.HasPrefix(svc.Entry.Import, prefix) {
+			set[strings.TrimPrefix(svc.Entry.Import, prefix)] = true
+		}
+	}
+	return sortedKeys(set)
+}
+
+// livekitServiceNotes lists every used catalogue entry in the compile report.
+func livekitServiceNotes(data livekitData) []string {
+	set := map[string]bool{}
+	for _, svc := range livekitServices(data) {
+		if svc.Entry.Call == nil {
+			continue
+		}
+		set[fmt.Sprintf("%s: %s via %s (%s, verified %s)",
+			svc.Entry.Role, svc.Vendor, svc.Entry.Call.Class, installLabel(svc.Entry), svc.Entry.Verified)] = true
+	}
+	return sortedKeys(set)
 }
 
 // livekitGuards fails loud on features the driver does not emit yet, so a spec
@@ -136,14 +181,14 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 		IsEntry: name == agent.EntryAgent,
 	}
 	if def.Model != entry.Model {
-		llm, err := livekitInferenceLLM(tgt.Models.Reason[def.Model])
+		llm, err := livekitLLMService(tgt.Models.Reason[def.Model], env)
 		if err != nil {
 			return livekitAgent{}, fmt.Errorf("agent %q: %w", name, err)
 		}
 		built.LLM = &llm
 	}
 	if def.Voice != entry.Voice {
-		tts, err := livekitSlngTTS(tgt.Models.Speak[def.Voice], env)
+		tts, err := livekitTTSService(tgt.Models.Speak[def.Voice], env)
 		if err != nil {
 			return livekitAgent{}, fmt.Errorf("agent %q: %w", name, err)
 		}
@@ -237,47 +282,35 @@ func buildLiveKitTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (
 }
 
 // --- binding → call mapping ------------------------------------------------
+// The catalogue (internal/target/catalog_livekit.go) picks the class, plugin
+// module, install path, and constructor shape; model routes keep their entry's
+// named form (the SLNG plugin strips the slng/ prefix, Inference joins
+// provider/model).
 
-// slngRoute strips the Execution-Layer `slng/` prefix: the livekit-plugins-slng
-// plugin takes the bare provider/model form (verified: model="deepgram/aura:2").
-func slngRoute(model string) string { return strings.TrimPrefix(model, "slng/") }
+// livekitEnvRef renders the driver's environment-lookup idiom.
+func livekitEnvRef(name string) string { return "os.environ.get(" + pyQuote(name) + ")" }
 
-func livekitSlngSTT(binding *ir.Binding, env *envSet) (livekitSTT, error) {
-	if binding == nil || binding.Model == "" {
-		return livekitSTT{}, fmt.Errorf("livekit listen binding is missing a model")
+func resolveLiveKitService(role targetcap.Role, binding ir.Binding, env *envSet) (livekitService, error) {
+	call, entry, err := resolveService(defaultCatalog, targetcap.LiveKit, role, binding, livekitEnvRef, env)
+	if err != nil {
+		return livekitService{}, err
 	}
-	if binding.Provider != "slng" {
-		return livekitSTT{}, fmt.Errorf("livekit routes listen through SLNG only; bind provider: slng (got %q)", binding.Provider)
-	}
-	key := apiKeyEnv("slng")
-	env.add(key)
-	return livekitSTT{Model: slngRoute(binding.Model), APIKeyEnv: key, Params: forwardParams(binding.Params)}, nil
+	return livekitService{Call: call, Entry: entry, Vendor: firstNonEmpty(binding.Provider, "openai")}, nil
 }
 
-func livekitSlngTTS(binding ir.Binding, env *envSet) (livekitTTS, error) {
-	if binding.Model == "" {
-		return livekitTTS{}, fmt.Errorf("livekit speak binding is missing a model")
+func livekitSTTService(binding *ir.Binding, env *envSet) (livekitService, error) {
+	if binding == nil {
+		return livekitService{}, fmt.Errorf("livekit listen binding is missing a model")
 	}
-	if binding.Provider != "slng" {
-		return livekitTTS{}, fmt.Errorf("livekit routes speak through SLNG only; bind provider: slng (got %q)", binding.Provider)
-	}
-	key := apiKeyEnv("slng")
-	env.add(key)
-	return livekitTTS{
-		Model: slngRoute(binding.Model), Voice: firstNonEmpty(binding.Voice, binding.VoiceID),
-		APIKeyEnv: key, Params: forwardParams(binding.Params),
-	}, nil
+	return resolveLiveKitService(targetcap.Listen, *binding, env)
 }
 
-func livekitInferenceLLM(binding ir.Binding) (livekitLLM, error) {
-	if binding.Model == "" {
-		return livekitLLM{}, fmt.Errorf("reason binding is missing a model")
-	}
-	model := binding.Model
-	if binding.Provider != "" {
-		model = binding.Provider + "/" + binding.Model
-	}
-	return livekitLLM{Model: model, Params: forwardParams(binding.Params)}, nil
+func livekitTTSService(binding ir.Binding, env *envSet) (livekitService, error) {
+	return resolveLiveKitService(targetcap.Speak, binding, env)
+}
+
+func livekitLLMService(binding ir.Binding, env *envSet) (livekitService, error) {
+	return resolveLiveKitService(targetcap.Reason, binding, env)
 }
 
 // --- small helpers ---------------------------------------------------------
@@ -378,13 +411,26 @@ func livekitGreetingFor(c *ir.Conversation) *livekitGreeting {
 	}
 }
 
+// livekitDeps builds the dependency list from the used entries: extras merge
+// onto the livekit-agents pin, standalone plugin packages keep their own
+// floors (user pins: override them per SCHEMA.md 6.1).
 func livekitDeps(data livekitData) []string {
-	deps := []string{
-		fmt.Sprintf("livekit-agents>=%d.%d", livekitVersionMajor, livekitVersionMinMinor),
-		"livekit-plugins-silero>=1.6.1",
-		"livekit-plugins-slng>=1.6.1",
-		"python-dotenv",
+	extras := map[string]bool{}
+	packages := map[string]bool{}
+	for _, svc := range livekitServices(data) {
+		if svc.Entry.Install.Extra != "" {
+			extras[svc.Entry.Install.Extra] = true
+		}
+		if svc.Entry.Install.Package != "" {
+			packages[svc.Entry.Install.Package+svc.Entry.Install.Constraint] = true
+		}
 	}
+	base := fmt.Sprintf("livekit-agents>=%d.%d", livekitVersionMajor, livekitVersionMinMinor)
+	if len(extras) > 0 {
+		base = fmt.Sprintf("livekit-agents[%s]>=%d.%d",
+			strings.Join(sortedKeys(extras), ","), livekitVersionMajor, livekitVersionMinMinor)
+	}
+	deps := append([]string{base, "livekit-plugins-silero>=1.6.1", "python-dotenv"}, sortedKeys(packages)...)
 	if data.NeedsHTTPX {
 		deps = append(deps, "httpx")
 	}

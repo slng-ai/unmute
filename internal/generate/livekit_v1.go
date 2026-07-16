@@ -13,15 +13,17 @@ import (
 	"text/template"
 
 	"github.com/slng/unmute/internal/ir"
+	targetcap "github.com/slng/unmute/internal/target"
 )
 
 // The LiveKit driver lowers the resolved IR into a runnable LiveKit Agents
 // project (Python). Each agent is a livekit.agents.Agent; agent_transfer is a
 // @function_tool returning the next Agent (native handoff); a task is an
-// AgentTask[dict]; a task_group is a beta.workflows.TaskGroup. STT/TTS route
-// through the SLNG Execution Layer via livekit-plugins-slng (never a per-vendor
-// plugin), reason through LiveKit Inference (driver-livekit C8/V11). Python is
-// emitted only through these templates (C1/ADR-0002).
+// AgentTask[dict]; a task_group is a beta.workflows.TaskGroup. listen/speak
+// resolve through the provider catalogue (internal/target/catalog_livekit.go):
+// SLNG is the scaffold default, per-vendor plugins bind when the user picks
+// them; reason lowers to LiveKit Inference. Python is emitted only through
+// these templates (C1/ADR-0002).
 //
 //go:embed templates/livekit_v1/*.tmpl
 var livekitV1Templates embed.FS
@@ -36,27 +38,12 @@ const (
 
 var livekitVersionPattern = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
 
-// livekitSTT / livekitTTS render slng.STT / slng.TTS (the Execution Layer). The
-// model route has its `slng/` prefix stripped: the plugin takes the bare
-// provider/model form (e.g. "deepgram/aura:2"), verified against the plugin.
-type livekitSTT struct {
-	Model     string
-	APIKeyEnv string
-	Params    []pyKV
-}
-
-type livekitTTS struct {
-	Model     string
-	Voice     string
-	APIKeyEnv string
-	Params    []pyKV
-}
-
-// livekitLLM renders inference.LLM: the model is provider/model for LiveKit
-// Inference; params ride extra_kwargs.
-type livekitLLM struct {
-	Model  string
-	Params []pyKV
+// livekitService is one resolved binding: the rendered constructor plus its
+// catalogue entry (imports/deps) and vendor (report labeling).
+type livekitService struct {
+	Call   ServiceCall
+	Entry  targetcap.Entry
+	Vendor string
 }
 
 type livekitAgent struct {
@@ -64,8 +51,8 @@ type livekitAgent struct {
 	Class       string
 	PromptConst string
 	IsEntry     bool
-	LLM         *livekitLLM // set only when it differs from the session default
-	TTS         *livekitTTS // set only when it differs from the session default
+	LLM         *livekitService // set only when it differs from the session default
+	TTS         *livekitService // set only when it differs from the session default
 	Greeting    *livekitGreeting
 	Transfers   []livekitTransfer
 	Delegates   []livekitDelegate
@@ -127,20 +114,21 @@ type livekitPrompt struct {
 }
 
 type livekitData struct {
-	Project     string
-	Version     string
-	AgentName   string
-	EntryClass  string
-	STT         livekitSTT
-	SessionLLM  livekitLLM
-	SessionTTS  livekitTTS
-	TurnVersion string
-	Agents      []livekitAgent
-	Tasks       []livekitTask
-	Prompts     []livekitPrompt
-	Deps        []string
-	RequiredEnv []string
-	Notes       []string
+	Project       string
+	Version       string
+	AgentName     string
+	EntryClass    string
+	STT           livekitService
+	SessionLLM    livekitService
+	SessionTTS    livekitService
+	TurnVersion   string
+	Agents        []livekitAgent
+	Tasks         []livekitTask
+	Prompts       []livekitPrompt
+	PluginModules []string // merged `from livekit.plugins import ...` names
+	Deps          []string
+	RequiredEnv   []string
+	Notes         []string
 
 	NeedsTasks bool // AgentTask / TaskGroup imports
 	NeedsHTTPX bool // any webhook tool

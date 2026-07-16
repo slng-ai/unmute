@@ -147,12 +147,13 @@ const (
 	FallbackProvider     FallbackSlot = "provider_entry"
 )
 
+// Per-role vendor allowlists live in the provider catalogue (catalog_*.go);
+// validation checks bindings with Catalog.CheckVendor, not this table.
 type Table struct {
 	Fields        map[Field]map[Provider]Capability
 	Controls      map[TelephonyControl]map[Provider]ControlCapability
 	Conditions    map[Field]map[Provider]ValueCondition
 	Roles         map[Role]map[Provider]RoleKind
-	RoleProviders map[Role]map[Provider][]string
 	History       map[History]map[Provider]HistorySupport
 	FallbackSlots map[Provider]FallbackSlot
 }
@@ -193,10 +194,6 @@ func (t Table) CapabilityForValue(field Field, provider Provider, value string) 
 
 func (t Table) Role(role Role, provider Provider) RoleKind {
 	return t.Roles[role][provider]
-}
-
-func (t Table) RoleProvider(role Role, provider Provider) []string {
-	return t.RoleProviders[role][provider]
 }
 
 func (t Table) HistorySupport(history History, provider Provider) HistorySupport {
@@ -410,13 +407,6 @@ func Default() Table {
 			Turn:   role(Open, Open, Integrated, Integrated, Integrated),
 			Speak:  role(Open, Open, Open, Open, Open),
 			Reason: role(Open, Open, Open, Open, Open),
-		},
-		RoleProviders: map[Role]map[Provider][]string{
-			Listen: {Deepgram: {"deepgram"}},
-			Speak: {
-				ElevenLabs: {"elevenlabs", "eleven_labs"},
-				Deepgram:   {"deepgram", "eleven_labs", "cartesia", "open_ai", "aws_polly"},
-			},
 		},
 		History: map[History]map[Provider]HistorySupport{
 			// Pipecat driver v1 emits history: full only; other values are a

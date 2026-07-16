@@ -252,7 +252,9 @@ AGENTS = [BillingAgent(), IntakeAgent()]
 def build_stt():
     return DeepgramSTTService(
         api_key=os.environ["DEEPGRAM_API_KEY"],
-        model="nova-3",
+        settings=DeepgramSTTService.Settings(
+            model="nova-3",
+        ),
     )
 
 
@@ -364,6 +366,9 @@ if __name__ == "__main__":
   ],
   "notes": [
     "interruption ignore_phrases emitted as IGNORE_PHRASES; short phrases are also suppressed by the min-words turn-start strategy",
+    "listen: deepgram via DeepgramSTTService (pipecat-ai[deepgram], verified 2026-07-15)",
+    "reason: openai via OpenAILLMService (pipecat-ai[openai], verified 2026-07-15)",
+    "speak: slng via SlngTTSService (pipecat-slng\u003e=0.4.0, verified 2026-07-15)",
     "turn role lowers to on-device VAD (Silero); its binding is advisory"
   ]
 }

@@ -1,6 +1,6 @@
 # Reference: the CLI
 
-`unmute` has five commands: `init`, `validate`, `compile`, `apply`, and `dev`. All of them except `init` read a v1 package (see [agent.yaml](agent-yaml.md)). Only the Pipecat driver is implemented today, so `compile` and `dev` produce artifacts for Pipecat targets; other providers report that their driver is not implemented.
+`unmute` has five commands: `init`, `validate`, `compile`, `apply`, and `dev`. All of them except `init` read a v1 package (see [agent.yaml](agent-yaml.md)). Three drivers are shipped: **Pipecat** and **LiveKit** (code targets, `compile` writes a runnable project) and **ElevenLabs** (managed target, `apply` reconciles the provider's config). Vapi and Deepgram report `driver is not implemented` until theirs land.
 
 **Exit codes:** `0` on success, `1` on error. Warnings go to standard error and still exit `0`; they never silently downgrade a result.
 
@@ -10,7 +10,7 @@
 unmute init [name]
 ```
 
-Scaffolds a new v1 package: `agent.yaml`, `instructions.md`, `targets.yaml`, and `.env.example`, with a ready-to-run `pipecat-dev` target. Prints a `created <path>` line for each file.
+Scaffolds a new v1 package: `agent.yaml`, `instructions.md`, `targets.yaml`, and `.env.example`, with a ready-to-run `pipecat-dev` target. The scaffold binds speech in and out to SLNG (one `SLNG_API_KEY` covers hosted STT and TTS) unless you rebind afterwards; any provider in the [providers reference](providers.md) is a one-line change. Prints a `created <path>` line for each file.
 
 - With a `name`, writes the package to that directory.
 - With no argument on an interactive terminal, opens a menu to set the prompt, models, greeting, and language before writing. Nothing is written until you confirm.
@@ -31,7 +31,7 @@ pipecat-dev   pipecat   pass
 
 Warnings and errors print to standard error, prefixed `warning:` and `error:`, each naming the target. Exits `1` if any target fails.
 
-`validate` uses the schema's capability rules, not a driver, so it works for **all five providers** even though only Pipecat compiles. Use it to check portability across targets before you commit to one. Repeat `--target` to check specific instances, or omit it to check every declared target.
+`validate` uses the schema's capability rules and the provider catalogue, not a driver, so it works for **all five providers** whether or not their driver is shipped. Use it to check portability across targets before you commit to one. Repeat `--target` to check specific instances, or omit it to check every declared target.
 
 ## compile
 
@@ -39,9 +39,9 @@ Warnings and errors print to standard error, prefixed `warning:` and `error:`, e
 unmute compile <package-dir> [--target <name>]...
 ```
 
-Runs validate, then generates. For a **code target** (Pipecat), writes the project to `<package-dir>/build/<target-name>/` and prints a `generated <path>` line per file. For a **managed target**, prints a line telling you to use `apply`. Omitting `--target` compiles every declared target.
+Runs validate, then generates. For a **code target** (Pipecat, LiveKit), writes the project to `<package-dir>/build/<target-name>/` and prints a `generated <path>` line per file. For a **managed target**, prints a line telling you to use `apply`. Omitting `--target` compiles every declared target.
 
-Only Pipecat has a driver: compiling a LiveKit, Vapi, ElevenLabs, or Deepgram instance fails with `<provider> driver is not implemented`.
+Compiling a Vapi or Deepgram instance fails with `<provider> driver is not implemented` until those drivers ship.
 
 ## apply
 
@@ -49,7 +49,7 @@ Only Pipecat has a driver: compiling a LiveKit, Vapi, ElevenLabs, or Deepgram in
 unmute apply <package-dir> [--target <name>]...
 ```
 
-Intended for **managed** targets (Vapi, ElevenLabs): reconcile the provider's live config to your spec. Run it against a code target and it tells you to use `unmute compile` instead. Because no managed driver is implemented yet, applying to a managed instance currently fails with `<provider> driver is not implemented`. This command is a placeholder until the first managed driver ships.
+For **managed** targets: reconcile the provider's live config to your spec. Run it against a code target and it tells you to use `unmute compile` instead. The **ElevenLabs** driver is shipped: it builds one Conversational-AI Agent resource per Unmute agent, creates them in dependency order (transfer targets first, captured ids wired into the callers), PATCHes agents pinned by `agent_id.<name>`, honors a `branch_id` pin, and authenticates with `ELEVENLABS_API_KEY`. Applying to a Vapi instance fails with `vapi driver is not implemented` until that driver ships.
 
 ## dev
 

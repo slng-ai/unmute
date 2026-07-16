@@ -32,11 +32,11 @@ targets:
 | `models` | yes | the binding block, below |
 | `destinations` | if any `human_transfer` is used | map of symbolic name to phone number or SIP address |
 
-Only Pipecat has a driver today, so only Pipecat instances compile; other providers error on `compile` until their driver ships. `validate` still checks any provider against the schema. See the [target pages](../targets/pipecat.md).
+Pipecat, LiveKit, and ElevenLabs have drivers today; Vapi and Deepgram instances error on `compile` until their driver ships. `validate` still checks any provider against the schema. See the [target pages](../targets/pipecat.md).
 
 ## Bindings
 
-The `models` block binds each role. `listen` and `turn` bind once each. `reason` binds once per model profile. `speak` binds once per voice profile.
+The `models` block binds each role. `listen` and `turn` bind once each. `reason` binds once per model profile. `speak` binds once per voice profile. Which `provider:` values each target accepts, and what each choice emits, is the [providers reference](providers.md).
 
 Each role is **open** (you bind an outside model) or **integrated** (the platform builds it in; you can bind settings only, never an outside model):
 
@@ -58,4 +58,4 @@ Rules:
 
 ### Why bindings are never validated
 
-Provider model lists change faster than any shipped catalog, the valid set on code targets depends on the pinned versions, and the real validators already exist: the provider API at apply time, and the generated project at startup. Unmute relays those errors word for word rather than guessing ahead of them. To point a role at an OpenAI-compatible endpoint, a binding may carry `endpoint_env` (an environment variable name), which the Pipecat driver passes as the service `base_url`.
+Provider model lists change faster than any shipped catalog, the valid set on code targets depends on the pinned versions, and the real validators already exist: the provider API at apply time, and the generated project at startup. Unmute relays those errors word for word rather than guessing ahead of them. The one thing that **is** checked is the `provider:` name itself, because it selects the emitted integration: the [providers reference](providers.md) lists the accepted names per target, and an unknown one fails at `validate` with the alternatives quoted. To point a role at an OpenAI-compatible endpoint, a binding may carry `endpoint_env` (an environment variable name), which the Pipecat driver passes as the service `base_url`.

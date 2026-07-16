@@ -234,7 +234,9 @@ TASK_WORKERS = [CollectTask()]
 def build_stt():
     return DeepgramSTTService(
         api_key=os.environ["DEEPGRAM_API_KEY"],
-        model="nova-3",
+        settings=DeepgramSTTService.Settings(
+            model="nova-3",
+        ),
     )
 
 
