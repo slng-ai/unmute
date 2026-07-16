@@ -58,12 +58,12 @@ func (l livekitLLM) services() []livekitService {
 }
 
 type livekitAgent struct {
-	Name        string
-	Class       string
-	PromptConst string
-	IsEntry     bool
-	LLM         *livekitLLM     // set only when it differs from the session default
-	TTS         *livekitService // set only when it differs from the session default
+	Name           string
+	Class          string
+	PromptConst    string
+	IsEntry        bool
+	LLM            *livekitLLM     // set only when it differs from the session default
+	TTS            *livekitService // set only when it differs from the session default
 	Greeting       *livekitGreeting
 	Tools          []livekitTool
 	MCPServers     []livekitMCPServer
@@ -241,13 +241,50 @@ type livekitData struct {
 	Outbound        *livekitOutbound
 
 	// Conversation shaping (V16).
-	ThinkingAudio       bool // subtle → BackgroundAudioPlayer thinking sound
-	Interruption        *livekitInterruption
-	IgnorePhrases       []string // generated stt_node filter mixin
+	ThinkingAudio          bool // subtle → BackgroundAudioPlayer thinking sound
+	Interruption           *livekitInterruption
+	IgnorePhrases          []string // generated stt_node filter mixin
 	InactivityNudgeSecs    int
 	InactivityEndSecs      int
 	InactivityEndDeltaSecs int // end_after minus nudge_after, floored at 1s
 	MaxDurationSecs        int
+}
+
+// livekitEmittedFields declares every capability field the LiveKit emitter has
+// a real code path for. It MUST equal the table's non-gated LiveKit rows — the
+// V15 agreement test enforces it, so a field can never be validate-green while
+// the emitter silently drops it (B1). Add a row here only with the code.
+var livekitEmittedFields = map[targetcap.Field]bool{
+	targetcap.FieldListenLocal:           true, // placement forwarded (code target runs it locally)
+	targetcap.FieldSpeakLocal:            true,
+	targetcap.FieldReasonLocal:           true,
+	targetcap.FieldTurnPlacement:         true, // advisory (Inference turn detection supplied)
+	targetcap.FieldSemanticEndpointing:   true, // advisory
+	targetcap.FieldFallback:              true, // llm.FallbackAdapter (V4)
+	targetcap.FieldTask:                  true, // AgentTask; single delegate awaits it (T12)
+	targetcap.FieldTaskModel:             true, // AgentTask(llm=...) (T14, B1)
+	targetcap.FieldTaskNestedResult:      true, // dict finish arg
+	targetcap.FieldTaskGroup:             true, // beta.workflows TaskGroup (warn: experimental)
+	targetcap.FieldTaskGroupReturn:       true, // N13 snapshot/restore + task_results
+	targetcap.FieldContextIsolated:       true, // standalone-AgentTask sequence (T13)
+	targetcap.FieldTransferRequires:      true, // generated guard naming unmet vars (V7)
+	targetcap.FieldContextNoToolCalls:    true, // copy(exclude_function_call=True)
+	targetcap.FieldContextVariableSubset: true, // uncarried userdata fields reset (D7)
+	targetcap.FieldBriefingSummary:       true, // WarmTransferTask consultation flow
+	targetcap.FieldGreetingUserFirst:     true,
+	targetcap.FieldGreetingModelWritten:  true,
+	targetcap.FieldGreetingAbsent:        true,
+	targetcap.FieldInterruptionMinWords:  true, // TurnHandlingOptions interruption min_words
+	targetcap.FieldInterruptionIgnore:    true, // generated stt_node filter mixin
+	targetcap.FieldInactivity:            true, // user_away_timeout + away handler
+	targetcap.FieldMaxDuration:           true, // asyncio shutdown timer
+	targetcap.FieldThinkingAudio:         true, // BackgroundAudioPlayer thinking sound
+	targetcap.FieldToolOutput:            true, // tool returns response.json()
+	targetcap.FieldToolLocal:             true, // handler copied + wrapped
+	targetcap.FieldToolMCP:               true, // mcp.MCPServerHTTP mounts (B3)
+	targetcap.FieldToolInterruption:      true, // warn: runs to completion
+	targetcap.FieldOutbound:              true, // SIP dial-out off job metadata
+	targetcap.FieldVoicemail:             true, // AMD machine-vm branches (N6)
 }
 
 // GenerateLiveKit lowers a validated agent + livekit target into a project. The

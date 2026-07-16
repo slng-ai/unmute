@@ -214,6 +214,7 @@ func Default() Table {
 				deny(Deepgram, "Deepgram cannot run a local voice model"),
 			),
 			FieldSpeakEndpoint: field(
+				deny(LiveKit, "LiveKit has no OpenAI-compatible speak wildcard: its openai plugin TTS carries no language slot (N14), so a custom speak endpoint cannot be catalogued"),
 				deny(ElevenLabs, "ElevenLabs custom speak endpoints have no slot"),
 			),
 			FieldReasonLocal: field(deny(Vapi, "Vapi custom local LLM endpoints are unverified")),
@@ -356,6 +357,7 @@ func Default() Table {
 				deny(Deepgram, "Deepgram builtin tools are not proven by its driver"),
 			),
 			FieldToolInterruption: field(
+				warn(LiveKit, "LiveKit runs tool executions to completion; a per-tool interruption preference is not enforced"),
 				warn(Vapi, "Vapi uses provider-default tool interruption"),
 				warn(ElevenLabs, "ElevenLabs uses provider-default tool interruption"),
 			),

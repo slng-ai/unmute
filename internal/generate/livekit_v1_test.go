@@ -694,6 +694,94 @@ func TestLiveKitV1LocalAndMCPTools(t *testing.T) {
 	}
 }
 
+// TestLiveKitEmitterMatchesCapabilityTable is the table↔emitter agreement test
+// (V15, mirroring pipecat's): the emitter's declared code paths must equal the
+// table's non-gated LiveKit rows, so no field is validate-green yet silently
+// unemitted (B1's class).
+func TestLiveKitEmitterMatchesCapabilityTable(t *testing.T) {
+	table := target.Default()
+	for field := range table.Fields {
+		capability := table.Capability(field, target.LiveKit)
+		supported := capability.Tag != target.Gated && capability.Tag != target.Provisional
+		if livekitEmittedFields[field] != supported {
+			t.Errorf("field %q: emitter emits=%v, table supported=%v (tag %q) — implement or gate to reconcile",
+				field, livekitEmittedFields[field], supported, capability.Tag)
+		}
+	}
+}
+
+// TestLiveKitV1ParityFixture is the V14 fixture: one package loaded with every
+// SCHEMA §7 livekit-ok feature at once must validate green AND generate — no
+// validate-green/generate-fail is representable (B2's class).
+func TestLiveKitV1ParityFixture(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbound, outbound, enabled, noCalls := false, true, true, false
+	agent.Channels["phone"] = ir.Channel{Kind: ir.ChannelTelephony, Inbound: &inbound, Outbound: &outbound, OnVoicemail: ir.VoicemailLeaveMessage}
+	agent.Conversation.Interruption = &ir.Interruption{Enabled: &enabled, MinimumWords: 2, IgnorePhrases: []string{"uh-huh"}}
+	agent.Conversation.ThinkingAudio = ir.ThinkingSubtle
+	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
+	agent.Models["backup"] = ir.ModelProfile{Placement: ir.PlacementAPI}
+	profile := agent.Models["reasoning"]
+	profile.Fallback = []string{"backup"}
+	agent.Models["reasoning"] = profile
+	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
+	toRes.Requires = []string{"caller_phone"}
+	toRes.Context.History = ir.HistoryLastN
+	toRes.Context.MaxMessages = 6
+	toRes.Context.IncludeToolCalls = &noCalls
+	toRes.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}}
+	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
+	back.Context.History = ir.HistorySummary
+	back.Context.Summarizer = "backup"
+	agent.Controls["to_human"] = &ir.HumanTransfer{Kind: ir.ControlHumanTransfer, Destination: "line", Mode: ir.TransferWarm, Briefing: ir.BriefingSummary}
+	agent.Controls["to_human_cold"] = &ir.HumanTransfer{Kind: ir.ControlHumanTransfer, Destination: "line", Mode: ir.TransferCold}
+	agent.Tools["fetch_notes"] = ir.Tool{
+		Description: "Fetch the caller's saved notes.",
+		Input:       map[string]any{"type": "object", "properties": map[string]any{"topic": map[string]any{"type": "string"}}},
+		Execution:   ir.ToolLocal, Handler: "tools/fetch_notes.py", HandlerSource: "def fetch_notes(topic):\n    return {}\n",
+		Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+	}
+	agent.Tools["book_table"] = ir.Tool{
+		Description: "Book through the bookings MCP server.", Input: map[string]any{"type": "object"},
+		Execution: ir.ToolMCP, URLEnv: "BOOKINGS_MCP_URL",
+		Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+	}
+	def := agent.Agents["greeter"]
+	def.Tools = append(def.Tools, "to_human", "to_human_cold", "fetch_notes", "book_table")
+	agent.Agents["greeter"] = def
+	reserve := agent.TaskGroups["reserve_group"]
+	reserve.ContextScope = ir.ContextIsolated
+	agent.TaskGroups["reserve_group"] = reserve
+	task := agent.Tasks["find_slot"]
+	task.Model = "backup"
+	task.Result["details"] = ir.ResultField{Schema: map[string]any{"type": "object"}}
+	agent.Tasks["find_slot"] = task
+	agent.Controls["do_find"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "find_slot", Assign: map[string]string{"caller_phone": "result.date"}}
+	resDef := agent.Agents["reservations"]
+	resDef.Tools = append(resDef.Tools, "do_find")
+	agent.Agents["reservations"] = resDef
+
+	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+	tgt.Models.Reason["backup"] = ir.Binding{Model: "openai/gpt-4o"}
+	tgt.Destinations = map[string]string{"line": "+14155550123"}
+	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.7.0"}
+
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatalf("the fully-loaded fixture must generate: %v", err)
+	}
+	if len(artifact.Files) == 0 {
+		t.Fatal("no files emitted")
+	}
+}
+
 // TestCheckLiveKitVersion pins the template-compatible range (>=1.5, <2.0):
 // beta.workflows TaskGroup + AgentTask + inference are present from 1.5.x.
 func TestCheckLiveKitVersion(t *testing.T) {

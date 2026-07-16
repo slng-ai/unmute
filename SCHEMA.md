@@ -302,7 +302,7 @@ The file name is the tool name (N4). Four parts plus a description. Which agents
 | `execution` | yes | `local \| client \| webhook \| provider_hosted \| builtin \| mcp` | see below | |
 | `handler` | iff `execution: local` | path, default `<name>.py` | | Code targets only. |
 | `url_env` | iff `execution: webhook` or `mcp` | env var name | core | Reference only, never a URL value. For `mcp` it names the MCP server address (driver-livekit B3, 2026-07-16: code targets have no other slot for it; managed targets may configure the server provider-side and ignore it). |
-| `interruption` | no, default `provider_default` | `continue \| cancel \| provider_default` | warn | Honored on code targets. On managed targets only `provider_default` means anything; other values warn. |
+| `interruption` | no, default `provider_default` | `continue \| cancel \| provider_default` | warn | Honored on Pipecat (`cancel_on_interruption`); LiveKit runs tools to completion, so non-default values warn there (2026-07-16). On managed targets only `provider_default` means anything; other values warn. |
 | `effect` | no, default `returns_data` | `returns_data \| ends_conversation` | core | |
 
 Execution gating across the five:
