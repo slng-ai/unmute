@@ -296,6 +296,41 @@ func TestPreflightRejectsUnsupportedOutbound(t *testing.T) {
 	}
 }
 
+func TestPreflightCustomizedElevenLabs(t *testing.T) {
+	enabled := true
+	data := Data{
+		Name: "agent", Language: "en", SpeaksFirst: "user", ModelGreeting: true, Interruption: &enabled,
+		MinimumWords: 2, IgnorePhrases: []string{"okay"}, NudgeAfter: "20s", EndAfter: "1m", MaxDuration: "10m",
+		Capacity: Capacity{PeakSessions: 5, MaxSessions: 10, AvgSessionDuration: "4m"},
+		Region:   "eu",
+	}
+	data.SetTarget("elevenlabs")
+	data.Region = "eu"
+	data.Fallbacks = []ModelFallback{{
+		Name: "backup_model", Profile: "assistant_model", Binding: data.Reason,
+	}}
+	report, err := Preflight(data)
+	if err != nil {
+		t.Fatalf("Preflight() = %v", err)
+	}
+	if report.TargetName != "elevenlabs-dev" {
+		t.Fatalf("report = %#v", report)
+	}
+	dir := filepath.Join(t.TempDir(), "agent")
+	if _, err := Write(dir, data); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"fallback:", "- backup_model", "speaks_first: user", "minimum_words: 2", "peak_sessions: 5"} {
+		if !strings.Contains(string(agent), want) {
+			t.Errorf("agent.yaml missing %q:\n%s", want, agent)
+		}
+	}
+}
+
 func TestPreflightShippedTargets(t *testing.T) {
 	for _, provider := range []string{"pipecat", "livekit", "elevenlabs"} {
 		t.Run(provider, func(t *testing.T) {

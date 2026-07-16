@@ -46,7 +46,21 @@ type Data struct {
 	EntryAgent     string
 	Transport      string
 	Carrier        string
+	TargetVersion  string
+	SDKLanguage    string
+	Region         string
+	Edition        string
+	Pins           string
 	Greeting       string
+	ModelGreeting  bool
+	SpeaksFirst    string
+	Interruption   *bool
+	MinimumWords   int
+	IgnorePhrases  []string
+	NudgeAfter     string
+	EndAfter       string
+	MaxDuration    string
+	ThinkingAudio  string
 	Instructions   string
 	Listen         Binding
 	Reason         Binding
@@ -58,6 +72,8 @@ type Data struct {
 	Tasks          []Task
 	TaskGroups     []TaskGroup
 	HumanTransfers []HumanTransfer
+	Fallbacks      []ModelFallback
+	Capacity       Capacity
 }
 
 // Binding is one concrete role choice collected by the wizard. Params is an
@@ -177,13 +193,34 @@ type HumanTransfer struct {
 	Briefing    string
 }
 
+type ModelFallback struct {
+	Name    string
+	Profile string
+	Binding Binding
+}
+
+type Capacity struct {
+	PeakSessions       int
+	MaxSessions        int
+	AvgSessionDuration string
+}
+
 // SetTarget selects an orchestrator and resets its target-dependent defaults.
 func (d *Data) SetTarget(provider string) {
 	d.Target = provider
 	d.Transport = ""
 	d.Carrier = ""
+	d.TargetVersion = ""
+	d.SDKLanguage = ""
+	d.Region = ""
+	d.Edition = ""
+	d.Pins = ""
 	if provider == "pipecat" {
 		d.Transport = "daily-sip"
+		d.TargetVersion = "1.5.0"
+	} else if provider == "livekit" {
+		d.TargetVersion = "1.5.2"
+		d.SDKLanguage = "python"
 	}
 	switch provider {
 	case "elevenlabs":
@@ -203,7 +240,7 @@ func (d Data) withDefaults() Data {
 	} else if d.Listen == (Binding{}) && d.Reason == (Binding{}) && d.Speak == (Binding{}) {
 		d.SetTarget(d.Target)
 	}
-	if d.Greeting == "" {
+	if d.Greeting == "" && !d.ModelGreeting {
 		d.Greeting = DefaultGreeting
 	}
 	if d.Instructions == "" {
@@ -217,6 +254,18 @@ func (d Data) withDefaults() Data {
 	}
 	if d.EntryAgent == "" {
 		d.EntryAgent = "assistant"
+	}
+	if d.SpeaksFirst == "" {
+		d.SpeaksFirst = "agent"
+	}
+	if d.Capacity.PeakSessions == 0 {
+		d.Capacity.PeakSessions = 10
+	}
+	if d.Capacity.MaxSessions == 0 {
+		d.Capacity.MaxSessions = 20
+	}
+	if d.Capacity.AvgSessionDuration == "" {
+		d.Capacity.AvgSessionDuration = "5m"
 	}
 	return d
 }
@@ -290,6 +339,20 @@ func (d Data) Destinations() []HumanTransfer {
 	return destinations
 }
 
+func (d Data) FallbacksFor(profile string) []string {
+	var names []string
+	for _, fallback := range d.Fallbacks {
+		if fallback.Profile == profile {
+			names = append(names, fallback.Name)
+		}
+	}
+	return names
+}
+
+func (d Data) EffectiveCapacity() Capacity {
+	return d.withDefaults().Capacity
+}
+
 func (d Data) TaskTools(name string) []string {
 	seen := map[string]bool{}
 	var names []string
@@ -342,6 +405,12 @@ func (d Data) RequiredEnv() []string {
 			role    targetcap.Role
 			binding Binding
 		}{targetcap.Speak, agent.Speak})
+	}
+	for _, fallback := range d.Fallbacks {
+		bindings = append(bindings, struct {
+			role    targetcap.Role
+			binding Binding
+		}{targetcap.Reason, fallback.Binding})
 	}
 	for _, item := range bindings {
 		role, binding := item.role, item.binding

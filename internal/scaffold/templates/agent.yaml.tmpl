@@ -14,6 +14,11 @@ models:
 [[range .AllAgents]]  [[.ModelProfile]]:
     description: [[.ModelDescription]]
     placement: api
+[[$fallbacks := $.FallbacksFor .ModelProfile]][[if $fallbacks]]    fallback:
+[[range $fallbacks]]      - [[.]]
+[[end]][[end]][[end]][[range .Fallbacks]]  [[.Name]]:
+    description: fallback reasoning model
+    placement: api
 [[end]]
 voices:
 [[range .AllAgents]]  [[.VoiceProfile]]: { description: [[.VoiceDescription]] }
@@ -90,9 +95,19 @@ voices:
 [[end]]
 [[end]]conversation:
   greeting:
-    speaks_first: agent
-    text: [[ quote .Greeting ]]
-
+    speaks_first: [[.SpeaksFirst]]
+[[if .Greeting]]    text: [[ quote .Greeting ]]
+[[end]][[if .Interruption]]  interruption:
+    enabled: [[boolValue .Interruption]]
+[[if .MinimumWords]]    minimum_words: [[.MinimumWords]]
+[[end]][[if .IgnorePhrases]]    ignore_phrases:
+[[range .IgnorePhrases]]      - [[quote .]]
+[[end]][[end]][[end]][[if or .NudgeAfter .EndAfter]]  inactivity:
+[[if .NudgeAfter]]    nudge_after: [[.NudgeAfter]]
+[[end]][[if .EndAfter]]    end_after: [[.EndAfter]]
+[[end]][[end]][[if .MaxDuration]]  max_duration: [[.MaxDuration]]
+[[end]][[if .ThinkingAudio]]  thinking_audio: [[.ThinkingAudio]]
+[[end]]
 channels:
 [[range .AllChannels]][[if eq .Kind "realtime_audio"]]  [[.Name]]: { kind: realtime_audio }
 [[else]]  [[.Name]]:
@@ -103,7 +118,8 @@ channels:
 [[range .RequiredControls]]      - [[.]]
 [[end]][[end]][[if .OnVoicemail]]    on_voicemail: [[.OnVoicemail]]
 [[end]][[end]][[end]]
-capacity:
-  peak_sessions: 10
-  max_sessions: 20
-  avg_session_duration: 5m
+[[with .EffectiveCapacity]]capacity:
+  peak_sessions: [[.PeakSessions]]
+  max_sessions: [[.MaxSessions]]
+  avg_session_duration: [[.AvgSessionDuration]]
+[[end -]]

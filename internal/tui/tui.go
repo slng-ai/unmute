@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/slng/unmute/internal/scaffold"
@@ -107,6 +108,7 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 				huh.NewOption(fmt.Sprintf("Task groups  ·  %d", len(result.Agent.Data.TaskGroups)), "groups"),
 				huh.NewOption("Caller channels  ·  "+channelsLabel(result.Agent.Data), "channels"),
 				huh.NewOption(fmt.Sprintf("Human transfers  ·  %d", len(result.Agent.Data.HumanTransfers)), "humans"),
+				huh.NewOption("Customize  ·  conversation, fallback, capacity, target", "customize"),
 				huh.NewOption("Compile after create  ·  "+compile, "compile"),
 				huh.NewOption("Create agent", "save"),
 				huh.NewOption("← Back", actionBack),
@@ -139,6 +141,9 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 				for i := range result.Agent.Data.Agents {
 					result.Agent.Data.Agents[i].Reason = result.Agent.Data.Reason
 					result.Agent.Data.Agents[i].Speak = result.Agent.Data.Speak
+				}
+				for i := range result.Agent.Data.Fallbacks {
+					result.Agent.Data.Fallbacks[i].Binding = result.Agent.Data.Reason
 				}
 			}
 		case "language":
@@ -187,6 +192,10 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			}
 		case "humans":
 			if err := editHumanTransfers(runner, &result.Agent.Data); err != nil {
+				return Result{}, false, err
+			}
+		case "customize":
+			if err := editCustomize(runner, &result.Agent.Data); err != nil {
 				return Result{}, false, err
 			}
 		case "compile":
@@ -1039,6 +1048,262 @@ func editHumanTransfers(runner *fieldRunner, data *scaffold.Data) error {
 		}
 		data.HumanTransfers = append(data.HumanTransfers, transfer)
 	}
+}
+
+func editCustomize(runner *fieldRunner, data *scaffold.Data) error {
+	for {
+		choice := actionBack
+		_, err := runner.run(huh.NewSelect[string]().Title("Customize").Description(runner.describe("Optional settings stay collapsed here; starter defaults remain valid.")).Options(
+			huh.NewOption("Conversation behavior", "conversation"),
+			huh.NewOption(fmt.Sprintf("Model fallbacks  ·  %d", len(data.Fallbacks)), "fallbacks"),
+			huh.NewOption("Capacity", "capacity"),
+			huh.NewOption("Advanced target settings", "target"),
+			huh.NewOption("← Back", actionBack),
+		).Value(&choice), true)
+		if err != nil || choice == actionBack {
+			return err
+		}
+		switch choice {
+		case "conversation":
+			if err := editConversation(runner, data); err != nil {
+				return err
+			}
+		case "fallbacks":
+			if err := editFallbacks(runner, data); err != nil {
+				return err
+			}
+		case "capacity":
+			if err := editCapacity(runner, data); err != nil {
+				return err
+			}
+		case "target":
+			if err := editAdvancedTarget(runner, data); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func editConversation(runner *fieldRunner, data *scaffold.Data) error {
+	data.SpeaksFirst = firstNonempty(data.SpeaksFirst, "agent")
+	back, err := runner.run(huh.NewSelect[string]().Title("Who speaks first").Options(
+		huh.NewOption("Agent", "agent"), huh.NewOption("Caller", "user"),
+	).Value(&data.SpeaksFirst), true)
+	if err != nil || back {
+		return err
+	}
+	opening := "fixed"
+	if data.ModelGreeting {
+		opening = "model"
+	}
+	back, err = runner.run(huh.NewSelect[string]().Title("Opening").Options(
+		huh.NewOption("Fixed greeting", "fixed"), huh.NewOption("Model-written greeting", "model"),
+	).Value(&opening), true)
+	if err != nil || back {
+		return err
+	}
+	if opening == "model" {
+		data.Greeting = ""
+		data.ModelGreeting = true
+	} else {
+		data.ModelGreeting = false
+		data.Greeting = firstNonempty(data.Greeting, scaffold.DefaultGreeting)
+		if back, err = runner.input("Fixed greeting", "Spoken verbatim.", &data.Greeting, validateRequiredText); err != nil || back {
+			return err
+		}
+	}
+	interruption := "default"
+	if data.Interruption != nil {
+		if *data.Interruption {
+			interruption = "enabled"
+		} else {
+			interruption = "disabled"
+		}
+	}
+	back, err = runner.run(huh.NewSelect[string]().Title("Interruption").Options(
+		huh.NewOption("Provider default", "default"), huh.NewOption("Enabled", "enabled"), huh.NewOption("Disabled", "disabled"),
+	).Value(&interruption), true)
+	if err != nil || back {
+		return err
+	}
+	data.Interruption = nil
+	if interruption != "default" {
+		enabled := interruption == "enabled"
+		data.Interruption = &enabled
+		minimum := ""
+		if data.MinimumWords > 0 {
+			minimum = strconv.Itoa(data.MinimumWords)
+		}
+		if back, err = runner.input("Minimum interruption words (optional)", "Non-negative integer; provider support varies.", &minimum, validateOptionalNonNegativeInteger); err != nil || back {
+			return err
+		}
+		data.MinimumWords = 0
+		if minimum != "" {
+			data.MinimumWords, _ = strconv.Atoi(minimum)
+		}
+		phrases := strings.Join(data.IgnorePhrases, ",")
+		if back, err = runner.input("Ignored interruption phrases (optional)", "Comma-separated phrases.", &phrases, func(string) error { return nil }); err != nil || back {
+			return err
+		}
+		data.IgnorePhrases = parsePhrases(phrases)
+	}
+	for _, field := range []struct {
+		title string
+		value *string
+	}{{"Inactivity nudge after (optional)", &data.NudgeAfter}, {"Inactivity end after (optional)", &data.EndAfter}, {"Maximum call duration (optional)", &data.MaxDuration}} {
+		if back, err = runner.input(field.title, "Go duration such as 30s or 20m.", field.value, validateOptionalDuration); err != nil || back {
+			return err
+		}
+	}
+	thinking := firstNonempty(data.ThinkingAudio, "none")
+	back, err = runner.run(huh.NewSelect[string]().Title("Thinking audio").Options(
+		huh.NewOption("None", "none"), huh.NewOption("Subtle", "subtle"),
+	).Value(&thinking), true)
+	if err != nil || back {
+		return err
+	}
+	data.ThinkingAudio = ""
+	if thinking != "none" {
+		data.ThinkingAudio = thinking
+	}
+	return nil
+}
+
+func editFallbacks(runner *fieldRunner, data *scaffold.Data) error {
+	for {
+		choice := actionBack
+		_, err := runner.run(huh.NewSelect[string]().Title("Model fallbacks").Description(runner.describe("Fallback support is target-gated and checked by preflight.")).Options(
+			huh.NewOption("Add fallback", "add"), huh.NewOption("← Back", actionBack),
+		).Value(&choice), true)
+		if err != nil || choice == actionBack {
+			return err
+		}
+		fallback := scaffold.ModelFallback{Binding: data.Reason}
+		profiles := make([]huh.Option[string], 0, len(data.AllAgents()))
+		for _, agent := range data.AllAgents() {
+			profiles = append(profiles, huh.NewOption(agent.ModelProfile(), agent.ModelProfile()))
+		}
+		fallback.Profile = profiles[0].Value
+		back, err := runner.run(huh.NewSelect[string]().Title("Model profile to protect").Options(profiles...).Value(&fallback.Profile), true)
+		if err != nil || back {
+			return err
+		}
+		for _, agent := range data.AllAgents() {
+			if agent.ModelProfile() == fallback.Profile {
+				fallback.Binding = agent.Reason
+			}
+		}
+		back, err = runner.input("Fallback profile name", "Lowercase snake_case.", &fallback.Name, func(value string) error {
+			if err := validateIdentifier(value); err != nil {
+				return err
+			}
+			for _, agent := range data.AllAgents() {
+				if agent.ModelProfile() == value {
+					return errors.New("model profile already exists")
+				}
+			}
+			for _, existing := range data.Fallbacks {
+				if existing.Name == value {
+					return errors.New("fallback profile already exists")
+				}
+			}
+			return nil
+		})
+		if err != nil || back {
+			continue
+		}
+		if err := editBindingFor(runner, data.Target, targetcap.Reason, &fallback.Binding); err != nil {
+			return err
+		}
+		data.Fallbacks = append(data.Fallbacks, fallback)
+	}
+}
+
+func editCapacity(runner *fieldRunner, data *scaffold.Data) error {
+	capacity := data.EffectiveCapacity()
+	peak, max := strconv.Itoa(capacity.PeakSessions), strconv.Itoa(capacity.MaxSessions)
+	back, err := runner.input("Peak sessions", "Positive concurrent conversations at busy hour.", &peak, validatePositiveInteger)
+	if err != nil || back {
+		return err
+	}
+	peakValue, _ := strconv.Atoi(peak)
+	back, err = runner.input("Maximum sessions", "Positive hard admission limit; must be at least peak.", &max, func(value string) error {
+		if err := validatePositiveInteger(value); err != nil {
+			return err
+		}
+		number, _ := strconv.Atoi(value)
+		if number < peakValue {
+			return errors.New("maximum sessions must be at least peak sessions")
+		}
+		return nil
+	})
+	if err != nil || back {
+		return err
+	}
+	maxValue, _ := strconv.Atoi(max)
+	back, err = runner.input("Average session duration", "Positive Go duration such as 5m.", &capacity.AvgSessionDuration, validateDuration)
+	if err != nil || back {
+		return err
+	}
+	capacity.PeakSessions, capacity.MaxSessions = peakValue, maxValue
+	data.Capacity = capacity
+	return nil
+}
+
+func editAdvancedTarget(runner *fieldRunner, data *scaffold.Data) error {
+	for _, field := range []struct {
+		title, help string
+		value       *string
+		validate    func(string) error
+	}{
+		{"Target version", "Driver/framework version pin.", &data.TargetVersion, validateBasic},
+		{"SDK language (optional)", "For example python on LiveKit.", &data.SDKLanguage, validateBasic},
+		{"Region (optional)", "Provider vocabulary; forwarded as declared.", &data.Region, validateBasic},
+		{"Edition (optional)", "Provider vocabulary; forwarded as declared.", &data.Edition, validateBasic},
+		{"Pins (optional JSON object)", "Independently versioned target packages.", &data.Pins, validateParams},
+	} {
+		back, err := runner.input(field.title, field.help, field.value, field.validate)
+		if err != nil || back {
+			return err
+		}
+	}
+	return nil
+}
+
+func parsePhrases(value string) []string {
+	var phrases []string
+	for _, phrase := range strings.Split(value, ",") {
+		if phrase = strings.TrimSpace(phrase); phrase != "" {
+			phrases = append(phrases, phrase)
+		}
+	}
+	return phrases
+}
+
+func validateOptionalNonNegativeInteger(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	number, err := strconv.Atoi(value)
+	if err != nil || number < 0 {
+		return errors.New("value must be a non-negative integer")
+	}
+	return nil
+}
+
+func validateOptionalDuration(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return validateDuration(value)
+}
+
+func validateDuration(value string) error {
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 {
+		return errors.New("value must be a positive Go duration")
+	}
+	return nil
 }
 
 func hasTelephony(data *scaffold.Data) bool {
