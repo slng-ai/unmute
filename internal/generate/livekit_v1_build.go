@@ -122,17 +122,11 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		}
 	}
 
+	applyLiveKitConversation(agent.Conversation, &data)
+
 	data.Notes = append(data.Notes, livekitServiceNotes(data)...)
 	if agent.Pipeline.Turn != nil {
 		data.Notes = append(data.Notes, "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory")
-	}
-	if c := agent.Conversation; c != nil {
-		if c.Inactivity != nil {
-			data.Notes = append(data.Notes, "conversation.inactivity is not emitted yet")
-		}
-		if c.MaxDuration != "" {
-			data.Notes = append(data.Notes, "conversation.max_duration is not emitted yet")
-		}
 	}
 
 	data.PluginModules = collectLiveKitPlugins(data)
@@ -201,20 +195,43 @@ func livekitServiceNotes(data livekitData) []string {
 // livekitGuards fails loud on features the driver does not emit yet, so a spec
 // that validates green never silently loses behavior on LiveKit.
 func livekitGuards(agent *ir.Agent) error {
-	if c := agent.Conversation; c != nil {
-		if c.ThinkingAudio != "" {
-			return fmt.Errorf("livekit driver does not emit thinking_audio yet")
-		}
-		if c.Interruption != nil && (c.Interruption.MinimumWords > 0 || len(c.Interruption.IgnorePhrases) > 0) {
-			return fmt.Errorf("livekit driver does not shape interruption minimum_words/ignore_phrases yet")
-		}
-	}
 	for name, ch := range agent.Channels {
 		if ch.Outbound != nil && *ch.Outbound {
 			return fmt.Errorf("livekit driver does not emit outbound calling yet (channel %q)", name)
 		}
 	}
 	return nil
+}
+
+// applyLiveKitConversation lowers the conversation block (V16): interruption
+// options, the generated ignore-phrase filter, thinking audio, inactivity
+// timeouts, and the max-duration timer.
+func applyLiveKitConversation(c *ir.Conversation, data *livekitData) {
+	if c == nil {
+		return
+	}
+	if c.Interruption != nil {
+		data.Interruption = &livekitInterruption{
+			Enabled:  c.Interruption.Enabled == nil || *c.Interruption.Enabled,
+			MinWords: c.Interruption.MinimumWords,
+		}
+		for _, p := range c.Interruption.IgnorePhrases {
+			data.IgnorePhrases = append(data.IgnorePhrases, strings.ToLower(p))
+		}
+	}
+	data.ThinkingAudio = c.ThinkingAudio == ir.ThinkingSubtle
+	if c.Inactivity != nil {
+		data.InactivityNudgeSecs = durationSecs(c.Inactivity.NudgeAfter)
+		data.InactivityEndSecs = durationSecs(c.Inactivity.EndAfter)
+		if delta := data.InactivityEndSecs - data.InactivityNudgeSecs; delta > 0 {
+			data.InactivityEndDeltaSecs = delta
+		} else if data.InactivityEndSecs > 0 {
+			data.InactivityEndDeltaSecs = 1
+		}
+	}
+	data.MaxDurationSecs = durationSecs(c.MaxDuration)
+	data.NeedsAsyncio = data.MaxDurationSecs > 0 ||
+		(data.InactivityEndSecs > 0 && data.InactivityNudgeSecs > 0)
 }
 
 func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry ir.AgentDef, env *envSet) (livekitAgent, error) {
@@ -240,8 +257,13 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 		built.Greeting = livekitGreetingFor(agent.Conversation)
 	}
 	for _, ref := range def.Tools {
-		if _, ok := agent.Tools[ref]; ok {
-			return livekitAgent{}, fmt.Errorf("agent %q references tool %q: livekit driver emits tools on tasks only for now", name, ref)
+		if tool, ok := agent.Tools[ref]; ok {
+			lowered, err := buildLiveKitTool(ref, tool, env)
+			if err != nil {
+				return livekitAgent{}, fmt.Errorf("agent %q: %w", name, err)
+			}
+			built.Tools = append(built.Tools, lowered)
+			continue
 		}
 		control, ok := agent.Controls[ref]
 		if !ok {
@@ -376,17 +398,30 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 		if !ok {
 			return livekitTask{}, fmt.Errorf("task %q references unknown tool %q", name, ref)
 		}
-		if tool.Execution != ir.ToolWebhook {
-			return livekitTask{}, fmt.Errorf("task %q tool %q: livekit driver emits webhook tools only for now (got %q)", name, ref, tool.Execution)
+		lowered, err := buildLiveKitTool(ref, tool, env)
+		if err != nil {
+			return livekitTask{}, fmt.Errorf("task %q: %w", name, err)
 		}
-		if tool.URLEnv != "" {
-			env.add(tool.URLEnv)
-		}
-		built.Tools = append(built.Tools, livekitTool{
-			Method: ref, Description: tool.Description, URLEnv: tool.URLEnv, Args: livekitToolArgs(tool.Input),
-		})
+		built.Tools = append(built.Tools, lowered)
 	}
 	return built, nil
+}
+
+// buildLiveKitTool lowers a webhook tool to a @function_tool method (agents
+// and tasks share the shape). local/mcp arrive with T16's sweep; until then
+// they fail loud here.
+func buildLiveKitTool(name string, tool ir.Tool, env *envSet) (livekitTool, error) {
+	if tool.Execution != ir.ToolWebhook {
+		return livekitTool{}, fmt.Errorf("tool %q: livekit driver emits webhook tools only for now (got %q)", name, tool.Execution)
+	}
+	if tool.URLEnv != "" {
+		env.add(tool.URLEnv)
+	}
+	return livekitTool{
+		Method: name, Description: tool.Description, URLEnv: tool.URLEnv,
+		Args:             livekitToolArgs(tool.Input),
+		EndsConversation: tool.Effect == ir.ToolEndsConversation,
+	}, nil
 }
 
 // --- binding → call mapping ------------------------------------------------

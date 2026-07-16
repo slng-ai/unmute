@@ -5,7 +5,25 @@ Classes, kwargs, and model-route forms come from the provider catalogue
 {{- /* llmexpr renders a reason profile: bare service, or the native
 llm.FallbackAdapter around its fallback chain (V4). */ -}}
 {{define "llmexpr"}}{{if .Chain}}llm.FallbackAdapter(llm=[{{template "svc" .Primary.Call}}{{range .Chain}}, {{template "svc" .Call}}{{end}}]){{else}}{{template "svc" .Primary.Call}}{{end}}{{end -}}
-import logging
+{{- /* webhook_tool renders one webhook tool as a @function_tool method;
+agents and tasks share the shape (T15). */ -}}
+{{define "webhook_tool"}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.PyType}}{{end}}) -> dict:
+        {{triple .Description}}
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                os.environ[{{pyq .URLEnv}}],
+                json={ {{- range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end -}} },
+            )
+            resp.raise_for_status()
+{{- if .EndsConversation}}
+            self.session.shutdown()  # effect: ends_conversation
+{{- end}}
+            return resp.json()
+{{end -}}
+{{if .NeedsAsyncio}}import asyncio
+{{end}}import logging
 import os
 {{if .HasVars}}from dataclasses import dataclass
 {{end}}{{if .NeedsHTTPX}}import httpx
@@ -18,6 +36,10 @@ from livekit.agents import (
 {{- end}}
     AgentServer,
     AgentSession,
+{{- if .ThinkingAudio}}
+    BackgroundAudioPlayer,
+    BuiltinAudioClip,
+{{- end}}
     JobContext,
     JobProcess,
     NotGivenOr,
@@ -28,6 +50,9 @@ from livekit.agents import (
     inference,
     llm,
     metrics,
+{{- if .IgnorePhrases}}
+    stt,
+{{- end}}
 )
 {{- if .NeedsTaskGroups}}
 from livekit.agents.beta.workflows import TaskGroup
@@ -86,9 +111,32 @@ class Userdata:
 {{- end}}
 
 {{end}}
+{{- if .IgnorePhrases}}
+# --- interruption shaping ----------------------------------------------------
+IGNORE_PHRASES = [{{range $i, $p := .IgnorePhrases}}{{if $i}}, {{end}}{{pyq $p}}{{end}}]
+
+
+class IgnorePhrasesMixin:
+    """interruption.ignore_phrases (generated): matching final transcripts are
+    dropped before turn handling, so they neither interrupt nor reach the LLM."""
+
+    def stt_node(self, audio, model_settings):
+        async def _filtered():
+            async for event in Agent.default.stt_node(self, audio, model_settings):
+                if (
+                    event.type == stt.SpeechEventType.FINAL_TRANSCRIPT
+                    and event.alternatives
+                    and event.alternatives[0].text.strip().lower().strip(" .,!?") in IGNORE_PHRASES
+                ):
+                    continue
+                yield event
+
+        return _filtered()
+
+{{end}}
 # --- agents ----------------------------------------------------------------
 {{range .Agents}}
-class {{.Class}}(Agent):
+class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(
             instructions={{.PromptConst}},
@@ -115,6 +163,7 @@ class {{.Class}}(Agent):
             instructions="You are now handling this. Continue in one short line; do not greet again."
         )
 {{- end}}
+{{- range .Tools}}{{template "webhook_tool" .}}{{end}}
 {{range .Transfers}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext):
@@ -212,24 +261,13 @@ class {{.Class}}(Agent):
 {{- if .NeedsTasks}}
 # --- tasks -----------------------------------------------------------------
 {{range .Tasks}}
-class {{.Class}}(AgentTask[dict]):
+class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}})
 
     async def on_enter(self) -> None:
         self.session.generate_reply(instructions="Begin this step.")
-{{range .Tools}}
-    @function_tool
-    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.PyType}}{{end}}) -> dict:
-        {{triple .Description}}
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                os.environ[{{pyq .URLEnv}}],
-                json={ {{- range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end -}} },
-            )
-            resp.raise_for_status()
-            return resp.json()
-{{end}}
+{{range .Tools}}{{template "webhook_tool" .}}{{end}}
     @function_tool
     async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.PyType}}{{end}}) -> str:
         """Record the result of this step and finish."""
@@ -256,17 +294,66 @@ async def entrypoint(ctx: JobContext) -> None:
         stt={{template "svc" .STT.Call}},
         llm={{template "llmexpr" .SessionLLM}},
         tts={{template "svc" .SessionTTS.Call}},
+{{- if .Interruption}}
+        turn_handling=TurnHandlingOptions(
+            turn_detection=inference.TurnDetector(version={{pyq .TurnVersion}}),
+            interruption={"enabled": {{if .Interruption.Enabled}}True{{else}}False{{end}}{{if .Interruption.MinWords}}, "min_words": {{.Interruption.MinWords}}{{end}}},
+        ),
+{{- else}}
         turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector(version={{pyq .TurnVersion}})),
+{{- end}}
         vad=ctx.proc.userdata["vad"],
+{{- if or .InactivityNudgeSecs .InactivityEndSecs}}
+        user_away_timeout={{if .InactivityNudgeSecs}}{{.InactivityNudgeSecs}}{{else}}{{.InactivityEndSecs}}{{end}},
+{{- end}}
         preemptive_generation=True,
     )
 
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
         metrics.log_metrics(ev.metrics)
+{{- if or .InactivityNudgeSecs .InactivityEndSecs}}
+{{- if and .InactivityNudgeSecs .InactivityEndSecs}}
+
+    async def _end_if_still_away() -> None:
+        await asyncio.sleep({{.InactivityEndDeltaSecs}})  # inactivity.end_after
+        if session.user_state == "away":
+            session.shutdown()
+{{- end}}
+
+    @session.on("user_state_changed")
+    def _on_user_state_changed(ev) -> None:
+        if ev.new_state != "away":
+            return
+{{- if .InactivityNudgeSecs}}
+        session.generate_reply(
+            instructions="The caller went quiet. Briefly check whether they are still there."
+        )
+{{- if .InactivityEndSecs}}
+        asyncio.create_task(_end_if_still_away())
+{{- end}}
+{{- else}}
+        session.shutdown()  # inactivity.end_after with no nudge
+{{- end}}
+{{- end}}
 
     await session.start(agent={{.EntryClass}}(), room=ctx.room)
     await ctx.connect()
+{{- if .MaxDurationSecs}}
+
+    async def _max_duration() -> None:
+        await asyncio.sleep({{.MaxDurationSecs}})
+        session.shutdown()  # conversation.max_duration
+
+    asyncio.create_task(_max_duration())
+{{- end}}
+{{- if .ThinkingAudio}}
+
+    background_audio = BackgroundAudioPlayer(
+        thinking_sound=BuiltinAudioClip.KEYBOARD_TYPING,  # thinking_audio: subtle
+    )
+    await background_audio.start(room=ctx.room, agent_session=session)
+{{- end}}
 
 
 if __name__ == "__main__":

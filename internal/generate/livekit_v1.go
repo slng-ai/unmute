@@ -65,6 +65,7 @@ type livekitAgent struct {
 	LLM         *livekitLLM     // set only when it differs from the session default
 	TTS         *livekitService // set only when it differs from the session default
 	Greeting    *livekitGreeting
+	Tools       []livekitTool
 	Transfers   []livekitTransfer
 	Delegates   []livekitDelegate
 }
@@ -146,10 +147,19 @@ type livekitTask struct {
 }
 
 type livekitTool struct {
-	Method      string
-	Description string
-	URLEnv      string
-	Args        []livekitArg
+	Method           string
+	Description      string
+	URLEnv           string
+	Args             []livekitArg
+	EndsConversation bool // effect: ends_conversation — shutdown after the call
+}
+
+// livekitInterruption is the conversation.interruption block (V16): enabled
+// and min_words lower to the session's InterruptionOptions; ignore phrases
+// lower to the generated stt_node filter mixin.
+type livekitInterruption struct {
+	Enabled  bool
+	MinWords int
 }
 
 type livekitArg struct {
@@ -187,6 +197,16 @@ type livekitData struct {
 	HasVars         bool // Userdata dataclass + session userdata
 	NeedsLastN      bool // the _last_n history helper
 	NeedsSummarize  bool // the _summarize history helper
+	NeedsAsyncio    bool // inactivity end / max_duration timers
+
+	// Conversation shaping (V16).
+	ThinkingAudio       bool // subtle → BackgroundAudioPlayer thinking sound
+	Interruption        *livekitInterruption
+	IgnorePhrases       []string // generated stt_node filter mixin
+	InactivityNudgeSecs    int
+	InactivityEndSecs      int
+	InactivityEndDeltaSecs int // end_after minus nudge_after, floored at 1s
+	MaxDurationSecs        int
 }
 
 // GenerateLiveKit lowers a validated agent + livekit target into a project. The

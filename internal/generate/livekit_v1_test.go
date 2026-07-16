@@ -99,13 +99,12 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Provider resolution is the subject here; interruption shaping, agent
-	// tools, and human transfer are separate livekit maturity gates.
-	agent.Conversation.Interruption = nil
+	// Provider resolution is the subject here. Interruption shaping and agent
+	// tools emit since T15; only human_transfer stays gated until T6.
 	for name, def := range agent.Agents {
 		var kept []string
 		for _, ref := range def.Tools {
-			if _, ok := agent.Controls[ref].(*ir.AgentTransfer); ok {
+			if _, isHuman := agent.Controls[ref].(*ir.HumanTransfer); !isHuman {
 				kept = append(kept, ref)
 			}
 		}
@@ -431,6 +430,59 @@ func TestLiveKitV1HistoryResetAndToolCallShaping(t *testing.T) {
 		`return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True))`,
 		"# history: reset — the target starts fresh (a handoff marker still lands).",
 		"return Greeter()",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+}
+
+// TestLiveKitV1ConversationShapingAndAgentTools covers the T15 lowerings
+// (V16): agent-level webhook tools, interruption enabled/min_words via
+// TurnHandlingOptions, the generated ignore-phrase stt_node filter, thinking
+// audio via BackgroundAudioPlayer, and effect: ends_conversation.
+func TestLiveKitV1ConversationShapingAndAgentTools(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := agent.Agents["greeter"]
+	def.Tools = append(def.Tools, "check_availability")
+	agent.Agents["greeter"] = def
+	enabled := true
+	agent.Conversation.Interruption = &ir.Interruption{
+		Enabled: &enabled, MinimumWords: 2, IgnorePhrases: []string{"uh-huh", "OK"},
+	}
+	agent.Conversation.ThinkingAudio = ir.ThinkingSubtle
+	tool := agent.Tools["send_confirmation"]
+	tool.Effect = ir.ToolEndsConversation
+	agent.Tools["send_confirmation"] = tool
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		// Agent-level webhook tool on the greeter class.
+		"class Greeter(IgnorePhrasesMixin, Agent):",
+		"async def check_availability(self, ctx: RunContext, date: str, party_size: int) -> dict:",
+		// Interruption options ride turn_handling.
+		`interruption={"enabled": True, "min_words": 2},`,
+		// Generated ignore-phrase filter (lowercased phrases).
+		`IGNORE_PHRASES = ["uh-huh", "ok"]`,
+		"stt.SpeechEventType.FINAL_TRANSCRIPT",
+		"class FindSlot(IgnorePhrasesMixin, AgentTask[dict]):",
+		// Thinking audio.
+		"background_audio = BackgroundAudioPlayer(",
+		"thinking_sound=BuiltinAudioClip.KEYBOARD_TYPING,  # thinking_audio: subtle",
+		"await background_audio.start(room=ctx.room, agent_session=session)",
+		// effect: ends_conversation on a webhook tool.
+		"self.session.shutdown()  # effect: ends_conversation",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
