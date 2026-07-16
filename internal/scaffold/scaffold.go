@@ -12,11 +12,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"text/template"
 
 	"github.com/goccy/go-yaml"
+	targetcap "github.com/slng/unmute/internal/target"
 )
 
 //go:embed templates
@@ -30,12 +32,16 @@ const (
 	DefaultGreeting     = "Hi, thanks for calling. How can I help you today?"
 	DefaultInstructions = "You are a helpful voice assistant. This is a phone call, so keep every answer to one or two short sentences."
 	DefaultTarget       = "pipecat"
+	DefaultLanguage     = "en"
+	DefaultChannel      = "web"
 )
 
 // Data is the v1 agent configuration rendered by the scaffold templates.
 type Data struct {
 	Name         string
 	Target       string
+	Language     string
+	Channel      string
 	Greeting     string
 	Instructions string
 	Listen       Binding
@@ -79,7 +85,51 @@ func (d Data) withDefaults() Data {
 	if d.Instructions == "" {
 		d.Instructions = DefaultInstructions
 	}
+	if d.Language == "" {
+		d.Language = DefaultLanguage
+	}
+	if d.Channel == "" {
+		d.Channel = DefaultChannel
+	}
 	return d
+}
+
+// RequiredEnv returns the starter env names implied by the selected target
+// and catalogue entries. Values are never rendered.
+func (d Data) RequiredEnv() []string {
+	set := map[string]bool{}
+	framework := targetcap.Provider(d.Target)
+	switch framework {
+	case targetcap.LiveKit:
+		for _, name := range []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"} {
+			set[name] = true
+		}
+	case targetcap.ElevenLabs:
+		set["ELEVENLABS_API_KEY"] = true
+	}
+	for role, binding := range map[targetcap.Role]Binding{
+		targetcap.Listen: d.Listen,
+		targetcap.Reason: d.Reason,
+		targetcap.Speak:  d.Speak,
+	} {
+		entry, ok := targetcap.DefaultCatalog().Lookup(framework, role, binding.Provider)
+		if !ok || entry.Call == nil || entry.Call.APIKeyArg == "" {
+			continue
+		}
+		name := entry.Call.APIKeyEnv
+		if name == "" && binding.Provider != "" {
+			name = strings.ToUpper(strings.ReplaceAll(binding.Provider, "-", "_")) + "_API_KEY"
+		}
+		if name != "" {
+			set[name] = true
+		}
+	}
+	names := make([]string, 0, len(set))
+	for name := range set {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Write renders every embedded template into dir/. Returns the created file

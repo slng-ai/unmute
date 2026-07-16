@@ -2,7 +2,7 @@
 # and `unmute compile .`. Nothing here is provider-specific — that lives in
 # targets.yaml.
 version: 1
-language: en
+language: [[ yaml .Language ]]
 entry_agent: assistant
 
 pipeline:
@@ -30,7 +30,7 @@ conversation:
     text: [[ quote .Greeting ]]
 
 channels:
-  web: { kind: realtime_audio }
+  [[.Channel]]: { kind: realtime_audio }
 
 capacity:
   peak_sessions: 10

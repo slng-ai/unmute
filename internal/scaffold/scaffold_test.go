@@ -92,6 +92,61 @@ func TestWrite_customData(t *testing.T) {
 	}
 }
 
+func TestWrite_targetChoices(t *testing.T) {
+	for _, tc := range []struct {
+		target string
+		want   []string
+		env    []string
+	}{
+		{
+			target: "livekit",
+			want:   []string{"provider: livekit", "sdk_language: python", "provider: slng", `voice: "aura-2-thalia-en"`},
+			env:    []string{"LIVEKIT_API_KEY=", "LIVEKIT_API_SECRET=", "LIVEKIT_URL=", "SLNG_API_KEY="},
+		},
+		{
+			target: "elevenlabs",
+			want:   []string{"provider: elevenlabs", `voice_id: "cgSgspJ2msm6clMCkdW9"`, `model: "gemini-2.5-flash"`},
+			env:    []string{"ELEVENLABS_API_KEY="},
+		},
+	} {
+		t.Run(tc.target, func(t *testing.T) {
+			data := Data{Name: "agent", Language: "es-MX", Channel: "web"}
+			data.SetTarget(tc.target)
+			data.Speak.Params = `{"speed":1}`
+			dir := filepath.Join(t.TempDir(), "agent")
+			if _, err := Write(dir, data); err != nil {
+				t.Fatal(err)
+			}
+			targets, err := os.ReadFile(filepath.Join(dir, "targets.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var parsed map[string]any
+			if err := yaml.Unmarshal(targets, &parsed); err != nil {
+				t.Fatalf("targets.yaml: %v\n%s", err, targets)
+			}
+			for _, want := range append(tc.want, `params: {"speed":1}`) {
+				if !strings.Contains(string(targets), want) {
+					t.Errorf("targets.yaml missing %q:\n%s", want, targets)
+				}
+			}
+			agent, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
+			if err != nil || !strings.Contains(string(agent), "language: es-MX") {
+				t.Fatalf("agent language: err=%v\n%s", err, agent)
+			}
+			env, err := os.ReadFile(filepath.Join(dir, ".env.example"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tc.env {
+				if !strings.Contains(string(env), want) {
+					t.Errorf(".env.example missing %q:\n%s", want, env)
+				}
+			}
+		})
+	}
+}
+
 func TestWrite_deterministic(t *testing.T) {
 	a := filepath.Join(t.TempDir(), "x")
 	b := filepath.Join(t.TempDir(), "x")

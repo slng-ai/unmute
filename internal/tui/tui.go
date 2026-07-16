@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -63,6 +64,8 @@ func Run(in io.Reader, out io.Writer, accessible bool) (Result, error) {
 		}
 		data := scaffold.Data{
 			Name:         filepath.Base(filepath.Clean(path)),
+			Language:     scaffold.DefaultLanguage,
+			Channel:      scaffold.DefaultChannel,
 			Greeting:     scaffold.DefaultGreeting,
 			Instructions: scaffold.DefaultInstructions,
 		}
@@ -91,6 +94,7 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			Description("Choose a section; changes stay in memory until Create agent.").
 			Options(
 				huh.NewOption("Target  ·  "+targetLabel(result.Agent.Data.Target), "target"),
+				huh.NewOption("Language  ·  "+result.Agent.Data.Language, "language"),
 				huh.NewOption("Models  ·  "+modelsLabel(result.Agent.Data), "models"),
 				huh.NewOption("Instructions (prompt)", "prompt"),
 				huh.NewOption("Greeting  ·  "+result.Agent.Data.Greeting, "greeting"),
@@ -123,6 +127,10 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			}
 			if !back && selected != actionBack {
 				result.Agent.Data.SetTarget(selected)
+			}
+		case "language":
+			if _, err := runner.input("Language", "Primary spoken BCP-47 language tag, for example en or es-MX.", &result.Agent.Data.Language, validateLanguage); err != nil {
+				return Result{}, false, err
 			}
 		case "models":
 			if err := editModels(runner, &result.Agent.Data); err != nil {
@@ -157,7 +165,7 @@ func summary(result Result) string {
 	if result.Compile {
 		compile = "yes (all targets)"
 	}
-	return fmt.Sprintf("Create %s?\nTarget: %s\nGreeting: %s\nCompile: %s", result.Agent.Data.Name, targetLabel(result.Agent.Data.Target), result.Agent.Data.Greeting, compile)
+	return fmt.Sprintf("Create %s?\nTarget: %s\nLanguage: %s\nGreeting: %s\nCompile: %s", result.Agent.Data.Name, targetLabel(result.Agent.Data.Target), result.Agent.Data.Language, result.Agent.Data.Greeting, compile)
 }
 
 func targetLabel(provider string) string {
@@ -174,6 +182,9 @@ func targetLabel(provider string) string {
 func modelsLabel(data scaffold.Data) string {
 	label := func(binding scaffold.Binding) string {
 		if binding.Provider == "" {
+			if binding.Model != "" {
+				return "forwarded"
+			}
 			return "integrated"
 		}
 		return binding.Provider
@@ -327,6 +338,15 @@ func validateRequiredBasic(value string) error {
 		return errors.New("value is required")
 	}
 	return validateBasic(value)
+}
+
+var languagePattern = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`)
+
+func validateLanguage(value string) error {
+	if !languagePattern.MatchString(value) {
+		return errors.New("language must be a BCP-47 tag such as en or en-US")
+	}
+	return nil
 }
 
 func validateParams(value string) error {
