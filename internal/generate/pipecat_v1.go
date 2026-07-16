@@ -124,7 +124,7 @@ type pipecatArg struct {
 // pipecatTransfer is an agent_transfer control lowered to activate_worker.
 type pipecatTransfer struct {
 	MethodName string
-	To         string   // target worker name
+	To         string // target worker name
 	When       string
 	Reason     string   // developer message injected on activation
 	Requires   []string // variables that must be set before the handoff (guard)
@@ -137,11 +137,11 @@ type pipecatVariable struct {
 }
 
 type pipecatData struct {
-	Project     string
-	Version     string
-	MainName    string
-	EntryAgent  string
-	EntryClass  string
+	Project             string
+	Version             string
+	MainName            string
+	EntryAgent          string
+	EntryClass          string
 	STT                 pipecatService
 	Agents              []pipecatAgent
 	Tasks               []pipecatTask
@@ -173,14 +173,41 @@ type pipecatData struct {
 // pipecat-ai extra (native services) or a standalone pip Dep (plugins). Slng
 // STT/TTS ship in the separate `pipecat-slng` package, not pipecat-ai.
 var serviceInfo = map[string]struct{ Import, Extra, Dep string }{
-	"DeepgramSTTService":   {"from pipecat.services.deepgram.stt import DeepgramSTTService", "deepgram", ""},
-	"OpenAISTTService":     {"from pipecat.services.openai.stt import OpenAISTTService", "openai", ""},
+	// LLM (reason)
 	"OpenAILLMService":     {"from pipecat.services.openai.llm import OpenAILLMService", "openai", ""},
-	"OpenAITTSService":     {"from pipecat.services.openai.tts import OpenAITTSService", "openai", ""},
-	"ElevenLabsTTSService": {"from pipecat.services.elevenlabs.tts import ElevenLabsTTSService", "elevenlabs", ""},
-	"CartesiaTTSService":   {"from pipecat.services.cartesia.tts import CartesiaTTSService", "cartesia", ""},
-	"SlngSTTService":       {"from pipecat_slng import SlngSTTService", "", "pipecat-slng>=0.4.0"},
-	"SlngTTSService":       {"from pipecat_slng import SlngTTSService", "", "pipecat-slng>=0.4.0"},
+	"AnthropicLLMService":  {"from pipecat.services.anthropic.llm import AnthropicLLMService", "anthropic", ""},
+	"GoogleLLMService":     {"from pipecat.services.google.llm import GoogleLLMService", "google", ""},
+	"GroqLLMService":       {"from pipecat.services.groq.llm import GroqLLMService", "groq", ""},
+	"MistralLLMService":    {"from pipecat.services.mistral.llm import MistralLLMService", "mistral", ""},
+	"DeepSeekLLMService":   {"from pipecat.services.deepseek.llm import DeepSeekLLMService", "deepseek", ""},
+	"OpenRouterLLMService": {"from pipecat.services.openrouter.llm import OpenRouterLLMService", "openrouter", ""},
+	"QwenLLMService":       {"from pipecat.services.qwen.llm import QwenLLMService", "qwen", ""},
+
+	// STT (listen)
+	"DeepgramSTTService":     {"from pipecat.services.deepgram.stt import DeepgramSTTService", "deepgram", ""},
+	"OpenAISTTService":       {"from pipecat.services.openai.stt import OpenAISTTService", "openai", ""},
+	"AssemblyAISTTService":   {"from pipecat.services.assemblyai.stt import AssemblyAISTTService", "assemblyai", ""},
+	"CartesiaSTTService":     {"from pipecat.services.cartesia.stt import CartesiaSTTService", "cartesia", ""},
+	"ElevenLabsSTTService":   {"from pipecat.services.elevenlabs.stt import ElevenLabsSTTService", "elevenlabs", ""},
+	"GradiumSTTService":      {"from pipecat.services.gradium.stt import GradiumSTTService", "gradium", ""},
+	"SonioxSTTService":       {"from pipecat.services.soniox.stt import SonioxSTTService", "soniox", ""},
+	"SpeechmaticsSTTService": {"from pipecat.services.speechmatics.stt import SpeechmaticsSTTService", "speechmatics", ""},
+
+	// TTS (speak)
+	"OpenAITTSService":       {"from pipecat.services.openai.tts import OpenAITTSService", "openai", ""},
+	"ElevenLabsTTSService":   {"from pipecat.services.elevenlabs.tts import ElevenLabsTTSService", "elevenlabs", ""},
+	"CartesiaTTSService":     {"from pipecat.services.cartesia.tts import CartesiaTTSService", "cartesia", ""},
+	"DeepgramTTSService":     {"from pipecat.services.deepgram.tts import DeepgramTTSService", "deepgram", ""},
+	"GradiumTTSService":      {"from pipecat.services.gradium.tts import GradiumTTSService", "gradium", ""},
+	"InworldTTSService":      {"from pipecat.services.inworld.tts import InworldTTSService", "inworld", ""},
+	"RimeTTSService":         {"from pipecat.services.rime.tts import RimeTTSService", "rime", ""},
+	"SarvamHttpTTSService":   {"from pipecat.services.sarvam.tts import SarvamHttpTTSService", "sarvam", ""},
+	"SonioxTTSService":       {"from pipecat.services.soniox.tts import SonioxTTSService", "soniox", ""},
+	"SpeechmaticsTTSService": {"from pipecat.services.speechmatics.tts import SpeechmaticsTTSService", "speechmatics", ""},
+
+	// Plugins (standalone pip dep, not a pipecat-ai extra)
+	"SlngSTTService": {"from pipecat_slng import SlngSTTService", "", "pipecat-slng>=0.4.0"},
+	"SlngTTSService": {"from pipecat_slng import SlngTTSService", "", "pipecat-slng>=0.4.0"},
 }
 
 type pipecatInterrupt struct {
@@ -199,28 +226,28 @@ type pipecatInactivity struct {
 // agreement test enforces it, so a field can never be validate-green while the
 // emitter silently drops it (compiler V19). Add a row here only with the code.
 var pipecatEmittedFields = map[targetcap.Field]bool{
-	targetcap.FieldListenLocal:           true, // placement forwarded (code target runs it locally)
-	targetcap.FieldSpeakLocal:            true,
-	targetcap.FieldReasonLocal:           true,
-	targetcap.FieldSpeakEndpoint:         true, // base_url on the TTS service
-	targetcap.FieldTurnPlacement:         true, // advisory (VAD/smart-turn supplied)
-	targetcap.FieldSemanticEndpointing:   true, // advisory
-	targetcap.FieldTask:                  true, // @job task-worker
-	targetcap.FieldTaskModel:             true, // task-worker's own LLM
-	targetcap.FieldTaskNestedResult:      true, // forwarded json_schema
-	targetcap.FieldTaskGroup:             true, // sequential job dispatch
-	targetcap.FieldTaskGroupReturn:       true,
-	targetcap.FieldContextIsolated:       true, // fresh vs accumulated payload
-	targetcap.FieldTransferRequires:      true, // guard before activate_worker
-	targetcap.FieldGreetingUserFirst:     true,
-	targetcap.FieldGreetingModelWritten:  true,
-	targetcap.FieldGreetingAbsent:        true,
-	targetcap.FieldInterruptionMinWords:  true, // MinWordsUserTurnStartStrategy
-	targetcap.FieldInterruptionIgnore:    true, // IGNORE_PHRASES
-	targetcap.FieldInactivity:            true, // user_idle_timeout
-	targetcap.FieldMaxDuration:           true, // asyncio EndFrame timer
-	targetcap.FieldToolOutput:            true, // tool returns response.json()
-	targetcap.FieldToolInterruption:      true, // cancel_on_interruption
+	targetcap.FieldListenLocal:          true, // placement forwarded (code target runs it locally)
+	targetcap.FieldSpeakLocal:           true,
+	targetcap.FieldReasonLocal:          true,
+	targetcap.FieldSpeakEndpoint:        true, // base_url on the TTS service
+	targetcap.FieldTurnPlacement:        true, // advisory (VAD/smart-turn supplied)
+	targetcap.FieldSemanticEndpointing:  true, // advisory
+	targetcap.FieldTask:                 true, // @job task-worker
+	targetcap.FieldTaskModel:            true, // task-worker's own LLM
+	targetcap.FieldTaskNestedResult:     true, // forwarded json_schema
+	targetcap.FieldTaskGroup:            true, // sequential job dispatch
+	targetcap.FieldTaskGroupReturn:      true,
+	targetcap.FieldContextIsolated:      true, // fresh vs accumulated payload
+	targetcap.FieldTransferRequires:     true, // guard before activate_worker
+	targetcap.FieldGreetingUserFirst:    true,
+	targetcap.FieldGreetingModelWritten: true,
+	targetcap.FieldGreetingAbsent:       true,
+	targetcap.FieldInterruptionMinWords: true, // MinWordsUserTurnStartStrategy
+	targetcap.FieldInterruptionIgnore:   true, // IGNORE_PHRASES
+	targetcap.FieldInactivity:           true, // user_idle_timeout
+	targetcap.FieldMaxDuration:          true, // asyncio EndFrame timer
+	targetcap.FieldToolOutput:           true, // tool returns response.json()
+	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
 }
 
 // GeneratePipecat lowers a validated agent + pipecat target into a project.
