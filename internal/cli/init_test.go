@@ -72,8 +72,8 @@ func TestInit_refusesExistingDir(t *testing.T) {
 
 func TestInit_wizardScaffoldsFromScriptedInput(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// 1=create, name, 4=Create agent, confirm.
-	out, err := runWithInput(t, "1\nwiz-agent\n4\n\n", "init")
+	// 1=create, name, 5=Create agent, confirm.
+	out, err := runWithInput(t, "1\nwiz-agent\n5\n\n", "init")
 	if err != nil {
 		t.Fatalf("init wizard: %v\n%s", err, out)
 	}

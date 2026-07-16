@@ -29,16 +29,21 @@ var ErrExists = errors.New("directory already exists and is not empty")
 const (
 	DefaultGreeting     = "Hi, thanks for calling. How can I help you today?"
 	DefaultInstructions = "You are a helpful voice assistant. This is a phone call, so keep every answer to one or two short sentences."
+	DefaultTarget       = "pipecat"
 )
 
 // Data is the v1 agent configuration rendered by the scaffold templates.
 type Data struct {
 	Name         string
+	Target       string
 	Greeting     string
 	Instructions string
 }
 
 func (d Data) withDefaults() Data {
+	if d.Target == "" {
+		d.Target = DefaultTarget
+	}
 	if d.Greeting == "" {
 		d.Greeting = DefaultGreeting
 	}

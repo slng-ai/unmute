@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/slng/unmute/internal/scaffold"
+	targetcap "github.com/slng/unmute/internal/target"
 )
 
 const (
@@ -61,6 +62,7 @@ func Run(in io.Reader, out io.Writer, accessible bool) (Result, error) {
 		}
 		agent := Agent{Path: path, Data: scaffold.Data{
 			Name:         filepath.Base(filepath.Clean(path)),
+			Target:       scaffold.DefaultTarget,
 			Greeting:     scaffold.DefaultGreeting,
 			Instructions: scaffold.DefaultInstructions,
 		}}
@@ -86,6 +88,7 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			Title(result.Agent.Data.Name).
 			Description("Choose a section; changes stay in memory until Create agent.").
 			Options(
+				huh.NewOption("Target  ·  "+targetLabel(result.Agent.Data.Target), "target"),
 				huh.NewOption("Instructions (prompt)", "prompt"),
 				huh.NewOption("Greeting  ·  "+result.Agent.Data.Greeting, "greeting"),
 				huh.NewOption("Compile after create  ·  "+compile, "compile"),
@@ -100,6 +103,24 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			return Result{}, true, nil
 		}
 		switch choice {
+		case "target":
+			selected := result.Agent.Data.Target
+			back, err := runner.run(huh.NewSelect[string]().
+				Title("Target / orchestrator").
+				Description(runner.describe("Vapi and Deepgram are unavailable: their generators are not implemented yet.")).
+				Options(
+					huh.NewOption("Pipecat  ·  generated code project", string(targetcap.Pipecat)),
+					huh.NewOption("LiveKit  ·  generated code project", string(targetcap.LiveKit)),
+					huh.NewOption("ElevenLabs  ·  managed API plan", string(targetcap.ElevenLabs)),
+					huh.NewOption("← Back", actionBack),
+				).
+				Value(&selected), true)
+			if err != nil {
+				return Result{}, false, err
+			}
+			if !back && selected != actionBack {
+				result.Agent.Data.Target = selected
+			}
 		case "prompt":
 			if _, err := runner.text("Instructions", "Blank keeps the generated default.", &result.Agent.Data.Instructions); err != nil {
 				return Result{}, false, err
@@ -129,7 +150,18 @@ func summary(result Result) string {
 	if result.Compile {
 		compile = "yes (all targets)"
 	}
-	return fmt.Sprintf("Create %s?\nGreeting: %s\nCompile: %s", result.Agent.Data.Name, result.Agent.Data.Greeting, compile)
+	return fmt.Sprintf("Create %s?\nTarget: %s\nGreeting: %s\nCompile: %s", result.Agent.Data.Name, targetLabel(result.Agent.Data.Target), result.Agent.Data.Greeting, compile)
+}
+
+func targetLabel(provider string) string {
+	switch targetcap.Provider(provider) {
+	case targetcap.LiveKit:
+		return "LiveKit"
+	case targetcap.ElevenLabs:
+		return "ElevenLabs"
+	default:
+		return "Pipecat"
+	}
 }
 
 func validateName(name string) error {

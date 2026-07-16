@@ -16,13 +16,13 @@ import (
 func TestRunCreateDefaults(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
-	// 1=create, name=agent, 4=Create agent, ""=confirm default (yes).
-	got, err := Run(strings.NewReader("1\nagent\n4\n\n"), &output, true)
+	// 1=create, name=agent, 5=Create agent, ""=confirm default (yes).
+	got, err := Run(strings.NewReader("1\nagent\n5\n\n"), &output, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	agent := Agent{Path: "agent", Data: scaffold.Data{
-		Name: "agent", Greeting: scaffold.DefaultGreeting, Instructions: scaffold.DefaultInstructions,
+		Name: "agent", Target: scaffold.DefaultTarget, Greeting: scaffold.DefaultGreeting, Instructions: scaffold.DefaultInstructions,
 	}}
 	want := Result{Agent: agent, Create: true, Confirmed: true}
 	if !reflect.DeepEqual(got, want) {
@@ -31,7 +31,7 @@ func TestRunCreateDefaults(t *testing.T) {
 	if _, err := os.Stat("agent"); !os.IsNotExist(err) {
 		t.Fatalf("TUI wrote agent directory: %v", err)
 	}
-	for _, label := range []string{"Instructions", "Greeting", "Compile after create", "Create agent", "← Back"} {
+	for _, label := range []string{"Target", "Instructions", "Greeting", "Compile after create", "Create agent", "← Back"} {
 		if !strings.Contains(output.String(), label) {
 			t.Errorf("menu missing %q:\n%s", label, output.String())
 		}
@@ -53,13 +53,29 @@ func TestRunQuit(t *testing.T) {
 
 func TestRunCompileToggle(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// 1=create, name, 3=toggle compile on, 4=Create agent, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n3\n4\n\n"), &bytes.Buffer{}, true)
+	// 1=create, name, 4=toggle compile on, 5=Create agent, confirm.
+	got, err := Run(strings.NewReader("1\nagent\n4\n5\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !got.Confirmed || !got.Compile {
 		t.Fatalf("compile toggle result = %#v", got)
+	}
+}
+
+func TestRunSelectTarget(t *testing.T) {
+	t.Chdir(t.TempDir())
+	var output bytes.Buffer
+	// Create, name, Target, LiveKit, Create agent, confirm.
+	got, err := Run(strings.NewReader("1\nagent\n1\n2\n5\n\n"), &output, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Agent.Data.Target != "livekit" {
+		t.Fatalf("target = %q", got.Agent.Data.Target)
+	}
+	if !strings.Contains(output.String(), "Vapi and Deepgram are unavailable") {
+		t.Fatalf("missing unavailable-driver explanation:\n%s", output.String())
 	}
 }
 
