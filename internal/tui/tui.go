@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -60,12 +61,13 @@ func Run(in io.Reader, out io.Writer, accessible bool) (Result, error) {
 		if back {
 			continue
 		}
-		agent := Agent{Path: path, Data: scaffold.Data{
+		data := scaffold.Data{
 			Name:         filepath.Base(filepath.Clean(path)),
-			Target:       scaffold.DefaultTarget,
 			Greeting:     scaffold.DefaultGreeting,
 			Instructions: scaffold.DefaultInstructions,
-		}}
+		}
+		data.SetTarget(scaffold.DefaultTarget)
+		agent := Agent{Path: path, Data: data}
 		result, back, err := editAgent(runner, agent)
 		if err != nil {
 			return Result{}, err
@@ -89,6 +91,7 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			Description("Choose a section; changes stay in memory until Create agent.").
 			Options(
 				huh.NewOption("Target  ·  "+targetLabel(result.Agent.Data.Target), "target"),
+				huh.NewOption("Models  ·  "+modelsLabel(result.Agent.Data), "models"),
 				huh.NewOption("Instructions (prompt)", "prompt"),
 				huh.NewOption("Greeting  ·  "+result.Agent.Data.Greeting, "greeting"),
 				huh.NewOption("Compile after create  ·  "+compile, "compile"),
@@ -119,7 +122,11 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 				return Result{}, false, err
 			}
 			if !back && selected != actionBack {
-				result.Agent.Data.Target = selected
+				result.Agent.Data.SetTarget(selected)
+			}
+		case "models":
+			if err := editModels(runner, &result.Agent.Data); err != nil {
+				return Result{}, false, err
 			}
 		case "prompt":
 			if _, err := runner.text("Instructions", "Blank keeps the generated default.", &result.Agent.Data.Instructions); err != nil {
@@ -164,6 +171,132 @@ func targetLabel(provider string) string {
 	}
 }
 
+func modelsLabel(data scaffold.Data) string {
+	label := func(binding scaffold.Binding) string {
+		if binding.Provider == "" {
+			return "integrated"
+		}
+		return binding.Provider
+	}
+	return label(data.Listen) + " / " + label(data.Reason) + " / " + label(data.Speak)
+}
+
+func editModels(runner *fieldRunner, data *scaffold.Data) error {
+	for {
+		choice := actionBack
+		_, err := runner.run(huh.NewSelect[string]().
+			Title("STT / LLM / TTS").
+			Description(runner.describe("Providers come from the selected target's catalogue. Model ids, voices, and params are forwarded as entered.")).
+			Options(
+				huh.NewOption("Listen (STT)  ·  "+modelsLabelPart(data.Listen), string(targetcap.Listen)),
+				huh.NewOption("Reason (LLM)  ·  "+modelsLabelPart(data.Reason), string(targetcap.Reason)),
+				huh.NewOption("Speak (TTS)  ·  "+modelsLabelPart(data.Speak), string(targetcap.Speak)),
+				huh.NewOption("← Back", actionBack),
+			).
+			Value(&choice), true)
+		if err != nil {
+			return err
+		}
+		if choice == actionBack {
+			return nil
+		}
+		if err := editBinding(runner, data, targetcap.Role(choice)); err != nil {
+			return err
+		}
+	}
+}
+
+func modelsLabelPart(binding scaffold.Binding) string {
+	if binding.Provider != "" {
+		return binding.Provider
+	}
+	return "integrated / forwarded"
+}
+
+func editBinding(runner *fieldRunner, data *scaffold.Data, role targetcap.Role) error {
+	binding := bindingForRole(data, role)
+	framework := targetcap.Provider(data.Target)
+	options := providerOptions(framework, role)
+	integratedListen := framework == targetcap.ElevenLabs && role == targetcap.Listen
+
+	if integratedListen {
+		runner.describe("ElevenLabs STT is integrated; only its optional params are configurable.")
+	} else if len(options) > 0 {
+		selected := binding.Provider
+		options = append(options, huh.NewOption("← Back", actionBack))
+		back, err := runner.run(huh.NewSelect[string]().
+			Title(string(role)+" provider").
+			Description(runner.describe("Provider integrations listed by internal/target; model and voice identities are not catalogued.")).
+			Options(options...).
+			Value(&selected), true)
+		if err != nil {
+			return err
+		}
+		if back || selected == actionBack {
+			return nil
+		}
+		binding.Provider = selected
+	} else {
+		back, err := runner.input("Provider (optional)", "This role has no fixed provider catalogue; the identity is forwarded.", &binding.Provider, validateBasic)
+		if err != nil || back {
+			return err
+		}
+	}
+
+	entry, _ := targetcap.DefaultCatalog().Lookup(framework, role, binding.Provider)
+	if !integratedListen {
+		description := "Forwarded model id."
+		validate := validateBasic
+		if entry.ModelRequired() || role == targetcap.Reason || role == targetcap.Listen {
+			description = "Required by this provider integration; forwarded without an allowlist."
+			validate = validateRequiredBasic
+		}
+		back, err := runner.input("Model", description, &binding.Model, validate)
+		if err != nil || back {
+			return err
+		}
+	}
+
+	if role == targetcap.Speak {
+		description := "Optional voice name or id; forwarded without an allowlist."
+		validate := validateBasic
+		if entry.VoiceRequired() {
+			description = "Required by this provider integration; enter a voice name or id."
+			validate = validateRequiredBasic
+		}
+		back, err := runner.input("Voice", description, &binding.Voice, validate)
+		if err != nil || back {
+			return err
+		}
+	}
+
+	back, err := runner.input("Params (optional JSON object)", "Provider-specific request knobs, for example {\"temperature\":0.2}.", &binding.Params, validateParams)
+	if err != nil || back {
+		return err
+	}
+	return nil
+}
+
+func bindingForRole(data *scaffold.Data, role targetcap.Role) *scaffold.Binding {
+	switch role {
+	case targetcap.Listen:
+		return &data.Listen
+	case targetcap.Speak:
+		return &data.Speak
+	default:
+		return &data.Reason
+	}
+}
+
+func providerOptions(framework targetcap.Provider, role targetcap.Role) []huh.Option[string] {
+	vendors := targetcap.DefaultCatalog().Vendors(framework, role)
+	options := make([]huh.Option[string], 0, len(vendors))
+	for _, vendor := range vendors {
+		options = append(options, huh.NewOption(vendor, vendor))
+	}
+	return options
+}
+
 func validateName(name string) error {
 	if filepath.IsAbs(name) {
 		return errors.New("agent directory must be relative")
@@ -185,6 +318,24 @@ func validateName(name string) error {
 func validateBasic(value string) error {
 	if strings.ContainsAny(value, "\"\r\n") {
 		return errors.New(`value must not contain quotes or newlines`)
+	}
+	return nil
+}
+
+func validateRequiredBasic(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return errors.New("value is required")
+	}
+	return validateBasic(value)
+}
+
+func validateParams(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	var object map[string]any
+	if err := json.Unmarshal([]byte(value), &object); err != nil || object == nil {
+		return errors.New("params must be a JSON object")
 	}
 	return nil
 }

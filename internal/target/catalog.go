@@ -86,11 +86,23 @@ type Entry struct {
 	Install   InstallSpec
 	Import    string // full import line; "" = covered by the driver's core imports
 	Call      *CallSpec
+	// Managed rows have no Call; these fields retain binding arity for UIs and
+	// validation. Code rows derive the same facts from Call.
+	RequireModel bool
+	RequireVoice bool
 	// RequiresEndpoint gates wildcard rows: an unknown vendor is legal only as
 	// a genuinely custom OpenAI-compatible endpoint (endpoint_env set). This is
 	// the structural fix for driver-pipecat B1 (slng silently falling through).
 	RequiresEndpoint bool
 	Notes            []string
+}
+
+func (e Entry) ModelRequired() bool {
+	return e.RequireModel || e.Call != nil && e.Call.Model.Required
+}
+
+func (e Entry) VoiceRequired() bool {
+	return e.RequireVoice || e.Call != nil && e.Call.Voice.Required
 }
 
 // Wildcard reports whether this entry is a role's catch-all row.

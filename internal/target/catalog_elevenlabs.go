@@ -8,5 +8,5 @@ package target
 
 var elevenlabsCatalog = []Entry{
 	{Framework: ElevenLabs, Role: Speak, Vendor: "elevenlabs", Aliases: []string{"eleven_labs"},
-		Verified: "2026-07-15", Docs: "https://elevenlabs.io/docs/agents-platform (SCHEMA.md 6.2 role table)"},
+		Verified: "2026-07-15", Docs: "https://elevenlabs.io/docs/agents-platform (SCHEMA.md 6.2 role table)", RequireVoice: true},
 }

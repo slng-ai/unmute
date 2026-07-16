@@ -11,19 +11,20 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/slng/unmute/internal/scaffold"
+	targetcap "github.com/slng/unmute/internal/target"
 )
 
 func TestRunCreateDefaults(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
-	// 1=create, name=agent, 5=Create agent, ""=confirm default (yes).
-	got, err := Run(strings.NewReader("1\nagent\n5\n\n"), &output, true)
+	// 1=create, name=agent, 6=Create agent, ""=confirm default (yes).
+	got, err := Run(strings.NewReader("1\nagent\n6\n\n"), &output, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent := Agent{Path: "agent", Data: scaffold.Data{
-		Name: "agent", Target: scaffold.DefaultTarget, Greeting: scaffold.DefaultGreeting, Instructions: scaffold.DefaultInstructions,
-	}}
+	data := scaffold.Data{Name: "agent", Greeting: scaffold.DefaultGreeting, Instructions: scaffold.DefaultInstructions}
+	data.SetTarget(scaffold.DefaultTarget)
+	agent := Agent{Path: "agent", Data: data}
 	want := Result{Agent: agent, Create: true, Confirmed: true}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Run() = %#v, want %#v", got, want)
@@ -31,7 +32,7 @@ func TestRunCreateDefaults(t *testing.T) {
 	if _, err := os.Stat("agent"); !os.IsNotExist(err) {
 		t.Fatalf("TUI wrote agent directory: %v", err)
 	}
-	for _, label := range []string{"Target", "Instructions", "Greeting", "Compile after create", "Create agent", "← Back"} {
+	for _, label := range []string{"Target", "Models", "Instructions", "Greeting", "Compile after create", "Create agent", "← Back"} {
 		if !strings.Contains(output.String(), label) {
 			t.Errorf("menu missing %q:\n%s", label, output.String())
 		}
@@ -53,8 +54,8 @@ func TestRunQuit(t *testing.T) {
 
 func TestRunCompileToggle(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// 1=create, name, 4=toggle compile on, 5=Create agent, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n4\n5\n\n"), &bytes.Buffer{}, true)
+	// 1=create, name, 5=toggle compile on, 6=Create agent, confirm.
+	got, err := Run(strings.NewReader("1\nagent\n5\n6\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +68,7 @@ func TestRunSelectTarget(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
 	// Create, name, Target, LiveKit, Create agent, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n1\n2\n5\n\n"), &output, true)
+	got, err := Run(strings.NewReader("1\nagent\n1\n2\n6\n\n"), &output, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +77,57 @@ func TestRunSelectTarget(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "Vapi and Deepgram are unavailable") {
 		t.Fatalf("missing unavailable-driver explanation:\n%s", output.String())
+	}
+}
+
+func TestRunEditModels(t *testing.T) {
+	t.Chdir(t.TempDir())
+	// Create, name, Models, Speak, cartesia, model, voice, params, Back, Create, confirm.
+	got, err := Run(strings.NewReader("1\nagent\n2\n3\n1\nsonic-3\nvoice-id\n{\"speed\":1}\n4\n6\n\n"), &bytes.Buffer{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Agent.Data.Speak != (scaffold.Binding{Provider: "cartesia", Model: "sonic-3", Voice: "voice-id", Params: `{"speed":1}`}) {
+		t.Fatalf("speak binding = %#v", got.Agent.Data.Speak)
+	}
+}
+
+func TestProviderOptionsMirrorCatalog(t *testing.T) {
+	for _, tc := range []struct {
+		framework targetcap.Provider
+		role      targetcap.Role
+	}{
+		{targetcap.Pipecat, targetcap.Listen},
+		{targetcap.Pipecat, targetcap.Reason},
+		{targetcap.Pipecat, targetcap.Speak},
+		{targetcap.LiveKit, targetcap.Listen},
+		{targetcap.LiveKit, targetcap.Reason},
+		{targetcap.LiveKit, targetcap.Speak},
+		{targetcap.ElevenLabs, targetcap.Speak},
+	} {
+		options := providerOptions(tc.framework, tc.role)
+		vendors := targetcap.DefaultCatalog().Vendors(tc.framework, tc.role)
+		if len(options) != len(vendors) {
+			t.Fatalf("%s/%s options = %d, vendors = %d", tc.framework, tc.role, len(options), len(vendors))
+		}
+		for i := range vendors {
+			if options[i].Value != vendors[i] {
+				t.Errorf("%s/%s option %d = %q, want %q", tc.framework, tc.role, i, options[i].Value, vendors[i])
+			}
+		}
+	}
+}
+
+func TestValidateParams(t *testing.T) {
+	for _, value := range []string{"", `{}`, `{"temperature":0.2}`} {
+		if err := validateParams(value); err != nil {
+			t.Errorf("validateParams(%q) = %v", value, err)
+		}
+	}
+	for _, value := range []string{"[]", "nope", "null"} {
+		if err := validateParams(value); err == nil {
+			t.Errorf("validateParams(%q) accepted", value)
+		}
 	}
 }
 

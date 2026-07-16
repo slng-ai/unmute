@@ -555,13 +555,13 @@ func checkSpeakRequiredFields(catalog targetcap.Catalog, provider targetcap.Prov
 		return
 	}
 	entry, ok := catalog.Lookup(provider, targetcap.Speak, binding.Provider)
-	if !ok || entry.Call == nil {
+	if !ok {
 		return
 	}
-	if entry.Call.Voice.Required && binding.Voice == "" && binding.VoiceID == "" {
+	if entry.VoiceRequired() && binding.Voice == "" && binding.VoiceID == "" {
 		row.Errors = add(row.Errors, fmt.Sprintf("%s speak.%s binding provider %q is missing a voice", provider, profile, binding.Provider))
 	}
-	if entry.Call.Model.Required && binding.Model == "" {
+	if entry.ModelRequired() && binding.Model == "" {
 		row.Errors = add(row.Errors, fmt.Sprintf("%s speak.%s binding provider %q is missing a model", provider, profile, binding.Provider))
 	}
 }

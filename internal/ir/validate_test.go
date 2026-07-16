@@ -201,6 +201,16 @@ func TestValidateSpeakRequiredFieldsFromCatalog(t *testing.T) {
 	}
 }
 
+func TestValidateManagedSpeakRequiredFieldsFromCatalog(t *testing.T) {
+	agent := safeAgent(t)
+	target := targetFor(agent, ProviderElevenLabs)
+	target.Models.Speak["front_desk"] = Binding{Provider: "elevenlabs", Model: "eleven_turbo_v2_5"}
+	report, err := Validate(agent, []Target{target}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "missing a voice") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
 func TestValidateCapacity(t *testing.T) { // V12
 	agent := safeAgent(t)
 	agent.Capacity.PeakSessions = agent.Capacity.MaxSessions + 1

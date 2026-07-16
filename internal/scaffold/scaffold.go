@@ -38,11 +38,40 @@ type Data struct {
 	Target       string
 	Greeting     string
 	Instructions string
+	Listen       Binding
+	Reason       Binding
+	Speak        Binding
+}
+
+// Binding is one concrete role choice collected by the wizard. Params is an
+// optional JSON object; JSON is valid YAML, so templates can forward it intact.
+type Binding struct {
+	Provider string
+	Model    string
+	Voice    string
+	Params   string
+}
+
+// SetTarget selects an orchestrator and resets its target-dependent defaults.
+func (d *Data) SetTarget(provider string) {
+	d.Target = provider
+	switch provider {
+	case "elevenlabs":
+		d.Listen = Binding{}
+		d.Reason = Binding{Model: "gemini-2.5-flash"}
+		d.Speak = Binding{Provider: "elevenlabs", Voice: "cgSgspJ2msm6clMCkdW9"}
+	default: // Pipecat and LiveKit share the safe SLNG/OpenAI starter.
+		d.Listen = Binding{Provider: "slng", Model: "slng/deepgram/nova:3-en"}
+		d.Reason = Binding{Provider: "openai", Model: "gpt-4.1-mini"}
+		d.Speak = Binding{Provider: "slng", Model: "slng/deepgram/aura:2-en", Voice: "aura-2-thalia-en"}
+	}
 }
 
 func (d Data) withDefaults() Data {
 	if d.Target == "" {
-		d.Target = DefaultTarget
+		d.SetTarget(DefaultTarget)
+	} else if d.Listen == (Binding{}) && d.Reason == (Binding{}) && d.Speak == (Binding{}) {
+		d.SetTarget(d.Target)
 	}
 	if d.Greeting == "" {
 		d.Greeting = DefaultGreeting

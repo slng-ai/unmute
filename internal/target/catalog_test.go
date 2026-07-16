@@ -124,4 +124,7 @@ func TestCatalogLookup(t *testing.T) {
 	if got := cat.RolesFor(Pipecat, "slng"); strings.Join(got, ",") != "listen,speak" {
 		t.Errorf("slng roles on pipecat = %v", got)
 	}
+	if e, ok := cat.Lookup(ElevenLabs, Speak, "elevenlabs"); !ok || !e.VoiceRequired() {
+		t.Errorf("ElevenLabs speak arity = %#v", e)
+	}
 }
