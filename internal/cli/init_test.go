@@ -81,3 +81,14 @@ func TestInit_wizardScaffoldsFromScriptedInput(t *testing.T) {
 		t.Fatalf("wizard did not scaffold agent.yaml: %v\n%s", err, out)
 	}
 }
+
+func TestInitWizardDeclineWritesNothing(t *testing.T) {
+	t.Chdir(t.TempDir())
+	// Decline review, back out of the editor, then quit the create menu.
+	if _, err := runWithInput(t, "1\nagent\n16\nn\n17\n2\n", "init"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat("agent"); !os.IsNotExist(err) {
+		t.Fatalf("declined wizard wrote destination: %v", err)
+	}
+}

@@ -229,6 +229,18 @@ func TestRunCustomizeCapacity(t *testing.T) {
 	}
 }
 
+func TestRunBackPreservesPriorEdits(t *testing.T) {
+	t.Chdir(t.TempDir())
+	input := "1\nagent\n2\nes-MX\n4\n:back\n16\n\n"
+	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Agent.Data.Language != "es-MX" || got.Agent.Data.Instructions != scaffold.DefaultInstructions {
+		t.Fatalf("back lost edits: %#v", got.Agent.Data)
+	}
+}
+
 func TestProviderOptionsMirrorCatalog(t *testing.T) {
 	for _, tc := range []struct {
 		framework targetcap.Provider

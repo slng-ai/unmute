@@ -64,6 +64,27 @@ func TestWrite_golden(t *testing.T) {
 	}
 }
 
+func TestWriteDefaultFileSet(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent")
+	created, err := Write(dir, Data{Name: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, path := range created {
+		name, err := filepath.Rel(dir, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	want := []string{".env.example", "agent.yaml", "instructions.md", "targets.yaml"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("default files = %v, want %v", names, want)
+	}
+}
+
 func TestWrite_customData(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "support-bot")
 	data := Data{Name: "support-bot", Greeting: `Hello \ caller?`, Instructions: "Be brief and warm."}
