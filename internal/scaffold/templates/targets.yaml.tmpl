@@ -12,10 +12,10 @@ targets:
       listen: { provider: [[.Listen.Provider]], model: [[quote .Listen.Model]][[if .Listen.Params]], params: [[.Listen.Params]][[end]] }
       turn:   { provider: local, model: silero }
       speak:
-        assistant_voice: { provider: [[.Speak.Provider]][[if .Speak.Model]], model: [[quote .Speak.Model]][[end]], voice: [[quote .Speak.Voice]][[if .Speak.Params]], params: [[.Speak.Params]][[end]] }
-      reason:
-        assistant_model: {[[if .Reason.Provider]] provider: [[.Reason.Provider]],[[end]] model: [[quote .Reason.Model]][[if .Reason.Params]], params: [[.Reason.Params]][[end]] }
-[[else if eq .Target "livekit"]]  livekit-dev:
+[[range .AllAgents]]        [[.VoiceProfile]]: { provider: [[.Speak.Provider]][[if .Speak.Model]], model: [[quote .Speak.Model]][[end]], voice: [[quote .Speak.Voice]][[if .Speak.Params]], params: [[.Speak.Params]][[end]] }
+[[end]]      reason:
+[[range .AllAgents]]        [[.ModelProfile]]: {[[if .Reason.Provider]] provider: [[.Reason.Provider]],[[end]] model: [[quote .Reason.Model]][[if .Reason.Params]], params: [[.Reason.Params]][[end]] }
+[[end]][[else if eq .Target "livekit"]]  livekit-dev:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
@@ -23,14 +23,14 @@ targets:
       listen: { provider: [[.Listen.Provider]], model: [[quote .Listen.Model]][[if .Listen.Params]], params: [[.Listen.Params]][[end]] }
       turn:   { provider: livekit, model: turn-detector-mini }
       speak:
-        assistant_voice: { provider: [[.Speak.Provider]][[if .Speak.Model]], model: [[quote .Speak.Model]][[end]], voice: [[quote .Speak.Voice]][[if .Speak.Params]], params: [[.Speak.Params]][[end]] }
-      reason:
-        assistant_model: {[[if .Reason.Provider]] provider: [[.Reason.Provider]],[[end]] model: [[quote .Reason.Model]][[if .Reason.Params]], params: [[.Reason.Params]][[end]] }
-[[else]]  elevenlabs-dev:
+[[range .AllAgents]]        [[.VoiceProfile]]: { provider: [[.Speak.Provider]][[if .Speak.Model]], model: [[quote .Speak.Model]][[end]], voice: [[quote .Speak.Voice]][[if .Speak.Params]], params: [[.Speak.Params]][[end]] }
+[[end]]      reason:
+[[range .AllAgents]]        [[.ModelProfile]]: {[[if .Reason.Provider]] provider: [[.Reason.Provider]],[[end]] model: [[quote .Reason.Model]][[if .Reason.Params]], params: [[.Reason.Params]][[end]] }
+[[end]][[else]]  elevenlabs-dev:
     provider: elevenlabs
     models:
       speak:
-        assistant_voice: { provider: elevenlabs, voice_id: [[quote .Speak.Voice]][[if .Speak.Params]], params: [[.Speak.Params]][[end]] }
-      reason:
-        assistant_model: { model: [[quote .Reason.Model]][[if .Reason.Params]], params: [[.Reason.Params]][[end]] }
-[[end -]]
+[[range .AllAgents]]        [[.VoiceProfile]]: { provider: elevenlabs, voice_id: [[quote .Speak.Voice]][[if .Speak.Params]], params: [[.Speak.Params]][[end]] }
+[[end]]      reason:
+[[range .AllAgents]]        [[.ModelProfile]]: { model: [[quote .Reason.Model]][[if .Reason.Params]], params: [[.Reason.Params]][[end]] }
+[[end]][[end -]]

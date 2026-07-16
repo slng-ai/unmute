@@ -42,6 +42,7 @@ type Data struct {
 	Target       string
 	Language     string
 	Channel      string
+	EntryAgent   string
 	Greeting     string
 	Instructions string
 	Listen       Binding
@@ -49,6 +50,8 @@ type Data struct {
 	Speak        Binding
 	Variables    []Variable
 	Tools        []Tool
+	Agents       []Agent
+	Handoffs     []Handoff
 }
 
 // Binding is one concrete role choice collected by the wizard. Params is an
@@ -73,6 +76,49 @@ type Tool struct {
 	URLEnv      string
 	Input       string // JSON Schema object
 	Output      string // optional JSON Schema object
+	AttachTo    []string
+}
+
+type Agent struct {
+	Name         string
+	Instructions string
+	Reason       Binding
+	Speak        Binding
+}
+
+func (a Agent) ModelProfile() string { return a.Name + "_model" }
+func (a Agent) VoiceProfile() string { return a.Name + "_voice" }
+func (a Agent) ModelDescription() string {
+	if a.Name == "assistant" {
+		return "default reasoning model"
+	}
+	return "reasoning model for " + a.Name
+}
+func (a Agent) VoiceDescription() string {
+	if a.Name == "assistant" {
+		return "default voice"
+	}
+	return "voice for " + a.Name
+}
+func (a Agent) PromptPath() string {
+	if a.Name == "assistant" {
+		return "instructions.md"
+	}
+	return "agents/" + a.Name + ".md"
+}
+
+type Handoff struct {
+	Name             string
+	Source           string
+	To               string
+	When             string
+	Requires         []string
+	History          string
+	MaxMessages      int
+	Summarizer       string
+	IncludeToolCalls *bool
+	AllVariables     bool
+	Variables        []string
 }
 
 // SetTarget selects an orchestrator and resets its target-dependent defaults.
@@ -108,7 +154,44 @@ func (d Data) withDefaults() Data {
 	if d.Channel == "" {
 		d.Channel = DefaultChannel
 	}
+	if d.EntryAgent == "" {
+		d.EntryAgent = "assistant"
+	}
 	return d
+}
+
+// AllAgents returns the original assistant plus additional wizard agents in
+// stable order. Keeping the starter fields on Data preserves noninteractive
+// init compatibility.
+func (d Data) AllAgents() []Agent {
+	agents := []Agent{{Name: "assistant", Instructions: d.Instructions, Reason: d.Reason, Speak: d.Speak}}
+	agents = append(agents, d.Agents...)
+	sort.Slice(agents[1:], func(i, j int) bool { return agents[i+1].Name < agents[j+1].Name })
+	return agents
+}
+
+func (d Data) AgentTools(name string) []string {
+	var names []string
+	seen := map[string]bool{}
+	for _, tool := range d.Tools {
+		attach := tool.AttachTo
+		if len(attach) == 0 {
+			attach = []string{"assistant"}
+		}
+		for _, agent := range attach {
+			if agent == name && !seen[tool.Name] {
+				names = append(names, tool.Name)
+				seen[tool.Name] = true
+			}
+		}
+	}
+	for _, handoff := range d.Handoffs {
+		if handoff.Source == name && !seen[handoff.Name] {
+			names = append(names, handoff.Name)
+			seen[handoff.Name] = true
+		}
+	}
+	return names
 }
 
 // RequiredEnv returns the starter env names implied by the selected target
@@ -124,11 +207,21 @@ func (d Data) RequiredEnv() []string {
 	case targetcap.ElevenLabs:
 		set["ELEVENLABS_API_KEY"] = true
 	}
-	for role, binding := range map[targetcap.Role]Binding{
-		targetcap.Listen: d.Listen,
-		targetcap.Reason: d.Reason,
-		targetcap.Speak:  d.Speak,
-	} {
+	bindings := []struct {
+		role    targetcap.Role
+		binding Binding
+	}{{targetcap.Listen, d.Listen}}
+	for _, agent := range d.AllAgents() {
+		bindings = append(bindings, struct {
+			role    targetcap.Role
+			binding Binding
+		}{targetcap.Reason, agent.Reason}, struct {
+			role    targetcap.Role
+			binding Binding
+		}{targetcap.Speak, agent.Speak})
+	}
+	for _, item := range bindings {
+		role, binding := item.role, item.binding
 		entry, ok := targetcap.DefaultCatalog().Lookup(framework, role, binding.Provider)
 		if !ok || entry.Call == nil || entry.Call.APIKeyArg == "" {
 			continue
@@ -227,13 +320,26 @@ func Write(dir string, d Data) ([]string, error) {
 		}
 		created = append(created, out)
 	}
+	agents := append([]Agent(nil), d.Agents...)
+	sort.Slice(agents, func(i, j int) bool { return agents[i].Name < agents[j].Name })
+	for _, agent := range agents {
+		out := filepath.Join(dir, agent.PromptPath())
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, fmt.Errorf("scaffold: %w", err)
+		}
+		if err := os.WriteFile(out, []byte(agent.Instructions+"\n"), 0o644); err != nil {
+			return nil, fmt.Errorf("scaffold: %w", err)
+		}
+		created = append(created, out)
+	}
 	return created, nil
 }
 
 func parseTemplate(name string, raw []byte) (*template.Template, error) {
 	return template.New(name).Funcs(template.FuncMap{
-		"quote": strconv.Quote,
-		"yaml":  yamlScalar,
+		"boolValue": func(value *bool) bool { return value != nil && *value },
+		"quote":     strconv.Quote,
+		"yaml":      yamlScalar,
 	}).Delims("[[", "]]").Parse(string(raw))
 }
 

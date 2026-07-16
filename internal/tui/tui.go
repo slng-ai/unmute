@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -100,6 +101,8 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 				huh.NewOption("Greeting  ·  "+result.Agent.Data.Greeting, "greeting"),
 				huh.NewOption(fmt.Sprintf("Variables  ·  %d", len(result.Agent.Data.Variables)), "variables"),
 				huh.NewOption(fmt.Sprintf("Webhook tools  ·  %d", len(result.Agent.Data.Tools)), "tools"),
+				huh.NewOption(fmt.Sprintf("Agents  ·  %d", len(result.Agent.Data.AllAgents())), "agents"),
+				huh.NewOption(fmt.Sprintf("Handoffs  ·  %d", len(result.Agent.Data.Handoffs)), "handoffs"),
 				huh.NewOption("Compile after create  ·  "+compile, "compile"),
 				huh.NewOption("Create agent", "save"),
 				huh.NewOption("← Back", actionBack),
@@ -129,6 +132,10 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			}
 			if !back && selected != actionBack {
 				result.Agent.Data.SetTarget(selected)
+				for i := range result.Agent.Data.Agents {
+					result.Agent.Data.Agents[i].Reason = result.Agent.Data.Reason
+					result.Agent.Data.Agents[i].Speak = result.Agent.Data.Speak
+				}
 			}
 		case "language":
 			if _, err := runner.input("Language", "Primary spoken BCP-47 language tag, for example en or es-MX.", &result.Agent.Data.Language, validateLanguage); err != nil {
@@ -152,6 +159,14 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			}
 		case "tools":
 			if err := editTools(runner, &result.Agent.Data); err != nil {
+				return Result{}, false, err
+			}
+		case "agents":
+			if err := editAgents(runner, &result.Agent.Data); err != nil {
+				return Result{}, false, err
+			}
+		case "handoffs":
+			if err := editHandoffs(runner, &result.Agent.Data); err != nil {
 				return Result{}, false, err
 			}
 		case "compile":
@@ -278,7 +293,11 @@ func modelsLabelPart(binding scaffold.Binding) string {
 
 func editBinding(runner *fieldRunner, data *scaffold.Data, role targetcap.Role) error {
 	binding := bindingForRole(data, role)
-	framework := targetcap.Provider(data.Target)
+	return editBindingFor(runner, data.Target, role, binding)
+}
+
+func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, binding *scaffold.Binding) error {
+	framework := targetcap.Provider(target)
 	options := providerOptions(framework, role)
 	integratedListen := framework == targetcap.ElevenLabs && role == targetcap.Listen
 
@@ -430,7 +449,7 @@ func editTools(runner *fieldRunner, data *scaffold.Data) error {
 		choice := actionBack
 		_, err := runner.run(huh.NewSelect[string]().
 			Title("Webhook tools").
-			Description(runner.describe("New tools attach to the current entry agent.")).
+			Description(runner.describe("Choose which agent can see each tool.")).
 			Options(huh.NewOption("Add webhook tool", "add"), huh.NewOption("← Back", actionBack)).
 			Value(&choice), true)
 		if err != nil || choice == actionBack {
@@ -463,8 +482,260 @@ func editTools(runner *fieldRunner, data *scaffold.Data) error {
 		if back, err = runner.input("Output JSON Schema (optional)", "Blank leaves provider output unconstrained.", &tool.Output, validateParams); err != nil || back {
 			continue
 		}
+		attached := data.EntryAgent
+		if attached == "" {
+			attached = "assistant"
+		}
+		options := make([]huh.Option[string], 0, len(data.AllAgents())+1)
+		for _, agent := range data.AllAgents() {
+			options = append(options, huh.NewOption(agent.Name, agent.Name))
+		}
+		options = append(options, huh.NewOption("← Back", actionBack))
+		back, err = runner.run(huh.NewSelect[string]().Title("Attach to agent").Options(options...).Value(&attached), true)
+		if err != nil {
+			return err
+		}
+		if back || attached == actionBack {
+			continue
+		}
+		tool.AttachTo = []string{attached}
 		data.Tools = append(data.Tools, tool)
 	}
+}
+
+func editAgents(runner *fieldRunner, data *scaffold.Data) error {
+	for {
+		choice := actionBack
+		_, err := runner.run(huh.NewSelect[string]().Title("Agents").Options(
+			huh.NewOption("Add agent", "add"),
+			huh.NewOption("Choose entry agent  ·  "+firstNonempty(data.EntryAgent, "assistant"), "entry"),
+			huh.NewOption("← Back", actionBack),
+		).Value(&choice), true)
+		if err != nil || choice == actionBack {
+			return err
+		}
+		if choice == "entry" {
+			selected := firstNonempty(data.EntryAgent, "assistant")
+			options := agentOptions(data.AllAgents(), "")
+			options = append(options, huh.NewOption("← Back", actionBack))
+			back, err := runner.run(huh.NewSelect[string]().Title("Entry agent").Options(options...).Value(&selected), true)
+			if err != nil {
+				return err
+			}
+			if !back && selected != actionBack {
+				data.EntryAgent = selected
+			}
+			continue
+		}
+
+		agent := scaffold.Agent{
+			Instructions: "You are a helpful specialist. Keep every answer to one or two short sentences.",
+			Reason:       data.Reason,
+			Speak:        data.Speak,
+		}
+		back, err := runner.input("Agent name", "Lowercase snake_case.", &agent.Name, func(value string) error {
+			if err := validateIdentifier(value); err != nil {
+				return err
+			}
+			for _, existing := range data.AllAgents() {
+				if existing.Name == value {
+					return errors.New("agent already exists")
+				}
+			}
+			return nil
+		})
+		if err != nil || back {
+			continue
+		}
+		if back, err = runner.text("Agent instructions", "Prompt for this specialist.", &agent.Instructions); err != nil || back {
+			continue
+		}
+		if err := editBindingFor(runner, data.Target, targetcap.Reason, &agent.Reason); err != nil {
+			return err
+		}
+		if err := editBindingFor(runner, data.Target, targetcap.Speak, &agent.Speak); err != nil {
+			return err
+		}
+		data.Agents = append(data.Agents, agent)
+	}
+}
+
+func editHandoffs(runner *fieldRunner, data *scaffold.Data) error {
+	if len(data.AllAgents()) < 2 {
+		fmt.Fprintln(runner.out, "Handoffs are unavailable until at least two agents exist.")
+		return nil
+	}
+	for {
+		choice := actionBack
+		_, err := runner.run(huh.NewSelect[string]().Title("Directional handoffs").Options(
+			huh.NewOption("Add handoff", "add"), huh.NewOption("← Back", actionBack),
+		).Value(&choice), true)
+		if err != nil || choice == actionBack {
+			return err
+		}
+
+		handoff := scaffold.Handoff{History: "full", AllVariables: true}
+		handoff.Source = firstNonempty(data.EntryAgent, "assistant")
+		back, err := runner.run(huh.NewSelect[string]().Title("Source agent").Options(agentOptions(data.AllAgents(), "")...).Value(&handoff.Source), true)
+		if err != nil || back {
+			return err
+		}
+		targets := agentOptions(data.AllAgents(), handoff.Source)
+		handoff.To = targets[0].Value
+		back, err = runner.run(huh.NewSelect[string]().Title("Target agent").Options(targets...).Value(&handoff.To), true)
+		if err != nil || back {
+			return err
+		}
+		handoff.Name = "to_" + handoff.To
+		back, err = runner.input("Handoff name", "Lowercase snake_case; controls and tools share one namespace.", &handoff.Name, func(value string) error {
+			if err := validateIdentifier(value); err != nil {
+				return err
+			}
+			for _, tool := range data.Tools {
+				if tool.Name == value {
+					return errors.New("name already used by a tool")
+				}
+			}
+			for _, existing := range data.Handoffs {
+				if existing.Name == value {
+					return errors.New("handoff already exists")
+				}
+			}
+			return nil
+		})
+		if err != nil || back {
+			continue
+		}
+		if back, err = runner.input("When to hand off", "Plain-language trigger shown to the model.", &handoff.When, validateRequiredText); err != nil || back {
+			continue
+		}
+		if len(data.Variables) > 0 {
+			value := ""
+			if back, err = runner.input("Required variables (optional)", "Comma-separated existing variable names.", &value, referenceValidator(variableNames(data), true)); err != nil || back {
+				continue
+			}
+			handoff.Requires = parseNames(value)
+		}
+		historyOptions := []huh.Option[string]{huh.NewOption("Full history (portable)", "full")}
+		if data.Target != string(targetcap.ElevenLabs) {
+			historyOptions = append(historyOptions,
+				huh.NewOption("Messages", "messages"), huh.NewOption("Last N messages", "last_n"),
+				huh.NewOption("Summary", "summary"), huh.NewOption("Reset", "reset"))
+		}
+		back, err = runner.run(huh.NewSelect[string]().Title("Conversation history").Options(historyOptions...).Value(&handoff.History), true)
+		if err != nil || back {
+			return err
+		}
+		if handoff.History == "last_n" {
+			max := "10"
+			if back, err = runner.input("Maximum messages", "Positive integer.", &max, validatePositiveInteger); err != nil || back {
+				continue
+			}
+			handoff.MaxMessages, _ = strconv.Atoi(max)
+		}
+		if handoff.History == "summary" {
+			summarizerAgent := data.AllAgents()[0]
+			selected := summarizerAgent.ModelProfile()
+			options := make([]huh.Option[string], 0, len(data.AllAgents()))
+			for _, agent := range data.AllAgents() {
+				options = append(options, huh.NewOption(agent.ModelProfile(), agent.ModelProfile()))
+			}
+			back, err = runner.run(huh.NewSelect[string]().Title("Summarizer model profile").Options(options...).Value(&selected), true)
+			if err != nil || back {
+				return err
+			}
+			handoff.Summarizer = selected
+		}
+		includeTools := "default"
+		back, err = runner.run(huh.NewSelect[string]().Title("Tool calls in context").Options(
+			huh.NewOption("Provider default", "default"), huh.NewOption("Include", "yes"), huh.NewOption("Exclude", "no"),
+		).Value(&includeTools), true)
+		if err != nil || back {
+			return err
+		}
+		if includeTools != "default" {
+			include := includeTools == "yes"
+			handoff.IncludeToolCalls = &include
+		}
+		if len(data.Variables) > 0 {
+			variableScope := "all"
+			back, err = runner.run(huh.NewSelect[string]().Title("Variables in context").Options(
+				huh.NewOption("All variables (portable)", "all"), huh.NewOption("Selected variables", "selected"),
+			).Value(&variableScope), true)
+			if err != nil || back {
+				return err
+			}
+			if variableScope == "selected" {
+				value := ""
+				if back, err = runner.input("Variables", "Comma-separated existing variable names.", &value, referenceValidator(variableNames(data), false)); err != nil || back {
+					continue
+				}
+				handoff.AllVariables = false
+				handoff.Variables = parseNames(value)
+			}
+		}
+		data.Handoffs = append(data.Handoffs, handoff)
+	}
+}
+
+func agentOptions(agents []scaffold.Agent, except string) []huh.Option[string] {
+	options := make([]huh.Option[string], 0, len(agents))
+	for _, agent := range agents {
+		if agent.Name != except {
+			options = append(options, huh.NewOption(agent.Name, agent.Name))
+		}
+	}
+	return options
+}
+
+func variableNames(data *scaffold.Data) []string {
+	names := make([]string, 0, len(data.Variables))
+	for _, variable := range data.Variables {
+		names = append(names, variable.Name)
+	}
+	return names
+}
+
+func parseNames(value string) []string {
+	var names []string
+	for _, name := range strings.Split(value, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func referenceValidator(available []string, optional bool) func(string) error {
+	known := map[string]bool{}
+	for _, name := range available {
+		known[name] = true
+	}
+	return func(value string) error {
+		names := parseNames(value)
+		if len(names) == 0 && !optional {
+			return errors.New("at least one name is required")
+		}
+		seen := map[string]bool{}
+		for _, name := range names {
+			if !known[name] {
+				return fmt.Errorf("unknown name %q", name)
+			}
+			if seen[name] {
+				return fmt.Errorf("duplicate name %q", name)
+			}
+			seen[name] = true
+		}
+		return nil
+	}
+}
+
+func validatePositiveInteger(value string) error {
+	number, err := strconv.Atoi(value)
+	if err != nil || number <= 0 {
+		return errors.New("value must be a positive integer")
+	}
+	return nil
 }
 
 func validateName(name string) error {

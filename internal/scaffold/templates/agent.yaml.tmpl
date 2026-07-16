@@ -3,7 +3,7 @@
 # targets.yaml.
 version: 1
 language: [[ yaml .Language ]]
-entry_agent: assistant
+entry_agent: [[.EntryAgent]]
 
 pipeline:
   listen: { placement: api }
@@ -11,13 +11,13 @@ pipeline:
   speak:  { placement: api }
 
 models:
-  assistant_model:
-    description: default reasoning model
+[[range .AllAgents]]  [[.ModelProfile]]:
+    description: [[.ModelDescription]]
     placement: api
-
+[[end]]
 voices:
-  assistant_voice: { description: default voice }
-
+[[range .AllAgents]]  [[.VoiceProfile]]: { description: [[.VoiceDescription]] }
+[[end]]
 [[if .Variables]]variables:
 [[range .Variables]]  [[.Name]]:
     type: [[.Type]]
@@ -25,18 +25,32 @@ voices:
 [[end]][[if .Source]]    source: [[.Source]]
 [[end]][[end]]
 [[end]]agents:
-  assistant:
-    instructions: instructions.md
-    model: assistant_model
-    voice: assistant_voice
-[[if .Tools]]    tools:
-[[range .Tools]]      - [[.Name]]
-[[end]]
-[[end]]
-[[if .Tools]]tools:
+[[range .AllAgents]]  [[.Name]]:
+    instructions: [[.PromptPath]]
+    model: [[.ModelProfile]]
+    voice: [[.VoiceProfile]]
+[[$tools := $.AgentTools .Name]][[if $tools]]    tools:
+[[range $tools]]      - [[.]]
+[[end]][[end]]
+[[end]][[if .Handoffs]]controls:
+[[range .Handoffs]]  [[.Name]]:
+    kind: agent_transfer
+    to: [[.To]]
+    when: [[quote .When]]
+[[if .Requires]]    requires:
+[[range .Requires]]      - [[.]]
+[[end]][[end]]    context:
+      history: [[.History]]
+[[if .MaxMessages]]      max_messages: [[.MaxMessages]]
+[[end]][[if .Summarizer]]      summarizer: [[.Summarizer]]
+[[end]][[if .IncludeToolCalls]]      include_tool_calls: [[boolValue .IncludeToolCalls]]
+[[end]][[if .AllVariables]]      variables: all
+[[else]]      variables:
+[[range .Variables]]        - [[.]]
+[[end]][[end]]
+[[end]][[end]][[if .Tools]]tools:
 [[range .Tools]]  - [[.Name]]
 [[end]]
-
 [[end]]conversation:
   greeting:
     speaks_first: agent

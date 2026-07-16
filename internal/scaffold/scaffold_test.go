@@ -188,6 +188,40 @@ func TestWriteVariablesAndTools(t *testing.T) {
 	}
 }
 
+func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
+	for _, provider := range []string{"pipecat", "livekit", "elevenlabs"} {
+		t.Run(provider, func(t *testing.T) {
+			data := Data{Name: "agent", Language: "en", Channel: "web"}
+			data.SetTarget(provider)
+			data.Agents = []Agent{{
+				Name: "billing", Instructions: "You are the billing specialist.", Reason: data.Reason, Speak: data.Speak,
+			}}
+			data.Handoffs = []Handoff{{
+				Name: "to_billing", Source: "assistant", To: "billing", When: "The caller needs billing help.", History: "full", AllVariables: true,
+			}}
+			dir := filepath.Join(t.TempDir(), "agent")
+			if _, err := Write(dir, data); err != nil {
+				t.Fatal(err)
+			}
+			agentYAML, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"billing:", "to_billing:", "history: full", "variables: all"} {
+				if !strings.Contains(string(agentYAML), want) {
+					t.Errorf("agent.yaml missing %q:\n%s", want, agentYAML)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(dir, "agents", "billing.md")); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Preflight(data); err != nil {
+				t.Fatalf("Preflight() = %v", err)
+			}
+		})
+	}
+}
+
 func TestPreflightShippedTargets(t *testing.T) {
 	for _, provider := range []string{"pipecat", "livekit", "elevenlabs"} {
 		t.Run(provider, func(t *testing.T) {

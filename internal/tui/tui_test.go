@@ -17,8 +17,8 @@ import (
 func TestRunCreateDefaults(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
-	// 1=create, name=agent, 9=Create agent, ""=confirm default (yes).
-	got, err := Run(strings.NewReader("1\nagent\n9\n\n"), &output, true)
+	// 1=create, name=agent, 11=Create agent, ""=confirm default (yes).
+	got, err := Run(strings.NewReader("1\nagent\n11\n\n"), &output, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestRunCreateDefaults(t *testing.T) {
 	if _, err := os.Stat("agent"); !os.IsNotExist(err) {
 		t.Fatalf("TUI wrote agent directory: %v", err)
 	}
-	for _, label := range []string{"Target", "Language", "Models", "Instructions", "Greeting", "Variables", "Webhook tools", "Compile after create", "Create agent", "← Back"} {
+	for _, label := range []string{"Target", "Language", "Models", "Instructions", "Greeting", "Variables", "Webhook tools", "Agents", "Handoffs", "Compile after create", "Create agent", "← Back"} {
 		if !strings.Contains(output.String(), label) {
 			t.Errorf("menu missing %q:\n%s", label, output.String())
 		}
@@ -59,8 +59,8 @@ func TestRunQuit(t *testing.T) {
 
 func TestRunCompileToggle(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// 1=create, name, 8=toggle compile on, 9=Create agent, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n8\n9\n\n"), &bytes.Buffer{}, true)
+	// 1=create, name, 10=toggle compile on, 11=Create agent, confirm.
+	got, err := Run(strings.NewReader("1\nagent\n10\n11\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestRunSelectTarget(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
 	// Create, name, Target, LiveKit, Create agent, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n1\n2\n9\n\n"), &output, true)
+	got, err := Run(strings.NewReader("1\nagent\n1\n2\n11\n\n"), &output, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestRunSelectTarget(t *testing.T) {
 func TestRunEditModels(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// Create, name, Models, Speak, cartesia, model, voice, params, Back, Create, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n3\n3\n1\nsonic-3\nvoice-id\n{\"speed\":1}\n4\n9\n\n"), &bytes.Buffer{}, true)
+	got, err := Run(strings.NewReader("1\nagent\n3\n3\n1\nsonic-3\nvoice-id\n{\"speed\":1}\n4\n11\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestRunEditModels(t *testing.T) {
 
 func TestRunEditLanguage(t *testing.T) {
 	t.Chdir(t.TempDir())
-	got, err := Run(strings.NewReader("1\nagent\n2\nes-MX\n9\n\n"), &bytes.Buffer{}, true)
+	got, err := Run(strings.NewReader("1\nagent\n2\nes-MX\n11\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,8 +112,8 @@ func TestRunAddVariableAndWebhookTool(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
 		"6\n1\ncustomer_id\n1\n\"guest\"\n2\n2\n" +
-		"7\n1\nlookup_customer\nLook up the caller\nLOOKUP_URL\n{\"type\":\"object\"}\n\n2\n" +
-		"9\n\n"
+		"7\n1\nlookup_customer\nLook up the caller\nLOOKUP_URL\n{\"type\":\"object\"}\n\n1\n2\n" +
+		"11\n\n"
 	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +123,39 @@ func TestRunAddVariableAndWebhookTool(t *testing.T) {
 	}
 	if len(got.Agent.Data.Tools) != 1 || got.Agent.Data.Tools[0].URLEnv != "LOOKUP_URL" {
 		t.Fatalf("tools = %#v", got.Agent.Data.Tools)
+	}
+}
+
+func TestRunHandoffsRequireTwoAgents(t *testing.T) {
+	t.Chdir(t.TempDir())
+	var output bytes.Buffer
+	got, err := Run(strings.NewReader("1\nagent\n9\n11\n\n"), &output, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Agent.Data.Handoffs) != 0 || !strings.Contains(output.String(), "unavailable until at least two agents") {
+		t.Fatalf("handoff gate missing: result=%#v\n%s", got, output.String())
+	}
+}
+
+func TestRunAddAgentAndHandoff(t *testing.T) {
+	t.Chdir(t.TempDir())
+	input := "1\nagent\n" +
+		"8\n1\nbilling\nYou handle billing questions.\n" +
+		"1\ngpt-4.1-mini\n\n" +
+		"4\nslng/deepgram/aura:2-en\naura-2-thalia-en\n\n" +
+		"3\n" +
+		"9\n1\n1\n1\nto_billing\nCaller asks about billing.\n1\n1\n2\n" +
+		"11\n\n"
+	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Agent.Data.Agents) != 1 || got.Agent.Data.Agents[0].Name != "billing" {
+		t.Fatalf("agents = %#v", got.Agent.Data.Agents)
+	}
+	if len(got.Agent.Data.Handoffs) != 1 || got.Agent.Data.Handoffs[0].Source != "assistant" || got.Agent.Data.Handoffs[0].To != "billing" {
+		t.Fatalf("handoffs = %#v", got.Agent.Data.Handoffs)
 	}
 }
 
