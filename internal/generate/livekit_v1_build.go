@@ -158,6 +158,13 @@ func livekitGuards(agent *ir.Agent) error {
 			return fmt.Errorf("livekit driver does not emit model fallback yet (model %q)", name)
 		}
 	}
+	// B1 interim: fail loud instead of silently running the task on the session
+	// LLM. T14 replaces this with the AgentTask(llm=...) lowering.
+	for name, task := range agent.Tasks {
+		if task.Model != "" {
+			return fmt.Errorf("livekit driver does not emit per-task model yet (task %q)", name)
+		}
+	}
 	if c := agent.Conversation; c != nil {
 		if c.ThinkingAudio != "" {
 			return fmt.Errorf("livekit driver does not emit thinking_audio yet")
