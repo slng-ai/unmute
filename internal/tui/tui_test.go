@@ -40,6 +40,11 @@ func TestRunCreateDefaults(t *testing.T) {
 	if !strings.Contains(output.String(), "Agent name") || !strings.Contains(output.String(), agentNameHelp) {
 		t.Fatalf("name field missing guidance:\n%s", output.String())
 	}
+	for _, label := range []string{"Required env:", "Forwarded bindings:"} {
+		if !strings.Contains(output.String(), label) {
+			t.Errorf("review missing %q:\n%s", label, output.String())
+		}
+	}
 }
 
 func TestRunQuit(t *testing.T) {

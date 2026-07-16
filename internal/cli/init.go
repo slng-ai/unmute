@@ -75,6 +75,9 @@ func writeHeader(out io.Writer, tty bool) {
 }
 
 func writeScaffold(cmd *cobra.Command, dir string, data scaffold.Data) error {
+	if _, err := scaffold.Preflight(data); err != nil {
+		return fmt.Errorf("init %s: preflight: %w", dir, err)
+	}
 	created, err := scaffold.Write(dir, data)
 	if err != nil {
 		return fmt.Errorf("init %s: %w", dir, err)

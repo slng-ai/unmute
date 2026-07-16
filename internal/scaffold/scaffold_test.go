@@ -147,6 +147,35 @@ func TestWrite_targetChoices(t *testing.T) {
 	}
 }
 
+func TestPreflightShippedTargets(t *testing.T) {
+	for _, provider := range []string{"pipecat", "livekit", "elevenlabs"} {
+		t.Run(provider, func(t *testing.T) {
+			data := Data{Name: "agent", Language: "en", Channel: "web"}
+			data.SetTarget(provider)
+			report, err := Preflight(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.TargetName != provider+"-dev" || len(report.Bindings) == 0 || len(report.RequiredEnv) == 0 {
+				t.Fatalf("report = %#v", report)
+			}
+		})
+	}
+}
+
+func TestPreflightRejectsInvalidCandidateBeforeWrite(t *testing.T) {
+	t.Chdir(t.TempDir())
+	data := Data{Name: "agent", Language: "en", Channel: "web"}
+	data.SetTarget("livekit")
+	data.Speak = Binding{Provider: "elevenlabs", Model: "eleven_multilingual_v2"}
+	if _, err := Preflight(data); err == nil || !strings.Contains(err.Error(), "missing a voice") {
+		t.Fatalf("Preflight() error = %v", err)
+	}
+	if _, err := os.Stat("agent"); !os.IsNotExist(err) {
+		t.Fatalf("preflight wrote destination: %v", err)
+	}
+}
+
 func TestWrite_deterministic(t *testing.T) {
 	a := filepath.Join(t.TempDir(), "x")
 	b := filepath.Join(t.TempDir(), "x")

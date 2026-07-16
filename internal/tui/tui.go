@@ -147,8 +147,13 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 		case "compile":
 			result.Compile = !result.Compile
 		case "save":
+			review, err := scaffold.Preflight(result.Agent.Data)
+			if err != nil {
+				fmt.Fprintf(runner.out, "\nPreflight failed:\n%s\n", err)
+				continue
+			}
 			confirmed := true
-			back, err := runner.run(huh.NewConfirm().Title(summary(result)).Value(&confirmed), true)
+			back, err := runner.run(huh.NewConfirm().Title(summary(result, review)).Value(&confirmed), true)
 			if err != nil {
 				return Result{}, false, err
 			}
@@ -160,12 +165,49 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 	}
 }
 
-func summary(result Result) string {
+func summary(result Result, review scaffold.PreflightReport) string {
 	compile := "no"
 	if result.Compile {
-		compile = "yes (all targets)"
+		compile = "yes (selected target)"
 	}
-	return fmt.Sprintf("Create %s?\nTarget: %s\nLanguage: %s\nGreeting: %s\nCompile: %s", result.Agent.Data.Name, targetLabel(result.Agent.Data.Target), result.Agent.Data.Language, result.Agent.Data.Greeting, compile)
+	var text strings.Builder
+	fmt.Fprintf(&text, "Create %s?\nTarget: %s (%s)\nLanguage: %s\nGreeting: %s\nRequired env: %s\nForwarded bindings:",
+		result.Agent.Data.Name, targetLabel(result.Agent.Data.Target), review.TargetName,
+		result.Agent.Data.Language, result.Agent.Data.Greeting, strings.Join(review.RequiredEnv, ", "))
+	for _, binding := range review.Bindings {
+		profile := ""
+		if binding.Profile != "" {
+			profile = "." + binding.Profile
+		}
+		identity := binding.Binding.Provider
+		if identity == "" {
+			identity = "integrated"
+		}
+		if binding.Binding.Model != "" {
+			identity += "/" + binding.Binding.Model
+		}
+		if voice := firstNonempty(binding.Binding.Voice, binding.Binding.VoiceID); voice != "" {
+			identity += " voice=" + voice
+		}
+		fmt.Fprintf(&text, "\n- %s%s: %s", binding.Role, profile, identity)
+	}
+	if len(review.Warnings) > 0 {
+		text.WriteString("\nWarnings:")
+		for _, warning := range review.Warnings {
+			fmt.Fprintf(&text, "\n- %s", warning)
+		}
+	}
+	fmt.Fprintf(&text, "\nCompile: %s", compile)
+	return text.String()
+}
+
+func firstNonempty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func targetLabel(provider string) string {
