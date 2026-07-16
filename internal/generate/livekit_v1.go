@@ -203,6 +203,7 @@ type livekitData struct {
 	Agents        []livekitAgent
 	Tasks         []livekitTask
 	Vars          []livekitVar
+	Pins          map[string]string // plugin pins (C6): raise dep floors
 	Prompts       []livekitPrompt
 	PluginModules []string // merged `from livekit.plugins import ...` names
 	Deps          []string
@@ -259,6 +260,61 @@ func GenerateLiveKit(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedB
 	}, nil
 }
 
+// checkLiveKitPins validates plugin pins (C6): a pin key must be a catalogued
+// standalone package or the silero VAD plugin, its value must be a semantic
+// version at or above the catalogue floor. The pin then raises the dep floor
+// in livekitDeps. Unknown keys fail loud — a typo must not silently drop.
+func checkLiveKitPins(pins map[string]string) error {
+	floors := defaultCatalog.Packages(targetcap.LiveKit)
+	floors["livekit-plugins-silero"] = ">=1.6.1" // always emitted (session VAD)
+	names := make([]string, 0, len(pins))
+	for name := range pins {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		floor, ok := floors[name]
+		if !ok {
+			known := make([]string, 0, len(floors))
+			for k := range floors {
+				known = append(known, k)
+			}
+			sort.Strings(known)
+			return fmt.Errorf("livekit pin %q is not a pinnable package; known: %s", name, strings.Join(known, ", "))
+		}
+		pinned, ok := parseLiveKitVersion(pins[name])
+		if !ok {
+			return fmt.Errorf("livekit pin %s: %q is not a semantic version", name, pins[name])
+		}
+		min, ok := parseLiveKitVersion(strings.TrimPrefix(floor, ">="))
+		if ok && lessLiveKitVersion(pinned, min) {
+			return fmt.Errorf("livekit pin %s %q is below the catalogue floor %s", name, pins[name], floor)
+		}
+	}
+	return nil
+}
+
+func parseLiveKitVersion(v string) ([3]int, bool) {
+	match := livekitVersionPattern.FindStringSubmatch(v)
+	if match == nil {
+		return [3]int{}, false
+	}
+	var out [3]int
+	for i, part := range match[1:] {
+		out[i], _ = strconv.Atoi(part)
+	}
+	return out, true
+}
+
+func lessLiveKitVersion(a, b [3]int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
+}
+
 // checkLiveKitVersion rejects a framework version outside the templates' range.
 func checkLiveKitVersion(version string) error {
 	if version == "" {
@@ -282,6 +338,8 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		{"pyproject.toml", "pyproject.toml"},
 		{"README.md", "README.md"},
 		{"env.example", ".env.example"},
+		{"Dockerfile", "Dockerfile"},
+		{"livekit.toml", "livekit.toml"},
 	}
 	var files []File
 	for _, o := range outputs {

@@ -598,6 +598,46 @@ func TestLiveKitV1OutboundVoicemail(t *testing.T) {
 	}
 }
 
+// TestLiveKitV1PinsAndSDKLanguage covers the T7 remainders (C6/C1): plugin
+// pins raise dep floors and are range-checked; a non-python sdk_language
+// fails loud instead of emitting a silently-wrong Python project.
+func TestLiveKitV1PinsAndSDKLanguage(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.7.0"}
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatalf("generate with pin: %v", err)
+	}
+	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, `"livekit-plugins-slng>=1.7.0"`) {
+		t.Errorf("pin did not raise the plugin floor:\n%s", pyproject)
+	}
+	if !strings.Contains(artifactFile(t, artifact, "livekit.toml"), `id = "livekit-dev"`) {
+		t.Error("livekit.toml missing the agent id")
+	}
+
+	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.0.0"}
+	if _, err := Generate(agent, tgt, target.Default()); err == nil || !strings.Contains(err.Error(), "below the catalogue floor") {
+		t.Fatalf("below-floor pin must fail, got %v", err)
+	}
+	tgt.Pins = map[string]string{"left-pad": "1.0.0"}
+	if _, err := Generate(agent, tgt, target.Default()); err == nil || !strings.Contains(err.Error(), "not a pinnable package") {
+		t.Fatalf("unknown pin must fail, got %v", err)
+	}
+	tgt.Pins = nil
+	tgt.SDKLanguage = "node"
+	if _, err := Generate(agent, tgt, target.Default()); err == nil || !strings.Contains(err.Error(), "python projects only") {
+		t.Fatalf("sdk_language node must fail loud, got %v", err)
+	}
+}
+
 // TestCheckLiveKitVersion pins the template-compatible range (>=1.5, <2.0):
 // beta.workflows TaskGroup + AgentTask + inference are present from 1.5.x.
 func TestCheckLiveKitVersion(t *testing.T) {

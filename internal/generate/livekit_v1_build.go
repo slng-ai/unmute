@@ -12,10 +12,13 @@ import (
 // buildLiveKitData lowers the resolved IR + target into the template model.
 // listen/speak resolve through the provider catalogue (SLNG default, any
 // entry binds); reason lowers to LiveKit Inference (the role's wildcard row).
-// Features the driver does not emit yet fail loud here rather than emitting
-// broken code (no validate-green / generate-broken drift, compiler V19 in spirit).
 func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
-	if err := livekitGuards(agent); err != nil {
+	// The driver's templates are Python; a node project would be silently
+	// wrong, so fail loud until node templates exist (C1).
+	if tgt.SDKLanguage != "" && tgt.SDKLanguage != "python" {
+		return livekitData{}, fmt.Errorf("livekit driver emits python projects only; sdk_language %q has no templates yet", tgt.SDKLanguage)
+	}
+	if err := checkLiveKitPins(tgt.Pins); err != nil {
 		return livekitData{}, err
 	}
 	env := newEnvSet()
@@ -30,6 +33,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		AgentName:   tgt.Name,
 		EntryClass:  pyName(agent.EntryAgent),
 		TurnVersion: "v1",
+		Pins:        tgt.Pins,
 	}
 
 	entry := agent.Agents[agent.EntryAgent]
@@ -216,11 +220,6 @@ func livekitServiceNotes(data livekitData) []string {
 	return sortedKeys(set)
 }
 
-// livekitGuards fails loud on features the driver does not emit yet, so a spec
-// that validates green never silently loses behavior on LiveKit.
-func livekitGuards(agent *ir.Agent) error {
-	return nil
-}
 
 // applyLiveKitConversation lowers the conversation block (V16): interruption
 // options, the generated ignore-phrase filter, thinking audio, inactivity
@@ -416,11 +415,7 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 		built.LLM = &taskLLM
 	}
 	for _, fname := range sortedResultNames(task.Result) {
-		field := task.Result[fname]
-		if field.Schema != nil {
-			return livekitTask{}, fmt.Errorf("task %q result %q: livekit driver does not emit nested result schemas yet", name, fname)
-		}
-		built.Result = append(built.Result, livekitArg{Name: fname, PyType: resultPyType(field), Required: true})
+		built.Result = append(built.Result, livekitArg{Name: fname, PyType: resultPyType(task.Result[fname]), Required: true})
 	}
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
@@ -560,6 +555,9 @@ func humanize(name string) string {
 }
 
 func resultPyType(field ir.ResultField) string {
+	if field.Schema != nil {
+		return "dict" // nested result schema (code targets only): a JSON object arg
+	}
 	if len(field.Enum) > 0 {
 		return "str"
 	}
@@ -637,6 +635,13 @@ func livekitGreetingFor(c *ir.Conversation) *livekitGreeting {
 // onto the livekit-agents pin, standalone plugin packages keep their own
 // floors (user pins: override them per SCHEMA.md 6.1).
 func livekitDeps(data livekitData) []string {
+	// A user pin raises a plugin's floor (C6, checked by checkLiveKitPins).
+	pinned := func(pkg, constraint string) string {
+		if v := data.Pins[pkg]; v != "" {
+			return pkg + ">=" + v
+		}
+		return pkg + constraint
+	}
 	extras := map[string]bool{}
 	packages := map[string]bool{}
 	for _, svc := range livekitServices(data) {
@@ -644,7 +649,7 @@ func livekitDeps(data livekitData) []string {
 			extras[svc.Entry.Install.Extra] = true
 		}
 		if svc.Entry.Install.Package != "" {
-			packages[svc.Entry.Install.Package+svc.Entry.Install.Constraint] = true
+			packages[pinned(svc.Entry.Install.Package, svc.Entry.Install.Constraint)] = true
 		}
 	}
 	base := fmt.Sprintf("livekit-agents>=%d.%d", livekitVersionMajor, livekitVersionMinMinor)
@@ -652,7 +657,7 @@ func livekitDeps(data livekitData) []string {
 		base = fmt.Sprintf("livekit-agents[%s]>=%d.%d",
 			strings.Join(sortedKeys(extras), ","), livekitVersionMajor, livekitVersionMinMinor)
 	}
-	deps := append([]string{base, "livekit-plugins-silero>=1.6.1", "python-dotenv"}, sortedKeys(packages)...)
+	deps := append([]string{base, pinned("livekit-plugins-silero", ">=1.6.1"), "python-dotenv"}, sortedKeys(packages)...)
 	if data.NeedsHTTPX {
 		deps = append(deps, "httpx")
 	}

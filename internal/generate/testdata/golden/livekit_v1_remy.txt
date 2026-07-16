@@ -5,6 +5,19 @@ LIVEKIT_API_SECRET=
 LIVEKIT_URL=
 SEND_CONFIRMATION_URL=
 SLNG_API_KEY=
+=== Dockerfile ===
+FROM python:3.12-slim
+
+WORKDIR /app
+RUN pip install --no-cache-dir uv
+
+COPY pyproject.toml ./
+RUN uv pip install --system .
+
+COPY . .
+
+# LiveKit Cloud / the worker runner start agent.py; `python agent.py dev` for local runs.
+CMD ["python", "agent.py", "start"]
 === README.md ===
 # livekit-dev — generated LiveKit Agents project
 
@@ -389,9 +402,11 @@ if __name__ == "__main__":
   ],
   "generated_files": [
     ".env.example",
+    "Dockerfile",
     "README.md",
     "agent.py",
     "compile-report.json",
+    "livekit.toml",
     "pyproject.toml"
   ],
   "required_env": [
@@ -489,6 +504,11 @@ if __name__ == "__main__":
     "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory"
   ]
 }
+=== livekit.toml ===
+# LiveKit Cloud agent config (`lk agent create` fills project/subdomain on
+# first deploy; the id below matches the worker's agent_name).
+[agent]
+  id = "livekit-dev"
 === pyproject.toml ===
 [project]
 name = "livekit-dev"
