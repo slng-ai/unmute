@@ -22,7 +22,7 @@ matrix row (no code injection)
 === livekit listen deepgram ===
 binding:  provider=deepgram model=model-1
 class:    deepgram.STT
-args:     api_key=os.environ.get("DEEPGRAM_API_KEY"), model="model-1", sample_rate=24000
+args:     api_key=os.environ.get("DEEPGRAM_API_KEY"), model="model-1", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import deepgram
 install:  livekit-agents[deepgram]
 env:      DEEPGRAM_API_KEY
@@ -30,7 +30,7 @@ env:      DEEPGRAM_API_KEY
 === livekit listen slng ===
 binding:  provider=slng model=slng/deepgram/nova:3
 class:    slng.STT
-args:     api_key=os.environ.get("SLNG_API_KEY"), model="deepgram/nova:3", sample_rate=24000
+args:     api_key=os.environ.get("SLNG_API_KEY"), model="deepgram/nova:3", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import slng
 install:  livekit-plugins-slng>=1.6.1
 env:      SLNG_API_KEY
@@ -44,7 +44,7 @@ install:  ships with the framework
 === livekit speak cartesia ===
 binding:  provider=cartesia model=model-1 voice=voice-1
 class:    cartesia.TTS
-args:     api_key=os.environ.get("CARTESIA_API_KEY"), voice="voice-1", model="model-1", sample_rate=24000
+args:     api_key=os.environ.get("CARTESIA_API_KEY"), voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import cartesia
 install:  livekit-agents[cartesia]
 env:      CARTESIA_API_KEY
@@ -52,7 +52,7 @@ env:      CARTESIA_API_KEY
 === livekit speak elevenlabs ===
 binding:  provider=elevenlabs model=model-1 voice=voice-1
 class:    elevenlabs.TTS
-args:     api_key=os.environ.get("ELEVEN_API_KEY"), voice_id="voice-1", model="model-1", sample_rate=24000
+args:     api_key=os.environ.get("ELEVEN_API_KEY"), voice_id="voice-1", model="model-1", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import elevenlabs
 install:  livekit-agents[elevenlabs]
 env:      ELEVEN_API_KEY
@@ -60,7 +60,7 @@ env:      ELEVEN_API_KEY
 === livekit speak slng ===
 binding:  provider=slng model=slng/deepgram/aura:2-en voice=voice-1
 class:    slng.TTS
-args:     api_key=os.environ.get("SLNG_API_KEY"), voice="voice-1", model="deepgram/aura:2-en", sample_rate=24000
+args:     api_key=os.environ.get("SLNG_API_KEY"), voice="voice-1", model="deepgram/aura:2-en", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import slng
 install:  livekit-plugins-slng>=1.6.1
 env:      SLNG_API_KEY
@@ -69,7 +69,7 @@ env:      SLNG_API_KEY
 binding:  provider="*" as acme model=model-1 endpoint_env=ACME_BASE_URL
 class:    OpenAISTTService
 args:     api_key=os.environ["ACME_API_KEY"], base_url=os.environ["ACME_BASE_URL"]
-settings: model="model-1", sample_rate=24000
+settings: model="model-1", language="es-MX", sample_rate=24000
 import:   from pipecat.services.openai.stt import OpenAISTTService
 install:  pipecat-ai[openai]
 env:      ACME_API_KEY, ACME_BASE_URL
@@ -78,7 +78,7 @@ env:      ACME_API_KEY, ACME_BASE_URL
 binding:  provider=assemblyai model=model-1
 class:    AssemblyAISTTService
 args:     api_key=os.environ["ASSEMBLYAI_API_KEY"]
-settings: model="model-1", sample_rate=24000
+settings: model="model-1", language="es-MX", sample_rate=24000
 import:   from pipecat.services.assemblyai.stt import AssemblyAISTTService
 install:  pipecat-ai[assemblyai]
 env:      ASSEMBLYAI_API_KEY
@@ -87,7 +87,7 @@ env:      ASSEMBLYAI_API_KEY
 binding:  provider=deepgram model=model-1
 class:    DeepgramSTTService
 args:     api_key=os.environ["DEEPGRAM_API_KEY"]
-settings: model="model-1", sample_rate=24000
+settings: model="model-1", language="es-MX", sample_rate=24000
 import:   from pipecat.services.deepgram.stt import DeepgramSTTService
 install:  pipecat-ai[deepgram]
 env:      DEEPGRAM_API_KEY
@@ -96,7 +96,7 @@ env:      DEEPGRAM_API_KEY
 binding:  provider=openai model=model-1
 class:    OpenAISTTService
 args:     api_key=os.environ["OPENAI_API_KEY"]
-settings: model="model-1", sample_rate=24000
+settings: model="model-1", language="es-MX", sample_rate=24000
 import:   from pipecat.services.openai.stt import OpenAISTTService
 install:  pipecat-ai[openai]
 env:      OPENAI_API_KEY
@@ -104,7 +104,7 @@ env:      OPENAI_API_KEY
 === pipecat listen slng ===
 binding:  provider=slng model=slng/deepgram/nova:3
 class:    SlngSTTService
-args:     api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3", sample_rate=24000
+args:     api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3", language="es-MX", sample_rate=24000
 import:   from pipecat_slng import SlngSTTService
 install:  pipecat-slng>=0.4.0
 env:      SLNG_API_KEY
@@ -131,7 +131,7 @@ env:      OPENAI_API_KEY
 binding:  provider="*" as acme model=model-1 voice=voice-1 endpoint_env=ACME_BASE_URL
 class:    OpenAITTSService
 args:     api_key=os.environ["ACME_API_KEY"], base_url=os.environ["ACME_BASE_URL"]
-settings: voice="voice-1", model="model-1", sample_rate=24000
+settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
 import:   from pipecat.services.openai.tts import OpenAITTSService
 install:  pipecat-ai[openai]
 env:      ACME_API_KEY, ACME_BASE_URL
@@ -140,7 +140,7 @@ env:      ACME_API_KEY, ACME_BASE_URL
 binding:  provider=cartesia model=model-1 voice=voice-1
 class:    CartesiaTTSService
 args:     api_key=os.environ["CARTESIA_API_KEY"]
-settings: voice="voice-1", model="model-1", sample_rate=24000
+settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
 import:   from pipecat.services.cartesia.tts import CartesiaTTSService
 install:  pipecat-ai[cartesia]
 env:      CARTESIA_API_KEY
@@ -149,7 +149,7 @@ env:      CARTESIA_API_KEY
 binding:  provider=elevenlabs model=model-1 voice=voice-1
 class:    ElevenLabsTTSService
 args:     api_key=os.environ["ELEVENLABS_API_KEY"]
-settings: voice="voice-1", model="model-1", sample_rate=24000
+settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
 import:   from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 install:  pipecat-ai[elevenlabs]
 env:      ELEVENLABS_API_KEY
@@ -158,7 +158,7 @@ env:      ELEVENLABS_API_KEY
 binding:  provider=openai model=model-1 voice=voice-1
 class:    OpenAITTSService
 args:     api_key=os.environ["OPENAI_API_KEY"]
-settings: voice="voice-1", model="model-1", sample_rate=24000
+settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
 import:   from pipecat.services.openai.tts import OpenAITTSService
 install:  pipecat-ai[openai]
 env:      OPENAI_API_KEY
@@ -166,7 +166,7 @@ env:      OPENAI_API_KEY
 === pipecat speak slng ===
 binding:  provider=slng model=slng/deepgram/aura:2-en voice=voice-1
 class:    SlngTTSService
-args:     api_key=os.environ["SLNG_API_KEY"], voice="voice-1", model="slng/deepgram/aura:2-en", sample_rate=24000
+args:     api_key=os.environ["SLNG_API_KEY"], voice="voice-1", model="slng/deepgram/aura:2-en", language="es-MX", sample_rate=24000
 import:   from pipecat_slng import SlngTTSService
 install:  pipecat-slng>=0.4.0
 env:      SLNG_API_KEY

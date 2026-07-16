@@ -49,6 +49,9 @@ func TestCatalogInvariants(t *testing.T) {
 		if e.RequiresEndpoint && e.Call.Endpoint.Arg == "" {
 			t.Errorf("%s: RequiresEndpoint without an Endpoint slot", id)
 		}
+		if (e.Role == Listen || e.Role == Speak) && e.Call.Language.Arg == "" {
+			t.Errorf("%s: speech integration without a portable language slot", id)
+		}
 	}
 }
 

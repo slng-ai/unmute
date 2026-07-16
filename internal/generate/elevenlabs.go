@@ -191,7 +191,9 @@ func (b *elBuilder) agentBody(name string) (map[string]any, error) {
 		prompt["built_in_tools"] = builtIn
 	}
 
-	agentBlock := map[string]any{"prompt": prompt}
+	// ElevenAgents exposes one conversation language on the agent block; its
+	// integrated ASR and TTS both follow this value.
+	agentBlock := map[string]any{"prompt": prompt, "language": firstNonEmpty(b.agent.Language, "en")}
 	conv := map[string]any{"agent": agentBlock}
 	if asr := b.asr(); asr != nil {
 		conv["asr"] = asr

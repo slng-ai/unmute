@@ -33,7 +33,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 
 	entry := agent.Agents[agent.EntryAgent]
-	stt, err := livekitSTTService(tgt.Models.Listen, env)
+	stt, err := livekitSTTService(tgt.Models.Listen, agent.Language, env)
 	if err != nil {
 		return livekitData{}, err
 	}
@@ -42,7 +42,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	if err != nil {
 		return livekitData{}, fmt.Errorf("entry agent %q: %w", agent.EntryAgent, err)
 	}
-	data.SessionTTS, err = livekitTTSService(tgt.Models.Speak[entry.Voice], env)
+	data.SessionTTS, err = livekitTTSService(tgt.Models.Speak[entry.Voice], agent.Language, env)
 	if err != nil {
 		return livekitData{}, fmt.Errorf("entry agent %q: %w", agent.EntryAgent, err)
 	}
@@ -187,7 +187,7 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 		built.LLM = &llm
 	}
 	if def.Voice != entry.Voice {
-		tts, err := livekitTTSService(tgt.Models.Speak[def.Voice], env)
+		tts, err := livekitTTSService(tgt.Models.Speak[def.Voice], agent.Language, env)
 		if err != nil {
 			return livekitAgent{}, fmt.Errorf("agent %q: %w", name, err)
 		}
@@ -298,27 +298,27 @@ func buildLiveKitTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (
 // livekitEnvRef renders the driver's environment-lookup idiom.
 func livekitEnvRef(name string) string { return "os.environ.get(" + pyQuote(name) + ")" }
 
-func resolveLiveKitService(role targetcap.Role, binding ir.Binding, env *envSet) (livekitService, error) {
-	call, entry, err := resolveService(defaultCatalog, targetcap.LiveKit, role, binding, livekitEnvRef, env)
+func resolveLiveKitService(role targetcap.Role, binding ir.Binding, language string, env *envSet) (livekitService, error) {
+	call, entry, err := resolveService(defaultCatalog, targetcap.LiveKit, role, binding, language, livekitEnvRef, env)
 	if err != nil {
 		return livekitService{}, err
 	}
 	return livekitService{Call: call, Entry: entry, Vendor: firstNonEmpty(binding.Provider, "openai")}, nil
 }
 
-func livekitSTTService(binding *ir.Binding, env *envSet) (livekitService, error) {
+func livekitSTTService(binding *ir.Binding, language string, env *envSet) (livekitService, error) {
 	if binding == nil {
 		return livekitService{}, fmt.Errorf("livekit listen binding is missing a model")
 	}
-	return resolveLiveKitService(targetcap.Listen, *binding, env)
+	return resolveLiveKitService(targetcap.Listen, *binding, language, env)
 }
 
-func livekitTTSService(binding ir.Binding, env *envSet) (livekitService, error) {
-	return resolveLiveKitService(targetcap.Speak, binding, env)
+func livekitTTSService(binding ir.Binding, language string, env *envSet) (livekitService, error) {
+	return resolveLiveKitService(targetcap.Speak, binding, language, env)
 }
 
 func livekitLLMService(binding ir.Binding, env *envSet) (livekitService, error) {
-	return resolveLiveKitService(targetcap.Reason, binding, env)
+	return resolveLiveKitService(targetcap.Reason, binding, "", env)
 }
 
 // --- small helpers ---------------------------------------------------------

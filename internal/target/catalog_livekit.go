@@ -19,8 +19,9 @@ var livekitCatalog = []Entry{
 		Import:  "from livekit.plugins import slng",
 		Call: &CallSpec{
 			Class: "slng.STT", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
-			Model:  FieldSpec{Arg: "model", Required: true, Form: FormSlngRoute},
-			Params: ParamsKwargs,
+			Model:    FieldSpec{Arg: "model", Required: true, Form: FormSlngRoute},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsKwargs,
 		},
 		Notes: []string{"the plugin takes the bare vendor/model route; the slng/ prefix is stripped (driver-livekit C8)"},
 	},
@@ -31,8 +32,9 @@ var livekitCatalog = []Entry{
 		Import:  "from livekit.plugins import deepgram",
 		Call: &CallSpec{
 			Class: "deepgram.STT", APIKeyArg: "api_key", APIKeyEnv: "DEEPGRAM_API_KEY",
-			Model:  FieldSpec{Arg: "model", Required: true},
-			Params: ParamsKwargs,
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsKwargs,
 		},
 		Notes: []string{"flux models use deepgram.STTv2; add a separate entry when a spec needs one"},
 	},
@@ -45,9 +47,10 @@ var livekitCatalog = []Entry{
 		Import:  "from livekit.plugins import slng",
 		Call: &CallSpec{
 			Class: "slng.TTS", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
-			Model:  FieldSpec{Arg: "model", Required: true, Form: FormSlngRoute},
-			Voice:  FieldSpec{Arg: "voice"},
-			Params: ParamsKwargs,
+			Model:    FieldSpec{Arg: "model", Required: true, Form: FormSlngRoute},
+			Voice:    FieldSpec{Arg: "voice"},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsKwargs,
 		},
 		Notes: []string{"the plugin takes the bare vendor/model route; the slng/ prefix is stripped (driver-livekit C8)"},
 	},
@@ -61,9 +64,10 @@ var livekitCatalog = []Entry{
 			// ELEVEN_API_KEY (not ELEVENLABS_API_KEY, which the managed
 			// elevenlabs driver uses) — per-entry facts, not conventions.
 			Class: "elevenlabs.TTS", APIKeyArg: "api_key", APIKeyEnv: "ELEVEN_API_KEY",
-			Model:  FieldSpec{Arg: "model"},
-			Voice:  FieldSpec{Arg: "voice_id", Required: true},
-			Params: ParamsKwargs,
+			Model:    FieldSpec{Arg: "model"},
+			Voice:    FieldSpec{Arg: "voice_id", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsKwargs,
 		},
 	},
 	{
@@ -73,9 +77,10 @@ var livekitCatalog = []Entry{
 		Import:  "from livekit.plugins import cartesia",
 		Call: &CallSpec{
 			Class: "cartesia.TTS", APIKeyArg: "api_key", APIKeyEnv: "CARTESIA_API_KEY",
-			Model:  FieldSpec{Arg: "model"},
-			Voice:  FieldSpec{Arg: "voice", Required: true},
-			Params: ParamsKwargs,
+			Model:    FieldSpec{Arg: "model"},
+			Voice:    FieldSpec{Arg: "voice", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsKwargs,
 		},
 	},
 
@@ -86,8 +91,8 @@ var livekitCatalog = []Entry{
 		Install: InstallSpec{}, // LiveKit Inference ships with livekit-agents
 		Import:  "",            // inference is in the driver's core import block
 		Call: &CallSpec{
-			Class: "inference.LLM",
-			Model: FieldSpec{Arg: "model", Required: true, Form: FormProviderSlashModel},
+			Class:  "inference.LLM",
+			Model:  FieldSpec{Arg: "model", Required: true, Form: FormProviderSlashModel},
 			Params: ParamsExtraKwargs,
 		},
 		Notes: []string{"LiveKit Inference: managed models, billed through LiveKit Cloud, no provider key"},

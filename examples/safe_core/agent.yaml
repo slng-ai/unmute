@@ -10,6 +10,7 @@
 #   - outbound calls: omitted; Deepgram's carrier-conditional lowering warns
 
 version: 1
+language: en
 entry_agent: intake
 
 pipeline:

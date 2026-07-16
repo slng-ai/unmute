@@ -123,9 +123,9 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		"from livekit.plugins import cartesia, deepgram, elevenlabs, silero",
-		`stt=deepgram.STT(api_key=os.environ.get("DEEPGRAM_API_KEY"), model="nova-3")`,
-		`tts=elevenlabs.TTS(api_key=os.environ.get("ELEVEN_API_KEY"), voice_id="cgSgspJ2msm6clMCkdW9")`,
-		`tts=cartesia.TTS(api_key=os.environ.get("CARTESIA_API_KEY"), voice="f786b574-daa5-4673-aa0c-cbe3e8534c02", model="sonic-3")`,
+		`stt=deepgram.STT(api_key=os.environ.get("DEEPGRAM_API_KEY"), model="nova-3", language="en")`,
+		`tts=elevenlabs.TTS(api_key=os.environ.get("ELEVEN_API_KEY"), voice_id="cgSgspJ2msm6clMCkdW9", language="en")`,
+		`tts=cartesia.TTS(api_key=os.environ.get("CARTESIA_API_KEY"), voice="f786b574-daa5-4673-aa0c-cbe3e8534c02", model="sonic-3", language="en")`,
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -144,7 +144,7 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 // quotes the support matrix instead of guessing a substitute service.
 func TestLiveKitV1UnknownVendorFailsWithMatrix(t *testing.T) {
 	env := newEnvSet()
-	_, err := livekitSTTService(&ir.Binding{Provider: "acme", Model: "m"}, env)
+	_, err := livekitSTTService(&ir.Binding{Provider: "acme", Model: "m"}, "en", env)
 	if err == nil || !strings.Contains(err.Error(), "listen providers on livekit: deepgram, slng") {
 		t.Fatalf("want a matrix-quoting error, got %v", err)
 	}

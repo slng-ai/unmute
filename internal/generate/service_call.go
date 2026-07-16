@@ -26,7 +26,7 @@ type ServiceCall struct {
 // are driver-supplied nested args (the workers-model system_instruction),
 // inserted after model/voice. Every env var the call reads registers on env.
 func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap.Role,
-	binding ir.Binding, envRef func(string) string, env *envSet, extraSettings ...pyKV) (ServiceCall, targetcap.Entry, error) {
+	binding ir.Binding, language string, envRef func(string) string, env *envSet, extraSettings ...pyKV) (ServiceCall, targetcap.Entry, error) {
 
 	vendor := binding.Provider
 	if vendor == "" {
@@ -76,6 +76,19 @@ func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap
 	} else if spec.Model.Required {
 		return ServiceCall{}, entry, fmt.Errorf("%s %s binding is missing a model", fw, role)
 	}
+	if role == targetcap.Listen || role == targetcap.Speak {
+		if language == "" {
+			language = "en"
+		}
+		if spec.Language.Arg == "" {
+			return ServiceCall{}, entry, fmt.Errorf("%s %s binding provider %q has no language slot", fw, role, vendor)
+		}
+		// A target-specific param is an explicit integration override. Avoid
+		// emitting the same Python kwarg twice while keeping old packages valid.
+		if _, overridden := binding.Params[spec.Language.Arg]; !overridden {
+			nested(pyKV{Key: spec.Language.Arg, Value: pyQuote(language)})
+		}
+	}
 	for _, kv := range extraSettings {
 		nested(kv)
 	}
@@ -106,4 +119,3 @@ func formModel(form targetcap.ModelForm, binding ir.Binding) string {
 		return binding.Model
 	}
 }
-

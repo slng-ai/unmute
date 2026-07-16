@@ -47,7 +47,11 @@ func TestCatalogResolutionGolden(t *testing.T) {
 			envRef = livekitEnvRef
 		}
 		env := newEnvSet()
-		call, resolved, err := resolveService(defaultCatalog, entry.Framework, entry.Role, binding, envRef, env)
+		language := ""
+		if entry.Role == targetcap.Listen || entry.Role == targetcap.Speak {
+			language = "es-MX"
+		}
+		call, resolved, err := resolveService(defaultCatalog, entry.Framework, entry.Role, binding, language, envRef, env)
 		if err != nil {
 			t.Errorf("%s %s %s: resolve: %v", entry.Framework, entry.Role, entry.Vendor, err)
 			continue
@@ -83,6 +87,44 @@ func TestCatalogResolutionGolden(t *testing.T) {
 	}
 	if out.String() != string(want) {
 		t.Fatalf("catalogue resolution golden differs; run: go test ./internal/generate -run TestCatalogResolutionGolden -update-catalog")
+	}
+}
+
+func TestLanguageLoweringUsesCataloguedSlot(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		framework targetcap.Provider
+		role      targetcap.Role
+		binding   ir.Binding
+		agentLang string
+		want      string
+	}{
+		{"pipecat settings", targetcap.Pipecat, targetcap.Listen, ir.Binding{Provider: "deepgram", Model: "nova-3"}, "es-MX", `"es-MX"`},
+		{"livekit kwargs", targetcap.LiveKit, targetcap.Speak, ir.Binding{Provider: "slng", Model: "slng/deepgram/aura:2-en"}, "es-MX", `"es-MX"`},
+		{"target override", targetcap.Pipecat, targetcap.Listen, ir.Binding{Provider: "deepgram", Model: "nova-3", Params: map[string]any{"language": "multi"}}, "es-MX", `"multi"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			envRef := pipecatEnvRef
+			if tc.framework == targetcap.LiveKit {
+				envRef = livekitEnvRef
+			}
+			call, _, err := resolveService(defaultCatalog, tc.framework, tc.role, tc.binding, tc.agentLang, envRef, newEnvSet())
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := 0
+			for _, kv := range append(call.Args, call.SettingsArgs...) {
+				if kv.Key == "language" {
+					count++
+					if kv.Value != tc.want {
+						t.Errorf("language = %s, want %s", kv.Value, tc.want)
+					}
+				}
+			}
+			if count != 1 {
+				t.Fatalf("language kwargs = %d", count)
+			}
+		})
 	}
 }
 

@@ -138,11 +138,11 @@ func TestPipecatEmitterMatchesCapabilityTable(t *testing.T) {
 // mode (a silent OpenAI-compatible substitution) explicitly covered.
 func TestPipecatUnknownProviderFailsClosed(t *testing.T) {
 	env := newEnvSet()
-	_, err := ttsService(ir.Binding{Provider: "acme", Model: "m", Voice: "v"}, env)
+	_, err := ttsService(ir.Binding{Provider: "acme", Model: "m", Voice: "v"}, "en", env)
 	if err == nil || !strings.Contains(err.Error(), "endpoint_env") {
 		t.Fatalf("unknown provider without endpoint_env must fail closed, got %v", err)
 	}
-	svc, err := ttsService(ir.Binding{Provider: "acme", Model: "m", Voice: "v", EndpointEnv: "ACME_URL"}, env)
+	svc, err := ttsService(ir.Binding{Provider: "acme", Model: "m", Voice: "v", EndpointEnv: "ACME_URL"}, "en", env)
 	if err != nil {
 		t.Fatalf("OpenAI-compatible endpoint path: %v", err)
 	}

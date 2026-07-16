@@ -18,8 +18,9 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.deepgram.stt import DeepgramSTTService",
 		Call: &CallSpec{
 			Class: "DeepgramSTTService", APIKeyArg: "api_key", APIKeyEnv: "DEEPGRAM_API_KEY",
-			Model:  FieldSpec{Arg: "model", Required: true},
-			Params: ParamsSettings,
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
 		},
 	},
 	{
@@ -29,8 +30,9 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.assemblyai.stt import AssemblyAISTTService",
 		Call: &CallSpec{
 			Class: "AssemblyAISTTService", APIKeyArg: "api_key", APIKeyEnv: "ASSEMBLYAI_API_KEY",
-			Model:  FieldSpec{Arg: "model", Required: true},
-			Params: ParamsSettings,
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
 		},
 	},
 	{
@@ -41,6 +43,7 @@ var pipecatCatalog = []Entry{
 		Call: &CallSpec{
 			Class: "OpenAISTTService", APIKeyArg: "api_key", APIKeyEnv: "OPENAI_API_KEY",
 			Model:    FieldSpec{Arg: "model", Required: true},
+			Language: FieldSpec{Arg: "language"},
 			Endpoint: FieldSpec{Arg: "base_url"},
 			Params:   ParamsSettings,
 		},
@@ -52,8 +55,9 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat_slng import SlngSTTService",
 		Call: &CallSpec{
 			Class: "SlngSTTService", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
-			Model:  FieldSpec{Arg: "model", Required: true}, // keeps the slng/<vendor>/<model> route form
-			Params: ParamsKwargs,
+			Model:    FieldSpec{Arg: "model", Required: true}, // keeps the slng/<vendor>/<model> route form
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsKwargs,
 		},
 		Notes: []string{"routes by api_key + region params; endpoint_env has no slot (driver-pipecat B1/C10)"},
 	},
@@ -65,6 +69,7 @@ var pipecatCatalog = []Entry{
 		Call: &CallSpec{
 			Class: "OpenAISTTService", APIKeyArg: "api_key",
 			Model:    FieldSpec{Arg: "model", Required: true},
+			Language: FieldSpec{Arg: "language"},
 			Endpoint: FieldSpec{Arg: "base_url"},
 			Params:   ParamsSettings,
 		},
@@ -80,9 +85,10 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.elevenlabs.tts import ElevenLabsTTSService",
 		Call: &CallSpec{
 			Class: "ElevenLabsTTSService", APIKeyArg: "api_key", APIKeyEnv: "ELEVENLABS_API_KEY",
-			Model:  FieldSpec{Arg: "model"},
-			Voice:  FieldSpec{Arg: "voice", Required: true}, // Settings(voice=...); the flat voice_id kwarg is the deprecated pre-0.0.105 form
-			Params: ParamsSettings,
+			Model:    FieldSpec{Arg: "model"},
+			Voice:    FieldSpec{Arg: "voice", Required: true}, // Settings(voice=...); the flat voice_id kwarg is the deprecated pre-0.0.105 form
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
 		},
 	},
 	{
@@ -92,9 +98,10 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.cartesia.tts import CartesiaTTSService",
 		Call: &CallSpec{
 			Class: "CartesiaTTSService", APIKeyArg: "api_key", APIKeyEnv: "CARTESIA_API_KEY",
-			Model:  FieldSpec{Arg: "model"},
-			Voice:  FieldSpec{Arg: "voice", Required: true},
-			Params: ParamsSettings,
+			Model:    FieldSpec{Arg: "model"},
+			Voice:    FieldSpec{Arg: "voice", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
 		},
 	},
 	{
@@ -106,6 +113,7 @@ var pipecatCatalog = []Entry{
 			Class: "OpenAITTSService", APIKeyArg: "api_key", APIKeyEnv: "OPENAI_API_KEY",
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice"},
+			Language: FieldSpec{Arg: "language"},
 			Endpoint: FieldSpec{Arg: "base_url"},
 			Params:   ParamsSettings,
 		},
@@ -117,9 +125,10 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat_slng import SlngTTSService",
 		Call: &CallSpec{
 			Class: "SlngTTSService", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
-			Model:  FieldSpec{Arg: "model", Required: true},
-			Voice:  FieldSpec{Arg: "voice"},
-			Params: ParamsKwargs,
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Voice:    FieldSpec{Arg: "voice"},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsKwargs,
 		},
 		Notes: []string{"routes by api_key + region params; endpoint_env has no slot (driver-pipecat B1/C10)"},
 	},
@@ -132,6 +141,7 @@ var pipecatCatalog = []Entry{
 			Class: "OpenAITTSService", APIKeyArg: "api_key",
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice"},
+			Language: FieldSpec{Arg: "language"},
 			Endpoint: FieldSpec{Arg: "base_url"},
 			Params:   ParamsSettings,
 		},

@@ -26,7 +26,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	}
 	env := newEnvSet()
 
-	stt, err := sttService(target.Models.Listen, env)
+	stt, err := sttService(target.Models.Listen, agent.Language, env)
 	if err != nil {
 		return pipecatData{}, err
 	}
@@ -200,7 +200,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
-	tts, err := ttsService(target.Models.Speak[def.Voice], env)
+	tts, err := ttsService(target.Models.Speak[def.Voice], agent.Language, env)
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
@@ -463,8 +463,8 @@ func pipecatEnvRef(name string) string { return "os.environ[" + pyQuote(name) + 
 // resolvePipecatService resolves one binding through the catalogue.
 // extraSettings are nested Settings args the driver injects (the agents'
 // system_instruction); the task job-workers use the raw identity fields.
-func resolvePipecatService(role targetcap.Role, binding ir.Binding, env *envSet, extraSettings ...pyKV) (pipecatService, error) {
-	call, entry, err := resolveService(defaultCatalog, targetcap.Pipecat, role, binding, pipecatEnvRef, env, extraSettings...)
+func resolvePipecatService(role targetcap.Role, binding ir.Binding, language string, env *envSet, extraSettings ...pyKV) (pipecatService, error) {
+	call, entry, err := resolveService(defaultCatalog, targetcap.Pipecat, role, binding, language, pipecatEnvRef, env, extraSettings...)
 	if err != nil {
 		return pipecatService{}, err
 	}
@@ -479,28 +479,28 @@ func resolvePipecatService(role targetcap.Role, binding ir.Binding, env *envSet,
 	return svc, nil
 }
 
-func sttService(binding *ir.Binding, env *envSet) (pipecatService, error) {
+func sttService(binding *ir.Binding, language string, env *envSet) (pipecatService, error) {
 	if binding == nil {
 		return pipecatService{}, fmt.Errorf("pipecat listen binding is missing a model")
 	}
-	return resolvePipecatService(targetcap.Listen, *binding, env)
+	return resolvePipecatService(targetcap.Listen, *binding, language, env)
 }
 
 // agentLLMService builds an agent's LLM; the prompt nests into Settings as
 // system_instruction (the workers-model shape, driver-pipecat C2).
 func agentLLMService(binding ir.Binding, prompt string, env *envSet) (pipecatService, error) {
-	return resolvePipecatService(targetcap.Reason, binding, env,
+	return resolvePipecatService(targetcap.Reason, binding, "", env,
 		pyKV{Key: "system_instruction", Value: pyQuote(prompt)})
 }
 
 // taskLLMService builds a task job-worker's LLM identity: the worker drives
 // the OpenAI SDK directly, so only APIKeyEnv/BaseURL/Model are consumed.
 func taskLLMService(binding ir.Binding, env *envSet) (pipecatService, error) {
-	return resolvePipecatService(targetcap.Reason, binding, env)
+	return resolvePipecatService(targetcap.Reason, binding, "", env)
 }
 
-func ttsService(binding ir.Binding, env *envSet) (pipecatService, error) {
-	return resolvePipecatService(targetcap.Speak, binding, env)
+func ttsService(binding ir.Binding, language string, env *envSet) (pipecatService, error) {
+	return resolvePipecatService(targetcap.Speak, binding, language, env)
 }
 
 func forwardParams(params map[string]any) []pyKV {

@@ -70,6 +70,7 @@ type CallSpec struct {
 	APIKeyEnv string // "" = the <VENDOR>_API_KEY convention (wildcard rows)
 	Model     FieldSpec
 	Voice     FieldSpec
+	Language  FieldSpec // portable agent language; explicit per integration
 	Endpoint  FieldSpec // zero = endpoint_env is rejected for this entry
 	Params    ParamsStyle
 }

@@ -12,6 +12,7 @@ import (
 )
 
 var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var languagePattern = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`)
 
 type ValidateReport struct {
 	PerTarget         []TargetValidation
@@ -174,6 +175,9 @@ func validateStructure(agent *Agent) []string {
 	var errors []string
 	if agent.Version != 1 {
 		errors = add(errors, "version must be 1")
+	}
+	if agent.Language != "" && !languagePattern.MatchString(agent.Language) {
+		errors = add(errors, "language must be a BCP-47 language tag such as en or en-US")
 	}
 	if len(agent.Models) == 0 {
 		errors = add(errors, "models must contain at least one profile")

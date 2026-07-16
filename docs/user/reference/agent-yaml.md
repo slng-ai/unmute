@@ -34,6 +34,7 @@ Rules that hold across the whole package:
 | Field | Required | Type | Tag |
 |---|---|---|---|
 | `version` | yes | int, must be `1` | core |
+| `language` | no, defaults to `en` | BCP-47 tag such as `en` or `es-MX` | gated |
 | `entry_agent` | yes | name of an agent | core |
 | `pipeline` | yes | block | core |
 | `models` | yes, at least one | map of profiles | core |
@@ -53,6 +54,12 @@ Rules that hold across the whole package:
 The spec format version. Always `1`.
 
 Required: yes. Values: the integer `1`. Default: none. Targets: all five, core.
+
+### language
+
+The primary spoken language for STT and TTS. Pipecat and LiveKit lower it through the selected catalogue integrations; ElevenLabs uses its unified agent language. A target-specific `params.language` overrides it for that one binding.
+
+Required: no. Values: a BCP-47 tag. Default: `en`. Targets: shipped generators; Vapi and Deepgram stay unavailable until their generators ship.
 
 ### entry_agent
 

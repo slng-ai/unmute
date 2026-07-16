@@ -10,6 +10,7 @@ OPENAI_API_KEY=
 # and `unmute compile .`. Nothing here is provider-specific — that lives in
 # targets.yaml.
 version: 1
+language: en
 entry_agent: assistant
 
 pipeline:

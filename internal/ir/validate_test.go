@@ -22,6 +22,15 @@ func TestValidateSafeCorePerTarget(t *testing.T) { // V5, V18
 	}
 }
 
+func TestValidateLanguage(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Language = "not_a_language"
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "BCP-47") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
 func TestValidateUsesProviderVocabularyForGates(t *testing.T) { // V4, V11
 	agent := safeAgent(t)
 	agent.Conversation.ThinkingAudio = ThinkingSubtle
