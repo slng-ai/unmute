@@ -78,11 +78,11 @@ class {{.Class}}(Agent):
 {{end}}
 {{- range .Delegates}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext) -> str:
+    async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{end}}:
         {{triple .When}}
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True),
-            summarize_chat_ctx={{if .SummarizeChatCtx}}True{{else}}False{{end}},
+            summarize_chat_ctx=False,
         )
 {{- range .Steps}}
         group.add(
@@ -91,8 +91,25 @@ class {{.Class}}(Agent):
             description={{pyq .Desc}},
         )
 {{- end}}
+{{- if eq .Then "return"}}
+        owner_ctx = self.chat_ctx.copy()
+        result = await group
+        # N13: the flow's own turns must not land in the owner's context. The
+        # TaskGroup merges them back on completion, so restore the pre-flow
+        # context and hand the owner only the typed results (merge: results).
+        await self.update_chat_ctx(owner_ctx)
+        return result.task_results
+{{- else if eq .Then "transfer"}}
+        owner_ctx = self.chat_ctx.copy(exclude_instructions=True)
         await group
-        return {{pyq .Cue}}
+        # then: transfer — control moves on and does not return here. N13: drop
+        # the flow's turns by handing the target the pre-flow context.
+        return {{.ThenClass}}(chat_ctx=owner_ctx)
+{{- else}}
+        await group
+        # then: end — the flow is the last thing on the call; this does not return.
+        self.session.shutdown()
+{{- end}}
 {{end}}
 {{end}}
 {{- if .NeedsTasks}}

@@ -161,6 +161,196 @@ func artifactFile(t *testing.T, artifact Artifact, path string) string {
 	return ""
 }
 
+// TestLiveKitV1DelegateThenTransferAndEnd covers the two non-return `then`
+// lowerings (SCHEMA §4.7, N13): the delegate must not return to the owner, so it
+// emits a handoff (transfer) or session shutdown (end) instead of the typed
+// results, and its tool description must say control does not come back. Reuses
+// the Remy package and rewrites its two groups' `then` in-memory.
+func TestLiveKitV1DelegateThenTransferAndEnd(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// do_reserve -> reserve_group (transfer to the greeter); do_event -> events_group (end).
+	reserve := agent.TaskGroups["reserve_group"]
+	reserve.Then, reserve.ThenTarget = ir.GroupTransfer, "greeter"
+	agent.TaskGroups["reserve_group"] = reserve
+	events := agent.TaskGroups["events_group"]
+	events.Then, events.ThenTarget = ir.GroupEnd, ""
+	agent.TaskGroups["events_group"] = events
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	var botpy string
+	for _, file := range artifact.Files {
+		if file.Path == "agent.py" {
+			botpy = string(file.Content)
+		}
+	}
+	if botpy == "" {
+		t.Fatal("agent.py not emitted")
+	}
+
+	for _, want := range []string{
+		// transfer: hands off to the target, does not return; no typed-result return.
+		"async def do_reserve(self, ctx: RunContext):",
+		"return Greeter(chat_ctx=owner_ctx)",
+		"when it finishes the caller is handed to the greeter.",
+		// end: shuts the session down, does not return.
+		"self.session.shutdown()",
+		"when it finishes the call ends.",
+		"does not return to you",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	// Neither non-return path may hand back the typed results (N13/§4.7), and a
+	// transfer/end delegate is not typed `-> dict`.
+	for _, forbidden := range []string{"return result.task_results", "async def do_reserve(self, ctx: RunContext) -> dict:"} {
+		if strings.Contains(botpy, forbidden) {
+			t.Errorf("agent.py must not contain %q for a non-return delegate", forbidden)
+		}
+	}
+}
+
+// TestLiveKitPluginCatalogCoverage guards the native provider catalogues (V13):
+// every provider the driver advertises must have a well-formed entry (module,
+// callable, api-key env, package) after normalisation, or generate emits a
+// broken agent.py. Mirrors pipecat's TestServiceInfoCoversEveryMappedClass.
+func TestLiveKitPluginCatalogCoverage(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		table map[string]lkPlugin
+		class string
+		want  []string
+	}{
+		{"stt", livekitSTTPlugins, "STT", []string{"assemblyai", "cartesia", "deepgram", "elevenlabs", "gradium", "sarvam", "soniox", "speechmatics"}},
+		{"tts", livekitTTSPlugins, "TTS", []string{"cartesia", "deepgram", "elevenlabs", "gemini", "google", "gradium", "inworld", "rime", "sarvam", "soniox", "speechmatics"}},
+		{"llm", livekitLLMPlugins, "LLM", []string{"anthropic", "aws", "azure", "groq", "mistralai", "openai-compatible", "openrouter", "sarvam"}},
+	} {
+		for _, key := range tc.want {
+			p, ok := tc.table[key]
+			if !ok {
+				t.Errorf("%s catalogue missing provider %q", tc.name, key)
+				continue
+			}
+			n := p.norm(tc.class)
+			if n.Module == "" {
+				t.Errorf("%s[%q]: empty module", tc.name, key)
+			}
+			if n.Callable == "" {
+				t.Errorf("%s[%q]: empty callable", tc.name, key)
+			}
+			if len(n.Env) == 0 {
+				t.Errorf("%s[%q]: no api-key env", tc.name, key)
+			}
+			for _, ev := range n.Env {
+				if ev == "" {
+					t.Errorf("%s[%q]: empty env var", tc.name, key)
+				}
+			}
+		}
+	}
+}
+
+// TestLiveKitPluginCtorShapes pins the non-obvious constructor branches: soniox
+// nests model in STTOptions, speechmatics takes no model, elevenlabs/gradium use
+// model_id/model_name, gemini is google.beta.GeminiTTS, openai-compatible adds
+// base_url, and the OpenAI-hub vendors use with_<vendor>. Facts per the live
+// docs (2026-07-16); a drift here emits wrong Python that only L4 smoke catches.
+func TestLiveKitPluginCtorShapes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"soniox-stt-nested", livekitSTTPlugins["soniox"].norm("STT").call("stt-rt-v4", "", nil, ""), `soniox.STT(params=soniox.STTOptions(model="stt-rt-v4"))`},
+		{"speechmatics-stt-nomodel", livekitSTTPlugins["speechmatics"].norm("STT").call("ignored", "", nil, ""), `speechmatics.STT()`},
+		{"elevenlabs-stt-modelid", livekitSTTPlugins["elevenlabs"].norm("STT").call("scribe_v2_realtime", "", nil, ""), `elevenlabs.STT(model_id="scribe_v2_realtime")`},
+		{"speechmatics-tts-voice", livekitTTSPlugins["speechmatics"].norm("TTS").call("ignored", "sarah", nil, ""), `speechmatics.TTS(voice="sarah")`},
+		{"deepgram-tts-novoice", livekitTTSPlugins["deepgram"].norm("TTS").call("aura-2-asteria-en", "dropped", nil, ""), `deepgram.TTS(model="aura-2-asteria-en")`},
+		{"gemini-tts-class", livekitTTSPlugins["gemini"].norm("TTS").call("gemini-3-flash-tts", "Zephyr", nil, ""), `google.beta.GeminiTTS(model="gemini-3-flash-tts", voice_name="Zephyr")`},
+		{"gradium-tts-kwargs", livekitTTSPlugins["gradium"].norm("TTS").call("default", "YTpq7expH9539ERJ", nil, ""), `gradium.TTS(model_name="default", voice_id="YTpq7expH9539ERJ")`},
+		{"openai-compatible-baseurl", livekitLLMPlugins["openai-compatible"].norm("LLM").call("my-model", "", nil, "LLM_BASE_URL"), `openai.LLM(model="my-model", base_url=os.environ.get("LLM_BASE_URL"))`},
+		{"openrouter-with", livekitLLMPlugins["openrouter"].norm("LLM").call("anthropic/claude-sonnet-4.5", "", nil, ""), `openai.LLM.with_openrouter(model="anthropic/claude-sonnet-4.5")`},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+// TestLiveKitV1NativePlugins proves the native per-vendor path (C8/V11 amended
+// 2026-07-16): rebinding Remy's roles to deepgram/cartesia/anthropic emits their
+// livekit.plugins imports, constructors, pinned deps, and api-key env — and drops
+// the slng plugin when no slng binding remains.
+func TestLiveKitV1NativePlugins(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+	tgt.Models.Listen = &ir.Binding{Provider: "deepgram", Model: "nova-3", Params: map[string]any{"language": "en"}}
+	for name, b := range tgt.Models.Speak {
+		b.Provider, b.Model, b.Voice, b.VoiceID = "cartesia", "sonic-3", "f786b574-daa5-4673-aa0c-cbe3e8534c02", ""
+		tgt.Models.Speak[name] = b
+	}
+	for name, b := range tgt.Models.Reason {
+		b.Provider, b.Model, b.Params = "anthropic", "claude-sonnet-4-6", nil
+		tgt.Models.Reason[name] = b
+	}
+
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	files := map[string]string{}
+	for _, f := range artifact.Files {
+		files[f.Path] = string(f.Content)
+	}
+
+	agentpy := files["agent.py"]
+	for _, want := range []string{
+		"from livekit.plugins import anthropic, cartesia, deepgram, silero",
+		`stt=deepgram.STT(model="nova-3", language="en")`,
+		`cartesia.TTS(model="sonic-3", voice="f786b574-daa5-4673-aa0c-cbe3e8534c02")`,
+		`llm=anthropic.LLM(model="claude-sonnet-4-6")`,
+	} {
+		if !strings.Contains(agentpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"slng.STT(", "slng.TTS(", "inference.LLM("} {
+		if strings.Contains(agentpy, forbidden) {
+			t.Errorf("agent.py still routes through %q after native rebind", forbidden)
+		}
+	}
+	for _, want := range []string{"livekit-plugins-deepgram>=1.5", "livekit-plugins-cartesia>=1.5", "livekit-plugins-anthropic>=1.5"} {
+		if !strings.Contains(files["pyproject.toml"], want) {
+			t.Errorf("pyproject.toml missing %q", want)
+		}
+	}
+	if strings.Contains(files["pyproject.toml"], "livekit-plugins-slng") {
+		t.Errorf("pyproject.toml should not pin slng after native rebind")
+	}
+	for _, want := range []string{"DEEPGRAM_API_KEY=", "CARTESIA_API_KEY=", "ANTHROPIC_API_KEY="} {
+		if !strings.Contains(files[".env.example"], want) {
+			t.Errorf(".env.example missing %q", want)
+		}
+	}
+}
+
 // TestCheckLiveKitVersion pins the template-compatible range (>=1.5, <2.0):
 // beta.workflows TaskGroup + AgentTask + inference are present from 1.5.x.
 func TestCheckLiveKitVersion(t *testing.T) {

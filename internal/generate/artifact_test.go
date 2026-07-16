@@ -62,12 +62,12 @@ func TestGeneratePipecatEmitsProject(t *testing.T) { // driver-pipecat T2, V17
 	}
 }
 
-func TestApplyPlanIsOrderedAndBranchAware(t *testing.T) {
+func TestApplyPlanIsOrdered(t *testing.T) {
 	plan := ApplyPlan{Steps: []ApplyStep{
 		{Method: "POST", Endpoint: "/assistants", CaptureID: "assistant"},
-		{Method: "POST", Endpoint: "/squads", Branch: "preview"},
+		{Method: "POST", Endpoint: "/squads"},
 	}}
-	if plan.Steps[0].CaptureID != "assistant" || plan.Steps[1].Branch != "preview" {
+	if plan.Steps[0].CaptureID != "assistant" || plan.Steps[1].Endpoint != "/squads" {
 		t.Fatalf("plan = %#v", plan)
 	}
 }

@@ -3,6 +3,7 @@ package generate
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -10,20 +11,27 @@ import (
 )
 
 // The ElevenLabs driver lowers a validated agent + elevenlabs target into a
-// managed artifact: one Conversational-AI Agent resource per Unmute agent
-// (conversation_config), wired by the transfer_to_agent / transfer_to_number
-// system tools, plus a branch-aware ApplyPlan. Tasks, task groups, and a
-// model-written opening lower to a linear Workflow graph on the entry agent.
-// No code is generated (C1); only the provider API surface is used (D4).
+// managed artifact: standalone workspace tool resources plus one
+// Conversational-AI Agent resource per Unmute agent (conversation_config),
+// wired by the transfer_to_agent / transfer_to_number built-in tools. Tasks,
+// task groups, and a model-written opening lower to a linear Workflow graph on
+// the entry agent. No code is generated (C1); only the provider API surface is
+// used (D4).
 //
 // Validate() runs before this (Generate calls it first, V17), so every gate and
 // warning is already recorded — this reads agent + target only.
 //
-// API facts verified against ElevenLabs docs 2026-07-15 (SCHEMA.md ³, ORCHESTRATOR ³).
+// API surface verified against live ElevenLabs docs 2026-07-15 (context7
+// /websites/elevenlabs_io, OpenAPI): agents create at POST /v1/convai/agents/create;
+// webhook tools are standalone POST /v1/convai/tools resources referenced by
+// prompt.tool_ids; system tools live in prompt.built_in_tools; turn-level fields
+// (silence_end_call_timeout, interruption_ignore_terms) sit under conversation_config.turn.
 
 const (
-	elCredentialEnv = "ELEVENLABS_API_KEY"
-	elAgentsPath    = "/v1/convai/agents"
+	elCredentialEnv   = "ELEVENLABS_API_KEY"
+	elAgentsPath      = "/v1/convai/agents"        // GET / PATCH / DELETE by id
+	elAgentCreatePath = "/v1/convai/agents/create" // POST create (not /agents)
+	elToolsPath       = "/v1/convai/tools"         // POST create a workspace tool
 	// cascade_timeout_seconds: default 8, range 2-15s (SCHEMA.md fallback row).
 	elCascadeTimeoutDefault = 8
 	elCascadeTimeoutMin     = 2
@@ -32,6 +40,15 @@ const (
 
 // GenerateElevenLabs is the elevenlabs case of generate.Artifact.
 func GenerateElevenLabs(agent *ir.Agent, tgt ir.Target) (Artifact, error) {
+	// Branch/draft targeting is a whole separate resource surface
+	// (POST /v1/convai/agents/{id}/branches/... plus versioning enabled on the
+	// agent), not a query param on create. Until that is wired, refuse a branch
+	// pin loudly rather than silently ignore it (V10). Upgrade path: emit the
+	// branches API when a branch-using spec ships.
+	if branch := tgt.Pins["branch_id"]; branch != "" {
+		return Artifact{}, fmt.Errorf("elevenlabs: branch_id pin %q: branch/draft-targeted apply is not supported (needs the drafts/branches API with versioning enabled); apply targets the agent's live config — drop the pin or manage branches in the dashboard", branch)
+	}
+
 	b := &elBuilder{agent: agent, tgt: tgt}
 
 	order, err := b.agentOrder()
@@ -39,8 +56,25 @@ func GenerateElevenLabs(agent *ir.Agent, tgt ir.Target) (Artifact, error) {
 		return Artifact{}, err
 	}
 
-	branch := tgt.Pins["branch_id"] // empty = the agent's main branch
-	steps := make([]ApplyStep, 0, len(order))
+	tools := b.referencedWebhookTools()
+	steps := make([]ApplyStep, 0, len(tools)+len(order))
+
+	// Workspace tools are created first so agents can reference their captured
+	// ids via prompt.tool_ids / node.additional_tool_ids.
+	for _, name := range tools {
+		cfg, err := b.webhookToolConfig(name, b.agent.Tools[name])
+		if err != nil {
+			return Artifact{}, err
+		}
+		raw, err := json.MarshalIndent(map[string]any{"tool_config": cfg}, "", "  ")
+		if err != nil {
+			return Artifact{}, fmt.Errorf("elevenlabs: marshal tool %q: %w", name, err)
+		}
+		steps = append(steps, ApplyStep{
+			Method: "POST", Endpoint: elToolsPath, Body: raw, CaptureID: toolCaptureID(name),
+		})
+	}
+
 	for _, name := range order {
 		body, err := b.agentBody(name)
 		if err != nil {
@@ -50,19 +84,19 @@ func GenerateElevenLabs(agent *ir.Agent, tgt ir.Target) (Artifact, error) {
 		if err != nil {
 			return Artifact{}, fmt.Errorf("elevenlabs: marshal agent %q: %w", name, err)
 		}
-		method, endpoint := "POST", elAgentsPath
+		method, endpoint := "POST", elAgentCreatePath
 		if id := tgt.Pins["agent_id."+name]; id != "" {
 			method, endpoint = "PATCH", elAgentsPath+"/"+id
 		}
 		steps = append(steps, ApplyStep{
-			Method: method, Endpoint: endpoint, Body: raw, CaptureID: name, Branch: branch,
+			Method: method, Endpoint: endpoint, Body: raw, CaptureID: name,
 		})
 	}
 
 	return Artifact{
 		Kind:  ManagedTarget,
 		Apply: &ApplyPlan{CredentialEnv: elCredentialEnv, Steps: steps},
-		Notes: GenerateReport{Notes: b.notes(order, branch)},
+		Notes: GenerateReport{Notes: b.notes(order, tools)},
 	}, nil
 }
 
@@ -146,12 +180,15 @@ func (b *elBuilder) agentBody(name string) (map[string]any, error) {
 	}
 	b.applyFallback(prompt, def.Model)
 
-	tools, err := b.agentTools(name)
+	toolIDs, builtIn, err := b.agentToolRefs(name)
 	if err != nil {
 		return nil, err
 	}
-	if len(tools) > 0 {
-		prompt["tools"] = tools
+	if len(toolIDs) > 0 {
+		prompt["tool_ids"] = toolIDs
+	}
+	if len(builtIn) > 0 {
+		prompt["built_in_tools"] = builtIn
 	}
 
 	agentBlock := map[string]any{"prompt": prompt}
@@ -268,17 +305,31 @@ func (b *elBuilder) tts(agentName string) (map[string]any, error) {
 	return tts, nil
 }
 
-// turn carries interruption ignore-phrases (native); minimum_words has no knob
-// (warned in Validate) and turn placement is integrated (ignored).
+// turn carries the turn-level knobs: interruption ignore-phrases and the
+// silence-before-hangup timeout. Both live under conversation_config.turn per
+// the live TurnConfig schema (interruption_ignore_terms, silence_end_call_timeout);
+// minimum_words has no knob (warned in Validate) and turn placement is integrated.
 func (b *elBuilder) turn() map[string]any {
 	c := b.agent.Conversation
-	if c == nil || c.Interruption == nil || len(c.Interruption.IgnorePhrases) == 0 {
+	if c == nil {
 		return nil
 	}
-	return map[string]any{"interruption_ignore_terms": c.Interruption.IgnorePhrases}
+	block := map[string]any{}
+	if c.Interruption != nil && len(c.Interruption.IgnorePhrases) > 0 {
+		block["interruption_ignore_terms"] = c.Interruption.IgnorePhrases
+	}
+	if c.Inactivity != nil {
+		if secs := durationSeconds(c.Inactivity.EndAfter); secs > 0 {
+			block["silence_end_call_timeout"] = secs
+		}
+	}
+	if len(block) == 0 {
+		return nil
+	}
+	return block
 }
 
-// conversationBlock carries max_duration (V) and inactivity (range-checked in Validate).
+// conversationBlock carries max_duration (V, range-checked in Validate).
 func (b *elBuilder) conversationBlock() map[string]any {
 	c := b.agent.Conversation
 	if c == nil {
@@ -287,11 +338,6 @@ func (b *elBuilder) conversationBlock() map[string]any {
 	block := map[string]any{}
 	if secs := durationSeconds(c.MaxDuration); secs > 0 {
 		block["max_duration_seconds"] = secs
-	}
-	if c.Inactivity != nil {
-		if secs := durationSeconds(c.Inactivity.EndAfter); secs > 0 {
-			block["silence_end_call_timeout"] = secs
-		}
 	}
 	if len(block) == 0 {
 		return nil
@@ -418,16 +464,23 @@ func (b *elBuilder) groupThen(nodes, edges map[string]any, group, last string, g
 }
 
 // subagentNode is an override_agent node for a task: it appends the task prompt
-// and references the task's tools by name (see workflow ceiling note).
+// and references the task's webhook tools by their apply-time captured ids
+// (additional_tool_ids holds real tool ids, not Unmute tool names).
 func (b *elBuilder) subagentNode(taskName string) map[string]any {
 	task := b.agent.Tasks[taskName]
 	node := map[string]any{
-		"type":            "override_agent",
-		"label":           taskName,
+		"type":              "override_agent",
+		"label":             taskName,
 		"additional_prompt": task.Instructions,
 	}
-	if len(task.Tools) > 0 {
-		node["additional_tool_ids"] = append([]string(nil), task.Tools...)
+	var ids []any
+	for _, name := range task.Tools {
+		if tool, ok := b.agent.Tools[name]; ok && tool.Execution == ir.ToolWebhook {
+			ids = append(ids, toolCapturePlaceholder(name))
+		}
+	}
+	if len(ids) > 0 {
+		node["additional_tool_ids"] = ids
 	}
 	return node
 }
@@ -454,10 +507,44 @@ func llmCondition(when string) map[string]any {
 	return map[string]any{"type": "llm", "condition": when}
 }
 
-// agentTools lowers the agent's declared tools: webhook tools plus the control
-// system tools (transfer_to_agent, transfer_to_number, voicemail_detection).
-func (b *elBuilder) agentTools(name string) ([]any, error) {
-	var tools []any
+// referencedWebhookTools returns the sorted, unique names of the webhook tools
+// referenced by any agent or task — these become standalone workspace tool
+// resources (POST /v1/convai/tools). Unreferenced or non-webhook entries are
+// skipped so apply never creates orphan workspace tools.
+func (b *elBuilder) referencedWebhookTools() []string {
+	seen := map[string]bool{}
+	add := func(name string) {
+		if seen[name] {
+			return
+		}
+		if tool, ok := b.agent.Tools[name]; ok && tool.Execution == ir.ToolWebhook {
+			seen[name] = true
+		}
+	}
+	for _, a := range b.agent.Agents {
+		for _, t := range a.Tools {
+			add(t)
+		}
+	}
+	for _, task := range b.agent.Tasks {
+		for _, t := range task.Tools {
+			add(t)
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for n := range seen {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// agentToolRefs lowers the agent's declared tools into the current API surface:
+// webhook tools by their apply-time captured ids (prompt.tool_ids) and the
+// control system tools (transfer_to_agent, transfer_to_number,
+// voicemail_detection) into prompt.built_in_tools.
+func (b *elBuilder) agentToolRefs(name string) (toolIDs []any, builtIn map[string]any, err error) {
+	builtIn = map[string]any{}
 	var agentTransfers, numberTransfers []any
 
 	for _, toolName := range b.agent.Agents[name].Tools {
@@ -468,7 +555,7 @@ func (b *elBuilder) agentTools(name string) ([]any, error) {
 			case *ir.HumanTransfer:
 				rule, err := b.humanTransferRule(c)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				numberTransfers = append(numberTransfers, rule)
 			case *ir.Delegate:
@@ -480,26 +567,25 @@ func (b *elBuilder) agentTools(name string) ([]any, error) {
 		if !ok {
 			continue
 		}
-		lowered, err := b.webhookTool(toolName, tool)
-		if err != nil {
-			return nil, err
+		if tool.Execution != ir.ToolWebhook {
+			return nil, nil, fmt.Errorf("elevenlabs: tool %q execution %q is not emitted by this driver", toolName, tool.Execution)
 		}
-		tools = append(tools, lowered)
+		toolIDs = append(toolIDs, toolCapturePlaceholder(toolName))
 	}
 
 	if len(agentTransfers) > 0 {
-		tools = append(tools, systemTool("transfer_to_agent", map[string]any{"transfers": agentTransfers}))
+		builtIn["transfer_to_agent"] = builtInTool("transfer_to_agent", map[string]any{"transfers": agentTransfers})
 	}
 	if len(numberTransfers) > 0 {
-		tools = append(tools, systemTool("transfer_to_number", map[string]any{"transfers": numberTransfers}))
+		builtIn["transfer_to_number"] = builtInTool("transfer_to_number", map[string]any{"transfers": numberTransfers})
 	}
 	// Voicemail detection rides the entry agent, which answers the outbound call.
 	if name == b.agent.EntryAgent {
-		if vm := b.voicemailTool(); vm != nil {
-			tools = append(tools, vm)
+		if vm, ok := b.voicemailParams(); ok {
+			builtIn["voicemail_detection"] = builtInTool("voicemail_detection", vm)
 		}
 	}
-	return tools, nil
+	return toolIDs, builtIn, nil
 }
 
 func (b *elBuilder) agentTransferRule(c *ir.AgentTransfer) map[string]any {
@@ -538,24 +624,33 @@ func (b *elBuilder) humanTransferRule(c *ir.HumanTransfer) (map[string]any, erro
 	return rule, nil
 }
 
-func (b *elBuilder) webhookTool(name string, tool ir.Tool) (map[string]any, error) {
+// webhookToolConfig builds the tool_config for a standalone webhook tool
+// (POST /v1/convai/tools). The request input schema rides api_schema, not a
+// tool-level field.
+// ponytail: the spec models no HTTP verb, so a tool that takes input is sent as
+// POST with a request_body_schema; wire method through the spec if a GET/query
+// webhook tool is ever needed.
+func (b *elBuilder) webhookToolConfig(name string, tool ir.Tool) (map[string]any, error) {
 	if tool.Execution != ir.ToolWebhook {
 		return nil, fmt.Errorf("elevenlabs: tool %q execution %q is not emitted by this driver", name, tool.Execution)
 	}
-	lowered := map[string]any{
-		"type":            "webhook",
-		"name":            name,
-		"description":     tool.Description,
-		"api_schema":      map[string]any{"url": envPlaceholder(tool.URLEnv)},
-		"input_json_schema": tool.Input,
+	api := map[string]any{"url": envPlaceholder(tool.URLEnv)}
+	if tool.Input != nil {
+		api["method"] = "POST"
+		api["request_body_schema"] = tool.Input
 	}
-	return lowered, nil
+	return map[string]any{
+		"type":        "webhook",
+		"name":        name,
+		"description": tool.Description,
+		"api_schema":  api,
+	}, nil
 }
 
-// voicemailTool emits the voicemail_detection system tool for an outbound
+// voicemailParams returns the voicemail_detection params for an outbound
 // telephony channel with on_voicemail; leave_message carries a voicemail_message,
-// hangup omits it (absent = hang up) (V7).
-func (b *elBuilder) voicemailTool() map[string]any {
+// hangup omits it (absent = hang up) (V7). The bool reports whether the tool applies.
+func (b *elBuilder) voicemailParams() (map[string]any, bool) {
 	for _, ch := range b.agent.Channels {
 		if ch.Kind != ir.ChannelTelephony || ch.Outbound == nil || !*ch.Outbound || ch.OnVoicemail == "" {
 			continue
@@ -564,33 +659,41 @@ func (b *elBuilder) voicemailTool() map[string]any {
 		if ch.OnVoicemail == ir.VoicemailLeaveMessage {
 			params["voicemail_message"] = ""
 		}
-		return systemTool("voicemail_detection", params)
+		return params, true
 	}
-	return nil
+	return nil, false
 }
 
-// notes records the driver's documented reconcile choices (C5/V10): which branch
-// apply targets, the comparison rule, and that forwarded/inert fields are
-// reported but never judged (the full forwarded list rides in Notes.ForwardedBindings).
-func (b *elBuilder) notes(order []string, branch string) []string {
-	branchNote := "apply targets the agent's main branch (partial PATCH preserves dashboard-authored fields Unmute does not model); override with target pin branch_id"
-	if branch != "" {
-		branchNote = fmt.Sprintf("apply targets branch %q (target pin branch_id); merge/rebase to main is a dashboard step", branch)
-	}
+// notes records the driver's documented reconcile choices (C5/V10): create
+// order, what apply targets, the comparison rule, and that forwarded/inert
+// fields are reported but never judged (the full forwarded list rides in
+// Notes.ForwardedBindings).
+func (b *elBuilder) notes(order, tools []string) []string {
 	return []string{
-		fmt.Sprintf("elevenlabs: %d agent(s) created in order %s (entry: %s)", len(order), strings.Join(order, ", "), b.agent.EntryAgent),
-		branchNote,
+		fmt.Sprintf("elevenlabs: %d tool(s) then %d agent(s) created in order %s (entry: %s)", len(tools), len(order), strings.Join(order, ", "), b.agent.EntryAgent),
+		"apply targets the agent's live config (partial PATCH preserves dashboard-authored fields Unmute does not model); branch/draft targeting is not supported",
 		"reconcile comparison: modeled fields diffed normally; forwarded params compared byte-equal after JSON normalization; inert provider fields are reported, never judged",
 	}
 }
 
 // --- small helpers ---
 
-func systemTool(name string, params map[string]any) map[string]any {
+// builtInTool wraps a system tool for prompt.built_in_tools: the value is a
+// SystemToolConfig keyed by tool name, with system_tool_type in its params.
+func builtInTool(name string, params map[string]any) map[string]any {
+	if params == nil {
+		params = map[string]any{}
+	}
+	params["system_tool_type"] = name
 	return map[string]any{"type": "system", "name": name, "params": params}
 }
 
 func capturePlaceholder(agentName string) string { return "{{capture:" + agentName + "}}" }
+
+// tool captures are namespaced so a tool and an agent can share a name without
+// colliding in the apply-time capture map.
+func toolCaptureID(name string) string          { return "tool:" + name }
+func toolCapturePlaceholder(name string) string { return capturePlaceholder(toolCaptureID(name)) }
 
 func envPlaceholder(env string) string { return "{{env:" + env + "}}" }
 

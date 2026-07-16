@@ -153,7 +153,7 @@ class Events(Agent):
         return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
 
     @function_tool
-    async def do_event(self, ctx: RunContext) -> str:
+    async def do_event(self, ctx: RunContext) -> dict:
         """The caller is ready to plan their event; run the events flow."""
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True),
@@ -169,8 +169,13 @@ class Events(Agent):
             id="confirm_booking",
             description="confirm booking",
         )
-        await group
-        return "This flow is complete. Move to the closing and ask if there is anything else."
+        owner_ctx = self.chat_ctx.copy()
+        result = await group
+        # N13: the flow's own turns must not land in the owner's context. The
+        # TaskGroup merges them back on completion, so restore the pre-flow
+        # context and hand the owner only the typed results (merge: results).
+        await self.update_chat_ctx(owner_ctx)
+        return result.task_results
 
 
 class Greeter(Agent):
@@ -213,7 +218,7 @@ class Reservations(Agent):
         return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
 
     @function_tool
-    async def do_reserve(self, ctx: RunContext) -> str:
+    async def do_reserve(self, ctx: RunContext) -> dict:
         """The caller is ready to book a table; run the reservation flow."""
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True),
@@ -229,8 +234,13 @@ class Reservations(Agent):
             id="confirm_booking",
             description="confirm booking",
         )
-        await group
-        return "This flow is complete. Move to the closing and ask if there is anything else."
+        owner_ctx = self.chat_ctx.copy()
+        result = await group
+        # N13: the flow's own turns must not land in the owner's context. The
+        # TaskGroup merges them back on completion, so restore the pre-flow
+        # context and hand the owner only the typed results (merge: results).
+        await self.update_chat_ctx(owner_ctx)
+        return result.task_results
 
 
 # --- tasks -----------------------------------------------------------------
@@ -357,6 +367,86 @@ if __name__ == "__main__":
     "LIVEKIT_URL",
     "SEND_CONFIRMATION_URL",
     "SLNG_API_KEY"
+  ],
+  "bindings": [
+    {
+      "target": "livekit-dev",
+      "role": "listen",
+      "binding": {
+        "provider": "slng",
+        "model": "slng/deepgram/nova:3-en"
+      }
+    },
+    {
+      "target": "livekit-dev",
+      "role": "turn",
+      "binding": {
+        "provider": "livekit",
+        "model": "turn-detector-mini"
+      }
+    },
+    {
+      "target": "livekit-dev",
+      "role": "speak",
+      "profile": "desk",
+      "binding": {
+        "provider": "slng",
+        "model": "slng/deepgram/aura:2-en",
+        "voice": "aura-2-orion-en"
+      }
+    },
+    {
+      "target": "livekit-dev",
+      "role": "speak",
+      "profile": "host",
+      "binding": {
+        "provider": "slng",
+        "model": "slng/deepgram/aura:2-en",
+        "voice": "aura-2-thalia-en"
+      }
+    },
+    {
+      "target": "livekit-dev",
+      "role": "reason",
+      "profile": "reasoning",
+      "binding": {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "params": {
+          "temperature": 0.4
+        }
+      }
+    }
+  ],
+  "sizing": [
+    {
+      "target": "livekit-dev",
+      "metric": "workers",
+      "value": "40",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    },
+    {
+      "target": "livekit-dev",
+      "metric": "gpus",
+      "value": "0",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    },
+    {
+      "target": "livekit-dev",
+      "metric": "provider_concurrency_quota.realtime_audio",
+      "value": "20",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    },
+    {
+      "target": "livekit-dev",
+      "metric": "provider_session_time_quota.realtime_audio",
+      "value": "1h20m0s",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
+    }
   ],
   "notes": [
     "listen: slng via slng.STT (livekit-plugins-slng\u003e=1.6.1, verified 2026-07-15)",

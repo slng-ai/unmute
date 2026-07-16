@@ -125,7 +125,7 @@ type pipecatArg struct {
 // pipecatTransfer is an agent_transfer control lowered to activate_worker.
 type pipecatTransfer struct {
 	MethodName string
-	To         string   // target worker name
+	To         string // target worker name
 	When       string
 	Reason     string   // developer message injected on activation
 	Requires   []string // variables that must be set before the handoff (guard)
@@ -138,11 +138,11 @@ type pipecatVariable struct {
 }
 
 type pipecatData struct {
-	Project     string
-	Version     string
-	MainName    string
-	EntryAgent  string
-	EntryClass  string
+	Project             string
+	Version             string
+	MainName            string
+	EntryAgent          string
+	EntryClass          string
 	STT                 pipecatService
 	Agents              []pipecatAgent
 	Tasks               []pipecatTask
@@ -191,33 +191,33 @@ type pipecatInactivity struct {
 // agreement test enforces it, so a field can never be validate-green while the
 // emitter silently drops it (compiler V19). Add a row here only with the code.
 var pipecatEmittedFields = map[targetcap.Field]bool{
-	targetcap.FieldListenLocal:           true, // placement forwarded (code target runs it locally)
-	targetcap.FieldSpeakLocal:            true,
-	targetcap.FieldReasonLocal:           true,
-	targetcap.FieldSpeakEndpoint:         true, // base_url on the TTS service
-	targetcap.FieldTurnPlacement:         true, // advisory (VAD/smart-turn supplied)
-	targetcap.FieldSemanticEndpointing:   true, // advisory
-	targetcap.FieldTask:                  true, // @job task-worker
-	targetcap.FieldTaskModel:             true, // task-worker's own LLM
-	targetcap.FieldTaskNestedResult:      true, // forwarded json_schema
-	targetcap.FieldTaskGroup:             true, // sequential job dispatch
-	targetcap.FieldTaskGroupReturn:       true,
-	targetcap.FieldContextIsolated:       true, // fresh vs accumulated payload
-	targetcap.FieldTransferRequires:      true, // guard before activate_worker
-	targetcap.FieldGreetingUserFirst:     true,
-	targetcap.FieldGreetingModelWritten:  true,
-	targetcap.FieldGreetingAbsent:        true,
-	targetcap.FieldInterruptionMinWords:  true, // MinWordsUserTurnStartStrategy
-	targetcap.FieldInterruptionIgnore:    true, // IGNORE_PHRASES
-	targetcap.FieldInactivity:            true, // user_idle_timeout
-	targetcap.FieldMaxDuration:           true, // asyncio EndFrame timer
-	targetcap.FieldToolOutput:            true, // tool returns response.json()
-	targetcap.FieldToolInterruption:      true, // cancel_on_interruption
+	targetcap.FieldListenLocal:          true, // placement forwarded (code target runs it locally)
+	targetcap.FieldSpeakLocal:           true,
+	targetcap.FieldReasonLocal:          true,
+	targetcap.FieldSpeakEndpoint:        true, // base_url on the TTS service
+	targetcap.FieldTurnPlacement:        true, // advisory (VAD/smart-turn supplied)
+	targetcap.FieldSemanticEndpointing:  true, // advisory
+	targetcap.FieldTask:                 true, // @job task-worker
+	targetcap.FieldTaskModel:            true, // task-worker's own LLM
+	targetcap.FieldTaskNestedResult:     true, // forwarded json_schema
+	targetcap.FieldTaskGroup:            true, // sequential job dispatch
+	targetcap.FieldTaskGroupReturn:      true,
+	targetcap.FieldContextIsolated:      true, // fresh vs accumulated payload
+	targetcap.FieldTransferRequires:     true, // guard before activate_worker
+	targetcap.FieldGreetingUserFirst:    true,
+	targetcap.FieldGreetingModelWritten: true,
+	targetcap.FieldGreetingAbsent:       true,
+	targetcap.FieldInterruptionMinWords: true, // MinWordsUserTurnStartStrategy
+	targetcap.FieldInterruptionIgnore:   true, // IGNORE_PHRASES
+	targetcap.FieldInactivity:           true, // user_idle_timeout
+	targetcap.FieldMaxDuration:          true, // asyncio EndFrame timer
+	targetcap.FieldToolOutput:           true, // tool returns response.json()
+	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
 }
 
 // GeneratePipecat lowers a validated agent + pipecat target into a project.
 // The socket runs Validate(caps) first (V17), so this reads only agent+target.
-func GeneratePipecat(agent *ir.Agent, target ir.Target) (Artifact, error) {
+func GeneratePipecat(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedBinding, sizing []ir.Sizing) (Artifact, error) {
 	if err := checkPipecatVersion(target.Version); err != nil {
 		return Artifact{}, err
 	}
@@ -230,7 +230,7 @@ func GeneratePipecat(agent *ir.Agent, target ir.Target) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, err
 	}
-	report, err := pipecatReport(data, files)
+	report, err := pipecatReport(data, files, bindings, sizing)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -303,17 +303,19 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 func pyQuote(s string) string { return strconv.Quote(s) }
 
 type pipecatReportJSON struct {
-	Target      string   `json:"target"`
-	Provider    string   `json:"provider"`
-	Version     string   `json:"version"`
-	EntryAgent  string   `json:"entry_agent"`
-	Agents      []string `json:"agents"`
-	Files       []string `json:"generated_files"`
-	RequiredEnv []string `json:"required_env"`
-	Notes       []string `json:"notes,omitempty"`
+	Target      string                `json:"target"`
+	Provider    string                `json:"provider"`
+	Version     string                `json:"version"`
+	EntryAgent  string                `json:"entry_agent"`
+	Agents      []string              `json:"agents"`
+	Files       []string              `json:"generated_files"`
+	RequiredEnv []string              `json:"required_env"`
+	Bindings    []ir.ForwardedBinding `json:"bindings,omitempty"`
+	Sizing      []ir.Sizing           `json:"sizing,omitempty"`
+	Notes       []string              `json:"notes,omitempty"`
 }
 
-func pipecatReport(data pipecatData, files []File) ([]byte, error) {
+func pipecatReport(data pipecatData, files []File, bindings []ir.ForwardedBinding, sizing []ir.Sizing) ([]byte, error) {
 	generated := make([]string, 0, len(files)+1)
 	for _, file := range files {
 		generated = append(generated, file.Path)
@@ -326,7 +328,8 @@ func pipecatReport(data pipecatData, files []File) ([]byte, error) {
 	}
 	out, err := json.MarshalIndent(pipecatReportJSON{
 		Target: data.Project, Provider: "pipecat", Version: data.Version, EntryAgent: data.EntryAgent,
-		Agents: agents, Files: generated, RequiredEnv: data.RequiredEnv, Notes: data.Notes,
+		Agents: agents, Files: generated, RequiredEnv: data.RequiredEnv,
+		Bindings: bindings, Sizing: sizing, Notes: data.Notes,
 	}, "", "  ")
 	if err != nil {
 		return nil, err
