@@ -14,7 +14,8 @@ var livekitCatalog = []Entry{
 	// --- listen ---------------------------------------------------------
 	{
 		Framework: LiveKit, Role: Listen, Vendor: "slng",
-		Verified: "2026-07-15", Docs: "https://docs.livekit.io/agents/models/stt/slng/",
+		Distributes: []string{"deepgram"},
+		Verified:    "2026-07-15", Docs: "https://docs.livekit.io/agents/models/stt/slng/",
 		Install: InstallSpec{Package: "livekit-plugins-slng", Constraint: ">=1.6.1"},
 		Import:  "from livekit.plugins import slng",
 		Call: &CallSpec{
@@ -42,7 +43,8 @@ var livekitCatalog = []Entry{
 	// --- speak ----------------------------------------------------------
 	{
 		Framework: LiveKit, Role: Speak, Vendor: "slng",
-		Verified: "2026-07-15", Docs: "https://docs.livekit.io/agents/models/tts/slng/",
+		Distributes: []string{"cartesia", "deepgram"},
+		Verified:    "2026-07-15", Docs: "https://docs.livekit.io/agents/models/tts/slng/",
 		Install: InstallSpec{Package: "livekit-plugins-slng", Constraint: ">=1.6.1"},
 		Import:  "from livekit.plugins import slng",
 		Call: &CallSpec{

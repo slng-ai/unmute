@@ -50,7 +50,8 @@ var pipecatCatalog = []Entry{
 	},
 	{
 		Framework: Pipecat, Role: Listen, Vendor: "slng",
-		Verified: "2026-07-15", Docs: pipecatServicesDocs,
+		Distributes: []string{"deepgram"},
+		Verified:    "2026-07-15", Docs: pipecatServicesDocs,
 		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.4.0"},
 		Import:  "from pipecat_slng import SlngSTTService",
 		Call: &CallSpec{
@@ -120,7 +121,8 @@ var pipecatCatalog = []Entry{
 	},
 	{
 		Framework: Pipecat, Role: Speak, Vendor: "slng",
-		Verified: "2026-07-15", Docs: pipecatServicesDocs,
+		Distributes: []string{"cartesia", "deepgram"},
+		Verified:    "2026-07-15", Docs: pipecatServicesDocs,
 		Install: InstallSpec{Package: "pipecat-slng", Constraint: ">=0.4.0"},
 		Import:  "from pipecat_slng import SlngTTSService",
 		Call: &CallSpec{

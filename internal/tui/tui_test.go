@@ -88,7 +88,7 @@ func TestRunSelectTarget(t *testing.T) {
 func TestRunEditModels(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// Create, name, Models, Speak, cartesia, model, voice, params, Back, Create, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n3\n3\n1\nsonic-3\nvoice-id\n{\"speed\":1}\n4\n16\n\n"), &bytes.Buffer{}, true)
+	got, err := Run(strings.NewReader("1\nagent\n3\n3\n1\n1\nsonic-3\nvoice-id\n{\"speed\":1}\n5\n16\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestV18AgentMenuShowsAndEditsSavedAgent(t *testing.T) {
 	}}
 	data.Tools = []scaffold.Tool{{Name: "lookup_customer", AttachTo: []string{"billing"}}}
 	var output bytes.Buffer
-	err := editAgents(newRunner(strings.NewReader("2\n1\nUpdated billing prompt.\n6\n5\n"), &output, true), &data)
+	err := editAgents(newRunner(strings.NewReader("2\n1\nUpdated billing prompt.\n7\n5\n"), &output, true), &data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,14 +245,14 @@ func TestV21PreflightFailureUsesDedicatedScreen(t *testing.T) {
 	data.SetTarget("livekit")
 	data.Fallbacks = []scaffold.ModelFallback{{Name: "backup", Profile: "assistant_model", Binding: data.Reason}}
 	var output bytes.Buffer
-	_, back, err := editAgent(newRunner(strings.NewReader("16\n1\n17\n"), &output, true), Agent{Path: "agent", Data: data})
+	_, back, err := editAgent(newRunner(strings.NewReader("16\n10\n17\n"), &output, true), Agent{Path: "agent", Data: data})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !back {
 		t.Fatal("editAgent() did not return through Back")
 	}
-	for _, want := range []string{"Cannot create agent", "Fix the configuration, then go Back", "does not emit model fallback"} {
+	for _, want := range []string{"Cannot create agent", "Fix the configuration, then go Back", "does not emit model fallback", "Review / delete model fallbacks"} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("preflight screen missing %q:\n%s", want, output.String())
 		}
@@ -276,7 +276,7 @@ func TestRunAddAgentAndHandoff(t *testing.T) {
 	input := "1\nagent\n" +
 		"8\n2\nbilling\nYou handle billing questions.\n" +
 		"1\ngpt-4.1-mini\n\n" +
-		"4\nslng/deepgram/aura:2-en\naura-2-thalia-en\n\n" +
+		"2\nslng/deepgram/aura:2-en\naura-2-thalia-en\n\n" +
 		"5\n" +
 		"9\n1\n1\n1\nto_billing\nCaller asks about billing.\n1\n1\n3\n" +
 		"16\n\n"
@@ -388,15 +388,128 @@ func TestProviderOptionsMirrorCatalog(t *testing.T) {
 		{targetcap.ElevenLabs, targetcap.Speak},
 	} {
 		options := providerOptions(tc.framework, tc.role)
-		vendors := targetcap.DefaultCatalog().Vendors(tc.framework, tc.role)
-		if len(options) != len(vendors) {
-			t.Fatalf("%s/%s options = %d, vendors = %d", tc.framework, tc.role, len(options), len(vendors))
+		brands := targetcap.DefaultCatalog().Brands(tc.framework, tc.role)
+		if len(options) != len(brands) {
+			t.Fatalf("%s/%s options = %d, brands = %d", tc.framework, tc.role, len(options), len(brands))
 		}
-		for i := range vendors {
-			if options[i].Value != vendors[i] {
-				t.Errorf("%s/%s option %d = %q, want %q", tc.framework, tc.role, i, options[i].Value, vendors[i])
+		for i := range brands {
+			if options[i].Value != brands[i] {
+				t.Errorf("%s/%s option %d = %q, want %q", tc.framework, tc.role, i, options[i].Value, brands[i])
 			}
 		}
+	}
+}
+
+func TestV24ModelsLabelDeduplicatesProviderBrands(t *testing.T) {
+	data := scaffold.Data{}
+	data.SetTarget("livekit")
+	if got := modelsLabel(data); got != "deepgram / openai" {
+		t.Fatalf("models label = %q", got)
+	}
+}
+
+func TestV24ProviderThenDistributorFlow(t *testing.T) {
+	binding := scaffold.Binding{}
+	input := "1\n2\nslng/cartesia/sonic-3\nvoice-id\n\n"
+	if err := editBindingFor(newRunner(strings.NewReader(input), &bytes.Buffer{}, true), "pipecat", targetcap.Speak, &binding); err != nil {
+		t.Fatal(err)
+	}
+	want := scaffold.Binding{Provider: "slng", Model: "slng/cartesia/sonic-3", Voice: "voice-id"}
+	if binding != want {
+		t.Fatalf("binding = %#v, want %#v", binding, want)
+	}
+}
+
+func TestV25SavedResourcesOfferDelete(t *testing.T) {
+	base := func() scaffold.Data {
+		data := scaffold.Data{Name: "agent", Instructions: scaffold.DefaultInstructions}
+		data.SetTarget("pipecat")
+		data.Variables = []scaffold.Variable{{Name: "customer_id", Type: "string"}}
+		data.Tools = []scaffold.Tool{{Name: "lookup_customer", Description: "Lookup", Input: `{}`}}
+		data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Billing", Reason: data.Reason, Speak: data.Speak}}
+		data.Handoffs = []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", When: "Billing", History: "full", AllVariables: true}}
+		data.Tasks = []scaffold.Task{{Name: "collect", Instructions: "Collect", Result: `{"result":"string"}`, History: "full", Agent: "assistant", When: "Collect"}}
+		data.TaskGroups = []scaffold.TaskGroup{{Name: "flow", Steps: []string{"collect"}, ContextScope: "shared", Then: "return", Agent: "assistant", When: "Flow"}}
+		data.Channels = []scaffold.Channel{{Name: "phone", Kind: "telephony", Inbound: true}}
+		data.HumanTransfers = []scaffold.HumanTransfer{{Name: "to_human", Agent: "assistant", When: "Human", Destination: "support", Value: "+14155550123", Mode: "cold"}}
+		data.Fallbacks = []scaffold.ModelFallback{{Name: "backup", Profile: "assistant_model", Binding: data.Reason}}
+		return data
+	}
+
+	tests := []struct {
+		name  string
+		input string
+		open  func(*fieldRunner, *scaffold.Data) error
+	}{
+		{"variable", "1\n", editVariables},
+		{"tool", "1\n", editTools},
+		{"agent", "2\n", editAgents},
+		{"handoff", "1\n", editHandoffs},
+		{"task", "1\n", editTasks},
+		{"task group", "1\n", editTaskGroups},
+		{"human transfer", "1\n", editHumanTransfers},
+		{"fallback", "1\n", editFallbacks},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			data := base()
+			var output bytes.Buffer
+			err := tc.open(newRunner(strings.NewReader(tc.input), &output, true), &data)
+			if !errors.Is(err, huh.ErrUserAborted) {
+				t.Fatalf("editor error = %v, want ErrUserAborted", err)
+			}
+			if !strings.Contains(output.String(), "Delete") {
+				t.Fatalf("saved %s has no Delete action:\n%s", tc.name, output.String())
+			}
+		})
+	}
+}
+
+func TestV25DeleteResourceCleansReferences(t *testing.T) {
+	data := scaffold.Data{EntryAgent: "billing"}
+	data.Agents = []scaffold.Agent{{Name: "billing"}}
+	data.Variables = []scaffold.Variable{{Name: "customer_id", Type: "string"}}
+	data.Tools = []scaffold.Tool{{Name: "lookup", AttachTo: []string{"billing"}, AttachTasks: []string{"collect"}}}
+	data.Handoffs = []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", Requires: []string{"customer_id"}, Variables: []string{"customer_id"}}}
+	data.Tasks = []scaffold.Task{{Name: "collect", Tools: []string{"lookup"}, Model: "billing_model", Assign: `{"customer_id":"result.result"}`, Agent: "billing"}}
+	data.TaskGroups = []scaffold.TaskGroup{{Name: "flow", Steps: []string{"collect"}, Agent: "billing"}}
+	data.HumanTransfers = []scaffold.HumanTransfer{{Name: "human", Agent: "billing"}}
+	data.Fallbacks = []scaffold.ModelFallback{{Name: "backup", Profile: "billing_model"}}
+
+	for _, item := range [][2]string{{"variable", "customer_id"}, {"tool", "lookup"}, {"agent", "billing"}, {"task", "collect"}} {
+		if err := deleteResource(&data, item[0], item[1]); err != nil {
+			t.Fatalf("delete %s: %v", item[0], err)
+		}
+	}
+	if len(data.Variables)+len(data.Tools)+len(data.Agents)+len(data.Handoffs)+len(data.Tasks)+len(data.TaskGroups)+len(data.Fallbacks) != 0 {
+		t.Fatalf("dangling resources after delete: %#v", data)
+	}
+	if data.EntryAgent != "assistant" || data.HumanTransfers[0].Agent != "assistant" {
+		t.Fatalf("agent references were not reset: %#v", data)
+	}
+}
+
+func TestV25InvalidSavedResourcesRemainAvailableForRepair(t *testing.T) {
+	tests := []struct {
+		name string
+		data scaffold.Data
+		open func(*fieldRunner, *scaffold.Data) error
+	}{
+		{"handoff without second agent", scaffold.Data{Handoffs: []scaffold.Handoff{{Name: "broken", Source: "assistant", To: "missing"}}}, editHandoffs},
+		{"group without tasks", scaffold.Data{TaskGroups: []scaffold.TaskGroup{{Name: "broken", Steps: []string{"missing"}}}}, editTaskGroups},
+		{"transfer without phone", scaffold.Data{HumanTransfers: []scaffold.HumanTransfer{{Name: "broken", Agent: "assistant"}}}, editHumanTransfers},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var output bytes.Buffer
+			err := tc.open(newRunner(strings.NewReader("1\n"), &output, true), &tc.data)
+			if !errors.Is(err, huh.ErrUserAborted) {
+				t.Fatalf("editor error = %v, want ErrUserAborted", err)
+			}
+			if !strings.Contains(output.String(), "Delete") {
+				t.Fatalf("invalid saved resource cannot be repaired or deleted:\n%s", output.String())
+			}
+		})
 	}
 }
 

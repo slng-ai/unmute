@@ -77,15 +77,16 @@ type CallSpec struct {
 
 // Entry is one (framework, role, vendor) integration.
 type Entry struct {
-	Framework Provider
-	Role      Role
-	Vendor    string   // canonical binding spelling (SCHEMA.md N8); "*" = wildcard
-	Aliases   []string // accepted alternative spellings
-	Verified  string   // date last checked against upstream docs/source
-	Docs      string
-	Install   InstallSpec
-	Import    string // full import line; "" = covered by the driver's core imports
-	Call      *CallSpec
+	Framework   Provider
+	Role        Role
+	Vendor      string   // canonical distributor spelling (SCHEMA.md N8); "*" = wildcard
+	Aliases     []string // accepted alternative spellings
+	Distributes []string // provider brands routed through this distributor
+	Verified    string   // date last checked against upstream docs/source
+	Docs        string
+	Install     InstallSpec
+	Import      string // full import line; "" = covered by the driver's core imports
+	Call        *CallSpec
 	// Managed rows have no Call; these fields retain binding arity for UIs and
 	// validation. Code rows derive the same facts from Call.
 	RequireModel bool
@@ -153,6 +154,57 @@ func (c Catalog) Vendors(fw Provider, role Role) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Brands lists provider brands once, regardless of how many distributors
+// expose them. Entries without an explicit route distribute themselves.
+func (c Catalog) Brands(fw Provider, role Role) []string {
+	var out []string
+	for _, e := range c.entries {
+		if e.Framework != fw || e.Role != role || e.Wildcard() {
+			continue
+		}
+		if len(e.Distributes) == 0 {
+			out = append(out, e.Vendor)
+		} else {
+			out = append(out, e.Distributes...)
+		}
+	}
+	sort.Strings(out)
+	return slices.Compact(out)
+}
+
+// Distributors lists the integrations that can deliver a provider brand.
+func (c Catalog) Distributors(fw Provider, role Role, brand string) []string {
+	var out []string
+	for _, e := range c.entries {
+		if e.Framework != fw || e.Role != role || e.Wildcard() {
+			continue
+		}
+		if (e.Vendor == brand && len(e.Distributes) == 0) || slices.Contains(e.Distributes, brand) {
+			out = append(out, e.Vendor)
+		}
+	}
+	sort.Strings(out)
+	return slices.Compact(out)
+}
+
+// Brand resolves a stored distributor/model binding to its user-facing brand.
+func (c Catalog) Brand(fw Provider, role Role, distributor, model string) string {
+	entry, ok := c.Lookup(fw, role, distributor)
+	if !ok || entry.Wildcard() {
+		return distributor
+	}
+	if len(entry.Distributes) == 0 {
+		return entry.Vendor
+	}
+	parts := strings.Split(model, "/")
+	for _, part := range parts {
+		if slices.Contains(entry.Distributes, part) {
+			return part
+		}
+	}
+	return entry.Distributes[0]
 }
 
 // RolesFor lists the roles a vendor serves on a framework, sorted. Used for

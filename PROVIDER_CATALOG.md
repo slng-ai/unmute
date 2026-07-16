@@ -19,8 +19,9 @@ One entry per **(framework, role, vendor)**, typed Go data in `internal/target/c
 
 | Field | Meaning |
 |---|---|
-| `Framework, Role, Vendor` | the key; `Vendor` is the canonical binding spelling (N8), `"*"` is a role's wildcard row |
+| `Framework, Role, Vendor` | the key; `Vendor` is the canonical stored distributor/integration spelling (N8), `"*"` is a role's wildcard row |
 | `Aliases` | accepted alternative spellings (`eleven_labs`) |
+| `Distributes` | provider brands routed by an aggregate distributor such as SLNG; empty means the integration distributes its own brand |
 | `Verified, Docs` | date last checked against upstream docs/source, and where |
 | `Install` | exactly one of `Extra` (rides the framework pin: `pipecat-ai[deepgram]`, `livekit-agents[deepgram]`) or `Package`+`Constraint` (standalone: `pipecat-slng>=0.4.0`); both empty = ships with the framework |
 | `Import` | the full import line; empty = covered by the driver's core imports (LiveKit Inference) |
@@ -35,7 +36,7 @@ One entry per **(framework, role, vendor)**, typed Go data in `internal/target/c
 - `Model.Form` names a transform: `verbatim`, `slng_route` (strip the `slng/` prefix; the LiveKit plugin takes the bare vendor/model route), `provider_slash_model` (LiveKit Inference). Each form is a few lines of shared Go; new forms only with a real second user.
 - `Params` style: `kwargs` (flat), `settings` (model/voice/params nest in `Class.Settings(...)`, the current Pipecat official-service shape), `extra_kwargs` (one dict, LiveKit Inference).
 
-**What the catalogue never contains:** model names, voice ids, or param schemas. D10 stands: identities and `params` forward verbatim, unvalidated. An entry is a code slot, not an allowlist. On LiveKit, third-party vendors also ride *inside* the SLNG route string (`slng/deepgram/nova:3`); that is model identity and deliberately not catalogued.
+**What the catalogue never contains:** model names, voice ids, or param schemas. D10 stands: identities and `params` forward verbatim, unvalidated. An entry is a code slot, not an allowlist. Known provider brands that ride inside an aggregate route (`slng/deepgram/nova:3`) are recorded only to let the wizard present a provider once and then ask for its distributor; the route and model identity remain forwarded text.
 
 ## 3. Resolution and injection
 

@@ -8,6 +8,15 @@ import (
 	"testing"
 )
 
+func TestV23WordmarkHasNoBackgroundColor(t *testing.T) {
+	if strings.Contains(slngWordmark, "48;") {
+		t.Fatalf("wordmark still paints a background: %q", slngWordmark)
+	}
+	if !strings.Contains(slngWordmark, "38;2;245;201;110m") {
+		t.Fatalf("wordmark lost the SLNG foreground color: %q", slngWordmark)
+	}
+}
+
 // run executes a fresh command tree (rule 1) and returns captured output + err.
 func run(t *testing.T, args ...string) (string, error) {
 	t.Helper()

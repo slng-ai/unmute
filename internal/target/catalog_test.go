@@ -128,3 +128,13 @@ func TestCatalogLookup(t *testing.T) {
 		t.Errorf("ElevenLabs speak arity = %#v", e)
 	}
 }
+
+func TestV24ProviderBrandsAreUniqueAndExposeDistributors(t *testing.T) {
+	cat := DefaultCatalog()
+	if got := strings.Join(cat.Brands(Pipecat, Speak), ","); got != "cartesia,deepgram,elevenlabs,openai" {
+		t.Fatalf("pipecat speak brands = %q", got)
+	}
+	if got := strings.Join(cat.Distributors(Pipecat, Speak, "cartesia"), ","); got != "cartesia,slng" {
+		t.Fatalf("cartesia distributors = %q", got)
+	}
+}
