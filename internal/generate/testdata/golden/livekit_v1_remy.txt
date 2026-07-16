@@ -5,6 +5,19 @@ LIVEKIT_API_SECRET=
 LIVEKIT_URL=
 SEND_CONFIRMATION_URL=
 SLNG_API_KEY=
+=== Dockerfile ===
+FROM python:3.12-slim
+
+WORKDIR /app
+RUN pip install --no-cache-dir uv
+
+COPY pyproject.toml ./
+RUN uv pip install --system .
+
+COPY . .
+
+# LiveKit Cloud / the worker runner start agent.py; `python agent.py dev` for local runs.
+CMD ["python", "agent.py", "start"]
 === README.md ===
 # livekit-dev — generated LiveKit Agents project
 
@@ -23,8 +36,10 @@ python agent.py dev
 Do not edit this project by hand — it is regenerated from the agent spec. Change
 the spec and recompile.
 === agent.py ===
+import asyncio
 import logging
 import os
+from dataclasses import dataclass
 import httpx
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -131,6 +146,13 @@ When you have all three, record them and finish. Do not quote prices, menus, or 
 
 
 When this step is complete, call `finish` with: date, headcount, occasion."""
+
+# --- shared state ------------------------------------------------------------
+# Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
+@dataclass
+class Userdata:
+    caller_phone: str | None = None
+
 
 # --- agents ----------------------------------------------------------------
 
@@ -318,12 +340,17 @@ server.setup_fnc = prewarm
 
 @server.rtc_session(agent_name="livekit-dev")
 async def entrypoint(ctx: JobContext) -> None:
-    session = AgentSession(
+    session = AgentSession[Userdata](
+        userdata=Userdata(),
         stt=slng.STT(api_key=os.environ.get("SLNG_API_KEY"), model="deepgram/nova:3-en", language="en"),
         llm=inference.LLM(model="openai/gpt-4o-mini", extra_kwargs={"temperature": 0.4}),
         tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-thalia-en", model="deepgram/aura:2-en", language="en"),
-        turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector(version="v1")),
+        turn_handling=TurnHandlingOptions(
+            turn_detection=inference.TurnDetector(version="v1"),
+            interruption={"enabled": True},
+        ),
         vad=ctx.proc.userdata["vad"],
+        user_away_timeout=15,
         preemptive_generation=True,
     )
 
@@ -331,8 +358,28 @@ async def entrypoint(ctx: JobContext) -> None:
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
         metrics.log_metrics(ev.metrics)
 
+    async def _end_if_still_away() -> None:
+        await asyncio.sleep(30)  # inactivity.end_after
+        if session.user_state == "away":
+            session.shutdown()
+
+    @session.on("user_state_changed")
+    def _on_user_state_changed(ev) -> None:
+        if ev.new_state != "away":
+            return
+        session.generate_reply(
+            instructions="The caller went quiet. Briefly check whether they are still there."
+        )
+        asyncio.create_task(_end_if_still_away())
+
     await session.start(agent=Greeter(), room=ctx.room)
     await ctx.connect()
+
+    async def _max_duration() -> None:
+        await asyncio.sleep(1200)
+        session.shutdown()  # conversation.max_duration
+
+    asyncio.create_task(_max_duration())
 
 
 if __name__ == "__main__":
@@ -355,9 +402,11 @@ if __name__ == "__main__":
   ],
   "generated_files": [
     ".env.example",
+    "Dockerfile",
     "README.md",
     "agent.py",
     "compile-report.json",
+    "livekit.toml",
     "pyproject.toml"
   ],
   "required_env": [
@@ -452,11 +501,14 @@ if __name__ == "__main__":
     "listen: slng via slng.STT (livekit-plugins-slng\u003e=1.6.1, verified 2026-07-15)",
     "reason: openai via inference.LLM (ships with the framework, verified 2026-07-15)",
     "speak: slng via slng.TTS (livekit-plugins-slng\u003e=1.6.1, verified 2026-07-15)",
-    "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory",
-    "conversation.inactivity is not emitted yet",
-    "conversation.max_duration is not emitted yet"
+    "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory"
   ]
 }
+=== livekit.toml ===
+# LiveKit Cloud agent config (`lk agent create` fills project/subdomain on
+# first deploy; the id below matches the worker's agent_name).
+[agent]
+  id = "livekit-dev"
 === pyproject.toml ===
 [project]
 name = "livekit-dev"

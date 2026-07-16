@@ -58,7 +58,7 @@ A group ([learn page 06](../learn/06-task-groups.md)) is an ordered list of task
 - **LiveKit**: a `TaskGroup` container. The generated code adds each step and awaits the whole group; the results come back together.
 - **Pipecat**: a chain of re-programmings. Each step's `finish` function returns the *next* step's configuration, so the agent walks the chain one node at a time until the last `finish`.
 
-`context_scope` maps naturally on both. On Pipecat, `shared` means each step keeps seeing the growing conversation, and `isolated` means each step starts from a clean context.
+`context_scope` works on both, with one structural twist. On Pipecat, `shared` means each step keeps seeing the growing conversation, and `isolated` resets the context per node. On LiveKit, `TaskGroup` always shares context, so `isolated` compiles to something else entirely: a plain sequence of standalone `AgentTask`s, each starting fresh, with the results collected into the same shape a group would return. Same yaml, same contract, different container.
 
 ## The part that is identical on purpose
 

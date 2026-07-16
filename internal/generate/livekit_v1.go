@@ -46,16 +46,30 @@ type livekitService struct {
 	Vendor string
 }
 
+// livekitLLM is a reason profile's resolved model plus its fallback chain
+// (V4): a non-empty Chain renders as llm.FallbackAdapter(llm=[...]).
+type livekitLLM struct {
+	Primary livekitService
+	Chain   []livekitService
+}
+
+func (l livekitLLM) services() []livekitService {
+	return append([]livekitService{l.Primary}, l.Chain...)
+}
+
 type livekitAgent struct {
-	Name        string
-	Class       string
-	PromptConst string
-	IsEntry     bool
-	LLM         *livekitService // set only when it differs from the session default
-	TTS         *livekitService // set only when it differs from the session default
-	Greeting    *livekitGreeting
-	Transfers   []livekitTransfer
-	Delegates   []livekitDelegate
+	Name           string
+	Class          string
+	PromptConst    string
+	IsEntry        bool
+	LLM            *livekitLLM     // set only when it differs from the session default
+	TTS            *livekitService // set only when it differs from the session default
+	Greeting       *livekitGreeting
+	Tools          []livekitTool
+	MCPServers     []livekitMCPServer
+	Transfers      []livekitTransfer
+	HumanTransfers []livekitHumanTransfer
+	Delegates      []livekitDelegate
 }
 
 // livekitGreeting drives the entry agent's on_enter: a fixed line, a
@@ -66,22 +80,74 @@ type livekitGreeting struct {
 	Silent bool
 }
 
+// livekitTransfer carries the shaped context of an agent_transfer (V5): a
+// prebuilt Python expression for the handed-over ChatContext ("" = history:
+// reset, the target starts fresh), an optional generated summarizer, and the
+// userdata fields the transfer does not carry (context.variables subset).
 type livekitTransfer struct {
 	Method      string
 	When        string
 	TargetClass string
+	Requires    []string    // guard: refuse until these userdata fields are set (V7)
+	CtxExpr     string      // Python expr for chat_ctx=; "" = reset
+	Summary     *livekitLLM // set for history: summary — _summarize before handoff
+	ResetVars   []livekitVar
 }
 
-// livekitDelegate builds a TaskGroup, awaits it, and hands control on per the
-// group's `then`: return the typed results to the owner (merge: results),
-// transfer to another agent, or end the call. N13: the flow's own turns never
-// land in the owner's context regardless of which path is taken.
+// livekitHumanTransfer lowers a human_transfer control (V6): cold is a SIP
+// REFER through the job context; warm awaits the prebuilt WarmTransferTask
+// (beta.workflows, Beta on Python) whose consultation flow briefs the operator
+// (briefing: summary).
+type livekitHumanTransfer struct {
+	Method string
+	When   string
+	To     string // resolved destination: a number or SIP URI
+	Warm   bool
+}
+
+// livekitOutbound is the telephony outbound + AMD voicemail lowering (V8/N6).
+type livekitOutbound struct {
+	LeaveMessage bool // on_voicemail: leave_message (false = hangup)
+}
+
+// livekitDelegate lowers a delegate control. A single task awaits its
+// AgentTask directly (typed-result-only return, C4) and applies `assign`; a
+// group builds a TaskGroup, awaits it, and hands control on per the group's
+// `then`: return the typed results to the owner (merge: results), transfer to
+// another agent, or end the call. N13: the flow's own turns never land in the
+// owner's context regardless of which path is taken.
 type livekitDelegate struct {
 	Method    string
 	When      string
+	Task      *livekitSingleTask // set for a single-task delegate; Steps empty
 	Steps     []livekitStep
+	Isolated  bool   // context_scope: isolated — standalone-AgentTask sequence, no TaskGroup (C3)
 	Then      string // "return" | "transfer" | "end"
 	ThenClass string // target Agent class, set only for then: transfer
+}
+
+// livekitSingleTask is the task side of a single-task delegate: the AgentTask
+// class to await plus the `assign` writes into the typed userdata (N5). The
+// task's own context (N12) shapes what the AgentTask sees on entry.
+type livekitSingleTask struct {
+	Class   string
+	ID      string
+	Assign  []livekitAssign
+	CtxExpr string      // Python expr for chat_ctx=; "" = reset (fresh task)
+	Summary *livekitLLM // set for history: summary
+}
+
+type livekitAssign struct {
+	Var   string
+	Field string
+}
+
+// livekitVar is one typed shared-state field on the generated Userdata
+// dataclass (SCHEMA 4.4; LiveKit session userdata).
+type livekitVar struct {
+	Name    string
+	PyType  string
+	Default string // Python literal; "None" when the spec declares none
 }
 
 type livekitStep struct {
@@ -94,15 +160,40 @@ type livekitTask struct {
 	Name        string
 	Class       string
 	PromptConst string
+	LLM         *livekitLLM  // per-task model override (B1); nil = session LLM
 	Result      []livekitArg // finish() args + the completed result dict
 	Tools       []livekitTool
+	MCPServers  []livekitMCPServer
 }
 
 type livekitTool struct {
-	Method      string
-	Description string
-	URLEnv      string
-	Args        []livekitArg
+	Method           string
+	Description      string
+	URLEnv           string
+	Args             []livekitArg
+	Local            bool // execution: local — call the copied handler module
+	EndsConversation bool // effect: ends_conversation — shutdown after the call
+}
+
+// livekitMCPServer is one MCP server an agent or task mounts (B3): the tools
+// sharing a url_env collapse to one MCPServerHTTP with allowed_tools (D8).
+type livekitMCPServer struct {
+	URLEnv string
+	Tools  []string
+}
+
+// livekitLocalTool is a copied handler file: tools/<name>.py in the project.
+type livekitLocalTool struct {
+	Name   string
+	Source string
+}
+
+// livekitInterruption is the conversation.interruption block (V16): enabled
+// and min_words lower to the session's InterruptionOptions; ignore phrases
+// lower to the generated stt_node filter mixin.
+type livekitInterruption struct {
+	Enabled  bool
+	MinWords int
 }
 
 type livekitArg struct {
@@ -122,19 +213,78 @@ type livekitData struct {
 	AgentName     string
 	EntryClass    string
 	STT           livekitService
-	SessionLLM    livekitService
+	SessionLLM    livekitLLM
 	SessionTTS    livekitService
 	TurnVersion   string
 	Agents        []livekitAgent
 	Tasks         []livekitTask
+	Vars          []livekitVar
+	LocalTools    []livekitLocalTool // copied handler files (tools/<name>.py)
+	Pins          map[string]string  // plugin pins (C6): raise dep floors
 	Prompts       []livekitPrompt
 	PluginModules []string // merged `from livekit.plugins import ...` names
 	Deps          []string
 	RequiredEnv   []string
 	Notes         []string
 
-	NeedsTasks bool // AgentTask / TaskGroup imports
-	NeedsHTTPX bool // any webhook tool
+	NeedsTasks      bool // AgentTask import
+	NeedsTaskGroups bool // beta.workflows TaskGroup import
+	NeedsHTTPX      bool // any webhook tool
+	HasVars         bool // Userdata dataclass + session userdata
+	NeedsLastN      bool // the _last_n history helper
+	NeedsSummarize  bool // the _summarize history helper
+	NeedsAsyncio    bool // inactivity end / max_duration timers
+	NeedsInspect    bool // local tool wrappers (isawaitable)
+	NeedsMCP        bool // mcp import (MCPServerHTTP)
+	HasColdTransfer bool // get_job_context import
+	HasWarmTransfer bool // WarmTransferTask import + trunk env
+	Outbound        *livekitOutbound
+
+	// Conversation shaping (V16).
+	ThinkingAudio          bool // subtle → BackgroundAudioPlayer thinking sound
+	Interruption           *livekitInterruption
+	IgnorePhrases          []string // generated stt_node filter mixin
+	InactivityNudgeSecs    int
+	InactivityEndSecs      int
+	InactivityEndDeltaSecs int // end_after minus nudge_after, floored at 1s
+	MaxDurationSecs        int
+}
+
+// livekitEmittedFields declares every capability field the LiveKit emitter has
+// a real code path for. It MUST equal the table's non-gated LiveKit rows — the
+// V15 agreement test enforces it, so a field can never be validate-green while
+// the emitter silently drops it (B1). Add a row here only with the code.
+var livekitEmittedFields = map[targetcap.Field]bool{
+	targetcap.FieldListenLocal:           true, // placement forwarded (code target runs it locally)
+	targetcap.FieldSpeakLocal:            true,
+	targetcap.FieldReasonLocal:           true,
+	targetcap.FieldTurnPlacement:         true, // advisory (Inference turn detection supplied)
+	targetcap.FieldSemanticEndpointing:   true, // advisory
+	targetcap.FieldFallback:              true, // llm.FallbackAdapter (V4)
+	targetcap.FieldTask:                  true, // AgentTask; single delegate awaits it (T12)
+	targetcap.FieldTaskModel:             true, // AgentTask(llm=...) (T14, B1)
+	targetcap.FieldTaskNestedResult:      true, // dict finish arg
+	targetcap.FieldTaskGroup:             true, // beta.workflows TaskGroup (warn: experimental)
+	targetcap.FieldTaskGroupReturn:       true, // N13 snapshot/restore + task_results
+	targetcap.FieldContextIsolated:       true, // standalone-AgentTask sequence (T13)
+	targetcap.FieldTransferRequires:      true, // generated guard naming unmet vars (V7)
+	targetcap.FieldContextNoToolCalls:    true, // copy(exclude_function_call=True)
+	targetcap.FieldContextVariableSubset: true, // uncarried userdata fields reset (D7)
+	targetcap.FieldBriefingSummary:       true, // WarmTransferTask consultation flow
+	targetcap.FieldGreetingUserFirst:     true,
+	targetcap.FieldGreetingModelWritten:  true,
+	targetcap.FieldGreetingAbsent:        true,
+	targetcap.FieldInterruptionMinWords:  true, // TurnHandlingOptions interruption min_words
+	targetcap.FieldInterruptionIgnore:    true, // generated stt_node filter mixin
+	targetcap.FieldInactivity:            true, // user_away_timeout + away handler
+	targetcap.FieldMaxDuration:           true, // asyncio shutdown timer
+	targetcap.FieldThinkingAudio:         true, // BackgroundAudioPlayer thinking sound
+	targetcap.FieldToolOutput:            true, // tool returns response.json()
+	targetcap.FieldToolLocal:             true, // handler copied + wrapped
+	targetcap.FieldToolMCP:               true, // mcp.MCPServerHTTP mounts (B3)
+	targetcap.FieldToolInterruption:      true, // warn: runs to completion
+	targetcap.FieldOutbound:              true, // SIP dial-out off job metadata
+	targetcap.FieldVoicemail:             true, // AMD machine-vm branches (N6)
 }
 
 // GenerateLiveKit lowers a validated agent + livekit target into a project. The
@@ -166,6 +316,61 @@ func GenerateLiveKit(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedB
 	}, nil
 }
 
+// checkLiveKitPins validates plugin pins (C6): a pin key must be a catalogued
+// standalone package or the silero VAD plugin, its value must be a semantic
+// version at or above the catalogue floor. The pin then raises the dep floor
+// in livekitDeps. Unknown keys fail loud — a typo must not silently drop.
+func checkLiveKitPins(pins map[string]string) error {
+	floors := defaultCatalog.Packages(targetcap.LiveKit)
+	floors["livekit-plugins-silero"] = ">=1.6.1" // always emitted (session VAD)
+	names := make([]string, 0, len(pins))
+	for name := range pins {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		floor, ok := floors[name]
+		if !ok {
+			known := make([]string, 0, len(floors))
+			for k := range floors {
+				known = append(known, k)
+			}
+			sort.Strings(known)
+			return fmt.Errorf("livekit pin %q is not a pinnable package; known: %s", name, strings.Join(known, ", "))
+		}
+		pinned, ok := parseLiveKitVersion(pins[name])
+		if !ok {
+			return fmt.Errorf("livekit pin %s: %q is not a semantic version", name, pins[name])
+		}
+		min, ok := parseLiveKitVersion(strings.TrimPrefix(floor, ">="))
+		if ok && lessLiveKitVersion(pinned, min) {
+			return fmt.Errorf("livekit pin %s %q is below the catalogue floor %s", name, pins[name], floor)
+		}
+	}
+	return nil
+}
+
+func parseLiveKitVersion(v string) ([3]int, bool) {
+	match := livekitVersionPattern.FindStringSubmatch(v)
+	if match == nil {
+		return [3]int{}, false
+	}
+	var out [3]int
+	for i, part := range match[1:] {
+		out[i], _ = strconv.Atoi(part)
+	}
+	return out, true
+}
+
+func lessLiveKitVersion(a, b [3]int) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return false
+}
+
 // checkLiveKitVersion rejects a framework version outside the templates' range.
 func checkLiveKitVersion(version string) error {
 	if version == "" {
@@ -189,6 +394,8 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		{"pyproject.toml", "pyproject.toml"},
 		{"README.md", "README.md"},
 		{"env.example", ".env.example"},
+		{"Dockerfile", "Dockerfile"},
+		{"livekit.toml", "livekit.toml"},
 	}
 	var files []File
 	for _, o := range outputs {
@@ -197,6 +404,14 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 			return nil, err
 		}
 		files = append(files, File{Path: o.path, Content: content})
+	}
+	// Local tool handlers are copied verbatim from the source package (SCHEMA
+	// §5: code targets host the handler).
+	if len(data.LocalTools) > 0 {
+		files = append(files, File{Path: "tools/__init__.py", Content: []byte("")})
+		for _, lt := range data.LocalTools {
+			files = append(files, File{Path: "tools/" + lt.Name + ".py", Content: []byte(lt.Source)})
+		}
 	}
 	return files, nil
 }

@@ -13,6 +13,7 @@ type Package struct {
 
 	Root     string            `json:"-" yaml:"-"`
 	Markdown map[string]string `json:"-" yaml:"-"`
+	Handlers map[string]string `json:"-" yaml:"-"` // local tool handler sources, by path
 	files    map[string][]byte
 }
 

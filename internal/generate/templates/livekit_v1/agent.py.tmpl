@@ -2,11 +2,59 @@
 Classes, kwargs, and model-route forms come from the provider catalogue
 (internal/target/catalog_livekit.go). */ -}}
 {{define "svc"}}{{.Class}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Key}}={{$a.Value}}{{end}}){{end -}}
-import logging
+{{- /* llmexpr renders a reason profile: bare service, or the native
+llm.FallbackAdapter around its fallback chain (V4). */ -}}
+{{define "llmexpr"}}{{if .Chain}}llm.FallbackAdapter(llm=[{{template "svc" .Primary.Call}}{{range .Chain}}, {{template "svc" .Call}}{{end}}]){{else}}{{template "svc" .Primary.Call}}{{end}}{{end -}}
+{{- /* webhook_tool renders one webhook tool as a @function_tool method;
+agents and tasks share the shape (T15). */ -}}
+{{define "webhook_tool"}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.PyType}}{{end}}) -> dict:
+        {{triple .Description}}
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                os.environ[{{pyq .URLEnv}}],
+                json={ {{- range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end -}} },
+            )
+            resp.raise_for_status()
+{{- if .EndsConversation}}
+            self.session.shutdown()  # effect: ends_conversation
+{{- end}}
+            return resp.json()
+{{end -}}
+{{- /* local_tool calls the handler copied from the source package (SCHEMA §5:
+the file defines a callable named like the tool; sync or async). */ -}}
+{{define "local_tool"}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.PyType}}{{end}}) -> dict:
+        {{triple .Description}}
+        result = tools.{{.Method}}.{{.Method}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Name}}={{$a.Name}}{{end}})
+        if inspect.isawaitable(result):
+            result = await result
+{{- if .EndsConversation}}
+        self.session.shutdown()  # effect: ends_conversation
+{{- end}}
+        return result
+{{end -}}
+{{- /* method_tool dispatches on execution. */ -}}
+{{define "method_tool"}}{{if .Local}}{{template "local_tool" .}}{{else}}{{template "webhook_tool" .}}{{end}}{{end -}}
+{{- /* mcp_mounts renders an agent's/task's MCP servers (B3): one server per
+url_env, allowed_tools keeping D8 visibility. */ -}}
+{{define "mcp_mounts"}}mcp_servers=[{{range $i, $s := .}}{{if $i}}, {{end}}mcp.MCPServerHTTP(url=os.environ[{{pyq $s.URLEnv}}], allowed_tools=[{{range $j, $t := $s.Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]){{end}}]{{end -}}
+{{if .NeedsAsyncio}}import asyncio
+{{end}}{{if .NeedsInspect}}import inspect
+{{end}}{{if .Outbound}}import json
+{{end}}import logging
 import os
-{{if .NeedsHTTPX}}import httpx
+{{if .HasVars}}from dataclasses import dataclass
+{{end}}{{if .NeedsHTTPX}}import httpx
+{{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
-from livekit.agents import (
+{{if .Outbound}}from livekit import api
+{{end}}from livekit.agents import (
+{{- if .Outbound}}
+    AMD,
+{{- end}}
     NOT_GIVEN,
     Agent,
 {{- if .NeedsTasks}}
@@ -14,6 +62,10 @@ from livekit.agents import (
 {{- end}}
     AgentServer,
     AgentSession,
+{{- if .ThinkingAudio}}
+    BackgroundAudioPlayer,
+    BuiltinAudioClip,
+{{- end}}
     JobContext,
     JobProcess,
     NotGivenOr,
@@ -21,12 +73,21 @@ from livekit.agents import (
     TurnHandlingOptions,
     cli,
     function_tool,
+{{- if .HasColdTransfer}}
+    get_job_context,
+{{- end}}
     inference,
     llm,
+{{- if .NeedsMCP}}
+    mcp,
+{{- end}}
     metrics,
+{{- if .IgnorePhrases}}
+    stt,
+{{- end}}
 )
-{{- if .NeedsTasks}}
-from livekit.agents.beta.workflows import TaskGroup
+{{- if or .NeedsTaskGroups .HasWarmTransfer}}
+from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskGroup{{if .HasWarmTransfer}}, WarmTransferTask{{end}}{{else}}WarmTransferTask{{end}}
 {{- end}}
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import {{join .PluginModules ", "}}
@@ -41,18 +102,85 @@ load_dotenv(".env.local")
 {{range .Prompts}}
 {{.Const}} = {{triple .Body}}
 {{end}}
+{{- if or .NeedsLastN .NeedsSummarize}}
+# --- context shaping ---------------------------------------------------------
+{{- if .NeedsLastN}}
+def _last_n(source: llm.ChatContext, n: int, *, exclude_function_call: bool = False) -> llm.ChatContext:
+    """history: last_n — the newest n items; truncate() keeps call/output pairs."""
+    ctx = source.copy(exclude_instructions=True, exclude_function_call=exclude_function_call)
+    ctx.truncate(max_items=n)
+    return ctx
+{{end}}
+{{- if .NeedsSummarize}}
+async def _summarize(source: llm.ChatContext, summarizer: llm.LLM) -> llm.ChatContext:
+    """history: summary — one summarizer turn replaces the running transcript."""
+    transcript = "\n".join(
+        f"{m.role}: {m.text_content}" for m in source.messages() if m.text_content
+    )
+    prompt = llm.ChatContext()
+    prompt.add_message(
+        role="system",
+        content="Summarize this conversation for the agent taking over. Keep names, facts, and open commitments. Reply with the summary only.",
+    )
+    prompt.add_message(role="user", content=transcript)
+    parts: list[str] = []
+    async with summarizer.chat(chat_ctx=prompt) as stream:
+        async for chunk in stream:
+            if chunk.delta and chunk.delta.content:
+                parts.append(chunk.delta.content)
+    out = llm.ChatContext()
+    out.add_message(role="assistant", content="Summary of the conversation so far: " + "".join(parts))
+    return out
+{{end}}
+{{end}}
+{{- if .HasVars}}
+# --- shared state ------------------------------------------------------------
+# Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
+@dataclass
+class Userdata:
+{{- range .Vars}}
+    {{.Name}}: {{.PyType}} | None = {{.Default}}
+{{- end}}
+
+{{end}}
+{{- if .IgnorePhrases}}
+# --- interruption shaping ----------------------------------------------------
+IGNORE_PHRASES = [{{range $i, $p := .IgnorePhrases}}{{if $i}}, {{end}}{{pyq $p}}{{end}}]
+
+
+class IgnorePhrasesMixin:
+    """interruption.ignore_phrases (generated): matching final transcripts are
+    dropped before turn handling, so they neither interrupt nor reach the LLM."""
+
+    def stt_node(self, audio, model_settings):
+        async def _filtered():
+            async for event in Agent.default.stt_node(self, audio, model_settings):
+                if (
+                    event.type == stt.SpeechEventType.FINAL_TRANSCRIPT
+                    and event.alternatives
+                    and event.alternatives[0].text.strip().lower().strip(" .,!?") in IGNORE_PHRASES
+                ):
+                    continue
+                yield event
+
+        return _filtered()
+
+{{end}}
 # --- agents ----------------------------------------------------------------
 {{range .Agents}}
-class {{.Class}}(Agent):
+class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(
             instructions={{.PromptConst}},
             chat_ctx=chat_ctx,
 {{- if .LLM}}
-            llm={{template "svc" .LLM.Call}},
+            llm={{template "llmexpr" .LLM}},
 {{- end}}
 {{- if .TTS}}
             tts={{template "svc" .TTS.Call}},
+{{- end}}
+{{- if .MCPServers}}
+            {{template "mcp_mounts" .MCPServers}},
 {{- end}}
         )
 
@@ -70,13 +198,88 @@ class {{.Class}}(Agent):
             instructions="You are now handling this. Continue in one short line; do not greet again."
         )
 {{- end}}
+{{- range .Tools}}{{template "method_tool" .}}{{end}}
 {{range .Transfers}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext):
         {{triple .When}}
-        return {{.TargetClass}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
+{{- if .Requires}}
+        missing = [n for n, v in ({{range .Requires}}({{pyq .}}, ctx.userdata.{{.}}), {{end}}) if v is None]
+        if missing:
+            # requires guard (machine-checked): refuse and name the unmet variables.
+            return "Cannot transfer yet; missing required information: " + ", ".join(missing)
+{{- end}}
+{{- range .ResetVars}}
+        ctx.userdata.{{.Name}} = {{.Default}}  # context.variables: not carried on this transfer
+{{- end}}
+{{- if .Summary}}
+        summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Summary}})
+        return {{.TargetClass}}(chat_ctx=summary_ctx)
+{{- else if .CtxExpr}}
+        return {{.TargetClass}}(chat_ctx={{.CtxExpr}})
+{{- else}}
+        # history: reset — the target starts fresh (a handoff marker still lands).
+        return {{.TargetClass}}()
+{{- end}}
+{{end}}
+{{- range .HumanTransfers}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext) -> str:
+        {{triple .When}}
+{{- if .Warm}}
+        # mode: warm — the prebuilt consultation flow briefs the human agent
+        # (briefing: summary) before connecting the caller. Beta on Python.
+        result = await WarmTransferTask(sip_call_to={{pyq .To}})
+        return "The caller is now connected to " + result.human_agent_identity + "."
+{{- else}}
+        # mode: cold — SIP REFER through the job context.
+        job_ctx = get_job_context()
+        identity = next(iter(job_ctx.room.remote_participants))
+        await job_ctx.transfer_sip_participant(identity, {{pyq .To}}, play_dialtone=True)
+        return "The caller was transferred."
+{{- end}}
 {{end}}
 {{- range .Delegates}}
+{{- if .Task}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext) -> dict:
+        {{triple .When}}
+{{- if .Task.Summary}}
+        summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Task.Summary}})
+        result = await {{.Task.Class}}(chat_ctx=summary_ctx)
+{{- else if .Task.CtxExpr}}
+        result = await {{.Task.Class}}(chat_ctx={{.Task.CtxExpr}})
+{{- else}}
+        result = await {{.Task.Class}}()  # history: reset — the task starts fresh
+{{- end}}
+{{- range .Task.Assign}}
+        ctx.userdata.{{.Var}} = result[{{pyq .Field}}]
+{{- end}}
+        # C4/N13: the task's turns are not propagated back; the typed result is
+        # the only return.
+        return result
+{{- else if .Isolated}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{end}}:
+        {{triple .When}}
+        # context_scope: isolated — each step is a standalone AgentTask starting
+        # fresh (C3/C4); the grouped form always shares context, so it is not used.
+        task_results: dict = {}
+{{- range .Steps}}
+        task_results[{{pyq .ID}}] = await {{.Class}}()
+{{- end}}
+{{- if eq .Then "return"}}
+        # N13: standalone tasks never merge their turns back; hand the owner the
+        # typed results only (merge: results).
+        return task_results
+{{- else if eq .Then "transfer"}}
+        # then: transfer — control moves on and does not return here.
+        return {{.ThenClass}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
+{{- else}}
+        # then: end — the flow is the last thing on the call; this does not return.
+        self.session.shutdown()
+{{- end}}
+{{- else}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{end}}:
         {{triple .When}}
@@ -110,29 +313,19 @@ class {{.Class}}(Agent):
         # then: end — the flow is the last thing on the call; this does not return.
         self.session.shutdown()
 {{- end}}
+{{- end}}
 {{end}}
 {{end}}
 {{- if .NeedsTasks}}
 # --- tasks -----------------------------------------------------------------
 {{range .Tasks}}
-class {{.Class}}(AgentTask[dict]):
+class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
-        super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx)
+        super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if .MCPServers}}, {{template "mcp_mounts" .MCPServers}}{{end}})
 
     async def on_enter(self) -> None:
         self.session.generate_reply(instructions="Begin this step.")
-{{range .Tools}}
-    @function_tool
-    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.PyType}}{{end}}) -> dict:
-        {{triple .Description}}
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                os.environ[{{pyq .URLEnv}}],
-                json={ {{- range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end -}} },
-            )
-            resp.raise_for_status()
-            return resp.json()
-{{end}}
+{{range .Tools}}{{template "method_tool" .}}{{end}}
     @function_tool
     async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.PyType}}{{end}}) -> str:
         """Record the result of this step and finish."""
@@ -152,21 +345,110 @@ server.setup_fnc = prewarm
 
 @server.rtc_session(agent_name={{pyq .AgentName}})
 async def entrypoint(ctx: JobContext) -> None:
-    session = AgentSession(
+    session = AgentSession{{if .HasVars}}[Userdata]{{end}}(
+{{- if .HasVars}}
+        userdata=Userdata(),
+{{- end}}
         stt={{template "svc" .STT.Call}},
-        llm={{template "svc" .SessionLLM.Call}},
+        llm={{template "llmexpr" .SessionLLM}},
         tts={{template "svc" .SessionTTS.Call}},
+{{- if .Interruption}}
+        turn_handling=TurnHandlingOptions(
+            turn_detection=inference.TurnDetector(version={{pyq .TurnVersion}}),
+            interruption={"enabled": {{if .Interruption.Enabled}}True{{else}}False{{end}}{{if .Interruption.MinWords}}, "min_words": {{.Interruption.MinWords}}{{end}}},
+        ),
+{{- else}}
         turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector(version={{pyq .TurnVersion}})),
+{{- end}}
         vad=ctx.proc.userdata["vad"],
+{{- if or .InactivityNudgeSecs .InactivityEndSecs}}
+        user_away_timeout={{if .InactivityNudgeSecs}}{{.InactivityNudgeSecs}}{{else}}{{.InactivityEndSecs}}{{end}},
+{{- end}}
         preemptive_generation=True,
     )
 
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
         metrics.log_metrics(ev.metrics)
+{{- if or .InactivityNudgeSecs .InactivityEndSecs}}
+{{- if and .InactivityNudgeSecs .InactivityEndSecs}}
+
+    async def _end_if_still_away() -> None:
+        await asyncio.sleep({{.InactivityEndDeltaSecs}})  # inactivity.end_after
+        if session.user_state == "away":
+            session.shutdown()
+{{- end}}
+
+    @session.on("user_state_changed")
+    def _on_user_state_changed(ev) -> None:
+        if ev.new_state != "away":
+            return
+{{- if .InactivityNudgeSecs}}
+        session.generate_reply(
+            instructions="The caller went quiet. Briefly check whether they are still there."
+        )
+{{- if .InactivityEndSecs}}
+        asyncio.create_task(_end_if_still_away())
+{{- end}}
+{{- else}}
+        session.shutdown()  # inactivity.end_after with no nudge
+{{- end}}
+{{- end}}
 
     await session.start(agent={{.EntryClass}}(), room=ctx.room)
     await ctx.connect()
+{{- if .Outbound}}
+
+    # channels.telephony outbound: a job dispatched with {"phone_number": ...}
+    # metadata dials out; AMD classifies who answered (playout stays locked
+    # until the verdict, so the greeting waits for a human).
+    phone_number = None
+    if ctx.job.metadata:
+        phone_number = json.loads(ctx.job.metadata).get("phone_number")
+    if phone_number:
+        if not session.room_io:
+            raise RuntimeError("session room_io is unavailable")
+        session.room_io.set_participant("phone_user")
+        async with AMD(session, participant_identity="phone_user") as detector:
+            await ctx.api.sip.create_sip_participant(
+                api.CreateSIPParticipantRequest(
+                    room_name=ctx.room.name,
+                    sip_trunk_id=os.environ["LIVEKIT_SIP_OUTBOUND_TRUNK"],
+                    sip_call_to=phone_number,
+                    participant_identity="phone_user",
+                    wait_until_answered=True,
+                )
+            )
+            await ctx.wait_for_participant(identity="phone_user")
+            result = await detector.execute()
+        if result.category == "machine-vm":
+{{- if .Outbound.LeaveMessage}}
+            handle = session.generate_reply(
+                instructions="You reached voicemail. Leave a brief message and say you will call back."
+            )
+            await handle.wait_for_playout()
+            ctx.shutdown("voicemail: left a message")  # on_voicemail: leave_message
+{{- else}}
+            ctx.shutdown("voicemail detected")  # on_voicemail: hangup
+{{- end}}
+        elif result.category == "machine-unavailable":
+            ctx.shutdown("mailbox unavailable")
+{{- end}}
+{{- if .MaxDurationSecs}}
+
+    async def _max_duration() -> None:
+        await asyncio.sleep({{.MaxDurationSecs}})
+        session.shutdown()  # conversation.max_duration
+
+    asyncio.create_task(_max_duration())
+{{- end}}
+{{- if .ThinkingAudio}}
+
+    background_audio = BackgroundAudioPlayer(
+        thinking_sound=BuiltinAudioClip.KEYBOARD_TYPING,  # thinking_audio: subtle
+    )
+    await background_audio.start(room=ctx.room, agent_session=session)
+{{- end}}
 
 
 if __name__ == "__main__":

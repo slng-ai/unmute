@@ -19,6 +19,7 @@ func Load(dir string) (*Package, error) {
 		Root:     root,
 		Tools:    make(map[string]Tool),
 		Markdown: make(map[string]string),
+		Handlers: make(map[string]string),
 		files:    make(map[string][]byte),
 	}
 	if err := pkg.readYAML("agent.yaml", &pkg.Agent); err != nil {
@@ -34,6 +35,19 @@ func Load(dir string) (*Package, error) {
 			return nil, err
 		}
 		pkg.Tools[name] = tool
+		// A local tool's handler travels with the package (code targets copy
+		// it into the generated project), so load it like instructions.
+		if tool.Execution == "local" {
+			handler := tool.Handler
+			if handler == "" {
+				handler = filepath.Join("tools", name+".py")
+			}
+			content, err := readWithin(root, handler)
+			if err != nil {
+				return nil, err
+			}
+			pkg.Handlers[handler] = string(content)
+		}
 	}
 
 	var targets TargetsFile

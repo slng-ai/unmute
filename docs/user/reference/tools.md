@@ -66,15 +66,15 @@ Required: conditional (iff `execution: local`). Values: a path, default `<name>.
 
 ### url_env
 
-The environment variable holding the endpoint URL for a webhook tool. A variable name, never a URL value.
+The environment variable holding the tool's endpoint. A variable name, never a URL value. For a `webhook` tool it is the webhook URL; for an `mcp` tool it is the MCP server address.
 
-Required: conditional (iff `execution: webhook`). Values: an environment variable name. Default: none. Targets: all five, core.
+Required: conditional (iff `execution: webhook` or `mcp`). Values: an environment variable name. Default: none. Targets: all five, core.
 
 ### interruption
 
 What happens if the caller talks while the tool runs.
 
-Required: no. Values: `continue | cancel | provider_default`. Default: `provider_default`. Tag: warn. Honored on code targets. On managed targets only `provider_default` means anything; other values warn.
+Required: no. Values: `continue | cancel | provider_default`. Default: `provider_default`. Tag: warn. Honored on Pipecat. On LiveKit tools run to completion, so non-default values warn there. On managed targets only `provider_default` means anything; other values warn.
 
 ### effect
 

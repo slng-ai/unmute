@@ -124,6 +124,18 @@ func DefaultCatalog() Catalog {
 
 // Lookup resolves a binding vendor. Exact vendor (or alias) wins; otherwise
 // the role's wildcard row, if any. The caller checks RequiresEndpoint.
+// Packages lists a framework's standalone install packages and their version
+// floors (constraint with the leading ">=" intact), for pin validation.
+func (c Catalog) Packages(fw Provider) map[string]string {
+	out := map[string]string{}
+	for _, e := range c.entries {
+		if e.Framework == fw && e.Install.Package != "" {
+			out[e.Install.Package] = e.Install.Constraint
+		}
+	}
+	return out
+}
+
 func (c Catalog) Lookup(fw Provider, role Role, vendor string) (Entry, bool) {
 	var wildcard *Entry
 	for i := range c.entries {

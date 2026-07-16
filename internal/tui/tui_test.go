@@ -241,8 +241,10 @@ func TestV19TaskAssignmentPicksSavedVariableAndResultField(t *testing.T) {
 }
 
 func TestV21PreflightFailureUsesDedicatedScreen(t *testing.T) {
+	// Pipecat still gates fallback (driver-pipecat C9/B7); livekit emits it
+	// natively since driver-livekit T5, so the failure fixture lives here.
 	data := scaffold.Data{Name: "agent", Language: "en", Channel: "web"}
-	data.SetTarget("livekit")
+	data.SetTarget("pipecat")
 	data.Fallbacks = []scaffold.ModelFallback{{Name: "backup", Profile: "assistant_model", Binding: data.Reason}}
 	var output bytes.Buffer
 	_, back, err := editAgent(newRunner(strings.NewReader("16\n10\n17\n"), &output, true), Agent{Path: "agent", Data: data})
@@ -252,7 +254,7 @@ func TestV21PreflightFailureUsesDedicatedScreen(t *testing.T) {
 	if !back {
 		t.Fatal("editAgent() did not return through Back")
 	}
-	for _, want := range []string{"Cannot create agent", "Fix the configuration, then go Back", "does not emit model fallback", "Review / delete model fallbacks"} {
+	for _, want := range []string{"Cannot create agent", "Fix the configuration, then go Back", "does not emit generated fallback", "Review / delete model fallbacks"} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("preflight screen missing %q:\n%s", want, output.String())
 		}
