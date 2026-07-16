@@ -23,12 +23,17 @@ agents and tasks share the shape (T15). */ -}}
             return resp.json()
 {{end -}}
 {{if .NeedsAsyncio}}import asyncio
+{{end}}{{if .Outbound}}import json
 {{end}}import logging
 import os
 {{if .HasVars}}from dataclasses import dataclass
 {{end}}{{if .NeedsHTTPX}}import httpx
 {{end}}from dotenv import load_dotenv
-from livekit.agents import (
+{{if .Outbound}}from livekit import api
+{{end}}from livekit.agents import (
+{{- if .Outbound}}
+    AMD,
+{{- end}}
     NOT_GIVEN,
     Agent,
 {{- if .NeedsTasks}}
@@ -47,6 +52,9 @@ from livekit.agents import (
     TurnHandlingOptions,
     cli,
     function_tool,
+{{- if .HasColdTransfer}}
+    get_job_context,
+{{- end}}
     inference,
     llm,
     metrics,
@@ -54,8 +62,8 @@ from livekit.agents import (
     stt,
 {{- end}}
 )
-{{- if .NeedsTaskGroups}}
-from livekit.agents.beta.workflows import TaskGroup
+{{- if or .NeedsTaskGroups .HasWarmTransfer}}
+from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskGroup{{if .HasWarmTransfer}}, WarmTransferTask{{end}}{{else}}WarmTransferTask{{end}}
 {{- end}}
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import {{join .PluginModules ", "}}
@@ -168,6 +176,12 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
     @function_tool
     async def {{.Method}}(self, ctx: RunContext):
         {{triple .When}}
+{{- if .Requires}}
+        missing = [n for n, v in ({{range .Requires}}({{pyq .}}, ctx.userdata.{{.}}), {{end}}) if v is None]
+        if missing:
+            # requires guard (machine-checked): refuse and name the unmet variables.
+            return "Cannot transfer yet; missing required information: " + ", ".join(missing)
+{{- end}}
 {{- range .ResetVars}}
         ctx.userdata.{{.Name}} = {{.Default}}  # context.variables: not carried on this transfer
 {{- end}}
@@ -179,6 +193,23 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- else}}
         # history: reset — the target starts fresh (a handoff marker still lands).
         return {{.TargetClass}}()
+{{- end}}
+{{end}}
+{{- range .HumanTransfers}}
+    @function_tool
+    async def {{.Method}}(self, ctx: RunContext) -> str:
+        {{triple .When}}
+{{- if .Warm}}
+        # mode: warm — the prebuilt consultation flow briefs the human agent
+        # (briefing: summary) before connecting the caller. Beta on Python.
+        result = await WarmTransferTask(sip_call_to={{pyq .To}})
+        return "The caller is now connected to " + result.human_agent_identity + "."
+{{- else}}
+        # mode: cold — SIP REFER through the job context.
+        job_ctx = get_job_context()
+        identity = next(iter(job_ctx.room.remote_participants))
+        await job_ctx.transfer_sip_participant(identity, {{pyq .To}}, play_dialtone=True)
+        return "The caller was transferred."
 {{- end}}
 {{end}}
 {{- range .Delegates}}
@@ -339,6 +370,43 @@ async def entrypoint(ctx: JobContext) -> None:
 
     await session.start(agent={{.EntryClass}}(), room=ctx.room)
     await ctx.connect()
+{{- if .Outbound}}
+
+    # channels.telephony outbound: a job dispatched with {"phone_number": ...}
+    # metadata dials out; AMD classifies who answered (playout stays locked
+    # until the verdict, so the greeting waits for a human).
+    phone_number = None
+    if ctx.job.metadata:
+        phone_number = json.loads(ctx.job.metadata).get("phone_number")
+    if phone_number:
+        if not session.room_io:
+            raise RuntimeError("session room_io is unavailable")
+        session.room_io.set_participant("phone_user")
+        async with AMD(session, participant_identity="phone_user") as detector:
+            await ctx.api.sip.create_sip_participant(
+                api.CreateSIPParticipantRequest(
+                    room_name=ctx.room.name,
+                    sip_trunk_id=os.environ["LIVEKIT_SIP_OUTBOUND_TRUNK"],
+                    sip_call_to=phone_number,
+                    participant_identity="phone_user",
+                    wait_until_answered=True,
+                )
+            )
+            await ctx.wait_for_participant(identity="phone_user")
+            result = await detector.execute()
+        if result.category == "machine-vm":
+{{- if .Outbound.LeaveMessage}}
+            handle = session.generate_reply(
+                instructions="You reached voicemail. Leave a brief message and say you will call back."
+            )
+            await handle.wait_for_playout()
+            ctx.shutdown("voicemail: left a message")  # on_voicemail: leave_message
+{{- else}}
+            ctx.shutdown("voicemail detected")  # on_voicemail: hangup
+{{- end}}
+        elif result.category == "machine-unavailable":
+            ctx.shutdown("mailbox unavailable")
+{{- end}}
 {{- if .MaxDurationSecs}}
 
     async def _max_duration() -> None:

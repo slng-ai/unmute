@@ -64,10 +64,11 @@ type livekitAgent struct {
 	IsEntry     bool
 	LLM         *livekitLLM     // set only when it differs from the session default
 	TTS         *livekitService // set only when it differs from the session default
-	Greeting    *livekitGreeting
-	Tools       []livekitTool
-	Transfers   []livekitTransfer
-	Delegates   []livekitDelegate
+	Greeting       *livekitGreeting
+	Tools          []livekitTool
+	Transfers      []livekitTransfer
+	HumanTransfers []livekitHumanTransfer
+	Delegates      []livekitDelegate
 }
 
 // livekitGreeting drives the entry agent's on_enter: a fixed line, a
@@ -86,9 +87,26 @@ type livekitTransfer struct {
 	Method      string
 	When        string
 	TargetClass string
+	Requires    []string    // guard: refuse until these userdata fields are set (V7)
 	CtxExpr     string      // Python expr for chat_ctx=; "" = reset
 	Summary     *livekitLLM // set for history: summary — _summarize before handoff
 	ResetVars   []livekitVar
+}
+
+// livekitHumanTransfer lowers a human_transfer control (V6): cold is a SIP
+// REFER through the job context; warm awaits the prebuilt WarmTransferTask
+// (beta.workflows, Beta on Python) whose consultation flow briefs the operator
+// (briefing: summary).
+type livekitHumanTransfer struct {
+	Method string
+	When   string
+	To     string // resolved destination: a number or SIP URI
+	Warm   bool
+}
+
+// livekitOutbound is the telephony outbound + AMD voicemail lowering (V8/N6).
+type livekitOutbound struct {
+	LeaveMessage bool // on_voicemail: leave_message (false = hangup)
 }
 
 // livekitDelegate lowers a delegate control. A single task awaits its
@@ -198,6 +216,9 @@ type livekitData struct {
 	NeedsLastN      bool // the _last_n history helper
 	NeedsSummarize  bool // the _summarize history helper
 	NeedsAsyncio    bool // inactivity end / max_duration timers
+	HasColdTransfer bool // get_job_context import
+	HasWarmTransfer bool // WarmTransferTask import + trunk env
+	Outbound        *livekitOutbound
 
 	// Conversation shaping (V16).
 	ThinkingAudio       bool // subtle → BackgroundAudioPlayer thinking sound

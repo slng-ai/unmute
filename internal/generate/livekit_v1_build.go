@@ -124,7 +124,31 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 
 	applyLiveKitConversation(agent.Conversation, &data)
 
+	// Telephony: outbound + AMD voicemail (V8/N6); cold/warm transfer imports.
+	channelNames := make([]string, 0, len(agent.Channels))
+	for name := range agent.Channels {
+		channelNames = append(channelNames, name)
+	}
+	sort.Strings(channelNames)
+	for _, name := range channelNames {
+		ch := agent.Channels[name]
+		if ch.Kind == ir.ChannelTelephony && ch.Outbound != nil && *ch.Outbound {
+			data.Outbound = &livekitOutbound{LeaveMessage: ch.OnVoicemail == ir.VoicemailLeaveMessage}
+			env.add("LIVEKIT_SIP_OUTBOUND_TRUNK")
+			break
+		}
+	}
+	for _, a := range data.Agents {
+		for _, ht := range a.HumanTransfers {
+			data.HasColdTransfer = data.HasColdTransfer || !ht.Warm
+			data.HasWarmTransfer = data.HasWarmTransfer || ht.Warm
+		}
+	}
+
 	data.Notes = append(data.Notes, livekitServiceNotes(data)...)
+	if data.HasWarmTransfer {
+		data.Notes = append(data.Notes, "human_transfer warm uses livekit-agents beta.workflows on Python (Beta)")
+	}
 	if agent.Pipeline.Turn != nil {
 		data.Notes = append(data.Notes, "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory")
 	}
@@ -195,11 +219,6 @@ func livekitServiceNotes(data livekitData) []string {
 // livekitGuards fails loud on features the driver does not emit yet, so a spec
 // that validates green never silently loses behavior on LiveKit.
 func livekitGuards(agent *ir.Agent) error {
-	for name, ch := range agent.Channels {
-		if ch.Outbound != nil && *ch.Outbound {
-			return fmt.Errorf("livekit driver does not emit outbound calling yet (channel %q)", name)
-		}
-	}
 	return nil
 }
 
@@ -271,11 +290,9 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 		}
 		switch c := control.(type) {
 		case *ir.AgentTransfer:
-			if len(c.Requires) > 0 {
-				return livekitAgent{}, fmt.Errorf("agent %q transfer %q: livekit driver does not emit transfer requires yet", name, ref)
-			}
 			transfer := livekitTransfer{
 				Method: ref, When: transferWhen(c), TargetClass: pyName(c.To),
+				Requires: c.Requires,
 			}
 			if c.Context.History == ir.HistorySummary {
 				summarizer, err := livekitReasonLLM(agent, tgt, c.Context.Summarizer, env)
@@ -307,7 +324,19 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 			}
 			built.Transfers = append(built.Transfers, transfer)
 		case *ir.HumanTransfer:
-			return livekitAgent{}, fmt.Errorf("agent %q: livekit driver does not emit human_transfer yet (%q)", name, ref)
+			dest, ok := tgt.Destinations[c.Destination]
+			if !ok {
+				return livekitAgent{}, fmt.Errorf("agent %q human_transfer %q: destination %q is not in the target's destinations map", name, ref, c.Destination)
+			}
+			ht := livekitHumanTransfer{
+				Method: ref, When: humanTransferWhen(c), To: dest,
+				Warm: c.Mode == ir.TransferWarm,
+			}
+			if ht.Warm {
+				// WarmTransferTask reads LIVEKIT_SIP_OUTBOUND_TRUNK itself.
+				env.add("LIVEKIT_SIP_OUTBOUND_TRUNK")
+			}
+			built.HumanTransfers = append(built.HumanTransfers, ht)
 		case *ir.Delegate:
 			delegate, err := buildLiveKitDelegate(agent, tgt, ref, c, env)
 			if err != nil {
@@ -510,6 +539,13 @@ func transferWhen(c *ir.AgentTransfer) string {
 		return c.When
 	}
 	return "Transfer the caller to the " + c.To + "."
+}
+
+func humanTransferWhen(c *ir.HumanTransfer) string {
+	if c.When != "" {
+		return c.When
+	}
+	return "Transfer the caller to a human agent."
 }
 
 func delegateWhen(c *ir.Delegate) string {

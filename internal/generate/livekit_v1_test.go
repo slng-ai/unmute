@@ -99,18 +99,6 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Provider resolution is the subject here. Interruption shaping and agent
-	// tools emit since T15; only human_transfer stays gated until T6.
-	for name, def := range agent.Agents {
-		var kept []string
-		for _, ref := range def.Tools {
-			if _, isHuman := agent.Controls[ref].(*ir.HumanTransfer); !isHuman {
-				kept = append(kept, ref)
-			}
-		}
-		def.Tools = kept
-		agent.Agents[name] = def
-	}
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
 	tgt.Models.Speak["specialist"] = ir.Binding{
 		Provider: "cartesia", Model: "sonic-3", Voice: "f786b574-daa5-4673-aa0c-cbe3e8534c02",
@@ -486,6 +474,126 @@ func TestLiveKitV1ConversationShapingAndAgentTools(t *testing.T) {
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
+		}
+	}
+}
+
+// TestLiveKitV1HumanTransferColdAndWarm covers the T6 control lowerings (V6):
+// cold is a SIP REFER through the job context with the resolved destination;
+// warm awaits the prebuilt WarmTransferTask and registers the trunk env.
+func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate cold: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		"async def to_human(self, ctx: RunContext) -> str:",
+		"job_ctx = get_job_context()",
+		`await job_ctx.transfer_sip_participant(identity, "+14155550123", play_dialtone=True)`,
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("cold agent.py missing %q", want)
+		}
+	}
+
+	human := agent.Controls["to_human"].(*ir.HumanTransfer)
+	human.Mode = ir.TransferWarm
+	human.Briefing = ir.BriefingSummary
+	artifact, err = Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate warm: %v", err)
+	}
+	botpy = artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		"from livekit.agents.beta.workflows import WarmTransferTask",
+		`result = await WarmTransferTask(sip_call_to="+14155550123")`,
+		"result.human_agent_identity",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("warm agent.py missing %q", want)
+		}
+	}
+	envExample := artifactFile(t, artifact, ".env.example")
+	if !strings.Contains(envExample, "LIVEKIT_SIP_OUTBOUND_TRUNK") {
+		t.Error(".env.example missing LIVEKIT_SIP_OUTBOUND_TRUNK for warm transfer")
+	}
+}
+
+// TestLiveKitV1RequiresGuard covers V7: a transfer with requires: emits a
+// machine-checked guard that refuses and names the unmet variables.
+func TestLiveKitV1RequiresGuard(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
+	toRes.Requires = []string{"caller_phone"}
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		`missing = [n for n, v in (("caller_phone", ctx.userdata.caller_phone), ) if v is None]`,
+		`return "Cannot transfer yet; missing required information: " + ", ".join(missing)`,
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+}
+
+// TestLiveKitV1OutboundVoicemail covers V8/N6: an outbound telephony channel
+// emits the AMD dial-out flow; on_voicemail picks the machine-vm branch.
+func TestLiveKitV1OutboundVoicemail(t *testing.T) {
+	for _, tc := range []struct {
+		action ir.VoicemailAction
+		want   string
+	}{
+		{ir.VoicemailLeaveMessage, `ctx.shutdown("voicemail: left a message")  # on_voicemail: leave_message`},
+		{ir.VoicemailHangup, `ctx.shutdown("voicemail detected")  # on_voicemail: hangup`},
+	} {
+		pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent, err := ir.Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inbound, outbound := false, true
+		agent.Channels["phone"] = ir.Channel{Kind: ir.ChannelTelephony, Inbound: &inbound, Outbound: &outbound, OnVoicemail: tc.action}
+
+		artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+		if err != nil {
+			t.Fatalf("generate %s: %v", tc.action, err)
+		}
+		botpy := artifactFile(t, artifact, "agent.py")
+		for _, want := range []string{
+			"async with AMD(session, participant_identity=\"phone_user\") as detector:",
+			"api.CreateSIPParticipantRequest(",
+			`sip_trunk_id=os.environ["LIVEKIT_SIP_OUTBOUND_TRUNK"],`,
+			"wait_until_answered=True,",
+			"result = await detector.execute()",
+			tc.want,
+		} {
+			if !strings.Contains(botpy, want) {
+				t.Errorf("%s agent.py missing %q", tc.action, want)
+			}
 		}
 	}
 }
