@@ -17,8 +17,8 @@ import (
 func TestRunCreateDefaults(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
-	// 1=create, name=agent, 11=Create agent, ""=confirm default (yes).
-	got, err := Run(strings.NewReader("1\nagent\n11\n\n"), &output, true)
+	// 1=create, name=agent, 13=Create agent, ""=confirm default (yes).
+	got, err := Run(strings.NewReader("1\nagent\n13\n\n"), &output, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestRunCreateDefaults(t *testing.T) {
 	if _, err := os.Stat("agent"); !os.IsNotExist(err) {
 		t.Fatalf("TUI wrote agent directory: %v", err)
 	}
-	for _, label := range []string{"Target", "Language", "Models", "Instructions", "Greeting", "Variables", "Webhook tools", "Agents", "Handoffs", "Compile after create", "Create agent", "← Back"} {
+	for _, label := range []string{"Target", "Language", "Models", "Instructions", "Greeting", "Variables", "Webhook tools", "Agents", "Handoffs", "Tasks", "Task groups", "Compile after create", "Create agent", "← Back"} {
 		if !strings.Contains(output.String(), label) {
 			t.Errorf("menu missing %q:\n%s", label, output.String())
 		}
@@ -59,8 +59,8 @@ func TestRunQuit(t *testing.T) {
 
 func TestRunCompileToggle(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// 1=create, name, 10=toggle compile on, 11=Create agent, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n10\n11\n\n"), &bytes.Buffer{}, true)
+	// 1=create, name, 12=toggle compile on, 13=Create agent, confirm.
+	got, err := Run(strings.NewReader("1\nagent\n12\n13\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestRunSelectTarget(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
 	// Create, name, Target, LiveKit, Create agent, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n1\n2\n11\n\n"), &output, true)
+	got, err := Run(strings.NewReader("1\nagent\n1\n2\n13\n\n"), &output, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestRunSelectTarget(t *testing.T) {
 func TestRunEditModels(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// Create, name, Models, Speak, cartesia, model, voice, params, Back, Create, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n3\n3\n1\nsonic-3\nvoice-id\n{\"speed\":1}\n4\n11\n\n"), &bytes.Buffer{}, true)
+	got, err := Run(strings.NewReader("1\nagent\n3\n3\n1\nsonic-3\nvoice-id\n{\"speed\":1}\n4\n13\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestRunEditModels(t *testing.T) {
 
 func TestRunEditLanguage(t *testing.T) {
 	t.Chdir(t.TempDir())
-	got, err := Run(strings.NewReader("1\nagent\n2\nes-MX\n11\n\n"), &bytes.Buffer{}, true)
+	got, err := Run(strings.NewReader("1\nagent\n2\nes-MX\n13\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestRunAddVariableAndWebhookTool(t *testing.T) {
 	input := "1\nagent\n" +
 		"6\n1\ncustomer_id\n1\n\"guest\"\n2\n2\n" +
 		"7\n1\nlookup_customer\nLook up the caller\nLOOKUP_URL\n{\"type\":\"object\"}\n\n1\n2\n" +
-		"11\n\n"
+		"13\n\n"
 	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestRunAddVariableAndWebhookTool(t *testing.T) {
 func TestRunHandoffsRequireTwoAgents(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
-	got, err := Run(strings.NewReader("1\nagent\n9\n11\n\n"), &output, true)
+	got, err := Run(strings.NewReader("1\nagent\n9\n13\n\n"), &output, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestRunAddAgentAndHandoff(t *testing.T) {
 		"4\nslng/deepgram/aura:2-en\naura-2-thalia-en\n\n" +
 		"3\n" +
 		"9\n1\n1\n1\nto_billing\nCaller asks about billing.\n1\n1\n2\n" +
-		"11\n\n"
+		"13\n\n"
 	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -156,6 +156,35 @@ func TestRunAddAgentAndHandoff(t *testing.T) {
 	}
 	if len(got.Agent.Data.Handoffs) != 1 || got.Agent.Data.Handoffs[0].Source != "assistant" || got.Agent.Data.Handoffs[0].To != "billing" {
 		t.Fatalf("handoffs = %#v", got.Agent.Data.Handoffs)
+	}
+}
+
+func TestRunTaskGroupsRequireTasks(t *testing.T) {
+	t.Chdir(t.TempDir())
+	var output bytes.Buffer
+	if _, err := Run(strings.NewReader("1\nagent\n11\n13\n\n"), &output, true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "unavailable until at least one task") {
+		t.Fatalf("task-group gate missing:\n%s", output.String())
+	}
+}
+
+func TestRunAddTaskAndOrderedGroup(t *testing.T) {
+	t.Chdir(t.TempDir())
+	input := "1\nagent\n" +
+		"10\n1\ncollect\nCollect the caller tier.\n1\n{\"tier\":{\"enum\":[\"free\",\"pro\"]}}\n1\n1\n1\nClassify the caller.\n2\n" +
+		"11\n1\ntriage\ncollect\n1\n1\n1\nRun triage.\n2\n" +
+		"13\n\n"
+	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Agent.Data.Tasks) != 1 || got.Agent.Data.Tasks[0].Name != "collect" {
+		t.Fatalf("tasks = %#v", got.Agent.Data.Tasks)
+	}
+	if len(got.Agent.Data.TaskGroups) != 1 || !reflect.DeepEqual(got.Agent.Data.TaskGroups[0].Steps, []string{"collect"}) {
+		t.Fatalf("task groups = %#v", got.Agent.Data.TaskGroups)
 	}
 }
 
@@ -223,6 +252,19 @@ func TestValidateVariableDefault(t *testing.T) {
 	for _, tc := range []struct{ kind, value string }{{"string", "1"}, {"integer", "1.5"}, {"boolean", `"false"`}} {
 		if err := validateVariableDefault(tc.kind, tc.value); err == nil {
 			t.Errorf("%s %s accepted", tc.kind, tc.value)
+		}
+	}
+}
+
+func TestValidateTaskResult(t *testing.T) {
+	for _, value := range []string{`{"ok":"boolean"}`, `{"tier":{"enum":["free","pro"]}}`} {
+		if err := validateTaskResult(value); err != nil {
+			t.Errorf("validateTaskResult(%s) = %v", value, err)
+		}
+	}
+	for _, value := range []string{`{}`, `{"nested":{"type":"object"}}`, `{"score":"float"}`} {
+		if err := validateTaskResult(value); err == nil {
+			t.Errorf("validateTaskResult(%s) accepted", value)
 		}
 	}
 }

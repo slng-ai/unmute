@@ -32,7 +32,29 @@ voices:
 [[$tools := $.AgentTools .Name]][[if $tools]]    tools:
 [[range $tools]]      - [[.]]
 [[end]][[end]]
-[[end]][[if .Handoffs]]controls:
+[[end]][[if .Tasks]]tasks:
+[[range .Tasks]]  [[.Name]]:
+    instructions: [[.PromptPath]]
+[[$tools := $.TaskTools .Name]][[if $tools]]    tools:
+[[range $tools]]      - [[.]]
+[[end]][[end]][[if .Model]]    model: [[.Model]]
+[[end]]    result: [[.Result]]
+    context:
+      history: [[.History]]
+[[if .MaxMessages]]      max_messages: [[.MaxMessages]]
+[[end]][[if .Summarizer]]      summarizer: [[.Summarizer]]
+[[end]][[if .IncludeToolCalls]]      include_tool_calls: [[boolValue .IncludeToolCalls]]
+[[end]][[end]]
+[[end]][[if .TaskGroups]]task_groups:
+[[range .TaskGroups]]  [[.Name]]:
+    steps:
+[[range .Steps]]      - [[.]]
+[[end]]    context_scope: [[.ContextScope]]
+    then: [[.Then]]
+[[if .ThenTarget]]    then_target: [[.ThenTarget]]
+[[end]]    merge: results
+[[end]]
+[[end]][[if or .Handoffs .Tasks .TaskGroups]]controls:
 [[range .Handoffs]]  [[.Name]]:
     kind: agent_transfer
     to: [[.To]]
@@ -48,6 +70,15 @@ voices:
 [[else]]      variables:
 [[range .Variables]]        - [[.]]
 [[end]][[end]]
+[[end]][[range .Tasks]]  [[.RunName]]:
+    kind: delegate
+    task: [[.Name]]
+    when: [[quote .When]]
+[[if .Assign]]    assign: [[.Assign]]
+[[end]][[end]][[range .TaskGroups]]  [[.RunName]]:
+    kind: delegate
+    group: [[.Name]]
+    when: [[quote .When]]
 [[end]][[end]][[if .Tools]]tools:
 [[range .Tools]]  - [[.Name]]
 [[end]]

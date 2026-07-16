@@ -52,6 +52,8 @@ type Data struct {
 	Tools        []Tool
 	Agents       []Agent
 	Handoffs     []Handoff
+	Tasks        []Task
+	TaskGroups   []TaskGroup
 }
 
 // Binding is one concrete role choice collected by the wizard. Params is an
@@ -77,6 +79,7 @@ type Tool struct {
 	Input       string // JSON Schema object
 	Output      string // optional JSON Schema object
 	AttachTo    []string
+	AttachTasks []string
 }
 
 type Agent struct {
@@ -120,6 +123,36 @@ type Handoff struct {
 	AllVariables     bool
 	Variables        []string
 }
+
+type Task struct {
+	Name             string
+	Instructions     string
+	Tools            []string
+	Model            string
+	Result           string // flat typed result as a JSON object
+	History          string
+	MaxMessages      int
+	Summarizer       string
+	IncludeToolCalls *bool
+	Agent            string
+	When             string
+	Assign           string // optional JSON object mapping variables to result fields
+}
+
+func (t Task) PromptPath() string { return "tasks/" + t.Name + ".md" }
+func (t Task) RunName() string    { return "run_" + t.Name }
+
+type TaskGroup struct {
+	Name         string
+	Steps        []string
+	ContextScope string
+	Then         string
+	ThenTarget   string
+	Agent        string
+	When         string
+}
+
+func (g TaskGroup) RunName() string { return "run_" + g.Name }
 
 // SetTarget selects an orchestrator and resets its target-dependent defaults.
 func (d *Data) SetTarget(provider string) {
@@ -189,6 +222,42 @@ func (d Data) AgentTools(name string) []string {
 		if handoff.Source == name && !seen[handoff.Name] {
 			names = append(names, handoff.Name)
 			seen[handoff.Name] = true
+		}
+	}
+	for _, task := range d.Tasks {
+		if task.Agent == name && !seen[task.RunName()] {
+			names = append(names, task.RunName())
+			seen[task.RunName()] = true
+		}
+	}
+	for _, group := range d.TaskGroups {
+		if group.Agent == name && !seen[group.RunName()] {
+			names = append(names, group.RunName())
+			seen[group.RunName()] = true
+		}
+	}
+	return names
+}
+
+func (d Data) TaskTools(name string) []string {
+	seen := map[string]bool{}
+	var names []string
+	for _, task := range d.Tasks {
+		if task.Name == name {
+			for _, tool := range task.Tools {
+				if !seen[tool] {
+					names = append(names, tool)
+					seen[tool] = true
+				}
+			}
+		}
+	}
+	for _, tool := range d.Tools {
+		for _, task := range tool.AttachTasks {
+			if task == name && !seen[tool.Name] {
+				names = append(names, tool.Name)
+				seen[tool.Name] = true
+			}
 		}
 	}
 	return names
@@ -328,6 +397,18 @@ func Write(dir string, d Data) ([]string, error) {
 			return nil, fmt.Errorf("scaffold: %w", err)
 		}
 		if err := os.WriteFile(out, []byte(agent.Instructions+"\n"), 0o644); err != nil {
+			return nil, fmt.Errorf("scaffold: %w", err)
+		}
+		created = append(created, out)
+	}
+	tasks := append([]Task(nil), d.Tasks...)
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].Name < tasks[j].Name })
+	for _, task := range tasks {
+		out := filepath.Join(dir, task.PromptPath())
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			return nil, fmt.Errorf("scaffold: %w", err)
+		}
+		if err := os.WriteFile(out, []byte(task.Instructions+"\n"), 0o644); err != nil {
 			return nil, fmt.Errorf("scaffold: %w", err)
 		}
 		created = append(created, out)

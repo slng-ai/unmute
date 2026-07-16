@@ -222,6 +222,46 @@ func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
 	}
 }
 
+func TestPreflightTaskAndOrderedGroup(t *testing.T) {
+	for _, provider := range []string{"pipecat", "livekit", "elevenlabs"} {
+		t.Run(provider, func(t *testing.T) {
+			data := Data{Name: "agent", Language: "en", Channel: "web"}
+			data.SetTarget(provider)
+			data.Tasks = []Task{{
+				Name: "collect", Instructions: "Return the caller tier.", Result: `{"tier":{"enum":["free","pro"]}}`,
+				History: "full", Agent: "assistant", When: "Classify the caller.",
+			}}
+			data.TaskGroups = []TaskGroup{{
+				Name: "triage", Steps: []string{"collect"}, ContextScope: "shared", Then: "return", Agent: "assistant", When: "Run triage.",
+			}}
+			dir := filepath.Join(t.TempDir(), "agent")
+			if _, err := Write(dir, data); err != nil {
+				t.Fatal(err)
+			}
+			agentYAML, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"tasks:", "run_collect:", "task_groups:", "- collect", "run_triage:"} {
+				if !strings.Contains(string(agentYAML), want) {
+					t.Errorf("agent.yaml missing %q:\n%s", want, agentYAML)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(dir, "tasks", "collect.md")); err != nil {
+				t.Fatal(err)
+			}
+			_, err = Preflight(data)
+			if provider == "livekit" {
+				if err == nil || !strings.Contains(err.Error(), "emits task-group delegates only") {
+					t.Fatalf("Preflight() error = %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("Preflight() = %v", err)
+			}
+		})
+	}
+}
+
 func TestPreflightShippedTargets(t *testing.T) {
 	for _, provider := range []string{"pipecat", "livekit", "elevenlabs"} {
 		t.Run(provider, func(t *testing.T) {

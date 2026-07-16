@@ -103,6 +103,8 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 				huh.NewOption(fmt.Sprintf("Webhook tools  ·  %d", len(result.Agent.Data.Tools)), "tools"),
 				huh.NewOption(fmt.Sprintf("Agents  ·  %d", len(result.Agent.Data.AllAgents())), "agents"),
 				huh.NewOption(fmt.Sprintf("Handoffs  ·  %d", len(result.Agent.Data.Handoffs)), "handoffs"),
+				huh.NewOption(fmt.Sprintf("Tasks  ·  %d", len(result.Agent.Data.Tasks)), "tasks"),
+				huh.NewOption(fmt.Sprintf("Task groups  ·  %d", len(result.Agent.Data.TaskGroups)), "groups"),
 				huh.NewOption("Compile after create  ·  "+compile, "compile"),
 				huh.NewOption("Create agent", "save"),
 				huh.NewOption("← Back", actionBack),
@@ -167,6 +169,14 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			}
 		case "handoffs":
 			if err := editHandoffs(runner, &result.Agent.Data); err != nil {
+				return Result{}, false, err
+			}
+		case "tasks":
+			if err := editTasks(runner, &result.Agent.Data); err != nil {
+				return Result{}, false, err
+			}
+		case "groups":
+			if err := editTaskGroups(runner, &result.Agent.Data); err != nil {
 				return Result{}, false, err
 			}
 		case "compile":
@@ -441,15 +451,15 @@ func editVariables(runner *fieldRunner, data *scaffold.Data) error {
 }
 
 func editTools(runner *fieldRunner, data *scaffold.Data) error {
-	if data.Target == string(targetcap.LiveKit) {
-		fmt.Fprintln(runner.out, "Webhook tools on agents are unavailable for LiveKit: its current driver emits webhook tools on tasks only.")
+	if data.Target == string(targetcap.LiveKit) && len(data.Tasks) == 0 {
+		fmt.Fprintln(runner.out, "LiveKit webhook tools attach to tasks; add a task first.")
 		return nil
 	}
 	for {
 		choice := actionBack
 		_, err := runner.run(huh.NewSelect[string]().
 			Title("Webhook tools").
-			Description(runner.describe("Choose which agent can see each tool.")).
+			Description(runner.describe("Choose which agent or target-supported task can see each tool.")).
 			Options(huh.NewOption("Add webhook tool", "add"), huh.NewOption("← Back", actionBack)).
 			Value(&choice), true)
 		if err != nil || choice == actionBack {
@@ -482,23 +492,31 @@ func editTools(runner *fieldRunner, data *scaffold.Data) error {
 		if back, err = runner.input("Output JSON Schema (optional)", "Blank leaves provider output unconstrained.", &tool.Output, validateParams); err != nil || back {
 			continue
 		}
-		attached := data.EntryAgent
-		if attached == "" {
-			attached = "assistant"
-		}
-		options := make([]huh.Option[string], 0, len(data.AllAgents())+1)
-		for _, agent := range data.AllAgents() {
-			options = append(options, huh.NewOption(agent.Name, agent.Name))
+		attached := firstNonempty(data.EntryAgent, "assistant")
+		var options []huh.Option[string]
+		if data.Target == string(targetcap.LiveKit) {
+			attached = data.Tasks[0].Name
+			for _, task := range data.Tasks {
+				options = append(options, huh.NewOption(task.Name, task.Name))
+			}
+		} else {
+			for _, agent := range data.AllAgents() {
+				options = append(options, huh.NewOption(agent.Name, agent.Name))
+			}
 		}
 		options = append(options, huh.NewOption("← Back", actionBack))
-		back, err = runner.run(huh.NewSelect[string]().Title("Attach to agent").Options(options...).Value(&attached), true)
+		back, err = runner.run(huh.NewSelect[string]().Title("Attach tool").Options(options...).Value(&attached), true)
 		if err != nil {
 			return err
 		}
 		if back || attached == actionBack {
 			continue
 		}
-		tool.AttachTo = []string{attached}
+		if data.Target == string(targetcap.LiveKit) {
+			tool.AttachTasks = []string{attached}
+		} else {
+			tool.AttachTo = []string{attached}
+		}
 		data.Tools = append(data.Tools, tool)
 	}
 }
@@ -676,6 +694,281 @@ func editHandoffs(runner *fieldRunner, data *scaffold.Data) error {
 		}
 		data.Handoffs = append(data.Handoffs, handoff)
 	}
+}
+
+func editTasks(runner *fieldRunner, data *scaffold.Data) error {
+	for {
+		choice := actionBack
+		_, err := runner.run(huh.NewSelect[string]().Title("Tasks").Options(
+			huh.NewOption("Add task", "add"), huh.NewOption("← Back", actionBack),
+		).Value(&choice), true)
+		if err != nil || choice == actionBack {
+			return err
+		}
+		task := scaffold.Task{
+			Instructions: "Complete this focused task and return only the structured result.",
+			Result:       `{"result":"string"}`,
+			History:      "full",
+			Agent:        firstNonempty(data.EntryAgent, "assistant"),
+		}
+		back, err := runner.input("Task name", "Lowercase snake_case; its delegate is named run_<task>.", &task.Name, func(value string) error {
+			if err := validateIdentifier(value); err != nil {
+				return err
+			}
+			for _, existing := range data.Tasks {
+				if existing.Name == value {
+					return errors.New("task already exists")
+				}
+			}
+			return validateControlName(data, "run_"+value)
+		})
+		if err != nil || back {
+			continue
+		}
+		if back, err = runner.text("Task instructions", "Prompt for this delegated task.", &task.Instructions); err != nil || back {
+			continue
+		}
+		if len(data.Tools) > 0 {
+			value := ""
+			if back, err = runner.input("Task tools (optional)", "Comma-separated existing webhook tool names.", &value, referenceValidator(toolNames(data), true)); err != nil || back {
+				continue
+			}
+			task.Tools = parseNames(value)
+		}
+		model := "default"
+		modelOptions := []huh.Option[string]{huh.NewOption("Entry agent model", "default")}
+		for _, agent := range data.AllAgents() {
+			modelOptions = append(modelOptions, huh.NewOption(agent.ModelProfile(), agent.ModelProfile()))
+		}
+		back, err = runner.run(huh.NewSelect[string]().Title("Task model").Options(modelOptions...).Value(&model), true)
+		if err != nil || back {
+			return err
+		}
+		if model != "default" {
+			task.Model = model
+		}
+		if back, err = runner.input("Typed result", `Flat JSON object, for example {"verified":"boolean","tier":{"enum":["free","pro"]}}.`, &task.Result, validateTaskResult); err != nil || back {
+			continue
+		}
+		if err := editTaskContext(runner, data, &task); err != nil {
+			return err
+		}
+		options := agentOptions(data.AllAgents(), "")
+		back, err = runner.run(huh.NewSelect[string]().Title("Agent allowed to delegate").Options(options...).Value(&task.Agent), true)
+		if err != nil || back {
+			return err
+		}
+		if back, err = runner.input("When to run", "Plain-language trigger shown to the agent.", &task.When, validateRequiredText); err != nil || back {
+			continue
+		}
+		if len(data.Variables) > 0 {
+			if back, err = runner.input("Result assignments (optional)", `JSON object mapping variables to result fields, for example {"verified":"result.verified"}.`, &task.Assign, validateAssignments); err != nil || back {
+				continue
+			}
+		}
+		data.Tasks = append(data.Tasks, task)
+	}
+}
+
+func editTaskContext(runner *fieldRunner, data *scaffold.Data, task *scaffold.Task) error {
+	options := []huh.Option[string]{huh.NewOption("Full history (portable)", "full")}
+	if data.Target != string(targetcap.ElevenLabs) {
+		options = append(options,
+			huh.NewOption("Messages", "messages"), huh.NewOption("Last N messages", "last_n"),
+			huh.NewOption("Summary", "summary"), huh.NewOption("Reset", "reset"))
+	}
+	back, err := runner.run(huh.NewSelect[string]().Title("Task history").Options(options...).Value(&task.History), true)
+	if err != nil || back {
+		return err
+	}
+	if task.History == "last_n" {
+		max := "10"
+		back, err = runner.input("Maximum messages", "Positive integer.", &max, validatePositiveInteger)
+		if err != nil || back {
+			return err
+		}
+		task.MaxMessages, _ = strconv.Atoi(max)
+	}
+	if task.History == "summary" {
+		task.Summarizer = data.AllAgents()[0].ModelProfile()
+		var modelOptions []huh.Option[string]
+		for _, agent := range data.AllAgents() {
+			modelOptions = append(modelOptions, huh.NewOption(agent.ModelProfile(), agent.ModelProfile()))
+		}
+		back, err = runner.run(huh.NewSelect[string]().Title("Summarizer model profile").Options(modelOptions...).Value(&task.Summarizer), true)
+		if err != nil || back {
+			return err
+		}
+	}
+	includeTools := "default"
+	back, err = runner.run(huh.NewSelect[string]().Title("Tool calls in task context").Options(
+		huh.NewOption("Provider default", "default"), huh.NewOption("Include", "yes"), huh.NewOption("Exclude", "no"),
+	).Value(&includeTools), true)
+	if err != nil || back {
+		return err
+	}
+	if includeTools != "default" {
+		include := includeTools == "yes"
+		task.IncludeToolCalls = &include
+	}
+	return nil
+}
+
+func editTaskGroups(runner *fieldRunner, data *scaffold.Data) error {
+	if len(data.Tasks) == 0 {
+		fmt.Fprintln(runner.out, "Task groups are unavailable until at least one task exists.")
+		return nil
+	}
+	for {
+		choice := actionBack
+		_, err := runner.run(huh.NewSelect[string]().Title("Ordered task groups").Options(
+			huh.NewOption("Add task group", "add"), huh.NewOption("← Back", actionBack),
+		).Value(&choice), true)
+		if err != nil || choice == actionBack {
+			return err
+		}
+		group := scaffold.TaskGroup{ContextScope: "shared", Then: "return", Agent: firstNonempty(data.EntryAgent, "assistant")}
+		back, err := runner.input("Task group name", "Lowercase snake_case; its delegate is named run_<group>.", &group.Name, func(value string) error {
+			if err := validateIdentifier(value); err != nil {
+				return err
+			}
+			for _, existing := range data.TaskGroups {
+				if existing.Name == value {
+					return errors.New("task group already exists")
+				}
+			}
+			return validateControlName(data, "run_"+value)
+		})
+		if err != nil || back {
+			continue
+		}
+		steps := ""
+		if back, err = runner.input("Ordered steps", "Comma-separated task names, in execution order.", &steps, referenceValidator(taskNames(data), false)); err != nil || back {
+			continue
+		}
+		group.Steps = parseNames(steps)
+		scopeOptions := []huh.Option[string]{huh.NewOption("Shared context", "shared")}
+		if data.Target != string(targetcap.ElevenLabs) {
+			scopeOptions = append(scopeOptions, huh.NewOption("Isolated context", "isolated"))
+		}
+		back, err = runner.run(huh.NewSelect[string]().Title("Context between steps").Options(scopeOptions...).Value(&group.ContextScope), true)
+		if err != nil || back {
+			return err
+		}
+		back, err = runner.run(huh.NewSelect[string]().Title("After the final step").Options(
+			huh.NewOption("Return to caller agent", "return"), huh.NewOption("Transfer to agent", "transfer"), huh.NewOption("End conversation", "end"),
+		).Value(&group.Then), true)
+		if err != nil || back {
+			return err
+		}
+		if group.Then == "transfer" {
+			options := agentOptions(data.AllAgents(), "")
+			group.ThenTarget = options[0].Value
+			back, err = runner.run(huh.NewSelect[string]().Title("Transfer target").Options(options...).Value(&group.ThenTarget), true)
+			if err != nil || back {
+				return err
+			}
+		}
+		options := agentOptions(data.AllAgents(), "")
+		back, err = runner.run(huh.NewSelect[string]().Title("Agent allowed to delegate").Options(options...).Value(&group.Agent), true)
+		if err != nil || back {
+			return err
+		}
+		if back, err = runner.input("When to run", "Plain-language trigger shown to the agent.", &group.When, validateRequiredText); err != nil || back {
+			continue
+		}
+		data.TaskGroups = append(data.TaskGroups, group)
+	}
+}
+
+func validateControlName(data *scaffold.Data, name string) error {
+	for _, tool := range data.Tools {
+		if tool.Name == name {
+			return errors.New("control name already used by a tool")
+		}
+	}
+	for _, handoff := range data.Handoffs {
+		if handoff.Name == name {
+			return errors.New("control name already used by a handoff")
+		}
+	}
+	for _, task := range data.Tasks {
+		if task.RunName() == name {
+			return errors.New("control name already used by a task")
+		}
+	}
+	for _, group := range data.TaskGroups {
+		if group.RunName() == name {
+			return errors.New("control name already used by a task group")
+		}
+	}
+	return nil
+}
+
+func toolNames(data *scaffold.Data) []string {
+	names := make([]string, 0, len(data.Tools))
+	for _, tool := range data.Tools {
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
+func taskNames(data *scaffold.Data) []string {
+	names := make([]string, 0, len(data.Tasks))
+	for _, task := range data.Tasks {
+		names = append(names, task.Name)
+	}
+	return names
+}
+
+func validateTaskResult(value string) error {
+	var result map[string]any
+	if err := json.Unmarshal([]byte(value), &result); err != nil || len(result) == 0 {
+		return errors.New("result must be a nonempty JSON object")
+	}
+	for name, field := range result {
+		if err := validateIdentifier(name); err != nil {
+			return fmt.Errorf("result field %q: %w", name, err)
+		}
+		switch typed := field.(type) {
+		case string:
+			if typed != "string" && typed != "number" && typed != "boolean" && typed != "integer" {
+				return fmt.Errorf("result field %q has unknown type %q", name, typed)
+			}
+		case map[string]any:
+			values, ok := typed["enum"].([]any)
+			if !ok || len(typed) != 1 || len(values) == 0 {
+				return fmt.Errorf("result field %q must be a primitive type or nonempty enum", name)
+			}
+			for _, value := range values {
+				if _, ok := value.(string); !ok {
+					return fmt.Errorf("result field %q enum values must be strings", name)
+				}
+			}
+		default:
+			return fmt.Errorf("result field %q must be a primitive type or enum", name)
+		}
+	}
+	return nil
+}
+
+func validateAssignments(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	var assignments map[string]string
+	if err := json.Unmarshal([]byte(value), &assignments); err != nil {
+		return errors.New("assignments must be a JSON object of strings")
+	}
+	for variable, source := range assignments {
+		if err := validateIdentifier(variable); err != nil {
+			return fmt.Errorf("assignment variable %q: %w", variable, err)
+		}
+		if !strings.HasPrefix(source, "result.") || validateIdentifier(strings.TrimPrefix(source, "result.")) != nil {
+			return fmt.Errorf("assignment for %q must reference result.<field>", variable)
+		}
+	}
+	return nil
 }
 
 func agentOptions(agents []scaffold.Agent, except string) []huh.Option[string] {
