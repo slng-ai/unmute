@@ -24,15 +24,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	for _, e := range []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"} {
 		env.add(e)
 	}
-	// silero (VAD) is always emitted; other plugin modules/deps/env accrue as
-	// listen/speak/reason bindings are lowered through the catalogue (C8/V11/V13).
-	emit := &lkEmit{
-		env:     env,
-		modules: map[string]bool{"silero": true},
-		deps:    map[string]string{"livekit-plugins-silero": "1.6.1"},
-		pins:    tgt.Pins,
-	}
-
 	data := livekitData{
 		Project:     tgt.Name,
 		Version:     tgt.Version,
@@ -57,7 +48,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 
 	for _, name := range sortedAgentNames(agent) {
-		built, err := buildLiveKitAgent(agent, tgt, name, agent.Agents[name], entry, emit)
+		built, err := buildLiveKitAgent(agent, tgt, name, agent.Agents[name], entry, env)
 		if err != nil {
 			return livekitData{}, err
 		}
@@ -183,7 +174,7 @@ func livekitGuards(agent *ir.Agent) error {
 	return nil
 }
 
-func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry ir.AgentDef, emit *lkEmit) (livekitAgent, error) {
+func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry ir.AgentDef, env *envSet) (livekitAgent, error) {
 	built := livekitAgent{
 		Name: name, Class: pyName(name), PromptConst: promptConst(name),
 		IsEntry: name == agent.EntryAgent,
