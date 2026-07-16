@@ -105,6 +105,8 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 				huh.NewOption(fmt.Sprintf("Handoffs  ·  %d", len(result.Agent.Data.Handoffs)), "handoffs"),
 				huh.NewOption(fmt.Sprintf("Tasks  ·  %d", len(result.Agent.Data.Tasks)), "tasks"),
 				huh.NewOption(fmt.Sprintf("Task groups  ·  %d", len(result.Agent.Data.TaskGroups)), "groups"),
+				huh.NewOption("Caller channels  ·  "+channelsLabel(result.Agent.Data), "channels"),
+				huh.NewOption(fmt.Sprintf("Human transfers  ·  %d", len(result.Agent.Data.HumanTransfers)), "humans"),
 				huh.NewOption("Compile after create  ·  "+compile, "compile"),
 				huh.NewOption("Create agent", "save"),
 				huh.NewOption("← Back", actionBack),
@@ -179,6 +181,14 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			if err := editTaskGroups(runner, &result.Agent.Data); err != nil {
 				return Result{}, false, err
 			}
+		case "channels":
+			if err := editChannels(runner, &result.Agent.Data); err != nil {
+				return Result{}, false, err
+			}
+		case "humans":
+			if err := editHumanTransfers(runner, &result.Agent.Data); err != nil {
+				return Result{}, false, err
+			}
 		case "compile":
 			result.Compile = !result.Compile
 		case "save":
@@ -206,9 +216,9 @@ func summary(result Result, review scaffold.PreflightReport) string {
 		compile = "yes (selected target)"
 	}
 	var text strings.Builder
-	fmt.Fprintf(&text, "Create %s?\nTarget: %s (%s)\nLanguage: %s\nGreeting: %s\nRequired env: %s\nForwarded bindings:",
+	fmt.Fprintf(&text, "Create %s?\nTarget: %s (%s)\nLanguage: %s\nCaller channels: %s\nGreeting: %s\nRequired env: %s\nForwarded bindings:",
 		result.Agent.Data.Name, targetLabel(result.Agent.Data.Target), review.TargetName,
-		result.Agent.Data.Language, result.Agent.Data.Greeting, strings.Join(review.RequiredEnv, ", "))
+		result.Agent.Data.Language, channelsLabel(result.Agent.Data), result.Agent.Data.Greeting, strings.Join(review.RequiredEnv, ", "))
 	for _, binding := range review.Bindings {
 		profile := ""
 		if binding.Profile != "" {
@@ -231,6 +241,10 @@ func summary(result Result, review scaffold.PreflightReport) string {
 		for _, warning := range review.Warnings {
 			fmt.Fprintf(&text, "\n- %s", warning)
 		}
+	}
+	if hasTelephony(&result.Agent.Data) {
+		fmt.Fprintf(&text, "\nExternal phone setup required: transport=%s carrier=%s; provision numbers/trunks outside Unmute.",
+			firstNonempty(result.Agent.Data.Transport, "provider default"), firstNonempty(result.Agent.Data.Carrier, "provider default"))
 	}
 	fmt.Fprintf(&text, "\nCompile: %s", compile)
 	return text.String()
@@ -267,6 +281,22 @@ func modelsLabel(data scaffold.Data) string {
 		return binding.Provider
 	}
 	return label(data.Listen) + " / " + label(data.Reason) + " / " + label(data.Speak)
+}
+
+func channelsLabel(data scaffold.Data) string {
+	channels := data.AllChannels()
+	web, phone := false, false
+	for _, channel := range channels {
+		web = web || channel.Kind == "realtime_audio"
+		phone = phone || channel.Kind == "telephony"
+	}
+	if web && phone {
+		return "web + phone"
+	}
+	if phone {
+		return "phone"
+	}
+	return "web"
 }
 
 func editModels(runner *fieldRunner, data *scaffold.Data) error {
@@ -881,6 +911,160 @@ func editTaskGroups(runner *fieldRunner, data *scaffold.Data) error {
 	}
 }
 
+func editChannels(runner *fieldRunner, data *scaffold.Data) error {
+	mode := "web"
+	for _, channel := range data.AllChannels() {
+		if channel.Kind != "telephony" {
+			continue
+		}
+		switch {
+		case channel.Inbound && channel.Outbound:
+			mode = "web_phone_both"
+		case channel.Outbound:
+			mode = "web_phone_outbound"
+		default:
+			mode = "web_phone_inbound"
+		}
+	}
+	back, err := runner.run(huh.NewSelect[string]().Title("Caller channels").Description(runner.describe(
+		"This declares web/phone behavior only. Phone numbers, SIP trunks, carriers, and rooms remain external setup.",
+	)).Options(
+		huh.NewOption("Web browser audio", "web"),
+		huh.NewOption("Web + inbound phone", "web_phone_inbound"),
+		huh.NewOption("Web + outbound phone", "web_phone_outbound"),
+		huh.NewOption("Web + inbound/outbound phone", "web_phone_both"),
+		huh.NewOption("← Back", actionBack),
+	).Value(&mode), true)
+	if err != nil || back || mode == actionBack {
+		return err
+	}
+	data.Channels = []scaffold.Channel{{Name: "web", Kind: "realtime_audio"}}
+	if mode == "web" {
+		return nil
+	}
+	phone := scaffold.Channel{Name: "phone", Kind: "telephony", Inbound: strings.Contains(mode, "inbound") || mode == "web_phone_both", Outbound: strings.Contains(mode, "outbound") || mode == "web_phone_both"}
+	controls := ""
+	back, err = runner.input("Required phone controls (optional)", "Comma-separated: cold_transfer, warm_transfer, dtmf_send, dtmf_receive, hold, hangup, voicemail_detection, ivr_navigation.", &controls, validateTelephonyControls)
+	if err != nil || back {
+		return err
+	}
+	phone.RequiredControls = parseNames(controls)
+	if phone.Outbound {
+		phone.OnVoicemail = "hangup"
+		back, err = runner.run(huh.NewSelect[string]().Title("When voicemail answers").Options(
+			huh.NewOption("Hang up", "hangup"), huh.NewOption("Leave a message", "leave_message"),
+		).Value(&phone.OnVoicemail), true)
+		if err != nil || back {
+			return err
+		}
+	}
+	if data.Target == string(targetcap.Pipecat) && data.Transport == "" {
+		data.Transport = "daily-sip"
+	}
+	if back, err = runner.input("Target transport (optional)", "Driver vocabulary; Pipecat cold transfer uses daily-sip.", &data.Transport, validateBasic); err != nil || back {
+		return err
+	}
+	if back, err = runner.input("Carrier (optional)", "Driver vocabulary such as twilio; never provisions the carrier.", &data.Carrier, validateBasic); err != nil || back {
+		return err
+	}
+	data.Channels = append(data.Channels, phone)
+	return nil
+}
+
+func editHumanTransfers(runner *fieldRunner, data *scaffold.Data) error {
+	if !hasTelephony(data) {
+		fmt.Fprintln(runner.out, "Human transfers are unavailable until a telephony caller channel exists.")
+		return nil
+	}
+	for {
+		choice := actionBack
+		_, err := runner.run(huh.NewSelect[string]().Title("Human transfers").Description(runner.describe(
+			"Destinations are references in targets.yaml. Unmute does not buy numbers, create trunks, or configure carriers.",
+		)).Options(huh.NewOption("Add human transfer", "add"), huh.NewOption("← Back", actionBack)).Value(&choice), true)
+		if err != nil || choice == actionBack {
+			return err
+		}
+		transfer := scaffold.HumanTransfer{Agent: firstNonempty(data.EntryAgent, "assistant"), Mode: "cold"}
+		back, err := runner.input("Control name", "Lowercase snake_case; controls and tools share one namespace.", &transfer.Name, func(value string) error {
+			if err := validateIdentifier(value); err != nil {
+				return err
+			}
+			return validateControlName(data, value)
+		})
+		if err != nil || back {
+			continue
+		}
+		options := agentOptions(data.AllAgents(), "")
+		back, err = runner.run(huh.NewSelect[string]().Title("Agent allowed to transfer").Options(options...).Value(&transfer.Agent), true)
+		if err != nil || back {
+			return err
+		}
+		if back, err = runner.input("When to transfer", "Plain-language trigger shown to the agent.", &transfer.When, validateRequiredText); err != nil || back {
+			continue
+		}
+		if back, err = runner.input("Destination name", "Symbolic lowercase snake_case name stored in the portable agent spec.", &transfer.Destination, func(value string) error {
+			if err := validateIdentifier(value); err != nil {
+				return err
+			}
+			for _, existing := range data.HumanTransfers {
+				if existing.Destination == value {
+					return errors.New("destination already exists")
+				}
+			}
+			return nil
+		}); err != nil || back {
+			continue
+		}
+		if back, err = runner.input("Destination value", "E.164 number such as +14155550123, or a SIP URI.", &transfer.Value, validateDestination); err != nil || back {
+			continue
+		}
+		modeOptions := []huh.Option[string]{huh.NewOption("Cold transfer", "cold")}
+		if data.Target != string(targetcap.Pipecat) {
+			modeOptions = append(modeOptions, huh.NewOption("Warm transfer", "warm"))
+		}
+		back, err = runner.run(huh.NewSelect[string]().Title("Transfer mode").Options(modeOptions...).Value(&transfer.Mode), true)
+		if err != nil || back {
+			return err
+		}
+		if transfer.Mode == "warm" {
+			briefings := []huh.Option[string]{huh.NewOption("Summary", "summary")}
+			if data.Target == string(targetcap.ElevenLabs) {
+				briefings = []huh.Option[string]{huh.NewOption("Message", "message")}
+			}
+			transfer.Briefing = briefings[0].Value
+			back, err = runner.run(huh.NewSelect[string]().Title("Operator briefing").Options(briefings...).Value(&transfer.Briefing), true)
+			if err != nil || back {
+				return err
+			}
+		}
+		data.HumanTransfers = append(data.HumanTransfers, transfer)
+	}
+}
+
+func hasTelephony(data *scaffold.Data) bool {
+	for _, channel := range data.AllChannels() {
+		if channel.Kind == "telephony" {
+			return true
+		}
+	}
+	return false
+}
+
+func validateTelephonyControls(value string) error {
+	return referenceValidator([]string{
+		"cold_transfer", "warm_transfer", "dtmf_send", "dtmf_receive", "hold", "hangup", "voicemail_detection", "ivr_navigation",
+	}, true)(value)
+}
+
+var destinationPattern = regexp.MustCompile(`^\+[1-9][0-9]{6,14}$|^sips?:[^@\s]+@[^@\s]+$`)
+
+func validateDestination(value string) error {
+	if !destinationPattern.MatchString(value) {
+		return errors.New("destination must be an E.164 number or SIP URI")
+	}
+	return nil
+}
+
 func validateControlName(data *scaffold.Data, name string) error {
 	for _, tool := range data.Tools {
 		if tool.Name == name {
@@ -900,6 +1084,11 @@ func validateControlName(data *scaffold.Data, name string) error {
 	for _, group := range data.TaskGroups {
 		if group.RunName() == name {
 			return errors.New("control name already used by a task group")
+		}
+	}
+	for _, transfer := range data.HumanTransfers {
+		if transfer.Name == name {
+			return errors.New("control name already used by a human transfer")
 		}
 	}
 	return nil

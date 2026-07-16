@@ -5,8 +5,9 @@ targets:
 [[if eq .Target "pipecat"]]  pipecat-dev:
     provider: pipecat
     version: "1.5.0"
-    transport: daily-sip
-    models:
+[[if .Transport]]    transport: [[.Transport]]
+[[end]][[if .Carrier]]    carrier: [[.Carrier]]
+[[end]]    models:
       # Speech in/out via the selected catalogue integrations. Model and voice
       # identities are forwarded; the default remains SLNG + OpenAI.
       listen: { provider: [[.Listen.Provider]], model: [[quote .Listen.Model]][[if .Listen.Params]], params: [[.Listen.Params]][[end]] }
@@ -19,7 +20,9 @@ targets:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
-    models:
+[[if .Transport]]    transport: [[.Transport]]
+[[end]][[if .Carrier]]    carrier: [[.Carrier]]
+[[end]]    models:
       listen: { provider: [[.Listen.Provider]], model: [[quote .Listen.Model]][[if .Listen.Params]], params: [[.Listen.Params]][[end]] }
       turn:   { provider: livekit, model: turn-detector-mini }
       speak:
@@ -28,9 +31,13 @@ targets:
 [[range .AllAgents]]        [[.ModelProfile]]: {[[if .Reason.Provider]] provider: [[.Reason.Provider]],[[end]] model: [[quote .Reason.Model]][[if .Reason.Params]], params: [[.Reason.Params]][[end]] }
 [[end]][[else]]  elevenlabs-dev:
     provider: elevenlabs
-    models:
+[[if .Transport]]    transport: [[.Transport]]
+[[end]][[if .Carrier]]    carrier: [[.Carrier]]
+[[end]]    models:
       speak:
 [[range .AllAgents]]        [[.VoiceProfile]]: { provider: elevenlabs, voice_id: [[quote .Speak.Voice]][[if .Speak.Params]], params: [[.Speak.Params]][[end]] }
 [[end]]      reason:
 [[range .AllAgents]]        [[.ModelProfile]]: { model: [[quote .Reason.Model]][[if .Reason.Params]], params: [[.Reason.Params]][[end]] }
+[[end]][[end]][[if .HumanTransfers]]    destinations:
+[[range .Destinations]]      [[.Destination]]: [[quote .Value]]
 [[end]][[end -]]

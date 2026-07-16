@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -259,6 +260,39 @@ func TestPreflightTaskAndOrderedGroup(t *testing.T) {
 				t.Fatalf("Preflight() = %v", err)
 			}
 		})
+	}
+}
+
+func TestPreflightTelephonyAndHumanTransfer(t *testing.T) {
+	for _, provider := range []string{"pipecat", "elevenlabs"} {
+		t.Run(provider, func(t *testing.T) {
+			data := Data{Name: "agent", Language: "en"}
+			data.SetTarget(provider)
+			data.Channels = []Channel{
+				{Name: "web", Kind: "realtime_audio"},
+				{Name: "phone", Kind: "telephony", Inbound: true, RequiredControls: []string{"cold_transfer", "hangup"}},
+			}
+			data.HumanTransfers = []HumanTransfer{{
+				Name: "to_human", Agent: "assistant", When: "The caller requests a person.",
+				Destination: "support_line", Value: "+14155550123", Mode: "cold",
+			}}
+			report, err := Preflight(data)
+			if err != nil {
+				t.Fatalf("Preflight() = %v", err)
+			}
+			if provider == "pipecat" && !slices.Contains(report.RequiredEnv, "DAILY_API_KEY") {
+				t.Fatalf("required env = %v", report.RequiredEnv)
+			}
+		})
+	}
+}
+
+func TestPreflightRejectsUnsupportedOutbound(t *testing.T) {
+	data := Data{Name: "agent", Language: "en"}
+	data.SetTarget("pipecat")
+	data.Channels = []Channel{{Name: "phone", Kind: "telephony", Outbound: true, OnVoicemail: "hangup"}}
+	if _, err := Preflight(data); err == nil || !strings.Contains(err.Error(), "does not emit outbound calling") {
+		t.Fatalf("Preflight() error = %v", err)
 	}
 }
 

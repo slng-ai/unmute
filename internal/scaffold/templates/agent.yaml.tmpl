@@ -54,7 +54,7 @@ voices:
 [[if .ThenTarget]]    then_target: [[.ThenTarget]]
 [[end]]    merge: results
 [[end]]
-[[end]][[if or .Handoffs .Tasks .TaskGroups]]controls:
+[[end]][[if or .Handoffs .Tasks .TaskGroups .HumanTransfers]]controls:
 [[range .Handoffs]]  [[.Name]]:
     kind: agent_transfer
     to: [[.To]]
@@ -79,7 +79,13 @@ voices:
     kind: delegate
     group: [[.Name]]
     when: [[quote .When]]
-[[end]][[end]][[if .Tools]]tools:
+[[end]][[range .HumanTransfers]]  [[.Name]]:
+    kind: human_transfer
+    destination: [[.Destination]]
+    mode: [[.Mode]]
+[[if .When]]    when: [[quote .When]]
+[[end]][[if .Briefing]]    briefing: [[.Briefing]]
+[[end]][[end]][[end]][[if .Tools]]tools:
 [[range .Tools]]  - [[.Name]]
 [[end]]
 [[end]]conversation:
@@ -88,8 +94,15 @@ voices:
     text: [[ quote .Greeting ]]
 
 channels:
-  [[.Channel]]: { kind: realtime_audio }
-
+[[range .AllChannels]][[if eq .Kind "realtime_audio"]]  [[.Name]]: { kind: realtime_audio }
+[[else]]  [[.Name]]:
+    kind: telephony
+    inbound: [[.Inbound]]
+    outbound: [[.Outbound]]
+[[if .RequiredControls]]    required_controls:
+[[range .RequiredControls]]      - [[.]]
+[[end]][[end]][[if .OnVoicemail]]    on_voicemail: [[.OnVoicemail]]
+[[end]][[end]][[end]]
 capacity:
   peak_sessions: 10
   max_sessions: 20

@@ -38,22 +38,26 @@ const (
 
 // Data is the v1 agent configuration rendered by the scaffold templates.
 type Data struct {
-	Name         string
-	Target       string
-	Language     string
-	Channel      string
-	EntryAgent   string
-	Greeting     string
-	Instructions string
-	Listen       Binding
-	Reason       Binding
-	Speak        Binding
-	Variables    []Variable
-	Tools        []Tool
-	Agents       []Agent
-	Handoffs     []Handoff
-	Tasks        []Task
-	TaskGroups   []TaskGroup
+	Name           string
+	Target         string
+	Language       string
+	Channel        string
+	Channels       []Channel
+	EntryAgent     string
+	Transport      string
+	Carrier        string
+	Greeting       string
+	Instructions   string
+	Listen         Binding
+	Reason         Binding
+	Speak          Binding
+	Variables      []Variable
+	Tools          []Tool
+	Agents         []Agent
+	Handoffs       []Handoff
+	Tasks          []Task
+	TaskGroups     []TaskGroup
+	HumanTransfers []HumanTransfer
 }
 
 // Binding is one concrete role choice collected by the wizard. Params is an
@@ -154,9 +158,33 @@ type TaskGroup struct {
 
 func (g TaskGroup) RunName() string { return "run_" + g.Name }
 
+type Channel struct {
+	Name             string
+	Kind             string
+	Inbound          bool
+	Outbound         bool
+	RequiredControls []string
+	OnVoicemail      string
+}
+
+type HumanTransfer struct {
+	Name        string
+	Agent       string
+	When        string
+	Destination string
+	Value       string
+	Mode        string
+	Briefing    string
+}
+
 // SetTarget selects an orchestrator and resets its target-dependent defaults.
 func (d *Data) SetTarget(provider string) {
 	d.Target = provider
+	d.Transport = ""
+	d.Carrier = ""
+	if provider == "pipecat" {
+		d.Transport = "daily-sip"
+	}
 	switch provider {
 	case "elevenlabs":
 		d.Listen = Binding{}
@@ -236,7 +264,30 @@ func (d Data) AgentTools(name string) []string {
 			seen[group.RunName()] = true
 		}
 	}
+	for _, transfer := range d.HumanTransfers {
+		if transfer.Agent == name && !seen[transfer.Name] {
+			names = append(names, transfer.Name)
+			seen[transfer.Name] = true
+		}
+	}
 	return names
+}
+
+func (d Data) AllChannels() []Channel {
+	if len(d.Channels) > 0 {
+		return d.Channels
+	}
+	name := d.Channel
+	if name == "" {
+		name = DefaultChannel
+	}
+	return []Channel{{Name: name, Kind: "realtime_audio"}}
+}
+
+func (d Data) Destinations() []HumanTransfer {
+	destinations := append([]HumanTransfer(nil), d.HumanTransfers...)
+	sort.Slice(destinations, func(i, j int) bool { return destinations[i].Destination < destinations[j].Destination })
+	return destinations
 }
 
 func (d Data) TaskTools(name string) []string {
@@ -275,6 +326,9 @@ func (d Data) RequiredEnv() []string {
 		}
 	case targetcap.ElevenLabs:
 		set["ELEVENLABS_API_KEY"] = true
+	}
+	if d.Transport == "daily-sip" {
+		set["DAILY_API_KEY"] = true
 	}
 	bindings := []struct {
 		role    targetcap.Role

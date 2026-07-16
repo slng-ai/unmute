@@ -2,6 +2,7 @@
 # Starter keys for the selected target. Copy to `.env`, fill in, then run
 # `unmute dev support-bot`. `unmute compile` writes an exact per-target
 # build/<target>/.env.example from your spec.
+DAILY_API_KEY=
 OPENAI_API_KEY=
 SLNG_API_KEY=
 
