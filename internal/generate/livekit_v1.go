@@ -18,10 +18,11 @@ import (
 // The LiveKit driver lowers the resolved IR into a runnable LiveKit Agents
 // project (Python). Each agent is a livekit.agents.Agent; agent_transfer is a
 // @function_tool returning the next Agent (native handoff); a task is an
-// AgentTask[dict]; a task_group is a beta.workflows.TaskGroup. STT/TTS route
-// through the SLNG Execution Layer via livekit-plugins-slng (never a per-vendor
-// plugin), reason through LiveKit Inference (driver-livekit C8/V11). Python is
-// emitted only through these templates (C1/ADR-0002).
+// AgentTask[dict]; a task_group is a beta.workflows.TaskGroup. listen/speak
+// default to the SLNG Execution Layer (livekit-plugins-slng) and reason to
+// LiveKit Inference; a binding whose provider names a catalogued vendor instead
+// lowers to that native livekit.plugins.<vendor> plugin (driver-livekit C8/V11/
+// V13). Python is emitted only through these templates (C1/ADR-0002).
 //
 //go:embed templates/livekit_v1/*.tmpl
 var livekitV1Templates embed.FS
@@ -36,28 +37,16 @@ const (
 
 var livekitVersionPattern = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
 
-// livekitSTT / livekitTTS render slng.STT / slng.TTS (the Execution Layer). The
-// model route has its `slng/` prefix stripped: the plugin takes the bare
-// provider/model form (e.g. "deepgram/aura:2"), verified against the plugin.
-type livekitSTT struct {
-	Model     string
-	APIKeyEnv string
-	Params    []pyKV
-}
-
-type livekitTTS struct {
-	Model     string
-	Voice     string
-	APIKeyEnv string
-	Params    []pyKV
-}
-
-// livekitLLM renders inference.LLM: the model is provider/model for LiveKit
-// Inference; params ride extra_kwargs.
-type livekitLLM struct {
-	Model  string
-	Params []pyKV
-}
+// livekitSTT / livekitTTS / livekitLLM each carry a fully-rendered Python
+// constructor expression: `slng.STT(...)` / a native `deepgram.STT(...)` for
+// listen, the SLNG or a native vendor TTS for speak, `inference.LLM(...)` or a
+// native `anthropic.LLM(...)` for reason. The per-provider shape (module,
+// kwargs, api-key env, version) lives in the plugin catalogue
+// (livekit_v1_build.go); the template just emits the Ctor. Agent-level overrides
+// use pointer fields (nil when the agent matches the session default).
+type livekitSTT struct{ Ctor string }
+type livekitTTS struct{ Ctor string }
+type livekitLLM struct{ Ctor string }
 
 type livekitAgent struct {
 	Name        string
@@ -130,20 +119,21 @@ type livekitPrompt struct {
 }
 
 type livekitData struct {
-	Project     string
-	Version     string
-	AgentName   string
-	EntryClass  string
-	STT         livekitSTT
-	SessionLLM  livekitLLM
-	SessionTTS  livekitTTS
-	TurnVersion string
-	Agents      []livekitAgent
-	Tasks       []livekitTask
-	Prompts     []livekitPrompt
-	Deps        []string
-	RequiredEnv []string
-	Notes       []string
+	Project       string
+	Version       string
+	AgentName     string
+	EntryClass    string
+	STT           livekitSTT
+	SessionLLM    livekitLLM
+	SessionTTS    livekitTTS
+	TurnVersion   string
+	Agents        []livekitAgent
+	Tasks         []livekitTask
+	Prompts       []livekitPrompt
+	PluginModules []string // livekit.plugins submodules to import (sorted; always includes silero)
+	Deps          []string
+	RequiredEnv   []string
+	Notes         []string
 
 	NeedsTasks bool // AgentTask / TaskGroup imports
 	NeedsHTTPX bool // any webhook tool
