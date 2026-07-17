@@ -827,6 +827,11 @@ func TestV31ProviderOptionsMirrorCatalog(t *testing.T) {
 	for key, brands := range expected {
 		slices.Sort(brands)
 		brands = slices.Compact(brands)
+		// V31 (amended, B12): an editor-expressible wildcard row adds the
+		// Other option after the native brands (V43).
+		if _, ok := wildcardRow(key.framework, key.role); ok {
+			brands = append(brands, providerOther)
+		}
 		options := providerOptions(key.framework, key.role)
 		got := make([]string, len(options))
 		for i := range options {
@@ -836,6 +841,70 @@ func TestV31ProviderOptionsMirrorCatalog(t *testing.T) {
 			t.Errorf("%s/%s options = %v, catalogue brands = %v", key.framework, key.role, got, brands)
 		}
 	}
+}
+
+func TestV43WildcardRoleOffersOtherProvider(t *testing.T) { // docs/spec/tui.md V43
+	values := []string{}
+	for _, option := range providerOptions(targetcap.LiveKit, targetcap.Reason) {
+		values = append(values, option.Value)
+	}
+	if !slices.Contains(values, providerOther) {
+		t.Fatalf("livekit reason picker lost the wildcard route: %v", values)
+	}
+	if !slices.Contains(values, "anthropic") {
+		t.Fatalf("livekit reason picker lost its native brands: %v", values)
+	}
+	// Endpoint-gated wildcards stay out: the scaffold has no endpoint_env slot.
+	for _, option := range providerOptions(targetcap.Pipecat, targetcap.Reason) {
+		if option.Value == providerOther {
+			t.Fatal("pipecat reason offered its endpoint-gated wildcard, which the editor cannot express")
+		}
+	}
+
+	// Selecting Other opens the free-text input and stores the typed provider:
+	// overview row 1 (Provider) -> picker option 8 (Other) -> "deepseek" ->
+	// overview row 5 (Back).
+	var output bytes.Buffer
+	binding := scaffold.Binding{Provider: "openai", Model: "gpt-4o-mini"}
+	language := "en"
+	if err := editBindingFor(newRunner(strings.NewReader("1\n8\ndeepseek\n5\n"), &output, true), string(targetcap.LiveKit), targetcap.Reason, &language, &binding); err != nil {
+		t.Fatal(err)
+	}
+	if binding.Provider != "deepseek" {
+		t.Fatalf("binding.Provider = %q, want the Other-typed provider", binding.Provider)
+	}
+}
+
+func TestV43OtherProviderCompilesThroughWildcard(t *testing.T) { // docs/spec/tui.md V43
+	data := scaffold.Data{Name: "agent", Instructions: scaffold.DefaultInstructions}
+	data.SetTarget(string(targetcap.LiveKit))
+	data.Reason = scaffold.Binding{Provider: "deepseek", Model: "deepseek-chat"}
+	dir := filepath.Join(t.TempDir(), "agent")
+	if _, err := scaffold.Write(dir, data); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := spec.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var livekit ir.Target
+	for _, target := range agent.Targets {
+		livekit = target
+	}
+	artifact, err := generate.Generate(agent, livekit, targetcap.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range artifact.Files {
+		if file.Path == "agent.py" && strings.Contains(string(file.Content), `model="deepseek/deepseek-chat"`) {
+			return
+		}
+	}
+	t.Fatal("generated agent.py did not route the Other-typed provider through inference.LLM")
 }
 
 func TestV31CatalogueHintUsesEntryArityAndLanguageSlot(t *testing.T) {
@@ -1031,6 +1100,9 @@ func TestV24ProviderBrandsAreUniqueAndExposeDistributors(t *testing.T) { // docs
 				t.Errorf("%s/%s repeats provider brand %q", key.framework, key.role, option.Value)
 			}
 			seen[option.Value] = true
+			if option.Value == providerOther {
+				continue // the wildcard route (V43) is not a brand; it has no distributor row
+			}
 			if routes := catalog.Distributors(key.framework, key.role, option.Value); len(routes) == 0 {
 				t.Errorf("%s/%s provider brand %q has no distributor", key.framework, key.role, option.Value)
 			}

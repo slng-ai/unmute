@@ -573,11 +573,19 @@ func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, lan
 			if err != nil {
 				return err
 			}
-			if !back {
-				routes := catalog.Distributors(framework, role, selected)
-				if len(routes) > 0 {
-					binding.Provider = routes[0]
+			if back {
+				continue
+			}
+			if selected == providerOther {
+				// The wildcard route (V43): any provider name, forwarded.
+				if _, err := runner.input("Provider", "Any provider name; the identity is forwarded through this role's wildcard route.", &binding.Provider, validateBasic); err != nil {
+					return err
 				}
+				continue
+			}
+			routes := catalog.Distributors(framework, role, selected)
+			if len(routes) > 0 {
+				binding.Provider = routes[0]
 			}
 		case "distributor":
 			routeOptions := make([]huh.Option[string], 0, len(distributors)+1)
@@ -659,11 +667,30 @@ func bindingForRole(data *scaffold.Data, role targetcap.Role) *scaffold.Binding 
 	}
 }
 
+// providerOther is the picker value for the wildcard route (V43): a role's
+// free-text provider stays reachable no matter how many native brands exist.
+const providerOther = "__other"
+
+// wildcardRow returns the role's wildcard entry when the editor can express
+// it. Endpoint-gated wildcards are excluded: the scaffold has no endpoint_env
+// slot, so offering them would scaffold packages that cannot validate (V43).
+func wildcardRow(framework targetcap.Provider, role targetcap.Role) (targetcap.Entry, bool) {
+	for _, entry := range targetcap.DefaultCatalog().Entries() {
+		if entry.Framework == framework && entry.Role == role && entry.Wildcard() && !entry.RequiresEndpoint {
+			return entry, true
+		}
+	}
+	return targetcap.Entry{}, false
+}
+
 func providerOptions(framework targetcap.Provider, role targetcap.Role) []huh.Option[string] {
 	brands := targetcap.DefaultCatalog().Brands(framework, role)
-	options := make([]huh.Option[string], 0, len(brands))
+	options := make([]huh.Option[string], 0, len(brands)+1)
 	for _, brand := range brands {
 		options = append(options, huh.NewOption(brand, brand))
+	}
+	if _, ok := wildcardRow(framework, role); ok {
+		options = append(options, huh.NewOption("Other  ·  any provider, forwarded", providerOther))
 	}
 	return options
 }
