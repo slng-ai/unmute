@@ -1,9 +1,0 @@
-# Twilio connection — external auth/config for the SIP trunk.
-# Values do not live here. These names reference secrets resolved by the
-# runtime/deploy environment.
-type: twilio
-auth:
-  account_sid_secret: TWILIO_ACCOUNT_SID
-  auth_token_secret: TWILIO_AUTH_TOKEN
-sip:
-  enabled: true

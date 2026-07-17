@@ -1,7 +1,0 @@
-agent_name = "nosh-v2"
-image = "nosh-v2:latest"
-secret_set = "nosh-v2-local"
-agent_profile = "voice-agent"
-
-[scaling]
-min_agents = 1

@@ -1,4 +1,0 @@
-.env.local
-.venv/
-__pycache__/
-*.py[cod]

@@ -1,6 +1,0 @@
-docs/
-.env
-.env.local
-voice-agent-prompting/
-my-test-agent/
-.firecrawl/
