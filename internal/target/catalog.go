@@ -66,13 +66,25 @@ type FieldSpec struct {
 // provider names into API bodies instead of emitting code).
 type CallSpec struct {
 	Class     string
-	APIKeyArg string // "" = the constructor takes no key argument
-	APIKeyEnv string // "" = the <VENDOR>_API_KEY convention (wildcard rows)
+	APIKeyArg string   // "" = the constructor takes no key argument
+	APIKeyEnv string   // "" = the <VENDOR>_API_KEY convention (wildcard rows)
+	ExtraEnvs []string // required env the constructor reads implicitly (AWS SDK creds); no kwarg emitted
 	Model     FieldSpec
 	Voice     FieldSpec
 	Language  FieldSpec // portable agent language; explicit per integration
-	Endpoint  FieldSpec // zero = endpoint_env is rejected for this entry
-	Params    ParamsStyle
+	// NoLanguage declares the integration has no language slot on purpose:
+	// language rides the model/voice id (deepgram aura) or is auto-detected
+	// (soniox). The agent language field is then not forwarded — a per-entry
+	// decision, never a silent fallthrough. Exactly one of Language/NoLanguage.
+	NoLanguage bool
+	Endpoint   FieldSpec // zero = endpoint_env is rejected for this entry
+	Params     ParamsStyle
+	// SettingsArg/SettingsClass override the nested-args wrapper for
+	// ParamsSettings entries. Defaults: "settings" and Class+".Settings"
+	// (the Pipecat official-service shape). Soniox on LiveKit nests in
+	// params=soniox.STTOptions(...).
+	SettingsArg   string
+	SettingsClass string
 }
 
 // Entry is one (framework, role, vendor) integration.

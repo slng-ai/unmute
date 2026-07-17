@@ -19,6 +19,22 @@ matrix row (no code injection)
 === elevenlabs speak elevenlabs ===
 matrix row (no code injection)
 
+=== livekit listen assemblyai ===
+binding:  provider=assemblyai model=model-1
+class:    assemblyai.STT
+args:     api_key=os.environ.get("ASSEMBLYAI_API_KEY"), model="model-1", language_code="es-MX", sample_rate=24000
+import:   from livekit.plugins import assemblyai
+install:  livekit-agents[assemblyai]
+env:      ASSEMBLYAI_API_KEY
+
+=== livekit listen cartesia ===
+binding:  provider=cartesia model=model-1
+class:    cartesia.STT
+args:     api_key=os.environ.get("CARTESIA_API_KEY"), model="model-1", language="es-MX", sample_rate=24000
+import:   from livekit.plugins import cartesia
+install:  livekit-agents[cartesia]
+env:      CARTESIA_API_KEY
+
 === livekit listen deepgram ===
 binding:  provider=deepgram model=model-1
 class:    deepgram.STT
@@ -26,6 +42,30 @@ args:     api_key=os.environ.get("DEEPGRAM_API_KEY"), model="model-1", language=
 import:   from livekit.plugins import deepgram
 install:  livekit-agents[deepgram]
 env:      DEEPGRAM_API_KEY
+
+=== livekit listen elevenlabs ===
+binding:  provider=elevenlabs model=model-1
+class:    elevenlabs.STT
+args:     api_key=os.environ.get("ELEVEN_API_KEY"), model_id="model-1", language_code="es-MX", sample_rate=24000
+import:   from livekit.plugins import elevenlabs
+install:  livekit-agents[elevenlabs]
+env:      ELEVEN_API_KEY
+
+=== livekit listen gradium ===
+binding:  provider=gradium model=model-1
+class:    gradium.STT
+args:     api_key=os.environ.get("GRADIUM_API_KEY"), model_name="model-1", language="es-MX", sample_rate=24000
+import:   from livekit.plugins import gradium
+install:  livekit-agents[gradium]
+env:      GRADIUM_API_KEY
+
+=== livekit listen sarvam ===
+binding:  provider=sarvam model=model-1
+class:    sarvam.STT
+args:     api_key=os.environ.get("SARVAM_API_KEY"), model="model-1", language="es-MX", sample_rate=24000
+import:   from livekit.plugins import sarvam
+install:  livekit-agents[sarvam]
+env:      SARVAM_API_KEY
 
 === livekit listen slng ===
 binding:  provider=slng model=slng/deepgram/nova:3
@@ -35,11 +75,84 @@ import:   from livekit.plugins import slng
 install:  livekit-plugins-slng>=1.6.1
 env:      SLNG_API_KEY
 
+=== livekit listen soniox ===
+binding:  provider=soniox model=model-1
+class:    soniox.STT
+args:     api_key=os.environ.get("SONIOX_API_KEY")
+settings: model="model-1", sample_rate=24000
+import:   from livekit.plugins import soniox
+install:  livekit-agents[soniox]
+env:      SONIOX_API_KEY
+
+=== livekit listen speechmatics ===
+binding:  provider=speechmatics model=model-1
+class:    speechmatics.STT
+args:     api_key=os.environ.get("SPEECHMATICS_API_KEY"), ="model-1", language="es-MX", sample_rate=24000
+import:   from livekit.plugins import speechmatics
+install:  livekit-agents[speechmatics]
+env:      SPEECHMATICS_API_KEY
+
 === livekit reason * ===
 binding:  provider="*" as acme model=model-1
 class:    inference.LLM
 args:     model="acme/model-1", extra_kwargs={"sample_rate": 24000}
 install:  ships with the framework
+
+=== livekit reason anthropic ===
+binding:  provider=anthropic model=model-1
+class:    anthropic.LLM
+args:     api_key=os.environ.get("ANTHROPIC_API_KEY"), model="model-1", sample_rate=24000
+import:   from livekit.plugins import anthropic
+install:  livekit-agents[anthropic]
+env:      ANTHROPIC_API_KEY
+
+=== livekit reason aws ===
+binding:  provider=aws model=model-1
+class:    aws.LLM
+args:     model="model-1", sample_rate=24000
+import:   from livekit.plugins import aws
+install:  livekit-agents[aws]
+env:      AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+
+=== livekit reason azure ===
+binding:  provider=azure model=model-1
+class:    openai.LLM.with_azure
+args:     api_key=os.environ.get("AZURE_OPENAI_API_KEY"), model="model-1", sample_rate=24000
+import:   from livekit.plugins import openai
+install:  livekit-agents[openai]
+env:      AZURE_OPENAI_API_KEY
+
+=== livekit reason groq ===
+binding:  provider=groq model=model-1
+class:    groq.LLM
+args:     api_key=os.environ.get("GROQ_API_KEY"), model="model-1", sample_rate=24000
+import:   from livekit.plugins import groq
+install:  livekit-agents[groq]
+env:      GROQ_API_KEY
+
+=== livekit reason mistralai ===
+binding:  provider=mistralai model=model-1
+class:    mistralai.LLM
+args:     api_key=os.environ.get("MISTRAL_API_KEY"), model="model-1", sample_rate=24000
+import:   from livekit.plugins import mistralai
+install:  livekit-agents[mistralai]
+env:      MISTRAL_API_KEY
+
+=== livekit reason openrouter ===
+binding:  provider=openrouter model=model-1
+class:    openai.LLM.with_openrouter
+args:     api_key=os.environ.get("OPENROUTER_API_KEY"), model="model-1", sample_rate=24000
+import:   from livekit.plugins import openai
+install:  livekit-agents[openai]
+env:      OPENROUTER_API_KEY
+
+=== livekit reason sarvam ===
+binding:  provider=sarvam model=model-1
+class:    sarvam.LLM
+args:     api_key=os.environ.get("SARVAM_API_KEY"), model="model-1", sample_rate=24000
+import:   from livekit.plugins import sarvam
+install:  livekit-agents[sarvam]
+env:      SARVAM_API_KEY
 
 === livekit speak cartesia ===
 binding:  provider=cartesia model=model-1 voice=voice-1
@@ -49,6 +162,14 @@ import:   from livekit.plugins import cartesia
 install:  livekit-agents[cartesia]
 env:      CARTESIA_API_KEY
 
+=== livekit speak deepgram ===
+binding:  provider=deepgram model=model-1
+class:    deepgram.TTS
+args:     api_key=os.environ.get("DEEPGRAM_API_KEY"), model="model-1", sample_rate=24000
+import:   from livekit.plugins import deepgram
+install:  livekit-agents[deepgram]
+env:      DEEPGRAM_API_KEY
+
 === livekit speak elevenlabs ===
 binding:  provider=elevenlabs model=model-1 voice=voice-1
 class:    elevenlabs.TTS
@@ -57,6 +178,46 @@ import:   from livekit.plugins import elevenlabs
 install:  livekit-agents[elevenlabs]
 env:      ELEVEN_API_KEY
 
+=== livekit speak gemini ===
+binding:  provider=gemini model=model-1 voice=voice-1
+class:    google.beta.GeminiTTS
+args:     api_key=os.environ.get("GOOGLE_API_KEY"), voice_name="voice-1", model="model-1", sample_rate=24000
+import:   from livekit.plugins import google
+install:  livekit-agents[google]
+env:      GOOGLE_API_KEY
+
+=== livekit speak gradium ===
+binding:  provider=gradium model=model-1 voice=voice-1
+class:    gradium.TTS
+args:     api_key=os.environ.get("GRADIUM_API_KEY"), voice_id="voice-1", model_name="model-1", sample_rate=24000
+import:   from livekit.plugins import gradium
+install:  livekit-agents[gradium]
+env:      GRADIUM_API_KEY
+
+=== livekit speak inworld ===
+binding:  provider=inworld model=model-1 voice=voice-1
+class:    inworld.TTS
+args:     api_key=os.environ.get("INWORLD_API_KEY"), voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+import:   from livekit.plugins import inworld
+install:  livekit-agents[inworld]
+env:      INWORLD_API_KEY
+
+=== livekit speak rime ===
+binding:  provider=rime model=model-1 voice=voice-1
+class:    rime.TTS
+args:     api_key=os.environ.get("RIME_API_KEY"), speaker="voice-1", model="model-1", lang="es-MX", sample_rate=24000
+import:   from livekit.plugins import rime
+install:  livekit-agents[rime]
+env:      RIME_API_KEY
+
+=== livekit speak sarvam ===
+binding:  provider=sarvam model=model-1 voice=voice-1
+class:    sarvam.TTS
+args:     api_key=os.environ.get("SARVAM_API_KEY"), speaker="voice-1", model="model-1", target_language_code="es-MX", sample_rate=24000
+import:   from livekit.plugins import sarvam
+install:  livekit-agents[sarvam]
+env:      SARVAM_API_KEY
+
 === livekit speak slng ===
 binding:  provider=slng model=slng/deepgram/aura:2-en voice=voice-1
 class:    slng.TTS
@@ -64,6 +225,14 @@ args:     api_key=os.environ.get("SLNG_API_KEY"), voice="voice-1", model="deepgr
 import:   from livekit.plugins import slng
 install:  livekit-plugins-slng>=1.6.1
 env:      SLNG_API_KEY
+
+=== livekit speak soniox ===
+binding:  provider=soniox model=model-1 voice=voice-1
+class:    soniox.TTS
+args:     api_key=os.environ.get("SONIOX_API_KEY"), voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+import:   from livekit.plugins import soniox
+install:  livekit-agents[soniox]
+env:      SONIOX_API_KEY
 
 === pipecat listen * ===
 binding:  provider="*" as acme model=model-1 endpoint_env=ACME_BASE_URL
@@ -83,6 +252,15 @@ import:   from pipecat.services.assemblyai.stt import AssemblyAISTTService
 install:  pipecat-ai[assemblyai]
 env:      ASSEMBLYAI_API_KEY
 
+=== pipecat listen cartesia ===
+binding:  provider=cartesia model=model-1
+class:    CartesiaSTTService
+args:     api_key=os.environ["CARTESIA_API_KEY"]
+settings: model="model-1", language="es-MX", sample_rate=24000
+import:   from pipecat.services.cartesia.stt import CartesiaSTTService
+install:  pipecat-ai[cartesia]
+env:      CARTESIA_API_KEY
+
 === pipecat listen deepgram ===
 binding:  provider=deepgram model=model-1
 class:    DeepgramSTTService
@@ -91,6 +269,24 @@ settings: model="model-1", language="es-MX", sample_rate=24000
 import:   from pipecat.services.deepgram.stt import DeepgramSTTService
 install:  pipecat-ai[deepgram]
 env:      DEEPGRAM_API_KEY
+
+=== pipecat listen elevenlabs ===
+binding:  provider=elevenlabs model=model-1
+class:    ElevenLabsRealtimeSTTService
+args:     api_key=os.environ["ELEVENLABS_API_KEY"]
+settings: model="model-1", language="es-MX", sample_rate=24000
+import:   from pipecat.services.elevenlabs.stt import ElevenLabsRealtimeSTTService
+install:  pipecat-ai[elevenlabs]
+env:      ELEVENLABS_API_KEY
+
+=== pipecat listen gradium ===
+binding:  provider=gradium model=model-1
+class:    GradiumSTTService
+args:     api_key=os.environ["GRADIUM_API_KEY"]
+settings: model="model-1", language="es-MX", sample_rate=24000
+import:   from pipecat.services.gradium.stt import GradiumSTTService
+install:  pipecat-ai[gradium]
+env:      GRADIUM_API_KEY
 
 === pipecat listen openai ===
 binding:  provider=openai model=model-1
@@ -109,6 +305,24 @@ import:   from pipecat_slng import SlngSTTService
 install:  pipecat-slng>=0.4.0
 env:      SLNG_API_KEY
 
+=== pipecat listen soniox ===
+binding:  provider=soniox model=model-1
+class:    SonioxSTTService
+args:     api_key=os.environ["SONIOX_API_KEY"]
+settings: model="model-1", language="es-MX", sample_rate=24000
+import:   from pipecat.services.soniox.stt import SonioxSTTService
+install:  pipecat-ai[soniox]
+env:      SONIOX_API_KEY
+
+=== pipecat listen speechmatics ===
+binding:  provider=speechmatics model=model-1
+class:    SpeechmaticsSTTService
+args:     api_key=os.environ["SPEECHMATICS_API_KEY"]
+settings: model="model-1", language="es-MX", sample_rate=24000
+import:   from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
+install:  pipecat-ai[speechmatics]
+env:      SPEECHMATICS_API_KEY
+
 === pipecat reason * ===
 binding:  provider="*" as acme model=model-1 endpoint_env=ACME_BASE_URL
 class:    OpenAILLMService
@@ -118,6 +332,51 @@ import:   from pipecat.services.openai.llm import OpenAILLMService
 install:  pipecat-ai[openai]
 env:      ACME_API_KEY, ACME_BASE_URL
 
+=== pipecat reason anthropic ===
+binding:  provider=anthropic model=model-1
+class:    AnthropicLLMService
+args:     api_key=os.environ["ANTHROPIC_API_KEY"]
+settings: model="model-1", sample_rate=24000
+import:   from pipecat.services.anthropic.llm import AnthropicLLMService
+install:  pipecat-ai[anthropic]
+env:      ANTHROPIC_API_KEY
+
+=== pipecat reason deepseek ===
+binding:  provider=deepseek model=model-1
+class:    DeepSeekLLMService
+args:     api_key=os.environ["DEEPSEEK_API_KEY"]
+settings: model="model-1", sample_rate=24000
+import:   from pipecat.services.deepseek.llm import DeepSeekLLMService
+install:  pipecat-ai[deepseek]
+env:      DEEPSEEK_API_KEY
+
+=== pipecat reason google ===
+binding:  provider=google model=model-1
+class:    GoogleLLMService
+args:     api_key=os.environ["GOOGLE_API_KEY"]
+settings: model="model-1", sample_rate=24000
+import:   from pipecat.services.google.llm import GoogleLLMService
+install:  pipecat-ai[google]
+env:      GOOGLE_API_KEY
+
+=== pipecat reason groq ===
+binding:  provider=groq model=model-1
+class:    GroqLLMService
+args:     api_key=os.environ["GROQ_API_KEY"]
+settings: model="model-1", sample_rate=24000
+import:   from pipecat.services.groq.llm import GroqLLMService
+install:  pipecat-ai[groq]
+env:      GROQ_API_KEY
+
+=== pipecat reason mistral ===
+binding:  provider=mistral model=model-1
+class:    MistralLLMService
+args:     api_key=os.environ["MISTRAL_API_KEY"]
+settings: model="model-1", sample_rate=24000
+import:   from pipecat.services.mistral.llm import MistralLLMService
+install:  pipecat-ai[mistral]
+env:      MISTRAL_API_KEY
+
 === pipecat reason openai ===
 binding:  provider=openai model=model-1
 class:    OpenAILLMService
@@ -126,6 +385,24 @@ settings: model="model-1", sample_rate=24000
 import:   from pipecat.services.openai.llm import OpenAILLMService
 install:  pipecat-ai[openai]
 env:      OPENAI_API_KEY
+
+=== pipecat reason openrouter ===
+binding:  provider=openrouter model=model-1
+class:    OpenRouterLLMService
+args:     api_key=os.environ["OPENROUTER_API_KEY"]
+settings: model="model-1", sample_rate=24000
+import:   from pipecat.services.openrouter.llm import OpenRouterLLMService
+install:  pipecat-ai[openrouter]
+env:      OPENROUTER_API_KEY
+
+=== pipecat reason qwen ===
+binding:  provider=qwen model=model-1
+class:    QwenLLMService
+args:     api_key=os.environ["QWEN_API_KEY"]
+settings: model="model-1", sample_rate=24000
+import:   from pipecat.services.qwen.llm import QwenLLMService
+install:  pipecat-ai[qwen]
+env:      QWEN_API_KEY
 
 === pipecat speak * ===
 binding:  provider="*" as acme model=model-1 voice=voice-1 endpoint_env=ACME_BASE_URL
@@ -145,6 +422,15 @@ import:   from pipecat.services.cartesia.tts import CartesiaTTSService
 install:  pipecat-ai[cartesia]
 env:      CARTESIA_API_KEY
 
+=== pipecat speak deepgram ===
+binding:  provider=deepgram model=model-1 voice=voice-1
+class:    DeepgramTTSService
+args:     api_key=os.environ["DEEPGRAM_API_KEY"]
+settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+import:   from pipecat.services.deepgram.tts import DeepgramTTSService
+install:  pipecat-ai[deepgram]
+env:      DEEPGRAM_API_KEY
+
 === pipecat speak elevenlabs ===
 binding:  provider=elevenlabs model=model-1 voice=voice-1
 class:    ElevenLabsTTSService
@@ -153,6 +439,24 @@ settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
 import:   from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 install:  pipecat-ai[elevenlabs]
 env:      ELEVENLABS_API_KEY
+
+=== pipecat speak gradium ===
+binding:  provider=gradium model=model-1 voice=voice-1
+class:    GradiumTTSService
+args:     api_key=os.environ["GRADIUM_API_KEY"]
+settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+import:   from pipecat.services.gradium.tts import GradiumTTSService
+install:  pipecat-ai[gradium]
+env:      GRADIUM_API_KEY
+
+=== pipecat speak inworld ===
+binding:  provider=inworld model=model-1 voice=voice-1
+class:    InworldTTSService
+args:     api_key=os.environ["INWORLD_API_KEY"]
+settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+import:   from pipecat.services.inworld.tts import InworldTTSService
+install:  pipecat-ai[inworld]
+env:      INWORLD_API_KEY
 
 === pipecat speak openai ===
 binding:  provider=openai model=model-1 voice=voice-1
@@ -163,6 +467,24 @@ import:   from pipecat.services.openai.tts import OpenAITTSService
 install:  pipecat-ai[openai]
 env:      OPENAI_API_KEY
 
+=== pipecat speak rime ===
+binding:  provider=rime model=model-1 voice=voice-1
+class:    RimeTTSService
+args:     api_key=os.environ["RIME_API_KEY"]
+settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+import:   from pipecat.services.rime.tts import RimeTTSService
+install:  pipecat-ai[rime]
+env:      RIME_API_KEY
+
+=== pipecat speak sarvam ===
+binding:  provider=sarvam model=model-1 voice=voice-1
+class:    SarvamTTSService
+args:     api_key=os.environ["SARVAM_API_KEY"]
+settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+import:   from pipecat.services.sarvam.tts import SarvamTTSService
+install:  pipecat-ai[sarvam]
+env:      SARVAM_API_KEY
+
 === pipecat speak slng ===
 binding:  provider=slng model=slng/deepgram/aura:2-en voice=voice-1
 class:    SlngTTSService
@@ -170,4 +492,13 @@ args:     api_key=os.environ["SLNG_API_KEY"], voice="voice-1", model="slng/deepg
 import:   from pipecat_slng import SlngTTSService
 install:  pipecat-slng>=0.4.0
 env:      SLNG_API_KEY
+
+=== pipecat speak soniox ===
+binding:  provider=soniox model=model-1 voice=voice-1
+class:    SonioxTTSService
+args:     api_key=os.environ["SONIOX_API_KEY"]
+settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+import:   from pipecat.services.soniox.tts import SonioxTTSService
+install:  pipecat-ai[soniox]
+env:      SONIOX_API_KEY
 

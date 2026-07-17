@@ -3,7 +3,7 @@ Class.Settings(...) block for settings-style services (see the provider
 catalogue, internal/target/catalog_pipecat.go). */ -}}
 {{define "svc"}}{{.Class}}(
 {{range .Args}}        {{.Key}}={{.Value}},
-{{end}}{{if .SettingsArgs}}        settings={{.Class}}.Settings(
+{{end}}{{if .SettingsArgs}}        {{.SettingsArg}}={{.SettingsClass}}(
 {{range .SettingsArgs}}            {{.Key}}={{.Value}},
 {{end}}        ),
 {{end}}    ){{end -}}

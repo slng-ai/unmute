@@ -19,6 +19,7 @@ import (
 // the real installed services — the drift class py_compile can never see
 // (driver-pipecat B6).
 const smokeCheckScript = `"""Smoke check: import the generated bot and instantiate every service."""
+import asyncio
 import json
 import os
 
@@ -29,8 +30,14 @@ import bot  # noqa: E402  (module import already constructs the agent workers)
 
 builders = sorted(n for n in vars(bot) if n.startswith("build_") and callable(getattr(bot, n)))
 assert builders, "no service builders found in bot.py"
-for name in builders:
-    getattr(bot, name)()
+
+
+async def _run() -> None:  # some services construct an aiohttp session
+    for name in builders:
+        getattr(bot, name)()
+
+
+asyncio.run(_run())
 print("smoke ok:", ", ".join(builders))
 `
 
@@ -53,6 +60,27 @@ func TestSmokePipecatV1MultiVendorInstantiates(t *testing.T) {
 		}
 		tgt.Models.Speak["specialist"] = ir.Binding{
 			Provider: "cartesia", Model: "sonic-3", Voice: "f786b574-daa5-4673-aa0c-cbe3e8534c02",
+		}
+	}, nil)
+}
+
+// TestSmokePipecatV1RestoredVendorsInstantiates covers the riskiest of the
+// T13-restored entries in one venv: soniox listen, inworld + rime speak, and
+// anthropic reason (the workers driver injects system_instruction into its
+// Settings). Constructor kwargs are checked against the real packages.
+// (speechmatics speak was smoke-rejected here 2026-07-17: its service demands
+// a caller-supplied aiohttp_session, impossible at module import — T13.)
+func TestSmokePipecatV1RestoredVendorsInstantiates(t *testing.T) {
+	runPipecatSmoke(t, func(tgt *ir.Target) {
+		tgt.Models.Listen = &ir.Binding{Provider: "soniox", Model: "stt-rt-v5"}
+		tgt.Models.Speak["front_desk"] = ir.Binding{
+			Provider: "inworld", Model: "inworld-tts-2", Voice: "Ashley",
+		}
+		tgt.Models.Speak["specialist"] = ir.Binding{
+			Provider: "rime", Model: "mistv2", Voice: "cove",
+		}
+		tgt.Models.Reason["fast_reasoning"] = ir.Binding{
+			Provider: "anthropic", Model: "claude-sonnet-4-6",
 		}
 	}, nil)
 }

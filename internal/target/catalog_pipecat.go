@@ -49,6 +49,67 @@ var pipecatCatalog = []Entry{
 		},
 	},
 	{
+		Framework: Pipecat, Role: Listen, Vendor: "cartesia",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/stt/cartesia",
+		Install: InstallSpec{Extra: "cartesia"},
+		Import:  "from pipecat.services.cartesia.stt import CartesiaSTTService",
+		Call: &CallSpec{
+			Class: "CartesiaSTTService", APIKeyArg: "api_key", APIKeyEnv: "CARTESIA_API_KEY",
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
+		},
+	},
+	{
+		Framework: Pipecat, Role: Listen, Vendor: "elevenlabs", Aliases: []string{"eleven_labs"},
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/stt/elevenlabs",
+		Install: InstallSpec{Extra: "elevenlabs"},
+		Import:  "from pipecat.services.elevenlabs.stt import ElevenLabsRealtimeSTTService",
+		Call: &CallSpec{
+			Class: "ElevenLabsRealtimeSTTService", APIKeyArg: "api_key", APIKeyEnv: "ELEVENLABS_API_KEY",
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
+		},
+		Notes: []string{"the WebSocket realtime service; the HTTP ElevenLabsSTTService needs a caller-supplied aiohttp session, which the generic builder has no slot for"},
+	},
+	{
+		Framework: Pipecat, Role: Listen, Vendor: "gradium",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/stt/gradium",
+		Install: InstallSpec{Extra: "gradium"},
+		Import:  "from pipecat.services.gradium.stt import GradiumSTTService",
+		Call: &CallSpec{
+			Class: "GradiumSTTService", APIKeyArg: "api_key", APIKeyEnv: "GRADIUM_API_KEY",
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
+		},
+	},
+	{
+		Framework: Pipecat, Role: Listen, Vendor: "soniox",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/stt/soniox",
+		Install: InstallSpec{Extra: "soniox"},
+		Import:  "from pipecat.services.soniox.stt import SonioxSTTService",
+		Call: &CallSpec{
+			Class: "SonioxSTTService", APIKeyArg: "api_key", APIKeyEnv: "SONIOX_API_KEY",
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
+		},
+	},
+	{
+		Framework: Pipecat, Role: Listen, Vendor: "speechmatics",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/stt/speechmatics",
+		Install: InstallSpec{Extra: "speechmatics"},
+		Import:  "from pipecat.services.speechmatics.stt import SpeechmaticsSTTService",
+		Call: &CallSpec{
+			Class: "SpeechmaticsSTTService", APIKeyArg: "api_key", APIKeyEnv: "SPEECHMATICS_API_KEY",
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
+		},
+	},
+	{
 		Framework: Pipecat, Role: Listen, Vendor: "slng",
 		Distributes: []string{"deepgram"},
 		Verified:    "2026-07-15", Docs: pipecatServicesDocs,
@@ -120,6 +181,89 @@ var pipecatCatalog = []Entry{
 		},
 	},
 	{
+		Framework: Pipecat, Role: Speak, Vendor: "deepgram",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/tts/deepgram",
+		Install: InstallSpec{Extra: "deepgram"},
+		Import:  "from pipecat.services.deepgram.tts import DeepgramTTSService",
+		Call: &CallSpec{
+			Class: "DeepgramTTSService", APIKeyArg: "api_key", APIKeyEnv: "DEEPGRAM_API_KEY",
+			Model:    FieldSpec{Arg: "model"},
+			Voice:    FieldSpec{Arg: "voice", Required: true}, // aura voice ids (e.g. aura-2-helena-en)
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
+		},
+	},
+	{
+		Framework: Pipecat, Role: Speak, Vendor: "gradium",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/tts/gradium",
+		Install: InstallSpec{Extra: "gradium"},
+		Import:  "from pipecat.services.gradium.tts import GradiumTTSService",
+		Call: &CallSpec{
+			Class: "GradiumTTSService", APIKeyArg: "api_key", APIKeyEnv: "GRADIUM_API_KEY",
+			Model:    FieldSpec{Arg: "model"},
+			Voice:    FieldSpec{Arg: "voice", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
+		},
+	},
+	{
+		Framework: Pipecat, Role: Speak, Vendor: "inworld",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/tts/inworld",
+		Install: InstallSpec{Extra: "inworld"},
+		Import:  "from pipecat.services.inworld.tts import InworldTTSService",
+		Call: &CallSpec{
+			Class: "InworldTTSService", APIKeyArg: "api_key", APIKeyEnv: "INWORLD_API_KEY",
+			Model:    FieldSpec{Arg: "model"},
+			Voice:    FieldSpec{Arg: "voice", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
+		},
+	},
+	{
+		Framework: Pipecat, Role: Speak, Vendor: "rime",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/tts/rime",
+		Install: InstallSpec{Extra: "rime"},
+		Import:  "from pipecat.services.rime.tts import RimeTTSService",
+		Call: &CallSpec{
+			Class: "RimeTTSService", APIKeyArg: "api_key", APIKeyEnv: "RIME_API_KEY",
+			Model:    FieldSpec{Arg: "model"},
+			Voice:    FieldSpec{Arg: "voice", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
+		},
+	},
+	{
+		Framework: Pipecat, Role: Speak, Vendor: "sarvam",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/tts/sarvam",
+		Install: InstallSpec{Extra: "sarvam"},
+		Import:  "from pipecat.services.sarvam.tts import SarvamTTSService",
+		Call: &CallSpec{
+			Class: "SarvamTTSService", APIKeyArg: "api_key", APIKeyEnv: "SARVAM_API_KEY",
+			Model:    FieldSpec{Arg: "model"},
+			Voice:    FieldSpec{Arg: "voice", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
+		},
+		Notes: []string{"the WebSocket service; SarvamHttpTTSService is the HTTP variant (PR #9 shipped that one)"},
+	},
+	{
+		Framework: Pipecat, Role: Speak, Vendor: "soniox",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/tts/soniox",
+		Install: InstallSpec{Extra: "soniox"},
+		Import:  "from pipecat.services.soniox.tts import SonioxTTSService",
+		Call: &CallSpec{
+			Class: "SonioxTTSService", APIKeyArg: "api_key", APIKeyEnv: "SONIOX_API_KEY",
+			Model:    FieldSpec{Arg: "model"},
+			Voice:    FieldSpec{Arg: "voice", Required: true},
+			Language: FieldSpec{Arg: "language"},
+			Params:   ParamsSettings,
+		},
+	},
+	// speechmatics speak is deliberately absent: SpeechmaticsTTSService requires
+	// a caller-supplied aiohttp_session (required keyword-only argument), and
+	// this driver constructs its workers at module import where no event loop
+	// runs — smoke-proven incompatible 2026-07-17 (driver-pipecat T13).
+	{
 		Framework: Pipecat, Role: Speak, Vendor: "slng",
 		Distributes: []string{"cartesia", "deepgram"},
 		Verified:    "2026-07-15", Docs: pipecatServicesDocs,
@@ -161,6 +305,88 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.openai.llm import OpenAILLMService",
 		Call: &CallSpec{
 			Class: "OpenAILLMService", APIKeyArg: "api_key", APIKeyEnv: "OPENAI_API_KEY",
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Endpoint: FieldSpec{Arg: "base_url"},
+			Params:   ParamsSettings,
+		},
+	},
+	{
+		Framework: Pipecat, Role: Reason, Vendor: "anthropic",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/llm/anthropic",
+		Install: InstallSpec{Extra: "anthropic"},
+		Import:  "from pipecat.services.anthropic.llm import AnthropicLLMService",
+		Call: &CallSpec{
+			Class: "AnthropicLLMService", APIKeyArg: "api_key", APIKeyEnv: "ANTHROPIC_API_KEY",
+			Model:  FieldSpec{Arg: "model", Required: true},
+			Params: ParamsSettings, // Settings accepts system_instruction (workers driver injects it)
+		},
+	},
+	{
+		Framework: Pipecat, Role: Reason, Vendor: "deepseek",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/llm/deepseek",
+		Install: InstallSpec{Extra: "deepseek"},
+		Import:  "from pipecat.services.deepseek.llm import DeepSeekLLMService",
+		Call: &CallSpec{
+			Class: "DeepSeekLLMService", APIKeyArg: "api_key", APIKeyEnv: "DEEPSEEK_API_KEY",
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Endpoint: FieldSpec{Arg: "base_url"},
+			Params:   ParamsSettings,
+		},
+	},
+	{
+		Framework: Pipecat, Role: Reason, Vendor: "google",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/llm/google",
+		Install: InstallSpec{Extra: "google"},
+		Import:  "from pipecat.services.google.llm import GoogleLLMService",
+		Call: &CallSpec{
+			Class: "GoogleLLMService", APIKeyArg: "api_key", APIKeyEnv: "GOOGLE_API_KEY",
+			Model:  FieldSpec{Arg: "model", Required: true},
+			Params: ParamsSettings, // Gemini GenAI backend; Settings accepts system_instruction
+		},
+	},
+	{
+		Framework: Pipecat, Role: Reason, Vendor: "groq",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/llm/groq",
+		Install: InstallSpec{Extra: "groq"},
+		Import:  "from pipecat.services.groq.llm import GroqLLMService",
+		Call: &CallSpec{
+			Class: "GroqLLMService", APIKeyArg: "api_key", APIKeyEnv: "GROQ_API_KEY",
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Endpoint: FieldSpec{Arg: "base_url"},
+			Params:   ParamsSettings,
+		},
+	},
+	{
+		Framework: Pipecat, Role: Reason, Vendor: "mistral",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/llm/mistral",
+		Install: InstallSpec{Extra: "mistral"},
+		Import:  "from pipecat.services.mistral.llm import MistralLLMService",
+		Call: &CallSpec{
+			Class: "MistralLLMService", APIKeyArg: "api_key", APIKeyEnv: "MISTRAL_API_KEY",
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Endpoint: FieldSpec{Arg: "base_url"},
+			Params:   ParamsSettings,
+		},
+	},
+	{
+		Framework: Pipecat, Role: Reason, Vendor: "openrouter",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/llm/openrouter",
+		Install: InstallSpec{Extra: "openrouter"},
+		Import:  "from pipecat.services.openrouter.llm import OpenRouterLLMService",
+		Call: &CallSpec{
+			Class: "OpenRouterLLMService", APIKeyArg: "api_key", APIKeyEnv: "OPENROUTER_API_KEY",
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Endpoint: FieldSpec{Arg: "base_url"},
+			Params:   ParamsSettings,
+		},
+	},
+	{
+		Framework: Pipecat, Role: Reason, Vendor: "qwen",
+		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/llm/qwen",
+		Install: InstallSpec{Extra: "qwen"},
+		Import:  "from pipecat.services.qwen.llm import QwenLLMService",
+		Call: &CallSpec{
+			Class: "QwenLLMService", APIKeyArg: "api_key", APIKeyEnv: "QWEN_API_KEY",
 			Model:    FieldSpec{Arg: "model", Required: true},
 			Endpoint: FieldSpec{Arg: "base_url"},
 			Params:   ParamsSettings,

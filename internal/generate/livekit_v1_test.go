@@ -132,7 +132,7 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 func TestLiveKitV1UnknownVendorFailsWithMatrix(t *testing.T) {
 	env := newEnvSet()
 	_, err := livekitSTTService(&ir.Binding{Provider: "acme", Model: "m"}, "en", env)
-	if err == nil || !strings.Contains(err.Error(), "listen providers on livekit: deepgram, slng") {
+	if err == nil || !strings.Contains(err.Error(), "listen providers on livekit: assemblyai, cartesia, deepgram, elevenlabs, gradium, sarvam, slng, soniox, speechmatics") {
 		t.Fatalf("want a matrix-quoting error, got %v", err)
 	}
 }
