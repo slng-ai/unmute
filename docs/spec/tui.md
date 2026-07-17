@@ -51,7 +51,7 @@ T3|x|Maintain Validate / Compile actions reuse the in-process Cobra paths; combi
 T4|x|catalogue-driven binding editor: all `(framework, role)` entries/brands, provider grouping, distributor route, model/voice arity + language hints; extend the coverage test to iterate `DefaultCatalog()`|C6,C7,I.catalog,V24,V31
 T5|.|single webhook endpoint input auto-detects literal http(s) URL vs env name; gate literal URLs through `FieldToolWebhookURL`; land only after compiler.md + driver-spec `url` plumbing|C8,V28
 T6|x|regroup the ~17-item agent menu into identity / models / behavior / integrations / lifecycle; every gated notice uses target vocabulary + Back|G,V29
-T7|.|retrofit the existing V18–V25 tests to cite this spec and rename the unnumbered Back test to `TestV20BackPreservesPriorEdits`; keep all create-flow repair behavior green under the persistent shell|V18,V19,V20,V21,V22,V23,V24,V25
+T7|x|retrofit the existing V18–V25 tests to cite this spec and rename the unnumbered Back test to `TestV20BackPreservesPriorEdits`; keep all create-flow repair behavior green under the persistent shell|V18,V19,V20,V21,V22,V23,V24,V25
 
 Dependency order: T1 → T2 → T3; T4 after T1; T5 after its compiler/driver cross-spec dependency; T6 after T2; T7 last.
 

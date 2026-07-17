@@ -59,7 +59,7 @@ func TestRunQuit(t *testing.T) {
 	}
 }
 
-func TestV23WordmarkHasNoBackgroundColor(t *testing.T) {
+func TestV23WordmarkHasNoBackgroundColor(t *testing.T) { // docs/spec/tui.md V23
 	if strings.Contains(slngWordmark, "48;") {
 		t.Fatalf("wordmark still paints a background: %q", slngWordmark)
 	}
@@ -172,7 +172,7 @@ func TestRunAddVariableAndTool(t *testing.T) {
 	}
 }
 
-func TestV18VariablesMenuShowsSavedItems(t *testing.T) {
+func TestV18VariablesMenuShowsSavedItems(t *testing.T) { // docs/spec/tui.md V18
 	data := scaffold.Data{Variables: []scaffold.Variable{{Name: "customer_id", Type: "string", Source: "call_start"}}}
 	var output bytes.Buffer
 	err := editVariables(newRunner(strings.NewReader(""), &output, true), &data)
@@ -184,7 +184,7 @@ func TestV18VariablesMenuShowsSavedItems(t *testing.T) {
 	}
 }
 
-func TestV18ToolsMenuUsesNeutralNameAndShowsExecution(t *testing.T) {
+func TestV18ToolsMenuUsesNeutralNameAndShowsExecution(t *testing.T) { // docs/spec/tui.md V18
 	data := scaffold.Data{Target: "pipecat"}
 	var output bytes.Buffer
 	err := editTools(newRunner(strings.NewReader("1\nlookup_customer\nLook up the caller.\n"), &output, true), &data)
@@ -198,7 +198,7 @@ func TestV18ToolsMenuUsesNeutralNameAndShowsExecution(t *testing.T) {
 	}
 }
 
-func TestV18AgentMenuShowsAndEditsSavedAgent(t *testing.T) {
+func TestV18AgentMenuShowsAndEditsSavedAgent(t *testing.T) { // docs/spec/tui.md V18
 	data := scaffold.Data{Instructions: scaffold.DefaultInstructions}
 	data.SetTarget("pipecat")
 	data.Agents = []scaffold.Agent{{
@@ -221,7 +221,7 @@ func TestV18AgentMenuShowsAndEditsSavedAgent(t *testing.T) {
 	}
 }
 
-func TestV19HandoffShowsExistingVariablesAsChoices(t *testing.T) {
+func TestV19HandoffShowsExistingVariablesAsChoices(t *testing.T) { // docs/spec/tui.md V19
 	data := scaffold.Data{Instructions: scaffold.DefaultInstructions, Variables: []scaffold.Variable{{Name: "customer_id", Type: "string"}}}
 	data.SetTarget("pipecat")
 	data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Handle billing.", Reason: data.Reason, Speak: data.Speak}}
@@ -237,7 +237,7 @@ func TestV19HandoffShowsExistingVariablesAsChoices(t *testing.T) {
 	}
 }
 
-func TestV19TaskShowsExistingToolsAsChoices(t *testing.T) {
+func TestV19TaskShowsExistingToolsAsChoices(t *testing.T) { // docs/spec/tui.md V19
 	data := scaffold.Data{Tools: []scaffold.Tool{{Name: "lookup_customer"}}}
 	data.SetTarget("pipecat")
 	var output bytes.Buffer
@@ -250,7 +250,7 @@ func TestV19TaskShowsExistingToolsAsChoices(t *testing.T) {
 	}
 }
 
-func TestV22TaskResultExplainsPrefilledShape(t *testing.T) {
+func TestV22TaskResultExplainsPrefilledShape(t *testing.T) { // docs/spec/tui.md V22
 	data := scaffold.Data{}
 	data.SetTarget("pipecat")
 	var output bytes.Buffer
@@ -265,7 +265,7 @@ func TestV22TaskResultExplainsPrefilledShape(t *testing.T) {
 	}
 }
 
-func TestV19TaskAssignmentPicksSavedVariableAndResultField(t *testing.T) {
+func TestV19TaskAssignmentPicksSavedVariableAndResultField(t *testing.T) { // docs/spec/tui.md V19
 	data := scaffold.Data{Variables: []scaffold.Variable{{Name: "verified", Type: "boolean"}, {Name: "tier", Type: "string"}}}
 	task := scaffold.Task{Result: `{"verified":"boolean","tier":{"enum":["free","pro"]}}`}
 	var output bytes.Buffer
@@ -286,7 +286,7 @@ func TestV19TaskAssignmentPicksSavedVariableAndResultField(t *testing.T) {
 	}
 }
 
-func TestV21PreflightFailureUsesDedicatedScreen(t *testing.T) {
+func TestV21PreflightFailureUsesDedicatedScreen(t *testing.T) { // docs/spec/tui.md V21
 	// Pipecat still gates fallback (driver-pipecat C9/B7); livekit emits it
 	// natively since driver-livekit T5, so the failure fixture lives here.
 	data := scaffold.Data{Name: "agent", Language: "en", Channel: "web"}
@@ -410,7 +410,7 @@ func TestRunCustomizeCapacity(t *testing.T) {
 	}
 }
 
-func TestRunBackPreservesPriorEdits(t *testing.T) {
+func TestV20BackPreservesPriorEdits(t *testing.T) { // docs/spec/tui.md V20
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n1\n2\nes-MX\n3\n1\n:back\n7\n\n"
 	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
@@ -486,7 +486,7 @@ func TestV29UnavailableChoiceNamesGateAndOffersBack(t *testing.T) {
 	}
 }
 
-func TestV24ModelsLabelDeduplicatesProviderBrands(t *testing.T) {
+func TestV24ModelsLabelDeduplicatesProviderBrands(t *testing.T) { // docs/spec/tui.md V24
 	data := scaffold.Data{}
 	data.SetTarget("livekit")
 	if got := modelsLabel(data); got != "deepgram / openai" {
@@ -494,7 +494,7 @@ func TestV24ModelsLabelDeduplicatesProviderBrands(t *testing.T) {
 	}
 }
 
-func TestV24ProviderThenDistributorFlow(t *testing.T) {
+func TestV24ProviderThenDistributorFlow(t *testing.T) { // docs/spec/tui.md V24
 	binding := scaffold.Binding{}
 	input := "1\n2\nslng/cartesia/sonic-3\nvoice-id\n\n"
 	if err := editBindingFor(newRunner(strings.NewReader(input), &bytes.Buffer{}, true), "pipecat", targetcap.Speak, &binding); err != nil {
@@ -506,7 +506,7 @@ func TestV24ProviderThenDistributorFlow(t *testing.T) {
 	}
 }
 
-func TestV25SavedResourcesOfferDelete(t *testing.T) {
+func TestV25SavedResourcesOfferDelete(t *testing.T) { // docs/spec/tui.md V25
 	base := func() scaffold.Data {
 		data := scaffold.Data{Name: "agent", Instructions: scaffold.DefaultInstructions}
 		data.SetTarget("pipecat")
@@ -551,7 +551,7 @@ func TestV25SavedResourcesOfferDelete(t *testing.T) {
 	}
 }
 
-func TestV25DeleteResourceCleansReferences(t *testing.T) {
+func TestV25DeleteResourceCleansReferences(t *testing.T) { // docs/spec/tui.md V25
 	data := scaffold.Data{EntryAgent: "billing"}
 	data.Agents = []scaffold.Agent{{Name: "billing"}}
 	data.Variables = []scaffold.Variable{{Name: "customer_id", Type: "string"}}
@@ -575,7 +575,7 @@ func TestV25DeleteResourceCleansReferences(t *testing.T) {
 	}
 }
 
-func TestV25InvalidSavedResourcesRemainAvailableForRepair(t *testing.T) {
+func TestV25InvalidSavedResourcesRemainAvailableForRepair(t *testing.T) { // docs/spec/tui.md V25
 	tests := []struct {
 		name string
 		data scaffold.Data
@@ -791,7 +791,7 @@ func TestV32DestructiveSaveNamesFilesAndConfirms(t *testing.T) {
 	}
 }
 
-func TestV20MaintainBackPreservesPriorEdits(t *testing.T) {
+func TestV20MaintainBackPreservesPriorEdits(t *testing.T) { // docs/spec/tui.md V20
 	root := filepath.Join(t.TempDir(), "agent")
 	data := scaffold.Data{Name: "agent"}
 	data.SetTarget(scaffold.DefaultTarget)
