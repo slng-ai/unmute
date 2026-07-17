@@ -472,6 +472,44 @@ func TestV19TaskAssignmentPicksSavedVariableAndResultField(t *testing.T) { // do
 	}
 }
 
+func TestV39TaskResultAssignmentCanBeRemoved(t *testing.T) { // docs/spec/tui.md V39
+	for _, test := range []struct {
+		name, result, assign, input, want string
+		variables                         []scaffold.Variable
+	}{
+		{
+			name: "remaining map", result: `{"company":"string","customer_name":"string"}`,
+			assign: `{"company":"result.company","customer_name":"result.customer_name"}`,
+			input:  "3\n1\n3\n2\n", want: `{"customer_name":"result.customer_name"}`,
+			variables: []scaffold.Variable{{Name: "company", Type: "string"}, {Name: "customer_name", Type: "string"}},
+		},
+		{
+			name: "empty map", result: `{"customer_name":"string"}`,
+			assign: `{"customer_name":"result.customer_name"}`, input: "2\n1\n2\n1\n", want: "",
+			variables: []scaffold.Variable{{Name: "customer_name", Type: "string"}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := scaffold.Data{Variables: test.variables}
+			task := scaffold.Task{Result: test.result, Assign: test.assign}
+			var output bytes.Buffer
+			back, err := editTaskAssignments(newRunner(strings.NewReader(test.input), &output, true), &data, &task)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if back {
+				t.Fatal("removing an assignment unexpectedly went back")
+			}
+			if task.Assign != test.want {
+				t.Fatalf("task assignment = %q, want %q", task.Assign, test.want)
+			}
+			if !strings.Contains(output.String(), "Remove assignment") {
+				t.Fatalf("field editor omitted Remove assignment:\n%s", output.String())
+			}
+		})
+	}
+}
+
 func TestV21PreflightFailureUsesDedicatedScreen(t *testing.T) { // docs/spec/tui.md V21
 	// Pipecat still gates fallback (driver-pipecat C9/B7); livekit emits it
 	// natively since driver-livekit T5, so the failure fixture lives here.

@@ -1725,6 +1725,10 @@ func editTaskAssignments(runner *fieldRunner, data *scaffold.Data, task *scaffol
 			return true, nil
 		}
 		if choice == "done" {
+			if len(assignments) == 0 {
+				task.Assign = ""
+				return false, nil
+			}
 			raw, err := json.Marshal(assignments)
 			if err != nil {
 				return false, err
@@ -1732,16 +1736,22 @@ func editTaskAssignments(runner *fieldRunner, data *scaffold.Data, task *scaffol
 			task.Assign = string(raw)
 			return false, nil
 		}
-		fieldOptions := make([]huh.Option[string], 0, len(fields)+1)
+		fieldOptions := make([]huh.Option[string], 0, len(fields)+2)
 		for _, name := range fields {
 			fieldOptions = append(fieldOptions, huh.NewOption(name, name))
 		}
+		fieldOptions = append(fieldOptions, huh.NewOption("Remove assignment", "remove"))
 		fieldOptions = append(fieldOptions, huh.NewOption("← Back", actionBack))
 		field, back, err := runner.selectOne("Result field for "+choice, "", fieldOptions, true)
 		if err != nil {
 			return false, err
 		}
 		if !back {
+			if field == "remove" {
+				delete(assignments, choice)
+				selected = removeName(selected, choice)
+				continue
+			}
 			assignments[choice] = "result." + field
 		}
 	}

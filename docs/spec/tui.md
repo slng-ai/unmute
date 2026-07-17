@@ -51,6 +51,7 @@ Make the TUI the Unmute console: bare `unmute` on a TTY opens **Create a new age
 - V36: section children appear directly in their section. Models shows Listen, Reason, and Speak rows without a one-row "Listen, reason, speak" wrapper; no console menu has one actionable row whose sole effect is opening another menu (`TestV36SectionsHaveNoPassThroughMenus`).
 - V37: every screen has a visible Back affordance. Select/confirm screens show a Back option or footer action; input/text screens show Back in the footer. Esc and `:back` remain shortcuts, never the only route (`TestV37EveryScreenShowsBackAffordance`).
 - V38: every flow with multiple editable fields opens an overview menu showing all field names and current values, edits one chosen field, then returns to that menu. Listen/Reason/Speak binding overviews show Provider, conditional Distributor, catalogue-applicable Model/Voice, Language, Additional config, and Back; no create or edit flow is a blind field sequence (`TestV38MultiFieldFlowsUseOverviewMenus`, `TestV38BindingOverviewShowsAllFieldsAndReturns`).
+- V39: every task-result assignment can be removed from its field editor. Removal returns to the assignment overview immediately; **Done** persists the remaining map, and removing the last assignment clears `task.assign` (`TestV39TaskResultAssignmentCanBeRemoved`).
 
 ## §T tasks
 id|status|desc|cites
@@ -66,8 +67,9 @@ T9|x|remove pass-through menus; Models exposes Listen/Reason/Speak directly and 
 T10|x|make Back visible on every input/text/select/confirm/notice screen in interactive + accessible modes; keep Esc/`:back` shortcuts|C5,C12,V37
 T11|x|replace every multi-field create/edit chain with current-value overview rows; binding Provider/conditional Distributor/Model/Voice/Language/Additional config edit one field and return|C13,V20,V24,V38
 T12|.|BLOCKED on catalogue breadth follow-up to [driver-livekit.md](driver-livekit.md) T11 + [driver-pipecat.md](driver-pipecat.md) T9: complete the PR #9/#10 doc-verified entries in `catalog_livekit.go` + `catalog_pipecat.go`; TUI changes none|C6,I.catalog,V31
+T13|x|add an explicit Remove assignment action to each task-result assignment field editor; return to the overview and persist the reduced or empty assignment map on Done|C13,V39
 
-Dependency order: T1 → T2 → T3; T4 after T1; T5 after its compiler/driver cross-spec dependency; T6 after T2; T7 closed the first build. T8 → T9 → T10 → T11. T12 stays blocked on catalogue work and does not permit TUI-local provider lists.
+Dependency order: T1 → T2 → T3; T4 after T1; T5 after its compiler/driver cross-spec dependency; T6 after T2; T7 closed the first build. T8 → T9 → T10 → T11 → T13. T12 stays blocked on catalogue work and does not permit TUI-local provider lists.
 
 ## §B bugs
 id|date|cause|fix
@@ -77,3 +79,4 @@ B3|2026-07-16|the SLNG wordmark ANSI sequence painted a background color, leakin
 B4|2026-07-16|catalogue vendor choices conflated provider brands with distributor routes, producing duplicate labels and no provider-then-distributor flow (commit c77787e)|V24
 B5|2026-07-16|saved resources had no delete/cascade cleanup, while Add gates hid already-invalid saved resources and trapped repair (commit c77787e)|V25
 B6|2026-07-16|the SLNG wordmark was printed before the TUI program; once alt-screen landed it remained on the hidden normal buffer instead of the console|V26
+B7|2026-07-17|T11's task-result assignment overview exposed field remapping plus Done/Back but no in-place removal action, trapping users after assignment selection|V39
