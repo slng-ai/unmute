@@ -119,6 +119,61 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	}
 }
 
+// TestPipecatV1LocalTool covers execution: local (T14, V13): the same @tool
+// shape as webhook whose body imports + awaits the user handler from
+// tools/<name>.py, at both sites — agent @tool method and flows handler. The
+// handler file rides the artifact verbatim, mirroring the LiveKit driver.
+func TestPipecatV1LocalTool(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tools["fetch_notes"] = ir.Tool{
+		Description: "Fetch the caller's saved notes.",
+		Input:       map[string]any{"type": "object", "properties": map[string]any{"topic": map[string]any{"type": "string"}}, "required": []any{"topic"}},
+		Execution:   ir.ToolLocal, Handler: "tools/fetch_notes.py",
+		HandlerSource: "def fetch_notes(topic):\n    return {\"notes\": []}\n",
+		Interruption:  ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+	}
+	agent.Tasks["collect"] = ir.Task{
+		Instructions: "Ask what the caller needs, then pull their notes.",
+		Tools:        []string{"fetch_notes"},
+		Result:       map[string]ir.ResultField{"summary": {Type: ir.PrimitiveString}},
+		Context:      ir.TaskContext{History: ir.HistoryFull},
+	}
+	agent.Controls["run_collect"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "collect", When: "Collect the caller's request."}
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "fetch_notes", "run_collect")
+	agent.Agents["intake"] = intake
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"import inspect",
+		"import tools.fetch_notes",
+		"async def fetch_notes(self, params: FunctionCallParams, topic: str):",
+		"result = tools.fetch_notes.fetch_notes(topic=topic)",
+		"if inspect.isawaitable(result):",
+		"await params.result_callback(result)",
+		"result = tools.fetch_notes.fetch_notes(**dict(args))", // flows handler site
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing %q", want)
+		}
+	}
+	if handler := artifactFile(t, artifact, "tools/fetch_notes.py"); !strings.Contains(handler, "def fetch_notes(topic):") {
+		t.Errorf("handler not copied verbatim:\n%s", handler)
+	}
+	artifactFile(t, artifact, "tools/__init__.py")
+}
+
 // TestPipecatEmitterMatchesCapabilityTable is the table↔emitter agreement test
 // (compiler V19 / T12): the emitter's declared code paths must equal the table's
 // non-gated Pipecat rows, so no field is validate-green yet silently unemitted.

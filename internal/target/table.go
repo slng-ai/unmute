@@ -327,7 +327,6 @@ func Default() Table {
 				warn(ElevenLabs, "ElevenLabs cannot enforce tool output schemas"),
 			),
 			FieldToolLocal: field(
-				deny(Pipecat, "the Pipecat driver does not emit local tool handlers yet"),
 				deny(Vapi, "Vapi cannot host local tool code"),
 				deny(ElevenLabs, "ElevenLabs cannot host local tool code"),
 			),

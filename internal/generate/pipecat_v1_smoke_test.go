@@ -40,7 +40,7 @@ print("smoke ok:", ", ".join(builders))
 // (deepgram Settings-style STT, slng flat-kwargs TTS, openai Settings LLM).
 // Opt-in (`make smoke` / -tags smoke), never in the default suite.
 func TestSmokePipecatV1ServicesInstantiate(t *testing.T) {
-	runPipecatSmoke(t, nil)
+	runPipecatSmoke(t, nil, nil)
 }
 
 // TestSmokePipecatV1MultiVendorInstantiates covers the remaining official
@@ -54,10 +54,29 @@ func TestSmokePipecatV1MultiVendorInstantiates(t *testing.T) {
 		tgt.Models.Speak["specialist"] = ir.Binding{
 			Provider: "cartesia", Model: "sonic-3", Voice: "f786b574-daa5-4673-aa0c-cbe3e8534c02",
 		}
+	}, nil)
+}
+
+// TestSmokePipecatV1LocalToolInstantiates proves the local-tool lowering (T14,
+// V13) against real pipecat-ai: importing bot constructs the agent workers, so
+// the @tool wrapper class-collects and `import tools.fetch_notes` resolves the
+// copied handler file inside the venv.
+func TestSmokePipecatV1LocalToolInstantiates(t *testing.T) {
+	runPipecatSmoke(t, nil, func(agent *ir.Agent) {
+		agent.Tools["fetch_notes"] = ir.Tool{
+			Description: "Fetch the caller's saved notes.",
+			Input:       map[string]any{"type": "object", "properties": map[string]any{"topic": map[string]any{"type": "string"}}, "required": []any{"topic"}},
+			Execution:   ir.ToolLocal, Handler: "tools/fetch_notes.py",
+			HandlerSource: "def fetch_notes(topic):\n    return {\"notes\": []}\n",
+			Interruption:  ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+		}
+		intake := agent.Agents["intake"]
+		intake.Tools = append(intake.Tools, "fetch_notes")
+		agent.Agents["intake"] = intake
 	})
 }
 
-func runPipecatSmoke(t *testing.T, mutate func(*ir.Target)) {
+func runPipecatSmoke(t *testing.T, mutate func(*ir.Target), mutateAgent func(*ir.Agent)) {
 	t.Helper()
 	if _, err := exec.LookPath("uv"); err != nil {
 		t.Skip("uv not available")
@@ -70,6 +89,9 @@ func runPipecatSmoke(t *testing.T, mutate func(*ir.Target)) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if mutateAgent != nil {
+		mutateAgent(agent)
+	}
 	tgt := targetByProvider(t, agent, ir.ProviderPipecat)
 	if mutate != nil {
 		mutate(&tgt)
@@ -81,7 +103,11 @@ func runPipecatSmoke(t *testing.T, mutate func(*ir.Target)) {
 
 	dir := t.TempDir()
 	for _, file := range artifact.Files {
-		if err := os.WriteFile(filepath.Join(dir, file.Path), file.Content, 0o644); err != nil {
+		out := filepath.Join(dir, file.Path)
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(out, file.Content, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

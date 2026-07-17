@@ -814,16 +814,17 @@ func TestV31CatalogueHintUsesEntryArityAndLanguageSlot(t *testing.T) {
 }
 
 func TestV29UnavailableChoiceNamesGateAndOffersBack(t *testing.T) {
+	// Vapi still gates local tools; pipecat's gate lifted 2026-07-17 (T14).
 	var output bytes.Buffer
 	tool := scaffold.Tool{}
-	back, err := chooseToolExecution(newRunner(strings.NewReader("2\n1\n3\n"), &output, true), string(targetcap.Pipecat), &tool)
+	back, err := chooseToolExecution(newRunner(strings.NewReader("2\n1\n3\n"), &output, true), string(targetcap.Vapi), &tool)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !back {
 		t.Fatal("unavailable choice did not permit Back")
 	}
-	want := targetcap.Default().Capability(targetcap.FieldToolLocal, targetcap.Pipecat).Note
+	want := targetcap.Default().Capability(targetcap.FieldToolLocal, targetcap.Vapi).Note
 	if !strings.Contains(output.String(), want) || !strings.Contains(output.String(), "Identity → Target") || !strings.Contains(output.String(), "← Back") {
 		t.Fatalf("unavailable choice omitted exact gate, target guidance, or Back:\n%s", output.String())
 	}

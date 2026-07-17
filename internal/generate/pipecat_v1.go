@@ -110,7 +110,8 @@ type pipecatAssign struct {
 	Field string
 }
 
-// pipecatTool is a webhook tool exposed as an @tool method that POSTs to url_env.
+// pipecatTool is a webhook or local tool exposed as an @tool method: webhook
+// POSTs to url_env, local awaits the user's handler from tools/<name>.py (V13).
 // Inside a Flow node the same tool is instead a module-level flows handler; the
 // InputProps/InputRequired literals carry its schema onto the FlowsFunctionSchema.
 type pipecatTool struct {
@@ -118,12 +119,20 @@ type pipecatTool struct {
 	MethodName      string
 	Description     string
 	URLEnv          string
+	Local           bool   // execution: local — body imports + awaits tools/<name>.py (V13)
+	HandlerSource   string // local handler file content, copied into the artifact
 	Args            []pipecatArg
 	InputProps      string // Python literal: the input schema's properties object
 	InputRequired   string // Python literal: the input schema's required list
 	EndsCall        bool
 	Interruption    string // "cancel" | "continue" | "" (provider default)
 	ColdDestination string // set for a cold human_transfer: the resolved number/SIP URI
+}
+
+// pipecatLocalTool is a copied handler file: tools/<name>.py in the project.
+type pipecatLocalTool struct {
+	Name   string
+	Source string
 }
 
 type pipecatArg struct {
@@ -154,7 +163,8 @@ type pipecatData struct {
 	EntryClass          string
 	STT                 pipecatService
 	Agents              []pipecatAgent
-	FlowTools           []pipecatTool // deduped task tools, emitted as module-level flows handlers
+	FlowTools           []pipecatTool      // deduped task tools, emitted as module-level flows handlers
+	LocalTools          []pipecatLocalTool // copied handler files (tools/<name>.py, V13)
 	Variables           []pipecatVariable
 	GreetingInstruction string
 	GreetingRunLLM      string // "True" or "False"
@@ -172,6 +182,7 @@ type pipecatData struct {
 	// Import needs: keep bot.py free of unused imports (only what a given spec
 	// actually exercises), so the emitted pipeline reads clean.
 	NeedsAsyncio        bool // _end_after max-duration timer
+	NeedsInspect        bool // any local tool (isawaitable on the user handler, V13)
 	NeedsHTTPX          bool // any webhook tool (agent @tool or flows handler)
 	NeedsFunctionCalls  bool // any @tool/transfer/delegate (FunctionCallParams)
 	NeedsTurnStrategies bool // interruption min-words strategy
@@ -222,6 +233,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldInactivity:           true, // user_idle_timeout
 	targetcap.FieldMaxDuration:          true, // asyncio EndFrame timer
 	targetcap.FieldToolOutput:           true, // tool returns response.json()
+	targetcap.FieldToolLocal:            true, // @tool awaiting tools/<name>.py (T14, V13)
 	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
 }
 
@@ -289,6 +301,14 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 			return nil, err
 		}
 		files = append(files, File{Path: o.path, Content: content})
+	}
+	// Local tool handlers are copied verbatim from the source package (SCHEMA
+	// §5: code targets host the handler; V13).
+	if len(data.LocalTools) > 0 {
+		files = append(files, File{Path: "tools/__init__.py", Content: []byte("")})
+		for _, lt := range data.LocalTools {
+			files = append(files, File{Path: "tools/" + lt.Name + ".py", Content: []byte(lt.Source)})
+		}
 	}
 	return files, nil
 }
