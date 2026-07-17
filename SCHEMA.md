@@ -312,7 +312,7 @@ Execution gating across the five:
 - `mcp`: **fails on Deepgram** (no runtime MCP client). On LiveKit it requires SDK language Python; code targets read the server address from `url_env` (B3, 2026-07-16).
 - `client`, `provider_hosted`, `builtin`: gated per driver; each driver documents what it can host. Not part of the safe core yet.
 
-The Pipecat driver v1 emits `webhook` tools only; `local` and `mcp` are maturity-gated there until the driver emits them.
+The Pipecat driver v1 emits `webhook` and `local` tools (amended 2026-07-17, driver-pipecat T14: `local` lowers to the same `@tool` method, body awaiting the user handler from `tools/<name>.py`); `mcp` stays maturity-gated there until the driver emits it.
 
 ---
 
@@ -441,4 +441,4 @@ Still open:
 
 | Driver | Gated until emitted | Where |
 |---|---|---|
-| Pipecat v1 | `models.fallback`, `thinking_audio`, `outbound` + `on_voicemail`, `local` tools, `mcp` tools, warm transfer; transfer/task context shaping beyond the safe-core defaults — `history` other than `full`, `context.variables` subset, `include_tool_calls: false` (the workers handoff carries the running context; fine-grained shaping is not emitted yet) | [docs/spec/driver-pipecat.md](docs/spec/driver-pipecat.md) §T. Emitted: single agent, `agent_transfer` (+ `requires` guard), `tasks`, `task_groups` with `context_scope` (shared/isolated), `then` return/transfer/end. |
+| Pipecat v1 | `models.fallback`, `thinking_audio`, `outbound` + `on_voicemail`, `mcp` tools, warm transfer; transfer/task context shaping beyond the safe-core defaults — `history` other than `full`, `context.variables` subset, `include_tool_calls: false` (the workers handoff carries the running context; fine-grained shaping is not emitted yet). (`local` tools lifted 2026-07-17, driver-pipecat T14.) | [docs/spec/driver-pipecat.md](docs/spec/driver-pipecat.md) §T. Emitted: single agent, `agent_transfer` (+ `requires` guard), `tasks`, `task_groups` with `context_scope` (shared/isolated), `then` return/transfer/end, `local` tools (2026-07-17). |
