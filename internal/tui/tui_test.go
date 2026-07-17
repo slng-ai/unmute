@@ -166,10 +166,10 @@ func TestV36SectionsHaveNoPassThroughMenus(t *testing.T) { // docs/spec/tui.md V
 func TestV37EveryScreenShowsBackAffordance(t *testing.T) { // docs/spec/tui.md V37
 	keymap := backKeyMap()
 	for name, help := range map[string]string{
-		"input":   keymap.Input.Submit.Help().Desc,
-		"text":    keymap.Text.Submit.Help().Desc,
-		"select":  keymap.Select.Submit.Help().Desc,
-		"confirm": keymap.Confirm.Submit.Help().Desc,
+		"input":   keymap.Input.Submit.Help().Key + " " + keymap.Input.Submit.Help().Desc,
+		"text":    keymap.Text.Submit.Help().Key + " " + keymap.Text.Submit.Help().Desc,
+		"select":  keymap.Select.Submit.Help().Key + " " + keymap.Select.Submit.Help().Desc,
+		"confirm": keymap.Confirm.Submit.Help().Key + " " + keymap.Confirm.Submit.Help().Desc,
 	} {
 		if !strings.Contains(help, "Back") {
 			t.Errorf("%s interactive footer omits Back: %q", name, help)
@@ -225,6 +225,28 @@ func TestV37EveryScreenShowsBackAffordance(t *testing.T) { // docs/spec/tui.md V
 	notice := programShell{notice: &noticeState{title: "Report", lines: []string{"done"}, height: 10}}
 	if view := notice.View(); !strings.Contains(view, "Back") {
 		t.Errorf("interactive notice footer omits Back: %q", view)
+	}
+}
+
+func TestV37ConstrainedMenuPinsBackInFooter(t *testing.T) { // docs/spec/tui.md V37
+	var choice string
+	options := []huh.Option[string]{
+		huh.NewOption("Description", "description"),
+		huh.NewOption("Execution", "execution"),
+		huh.NewOption("Webhook URL env", "url"),
+		huh.NewOption("Input schema", "input"),
+		huh.NewOption("Output schema", "output"),
+		huh.NewOption("Attached to", "attach"),
+		huh.NewOption("Delete tool", "delete"),
+		huh.NewOption("← Back", actionBack),
+	}
+	form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("user_verified").Options(options...).Value(&choice))).
+		WithKeyMap(backKeyMap()).
+		WithHeight(9)
+
+	model, _ := (programShell{}).Update(requestMsg{request: formRequest{form: form, done: make(chan error, 1)}, ok: true})
+	if view := model.(programShell).View(); !strings.Contains(view, "← Back") {
+		t.Fatalf("constrained menu omitted pinned Back affordance:\n%s", view)
 	}
 }
 
@@ -1002,7 +1024,7 @@ func TestRunEOFAborts(t *testing.T) {
 
 func TestBackKeyMapShowsFooterHint(t *testing.T) {
 	help := backKeyMap().Input.Submit.Help()
-	if help.Key != "esc" || !strings.Contains(help.Desc, "Back") {
+	if help.Key != "← Back" || !strings.Contains(help.Desc, "Esc") {
 		t.Fatalf("input footer help = %#v", help)
 	}
 }

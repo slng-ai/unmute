@@ -3091,10 +3091,10 @@ func backKeyMap() *huh.KeyMap {
 	keymap.Quit.SetKeys("esc", "ctrl+c")
 	// ponytail: Huh omits form-level Quit from field help, so include Esc in
 	// submit help until Huh exposes custom footer bindings.
-	keymap.Input.Submit.SetHelp("esc", "Back • enter Submit")
-	keymap.Text.Submit.SetHelp("esc", "Back • enter Submit")
-	keymap.Select.Submit.SetHelp("esc", "Back • enter Select")
-	keymap.Confirm.Submit.SetHelp("esc", "Back • enter Confirm")
+	keymap.Input.Submit.SetHelp("← Back", "(Esc) • enter Submit")
+	keymap.Text.Submit.SetHelp("← Back", "(Esc) • enter Submit")
+	keymap.Select.Submit.SetHelp("← Back", "(Esc) • enter Select")
+	keymap.Confirm.Submit.SetHelp("← Back", "(Esc) • enter Confirm")
 	return keymap
 }
 
