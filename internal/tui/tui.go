@@ -836,37 +836,75 @@ func toolLabel(data *scaffold.Data, tool scaffold.Tool) string {
 	return fmt.Sprintf("%s  ·  %s  ·  %s", tool.Name, tool.ExecutionKind(), toolAttachmentLabel(data, tool))
 }
 
+// toolExecutionKinds are the execution kinds the console can express, each
+// gated by its capability-table field (a zero field means core everywhere,
+// SCHEMA §5: webhook is the safe choice). The picker derives its options and
+// notices from this list plus the table — never a hardcoded kind list (V42).
+type toolExecutionKind struct {
+	Value string
+	Name  string
+	Field targetcap.Field // "" = ungated
+}
+
+var toolExecutionKinds = []toolExecutionKind{
+	{Value: "webhook", Name: "Webhook"},
+	{Value: "local", Name: "Local Python", Field: targetcap.FieldToolLocal},
+	{Value: "mcp", Name: "MCP server", Field: targetcap.FieldToolMCP},
+}
+
+// toolExecutionGate returns the capability row gating kind on target; ok is
+// false when the kind is gated there (V42: offered iff non-gated in the table).
+func toolExecutionGate(kind toolExecutionKind, target string) (targetcap.Capability, bool) {
+	if kind.Field == "" {
+		return targetcap.Capability{}, true
+	}
+	capability := targetcap.Default().Capability(kind.Field, targetcap.Provider(target))
+	return capability, capability.Tag != targetcap.Gated
+}
+
 func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool) (bool, error) {
 	for {
-		capability := targetcap.Default().Capability(targetcap.FieldToolLocal, targetcap.Provider(target))
 		handler := filepath.ToSlash(filepath.Join("tools", tool.Name+".py"))
-		localLabel := "Local Python  ·  creates " + handler + " when saved"
-		if capability.Tag == targetcap.Gated {
-			localLabel = "Local Python  ·  unavailable on " + targetLabel(target)
+		detail := map[string]string{
+			"webhook": "HTTP endpoint from an environment variable",
+			"local":   "creates " + handler + " when saved",
+			"mcp":     "server address from an environment variable",
 		}
-		selected, back, err := runner.selectOne("Tool execution", "Choose where this tool runs. Local Python creates an empty handler file when supported.", []huh.Option[string]{
-			huh.NewOption("Webhook  ·  HTTP endpoint from an environment variable", "webhook"),
-			huh.NewOption(localLabel, "local"),
-			huh.NewOption("← Back", actionBack),
-		}, true)
+		options := make([]huh.Option[string], 0, len(toolExecutionKinds)+1)
+		for _, kind := range toolExecutionKinds {
+			label := kind.Name + "  ·  " + detail[kind.Value]
+			if _, ok := toolExecutionGate(kind, target); !ok {
+				label = kind.Name + "  ·  unavailable on " + targetLabel(target)
+			}
+			options = append(options, huh.NewOption(label, kind.Value))
+		}
+		options = append(options, huh.NewOption("← Back", actionBack))
+		selected, back, err := runner.selectOne("Tool execution", "Choose where this tool runs. Local Python creates an empty handler file when supported.", options, true)
 		if err != nil || back || selected == actionBack {
 			return back || selected == actionBack, err
 		}
-		if selected == "local" {
-			if capability.Tag == targetcap.Gated {
-				message := fmt.Sprintf("%s: %s. Change Target under Identity → Target to use Local Python.", targetLabel(target), capability.Note)
-				if err := showNotice(runner, "Local Python unavailable", message); err != nil {
-					return false, err
-				}
+		for _, kind := range toolExecutionKinds {
+			if kind.Value != selected {
 				continue
 			}
-			tool.Execution = "local"
-			tool.Handler = handler
-			tool.URLEnv = ""
-			return false, nil
+			if capability, ok := toolExecutionGate(kind, target); !ok {
+				message := fmt.Sprintf("%s: %s. Change Target under Identity → Target to use %s.", targetLabel(target), capability.Note, kind.Name)
+				if err := showNotice(runner, kind.Name+" unavailable", message); err != nil {
+					return false, err
+				}
+				selected = ""
+			}
+			break
+		}
+		if selected == "" {
+			continue
 		}
 		tool.Execution = selected
 		tool.Handler = ""
+		if selected == "local" {
+			tool.Handler = handler
+			tool.URLEnv = ""
+		}
 		return false, nil
 	}
 }
@@ -874,8 +912,11 @@ func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool
 func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) error {
 	for {
 		executionField := huh.NewOption("Webhook URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url")
-		if tool.ExecutionKind() == "local" {
+		switch tool.ExecutionKind() {
+		case "local":
 			executionField = huh.NewOption("Python handler  ·  "+firstNonempty(tool.Handler, "none"), "handler")
+		case "mcp":
+			executionField = huh.NewOption("MCP server URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url")
 		}
 		choice, _, err := runner.selectOne(tool.Name, "", []huh.Option[string]{
 			huh.NewOption("Description  ·  "+oneLine(tool.Description), "description"),
@@ -900,7 +941,11 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 				return err
 			}
 		case "url":
-			if _, err := runner.input("Webhook URL env", "Environment variable containing the URL; never the URL itself.", &tool.URLEnv, validateEnvName); err != nil {
+			title, hint := "Webhook URL env", "Environment variable containing the URL; never the URL itself."
+			if tool.ExecutionKind() == "mcp" {
+				title, hint = "MCP server URL env", "Environment variable containing the MCP server address; never the URL itself."
+			}
+			if _, err := runner.input(title, hint, &tool.URLEnv, validateEnvName); err != nil {
 				return err
 			}
 		case "handler":

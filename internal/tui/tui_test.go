@@ -504,6 +504,44 @@ func TestV41LiveKitInitWebhookCompilesOnAgent(t *testing.T) { // docs/spec/tui.m
 	t.Fatal("generated agent.py omitted the entry agent's @function_tool method")
 }
 
+func TestV42LiveKitInitMCPCompilesOnAgent(t *testing.T) { // docs/spec/tui.md V42
+	data := scaffold.Data{
+		Name: "agent", Instructions: scaffold.DefaultInstructions,
+		Tools: []scaffold.Tool{{
+			Name: "book_table", Description: "Book through the bookings MCP server.",
+			Execution: "mcp", URLEnv: "BOOKINGS_MCP_URL", Input: `{"type":"object"}`,
+			AttachTo: []string{"assistant"},
+		}},
+	}
+	data.SetTarget(string(targetcap.LiveKit))
+	dir := filepath.Join(t.TempDir(), "agent")
+	if _, err := scaffold.Write(dir, data); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := spec.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var livekit ir.Target
+	for _, target := range agent.Targets {
+		livekit = target
+	}
+	artifact, err := generate.Generate(agent, livekit, targetcap.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range artifact.Files {
+		if file.Path == "agent.py" && strings.Contains(string(file.Content), `mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"]`) {
+			return
+		}
+	}
+	t.Fatal("generated agent.py omitted the MCP server mount")
+}
+
 func TestV18AgentMenuShowsAndEditsSavedAgent(t *testing.T) { // docs/spec/tui.md V18
 	data := scaffold.Data{Instructions: scaffold.DefaultInstructions}
 	data.SetTarget("pipecat")
@@ -817,7 +855,7 @@ func TestV29UnavailableChoiceNamesGateAndOffersBack(t *testing.T) {
 	// Vapi still gates local tools; pipecat's gate lifted 2026-07-17 (T14).
 	var output bytes.Buffer
 	tool := scaffold.Tool{}
-	back, err := chooseToolExecution(newRunner(strings.NewReader("2\n1\n3\n"), &output, true), string(targetcap.Vapi), &tool)
+	back, err := chooseToolExecution(newRunner(strings.NewReader("2\n1\n4\n"), &output, true), string(targetcap.Vapi), &tool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -827,6 +865,67 @@ func TestV29UnavailableChoiceNamesGateAndOffersBack(t *testing.T) {
 	want := targetcap.Default().Capability(targetcap.FieldToolLocal, targetcap.Vapi).Note
 	if !strings.Contains(output.String(), want) || !strings.Contains(output.String(), "Identity → Target") || !strings.Contains(output.String(), "← Back") {
 		t.Fatalf("unavailable choice omitted exact gate, target guidance, or Back:\n%s", output.String())
+	}
+}
+
+func TestTUIMatchesCapabilityTable(t *testing.T) { // docs/spec/tui.md V42
+	table := targetcap.Default()
+	providers := []targetcap.Provider{targetcap.LiveKit, targetcap.Pipecat, targetcap.Deepgram, targetcap.Vapi, targetcap.ElevenLabs}
+	kindFields := map[targetcap.Field]bool{}
+	for _, kind := range toolExecutionKinds {
+		if kind.Field != "" {
+			kindFields[kind.Field] = true
+		}
+		for _, provider := range providers {
+			_, offered := toolExecutionGate(kind, string(provider))
+			supported := kind.Field == "" || table.Capability(kind.Field, provider).Tag != targetcap.Gated
+			if offered != supported {
+				t.Errorf("%s on %s: console offers=%v, table supports=%v — wizard gating contradicts internal/target", kind.Value, provider, offered, supported)
+			}
+		}
+	}
+	// Every tool-execution capability the console never offers must be gated on
+	// every target; otherwise the wizard hides a kind some driver emits.
+	for field := range table.Fields {
+		if !strings.HasPrefix(string(field), "tools.execution.") || kindFields[field] {
+			continue
+		}
+		for _, provider := range providers {
+			if capability := table.Capability(field, provider); capability.Tag != targetcap.Gated {
+				t.Errorf("capability %q is emittable on %s (tag %q) but the console never offers it", field, provider, capability.Tag)
+			}
+		}
+	}
+}
+
+func TestV42ExecutionPickerDerivesFromTable(t *testing.T) { // docs/spec/tui.md V42
+	// Gated: mcp on Pipecat surfaces the table row's own note, then Back.
+	var output bytes.Buffer
+	tool := scaffold.Tool{Name: "book_table"}
+	back, err := chooseToolExecution(newRunner(strings.NewReader("3\n1\n4\n"), &output, true), string(targetcap.Pipecat), &tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !back {
+		t.Fatal("gated mcp choice did not permit Back")
+	}
+	note := targetcap.Default().Capability(targetcap.FieldToolMCP, targetcap.Pipecat).Note
+	if !strings.Contains(output.String(), note) || !strings.Contains(output.String(), "Identity → Target") {
+		t.Fatalf("gated mcp choice omitted the table note or target guidance:\n%s", output.String())
+	}
+
+	// Available: mcp on LiveKit selects, clearing any local handler state.
+	output.Reset()
+	tool = scaffold.Tool{Name: "book_table", Execution: "local", Handler: "tools/book_table.py"}
+	back, err = chooseToolExecution(newRunner(strings.NewReader("3\n"), &output, true), string(targetcap.LiveKit), &tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back {
+		t.Fatal("available mcp selection returned Back")
+	}
+	if tool.Execution != "mcp" || tool.Handler != "" {
+		t.Fatalf("mcp selection left tool = %+v", tool)
 	}
 }
 
