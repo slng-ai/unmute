@@ -2,10 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/slng/unmute/internal/scaffold"
 )
 
 // run executes a fresh command tree (rule 1) and returns captured output + err.
@@ -115,5 +118,28 @@ func TestInitWizardDeclineWritesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat("agent"); !os.IsNotExist(err) {
 		t.Fatalf("declined wizard wrote destination: %v", err)
+	}
+}
+
+func TestConsoleActionUsesCommandPaths(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agent")
+	data := scaffold.Data{Name: "agent"}
+	data.SetTarget(scaffold.DefaultTarget)
+	if _, err := scaffold.Write(dir, data); err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"validate", "compile"} {
+		t.Run(action, func(t *testing.T) {
+			var output bytes.Buffer
+			if err := consoleAction(action, dir, &output); err != nil {
+				t.Fatalf("consoleAction(%q): %v\n%s", action, err, output.String())
+			}
+			if output.Len() == 0 {
+				t.Fatalf("consoleAction(%q) produced no report", action)
+			}
+		})
+	}
+	if err := consoleAction("unknown", dir, &bytes.Buffer{}); err == nil || err.Error() != fmt.Sprintf("unknown console action %q", "unknown") {
+		t.Fatalf("unknown action error = %v", err)
 	}
 }

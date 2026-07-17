@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
@@ -438,7 +439,13 @@ func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 		case "customize":
 			err = editCustomize(runner, &agent.data)
 		case "validate", "compile":
-			err = showNotice(runner, strings.ToUpper(choice[:1])+choice[1:]+" lands in T3", "The in-console action handler is the next task. Choose Back to continue maintaining this package.")
+			if runner.actions == nil {
+				err = showNotice(runner, "Action unavailable", "This console was started without a Validate/Compile handler. Choose Back to continue.")
+			} else {
+				err = runner.runNotice(strings.ToUpper(choice[:1])+choice[1:], func(out io.Writer) error {
+					return runner.actions(choice, agent.path, out)
+				})
+			}
 		case "save":
 			err = saveMaintained(runner, agent)
 		}

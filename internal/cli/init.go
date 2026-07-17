@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -39,7 +40,9 @@ func isCharDevice(value any) bool {
 
 func runConsole(cmd *cobra.Command, createOnly bool) error {
 	in := cmd.InOrStdin()
-	run := tui.Run
+	run := func(in io.Reader, out io.Writer, accessible bool) (tui.Result, error) {
+		return tui.RunConsole(in, out, accessible, consoleAction)
+	}
 	if createOnly {
 		run = tui.RunCreate
 	}
@@ -60,6 +63,20 @@ func runConsole(cmd *cobra.Command, createOnly bool) error {
 		}
 	}
 	return nil
+}
+
+func consoleAction(action, path string, out io.Writer) error {
+	cmd := &cobra.Command{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	switch action {
+	case "validate":
+		return runValidate(cmd, path, nil)
+	case "compile":
+		return runCompile(cmd, path, nil)
+	default:
+		return fmt.Errorf("unknown console action %q", action)
+	}
 }
 
 func writeScaffold(cmd *cobra.Command, dir string, data scaffold.Data) error {

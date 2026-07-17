@@ -48,18 +48,27 @@ type Result struct {
 	Confirmed bool
 }
 
+// ActionHandler runs an existing CLI action and writes its report.
+type ActionHandler func(action, path string, out io.Writer) error
+
 // Run displays the console without writing files.
 func Run(in io.Reader, out io.Writer, accessible bool) (Result, error) {
-	return runWithStart(in, out, accessible, false)
+	return RunConsole(in, out, accessible, nil)
+}
+
+// RunConsole displays Home with optional in-process maintenance actions.
+func RunConsole(in io.Reader, out io.Writer, accessible bool, actions ActionHandler) (Result, error) {
+	return runWithStart(in, out, accessible, false, actions)
 }
 
 // RunCreate enters the create flow directly for `unmute init`.
 func RunCreate(in io.Reader, out io.Writer, accessible bool) (Result, error) {
-	return runWithStart(in, out, accessible, true)
+	return runWithStart(in, out, accessible, true, nil)
 }
 
-func runWithStart(in io.Reader, out io.Writer, accessible, createOnly bool) (Result, error) {
+func runWithStart(in io.Reader, out io.Writer, accessible, createOnly bool, actions ActionHandler) (Result, error) {
 	runner := newRunner(in, out, accessible)
+	runner.actions = actions
 	flow := func() (Result, error) {
 		if createOnly {
 			result, _, err := runCreate(runner)
@@ -3150,7 +3159,8 @@ type fieldRunner struct {
 	out        io.Writer
 	accessible bool
 	tracked    *eofReader
-	requests   chan formRequest
+	requests   chan shellRequest
+	actions    ActionHandler
 }
 
 func newRunner(in io.Reader, out io.Writer, accessible bool) *fieldRunner {

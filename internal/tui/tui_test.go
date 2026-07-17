@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -769,6 +770,59 @@ func TestV20MaintainBackPreservesPriorEdits(t *testing.T) {
 	if agent.data.Language != "es-MX" {
 		t.Fatalf("Back lost maintain edit: %#v", agent.data)
 	}
+}
+
+func TestV33ValidateStaysInConsole(t *testing.T) {
+	agent := testMaintainedAgent(t)
+	var output bytes.Buffer
+	runner := newRunner(strings.NewReader("15\n1\n18\n"), &output, true)
+	runner.actions = func(action, path string, out io.Writer) error {
+		if action != "validate" || path != agent.path {
+			t.Fatalf("action = %q, path = %q", action, path)
+		}
+		_, _ = io.WriteString(out, "TARGET\tPROVIDER\tRESULT\npipecat-dev\tpipecat\tpass\n")
+		return nil
+	}
+	if err := editMaintained(runner, &agent); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "pipecat-dev") || strings.Count(output.String(), "Enter a number between 1 and 18") < 2 {
+		t.Fatalf("Validate report did not return to maintain menu:\n%s", output.String())
+	}
+}
+
+func TestV33CompileStaysInConsole(t *testing.T) {
+	agent := testMaintainedAgent(t)
+	var output bytes.Buffer
+	runner := newRunner(strings.NewReader("16\n1\n18\n"), &output, true)
+	runner.actions = func(action, path string, out io.Writer) error {
+		if action != "compile" || path != agent.path {
+			t.Fatalf("action = %q, path = %q", action, path)
+		}
+		_, _ = io.WriteString(out, "generated build/pipecat-dev/agent.py\n")
+		return nil
+	}
+	if err := editMaintained(runner, &agent); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "generated build/pipecat-dev/agent.py") || strings.Count(output.String(), "Enter a number between 1 and 18") < 2 {
+		t.Fatalf("Compile report did not return to maintain menu:\n%s", output.String())
+	}
+}
+
+func testMaintainedAgent(t *testing.T) maintainedAgent {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "agent")
+	data := scaffold.Data{Name: "agent"}
+	data.SetTarget(scaffold.DefaultTarget)
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return agent
 }
 
 func TestOpenReportsUnrepresentableFieldPath(t *testing.T) {
