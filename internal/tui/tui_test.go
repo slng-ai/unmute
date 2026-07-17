@@ -506,6 +506,30 @@ func TestV24ProviderThenDistributorFlow(t *testing.T) { // docs/spec/tui.md V24
 	}
 }
 
+func TestV24ProviderBrandsAreUniqueAndExposeDistributors(t *testing.T) { // docs/spec/tui.md V24
+	type pair struct {
+		framework targetcap.Provider
+		role      targetcap.Role
+	}
+	catalog := targetcap.DefaultCatalog()
+	pairs := map[pair]bool{}
+	for _, entry := range catalog.Entries() {
+		pairs[pair{entry.Framework, entry.Role}] = true
+	}
+	for key := range pairs {
+		seen := map[string]bool{}
+		for _, option := range providerOptions(key.framework, key.role) {
+			if seen[option.Value] {
+				t.Errorf("%s/%s repeats provider brand %q", key.framework, key.role, option.Value)
+			}
+			seen[option.Value] = true
+			if routes := catalog.Distributors(key.framework, key.role, option.Value); len(routes) == 0 {
+				t.Errorf("%s/%s provider brand %q has no distributor", key.framework, key.role, option.Value)
+			}
+		}
+	}
+}
+
 func TestV25SavedResourcesOfferDelete(t *testing.T) { // docs/spec/tui.md V25
 	base := func() scaffold.Data {
 		data := scaffold.Data{Name: "agent", Instructions: scaffold.DefaultInstructions}
