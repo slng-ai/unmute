@@ -53,7 +53,6 @@ func openExisting(runner *fieldRunner) error {
 		if err != nil {
 			return fmt.Errorf("discover packages: %w", err)
 		}
-		choice := actionBack
 		options := make([]huh.Option[string], 0, len(paths)+2)
 		for _, path := range paths {
 			options = append(options, huh.NewOption(filepath.Base(path), path))
@@ -62,7 +61,8 @@ func openExisting(runner *fieldRunner) error {
 			huh.NewOption("Enter a path manually", "manual"),
 			huh.NewOption("← Back", actionBack),
 		)
-		if _, err := runner.run(huh.NewSelect[string]().Title("Open an existing agent").Options(options...).Value(&choice), true); err != nil {
+		choice, _, err := runner.selectOne("Open an existing agent", "", options, true)
+		if err != nil {
 			return err
 		}
 		if choice == actionBack {
@@ -382,8 +382,7 @@ func diffJSON(path string, left, right any, losses *[]string) {
 
 func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 	for {
-		choice := actionBack
-		if _, err := runner.run(huh.NewSelect[string]().Title(agent.data.Name).Description("Maintain existing package; Save regenerates confirmed package files.").Options(
+		choice, _, err := runner.selectOne(agent.data.Name, "Maintain existing package; Save regenerates confirmed package files.", []huh.Option[string]{
 			huh.NewOption("Identity  ·  target, language", "section:identity"),
 			huh.NewOption("Models  ·  "+modelsLabel(agent.data), "section:models"),
 			huh.NewOption("Behavior  ·  instructions, greeting, variables, advanced", "section:behavior"),
@@ -393,7 +392,8 @@ func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 			huh.NewOption("Compile", "compile"),
 			huh.NewOption("Save", "save"),
 			huh.NewOption("← Back", actionBack),
-		).Value(&choice), true); err != nil {
+		}, true)
+		if err != nil {
 			return err
 		}
 		if choice == actionBack {
@@ -409,7 +409,6 @@ func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 				continue
 			}
 		}
-		var err error
 		switch choice {
 		case "target":
 			err = editTarget(runner, &agent.data)
@@ -457,13 +456,12 @@ func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 }
 
 func editTarget(runner *fieldRunner, data *scaffold.Data) error {
-	selected := data.Target
-	back, err := runner.run(huh.NewSelect[string]().Title("Target / orchestrator").Options(
+	selected, back, err := runner.selectOne("Target / orchestrator", "", []huh.Option[string]{
 		huh.NewOption("Pipecat", string(targetcap.Pipecat)),
 		huh.NewOption("LiveKit", string(targetcap.LiveKit)),
 		huh.NewOption("ElevenLabs", string(targetcap.ElevenLabs)),
 		huh.NewOption("← Back", actionBack),
-	).Value(&selected), true)
+	}, true)
 	if err == nil && !back && selected != actionBack && selected != data.Target {
 		data.SetTarget(selected)
 	}
@@ -602,10 +600,9 @@ func confirmRewrite(runner *fieldRunner, affected, removals, losses []string) (b
 			lines = append(lines, "- "+loss)
 		}
 	}
-	choice := actionBack
-	back, err := runner.run(huh.NewSelect[string]().Title("Save regenerated package?").Description(runner.describe(strings.Join(lines, "\n"))).Options(
+	choice, back, err := runner.selectOne("Save regenerated package?", runner.describe(strings.Join(lines, "\n")), []huh.Option[string]{
 		huh.NewOption("Rewrite listed files", "confirm"), huh.NewOption("← Back", actionBack),
-	).Value(&choice), true)
+	}, true)
 	return err == nil && !back && choice == "confirm", err
 }
 

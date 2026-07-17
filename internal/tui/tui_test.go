@@ -103,6 +103,26 @@ func TestV27StepsRedrawInPersistentAltScreen(t *testing.T) {
 	}
 }
 
+func TestV35MenusDefaultToFirstActionAndBackLast(t *testing.T) { // docs/spec/tui.md V35
+	runner := newRunner(strings.NewReader("\n"), &bytes.Buffer{}, true)
+	choice, back, err := runner.selectOne("Actions", "", []huh.Option[string]{
+		huh.NewOption("First action", "first"),
+		huh.NewOption("Second action", "second"),
+		huh.NewOption("← Back", actionBack),
+	}, true)
+	if err != nil || back || choice != "first" {
+		t.Fatalf("default choice = %q, back = %v, error = %v; want first action", choice, back, err)
+	}
+
+	_, _, err = runner.selectOne("Broken", "", []huh.Option[string]{
+		huh.NewOption("← Back", actionBack),
+		huh.NewOption("Action", "action"),
+	}, true)
+	if err == nil || !strings.Contains(err.Error(), "Back action must be last") {
+		t.Fatalf("misordered Back error = %v", err)
+	}
+}
+
 func TestRunCompileToggle(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// 1=create, name, 6=toggle compile on, 7=Create agent, confirm.

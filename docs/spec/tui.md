@@ -61,7 +61,7 @@ T4|x|catalogue-driven binding editor: all `(framework, role)` entries/brands, pr
 T5|.|single webhook endpoint input auto-detects literal http(s) URL vs env name; gate literal URLs through `FieldToolWebhookURL`; land only after compiler.md + driver-spec `url` plumbing|C8,V28
 T6|x|regroup the ~17-item agent menu into identity / models / behavior / integrations / lifecycle; every gated notice uses target vocabulary + Back|G,V29,V34
 T7|x|retrofit the existing V18–V25 tests to cite this spec and rename the unnumbered Back test to `TestV20BackPreservesPriorEdits`; keep all create-flow repair behavior green under the persistent shell|V18,V19,V20,V21,V22,V23,V24,V25
-T8|.|audit every static/dynamic menu default; focus first actionable row and keep Back last/non-default|C11,V35
+T8|x|audit every static/dynamic menu default; focus first actionable row and keep Back last/non-default|C11,V35
 T9|.|remove pass-through menus; Models exposes Listen/Reason/Speak directly and every other section passes the same audit|C10,C11,V34,V36
 T10|.|make Back visible on every input/text/select/confirm/notice screen in interactive + accessible modes; keep Esc/`:back` shortcuts|C5,C12,V37
 T11|.|replace every multi-field create/edit chain with current-value overview rows; binding Provider/conditional Distributor/Model/Voice/Language/Additional config edit one field and return|C13,V20,V24,V38
