@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -10,13 +9,6 @@ import (
 	"github.com/slng/unmute/internal/tui"
 	"github.com/spf13/cobra"
 )
-
-const slngWordmark = "\x1b[1;38;2;245;201;110m" +
-	"  ____  _     _   _  ____       //  // \n" +
-	" / ___|| |   | \\ | |/ ___|     //  //  \n" +
-	" \\___ \\| |   |  \\| | |  _     //  //   \n" +
-	"  ___) | |___| |\\  | |_| |   //  //    \n" +
-	" |____/|_____|_| \\_|\\____|  //  //     \x1b[0m\n"
 
 func newInitCmd() *cobra.Command {
 	return &cobra.Command{
@@ -28,7 +20,7 @@ func newInitCmd() *cobra.Command {
 				if cmd.InOrStdin() == os.Stdin && (!isCharDevice(os.Stdin) || !isCharDevice(cmd.OutOrStdout())) {
 					return fmt.Errorf("agent name required")
 				}
-				return runInitWizard(cmd)
+				return runConsole(cmd, true)
 			}
 			dir := args[0]
 			return writeScaffold(cmd, dir, scaffold.Data{Name: filepath.Base(dir)})
@@ -45,12 +37,15 @@ func isCharDevice(value any) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-func runInitWizard(cmd *cobra.Command) error {
+func runConsole(cmd *cobra.Command, createOnly bool) error {
 	in := cmd.InOrStdin()
-	writeHeader(cmd.ErrOrStderr(), isCharDevice(cmd.ErrOrStderr()))
-	result, err := tui.Run(in, cmd.OutOrStdout(), in != os.Stdin)
+	run := tui.Run
+	if createOnly {
+		run = tui.RunCreate
+	}
+	result, err := run(in, cmd.OutOrStdout(), in != os.Stdin)
 	if err != nil {
-		return fmt.Errorf("init menu: %w", err)
+		return fmt.Errorf("console: %w", err)
 	}
 	if !result.Confirmed {
 		return nil
@@ -65,13 +60,6 @@ func runInitWizard(cmd *cobra.Command) error {
 		}
 	}
 	return nil
-}
-
-func writeHeader(out io.Writer, tty bool) {
-	if !tty || os.Getenv("NO_COLOR") != "" {
-		return
-	}
-	fmt.Fprint(out, slngWordmark)
 }
 
 func writeScaffold(cmd *cobra.Command, dir string, data scaffold.Data) error {

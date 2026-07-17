@@ -15,9 +15,20 @@ func newRootCmd() *cobra.Command {
 		Short:         "Author-once, portable voice agents.",
 		SilenceUsage:  true, // a failed command must not reprint --help
 		SilenceErrors: true, // Execute owns error printing
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if shouldRunConsole(cmd.InOrStdin(), cmd.OutOrStdout()) {
+				return runConsole(cmd, false)
+			}
+			return cmd.Help()
+		},
 	}
 	root.AddCommand(newInitCmd(), newCompileCmd(), newApplyCmd(), newDevCmd(), newValidateCmd())
 	return root
+}
+
+func shouldRunConsole(in, out any) bool {
+	return isCharDevice(in) && isCharDevice(out)
 }
 
 // Execute builds the root, runs it, prints any error once to stderr, and

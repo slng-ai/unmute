@@ -7,7 +7,7 @@ We own **Go only**. Python is *emitted* by our `text/template` files and *shelle
 
 ## Tooling
 - Go 1.24 (pin in `go.mod`); `CGO_ENABLED=0` static binary; version stamped at link time, never hardcoded.
-- Direct deps — `cobra`, `goccy/go-yaml` (gives line/col on parse errors), `google/jsonschema-go` (**v0.x — pin the exact version, bump deliberately**), and `charmbracelet/huh` v1.0.0 for interactive init. Huh intentionally brings its terminal UI graph; do not import Bubble Tea or Lip Gloss directly. Everything else is stdlib. **No new dep for what a few lines of stdlib do — justify any addition in the PR.** No `viper` until a real global config file exists.
+- Direct deps — `cobra`, `goccy/go-yaml` (gives line/col on parse errors), `google/jsonschema-go` (**v0.x — pin the exact version, bump deliberately**), and `charmbracelet/huh` v1.0.0 for the console. Huh intentionally brings its terminal UI graph; the only sanctioned direct Bubble Tea import is `internal/tui/shell.go`, whose single persistent `tea.Program` owns the console alt-screen and hosts the huh forms. Do not import Bubble Tea anywhere else or Lip Gloss directly. Everything else is stdlib. **No new dep for what a few lines of stdlib do — justify any addition in the PR.** No `viper` until a real global config file exists.
 - `golangci-lint` from day one (`.golangci.yml`).
 - Make targets: `build test smoke lint fmt install`.
 

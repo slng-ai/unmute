@@ -48,12 +48,56 @@ func TestRunCreateDefaults(t *testing.T) {
 }
 
 func TestRunQuit(t *testing.T) {
-	got, err := Run(strings.NewReader("2\n"), &bytes.Buffer{}, true)
+	got, err := Run(strings.NewReader("3\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Confirmed {
 		t.Fatalf("quit returned a confirmed result: %#v", got)
+	}
+}
+
+func TestV23WordmarkHasNoBackgroundColor(t *testing.T) {
+	if strings.Contains(slngWordmark, "48;") {
+		t.Fatalf("wordmark still paints a background: %q", slngWordmark)
+	}
+	if !strings.Contains(slngWordmark, "38;2;245;201;110m") {
+		t.Fatalf("wordmark lost the SLNG foreground color: %q", slngWordmark)
+	}
+}
+
+func TestV26WordmarkRendersInsideHome(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	var output bytes.Buffer
+	if _, err := Run(strings.NewReader("3\n"), &output, true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "____") {
+		t.Fatalf("home omitted wordmark:\n%s", output.String())
+	}
+}
+
+func TestV26NoColorOmitsWordmark(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	var output bytes.Buffer
+	if _, err := Run(strings.NewReader("3\n"), &output, true); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "____") {
+		t.Fatalf("NO_COLOR output contains wordmark:\n%s", output.String())
+	}
+}
+
+func TestV27StepsRedrawInPersistentAltScreen(t *testing.T) {
+	var output bytes.Buffer
+	runner := newRunner(strings.NewReader(""), &output, false)
+	if _, err := runner.runProgram(func() (Result, error) { return Result{}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	for _, sequence := range []string{"\x1b[?1049h", "\x1b[?1049l"} {
+		if got := strings.Count(output.String(), sequence); got != 1 {
+			t.Fatalf("alt-screen sequence %q count = %d, want 1", sequence, got)
+		}
 	}
 }
 

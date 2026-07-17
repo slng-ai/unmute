@@ -8,15 +8,6 @@ import (
 	"testing"
 )
 
-func TestV23WordmarkHasNoBackgroundColor(t *testing.T) {
-	if strings.Contains(slngWordmark, "48;") {
-		t.Fatalf("wordmark still paints a background: %q", slngWordmark)
-	}
-	if !strings.Contains(slngWordmark, "38;2;245;201;110m") {
-		t.Fatalf("wordmark lost the SLNG foreground color: %q", slngWordmark)
-	}
-}
-
 // run executes a fresh command tree (rule 1) and returns captured output + err.
 func run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
@@ -79,10 +70,10 @@ func TestInit_refusesExistingDir(t *testing.T) {
 	}
 }
 
-func TestInit_wizardScaffoldsFromScriptedInput(t *testing.T) {
+func TestV30InitEntersCreate(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// 1=create, name, 16=Create agent, confirm.
-	out, err := runWithInput(t, "1\nwiz-agent\n16\n\n", "init")
+	// init enters Create directly: name, 16=Create agent, confirm.
+	out, err := runWithInput(t, "wiz-agent\n16\n\n", "init")
 	if err != nil {
 		t.Fatalf("init wizard: %v\n%s", err, out)
 	}
@@ -91,10 +82,35 @@ func TestInit_wizardScaffoldsFromScriptedInput(t *testing.T) {
 	}
 }
 
+func TestV30BareRootNonTTYPrintsHelp(t *testing.T) {
+	out, err := run(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Usage:") || !strings.Contains(out, "Available Commands:") {
+		t.Fatalf("bare non-TTY output is not help:\n%s", out)
+	}
+}
+
+func TestV30BareRootTTYLaunchesConsole(t *testing.T) {
+	device, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = device.Close() }()
+	if !shouldRunConsole(device, device) {
+		t.Fatal("character-device stdin/stdout did not select console")
+	}
+	var output bytes.Buffer
+	if shouldRunConsole(strings.NewReader(""), &output) {
+		t.Fatal("scripted stdin/stdout selected console")
+	}
+}
+
 func TestInitWizardDeclineWritesNothing(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// Decline review, back out of the editor, then quit the create menu.
-	if _, err := runWithInput(t, "1\nagent\n16\nn\n17\n2\n", "init"); err != nil {
+	// Decline review, then back out of the editor.
+	if _, err := runWithInput(t, "agent\n16\nn\n17\n", "init"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat("agent"); !os.IsNotExist(err) {

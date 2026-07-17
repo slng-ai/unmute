@@ -22,9 +22,16 @@ import (
 
 const (
 	actionCreate  = "create"
+	actionOpen    = "open"
 	actionQuit    = "quit"
 	actionBack    = ":back"
 	agentNameHelp = "Choose a unique name for your agent. This name is also used for its local directory."
+	slngWordmark  = "\x1b[1;38;2;245;201;110m" +
+		"  ____  _     _   _  ____       //  // \n" +
+		" / ___|| |   | \\ | |/ ___|     //  //  \n" +
+		" \\___ \\| |   |  \\| | |  _     //  //   \n" +
+		"  ___) | |___| |\\  | |_| |   //  //    \n" +
+		" |____/|_____|_| \\_|\\____|  //  //     \x1b[0m"
 )
 
 // Agent is the basic configuration for a scaffold.
@@ -41,15 +48,40 @@ type Result struct {
 	Confirmed bool
 }
 
-// Run displays the create wizard without reading or writing files.
+// Run displays the console without writing files.
 func Run(in io.Reader, out io.Writer, accessible bool) (Result, error) {
+	return runWithStart(in, out, accessible, false)
+}
+
+// RunCreate enters the create flow directly for `unmute init`.
+func RunCreate(in io.Reader, out io.Writer, accessible bool) (Result, error) {
+	return runWithStart(in, out, accessible, true)
+}
+
+func runWithStart(in io.Reader, out io.Writer, accessible, createOnly bool) (Result, error) {
 	runner := newRunner(in, out, accessible)
+	flow := func() (Result, error) {
+		if createOnly {
+			result, _, err := runCreate(runner)
+			return result, err
+		}
+		return runHome(runner)
+	}
+	if accessible {
+		return flow()
+	}
+	return runner.runProgram(flow)
+}
+
+func runHome(runner *fieldRunner) (Result, error) {
 	for {
 		choice := actionCreate
 		if _, err := runner.run(huh.NewSelect[string]().
-			Title("What would you like to do?").
+			Title(homeTitle()).
+			Description("What would you like to do?").
 			Options(
 				huh.NewOption("Create a new agent", actionCreate),
+				huh.NewOption("Open an existing agent", actionOpen),
 				huh.NewOption("Quit", actionQuit),
 			).
 			Value(&choice), false); err != nil {
@@ -58,31 +90,45 @@ func Run(in io.Reader, out io.Writer, accessible bool) (Result, error) {
 		if choice == actionQuit {
 			return Result{}, nil
 		}
-		path := ""
-		back, err := runner.input("Agent name", agentNameHelp, &path, validateName)
+		if choice == actionOpen {
+			if err := showNotice(runner, "Open existing agent unavailable", "Package maintenance lands in T2. Choose Back to return Home."); err != nil {
+				return Result{}, err
+			}
+			continue
+		}
+		result, back, err := runCreate(runner)
 		if err != nil {
 			return Result{}, err
 		}
 		if back {
 			continue
 		}
-		data := scaffold.Data{
-			Name:         filepath.Base(filepath.Clean(path)),
-			Language:     scaffold.DefaultLanguage,
-			Channel:      scaffold.DefaultChannel,
-			Greeting:     scaffold.DefaultGreeting,
-			Instructions: scaffold.DefaultInstructions,
-		}
-		data.SetTarget(scaffold.DefaultTarget)
-		agent := Agent{Path: path, Data: data}
-		result, back, err := editAgent(runner, agent)
-		if err != nil {
-			return Result{}, err
-		}
-		if !back {
-			return result, nil
-		}
+		return result, nil
 	}
+}
+
+func runCreate(runner *fieldRunner) (Result, bool, error) {
+	path := ""
+	back, err := runner.input("Agent name", agentNameHelp, &path, validateName)
+	if err != nil || back {
+		return Result{}, back, err
+	}
+	data := scaffold.Data{
+		Name:         filepath.Base(filepath.Clean(path)),
+		Language:     scaffold.DefaultLanguage,
+		Channel:      scaffold.DefaultChannel,
+		Greeting:     scaffold.DefaultGreeting,
+		Instructions: scaffold.DefaultInstructions,
+	}
+	data.SetTarget(scaffold.DefaultTarget)
+	return editAgent(runner, Agent{Path: path, Data: data})
+}
+
+func homeTitle() string {
+	if os.Getenv("NO_COLOR") != "" {
+		return "Unmute"
+	}
+	return slngWordmark
 }
 
 func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
@@ -3104,6 +3150,7 @@ type fieldRunner struct {
 	out        io.Writer
 	accessible bool
 	tracked    *eofReader
+	requests   chan formRequest
 }
 
 func newRunner(in io.Reader, out io.Writer, accessible bool) *fieldRunner {
@@ -3117,13 +3164,18 @@ func newRunner(in io.Reader, out io.Writer, accessible bool) *fieldRunner {
 
 func (r *fieldRunner) run(field huh.Field, backable bool) (bool, error) {
 	form := huh.NewForm(huh.NewGroup(field)).
-		WithInput(r.in).
-		WithOutput(r.out).
 		WithAccessible(r.accessible)
 	if backable && !r.accessible {
 		form.WithKeyMap(backKeyMap())
 	}
-	err := form.Run()
+	var err error
+	if r.accessible {
+		err = form.WithInput(r.in).WithOutput(r.out).Run()
+	} else {
+		done := make(chan error, 1)
+		r.requests <- formRequest{form: form, done: done}
+		err = <-done
+	}
 	if r.tracked != nil && r.tracked.eof {
 		return false, fmt.Errorf("menu: %w", huh.ErrUserAborted)
 	}
