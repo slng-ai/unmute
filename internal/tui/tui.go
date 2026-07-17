@@ -91,7 +91,7 @@ func runHome(runner *fieldRunner) (Result, error) {
 			return Result{}, nil
 		}
 		if choice == actionOpen {
-			if err := showNotice(runner, "Open existing agent unavailable", "Package maintenance lands in T2. Choose Back to return Home."); err != nil {
+			if err := openExisting(runner); err != nil {
 				return Result{}, err
 			}
 			continue

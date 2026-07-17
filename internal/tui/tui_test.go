@@ -675,3 +675,140 @@ func TestValidateBasicRejectsTemplateBreakers(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenDiscoversOnlyImmediateAgentPackages(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"b", "a", filepath.Join("nested", "agent")} {
+		path := filepath.Join(root, dir)
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "agent.yaml"), []byte("version: 1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := discoverPackages(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(root, "a"), filepath.Join(root, "b")}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("discoverPackages() = %v, want %v", got, want)
+	}
+}
+
+func TestV32MaintainNoOpSaveIsByteIdentical(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agent")
+	data := scaffold.Data{Name: "agent"}
+	data.SetTarget(scaffold.DefaultTarget)
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	before := packageBytes(t, root)
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := saveMaintained(newRunner(strings.NewReader("1\n"), &output, true), &agent); err != nil {
+		t.Fatal(err)
+	}
+	after := packageBytes(t, root)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("no-op Save changed package bytes")
+	}
+	if !strings.Contains(output.String(), "No changes to save") {
+		t.Fatalf("missing no-op notice:\n%s", output.String())
+	}
+}
+
+func TestV32DestructiveSaveNamesFilesAndConfirms(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agent")
+	data := scaffold.Data{Name: "agent"}
+	data.SetTarget(scaffold.DefaultTarget)
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.data.Language = "es-MX"
+	var output bytes.Buffer
+	// Confirm rewrite, then Back from the saved notice.
+	if err := saveMaintained(newRunner(strings.NewReader("1\n1\n"), &output, true), &agent); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(root, "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(manifest), "language: es-MX") {
+		t.Fatalf("saved manifest omitted edit:\n%s", manifest)
+	}
+	if !strings.Contains(output.String(), "agent.yaml") || !strings.Contains(output.String(), "Rewrite listed files") {
+		t.Fatalf("confirmation omitted affected file:\n%s", output.String())
+	}
+}
+
+func TestV20MaintainBackPreservesPriorEdits(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agent")
+	data := scaffold.Data{Name: "agent"}
+	data.SetTarget(scaffold.DefaultTarget)
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Language, new value, Back from the maintain menu.
+	if err := editMaintained(newRunner(strings.NewReader("2\nes-MX\n18\n"), &bytes.Buffer{}, true), &agent); err != nil {
+		t.Fatal(err)
+	}
+	if agent.data.Language != "es-MX" {
+		t.Fatalf("Back lost maintain edit: %#v", agent.data)
+	}
+}
+
+func TestOpenReportsUnrepresentableFieldPath(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agent")
+	data := scaffold.Data{Name: "agent"}
+	data.SetTarget(scaffold.DefaultTarget)
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "targets.yaml")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content = bytes.Replace(content, []byte(`model: "gpt-4.1-mini"`), []byte(`model: "gpt-4.1-mini", endpoint_env: CUSTOM_LLM_URL`), 1)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(agent.losses, "\n"); !strings.Contains(got, "endpoint_env") || !strings.Contains(got, "targets.yaml") {
+		t.Fatalf("loss report = %q", got)
+	}
+}
+
+func packageBytes(t *testing.T, root string) map[string]string {
+	t.Helper()
+	paths, err := knownPackageFiles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(map[string]string, len(paths))
+	for _, path := range paths {
+		content, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result[path] = string(content)
+	}
+	return result
+}
