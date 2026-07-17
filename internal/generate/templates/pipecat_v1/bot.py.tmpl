@@ -3,7 +3,7 @@ Class.Settings(...) block for settings-style services (see the provider
 catalogue, internal/target/catalog_pipecat.go). */ -}}
 {{define "svc"}}{{.Class}}(
 {{range .Args}}        {{.Key}}={{.Value}},
-{{end}}{{if .SettingsArgs}}        settings={{.Class}}.Settings(
+{{end}}{{if .SettingsArgs}}        {{.SettingsArg}}={{.SettingsClass}}(
 {{range .SettingsArgs}}            {{.Key}}={{.Value}},
 {{end}}        ),
 {{end}}    ){{end -}}
@@ -22,11 +22,13 @@ the typed results.
 from __future__ import annotations
 
 {{if .NeedsAsyncio}}import asyncio
+{{end}}{{if .NeedsInspect}}import inspect
 {{end}}import os
 {{if .HasFlows}}import json
 {{end}}{{if .Variables}}from dataclasses import asdict, dataclass
 {{end}}{{if .NeedsHTTPX}}
 import httpx
+{{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
@@ -132,6 +134,10 @@ class {{.Class}}(LLMWorker):
         if _TRANSPORT is not None:
             await _TRANSPORT.sip_call_transfer({"toEndPoint": {{pyq .ColdDestination}}})
         await params.result_callback({"transferred": True})
+{{else if .Local}}        result = tools.{{.Name}}.{{.Name}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Name}}={{$a.Name}}{{end}})
+        if inspect.isawaitable(result):
+            result = await result
+        await params.result_callback(result)
 {{else}}        async with httpx.AsyncClient() as client:
             response = await client.post(
                 os.environ[{{pyq .URLEnv}}],
@@ -140,8 +146,8 @@ class {{.Class}}(LLMWorker):
             )
             response.raise_for_status()
             await params.result_callback(response.json())
-{{if .EndsCall}}        await params.llm.push_frame(EndFrame())
-{{end}}{{end}}{{end}}{{range $d := .Delegates}}
+{{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.llm.push_frame(EndFrame())
+{{end}}{{end}}{{range $d := .Delegates}}
     @tool()
     async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
@@ -209,17 +215,21 @@ class {{.Class}}(LLMWorker):
 {{end}}{{end}}{{end}}{{end}}
 {{end}}{{if .FlowTools}}
 # --- task tools (flows handlers) ----------------------------------------------
-# Webhook tools available inside task steps; stable module-level handlers so a
+# Tools available inside task steps; stable module-level handlers so a
 # re-registered function name always resolves to the same callable.
 {{range .FlowTools}}
 
 async def _flow_tool_{{.Name}}(args, flow_manager):
     """{{.Description}}"""
-    async with httpx.AsyncClient() as client:
+{{if .Local}}    result = tools.{{.Name}}.{{.Name}}(**dict(args))
+    if inspect.isawaitable(result):
+        result = await result
+    return result
+{{else}}    async with httpx.AsyncClient() as client:
         response = await client.post(os.environ[{{pyq .URLEnv}}], json=dict(args), timeout=30.0)
         response.raise_for_status()
         return response.json()
-{{end}}
+{{end}}{{end}}
 {{end}}
 # --- transport & run --------------------------------------------------------
 transport_params: dict = {

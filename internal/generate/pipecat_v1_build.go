@@ -96,7 +96,11 @@ func setImportNeeds(data *pipecatData) {
 				data.NeedsEndFrame = true    // on_dialout_answered ends the call
 				continue
 			}
-			data.NeedsHTTPX = true // webhook tool POSTs with httpx
+			if t.Local {
+				data.NeedsInspect = true // isawaitable on the user handler (V13)
+			} else {
+				data.NeedsHTTPX = true // webhook tool POSTs with httpx
+			}
 			if t.EndsCall {
 				data.NeedsEndFrame = true
 			}
@@ -110,12 +114,33 @@ func setImportNeeds(data *pipecatData) {
 				data.HasIsolated = true
 			}
 			for _, step := range d.StepTasks {
-				if len(step.Tools) > 0 {
-					data.NeedsHTTPX = true // flows tool handlers POST with httpx
+				for _, t := range step.Tools {
+					if t.Local {
+						data.NeedsInspect = true
+					} else {
+						data.NeedsHTTPX = true // flows tool handlers POST with httpx
+					}
 				}
 			}
 		}
 	}
+	// Local handler files ride the artifact (tools/<name>.py, V13); dedupe
+	// across agent @tool methods and flows handlers, mirroring livekit.
+	seenLocal := map[string]bool{}
+	collectLocal := func(tools []pipecatTool) {
+		for _, t := range tools {
+			if !t.Local || seenLocal[t.Name] {
+				continue
+			}
+			seenLocal[t.Name] = true
+			data.LocalTools = append(data.LocalTools, pipecatLocalTool{Name: t.Name, Source: t.HandlerSource})
+		}
+	}
+	for _, a := range data.Agents {
+		collectLocal(a.Tools)
+	}
+	collectLocal(data.FlowTools)
+	sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
 }
 
 // collectImportsExtras returns the deduped, sorted service imports for bot.py,
@@ -373,6 +398,7 @@ func buildTool(name string, tool ir.Tool, env *envSet) pipecatTool {
 	}
 	built := pipecatTool{
 		Name: name, MethodName: name, Description: tool.Description, URLEnv: tool.URLEnv,
+		Local: tool.Execution == ir.ToolLocal, HandlerSource: tool.HandlerSource,
 		EndsCall: tool.Effect == ir.ToolEndsConversation, Interruption: interruptionValue(tool.Interruption),
 	}
 	built.Args = append(built.Args, inputFields(tool.Input)...)

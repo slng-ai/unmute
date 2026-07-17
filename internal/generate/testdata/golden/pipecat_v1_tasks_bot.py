@@ -294,7 +294,7 @@ class IntakeAgent(LLMWorker):
 
 
 # --- task tools (flows handlers) ----------------------------------------------
-# Webhook tools available inside task steps; stable module-level handlers so a
+# Tools available inside task steps; stable module-level handlers so a
 # re-registered function name always resolves to the same callable.
 
 

@@ -49,8 +49,14 @@ func TestCatalogInvariants(t *testing.T) {
 		if e.RequiresEndpoint && e.Call.Endpoint.Arg == "" {
 			t.Errorf("%s: RequiresEndpoint without an Endpoint slot", id)
 		}
-		if (e.Role == Listen || e.Role == Speak) && e.Call.Language.Arg == "" {
-			t.Errorf("%s: speech integration without a portable language slot", id)
+		if e.Role == Listen || e.Role == Speak {
+			hasSlot := e.Call.Language.Arg != ""
+			if hasSlot == e.Call.NoLanguage {
+				t.Errorf("%s: speech integration needs exactly one of a language slot or an explicit NoLanguage declaration", id)
+			}
+		}
+		if (e.Call.SettingsArg != "" || e.Call.SettingsClass != "") && e.Call.Params != ParamsSettings {
+			t.Errorf("%s: SettingsArg/SettingsClass are meaningful only with ParamsSettings", id)
 		}
 	}
 }
@@ -94,7 +100,7 @@ func TestCheckVendor(t *testing.T) {
 		{Pipecat, Listen, "acme", false, "endpoint_env"},
 		{Pipecat, Listen, "acme", true, ""}, // OpenAI-compatible custom endpoint
 		{Pipecat, Speak, "slng", true, "endpoint_env has no slot"},
-		{LiveKit, Listen, "acme", false, "listen providers on livekit: deepgram, slng"},
+		{LiveKit, Listen, "acme", false, "listen providers on livekit: assemblyai, cartesia, deepgram, elevenlabs, gradium, sarvam, slng, soniox, speechmatics"},
 	} {
 		err := cat.CheckVendor(tc.fw, tc.role, tc.vendor, tc.endpoint)
 		switch {
@@ -118,7 +124,7 @@ func TestCatalogLookup(t *testing.T) {
 	if _, ok := cat.Lookup(LiveKit, Listen, "acme"); ok {
 		t.Error("livekit listen has no wildcard; unknown vendors must fail")
 	}
-	if got := cat.Vendors(LiveKit, Speak); strings.Join(got, ",") != "cartesia,elevenlabs,slng" {
+	if got := cat.Vendors(LiveKit, Speak); strings.Join(got, ",") != "cartesia,deepgram,elevenlabs,gemini,gradium,inworld,rime,sarvam,slng,soniox" {
 		t.Errorf("livekit speak vendors = %v", got)
 	}
 	if got := cat.RolesFor(Pipecat, "slng"); strings.Join(got, ",") != "listen,speak" {
@@ -131,7 +137,7 @@ func TestCatalogLookup(t *testing.T) {
 
 func TestV24ProviderBrandsAreUniqueAndExposeDistributors(t *testing.T) {
 	cat := DefaultCatalog()
-	if got := strings.Join(cat.Brands(Pipecat, Speak), ","); got != "cartesia,deepgram,elevenlabs,openai" {
+	if got := strings.Join(cat.Brands(Pipecat, Speak), ","); got != "cartesia,deepgram,elevenlabs,gradium,inworld,openai,rime,sarvam,soniox" {
 		t.Fatalf("pipecat speak brands = %q", got)
 	}
 	if got := strings.Join(cat.Distributors(Pipecat, Speak, "cartesia"), ","); got != "cartesia,slng" {

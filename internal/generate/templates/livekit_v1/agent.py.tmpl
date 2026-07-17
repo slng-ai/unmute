@@ -1,7 +1,7 @@
 {{- /* svc renders any resolved ServiceCall inline (session/agent kwargs).
 Classes, kwargs, and model-route forms come from the provider catalogue
 (internal/target/catalog_livekit.go). */ -}}
-{{define "svc"}}{{.Class}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Key}}={{$a.Value}}{{end}}){{end -}}
+{{define "svc"}}{{.Class}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Key}}={{$a.Value}}{{end}}{{if .SettingsArgs}}{{if .Args}}, {{end}}{{.SettingsArg}}={{.SettingsClass}}({{range $i, $a := .SettingsArgs}}{{if $i}}, {{end}}{{$a.Key}}={{$a.Value}}{{end}}){{end}}){{end -}}
 {{- /* llmexpr renders a reason profile: bare service, or the native
 llm.FallbackAdapter around its fallback chain (V4). */ -}}
 {{define "llmexpr"}}{{if .Chain}}llm.FallbackAdapter(llm=[{{template "svc" .Primary.Call}}{{range .Chain}}, {{template "svc" .Call}}{{end}}]){{else}}{{template "svc" .Primary.Call}}{{end}}{{end -}}

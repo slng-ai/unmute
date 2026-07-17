@@ -69,6 +69,27 @@ func TestSmokeLiveKitV1MultiVendorInstantiates(t *testing.T) {
 	})
 }
 
+// TestSmokeLiveKitV1RestoredVendorsInstantiates covers the riskiest of the
+// T17-restored entries in one venv: soniox listen (model nests in
+// params=soniox.STTOptions), deepgram speak (model-only aura id, no voice
+// kwarg), gemini speak (google.beta.GeminiTTS classpath), and anthropic reason
+// (native plugin instead of Inference). Per-agent tts=/llm= constructors run
+// at instantiation; the listen binding proves import + dependency resolution.
+func TestSmokeLiveKitV1RestoredVendorsInstantiates(t *testing.T) {
+	runLiveKitSmoke(t, "safe_core", func(tgt *ir.Target) {
+		tgt.Models.Listen = &ir.Binding{Provider: "soniox", Model: "stt-rt-v5"}
+		tgt.Models.Speak["front_desk"] = ir.Binding{
+			Provider: "deepgram", Model: "aura-2-andromeda-en",
+		}
+		tgt.Models.Speak["specialist"] = ir.Binding{
+			Provider: "gemini", Voice: "Kore",
+		}
+		tgt.Models.Reason["fast_reasoning"] = ir.Binding{
+			Provider: "anthropic", Model: "claude-sonnet-4-6",
+		}
+	})
+}
+
 func runLiveKitSmoke(t *testing.T, example string, mutate func(*ir.Target)) {
 	t.Helper()
 	if _, err := exec.LookPath("uv"); err != nil {

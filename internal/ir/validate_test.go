@@ -401,11 +401,7 @@ func TestValidatePipecatMaturityGates(t *testing.T) { // driver-pipecat T1, C9
 			a.Models["fast_reasoning"] = profile
 		}, "does not emit generated fallback yet"},
 		{"thinking_audio", func(a *Agent) { a.Conversation.ThinkingAudio = ThinkingSubtle }, "does not emit thinking audio yet"},
-		{"local_tool", func(a *Agent) {
-			tool := a.Tools["lookup_customer"]
-			tool.Execution, tool.URLEnv, tool.Handler = ToolLocal, "", "tools/lookup_customer.py"
-			a.Tools["lookup_customer"] = tool
-		}, "does not emit local tool handlers yet"},
+		// local tools lifted 2026-07-17 (driver-pipecat C9/T14) — no longer gated.
 		{"mcp_tool", func(a *Agent) {
 			tool := a.Tools["lookup_customer"]
 			tool.Execution, tool.URLEnv = ToolMCP, ""

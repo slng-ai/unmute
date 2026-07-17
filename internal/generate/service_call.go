@@ -14,11 +14,14 @@ var defaultCatalog = targetcap.DefaultCatalog()
 
 // ServiceCall is a resolved constructor, ready for a template: the class and
 // its ordered kwargs, each value already a Python expression. SettingsArgs is
-// non-empty only for ParamsSettings entries (Pipecat's Class.Settings(...)).
+// non-empty only for ParamsSettings entries; SettingsArg/SettingsClass name
+// its wrapper (default settings=Class.Settings(...), soniox params=STTOptions).
 type ServiceCall struct {
-	Class        string
-	Args         []pyKV
-	SettingsArgs []pyKV
+	Class         string
+	Args          []pyKV
+	SettingsArgs  []pyKV
+	SettingsArg   string
+	SettingsClass string
 }
 
 // resolveService looks a binding's vendor up in the catalogue and builds its
@@ -48,6 +51,8 @@ func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap
 	nested := flat
 	if spec.Params == targetcap.ParamsSettings {
 		nested = func(kv pyKV) { call.SettingsArgs = append(call.SettingsArgs, kv) }
+		call.SettingsArg = firstNonEmpty(spec.SettingsArg, "settings")
+		call.SettingsClass = firstNonEmpty(spec.SettingsClass, spec.Class+".Settings")
 	}
 
 	if spec.APIKeyArg != "" {
@@ -57,6 +62,9 @@ func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap
 		}
 		env.add(keyEnv)
 		flat(pyKV{Key: spec.APIKeyArg, Value: envRef(keyEnv)})
+	}
+	for _, name := range spec.ExtraEnvs {
+		env.add(name) // read implicitly by the constructor (AWS SDK creds)
 	}
 	if binding.EndpointEnv != "" { // slotting already checked by CheckVendor
 		env.add(binding.EndpointEnv)
@@ -76,7 +84,7 @@ func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap
 	} else if spec.Model.Required {
 		return ServiceCall{}, entry, fmt.Errorf("%s %s binding is missing a model", fw, role)
 	}
-	if role == targetcap.Listen || role == targetcap.Speak {
+	if (role == targetcap.Listen || role == targetcap.Speak) && !spec.NoLanguage {
 		if language == "" {
 			language = "en"
 		}

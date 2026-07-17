@@ -19,6 +19,7 @@ import (
 // the real installed services — the drift class py_compile can never see
 // (driver-pipecat B6).
 const smokeCheckScript = `"""Smoke check: import the generated bot and instantiate every service."""
+import asyncio
 import json
 import os
 
@@ -29,8 +30,14 @@ import bot  # noqa: E402  (module import already constructs the agent workers)
 
 builders = sorted(n for n in vars(bot) if n.startswith("build_") and callable(getattr(bot, n)))
 assert builders, "no service builders found in bot.py"
-for name in builders:
-    getattr(bot, name)()
+
+
+async def _run() -> None:  # some services construct an aiohttp session
+    for name in builders:
+        getattr(bot, name)()
+
+
+asyncio.run(_run())
 print("smoke ok:", ", ".join(builders))
 `
 
@@ -40,7 +47,7 @@ print("smoke ok:", ", ".join(builders))
 // (deepgram Settings-style STT, slng flat-kwargs TTS, openai Settings LLM).
 // Opt-in (`make smoke` / -tags smoke), never in the default suite.
 func TestSmokePipecatV1ServicesInstantiate(t *testing.T) {
-	runPipecatSmoke(t, nil)
+	runPipecatSmoke(t, nil, nil)
 }
 
 // TestSmokePipecatV1MultiVendorInstantiates covers the remaining official
@@ -54,10 +61,50 @@ func TestSmokePipecatV1MultiVendorInstantiates(t *testing.T) {
 		tgt.Models.Speak["specialist"] = ir.Binding{
 			Provider: "cartesia", Model: "sonic-3", Voice: "f786b574-daa5-4673-aa0c-cbe3e8534c02",
 		}
+	}, nil)
+}
+
+// TestSmokePipecatV1RestoredVendorsInstantiates covers the riskiest of the
+// T13-restored entries in one venv: soniox listen, inworld + rime speak, and
+// anthropic reason (the workers driver injects system_instruction into its
+// Settings). Constructor kwargs are checked against the real packages.
+// (speechmatics speak was smoke-rejected here 2026-07-17: its service demands
+// a caller-supplied aiohttp_session, impossible at module import — T13.)
+func TestSmokePipecatV1RestoredVendorsInstantiates(t *testing.T) {
+	runPipecatSmoke(t, func(tgt *ir.Target) {
+		tgt.Models.Listen = &ir.Binding{Provider: "soniox", Model: "stt-rt-v5"}
+		tgt.Models.Speak["front_desk"] = ir.Binding{
+			Provider: "inworld", Model: "inworld-tts-2", Voice: "Ashley",
+		}
+		tgt.Models.Speak["specialist"] = ir.Binding{
+			Provider: "rime", Model: "mistv2", Voice: "cove",
+		}
+		tgt.Models.Reason["fast_reasoning"] = ir.Binding{
+			Provider: "anthropic", Model: "claude-sonnet-4-6",
+		}
+	}, nil)
+}
+
+// TestSmokePipecatV1LocalToolInstantiates proves the local-tool lowering (T14,
+// V13) against real pipecat-ai: importing bot constructs the agent workers, so
+// the @tool wrapper class-collects and `import tools.fetch_notes` resolves the
+// copied handler file inside the venv.
+func TestSmokePipecatV1LocalToolInstantiates(t *testing.T) {
+	runPipecatSmoke(t, nil, func(agent *ir.Agent) {
+		agent.Tools["fetch_notes"] = ir.Tool{
+			Description: "Fetch the caller's saved notes.",
+			Input:       map[string]any{"type": "object", "properties": map[string]any{"topic": map[string]any{"type": "string"}}, "required": []any{"topic"}},
+			Execution:   ir.ToolLocal, Handler: "tools/fetch_notes.py",
+			HandlerSource: "def fetch_notes(topic):\n    return {\"notes\": []}\n",
+			Interruption:  ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+		}
+		intake := agent.Agents["intake"]
+		intake.Tools = append(intake.Tools, "fetch_notes")
+		agent.Agents["intake"] = intake
 	})
 }
 
-func runPipecatSmoke(t *testing.T, mutate func(*ir.Target)) {
+func runPipecatSmoke(t *testing.T, mutate func(*ir.Target), mutateAgent func(*ir.Agent)) {
 	t.Helper()
 	if _, err := exec.LookPath("uv"); err != nil {
 		t.Skip("uv not available")
@@ -70,6 +117,9 @@ func runPipecatSmoke(t *testing.T, mutate func(*ir.Target)) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if mutateAgent != nil {
+		mutateAgent(agent)
+	}
 	tgt := targetByProvider(t, agent, ir.ProviderPipecat)
 	if mutate != nil {
 		mutate(&tgt)
@@ -81,7 +131,11 @@ func runPipecatSmoke(t *testing.T, mutate func(*ir.Target)) {
 
 	dir := t.TempDir()
 	for _, file := range artifact.Files {
-		if err := os.WriteFile(filepath.Join(dir, file.Path), file.Content, 0o644); err != nil {
+		out := filepath.Join(dir, file.Path)
+		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(out, file.Content, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
