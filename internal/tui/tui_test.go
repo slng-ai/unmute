@@ -123,6 +123,46 @@ func TestV35MenusDefaultToFirstActionAndBackLast(t *testing.T) { // docs/spec/tu
 	}
 }
 
+func TestV34EditorSectionsStayGrouped(t *testing.T) { // docs/spec/tui.md V34
+	data := scaffold.Data{}
+	data.SetTarget(scaffold.DefaultTarget)
+	options := editorSectionOptions(data)
+	want := []struct {
+		value, label string
+	}{
+		{"section:identity", "Identity  ·  target, language"},
+		{"section:models", "Models  ·  "},
+		{"section:behavior", "Behavior  ·  instructions, greeting, variables, advanced"},
+		{"section:integrations", "Integrations  ·  tools, channels, human transfers"},
+		{"section:lifecycle", "Lifecycle  ·  agents, handoffs, tasks, groups"},
+	}
+	if len(options) != len(want) {
+		t.Fatalf("section count = %d, want %d", len(options), len(want))
+	}
+	for i := range want {
+		if options[i].Value != want[i].value || !strings.HasPrefix(options[i].Key, want[i].label) {
+			t.Errorf("section %d = (%q, %q), want (%q, prefix %q)", i, options[i].Value, options[i].Key, want[i].value, want[i].label)
+		}
+	}
+}
+
+func TestV36SectionsHaveNoPassThroughMenus(t *testing.T) { // docs/spec/tui.md V36
+	data := scaffold.Data{}
+	data.SetTarget(scaffold.DefaultTarget)
+	var output bytes.Buffer
+	if err := editModels(newRunner(strings.NewReader("5\n"), &output, true), &data); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Listen (STT)", "Reason (LLM)", "Speak (TTS)"} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("Models section missing direct child %q:\n%s", want, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "Listen, reason, speak") {
+		t.Fatalf("Models still contains a pass-through row:\n%s", output.String())
+	}
+}
+
 func TestRunCompileToggle(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// 1=create, name, 6=toggle compile on, 7=Create agent, confirm.
@@ -154,7 +194,7 @@ func TestRunSelectTarget(t *testing.T) {
 func TestRunEditModels(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// Create, name, Models, Speak, cartesia, model, voice, params, Back, Create, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n2\n1\n3\n1\n1\nsonic-3\nvoice-id\n{\"speed\":1}\n5\n7\n\n"), &bytes.Buffer{}, true)
+	got, err := Run(strings.NewReader("1\nagent\n2\n3\n1\n1\nsonic-3\nvoice-id\n{\"speed\":1}\n5\n7\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}

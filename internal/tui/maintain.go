@@ -382,17 +382,14 @@ func diffJSON(path string, left, right any, losses *[]string) {
 
 func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 	for {
-		choice, _, err := runner.selectOne(agent.data.Name, "Maintain existing package; Save regenerates confirmed package files.", []huh.Option[string]{
-			huh.NewOption("Identity  ·  target, language", "section:identity"),
-			huh.NewOption("Models  ·  "+modelsLabel(agent.data), "section:models"),
-			huh.NewOption("Behavior  ·  instructions, greeting, variables, advanced", "section:behavior"),
-			huh.NewOption("Integrations  ·  tools, channels, human transfers", "section:integrations"),
-			huh.NewOption("Lifecycle  ·  agents, handoffs, tasks, groups", "section:lifecycle"),
+		options := editorSectionOptions(agent.data)
+		options = append(options,
 			huh.NewOption("Validate", "validate"),
 			huh.NewOption("Compile", "compile"),
 			huh.NewOption("Save", "save"),
 			huh.NewOption("← Back", actionBack),
-		}, true)
+		)
+		choice, _, err := runner.selectOne(agent.data.Name, "Maintain existing package; Save regenerates confirmed package files.", options, true)
 		if err != nil {
 			return err
 		}
@@ -400,8 +397,14 @@ func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 			return nil
 		}
 		if strings.HasPrefix(choice, "section:") {
-			var err error
-			choice, err = chooseEditorSection(runner, &agent.data, strings.TrimPrefix(choice, "section:"))
+			section := strings.TrimPrefix(choice, "section:")
+			if section == "models" {
+				if err := editModels(runner, &agent.data); err != nil {
+					return err
+				}
+				continue
+			}
+			choice, err = chooseEditorSection(runner, &agent.data, section)
 			if err != nil {
 				return err
 			}

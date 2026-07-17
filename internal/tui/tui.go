@@ -143,16 +143,13 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 		if result.Compile {
 			compile = "on"
 		}
-		choice, back, err := runner.selectOne(result.Agent.Data.Name, "Choose a section; changes stay in memory until Create agent.", []huh.Option[string]{
-			huh.NewOption("Identity  ·  target, language", "section:identity"),
-			huh.NewOption("Models  ·  "+modelsLabel(result.Agent.Data), "section:models"),
-			huh.NewOption("Behavior  ·  instructions, greeting, variables, advanced", "section:behavior"),
-			huh.NewOption("Integrations  ·  tools, channels, human transfers", "section:integrations"),
-			huh.NewOption("Lifecycle  ·  agents, handoffs, tasks, groups", "section:lifecycle"),
+		options := editorSectionOptions(result.Agent.Data)
+		options = append(options,
 			huh.NewOption("Compile after create  ·  "+compile, "compile"),
 			huh.NewOption("Create agent", "save"),
 			huh.NewOption("← Back", actionBack),
-		}, true)
+		)
+		choice, back, err := runner.selectOne(result.Agent.Data.Name, "Choose a section; changes stay in memory until Create agent.", options, true)
 		if err != nil {
 			return Result{}, false, err
 		}
@@ -160,7 +157,14 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			return Result{}, true, nil
 		}
 		if strings.HasPrefix(choice, "section:") {
-			choice, err = chooseEditorSection(runner, &result.Agent.Data, strings.TrimPrefix(choice, "section:"))
+			section := strings.TrimPrefix(choice, "section:")
+			if section == "models" {
+				if err := editModels(runner, &result.Agent.Data); err != nil {
+					return Result{}, false, err
+				}
+				continue
+			}
+			choice, err = chooseEditorSection(runner, &result.Agent.Data, section)
 			if err != nil {
 				return Result{}, false, err
 			}
@@ -264,6 +268,16 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 	}
 }
 
+func editorSectionOptions(data scaffold.Data) []huh.Option[string] {
+	return []huh.Option[string]{
+		huh.NewOption("Identity  ·  target, language", "section:identity"),
+		huh.NewOption("Models  ·  "+modelsLabel(data), "section:models"),
+		huh.NewOption("Behavior  ·  instructions, greeting, variables, advanced", "section:behavior"),
+		huh.NewOption("Integrations  ·  tools, channels, human transfers", "section:integrations"),
+		huh.NewOption("Lifecycle  ·  agents, handoffs, tasks, groups", "section:lifecycle"),
+	}
+}
+
 func chooseEditorSection(runner *fieldRunner, data *scaffold.Data, section string) (string, error) {
 	var options []huh.Option[string]
 	switch section {
@@ -272,8 +286,6 @@ func chooseEditorSection(runner *fieldRunner, data *scaffold.Data, section strin
 			huh.NewOption("Target  ·  "+targetLabel(data.Target), "target"),
 			huh.NewOption("Language  ·  "+data.Language, "language"),
 		}
-	case "models":
-		options = []huh.Option[string]{huh.NewOption("Listen, reason, speak  ·  "+modelsLabel(*data), "models")}
 	case "behavior":
 		options = []huh.Option[string]{
 			huh.NewOption("Instructions (prompt)", "prompt"),
