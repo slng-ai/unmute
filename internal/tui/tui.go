@@ -513,86 +513,115 @@ func modelsLabelPart(target string, role targetcap.Role, binding scaffold.Bindin
 
 func editBinding(runner *fieldRunner, data *scaffold.Data, role targetcap.Role) error {
 	binding := bindingForRole(data, role)
-	return editBindingFor(runner, data.Target, role, binding)
+	return editBindingFor(runner, data.Target, role, &data.Language, binding)
 }
 
-func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, binding *scaffold.Binding) error {
+func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, language *string, binding *scaffold.Binding) error {
 	framework := targetcap.Provider(target)
 	catalog := targetcap.DefaultCatalog()
-	options := providerOptions(framework, role)
 	integratedListen := framework == targetcap.ElevenLabs && role == targetcap.Listen
+	for {
+		brand := catalog.Brand(framework, role, binding.Provider, binding.Model)
+		if brand == "" && integratedListen {
+			brand = "integrated"
+		}
+		if brand == "" {
+			brand = "not set"
+		}
+		distributors := catalog.Distributors(framework, role, brand)
+		entry, _ := catalog.Lookup(framework, role, binding.Provider)
+		entryHint := catalogueEntryHint(entry)
+		modelApplicable := !integratedListen && (entry.Call == nil || entry.Call.Model.Arg != "")
+		voiceApplicable := role == targetcap.Speak && (entry.Call == nil || entry.Call.Voice.Arg != "")
 
-	if integratedListen {
-		runner.describe("ElevenLabs STT is integrated; only its optional params are configurable.")
-	} else if len(options) > 0 {
-		options = append(options, huh.NewOption("← Back", actionBack))
-		selected, back, err := runner.selectOne(string(role)+" provider", runner.describe("Choose the provider brand. Model and voice identities are forwarded without an allowlist."), options, true)
-		if err != nil {
+		options := []huh.Option[string]{huh.NewOption("Provider  ·  "+brand, "provider")}
+		if len(distributors) > 1 {
+			options = append(options, huh.NewOption("Distributor  ·  "+firstNonempty(binding.Provider, distributors[0]), "distributor"))
+		}
+		if modelApplicable {
+			options = append(options, huh.NewOption("Model  ·  "+firstNonempty(binding.Model, "not set"), "model"))
+		}
+		if voiceApplicable {
+			options = append(options, huh.NewOption("Voice  ·  "+firstNonempty(binding.Voice, "not set"), "voice"))
+		}
+		options = append(options,
+			huh.NewOption("Language  ·  "+firstNonempty(*language, scaffold.DefaultLanguage), "language"),
+			huh.NewOption("Additional config  ·  "+firstNonempty(binding.Params, "none"), "params"),
+			huh.NewOption("← Back", actionBack),
+		)
+		choice, _, err := runner.selectOne(strings.ToUpper(string(role)[:1])+string(role)[1:], runner.describe(entryHint), options, true)
+		if err != nil || choice == actionBack {
 			return err
 		}
-		if back || selected == actionBack {
-			return nil
-		}
-		distributors := catalog.Distributors(framework, role, selected)
-		distributor := binding.Provider
-		if !slices.Contains(distributors, distributor) {
-			distributor = distributors[0]
-		}
-		if len(distributors) > 1 {
-			distributorOptions := make([]huh.Option[string], 0, len(distributors)+1)
-			for _, name := range distributors {
-				distributorOptions = append(distributorOptions, huh.NewOption(name, name))
+		switch choice {
+		case "provider":
+			providerChoices := providerOptions(framework, role)
+			if integratedListen {
+				if err := showNotice(runner, "Integrated provider", "ElevenLabs owns the listen provider for this target."); err != nil {
+					return err
+				}
+				continue
 			}
-			distributorOptions = append(distributorOptions, huh.NewOption("← Back", actionBack))
-			distributor, back, err = runner.selectOne("Distributor for "+selected, runner.describe("Choose the integration that will deliver this provider."), distributorOptions, true)
+			if len(providerChoices) == 0 {
+				if _, err := runner.input("Provider (optional)", "This role has no fixed provider catalogue; the identity is forwarded.", &binding.Provider, validateBasic); err != nil {
+					return err
+				}
+				continue
+			}
+			providerChoices = append(providerChoices, huh.NewOption("← Back", actionBack))
+			selected, back, err := runner.selectOne(string(role)+" provider", runner.describe("Choose the provider brand. Model and voice identities are forwarded without an allowlist."), providerChoices, true)
 			if err != nil {
 				return err
 			}
-			if back || distributor == actionBack {
-				return nil
+			if !back {
+				routes := catalog.Distributors(framework, role, selected)
+				if len(routes) > 0 {
+					binding.Provider = routes[0]
+				}
+			}
+		case "distributor":
+			routeOptions := make([]huh.Option[string], 0, len(distributors)+1)
+			for _, route := range distributors {
+				routeOptions = append(routeOptions, huh.NewOption(route, route))
+			}
+			routeOptions = append(routeOptions, huh.NewOption("← Back", actionBack))
+			selected, back, err := runner.selectOne("Distributor for "+brand, runner.describe("Choose the integration that will deliver this provider."), routeOptions, true)
+			if err != nil {
+				return err
+			}
+			if !back {
+				binding.Provider = selected
+			}
+		case "model":
+			description := "Forwarded model id."
+			validate := validateBasic
+			if entry.ModelRequired() || role == targetcap.Reason || role == targetcap.Listen {
+				description = "Required by this provider integration; forwarded without an allowlist."
+				validate = validateRequiredBasic
+			}
+			if _, err := runner.input("Model", description+" "+entryHint, &binding.Model, validate); err != nil {
+				return err
+			}
+		case "voice":
+			description := "Optional voice name or id; forwarded without an allowlist."
+			validate := validateBasic
+			if entry.VoiceRequired() {
+				description = "Required by this provider integration; enter a voice name or id."
+				validate = validateRequiredBasic
+			}
+			if _, err := runner.input("Voice", description+" "+entryHint, &binding.Voice, validate); err != nil {
+				return err
+			}
+		case "language":
+			if _, err := runner.input("Language", "Primary spoken BCP-47 language tag, for example en or es-MX. "+entryHint, language, validateLanguage); err != nil {
+				return err
+			}
+		case "params":
+			if _, err := runner.input("Additional config (optional JSON object)", "Provider-specific request knobs, for example {\"temperature\":0.2}. "+entryHint, &binding.Params, validateParams); err != nil {
+				return err
 			}
 		}
-		binding.Provider = distributor
-	} else {
-		back, err := runner.input("Provider (optional)", "This role has no fixed provider catalogue; the identity is forwarded.", &binding.Provider, validateBasic)
-		if err != nil || back {
-			return err
-		}
 	}
-
-	entry, _ := catalog.Lookup(framework, role, binding.Provider)
-	entryHint := catalogueEntryHint(entry)
-	if !integratedListen {
-		description := "Forwarded model id."
-		validate := validateBasic
-		if entry.ModelRequired() || role == targetcap.Reason || role == targetcap.Listen {
-			description = "Required by this provider integration; forwarded without an allowlist."
-			validate = validateRequiredBasic
-		}
-		back, err := runner.input("Model", description+" "+entryHint, &binding.Model, validate)
-		if err != nil || back {
-			return err
-		}
-	}
-
-	if role == targetcap.Speak {
-		description := "Optional voice name or id; forwarded without an allowlist."
-		validate := validateBasic
-		if entry.VoiceRequired() {
-			description = "Required by this provider integration; enter a voice name or id."
-			validate = validateRequiredBasic
-		}
-		back, err := runner.input("Voice", description+" "+entryHint, &binding.Voice, validate)
-		if err != nil || back {
-			return err
-		}
-	}
-
-	back, err := runner.input("Params (optional JSON object)", "Provider-specific request knobs, for example {\"temperature\":0.2}. "+entryHint, &binding.Params, validateParams)
-	if err != nil || back {
-		return err
-	}
-	return nil
 }
 
 func catalogueEntryHint(entry targetcap.Entry) string {
@@ -671,39 +700,10 @@ func editVariables(runner *fieldRunner, data *scaffold.Data) error {
 		if err != nil || back {
 			continue
 		}
-		selectedType, back, err := runner.selectOne("Variable type", "", []huh.Option[string]{
-			huh.NewOption("string", "string"), huh.NewOption("number", "number"),
-			huh.NewOption("boolean", "boolean"), huh.NewOption("integer", "integer"),
-			huh.NewOption("← Back", actionBack),
-		}, true)
-		if err != nil {
-			return err
-		}
-		if back || selectedType == actionBack {
-			continue
-		}
-		variable.Type = selectedType
-		back, err = runner.input("Default (optional JSON value)", `Examples: "guest", false, 42. Blank means no default.`, &variable.Default, func(value string) error {
-			return validateVariableDefault(variable.Type, value)
-		})
-		if err != nil || back {
-			continue
-		}
-		source, back, err := runner.selectOne("Value source", "", []huh.Option[string]{
-			huh.NewOption("No external source", "none"),
-			huh.NewOption("Required at call start", "call_start"),
-			huh.NewOption("← Back", actionBack),
-		}, true)
-		if err != nil {
-			return err
-		}
-		if back || source == actionBack {
-			continue
-		}
-		if source != "none" {
-			variable.Source = source
-		}
 		data.Variables = append(data.Variables, variable)
+		if err := editVariable(runner, data, variable.Name); err != nil {
+			return err
+		}
 	}
 }
 
@@ -830,50 +830,15 @@ func editTools(runner *fieldRunner, data *scaffold.Data) error {
 		if err != nil || back {
 			continue
 		}
-		if back, err = runner.input("Description", "What the model sees.", &tool.Description, validateRequiredText); err != nil || back {
-			continue
-		}
-		if back, err = chooseToolExecution(runner, data.Target, &tool); err != nil {
-			return err
-		} else if back {
-			continue
-		}
-		if tool.ExecutionKind() == "webhook" {
-			if back, err = runner.input("Webhook URL env", "Environment variable containing the URL; never the URL itself.", &tool.URLEnv, validateEnvName); err != nil || back {
-				continue
-			}
-		}
-		if back, err = runner.input("Input JSON Schema", "JSON object.", &tool.Input, validateRequiredObject); err != nil || back {
-			continue
-		}
-		if back, err = runner.input("Output JSON Schema (optional)", "Blank leaves provider output unconstrained.", &tool.Output, validateParams); err != nil || back {
-			continue
-		}
-		attached := []string{firstNonempty(data.EntryAgent, "assistant")}
-		var available []string
 		if data.Target == string(targetcap.LiveKit) {
-			attached = []string{data.Tasks[0].Name}
-			for _, task := range data.Tasks {
-				available = append(available, task.Name)
-			}
+			tool.AttachTasks = []string{data.Tasks[0].Name}
 		} else {
-			for _, agent := range data.AllAgents() {
-				available = append(available, agent.Name)
-			}
-		}
-		attached, back, err = pickReferences(runner, "Attach tool", "Select every place that can call this tool.", available, attached, false)
-		if err != nil {
-			return err
-		}
-		if back {
-			continue
-		}
-		if data.Target == string(targetcap.LiveKit) {
-			tool.AttachTasks = attached
-		} else {
-			tool.AttachTo = attached
+			tool.AttachTo = []string{firstNonempty(data.EntryAgent, "assistant")}
 		}
 		data.Tools = append(data.Tools, tool)
+		if err := editTool(runner, data, &data.Tools[len(data.Tools)-1]); err != nil {
+			return err
+		}
 	}
 }
 
@@ -1061,16 +1026,10 @@ func editAgents(runner *fieldRunner, data *scaffold.Data) error {
 		if err != nil || back {
 			continue
 		}
-		if back, err = runner.text("Agent instructions", "Prompt for this specialist.", &agent.Instructions); err != nil || back {
-			continue
-		}
-		if err := editBindingFor(runner, data.Target, targetcap.Reason, &agent.Reason); err != nil {
-			return err
-		}
-		if err := editBindingFor(runner, data.Target, targetcap.Speak, &agent.Speak); err != nil {
-			return err
-		}
 		data.Agents = append(data.Agents, agent)
+		if err := editAgentDetails(runner, data, agent.Name); err != nil {
+			return err
+		}
 	}
 }
 
@@ -1125,13 +1084,13 @@ func editAgentDetails(runner *fieldRunner, data *scaffold.Data, name string) err
 			}
 		case "reason":
 			binding := agent.Reason
-			if err := editBindingFor(runner, data.Target, targetcap.Reason, &binding); err != nil {
+			if err := editBindingFor(runner, data.Target, targetcap.Reason, &data.Language, &binding); err != nil {
 				return err
 			}
 			setAgentBinding(data, name, targetcap.Reason, binding)
 		case "speak":
 			binding := agent.Speak
-			if err := editBindingFor(runner, data.Target, targetcap.Speak, &binding); err != nil {
+			if err := editBindingFor(runner, data.Target, targetcap.Speak, &data.Language, &binding); err != nil {
 				return err
 			}
 			setAgentBinding(data, name, targetcap.Speak, binding)
@@ -1288,29 +1247,10 @@ func editHandoffs(runner *fieldRunner, data *scaffold.Data) error {
 			continue
 		}
 
-		handoff := scaffold.Handoff{History: "full", AllVariables: true}
-		sources := agentOptions(data.AllAgents(), "")
-		sources = append(sources, huh.NewOption("← Back", actionBack))
-		source, back, err := runner.selectOne("Source agent", "", sources, true)
-		if err != nil {
-			return err
-		}
-		if back || source == actionBack {
-			continue
-		}
-		handoff.Source = source
-		targets := agentOptions(data.AllAgents(), handoff.Source)
-		targets = append(targets, huh.NewOption("← Back", actionBack))
-		targetName, back, err := runner.selectOne("Target agent", "", targets, true)
-		if err != nil {
-			return err
-		}
-		if back || targetName == actionBack {
-			continue
-		}
-		handoff.To = targetName
+		agents := data.AllAgents()
+		handoff := scaffold.Handoff{Source: agents[0].Name, To: agents[1].Name, History: "full", AllVariables: true}
 		handoff.Name = "to_" + handoff.To
-		back, err = runner.input("Handoff name", "Lowercase snake_case; controls and tools share one namespace.", &handoff.Name, func(value string) error {
+		back, err := runner.input("Handoff name", "Lowercase snake_case; controls and tools share one namespace.", &handoff.Name, func(value string) error {
 			if err := validateIdentifier(value); err != nil {
 				return err
 			}
@@ -1329,92 +1269,10 @@ func editHandoffs(runner *fieldRunner, data *scaffold.Data) error {
 		if err != nil || back {
 			continue
 		}
-		if back, err = runner.input("When to hand off", "Plain-language trigger shown to the model.", &handoff.When, validateRequiredText); err != nil || back {
-			continue
-		}
-		if len(data.Variables) > 0 {
-			handoff.Requires, back, err = pickReferences(runner, "Required variables (optional)", "The handoff is available only after every selected variable has a value.", variableNames(data), nil, true)
-			if err != nil {
-				return err
-			}
-			if back {
-				continue
-			}
-		}
-		historyOptions := []huh.Option[string]{huh.NewOption("Full history (portable)", "full")}
-		if data.Target != string(targetcap.ElevenLabs) {
-			historyOptions = append(historyOptions,
-				huh.NewOption("Messages", "messages"), huh.NewOption("Last N messages", "last_n"),
-				huh.NewOption("Summary", "summary"), huh.NewOption("Reset", "reset"))
-		}
-		historyOptions = append(historyOptions, huh.NewOption("← Back", actionBack))
-		history, back, err := runner.selectOne("Conversation history", "", historyOptions, true)
-		if err != nil {
-			return err
-		}
-		if back || history == actionBack {
-			continue
-		}
-		handoff.History = history
-		if handoff.History == "last_n" {
-			max := "10"
-			if back, err = runner.input("Maximum messages", "Positive integer.", &max, validatePositiveInteger); err != nil || back {
-				continue
-			}
-			handoff.MaxMessages, _ = strconv.Atoi(max)
-		}
-		if handoff.History == "summary" {
-			options := make([]huh.Option[string], 0, len(data.AllAgents()))
-			for _, agent := range data.AllAgents() {
-				options = append(options, huh.NewOption(agent.ModelProfile(), agent.ModelProfile()))
-			}
-			options = append(options, huh.NewOption("← Back", actionBack))
-			selected, back, err := runner.selectOne("Summarizer model profile", "", options, true)
-			if err != nil {
-				return err
-			}
-			if back || selected == actionBack {
-				continue
-			}
-			handoff.Summarizer = selected
-		}
-		includeTools, back, err := runner.selectOne("Tool calls in context", "", []huh.Option[string]{
-			huh.NewOption("Provider default", "default"), huh.NewOption("Include", "yes"), huh.NewOption("Exclude", "no"),
-			huh.NewOption("← Back", actionBack),
-		}, true)
-		if err != nil {
-			return err
-		}
-		if back || includeTools == actionBack {
-			continue
-		}
-		if includeTools != "default" {
-			include := includeTools == "yes"
-			handoff.IncludeToolCalls = &include
-		}
-		if len(data.Variables) > 0 {
-			variableScope, back, err := runner.selectOne("Variables in context", "Available variables: "+strings.Join(variableNames(data), ", "), []huh.Option[string]{
-				huh.NewOption("All variables (portable)", "all"), huh.NewOption("Selected variables", "selected"),
-				huh.NewOption("← Back", actionBack),
-			}, true)
-			if err != nil {
-				return err
-			}
-			if back || variableScope == actionBack {
-				continue
-			}
-			if variableScope == "selected" {
-				handoff.Variables, back, err = pickReferences(runner, "Variables to include", "Choose which saved variables enter the target agent's context.", variableNames(data), nil, false)
-				if err != nil {
-					return err
-				}
-				if back {
-					continue
-				}
-				handoff.AllVariables = false
-			}
-		}
 		data.Handoffs = append(data.Handoffs, handoff)
+		if err := editHandoffDetails(runner, data, handoff.Name); err != nil {
+			return err
+		}
 	}
 }
 
@@ -1438,7 +1296,8 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 			return nil
 		}
 		choice, _, err := runner.selectOne(name, "Edit this saved handoff or remove it.", []huh.Option[string]{
-			huh.NewOption("Route  ·  "+handoff.Source+" → "+handoff.To, "route"),
+			huh.NewOption("Source agent  ·  "+handoff.Source, "source"),
+			huh.NewOption("Target agent  ·  "+handoff.To, "target"),
 			huh.NewOption("Trigger  ·  "+oneLine(handoff.When), "trigger"),
 			huh.NewOption("Required variables  ·  "+firstNonempty(strings.Join(handoff.Requires, ", "), "none"), "requires"),
 			huh.NewOption("Context  ·  "+firstNonempty(handoff.History, "full")+" · variables "+handoffVariablesLabel(*handoff), "context"),
@@ -1449,31 +1308,25 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 			return err
 		}
 		switch choice {
-		case "route":
+		case "source":
 			options := agentOptions(data.AllAgents(), "")
 			options = append(options, huh.NewOption("← Back", actionBack))
 			source, back, err := runner.selectOne("Source agent", "", options, true)
 			if err != nil {
 				return err
 			}
-			if back || source == actionBack {
-				continue
+			if !back && source != handoff.To {
+				handoff.Source = source
 			}
-			targetName := handoff.To
-			if targetName == source {
-				targetName = ""
-			}
-			options = agentOptions(data.AllAgents(), source)
-			if targetName == "" {
-				targetName = options[0].Value
-			}
+		case "target":
+			options := agentOptions(data.AllAgents(), handoff.Source)
 			options = append(options, huh.NewOption("← Back", actionBack))
-			targetName, back, err = runner.selectOne("Target agent", "", options, true)
+			targetName, back, err := runner.selectOne("Target agent", "", options, true)
 			if err != nil {
 				return err
 			}
 			if !back && targetName != actionBack {
-				handoff.Source, handoff.To = source, targetName
+				handoff.To = targetName
 			}
 		case "trigger":
 			if _, err := runner.input("When to hand off", "Plain-language trigger shown to the model.", &handoff.When, validateRequiredText); err != nil {
@@ -1504,63 +1357,114 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 }
 
 func editHandoffContextDetails(runner *fieldRunner, data *scaffold.Data, handoff *scaffold.Handoff) error {
-	options := []huh.Option[string]{huh.NewOption("Full history (portable)", "full")}
-	if data.Target != string(targetcap.ElevenLabs) {
-		options = append(options, huh.NewOption("Messages", "messages"), huh.NewOption("Last N messages", "last_n"), huh.NewOption("Summary", "summary"), huh.NewOption("Reset", "reset"))
-	}
-	options = append(options, huh.NewOption("← Back", actionBack))
-	history, back, err := runner.selectOne("Conversation history", "", options, true)
-	if err != nil || back || history == actionBack {
-		return err
-	}
-	handoff.History, handoff.MaxMessages, handoff.Summarizer = history, 0, ""
-	if history == "last_n" {
-		max := "10"
-		back, err = runner.input("Maximum messages", "Positive integer.", &max, validatePositiveInteger)
-		if err != nil || back {
+	for {
+		history := firstNonempty(handoff.History, "full")
+		tools := "provider default"
+		if handoff.IncludeToolCalls != nil {
+			tools = map[bool]string{true: "include", false: "exclude"}[*handoff.IncludeToolCalls]
+		}
+		scope := "none"
+		if handoff.AllVariables {
+			scope = "all"
+		} else if len(handoff.Variables) > 0 {
+			scope = "selected"
+		}
+		options := []huh.Option[string]{huh.NewOption("History  ·  "+history, "history")}
+		if history == "last_n" {
+			options = append(options, huh.NewOption(fmt.Sprintf("Maximum messages  ·  %d", handoff.MaxMessages), "maximum"))
+		}
+		if history == "summary" {
+			options = append(options, huh.NewOption("Summarizer model  ·  "+firstNonempty(handoff.Summarizer, data.AllAgents()[0].ModelProfile()), "summarizer"))
+		}
+		options = append(options, huh.NewOption("Tool calls  ·  "+tools, "tools"))
+		if len(data.Variables) > 0 {
+			options = append(options, huh.NewOption("Variable scope  ·  "+scope, "scope"))
+			if scope == "selected" {
+				options = append(options, huh.NewOption("Selected variables  ·  "+strings.Join(handoff.Variables, ", "), "variables"))
+			}
+		}
+		options = append(options, huh.NewOption("← Back", actionBack))
+		choice, _, err := runner.selectOne("Handoff context", "Edit one field, then return here.", options, true)
+		if err != nil || choice == actionBack {
 			return err
 		}
-		handoff.MaxMessages, _ = strconv.Atoi(max)
-	}
-	if history == "summary" {
-		profiles := make([]huh.Option[string], 0, len(data.AllAgents())+1)
-		for _, agent := range data.AllAgents() {
-			profiles = append(profiles, huh.NewOption(agent.ModelProfile(), agent.ModelProfile()))
+		switch choice {
+		case "history":
+			choices := []huh.Option[string]{huh.NewOption("Full history (portable)", "full")}
+			if data.Target != string(targetcap.ElevenLabs) {
+				choices = append(choices, huh.NewOption("Messages", "messages"), huh.NewOption("Last N messages", "last_n"), huh.NewOption("Summary", "summary"), huh.NewOption("Reset", "reset"))
+			}
+			choices = append(choices, huh.NewOption("← Back", actionBack))
+			selected, back, err := runner.selectOne("Conversation history", "", choices, true)
+			if err != nil {
+				return err
+			}
+			if !back {
+				handoff.History, handoff.MaxMessages, handoff.Summarizer = selected, 0, ""
+				if selected == "last_n" {
+					handoff.MaxMessages = 10
+				}
+				if selected == "summary" {
+					handoff.Summarizer = data.AllAgents()[0].ModelProfile()
+				}
+			}
+		case "maximum":
+			value := strconv.Itoa(handoff.MaxMessages)
+			back, err := runner.input("Maximum messages", "Positive integer.", &value, validatePositiveInteger)
+			if err != nil {
+				return err
+			}
+			if !back {
+				handoff.MaxMessages, _ = strconv.Atoi(value)
+			}
+		case "summarizer":
+			profiles := make([]huh.Option[string], 0, len(data.AllAgents())+1)
+			for _, agent := range data.AllAgents() {
+				profiles = append(profiles, huh.NewOption(agent.ModelProfile(), agent.ModelProfile()))
+			}
+			profiles = append(profiles, huh.NewOption("← Back", actionBack))
+			selected, back, err := runner.selectOne("Summarizer model profile", "", profiles, true)
+			if err != nil {
+				return err
+			}
+			if !back {
+				handoff.Summarizer = selected
+			}
+		case "tools":
+			selected, back, err := runner.selectOne("Tool calls in context", "", []huh.Option[string]{huh.NewOption("Provider default", "default"), huh.NewOption("Include", "yes"), huh.NewOption("Exclude", "no"), huh.NewOption("← Back", actionBack)}, true)
+			if err != nil {
+				return err
+			}
+			if !back {
+				handoff.IncludeToolCalls = nil
+				if selected != "default" {
+					include := selected == "yes"
+					handoff.IncludeToolCalls = &include
+				}
+			}
+		case "scope":
+			selected, back, err := runner.selectOne("Variables in context", "Available variables: "+strings.Join(variableNames(data), ", "), []huh.Option[string]{huh.NewOption("All variables", "all"), huh.NewOption("Selected variables", "selected"), huh.NewOption("No variables", "none"), huh.NewOption("← Back", actionBack)}, true)
+			if err != nil {
+				return err
+			}
+			if !back {
+				handoff.AllVariables = selected == "all"
+				if selected == "selected" && len(handoff.Variables) == 0 {
+					handoff.Variables = []string{data.Variables[0].Name}
+				} else if selected != "selected" {
+					handoff.Variables = nil
+				}
+			}
+		case "variables":
+			selected, back, err := pickReferences(runner, "Variables to include", "Choose which saved variables enter the target agent's context.", variableNames(data), handoff.Variables, false)
+			if err != nil {
+				return err
+			}
+			if !back {
+				handoff.Variables = selected
+			}
 		}
-		profiles = append(profiles, huh.NewOption("← Back", actionBack))
-		summarizer, back, err := runner.selectOne("Summarizer model profile", "", profiles, true)
-		if err != nil || back || summarizer == actionBack {
-			return err
-		}
-		handoff.Summarizer = summarizer
 	}
-	includeTools, back, err := runner.selectOne("Tool calls in context", "", []huh.Option[string]{
-		huh.NewOption("Provider default", "default"), huh.NewOption("Include", "yes"), huh.NewOption("Exclude", "no"), huh.NewOption("← Back", actionBack),
-	}, true)
-	if err != nil || back || includeTools == actionBack {
-		return err
-	}
-	handoff.IncludeToolCalls = nil
-	if includeTools != "default" {
-		include := includeTools == "yes"
-		handoff.IncludeToolCalls = &include
-	}
-	if len(data.Variables) == 0 {
-		handoff.AllVariables, handoff.Variables = false, nil
-		return nil
-	}
-	scope, back, err := runner.selectOne("Variables in context", "Available variables: "+strings.Join(variableNames(data), ", "), []huh.Option[string]{
-		huh.NewOption("All variables", "all"), huh.NewOption("Selected variables", "selected"), huh.NewOption("No variables", "none"), huh.NewOption("← Back", actionBack),
-	}, true)
-	if err != nil || back || scope == actionBack {
-		return err
-	}
-	currentVariables := append([]string(nil), handoff.Variables...)
-	handoff.AllVariables, handoff.Variables = scope == "all", nil
-	if scope == "selected" {
-		handoff.Variables, _, err = pickReferences(runner, "Variables to include", "Choose which saved variables enter the target agent's context.", variableNames(data), currentVariables, false)
-	}
-	return err
 }
 
 func editTasks(runner *fieldRunner, data *scaffold.Data) error {
@@ -1600,62 +1504,10 @@ func editTasks(runner *fieldRunner, data *scaffold.Data) error {
 		if err != nil || back {
 			continue
 		}
-		if back, err = runner.text("Task instructions", "Prompt for this delegated task.", &task.Instructions); err != nil || back {
-			continue
-		}
-		if len(data.Tools) > 0 {
-			task.Tools, back, err = pickReferences(runner, "Task tools (optional)", "Choose from every saved tool.", toolNames(data), nil, true)
-			if err != nil {
-				return err
-			}
-			if back {
-				continue
-			}
-		}
-		modelOptions := []huh.Option[string]{huh.NewOption("Entry agent model", "default")}
-		for _, agent := range data.AllAgents() {
-			modelOptions = append(modelOptions, huh.NewOption(agent.ModelProfile(), agent.ModelProfile()))
-		}
-		modelOptions = append(modelOptions, huh.NewOption("← Back", actionBack))
-		model, back, err := runner.selectOne("Task model", "", modelOptions, true)
-		if err != nil {
-			return err
-		}
-		if back || model == actionBack {
-			continue
-		}
-		if model != "default" {
-			task.Model = model
-		}
-		if back, err = runner.input("Typed result", `Prefilled default: {"result":"string"}. Each key becomes one returned field. Use string, number, boolean, integer, or an enum; for example {"verified":"boolean","tier":{"enum":["free","pro"]}}.`, &task.Result, validateTaskResult); err != nil || back {
-			continue
-		}
-		if back, err = editTaskContext(runner, data, &task); err != nil {
-			return err
-		} else if back {
-			continue
-		}
-		agentChoices := agentOptions(data.AllAgents(), "")
-		agentChoices = append(agentChoices, huh.NewOption("← Back", actionBack))
-		selectedAgent, back, err := runner.selectOne("Agent allowed to delegate", "", agentChoices, true)
-		if err != nil {
-			return err
-		}
-		if back {
-			continue
-		}
-		task.Agent = selectedAgent
-		if back, err = runner.input("When to run", "Plain-language trigger shown to the agent.", &task.When, validateRequiredText); err != nil || back {
-			continue
-		}
-		if len(data.Variables) > 0 {
-			if back, err = editTaskAssignments(runner, data, &task); err != nil {
-				return err
-			} else if back {
-				continue
-			}
-		}
 		data.Tasks = append(data.Tasks, task)
+		if err := editTaskDetails(runner, data, task.Name); err != nil {
+			return err
+		}
 	}
 }
 
@@ -1720,7 +1572,7 @@ func editTaskDetails(runner *fieldRunner, data *scaffold.Data, name string) erro
 				}
 			}
 		case "result":
-			if _, err := runner.input("Typed result", `Prefilled default: {"result":"string"}. Use string, number, boolean, integer, or a nonempty enum.`, &task.Result, validateTaskResult); err != nil {
+			if _, err := runner.input("Typed result", `Prefilled default: {"result":"string"}. Each key becomes one returned field. Use string, number, boolean, integer, or a nonempty enum.`, &task.Result, validateTaskResult); err != nil {
 				return err
 			}
 		case "context":
@@ -1764,62 +1616,80 @@ func editTaskDetails(runner *fieldRunner, data *scaffold.Data, name string) erro
 }
 
 func editTaskContext(runner *fieldRunner, data *scaffold.Data, task *scaffold.Task) (bool, error) {
-	options := []huh.Option[string]{huh.NewOption("Full history (portable)", "full")}
-	if data.Target != string(targetcap.ElevenLabs) {
-		options = append(options,
-			huh.NewOption("Messages", "messages"), huh.NewOption("Last N messages", "last_n"),
-			huh.NewOption("Summary", "summary"), huh.NewOption("Reset", "reset"))
-	}
-	options = append(options, huh.NewOption("← Back", actionBack))
-	history, back, err := runner.selectOne("Task history", "", options, true)
-	if err != nil {
-		return false, err
-	}
-	if back || history == actionBack {
-		return true, nil
-	}
-	task.History, task.MaxMessages, task.Summarizer = history, 0, ""
-	if history == "last_n" {
-		max := "10"
-		back, err = runner.input("Maximum messages", "Positive integer.", &max, validatePositiveInteger)
-		if err != nil || back {
-			return back, err
+	for {
+		history := firstNonempty(task.History, "full")
+		tools := "provider default"
+		if task.IncludeToolCalls != nil {
+			tools = map[bool]string{true: "include", false: "exclude"}[*task.IncludeToolCalls]
 		}
-		task.MaxMessages, _ = strconv.Atoi(max)
-	}
-	if history == "summary" {
-		var modelOptions []huh.Option[string]
-		for _, agent := range data.AllAgents() {
-			modelOptions = append(modelOptions, huh.NewOption(agent.ModelProfile(), agent.ModelProfile()))
+		options := []huh.Option[string]{huh.NewOption("History  ·  "+history, "history")}
+		if history == "last_n" {
+			options = append(options, huh.NewOption(fmt.Sprintf("Maximum messages  ·  %d", task.MaxMessages), "maximum"))
 		}
-		modelOptions = append(modelOptions, huh.NewOption("← Back", actionBack))
-		summarizer, selectedBack, selectErr := runner.selectOne("Summarizer model profile", "", modelOptions, true)
-		back, err = selectedBack, selectErr
-		if err != nil {
-			return false, err
+		if history == "summary" {
+			options = append(options, huh.NewOption("Summarizer model  ·  "+firstNonempty(task.Summarizer, data.AllAgents()[0].ModelProfile()), "summarizer"))
 		}
-		if back {
-			return true, nil
+		options = append(options, huh.NewOption("Tool calls  ·  "+tools, "tools"), huh.NewOption("← Back", actionBack))
+		choice, _, err := runner.selectOne("Task context", "Edit one field, then return here.", options, true)
+		if err != nil || choice == actionBack {
+			return true, err
 		}
-		task.Summarizer = summarizer
+		switch choice {
+		case "history":
+			choices := []huh.Option[string]{huh.NewOption("Full history (portable)", "full")}
+			if data.Target != string(targetcap.ElevenLabs) {
+				choices = append(choices, huh.NewOption("Messages", "messages"), huh.NewOption("Last N messages", "last_n"), huh.NewOption("Summary", "summary"), huh.NewOption("Reset", "reset"))
+			}
+			choices = append(choices, huh.NewOption("← Back", actionBack))
+			selected, back, err := runner.selectOne("Task history", "", choices, true)
+			if err != nil {
+				return false, err
+			}
+			if !back {
+				task.History, task.MaxMessages, task.Summarizer = selected, 0, ""
+				if selected == "last_n" {
+					task.MaxMessages = 10
+				}
+				if selected == "summary" {
+					task.Summarizer = data.AllAgents()[0].ModelProfile()
+				}
+			}
+		case "maximum":
+			value := strconv.Itoa(task.MaxMessages)
+			back, err := runner.input("Maximum messages", "Positive integer.", &value, validatePositiveInteger)
+			if err != nil {
+				return false, err
+			}
+			if !back {
+				task.MaxMessages, _ = strconv.Atoi(value)
+			}
+		case "summarizer":
+			var profiles []huh.Option[string]
+			for _, agent := range data.AllAgents() {
+				profiles = append(profiles, huh.NewOption(agent.ModelProfile(), agent.ModelProfile()))
+			}
+			profiles = append(profiles, huh.NewOption("← Back", actionBack))
+			selected, back, err := runner.selectOne("Summarizer model profile", "", profiles, true)
+			if err != nil {
+				return false, err
+			}
+			if !back {
+				task.Summarizer = selected
+			}
+		case "tools":
+			selected, back, err := runner.selectOne("Tool calls in task context", "", []huh.Option[string]{huh.NewOption("Provider default", "default"), huh.NewOption("Include", "yes"), huh.NewOption("Exclude", "no"), huh.NewOption("← Back", actionBack)}, true)
+			if err != nil {
+				return false, err
+			}
+			if !back {
+				task.IncludeToolCalls = nil
+				if selected != "default" {
+					include := selected == "yes"
+					task.IncludeToolCalls = &include
+				}
+			}
+		}
 	}
-	includeTools, selectedBack, selectErr := runner.selectOne("Tool calls in task context", "", []huh.Option[string]{
-		huh.NewOption("Provider default", "default"), huh.NewOption("Include", "yes"), huh.NewOption("Exclude", "no"),
-		huh.NewOption("← Back", actionBack),
-	}, true)
-	back, err = selectedBack, selectErr
-	if err != nil {
-		return false, err
-	}
-	if back || includeTools == actionBack {
-		return true, nil
-	}
-	task.IncludeToolCalls = nil
-	if includeTools != "default" {
-		include := includeTools == "yes"
-		task.IncludeToolCalls = &include
-	}
-	return false, nil
 }
 
 func editTaskAssignments(runner *fieldRunner, data *scaffold.Data, task *scaffold.Task) (bool, error) {
@@ -1835,26 +1705,46 @@ func editTaskAssignments(runner *fieldRunner, data *scaffold.Data, task *scaffol
 	fields := taskResultNames(task.Result)
 	assignments := make(map[string]string, len(selected))
 	for _, variable := range selected {
-		options := make([]huh.Option[string], 0, len(fields)+1)
-		for _, name := range fields {
-			options = append(options, huh.NewOption(name, name))
-		}
-		options = append(options, huh.NewOption("← Back", actionBack))
-		field, back, err := runner.selectOne("Result field for "+variable, "", options, true)
-		if err != nil {
-			return false, err
-		}
-		if back || field == actionBack {
-			return true, nil
+		field := assignmentField(task.Assign, variable)
+		if !containsName(fields, field) {
+			field = fields[0]
 		}
 		assignments[variable] = "result." + field
 	}
-	raw, err := json.Marshal(assignments)
-	if err != nil {
-		return false, err
+	for {
+		options := make([]huh.Option[string], 0, len(selected)+2)
+		for _, variable := range selected {
+			options = append(options, huh.NewOption(variable+"  ·  "+strings.TrimPrefix(assignments[variable], "result."), variable))
+		}
+		options = append(options, huh.NewOption("Done", "done"), huh.NewOption("← Back", actionBack))
+		choice, _, err := runner.selectOne("Task result assignments", "Every selected variable shows its current result field.", options, true)
+		if err != nil {
+			return false, err
+		}
+		if choice == actionBack {
+			return true, nil
+		}
+		if choice == "done" {
+			raw, err := json.Marshal(assignments)
+			if err != nil {
+				return false, err
+			}
+			task.Assign = string(raw)
+			return false, nil
+		}
+		fieldOptions := make([]huh.Option[string], 0, len(fields)+1)
+		for _, name := range fields {
+			fieldOptions = append(fieldOptions, huh.NewOption(name, name))
+		}
+		fieldOptions = append(fieldOptions, huh.NewOption("← Back", actionBack))
+		field, back, err := runner.selectOne("Result field for "+choice, "", fieldOptions, true)
+		if err != nil {
+			return false, err
+		}
+		if !back {
+			assignments[choice] = "result." + field
+		}
 	}
-	task.Assign = string(raw)
-	return false, nil
 }
 
 func taskResultNames(result string) []string {
@@ -1926,67 +1816,11 @@ func editTaskGroups(runner *fieldRunner, data *scaffold.Data) error {
 		if err != nil || back {
 			continue
 		}
-		group.Steps, back, err = pickReferences(runner, "Ordered steps", "Toggle tasks in the order they should run. Selecting a saved task adds it to the end.", taskNames(data), nil, false)
-		if err != nil {
-			return err
-		}
-		if back {
-			continue
-		}
-		scopeOptions := []huh.Option[string]{huh.NewOption("Shared context", "shared")}
-		if data.Target != string(targetcap.ElevenLabs) {
-			scopeOptions = append(scopeOptions, huh.NewOption("Isolated context", "isolated"))
-		}
-		scopeOptions = append(scopeOptions, huh.NewOption("← Back", actionBack))
-		contextScope, selectedBack, selectErr := runner.selectOne("Context between steps", "", scopeOptions, true)
-		back, err = selectedBack, selectErr
-		if err != nil {
-			return err
-		}
-		if back {
-			continue
-		}
-		group.ContextScope = contextScope
-		completion, selectedBack, selectErr := runner.selectOne("After the final step", "", []huh.Option[string]{
-			huh.NewOption("Return to caller agent", "return"), huh.NewOption("Transfer to agent", "transfer"), huh.NewOption("End conversation", "end"),
-			huh.NewOption("← Back", actionBack),
-		}, true)
-		back, err = selectedBack, selectErr
-		if err != nil {
-			return err
-		}
-		if back {
-			continue
-		}
-		group.Then = completion
-		if group.Then == "transfer" {
-			options := agentOptions(data.AllAgents(), "")
-			options = append(options, huh.NewOption("← Back", actionBack))
-			transferTarget, selectedBack, selectErr := runner.selectOne("Transfer target", "", options, true)
-			back, err = selectedBack, selectErr
-			if err != nil {
-				return err
-			}
-			if back {
-				continue
-			}
-			group.ThenTarget = transferTarget
-		}
-		agentChoices := agentOptions(data.AllAgents(), "")
-		agentChoices = append(agentChoices, huh.NewOption("← Back", actionBack))
-		selectedAgent, selectedBack, selectErr := runner.selectOne("Agent allowed to delegate", "", agentChoices, true)
-		back, err = selectedBack, selectErr
-		if err != nil {
-			return err
-		}
-		if back {
-			continue
-		}
-		group.Agent = selectedAgent
-		if back, err = runner.input("When to run", "Plain-language trigger shown to the agent.", &group.When, validateRequiredText); err != nil || back {
-			continue
-		}
+		group.Steps = []string{data.Tasks[0].Name}
 		data.TaskGroups = append(data.TaskGroups, group)
+		if err := editTaskGroupDetails(runner, data, group.Name); err != nil {
+			return err
+		}
 	}
 }
 
@@ -2010,6 +1844,7 @@ func editTaskGroupDetails(runner *fieldRunner, data *scaffold.Data, name string)
 			huh.NewOption("Ordered steps  ·  "+strings.Join(group.Steps, " → "), "steps"),
 			huh.NewOption("Context between steps  ·  "+group.ContextScope, "context"),
 			huh.NewOption("Completion  ·  "+completion, "completion"),
+			huh.NewOption("Transfer target  ·  "+firstNonempty(group.ThenTarget, "not applicable"), "target"),
 			huh.NewOption("Delegating agent  ·  "+group.Agent, "agent"),
 			huh.NewOption("Trigger  ·  "+oneLine(group.When), "trigger"),
 			huh.NewOption("Delete task group", "delete"),
@@ -2052,16 +1887,23 @@ func editTaskGroupDetails(runner *fieldRunner, data *scaffold.Data, name string)
 			}
 			group.Then, group.ThenTarget = selected, ""
 			if selected == "transfer" {
-				options := agentOptions(data.AllAgents(), "")
-				options = append(options, huh.NewOption("← Back", actionBack))
-				targetName, selectedBack, selectErr := runner.selectOne("Transfer target", "", options, true)
-				back, err = selectedBack, selectErr
-				if err != nil {
+				group.ThenTarget = data.AllAgents()[0].Name
+			}
+		case "target":
+			if group.Then != "transfer" {
+				if err := showNotice(runner, "Transfer target unavailable", "Set Completion to transfer first."); err != nil {
 					return err
 				}
-				if !back && targetName != actionBack {
-					group.ThenTarget = targetName
-				}
+				continue
+			}
+			options := agentOptions(data.AllAgents(), "")
+			options = append(options, huh.NewOption("← Back", actionBack))
+			selected, back, err := runner.selectOne("Transfer target", "", options, true)
+			if err != nil {
+				return err
+			}
+			if !back {
+				group.ThenTarget = selected
 			}
 		case "agent":
 			options := agentOptions(data.AllAgents(), "")
@@ -2090,65 +1932,98 @@ func editTaskGroupDetails(runner *fieldRunner, data *scaffold.Data, name string)
 }
 
 func editChannels(runner *fieldRunner, data *scaffold.Data) error {
-	mode := "web"
-	for _, channel := range data.AllChannels() {
-		if channel.Kind != "telephony" {
-			continue
+	for {
+		mode := "web"
+		phone := scaffold.Channel{Name: "phone", Kind: "telephony"}
+		for _, channel := range data.AllChannels() {
+			if channel.Kind != "telephony" {
+				continue
+			}
+			phone = channel
+			switch {
+			case channel.Inbound && channel.Outbound:
+				mode = "web_phone_both"
+			case channel.Outbound:
+				mode = "web_phone_outbound"
+			default:
+				mode = "web_phone_inbound"
+			}
 		}
-		switch {
-		case channel.Inbound && channel.Outbound:
-			mode = "web_phone_both"
-		case channel.Outbound:
-			mode = "web_phone_outbound"
-		default:
-			mode = "web_phone_inbound"
+		options := []huh.Option[string]{huh.NewOption("Channels  ·  "+strings.ReplaceAll(mode, "_", " "), "mode")}
+		if mode != "web" {
+			options = append(options, huh.NewOption("Required phone controls  ·  "+firstNonempty(strings.Join(phone.RequiredControls, ", "), "none"), "controls"))
+			if phone.Outbound {
+				options = append(options, huh.NewOption("When voicemail answers  ·  "+firstNonempty(phone.OnVoicemail, "hangup"), "voicemail"))
+			}
+			options = append(options,
+				huh.NewOption("Target transport  ·  "+firstNonempty(data.Transport, "not set"), "transport"),
+				huh.NewOption("Carrier  ·  "+firstNonempty(data.Carrier, "not set"), "carrier"),
+			)
 		}
-	}
-	mode, back, err := runner.selectOne("Caller channels", runner.describe(
-		"This declares web/phone behavior only. Phone numbers, SIP trunks, carriers, and rooms remain external setup.",
-	), []huh.Option[string]{
-		huh.NewOption("Web browser audio", "web"),
-		huh.NewOption("Web + inbound phone", "web_phone_inbound"),
-		huh.NewOption("Web + outbound phone", "web_phone_outbound"),
-		huh.NewOption("Web + inbound/outbound phone", "web_phone_both"),
-		huh.NewOption("← Back", actionBack),
-	}, true)
-	if err != nil || back || mode == actionBack {
-		return err
-	}
-	data.Channels = []scaffold.Channel{{Name: "web", Kind: "realtime_audio"}}
-	if mode == "web" {
-		return nil
-	}
-	phone := scaffold.Channel{Name: "phone", Kind: "telephony", Inbound: strings.Contains(mode, "inbound") || mode == "web_phone_both", Outbound: strings.Contains(mode, "outbound") || mode == "web_phone_both"}
-	phone.RequiredControls, back, err = pickReferences(runner, "Required phone controls (optional)", "Choose every runtime capability this phone channel requires.", []string{
-		"cold_transfer", "warm_transfer", "dtmf_send", "dtmf_receive", "hold", "hangup", "voicemail_detection", "ivr_navigation",
-	}, nil, true)
-	if err != nil || back {
-		return err
-	}
-	if phone.Outbound {
-		voicemail, selectedBack, selectErr := runner.selectOne("When voicemail answers", "", []huh.Option[string]{
-			huh.NewOption("Hang up", "hangup"), huh.NewOption("Leave a message", "leave_message"),
-			huh.NewOption("← Back", actionBack),
-		}, true)
-		back, err = selectedBack, selectErr
-		if err != nil || back {
+		options = append(options, huh.NewOption("← Back", actionBack))
+		choice, _, err := runner.selectOne("Caller channels", runner.describe("This declares web/phone behavior only. Phone numbers, SIP trunks, carriers, and rooms remain external setup."), options, true)
+		if err != nil || choice == actionBack {
 			return err
 		}
-		phone.OnVoicemail = voicemail
+		savePhone := func() {
+			data.Channels = []scaffold.Channel{{Name: "web", Kind: "realtime_audio"}, phone}
+		}
+		switch choice {
+		case "mode":
+			selected, back, err := runner.selectOne("Caller channels", "", []huh.Option[string]{
+				huh.NewOption("Web browser audio", "web"), huh.NewOption("Web + inbound phone", "web_phone_inbound"),
+				huh.NewOption("Web + outbound phone", "web_phone_outbound"), huh.NewOption("Web + inbound/outbound phone", "web_phone_both"),
+				huh.NewOption("← Back", actionBack),
+			}, true)
+			if err != nil {
+				return err
+			}
+			if back {
+				continue
+			}
+			if selected == "web" {
+				data.Channels = []scaffold.Channel{{Name: "web", Kind: "realtime_audio"}}
+				continue
+			}
+			phone.Inbound = strings.Contains(selected, "inbound") || selected == "web_phone_both"
+			phone.Outbound = strings.Contains(selected, "outbound") || selected == "web_phone_both"
+			if phone.Outbound {
+				phone.OnVoicemail = firstNonempty(phone.OnVoicemail, "hangup")
+			} else {
+				phone.OnVoicemail = ""
+			}
+			if data.Target == string(targetcap.Pipecat) && data.Transport == "" {
+				data.Transport = "daily-sip"
+			}
+			savePhone()
+		case "controls":
+			selected, back, err := pickReferences(runner, "Required phone controls (optional)", "Choose every runtime capability this phone channel requires.", []string{"cold_transfer", "warm_transfer", "dtmf_send", "dtmf_receive", "hold", "hangup", "voicemail_detection", "ivr_navigation"}, phone.RequiredControls, true)
+			if err != nil {
+				return err
+			}
+			if !back {
+				phone.RequiredControls = selected
+				savePhone()
+			}
+		case "voicemail":
+			selected, back, err := runner.selectOne("When voicemail answers", "", []huh.Option[string]{huh.NewOption("Hang up", "hangup"), huh.NewOption("Leave a message", "leave_message"), huh.NewOption("← Back", actionBack)}, true)
+			if err != nil {
+				return err
+			}
+			if !back {
+				phone.OnVoicemail = selected
+				savePhone()
+			}
+		case "transport":
+			if _, err := runner.input("Target transport (optional)", "Driver vocabulary; Pipecat cold transfer uses daily-sip.", &data.Transport, validateBasic); err != nil {
+				return err
+			}
+		case "carrier":
+			if _, err := runner.input("Carrier (optional)", "Driver vocabulary such as twilio; never provisions the carrier.", &data.Carrier, validateBasic); err != nil {
+				return err
+			}
+		}
 	}
-	if data.Target == string(targetcap.Pipecat) && data.Transport == "" {
-		data.Transport = "daily-sip"
-	}
-	if back, err = runner.input("Target transport (optional)", "Driver vocabulary; Pipecat cold transfer uses daily-sip.", &data.Transport, validateBasic); err != nil || back {
-		return err
-	}
-	if back, err = runner.input("Carrier (optional)", "Driver vocabulary such as twilio; never provisions the carrier.", &data.Carrier, validateBasic); err != nil || back {
-		return err
-	}
-	data.Channels = append(data.Channels, phone)
-	return nil
 }
 
 func editHumanTransfers(runner *fieldRunner, data *scaffold.Data) error {
@@ -2189,67 +2064,10 @@ func editHumanTransfers(runner *fieldRunner, data *scaffold.Data) error {
 		if err != nil || back {
 			continue
 		}
-		options = agentOptions(data.AllAgents(), "")
-		options = append(options, huh.NewOption("← Back", actionBack))
-		selectedAgent, selectedBack, selectErr := runner.selectOne("Agent allowed to transfer", "", options, true)
-		back, err = selectedBack, selectErr
-		if err != nil {
-			return err
-		}
-		if back {
-			continue
-		}
-		transfer.Agent = selectedAgent
-		if back, err = runner.input("When to transfer", "Plain-language trigger shown to the agent.", &transfer.When, validateRequiredText); err != nil || back {
-			continue
-		}
-		if back, err = runner.input("Destination name", "Symbolic lowercase snake_case name stored in the portable agent spec.", &transfer.Destination, func(value string) error {
-			if err := validateIdentifier(value); err != nil {
-				return err
-			}
-			for _, existing := range data.HumanTransfers {
-				if existing.Destination == value {
-					return errors.New("destination already exists")
-				}
-			}
-			return nil
-		}); err != nil || back {
-			continue
-		}
-		if back, err = runner.input("Destination value", "E.164 number such as +14155550123, or a SIP URI.", &transfer.Value, validateDestination); err != nil || back {
-			continue
-		}
-		modeOptions := []huh.Option[string]{huh.NewOption("Cold transfer", "cold")}
-		if data.Target != string(targetcap.Pipecat) {
-			modeOptions = append(modeOptions, huh.NewOption("Warm transfer", "warm"))
-		}
-		modeOptions = append(modeOptions, huh.NewOption("← Back", actionBack))
-		transferMode, selectedBack, selectErr := runner.selectOne("Transfer mode", "", modeOptions, true)
-		back, err = selectedBack, selectErr
-		if err != nil {
-			return err
-		}
-		if back {
-			continue
-		}
-		transfer.Mode = transferMode
-		if transfer.Mode == "warm" {
-			briefings := []huh.Option[string]{huh.NewOption("Summary", "summary")}
-			if data.Target == string(targetcap.ElevenLabs) {
-				briefings = []huh.Option[string]{huh.NewOption("Message", "message")}
-			}
-			briefings = append(briefings, huh.NewOption("← Back", actionBack))
-			briefing, selectedBack, selectErr := runner.selectOne("Operator briefing", "", briefings, true)
-			back, err = selectedBack, selectErr
-			if err != nil {
-				return err
-			}
-			if back {
-				continue
-			}
-			transfer.Briefing = briefing
-		}
 		data.HumanTransfers = append(data.HumanTransfers, transfer)
+		if err := editHumanTransferDetails(runner, data, transfer.Name); err != nil {
+			return err
+		}
 	}
 }
 
@@ -2392,82 +2210,115 @@ func editCustomize(runner *fieldRunner, data *scaffold.Data) error {
 }
 
 func editConversation(runner *fieldRunner, data *scaffold.Data) error {
-	speaksFirst, back, err := runner.selectOne("Who speaks first", "", []huh.Option[string]{
-		huh.NewOption("Agent", "agent"), huh.NewOption("Caller", "user"),
-		huh.NewOption("← Back", actionBack),
-	}, true)
-	if err != nil || back {
-		return err
-	}
-	data.SpeaksFirst = speaksFirst
-	opening, selectedBack, selectErr := runner.selectOne("Opening", "", []huh.Option[string]{
-		huh.NewOption("Fixed greeting", "fixed"), huh.NewOption("Model-written greeting", "model"),
-		huh.NewOption("← Back", actionBack),
-	}, true)
-	back, err = selectedBack, selectErr
-	if err != nil || back || opening == actionBack {
-		return err
-	}
-	if opening == "model" {
-		data.Greeting = ""
-		data.ModelGreeting = true
-	} else {
-		data.ModelGreeting = false
-		data.Greeting = firstNonempty(data.Greeting, scaffold.DefaultGreeting)
-		if back, err = runner.input("Fixed greeting", "Spoken verbatim.", &data.Greeting, validateRequiredText); err != nil || back {
+	for {
+		speaksFirst := firstNonempty(data.SpeaksFirst, "agent")
+		opening := "fixed"
+		if data.ModelGreeting {
+			opening = "model-written"
+		}
+		interruption := "provider default"
+		if data.Interruption != nil {
+			interruption = map[bool]string{true: "enabled", false: "disabled"}[*data.Interruption]
+		}
+		options := []huh.Option[string]{
+			huh.NewOption("Who speaks first  ·  "+speaksFirst, "speaker"),
+			huh.NewOption("Opening mode  ·  "+opening, "opening"),
+		}
+		if !data.ModelGreeting {
+			options = append(options, huh.NewOption("Fixed greeting  ·  "+oneLine(firstNonempty(data.Greeting, scaffold.DefaultGreeting)), "greeting"))
+		}
+		options = append(options,
+			huh.NewOption("Interruption  ·  "+interruption, "interruption"),
+			huh.NewOption(fmt.Sprintf("Minimum interruption words  ·  %d", data.MinimumWords), "minimum"),
+			huh.NewOption("Ignored interruption phrases  ·  "+firstNonempty(strings.Join(data.IgnorePhrases, ", "), "none"), "phrases"),
+			huh.NewOption("Inactivity nudge after  ·  "+firstNonempty(data.NudgeAfter, "not set"), "nudge"),
+			huh.NewOption("Inactivity end after  ·  "+firstNonempty(data.EndAfter, "not set"), "end"),
+			huh.NewOption("Maximum call duration  ·  "+firstNonempty(data.MaxDuration, "not set"), "duration"),
+			huh.NewOption("Thinking audio  ·  "+firstNonempty(data.ThinkingAudio, "none"), "thinking"),
+			huh.NewOption("← Back", actionBack),
+		)
+		choice, _, err := runner.selectOne("Conversation behavior", "Edit one field, then return here.", options, true)
+		if err != nil || choice == actionBack {
 			return err
 		}
-	}
-	interruption, selectedBack, selectErr := runner.selectOne("Interruption", "", []huh.Option[string]{
-		huh.NewOption("Provider default", "default"), huh.NewOption("Enabled", "enabled"), huh.NewOption("Disabled", "disabled"),
-		huh.NewOption("← Back", actionBack),
-	}, true)
-	back, err = selectedBack, selectErr
-	if err != nil || back || interruption == actionBack {
-		return err
-	}
-	data.Interruption = nil
-	if interruption != "default" {
-		enabled := interruption == "enabled"
-		data.Interruption = &enabled
-		minimum := ""
-		if data.MinimumWords > 0 {
-			minimum = strconv.Itoa(data.MinimumWords)
+		switch choice {
+		case "speaker":
+			selected, back, err := runner.selectOne("Who speaks first", "", []huh.Option[string]{huh.NewOption("Agent", "agent"), huh.NewOption("Caller", "user"), huh.NewOption("← Back", actionBack)}, true)
+			if err != nil {
+				return err
+			}
+			if !back {
+				data.SpeaksFirst = selected
+			}
+		case "opening":
+			selected, back, err := runner.selectOne("Opening", "", []huh.Option[string]{huh.NewOption("Fixed greeting", "fixed"), huh.NewOption("Model-written greeting", "model"), huh.NewOption("← Back", actionBack)}, true)
+			if err != nil {
+				return err
+			}
+			if !back {
+				data.ModelGreeting = selected == "model"
+				if data.ModelGreeting {
+					data.Greeting = ""
+				} else {
+					data.Greeting = firstNonempty(data.Greeting, scaffold.DefaultGreeting)
+				}
+			}
+		case "greeting":
+			if _, err := runner.input("Fixed greeting", "Spoken verbatim.", &data.Greeting, validateRequiredText); err != nil {
+				return err
+			}
+		case "interruption":
+			selected, back, err := runner.selectOne("Interruption", "", []huh.Option[string]{huh.NewOption("Provider default", "default"), huh.NewOption("Enabled", "enabled"), huh.NewOption("Disabled", "disabled"), huh.NewOption("← Back", actionBack)}, true)
+			if err != nil {
+				return err
+			}
+			if !back {
+				data.Interruption = nil
+				if selected != "default" {
+					enabled := selected == "enabled"
+					data.Interruption = &enabled
+				}
+			}
+		case "minimum":
+			value := strconv.Itoa(data.MinimumWords)
+			if data.MinimumWords == 0 {
+				value = ""
+			}
+			back, err := runner.input("Minimum interruption words (optional)", "Non-negative integer; provider support varies.", &value, validateOptionalNonNegativeInteger)
+			if err != nil {
+				return err
+			}
+			if !back {
+				data.MinimumWords = 0
+				if value != "" {
+					data.MinimumWords, _ = strconv.Atoi(value)
+				}
+			}
+		case "phrases":
+			value := strings.Join(data.IgnorePhrases, ", ")
+			back, err := runner.input("Ignored interruption phrases (optional)", "Comma-separated phrases.", &value, func(string) error { return nil })
+			if err != nil {
+				return err
+			}
+			if !back {
+				data.IgnorePhrases = parsePhrases(value)
+			}
+		case "nudge", "end", "duration":
+			field := map[string]*string{"nudge": &data.NudgeAfter, "end": &data.EndAfter, "duration": &data.MaxDuration}[choice]
+			title := map[string]string{"nudge": "Inactivity nudge after (optional)", "end": "Inactivity end after (optional)", "duration": "Maximum call duration (optional)"}[choice]
+			if _, err := runner.input(title, "Go duration such as 30s or 20m.", field, validateOptionalDuration); err != nil {
+				return err
+			}
+		case "thinking":
+			selected, back, err := runner.selectOne("Thinking audio", "", []huh.Option[string]{huh.NewOption("None", "none"), huh.NewOption("Subtle", "subtle"), huh.NewOption("← Back", actionBack)}, true)
+			if err != nil {
+				return err
+			}
+			if !back {
+				data.ThinkingAudio = strings.TrimPrefix(selected, "none")
+			}
 		}
-		if back, err = runner.input("Minimum interruption words (optional)", "Non-negative integer; provider support varies.", &minimum, validateOptionalNonNegativeInteger); err != nil || back {
-			return err
-		}
-		data.MinimumWords = 0
-		if minimum != "" {
-			data.MinimumWords, _ = strconv.Atoi(minimum)
-		}
-		phrases := strings.Join(data.IgnorePhrases, ",")
-		if back, err = runner.input("Ignored interruption phrases (optional)", "Comma-separated phrases.", &phrases, func(string) error { return nil }); err != nil || back {
-			return err
-		}
-		data.IgnorePhrases = parsePhrases(phrases)
 	}
-	for _, field := range []struct {
-		title string
-		value *string
-	}{{"Inactivity nudge after (optional)", &data.NudgeAfter}, {"Inactivity end after (optional)", &data.EndAfter}, {"Maximum call duration (optional)", &data.MaxDuration}} {
-		if back, err = runner.input(field.title, "Go duration such as 30s or 20m.", field.value, validateOptionalDuration); err != nil || back {
-			return err
-		}
-	}
-	thinking, selectedBack, selectErr := runner.selectOne("Thinking audio", "", []huh.Option[string]{
-		huh.NewOption("None", "none"), huh.NewOption("Subtle", "subtle"),
-		huh.NewOption("← Back", actionBack),
-	}, true)
-	back, err = selectedBack, selectErr
-	if err != nil || back || thinking == actionBack {
-		return err
-	}
-	data.ThinkingAudio = ""
-	if thinking != "none" {
-		data.ThinkingAudio = thinking
-	}
-	return nil
 }
 
 func editFallbacks(runner *fieldRunner, data *scaffold.Data) error {
@@ -2487,26 +2338,8 @@ func editFallbacks(runner *fieldRunner, data *scaffold.Data) error {
 			}
 			continue
 		}
-		fallback := scaffold.ModelFallback{Binding: data.Reason}
-		profiles := make([]huh.Option[string], 0, len(data.AllAgents()))
-		for _, agent := range data.AllAgents() {
-			profiles = append(profiles, huh.NewOption(agent.ModelProfile(), agent.ModelProfile()))
-		}
-		profiles = append(profiles, huh.NewOption("← Back", actionBack))
-		profile, back, err := runner.selectOne("Model profile to protect", "", profiles, true)
-		if err != nil {
-			return err
-		}
-		if back {
-			continue
-		}
-		fallback.Profile = profile
-		for _, agent := range data.AllAgents() {
-			if agent.ModelProfile() == fallback.Profile {
-				fallback.Binding = agent.Reason
-			}
-		}
-		back, err = runner.input("Fallback profile name", "Lowercase snake_case.", &fallback.Name, func(value string) error {
+		fallback := scaffold.ModelFallback{Profile: data.AllAgents()[0].ModelProfile(), Binding: data.Reason}
+		back, err := runner.input("Fallback profile name", "Lowercase snake_case.", &fallback.Name, func(value string) error {
 			if err := validateIdentifier(value); err != nil {
 				return err
 			}
@@ -2525,10 +2358,10 @@ func editFallbacks(runner *fieldRunner, data *scaffold.Data) error {
 		if err != nil || back {
 			continue
 		}
-		if err := editBindingFor(runner, data.Target, targetcap.Reason, &fallback.Binding); err != nil {
+		data.Fallbacks = append(data.Fallbacks, fallback)
+		if err := editFallbackDetails(runner, data, fallback.Name); err != nil {
 			return err
 		}
-		data.Fallbacks = append(data.Fallbacks, fallback)
 	}
 }
 
@@ -2568,7 +2401,7 @@ func editFallbackDetails(runner *fieldRunner, data *scaffold.Data, name string) 
 				fallback.Profile = selected
 			}
 		case "binding":
-			if err := editBindingFor(runner, data.Target, targetcap.Reason, &fallback.Binding); err != nil {
+			if err := editBindingFor(runner, data.Target, targetcap.Reason, &data.Language, &fallback.Binding); err != nil {
 				return err
 			}
 		case "delete":
@@ -2584,54 +2417,98 @@ func editFallbackDetails(runner *fieldRunner, data *scaffold.Data, name string) 
 }
 
 func editCapacity(runner *fieldRunner, data *scaffold.Data) error {
-	capacity := data.EffectiveCapacity()
-	peak, max := strconv.Itoa(capacity.PeakSessions), strconv.Itoa(capacity.MaxSessions)
-	back, err := runner.input("Peak sessions", "Positive concurrent conversations at busy hour.", &peak, validatePositiveInteger)
-	if err != nil || back {
-		return err
-	}
-	peakValue, _ := strconv.Atoi(peak)
-	back, err = runner.input("Maximum sessions", "Positive hard admission limit; must be at least peak.", &max, func(value string) error {
-		if err := validatePositiveInteger(value); err != nil {
+	for {
+		capacity := data.EffectiveCapacity()
+		choice, _, err := runner.selectOne("Capacity", "Edit one field, then return here.", []huh.Option[string]{
+			huh.NewOption(fmt.Sprintf("Peak sessions  ·  %d", capacity.PeakSessions), "peak"),
+			huh.NewOption(fmt.Sprintf("Maximum sessions  ·  %d", capacity.MaxSessions), "max"),
+			huh.NewOption("Average session duration  ·  "+capacity.AvgSessionDuration, "duration"),
+			huh.NewOption("← Back", actionBack),
+		}, true)
+		if err != nil || choice == actionBack {
 			return err
 		}
-		number, _ := strconv.Atoi(value)
-		if number < peakValue {
-			return errors.New("maximum sessions must be at least peak sessions")
+		switch choice {
+		case "peak":
+			value := strconv.Itoa(capacity.PeakSessions)
+			back, err := runner.input("Peak sessions", "Positive concurrent conversations at busy hour.", &value, func(value string) error {
+				if err := validatePositiveInteger(value); err != nil {
+					return err
+				}
+				number, _ := strconv.Atoi(value)
+				if number > capacity.MaxSessions {
+					return errors.New("peak sessions must not exceed maximum sessions")
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			if !back {
+				capacity.PeakSessions, _ = strconv.Atoi(value)
+				data.Capacity = capacity
+			}
+		case "max":
+			value := strconv.Itoa(capacity.MaxSessions)
+			back, err := runner.input("Maximum sessions", "Positive hard admission limit; must be at least peak.", &value, func(value string) error {
+				if err := validatePositiveInteger(value); err != nil {
+					return err
+				}
+				number, _ := strconv.Atoi(value)
+				if number < capacity.PeakSessions {
+					return errors.New("maximum sessions must be at least peak sessions")
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			if !back {
+				capacity.MaxSessions, _ = strconv.Atoi(value)
+				data.Capacity = capacity
+			}
+		case "duration":
+			value := capacity.AvgSessionDuration
+			back, err := runner.input("Average session duration", "Positive Go duration such as 5m.", &value, validateDuration)
+			if err != nil {
+				return err
+			}
+			if !back {
+				capacity.AvgSessionDuration = value
+				data.Capacity = capacity
+			}
 		}
-		return nil
-	})
-	if err != nil || back {
-		return err
 	}
-	maxValue, _ := strconv.Atoi(max)
-	back, err = runner.input("Average session duration", "Positive Go duration such as 5m.", &capacity.AvgSessionDuration, validateDuration)
-	if err != nil || back {
-		return err
-	}
-	capacity.PeakSessions, capacity.MaxSessions = peakValue, maxValue
-	data.Capacity = capacity
-	return nil
 }
 
 func editAdvancedTarget(runner *fieldRunner, data *scaffold.Data) error {
-	for _, field := range []struct {
-		title, help string
-		value       *string
-		validate    func(string) error
-	}{
-		{"Target version", "Driver/framework version pin.", &data.TargetVersion, validateBasic},
-		{"SDK language (optional)", "For example python on LiveKit.", &data.SDKLanguage, validateBasic},
-		{"Region (optional)", "Provider vocabulary; forwarded as declared.", &data.Region, validateBasic},
-		{"Edition (optional)", "Provider vocabulary; forwarded as declared.", &data.Edition, validateBasic},
-		{"Pins (optional JSON object)", "Independently versioned target packages.", &data.Pins, validateParams},
-	} {
-		back, err := runner.input(field.title, field.help, field.value, field.validate)
-		if err != nil || back {
+	for {
+		fields := []struct {
+			title, help string
+			value       *string
+			validate    func(string) error
+		}{
+			{"Target version", "Driver/framework version pin.", &data.TargetVersion, validateBasic},
+			{"SDK language (optional)", "For example python on LiveKit.", &data.SDKLanguage, validateBasic},
+			{"Region (optional)", "Provider vocabulary; forwarded as declared.", &data.Region, validateBasic},
+			{"Edition (optional)", "Provider vocabulary; forwarded as declared.", &data.Edition, validateBasic},
+			{"Pins (optional JSON object)", "Independently versioned target packages.", &data.Pins, validateParams},
+		}
+		options := make([]huh.Option[string], 0, len(fields)+1)
+		for i, field := range fields {
+			options = append(options, huh.NewOption(field.title+"  ·  "+firstNonempty(*field.value, "not set"), strconv.Itoa(i)))
+		}
+		options = append(options, huh.NewOption("← Back", actionBack))
+		choice, _, err := runner.selectOne("Advanced target settings", "Edit one field, then return here.", options, true)
+		if err != nil || choice == actionBack {
+			return err
+		}
+		index, _ := strconv.Atoi(choice)
+		field := fields[index]
+		if _, err := runner.input(field.title, field.help, field.value, field.validate); err != nil {
 			return err
 		}
 	}
-	return nil
 }
 
 func parsePhrases(value string) []string {
@@ -3136,7 +3013,7 @@ func (r *fieldRunner) run(field huh.Field, backable bool) (bool, error) {
 	}
 	var err error
 	if r.accessible {
-		err = form.WithInput(r.in).WithOutput(r.out).Run()
+		err = r.runAccessible(form)
 	} else {
 		done := make(chan error, 1)
 		r.requests <- formRequest{form: form, done: done}
@@ -3152,6 +3029,19 @@ func (r *fieldRunner) run(field huh.Field, backable bool) (bool, error) {
 		return false, fmt.Errorf("menu: %w", err)
 	}
 	return false, nil
+}
+
+func (r *fieldRunner) runAccessible(form *huh.Form) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if r.tracked != nil && r.tracked.eof {
+				err = huh.ErrUserAborted
+				return
+			}
+			panic(recovered)
+		}
+	}()
+	return form.WithInput(r.in).WithOutput(r.out).Run()
 }
 
 func (r *fieldRunner) selectOne(title, description string, options []huh.Option[string], backable bool) (string, bool, error) {

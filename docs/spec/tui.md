@@ -64,7 +64,7 @@ T7|x|retrofit the existing V18–V25 tests to cite this spec and rename the unnu
 T8|x|audit every static/dynamic menu default; focus first actionable row and keep Back last/non-default|C11,V35
 T9|x|remove pass-through menus; Models exposes Listen/Reason/Speak directly and every other section passes the same audit|C10,C11,V34,V36
 T10|x|make Back visible on every input/text/select/confirm/notice screen in interactive + accessible modes; keep Esc/`:back` shortcuts|C5,C12,V37
-T11|.|replace every multi-field create/edit chain with current-value overview rows; binding Provider/conditional Distributor/Model/Voice/Language/Additional config edit one field and return|C13,V20,V24,V38
+T11|x|replace every multi-field create/edit chain with current-value overview rows; binding Provider/conditional Distributor/Model/Voice/Language/Additional config edit one field and return|C13,V20,V24,V38
 T12|.|BLOCKED on catalogue breadth follow-up to [driver-livekit.md](driver-livekit.md) T11 + [driver-pipecat.md](driver-pipecat.md) T9: complete the PR #9/#10 doc-verified entries in `catalog_livekit.go` + `catalog_pipecat.go`; TUI changes none|C6,I.catalog,V31
 
 Dependency order: T1 → T2 → T3; T4 after T1; T5 after its compiler/driver cross-spec dependency; T6 after T2; T7 closed the first build. T8 → T9 → T10 → T11. T12 stays blocked on catalogue work and does not permit TUI-local provider lists.

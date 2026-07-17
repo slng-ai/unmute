@@ -228,6 +228,66 @@ func TestV37EveryScreenShowsBackAffordance(t *testing.T) { // docs/spec/tui.md V
 	}
 }
 
+func TestV38MultiFieldFlowsUseOverviewMenus(t *testing.T) { // docs/spec/tui.md V38
+	data := scaffold.Data{}
+	var output bytes.Buffer
+	err := editVariables(newRunner(strings.NewReader("1\ncustomer_id\n"), &output, true), &data)
+	if !errors.Is(err, huh.ErrUserAborted) {
+		t.Fatalf("variable overview error = %v, want ErrUserAborted", err)
+	}
+	for _, field := range []string{"Type  ·", "Default  ·", "Source  ·", "← Back"} {
+		if !strings.Contains(output.String(), field) {
+			t.Errorf("variable overview missing %q:\n%s", field, output.String())
+		}
+	}
+}
+
+func TestV38BindingOverviewShowsAllFieldsAndReturns(t *testing.T) { // docs/spec/tui.md V38
+	data := scaffold.Data{}
+	data.SetTarget("pipecat")
+	var output bytes.Buffer
+	err := editBinding(newRunner(strings.NewReader("1\n1\n"), &output, true), &data, targetcap.Speak)
+	if !errors.Is(err, huh.ErrUserAborted) {
+		t.Fatalf("binding overview error = %v, want ErrUserAborted", err)
+	}
+	for _, field := range []string{"Provider  ·", "Distributor  ·", "Model  ·", "Voice  ·", "Language  ·", "Additional config  ·", "← Back"} {
+		if !strings.Contains(output.String(), field) {
+			t.Errorf("binding overview missing %q:\n%s", field, output.String())
+		}
+	}
+	if strings.Count(output.String(), "Speak \n") < 2 {
+		t.Fatalf("provider edit did not return to binding overview:\n%s", output.String())
+	}
+}
+
+func TestV24DistributorRowAppearsOnlyForMultipleRoutes(t *testing.T) { // docs/spec/tui.md V24
+	catalog := targetcap.DefaultCatalog()
+	framework, role := targetcap.Pipecat, targetcap.Speak
+	for _, wantMultiple := range []bool{false, true} {
+		var brand string
+		for _, candidate := range catalog.Brands(framework, role) {
+			if (len(catalog.Distributors(framework, role, candidate)) > 1) == wantMultiple {
+				brand = candidate
+				break
+			}
+		}
+		if brand == "" {
+			t.Fatalf("catalogue has no speak brand with multiple=%v", wantMultiple)
+		}
+		routes := catalog.Distributors(framework, role, brand)
+		binding := scaffold.Binding{Provider: routes[0], Model: brand + "/model"}
+		language := scaffold.DefaultLanguage
+		var output bytes.Buffer
+		err := editBindingFor(newRunner(strings.NewReader(""), &output, true), string(framework), role, &language, &binding)
+		if !errors.Is(err, huh.ErrUserAborted) {
+			t.Fatalf("binding overview error = %v, want ErrUserAborted", err)
+		}
+		if got := strings.Contains(output.String(), "Distributor  ·"); got != wantMultiple {
+			t.Errorf("brand %q distributor row = %v, want %v:\n%s", brand, got, wantMultiple, output.String())
+		}
+	}
+}
+
 func TestRunCompileToggle(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// 1=create, name, 6=toggle compile on, 7=Create agent, confirm.
@@ -258,8 +318,8 @@ func TestRunSelectTarget(t *testing.T) {
 
 func TestRunEditModels(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// Create, name, Models, Speak, cartesia, model, voice, params, Back, Create, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n2\n3\n1\n1\nsonic-3\nvoice-id\n{\"speed\":1}\n5\n7\n\n"), &bytes.Buffer{}, true)
+	// Create, name, Models, Speak, edit model/voice/config rows, Back, Create, confirm.
+	got, err := Run(strings.NewReader("1\nagent\n2\n3\n1\n1\n2\n1\n3\nsonic-3\n4\nvoice-id\n6\n{\"speed\":1}\n7\n5\n7\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,12 +342,13 @@ func TestRunEditLanguage(t *testing.T) {
 func TestRunAddVariableAndTool(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
-		"3\n3\n1\ncustomer_id\n1\n\"guest\"\n2\n3\n" +
-		"4\n1\n1\nlookup_customer\nLook up the caller\n1\nLOOKUP_URL\n{\"type\":\"object\"}\n\n2\n3\n" +
+		"3\n3\n1\ncustomer_id\n3\n2\n5\n3\n" +
+		"4\n1\n1\nlookup_customer\n1\nLook up the caller\n3\nLOOKUP_URL\n8\n3\n" +
 		"7\n\n"
-	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
+	var output bytes.Buffer
+	got, err := Run(strings.NewReader(input), &output, true)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v\n%s", err, output.String())
 	}
 	if len(got.Agent.Data.Variables) != 1 || got.Agent.Data.Variables[0].Source != "call_start" {
 		t.Fatalf("variables = %#v", got.Agent.Data.Variables)
@@ -312,7 +373,7 @@ func TestV18VariablesMenuShowsSavedItems(t *testing.T) { // docs/spec/tui.md V18
 func TestV18ToolsMenuUsesNeutralNameAndShowsExecution(t *testing.T) { // docs/spec/tui.md V18
 	data := scaffold.Data{Target: "pipecat"}
 	var output bytes.Buffer
-	err := editTools(newRunner(strings.NewReader("1\nlookup_customer\nLook up the caller.\n"), &output, true), &data)
+	err := editTools(newRunner(strings.NewReader("1\nlookup_customer\n2\n"), &output, true), &data)
 	if !errors.Is(err, huh.ErrUserAborted) {
 		t.Fatalf("editTools() error = %v, want ErrUserAborted", err)
 	}
@@ -351,7 +412,7 @@ func TestV19HandoffShowsExistingVariablesAsChoices(t *testing.T) { // docs/spec/
 	data.SetTarget("pipecat")
 	data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Handle billing.", Reason: data.Reason, Speak: data.Speak}}
 	var output bytes.Buffer
-	err := editHandoffs(newRunner(strings.NewReader("1\n1\n1\nto_billing\nCaller asks about billing.\n"), &output, true), &data)
+	err := editHandoffs(newRunner(strings.NewReader("1\nto_billing\n4\n"), &output, true), &data)
 	if !errors.Is(err, huh.ErrUserAborted) {
 		t.Fatalf("editHandoffs() error = %v, want ErrUserAborted", err)
 	}
@@ -366,7 +427,7 @@ func TestV19TaskShowsExistingToolsAsChoices(t *testing.T) { // docs/spec/tui.md 
 	data := scaffold.Data{Tools: []scaffold.Tool{{Name: "lookup_customer"}}}
 	data.SetTarget("pipecat")
 	var output bytes.Buffer
-	err := editTasks(newRunner(strings.NewReader("1\ncollect\nCollect customer data.\n"), &output, true), &data)
+	err := editTasks(newRunner(strings.NewReader("1\ncollect\n2\n"), &output, true), &data)
 	if !errors.Is(err, huh.ErrUserAborted) {
 		t.Fatalf("editTasks() error = %v, want ErrUserAborted", err)
 	}
@@ -379,7 +440,7 @@ func TestV22TaskResultExplainsPrefilledShape(t *testing.T) { // docs/spec/tui.md
 	data := scaffold.Data{}
 	data.SetTarget("pipecat")
 	var output bytes.Buffer
-	err := editTasks(newRunner(strings.NewReader("1\ncollect\nCollect customer data.\n1\n"), &output, true), &data)
+	err := editTasks(newRunner(strings.NewReader("1\ncollect\n4\n"), &output, true), &data)
 	if !errors.Is(err, huh.ErrUserAborted) {
 		t.Fatalf("editTasks() error = %v, want ErrUserAborted", err)
 	}
@@ -394,7 +455,7 @@ func TestV19TaskAssignmentPicksSavedVariableAndResultField(t *testing.T) { // do
 	data := scaffold.Data{Variables: []scaffold.Variable{{Name: "verified", Type: "boolean"}, {Name: "tier", Type: "string"}}}
 	task := scaffold.Task{Result: `{"verified":"boolean","tier":{"enum":["free","pro"]}}`}
 	var output bytes.Buffer
-	back, err := editTaskAssignments(newRunner(strings.NewReader("1\n3\n2\n"), &output, true), &data, &task)
+	back, err := editTaskAssignments(newRunner(strings.NewReader("1\n3\n1\n2\n2\n"), &output, true), &data, &task)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,15 +508,13 @@ func TestRunHandoffsRequireTwoAgents(t *testing.T) {
 func TestRunAddAgentAndHandoff(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
-		"5\n1\n2\nbilling\nYou handle billing questions.\n" +
-		"1\ngpt-4.1-mini\n\n" +
-		"2\nslng/deepgram/aura:2-en\naura-2-thalia-en\n\n" +
-		"5\n" +
-		"5\n2\n1\n1\n1\nto_billing\nCaller asks about billing.\n1\n1\n3\n" +
+		"5\n1\n2\nbilling\n1\nYou handle billing questions.\n7\n5\n" +
+		"5\n2\n1\nto_billing\n3\nCaller asks about billing.\n7\n3\n" +
 		"7\n\n"
-	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
+	var output bytes.Buffer
+	got, err := Run(strings.NewReader(input), &output, true)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v\n%s", err, output.String())
 	}
 	if len(got.Agent.Data.Agents) != 1 || got.Agent.Data.Agents[0].Name != "billing" {
 		t.Fatalf("agents = %#v", got.Agent.Data.Agents)
@@ -479,8 +538,8 @@ func TestRunTaskGroupsRequireTasks(t *testing.T) {
 func TestRunAddTaskAndOrderedGroup(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
-		"5\n3\n1\ncollect\nCollect the caller tier.\n1\n{\"tier\":{\"enum\":[\"free\",\"pro\"]}}\n1\n1\n1\nClassify the caller.\n3\n" +
-		"5\n4\n1\ntriage\n1\n2\n1\n1\n1\nRun triage.\n3\n" +
+		"5\n3\n1\ncollect\n7\nClassify the caller.\n10\n3\n" +
+		"5\n4\n1\ntriage\n6\nRun triage.\n8\n3\n" +
 		"7\n\n"
 	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
 	if err != nil {
@@ -508,12 +567,13 @@ func TestRunHumanTransfersRequireTelephony(t *testing.T) {
 func TestRunAddTelephonyAndHumanTransfer(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
-		"4\n2\n2\n1\n6\n9\ndaily-sip\n\n" +
-		"4\n3\n1\nto_human\n1\nCaller requests a person.\nsupport_line\n+14155550123\n1\n3\n" +
+		"4\n2\n1\n2\n5\n" +
+		"4\n3\n1\nto_human\n2\nCaller requests a person.\n3\nsupport_line\n4\n+14155550123\n8\n3\n" +
 		"7\n\n"
-	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
+	var output bytes.Buffer
+	got, err := Run(strings.NewReader(input), &output, true)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v\n%s", err, output.String())
 	}
 	if !hasTelephony(&got.Agent.Data) || len(got.Agent.Data.HumanTransfers) != 1 {
 		t.Fatalf("telephony result = %#v", got.Agent.Data)
@@ -525,7 +585,7 @@ func TestRunAddTelephonyAndHumanTransfer(t *testing.T) {
 
 func TestRunCustomizeCapacity(t *testing.T) {
 	t.Chdir(t.TempDir())
-	input := "1\nagent\n3\n4\n3\n5\n10\n4m\n5\n7\n\n"
+	input := "1\nagent\n3\n4\n3\n2\n10\n1\n5\n3\n4m\n4\n5\n7\n\n"
 	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -621,8 +681,9 @@ func TestV24ModelsLabelDeduplicatesProviderBrands(t *testing.T) { // docs/spec/t
 
 func TestV24ProviderThenDistributorFlow(t *testing.T) { // docs/spec/tui.md V24
 	binding := scaffold.Binding{}
-	input := "1\n2\nslng/cartesia/sonic-3\nvoice-id\n\n"
-	if err := editBindingFor(newRunner(strings.NewReader(input), &bytes.Buffer{}, true), "pipecat", targetcap.Speak, &binding); err != nil {
+	input := "1\n1\n2\n2\n3\nslng/cartesia/sonic-3\n4\nvoice-id\n7\n"
+	language := scaffold.DefaultLanguage
+	if err := editBindingFor(newRunner(strings.NewReader(input), &bytes.Buffer{}, true), "pipecat", targetcap.Speak, &language, &binding); err != nil {
 		t.Fatal(err)
 	}
 	want := scaffold.Binding{Provider: "slng", Model: "slng/cartesia/sonic-3", Voice: "voice-id"}
