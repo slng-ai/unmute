@@ -48,7 +48,7 @@ id|status|desc|cites
 T1|x|one persistent `tea.Program` shell + alt-screen; Home; wordmark as Home content; bare-root TTY dispatch + direct-Create init path; add the single Bubble Tea exception to `CLAUDE.md`|C1,C4,I.root,I.init,I.console,V26,V27,V30
 T2|x|immediate-child package discovery + manual path; `spec.Load` adapter into editor state + loss report; Maintain menu; validated no-op Save or candidate render/diff/explicit rewrite confirmation|C2,C3,C9,I.open,I.save,V32
 T3|x|Maintain Validate / Compile actions reuse the in-process Cobra paths; combined stdout+stderr scrollable notice; return to menu|I.actions,V33
-T4|.|catalogue-driven binding editor: all `(framework, role)` entries/brands, provider grouping, distributor route, model/voice arity + language hints; extend the coverage test to iterate `DefaultCatalog()`|C6,C7,I.catalog,V24,V31
+T4|x|catalogue-driven binding editor: all `(framework, role)` entries/brands, provider grouping, distributor route, model/voice arity + language hints; extend the coverage test to iterate `DefaultCatalog()`|C6,C7,I.catalog,V24,V31
 T5|.|single webhook endpoint input auto-detects literal http(s) URL vs env name; gate literal URLs through `FieldToolWebhookURL`; land only after compiler.md + driver-spec `url` plumbing|C8,V28
 T6|.|regroup the ~17-item agent menu into identity / models / behavior / integrations / lifecycle; every gated notice uses target vocabulary + Back|G,V29
 T7|.|retrofit the existing V18–V25 tests to cite this spec and rename the unnumbered Back test to `TestV20BackPreservesPriorEdits`; keep all create-flow repair behavior green under the persistent shell|V18,V19,V20,V21,V22,V23,V24,V25

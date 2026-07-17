@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -421,28 +422,50 @@ func TestRunBackPreservesPriorEdits(t *testing.T) {
 	}
 }
 
-func TestProviderOptionsMirrorCatalog(t *testing.T) {
-	for _, tc := range []struct {
+func TestV31ProviderOptionsMirrorCatalog(t *testing.T) {
+	type pair struct {
 		framework targetcap.Provider
 		role      targetcap.Role
-	}{
-		{targetcap.Pipecat, targetcap.Listen},
-		{targetcap.Pipecat, targetcap.Reason},
-		{targetcap.Pipecat, targetcap.Speak},
-		{targetcap.LiveKit, targetcap.Listen},
-		{targetcap.LiveKit, targetcap.Reason},
-		{targetcap.LiveKit, targetcap.Speak},
-		{targetcap.ElevenLabs, targetcap.Speak},
-	} {
-		options := providerOptions(tc.framework, tc.role)
-		brands := targetcap.DefaultCatalog().Brands(tc.framework, tc.role)
-		if len(options) != len(brands) {
-			t.Fatalf("%s/%s options = %d, brands = %d", tc.framework, tc.role, len(options), len(brands))
-		}
-		for i := range brands {
-			if options[i].Value != brands[i] {
-				t.Errorf("%s/%s option %d = %q, want %q", tc.framework, tc.role, i, options[i].Value, brands[i])
+	}
+	catalog := targetcap.DefaultCatalog()
+	expected := map[pair][]string{}
+	for _, entry := range catalog.Entries() {
+		key := pair{entry.Framework, entry.Role}
+		if entry.Wildcard() {
+			if _, ok := expected[key]; !ok {
+				expected[key] = nil
 			}
+			continue
+		}
+		brands := entry.Distributes
+		if len(brands) == 0 {
+			brands = []string{entry.Vendor}
+		}
+		expected[key] = append(expected[key], brands...)
+	}
+	for key, brands := range expected {
+		slices.Sort(brands)
+		brands = slices.Compact(brands)
+		options := providerOptions(key.framework, key.role)
+		got := make([]string, len(options))
+		for i := range options {
+			got[i] = options[i].Value
+		}
+		if !slices.Equal(got, brands) {
+			t.Errorf("%s/%s options = %v, catalogue brands = %v", key.framework, key.role, got, brands)
+		}
+	}
+}
+
+func TestV31CatalogueHintUsesEntryArityAndLanguageSlot(t *testing.T) {
+	entry, ok := targetcap.DefaultCatalog().Lookup(targetcap.Pipecat, targetcap.Listen, "deepgram")
+	if !ok {
+		t.Fatal("missing pipecat/listen/deepgram catalogue entry")
+	}
+	hint := catalogueEntryHint(entry)
+	for _, want := range []string{"model → model (required)", "voice unavailable", "language → language (optional)"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("catalogue hint %q omits %q", hint, want)
 		}
 	}
 }

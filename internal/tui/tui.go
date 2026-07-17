@@ -545,6 +545,7 @@ func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, bin
 	}
 
 	entry, _ := catalog.Lookup(framework, role, binding.Provider)
+	entryHint := catalogueEntryHint(entry)
 	if !integratedListen {
 		description := "Forwarded model id."
 		validate := validateBasic
@@ -552,7 +553,7 @@ func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, bin
 			description = "Required by this provider integration; forwarded without an allowlist."
 			validate = validateRequiredBasic
 		}
-		back, err := runner.input("Model", description, &binding.Model, validate)
+		back, err := runner.input("Model", description+" "+entryHint, &binding.Model, validate)
 		if err != nil || back {
 			return err
 		}
@@ -565,17 +566,41 @@ func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, bin
 			description = "Required by this provider integration; enter a voice name or id."
 			validate = validateRequiredBasic
 		}
-		back, err := runner.input("Voice", description, &binding.Voice, validate)
+		back, err := runner.input("Voice", description+" "+entryHint, &binding.Voice, validate)
 		if err != nil || back {
 			return err
 		}
 	}
 
-	back, err := runner.input("Params (optional JSON object)", "Provider-specific request knobs, for example {\"temperature\":0.2}.", &binding.Params, validateParams)
+	back, err := runner.input("Params (optional JSON object)", "Provider-specific request knobs, for example {\"temperature\":0.2}. "+entryHint, &binding.Params, validateParams)
 	if err != nil || back {
 		return err
 	}
 	return nil
+}
+
+func catalogueEntryHint(entry targetcap.Entry) string {
+	required := func(value bool) string {
+		if value {
+			return "required"
+		}
+		return "optional"
+	}
+	if entry.Call == nil {
+		return fmt.Sprintf("Catalogue arity: model %s; voice %s; language target-managed.",
+			required(entry.ModelRequired()), required(entry.VoiceRequired()))
+	}
+	slot := func(name string, field targetcap.FieldSpec) string {
+		if field.Arg == "" {
+			return name + " unavailable"
+		}
+		return fmt.Sprintf("%s → %s (%s)", name, field.Arg, required(field.Required))
+	}
+	return "Catalogue arity: " + strings.Join([]string{
+		slot("model", entry.Call.Model),
+		slot("voice", entry.Call.Voice),
+		slot("language", entry.Call.Language),
+	}, "; ") + "."
 }
 
 func bindingForRole(data *scaffold.Data, role targetcap.Role) *scaffold.Binding {
