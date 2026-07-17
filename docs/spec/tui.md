@@ -52,6 +52,7 @@ Make the TUI the Unmute console: bare `unmute` on a TTY opens **Create a new age
 - V37: every screen has a visible Back affordance. Select/confirm screens show a Back option or footer action; input/text screens show Back in the footer. Esc and `:back` remain shortcuts, never the only route (`TestV37EveryScreenShowsBackAffordance`).
 - V38: every flow with multiple editable fields opens an overview menu showing all field names and current values, edits one chosen field, then returns to that menu. Listen/Reason/Speak binding overviews show Provider, conditional Distributor, catalogue-applicable Model/Voice, Language, Additional config, and Back; no create or edit flow is a blind field sequence (`TestV38MultiFieldFlowsUseOverviewMenus`, `TestV38BindingOverviewShowsAllFieldsAndReturns`).
 - V39: every task-result assignment can be removed from its field editor. Removal returns to the assignment overview immediately; **Done** persists the remaining map, and removing the last assignment clears `task.assign` (`TestV39TaskResultAssignmentCanBeRemoved`).
+- V40: **Local Python** follows `target.FieldToolLocal`: on a supported target it is selectable, declares `handler: tools/<name>.py`, clears webhook state, and says the empty handler file is created on Save; Create and changed Maintain Save create that file when absent and preserve existing handler bytes. On a gated target the option remains visible, and its notice gives the capability's exact note, directs the user to **Identity → Target**, and offers Back (`TestV29UnavailableChoiceNamesGateAndOffersBack`, `TestV40LocalPythonSelectionScaffoldsHandler`, `TestV40MaintainPreservesLocalHandler`).
 
 ## §T tasks
 id|status|desc|cites
@@ -68,8 +69,9 @@ T10|x|make Back visible on every input/text/select/confirm/notice screen in inte
 T11|x|replace every multi-field create/edit chain with current-value overview rows; binding Provider/conditional Distributor/Model/Voice/Language/Additional config edit one field and return|C13,V20,V24,V38
 T12|.|BLOCKED on catalogue breadth follow-up to [driver-livekit.md](driver-livekit.md) T11 + [driver-pipecat.md](driver-pipecat.md) T9: complete the PR #9/#10 doc-verified entries in `catalog_livekit.go` + `catalog_pipecat.go`; TUI changes none|C6,I.catalog,V31
 T13|x|add an explicit Remove assignment action to each task-result assignment field editor; return to the overview and persist the reduced or empty assignment map on Done|C13,V39
+T14|x|make Local Python capability-driven; declare its conventional handler path, scaffold an empty handler on confirmed writes, preserve loaded handler bytes, and replace the blanket denial with target-specific guidance|C3,I.save,V29,V40
 
-Dependency order: T1 → T2 → T3; T4 after T1; T5 after its compiler/driver cross-spec dependency; T6 after T2; T7 closed the first build. T8 → T9 → T10 → T11 → T13. T12 stays blocked on catalogue work and does not permit TUI-local provider lists.
+Dependency order: T1 → T2 → T3; T4 after T1; T5 after its compiler/driver cross-spec dependency; T6 after T2; T7 closed the first build. T8 → T9 → T10 → T11 → T13 → T14. T12 stays blocked on catalogue work and does not permit TUI-local provider lists.
 
 ## §B bugs
 id|date|cause|fix
@@ -80,3 +82,4 @@ B4|2026-07-16|catalogue vendor choices conflated provider brands with distributo
 B5|2026-07-16|saved resources had no delete/cascade cleanup, while Add gates hid already-invalid saved resources and trapped repair (commit c77787e)|V25
 B6|2026-07-16|the SLNG wordmark was printed before the TUI program; once alt-screen landed it remained on the hidden normal buffer instead of the console|V26
 B7|2026-07-17|T11's task-result assignment overview exposed field remapping plus Done/Back but no in-place removal action, trapping users after assignment selection|V39
+B8|2026-07-17|the tool execution picker unconditionally marked Local Python unavailable because the console had no handler-file scaffold path, even when `FieldToolLocal` was core on the selected target|V40

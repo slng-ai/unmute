@@ -97,11 +97,14 @@ type Tool struct {
 	Description string
 	Execution   string
 	Handler     string
-	URLEnv      string
-	Input       string // JSON Schema object
-	Output      string // optional JSON Schema object
-	AttachTo    []string
-	AttachTasks []string
+	// HandlerSource is package content carried through maintenance. It is not
+	// rendered into the tool declaration.
+	HandlerSource string
+	URLEnv        string
+	Input         string // JSON Schema object
+	Output        string // optional JSON Schema object
+	AttachTo      []string
+	AttachTasks   []string
 }
 
 func (t Tool) ExecutionKind() string {
@@ -521,6 +524,28 @@ func Write(dir string, d Data) ([]string, error) {
 			return nil, fmt.Errorf("scaffold: %w", err)
 		}
 		created = append(created, out)
+		if tool.ExecutionKind() == "local" {
+			handler := tool.Handler
+			if handler == "" {
+				handler = filepath.Join("tools", tool.Name+".py")
+			}
+			handlerOut, err := packagePath(dir, handler)
+			if err != nil {
+				return nil, fmt.Errorf("scaffold: tool %q handler: %w", tool.Name, err)
+			}
+			if _, err := os.Stat(handlerOut); err == nil {
+				return nil, fmt.Errorf("scaffold: tool %q handler %q conflicts with another package file", tool.Name, handler)
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("scaffold: tool %q handler: %w", tool.Name, err)
+			}
+			if err := os.MkdirAll(filepath.Dir(handlerOut), 0o755); err != nil {
+				return nil, fmt.Errorf("scaffold: %w", err)
+			}
+			if err := os.WriteFile(handlerOut, []byte(tool.HandlerSource), 0o644); err != nil {
+				return nil, fmt.Errorf("scaffold: %w", err)
+			}
+			created = append(created, handlerOut)
+		}
 	}
 	agents := append([]Agent(nil), d.Agents...)
 	sort.Slice(agents, func(i, j int) bool { return agents[i].Name < agents[j].Name })
@@ -547,6 +572,17 @@ func Write(dir string, d Data) ([]string, error) {
 		created = append(created, out)
 	}
 	return created, nil
+}
+
+func packagePath(root, relative string) (string, error) {
+	if filepath.IsAbs(relative) {
+		return "", errors.New("path must be relative")
+	}
+	clean := filepath.Clean(relative)
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", errors.New("path escapes the package directory")
+	}
+	return filepath.Join(root, clean), nil
 }
 
 func parseTemplate(name string, raw []byte) (*template.Template, error) {

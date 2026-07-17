@@ -854,20 +854,32 @@ func toolLabel(data *scaffold.Data, tool scaffold.Tool) string {
 
 func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool) (bool, error) {
 	for {
-		localNote := localToolNote(target)
-		selected, back, err := runner.selectOne("Tool execution", "Choose how this tool runs. Unsupported choices include the exact driver limitation.", []huh.Option[string]{
+		capability := targetcap.Default().Capability(targetcap.FieldToolLocal, targetcap.Provider(target))
+		handler := filepath.ToSlash(filepath.Join("tools", tool.Name+".py"))
+		localLabel := "Local Python  ·  creates " + handler + " when saved"
+		if capability.Tag == targetcap.Gated {
+			localLabel = "Local Python  ·  unavailable on " + targetLabel(target)
+		}
+		selected, back, err := runner.selectOne("Tool execution", "Choose where this tool runs. Local Python creates an empty handler file when supported.", []huh.Option[string]{
 			huh.NewOption("Webhook  ·  HTTP endpoint from an environment variable", "webhook"),
-			huh.NewOption("Local Python  ·  unavailable: "+localNote, "local"),
+			huh.NewOption(localLabel, "local"),
 			huh.NewOption("← Back", actionBack),
 		}, true)
 		if err != nil || back || selected == actionBack {
 			return back || selected == actionBack, err
 		}
 		if selected == "local" {
-			if err := showNotice(runner, "Local Python unavailable", fmt.Sprintf("%s: %s.", targetLabel(target), localNote)); err != nil {
-				return false, err
+			if capability.Tag == targetcap.Gated {
+				message := fmt.Sprintf("%s: %s. Change Target under Identity → Target to use Local Python.", targetLabel(target), capability.Note)
+				if err := showNotice(runner, "Local Python unavailable", message); err != nil {
+					return false, err
+				}
+				continue
 			}
-			continue
+			tool.Execution = "local"
+			tool.Handler = handler
+			tool.URLEnv = ""
+			return false, nil
 		}
 		tool.Execution = selected
 		tool.Handler = ""
@@ -875,20 +887,16 @@ func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool
 	}
 }
 
-func localToolNote(target string) string {
-	capability := targetcap.Default().Capability(targetcap.FieldToolLocal, targetcap.Provider(target))
-	if capability.Tag == targetcap.Gated {
-		return capability.Note
-	}
-	return "tools.execution.local requires a handler source file; this console edits declarations but does not author handler code"
-}
-
 func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) error {
 	for {
+		executionField := huh.NewOption("Webhook URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url")
+		if tool.ExecutionKind() == "local" {
+			executionField = huh.NewOption("Python handler  ·  "+firstNonempty(tool.Handler, "none"), "handler")
+		}
 		choice, _, err := runner.selectOne(tool.Name, "", []huh.Option[string]{
 			huh.NewOption("Description  ·  "+oneLine(tool.Description), "description"),
 			huh.NewOption("Execution  ·  "+tool.ExecutionKind(), "execution"),
-			huh.NewOption("Webhook URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url"),
+			executionField,
 			huh.NewOption("Input schema  ·  "+oneLine(tool.Input), "input"),
 			huh.NewOption("Output schema  ·  "+firstNonempty(oneLine(tool.Output), "unconstrained"), "output"),
 			huh.NewOption("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
@@ -908,13 +916,11 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 				return err
 			}
 		case "url":
-			if tool.ExecutionKind() != "webhook" {
-				if err := showNotice(runner, "No webhook URL", "Only webhook tools use a URL environment variable."); err != nil {
-					return err
-				}
-				continue
-			}
 			if _, err := runner.input("Webhook URL env", "Environment variable containing the URL; never the URL itself.", &tool.URLEnv, validateEnvName); err != nil {
+				return err
+			}
+		case "handler":
+			if err := showNotice(runner, "Python handler", tool.Handler+" is created empty when you save. Add the implementation in that file."); err != nil {
 				return err
 			}
 		case "input":

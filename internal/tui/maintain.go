@@ -170,9 +170,13 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 
 	for _, name := range slices.Sorted(maps.Keys(pkg.Tools)) {
 		tool := pkg.Tools[name]
+		handlerPath := tool.Handler
+		if tool.Execution == "local" && handlerPath == "" {
+			handlerPath = filepath.Join("tools", name+".py")
+		}
 		value := scaffold.Tool{
 			Name: name, Description: tool.Description, Execution: tool.Execution,
-			Handler: tool.Handler, URLEnv: tool.URLEnv,
+			Handler: tool.Handler, HandlerSource: pkg.Handlers[handlerPath], URLEnv: tool.URLEnv,
 			Input: jsonText(tool.Input), Output: jsonText(tool.Output),
 		}
 		for agentName, definition := range pkg.Agent.Agents {
@@ -340,8 +344,11 @@ func roundTripLosses(original *packagespec.Package, data scaffold.Data) ([]strin
 			losses = append(losses, path+": content")
 		}
 	}
-	for path := range original.Handlers {
-		losses = append(losses, path+": handler content")
+	for path, content := range original.Handlers {
+		renderedContent, ok := rendered.Handlers[path]
+		if !ok || renderedContent != content {
+			losses = append(losses, path+": handler content")
+		}
 	}
 	slices.Sort(losses)
 	return slices.Compact(losses), nil

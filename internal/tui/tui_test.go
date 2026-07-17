@@ -704,8 +704,72 @@ func TestV29UnavailableChoiceNamesGateAndOffersBack(t *testing.T) {
 		t.Fatal("unavailable choice did not permit Back")
 	}
 	want := targetcap.Default().Capability(targetcap.FieldToolLocal, targetcap.Pipecat).Note
-	if !strings.Contains(output.String(), want) || !strings.Contains(output.String(), "← Back") {
-		t.Fatalf("unavailable choice omitted exact gate or Back:\n%s", output.String())
+	if !strings.Contains(output.String(), want) || !strings.Contains(output.String(), "Identity → Target") || !strings.Contains(output.String(), "← Back") {
+		t.Fatalf("unavailable choice omitted exact gate, target guidance, or Back:\n%s", output.String())
+	}
+}
+
+func TestV40LocalPythonSelectionScaffoldsHandler(t *testing.T) { // docs/spec/tui.md V40
+	tool := scaffold.Tool{Name: "lookup_customer", Execution: "webhook", URLEnv: "LOOKUP_URL", Input: `{"type":"object"}`}
+	var output bytes.Buffer
+	back, err := chooseToolExecution(newRunner(strings.NewReader("2\n"), &output, true), string(targetcap.LiveKit), &tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back {
+		t.Fatal("Local Python selection unexpectedly went back")
+	}
+	if tool.Execution != "local" || tool.Handler != "tools/lookup_customer.py" || tool.URLEnv != "" {
+		t.Fatalf("local tool = %#v", tool)
+	}
+	if !strings.Contains(output.String(), "creates tools/lookup_customer.py when saved") {
+		t.Fatalf("Local Python option omitted file guidance:\n%s", output.String())
+	}
+
+	root := filepath.Join(t.TempDir(), "agent")
+	data := scaffold.Data{Name: "agent", Tools: []scaffold.Tool{tool}}
+	data.SetTarget(string(targetcap.LiveKit))
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(root, "tools", "lookup_customer.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 0 {
+		t.Fatalf("new handler content = %q, want empty", content)
+	}
+}
+
+func TestV40MaintainPreservesLocalHandler(t *testing.T) { // docs/spec/tui.md V40
+	root := filepath.Join(t.TempDir(), "agent")
+	data := scaffold.Data{Name: "agent", Tools: []scaffold.Tool{{
+		Name: "lookup_customer", Description: "Look up the customer.", Execution: "local",
+		Handler: "tools/lookup_customer.py", Input: `{"type":"object"}`,
+	}}}
+	data.SetTarget(string(targetcap.LiveKit))
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	handler := filepath.Join(root, "tools", "lookup_customer.py")
+	want := "def lookup_customer():\n    return {}\n"
+	if err := os.WriteFile(handler, []byte(want), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.data.Language = "es"
+	if err := saveMaintained(newRunner(strings.NewReader("1\n1\n"), &bytes.Buffer{}, true), &agent); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("handler changed:\n%s", got)
 	}
 }
 
