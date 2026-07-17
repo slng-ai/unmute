@@ -53,6 +53,7 @@ Make the TUI the Unmute console: bare `unmute` on a TTY opens **Create a new age
 - V38: every flow with multiple editable fields opens an overview menu showing all field names and current values, edits one chosen field, then returns to that menu. Listen/Reason/Speak binding overviews show Provider, conditional Distributor, catalogue-applicable Model/Voice, Language, Additional config, and Back; no create or edit flow is a blind field sequence (`TestV38MultiFieldFlowsUseOverviewMenus`, `TestV38BindingOverviewShowsAllFieldsAndReturns`).
 - V39: every task-result assignment can be removed from its field editor. Removal returns to the assignment overview immediately; **Done** persists the remaining map, and removing the last assignment clears `task.assign` (`TestV39TaskResultAssignmentCanBeRemoved`).
 - V40: **Local Python** follows `target.FieldToolLocal`: on a supported target it is selectable, declares `handler: tools/<name>.py`, clears webhook state, and says the empty handler file is created on Save; Create and changed Maintain Save create that file when absent and preserve existing handler bytes. On a gated target the option remains visible, and its notice gives the capability's exact note, directs the user to **Identity → Target**, and offers Back (`TestV29UnavailableChoiceNamesGateAndOffersBack`, `TestV40LocalPythonSelectionScaffoldsHandler`, `TestV40MaintainPreservesLocalHandler`).
+- V41: tool attachment follows SCHEMA.md D8/§4.5/§4.6, never provider-specific TUI gates. On every target the attachment editor lists every agent and, when present, every task with explicit type labels; one tool may attach to both, writing agents to `AttachTo` and tasks to `AttachTasks`. A new tool defaults to the configured entry agent. A single-agent LiveKit package with no tasks can create an agent-level webhook tool, and the real scaffold → load → build → generate path emits its `@function_tool` method on the `Agent` class (`TestV41NewToolDefaultsToEntryAgent`, `TestV41ToolAttachmentsAreTargetIndependent`, `TestV41LiveKitAgentEditorAttachesTool`, `TestV41LiveKitInitWebhookCompilesOnAgent`).
 
 ## §T tasks
 id|status|desc|cites
@@ -71,8 +72,9 @@ T12|.|BLOCKED on catalogue breadth follow-up to [driver-livekit.md](driver-livek
 T13|x|add an explicit Remove assignment action to each task-result assignment field editor; return to the overview and persist the reduced or empty assignment map on Done|C13,V39
 T14|x|make Local Python capability-driven; declare its conventional handler path, scaffold an empty handler on confirmed writes, preserve loaded handler bytes, and replace the blanket denial with target-specific guidance|C3,I.save,V29,V40
 T15|x|pin the `← Back (Esc)` action in every interactive footer so a constrained select viewport cannot hide the final Back row|C12,I.console,V37
+T16|x|remove the stale LiveKit task-only tool gates from Add, labels, attachment editing, and agent details; expose typed agent + task choices on every target, default Add to the entry agent, and compile-check a zero-task LiveKit webhook tool|V40,V41
 
-Dependency order: T1 → T2 → T3; T4 after T1; T5 after its compiler/driver cross-spec dependency; T6 after T2; T7 closed the first build. T8 → T9 → T10 → T11 → T13 → T14 → T15. T12 stays blocked on catalogue work and does not permit TUI-local provider lists.
+Dependency order: T1 → T2 → T3; T4 after T1; T5 after its compiler/driver cross-spec dependency; T6 after T2; T7 closed the first build. T8 → T9 → T10 → T11 → T13 → T14 → T15 → T16. T12 stays blocked on catalogue work and does not permit TUI-local provider lists.
 
 ## §B bugs
 id|date|cause|fix
@@ -85,3 +87,4 @@ B6|2026-07-16|the SLNG wordmark was printed before the TUI program; once alt-scr
 B7|2026-07-17|T11's task-result assignment overview exposed field remapping plus Done/Back but no in-place removal action, trapping users after assignment selection|V39
 B8|2026-07-17|the tool execution picker unconditionally marked Local Python unavailable because the console had no handler-file scaffold path, even when `FieldToolLocal` was core on the selected target|V40
 B9|2026-07-17|long Huh selects kept Back only as their final scrollable row; a constrained viewport clipped it while the footer exposed only an easy-to-miss `esc Back` key hint|V37
+B10|2026-07-17|after [driver-livekit.md](driver-livekit.md) B2/T15 added agent-level tools, the TUI retained four pre-B2 LiveKit branches that refused Add without a task, displayed task-only attachments, and blocked the per-agent Tools editor; `unmute init` could not express SCHEMA.md §4.5 even though load/build/generate supported it|V41

@@ -12,7 +12,10 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/huh"
+	"github.com/slng/unmute/internal/generate"
+	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/scaffold"
+	"github.com/slng/unmute/internal/spec"
 	targetcap "github.com/slng/unmute/internal/target"
 )
 
@@ -404,6 +407,101 @@ func TestV18ToolsMenuUsesNeutralNameAndShowsExecution(t *testing.T) { // docs/sp
 			t.Errorf("tools flow missing %q:\n%s", want, output.String())
 		}
 	}
+}
+
+func TestV41NewToolDefaultsToEntryAgent(t *testing.T) { // docs/spec/tui.md V41
+	data := scaffold.Data{Name: "agent", EntryAgent: "billing", Instructions: scaffold.DefaultInstructions}
+	data.SetTarget(string(targetcap.LiveKit))
+	data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Handle billing.", Reason: data.Reason, Speak: data.Speak}}
+	var output bytes.Buffer
+	if err := editTools(newRunner(strings.NewReader("1\nlookup_customer\n8\n3\n"), &output, true), &data); err != nil {
+		t.Fatalf("editTools: %v\n%s", err, output.String())
+	}
+	if len(data.Tools) != 1 {
+		t.Fatalf("tools = %#v", data.Tools)
+	}
+	if !slices.Equal(data.Tools[0].AttachTo, []string{"billing"}) || len(data.Tools[0].AttachTasks) != 0 {
+		t.Fatalf("attachments = agents %v, tasks %v", data.Tools[0].AttachTo, data.Tools[0].AttachTasks)
+	}
+}
+
+func TestV41ToolAttachmentsAreTargetIndependent(t *testing.T) { // docs/spec/tui.md V41
+	data := scaffold.Data{Name: "agent", Instructions: scaffold.DefaultInstructions}
+	data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Handle billing.", Reason: data.Reason, Speak: data.Speak}}
+	data.Tasks = []scaffold.Task{{Name: "collect"}}
+	tool := scaffold.Tool{Name: "lookup_customer", AttachTo: []string{"assistant"}}
+	for _, provider := range targetcap.Providers {
+		data.SetTarget(string(provider))
+		available, _ := toolAttachmentChoices(&data, tool)
+		want := []string{"Agent · assistant", "Agent · billing", "Task · collect"}
+		if !slices.Equal(available, want) {
+			t.Errorf("%s attachments = %v, want %v", provider, available, want)
+		}
+	}
+	data.SetTarget(string(targetcap.LiveKit))
+	var output bytes.Buffer
+	if err := editTool(newRunner(strings.NewReader("6\n2\n3\n4\n8\n"), &output, true), &data, &tool); err != nil {
+		t.Fatalf("editTool: %v\n%s", err, output.String())
+	}
+	for _, want := range []string{"Agent · assistant", "Agent · billing", "Task · collect"} {
+		if !strings.Contains(output.String(), want) {
+			t.Errorf("attachment choices omit %q:\n%s", want, output.String())
+		}
+	}
+	if !slices.Equal(tool.AttachTo, []string{"assistant", "billing"}) || !slices.Equal(tool.AttachTasks, []string{"collect"}) {
+		t.Fatalf("attachments = agents %v, tasks %v", tool.AttachTo, tool.AttachTasks)
+	}
+}
+
+func TestV41LiveKitAgentEditorAttachesTool(t *testing.T) { // docs/spec/tui.md V41
+	data := scaffold.Data{Name: "agent", Instructions: scaffold.DefaultInstructions}
+	data.SetTarget(string(targetcap.LiveKit))
+	data.Tools = []scaffold.Tool{{Name: "lookup_customer", AttachTo: []string{}}}
+	var output bytes.Buffer
+	if err := editAgentDetails(newRunner(strings.NewReader("4\n1\n2\n7\n"), &output, true), &data, "assistant"); err != nil {
+		t.Fatalf("editAgentDetails: %v\n%s", err, output.String())
+	}
+	if !slices.Equal(data.Tools[0].AttachTo, []string{"assistant"}) {
+		t.Fatalf("agent attachments = %v", data.Tools[0].AttachTo)
+	}
+}
+
+func TestV41LiveKitInitWebhookCompilesOnAgent(t *testing.T) { // docs/spec/tui.md V41
+	data := scaffold.Data{
+		Name: "agent", Instructions: scaffold.DefaultInstructions,
+		Tools: []scaffold.Tool{{
+			Name: "lookup_customer", Description: "Look up the customer.",
+			Execution: "webhook", URLEnv: "LOOKUP_URL", Input: `{"type":"object"}`,
+			AttachTo: []string{"assistant"},
+		}},
+	}
+	data.SetTarget(string(targetcap.LiveKit))
+	dir := filepath.Join(t.TempDir(), "agent")
+	if _, err := scaffold.Write(dir, data); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := spec.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var livekit ir.Target
+	for _, target := range agent.Targets {
+		livekit = target
+	}
+	artifact, err := generate.Generate(agent, livekit, targetcap.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range artifact.Files {
+		if file.Path == "agent.py" && strings.Contains(string(file.Content), "@function_tool") && strings.Contains(string(file.Content), "async def lookup_customer(") {
+			return
+		}
+	}
+	t.Fatal("generated agent.py omitted the entry agent's @function_tool method")
 }
 
 func TestV18AgentMenuShowsAndEditsSavedAgent(t *testing.T) { // docs/spec/tui.md V18

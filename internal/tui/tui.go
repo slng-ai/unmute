@@ -809,12 +809,6 @@ func editTools(runner *fieldRunner, data *scaffold.Data) error {
 			}
 			continue
 		}
-		if data.Target == string(targetcap.LiveKit) && len(data.Tasks) == 0 {
-			if err := showNotice(runner, "Tools unavailable", "LiveKit tools attach to tasks. Add a task first."); err != nil {
-				return err
-			}
-			continue
-		}
 		tool := scaffold.Tool{Execution: "webhook", Input: `{"type":"object","properties":{}}`}
 		back, err := runner.input("Tool name", "Lowercase snake_case.", &tool.Name, func(value string) error {
 			if err := validateIdentifier(value); err != nil {
@@ -830,11 +824,7 @@ func editTools(runner *fieldRunner, data *scaffold.Data) error {
 		if err != nil || back {
 			continue
 		}
-		if data.Target == string(targetcap.LiveKit) {
-			tool.AttachTasks = []string{data.Tasks[0].Name}
-		} else {
-			tool.AttachTo = []string{firstNonempty(data.EntryAgent, "assistant")}
-		}
+		tool.AttachTo = []string{firstNonempty(data.EntryAgent, "assistant")}
 		data.Tools = append(data.Tools, tool)
 		if err := editTool(runner, data, &data.Tools[len(data.Tools)-1]); err != nil {
 			return err
@@ -843,13 +833,7 @@ func editTools(runner *fieldRunner, data *scaffold.Data) error {
 }
 
 func toolLabel(data *scaffold.Data, tool scaffold.Tool) string {
-	attached := tool.AttachTo
-	if data.Target == string(targetcap.LiveKit) {
-		attached = tool.AttachTasks
-	} else if attached == nil {
-		attached = []string{"assistant"}
-	}
-	return fmt.Sprintf("%s  ·  %s  ·  %s", tool.Name, tool.ExecutionKind(), firstNonempty(strings.Join(attached, ", "), "not attached"))
+	return fmt.Sprintf("%s  ·  %s  ·  %s", tool.Name, tool.ExecutionKind(), toolAttachmentLabel(data, tool))
 }
 
 func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool) (bool, error) {
@@ -933,21 +917,19 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 			}
 		case "attach":
 			available, selected := toolAttachmentChoices(data, *tool)
-			if len(available) == 0 {
-				if err := showNotice(runner, "No attachment targets", "Add a task before attaching LiveKit tools."); err != nil {
-					return err
-				}
-				continue
-			}
 			selected, back, err := pickReferences(runner, "Attach tool", "Select every place that can call this tool.", available, selected, false)
 			if err != nil {
 				return err
 			}
 			if !back {
-				if data.Target == string(targetcap.LiveKit) {
-					tool.AttachTasks, tool.AttachTo = selected, nil
-				} else {
-					tool.AttachTo, tool.AttachTasks = selected, nil
+				tool.AttachTo, tool.AttachTasks = nil, nil
+				for _, attachment := range selected {
+					if name, ok := strings.CutPrefix(attachment, "Agent · "); ok {
+						tool.AttachTo = append(tool.AttachTo, name)
+					}
+					if name, ok := strings.CutPrefix(attachment, "Task · "); ok {
+						tool.AttachTasks = append(tool.AttachTasks, name)
+					}
 				}
 			}
 		case "delete":
@@ -964,14 +946,24 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 }
 
 func toolAttachmentChoices(data *scaffold.Data, tool scaffold.Tool) ([]string, []string) {
-	if data.Target == string(targetcap.LiveKit) {
-		return taskNames(data), append([]string(nil), tool.AttachTasks...)
+	available := make([]string, 0, len(data.AllAgents())+len(data.Tasks))
+	for _, name := range agentNames(data) {
+		available = append(available, "Agent · "+name)
 	}
-	selected := append([]string(nil), tool.AttachTo...)
+	for _, name := range taskNames(data) {
+		available = append(available, "Task · "+name)
+	}
+	selected := make([]string, 0, len(tool.AttachTo)+len(tool.AttachTasks))
+	for _, name := range tool.AttachTo {
+		selected = append(selected, "Agent · "+name)
+	}
 	if tool.AttachTo == nil {
-		selected = []string{"assistant"}
+		selected = append(selected, "Agent · "+firstNonempty(data.EntryAgent, "assistant"))
 	}
-	return agentNames(data), selected
+	for _, name := range tool.AttachTasks {
+		selected = append(selected, "Task · "+name)
+	}
+	return available, selected
 }
 
 func toolAttachmentLabel(data *scaffold.Data, tool scaffold.Tool) string {
@@ -1101,12 +1093,6 @@ func editAgentDetails(runner *fieldRunner, data *scaffold.Data, name string) err
 			}
 			setAgentBinding(data, name, targetcap.Speak, binding)
 		case "tools":
-			if data.Target == string(targetcap.LiveKit) {
-				if err := showNotice(runner, "Tools are task-bound", "LiveKit tools are attached to tasks; edit them from Tasks or Tools."); err != nil {
-					return err
-				}
-				continue
-			}
 			if len(data.Tools) == 0 {
 				if err := showNotice(runner, "No tools yet", "Add a tool from Tools, then return here to attach it."); err != nil {
 					return err
