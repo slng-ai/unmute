@@ -255,12 +255,11 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 				}
 				continue
 			}
-			confirmed := true
-			back, err := runner.run(huh.NewConfirm().Title(summary(result, review)).Value(&confirmed), true)
+			confirmed, err := confirmChoice(runner, summary(result, review), "Create agent")
 			if err != nil {
 				return Result{}, false, err
 			}
-			if !back && confirmed {
+			if confirmed {
 				result.Confirmed = true
 				return result, false, nil
 			}
@@ -2845,7 +2844,11 @@ func confirmDelete(runner *fieldRunner, kind, name string) (bool, error) {
 }
 
 func confirmAction(runner *fieldRunner, title, action string) (bool, error) {
-	choice, back, err := runner.selectOne(title, "References are updated so the generated spec stays valid.", []huh.Option[string]{
+	return confirmChoice(runner, title, action)
+}
+
+func confirmChoice(runner *fieldRunner, title, action string) (bool, error) {
+	choice, back, err := runner.selectOne(title, "Choose Back to return without applying this action.", []huh.Option[string]{
 		huh.NewOption(action, "confirm"),
 		huh.NewOption("← Back", actionBack),
 	}, true)
@@ -3182,10 +3185,10 @@ func backKeyMap() *huh.KeyMap {
 	keymap.Quit.SetKeys("esc", "ctrl+c")
 	// ponytail: Huh omits form-level Quit from field help, so include Esc in
 	// submit help until Huh exposes custom footer bindings.
-	keymap.Input.Submit.SetHelp("esc back • enter", "submit")
-	keymap.Text.Submit.SetHelp("esc back • enter", "submit")
-	keymap.Select.Submit.SetHelp("esc back • enter", "select")
-	keymap.Confirm.Submit.SetHelp("esc back • enter", "submit")
+	keymap.Input.Submit.SetHelp("esc", "Back • enter Submit")
+	keymap.Text.Submit.SetHelp("esc", "Back • enter Submit")
+	keymap.Select.Submit.SetHelp("esc", "Back • enter Select")
+	keymap.Confirm.Submit.SetHelp("esc", "Back • enter Confirm")
 	return keymap
 }
 

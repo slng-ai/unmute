@@ -163,6 +163,71 @@ func TestV36SectionsHaveNoPassThroughMenus(t *testing.T) { // docs/spec/tui.md V
 	}
 }
 
+func TestV37EveryScreenShowsBackAffordance(t *testing.T) { // docs/spec/tui.md V37
+	keymap := backKeyMap()
+	for name, help := range map[string]string{
+		"input":   keymap.Input.Submit.Help().Desc,
+		"text":    keymap.Text.Submit.Help().Desc,
+		"select":  keymap.Select.Submit.Help().Desc,
+		"confirm": keymap.Confirm.Submit.Help().Desc,
+	} {
+		if !strings.Contains(help, "Back") {
+			t.Errorf("%s interactive footer omits Back: %q", name, help)
+		}
+	}
+
+	for name, run := range map[string]func(*fieldRunner) error{
+		"input": func(runner *fieldRunner) error {
+			value := "saved"
+			_, err := runner.input("Input", "", &value, validateBasic)
+			return err
+		},
+		"text": func(runner *fieldRunner) error {
+			value := "saved"
+			_, err := runner.text("Text", "", &value)
+			return err
+		},
+	} {
+		var output bytes.Buffer
+		if err := run(newRunner(strings.NewReader(":back\n"), &output, true)); err != nil {
+			t.Fatalf("%s screen: %v", name, err)
+		}
+		if !strings.Contains(output.String(), "Type :back to return.") {
+			t.Errorf("%s accessible screen omits Back affordance:\n%s", name, output.String())
+		}
+	}
+
+	for _, screen := range []struct {
+		name, input string
+		run         func(*fieldRunner) error
+	}{
+		{"select", "2\n", func(runner *fieldRunner) error {
+			_, _, err := runner.selectOne("Select", "", []huh.Option[string]{huh.NewOption("Act", "act"), huh.NewOption("← Back", actionBack)}, true)
+			return err
+		}},
+		{"confirm", "2\n", func(runner *fieldRunner) error {
+			_, err := confirmChoice(runner, "Confirm?", "Confirm")
+			return err
+		}},
+		{"notice", "1\n", func(runner *fieldRunner) error {
+			return showNotice(runner, "Notice", "Something happened.")
+		}},
+	} {
+		var output bytes.Buffer
+		if err := screen.run(newRunner(strings.NewReader(screen.input), &output, true)); err != nil {
+			t.Fatalf("%s screen: %v", screen.name, err)
+		}
+		if !strings.Contains(output.String(), "Back") {
+			t.Errorf("%s screen omits Back affordance:\n%s", screen.name, output.String())
+		}
+	}
+
+	notice := programShell{notice: &noticeState{title: "Report", lines: []string{"done"}, height: 10}}
+	if view := notice.View(); !strings.Contains(view, "Back") {
+		t.Errorf("interactive notice footer omits Back: %q", view)
+	}
+}
+
 func TestRunCompileToggle(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// 1=create, name, 6=toggle compile on, 7=Create agent, confirm.
@@ -774,7 +839,7 @@ func TestRunEOFAborts(t *testing.T) {
 
 func TestBackKeyMapShowsFooterHint(t *testing.T) {
 	help := backKeyMap().Input.Submit.Help()
-	if !strings.Contains(help.Key, "esc back") || help.Desc != "submit" {
+	if help.Key != "esc" || !strings.Contains(help.Desc, "Back") {
 		t.Fatalf("input footer help = %#v", help)
 	}
 }

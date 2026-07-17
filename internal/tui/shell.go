@@ -131,7 +131,7 @@ func (m programShell) View() string {
 	if m.notice != nil {
 		end := min(len(m.notice.lines), m.notice.offset+m.notice.height)
 		lines := m.notice.lines[m.notice.offset:end]
-		return m.notice.title + "\n\n" + strings.Join(lines, "\n") + "\n\n↑/↓ scroll • enter/esc back"
+		return m.notice.title + "\n\n" + strings.Join(lines, "\n") + "\n\n↑/↓ scroll • Enter/Esc Back"
 	}
 	if m.current == nil {
 		return ""
