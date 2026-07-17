@@ -19,8 +19,8 @@ import (
 func TestRunCreateDefaults(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
-	// 1=create, name=agent, 16=Create agent, ""=confirm default (yes).
-	got, err := Run(strings.NewReader("1\nagent\n16\n\n"), &output, true)
+	// 1=create, name=agent, 7=Create agent, ""=confirm default (yes).
+	got, err := Run(strings.NewReader("1\nagent\n7\n\n"), &output, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestRunCreateDefaults(t *testing.T) {
 	if _, err := os.Stat("agent"); !os.IsNotExist(err) {
 		t.Fatalf("TUI wrote agent directory: %v", err)
 	}
-	for _, label := range []string{"Target", "Language", "Models", "Instructions", "Greeting", "Variables", "Tools", "Agents", "Handoffs", "Tasks", "Task groups", "Caller channels", "Human transfers", "Customize", "Compile after create", "Create agent", "← Back"} {
+	for _, label := range []string{"Identity", "Models", "Behavior", "Integrations", "Lifecycle", "Compile after create", "Create agent", "← Back"} {
 		if !strings.Contains(output.String(), label) {
 			t.Errorf("menu missing %q:\n%s", label, output.String())
 		}
@@ -105,8 +105,8 @@ func TestV27StepsRedrawInPersistentAltScreen(t *testing.T) {
 
 func TestRunCompileToggle(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// 1=create, name, 15=toggle compile on, 16=Create agent, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n15\n16\n\n"), &bytes.Buffer{}, true)
+	// 1=create, name, 6=toggle compile on, 7=Create agent, confirm.
+	got, err := Run(strings.NewReader("1\nagent\n6\n7\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestRunSelectTarget(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
 	// Create, name, Target, LiveKit, Create agent, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n1\n2\n16\n\n"), &output, true)
+	got, err := Run(strings.NewReader("1\nagent\n1\n1\n2\n7\n\n"), &output, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestRunSelectTarget(t *testing.T) {
 func TestRunEditModels(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// Create, name, Models, Speak, cartesia, model, voice, params, Back, Create, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n3\n3\n1\n1\nsonic-3\nvoice-id\n{\"speed\":1}\n5\n16\n\n"), &bytes.Buffer{}, true)
+	got, err := Run(strings.NewReader("1\nagent\n2\n1\n3\n1\n1\nsonic-3\nvoice-id\n{\"speed\":1}\n5\n7\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestRunEditModels(t *testing.T) {
 
 func TestRunEditLanguage(t *testing.T) {
 	t.Chdir(t.TempDir())
-	got, err := Run(strings.NewReader("1\nagent\n2\nes-MX\n16\n\n"), &bytes.Buffer{}, true)
+	got, err := Run(strings.NewReader("1\nagent\n1\n2\nes-MX\n7\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,9 +157,9 @@ func TestRunEditLanguage(t *testing.T) {
 func TestRunAddVariableAndTool(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
-		"6\n1\ncustomer_id\n1\n\"guest\"\n2\n3\n" +
-		"7\n1\nlookup_customer\nLook up the caller\n1\nLOOKUP_URL\n{\"type\":\"object\"}\n\n2\n3\n" +
-		"16\n\n"
+		"3\n3\n1\ncustomer_id\n1\n\"guest\"\n2\n3\n" +
+		"4\n1\n1\nlookup_customer\nLook up the caller\n1\nLOOKUP_URL\n{\"type\":\"object\"}\n\n2\n3\n" +
+		"7\n\n"
 	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -293,7 +293,7 @@ func TestV21PreflightFailureUsesDedicatedScreen(t *testing.T) {
 	data.SetTarget("pipecat")
 	data.Fallbacks = []scaffold.ModelFallback{{Name: "backup", Profile: "assistant_model", Binding: data.Reason}}
 	var output bytes.Buffer
-	_, back, err := editAgent(newRunner(strings.NewReader("16\n10\n17\n"), &output, true), Agent{Path: "agent", Data: data})
+	_, back, err := editAgent(newRunner(strings.NewReader("7\n10\n8\n"), &output, true), Agent{Path: "agent", Data: data})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestV21PreflightFailureUsesDedicatedScreen(t *testing.T) {
 func TestRunHandoffsRequireTwoAgents(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
-	got, err := Run(strings.NewReader("1\nagent\n9\n1\n16\n\n"), &output, true)
+	got, err := Run(strings.NewReader("1\nagent\n5\n2\n1\n7\n\n"), &output, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,12 +322,12 @@ func TestRunHandoffsRequireTwoAgents(t *testing.T) {
 func TestRunAddAgentAndHandoff(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
-		"8\n2\nbilling\nYou handle billing questions.\n" +
+		"5\n1\n2\nbilling\nYou handle billing questions.\n" +
 		"1\ngpt-4.1-mini\n\n" +
 		"2\nslng/deepgram/aura:2-en\naura-2-thalia-en\n\n" +
 		"5\n" +
-		"9\n1\n1\n1\nto_billing\nCaller asks about billing.\n1\n1\n3\n" +
-		"16\n\n"
+		"5\n2\n1\n1\n1\nto_billing\nCaller asks about billing.\n1\n1\n3\n" +
+		"7\n\n"
 	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -343,7 +343,7 @@ func TestRunAddAgentAndHandoff(t *testing.T) {
 func TestRunTaskGroupsRequireTasks(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
-	if _, err := Run(strings.NewReader("1\nagent\n11\n1\n16\n\n"), &output, true); err != nil {
+	if _, err := Run(strings.NewReader("1\nagent\n5\n4\n1\n7\n\n"), &output, true); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "Create at least one task first") {
@@ -354,9 +354,9 @@ func TestRunTaskGroupsRequireTasks(t *testing.T) {
 func TestRunAddTaskAndOrderedGroup(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
-		"10\n1\ncollect\nCollect the caller tier.\n1\n{\"tier\":{\"enum\":[\"free\",\"pro\"]}}\n1\n1\n1\nClassify the caller.\n3\n" +
-		"11\n1\ntriage\n1\n2\n1\n1\n1\nRun triage.\n3\n" +
-		"16\n\n"
+		"5\n3\n1\ncollect\nCollect the caller tier.\n1\n{\"tier\":{\"enum\":[\"free\",\"pro\"]}}\n1\n1\n1\nClassify the caller.\n3\n" +
+		"5\n4\n1\ntriage\n1\n2\n1\n1\n1\nRun triage.\n3\n" +
+		"7\n\n"
 	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -372,7 +372,7 @@ func TestRunAddTaskAndOrderedGroup(t *testing.T) {
 func TestRunHumanTransfersRequireTelephony(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
-	if _, err := Run(strings.NewReader("1\nagent\n13\n1\n16\n\n"), &output, true); err != nil {
+	if _, err := Run(strings.NewReader("1\nagent\n4\n3\n1\n7\n\n"), &output, true); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "Add a telephony caller channel first") {
@@ -383,9 +383,9 @@ func TestRunHumanTransfersRequireTelephony(t *testing.T) {
 func TestRunAddTelephonyAndHumanTransfer(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
-		"12\n2\n1\n6\n9\ndaily-sip\n\n" +
-		"13\n1\nto_human\n1\nCaller requests a person.\nsupport_line\n+14155550123\n1\n3\n" +
-		"16\n\n"
+		"4\n2\n2\n1\n6\n9\ndaily-sip\n\n" +
+		"4\n3\n1\nto_human\n1\nCaller requests a person.\nsupport_line\n+14155550123\n1\n3\n" +
+		"7\n\n"
 	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -400,7 +400,7 @@ func TestRunAddTelephonyAndHumanTransfer(t *testing.T) {
 
 func TestRunCustomizeCapacity(t *testing.T) {
 	t.Chdir(t.TempDir())
-	input := "1\nagent\n14\n3\n5\n10\n4m\n5\n16\n\n"
+	input := "1\nagent\n3\n4\n3\n5\n10\n4m\n5\n7\n\n"
 	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -412,7 +412,7 @@ func TestRunCustomizeCapacity(t *testing.T) {
 
 func TestRunBackPreservesPriorEdits(t *testing.T) {
 	t.Chdir(t.TempDir())
-	input := "1\nagent\n2\nes-MX\n4\n:back\n16\n\n"
+	input := "1\nagent\n1\n2\nes-MX\n3\n1\n:back\n7\n\n"
 	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -467,6 +467,22 @@ func TestV31CatalogueHintUsesEntryArityAndLanguageSlot(t *testing.T) {
 		if !strings.Contains(hint, want) {
 			t.Errorf("catalogue hint %q omits %q", hint, want)
 		}
+	}
+}
+
+func TestV29UnavailableChoiceNamesGateAndOffersBack(t *testing.T) {
+	var output bytes.Buffer
+	tool := scaffold.Tool{}
+	back, err := chooseToolExecution(newRunner(strings.NewReader("2\n1\n3\n"), &output, true), string(targetcap.Pipecat), &tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !back {
+		t.Fatal("unavailable choice did not permit Back")
+	}
+	want := targetcap.Default().Capability(targetcap.FieldToolLocal, targetcap.Pipecat).Note
+	if !strings.Contains(output.String(), want) || !strings.Contains(output.String(), "← Back") {
+		t.Fatalf("unavailable choice omitted exact gate or Back:\n%s", output.String())
 	}
 }
 
@@ -787,7 +803,7 @@ func TestV20MaintainBackPreservesPriorEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Language, new value, Back from the maintain menu.
-	if err := editMaintained(newRunner(strings.NewReader("2\nes-MX\n18\n"), &bytes.Buffer{}, true), &agent); err != nil {
+	if err := editMaintained(newRunner(strings.NewReader("1\n2\nes-MX\n9\n"), &bytes.Buffer{}, true), &agent); err != nil {
 		t.Fatal(err)
 	}
 	if agent.data.Language != "es-MX" {
@@ -798,7 +814,7 @@ func TestV20MaintainBackPreservesPriorEdits(t *testing.T) {
 func TestV33ValidateStaysInConsole(t *testing.T) {
 	agent := testMaintainedAgent(t)
 	var output bytes.Buffer
-	runner := newRunner(strings.NewReader("15\n1\n18\n"), &output, true)
+	runner := newRunner(strings.NewReader("6\n1\n9\n"), &output, true)
 	runner.actions = func(action, path string, out io.Writer) error {
 		if action != "validate" || path != agent.path {
 			t.Fatalf("action = %q, path = %q", action, path)
@@ -809,7 +825,7 @@ func TestV33ValidateStaysInConsole(t *testing.T) {
 	if err := editMaintained(runner, &agent); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "pipecat-dev") || strings.Count(output.String(), "Enter a number between 1 and 18") < 2 {
+	if !strings.Contains(output.String(), "pipecat-dev") || strings.Count(output.String(), "Enter a number between 1 and 9") < 2 {
 		t.Fatalf("Validate report did not return to maintain menu:\n%s", output.String())
 	}
 }
@@ -817,7 +833,7 @@ func TestV33ValidateStaysInConsole(t *testing.T) {
 func TestV33CompileStaysInConsole(t *testing.T) {
 	agent := testMaintainedAgent(t)
 	var output bytes.Buffer
-	runner := newRunner(strings.NewReader("16\n1\n18\n"), &output, true)
+	runner := newRunner(strings.NewReader("7\n1\n9\n"), &output, true)
 	runner.actions = func(action, path string, out io.Writer) error {
 		if action != "compile" || path != agent.path {
 			t.Fatalf("action = %q, path = %q", action, path)
@@ -828,7 +844,7 @@ func TestV33CompileStaysInConsole(t *testing.T) {
 	if err := editMaintained(runner, &agent); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "generated build/pipecat-dev/agent.py") || strings.Count(output.String(), "Enter a number between 1 and 18") < 2 {
+	if !strings.Contains(output.String(), "generated build/pipecat-dev/agent.py") || strings.Count(output.String(), "Enter a number between 1 and 9") < 2 {
 		t.Fatalf("Compile report did not return to maintain menu:\n%s", output.String())
 	}
 }

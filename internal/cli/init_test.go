@@ -75,8 +75,8 @@ func TestInit_refusesExistingDir(t *testing.T) {
 
 func TestV30InitEntersCreate(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// init enters Create directly: name, 16=Create agent, confirm.
-	out, err := runWithInput(t, "wiz-agent\n16\n\n", "init")
+	// init enters Create directly: name, 7=Create agent, confirm.
+	out, err := runWithInput(t, "wiz-agent\n7\n\n", "init")
 	if err != nil {
 		t.Fatalf("init wizard: %v\n%s", err, out)
 	}
@@ -113,7 +113,7 @@ func TestV30BareRootTTYLaunchesConsole(t *testing.T) {
 func TestInitWizardDeclineWritesNothing(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// Decline review, then back out of the editor.
-	if _, err := runWithInput(t, "agent\n16\nn\n17\n", "init"); err != nil {
+	if _, err := runWithInput(t, "agent\n7\nn\n8\n", "init"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat("agent"); !os.IsNotExist(err) {

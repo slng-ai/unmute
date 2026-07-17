@@ -384,20 +384,11 @@ func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 	for {
 		choice := actionBack
 		if _, err := runner.run(huh.NewSelect[string]().Title(agent.data.Name).Description("Maintain existing package; Save regenerates confirmed package files.").Options(
-			huh.NewOption("Target  ·  "+targetLabel(agent.data.Target), "target"),
-			huh.NewOption("Language  ·  "+agent.data.Language, "language"),
-			huh.NewOption("Models  ·  "+modelsLabel(agent.data), "models"),
-			huh.NewOption("Instructions (prompt)", "prompt"),
-			huh.NewOption("Greeting  ·  "+agent.data.Greeting, "greeting"),
-			huh.NewOption(fmt.Sprintf("Variables  ·  %d", len(agent.data.Variables)), "variables"),
-			huh.NewOption(fmt.Sprintf("Tools  ·  %d", len(agent.data.Tools)), "tools"),
-			huh.NewOption(fmt.Sprintf("Agents  ·  %d", len(agent.data.AllAgents())), "agents"),
-			huh.NewOption(fmt.Sprintf("Handoffs  ·  %d", len(agent.data.Handoffs)), "handoffs"),
-			huh.NewOption(fmt.Sprintf("Tasks  ·  %d", len(agent.data.Tasks)), "tasks"),
-			huh.NewOption(fmt.Sprintf("Task groups  ·  %d", len(agent.data.TaskGroups)), "groups"),
-			huh.NewOption("Caller channels  ·  "+channelsLabel(agent.data), "channels"),
-			huh.NewOption(fmt.Sprintf("Human transfers  ·  %d", len(agent.data.HumanTransfers)), "humans"),
-			huh.NewOption("Customize  ·  conversation, fallback, capacity, target", "customize"),
+			huh.NewOption("Identity  ·  target, language", "section:identity"),
+			huh.NewOption("Models  ·  "+modelsLabel(agent.data), "section:models"),
+			huh.NewOption("Behavior  ·  instructions, greeting, variables, advanced", "section:behavior"),
+			huh.NewOption("Integrations  ·  tools, channels, human transfers", "section:integrations"),
+			huh.NewOption("Lifecycle  ·  agents, handoffs, tasks, groups", "section:lifecycle"),
 			huh.NewOption("Validate", "validate"),
 			huh.NewOption("Compile", "compile"),
 			huh.NewOption("Save", "save"),
@@ -407,6 +398,16 @@ func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 		}
 		if choice == actionBack {
 			return nil
+		}
+		if strings.HasPrefix(choice, "section:") {
+			var err error
+			choice, err = chooseEditorSection(runner, &agent.data, strings.TrimPrefix(choice, "section:"))
+			if err != nil {
+				return err
+			}
+			if choice == actionBack {
+				continue
+			}
 		}
 		var err error
 		switch choice {

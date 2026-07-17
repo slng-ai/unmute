@@ -143,7 +143,7 @@ func homeTitle() string {
 func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 	result := Result{Agent: agent, Create: true}
 	for {
-		choice := "prompt"
+		choice := "section:identity"
 		compile := "off"
 		if result.Compile {
 			compile = "on"
@@ -152,20 +152,11 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			Title(result.Agent.Data.Name).
 			Description("Choose a section; changes stay in memory until Create agent.").
 			Options(
-				huh.NewOption("Target  ·  "+targetLabel(result.Agent.Data.Target), "target"),
-				huh.NewOption("Language  ·  "+result.Agent.Data.Language, "language"),
-				huh.NewOption("Models  ·  "+modelsLabel(result.Agent.Data), "models"),
-				huh.NewOption("Instructions (prompt)", "prompt"),
-				huh.NewOption("Greeting  ·  "+result.Agent.Data.Greeting, "greeting"),
-				huh.NewOption(fmt.Sprintf("Variables  ·  %d", len(result.Agent.Data.Variables)), "variables"),
-				huh.NewOption(fmt.Sprintf("Tools  ·  %d", len(result.Agent.Data.Tools)), "tools"),
-				huh.NewOption(fmt.Sprintf("Agents  ·  %d", len(result.Agent.Data.AllAgents())), "agents"),
-				huh.NewOption(fmt.Sprintf("Handoffs  ·  %d", len(result.Agent.Data.Handoffs)), "handoffs"),
-				huh.NewOption(fmt.Sprintf("Tasks  ·  %d", len(result.Agent.Data.Tasks)), "tasks"),
-				huh.NewOption(fmt.Sprintf("Task groups  ·  %d", len(result.Agent.Data.TaskGroups)), "groups"),
-				huh.NewOption("Caller channels  ·  "+channelsLabel(result.Agent.Data), "channels"),
-				huh.NewOption(fmt.Sprintf("Human transfers  ·  %d", len(result.Agent.Data.HumanTransfers)), "humans"),
-				huh.NewOption("Customize  ·  conversation, fallback, capacity, target", "customize"),
+				huh.NewOption("Identity  ·  target, language", "section:identity"),
+				huh.NewOption("Models  ·  "+modelsLabel(result.Agent.Data), "section:models"),
+				huh.NewOption("Behavior  ·  instructions, greeting, variables, advanced", "section:behavior"),
+				huh.NewOption("Integrations  ·  tools, channels, human transfers", "section:integrations"),
+				huh.NewOption("Lifecycle  ·  agents, handoffs, tasks, groups", "section:lifecycle"),
 				huh.NewOption("Compile after create  ·  "+compile, "compile"),
 				huh.NewOption("Create agent", "save"),
 				huh.NewOption("← Back", actionBack),
@@ -176,6 +167,15 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 		}
 		if back || choice == actionBack {
 			return Result{}, true, nil
+		}
+		if strings.HasPrefix(choice, "section:") {
+			choice, err = chooseEditorSection(runner, &result.Agent.Data, strings.TrimPrefix(choice, "section:"))
+			if err != nil {
+				return Result{}, false, err
+			}
+			if choice == actionBack {
+				continue
+			}
 		}
 		switch choice {
 		case "target":
@@ -276,6 +276,45 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			}
 		}
 	}
+}
+
+func chooseEditorSection(runner *fieldRunner, data *scaffold.Data, section string) (string, error) {
+	choice := actionBack
+	var options []huh.Option[string]
+	switch section {
+	case "identity":
+		options = []huh.Option[string]{
+			huh.NewOption("Target  ·  "+targetLabel(data.Target), "target"),
+			huh.NewOption("Language  ·  "+data.Language, "language"),
+		}
+	case "models":
+		options = []huh.Option[string]{huh.NewOption("Listen, reason, speak  ·  "+modelsLabel(*data), "models")}
+	case "behavior":
+		options = []huh.Option[string]{
+			huh.NewOption("Instructions (prompt)", "prompt"),
+			huh.NewOption("Greeting  ·  "+data.Greeting, "greeting"),
+			huh.NewOption(fmt.Sprintf("Variables  ·  %d", len(data.Variables)), "variables"),
+			huh.NewOption("Advanced  ·  conversation, fallback, capacity, target", "customize"),
+		}
+	case "integrations":
+		options = []huh.Option[string]{
+			huh.NewOption(fmt.Sprintf("Tools  ·  %d", len(data.Tools)), "tools"),
+			huh.NewOption("Caller channels  ·  "+channelsLabel(*data), "channels"),
+			huh.NewOption(fmt.Sprintf("Human transfers  ·  %d", len(data.HumanTransfers)), "humans"),
+		}
+	case "lifecycle":
+		options = []huh.Option[string]{
+			huh.NewOption(fmt.Sprintf("Agents  ·  %d", len(data.AllAgents())), "agents"),
+			huh.NewOption(fmt.Sprintf("Handoffs  ·  %d", len(data.Handoffs)), "handoffs"),
+			huh.NewOption(fmt.Sprintf("Tasks  ·  %d", len(data.Tasks)), "tasks"),
+			huh.NewOption(fmt.Sprintf("Task groups  ·  %d", len(data.TaskGroups)), "groups"),
+		}
+	default:
+		return "", fmt.Errorf("unknown editor section %q", section)
+	}
+	options = append(options, huh.NewOption("← Back", actionBack))
+	_, err := runner.run(huh.NewSelect[string]().Title(strings.ToUpper(section[:1])+section[1:]).Options(options...).Value(&choice), true)
+	return choice, err
 }
 
 func repairPreflight(runner *fieldRunner, data *scaffold.Data, preflightErr error) error {
@@ -913,14 +952,11 @@ func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool
 }
 
 func localToolNote(target string) string {
-	switch targetcap.Provider(target) {
-	case targetcap.LiveKit:
-		return "the LiveKit driver currently emits webhook task tools only"
-	case targetcap.ElevenLabs:
-		return "ElevenLabs cannot host local tool code"
-	default:
-		return "the Pipecat driver does not emit local tool handlers yet"
+	capability := targetcap.Default().Capability(targetcap.FieldToolLocal, targetcap.Provider(target))
+	if capability.Tag == targetcap.Gated {
+		return capability.Note
 	}
+	return "tools.execution.local requires a handler source file; this console edits declarations but does not author handler code"
 }
 
 func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) error {
