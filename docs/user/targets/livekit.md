@@ -99,16 +99,19 @@ LiveKit accepts the following provider choices through its provider catalogue.
 | `speak` | `cartesia` | `CARTESIA_API_KEY` |
 | `speak` | `elevenlabs` | `ELEVEN_API_KEY` |
 | `speak` | `slng` | `SLNG_API_KEY` |
-| `reason` | Any LiveKit Inference provider | LiveKit Cloud credentials |
-| `turn` | `livekit` | LiveKit Cloud credentials |
+| `reason` | `openai` | `OPENAI_API_KEY` |
+| `reason` | Any other LiveKit Inference provider, or `livekit` explicitly | LiveKit Cloud credentials |
+| `turn` | `livekit` + `turn-detector-mini` | none (runs locally) |
+| `turn` | `livekit` + `turn-detector` | LiveKit Cloud credentials |
 
 SLNG remains the default route, not the only route. Its model value keeps the
-`slng/<vendor>/<model>` form in YAML. The LiveKit integration removes the
-leading `slng/` when it uses the route.
+`slng/<vendor>/<model>` form in YAML and passes to the plugin verbatim — the
+`slng/` prefix names the SLNG-hosted route family and is part of the API path.
 
 The `turn` binding expresses intent rather than selecting a replaceable
-service. Its placement and `semantic_endpointing` values remain preferences on
-LiveKit.
+service: `turn-detector-mini` runs the local model with no cloud credentials,
+`turn-detector` uses the LiveKit Cloud model. Its placement and
+`semantic_endpointing` values remain preferences on LiveKit.
 
 The driver accepts `livekit-agents` versions from `1.5` up to, but not
 including, `2.0`. It currently accepts `sdk_language: python` only. A plugin

@@ -354,17 +354,20 @@ async def entrypoint(ctx: JobContext) -> None:
         tts={{template "svc" .SessionTTS.Call}},
 {{- if .Interruption}}
         turn_handling=TurnHandlingOptions(
-            turn_detection=inference.TurnDetector(version={{pyq .TurnVersion}}),
+            turn_detection=inference.TurnDetector({{if .TurnVersion}}version={{pyq .TurnVersion}}{{end}}),
             interruption={"enabled": {{if .Interruption.Enabled}}True{{else}}False{{end}}{{if .Interruption.MinWords}}, "min_words": {{.Interruption.MinWords}}{{end}}},
+            preemptive_generation={"enabled": True},
         ),
 {{- else}}
-        turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector(version={{pyq .TurnVersion}})),
+        turn_handling=TurnHandlingOptions(
+            turn_detection=inference.TurnDetector({{if .TurnVersion}}version={{pyq .TurnVersion}}{{end}}),
+            preemptive_generation={"enabled": True},
+        ),
 {{- end}}
         vad=ctx.proc.userdata["vad"],
 {{- if or .InactivityNudgeSecs .InactivityEndSecs}}
         user_away_timeout={{if .InactivityNudgeSecs}}{{.InactivityNudgeSecs}}{{else}}{{.InactivityEndSecs}}{{end}},
 {{- end}}
-        preemptive_generation=True,
     )
 
     @session.on("metrics_collected")

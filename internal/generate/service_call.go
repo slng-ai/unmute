@@ -2,7 +2,6 @@ package generate
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/slng/unmute/internal/ir"
 	targetcap "github.com/slng/unmute/internal/target"
@@ -116,10 +115,10 @@ func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap
 // formModel applies the entry's named model transform.
 func formModel(form targetcap.ModelForm, binding ir.Binding) string {
 	switch form {
-	case targetcap.FormSlngRoute:
-		return strings.TrimPrefix(binding.Model, "slng/")
 	case targetcap.FormProviderSlashModel:
-		if binding.Provider != "" {
+		// provider: livekit is the deliberate Inference spelling — the model
+		// already carries the provider/model route verbatim (driver-livekit V19).
+		if binding.Provider != "" && binding.Provider != "livekit" {
 			return binding.Provider + "/" + binding.Model
 		}
 		return binding.Model

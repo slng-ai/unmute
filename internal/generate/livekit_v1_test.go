@@ -74,10 +74,10 @@ func TestLiveKitV1EmitsSlngPlugin(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		"from livekit.plugins import silero, slng",
+		"from livekit.plugins import openai, silero, slng",
 		"slng.STT(",
 		"slng.TTS(",
-		"inference.LLM(",
+		"openai.LLM(", // native plugin, not Inference: console runs on OPENAI_API_KEY alone (B6/V19)
 		"from livekit.agents.beta.workflows import TaskGroup",
 	} {
 		if !strings.Contains(botpy, want) {
@@ -109,7 +109,7 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		"from livekit.plugins import cartesia, deepgram, elevenlabs, silero",
+		"from livekit.plugins import cartesia, deepgram, elevenlabs, openai, silero",
 		`stt=deepgram.STT(api_key=os.environ.get("DEEPGRAM_API_KEY"), model="nova-3", language="en")`,
 		`tts=elevenlabs.TTS(api_key=os.environ.get("ELEVEN_API_KEY"), voice_id="cgSgspJ2msm6clMCkdW9", language="en")`,
 		`tts=cartesia.TTS(api_key=os.environ.get("CARTESIA_API_KEY"), voice="f786b574-daa5-4673-aa0c-cbe3e8534c02", model="sonic-3", language="en")`,
@@ -119,7 +119,7 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 		}
 	}
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
-	if !strings.Contains(pyproject, `"livekit-agents[cartesia,deepgram,elevenlabs]>=1.5"`) {
+	if !strings.Contains(pyproject, `"livekit-agents[cartesia,deepgram,elevenlabs,openai]>=1.5"`) {
 		t.Errorf("pyproject.toml missing merged extras dep:\n%s", pyproject)
 	}
 	if strings.Contains(pyproject, "livekit-plugins-slng") {
@@ -317,14 +317,14 @@ func TestLiveKitV1PerTaskModel(t *testing.T) {
 	task.Model = "fast"
 	agent.Tasks["find_slot"] = task
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
-	tgt.Models.Reason["fast"] = ir.Binding{Model: "openai/gpt-4o-mini"}
+	tgt.Models.Reason["fast"] = ir.Binding{Provider: "openai", Model: "gpt-4o-mini"}
 
 	artifact, err := Generate(agent, tgt, target.Default())
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
-	want := `super().__init__(instructions=FIND_SLOT_PROMPT, chat_ctx=chat_ctx, llm=inference.LLM(model="openai/gpt-4o-mini"))`
+	want := `super().__init__(instructions=FIND_SLOT_PROMPT, chat_ctx=chat_ctx, llm=openai.LLM(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-4o-mini"))`
 	if !strings.Contains(botpy, want) {
 		t.Errorf("agent.py missing per-task llm override %q", want)
 	}
@@ -364,7 +364,7 @@ func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 	back.Context.Summarizer = "backup"
 
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
-	tgt.Models.Reason["backup"] = ir.Binding{Model: "openai/gpt-4o"}
+	tgt.Models.Reason["backup"] = ir.Binding{Provider: "openai", Model: "gpt-4o"}
 
 	artifact, err := Generate(agent, tgt, target.Default())
 	if err != nil {
@@ -373,12 +373,12 @@ func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		// V4: native adapter around the chain, everywhere the profile binds.
-		`llm=llm.FallbackAdapter(llm=[inference.LLM(model="openai/gpt-4o-mini", extra_kwargs={"temperature": 0.4}), inference.LLM(model="openai/gpt-4o")])`,
+		`llm=llm.FallbackAdapter(llm=[openai.LLM(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-4o-mini", temperature=0.4), openai.LLM(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-4o")])`,
 		// V5: messages / last_n / summary shaping.
 		`return Reservations(chat_ctx=llm.ChatContext(items=[m for m in self.chat_ctx.messages() if m.role in ("user", "assistant")]))`,
 		`return Events(chat_ctx=_last_n(self.chat_ctx, 6))`,
 		"def _last_n(source: llm.ChatContext",
-		`summary_ctx = await _summarize(self.chat_ctx, inference.LLM(model="openai/gpt-4o"))`,
+		`summary_ctx = await _summarize(self.chat_ctx, openai.LLM(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-4o"))`,
 		"return Greeter(chat_ctx=summary_ctx)",
 		"async def _summarize(source: llm.ChatContext",
 		// D7: an uncarried variable resets on the transfer.
@@ -802,6 +802,106 @@ func TestCheckLiveKitVersion(t *testing.T) {
 		err := checkLiveKitVersion(tc.version)
 		if (err == nil) != tc.ok {
 			t.Errorf("checkLiveKitVersion(%q): ok=%v, err=%v", tc.version, tc.ok, err)
+		}
+	}
+}
+
+// TestV17_SlngRouteVerbatim (driver-livekit V17, B4): slng routes reach the
+// plugin's model= argument verbatim — the slng/ prefix names the SLNG-hosted
+// route family and is part of the URL path, so stripping it 404s.
+func TestV17_SlngRouteVerbatim(t *testing.T) {
+	for _, tc := range []struct {
+		role  string
+		route string
+	}{
+		{"listen", "slng/deepgram/nova:3-en"},
+		{"speak", "slng/deepgram/aura:2-en"},
+	} {
+		binding := ir.Binding{Provider: "slng", Model: tc.route}
+		var svc livekitService
+		var err error
+		if tc.role == "listen" {
+			svc, err = livekitSTTService(&binding, "en", newEnvSet())
+		} else {
+			binding.Voice = "aura-2-thalia-en"
+			svc, err = livekitTTSService(binding, "en", newEnvSet())
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", tc.role, err)
+		}
+		found := false
+		for _, kv := range svc.Call.Args {
+			if kv.Key == "model" {
+				found = true
+				if kv.Value != pyQuote(tc.route) {
+					t.Errorf("%s model = %s, want %s (route must pass verbatim)", tc.role, kv.Value, pyQuote(tc.route))
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s call has no model kwarg", tc.role)
+		}
+	}
+}
+
+// TestV18_TurnBindingLowersToDetectorVersion (driver-livekit V18, B5): the
+// target's turn: binding maps to the inference.TurnDetector version — mini is
+// fully local (no LiveKit Cloud creds), absent means SDK auto-select (C5),
+// and an unrecognized model fails loud instead of being silently dropped.
+func TestV18_TurnBindingLowersToDetectorVersion(t *testing.T) {
+	for _, tc := range []struct {
+		binding *ir.Binding
+		want    string
+		wantErr bool
+	}{
+		{nil, "", false},
+		{&ir.Binding{Provider: "livekit"}, "", false},
+		{&ir.Binding{Provider: "livekit", Model: "turn-detector-mini"}, "v1-mini", false},
+		{&ir.Binding{Provider: "livekit", Model: "turn-detector"}, "v1", false},
+		{&ir.Binding{Provider: "livekit", Model: "eou-9000"}, "", true},
+	} {
+		got, err := livekitTurnVersion(tc.binding)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("livekitTurnVersion(%+v): err=%v, wantErr=%v", tc.binding, err, tc.wantErr)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("livekitTurnVersion(%+v) = %q, want %q", tc.binding, got, tc.want)
+		}
+	}
+}
+
+// TestV19_NativeReasonBeatsInferenceWildcard (driver-livekit V19, B6): a
+// reason vendor with a native catalogue entry binds that plugin with its own
+// key env — never the Inference wildcard — so the scaffold default runs
+// console with no LiveKit Cloud creds. provider: livekit stays the deliberate
+// Inference spelling with the model passed verbatim.
+func TestV19_NativeReasonBeatsInferenceWildcard(t *testing.T) {
+	env := newEnvSet()
+	svc, err := livekitLLMService(ir.Binding{Provider: "openai", Model: "gpt-4.1-mini"}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if svc.Call.Class != "openai.LLM" {
+		t.Errorf("openai reason class = %q, want openai.LLM", svc.Call.Class)
+	}
+	if !env.seen["OPENAI_API_KEY"] {
+		t.Error("openai reason binding did not register OPENAI_API_KEY")
+	}
+	if env.seen["LIVEKIT_API_KEY"] {
+		t.Error("openai reason binding registered LIVEKIT_API_KEY (wildcard leak)")
+	}
+
+	svc, err = livekitLLMService(ir.Binding{Provider: "livekit", Model: "openai/gpt-4o-mini"}, newEnvSet())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if svc.Call.Class != "inference.LLM" {
+		t.Errorf("provider livekit class = %q, want inference.LLM", svc.Call.Class)
+	}
+	for _, kv := range svc.Call.Args {
+		if kv.Key == "model" && kv.Value != pyQuote("openai/gpt-4o-mini") {
+			t.Errorf("inference model = %s, want %s (verbatim, no livekit/ join)", kv.Value, pyQuote("openai/gpt-4o-mini"))
 		}
 	}
 }

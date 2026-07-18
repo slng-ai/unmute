@@ -3,6 +3,7 @@ CHECK_AVAILABILITY_URL=
 LIVEKIT_API_KEY=
 LIVEKIT_API_SECRET=
 LIVEKIT_URL=
+OPENAI_API_KEY=
 SEND_CONFIRMATION_URL=
 SLNG_API_KEY=
 === Dockerfile ===
@@ -61,7 +62,7 @@ from livekit.agents import (
 )
 from livekit.agents.beta.workflows import TaskGroup
 from livekit.agents.voice import MetricsCollectedEvent
-from livekit.plugins import silero, slng
+from livekit.plugins import openai, silero, slng
 
 logger = logging.getLogger("livekit-dev")
 logger.setLevel(logging.INFO)
@@ -161,7 +162,7 @@ class Events(Agent):
         super().__init__(
             instructions=EVENTS_PROMPT,
             chat_ctx=chat_ctx,
-            tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-orion-en", model="deepgram/aura:2-en", language="en"),
+            tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-orion-en", model="slng/deepgram/aura:2-en", language="en"),
         )
 
     async def on_enter(self) -> None:
@@ -226,7 +227,7 @@ class Reservations(Agent):
         super().__init__(
             instructions=RESERVATIONS_PROMPT,
             chat_ctx=chat_ctx,
-            tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-orion-en", model="deepgram/aura:2-en", language="en"),
+            tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-orion-en", model="slng/deepgram/aura:2-en", language="en"),
         )
 
     async def on_enter(self) -> None:
@@ -342,16 +343,16 @@ server.setup_fnc = prewarm
 async def entrypoint(ctx: JobContext) -> None:
     session = AgentSession[Userdata](
         userdata=Userdata(),
-        stt=slng.STT(api_key=os.environ.get("SLNG_API_KEY"), model="deepgram/nova:3-en", language="en"),
-        llm=inference.LLM(model="openai/gpt-4o-mini", extra_kwargs={"temperature": 0.4}),
-        tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-thalia-en", model="deepgram/aura:2-en", language="en"),
+        stt=slng.STT(api_key=os.environ.get("SLNG_API_KEY"), model="slng/deepgram/nova:3-en", language="en"),
+        llm=openai.LLM(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-4o-mini", temperature=0.4),
+        tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-thalia-en", model="slng/deepgram/aura:2-en", language="en"),
         turn_handling=TurnHandlingOptions(
-            turn_detection=inference.TurnDetector(version="v1"),
+            turn_detection=inference.TurnDetector(version="v1-mini"),
             interruption={"enabled": True},
+            preemptive_generation={"enabled": True},
         ),
         vad=ctx.proc.userdata["vad"],
         user_away_timeout=15,
-        preemptive_generation=True,
     )
 
     @session.on("metrics_collected")
@@ -414,6 +415,7 @@ if __name__ == "__main__":
     "LIVEKIT_API_KEY",
     "LIVEKIT_API_SECRET",
     "LIVEKIT_URL",
+    "OPENAI_API_KEY",
     "SEND_CONFIRMATION_URL",
     "SLNG_API_KEY"
   ],
@@ -499,7 +501,7 @@ if __name__ == "__main__":
   ],
   "notes": [
     "listen: slng via slng.STT (livekit-plugins-slng\u003e=1.6.1, verified 2026-07-15)",
-    "reason: openai via inference.LLM (ships with the framework, verified 2026-07-15)",
+    "reason: openai via openai.LLM (livekit-agents[openai], verified 2026-07-18)",
     "speak: slng via slng.TTS (livekit-plugins-slng\u003e=1.6.1, verified 2026-07-15)",
     "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory"
   ]
@@ -517,7 +519,7 @@ description = "Generated LiveKit Agents project (unmute livekit driver)"
 requires-python = ">=3.10"
 dependencies = [
     "httpx",
-    "livekit-agents>=1.5",
+    "livekit-agents[openai]>=1.5",
     "livekit-plugins-silero>=1.6.1",
     "livekit-plugins-slng>=1.6.1",
     "python-dotenv",
