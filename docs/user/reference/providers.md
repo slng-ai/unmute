@@ -84,7 +84,7 @@ SlngTTSService(
 | listen | `elevenlabs` (also `eleven_labs`) | `model` (emitted as `model_id`) | `ELEVEN_API_KEY` | `livekit-agents[elevenlabs]` |
 | listen | `gradium` | `model` (emitted as `model_name`) | `GRADIUM_API_KEY` | `livekit-agents[gradium]` |
 | listen | `sarvam` | `model` | `SARVAM_API_KEY` | `livekit-agents[sarvam]` |
-| listen | `slng` | `model` (route; the `slng/` prefix is stripped for the plugin) | `SLNG_API_KEY` | `livekit-plugins-slng>=1.6.1` |
+| listen | `slng` | `model` (route, passed verbatim) | `SLNG_API_KEY` | `livekit-plugins-slng>=1.6.1` |
 | listen | `soniox` | `model` (nested in `params=soniox.STTOptions(...)`; language auto-identified) | `SONIOX_API_KEY` | `livekit-agents[soniox]` |
 | listen | `speechmatics` | no `model` slot (accuracy via `operating_point` param) | `SPEECHMATICS_API_KEY` | `livekit-agents[speechmatics]` |
 | speak | `cartesia` | `voice`, optional `model` | `CARTESIA_API_KEY` | `livekit-agents[cartesia]` |
@@ -102,6 +102,7 @@ SlngTTSService(
 | reason | `azure` | `model`, `endpoint_env` (emitted as `azure_endpoint`) | `AZURE_OPENAI_API_KEY` | `livekit-agents[openai]` |
 | reason | `groq` | `model`, optional `endpoint_env` | `GROQ_API_KEY` | `livekit-agents[groq]` |
 | reason | `mistralai` (also `mistral`) | `model` | `MISTRAL_API_KEY` | `livekit-agents[mistralai]` |
+| reason | `openai` | `model`, optional `endpoint_env` | `OPENAI_API_KEY` | `livekit-agents[openai]` |
 | reason | `openrouter` | `model`, optional `endpoint_env` | `OPENROUTER_API_KEY` | `livekit-agents[openai]` |
 | reason | `sarvam` | `model`, optional `endpoint_env` | `SARVAM_API_KEY` | `livekit-agents[sarvam]` |
 | reason | any other (LiveKit Inference) | `model`; emitted as `"<provider>/<model>"` | none (LiveKit Cloud credentials) | ships with `livekit-agents` |
@@ -113,13 +114,13 @@ listen: { provider: deepgram, model: nova-3 }         # deepgram.STT(model="nova
 speak:
   front_desk: { provider: elevenlabs, voice: cgSgspJ2msm6clMCkdW9 }
                                                       # elevenlabs.TTS(voice_id="cgSg...")
-# or the SLNG execution layer:
-listen: { provider: slng, model: "slng/deepgram/nova:3" }   # slng.STT(model="deepgram/nova:3")
+# or the SLNG execution layer (the route passes through verbatim):
+listen: { provider: slng, model: "slng/deepgram/nova:3-en" }   # slng.STT(model="slng/deepgram/nova:3-en")
 ```
 
 Watch the env names: the LiveKit ElevenLabs plugin reads `ELEVEN_API_KEY`, not `ELEVENLABS_API_KEY`. The emitted `.env.example` and compile report always list exactly what the project reads.
 
-Reason bindings need no provider key: `{ provider: openai, model: gpt-4o-mini }` emits `inference.LLM(model="openai/gpt-4o-mini")`, billed through LiveKit Cloud; `params` ride `extra_kwargs`. There is no custom-endpoint wildcard on LiveKit listen/speak: unknown vendors fail.
+A reason vendor with a row above binds its native plugin and its own key: `{ provider: openai, model: gpt-4o-mini }` emits `openai.LLM(...)` reading `OPENAI_API_KEY`, so a local `console` run needs no LiveKit Cloud credentials. Vendors without a row route through LiveKit Inference, and `{ provider: livekit, model: "openai/gpt-4o-mini" }` picks Inference deliberately — the model passes verbatim, billed through LiveKit Cloud, `params` ride `extra_kwargs`. There is no custom-endpoint wildcard on LiveKit listen/speak: unknown vendors fail.
 
 ## Managed targets
 

@@ -10,8 +10,9 @@ import (
 )
 
 // buildLiveKitData lowers the resolved IR + target into the template model.
-// listen/speak resolve through the provider catalogue (SLNG default, any
-// entry binds); reason lowers to LiveKit Inference (the role's wildcard row).
+// listen/speak/reason resolve through the provider catalogue (SLNG default,
+// any entry binds); a reason vendor without a native entry falls to the
+// LiveKit Inference wildcard row (C8/V19).
 func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// The driver's templates are Python; a node project would be silently
 	// wrong, so fail loud until node templates exist (C1).
@@ -22,17 +23,23 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		return livekitData{}, err
 	}
 	env := newEnvSet()
-	// LiveKit Cloud creds run the worker + Inference (reason/turn). SLNG and any
-	// native per-vendor plugin add their own api-key env as bindings are lowered.
+	// LiveKit Cloud creds run the worker against a real room (dev/start) and
+	// any Inference-routed role; console mode needs only the bound providers'
+	// keys (B5/B6). SLNG and any native per-vendor plugin add their own
+	// api-key env as bindings are lowered.
 	for _, e := range []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"} {
 		env.add(e)
+	}
+	turnVersion, err := livekitTurnVersion(tgt.Models.Turn)
+	if err != nil {
+		return livekitData{}, err
 	}
 	data := livekitData{
 		Project:     tgt.Name,
 		Version:     tgt.Version,
 		AgentName:   tgt.Name,
 		EntryClass:  pyName(agent.EntryAgent),
-		TurnVersion: "v1",
+		TurnVersion: turnVersion,
 		Pins:        tgt.Pins,
 	}
 
@@ -538,6 +545,25 @@ func livekitTTSService(binding ir.Binding, language string, env *envSet) (liveki
 
 func livekitLLMService(binding ir.Binding, env *envSet) (livekitService, error) {
 	return resolveLiveKitService(targetcap.Reason, binding, "", env)
+}
+
+// livekitTurnVersion maps the target's turn: binding to the
+// inference.TurnDetector version (V18, B5). turn-detector-mini runs fully
+// local — no LiveKit Cloud creds; an absent binding emits no version kwarg,
+// so the SDK auto-selects and falls back to the mini model with a warning
+// instead of raising (C5).
+func livekitTurnVersion(binding *ir.Binding) (string, error) {
+	if binding == nil || binding.Model == "" {
+		return "", nil
+	}
+	switch binding.Model {
+	case "turn-detector-mini":
+		return "v1-mini", nil
+	case "turn-detector":
+		return "v1", nil
+	default:
+		return "", fmt.Errorf("livekit turn model %q is not recognized; use turn-detector-mini (local) or turn-detector (LiveKit Cloud)", binding.Model)
+	}
 }
 
 // livekitReasonLLM resolves a reason profile plus its fallback chain (V4).

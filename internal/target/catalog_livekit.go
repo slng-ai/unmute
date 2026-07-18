@@ -20,11 +20,11 @@ var livekitCatalog = []Entry{
 		Import:  "from livekit.plugins import slng",
 		Call: &CallSpec{
 			Class: "slng.STT", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true, Form: FormSlngRoute},
+			Model:    FieldSpec{Arg: "model", Required: true},
 			Language: FieldSpec{Arg: "language"},
 			Params:   ParamsKwargs,
 		},
-		Notes: []string{"the plugin takes the bare vendor/model route; the slng/ prefix is stripped (driver-livekit C8)"},
+		Notes: []string{"the route passes to model= verbatim — the slng/ prefix names the SLNG-hosted route family and is part of the URL path (driver-livekit C8/V17, B4)"},
 	},
 	{
 		Framework: LiveKit, Role: Listen, Vendor: "deepgram",
@@ -136,12 +136,12 @@ var livekitCatalog = []Entry{
 		Import:  "from livekit.plugins import slng",
 		Call: &CallSpec{
 			Class: "slng.TTS", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true, Form: FormSlngRoute},
+			Model:    FieldSpec{Arg: "model", Required: true},
 			Voice:    FieldSpec{Arg: "voice"},
 			Language: FieldSpec{Arg: "language"},
 			Params:   ParamsKwargs,
 		},
-		Notes: []string{"the plugin takes the bare vendor/model route; the slng/ prefix is stripped (driver-livekit C8)"},
+		Notes: []string{"the route passes to model= verbatim — the slng/ prefix names the SLNG-hosted route family and is part of the URL path (driver-livekit C8/V17, B4)"},
 	},
 	{
 		Framework: LiveKit, Role: Speak, Vendor: "elevenlabs", Aliases: []string{"eleven_labs"},
@@ -269,9 +269,24 @@ var livekitCatalog = []Entry{
 	},
 
 	// --- reason ---------------------------------------------------------
-	// Native per-vendor LLM plugins where they exist (PR #10 restore); every
-	// other provider (openai, gemini, deepseek, kimi, ...) continues through
-	// the Inference wildcard below, which stays the default.
+	// Native per-vendor LLM plugins where they exist (PR #10 restore + openai,
+	// B6): an explicit vendor with a native entry binds it and its own key env
+	// (V19). Vendors without one (gemini, deepseek, kimi, ...) fall to the
+	// Inference wildcard below; provider: livekit is the deliberate Inference
+	// spelling (model verbatim, "openai/gpt-4o-mini" form).
+	{
+		Framework: LiveKit, Role: Reason, Vendor: "openai",
+		Verified: "2026-07-18", Docs: "https://docs.livekit.io/agents/models/llm/openai/",
+		Install: InstallSpec{Extra: "openai"},
+		Import:  "from livekit.plugins import openai",
+		Call: &CallSpec{
+			Class: "openai.LLM", APIKeyArg: "api_key", APIKeyEnv: "OPENAI_API_KEY",
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Endpoint: FieldSpec{Arg: "base_url"},
+			Params:   ParamsKwargs,
+		},
+		Notes: []string{"native plugin, not LiveKit Inference — a console run needs OPENAI_API_KEY only (B6); route through Inference deliberately with provider: livekit"},
+	},
 	{
 		Framework: LiveKit, Role: Reason, Vendor: "anthropic",
 		Verified: "2026-07-17", Docs: "https://docs.livekit.io/agents/models/llm/anthropic/",
@@ -369,6 +384,6 @@ var livekitCatalog = []Entry{
 			Model:  FieldSpec{Arg: "model", Required: true, Form: FormProviderSlashModel},
 			Params: ParamsExtraKwargs,
 		},
-		Notes: []string{"LiveKit Inference: managed models, billed through LiveKit Cloud, no provider key"},
+		Notes: []string{"LiveKit Inference: managed models, billed through LiveKit Cloud, no provider key — needs LIVEKIT_API_KEY/LIVEKIT_API_SECRET even in console mode; provider: livekit passes the model verbatim (V19)"},
 	},
 }

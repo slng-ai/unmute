@@ -35,8 +35,7 @@ type ModelForm string
 
 const (
 	FormVerbatim           ModelForm = ""                     // forwarded as written
-	FormSlngRoute          ModelForm = "slng_route"           // strip the slng/ prefix (the plugin takes the bare vendor/model route)
-	FormProviderSlashModel ModelForm = "provider_slash_model" // join provider + "/" + model (LiveKit Inference)
+	FormProviderSlashModel ModelForm = "provider_slash_model" // join provider + "/" + model (LiveKit Inference); provider "livekit" passes verbatim (V19)
 )
 
 // ParamsStyle says where the binding's model/voice/params land in the call.

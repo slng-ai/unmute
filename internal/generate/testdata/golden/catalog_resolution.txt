@@ -70,7 +70,7 @@ env:      SARVAM_API_KEY
 === livekit listen slng ===
 binding:  provider=slng model=slng/deepgram/nova:3
 class:    slng.STT
-args:     api_key=os.environ.get("SLNG_API_KEY"), model="deepgram/nova:3", language="es-MX", sample_rate=24000
+args:     api_key=os.environ.get("SLNG_API_KEY"), model="slng/deepgram/nova:3", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import slng
 install:  livekit-plugins-slng>=1.6.1
 env:      SLNG_API_KEY
@@ -137,6 +137,14 @@ args:     api_key=os.environ.get("MISTRAL_API_KEY"), model="model-1", sample_rat
 import:   from livekit.plugins import mistralai
 install:  livekit-agents[mistralai]
 env:      MISTRAL_API_KEY
+
+=== livekit reason openai ===
+binding:  provider=openai model=model-1
+class:    openai.LLM
+args:     api_key=os.environ.get("OPENAI_API_KEY"), model="model-1", sample_rate=24000
+import:   from livekit.plugins import openai
+install:  livekit-agents[openai]
+env:      OPENAI_API_KEY
 
 === livekit reason openrouter ===
 binding:  provider=openrouter model=model-1
@@ -221,7 +229,7 @@ env:      SARVAM_API_KEY
 === livekit speak slng ===
 binding:  provider=slng model=slng/deepgram/aura:2-en voice=voice-1
 class:    slng.TTS
-args:     api_key=os.environ.get("SLNG_API_KEY"), voice="voice-1", model="deepgram/aura:2-en", language="es-MX", sample_rate=24000
+args:     api_key=os.environ.get("SLNG_API_KEY"), voice="voice-1", model="slng/deepgram/aura:2-en", language="es-MX", sample_rate=24000
 import:   from livekit.plugins import slng
 install:  livekit-plugins-slng>=1.6.1
 env:      SLNG_API_KEY

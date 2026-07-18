@@ -181,7 +181,6 @@ type pipecatData struct {
 
 	// Import needs: keep bot.py free of unused imports (only what a given spec
 	// actually exercises), so the emitted pipeline reads clean.
-	NeedsAsyncio        bool // _end_after max-duration timer
 	NeedsInspect        bool // any local tool (isawaitable on the user handler, V13)
 	NeedsHTTPX          bool // any webhook tool (agent @tool or flows handler)
 	NeedsFunctionCalls  bool // any @tool/transfer/delegate (FunctionCallParams)

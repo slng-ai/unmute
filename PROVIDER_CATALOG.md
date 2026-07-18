@@ -73,7 +73,7 @@ Same binding vocabulary, per-framework facts:
 |---|---|---|
 | install | `pipecat-slng>=0.4.0` (standalone package) | `livekit-plugins-slng>=1.6.1` (standalone package) |
 | import | `from pipecat_slng import SlngSTTService, SlngTTSService` | `from livekit.plugins import slng` |
-| model form | verbatim `slng/<vendor>/<model>` | `slng_route` (prefix stripped, bare `deepgram/nova:3`) |
+| model form | verbatim `slng/<vendor>/<model>` | verbatim `slng/<vendor>/<model>` (the prefix is part of the API path; driver-livekit B4) |
 | call | `SlngTTSService(api_key=..., voice=..., model=...)`, flat kwargs | `slng.TTS(api_key=..., voice=..., model=...)`, flat kwargs |
 | endpoint_env | no slot: hard error | no slot: hard error |
 | env | `SLNG_API_KEY` | `SLNG_API_KEY` |

@@ -2,8 +2,9 @@
 # (provider: slng, slng/... routes) — the scaffold default, so the emitted
 # project uses slng.STT / slng.TTS from livekit-plugins-slng. Any catalogued
 # provider binds instead with a one-line change (driver-livekit C8 as amended;
-# docs/user/reference/providers.md). reason lowers to LiveKit Inference; turn
-# to the LiveKit turn model. Model names, voices, and params are forwarded to
+# docs/user/reference/providers.md). reason binds the native openai plugin
+# (OPENAI_API_KEY, no LiveKit Cloud creds for console runs); turn-detector-mini
+# runs the local turn model. Model names, voices, and params are forwarded to
 # the provider as-is (D10); secrets and URLs are env var names only.
 
 targets:
