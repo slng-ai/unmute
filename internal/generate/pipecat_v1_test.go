@@ -280,3 +280,38 @@ func targetByProvider(t *testing.T, agent *ir.Agent, provider ir.Provider) ir.Ta
 	t.Fatalf("no target for provider %q", provider)
 	return ir.Target{}
 }
+
+// TestV14_ActivationGatedOnPipelineStart (driver-pipecat V14, B8): the entry
+// agent's activation must not race main's StartFrame — frames pushed into
+// BusBridge before it are dropped (greeting lost, tools never registered).
+// The generated bot gates on_client_connected on an asyncio.Event set by
+// main's on_pipeline_started handler.
+func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"pipeline_started = asyncio.Event()",
+		`@main.event_handler("on_pipeline_started")`,
+		"pipeline_started.set()",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing %q", want)
+		}
+	}
+	gate := strings.Index(bot, "await pipeline_started.wait()")
+	activate := strings.Index(bot, "await main.activate_worker(")
+	if gate == -1 || activate == -1 || gate > activate {
+		t.Errorf("activation must await pipeline_started before activate_worker (gate=%d, activate=%d)", gate, activate)
+	}
+}

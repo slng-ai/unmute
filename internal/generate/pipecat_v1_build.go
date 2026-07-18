@@ -81,7 +81,8 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 // setImportNeeds inspects the built model so bot.py imports only what this spec
 // exercises (no dead imports in the emitted pipeline).
 func setImportNeeds(data *pipecatData) {
-	data.NeedsAsyncio = data.MaxDurationSecs > 0
+	// asyncio is unconditional: every bot gates entry-agent activation on an
+	// asyncio.Event (B8/V14), so it is not an import-need flag anymore.
 	data.NeedsTurnStrategies = data.Interrupt != nil && data.Interrupt.MinWords > 0
 	data.NeedsAppendFrame = data.Inactivity != nil
 	data.NeedsEndFrame = data.MaxDurationSecs > 0
