@@ -1,17 +1,13 @@
-# One LiveKit instance. listen routes through the SLNG Execution Layer
-# (provider: slng, slng/... route) and turn runs the local turn model. The
-# speak and reason models come from agent.yaml as-is (SLNG + OpenAI), so this
-# instance carries no model overrides — only the per-target listen/turn plumbing
-# and the framework pin. Any catalogued provider binds instead with a one-line
-# change (driver-livekit C8 as amended; docs/user/reference/providers.md).
-# Model names, voices, and params are forwarded to the provider as-is (D10);
-# secrets and URLs are env var names only. Instance named after the provider.
+# One LiveKit instance, named after the provider. All models, including the
+# STT (models.listen) and turn detector (models.turn), are defined once in
+# agent.yaml; this file carries only the infrastructure. Any catalogued
+# provider binds instead with a one-line change in agent.yaml (driver-livekit
+# C8 as amended; docs/user/reference/providers.md). Model names, voices, and
+# params are forwarded to the provider as-is (D10); secrets and URLs are env
+# var names only.
 
 targets:
   livekit:
     provider: livekit
     version: "1.5.2"            # framework pin; the driver checks its range (>=1.5, <2.0)
     sdk_language: python
-    models:                     # listen and turn are the per-target role slots
-      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
-      turn:   { provider: livekit, model: turn-detector-mini }

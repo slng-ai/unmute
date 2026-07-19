@@ -1,20 +1,19 @@
 # One instance per primary target. The same portable source compiles to all five.
 # Each instance carries infrastructure only (provider, version, transport,
-# destinations) plus a `models:` override map for the entries this target
-# cannot run as defined in agent.yaml (N15). listen and turn are role slots set
-# here because they are per-target plumbing, not per-agent identity. Overrides
-# are forwarded to the provider as-is and never validated (SCHEMA.md, D10);
-# secrets and URLs are env var names only. Instances are named after the
-# provider: what you test is what you deploy.
+# destinations) plus a `models:` override map, keyed by model name, for the
+# entries this target cannot run as defined in agent.yaml (N15). An override
+# replaces the whole entry; overrides are forwarded to the provider as-is and
+# never validated (SCHEMA.md, D10); secrets and URLs are env var names only.
+# Instances are named after the provider: what you test is what you deploy.
 
 targets:
   livekit:
     provider: livekit
     version: "1.5.2"            # framework pin; the driver checks its range (>=1.5, <2.0)
     sdk_language: python
-    models:                     # all four roles are open on LiveKit
-      listen: { provider: deepgram, model: nova-3 }
-      turn:   { provider: livekit, model: turn-detector-mini, semantic_endpointing: preferred }
+    models:
+      # override the vad entry: LiveKit runs its own turn model, not Silero
+      vad: { provider: livekit, model: turn-detector-mini, semantic_endpointing: preferred }
       front_desk: { provider: elevenlabs, voice: cgSgspJ2msm6clMCkdW9 }
       specialist: { provider: elevenlabs, voice: EXAVITQu4vr4xnSDxMaL }
     destinations:
@@ -24,9 +23,8 @@ targets:
     provider: pipecat
     version: "1.5.0"
     transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat
-    models:                     # speak/reason use the agent.yaml defaults (SLNG + OpenAI)
-      listen: { provider: deepgram, model: nova-3 }
-      turn:   { provider: local, model: silero, semantic_endpointing: preferred }  # on-device VAD; advisory
+    # no model overrides: the agent.yaml defaults (SLNG + OpenAI + deepgram STT
+    # + local silero VAD) run as defined
     destinations:
       billing_line: "+14155550123"
 
@@ -34,9 +32,8 @@ targets:
     provider: vapi
     carrier: twilio
     models:
-      # turn is integrated on Vapi: no turn binding. Endpointing intent comes
-      # from the conversation block, not from a bound model.
-      listen: { provider: deepgram, model: nova-3 }
+      # turn is integrated on Vapi; the vad entry is unused there. Endpointing
+      # intent comes from the conversation block, not from a bound model.
       front_desk: { provider: elevenlabs, voice: cgSgspJ2msm6clMCkdW9 }
       specialist: { provider: elevenlabs, voice: EXAVITQu4vr4xnSDxMaL }
     destinations:
@@ -45,9 +42,9 @@ targets:
   elevenlabs:
     provider: elevenlabs
     models:
-      # listen and turn are integrated on ElevenLabs. The listen override is
-      # settings-only; it can never name an outside STT model.
-      listen: { params: { user_input_audio_format: ulaw_8000 } }
+      # listen and turn are integrated on ElevenLabs: the transcriber override
+      # is settings-only and can never name an outside STT model.
+      transcriber: { params: { user_input_audio_format: ulaw_8000 } }
       front_desk: { voice: cgSgspJ2msm6clMCkdW9 }   # ElevenLabs voices only
       specialist: { voice: EXAVITQu4vr4xnSDxMaL }
       fast_reasoning:    { model: gemini-2.5-flash }    # ElevenLabs supported list
@@ -62,8 +59,8 @@ targets:
                                 # against the carrier
     models:
       # turn is integrated into listen on Deepgram: turn thresholds ride the
-      # listen override's params, because that is where Deepgram puts them.
-      listen: { model: flux, params: { eot_threshold: 0.7 } }
+      # transcriber override's params, because that is where Deepgram puts them.
+      transcriber: { model: flux, params: { eot_threshold: 0.7 } }
       front_desk: { model: aura-2-thalia-en }   # Deepgram voices, or a fixed third-party list
       specialist: { model: aura-2-orion-en }
     destinations:

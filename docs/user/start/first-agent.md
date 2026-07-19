@@ -30,16 +30,24 @@ language: en
 entry_agent: assistant
 
 models:
-  assistant_model:
-    description: Fast reasoning for general support
-    provider: openai
-    model: gpt-4o-mini
-    temperature: 0.4
-  assistant_voice:
-    description: Warm and concise
-    provider: slng
-    model: "slng/deepgram/aura:2-en"
-    voice: "aura-2-thalia-en"
+  think:
+    assistant_model:
+      description: Fast reasoning for general support
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.4
+  speak:
+    assistant_voice:
+      description: Warm and concise
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector: { provider: livekit, model: turn-detector-mini }
 
 agents:
   assistant:
@@ -65,16 +73,16 @@ capacity:
 
 Read this file from top to bottom as a behavior graph:
 
-1. `models` defines each model once, concretely — `assistant_model` (a think model) and `assistant_voice` (a speak model, carrying a `voice`). Their kind follows from where the agent references them.
-2. `agents` assigns those models and an instruction file to the entry agent.
+1. `models` defines each model once, under its kind section: `think`, `speak`, `listen`, and `turn`. The sole `listen` and `turn` entries select themselves; add alternates and swap with a top-level `listen: <name>`.
+2. `agents` assigns the think and speak models and an instruction file to the entry agent.
 3. `conversation` and `channels` describe what the caller experiences.
 4. `capacity` declares the expected concurrency for a code target.
 
 ## Add the LiveKit target
 
-Use `targets.yaml` to name the platform and its per-target plumbing. The model
-definitions are already in `agent.yaml`; a target only carries its `listen`/`turn`
-role slots and any overrides for models it cannot run as defined.
+Use `targets.yaml` to name the platform. The model definitions are already in
+`agent.yaml`; a target carries only its infrastructure and any overrides, by
+name, for models it cannot run as defined.
 
 ```yaml
 targets:
@@ -82,13 +90,10 @@ targets:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
-    models:
-      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
-      turn:   { provider: livekit, model: turn-detector-mini }
 ```
 
-The speak and think models come straight from `agent.yaml`, so this target needs
-no overrides. Changing where a model runs doesn't change the agent's behavior or
+Every model comes straight from `agent.yaml`, so this target needs no
+overrides. Changing where a model runs doesn't change the agent's behavior or
 prompt.
 
 ## Keep the boundary clear
@@ -100,8 +105,8 @@ the agent portable.
 |---|---|
 | What does the caller experience? | `agent.yaml` |
 | Which agents, tasks, and tools exist? | `agent.yaml` |
-| Which models (provider + model id) do they use? | `agent.yaml` |
-| Which platform, listen/turn plumbing, and per-target overrides? | `targets.yaml` |
+| Which models (provider + model id) exist, and which are selected? | `agent.yaml` |
+| Which platform, and which per-target model overrides? | `targets.yaml` |
 | Which framework version and plugin pins apply? | `targets.yaml` |
 | Where do secrets go? | Environment variables, never YAML values |
 

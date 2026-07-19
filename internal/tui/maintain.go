@@ -262,7 +262,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		}
 	}
 
-	for profile, model := range pkg.Agent.Models {
+	for profile, model := range pkg.Agent.Models.Think {
 		for _, fallback := range model.Fallback {
 			def, _ := effectiveModelDef(pkg, tgt, fallback)
 			data.Fallbacks = append(data.Fallbacks, scaffold.ModelFallback{Name: fallback, Profile: profile, Binding: scaffoldBinding(def)})
@@ -297,27 +297,43 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 }
 
 // effectiveModelDef resolves a model name to its per-target definition (N15): a
-// target override wins, else the agent.yaml definition. "listen"/"turn" resolve
-// against the target override map or the top-level agent blocks.
+// target override wins, else the agent.yaml section entry. The pseudo names
+// "listen"/"turn" resolve the package's role selection (pointer or sole entry).
 func effectiveModelDef(pkg *packagespec.Package, tgt packagespec.Target, name string) (packagespec.ModelDef, bool) {
+	switch name {
+	case "listen":
+		name = selectedRoleName(pkg.Agent.Models.Listen, pkg.Agent.Listen)
+	case "turn":
+		name = selectedRoleName(pkg.Agent.Models.Turn, pkg.Agent.Turn)
+	}
+	if name == "" {
+		return packagespec.ModelDef{}, false
+	}
 	if def, ok := tgt.Models[name]; ok {
 		return def, true
 	}
-	switch name {
-	case "listen":
-		if pkg.Agent.Listen != nil {
-			return *pkg.Agent.Listen, true
-		}
-	case "turn":
-		if pkg.Agent.Turn != nil {
-			return *pkg.Agent.Turn, true
-		}
-	default:
-		if def, ok := pkg.Agent.Models[name]; ok {
+	for _, section := range []map[string]packagespec.ModelDef{
+		pkg.Agent.Models.Think, pkg.Agent.Models.Speak, pkg.Agent.Models.Listen, pkg.Agent.Models.Turn,
+	} {
+		if def, ok := section[name]; ok {
 			return def, true
 		}
 	}
 	return packagespec.ModelDef{}, false
+}
+
+// selectedRoleName mirrors ir.Build's selection rule: pointer wins, else the
+// sole entry, else nothing (ambiguity is Build's error to raise, not ours).
+func selectedRoleName(section map[string]packagespec.ModelDef, pointer string) string {
+	if pointer != "" {
+		return pointer
+	}
+	if len(section) == 1 {
+		for name := range section {
+			return name
+		}
+	}
+	return ""
 }
 
 func scaffoldBinding(def packagespec.ModelDef) scaffold.Binding {

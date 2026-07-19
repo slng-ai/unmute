@@ -4,23 +4,20 @@ The agent works in `dev`. This page covers the last mile: running one spec again
 
 ## One spec, many targets
 
-`targets.yaml` can hold several target instances, each named after its provider. They all compile from the same `agent.yaml` — the model definitions live there; each instance only carries its infrastructure, its `listen`/`turn` role slots, and any overrides for models that platform cannot run as defined. One instance per platform you are evaluating:
+`targets.yaml` can hold several target instances, each named after its provider. They all compile from the same `agent.yaml` — the model definitions live there; each instance only carries its infrastructure and any by-name overrides for models that platform cannot run as defined. One instance per platform you are evaluating:
 
 ```yaml
 targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    models:
-      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
-      turn:   { provider: local, model: silero }
   livekit:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
     models:
-      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
-      turn:   { provider: livekit, model: turn-detector-mini }
+      # LiveKit swaps the VAD entry for its own turn model
+      vad: { provider: livekit, model: turn-detector-mini }
 ```
 
 Pick one with `--target`, or compile every declared target by leaving it off:

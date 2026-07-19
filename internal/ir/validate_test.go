@@ -344,7 +344,9 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.ForwardedBindings) != 27 {
+	// 5 targets x (listen + turn + 2 speak + 2 reason): the package-wide turn
+	// preference now reaches integrated-turn targets too (warned, not dropped).
+	if len(report.ForwardedBindings) != 30 {
 		t.Fatalf("forwarded bindings = %d", len(report.ForwardedBindings))
 	}
 	foundTemperature := false

@@ -1,31 +1,34 @@
 # Reference: models
 
-`models` is one unified map where every model the package uses is defined once, fully and concretely. There is no separate `voices` block. A model's kind follows from where it is referenced: an agent's `voice:` names a **speak model**, an agent's or task's `model:` (or a transfer's `summarizer:`, or a fallback list) names a **think model**. Each entry carries `provider` + `model` — the same pairing the old target bindings used — plus the settings for its kind. A target may override an entry for a provider it cannot run (see [targets.yaml](targets-yaml.md)); the split is explained in [profiles and bindings](../concepts/profiles-and-bindings.md).
+`models` is the central map, grouped into four kind sections: `think` (LLM), `speak` (TTS), `listen` (STT), `turn` (VAD/end-of-turn). Every model the package can use is defined here once, fully and concretely; there is no separate `voices` block. A model's kind is its section. Each entry carries `provider` + `model` — the same pairing the old target bindings used — plus the settings for its kind. A target may override an entry for a provider it cannot run (see [targets.yaml](targets-yaml.md)); the split is explained in [models and overrides](../concepts/profiles-and-bindings.md).
 
 ```yaml
 models:
-  fast_reasoning:                 # think model (referenced by an agent's model:)
-    description: cheap and quick, for greeting and routing
-    provider: openai
-    model: gpt-4o-mini
-    temperature: 0.4
-  careful_reasoning:
-    description: slower and careful, for billing work
-    provider: openai
-    model: gpt-4o
-  front_desk:                     # speak model (referenced by an agent's voice:)
-    description: "warm, concise"
-    provider: slng
-    model: "slng/deepgram/aura:2-en"
-    voice: "aura-2-thalia-en"
-  specialist:
-    description: "slower, more deliberate"
-    provider: slng
-    model: "slng/deepgram/aura:2-en"
-    voice: "aura-2-orion-en"
+  think:
+    fast_reasoning:
+      description: cheap and quick, for greeting and routing
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.4
+    careful_reasoning:
+      description: slower and careful, for billing work
+      provider: openai
+      model: gpt-4o
+  speak:
+    front_desk:
+      description: "warm, concise"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber: { provider: deepgram, model: nova-3 }
+  turn:
+    vad: { provider: local, model: silero }
 ```
 
-An entry that nothing references is an error (a declaration never silently does nothing); a name referenced but not defined here is an error naming the reference. There is no `tier` field: Unmute never picks a model for you. `placement` is not written here in the common case — it is derived from `provider` (see [listen, turn, and placement](pipeline.md)).
+References must land in the right section: an agent's `voice:` names a `speak` entry; an agent's or task's `model:`, a `summarizer:`, and a `fallback` list name `think` entries; the top-level `listen:`/`turn:` selectors name entries of their sections (see [listen, turn, and placement](pipeline.md)). A name referenced but not defined is an error naming the reference; a reference into the wrong section is an error naming both kinds; the same name in two sections is an error.
+
+The map is a **palette**: entries that nothing references are legal, swappable alternates. Only referenced or selected entries are compiled and forwarded; the rest are inert, so you can keep test alternates maintained in the file. There is no `tier` field: Unmute never picks a model for you. `placement` is not written here in the common case — it is derived from `provider`.
 
 ## Fields on every model
 

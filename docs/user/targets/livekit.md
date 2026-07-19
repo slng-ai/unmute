@@ -26,31 +26,37 @@ tasks, controls, or conversation outcomes.
 
 ## Define models and voices
 
-Define every model concretely in `agent.yaml`; a LiveKit target then carries the
-per-target `listen`/`turn` plumbing (and any overrides).
+Define every model concretely in `agent.yaml`'s kind sections; a LiveKit target
+then carries infrastructure and any by-name overrides.
 
 ```yaml
 # agent.yaml
 models:
-  primary_reasoning:
-    description: Main conversation model
-    provider: openai
-    model: gpt-4o-mini
-    temperature: 0.4
-    fallback: [backup_reasoning]
-  backup_reasoning:
-    description: Backup conversation model
-    provider: openai
-    model: gpt-4o
-  front_desk:
-    description: Warm and concise
-    provider: elevenlabs
-    voice: cgSgspJ2msm6clMCkdW9
-  specialist:
-    description: Calm and deliberate
-    provider: cartesia
-    model: sonic-3
-    voice: f786b574-daa5-4673-aa0c-cbe3e8534c02
+  think:
+    primary_reasoning:
+      description: Main conversation model
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.4
+      fallback: [backup_reasoning]
+    backup_reasoning:
+      description: Backup conversation model
+      provider: openai
+      model: gpt-4o
+  speak:
+    front_desk:
+      description: Warm and concise
+      provider: elevenlabs
+      voice: cgSgspJ2msm6clMCkdW9
+    specialist:
+      description: Calm and deliberate
+      provider: cartesia
+      model: sonic-3
+      voice: f786b574-daa5-4673-aa0c-cbe3e8534c02
+  listen:
+    transcriber: { provider: slng, model: "slng/deepgram/nova:3-en" }
+  turn:
+    detector: { provider: livekit, model: turn-detector-mini }
 
 agents:
   assistant:
@@ -71,14 +77,12 @@ targets:
     sdk_language: python
     pins:
       livekit-plugins-slng: "1.7.0"
-    models:
-      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
-      turn:   { provider: livekit, model: turn-detector-mini }
 ```
 
-The speak and think models come straight from `agent.yaml`; add an override under
-this instance's `models:` only if LiveKit needs a different one. LiveKit accepts
-the following provider choices through its provider catalogue.
+Every model comes straight from `agent.yaml`; add an override under this
+instance's `models:` (keyed by model name) only if LiveKit needs a different
+one. LiveKit accepts the following provider choices through its provider
+catalogue.
 
 | Role | `provider` | Required environment |
 |---|---|---|
@@ -213,10 +217,11 @@ result. A delegate control makes that task available to an agent.
 ```yaml
 # agent.yaml
 models:
-  careful_reasoning:
-    description: Careful account verification
-    provider: openai
-    model: gpt-4o
+  think:
+    careful_reasoning:
+      description: Careful account verification
+      provider: openai
+      model: gpt-4o
 
 variables:
   customer_id: { type: string }
@@ -303,10 +308,11 @@ tool calls, and carry all or a subset of shared variables.
 
 ```yaml
 models:
-  summary_model:
-    description: Compact handoff summaries
-    provider: openai
-    model: gpt-4o-mini
+  think:
+    summary_model:
+      description: Compact handoff summaries
+      provider: openai
+      model: gpt-4o-mini
 
 controls:
   to_specialist:

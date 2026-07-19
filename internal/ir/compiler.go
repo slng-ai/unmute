@@ -3,12 +3,15 @@ package ir
 // Agent is the resolved v1 package. References remain names so the graph is
 // acyclic and schema derivation does not recurse through agent handoffs.
 type Agent struct {
-	Version      int                  `json:"version" yaml:"version"`
-	Language     string               `json:"language" yaml:"language"`
-	EntryAgent   string               `json:"entry_agent" yaml:"entry_agent"`
-	Models       map[string]ModelDef  `json:"models" yaml:"models"`
-	Listen       *ModelDef            `json:"listen,omitempty" yaml:"listen,omitempty"`
-	Turn         *ModelDef            `json:"turn,omitempty" yaml:"turn,omitempty"`
+	Version    int    `json:"version" yaml:"version"`
+	Language   string `json:"language" yaml:"language"`
+	EntryAgent string `json:"entry_agent" yaml:"entry_agent"`
+	// Models flattens the four authoring sections into one name-keyed map; each
+	// entry's Kind records its section (names are one namespace, N15).
+	Models map[string]ModelDef `json:"models" yaml:"models"`
+	// Listen/Turn are the resolved selection names into Models ("" = none).
+	Listen       string               `json:"listen,omitempty" yaml:"listen,omitempty"`
+	Turn         string               `json:"turn,omitempty" yaml:"turn,omitempty"`
 	Variables    map[string]Variable  `json:"variables,omitempty" yaml:"variables,omitempty"`
 	Agents       map[string]AgentDef  `json:"agents" yaml:"agents"`
 	Tasks        map[string]Task      `json:"tasks,omitempty" yaml:"tasks,omitempty"`

@@ -123,8 +123,8 @@ func TestWrite_targetChoices(t *testing.T) {
 	}{
 		{
 			target:      "livekit",
-			targetsWant: []string{"livekit:", "provider: livekit", "sdk_language: python", "provider: slng"},
-			agentWant:   []string{`voice: "aura-2-thalia-en"`, `params: {"speed":1}`},
+			targetsWant: []string{"livekit:", "provider: livekit", "sdk_language: python"},
+			agentWant:   []string{`voice: "aura-2-thalia-en"`, `params: {"speed":1}`, "provider: slng", "listen:", "turn:"},
 			env:         []string{"LIVEKIT_API_KEY=", "LIVEKIT_API_SECRET=", "LIVEKIT_URL=", "SLNG_API_KEY="},
 		},
 		{

@@ -14,20 +14,28 @@ version: 1
 language: en
 entry_agent: assistant
 
-# Every model is defined here once, concretely (N15). A model's kind follows
-# from where it is referenced: an agent's `model:` names a think model, its
-# `voice:` a speak model. targets.yaml carries only per-target listen/turn
-# plumbing and any overrides.
+# Every model is defined here once, in the central map grouped by kind (N15):
+# think (LLM), speak (TTS), listen (STT), turn (VAD). Agents reference think
+# and speak entries by name; the sole listen/turn entries select themselves.
+# Add alternates alongside and swap with a top-level `listen: <name>` pointer.
 models:
-  assistant_model:
-    description: default reasoning model
-    provider: openai
-    model: "gpt-4.1-mini"
-  assistant_voice:
-    description: default voice
-    provider: slng
-    model: "slng/deepgram/aura:2-en"
-    voice: "aura-2-thalia-en"
+  think:
+    assistant_model:
+      description: default reasoning model
+      provider: openai
+      model: "gpt-4.1-mini"
+  speak:
+    assistant_voice:
+      description: default voice
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    vad: { provider: local, model: silero }
 
 agents:
   assistant:
@@ -53,19 +61,14 @@ You are a helpful voice assistant. This is a phone call, so keep every answer to
 
 === targets.yaml ===
 # One selected target, named after the provider (N15): what you test is what
-# you deploy. Model definitions live in agent.yaml; this file carries the
-# infrastructure plus the per-target listen/turn role slots. Add more instances
-# later if this package needs a second environment. Model names, voice ids, and
-# params are forwarded to the provider as-is and never validated. Secrets and
-# URLs are env var names only.
+# you deploy. All models, including STT and VAD, are defined in agent.yaml;
+# this file carries the infrastructure plus an optional `models:` map that
+# overrides an entry, by name, for a target that cannot run it as defined.
+# Add more instances later if this package needs a second environment.
+# Secrets and URLs are env var names only.
 targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
     transport: daily-sip
-    models:
-      # listen and turn are per-target role slots (integrated on ElevenLabs, so
-      # omitted there). Everything else is defined in agent.yaml.
-      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
-      turn:   { provider: local, model: silero }
 

@@ -14,24 +14,26 @@ Add a think model, a speak model, the second agent, and the transfer control:
 
 ```yaml
 models:
-  fast_reasoning:
-    description: cheap and quick, for greeting and routing
-    provider: openai
-    model: gpt-4o-mini
-  careful_reasoning:                 # new: billing gets a stronger model
-    description: slower and careful, for billing work
-    provider: openai
-    model: gpt-4o
-  front_desk:
-    description: "warm, concise"
-    provider: slng
-    model: "slng/deepgram/aura:2-en"
-    voice: "aura-2-thalia-en"
-  specialist:                        # new
-    description: "slower, more deliberate"
-    provider: slng
-    model: "slng/deepgram/aura:2-en"
-    voice: "aura-2-orion-en"
+  think:
+    fast_reasoning:
+      description: cheap and quick, for greeting and routing
+      provider: openai
+      model: gpt-4o-mini
+    careful_reasoning:               # new: billing gets a stronger model
+      description: slower and careful, for billing work
+      provider: openai
+      model: gpt-4o
+  speak:
+    front_desk:
+      description: "warm, concise"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+    specialist:                      # new
+      description: "slower, more deliberate"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-orion-en"
 
 agents:
   intake:

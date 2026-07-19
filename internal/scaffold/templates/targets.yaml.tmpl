@@ -1,9 +1,9 @@
 # One selected target, named after the provider (N15): what you test is what
-# you deploy. Model definitions live in agent.yaml; this file carries the
-# infrastructure plus the per-target listen/turn role slots. Add more instances
-# later if this package needs a second environment. Model names, voice ids, and
-# params are forwarded to the provider as-is and never validated. Secrets and
-# URLs are env var names only.
+# you deploy. All models, including STT and VAD, are defined in agent.yaml;
+# this file carries the infrastructure plus an optional `models:` map that
+# overrides an entry, by name, for a target that cannot run it as defined.
+# Add more instances later if this package needs a second environment.
+# Secrets and URLs are env var names only.
 targets:
   [[.Target]]:
     provider: [[.Target]]
@@ -14,12 +14,6 @@ targets:
 [[end]][[if .Pins]]    pins: [[.Pins]]
 [[end]][[if .Transport]]    transport: [[.Transport]]
 [[end]][[if .Carrier]]    carrier: [[.Carrier]]
-[[end]][[if .Listen.Provider]]    models:
-      # listen and turn are per-target role slots (integrated on ElevenLabs, so
-      # omitted there). Everything else is defined in agent.yaml.
-      listen: { provider: [[.Listen.Provider]], model: [[quote .Listen.Model]][[if .Listen.Params]], params: [[.Listen.Params]][[end]] }
-[[if eq .Target "pipecat"]]      turn:   { provider: local, model: silero }
-[[else if eq .Target "livekit"]]      turn:   { provider: livekit, model: turn-detector-mini }
-[[end]][[end]][[if .HumanTransfers]]    destinations:
+[[end]][[if .HumanTransfers]]    destinations:
 [[range .Destinations]]      [[.Destination]]: [[quote .Value]]
 [[end]][[end -]]

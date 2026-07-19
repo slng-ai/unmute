@@ -29,11 +29,18 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		return nil, missing(pkg, "agent.yaml", "entry_agent", pkg.Agent.EntryAgent)
 	}
 
-	kinds, err := resolveModelKinds(pkg)
+	models, err := buildModels(pkg)
 	if err != nil {
 		return nil, err
 	}
-	models, err := buildModels(pkg, kinds)
+	if err := checkModelReferences(pkg, models); err != nil {
+		return nil, err
+	}
+	listenName, err := selectRoleModel(pkg, pkg.Agent.Models.Listen, pkg.Agent.Listen, "listen")
+	if err != nil {
+		return nil, err
+	}
+	turnName, err := selectRoleModel(pkg, pkg.Agent.Models.Turn, pkg.Agent.Turn, "turn")
 	if err != nil {
 		return nil, err
 	}
@@ -46,6 +53,8 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		Language:     language,
 		EntryAgent:   pkg.Agent.EntryAgent,
 		Models:       models,
+		Listen:       listenName,
+		Turn:         turnName,
 		Variables:    make(map[string]Variable, len(pkg.Agent.Variables)),
 		Agents:       make(map[string]AgentDef, len(pkg.Agent.Agents)),
 		Tasks:        make(map[string]Task, len(pkg.Agent.Tasks)),
@@ -55,14 +64,6 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		Conversation: buildConversation(pkg.Agent.Conversation),
 		Channels:     make(map[string]Channel, len(pkg.Agent.Channels)),
 		Targets:      make(map[string]Target, len(pkg.Targets)),
-	}
-	if pkg.Agent.Listen != nil {
-		def := convertModelDef(*pkg.Agent.Listen, KindListen, nil)
-		out.Listen = &def
-	}
-	if pkg.Agent.Turn != nil {
-		def := convertModelDef(*pkg.Agent.Turn, KindTurn, nil)
-		out.Turn = &def
 	}
 	for name, variable := range pkg.Agent.Variables {
 		out.Variables[name] = Variable{Type: PrimitiveType(variable.Type), Default: variable.Default, Source: VariableSource(variable.Source)}
@@ -149,8 +150,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		}
 	}
 
+	used := usedModelNames(pkg, models)
 	for _, name := range sortedKeys(pkg.Targets) {
-		target, err := buildTarget(pkg, name, pkg.Targets[name], out.Models, out.Listen, out.Turn)
+		target, err := buildTarget(pkg, name, pkg.Targets[name], out, used)
 		if err != nil {
 			return nil, err
 		}
@@ -167,11 +169,15 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 }
 
 func checkNames(pkg *packagespec.Package) error {
+	modelNames := slices.Concat(
+		sortedKeys(pkg.Agent.Models.Think), sortedKeys(pkg.Agent.Models.Speak),
+		sortedKeys(pkg.Agent.Models.Listen), sortedKeys(pkg.Agent.Models.Turn),
+	)
 	sets := []struct {
 		kind  string
 		names []string
 	}{
-		{"model", sortedKeys(pkg.Agent.Models)},
+		{"model", modelNames},
 		{"variable", sortedKeys(pkg.Agent.Variables)}, {"agent", sortedKeys(pkg.Agent.Agents)},
 		{"task", sortedKeys(pkg.Agent.Tasks)}, {"task group", sortedKeys(pkg.Agent.TaskGroups)},
 		{"control", sortedKeys(pkg.Agent.Controls)}, {"tool", sortedKeys(pkg.Tools)},
@@ -198,79 +204,135 @@ func checkNames(pkg *packagespec.Package) error {
 	return nil
 }
 
-// resolveModelKinds fixes each model's kind from its reference site (N15) and
-// enforces the reference contract: every reference resolves to a defined model,
-// no model is referenced under two kinds, and no defined model is left unused.
-func resolveModelKinds(pkg *packagespec.Package) (map[string]ModelKind, error) {
-	kinds := make(map[string]ModelKind, len(pkg.Agent.Models))
-	assign := func(name string, kind ModelKind, ref string) error {
+// buildModels flattens the four kind sections into one name-keyed map. Kind is
+// the section; names share one namespace across sections (N15).
+func buildModels(pkg *packagespec.Package) (map[string]ModelDef, error) {
+	sections := []struct {
+		kind    ModelKind
+		entries map[string]packagespec.ModelDef
+	}{
+		{KindThink, pkg.Agent.Models.Think},
+		{KindSpeak, pkg.Agent.Models.Speak},
+		{KindListen, pkg.Agent.Models.Listen},
+		{KindTurn, pkg.Agent.Models.Turn},
+	}
+	result := make(map[string]ModelDef)
+	memo := make(map[string][]string)
+	for _, section := range sections {
+		for _, name := range sortedKeys(section.entries) {
+			if prev, ok := result[name]; ok {
+				return nil, fmt.Errorf("%s: model name %q appears in both %s and %s; names share one namespace", pkg.Location("agent.yaml", name), name, prev.Kind, section.kind)
+			}
+			var fallback []string
+			if section.kind == KindThink {
+				var err error
+				fallback, err = flattenFallback(pkg, name, nil, memo)
+				if err != nil {
+					return nil, err
+				}
+			} else if len(section.entries[name].Fallback) > 0 {
+				return nil, fmt.Errorf("%s: model %q has fallback but is a %s model (fallback is a think-model field)", pkg.Location("agent.yaml", name), name, section.kind)
+			}
+			result[name] = convertModelDef(section.entries[name], section.kind, fallback)
+		}
+	}
+	return result, nil
+}
+
+// checkModelReferences enforces that every reference lands in the right section
+// (V22). Unreferenced entries are legal palette alternates, never an error.
+func checkModelReferences(pkg *packagespec.Package, models map[string]ModelDef) error {
+	check := func(name string, kind ModelKind, ref string) error {
 		if name == "" {
 			return nil
 		}
-		if _, ok := pkg.Agent.Models[name]; !ok {
+		def, ok := models[name]
+		if !ok {
 			return missing(pkg, "agent.yaml", ref, name)
 		}
-		if prev, ok := kinds[name]; ok && prev != kind {
-			return fmt.Errorf("%s: model %q is referenced as both %s and %s", pkg.Location("agent.yaml", name), name, prev, kind)
+		if def.Kind != kind {
+			return fmt.Errorf("%s: %s %q is a %s model, not a %s model", pkg.Location("agent.yaml", name), ref, name, def.Kind, kind)
 		}
-		kinds[name] = kind
 		return nil
 	}
 	for _, agentName := range sortedKeys(pkg.Agent.Agents) {
 		agent := pkg.Agent.Agents[agentName]
-		if err := assign(agent.Model, KindThink, "model"); err != nil {
-			return nil, err
+		if err := check(agent.Model, KindThink, "model"); err != nil {
+			return err
 		}
-		if err := assign(agent.Voice, KindSpeak, "voice"); err != nil {
-			return nil, err
+		if err := check(agent.Voice, KindSpeak, "voice"); err != nil {
+			return err
 		}
 	}
 	for _, taskName := range sortedKeys(pkg.Agent.Tasks) {
 		task := pkg.Agent.Tasks[taskName]
-		if err := assign(task.Model, KindThink, "model"); err != nil {
-			return nil, err
+		if err := check(task.Model, KindThink, "model"); err != nil {
+			return err
 		}
-		if err := assign(task.Context.Summarizer, KindThink, "summarizer"); err != nil {
-			return nil, err
+		if err := check(task.Context.Summarizer, KindThink, "summarizer"); err != nil {
+			return err
 		}
 	}
 	for _, controlName := range sortedKeys(pkg.Agent.Controls) {
 		control := pkg.Agent.Controls[controlName]
 		if control.Context != nil {
-			if err := assign(control.Context.Summarizer, KindThink, "summarizer"); err != nil {
-				return nil, err
+			if err := check(control.Context.Summarizer, KindThink, "summarizer"); err != nil {
+				return err
 			}
 		}
 	}
-	for _, name := range sortedKeys(pkg.Agent.Models) {
-		for _, fallback := range pkg.Agent.Models[name].Fallback {
-			if err := assign(fallback, KindThink, "fallback"); err != nil {
-				return nil, err
-			}
-		}
-	}
-	for _, name := range sortedKeys(pkg.Agent.Models) {
-		if _, ok := kinds[name]; !ok {
-			return nil, fmt.Errorf("%s: model %q is defined but never referenced", pkg.Location("agent.yaml", name), name)
-		}
-		if len(pkg.Agent.Models[name].Fallback) > 0 && kinds[name] != KindThink {
-			return nil, fmt.Errorf("%s: model %q has fallback but is a %s model (fallback is a think-model field)", pkg.Location("agent.yaml", name), name, kinds[name])
-		}
-	}
-	return kinds, nil
+	return nil
 }
 
-func buildModels(pkg *packagespec.Package, kinds map[string]ModelKind) (map[string]ModelDef, error) {
-	result := make(map[string]ModelDef, len(pkg.Agent.Models))
-	memo := make(map[string][]string)
-	for _, name := range sortedKeys(pkg.Agent.Models) {
-		fallback, err := flattenFallback(pkg, name, nil, memo)
-		if err != nil {
-			return nil, err
+// selectRoleModel resolves the listen/turn selection (N15 palette): an explicit
+// pointer must name a section entry; with no pointer the sole entry selects
+// itself; 2+ entries with no pointer fail loud naming the candidates.
+func selectRoleModel(pkg *packagespec.Package, section map[string]packagespec.ModelDef, pointer, role string) (string, error) {
+	if pointer != "" {
+		if _, ok := section[pointer]; !ok {
+			return "", fmt.Errorf("%s: %s %q does not name a models.%s entry", pkg.Location("agent.yaml", pointer), role, pointer, role)
 		}
-		result[name] = convertModelDef(pkg.Agent.Models[name], kinds[name], fallback)
+		return pointer, nil
 	}
-	return result, nil
+	switch len(section) {
+	case 0:
+		return "", nil
+	case 1:
+		return sortedKeys(section)[0], nil
+	default:
+		return "", fmt.Errorf("agent.yaml: %d %s models defined (%s); select one with %s: <name>", len(section), role, strings.Join(sortedKeys(section), ", "), role)
+	}
+}
+
+// usedModelNames collects every model the package actually uses: agent and task
+// references, summarizers, fallback chains of used think models, and the
+// listen/turn selections. Palette alternates stay out (never compiled).
+func usedModelNames(pkg *packagespec.Package, models map[string]ModelDef) map[string]bool {
+	used := make(map[string]bool)
+	add := func(name string) {
+		if name != "" {
+			used[name] = true
+		}
+	}
+	for _, agent := range pkg.Agent.Agents {
+		add(agent.Model)
+		add(agent.Voice)
+	}
+	for _, task := range pkg.Agent.Tasks {
+		add(task.Model)
+		add(task.Context.Summarizer)
+	}
+	for _, control := range pkg.Agent.Controls {
+		if control.Context != nil {
+			add(control.Context.Summarizer)
+		}
+	}
+	for name := range maps.Clone(used) {
+		for _, fallback := range models[name].Fallback {
+			add(fallback)
+		}
+	}
+	return used
 }
 
 // convertModelDef types a raw model definition and derives its placement (N15).
@@ -309,7 +371,8 @@ func flattenFallback(pkg *packagespec.Package, name string, stack []string, memo
 	if slices.Contains(stack, name) {
 		return nil, fmt.Errorf("%s: fallback cycle: %s", pkg.Location("agent.yaml", name), strings.Join(append(stack, name), " -> "))
 	}
-	raw, ok := pkg.Agent.Models[name]
+	// Fallback chains live in the think section only (N15).
+	raw, ok := pkg.Agent.Models.Think[name]
 	if !ok {
 		return nil, missing(pkg, "agent.yaml", "fallback", name)
 	}
@@ -317,7 +380,7 @@ func flattenFallback(pkg *packagespec.Package, name string, stack []string, memo
 	seen := make(map[string]bool)
 	var flat []string
 	for _, next := range raw.Fallback {
-		if _, ok := pkg.Agent.Models[next]; !ok {
+		if _, ok := pkg.Agent.Models.Think[next]; !ok {
 			return nil, missing(pkg, "agent.yaml", "fallback", next)
 		}
 		if !seen[next] {
@@ -557,14 +620,11 @@ func stringSlice(value any) ([]string, error) {
 
 // buildTarget resolves a target's effective models (per-target override else the
 // agent definition, N15) into the derived Bindings view the generators consume.
-func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, models map[string]ModelDef, listen, turn *ModelDef) (Target, error) {
+// Only used models and the listen/turn selections resolve; palette alternates
+// stay inert.
+func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, agent *Agent, used map[string]bool) (Target, error) {
 	for key := range raw.Models {
-		// listen and turn are role slots: a target may set them directly, whether
-		// or not agent.yaml declares a package default (N15, §4.2).
-		if key == "listen" || key == "turn" {
-			continue
-		}
-		if _, ok := models[key]; !ok {
+		if _, ok := agent.Models[key]; !ok {
 			return Target{}, fmt.Errorf("%s: target %q overrides %q, which is not a defined model", pkg.Location("targets.yaml", key), name, key)
 		}
 	}
@@ -577,7 +637,7 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 		Name: name, Provider: Provider(raw.Provider), Version: raw.Version, Pins: raw.Pins,
 		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier,
 		Region: raw.Region, Edition: raw.Edition,
-		Models:       resolveBindings(models, listen, turn, raw.Models),
+		Models:       resolveBindings(agent, used, raw.Models),
 		Destinations: raw.Destinations,
 	}, nil
 }
@@ -586,39 +646,36 @@ func validDestination(value string) bool {
 	return e164Pattern.MatchString(value) || sipDestinationPath.MatchString(value)
 }
 
-// resolveBindings converts every effective model into a Binding. listen/turn are
-// keyed by role name; think models land in Reason, speak models in Speak.
-func resolveBindings(models map[string]ModelDef, listen, turn *ModelDef, overrides map[string]packagespec.ModelDef) Bindings {
+// resolveBindings converts each used effective model into a Binding: think
+// models land in Reason, speak models in Speak, the listen/turn selections in
+// their role slots.
+func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]packagespec.ModelDef) Bindings {
+	effective := func(name string) ModelDef {
+		def := agent.Models[name]
+		if override, ok := overrides[name]; ok {
+			def = convertModelDef(override, def.Kind, def.Fallback)
+		}
+		return def
+	}
 	bindings := Bindings{Speak: make(map[string]Binding), Reason: make(map[string]Binding)}
-	if def := effectiveRole(listen, overrides, "listen", KindListen); def != nil {
-		binding := toBinding(*def)
+	if agent.Listen != "" {
+		binding := toBinding(effective(agent.Listen))
 		bindings.Listen = &binding
 	}
-	if def := effectiveRole(turn, overrides, "turn", KindTurn); def != nil {
-		binding := toBinding(*def)
+	if agent.Turn != "" {
+		binding := toBinding(effective(agent.Turn))
 		bindings.Turn = &binding
 	}
-	for name, def := range models {
-		effective := def
-		if override, ok := overrides[name]; ok {
-			effective = convertModelDef(override, def.Kind, def.Fallback)
-		}
+	for name := range used {
+		def := effective(name)
 		switch def.Kind {
 		case KindSpeak:
-			bindings.Speak[name] = toBinding(effective)
+			bindings.Speak[name] = toBinding(def)
 		case KindThink:
-			bindings.Reason[name] = toBinding(effective)
+			bindings.Reason[name] = toBinding(def)
 		}
 	}
 	return bindings
-}
-
-func effectiveRole(base *ModelDef, overrides map[string]packagespec.ModelDef, key string, kind ModelKind) *ModelDef {
-	if override, ok := overrides[key]; ok {
-		def := convertModelDef(override, kind, nil)
-		return &def
-	}
-	return base
 }
 
 // toBinding flattens a model into the resolved binding, folding the typed

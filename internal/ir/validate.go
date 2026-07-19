@@ -208,23 +208,11 @@ func validateStructure(agent *Agent) []string {
 	}
 	for _, name := range slices.Sorted(maps.Keys(agent.Models)) {
 		model := agent.Models[name]
-		if !validPlacement(model.Placement) {
+		// A settings-only entry (integrated-role slot) has no derived placement.
+		if model.Placement != "" && !validPlacement(model.Placement) {
 			errors = add(errors, fmt.Sprintf("model %q placement must be api or local", name))
 		}
 		errors = append(errors, validateModelKind(name, model)...)
-	}
-	if agent.Listen != nil && !validPlacement(agent.Listen.Placement) {
-		errors = add(errors, "listen placement must be api or local")
-	}
-	if agent.Turn != nil {
-		if !validPlacement(agent.Turn.Placement) {
-			errors = add(errors, "turn placement must be api or local")
-		}
-		switch agent.Turn.SemanticEndpointing {
-		case "", SemanticEndpointingRequired, SemanticEndpointingPreferred, SemanticEndpointingOff:
-		default:
-			errors = add(errors, "turn.semantic_endpointing must be required, preferred, or off")
-		}
 	}
 	for name, variable := range agent.Variables {
 		if !validPrimitive(variable.Type) {
@@ -850,21 +838,33 @@ func validateDuration(name string, value Duration) []string {
 	return nil
 }
 
-// validateModelKind field-checks a model against the kind resolved in Build (V22).
+// validateModelKind field-checks a model against its section kind (V22).
 func validateModelKind(name string, model ModelDef) []string {
 	var errors []string
 	switch model.Kind {
 	case KindSpeak:
 		if model.Temperature != nil || model.TopP != nil || model.TopK != nil {
-			errors = add(errors, fmt.Sprintf("model %q is a voice model; temperature, top_p, and top_k are think-model fields", name))
+			errors = add(errors, fmt.Sprintf("model %q is a speak model; temperature, top_p, and top_k are think-model fields", name))
 		}
 	case KindThink:
 		if model.Voice != "" || model.Speed != nil {
-			errors = add(errors, fmt.Sprintf("model %q is a think model; voice and speed are voice-model fields", name))
+			errors = add(errors, fmt.Sprintf("model %q is a think model; voice and speed are speak-model fields", name))
+		}
+	case KindListen:
+		if model.Voice != "" || model.Speed != nil || model.Temperature != nil || model.TopP != nil || model.TopK != nil {
+			errors = add(errors, fmt.Sprintf("model %q is a listen model; voice, speed, and sampling fields do not apply", name))
 		}
 	}
 	if model.SemanticEndpointing != "" {
-		errors = add(errors, fmt.Sprintf("model %q semantic_endpointing is a turn-block field", name))
+		if model.Kind != KindTurn {
+			errors = add(errors, fmt.Sprintf("model %q semantic_endpointing is a turn-model field", name))
+		} else {
+			switch model.SemanticEndpointing {
+			case SemanticEndpointingRequired, SemanticEndpointingPreferred, SemanticEndpointingOff:
+			default:
+				errors = add(errors, fmt.Sprintf("model %q semantic_endpointing must be required, preferred, or off", name))
+			}
+		}
 	}
 	return errors
 }

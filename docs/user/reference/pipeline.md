@@ -1,17 +1,20 @@
 # Reference: listen, turn, and placement
 
-There is no `pipeline` block. Models are defined once in [`agent.yaml` models](models-and-voices.md) and the think and speak roles ride each agent's `model:` and `voice:` references. What stays at the top level of `agent.yaml` is the conversation plumbing that is shared by the whole package: `listen` (speech to text) and `turn` (deciding when the caller has finished). These are optional blocks; most packages set them per target in [targets.yaml](targets-yaml.md) instead, because a target may cover a role natively (Deepgram and ElevenLabs build in listen and turn) or with separate parts (Pipecat).
+There is no `pipeline` block. Models are defined once in the [`models` sections](models-and-voices.md), and the think and speak roles ride each agent's `model:` and `voice:` references. Listen (speech to text) and turn (deciding when the caller has finished) are conversation plumbing shared by the whole package: one STT hears the call no matter which agent is active, so they are selected once. Their models live in `models.listen` and `models.turn`; the top-level `listen:` and `turn:` fields select one **by name**:
 
 ```yaml
-# optional, in agent.yaml — a package-wide default; targets can override
-listen:
-  provider: deepgram
-  model: nova-3
-turn:
-  provider: local
-  model: silero
-  semantic_endpointing: preferred
+models:
+  listen:
+    transcriber: { provider: deepgram, model: nova-3 }
+    experiment:  { provider: soniox, model: stt-rt-v5 }   # alternate, kept for testing
+  turn:
+    vad: { provider: local, model: silero, semantic_endpointing: preferred }
+
+listen: transcriber   # required only because two listen entries exist; swap in one line
+# turn: needs no selector, vad is the sole entry
 ```
+
+A section's sole entry selects itself, so most packages never write the selector. Two or more entries with no selector fail loud naming the candidates. A target may cover a role natively (Deepgram and ElevenLabs build in listen and turn), in which case its override of the selected entry carries settings only (see [targets.yaml](targets-yaml.md)).
 
 ## placement, in one sentence
 

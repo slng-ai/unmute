@@ -4,20 +4,29 @@ Your agent needs models: something to hear with, something to think with, someth
 
 ## Define models once, in agent.yaml
 
-Every model lives in one unified `models:` map, each with its `provider` and `model` (the pairing that reaches the SDK) and the settings for its kind. A model's kind follows from where an agent refers to it: `voice:` names a speak model, `model:` names a think model.
+Every model lives in one central `models:` map, grouped into four kind sections: `think` (LLM), `speak` (TTS), `listen` (STT), and `turn` (VAD/end-of-turn). Each entry carries its `provider` and `model` (the pairing that reaches the SDK) and the settings for its kind.
 
 ```yaml
 models:
-  fast_reasoning:                 # think model
-    description: cheap and quick, for greeting and routing
-    provider: openai
-    model: gpt-4o-mini
-    temperature: 0.4
-  front_desk:                     # speak model
-    description: "warm, concise"
-    provider: slng
-    model: "slng/deepgram/aura:2-en"
-    voice: "aura-2-thalia-en"
+  think:
+    fast_reasoning:
+      description: cheap and quick, for greeting and routing
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.4
+  speak:
+    front_desk:
+      description: "warm, concise"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber: { provider: deepgram, model: nova-3 }
+    experiment:  { provider: soniox, model: stt-rt-v5 }   # alternate, kept for testing
+  turn:
+    vad: { provider: local, model: silero }
+
+listen: transcriber   # swap the STT with this one line; omit when only one is defined
 
 agents:
   intake:
@@ -25,30 +34,31 @@ agents:
     voice: front_desk
 ```
 
-Ten agents can share one `fast_reasoning` — you define it once and reference the name. `listen` and `turn` (hear, and detect end of turn) are the two remaining roles; they are per-target plumbing, so they live in `targets.yaml`.
+Ten agents can share one `fast_reasoning` — you define it once and reference the name. `listen` and `turn` are call plumbing (one STT hears the whole call, whichever agent is active), so they are selected once for the package, not per agent: a section's sole entry selects itself, and with two or more entries a top-level `listen: <name>` / `turn: <name>` picks one.
+
+The map is a **palette**: entries that nothing currently selects are legal and stay in the file as swappable alternates. Only referenced or selected entries are compiled and forwarded; the rest are inert. That makes model testing a one-line pointer flip, and lets a production package keep its maintained alternates in place.
 
 **`placement`** — where a model runs — you almost never write. It is derived from `provider`: `local` means on your own machines, anything else is a hosted vendor endpoint. It matters because `local` cannot work on a managed target (there is no machine of yours to run it on), and because it drives sizing. For your first agents, hosted providers everywhere are the simple, portable choice.
 
 ## Override per target, in targets.yaml
 
-`targets.yaml` carries the infrastructure plus an optional `models:` map that **overrides** an entry for one target — and the `listen`/`turn` role slots. An override replaces the whole entry (same kind, no partial merge).
+`targets.yaml` carries the infrastructure plus an optional `models:` map that **overrides** an entry, by name, for one target. An override replaces the whole entry (same kind, no partial merge); a target changes what a name means for itself, never which name is selected.
 
 ```yaml
 targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    models:
-      listen: { provider: deepgram, model: nova-3 }
-      turn:   { provider: local, model: silero }
-      # no speak/think overrides: they come from agent.yaml as-is
+    # no overrides: every model runs as defined in agent.yaml
 
   elevenlabs:
     provider: elevenlabs
     models:
-      # ElevenLabs can't run the SLNG voice, so override just that entry:
+      # ElevenLabs can't run the SLNG voice or the Deepgram STT, so override
+      # just those entries (by name; an override replaces the whole entry):
       front_desk: { voice: cgSgspJ2msm6clMCkdW9 }
       fast_reasoning: { model: gemini-2.5-flash }
+      transcriber: { params: { user_input_audio_format: ulaw_8000 } }  # settings-only: listen is integrated
 ```
 
 The instance is named after the provider (`pipecat`, not `pipecat-dev`): what you test is what you deploy.

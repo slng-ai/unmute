@@ -46,25 +46,28 @@ The `compile-report.json` is worth reading after a compile. It lists every requi
 
 ## Models on Pipecat
 
-All four roles are **open** on Pipecat: you choose the listen model, the voice, and the think model freely, and the turn role runs on your machine. Speak and think models are defined in `agent.yaml`; the Pipecat target carries the `listen`/`turn` role slots (and any overrides). The accepted `provider:` values per role, their key envs, and what each choice installs and emits are in the [providers reference](../reference/providers.md).
+All four roles are **open** on Pipecat: you choose the listen model, the voice, and the think model freely, and the turn role runs on your machine. Every model is defined in `agent.yaml`'s kind sections; the Pipecat target carries infrastructure and any by-name overrides. The accepted `provider:` values per role, their key envs, and what each choice installs and emits are in the [providers reference](../reference/providers.md).
 
 ```yaml
-# agent.yaml — models defined once
+# agent.yaml — models defined once, by kind
 models:
-  fast_reasoning:    { provider: openai, model: gpt-4o-mini, temperature: 0.4 }
-  careful_reasoning: { provider: openai, model: gpt-4o }
-  front_desk: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
-  specialist: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-orion-en" }
+  think:
+    fast_reasoning:    { provider: openai, model: gpt-4o-mini, temperature: 0.4 }
+    careful_reasoning: { provider: openai, model: gpt-4o }
+  speak:
+    front_desk: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
+    specialist: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-orion-en" }
+  listen:
+    transcriber: { provider: deepgram, model: nova-3 }
+  turn:
+    vad: { provider: local, model: silero }
 
-# targets.yaml — per-target plumbing
+# targets.yaml — infrastructure only
 targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
     transport: daily-sip
-    models:
-      listen: { provider: deepgram, model: nova-3 }
-      turn:   { provider: local, model: silero }
 ```
 
 ### Which provider maps to which service
@@ -88,7 +91,7 @@ The reasoning role always uses an OpenAI-compatible client. To point it at a non
 
 ### The turn role and Silero
 
-`turn` binds to `{ provider: local, model: silero }`. End-of-turn detection runs on-device with a Silero voice-activity detector: no key, no network hop. The turn binding is **advisory** on Pipecat: it tells Unmute your intent, but the actual detection is the local VAD. Semantic-endpointing preferences are advisory too.
+The turn model is `{ provider: local, model: silero }`. End-of-turn detection runs on-device with a Silero voice-activity detector: no key, no network hop. The turn binding is **advisory** on Pipecat: it tells Unmute your intent, but the actual detection is the local VAD. Semantic-endpointing preferences are advisory too.
 
 ### Transport
 

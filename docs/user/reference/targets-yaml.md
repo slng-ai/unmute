@@ -10,13 +10,16 @@ targets:
     provider: pipecat
     version: "1.5.0"
     transport: daily-sip
-    models:
-      # listen and turn are per-target role slots. Everything else
-      # (speak/think models) comes from agent.yaml unless overridden here.
-      listen: { provider: deepgram, model: nova-3 }
-      turn:   { provider: local, model: silero }
+    # no model overrides: everything runs as defined in agent.yaml
     destinations:
       billing_line: "+14155550123"
+
+  elevenlabs:
+    provider: elevenlabs
+    models:
+      # override entries this target cannot run, by name (whole-entry replace)
+      front_desk: { voice: cgSgspJ2msm6clMCkdW9 }
+      transcriber: { params: { user_input_audio_format: ulaw_8000 } }
 ```
 
 ## Instance fields
@@ -29,14 +32,14 @@ targets:
 | `sdk_language` | no | the LiveKit driver currently accepts `python` only |
 | `transport`, `carrier` | no | driver vocabulary; telephony controls resolve against these, never the brand alone |
 | `region`, `edition` | no | provider vocabulary; declared, never derived |
-| `models` | no | per-target overrides + the `listen`/`turn` role slots, below |
+| `models` | no | per-target overrides, keyed by model name, below |
 | `destinations` | if any `human_transfer` is used | map of symbolic name to phone number or SIP address |
 
 Pipecat, LiveKit, and ElevenLabs have drivers today; Vapi and Deepgram instances error on `compile` until their driver ships. `validate` still checks any provider against the schema. See the [target pages](../targets/pipecat.md).
 
-## Overrides and role slots
+## Overrides
 
-The `models:` map is keyed by model names from `agent.yaml` — plus `listen` and `turn` for the two role slots. An override **replaces the whole entry** for that target (same kind, no field-level merge); the effective model is the override when present, the `agent.yaml` definition otherwise. `listen` and `turn` live here because they are per-target plumbing: which target covers them, and how, differs.
+The `models:` map is keyed flat by model names from any `agent.yaml` section — names share one namespace, so the kind comes from the definition. An override **replaces the whole entry** for that target (same kind, no field-level merge); the effective model is the override when present, the `agent.yaml` definition otherwise. A target changes what a name means for itself, never which name the package selects.
 
 Each role is **open** (you name an outside model) or **integrated** (the platform builds it in; a slot carries settings only, never an outside model):
 
@@ -49,7 +52,7 @@ Each role is **open** (you name an outside model) or **integrated** (the platfor
 
 Rules:
 
-1. Every used model, and `listen` on every open-listen target, must have an effective definition (in `agent.yaml` or overridden here). Without one there is nothing to emit.
+1. Every used model, and a selected listen model on every open-listen target, must have an effective definition (in `agent.yaml` or overridden here). Without one there is nothing to emit.
 2. On a target whose role is integrated, the effective entry for that role carries settings only, and can never name an outside model.
 3. A definition or override may carry `params:`, an open map for the bound component's own settings. Forwarded as-is, **never validated**. Platform and telephony settings can never ride through it.
 4. Placement is derived from the effective entry's `provider` (`local` → local, else api; an explicit `placement:` overrides).

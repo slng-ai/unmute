@@ -22,15 +22,23 @@ version: 1
 entry_agent: intake
 
 models:
-  fast_reasoning:
-    description: cheap and quick, for greeting and routing
-    provider: openai
-    model: gpt-4o-mini
-  front_desk:
-    description: "warm, concise"
-    provider: slng
-    model: "slng/deepgram/aura:2-en"
-    voice: "aura-2-thalia-en"
+  think:
+    fast_reasoning:
+      description: cheap and quick, for greeting and routing
+      provider: openai
+      model: gpt-4o-mini
+  speak:
+    front_desk:
+      description: "warm, concise"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    vad: { provider: local, model: silero }
 
 agents:
   intake:
@@ -70,9 +78,6 @@ targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    models:
-      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
-      turn:   { provider: local, model: silero }
 ```
 
 Run it:
@@ -88,7 +93,7 @@ unmute dev acme
 
 **`entry_agent`** names the agent that answers first. It must be one of the agents you define below. Right now there is only `intake`.
 
-**`models`** defines every model once, concretely. `fast_reasoning` is a think model (it names an LLM `provider` and `model`); `front_desk` is a speak model (it also carries a `voice`). A model's kind follows from where an agent refers to it. `provider` + `model` are sent to the platform verbatim; you never write `placement` here (it is derived from `provider`). This is explained in [models and overrides](../concepts/profiles-and-bindings.md). The `listen` and `turn` roles (hearing, and end-of-turn) are per-target plumbing, so they live in `targets.yaml`.
+**`models`** defines every model once, in four kind sections: `think` (the LLM), `speak` (the voice), `listen` (the STT), and `turn` (the voice-activity detector). `provider` + `model` are sent to the platform verbatim; you never write `placement` (it is derived from `provider`). Because each of `listen` and `turn` has a single entry, they select themselves; define a second STT alongside and a one-line top-level `listen: <name>` swaps between them. This is explained in [models and overrides](../concepts/profiles-and-bindings.md).
 
 **`agents`** is the heart. Each agent has a prompt file (`instructions`), a `model` (a think model), and a `voice` (a speak model). The names must match models you defined.
 
@@ -100,11 +105,11 @@ unmute dev acme
 
 ## What targets.yaml does
 
-`targets.yaml` carries the infrastructure for the `pipecat` target plus the two per-target role slots:
+`targets.yaml` names the platform and carries its infrastructure. Every model comes straight from `agent.yaml` — this single-target package needs no overrides:
 
-- `listen` goes through a SLNG-hosted model, covered by one `SLNG_API_KEY`.
-- `turn` runs locally with Silero, an on-device voice-activity detector. No key, no network.
-- The speak model (`front_desk`) and think model (`fast_reasoning`) come straight from `agent.yaml` — this single-target package needs no overrides. `front_desk` uses SLNG TTS (same `SLNG_API_KEY`); `fast_reasoning` is OpenAI's `gpt-4o-mini`, covered by `OPENAI_API_KEY`.
+- `transcriber` (listen) goes through a SLNG-hosted model, covered by one `SLNG_API_KEY`.
+- `vad` (turn) runs locally with Silero, an on-device voice-activity detector. No key, no network.
+- `front_desk` uses SLNG TTS (same `SLNG_API_KEY`); `fast_reasoning` is OpenAI's `gpt-4o-mini`, covered by `OPENAI_API_KEY`.
 
 Model names and voice ids are sent to the platform as written and never checked by Unmute. A typo surfaces when the agent runs, not at validate. See [models and overrides](../concepts/profiles-and-bindings.md).
 

@@ -28,12 +28,15 @@ func (p *Package) Location(file, token string) string {
 }
 
 type AgentFile struct {
-	Version      int                  `json:"version" yaml:"version"`
-	Language     string               `json:"language,omitempty" yaml:"language,omitempty"`
-	EntryAgent   string               `json:"entry_agent" yaml:"entry_agent"`
-	Models       map[string]ModelDef  `json:"models" yaml:"models"`
-	Listen       *ModelDef            `json:"listen,omitempty" yaml:"listen,omitempty"`
-	Turn         *ModelDef            `json:"turn,omitempty" yaml:"turn,omitempty"`
+	Version    int           `json:"version" yaml:"version"`
+	Language   string        `json:"language,omitempty" yaml:"language,omitempty"`
+	EntryAgent string        `json:"entry_agent" yaml:"entry_agent"`
+	Models     ModelSections `json:"models" yaml:"models"`
+	// Listen/Turn select one entry of the matching models section by name.
+	// Optional when the section has at most one entry (the sole entry selects
+	// itself); required with 2+ entries (N15 palette).
+	Listen       string               `json:"listen,omitempty" yaml:"listen,omitempty"`
+	Turn         string               `json:"turn,omitempty" yaml:"turn,omitempty"`
 	Variables    map[string]Variable  `json:"variables,omitempty" yaml:"variables,omitempty"`
 	Agents       map[string]AgentDef  `json:"agents" yaml:"agents"`
 	Tasks        map[string]Task      `json:"tasks,omitempty" yaml:"tasks,omitempty"`
@@ -45,11 +48,21 @@ type AgentFile struct {
 	Capacity     *Capacity            `json:"capacity,omitempty" yaml:"capacity,omitempty"`
 }
 
-// ModelDef is the unified model definition (N15): one shape for the models map,
-// the listen/turn blocks, and per-target overrides. Which fields are legal is
-// decided by the kind resolved from the reference site in Build. provider+model
-// carry the same pairing the old target bindings used; the typed generation
-// fields are folded into the forwarded params at Build time.
+// ModelSections is the central models map, grouped by kind (N15): the section
+// an entry sits in IS its kind. Names share one namespace across sections.
+// Entries are a palette: unreferenced ones are legal swappable alternates.
+type ModelSections struct {
+	Think  map[string]ModelDef `json:"think,omitempty" yaml:"think,omitempty"`
+	Speak  map[string]ModelDef `json:"speak,omitempty" yaml:"speak,omitempty"`
+	Listen map[string]ModelDef `json:"listen,omitempty" yaml:"listen,omitempty"`
+	Turn   map[string]ModelDef `json:"turn,omitempty" yaml:"turn,omitempty"`
+}
+
+// ModelDef is the unified model definition (N15): one shape for every models
+// section entry and for per-target overrides. Which fields are legal is decided
+// by the section (kind). provider+model carry the same pairing the old target
+// bindings used; the typed generation fields are folded into the forwarded
+// params at Build time.
 type ModelDef struct {
 	Provider            string         `json:"provider,omitempty" yaml:"provider,omitempty"`
 	Model               string         `json:"model,omitempty" yaml:"model,omitempty"`

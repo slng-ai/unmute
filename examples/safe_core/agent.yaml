@@ -13,30 +13,43 @@ version: 1
 language: en
 entry_agent: intake
 
-# Every model is defined once, here, concretely (N15). A model's kind follows
-# from where it is referenced: `voice:` names a speak model, `model:` a think
-# model. The provider+model pairing is the same one the target bindings used;
-# targets.yaml only overrides an entry a given target cannot run as-is.
+# Every model is defined once, here, in the central map grouped by kind (N15):
+# think (LLM), speak (TTS), listen (STT), turn (VAD). Agents reference think
+# and speak by name; listen/turn select themselves when their section has one
+# entry. targets.yaml only overrides an entry a target cannot run as-is.
 models:
-  fast_reasoning:
-    description: cheap and quick, greeting and routing
-    provider: openai
-    model: gpt-4o-mini
-    temperature: 0.4
-  careful_reasoning:
-    description: slower and careful, billing work
-    provider: openai
-    model: gpt-4o
-  front_desk:
-    description: "warm, concise"
-    provider: slng
-    model: "slng/deepgram/aura:2-en"
-    voice: "aura-2-thalia-en"
-  specialist:
-    description: "slower, more deliberate"
-    provider: slng
-    model: "slng/deepgram/aura:2-en"
-    voice: "aura-2-orion-en"
+  think:
+    fast_reasoning:
+      description: cheap and quick, greeting and routing
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.4
+    careful_reasoning:
+      description: slower and careful, billing work
+      provider: openai
+      model: gpt-4o
+  speak:
+    front_desk:
+      description: "warm, concise"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+    specialist:
+      description: "slower, more deliberate"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-orion-en"
+  listen:
+    transcriber:
+      description: default STT; targets that cannot run it override the entry
+      provider: deepgram
+      model: nova-3
+  turn:
+    vad:
+      description: end-of-turn preference; integrated targets warn and ignore it
+      provider: local
+      model: silero
+      semantic_endpointing: preferred
 
 variables:
   customer_id: { type: string }

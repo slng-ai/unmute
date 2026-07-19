@@ -14,25 +14,35 @@ version: 1
 language: en
 entry_agent: greeter
 
-# Models are defined once, concretely (N15). host and desk are voice models
-# (referenced by an agent's voice:); reasoning is a think model. listen and turn
-# are per-target plumbing and live in targets.yaml.
+# Models are defined once, in the central map grouped by kind (N15). Agents
+# reference think and speak entries by name; the sole listen and turn entries
+# select themselves. targets.yaml carries infrastructure only.
 models:
-  reasoning:
-    description: greeting, routing, and the booking tasks
-    provider: openai
-    model: gpt-4o-mini
-    temperature: 0.4
-  host:
-    description: "warm, upbeat greeter"
-    provider: slng
-    model: "slng/deepgram/aura:2-en"
-    voice: "aura-2-thalia-en"
-  desk:
-    description: "calm, precise booking voice"
-    provider: slng
-    model: "slng/deepgram/aura:2-en"
-    voice: "aura-2-orion-en"
+  think:
+    reasoning:
+      description: greeting, routing, and the booking tasks
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.4
+  speak:
+    host:
+      description: "warm, upbeat greeter"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+    desk:
+      description: "calm, precise booking voice"
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-orion-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: livekit
+      model: turn-detector-mini
 
 variables:
   caller_phone: { type: string }

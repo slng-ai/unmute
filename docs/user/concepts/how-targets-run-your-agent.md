@@ -11,15 +11,21 @@ conversation.
 
 ```yaml
 models:
-  routing_model:
-    description: Fast greeting and routing
-    provider: openai
-    model: gpt-4o-mini
-  front_desk:
-    description: Warm and concise
-    provider: slng
-    model: "slng/deepgram/aura:2-en"
-    voice: "aura-2-thalia-en"
+  think:
+    routing_model:
+      description: Fast greeting and routing
+      provider: openai
+      model: gpt-4o-mini
+  speak:
+    front_desk:
+      description: Warm and concise
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber: { provider: deepgram, model: nova-3 }
+  turn:
+    detector: { provider: livekit, model: turn-detector-mini }
 
 agents:
   greeter:
@@ -29,8 +35,8 @@ agents:
     tools: [to_billing]
 ```
 
-`targets.yaml` names the platform and its per-target plumbing, and overrides any
-model that platform cannot run as defined.
+`targets.yaml` names the platform and overrides any model that platform cannot
+run as defined.
 
 ```yaml
 targets:
@@ -39,15 +45,13 @@ targets:
     version: "1.5.2"
     sdk_language: python
     models:
-      listen: { provider: deepgram, model: nova-3 }
-      turn:  { provider: livekit, model: turn-detector-mini }
       # LiveKit runs a different voice, so override just that entry:
       front_desk: { provider: elevenlabs, voice: cgSgspJ2msm6clMCkdW9 }
 ```
 
 The model name is the join between the files: `agent.yaml` defines it, an agent
-references it, and a target may override it. The platform, listen/turn plumbing,
-and version remain target-specific.
+or a top-level selector references it, and a target may override it. The
+platform and version remain target-specific.
 
 ## Follow the interpretation flow
 
