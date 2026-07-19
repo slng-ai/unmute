@@ -69,7 +69,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 
 	applyConversation(agent.Conversation, &data)
 	data.Notes = append(data.Notes, serviceNotes(data)...)
-	if agent.Pipeline.Turn != nil {
+	if target.Models.Turn != nil {
 		data.Notes = append(data.Notes, "turn role lowers to on-device VAD (Silero); its binding is advisory")
 	}
 	setImportNeeds(&data)

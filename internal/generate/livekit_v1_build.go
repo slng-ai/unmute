@@ -184,7 +184,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	if data.HasWarmTransfer {
 		data.Notes = append(data.Notes, "human_transfer warm uses livekit-agents beta.workflows on Python (Beta)")
 	}
-	if agent.Pipeline.Turn != nil {
+	if tgt.Models.Turn != nil {
 		data.Notes = append(data.Notes, "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory")
 	}
 

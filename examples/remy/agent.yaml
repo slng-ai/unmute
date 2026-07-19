@@ -14,19 +14,25 @@ version: 1
 language: en
 entry_agent: greeter
 
-pipeline:
-  listen: { placement: api }
-  turn:   { placement: local, semantic_endpointing: preferred }  # a preference on LiveKit
-  speak:  { placement: api }
-
+# Models are defined once, concretely (N15). host and desk are voice models
+# (referenced by an agent's voice:); reasoning is a think model. listen and turn
+# are per-target plumbing and live in targets.yaml.
 models:
   reasoning:
     description: greeting, routing, and the booking tasks
-    placement: api
-
-voices:
-  host: { description: "warm, upbeat greeter" }
-  desk: { description: "calm, precise booking voice" }
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.4
+  host:
+    description: "warm, upbeat greeter"
+    provider: slng
+    model: "slng/deepgram/aura:2-en"
+    voice: "aura-2-thalia-en"
+  desk:
+    description: "calm, precise booking voice"
+    provider: slng
+    model: "slng/deepgram/aura:2-en"
+    voice: "aura-2-orion-en"
 
 variables:
   caller_phone: { type: string }

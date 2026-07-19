@@ -62,7 +62,7 @@ func TestBuildRejectsBadAndCollidingNames(t *testing.T) { // V7
 		{
 			name: "reserved underscore",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Models["_private"] = packagespec.ModelProfile{Placement: "api"}
+				pkg.Agent.Models["_private"] = packagespec.ModelDef{Provider: "openai", Model: "x"}
 			},
 			want: "lowercase snake_case",
 		},
@@ -120,6 +120,50 @@ func TestBuildFlattensAndRejectsFallbackCycles(t *testing.T) { // V10
 	}
 }
 
+func TestBuildEnforcesModelReferenceContract(t *testing.T) { // V22
+	tests := []struct {
+		name   string
+		mutate func(*packagespec.Package)
+		want   string
+	}{
+		{
+			name: "dead declaration",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Models["orphan"] = packagespec.ModelDef{Provider: "openai", Model: "gpt-4o"}
+			},
+			want: "defined but never referenced",
+		},
+		{
+			name: "kind conflict",
+			mutate: func(pkg *packagespec.Package) {
+				intake := pkg.Agent.Agents["intake"]
+				intake.Voice = "fast_reasoning" // also referenced as a think model
+				pkg.Agent.Agents["intake"] = intake
+			},
+			want: "referenced as both",
+		},
+		{
+			name: "unknown override key",
+			mutate: func(pkg *packagespec.Package) {
+				target := pkg.Targets["pipecat"]
+				target.Models["ghost"] = packagespec.ModelDef{Provider: "openai", Model: "gpt-4o"}
+				pkg.Targets["pipecat"] = target
+			},
+			want: "not a defined model",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			test.mutate(pkg)
+			_, err := Build(pkg)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("got %v", err)
+			}
+		})
+	}
+}
+
 func TestBuildValidatesDestinationValues(t *testing.T) {
 	for _, test := range []struct {
 		value string
@@ -138,9 +182,9 @@ func TestBuildValidatesDestinationValues(t *testing.T) {
 	}
 
 	pkg := loadSafeCore(t)
-	target := pkg.Targets["livekit-dev"]
+	target := pkg.Targets["livekit"]
 	target.Destinations["billing_line"] = ""
-	pkg.Targets["livekit-dev"] = target
+	pkg.Targets["livekit"] = target
 	_, err := Build(pkg)
 	if err == nil || !strings.Contains(err.Error(), "E.164 phone number or SIP URI") {
 		t.Fatalf("got %v", err)

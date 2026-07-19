@@ -1,25 +1,17 @@
-# One LiveKit instance. listen and speak route through the SLNG Execution Layer
-# (provider: slng, slng/... routes) — the scaffold default, so the emitted
-# project uses slng.STT / slng.TTS from livekit-plugins-slng. Any catalogued
-# provider binds instead with a one-line change (driver-livekit C8 as amended;
-# docs/user/reference/providers.md). reason binds the native openai plugin
-# (OPENAI_API_KEY, no LiveKit Cloud creds for console runs); turn-detector-mini
-# runs the local turn model. Model names, voices, and params are forwarded to
-# the provider as-is (D10); secrets and URLs are env var names only.
+# One LiveKit instance. listen routes through the SLNG Execution Layer
+# (provider: slng, slng/... route) and turn runs the local turn model. The
+# speak and reason models come from agent.yaml as-is (SLNG + OpenAI), so this
+# instance carries no model overrides — only the per-target listen/turn plumbing
+# and the framework pin. Any catalogued provider binds instead with a one-line
+# change (driver-livekit C8 as amended; docs/user/reference/providers.md).
+# Model names, voices, and params are forwarded to the provider as-is (D10);
+# secrets and URLs are env var names only. Instance named after the provider.
 
 targets:
-  livekit-dev:
+  livekit:
     provider: livekit
     version: "1.5.2"            # framework pin; the driver checks its range (>=1.5, <2.0)
     sdk_language: python
-    models:                     # all four roles are open on LiveKit
+    models:                     # listen and turn are the per-target role slots
       listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
       turn:   { provider: livekit, model: turn-detector-mini }
-      speak:
-        host: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
-        desk: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-orion-en" }
-      reason:
-        reasoning:
-          provider: openai
-          model: gpt-4o-mini
-          params: { temperature: 0.4 }

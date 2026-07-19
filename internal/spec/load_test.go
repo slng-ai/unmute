@@ -34,6 +34,17 @@ func TestLoadRejectsUnknownFieldWithPosition(t *testing.T) { // V3
 	}
 }
 
+func TestLoadRejectsRetiredPipelineBlock(t *testing.T) { // V3, V22 (N15)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte("version: 1\nentry_agent: intake\npipeline:\n  listen: { placement: api }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil || !strings.Contains(err.Error(), "agent.yaml") || !strings.Contains(err.Error(), "pipeline") {
+		t.Fatalf("want old pipeline block rejected with position, got %v", err)
+	}
+}
+
 func TestSchemaIsDerivedFromPackage(t *testing.T) {
 	schema, err := Schema()
 	if err != nil {

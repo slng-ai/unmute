@@ -112,10 +112,7 @@ func sizing(agent *Agent, resolved Target) []Sizing {
 	if targetcap.IsCode(targetcap.Provider(resolved.Provider)) {
 		workers = agent.Capacity.MaxSessions
 	}
-	local := agent.Pipeline.Listen.Placement == PlacementLocal || agent.Pipeline.Speak.Placement == PlacementLocal
-	for _, profile := range agent.Models {
-		local = local || profile.Placement == PlacementLocal
-	}
+	local := resolvedHasLocal(resolved)
 	gpus := 0
 	if local && targetcap.IsCode(targetcap.Provider(resolved.Provider)) {
 		gpus = agent.Capacity.MaxSessions
@@ -143,6 +140,28 @@ func sizing(agent *Agent, resolved Target) []Sizing {
 		}
 	}
 	return result
+}
+
+// resolvedHasLocal reports whether any effective binding runs on local hardware,
+// the GPU-sizing input (N15: sizing reads each target's effective models).
+func resolvedHasLocal(resolved Target) bool {
+	if b := resolved.Models.Listen; b != nil && b.Placement == PlacementLocal {
+		return true
+	}
+	if b := resolved.Models.Turn; b != nil && b.Placement == PlacementLocal {
+		return true
+	}
+	for _, b := range resolved.Models.Speak {
+		if b.Placement == PlacementLocal {
+			return true
+		}
+	}
+	for _, b := range resolved.Models.Reason {
+		if b.Placement == PlacementLocal {
+			return true
+		}
+	}
+	return false
 }
 
 func validateConfiguredTargets(agent *Agent, caps targetcap.Table) []string {
@@ -180,10 +199,7 @@ func validateStructure(agent *Agent) []string {
 		errors = add(errors, "language must be a BCP-47 language tag such as en or en-US")
 	}
 	if len(agent.Models) == 0 {
-		errors = add(errors, "models must contain at least one profile")
-	}
-	if len(agent.Voices) == 0 {
-		errors = add(errors, "voices must contain at least one profile")
+		errors = add(errors, "models must contain at least one model")
 	}
 	if len(agent.Agents) == 0 {
 		errors = add(errors, "agents must contain the entry agent")
@@ -191,25 +207,24 @@ func validateStructure(agent *Agent) []string {
 	if len(agent.Channels) == 0 {
 		errors = add(errors, "channels must contain at least one channel")
 	}
-	if !validPlacement(agent.Pipeline.Listen.Placement) {
-		errors = add(errors, "pipeline.listen.placement must be api or local")
-	}
-	if !validPlacement(agent.Pipeline.Speak.Placement) {
-		errors = add(errors, "pipeline.speak.placement must be api or local")
-	}
-	if agent.Pipeline.Turn != nil {
-		if !validPlacement(agent.Pipeline.Turn.Placement) {
-			errors = add(errors, "pipeline.turn.placement must be api or local")
+	for _, name := range slices.Sorted(maps.Keys(agent.Models)) {
+		model := agent.Models[name]
+		if !validPlacement(model.Placement) {
+			errors = add(errors, fmt.Sprintf("model %q placement must be api or local", name))
 		}
-		switch agent.Pipeline.Turn.SemanticEndpointing {
+		errors = append(errors, validateModelKind(name, model)...)
+	}
+	if agent.Listen != nil && !validPlacement(agent.Listen.Placement) {
+		errors = add(errors, "listen placement must be api or local")
+	}
+	if agent.Turn != nil {
+		if !validPlacement(agent.Turn.Placement) {
+			errors = add(errors, "turn placement must be api or local")
+		}
+		switch agent.Turn.SemanticEndpointing {
 		case "", SemanticEndpointingRequired, SemanticEndpointingPreferred, SemanticEndpointingOff:
 		default:
-			errors = add(errors, "pipeline.turn.semantic_endpointing must be required, preferred, or off")
-		}
-	}
-	for name, profile := range agent.Models {
-		if !validPlacement(profile.Placement) {
-			errors = add(errors, fmt.Sprintf("model %q placement must be api or local", name))
+			errors = add(errors, "turn.semantic_endpointing must be required, preferred, or off")
 		}
 	}
 	for name, variable := range agent.Variables {
@@ -400,22 +415,26 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	if targetcap.IsCode(provider) && resolved.Version == "" {
 		row.Errors = add(row.Errors, fmt.Sprintf("%s code target requires version", resolved.Provider))
 	}
-	if agent.Pipeline.Listen.Placement == PlacementLocal {
+	// Placement gates read the resolved per-target bindings (N15): a per-target
+	// override can change where a model runs, so the effective binding decides.
+	if b := resolved.Models.Listen; b != nil && b.Placement == PlacementLocal {
 		applyCapability(caps, targetcap.FieldListenLocal, provider, row)
 	}
-	if agent.Pipeline.Speak.Placement == PlacementLocal {
-		applyCapability(caps, targetcap.FieldSpeakLocal, provider, row)
-	}
-	if agent.Pipeline.Turn != nil {
+	if b := resolved.Models.Turn; b != nil {
 		applyCapability(caps, targetcap.FieldTurnPlacement, provider, row)
-		if agent.Pipeline.Turn.SemanticEndpointing != "" {
+		if b.SemanticEndpointing != "" {
 			applyCapability(caps, targetcap.FieldSemanticEndpointing, provider, row)
 		}
 	}
-	for name, profile := range agent.Models {
-		if profile.Placement == PlacementLocal {
-			binding := resolved.Models.Reason[name]
-			applyCapabilityValue(caps.CapabilityForValue(targetcap.FieldReasonLocal, provider, binding.EndpointEnv), string(targetcap.FieldReasonLocal), provider, row)
+	for _, b := range resolved.Models.Speak {
+		if b.Placement == PlacementLocal {
+			applyCapability(caps, targetcap.FieldSpeakLocal, provider, row)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(resolved.Models.Reason)) {
+		b := resolved.Models.Reason[name]
+		if b.Placement == PlacementLocal {
+			applyCapabilityValue(caps.CapabilityForValue(targetcap.FieldReasonLocal, provider, b.EndpointEnv), string(targetcap.FieldReasonLocal), provider, row)
 		}
 	}
 	validateBindings(agent, resolved, caps, row)
@@ -521,13 +540,9 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 			row.Errors = add(row.Errors, err.Error())
 		}
 	}
-	validateRoleBinding("listen", caps.Role(targetcap.Listen, provider), resolved.Models.Listen, agent.Pipeline.Listen.Placement, row)
+	validateRoleBinding("listen", caps.Role(targetcap.Listen, provider), resolved.Models.Listen, row)
 	checkVendor(targetcap.Listen, resolved.Models.Listen)
-	turnPlacement := Placement("")
-	if agent.Pipeline.Turn != nil {
-		turnPlacement = agent.Pipeline.Turn.Placement
-	}
-	validateRoleBinding("turn", caps.Role(targetcap.Turn, provider), resolved.Models.Turn, turnPlacement, row)
+	validateRoleBinding("turn", caps.Role(targetcap.Turn, provider), resolved.Models.Turn, row)
 	checkVendor(targetcap.Turn, resolved.Models.Turn)
 
 	models, voices := usedProfiles(agent)
@@ -537,7 +552,7 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 			row.Errors = add(row.Errors, fmt.Sprintf("%s target %q is missing speak binding for voice %q", resolved.Provider, resolved.Name, name))
 			continue
 		}
-		validatePlacement("speak."+name, &binding, agent.Pipeline.Speak.Placement, row)
+		validatePlacement("speak."+name, &binding, row)
 		if binding.EndpointEnv != "" {
 			applyCapability(caps, targetcap.FieldSpeakEndpoint, provider, row)
 		}
@@ -550,7 +565,7 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 			row.Errors = add(row.Errors, fmt.Sprintf("%s target %q is missing reason binding for model %q", resolved.Provider, resolved.Name, name))
 			continue
 		}
-		validatePlacement("reason."+name, &binding, agent.Models[name].Placement, row)
+		validatePlacement("reason."+name, &binding, row)
 		checkVendor(targetcap.Reason, &binding)
 	}
 }
@@ -576,24 +591,25 @@ func checkSpeakRequiredFields(catalog targetcap.Catalog, provider targetcap.Prov
 	}
 }
 
-func validateRoleBinding(role string, kind targetcap.RoleKind, binding *Binding, placement Placement, row *TargetValidation) {
+func validateRoleBinding(role string, kind targetcap.RoleKind, binding *Binding, row *TargetValidation) {
 	if kind == targetcap.Open {
 		if binding == nil || binding.Model == "" {
 			row.Errors = add(row.Errors, fmt.Sprintf("%s target %q is missing open %s binding", row.Provider, row.Name, role))
 			return
 		}
-		validatePlacement(role, binding, placement, row)
+		validatePlacement(role, binding, row)
 		return
 	}
-	if bindingHasIdentity(binding) {
+	// turn is a preference everywhere (N15): an integrated target may carry an
+	// advisory turn model; FieldTurnPlacement warns, it does not fail.
+	if role != "turn" && bindingHasIdentity(binding) {
 		row.Errors = add(row.Errors, fmt.Sprintf("%s integrated %s binding may carry settings only", row.Provider, role))
 	}
 }
 
-func validatePlacement(role string, binding *Binding, placement Placement, row *TargetValidation) {
-	if placement != "" && binding.Placement != "" && binding.Placement != placement {
-		row.Errors = add(row.Errors, fmt.Sprintf("%s binding placement %q disagrees with %q", role, binding.Placement, placement))
-	}
+func validatePlacement(role string, binding *Binding, row *TargetValidation) {
+	// Placement is derived from a single source now (N15), so it cannot disagree
+	// with itself; only the endpoint env name still needs a shape check.
 	if binding.EndpointEnv != "" && !envNamePattern.MatchString(binding.EndpointEnv) {
 		row.Errors = add(row.Errors, fmt.Sprintf("%s endpoint_env must be an environment variable name", role))
 	}
@@ -833,6 +849,25 @@ func validateDuration(name string, value Duration) []string {
 		return []string{fmt.Sprintf("%s must be a positive Go duration", name)}
 	}
 	return nil
+}
+
+// validateModelKind field-checks a model against the kind resolved in Build (V22).
+func validateModelKind(name string, model ModelDef) []string {
+	var errors []string
+	switch model.Kind {
+	case KindSpeak:
+		if model.Temperature != nil || model.TopP != nil || model.TopK != nil {
+			errors = add(errors, fmt.Sprintf("model %q is a voice model; temperature, top_p, and top_k are think-model fields", name))
+		}
+	case KindThink:
+		if model.Voice != "" || model.Speed != nil {
+			errors = add(errors, fmt.Sprintf("model %q is a think model; voice and speed are voice-model fields", name))
+		}
+	}
+	if model.SemanticEndpointing != "" {
+		errors = add(errors, fmt.Sprintf("model %q semantic_endpointing is a turn-block field", name))
+	}
+	return errors
 }
 
 func validPlacement(value Placement) bool {

@@ -13,23 +13,30 @@ version: 1
 language: en
 entry_agent: intake
 
-pipeline:
-  listen: { placement: api }
-  turn:   { placement: local, semantic_endpointing: preferred }  # a preference,
-                                                                 # not a promise
-  speak:  { placement: api }
-
+# Every model is defined once, here, concretely (N15). A model's kind follows
+# from where it is referenced: `voice:` names a speak model, `model:` a think
+# model. The provider+model pairing is the same one the target bindings used;
+# targets.yaml only overrides an entry a given target cannot run as-is.
 models:
   fast_reasoning:
     description: cheap and quick, greeting and routing
-    placement: api
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.4
   careful_reasoning:
     description: slower and careful, billing work
-    placement: api
-
-voices:
-  front_desk: { description: "warm, concise" }
-  specialist: { description: "slower, more deliberate" }
+    provider: openai
+    model: gpt-4o
+  front_desk:
+    description: "warm, concise"
+    provider: slng
+    model: "slng/deepgram/aura:2-en"
+    voice: "aura-2-thalia-en"
+  specialist:
+    description: "slower, more deliberate"
+    provider: slng
+    model: "slng/deepgram/aura:2-en"
+    voice: "aura-2-orion-en"
 
 variables:
   customer_id: { type: string }

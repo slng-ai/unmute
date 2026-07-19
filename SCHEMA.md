@@ -1,6 +1,7 @@
 # Unmute schema, v1 (decided)
 
 Status: locked, v1. Post-lock adversarial review (context7 + live provider docs) applied 2026-07-15, marked inline as "review-corrected": warm transfer on Pipecat/LiveKit, model-written opening on ElevenLabs/Deepgram, Deepgram outbound voicemail. These re-word or loosen gates; none changes the schema shape.
+Amended 2026-07-19 (N15): the `pipeline` and `voices` blocks are removed; models are defined once, concretely, in `agent.yaml`'s unified `models:` map (voice and think models side by side, each carrying `provider` + `model` as the old target bindings did) and referenced by agents; `targets.yaml` shrinks to infrastructure plus optional per-target model overrides; `placement` is derived from `provider`; scaffold drops the `-dev` instance suffix. This one does change the authoring shape; old files fail strict decode loudly. (`reason` survives only as an internal role identifier — the `reason:` binding block is gone, so it is no longer user-facing; the think/speak vocabulary is the authoring surface.)
 Date: 2026-07-15.
 Source: [ORCHESTRATOR_SHARED_CONFIGURATION.md](./ORCHESTRATOR_SHARED_CONFIGURATION.md). That file holds the research and the reasons. This file holds the decisions. If the two disagree, this file wins, and the other file should be fixed.
 
@@ -33,7 +34,7 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
 ### Adopted from the source document
 
 - **D1. Five targets decide the schema.** A field gets in only when all five primaries can honor what it promises, natively, conditionally, or through generated code.
-- **D2. The source describes what the agent should do, never provider settings.** No free-form option maps in `agent.yaml`. The one exception is `params` on bindings in `targets.yaml`: sent to the provider as-is, never checked.
+- **D2. The source describes what the agent should do, never provider settings.** No free-form option maps in `agent.yaml`. The one exception is `params` on bindings in `targets.yaml`: sent to the provider as-is, never checked. Amended 2026-07-19 (N15): model definitions, including their `params`, now live in `agent.yaml`; the "never checked, forwarded as-is" contract is unchanged, only the file moved. Platform and telephony settings still never ride through `params`.
 - **D3. Fail loudly, never average.** If a target cannot honor a field, validation fails with a clear message in that provider's own words. No silent downgrades.
 - **D4. The pattern rule.** On code targets, Unmute may generate a missing feature itself. On managed targets the same feature fails, because there is nowhere to host generated logic.
 - **D5. Three tiers.** T0: one agent. T1: tasks and task groups. T2: agent handoff. A file may use any tier; validation checks it against the chosen target.
@@ -41,7 +42,7 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
 - **D7. Context is always explicit.** Every task and transfer says what history it carries. There is no default, because providers disagree about their own defaults.
 - **D8. One name space.** Tools and controls share one set of names. What an agent or task can call is decided only by its `tools:` list, nowhere else.
 - **D9. Flat typed data.** Variables and task results are flat maps of name to primitive type. That is the real common ground across the five providers.
-- **D10. Abstract profiles, concrete bindings.** `agent.yaml` names model and voice profiles. `targets.yaml` binds them to real models per target. Identities and `params` are forwarded as-is and never validated; the provider API and the generated project are the real validators. Version pins replace validation on code targets.
+- **D10. Abstract profiles, concrete bindings.** `agent.yaml` names model and voice profiles. `targets.yaml` binds them to real models per target. Identities and `params` are forwarded as-is and never validated; the provider API and the generated project are the real validators. Version pins replace validation on code targets. Amended 2026-07-19 (N15) to **concrete models, target overrides**: `agent.yaml` defines each model fully (`provider`, `model`, voice, generation settings) and `targets.yaml` overrides a definition only for a target that cannot run it. The forwarded-verbatim, never-validated contract is unchanged.
 - **D11. Declare traffic, derive machines.** The file declares peak sessions and call length. Worker counts, GPUs, and quotas are computed per target and printed in a report. They are never stored in the package.
 - **D12. Package layout** as in section 3. Secrets never appear in any package file. Only env var names and secret references.
 
@@ -55,12 +56,13 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
 - **N6.** Voicemail is verified on four of five primaries (2026-07-15): LiveKit `AMD` (classifications include `machine-vm`; leave a message via `generate_reply`, then shut down), Pipecat `VoicemailDetector` (leave message, then hang up), Vapi `voicemailDetection` plus `voicemailMessage` (message set = leave it, omitted = hang up), ElevenLabs `voicemail_detection` system tool plus `voicemail_message` (same semantics). `outbound: true` is therefore no longer blocked: it requires `on_voicemail`, generated with a warning on Deepgram (review-corrected 2026-07-15: an official AMD-bridge outbound reference impl proves the carrier-conditional lowering). (`greeting.speaks_first: user` history: native on Vapi as `firstMessageMode: assistant-waits-for-user`; native on ElevenLabs, verified 2026-07-15: an empty `first_message` means "the agent waits for the user to start the discussion"; generated on LiveKit and Pipecat. On Deepgram the behavior of an omitted `agent.greeting` is undocumented: warn until the driver smoke test proves silence.)
 - **N7.** Variable types are the four primitives: string, number, boolean, integer. An enum result field assigns into a string variable.
 - **N8.** All names (agents, tasks, groups, tools, controls, models, voices, variables, destinations) are lowercase snake_case. Names starting with an underscore are reserved by providers and rejected.
-- **N9.** `pipeline.turn` is optional in `agent.yaml`. Whether a turn binding is needed in `targets.yaml` follows the target's role table (section 6), not this block.
+- **N9.** `pipeline.turn` is optional in `agent.yaml`. Whether a turn binding is needed in `targets.yaml` follows the target's role table (section 6), not this block. Superseded by N15 (2026-07-19): the `pipeline` block itself is gone; the role-table rule lives on in section 6.2.
 - **N10.** Tool `input` is a JSON Schema object. All five targets accept JSON Schema tool inputs, so nesting is allowed here. `output` has the same shape but is only enforced on code targets; managed targets have no place to check it.
 - **N11.** `greeting` is a block, not a scalar: `speaks_first: agent | user` plus an optional `text`. With `text`, the agent opens with those exact words every call. Without it, the model writes the opening from the prompt. This replaces the scalar `greeting: agent_first | user_first` spelling in the source document, which could not express a fixed opening line.
 - **N12.** Task `context` is the transfer context block without `variables`. Within one session the state store is already shared on all five primaries (LiveKit `userdata`, Pipecat flow state, Vapi Squad variables), so a task has nothing to filter; `context.variables` exists only on transfers.
 - **N13.** The return path is part of the contract: when a task or a `then: return` group completes, the owner receives the typed result only; the task's conversation turns are not appended to the owner's context. This is LiveKit's native `AgentTask` behavior (verified against LiveKit docs 2026-07-15: a task starts with an empty chat context and its turns are not propagated back). `TaskGroup` is different, and `summarize_chat_ctx=False` alone does not honor this: a `TaskGroup` is itself an `AgentTask`, so when it completes LiveKit merges the group's turns into the owner's context on handoff regardless of that flag (verified against the livekit-agents source 2026-07-15: `voice/agent.py` merges `old_agent.chat_ctx` with the task context on completion; `summarize_chat_ctx` only controls a separate summarization pass, not the merge). To keep the group's turns out of the owner the driver must snapshot the owner's chat context before awaiting the group and restore it afterward, returning only the typed results; it still passes `summarize_chat_ctx=False` to skip the wasteful summarization call. Generated on Pipecat and Deepgram. On ElevenLabs the single running transcript makes task turns visible to the owner; the driver warns. Vapi is n/a while single tasks fail there.
 - **N14.** `language` is the agent's primary spoken language, written as a BCP-47 tag and defaulting to `en`. It does not rewrite model routes. Pipecat and LiveKit lower it only through each catalogue entry's explicit `CallSpec.Language` slot: Pipecat official services place it in `Settings`, while SLNG and LiveKit plugins use constructor kwargs. An existing target `params.language` is an explicit per-integration override. ElevenLabs lowers it once to `conversation_config.agent.language`, which governs its integrated ASR and TTS. Vapi and Deepgram stay unavailable in `unmute init` until their generators ship; no generic parameter injection is invented for them. Verified against Pipecat, SLNG, LiveKit, and ElevenLabs provider docs 2026-07-16.
+- **N15 (amended 2026-07-19).** One definition per model, in `agent.yaml`. The old shape declared the same model in up to three places (`pipeline` role placement, an abstract profile, a target binding) and put the only real definition in `targets.yaml`; all three collapse into one unified `models:` map in `agent.yaml` where every model is defined fully and concretely (`provider`, `model`, `voice`, generation settings, `params`), with voice models and think models side by side. The `pipeline` and `voices` blocks are gone. A model's kind follows from where it is referenced: an agent's `voice:` names a speak model, an agent's or task's `model:` (or a `summarizer:`) names a think model; the referenced entry is validated against that kind's fields (section 4.3). `listen` and `turn` are small optional top-level blocks (section 4.2), because they are conversation plumbing shared by the whole package, not per-agent identity; `turn.semantic_endpointing` lives there. Each entry keeps the `provider` + `model` pairing the old target bindings used (the shape the author already liked) — `provider` names the catalogue vendor, `model` is the identity that vendor's SDK expects, and `placement` derives from `provider` (`local` runs on your machines; anything else is a hosted API; an explicit `placement:` overrides). No route-parsing: folding the provider into the `model` string was rejected during implementation because the forwarded model identity is not uniform across vendors (OpenAI wants `gpt-4.1-mini`, SLNG wants `slng/deepgram/nova:3-en`), so a parse would mangle what reaches the SDK. `targets.yaml` keeps infrastructure only (provider, version, pins, transport, carrier, destinations) plus an optional `models:` override map for a target that cannot run a defined entry (section 6.2); an override replaces the whole entry, no merge rules. Supersedes N9 and amends D2/D10. Both original jobs of declared placement survive, per target and more precise: `local` still fails loudly on managed targets, and sizing still reads placement from each target's effective models. Strict decode (compiler V3) makes old files fail with "unknown field pipeline" naming file and line. The `reason` role identifier stays internal-only (the `reason:` binding block is gone), so it is never renamed in the authoring surface — think/speak is the user vocabulary. Scaffold names the generated target instance after the provider (`pipecat`, never `pipecat-dev`): users test exactly what they deploy, and extra instances are added only when a real second environment exists.
 
 ---
 
@@ -74,13 +76,13 @@ tasks/                # one .md per task (T1)
 tools/
   lookup_customer.yaml  # contract: input, output, execution, interruption, effect
   lookup_customer.py    # handler, code targets only
-targets.yaml          # named target instances: provider, pins, bindings, destinations
+targets.yaml          # named target instances: provider, pins, destinations, model overrides
 ```
 
 Rules:
 
 - Secrets and credentials never appear in any file. `targets.yaml` carries env var names and secret references only, never values.
-- Remote IDs, regions, editions, SDK language, version pins, carriers, and concrete model names live in `targets.yaml`, never in `agent.yaml`.
+- Remote IDs, regions, editions, SDK language, version pins, and carriers live in `targets.yaml`, never in `agent.yaml`. Model definitions live in `agent.yaml` (N15); `targets.yaml` only overrides one for a target that cannot run it.
 - Machine sizes, replica counts, and GPU counts appear in neither file. They are derived and printed in reports.
 
 ---
@@ -96,9 +98,9 @@ Named maps instead of lists, so every item has a stable identity and diffs stay 
 | `version` | yes | int, must be `1` | core |
 | `language` | no, defaults to `en` | BCP-47 tag, for example `en` or `es-MX` | gated (N14) |
 | `entry_agent` | yes | name of an agent | core |
-| `pipeline` | yes | block, see 4.2 | core |
-| `models` | yes, at least one | map of profiles, see 4.3 | core |
-| `voices` | yes, at least one | map of profiles, see 4.3 | core |
+| `models` | yes (N15) | map of model definitions, see 4.3 | core |
+| `listen` | no; required when a resolved target's listen role is open | block, see 4.2 | gated |
+| `turn` | no | block, see 4.2 | warn |
 | `variables` | no | map, see 4.4 | core |
 | `agents` | yes, must include `entry_agent` | map, see 4.5 | core |
 | `tasks` | no | map, see 4.6 | gated (T1) |
@@ -113,33 +115,65 @@ Named maps instead of lists, so every item has a stable identity and diffs stay 
 
 Top-level `tools` is the load manifest: only listed tool files are compiled into the package. Which agents and tasks can call a tool is decided by their own `tools:` lists (D8), never here.
 
-### 4.2 pipeline
+### 4.2 listen, turn, and placement (amended 2026-07-19, N15)
 
-Roles, not services. A target may cover `listen` and `turn` with one model (Deepgram Flux, ElevenLabs built-in ASR) or with separate parts (Pipecat). The `reason` role does not appear here; its placement rides on the model profiles.
-
-`placement` says where the **model** runs, not where the agent runs. `api` means the role calls a hosted vendor endpoint; `local` means the model runs on your own machines, next to the agent worker. Running the agent on a laptop in dev and deploying it later changes nothing here: `api` calls the vendor in both places. Dev versus prod lives in `targets.yaml` as separate target instances. The field exists for two reasons: `local` must fail loudly on managed targets (they cannot run your models), and placement is the main input to sizing (`api` means vendor quotas are the limit; `local` GPU models mean GPUs dominate cost).
+There is no `pipeline` block. The think and speak roles ride each agent's `model:` and `voice:` references (section 4.5). What remains at the top level is the conversation plumbing shared by the whole package:
 
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
-| `listen.placement` | yes | `api \| local` | gated | `local` only on LiveKit and Pipecat. Fails on Vapi and ElevenLabs (managed) and on Deepgram (no slot for an outside STT). |
-| `speak.placement` | yes | `api \| local` | gated | Same gating as `listen`. |
-| `turn` | no | block | warn | On Vapi, ElevenLabs, and Deepgram, turn is built in, so `placement` is ignored with a warning. On LiveKit the full turn model is a Cloud feature, so it is a preference there too. Everywhere: a preference, not a promise. |
-| `turn.placement` | yes, if block present | `api \| local` | warn | See above. |
-| `turn.semantic_endpointing` | no | `required \| preferred \| off` | warn | Forwarded as a preference. Whether it really applies depends on the bound listen model at runtime. |
+| `listen.provider` | yes, if block present | catalogue vendor, for example `slng` | gated | Names the catalogue entry. `local` runs your own STT. |
+| `listen.model` | yes, if block present | model identity forwarded to the provider, for example `slng/deepgram/nova:3-en` | gated | The block itself is optional in the file, but validation requires it on every resolved target whose listen role is open (section 6.2 role table): Pipecat, LiveKit, Deepgram (Deepgram models only). On integrated-listen targets (ElevenLabs) the block, when present, carries settings the built-in ASR accepts and never an outside model. |
+| `listen.params` | no | open map, forwarded verbatim | core | |
+| `turn.provider` | no | catalogue vendor, for example `local` | warn | Defaults to the target's built-in turn/VAD. |
+| `turn.model` | no | model identity, for example `silero` | warn | A preference, not a promise, everywhere (previously N9). On targets where turn is integrated (Vapi, ElevenLabs, Deepgram) the block carries settings only. |
+| `turn.semantic_endpointing` | no | `required \| preferred \| off` | warn | Forwarded as a preference. Whether it really applies depends on the listen model at runtime. |
+| `turn.params` | no | open map, forwarded verbatim | core | |
 
-### 4.3 models and voices
+`placement` says where a **model** runs, not where the agent runs, and keeps its two values (N1). It is never written in the common case: it derives from `provider`. `provider: local` runs on your own machines, next to the agent worker; any other provider is a hosted API endpoint. A model definition may state `placement:` explicitly to override the derivation (rare: a self-hosted deployment of a vendor's stack). Running the agent on a laptop and deploying it later changes nothing: a hosted provider calls the vendor in both places. (`provider` is a first-class field, exactly as the old target bindings carried it — only the file moved, section 4.3. The `model` identity is whatever that provider's SDK expects, forwarded verbatim: `gpt-4.1-mini` for OpenAI, `slng/deepgram/nova:3-en` for SLNG.)
 
-Model profiles are abstract on purpose. Concrete names bind per target (section 6).
+The two jobs declared placement used to do survive unchanged, per target and more precise than the old global declaration:
+
+- `provider: local` on listen or on a speak model fails loudly on managed targets (Vapi, ElevenLabs) and on Deepgram (no slot for an outside STT), exactly as before. `provider: local` on a think model fails on managed targets too, with one exception: a documented custom LLM endpoint (ElevenLabs has one; Vapi unverified, fails there for now). On Deepgram a custom think endpoint is fine.
+- placement is the main input to sizing: hosted providers make vendor quotas the limit; `local` GPU models make GPUs dominate cost. Sizing reads each target's effective models (section 6.2).
+
+### 4.3 models (amended 2026-07-19, N15)
+
+One unified map. Every model the package uses is defined here, once, fully and concretely; there is no separate `voices:` block and no per-target binding step (a target may *override* an entry, section 6.2, but never defines one). Identities, providers, and settings are forwarded to the provider as-is and never validated (D10): the provider API and the generated project are the real validators.
+
+Every entry carries `provider` (the catalogue vendor) and `model` (the identity that vendor's SDK expects), exactly as the old target bindings did — this is the pairing that already worked, moved into `agent.yaml`. `provider: local` marks an on-machine model (section 4.2).
+
+A model's kind follows from where it is referenced, and its fields are validated against that kind:
+
+- a **speak model** is referenced from an agent's `voice:`.
+- a **think model** is referenced from an agent's or task's `model:`, a transfer's `summarizer:`, or a fallback list.
+- an entry that nothing references is an error: a declaration never silently does nothing (section 1).
+- a name referenced but not defined here is an error naming the reference's file:line.
+
+Speak model fields:
 
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
+| `provider` | yes | catalogue vendor, for example `slng` | core | `local` marks an on-machine TTS (section 4.2). |
+| `model` | yes | model identity forwarded to the provider, for example `slng/deepgram/aura:2-en` | core | May be omitted when the target's TTS engine is integrated (ElevenLabs) and the voice id alone selects it. |
+| `voice` | yes | voice id, forwarded as-is | core | |
+| `speed` | no, default `1.0` | number | warn | Lowered through the catalogue entry's documented slot; warned where the provider has none (verify per provider, section 9). |
+| `language` | no, defaults to top-level `language` | BCP-47 tag | gated (N14) | Per-model override of the package language. |
+| `params` | no | open map, forwarded verbatim | core | |
 | `description` | no | text | core | For humans only. |
-| `placement` | yes | `api \| local` | gated | `local` reason fails on managed targets, with one exception: a documented custom LLM endpoint (ElevenLabs has one; Vapi unverified, fails there for now). On Deepgram a custom reason endpoint is fine. |
-| `fallback` | no | ordered list of profile names | gated | Cycle-checked. Every profile in a chain must land in the same slot kind and placement on the resolved target. All five verified 2026-07-15. Deepgram: native (`agent.think` as an ordered provider array; mixed providers, per-entry params). LiveKit: native (`llm.FallbackAdapter`; STT/TTS adapters exist too). Pipecat: generated (the Pipecat driver v1 does not emit fallback yet — a maturity gate, not a platform limit; lifts when driver §T lands). ElevenLabs: native (`backup_llm_config.preference: override` with ordered `order`, `cascade_timeout_seconds` 2-15s); entries are model IDs only, so fallback profiles whose bindings carry `params` warn there. Vapi: native (`model.fallbackModels`); entries are same-provider model IDs, so a **cross-provider chain fails on Vapi**; verified on OpenAI model schemas, others unverified. |
 
-A voice profile carries only `description`. Same pattern: abstract here, bound per target as `speak.<profile>`.
+Think model fields:
 
-There is no `tier` field on profiles. Nothing would use it; Unmute never picks a model for you.
+| Field | Required | Values | Tag | Notes |
+|---|---|---|---|---|
+| `provider` | yes | catalogue vendor, for example `openai` | core | `local` marks a self-hosted LLM (section 4.2). |
+| `model` | yes | model identity forwarded to the provider, for example `gpt-4.1-mini` | core | |
+| `temperature` | no | number | core | Verified slots on all five (section 9): Vapi `assistant.model.temperature`, ElevenLabs `conversation_config.agent.prompt.temperature`, Deepgram `agent.think.provider.temperature`, constructor kwargs on Pipecat and LiveKit. |
+| `top_p`, `top_k` | no | number | warn | Lowered through the catalogue entry's documented slot; warned where the provider has none (verify per provider, section 9). |
+| `params` | no | open map, forwarded verbatim | core | Anything else the bound component accepts (`max_tokens` where a slot exists; never forwarded to Deepgram, which has no max-tokens slot). |
+| `description` | no | text | core | For humans only. |
+| `fallback` | no | ordered list of think model names | gated | Cycle-checked. Every model in a chain must land in the same slot kind and placement on the resolved target. All five verified 2026-07-15. Deepgram: native (`agent.think` as an ordered provider array; mixed providers, per-entry params). LiveKit: native (`llm.FallbackAdapter`; STT/TTS adapters exist too). Pipecat: generated (the Pipecat driver v1 does not emit fallback yet — a maturity gate, not a platform limit; lifts when driver §T lands). ElevenLabs: native (`backup_llm_config.preference: override` with ordered `order`, `cascade_timeout_seconds` 2-15s); entries are model IDs only, so fallback models whose effective definitions carry settings beyond the ID warn there. Vapi: native (`model.fallbackModels`); entries are same-provider model IDs, so a **cross-provider chain fails on Vapi**; verified on OpenAI model schemas, others unverified. |
+
+There is no `tier` field on models. Nothing would use it; Unmute never picks a model for you.
 
 ### 4.4 variables
 
@@ -158,8 +192,8 @@ Notes that drivers must respect: on ElevenLabs the only mid-call write path is a
 | Field | Required | Values | Tag |
 |---|---|---|---|
 | `instructions` | yes | path to a markdown file | core |
-| `model` | yes | model profile name | core |
-| `voice` | yes | voice profile name | core |
+| `model` | yes | think model name (4.3) | core |
+| `voice` | yes | speak model name (4.3) | core |
 | `tools` | no | list of tool and control names | core |
 
 Per-agent voices are native on LiveKit, Pipecat, and ElevenLabs, and work on all five.
@@ -172,7 +206,7 @@ A `task` is delegate-and-return: control comes back to the owning agent with a t
 |---|---|---|---|---|
 | `instructions` | yes | path | | |
 | `tools` | no | list of names | | |
-| `model` | no | model profile name | gated | Per-task override. **Fails on Pipecat** — a maturity gate, not a platform limit (runtime-verified 2026-07-16: an `LLMSwitcher` inside an `LLMWorker` pipeline stalls all flow frames on pipecat-ai 1.5.0, so the driver has no working lowering; driver-pipecat B7. Review-corrected 2026-07-15 the other way on docs alone — the spike overrode it). |
+| `model` | no | think model name (4.3) | gated | Per-task override. **Fails on Pipecat** — a maturity gate, not a platform limit (runtime-verified 2026-07-16: an `LLMSwitcher` inside an `LLMWorker` pipeline stalls all flow frames on pipecat-ai 1.5.0, so the driver has no working lowering; driver-pipecat B7. Review-corrected 2026-07-15 the other way on docs alone — the spike overrode it). |
 | `result` | yes | flat map: name to `string \| number \| boolean \| integer \| {enum: [a, b]}` | core shape | Nested schemas only when every configured target is a code target. |
 | `context` | yes | transfer context block without `variables` (N12), `history` required | gated | See 4.7 and the history table. |
 
@@ -218,7 +252,7 @@ A delegate hands work off; whether control comes back is decided by the target. 
 | `requires` | no | list of variable names | gated | A machine-checked guard. Generated on code targets; **fails on Vapi and ElevenLabs** (no mechanism). On a failed guard the model gets a refusal naming the unmet variables; that behavior is part of the contract. |
 | `context.history` | yes | `full \| messages \| last_n \| summary \| reset` | gated | See the history table below. |
 | `context.max_messages` | iff `last_n` | int | | Illegal with any other value. |
-| `context.summarizer` | iff `summary` is generated | model profile name | | So the model is declared, bound, and counted by sizing. |
+| `context.summarizer` | iff `summary` is generated | think model name (4.3) | | So the model is defined and counted by sizing. |
 | `context.include_tool_calls` | no, default `true` | bool | gated | `false` works on code targets only. |
 | `context.variables` | yes | `all` or a list of names | gated | `all` is the only value managed targets accept. Lists compile on code targets only. |
 
@@ -318,7 +352,7 @@ The Pipecat driver v1 emits `webhook` and `local` tools (amended 2026-07-17, dri
 
 ## 6. targets.yaml
 
-Named target instances. Everything provider-specific lives here.
+Named target instances: which orchestrator runs the package, and the infrastructure facts that only make sense per target (amended 2026-07-19, N15 — model definitions moved to `agent.yaml` section 4.3; here they can only be overridden).
 
 ### 6.1 Instance fields
 
@@ -330,30 +364,31 @@ Named target instances. Everything provider-specific lives here.
 | `sdk_language` | no | LiveKit: warm transfer and MCP need `python`. |
 | `transport`, `carrier` | no | Driver vocabulary. Telephony controls resolve against these, never the brand alone. |
 | `region`, `edition` | no | Provider vocabulary. Declared, never derived. |
-| `models` | yes | The binding block, see 6.2. |
+| `models` | no | Per-target overrides, see 6.2. |
 | `destinations` | if any `human_transfer` is used | Map of symbolic name to phone number or SIP URI. |
 
-### 6.2 Bindings
+### 6.2 Overrides (amended 2026-07-19, N15)
 
-Grammar: a nested map, no dotted keys. `listen` and `turn` bind at role level (one block each). `reason` binds one block per model profile. `speak` binds one block per voice profile.
+The instance's `models:` map is optional and holds overrides only, for a target that cannot run an entry defined in `agent.yaml` (an SLNG provider on ElevenLabs, a `local` model on a managed target). Keys are the model names from `agent.yaml` section 4.3, plus `listen` and `turn` for the section 4.2 blocks. An override **replaces the whole entry** with the same shape and the same kind; there are no field-level merge rules to reason about. The effective model for a target is the override when present, the `agent.yaml` definition otherwise; every gate and sizing input below reads effective models.
 
 Each role is **open** or **integrated** per target:
 
 | Role | LiveKit | Pipecat | Vapi | ElevenLabs | Deepgram |
 |---|---|---|---|---|---|
 | `listen` | open | open | open | integrated (settings only, never an outside model) | open, Deepgram models only |
-| `turn` | open | open | integrated | integrated | integrated, rides the listen binding's `params` |
+| `turn` | open | open | integrated | integrated | integrated, rides the listen entry's `params` |
 | `speak` | open | open | open | open, ElevenLabs voices only | open, Deepgram plus a fixed third-party list |
-| `reason` | open | open | open | open, supported list plus custom LLM endpoint | open, custom endpoints allowed |
+| `think` (formerly `reason`) | open | open | open | open, supported list plus custom LLM endpoint | open, custom endpoints allowed |
 
 Rules:
 
-1. Every open role in use, and every used model and voice profile, must have a binding. Without one there is nothing to emit.
-2. An integrated role's binding is optional. When present, it carries settings for the built-in part only, and can never name an outside model.
-3. A binding may carry `params:`, an open map for the bound component's own settings (temperature, audio format, turn thresholds where the provider puts them). Forwarded as-is, **never validated**. It configures only the bound component; platform and telephony settings can never ride through it.
-4. Bindings must agree with the declared `placement`.
-5. If a driver has no slot for a value (a custom `speak` endpoint on ElevenLabs, a third-party `listen` model on Deepgram), compilation fails: the value has nowhere to go. That is a structural fact, not a judgment about the model.
-6. Every forwarded binding and param is listed in the compile or plan report, so what was sent is always inspectable. Some providers keep fields that do nothing, so run the agent to be sure. That is the contract.
+1. Every used model, and `listen` on every open-listen target, must have an effective definition. Without one there is nothing to emit; the error names the model and the target.
+2. On a target whose role is integrated, the effective entry for that role carries settings for the built-in part only, and can never name an outside model.
+3. Definitions and overrides carry their settings as typed fields (sections 4.2, 4.3) plus `params:`, an open map for the bound component's own remaining settings (audio format, turn thresholds where the provider puts them). Forwarded as-is, **never validated**. They configure only the bound component; platform and telephony settings can never ride through them.
+4. Placement is derived from the effective entry's `provider` (`local` means `local`, anything else `api`; explicit `placement:` overrides) and gates per section 4.2.
+5. If a driver has no slot for a value (a custom speak endpoint on ElevenLabs, a third-party listen model on Deepgram), compilation fails: the value has nowhere to go. That is a structural fact, not a judgment about the model.
+6. Every forwarded model and param is listed in the compile or plan report, so what was sent is always inspectable. Some providers keep fields that do nothing, so run the agent to be sure. That is the contract.
+7. An override naming a model that `agent.yaml` does not define, or changing its kind, is an error.
 
 Why never validated: provider model lists change faster than any shipped catalog, the valid set on code targets depends on the pinned versions, and the real validators already exist (the provider API at plan/apply, the generated project at startup). Unmute relays those errors word for word.
 
@@ -367,10 +402,10 @@ The subset that passes validation on every primary target. The example package i
 2. Every transfer context: `history: full`, `variables: all`.
 3. Tools: `execution: webhook`, `interruption: provider_default`, `effect: returns_data`.
 4. Human transfer: `mode: cold` only. Pipecat needs the Daily SIP transport; Deepgram needs a carrier in its target instance.
-5. Pipeline: `placement: api` for `listen` and `speak`. `turn` is a preference anyway.
+5. Hosted providers only for listen and speak models (no `provider: local`). `turn` is a preference anyway.
 6. If the agent speaks first, give it a fixed `greeting.text`. A model-written opening is conditional on ElevenLabs (workflow node) and generated-with-warning on Deepgram (review-corrected 2026-07-15); a fixed line stays the zero-warning safe choice.
-7. Skip for now: single `tasks` (return to owner unverified on Vapi) and `task_groups` with `then: return` (fails on Vapi). A `task_group` with `then: transfer` or `end` does pass on all five (warning on LiveKit: TaskGroup experimental). Also skip `requires`, `thinking_audio`, warm transfer, `mcp` and `local` tools, and any history other than `full`. `fallback` passes everywhere when the chain stays within one provider on Vapi and the fallback profiles carry no extra binding params on ElevenLabs. `outbound: true` with `on_voicemail` passes everywhere; on Deepgram it is generated with a warning (review-corrected 2026-07-15), so keep it out of the zero-warning safe core if you want no warnings.
-8. Accept warnings: `minimum_words` on ElevenLabs, interruption tuning on Deepgram, turn placement notes.
+7. Skip for now: single `tasks` (return to owner unverified on Vapi) and `task_groups` with `then: return` (fails on Vapi). A `task_group` with `then: transfer` or `end` does pass on all five (warning on LiveKit: TaskGroup experimental). Also skip `requires`, `thinking_audio`, warm transfer, `mcp` and `local` tools, and any history other than `full`. `fallback` passes everywhere when the chain stays within one provider on Vapi and the fallback models carry no settings beyond the ID on ElevenLabs. `outbound: true` with `on_voicemail` passes everywhere; on Deepgram it is generated with a warning (review-corrected 2026-07-15), so keep it out of the zero-warning safe core if you want no warnings.
+8. Accept warnings: `minimum_words` on ElevenLabs, interruption tuning on Deepgram, turn model notes.
 
 Feature by feature:
 
@@ -391,7 +426,7 @@ Feature by feature:
 | human_transfer cold | ok | Daily SIP only | ok | ok | carrier-conditional |
 | human_transfer warm | native (Node stable, Python Beta) | ships, not emitted yet | Twilio only (stable path) | ok | carrier-conditional |
 | `thinking_audio` | ok | gated (v1) | fail | ok | fail |
-| `placement: local` (listen/speak) | ok | ok | fail | fail | fail |
+| `provider: local` (listen/speak) | ok | ok | fail | fail | fail |
 | webhook tools | ok | ok | ok | ok | ok |
 | mcp tools | Python only | gated (v1) | ok | ok | fail |
 | outbound + `on_voicemail` | ok | gated (v1) | ok | ok | generated (warn) |
@@ -401,7 +436,7 @@ Feature by feature:
 ## 8. Not in v1
 
 - Branches, routers, backtracking, any graph beyond linear task groups.
-- Integrated speech-to-speech models (one model doing listen, reason, and speak). Cascaded only in v1.
+- Integrated speech-to-speech models (one model doing listen, think, and speak). Cascaded only in v1.
 - Parallel conversational agents and supervisor logic as schema constructs.
 - `merge: summary` and any automatic transfer summarization.
 - Cross-session variable persistence and history retention toggles.
@@ -436,6 +471,7 @@ Still open:
 | Deepgram voicemail: bridge plus carrier AMD lowering | `on_voicemail`, `outbound` on Deepgram | **review-resolved 2026-07-15**: Deepgram publishes an official AMD-bridge outbound reference impl (Twilio async AMD → hangup + leave-message); generated, carrier-conditional (warn) |
 | In-flight tool calls on barge-in, managed targets: Vapi and ElevenLabs docs both silent (ElevenLabs documents prevention via per-tool `interruption_mode`, not cancellation) | `interruption` | `provider_default` only |
 | Vapi `fallbackModels` on non-OpenAI model schemas | `fallback` on Vapi | conditional, same-provider chains |
+| Speak `speed` and think `top_p`/`top_k`: which providers document a slot (added 2026-07-19, N15; verify per catalogue entry before hardening) | `speed`, `top_p`, `top_k` | warn: lowered where the catalogue entry documents a slot, warned where none exists |
 
 **Driver maturity gates (tags tightened until a driver emits the feature).** A code target may support a feature at the schema level while its first driver has not emitted the lowering yet. Like warm transfer (§4.7), these are gates on the driver, not the platform, and lift when the matching driver §T task lands:
 

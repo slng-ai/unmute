@@ -28,46 +28,43 @@ func (p *Package) Location(file, token string) string {
 }
 
 type AgentFile struct {
-	Version      int                     `json:"version" yaml:"version"`
-	Language     string                  `json:"language,omitempty" yaml:"language,omitempty"`
-	EntryAgent   string                  `json:"entry_agent" yaml:"entry_agent"`
-	Pipeline     Pipeline                `json:"pipeline" yaml:"pipeline"`
-	Models       map[string]ModelProfile `json:"models" yaml:"models"`
-	Voices       map[string]VoiceProfile `json:"voices" yaml:"voices"`
-	Variables    map[string]Variable     `json:"variables,omitempty" yaml:"variables,omitempty"`
-	Agents       map[string]AgentDef     `json:"agents" yaml:"agents"`
-	Tasks        map[string]Task         `json:"tasks,omitempty" yaml:"tasks,omitempty"`
-	TaskGroups   map[string]TaskGroup    `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
-	Controls     map[string]Control      `json:"controls,omitempty" yaml:"controls,omitempty"`
-	Tools        []string                `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Conversation *Conversation           `json:"conversation,omitempty" yaml:"conversation,omitempty"`
-	Channels     map[string]Channel      `json:"channels" yaml:"channels"`
-	Capacity     *Capacity               `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	Version      int                 `json:"version" yaml:"version"`
+	Language     string              `json:"language,omitempty" yaml:"language,omitempty"`
+	EntryAgent   string              `json:"entry_agent" yaml:"entry_agent"`
+	Models       map[string]ModelDef `json:"models" yaml:"models"`
+	Listen       *ModelDef           `json:"listen,omitempty" yaml:"listen,omitempty"`
+	Turn         *ModelDef           `json:"turn,omitempty" yaml:"turn,omitempty"`
+	Variables    map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Agents       map[string]AgentDef `json:"agents" yaml:"agents"`
+	Tasks        map[string]Task     `json:"tasks,omitempty" yaml:"tasks,omitempty"`
+	TaskGroups   map[string]TaskGroup `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
+	Controls     map[string]Control  `json:"controls,omitempty" yaml:"controls,omitempty"`
+	Tools        []string            `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Conversation *Conversation       `json:"conversation,omitempty" yaml:"conversation,omitempty"`
+	Channels     map[string]Channel  `json:"channels" yaml:"channels"`
+	Capacity     *Capacity           `json:"capacity,omitempty" yaml:"capacity,omitempty"`
 }
 
-type Pipeline struct {
-	Listen PipelineRole `json:"listen" yaml:"listen"`
-	Turn   *TurnRole    `json:"turn,omitempty" yaml:"turn,omitempty"`
-	Speak  PipelineRole `json:"speak" yaml:"speak"`
-}
-
-type PipelineRole struct {
-	Placement string `json:"placement" yaml:"placement"`
-}
-
-type TurnRole struct {
-	Placement           string `json:"placement" yaml:"placement"`
-	SemanticEndpointing string `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
-}
-
-type ModelProfile struct {
-	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
-	Placement   string   `json:"placement" yaml:"placement"`
-	Fallback    []string `json:"fallback,omitempty" yaml:"fallback,omitempty"`
-}
-
-type VoiceProfile struct {
-	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+// ModelDef is the unified model definition (N15): one shape for the models map,
+// the listen/turn blocks, and per-target overrides. Which fields are legal is
+// decided by the kind resolved from the reference site in Build. provider+model
+// carry the same pairing the old target bindings used; the typed generation
+// fields are folded into the forwarded params at Build time.
+type ModelDef struct {
+	Provider            string         `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Model               string         `json:"model,omitempty" yaml:"model,omitempty"`
+	Voice               string         `json:"voice,omitempty" yaml:"voice,omitempty"`
+	Speed               *float64       `json:"speed,omitempty" yaml:"speed,omitempty"`
+	Language            string         `json:"language,omitempty" yaml:"language,omitempty"`
+	Temperature         *float64       `json:"temperature,omitempty" yaml:"temperature,omitempty"`
+	TopP                *float64       `json:"top_p,omitempty" yaml:"top_p,omitempty"`
+	TopK                *int           `json:"top_k,omitempty" yaml:"top_k,omitempty"`
+	EndpointEnv         string         `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
+	Placement           string         `json:"placement,omitempty" yaml:"placement,omitempty"`
+	SemanticEndpointing string         `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
+	Params              map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	Fallback            []string       `json:"fallback,omitempty" yaml:"fallback,omitempty"`
+	Description         string         `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 type Variable struct {
@@ -183,31 +180,14 @@ type TargetsFile struct {
 }
 
 type Target struct {
-	Provider     string            `json:"provider" yaml:"provider"`
-	Version      string            `json:"version,omitempty" yaml:"version,omitempty"`
-	Pins         map[string]string `json:"pins,omitempty" yaml:"pins,omitempty"`
-	SDKLanguage  string            `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
-	Transport    string            `json:"transport,omitempty" yaml:"transport,omitempty"`
-	Carrier      string            `json:"carrier,omitempty" yaml:"carrier,omitempty"`
-	Region       string            `json:"region,omitempty" yaml:"region,omitempty"`
-	Edition      string            `json:"edition,omitempty" yaml:"edition,omitempty"`
-	Models       Bindings          `json:"models" yaml:"models"`
-	Destinations map[string]string `json:"destinations,omitempty" yaml:"destinations,omitempty"`
-}
-
-type Bindings struct {
-	Listen *Binding           `json:"listen,omitempty" yaml:"listen,omitempty"`
-	Turn   *Binding           `json:"turn,omitempty" yaml:"turn,omitempty"`
-	Speak  map[string]Binding `json:"speak,omitempty" yaml:"speak,omitempty"`
-	Reason map[string]Binding `json:"reason,omitempty" yaml:"reason,omitempty"`
-}
-
-type Binding struct {
-	Provider    string         `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Model       string         `json:"model,omitempty" yaml:"model,omitempty"`
-	Voice       string         `json:"voice,omitempty" yaml:"voice,omitempty"`
-	VoiceID     string         `json:"voice_id,omitempty" yaml:"voice_id,omitempty"`
-	EndpointEnv string         `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
-	Placement   string         `json:"placement,omitempty" yaml:"placement,omitempty"`
-	Params      map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	Provider     string              `json:"provider" yaml:"provider"`
+	Version      string              `json:"version,omitempty" yaml:"version,omitempty"`
+	Pins         map[string]string   `json:"pins,omitempty" yaml:"pins,omitempty"`
+	SDKLanguage  string              `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
+	Transport    string              `json:"transport,omitempty" yaml:"transport,omitempty"`
+	Carrier      string              `json:"carrier,omitempty" yaml:"carrier,omitempty"`
+	Region       string              `json:"region,omitempty" yaml:"region,omitempty"`
+	Edition      string              `json:"edition,omitempty" yaml:"edition,omitempty"`
+	Models       map[string]ModelDef `json:"models,omitempty" yaml:"models,omitempty"` // per-target overrides (N15), keyed by model name / listen / turn
+	Destinations map[string]string   `json:"destinations,omitempty" yaml:"destinations,omitempty"`
 }

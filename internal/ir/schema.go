@@ -82,6 +82,7 @@ func setKind(schema *jsonschema.Schema, kind ControlKind) {
 func enumOptions() *jsonschema.ForOptions {
 	return &jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
 		reflect.TypeFor[Placement]():           enum(PlacementAPI, PlacementLocal),
+		reflect.TypeFor[ModelKind]():           enum(KindThink, KindSpeak, KindListen, KindTurn),
 		reflect.TypeFor[SemanticEndpointing](): enum(SemanticEndpointingRequired, SemanticEndpointingPreferred, SemanticEndpointingOff),
 		reflect.TypeFor[PrimitiveType]():       enum(PrimitiveString, PrimitiveNumber, PrimitiveBoolean, PrimitiveInteger),
 		reflect.TypeFor[VariableSource]():      enum(VariableSourceCallStart),

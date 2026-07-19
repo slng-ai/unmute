@@ -88,7 +88,7 @@ func TestValidateElevenLabsBriefingMessageIsTwilioOnly(t *testing.T) { // driver
 
 func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
 	agent := safeAgent(t)
-	agent.Models["group_only_summarizer"] = ModelProfile{Placement: PlacementAPI}
+	agent.Models["group_only_summarizer"] = ModelDef{Kind: KindThink, Placement: PlacementAPI}
 	agent.Tasks["collect"] = Task{
 		Instructions: "collect", Result: map[string]ResultField{"done": {Type: PrimitiveBoolean}},
 		Context: TaskContext{History: HistorySummary, Summarizer: "group_only_summarizer"},
@@ -148,9 +148,8 @@ func TestValidateRequiresCompleteBindings(t *testing.T) { // V9
 	}
 }
 
-func TestValidateOpenTurnBindingIsIndependentOfPipelineBlock(t *testing.T) {
+func TestValidateOpenTurnBindingRequiredWhenAbsent(t *testing.T) {
 	agent := safeAgent(t)
-	agent.Pipeline.Turn = nil
 	target := targetFor(agent, ProviderLiveKit)
 	target.Models.Turn = nil
 	report, err := Validate(agent, []Target{target}, targetcap.Default())
@@ -298,7 +297,7 @@ func TestValidateNestedResultChecksEveryConfiguredTarget(t *testing.T) {
 		Context: TaskContext{History: HistoryFull},
 	}
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `configured target "vapi-prod"`) {
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `configured target "vapi"`) {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}
 }
