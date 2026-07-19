@@ -14,7 +14,7 @@ listen: transcriber   # required only because two listen entries exist; swap in 
 # turn: needs no selector, vad is the sole entry
 ```
 
-A section's sole entry selects itself, so most packages never write the selector. Two or more entries with no selector fail loud naming the candidates. A target may cover a role natively (Deepgram and ElevenLabs build in listen and turn), in which case its override of the selected entry carries settings only (see [targets.yaml](targets-yaml.md)).
+A section's sole chain head selects itself (an entry named only in a `fallback` list is part of that chain, not a candidate), so most packages never write the selector. Two or more entries with no selector fail loud naming the candidates. A target may cover a role natively (Deepgram and ElevenLabs build in listen and turn), in which case its override of the selected entry carries settings only (see [targets.yaml](targets-yaml.md)).
 
 ## placement, in one sentence
 

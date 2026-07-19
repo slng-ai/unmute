@@ -217,21 +217,24 @@ func buildModels(pkg *packagespec.Package) (map[string]ModelDef, error) {
 		{KindTurn, pkg.Agent.Models.Turn},
 	}
 	result := make(map[string]ModelDef)
-	memo := make(map[string][]string)
 	for _, section := range sections {
+		memo := make(map[string][]string) // chains never cross sections
 		for _, name := range sortedKeys(section.entries) {
 			if prev, ok := result[name]; ok {
 				return nil, fmt.Errorf("%s: model name %q appears in both %s and %s; names share one namespace", pkg.Location("agent.yaml", name), name, prev.Kind, section.kind)
 			}
 			var fallback []string
-			if section.kind == KindThink {
+			switch section.kind {
+			case KindThink, KindListen:
 				var err error
-				fallback, err = flattenFallback(pkg, name, nil, memo)
+				fallback, err = flattenFallback(pkg, section.entries, name, nil, memo)
 				if err != nil {
 					return nil, err
 				}
-			} else if len(section.entries[name].Fallback) > 0 {
-				return nil, fmt.Errorf("%s: model %q has fallback but is a %s model (fallback is a think-model field)", pkg.Location("agent.yaml", name), name, section.kind)
+			default:
+				if len(section.entries[name].Fallback) > 0 {
+					return nil, fmt.Errorf("%s: model %q has fallback but is a %s model (fallback is legal on think and listen models)", pkg.Location("agent.yaml", name), name, section.kind)
+				}
 			}
 			result[name] = convertModelDef(section.entries[name], section.kind, fallback)
 		}
@@ -285,8 +288,10 @@ func checkModelReferences(pkg *packagespec.Package, models map[string]ModelDef) 
 }
 
 // selectRoleModel resolves the listen/turn selection (N15 palette): an explicit
-// pointer must name a section entry; with no pointer the sole entry selects
-// itself; 2+ entries with no pointer fail loud naming the candidates.
+// pointer must name a section entry; with no pointer the sole chain head
+// selects itself (an entry named only in another entry's fallback list is part
+// of that chain, not a selection candidate — T16); 2+ heads with no pointer
+// fail loud naming the candidates.
 func selectRoleModel(pkg *packagespec.Package, section map[string]packagespec.ModelDef, pointer, role string) (string, error) {
 	if pointer != "" {
 		if _, ok := section[pointer]; !ok {
@@ -294,13 +299,25 @@ func selectRoleModel(pkg *packagespec.Package, section map[string]packagespec.Mo
 		}
 		return pointer, nil
 	}
-	switch len(section) {
+	inChain := make(map[string]bool)
+	for _, def := range section {
+		for _, name := range def.Fallback {
+			inChain[name] = true
+		}
+	}
+	var heads []string
+	for _, name := range sortedKeys(section) {
+		if !inChain[name] {
+			heads = append(heads, name)
+		}
+	}
+	switch len(heads) {
 	case 0:
 		return "", nil
 	case 1:
-		return sortedKeys(section)[0], nil
+		return heads[0], nil
 	default:
-		return "", fmt.Errorf("agent.yaml: %d %s models defined (%s); select one with %s: <name>", len(section), role, strings.Join(sortedKeys(section), ", "), role)
+		return "", fmt.Errorf("agent.yaml: %d %s models defined (%s); select one with %s: <name>", len(heads), role, strings.Join(heads, ", "), role)
 	}
 }
 
@@ -364,15 +381,16 @@ func derivePlacement(raw packagespec.ModelDef) Placement {
 	return PlacementAPI
 }
 
-func flattenFallback(pkg *packagespec.Package, name string, stack []string, memo map[string][]string) ([]string, error) {
+// flattenFallback flattens a chain within one section: a fallback names an
+// entry of the same kind (think falls back to think, listen to listen, T16).
+func flattenFallback(pkg *packagespec.Package, section map[string]packagespec.ModelDef, name string, stack []string, memo map[string][]string) ([]string, error) {
 	if value, ok := memo[name]; ok {
 		return value, nil
 	}
 	if slices.Contains(stack, name) {
 		return nil, fmt.Errorf("%s: fallback cycle: %s", pkg.Location("agent.yaml", name), strings.Join(append(stack, name), " -> "))
 	}
-	// Fallback chains live in the think section only (N15).
-	raw, ok := pkg.Agent.Models.Think[name]
+	raw, ok := section[name]
 	if !ok {
 		return nil, missing(pkg, "agent.yaml", "fallback", name)
 	}
@@ -380,14 +398,14 @@ func flattenFallback(pkg *packagespec.Package, name string, stack []string, memo
 	seen := make(map[string]bool)
 	var flat []string
 	for _, next := range raw.Fallback {
-		if _, ok := pkg.Agent.Models.Think[next]; !ok {
+		if _, ok := section[next]; !ok {
 			return nil, missing(pkg, "agent.yaml", "fallback", next)
 		}
 		if !seen[next] {
 			flat = append(flat, next)
 			seen[next] = true
 		}
-		children, err := flattenFallback(pkg, next, stack, memo)
+		children, err := flattenFallback(pkg, section, next, stack, memo)
 		if err != nil {
 			return nil, err
 		}
@@ -661,6 +679,9 @@ func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]pa
 	if agent.Listen != "" {
 		binding := toBinding(effective(agent.Listen))
 		bindings.Listen = &binding
+		for _, name := range agent.Models[agent.Listen].Fallback {
+			bindings.ListenFallbacks = append(bindings.ListenFallbacks, ListenFallback{Name: name, Binding: toBinding(effective(name))})
+		}
 	}
 	if agent.Turn != "" {
 		binding := toBinding(effective(agent.Turn))

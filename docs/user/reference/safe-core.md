@@ -30,7 +30,8 @@ The **safe core** is the subset of the schema that passes validation on every on
 | history `messages` / `last_n` / `reset` | ok | gated (driver v1) | ok | fail | ok |
 | history `summary` | ok | gated (driver v1) | fail | fail | ok |
 | `requires:` | ok | ok | fail | fail | ok |
-| `fallback:` | ok | gated (driver v1) | conditional | ok | ok |
+| `fallback:` (think) | ok | gated (driver v1) | conditional | ok | ok |
+| `fallback:` (listen) | ok | gated (driver v1) | fail | fail | fail |
 | human_transfer cold | ok | Daily SIP only | ok | ok | carrier-conditional |
 | human_transfer warm | native | ships, not emitted yet | Twilio only | ok | carrier-conditional |
 | `thinking_audio` | ok | gated (driver v1) | fail | ok | fail |

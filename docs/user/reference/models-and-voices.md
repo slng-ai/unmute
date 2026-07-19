@@ -108,6 +108,30 @@ Required: no. Values: ordered list of model names. Default: none. The chain is c
 
 On Pipecat, using `fallback` fails validation today; it is a driver maturity gate, not a platform limit.
 
+## Listen model fields
+
+`provider`, `model`, `language`, `params`, and `description` work as above. Listen models also take `fallback` — an ordered list of other listen models to try when the STT fails or times out. The chain stays within the listen section and every entry must share the primary's placement.
+
+| Target | What happens | Tag |
+|---|---|---|
+| LiveKit | native (`stt.FallbackAdapter`) | gated |
+| Pipecat | the driver does not emit listen fallback yet (maturity gate) | gated |
+| Vapi | no documented transcriber fallback slot | gated |
+| ElevenLabs | listen is integrated; no STT fallback slot | gated |
+| Deepgram | `agent.listen` takes a single provider; no fallback slot | gated |
+
+```yaml
+models:
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+      fallback: [backup_stt]
+    backup_stt:
+      provider: deepgram
+      model: nova-3
+```
+
 ### placement
 
 Where this model runs. Derived from `provider` (`local` → local, else api); set explicitly only to override.

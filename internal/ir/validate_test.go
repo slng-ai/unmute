@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	packagespec "github.com/slng/unmute/internal/spec"
 	targetcap "github.com/slng/unmute/internal/target"
 )
 
@@ -313,6 +314,42 @@ func TestValidateNestedResultRejectsUnknownConfiguredProvider(t *testing.T) {
 	report, err := Validate(agent, []Target{livekit}, targetcap.Default())
 	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `configured target "unknown" has unknown provider "other"`) {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestT16_ListenFallbackGatesPerTarget(t *testing.T) {
+	build := func(t *testing.T) *Agent {
+		t.Helper()
+		pkg := loadSafeCore(t)
+		pkg.Agent.Models.Listen["backup_stt"] = packagespec.ModelDef{Provider: "soniox", Model: "stt-rt-v5"}
+		primary := pkg.Agent.Models.Listen["transcriber"]
+		primary.Fallback = []string{"backup_stt"}
+		pkg.Agent.Models.Listen["transcriber"] = primary
+		pkg.Agent.Listen = "transcriber"
+		agent, err := Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return agent
+	}
+	agent := build(t)
+	// LiveKit is the one target with a native slot (stt.FallbackAdapter).
+	// Soniox is not in the LiveKit catalogue, so rebind the fallback there.
+	livekit := targetFor(agent, ProviderLiveKit)
+	livekit.Models.ListenFallbacks[0].Binding = Binding{Provider: "deepgram", Model: "nova-2", Placement: PlacementAPI}
+	if report, err := Validate(agent, []Target{livekit}, targetcap.Default()); err != nil {
+		t.Fatalf("livekit must accept listen fallback; err=%v report=%#v", err, report.PerTarget)
+	}
+	for provider, want := range map[Provider]string{
+		ProviderPipecat:    "does not emit listen fallback yet",
+		ProviderVapi:       "no documented transcriber fallback slot",
+		ProviderElevenLabs: "no STT fallback slot",
+		ProviderDeepgram:   "single provider; there is no fallback slot",
+	} {
+		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
+		if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), want) {
+			t.Errorf("%s: want %q gate, err=%v report=%#v", provider, want, err, report.PerTarget)
+		}
 	}
 }
 

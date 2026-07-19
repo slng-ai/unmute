@@ -91,6 +91,10 @@ func forwardedBindings(resolved Target) []ForwardedBinding {
 		})
 	}
 	appendBinding("listen", "", resolved.Models.Listen)
+	for _, fallback := range resolved.Models.ListenFallbacks {
+		binding := fallback.Binding
+		appendBinding("listen", fallback.Name, &binding)
+	}
 	appendBinding("turn", "", resolved.Models.Turn)
 	for _, name := range slices.Sorted(maps.Keys(resolved.Models.Speak)) {
 		binding := resolved.Models.Speak[name]
@@ -149,6 +153,11 @@ func sizing(agent *Agent, resolved Target) []Sizing {
 func resolvedHasLocal(resolved Target) bool {
 	if b := resolved.Models.Listen; b != nil && b.Placement == PlacementLocal {
 		return true
+	}
+	for _, fallback := range resolved.Models.ListenFallbacks {
+		if fallback.Binding.Placement == PlacementLocal {
+			return true
+		}
 	}
 	for _, b := range resolved.Models.Speak {
 		if b.Placement == PlacementLocal {
@@ -407,6 +416,14 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	if b := resolved.Models.Listen; b != nil && b.Placement == PlacementLocal {
 		applyCapability(caps, targetcap.FieldListenLocal, provider, row)
 	}
+	for _, fallback := range resolved.Models.ListenFallbacks {
+		if fallback.Binding.Placement == PlacementLocal {
+			applyCapability(caps, targetcap.FieldListenLocal, provider, row)
+		}
+	}
+	if len(resolved.Models.ListenFallbacks) > 0 {
+		applyCapability(caps, targetcap.FieldListenFallback, provider, row)
+	}
 	if b := resolved.Models.Turn; b != nil {
 		applyCapability(caps, targetcap.FieldTurnPlacement, provider, row)
 		if b.SemanticEndpointing != "" {
@@ -529,6 +546,11 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 	}
 	validateRoleBinding("listen", caps.Role(targetcap.Listen, provider), resolved.Models.Listen, row)
 	checkVendor(targetcap.Listen, resolved.Models.Listen)
+	for _, fallback := range resolved.Models.ListenFallbacks {
+		binding := fallback.Binding
+		validatePlacement("listen."+fallback.Name, &binding, row)
+		checkVendor(targetcap.Listen, &binding)
+	}
 	validateRoleBinding("turn", caps.Role(targetcap.Turn, provider), resolved.Models.Turn, row)
 	checkVendor(targetcap.Turn, resolved.Models.Turn)
 
@@ -663,6 +685,15 @@ func validateFallbacks(agent *Agent, resolved Target, caps targetcap.Table, row 
 	if slot == "" {
 		row.Errors = add(row.Errors, fmt.Sprintf("%s target has no fallback slot kind", resolved.Provider))
 		return
+	}
+	// The listen chain mirrors the think rule: same section, same placement (T16).
+	if agent.Listen != "" {
+		listen := agent.Models[agent.Listen]
+		for _, fallbackName := range listen.Fallback {
+			if agent.Models[fallbackName].Placement != listen.Placement {
+				row.Errors = add(row.Errors, fmt.Sprintf("fallback %q placement differs from %q", fallbackName, agent.Listen))
+			}
+		}
 	}
 	for name := range models {
 		profile := agent.Models[name]

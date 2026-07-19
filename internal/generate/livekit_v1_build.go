@@ -48,7 +48,17 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	if err != nil {
 		return livekitData{}, err
 	}
-	data.STT = stt
+	data.STT = livekitChain{Primary: stt}
+	// The selected listen model's fallback chain lowers to stt.FallbackAdapter
+	// (T16); each entry resolves through the same catalogue path as the primary.
+	for _, fallback := range tgt.Models.ListenFallbacks {
+		binding := fallback.Binding
+		svc, err := livekitSTTService(&binding, agent.Language, env)
+		if err != nil {
+			return livekitData{}, fmt.Errorf("listen fallback %q: %w", fallback.Name, err)
+		}
+		data.STT.Chain = append(data.STT.Chain, svc)
+	}
 	data.SessionLLM, err = livekitReasonLLM(agent, tgt, entry.Model, env)
 	if err != nil {
 		return livekitData{}, fmt.Errorf("entry agent %q: %w", agent.EntryAgent, err)
@@ -221,7 +231,7 @@ func livekitInferenceUses(data livekitData) []string {
 
 // livekitServices lists every resolved service in the template model.
 func livekitServices(data livekitData) []livekitService {
-	services := []livekitService{data.STT, data.SessionTTS}
+	services := append(data.STT.services(), data.SessionTTS)
 	services = append(services, data.SessionLLM.services()...)
 	for _, a := range data.Agents {
 		if a.LLM != nil {
@@ -567,7 +577,7 @@ func livekitTTSService(binding ir.Binding, language string, env *envSet) (liveki
 	return resolveLiveKitService(targetcap.Speak, binding, language, env)
 }
 
-func livekitLLMService(binding ir.Binding, env *envSet) (livekitService, error) {
+func livekitChainService(binding ir.Binding, env *envSet) (livekitService, error) {
 	return resolveLiveKitService(targetcap.Reason, binding, "", env)
 }
 
@@ -593,16 +603,16 @@ func livekitTurnVersion(binding *ir.Binding) (string, error) {
 // livekitReasonLLM resolves a reason profile plus its fallback chain (V4).
 // Every profile in the chain must carry its own reason binding; validation
 // has already checked slot kind, placement, and cycles.
-func livekitReasonLLM(agent *ir.Agent, tgt ir.Target, profile string, env *envSet) (livekitLLM, error) {
-	primary, err := livekitLLMService(tgt.Models.Reason[profile], env)
+func livekitReasonLLM(agent *ir.Agent, tgt ir.Target, profile string, env *envSet) (livekitChain, error) {
+	primary, err := livekitChainService(tgt.Models.Reason[profile], env)
 	if err != nil {
-		return livekitLLM{}, fmt.Errorf("model %q: %w", profile, err)
+		return livekitChain{}, fmt.Errorf("model %q: %w", profile, err)
 	}
-	out := livekitLLM{Primary: primary}
+	out := livekitChain{Primary: primary}
 	for _, fb := range agent.Models[profile].Fallback {
-		svc, err := livekitLLMService(tgt.Models.Reason[fb], env)
+		svc, err := livekitChainService(tgt.Models.Reason[fb], env)
 		if err != nil {
-			return livekitLLM{}, fmt.Errorf("model %q fallback %q: %w", profile, fb, err)
+			return livekitChain{}, fmt.Errorf("model %q fallback %q: %w", profile, fb, err)
 		}
 		out.Chain = append(out.Chain, svc)
 	}

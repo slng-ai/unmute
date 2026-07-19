@@ -157,13 +157,32 @@ func TestBuildEnforcesModelReferenceContract(t *testing.T) { // V22
 			want: "does not name a models.listen entry",
 		},
 		{
-			name: "fallback on a non-think model",
+			name: "fallback on a speak model",
 			mutate: func(pkg *packagespec.Package) {
 				voice := pkg.Agent.Models.Speak["front_desk"]
 				voice.Fallback = []string{"specialist"}
 				pkg.Agent.Models.Speak["front_desk"] = voice
 			},
-			want: "fallback is a think-model field",
+			want: "fallback is legal on think and listen models",
+		},
+		{
+			name: "listen fallback cycle",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Models.Listen["backup_stt"] = packagespec.ModelDef{Provider: "soniox", Model: "stt-rt-v5", Fallback: []string{"transcriber"}}
+				primary := pkg.Agent.Models.Listen["transcriber"]
+				primary.Fallback = []string{"backup_stt"}
+				pkg.Agent.Models.Listen["transcriber"] = primary
+			},
+			want: "fallback cycle",
+		},
+		{
+			name: "listen fallback must stay in the listen section",
+			mutate: func(pkg *packagespec.Package) {
+				primary := pkg.Agent.Models.Listen["transcriber"]
+				primary.Fallback = []string{"fast_reasoning"} // a think entry
+				pkg.Agent.Models.Listen["transcriber"] = primary
+			},
+			want: "does not resolve",
 		},
 		{
 			name: "unknown override key",
@@ -207,6 +226,30 @@ func TestBuildAllowsPaletteAlternates(t *testing.T) { // V22: unreferenced entri
 		if target.Models.Listen != nil && target.Models.Listen.Provider == "soniox" {
 			t.Fatalf("target %q compiled the unselected listen alternate", name)
 		}
+	}
+}
+
+func TestT16_ListenFallbackResolvesIntoBindings(t *testing.T) {
+	pkg := loadSafeCore(t)
+	pkg.Agent.Models.Listen["backup_stt"] = packagespec.ModelDef{Provider: "soniox", Model: "stt-rt-v5"}
+	primary := pkg.Agent.Models.Listen["transcriber"]
+	primary.Fallback = []string{"backup_stt"}
+	pkg.Agent.Models.Listen["transcriber"] = primary
+	// No listen: pointer on purpose — a fallback-only entry is part of the
+	// chain, so transcriber is the sole head and selects itself (T16).
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Listen != "transcriber" {
+		t.Fatalf("listen selection = %q", agent.Listen)
+	}
+	if got := agent.Models["transcriber"].Fallback; len(got) != 1 || got[0] != "backup_stt" {
+		t.Fatalf("flattened listen fallback = %v", got)
+	}
+	livekit := targetFor(agent, ProviderLiveKit)
+	if len(livekit.Models.ListenFallbacks) != 1 || livekit.Models.ListenFallbacks[0].Name != "backup_stt" || livekit.Models.ListenFallbacks[0].Binding.Provider != "soniox" {
+		t.Fatalf("listen fallback bindings = %#v", livekit.Models.ListenFallbacks)
 	}
 }
 

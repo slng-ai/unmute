@@ -5,6 +5,9 @@ Classes, kwargs, and model-route forms come from the provider catalogue
 {{- /* llmexpr renders a reason profile: bare service, or the native
 llm.FallbackAdapter around its fallback chain (V4). */ -}}
 {{define "llmexpr"}}{{if .Chain}}llm.FallbackAdapter(llm=[{{template "svc" .Primary.Call}}{{range .Chain}}, {{template "svc" .Call}}{{end}}]){{else}}{{template "svc" .Primary.Call}}{{end}}{{end -}}
+{{- /* sttexpr renders the listen model: bare service, or the native
+stt.FallbackAdapter around its fallback chain (T16). */ -}}
+{{define "sttexpr"}}{{if .Chain}}stt.FallbackAdapter(stt=[{{template "svc" .Primary.Call}}{{range .Chain}}, {{template "svc" .Call}}{{end}}]){{else}}{{template "svc" .Primary.Call}}{{end}}{{end -}}
 {{- /* webhook_tool renders one webhook tool as a @function_tool method;
 agents and tasks share the shape (T15). */ -}}
 {{define "webhook_tool"}}
@@ -82,7 +85,7 @@ import os
     mcp,
 {{- end}}
     metrics,
-{{- if .IgnorePhrases}}
+{{- if or .IgnorePhrases .STT.Chain}}
     stt,
 {{- end}}
 )
@@ -349,7 +352,7 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- if .HasVars}}
         userdata=Userdata(),
 {{- end}}
-        stt={{template "svc" .STT.Call}},
+        stt={{template "sttexpr" .STT}},
         llm={{template "llmexpr" .SessionLLM}},
         tts={{template "svc" .SessionTTS.Call}},
 {{- if .Interruption}}

@@ -352,10 +352,19 @@ const (
 )
 
 type Bindings struct {
-	Listen *Binding           `json:"listen,omitempty" yaml:"listen,omitempty"`
-	Turn   *Binding           `json:"turn,omitempty" yaml:"turn,omitempty"`
-	Speak  map[string]Binding `json:"speak,omitempty" yaml:"speak,omitempty"`
-	Reason map[string]Binding `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Listen *Binding `json:"listen,omitempty" yaml:"listen,omitempty"`
+	// ListenFallbacks is the selected listen model's flattened fallback chain,
+	// in order, resolved per target (N15/T16). Empty without listen fallback.
+	ListenFallbacks []ListenFallback   `json:"listen_fallbacks,omitempty" yaml:"listen_fallbacks,omitempty"`
+	Turn            *Binding           `json:"turn,omitempty" yaml:"turn,omitempty"`
+	Speak           map[string]Binding `json:"speak,omitempty" yaml:"speak,omitempty"`
+	Reason          map[string]Binding `json:"reason,omitempty" yaml:"reason,omitempty"`
+}
+
+// ListenFallback pairs a chain entry's model name with its resolved binding.
+type ListenFallback struct {
+	Name    string  `json:"name" yaml:"name"`
+	Binding Binding `json:"binding" yaml:"binding"`
 }
 
 // Binding is the resolved per-target view of one effective model (N15): the

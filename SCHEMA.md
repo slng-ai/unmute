@@ -121,7 +121,7 @@ There is no `pipeline` block. The think and speak roles ride each agent's `model
 
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
-| `listen` | no when `models.listen` has zero or one entry (the sole entry selects itself); required with 2+ entries | name of a `models.listen` entry | gated | Swapping the STT is a one-line pointer change. Validation requires an effective listen model on every resolved target whose listen role is open (section 6.2 role table): Pipecat, LiveKit, Deepgram (Deepgram models only). On integrated-listen targets (ElevenLabs) the effective entry carries settings the built-in ASR accepts and never an outside model. |
+| `listen` | no when the section has at most one chain head (the sole head selects itself; entries named only in another entry's `fallback` list are chain members, not candidates); required with 2+ heads | name of a `models.listen` entry | gated | Swapping the STT is a one-line pointer change. Validation requires an effective listen model on every resolved target whose listen role is open (section 6.2 role table): Pipecat, LiveKit, Deepgram (Deepgram models only). On integrated-listen targets (ElevenLabs) the effective entry carries settings the built-in ASR accepts and never an outside model. |
 | `turn` | same rule against `models.turn` | name of a `models.turn` entry | warn | A preference, not a promise, everywhere (previously N9). On targets where turn is integrated (Vapi, ElevenLabs, Deepgram) the effective entry carries settings only. |
 
 `placement` says where a **model** runs, not where the agent runs, and keeps its two values (N1). It is never written in the common case: it derives from `provider`. `provider: local` runs on your own machines, next to the agent worker; any other provider is a hosted API endpoint. A model definition may state `placement:` explicitly to override the derivation (rare: a self-hosted deployment of a vendor's stack). Running the agent on a laptop and deploying it later changes nothing: a hosted provider calls the vendor in both places. (`provider` is a first-class field, exactly as the old target bindings carried it — only the file moved, section 4.3. The `model` identity is whatever that provider's SDK expects, forwarded verbatim: `gpt-4.1-mini` for OpenAI, `slng/deepgram/nova:3-en` for SLNG.)
@@ -168,11 +168,13 @@ Think model fields:
 | `description` | no | text | core | For humans only. |
 | `fallback` | no | ordered list of think model names | gated | Cycle-checked. Every model in a chain must land in the same slot kind and placement on the resolved target. All five verified 2026-07-15. Deepgram: native (`agent.think` as an ordered provider array; mixed providers, per-entry params). LiveKit: native (`llm.FallbackAdapter`; STT/TTS adapters exist too). Pipecat: generated (the Pipecat driver v1 does not emit fallback yet — a maturity gate, not a platform limit; lifts when driver §T lands). ElevenLabs: native (`backup_llm_config.preference: override` with ordered `order`, `cascade_timeout_seconds` 2-15s); entries are model IDs only, so fallback models whose effective definitions carry settings beyond the ID warn there. Vapi: native (`model.fallbackModels`); entries are same-provider model IDs, so a **cross-provider chain fails on Vapi**; verified on OpenAI model schemas, others unverified. |
 
-Listen model fields: `provider` (yes), `model` (yes; Deepgram models only on the Deepgram target), `language` (no, defaults to the top-level `language`, N14), `params` (no, forwarded verbatim), `description` (no). A settings-only entry (params without provider/model) is legal and is what integrated-listen targets accept.
+Listen model fields: `provider` (yes), `model` (yes; Deepgram models only on the Deepgram target), `language` (no, defaults to the top-level `language`, N14), `params` (no, forwarded verbatim), `fallback` (no; ordered list of listen model names, gated — see below), `description` (no). A settings-only entry (params without provider/model) is legal and is what integrated-listen targets accept.
+
+Listen `fallback` (added 2026-07-19, T16): the chain stays within the listen section, is cycle-checked, and every entry must share the primary's placement. LiveKit: native `stt.FallbackAdapter` (verified in the livekit-agents source 2026-07-19; the driver emits it). Pipecat: gated, the driver does not emit listen fallback yet. Vapi: gated, no documented transcriber fallback slot. ElevenLabs: gated, listen is integrated. Deepgram: gated, `agent.listen` takes a single provider (unlike think's ordered array). Verify rows in section 9.
 
 Turn model fields: `provider` (no), `model` (no, for example `silero`), `semantic_endpointing` (no: `required | preferred | off`, warn — forwarded as a preference; whether it applies depends on the listen model at runtime), `params` (no), `description` (no).
 
-There is no `tier` field on models. Nothing would use it; Unmute never picks a model for you. `fallback` is a think-model field today because that is what all five targets honor (LiveKit ships native STT/TTS fallback adapters, unverified elsewhere); the sectioned shape leaves room to allow it on `listen`/`speak` later with no new syntax.
+There is no `tier` field on models. Nothing would use it; Unmute never picks a model for you. `fallback` lives on think and listen models today (T16); speak stays fallback-free until a slot is verified somewhere beyond LiveKit's native TTS adapter — the sectioned shape takes it later with no new syntax.
 
 ### 4.4 variables
 
@@ -421,7 +423,8 @@ Feature by feature:
 | history `messages` / `last_n` / `reset` | ok | gated (v1) | ok | fail | ok |
 | history `summary` | ok | gated (v1) | fail | fail | ok |
 | `requires:` | ok | ok | fail | fail | ok |
-| `fallback:` | ok | gated (v1) | conditional | ok | ok |
+| `fallback:` (think) | ok | gated (v1) | conditional | ok | ok |
+| `fallback:` (listen) | ok | gated (v1) | fail | fail | fail |
 | human_transfer cold | ok | Daily SIP only | ok | ok | carrier-conditional |
 | human_transfer warm | native (Node stable, Python Beta) | ships, not emitted yet | Twilio only (stable path) | ok | carrier-conditional |
 | `thinking_audio` | ok | gated (v1) | fail | ok | fail |
@@ -471,6 +474,7 @@ Still open:
 | In-flight tool calls on barge-in, managed targets: Vapi and ElevenLabs docs both silent (ElevenLabs documents prevention via per-tool `interruption_mode`, not cancellation) | `interruption` | `provider_default` only |
 | Vapi `fallbackModels` on non-OpenAI model schemas | `fallback` on Vapi | conditional, same-provider chains |
 | Speak `speed` and think `top_p`/`top_k`: which providers document a slot (added 2026-07-19, N15; verify per catalogue entry before hardening) | `speed`, `top_p`, `top_k` | warn: lowered where the catalogue entry documents a slot, warned where none exists |
+| Listen fallback slots beyond LiveKit: Vapi transcriber fallback, Deepgram multi-provider listen, ElevenLabs integrated-ASR failover (added 2026-07-19, T16) | `fallback` on listen | gated on Pipecat/Vapi/ElevenLabs/Deepgram until a slot is doc-verified |
 
 **Driver maturity gates (tags tightened until a driver emits the feature).** A code target may support a feature at the schema level while its first driver has not emitted the lowering yet. Like warm transfer (§4.7), these are gates on the driver, not the platform, and lift when the matching driver §T task lands:
 
