@@ -27,15 +27,16 @@ This is a complete one-agent spec. It is a file called `agent.yaml`:
 version: 1
 entry_agent: assistant
 
-pipeline:
-  listen: { placement: api }
-  speak:  { placement: api }
-
 models:
-  assistant_model: { description: default reasoning model, placement: api }
-
-voices:
-  assistant_voice: { description: default voice }
+  assistant_model:
+    description: default reasoning model
+    provider: openai
+    model: gpt-4o-mini
+  assistant_voice:
+    description: default voice
+    provider: slng
+    model: "slng/deepgram/aura:2-en"
+    voice: "aura-2-thalia-en"
 
 agents:
   assistant:
@@ -57,7 +58,7 @@ capacity:
   avg_session_duration: 5m
 ```
 
-You do not need to understand every line yet. The point is the shape: it says what the agent is, not which company's API to call. The company-specific parts (which speech model, which voice id, which key) live in a separate file called `targets.yaml`, one block per platform. Change the target, keep the agent.
+You do not need to understand every line yet. The point is the shape: the models are defined once, here, and the agent references them by name. The platform choice and its per-target plumbing (which orchestrator, the listen/turn roles, version pins, keys) live in a separate file called `targets.yaml`, one block per platform, which can also override a model for a platform that cannot run it. Change the target, keep the agent.
 
 ## What this documentation covers
 

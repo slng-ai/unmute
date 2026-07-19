@@ -24,27 +24,33 @@ your-agent/
 This boundary lets you add or replace a target without rewriting the agents,
 tasks, controls, or conversation outcomes.
 
-## Bind models and voices
+## Define models and voices
 
-Declare profiles by purpose in `agent.yaml`, then bind every used profile to a
-LiveKit integration in `targets.yaml`.
+Define every model concretely in `agent.yaml`; a LiveKit target then carries the
+per-target `listen`/`turn` plumbing (and any overrides).
 
 ```yaml
 # agent.yaml
 models:
   primary_reasoning:
     description: Main conversation model
-    placement: api
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.4
     fallback: [backup_reasoning]
   backup_reasoning:
     description: Backup conversation model
-    placement: api
-
-voices:
+    provider: openai
+    model: gpt-4o
   front_desk:
     description: Warm and concise
+    provider: elevenlabs
+    voice: cgSgspJ2msm6clMCkdW9
   specialist:
     description: Calm and deliberate
+    provider: cartesia
+    model: sonic-3
+    voice: f786b574-daa5-4673-aa0c-cbe3e8534c02
 
 agents:
   assistant:
@@ -53,44 +59,26 @@ agents:
     voice: front_desk
 ```
 
-The fallback list is ordered. On LiveKit, every profile in the chain must have
-a `reason` binding and use the same placement.
+The fallback list is ordered. On LiveKit, every model in the chain must use the
+same placement (`fallback` is a think-model field).
 
 ```yaml
 # targets.yaml
 targets:
-  livekit-dev:
+  livekit:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
     pins:
       livekit-plugins-slng: "1.7.0"
     models:
-      listen:
-        provider: slng
-        model: "slng/deepgram/nova:3-en"
-      turn:
-        provider: livekit
-        model: turn-detector-mini
-      speak:
-        front_desk:
-          provider: elevenlabs
-          voice: cgSgspJ2msm6clMCkdW9
-        specialist:
-          provider: cartesia
-          model: sonic-3
-          voice: f786b574-daa5-4673-aa0c-cbe3e8534c02
-      reason:
-        primary_reasoning:
-          provider: openai
-          model: gpt-4o-mini
-          params: { temperature: 0.4 }
-        backup_reasoning:
-          provider: openai
-          model: gpt-4o
+      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
+      turn:   { provider: livekit, model: turn-detector-mini }
 ```
 
-LiveKit accepts the following provider choices through its provider catalogue.
+The speak and think models come straight from `agent.yaml`; add an override under
+this instance's `models:` only if LiveKit needs a different one. LiveKit accepts
+the following provider choices through its provider catalogue.
 
 | Role | `provider` | Required environment |
 |---|---|---|
@@ -227,7 +215,8 @@ result. A delegate control makes that task available to an agent.
 models:
   careful_reasoning:
     description: Careful account verification
-    placement: api
+    provider: openai
+    model: gpt-4o
 
 variables:
   customer_id: { type: string }
@@ -254,20 +243,10 @@ controls:
       verified: result.verified
 ```
 
-Bind the task model under the same profile name in `targets.yaml`.
-
-```yaml
-targets:
-  livekit-dev:
-    models:
-      reason:
-        careful_reasoning:
-          provider: openai
-          model: gpt-4o
-```
-
-LiveKit gives a task with `model` its own reasoning binding. If you omit the
-field, the task uses the entry agent's model.
+The task's `model:` names `careful_reasoning`, defined once in `agent.yaml`
+above like any other think model — there is nothing extra to add in
+`targets.yaml`. LiveKit gives a task with `model` its own think model; if you
+omit the field, the task uses the entry agent's model.
 
 LiveKit also accepts nested task results when every configured target is a code
 target. Wrap the JSON Schema value in `schema`.
@@ -326,7 +305,8 @@ tool calls, and carry all or a subset of shared variables.
 models:
   summary_model:
     description: Compact handoff summaries
-    placement: api
+    provider: openai
+    model: gpt-4o-mini
 
 controls:
   to_specialist:
@@ -342,7 +322,7 @@ controls:
 ```
 
 LiveKit supports `full`, `messages`, `last_n`, `summary`, and `reset` history.
-Use `max_messages` with `last_n`, and bind the `summarizer` profile when you use
+Use `max_messages` with `last_n`, and name a `summarizer` think model when you use
 `summary`. A failed `requires` guard names the missing variables instead of
 performing the transfer.
 
@@ -410,7 +390,7 @@ Resolve the symbolic destination for each LiveKit target.
 ```yaml
 # targets.yaml
 targets:
-  livekit-dev:
+  livekit:
     destinations:
       support_line: "+14155550123"
 ```
@@ -466,7 +446,7 @@ remaining boundaries are explicit YAML choices, not silent omissions.
 |---|---|
 | `sdk_language: python` | Supported and currently required |
 | `models.*.fallback` | Native ordered fallback |
-| Per-task `model` | Uses the task-specific reason binding |
+| Per-task `model` | Uses the task-specific think model |
 | Nested task result | Supported when every target is a code target |
 | `context_scope: shared` or `isolated` | Both supported |
 | All five handoff history modes | Supported |
@@ -476,7 +456,7 @@ remaining boundaries are explicit YAML choices, not silent omissions.
 | Conversation shaping block | Supported |
 | Cold and warm human transfer | Supported; warm summary is Beta |
 | Outbound calls and voicemail | Supported |
-| Pipeline or reasoning `placement: local` | Supported |
+| A `provider: local` model (listen, speak, or think) | Supported |
 | `speak.endpoint_env` | Rejected; no LiveKit integration slot |
 | Warm `briefing: message` or `wait` | Rejected; use `summary` |
 

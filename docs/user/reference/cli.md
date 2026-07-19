@@ -10,7 +10,7 @@
 unmute init [name]
 ```
 
-Scaffolds a new v1 package. The noninteractive default is exactly `agent.yaml`, `instructions.md`, `targets.yaml`, and `.env.example`, with a ready-to-run `pipecat-dev` target. Extra agents, tasks, and tools add their prompt or manifest files. Prints a `created <path>` line for each file.
+Scaffolds a new v1 package. The noninteractive default is exactly `agent.yaml`, `instructions.md`, `targets.yaml`, and `.env.example`, with a ready-to-run `pipecat` target. Extra agents, tasks, and tools add their prompt or manifest files. Prints a `created <path>` line for each file.
 
 - With a `name`, writes the package to that directory.
 - With no argument on an interactive terminal, opens the creation wizard. Start with target, language, STT/LLM/TTS bindings, prompt, and greeting; optionally add variables, tools, agents, directional handoffs, typed tasks, ordered task groups, web/phone channels, and human transfers. Saved items remain visible in their section and open into one edit screen with a delete action; deleting also removes or resets dependent references. The required starter agent and default models offer **Reset** instead. Every reference picker lists the compatible items already created. Advanced conversation, fallback, capacity, and target settings stay under **Customize**.
@@ -33,7 +33,7 @@ Loads, builds, and checks the package against its targets, without generating an
 
 ```text
 TARGET        PROVIDER  RESULT
-pipecat-dev   pipecat   pass
+pipecat   pipecat   pass
 ```
 
 Warnings and errors print to standard error, prefixed `warning:` and `error:`, each naming the target. Exits `1` if any target fails.

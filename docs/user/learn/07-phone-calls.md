@@ -36,7 +36,7 @@ Give it to the billing agent by adding `to_human` to its `tools:` list, and add 
 
 ```yaml
 targets:
-  pipecat-dev:
+  pipecat:
     provider: pipecat
     version: "1.5.0"
     transport: daily-sip          # cold transfer on Pipecat needs the Daily SIP transport
@@ -70,8 +70,8 @@ channels:
 **On Pipecat today this fails validation.** The driver does not emit outbound or voicemail yet:
 
 ```text
-error: pipecat-dev: the Pipecat driver does not emit outbound calling yet
-error: pipecat-dev: the Pipecat driver does not emit voicemail handling yet
+error: pipecat: the Pipecat driver does not emit outbound calling yet
+error: pipecat: the Pipecat driver does not emit voicemail handling yet
 ```
 
 This is the fail-loud rule doing its job: the feature is in the schema and Pipecat the platform can do it, but the driver has not shipped the lowering, so Unmute stops rather than pretend. When the driver adds it, the same spec will compile with no change. The same is true for **warm transfer**: Pipecat supports it, the driver does not emit it yet, so `mode: warm` fails today.

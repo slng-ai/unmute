@@ -10,20 +10,28 @@ So far the model could call tools. A **control** is the other thing the model ca
 
 ## The changes to agent.yaml
 
-Add a model profile, a voice, the second agent, and the transfer control:
+Add a think model, a speak model, the second agent, and the transfer control:
 
 ```yaml
 models:
   fast_reasoning:
     description: cheap and quick, for greeting and routing
-    placement: api
+    provider: openai
+    model: gpt-4o-mini
   careful_reasoning:                 # new: billing gets a stronger model
     description: slower and careful, for billing work
-    placement: api
-
-voices:
-  front_desk: { description: "warm, concise" }
-  specialist: { description: "slower, more deliberate" }   # new
+    provider: openai
+    model: gpt-4o
+  front_desk:
+    description: "warm, concise"
+    provider: slng
+    model: "slng/deepgram/aura:2-en"
+    voice: "aura-2-thalia-en"
+  specialist:                        # new
+    description: "slower, more deliberate"
+    provider: slng
+    model: "slng/deepgram/aura:2-en"
+    voice: "aura-2-orion-en"
 
 agents:
   intake:

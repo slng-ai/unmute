@@ -21,17 +21,16 @@ acme/
 version: 1
 entry_agent: intake
 
-pipeline:
-  listen: { placement: api }
-  speak:  { placement: api }
-
 models:
   fast_reasoning:
     description: cheap and quick, for greeting and routing
-    placement: api
-
-voices:
-  front_desk: { description: "warm, concise" }
+    provider: openai
+    model: gpt-4o-mini
+  front_desk:
+    description: "warm, concise"
+    provider: slng
+    model: "slng/deepgram/aura:2-en"
+    voice: "aura-2-thalia-en"
 
 agents:
   intake:
@@ -68,16 +67,12 @@ keep every answer to one or two short sentences.
 
 ```yaml
 targets:
-  pipecat-dev:
+  pipecat:
     provider: pipecat
     version: "1.5.0"
     models:
       listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
       turn:   { provider: local, model: silero }
-      speak:
-        front_desk: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
-      reason:
-        fast_reasoning: { provider: openai, model: gpt-4o-mini }
 ```
 
 Run it:
@@ -93,11 +88,9 @@ unmute dev acme
 
 **`entry_agent`** names the agent that answers first. It must be one of the agents you define below. Right now there is only `intake`.
 
-**`pipeline`** describes the three jobs in a voice loop: `listen` (turn speech into text), `speak` (turn text into speech), and `turn` (decide when the caller has finished talking). Here you set only **where the model runs**, with `placement`. `api` means a hosted endpoint; `local` means your own machines. `api` is the portable choice. You do not name the actual models here; that is `targets.yaml`'s job. (`turn` is optional in `agent.yaml`; the target decides whether it needs one.)
+**`models`** defines every model once, concretely. `fast_reasoning` is a think model (it names an LLM `provider` and `model`); `front_desk` is a speak model (it also carries a `voice`). A model's kind follows from where an agent refers to it. `provider` + `model` are sent to the platform verbatim; you never write `placement` here (it is derived from `provider`). This is explained in [models and overrides](../concepts/profiles-and-bindings.md). The `listen` and `turn` roles (hearing, and end-of-turn) are per-target plumbing, so they live in `targets.yaml`.
 
-**`models`** and **`voices`** declare **profiles**: abstract names with descriptions. `fast_reasoning` is a reasoning model, `front_desk` is a voice. They are bound to real models per target. This split is explained in [profiles and bindings](../concepts/profiles-and-bindings.md).
-
-**`agents`** is the heart. Each agent has a prompt file (`instructions`), a `model` profile, and a `voice` profile. The names must match profiles you declared.
+**`agents`** is the heart. Each agent has a prompt file (`instructions`), a `model` (a think model), and a `voice` (a speak model). The names must match models you defined.
 
 **`conversation`** shapes the call's behavior. Here, `greeting.speaks_first: agent` means the agent opens the call, and `text` is the exact opening line, spoken word for word every time. (Leave `text` out and the model writes its own opening from the prompt; that is portable on code targets like Pipecat, but see the note below.)
 
@@ -107,13 +100,13 @@ unmute dev acme
 
 ## What targets.yaml does
 
-`targets.yaml` binds each profile to a real model, for the `pipecat-dev` target:
+`targets.yaml` carries the infrastructure for the `pipecat` target plus the two per-target role slots:
 
-- `listen` and `speak` go through SLNG-hosted models, covered by one `SLNG_API_KEY`.
+- `listen` goes through a SLNG-hosted model, covered by one `SLNG_API_KEY`.
 - `turn` runs locally with Silero, an on-device voice-activity detector. No key, no network.
-- `reason` is OpenAI's `gpt-4o-mini`, covered by `OPENAI_API_KEY`.
+- The speak model (`front_desk`) and think model (`fast_reasoning`) come straight from `agent.yaml` — this single-target package needs no overrides. `front_desk` uses SLNG TTS (same `SLNG_API_KEY`); `fast_reasoning` is OpenAI's `gpt-4o-mini`, covered by `OPENAI_API_KEY`.
 
-Model names and voice ids here are sent to the platform as written and never checked by Unmute. A typo surfaces when the agent runs, not at validate. See [profiles and bindings](../concepts/profiles-and-bindings.md).
+Model names and voice ids are sent to the platform as written and never checked by Unmute. A typo surfaces when the agent runs, not at validate. See [models and overrides](../concepts/profiles-and-bindings.md).
 
 ## What just got harder
 

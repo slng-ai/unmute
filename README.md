@@ -65,7 +65,7 @@ user's first run.
 bin/unmute init demo-agent          # SLNG-bound v1 package: agent.yaml,
                                     # instructions.md, targets.yaml, .env.example
 bin/unmute validate demo-agent      # schema + capability + provider-matrix checks
-bin/unmute compile demo-agent       # writes build/pipecat-dev/ (bot.py, pyproject, ...)
+bin/unmute compile demo-agent       # writes build/pipecat/ (bot.py, pyproject, ...)
 bin/unmute dev demo-agent           # runs it with uv and opens a web client
 ```
 
@@ -76,8 +76,8 @@ The tracked examples exercise more of the schema:
 
 ```sh
 bin/unmute validate examples/safe_core                       # five-target portable example
-bin/unmute compile examples/safe_core --target pipecat-dev
-bin/unmute compile examples/remy --target livekit-dev        # handoff + task groups on LiveKit
+bin/unmute compile examples/safe_core --target pipecat
+bin/unmute compile examples/remy --target livekit        # handoff + task groups on LiveKit
 ```
 
 For a managed target, `apply` executes the plan against the provider

@@ -1,24 +1,45 @@
-# Reference: models and voices
+# Reference: models
 
-`models` and `voices` declare **profiles**: abstract names with descriptions. They are bound to real models per target in [targets.yaml](targets-yaml.md). The split is explained in [profiles and bindings](../concepts/profiles-and-bindings.md).
+`models` is one unified map where every model the package uses is defined once, fully and concretely. There is no separate `voices` block. A model's kind follows from where it is referenced: an agent's `voice:` names a **speak model**, an agent's or task's `model:` (or a transfer's `summarizer:`, or a fallback list) names a **think model**. Each entry carries `provider` + `model` — the same pairing the old target bindings used — plus the settings for its kind. A target may override an entry for a provider it cannot run (see [targets.yaml](targets-yaml.md)); the split is explained in [profiles and bindings](../concepts/profiles-and-bindings.md).
 
 ```yaml
 models:
-  fast_reasoning:
+  fast_reasoning:                 # think model (referenced by an agent's model:)
     description: cheap and quick, for greeting and routing
-    placement: api
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.4
   careful_reasoning:
     description: slower and careful, for billing work
-    placement: api
-
-voices:
-  front_desk: { description: "warm, concise" }
-  specialist: { description: "slower, more deliberate" }
+    provider: openai
+    model: gpt-4o
+  front_desk:                     # speak model (referenced by an agent's voice:)
+    description: "warm, concise"
+    provider: slng
+    model: "slng/deepgram/aura:2-en"
+    voice: "aura-2-thalia-en"
+  specialist:
+    description: "slower, more deliberate"
+    provider: slng
+    model: "slng/deepgram/aura:2-en"
+    voice: "aura-2-orion-en"
 ```
 
-There is no `tier` field on a profile. Nothing would use it; Unmute never picks a model for you.
+An entry that nothing references is an error (a declaration never silently does nothing); a name referenced but not defined here is an error naming the reference. There is no `tier` field: Unmute never picks a model for you. `placement` is not written here in the common case — it is derived from `provider` (see [listen, turn, and placement](pipeline.md)).
 
-## Model profile fields
+## Fields on every model
+
+### provider
+
+The catalogue vendor. Selects which service the driver emits. `local` marks an on-machine model.
+
+Required: yes (a hosted managed model may leave it implicit where the provider's engine is integrated). Values: a catalogue vendor. Default: none.
+
+### model
+
+The model identity, forwarded to that provider's SDK verbatim — `gpt-4o-mini` for OpenAI, `slng/deepgram/aura:2-en` for SLNG. Never parsed or rewritten.
+
+Required: yes (may be omitted when the target's engine is integrated and a voice id alone selects the model, e.g. ElevenLabs). Values: text. Default: none.
 
 ### description
 
@@ -26,40 +47,76 @@ For humans only. Not used to pick a model.
 
 Required: no. Values: text. Default: none. Targets: all five, core.
 
-### placement
+## Speak model fields
 
-Where this reasoning model runs.
+### voice
 
-Required: yes. Values: `api | local`. Default: none.
+The voice id, forwarded as-is.
 
-| Target | What happens | Tag |
-|---|---|---|
-| LiveKit | `api` and `local` both work | gated |
-| Pipecat | `api` and `local` both work | gated |
-| Vapi | `local` reasoning fails (custom LLM endpoint unverified) | gated |
-| ElevenLabs | `local` reasoning works only through its documented custom LLM endpoint | gated |
-| Deepgram | `local` reasoning works (a custom reason endpoint is fine) | gated |
+Required: yes. Values: text. Default: none.
 
-`api` is the portable choice. A `local` reasoning model needs somewhere to run: fine on code targets, and on ElevenLabs only via its custom LLM endpoint.
+### speed
+
+Playback speed multiplier.
+
+Required: no. Values: number. Default: `1.0`. Tag: warn — lowered through the provider's documented slot, warned where none exists.
+
+### language
+
+A per-model override of the package `language` (BCP-47).
+
+Required: no. Values: a BCP-47 tag. Default: the top-level `language`. Tag: gated per target.
+
+Per-agent voices are native on LiveKit, Pipecat, and ElevenLabs, and work on all five.
+
+## Think model fields
+
+### temperature
+
+Sampling temperature.
+
+Required: no. Values: number. Default: provider default. Targets: all five, core — Vapi `model.temperature`, ElevenLabs `prompt.temperature`, Deepgram `think.provider.temperature`, constructor kwargs on Pipecat and LiveKit.
+
+### top_p, top_k
+
+Sampling cutoffs.
+
+Required: no. Values: number. Tag: warn — lowered through the provider's documented slot, warned where none exists.
+
+### params
+
+An open map of anything else the bound component accepts (`max_tokens` where a slot exists; never forwarded to Deepgram, which has no max-tokens slot). Forwarded verbatim, never validated.
+
+Required: no. Values: a map. Default: none.
 
 ### fallback
 
-An ordered list of other model profile names to try when the primary fails or times out.
+An ordered list of other think-model names to try when the primary fails or times out.
 
-Required: no. Values: ordered list of profile names. Default: none. The chain is cycle-checked, and every profile in a chain must land in the same role kind and placement on the resolved target.
+Required: no. Values: ordered list of model names. Default: none. The chain is cycle-checked, and every model in a chain must land in the same role kind and placement on the resolved target.
 
 | Target | What happens | Tag |
 |---|---|---|
 | LiveKit | native (`FallbackAdapter`) | gated |
 | Pipecat | supported, but the driver does not emit it yet (maturity gate) | gated |
 | Vapi | native, but same-provider chains only; a cross-provider chain fails | gated |
-| ElevenLabs | native; entries are model ids only, so profiles carrying binding `params` warn | gated |
+| ElevenLabs | native; entries are model ids only, so models carrying extra settings warn | gated |
 | Deepgram | native (ordered provider array, mixed providers allowed) | gated |
 
 On Pipecat, using `fallback` fails validation today; it is a driver maturity gate, not a platform limit.
 
-## Voice profile fields
+### placement
 
-A voice profile carries only `description`. It is bound per target as `speak.<profile>`.
+Where this model runs. Derived from `provider` (`local` → local, else api); set explicitly only to override.
 
-Required: `description` no. Values: text. Default: none. Targets: all five, core. Per-agent voices are native on LiveKit, Pipecat, and ElevenLabs, and work on all five.
+Required: no. Values: `api | local`. Default: derived.
+
+| Target | What happens | Tag |
+|---|---|---|
+| LiveKit | hosted and `local` both work | gated |
+| Pipecat | hosted and `local` both work | gated |
+| Vapi | `local` think fails (custom LLM endpoint unverified) | gated |
+| ElevenLabs | `local` think works only through its documented custom LLM endpoint | gated |
+| Deepgram | `local` think works (a custom reason endpoint is fine) | gated |
+
+A hosted provider is the portable choice. A `local` think model needs somewhere to run: fine on code targets, and on ElevenLabs only via its custom LLM endpoint.

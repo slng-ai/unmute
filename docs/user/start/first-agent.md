@@ -21,7 +21,7 @@ file contains the prompt referenced by the agent definition.
 
 ## Describe the agent
 
-Start with one entry agent, one model profile, one voice profile, and one audio
+Start with one entry agent, one think model, one speak model, and one audio
 channel in `agent.yaml`.
 
 ```yaml
@@ -29,19 +29,17 @@ version: 1
 language: en
 entry_agent: assistant
 
-pipeline:
-  listen: { placement: api }
-  turn: { placement: local, semantic_endpointing: preferred }
-  speak: { placement: api }
-
 models:
   assistant_model:
     description: Fast reasoning for general support
-    placement: api
-
-voices:
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.4
   assistant_voice:
     description: Warm and concise
+    provider: slng
+    model: "slng/deepgram/aura:2-en"
+    voice: "aura-2-thalia-en"
 
 agents:
   assistant:
@@ -67,44 +65,31 @@ capacity:
 
 Read this file from top to bottom as a behavior graph:
 
-1. `pipeline` describes where listening, turn detection, and speech happen.
-2. `models` and `voices` declare portable profiles, not provider model IDs.
-3. `agents` assigns those profiles and an instruction file to the entry agent.
-4. `conversation` and `channels` describe what the caller experiences.
-5. `capacity` declares the expected concurrency for a code target.
+1. `models` defines each model once, concretely — `assistant_model` (a think model) and `assistant_voice` (a speak model, carrying a `voice`). Their kind follows from where the agent references them.
+2. `agents` assigns those models and an instruction file to the entry agent.
+3. `conversation` and `channels` describe what the caller experiences.
+4. `capacity` declares the expected concurrency for a code target.
 
-## Bind the profiles to LiveKit
+## Add the LiveKit target
 
-Use `targets.yaml` to choose the concrete integrations for every open pipeline
-role and every profile used by the agent.
+Use `targets.yaml` to name the platform and its per-target plumbing. The model
+definitions are already in `agent.yaml`; a target only carries its `listen`/`turn`
+role slots and any overrides for models it cannot run as defined.
 
 ```yaml
 targets:
-  livekit-dev:
+  livekit:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
     models:
-      listen:
-        provider: slng
-        model: "slng/deepgram/nova:3-en"
-      turn:
-        provider: livekit
-        model: turn-detector-mini
-      speak:
-        assistant_voice:
-          provider: slng
-          model: "slng/deepgram/aura:2-en"
-          voice: "aura-2-thalia-en"
-      reason:
-        assistant_model:
-          provider: openai
-          model: gpt-4o-mini
-          params: { temperature: 0.4 }
+      listen: { provider: slng, model: "slng/deepgram/nova:3-en" }
+      turn:   { provider: livekit, model: turn-detector-mini }
 ```
 
-The names under `speak` and `reason` match the profile names in `agent.yaml`.
-Changing a provider binding doesn't change the agent's behavior or prompt.
+The speak and think models come straight from `agent.yaml`, so this target needs
+no overrides. Changing where a model runs doesn't change the agent's behavior or
+prompt.
 
 ## Keep the boundary clear
 
@@ -115,8 +100,8 @@ the agent portable.
 |---|---|
 | What does the caller experience? | `agent.yaml` |
 | Which agents, tasks, and tools exist? | `agent.yaml` |
-| Which model and voice profiles do they use? | `agent.yaml` |
-| Which provider and model ID implement each profile? | `targets.yaml` |
+| Which models (provider + model id) do they use? | `agent.yaml` |
+| Which platform, listen/turn plumbing, and per-target overrides? | `targets.yaml` |
 | Which framework version and plugin pins apply? | `targets.yaml` |
 | Where do secrets go? | Environment variables, never YAML values |
 

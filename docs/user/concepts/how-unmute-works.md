@@ -21,7 +21,7 @@ load  ->  build  ->  validate  ->  generate
 ```
 
 1. **Load.** Read the package files: `agent.yaml`, the prompt files, each `tools/*.yaml`, and `targets.yaml`. Parsing is strict, so a typo or an unknown field is an error here, with the file and line.
-2. **Build.** Resolve the package into one internal model: link each agent to its prompt, model, and voice; connect controls to the tasks and agents they name; attach each binding to its profile. Anything that does not connect (an agent pointing at a model that does not exist) fails here.
+2. **Build.** Resolve the package into one internal model: link each agent to its prompt, model, and voice; connect controls to the tasks and agents they name; resolve each target's effective models (an override, or the agent.yaml definition). Anything that does not connect (an agent pointing at a model that does not exist) fails here.
 3. **Validate.** Check the built agent against the chosen target. Every feature you used is measured against what that target can do. If the target cannot honor a feature, validation fails with a clear message in that platform's own words. This is where [tags and gating](tags-and-gating.md) live.
 4. **Generate.** Only a valid agent reaches this step. The target's driver turns the model into that platform's artifacts. For Pipecat, that is a runnable Python project.
 

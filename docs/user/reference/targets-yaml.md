@@ -1,20 +1,20 @@
 # Reference: targets.yaml
 
-`targets.yaml` holds named **target instances**. Everything provider-specific lives here: the platform, version pins, and the bindings that attach abstract [profiles](models-and-voices.md) to real models. The same `agent.yaml` compiles to every instance. See [profiles and bindings](../concepts/profiles-and-bindings.md).
+`targets.yaml` holds named **target instances**. Each carries the infrastructure that only makes sense per target — the platform, version pins, transport, destinations — plus an optional `models:` **override** map for the entries a given target cannot run as [defined in agent.yaml](models-and-voices.md). Model definitions themselves live in `agent.yaml`; this file never defines a model, it only overrides one. The same `agent.yaml` compiles to every instance. See [profiles and bindings](../concepts/profiles-and-bindings.md).
+
+Instances are named after the provider, not a `-dev` suffix: what you test is what you deploy. Add a second instance only when you have a real second environment.
 
 ```yaml
 targets:
-  pipecat-dev:
+  pipecat:
     provider: pipecat
     version: "1.5.0"
     transport: daily-sip
     models:
+      # listen and turn are per-target role slots. Everything else
+      # (speak/think models) comes from agent.yaml unless overridden here.
       listen: { provider: deepgram, model: nova-3 }
       turn:   { provider: local, model: silero }
-      speak:
-        front_desk: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
-      reason:
-        fast_reasoning: { provider: openai, model: gpt-4o-mini, params: { temperature: 0.4 } }
     destinations:
       billing_line: "+14155550123"
 ```
@@ -29,33 +29,34 @@ targets:
 | `sdk_language` | no | the LiveKit driver currently accepts `python` only |
 | `transport`, `carrier` | no | driver vocabulary; telephony controls resolve against these, never the brand alone |
 | `region`, `edition` | no | provider vocabulary; declared, never derived |
-| `models` | yes | the binding block, below |
+| `models` | no | per-target overrides + the `listen`/`turn` role slots, below |
 | `destinations` | if any `human_transfer` is used | map of symbolic name to phone number or SIP address |
 
 Pipecat, LiveKit, and ElevenLabs have drivers today; Vapi and Deepgram instances error on `compile` until their driver ships. `validate` still checks any provider against the schema. See the [target pages](../targets/pipecat.md).
 
-## Bindings
+## Overrides and role slots
 
-The `models` block binds each role. `listen` and `turn` bind once each. `reason` binds once per model profile. `speak` binds once per voice profile. Which `provider:` values each target accepts, and what each choice emits, is the [providers reference](providers.md).
+The `models:` map is keyed by model names from `agent.yaml` — plus `listen` and `turn` for the two role slots. An override **replaces the whole entry** for that target (same kind, no field-level merge); the effective model is the override when present, the `agent.yaml` definition otherwise. `listen` and `turn` live here because they are per-target plumbing: which target covers them, and how, differs.
 
-Each role is **open** (you bind an outside model) or **integrated** (the platform builds it in; you can bind settings only, never an outside model):
+Each role is **open** (you name an outside model) or **integrated** (the platform builds it in; a slot carries settings only, never an outside model):
 
 | Role | LiveKit | Pipecat | Vapi | ElevenLabs | Deepgram |
 |---|---|---|---|---|---|
 | `listen` | open | open | open | integrated (settings only) | open (Deepgram models only) |
 | `turn` | open | open | integrated | integrated | integrated (rides the listen `params`) |
-| `speak` | open | open | open | open (ElevenLabs voices only) | open (Deepgram plus a fixed third-party list) |
-| `reason` | open | open | open | open (supported list plus custom LLM endpoint) | open (custom endpoints allowed) |
+| speak | open | open | open | open (ElevenLabs voices only) | open (Deepgram plus a fixed third-party list) |
+| think | open | open | open | open (supported list plus custom LLM endpoint) | open (custom endpoints allowed) |
 
 Rules:
 
-1. Every open role in use, and every used model and voice profile, must have a binding. Without one there is nothing to emit.
-2. An integrated role's binding is optional. When present it carries settings for the built-in part only, and can never name an outside model.
-3. A binding may carry `params:`, an open map for the bound component's own settings (temperature, audio format, turn thresholds). Forwarded as-is, **never validated**. It configures only the bound component; platform and telephony settings can never ride through it.
-4. Bindings must agree with the declared `placement`.
-5. If a driver has no slot for a value (a custom `speak` endpoint on ElevenLabs, a third-party `listen` model on Deepgram), compilation fails: the value has nowhere to go.
-6. Every forwarded binding and param is listed in the compile or plan report, so what was sent is always inspectable. Some providers keep fields that do nothing, so run the agent to be sure.
+1. Every used model, and `listen` on every open-listen target, must have an effective definition (in `agent.yaml` or overridden here). Without one there is nothing to emit.
+2. On a target whose role is integrated, the effective entry for that role carries settings only, and can never name an outside model.
+3. A definition or override may carry `params:`, an open map for the bound component's own settings. Forwarded as-is, **never validated**. Platform and telephony settings can never ride through it.
+4. Placement is derived from the effective entry's `provider` (`local` → local, else api; an explicit `placement:` overrides).
+5. If a driver has no slot for a value (a custom speak endpoint on ElevenLabs, a third-party listen model on Deepgram), compilation fails: the value has nowhere to go.
+6. An override naming a model `agent.yaml` does not define, or changing its kind, is an error.
+7. Every forwarded model and param is listed in the compile or plan report, so what was sent is always inspectable. Some providers keep fields that do nothing, so run the agent to be sure.
 
-### Why bindings are never validated
+### Why models are never validated
 
-Provider model lists change faster than any shipped catalog, the valid set on code targets depends on the pinned versions, and the real validators already exist: the provider API at apply time, and the generated project at startup. Unmute relays those errors word for word rather than guessing ahead of them. The one thing that **is** checked is the `provider:` name itself, because it selects the emitted integration: the [providers reference](providers.md) lists the accepted names per target, and an unknown one fails at `validate` with the alternatives quoted. To point a role at an OpenAI-compatible endpoint, a binding may carry `endpoint_env` (an environment variable name), which the Pipecat driver passes as the service `base_url`.
+Provider model lists change faster than any shipped catalog, the valid set on code targets depends on the pinned versions, and the real validators already exist: the provider API at apply time, and the generated project at startup. Unmute relays those errors word for word rather than guessing ahead of them. The one thing that **is** checked is the `provider:` name itself, because it selects the emitted integration: the [providers reference](providers.md) lists the accepted names per target, and an unknown one fails at `validate` with the alternatives quoted. To point a role at an OpenAI-compatible endpoint, a model may carry `endpoint_env` (an environment variable name), which the Pipecat driver passes as the service `base_url`.

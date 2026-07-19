@@ -36,9 +36,9 @@ Rules that hold across the whole package:
 | `version` | yes | int, must be `1` | core |
 | `language` | no, defaults to `en` | BCP-47 tag such as `en` or `es-MX` | gated |
 | `entry_agent` | yes | name of an agent | core |
-| `pipeline` | yes | block | core |
-| `models` | yes, at least one | map of profiles | core |
-| `voices` | yes, at least one | map of profiles | core |
+| `models` | yes, at least one | map of model definitions | core |
+| `listen` | no | block (per-target plumbing) | gated |
+| `turn` | no | block (per-target plumbing) | warn |
 | `variables` | no | map | core |
 | `agents` | yes, must include `entry_agent` | map | core |
 | `tasks` | no | map | gated (T1) |
@@ -71,8 +71,8 @@ Required: yes. Values: an agent name. Default: none. Targets: all five, core.
 
 Each block has its own reference page with every field:
 
-- **`pipeline`**: the listen / turn / speak roles and where models run. See [pipeline](pipeline.md).
-- **`models`, `voices`**: abstract profiles, bound per target. See [models and voices](models-and-voices.md).
+- **`models`**: every model defined once, concretely (think and speak side by side). See [models](models-and-voices.md).
+- **`listen`, `turn`**: the two shared-plumbing roles and where models run. Usually set per target. See [listen, turn, and placement](pipeline.md).
 - **`variables`**: typed shared state. See [variables](variables.md).
 - **`agents`**: prompt, model, voice, tools per agent. See [agents](agents.md).
 - **`tasks`, `task_groups`**: delegate-and-return work (T1). See [tasks](tasks.md).
