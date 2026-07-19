@@ -3,37 +3,56 @@ package ir
 // Agent is the resolved v1 package. References remain names so the graph is
 // acyclic and schema derivation does not recurse through agent handoffs.
 type Agent struct {
-	Version      int                     `json:"version" yaml:"version"`
-	Language     string                  `json:"language" yaml:"language"`
-	EntryAgent   string                  `json:"entry_agent" yaml:"entry_agent"`
-	Pipeline     Pipeline                `json:"pipeline" yaml:"pipeline"`
-	Models       map[string]ModelProfile `json:"models" yaml:"models"`
-	Voices       map[string]VoiceProfile `json:"voices" yaml:"voices"`
-	Variables    map[string]Variable     `json:"variables,omitempty" yaml:"variables,omitempty"`
-	Agents       map[string]AgentDef     `json:"agents" yaml:"agents"`
-	Tasks        map[string]Task         `json:"tasks,omitempty" yaml:"tasks,omitempty"`
-	TaskGroups   map[string]TaskGroup    `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
-	Controls     map[string]Control      `json:"controls,omitempty" yaml:"controls,omitempty"`
-	Tools        map[string]Tool         `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Conversation *Conversation           `json:"conversation,omitempty" yaml:"conversation,omitempty"`
-	Channels     map[string]Channel      `json:"channels" yaml:"channels"`
-	Capacity     *Capacity               `json:"capacity,omitempty" yaml:"capacity,omitempty"`
-	Targets      map[string]Target       `json:"targets" yaml:"targets"`
+	Version    int    `json:"version" yaml:"version"`
+	Language   string `json:"language" yaml:"language"`
+	EntryAgent string `json:"entry_agent" yaml:"entry_agent"`
+	// Models flattens the four authoring sections into one name-keyed map; each
+	// entry's Kind records its section (names are one namespace, N15).
+	Models map[string]ModelDef `json:"models" yaml:"models"`
+	// Listen/Turn are the resolved selection names into Models ("" = none).
+	Listen       string               `json:"listen,omitempty" yaml:"listen,omitempty"`
+	Turn         string               `json:"turn,omitempty" yaml:"turn,omitempty"`
+	Variables    map[string]Variable  `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Agents       map[string]AgentDef  `json:"agents" yaml:"agents"`
+	Tasks        map[string]Task      `json:"tasks,omitempty" yaml:"tasks,omitempty"`
+	TaskGroups   map[string]TaskGroup `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
+	Controls     map[string]Control   `json:"controls,omitempty" yaml:"controls,omitempty"`
+	Tools        map[string]Tool      `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Conversation *Conversation        `json:"conversation,omitempty" yaml:"conversation,omitempty"`
+	Channels     map[string]Channel   `json:"channels" yaml:"channels"`
+	Capacity     *Capacity            `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	Targets      map[string]Target    `json:"targets" yaml:"targets"`
 }
 
-type Pipeline struct {
-	Listen PipelineRole `json:"listen" yaml:"listen"`
-	Turn   *TurnRole    `json:"turn,omitempty" yaml:"turn,omitempty"`
-	Speak  PipelineRole `json:"speak" yaml:"speak"`
-}
+// ModelKind is resolved from a model's reference site in Build (N15).
+type ModelKind string
 
-type PipelineRole struct {
-	Placement Placement `json:"placement" yaml:"placement"`
-}
+const (
+	KindThink  ModelKind = "think"
+	KindSpeak  ModelKind = "speak"
+	KindListen ModelKind = "listen"
+	KindTurn   ModelKind = "turn"
+)
 
-type TurnRole struct {
+// ModelDef is the resolved unified model definition (N15). provider+model carry
+// the vendor pairing; Placement is derived from provider unless set explicitly;
+// Kind is fixed in Build from where the model is referenced.
+type ModelDef struct {
+	Kind                ModelKind           `json:"kind" yaml:"kind"`
+	Provider            string              `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Model               string              `json:"model,omitempty" yaml:"model,omitempty"`
+	Voice               string              `json:"voice,omitempty" yaml:"voice,omitempty"`
+	Speed               *float64            `json:"speed,omitempty" yaml:"speed,omitempty"`
+	Language            string              `json:"language,omitempty" yaml:"language,omitempty"`
+	Temperature         *float64            `json:"temperature,omitempty" yaml:"temperature,omitempty"`
+	TopP                *float64            `json:"top_p,omitempty" yaml:"top_p,omitempty"`
+	TopK                *int                `json:"top_k,omitempty" yaml:"top_k,omitempty"`
+	EndpointEnv         string              `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 	Placement           Placement           `json:"placement" yaml:"placement"`
 	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
+	Params              map[string]any      `json:"params,omitempty" yaml:"params,omitempty"`
+	Fallback            []string            `json:"fallback,omitempty" yaml:"fallback,omitempty"`
+	Description         string              `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 type Placement string
@@ -50,16 +69,6 @@ const (
 	SemanticEndpointingPreferred SemanticEndpointing = "preferred"
 	SemanticEndpointingOff       SemanticEndpointing = "off"
 )
-
-type ModelProfile struct {
-	Description string    `json:"description,omitempty" yaml:"description,omitempty"`
-	Placement   Placement `json:"placement" yaml:"placement"`
-	Fallback    []string  `json:"fallback,omitempty" yaml:"fallback,omitempty"`
-}
-
-type VoiceProfile struct {
-	Description string `json:"description,omitempty" yaml:"description,omitempty"`
-}
 
 type Variable struct {
 	Type    PrimitiveType  `json:"type" yaml:"type"`
@@ -343,18 +352,30 @@ const (
 )
 
 type Bindings struct {
-	Listen *Binding           `json:"listen,omitempty" yaml:"listen,omitempty"`
-	Turn   *Binding           `json:"turn,omitempty" yaml:"turn,omitempty"`
-	Speak  map[string]Binding `json:"speak,omitempty" yaml:"speak,omitempty"`
-	Reason map[string]Binding `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Listen *Binding `json:"listen,omitempty" yaml:"listen,omitempty"`
+	// ListenFallbacks is the selected listen model's flattened fallback chain,
+	// in order, resolved per target (N15/T16). Empty without listen fallback.
+	ListenFallbacks []ListenFallback   `json:"listen_fallbacks,omitempty" yaml:"listen_fallbacks,omitempty"`
+	Turn            *Binding           `json:"turn,omitempty" yaml:"turn,omitempty"`
+	Speak           map[string]Binding `json:"speak,omitempty" yaml:"speak,omitempty"`
+	Reason          map[string]Binding `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
+// ListenFallback pairs a chain entry's model name with its resolved binding.
+type ListenFallback struct {
+	Name    string  `json:"name" yaml:"name"`
+	Binding Binding `json:"binding" yaml:"binding"`
+}
+
+// Binding is the resolved per-target view of one effective model (N15): the
+// generators consume this, not the authoring ModelDef.
 type Binding struct {
-	Provider    string         `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Model       string         `json:"model,omitempty" yaml:"model,omitempty"`
-	Voice       string         `json:"voice,omitempty" yaml:"voice,omitempty"`
-	VoiceID     string         `json:"voice_id,omitempty" yaml:"voice_id,omitempty"`
-	EndpointEnv string         `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
-	Placement   Placement      `json:"placement,omitempty" yaml:"placement,omitempty"`
-	Params      map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	Provider            string              `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Model               string              `json:"model,omitempty" yaml:"model,omitempty"`
+	Voice               string              `json:"voice,omitempty" yaml:"voice,omitempty"`
+	VoiceID             string              `json:"voice_id,omitempty" yaml:"voice_id,omitempty"`
+	EndpointEnv         string              `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
+	Placement           Placement           `json:"placement,omitempty" yaml:"placement,omitempty"`
+	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
+	Params              map[string]any      `json:"params,omitempty" yaml:"params,omitempty"`
 }

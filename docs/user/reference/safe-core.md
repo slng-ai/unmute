@@ -8,10 +8,10 @@ The **safe core** is the subset of the schema that passes validation on every on
 2. Every transfer context: `history: full`, `variables: all`.
 3. Tools: `execution: webhook`, `interruption: provider_default`, `effect: returns_data`.
 4. Human transfer: `mode: cold` only. Pipecat needs the Daily SIP transport; Deepgram needs a carrier in its target instance.
-5. Pipeline: `placement: api` for `listen` and `speak`. `turn` is a preference anyway.
+5. Models: hosted providers for `listen` and speak models (no `provider: local`). `turn` is a preference anyway.
 6. If the agent speaks first, give it a fixed `greeting.text`. A model-written opening is conditional on ElevenLabs and generated-with-a-warning on Deepgram; a fixed line is the zero-warning choice.
-7. Skip for now: single `tasks` (return to owner is unverified on Vapi) and `task_groups` with `then: return` (fails on Vapi). A `task_group` with `then: transfer` or `end` does pass on all five (with a warning on LiveKit that TaskGroup is experimental). Also skip `requires`, `thinking_audio`, warm transfer, `mcp` and `local` tools, and any history other than `full`. `fallback` passes everywhere when the chain stays within one provider on Vapi and the fallback profiles carry no extra binding params on ElevenLabs. `outbound: true` with `on_voicemail` passes everywhere but is generated with a warning on Deepgram, so keep it out if you want zero warnings.
-8. Accept warnings: `minimum_words` on ElevenLabs, interruption tuning on Deepgram, turn placement notes.
+7. Skip for now: single `tasks` (return to owner is unverified on Vapi) and `task_groups` with `then: return` (fails on Vapi). A `task_group` with `then: transfer` or `end` does pass on all five (with a warning on LiveKit that TaskGroup is experimental). Also skip `requires`, `thinking_audio`, warm transfer, `mcp` and `local` tools, and any history other than `full`. `fallback` passes everywhere when the chain stays within one provider on Vapi and the fallback models carry no settings beyond the id on ElevenLabs. `outbound: true` with `on_voicemail` passes everywhere but is generated with a warning on Deepgram, so keep it out if you want zero warnings.
+8. Accept warnings: `minimum_words` on ElevenLabs, interruption tuning on Deepgram, turn model notes.
 
 ## Feature by feature
 
@@ -30,11 +30,12 @@ The **safe core** is the subset of the schema that passes validation on every on
 | history `messages` / `last_n` / `reset` | ok | gated (driver v1) | ok | fail | ok |
 | history `summary` | ok | gated (driver v1) | fail | fail | ok |
 | `requires:` | ok | ok | fail | fail | ok |
-| `fallback:` | ok | gated (driver v1) | conditional | ok | ok |
+| `fallback:` (think) | ok | gated (driver v1) | conditional | ok | ok |
+| `fallback:` (listen) | ok | gated (driver v1) | fail | fail | fail |
 | human_transfer cold | ok | Daily SIP only | ok | ok | carrier-conditional |
 | human_transfer warm | native | ships, not emitted yet | Twilio only | ok | carrier-conditional |
 | `thinking_audio` | ok | gated (driver v1) | fail | ok | fail |
-| `placement: local` (listen/speak) | ok | ok | fail | fail | fail |
+| `provider: local` (listen/speak) | ok | ok | fail | fail | fail |
 | webhook tools | ok | ok | ok | ok | ok |
 | mcp tools | Python only | gated (driver v1) | ok | ok | fail |
 | outbound + `on_voicemail` | ok | gated (driver v1) | ok | ok | generated (warn) |

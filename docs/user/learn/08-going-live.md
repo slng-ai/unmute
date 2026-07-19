@@ -4,26 +4,30 @@ The agent works in `dev`. This page covers the last mile: running one spec again
 
 ## One spec, many targets
 
-`targets.yaml` can hold several target instances. They all compile from the same `agent.yaml`. A common split is a dev instance and a prod instance, or one instance per platform you are evaluating:
+`targets.yaml` can hold several target instances, each named after its provider. They all compile from the same `agent.yaml` — the model definitions live there; each instance only carries its infrastructure and any by-name overrides for models that platform cannot run as defined. One instance per platform you are evaluating:
 
 ```yaml
 targets:
-  pipecat-dev:
+  pipecat:
     provider: pipecat
     version: "1.5.0"
-    models: # ...
-  pipecat-prod:
-    provider: pipecat
-    version: "1.5.0"
-    models: # ... same profiles, prod model ids and voices ...
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    models:
+      # LiveKit swaps the VAD entry for its own turn model
+      vad: { provider: livekit, model: turn-detector-mini }
 ```
 
 Pick one with `--target`, or compile every declared target by leaving it off:
 
 ```sh
-unmute compile acme --target pipecat-prod     # one target
+unmute compile acme --target livekit          # one target
 unmute compile acme                           # every declared target
 ```
+
+Add a second instance of the *same* provider only when you have a real second environment (a separate region or account, say); the default is one instance per provider, so what you test is what you deploy.
 
 ## Check portability before you commit
 
@@ -35,9 +39,9 @@ unmute validate acme
 
 ```text
 TARGET            PROVIDER    RESULT
-elevenlabs-prod   elevenlabs  pass
-pipecat-dev       pipecat     pass
-vapi-prod         vapi        fail
+elevenlabs   elevenlabs  pass
+pipecat       pipecat     pass
+vapi         vapi        fail
 ```
 
 with the warnings and errors printed per target. So you can declare a target for each of the five, run `validate`, and see exactly which features cost you a warning or a failure on each platform, before writing a line of platform code. Then `compile` the one whose driver is ready (Pipecat today). The other drivers error on `compile` until they ship; `validate` still tells you where you stand.

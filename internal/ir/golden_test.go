@@ -99,8 +99,14 @@ func historyGolden(t *testing.T) compilerGoldenCase {
 
 func localPlacementGolden(t *testing.T) compilerGoldenCase {
 	agent := safeAgent(t)
-	agent.Pipeline.Listen.Placement = PlacementLocal
-	return compilerGoldenCase{"local_listen", agent, []Target{targetFor(agent, ProviderVapi), targetFor(agent, ProviderElevenLabs)}, true}
+	// A local listen model on a managed target: derived placement is local, which
+	// they cannot host (N15). Each Target is a copy, so setting Listen is isolated.
+	local := &Binding{Provider: "local", Model: "whisper-large-v3", Placement: PlacementLocal}
+	vapi := targetFor(agent, ProviderVapi)
+	vapi.Models.Listen = local
+	eleven := targetFor(agent, ProviderElevenLabs)
+	eleven.Models.Listen = local
+	return compilerGoldenCase{"local_listen", agent, []Target{vapi, eleven}, true}
 }
 
 func mcpGolden(t *testing.T) compilerGoldenCase {

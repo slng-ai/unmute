@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	packagespec "github.com/slng/unmute/internal/spec"
 	targetcap "github.com/slng/unmute/internal/target"
 )
 
@@ -88,7 +89,7 @@ func TestValidateElevenLabsBriefingMessageIsTwilioOnly(t *testing.T) { // driver
 
 func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
 	agent := safeAgent(t)
-	agent.Models["group_only_summarizer"] = ModelProfile{Placement: PlacementAPI}
+	agent.Models["group_only_summarizer"] = ModelDef{Kind: KindThink, Placement: PlacementAPI}
 	agent.Tasks["collect"] = Task{
 		Instructions: "collect", Result: map[string]ResultField{"done": {Type: PrimitiveBoolean}},
 		Context: TaskContext{History: HistorySummary, Summarizer: "group_only_summarizer"},
@@ -148,9 +149,8 @@ func TestValidateRequiresCompleteBindings(t *testing.T) { // V9
 	}
 }
 
-func TestValidateOpenTurnBindingIsIndependentOfPipelineBlock(t *testing.T) {
+func TestValidateOpenTurnBindingRequiredWhenAbsent(t *testing.T) {
 	agent := safeAgent(t)
-	agent.Pipeline.Turn = nil
 	target := targetFor(agent, ProviderLiveKit)
 	target.Models.Turn = nil
 	report, err := Validate(agent, []Target{target}, targetcap.Default())
@@ -298,7 +298,7 @@ func TestValidateNestedResultChecksEveryConfiguredTarget(t *testing.T) {
 		Context: TaskContext{History: HistoryFull},
 	}
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `configured target "vapi-prod"`) {
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `configured target "vapi"`) {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}
 }
@@ -314,6 +314,42 @@ func TestValidateNestedResultRejectsUnknownConfiguredProvider(t *testing.T) {
 	report, err := Validate(agent, []Target{livekit}, targetcap.Default())
 	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `configured target "unknown" has unknown provider "other"`) {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestT16_ListenFallbackGatesPerTarget(t *testing.T) {
+	build := func(t *testing.T) *Agent {
+		t.Helper()
+		pkg := loadSafeCore(t)
+		pkg.Agent.Models.Listen["backup_stt"] = packagespec.ModelDef{Provider: "soniox", Model: "stt-rt-v5"}
+		primary := pkg.Agent.Models.Listen["transcriber"]
+		primary.Fallback = []string{"backup_stt"}
+		pkg.Agent.Models.Listen["transcriber"] = primary
+		pkg.Agent.Listen = "transcriber"
+		agent, err := Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return agent
+	}
+	agent := build(t)
+	// LiveKit is the one target with a native slot (stt.FallbackAdapter).
+	// Soniox is not in the LiveKit catalogue, so rebind the fallback there.
+	livekit := targetFor(agent, ProviderLiveKit)
+	livekit.Models.ListenFallbacks[0].Binding = Binding{Provider: "deepgram", Model: "nova-2", Placement: PlacementAPI}
+	if report, err := Validate(agent, []Target{livekit}, targetcap.Default()); err != nil {
+		t.Fatalf("livekit must accept listen fallback; err=%v report=%#v", err, report.PerTarget)
+	}
+	for provider, want := range map[Provider]string{
+		ProviderPipecat:    "does not emit listen fallback yet",
+		ProviderVapi:       "no documented transcriber fallback slot",
+		ProviderElevenLabs: "no STT fallback slot",
+		ProviderDeepgram:   "single provider; there is no fallback slot",
+	} {
+		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
+		if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), want) {
+			t.Errorf("%s: want %q gate, err=%v report=%#v", provider, want, err, report.PerTarget)
+		}
 	}
 }
 
@@ -345,7 +381,9 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.ForwardedBindings) != 27 {
+	// 5 targets x (listen + turn + 2 speak + 2 reason): the package-wide turn
+	// preference now reaches integrated-turn targets too (warned, not dropped).
+	if len(report.ForwardedBindings) != 30 {
 		t.Fatalf("forwarded bindings = %d", len(report.ForwardedBindings))
 	}
 	foundTemperature := false

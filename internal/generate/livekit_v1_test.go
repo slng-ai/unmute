@@ -127,6 +127,44 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 	}
 }
 
+// TestT16_LiveKitEmitsListenFallbackAdapter proves the listen chain lowers to
+// the native stt.FallbackAdapter (verified in livekit-agents source
+// 2026-07-19), with both services resolved through the catalogue and the
+// stt module imported.
+func TestT16_LiveKitEmitsListenFallbackAdapter(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg.Agent.Models.Listen["backup_stt"] = spec.ModelDef{Provider: "deepgram", Model: "nova-3"}
+	primary := pkg.Agent.Models.Listen["transcriber"]
+	primary.Fallback = []string{"backup_stt"}
+	pkg.Agent.Models.Listen["transcriber"] = primary
+	pkg.Agent.Listen = "transcriber"
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		"    stt,",
+		`stt=stt.FallbackAdapter(stt=[slng.STT(`,
+		`deepgram.STT(api_key=os.environ.get("DEEPGRAM_API_KEY"), model="nova-3", language="en")])`,
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	env := artifactFile(t, artifact, ".env.example")
+	if !strings.Contains(env, "DEEPGRAM_API_KEY=") {
+		t.Errorf(".env.example missing the fallback vendor key:\n%s", env)
+	}
+}
+
 // TestLiveKitV1UnknownVendorFailsWithMatrix asserts the no-slot diagnostic
 // quotes the support matrix instead of guessing a substitute service.
 func TestLiveKitV1UnknownVendorFailsWithMatrix(t *testing.T) {
@@ -365,7 +403,7 @@ func TestLiveKitV1PerTaskModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent.Models["fast"] = ir.ModelProfile{Placement: ir.PlacementAPI}
+	agent.Models["fast"] = ir.ModelDef{Kind: ir.KindThink, Placement: ir.PlacementAPI}
 	task := agent.Tasks["find_slot"]
 	task.Model = "fast"
 	agent.Tasks["find_slot"] = task
@@ -403,7 +441,7 @@ func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 	profile := agent.Models["reasoning"]
 	profile.Fallback = []string{"backup"}
 	agent.Models["reasoning"] = profile
-	agent.Models["backup"] = ir.ModelProfile{Placement: ir.PlacementAPI}
+	agent.Models["backup"] = ir.ModelDef{Kind: ir.KindThink, Placement: ir.PlacementAPI}
 	// Shape each transfer differently.
 	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
 	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
@@ -672,7 +710,7 @@ func TestLiveKitV1PinsAndSDKLanguage(t *testing.T) {
 	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, `"livekit-plugins-slng>=1.7.0"`) {
 		t.Errorf("pin did not raise the plugin floor:\n%s", pyproject)
 	}
-	if !strings.Contains(artifactFile(t, artifact, "livekit.toml"), `id = "livekit-dev"`) {
+	if !strings.Contains(artifactFile(t, artifact, "livekit.toml"), `id = "livekit"`) {
 		t.Error("livekit.toml missing the agent id")
 	}
 
@@ -780,7 +818,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	agent.Conversation.Interruption = &ir.Interruption{Enabled: &enabled, MinimumWords: 2, IgnorePhrases: []string{"uh-huh"}}
 	agent.Conversation.ThinkingAudio = ir.ThinkingSubtle
 	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
-	agent.Models["backup"] = ir.ModelProfile{Placement: ir.PlacementAPI}
+	agent.Models["backup"] = ir.ModelDef{Kind: ir.KindThink, Placement: ir.PlacementAPI}
 	profile := agent.Models["reasoning"]
 	profile.Fallback = []string{"backup"}
 	agent.Models["reasoning"] = profile
@@ -931,7 +969,7 @@ func TestV18_TurnBindingLowersToDetectorVersion(t *testing.T) {
 // Inference spelling with the model passed verbatim.
 func TestV19_NativeReasonBeatsInferenceWildcard(t *testing.T) {
 	env := newEnvSet()
-	svc, err := livekitLLMService(ir.Binding{Provider: "openai", Model: "gpt-4.1-mini"}, env)
+	svc, err := livekitChainService(ir.Binding{Provider: "openai", Model: "gpt-4.1-mini"}, env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -945,7 +983,7 @@ func TestV19_NativeReasonBeatsInferenceWildcard(t *testing.T) {
 		t.Error("openai reason binding registered LIVEKIT_API_KEY (wildcard leak)")
 	}
 
-	svc, err = livekitLLMService(ir.Binding{Provider: "livekit", Model: "openai/gpt-4o-mini"}, newEnvSet())
+	svc, err = livekitChainService(ir.Binding{Provider: "livekit", Model: "openai/gpt-4o-mini"}, newEnvSet())
 	if err != nil {
 		t.Fatal(err)
 	}

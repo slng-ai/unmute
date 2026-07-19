@@ -24,7 +24,7 @@ targets.yaml          # named target instances
 Rules that hold across the whole package:
 
 - Secrets never appear in any file. `targets.yaml` carries environment variable names and secret references only, never values.
-- Remote ids, regions, editions, SDK language, version pins, carriers, and concrete model names live in `targets.yaml`, never in `agent.yaml`.
+- Remote ids, regions, editions, SDK language, version pins, and carriers live in `targets.yaml`. Model definitions live in `agent.yaml`; a target only overrides one it cannot run.
 - Machine sizes, replica counts, and GPU counts appear in neither file. They are derived, not stored.
 - All names (agents, tasks, groups, tools, controls, models, voices, variables, destinations) are lowercase `snake_case`. A name starting with an underscore is reserved by providers and rejected.
 - Durations use Go syntax: `90s`, `15m`, `1h30m`.
@@ -36,9 +36,9 @@ Rules that hold across the whole package:
 | `version` | yes | int, must be `1` | core |
 | `language` | no, defaults to `en` | BCP-47 tag such as `en` or `es-MX` | gated |
 | `entry_agent` | yes | name of an agent | core |
-| `pipeline` | yes | block | core |
-| `models` | yes, at least one | map of profiles | core |
-| `voices` | yes, at least one | map of profiles | core |
+| `models` | yes | four kind sections (`think`/`speak`/`listen`/`turn`) | core |
+| `listen` | only when `models.listen` has 2+ entries | name of a listen model | gated |
+| `turn` | only when `models.turn` has 2+ entries | name of a turn model | warn |
 | `variables` | no | map | core |
 | `agents` | yes, must include `entry_agent` | map | core |
 | `tasks` | no | map | gated (T1) |
@@ -71,8 +71,8 @@ Required: yes. Values: an agent name. Default: none. Targets: all five, core.
 
 Each block has its own reference page with every field:
 
-- **`pipeline`**: the listen / turn / speak roles and where models run. See [pipeline](pipeline.md).
-- **`models`, `voices`**: abstract profiles, bound per target. See [models and voices](models-and-voices.md).
+- **`models`**: the central palette, every model defined once under its kind section. See [models](models-and-voices.md).
+- **`listen`, `turn`**: name selectors into their sections; a sole entry selects itself. See [listen, turn, and placement](pipeline.md).
 - **`variables`**: typed shared state. See [variables](variables.md).
 - **`agents`**: prompt, model, voice, tools per agent. See [agents](agents.md).
 - **`tasks`, `task_groups`**: delegate-and-return work (T1). See [tasks](tasks.md).

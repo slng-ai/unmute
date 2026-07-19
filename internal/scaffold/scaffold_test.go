@@ -116,19 +116,22 @@ func TestWrite_customData(t *testing.T) {
 
 func TestWrite_targetChoices(t *testing.T) {
 	for _, tc := range []struct {
-		target string
-		want   []string
-		env    []string
+		target      string
+		targetsWant []string // infrastructure + listen/turn plumbing (N15)
+		agentWant   []string // model definitions live in agent.yaml now
+		env         []string
 	}{
 		{
-			target: "livekit",
-			want:   []string{"provider: livekit", "sdk_language: python", "provider: slng", `voice: "aura-2-thalia-en"`},
-			env:    []string{"LIVEKIT_API_KEY=", "LIVEKIT_API_SECRET=", "LIVEKIT_URL=", "SLNG_API_KEY="},
+			target:      "livekit",
+			targetsWant: []string{"livekit:", "provider: livekit", "sdk_language: python"},
+			agentWant:   []string{`voice: "aura-2-thalia-en"`, `params: {"speed":1}`, "provider: slng", "listen:", "turn:"},
+			env:         []string{"LIVEKIT_API_KEY=", "LIVEKIT_API_SECRET=", "LIVEKIT_URL=", "SLNG_API_KEY="},
 		},
 		{
-			target: "elevenlabs",
-			want:   []string{"provider: elevenlabs", `voice_id: "cgSgspJ2msm6clMCkdW9"`, `model: "gemini-2.5-flash"`},
-			env:    []string{"ELEVENLABS_API_KEY="},
+			target:      "elevenlabs",
+			targetsWant: []string{"elevenlabs:", "provider: elevenlabs"},
+			agentWant:   []string{`voice: "cgSgspJ2msm6clMCkdW9"`, `model: "gemini-2.5-flash"`, `params: {"speed":1}`},
+			env:         []string{"ELEVENLABS_API_KEY="},
 		},
 	} {
 		t.Run(tc.target, func(t *testing.T) {
@@ -147,7 +150,10 @@ func TestWrite_targetChoices(t *testing.T) {
 			if err := yaml.Unmarshal(targets, &parsed); err != nil {
 				t.Fatalf("targets.yaml: %v\n%s", err, targets)
 			}
-			for _, want := range append(tc.want, `params: {"speed":1}`) {
+			if strings.Contains(string(targets), "-dev") {
+				t.Errorf("targets.yaml instance must be named after the provider, not -dev:\n%s", targets)
+			}
+			for _, want := range tc.targetsWant {
 				if !strings.Contains(string(targets), want) {
 					t.Errorf("targets.yaml missing %q:\n%s", want, targets)
 				}
@@ -155,6 +161,11 @@ func TestWrite_targetChoices(t *testing.T) {
 			agent, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
 			if err != nil || !strings.Contains(string(agent), "language: es-MX") {
 				t.Fatalf("agent language: err=%v\n%s", err, agent)
+			}
+			for _, want := range tc.agentWant {
+				if !strings.Contains(string(agent), want) {
+					t.Errorf("agent.yaml missing %q:\n%s", want, agent)
+				}
 			}
 			env, err := os.ReadFile(filepath.Join(dir, ".env.example"))
 			if err != nil {
@@ -356,7 +367,7 @@ func TestPreflightCustomizedElevenLabs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Preflight() = %v", err)
 	}
-	if report.TargetName != "elevenlabs-dev" {
+	if report.TargetName != "elevenlabs" {
 		t.Fatalf("report = %#v", report)
 	}
 	dir := filepath.Join(t.TempDir(), "agent")
@@ -383,7 +394,7 @@ func TestPreflightShippedTargets(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if report.TargetName != provider+"-dev" || len(report.Bindings) == 0 || len(report.RequiredEnv) == 0 {
+			if report.TargetName != provider || len(report.Bindings) == 0 || len(report.RequiredEnv) == 0 {
 				t.Fatalf("report = %#v", report)
 			}
 		})

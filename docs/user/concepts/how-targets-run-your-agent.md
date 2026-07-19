@@ -4,20 +4,28 @@ Your portable YAML defines one behavior contract. Each target maps that
 contract to its own runtime, so you can reason about agents, tasks, and results
 without authoring framework-specific code.
 
-## Separate behavior from bindings
+## Separate behavior from platform
 
-`agent.yaml` names profiles and describes what must happen during a
+`agent.yaml` defines the models and describes what must happen during a
 conversation.
 
 ```yaml
 models:
-  routing_model:
-    description: Fast greeting and routing
-    placement: api
-
-voices:
-  front_desk:
-    description: Warm and concise
+  think:
+    routing_model:
+      description: Fast greeting and routing
+      provider: openai
+      model: gpt-4o-mini
+  speak:
+    front_desk:
+      description: Warm and concise
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber: { provider: deepgram, model: nova-3 }
+  turn:
+    detector: { provider: livekit, model: turn-detector-mini }
 
 agents:
   greeter:
@@ -27,25 +35,23 @@ agents:
     tools: [to_billing]
 ```
 
-`targets.yaml` decides how a target fulfills those profile names.
+`targets.yaml` names the platform and overrides any model that platform cannot
+run as defined.
 
 ```yaml
 targets:
-  livekit-dev:
+  livekit:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
     models:
-      listen: { provider: deepgram, model: nova-3 }
-      turn: { provider: livekit, model: turn-detector-mini }
-      speak:
-        front_desk: { provider: elevenlabs, voice: cgSgspJ2msm6clMCkdW9 }
-      reason:
-        routing_model: { provider: openai, model: gpt-4o-mini }
+      # LiveKit runs a different voice, so override just that entry:
+      front_desk: { provider: elevenlabs, voice: cgSgspJ2msm6clMCkdW9 }
 ```
 
-The profile name is the join between the files. The provider, model, voice,
-and target version remain target-specific.
+The model name is the join between the files: `agent.yaml` defines it, an agent
+or a top-level selector references it, and a target may override it. The
+platform and version remain target-specific.
 
 ## Follow the interpretation flow
 
@@ -53,7 +59,7 @@ Every target follows the same four-part contract, even when its runtime
 mechanics differ.
 
 1. Read the portable agents, tasks, controls, tools, and conversation outcomes.
-2. Resolve every used model and voice profile through the selected target.
+2. Resolve every used model through the selected target (its override, or the agent.yaml definition).
 3. Reject any behavior that the target cannot represent faithfully.
 4. Map the accepted behavior to the target without dropping fields silently.
 
@@ -114,7 +120,7 @@ controls:
 ```
 
 LiveKit gives the task its own task object and, when `model` is present, its
-own reasoning binding. The portable contract is simpler: the owner receives
+own think model. The portable contract is simpler: the owner receives
 the declared result fields and the task's conversation doesn't leak back.
 
 ## Run tasks in order

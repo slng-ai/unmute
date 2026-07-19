@@ -62,7 +62,7 @@ func TestBuildRejectsBadAndCollidingNames(t *testing.T) { // V7
 		{
 			name: "reserved underscore",
 			mutate: func(pkg *packagespec.Package) {
-				pkg.Agent.Models["_private"] = packagespec.ModelProfile{Placement: "api"}
+				pkg.Agent.Models.Think["_private"] = packagespec.ModelDef{Provider: "openai", Model: "x"}
 			},
 			want: "lowercase snake_case",
 		},
@@ -100,9 +100,9 @@ func TestBuildRejectsFieldsFromAnotherControlKind(t *testing.T) { // V3
 
 func TestBuildFlattensAndRejectsFallbackCycles(t *testing.T) { // V10
 	pkg := loadSafeCore(t)
-	fast := pkg.Agent.Models["fast_reasoning"]
+	fast := pkg.Agent.Models.Think["fast_reasoning"]
 	fast.Fallback = []string{"careful_reasoning"}
-	pkg.Agent.Models["fast_reasoning"] = fast
+	pkg.Agent.Models.Think["fast_reasoning"] = fast
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -111,12 +111,145 @@ func TestBuildFlattensAndRejectsFallbackCycles(t *testing.T) { // V10
 		t.Fatalf("flattened fallback = %v", got)
 	}
 
-	careful := pkg.Agent.Models["careful_reasoning"]
+	careful := pkg.Agent.Models.Think["careful_reasoning"]
 	careful.Fallback = []string{"fast_reasoning"}
-	pkg.Agent.Models["careful_reasoning"] = careful
+	pkg.Agent.Models.Think["careful_reasoning"] = careful
 	_, err = Build(pkg)
 	if err == nil || !strings.Contains(err.Error(), "fallback cycle") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestBuildEnforcesModelReferenceContract(t *testing.T) { // V22
+	tests := []struct {
+		name   string
+		mutate func(*packagespec.Package)
+		want   string
+	}{
+		{
+			name: "wrong section reference",
+			mutate: func(pkg *packagespec.Package) {
+				intake := pkg.Agent.Agents["intake"]
+				intake.Voice = "fast_reasoning" // a think entry used as a voice
+				pkg.Agent.Agents["intake"] = intake
+			},
+			want: "is a think model, not a speak model",
+		},
+		{
+			name: "cross-section name collision",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Models.Speak["fast_reasoning"] = packagespec.ModelDef{Provider: "slng", Voice: "x"}
+			},
+			want: "names share one namespace",
+		},
+		{
+			name: "ambiguous listen selection",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Models.Listen["alternate"] = packagespec.ModelDef{Provider: "soniox", Model: "stt-rt-v5"}
+			},
+			want: "select one with listen:",
+		},
+		{
+			name: "pointer to unknown entry",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Listen = "ghost"
+			},
+			want: "does not name a models.listen entry",
+		},
+		{
+			name: "fallback on a speak model",
+			mutate: func(pkg *packagespec.Package) {
+				voice := pkg.Agent.Models.Speak["front_desk"]
+				voice.Fallback = []string{"specialist"}
+				pkg.Agent.Models.Speak["front_desk"] = voice
+			},
+			want: "fallback is legal on think and listen models",
+		},
+		{
+			name: "listen fallback cycle",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Models.Listen["backup_stt"] = packagespec.ModelDef{Provider: "soniox", Model: "stt-rt-v5", Fallback: []string{"transcriber"}}
+				primary := pkg.Agent.Models.Listen["transcriber"]
+				primary.Fallback = []string{"backup_stt"}
+				pkg.Agent.Models.Listen["transcriber"] = primary
+			},
+			want: "fallback cycle",
+		},
+		{
+			name: "listen fallback must stay in the listen section",
+			mutate: func(pkg *packagespec.Package) {
+				primary := pkg.Agent.Models.Listen["transcriber"]
+				primary.Fallback = []string{"fast_reasoning"} // a think entry
+				pkg.Agent.Models.Listen["transcriber"] = primary
+			},
+			want: "does not resolve",
+		},
+		{
+			name: "unknown override key",
+			mutate: func(pkg *packagespec.Package) {
+				target := pkg.Targets["pipecat"]
+				target.Models = map[string]packagespec.ModelDef{"ghost": {Provider: "openai", Model: "gpt-4o"}}
+				pkg.Targets["pipecat"] = target
+			},
+			want: "not a defined model",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			test.mutate(pkg)
+			_, err := Build(pkg)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("got %v", err)
+			}
+		})
+	}
+}
+
+func TestBuildAllowsPaletteAlternates(t *testing.T) { // V22: unreferenced entries are legal
+	pkg := loadSafeCore(t)
+	pkg.Agent.Models.Think["experimental"] = packagespec.ModelDef{Provider: "anthropic", Model: "claude-sonnet-4-6"}
+	pkg.Agent.Models.Listen["alternate"] = packagespec.ModelDef{Provider: "soniox", Model: "stt-rt-v5"}
+	pkg.Agent.Listen = "transcriber" // 2+ listen entries need an explicit selection
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Listen != "transcriber" {
+		t.Fatalf("listen selection = %q", agent.Listen)
+	}
+	// Alternates stay defined but never resolve into any target's bindings.
+	for name, target := range agent.Targets {
+		if _, ok := target.Models.Reason["experimental"]; ok {
+			t.Fatalf("target %q compiled the unused think alternate", name)
+		}
+		if target.Models.Listen != nil && target.Models.Listen.Provider == "soniox" {
+			t.Fatalf("target %q compiled the unselected listen alternate", name)
+		}
+	}
+}
+
+func TestT16_ListenFallbackResolvesIntoBindings(t *testing.T) {
+	pkg := loadSafeCore(t)
+	pkg.Agent.Models.Listen["backup_stt"] = packagespec.ModelDef{Provider: "soniox", Model: "stt-rt-v5"}
+	primary := pkg.Agent.Models.Listen["transcriber"]
+	primary.Fallback = []string{"backup_stt"}
+	pkg.Agent.Models.Listen["transcriber"] = primary
+	// No listen: pointer on purpose — a fallback-only entry is part of the
+	// chain, so transcriber is the sole head and selects itself (T16).
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Listen != "transcriber" {
+		t.Fatalf("listen selection = %q", agent.Listen)
+	}
+	if got := agent.Models["transcriber"].Fallback; len(got) != 1 || got[0] != "backup_stt" {
+		t.Fatalf("flattened listen fallback = %v", got)
+	}
+	livekit := targetFor(agent, ProviderLiveKit)
+	if len(livekit.Models.ListenFallbacks) != 1 || livekit.Models.ListenFallbacks[0].Name != "backup_stt" || livekit.Models.ListenFallbacks[0].Binding.Provider != "soniox" {
+		t.Fatalf("listen fallback bindings = %#v", livekit.Models.ListenFallbacks)
 	}
 }
 
@@ -138,9 +271,9 @@ func TestBuildValidatesDestinationValues(t *testing.T) {
 	}
 
 	pkg := loadSafeCore(t)
-	target := pkg.Targets["livekit-dev"]
+	target := pkg.Targets["livekit"]
 	target.Destinations["billing_line"] = ""
-	pkg.Targets["livekit-dev"] = target
+	pkg.Targets["livekit"] = target
 	_, err := Build(pkg)
 	if err == nil || !strings.Contains(err.Error(), "E.164 phone number or SIP URI") {
 		t.Fatalf("got %v", err)

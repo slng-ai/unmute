@@ -46,14 +46,15 @@ type livekitService struct {
 	Vendor string
 }
 
-// livekitLLM is a reason profile's resolved model plus its fallback chain
-// (V4): a non-empty Chain renders as llm.FallbackAdapter(llm=[...]).
-type livekitLLM struct {
+// livekitChain is a resolved model plus its fallback chain (V4/T16): a
+// non-empty Chain renders as a FallbackAdapter of the matching role module
+// (llm.FallbackAdapter for think, stt.FallbackAdapter for listen).
+type livekitChain struct {
 	Primary livekitService
 	Chain   []livekitService
 }
 
-func (l livekitLLM) services() []livekitService {
+func (l livekitChain) services() []livekitService {
 	return append([]livekitService{l.Primary}, l.Chain...)
 }
 
@@ -62,7 +63,7 @@ type livekitAgent struct {
 	Class          string
 	PromptConst    string
 	IsEntry        bool
-	LLM            *livekitLLM     // set only when it differs from the session default
+	LLM            *livekitChain   // set only when it differs from the session default
 	TTS            *livekitService // set only when it differs from the session default
 	Greeting       *livekitGreeting
 	Tools          []livekitTool
@@ -88,9 +89,9 @@ type livekitTransfer struct {
 	Method      string
 	When        string
 	TargetClass string
-	Requires    []string    // guard: refuse until these userdata fields are set (V7)
-	CtxExpr     string      // Python expr for chat_ctx=; "" = reset
-	Summary     *livekitLLM // set for history: summary — _summarize before handoff
+	Requires    []string      // guard: refuse until these userdata fields are set (V7)
+	CtxExpr     string        // Python expr for chat_ctx=; "" = reset
+	Summary     *livekitChain // set for history: summary — _summarize before handoff
 	ResetVars   []livekitVar
 }
 
@@ -133,8 +134,8 @@ type livekitSingleTask struct {
 	Class   string
 	ID      string
 	Assign  []livekitAssign
-	CtxExpr string      // Python expr for chat_ctx=; "" = reset (fresh task)
-	Summary *livekitLLM // set for history: summary
+	CtxExpr string        // Python expr for chat_ctx=; "" = reset (fresh task)
+	Summary *livekitChain // set for history: summary
 }
 
 type livekitAssign struct {
@@ -160,8 +161,8 @@ type livekitTask struct {
 	Name        string
 	Class       string
 	PromptConst string
-	LLM         *livekitLLM  // per-task model override (B1); nil = session LLM
-	Result      []livekitArg // finish() args + the completed result dict
+	LLM         *livekitChain // per-task model override (B1); nil = session LLM
+	Result      []livekitArg  // finish() args + the completed result dict
 	Tools       []livekitTool
 	MCPServers  []livekitMCPServer
 }
@@ -212,8 +213,8 @@ type livekitData struct {
 	Version       string
 	AgentName     string
 	EntryClass    string
-	STT           livekitService
-	SessionLLM    livekitLLM
+	STT           livekitChain
+	SessionLLM    livekitChain
 	SessionTTS    livekitService
 	TurnVersion   string
 	Agents        []livekitAgent
@@ -262,6 +263,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTurnPlacement:         true, // advisory (Inference turn detection supplied)
 	targetcap.FieldSemanticEndpointing:   true, // advisory
 	targetcap.FieldFallback:              true, // llm.FallbackAdapter (V4)
+	targetcap.FieldListenFallback:        true, // stt.FallbackAdapter (T16)
 	targetcap.FieldTask:                  true, // AgentTask; single delegate awaits it (T12)
 	targetcap.FieldTaskModel:             true, // AgentTask(llm=...) (T14, B1)
 	targetcap.FieldTaskNestedResult:      true, // dict finish arg

@@ -28,7 +28,7 @@ So a two-agent, one-task spec becomes a main worker plus two agent workers, wire
 
 ## What gets generated
 
-`unmute compile acme --target pipecat-dev` writes a complete project to `acme/build/pipecat-dev/`:
+`unmute compile acme --target pipecat` writes a complete project to `acme/build/pipecat/`:
 
 | File | What it is |
 |---|---|
@@ -44,30 +44,35 @@ The output folder is rewritten from scratch on every compile, so never edit it b
 
 The `compile-report.json` is worth reading after a compile. It lists every required environment variable and every binding that was forwarded, so you can always see what was sent to the platform, which matters because bindings are [never validated](../concepts/profiles-and-bindings.md).
 
-## Binding models on Pipecat
+## Models on Pipecat
 
-All four roles are **open** on Pipecat: you choose the listen model, the voice, and the reasoning model freely, and the turn role runs on your machine. The accepted `provider:` values per role, their key envs, and what each choice installs and emits are in the [providers reference](../reference/providers.md). A full binding block:
+All four roles are **open** on Pipecat: you choose the listen model, the voice, and the think model freely, and the turn role runs on your machine. Every model is defined in `agent.yaml`'s kind sections; the Pipecat target carries infrastructure and any by-name overrides. The accepted `provider:` values per role, their key envs, and what each choice installs and emits are in the [providers reference](../reference/providers.md).
 
 ```yaml
+# agent.yaml — models defined once, by kind
+models:
+  think:
+    fast_reasoning:    { provider: openai, model: gpt-4o-mini, temperature: 0.4 }
+    careful_reasoning: { provider: openai, model: gpt-4o }
+  speak:
+    front_desk: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
+    specialist: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-orion-en" }
+  listen:
+    transcriber: { provider: deepgram, model: nova-3 }
+  turn:
+    vad: { provider: local, model: silero }
+
+# targets.yaml — infrastructure only
 targets:
-  pipecat-dev:
+  pipecat:
     provider: pipecat
     version: "1.5.0"
     transport: daily-sip
-    models:
-      listen: { provider: deepgram, model: nova-3 }
-      turn:   { provider: local, model: silero }
-      speak:
-        front_desk: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
-        specialist: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-orion-en" }
-      reason:
-        fast_reasoning:    { provider: openai, model: gpt-4o-mini, params: { temperature: 0.4 } }
-        careful_reasoning: { provider: openai, model: gpt-4o }
 ```
 
 ### Which provider maps to which service
 
-The `provider` in each binding selects the Pipecat service class. Unmute knows these:
+The `provider` on each model selects the Pipecat service class. Unmute knows these:
 
 | Role | `provider` | Service used | Key needed |
 |---|---|---|---|
@@ -86,7 +91,7 @@ The reasoning role always uses an OpenAI-compatible client. To point it at a non
 
 ### The turn role and Silero
 
-`turn` binds to `{ provider: local, model: silero }`. End-of-turn detection runs on-device with a Silero voice-activity detector: no key, no network hop. The turn binding is **advisory** on Pipecat: it tells Unmute your intent, but the actual detection is the local VAD. Semantic-endpointing preferences are advisory too.
+The turn model is `{ provider: local, model: silero }`. End-of-turn detection runs on-device with a Silero voice-activity detector: no key, no network hop. The turn binding is **advisory** on Pipecat: it tells Unmute your intent, but the actual detection is the local VAD. Semantic-endpointing preferences are advisory too.
 
 ### Transport
 
@@ -122,7 +127,7 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | interruption `minimum_words` and `ignore_phrases` | ok |
 | `inactivity` nudge and end | ok |
 | `max_duration` | ok |
-| `placement: local` for listen and speak | ok |
+| `provider: local` for listen and speak | ok |
 | cold human transfer | ok, needs `transport: daily-sip` |
 
 Everything in the [learn pages](../learn/01-one-agent.md), including the guarded handoff, the task, and the task group, runs here. The one hard `fail` is the per-task `model:` override; it sits with the driver gates below.
@@ -131,7 +136,7 @@ Everything in the [learn pages](../learn/01-one-agent.md), including the guarded
 
 Some features are in the schema and Pipecat itself supports them, but this first version of the driver does not write them yet. These are **maturity gates on the driver, not limits of Pipecat.** Using one fails the compile today, and the gate lifts when the driver adds it. Right now these are not emitted:
 
-- **Model fallback** (`fallback` on a model profile).
+- **Model fallback** (`fallback` on a think model).
 - **Per-task `model:`.** Pipecat's mechanism for switching models mid-call stalls the conversation in the current release, so there is nothing safe to emit yet. Drop the override and the task runs on the delegating agent's model.
 - **`thinking_audio`.**
 - **Outbound calls and voicemail** (`outbound: true`, `on_voicemail`).
@@ -148,9 +153,9 @@ Two different things surface, and it helps to tell them apart.
 **Validation warnings** are printed to standard error during `validate` and `compile`. They pass (exit 0) but flag a real behavior difference. For an agent that uses turn preferences, inactivity, and a max duration, Pipecat prints:
 
 ```text
-warning: pipecat-dev: Pipecat semantic endpointing depends on the bound model
-warning: pipecat-dev: Pipecat driver must range-check inactivity durations
-warning: pipecat-dev: Pipecat driver must verify a max-duration cap
+warning: pipecat: Pipecat semantic endpointing depends on the bound model
+warning: pipecat: Pipecat driver must range-check inactivity durations
+warning: pipecat: Pipecat driver must verify a max-duration cap
 ```
 
 **Notes** are recorded in `compile-report.json` under `notes`, not printed as warnings. They describe how the driver lowered something. For example:
@@ -178,10 +183,10 @@ The default compiles the first Pipecat target, runs `bot.py` with `uv`, and open
 **Compile only, to inspect or deploy the project:**
 
 ```sh
-unmute compile acme --target pipecat-dev
+unmute compile acme --target pipecat
 ```
 
-Then, in `acme/build/pipecat-dev/`, the generated `README.md` shows the quickstart the project supports directly:
+Then, in `acme/build/pipecat/`, the generated `README.md` shows the quickstart the project supports directly:
 
 ```sh
 cp .env.example .env    # fill in your keys

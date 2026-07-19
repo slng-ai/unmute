@@ -81,12 +81,14 @@ func printContract(out io.Writer, name string, notes generate.GenerateReport) {
 	}
 }
 
-// bindingSummary renders the set identity fields of a binding for stdout.
+// bindingSummary renders the forwarded identity fields of a binding for stdout.
+// Placement is a derived routing fact, not a forwarded value, so it stays out of
+// the "forwarded as-is" line (N15).
 func bindingSummary(b ir.Binding) string {
 	var parts []string
 	for _, kv := range []struct{ k, v string }{
 		{"provider", b.Provider}, {"model", b.Model}, {"voice", b.Voice},
-		{"voice_id", b.VoiceID}, {"endpoint_env", b.EndpointEnv}, {"placement", string(b.Placement)},
+		{"voice_id", b.VoiceID}, {"endpoint_env", b.EndpointEnv},
 	} {
 		if kv.v != "" {
 			parts = append(parts, kv.k+"="+kv.v)

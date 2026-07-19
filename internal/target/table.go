@@ -35,6 +35,7 @@ const (
 	FieldTurnPlacement         Field = "pipeline.turn.placement"
 	FieldSemanticEndpointing   Field = "pipeline.turn.semantic_endpointing"
 	FieldFallback              Field = "models.fallback"
+	FieldListenFallback        Field = "models.listen.fallback"
 	FieldTask                  Field = "tasks"
 	FieldTaskModel             Field = "tasks.model"
 	FieldTaskNestedResult      Field = "tasks.result.nested"
@@ -232,6 +233,17 @@ func Default() Table {
 				warn(Deepgram, "Deepgram semantic endpointing depends on the bound listen model"),
 			),
 			FieldFallback: field(deny(Pipecat, "the Pipecat driver does not emit generated fallback yet")),
+			// Listen (STT) fallback: native on LiveKit (stt.FallbackAdapter,
+			// verified in livekit-agents source 2026-07-19). Gated elsewhere
+			// until a slot is verified: no documented transcriber fallback on
+			// Vapi, listen is integrated on ElevenLabs, and Deepgram's
+			// agent.listen takes a single provider (unlike think's array).
+			FieldListenFallback: field(
+				deny(Pipecat, "the Pipecat driver does not emit listen fallback yet"),
+				deny(Vapi, "Vapi has no documented transcriber fallback slot"),
+				deny(ElevenLabs, "ElevenLabs listen is integrated; there is no STT fallback slot"),
+				deny(Deepgram, "Deepgram agent.listen takes a single provider; there is no fallback slot"),
+			),
 			FieldTask: field(
 				deny(Vapi, "Vapi return-to-prior-assistant is unverified"),
 				warn(ElevenLabs, "ElevenLabs keeps task turns in the owner's running transcript"),
