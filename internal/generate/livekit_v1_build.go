@@ -188,10 +188,35 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.Notes = append(data.Notes, "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory")
 	}
 
+	data.InferenceUses = livekitInferenceUses(data)
+
 	data.PluginModules = collectLiveKitPlugins(data)
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
 	return data, nil
+}
+
+// livekitInferenceUses lists the bindings that route through LiveKit Inference,
+// which needs LIVEKIT_API_KEY/SECRET even in credless console mode (C2/C7): any
+// resolved service on the `inference.*` classes (the reason wildcard, provider:
+// livekit) and the cloud turn detector (turn-detector → v1; the mini runs
+// local, an absent binding auto-selects local, V18). Empty means console runs
+// on the bound providers' keys alone (the scaffold default).
+func livekitInferenceUses(data livekitData) []string {
+	set := map[string]bool{}
+	for _, svc := range livekitServices(data) {
+		if svc.Entry.Call != nil && strings.HasPrefix(svc.Entry.Call.Class, "inference.") {
+			set[fmt.Sprintf("%s provider %q", svc.Entry.Role, svc.Vendor)] = true
+		}
+	}
+	uses := sortedKeys(set)
+	if data.TurnVersion == "v1" {
+		uses = append(uses, "turn detection (cloud turn-detector)")
+	}
+	if len(uses) == 0 {
+		return nil
+	}
+	return uses
 }
 
 // livekitServices lists every resolved service in the template model.
@@ -250,7 +275,6 @@ func livekitServiceNotes(data livekitData) []string {
 	}
 	return sortedKeys(set)
 }
-
 
 // applyLiveKitConversation lowers the conversation block (V16): interruption
 // options, the generated ignore-phrase filter, thinking audio, inactivity

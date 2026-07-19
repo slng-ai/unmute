@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>unmute dev · livekit</title>
+<style>
+  :root{
+    --bg:oklch(0.178 0.008 96);
+    --surface:oklch(0.224 0.009 96);
+    --border:oklch(0.320 0.010 96);
+    --text:oklch(0.930 0.010 96);
+    --muted:oklch(0.660 0.012 96);
+    --accent:oklch(0.895 0.165 96);
+    --accent-ink:oklch(0.180 0.010 96);
+    --danger:oklch(0.640 0.165 28);
+    --ok:oklch(0.780 0.150 150);
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    font-family:var(--mono);font-size:15px;line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    display:flex;align-items:center;justify-content:center;min-height:100%;
+  }
+  main{width:100%;max-width:460px;padding:32px;display:flex;flex-direction:column;gap:22px}
+  h1{font-size:15px;font-weight:600;margin:0;letter-spacing:0.02em}
+  h1 .sub{color:var(--muted);font-weight:400}
+  .status{display:flex;align-items:center;gap:10px;color:var(--muted)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
+  body[data-state="connecting"] .dot{background:var(--accent);animation:pulse 1s infinite}
+  body[data-state="connected"] .dot{background:var(--ok)}
+  body[data-state="error"] .dot{background:var(--danger)}
+  @keyframes pulse{50%{opacity:0.3}}
+  button{
+    font:inherit;cursor:pointer;border:1px solid var(--border);border-radius:10px;
+    padding:12px 18px;background:var(--surface);color:var(--text);transition:.15s;
+  }
+  button.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
+  button:disabled{opacity:0.45;cursor:not-allowed}
+  .row{display:flex;gap:12px}
+  .hint{color:var(--muted);font-size:13px}
+  code{background:var(--surface);padding:1px 6px;border-radius:5px}
+</style>
+</head>
+<body data-state="idle">
+<main>
+  <h1>unmute dev <span class="sub">· livekit</span></h1>
+  <div class="status"><span class="dot"></span><span id="state">not connected</span></div>
+  <div class="row">
+    <button id="connect" class="primary">Connect &amp; talk</button>
+    <button id="disconnect" disabled>Stop</button>
+  </div>
+  <p class="hint">Grant microphone access when prompted, then speak. The agent joins the room automatically. Ctrl-C in the terminal stops everything.</p>
+</main>
+
+<script src="/livekit-client.umd.js"></script>
+<script>
+const LK = window.LivekitClient;
+const $ = (id) => document.getElementById(id);
+let room = null;
+
+function setState(s, msg){
+  document.body.dataset.state = s;
+  $("state").textContent = msg;
+  $("connect").disabled = (s === "connecting" || s === "connected");
+  $("disconnect").disabled = (s !== "connected");
+}
+
+async function connect(){
+  setState("connecting", "fetching token…");
+  let cfg;
+  try {
+    const res = await fetch("/api/token");
+    if(!res.ok){ setState("error", "token error: " + (await res.text()).trim()); return; }
+    cfg = await res.json();
+  } catch(e){ setState("error", "token fetch failed: " + e.message); return; }
+
+  room = new LK.Room({ adaptiveStream:true, dynacast:true });
+  // Play the agent's audio the moment its track arrives.
+  room.on(LK.RoomEvent.TrackSubscribed, (track) => {
+    if(track.kind === LK.Track.Kind.Audio){
+      const el = track.attach();
+      el.autoplay = true;
+      document.body.appendChild(el);
+    }
+  });
+  room.on(LK.RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((el) => el.remove()));
+  room.on(LK.RoomEvent.Disconnected, () => setState("idle", "not connected"));
+  room.on(LK.RoomEvent.ParticipantConnected, (p) => setState("connected", "talking to " + p.identity));
+
+  try {
+    setState("connecting", "connecting to room…");
+    await room.connect(cfg.url, cfg.token);
+    setState("connected", "connected — waiting for the agent…");
+  } catch(e){
+    setState("error", "connect failed: " + e.message);
+    return;
+  }
+  // Mic failure must not mask a successful join: you can still hear the agent.
+  try {
+    await room.localParticipant.setMicrophoneEnabled(true);
+  } catch(e){
+    $("state").textContent = "connected — microphone blocked (" + e.message + "); allow mic access and reconnect";
+  }
+}
+
+async function disconnect(){
+  if(room){ await room.disconnect(); room = null; }
+  setState("idle", "not connected");
+}
+
+$("connect").addEventListener("click", connect);
+$("disconnect").addEventListener("click", disconnect);
+</script>
+</body>
+</html>

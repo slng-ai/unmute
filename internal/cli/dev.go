@@ -31,11 +31,11 @@ import (
 
 func newDevCmd() *cobra.Command {
 	var uiPort, botPort, targetName string
-	var noOpen, verbose bool
+	var noOpen, verbose, console bool
 
 	cmd := &cobra.Command{
 		Use:   "dev <agent-dir>",
-		Short: "Compile, run the agent locally, and talk to it in the browser.",
+		Short: "Compile, run the agent locally, and talk to it in the browser or terminal (--console).",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := args[0]
@@ -43,6 +43,16 @@ func newDevCmd() *cobra.Command {
 			selected, err := selectDevTarget(cmd, root, targetName)
 			if err != nil {
 				return err
+			}
+			if console {
+				return runDevConsole(cmd, root, selected)
+			}
+			// livekit web mode has its own runner (LiveKit server + token, no
+			// local Pipecat proxy); every other provider stays on the flow below.
+			if prov, err := devTargetProvider(root, selected); err != nil {
+				return err
+			} else if prov == ir.ProviderLiveKit {
+				return runLiveKitWeb(cmd, root, selected, uiPort, noOpen, verbose)
 			}
 			outDir, err := compileTargetForDev(cmd, root, selected)
 			if err != nil {
@@ -139,7 +149,116 @@ func newDevCmd() *cobra.Command {
 	cmd.Flags().StringVar(&targetName, "target", "", "target instance name (required without a TTY when multiple exist)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open the browser automatically")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "stream agent logs to stderr (default: write to bot.log only)")
+	cmd.Flags().BoolVar(&console, "console", false, "talk to the agent in the terminal over the local mic/speaker (no browser or dev server; --port/--bot-port/--no-open are ignored)")
 	return cmd
+}
+
+// runDevConsole compiles the selected target and hands the terminal to its
+// native console mode: pipecat's LocalAudioTransport (via the `console` extra) or
+// livekit's `agent.py console`. Talk over the local mic/speaker — no dev
+// server, no browser, no log file (C6). livekit console needs LiveKit creds
+// only when a binding routes through Inference (C2/C7); the artifact carries
+// that fact, so this never re-derives it.
+func runDevConsole(cmd *cobra.Command, root, targetName string) error {
+	agent, targets, err := loadPackage(root, []string{targetName})
+	if err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
+	}
+	resolved := targets[0]
+	uvArgs, err := consolePlan(resolved.Provider)
+	if err != nil {
+		return fmt.Errorf("dev %s: target %q %w", root, resolved.Name, err)
+	}
+
+	artifact, err := generate.Generate(agent, resolved, target.Default())
+	if err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
+	}
+	for _, warning := range artifact.Notes.Warnings {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
+	}
+	outDir := filepath.Join(root, "build", resolved.Name)
+	if err := writeArtifactFiles(outDir, artifact.Files); err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "compiled %s\n", outDir)
+
+	if len(artifact.LiveKitInference) > 0 {
+		if err := requireInferenceCreds(root, artifact.LiveKitInference); err != nil {
+			return fmt.Errorf("dev %s: %w", root, err)
+		}
+	}
+	if _, err := exec.LookPath("uv"); err != nil {
+		return fmt.Errorf("dev %s: uv not found on PATH; install uv to run the agent locally (https://docs.astral.sh/uv/)", root)
+	}
+	return execConsole(outDir, uvArgs, devChildEnv(root, cmd.ErrOrStderr()))
+}
+
+// consolePlan is the `uv` invocation for a target's console mode. Pure and
+// exhaustive so the dispatch is unit-tested without running uv (V7). Managed
+// and unimplemented targets refuse with their next command.
+func consolePlan(p ir.Provider) ([]string, error) {
+	switch p {
+	case ir.ProviderPipecat:
+		// The `console` extra installs pyaudio (LocalAudioTransport); the
+		// `console` argv selects console_main() in bot.py (T1).
+		return []string{"run", "--extra", "console", "bot.py", "console"}, nil
+	case ir.ProviderLiveKit:
+		return []string{"run", "agent.py", "console"}, nil
+	case ir.ProviderElevenLabs:
+		return nil, fmt.Errorf("uses managed ElevenLabs; no local runner exists—use `unmute apply`")
+	default:
+		return nil, fmt.Errorf("uses %s; console mode is not implemented", p)
+	}
+}
+
+// requireInferenceCreds fails before launching the console TUI when a binding
+// routes through LiveKit Inference but the LiveKit creds are absent (C2/C7):
+// console never connects to a room, but Inference is billed through LiveKit
+// Cloud. A scaffold-default agent (native providers + local turn) hits neither
+// key, so this never fires for it.
+func requireInferenceCreds(root string, uses []string) error {
+	env := devChildEnv(root, io.Discard)
+	has := func(key string) bool {
+		for _, kv := range env {
+			if strings.HasPrefix(kv, key+"=") && len(kv) > len(key)+1 {
+				return true
+			}
+		}
+		return false
+	}
+	var missing []string
+	for _, key := range []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"} {
+		if !has(key) {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("console mode needs %s: this agent routes through LiveKit Inference (%s); set them in .env, or bind native providers + local turn to run console with no LiveKit credentials",
+		strings.Join(missing, " and "), strings.Join(uses, ", "))
+}
+
+// execConsole hands the terminal to the console child and blocks until it
+// exits. Real stdio is inherited so the child owns the TTY (livekit draws a
+// full-screen UI); the child stays in our process group so terminal Ctrl-C
+// reaches it directly, and we suppress SIGINT in the parent so we wait for the
+// child's graceful shutdown instead of dying first (C6).
+func execConsole(dir string, uvArgs, env []string) error {
+	child := exec.Command("uv", uvArgs...)
+	child.Dir = dir
+	child.Env = env
+	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	defer signal.Stop(sigCh)
+
+	if err := child.Run(); err != nil {
+		return fmt.Errorf("console: %w", err)
+	}
+	return nil
 }
 
 // spinner draws a single-line braille spinner on a TTY and is a no-op printer
@@ -230,9 +349,20 @@ func selectDevTarget(cmd *cobra.Command, root, requested string) (string, error)
 	return selected, nil
 }
 
-// compileTargetForDev dispatches the chosen instance. The bundled browser
-// runner speaks Pipecat WebRTC today; other shipped targets fail with their
-// specific next command instead of being silently replaced.
+// devTargetProvider resolves the chosen instance's provider without generating,
+// so RunE can route livekit web to its own runner before the pipecat flow.
+func devTargetProvider(root, targetName string) (ir.Provider, error) {
+	_, targets, err := loadPackage(root, []string{targetName})
+	if err != nil {
+		return "", fmt.Errorf("dev %s: %w", root, err)
+	}
+	return targets[0].Provider, nil
+}
+
+// compileTargetForDev dispatches the chosen instance for the Pipecat web runner.
+// livekit web is handled by runLiveKitWeb before this is reached; the remaining
+// non-pipecat targets fail with their specific next command instead of being
+// silently replaced.
 func compileTargetForDev(cmd *cobra.Command, root, targetName string) (string, error) {
 	agent, targets, err := loadPackage(root, []string{targetName})
 	if err != nil {
@@ -241,8 +371,6 @@ func compileTargetForDev(cmd *cobra.Command, root, targetName string) (string, e
 	resolved := targets[0]
 	if resolved.Provider != ir.ProviderPipecat {
 		switch resolved.Provider {
-		case ir.ProviderLiveKit:
-			return "", fmt.Errorf("dev %s: target %q uses livekit; no LiveKit local browser runner is shipped—use `unmute compile %s --target %s`", root, resolved.Name, root, resolved.Name)
 		case ir.ProviderElevenLabs:
 			return "", fmt.Errorf("dev %s: target %q uses managed ElevenLabs; no local runner exists—use `unmute apply %s --target %s`", root, resolved.Name, root, resolved.Name)
 		default:

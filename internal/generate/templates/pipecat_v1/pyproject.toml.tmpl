@@ -10,5 +10,12 @@ dependencies = [
 {{if .NeedsHTTPX}}    "httpx>=0.27",
 {{end}}]
 
+# Console mode (`unmute dev --console`) talks over the local mic/speaker via
+# pipecat's LocalAudioTransport, which needs pyaudio (portaudio at build time —
+# `brew install portaudio` on macOS). Kept out of the default deps so a plain
+# web run never depends on a system audio library.
+[project.optional-dependencies]
+console = ["pipecat-ai[local]=={{.Version}}"]
+
 [tool.uv]
 package = false

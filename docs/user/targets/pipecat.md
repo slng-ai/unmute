@@ -169,10 +169,11 @@ Read both, then test the exact behavior they point at.
 **Local, while iterating:**
 
 ```sh
-unmute dev acme
+unmute dev acme             # talk in the browser
+unmute dev acme --console   # talk in the terminal, over your mic and speaker
 ```
 
-This compiles the first Pipecat target, runs `bot.py` with `uv`, and opens a browser client so you can talk to the agent. It reads your keys from a `.env` at the package root. Logs go to `build/<target>/bot.log`; add `--verbose` to stream them.
+The default compiles the first Pipecat target, runs `bot.py` with `uv`, and opens a browser client so you can talk to the agent. `--console` instead runs `uv run --extra console bot.py console`, which talks over your local mic and speaker with no browser — the `console` extra pulls in pyaudio, so on macOS run `brew install portaudio` first. Both read your keys from a `.env` at the package root. Web logs go to `build/<target>/bot.log` (add `--verbose` to stream them); console streams to your terminal.
 
 **Compile only, to inspect or deploy the project:**
 

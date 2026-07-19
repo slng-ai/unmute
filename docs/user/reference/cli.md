@@ -61,17 +61,25 @@ For **managed** targets: reconcile the provider's live config to your spec. Run 
 ## dev
 
 ```sh
-unmute dev <agent-dir> [--target <name>] [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
+unmute dev <agent-dir> [--target <name>] [--console] [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
 ```
 
-The fastest loop for a Pipecat instance: compiles the selected target to `build/<name>/`, runs it with `uv run bot.py`, serves a small web client, and opens it in your browser so you can talk to the agent.
+The fastest loop for a **Pipecat or LiveKit** instance: compiles the selected target to `build/<name>/`, runs it locally, and lets you talk to the agent — in the browser (default) or in your terminal (`--console`). Whatever you build, you can speak to.
 
 - With exactly one declared target, `dev` selects it automatically.
 - With multiple targets on an interactive terminal, `dev` always asks which instance to test and shows both instance name and provider. In a noninteractive shell, pass `--target <name>`; it never picks by YAML/map order or by preferring Pipecat.
-- `--target` dispatches that exact instance. The local browser runner is currently Pipecat-only: a selected LiveKit target points to `unmute compile`, a selected ElevenLabs target points to `unmute apply`, and unshipped providers report their own missing dev runner.
+- `--target` dispatches that exact instance. Pipecat and LiveKit both run; a selected ElevenLabs target points to `unmute apply`, and unshipped providers report their own missing dev runner.
+
+**Web (default).** Opens a browser client:
+- Pipecat: runs `uv run bot.py`, proxies WebRTC to the local runner, serves the client.
+- LiveKit: runs `uv run agent.py dev`, waits for the worker to register, then serves a client that mints a token and joins the room (the agent joins the same room automatically). Zero-config by default: with no `LIVEKIT_URL` set, `unmute dev` uses the open-source dev server locally — reusing one already listening on `:7880`, or starting `livekit-server --dev` itself and stopping it when you quit. Install it once (`brew install livekit` on macOS; `curl -sSL https://get.livekit.io | bash` on Linux). Explicit `LIVEKIT_URL`/`LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` in the environment or `.env` (LiveKit Cloud or self-hosted) always win. With no creds and no binary, the error names the install command and points at `--console`.
+
+**Console (`--console`).** Talk in the terminal over your local mic and speaker — no browser, no dev server:
+- Pipecat: `uv run --extra console bot.py console`. The `console` extra pulls in pyaudio; on macOS run `brew install portaudio` first.
+- LiveKit: `uv run agent.py console`. Needs **no** LiveKit credentials for a scaffold-default agent (native providers + local turn). It only needs `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` if a binding routes through LiveKit Inference (`provider: livekit` reason, or the cloud `turn-detector`); the preflight tells you which.
 
 - Requires `uv` on your `PATH` (see [install](../start/install.md)). Reads keys from a `.env` at the package root.
-- `--port` sets the dev UI port (default 8765); `--bot-port` sets the port the Pipecat runner listens on (default 7860).
+- `--port` sets the dev UI port (default 8765); `--bot-port` sets the Pipecat runner port (default 7860). Both are web-only — `--console` and `--no-open` ignore them.
 - `--no-open` skips opening the browser; `--verbose` streams agent logs to your terminal.
-- Agent logs are written to `build/<name>/bot.log`. Press `ctrl-c` to stop.
-- Fails clearly if no target is declared, the selected provider has no local runner, or `uv` is not installed.
+- Web-mode agent logs are written to `build/<name>/bot.log` (Pipecat) or `agent.log` (LiveKit); console mode streams straight to your terminal. Press `ctrl-c` to stop.
+- Fails clearly if no target is declared, the selected provider has no local runner, LiveKit creds are missing where required, or `uv` is not installed.

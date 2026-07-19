@@ -2,11 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/scaffold"
 )
 
@@ -145,9 +147,21 @@ func TestCompileTargetForDevUsesExactInstance(t *testing.T) {
 
 func TestDevSelectedTargetReportsProviderSpecificRunner(t *testing.T) {
 	dir := copySafeCore(t)
+	// livekit web with no URL now tries the local dev-server fallback; force
+	// both probes negative (no server on :7880, no binary) so the machine's
+	// real state can't change the branch (V10), and force the ambient creds
+	// empty. Expect the C7 install prompt pointing at --console.
+	t.Setenv("LIVEKIT_URL", "")
+	t.Setenv("LIVEKIT_API_KEY", "")
+	t.Setenv("LIVEKIT_API_SECRET", "")
+	restorePort, restoreLook := liveKitPortProbe, liveKitLookPath
+	liveKitPortProbe = func(string) bool { return false }
+	liveKitLookPath = func(string) (string, error) { return "", errors.New("not found") }
+	t.Cleanup(func() { liveKitPortProbe, liveKitLookPath = restorePort, restoreLook })
+
 	_, err := run(t, "dev", dir, "--target", "livekit-dev")
-	if err == nil || !strings.Contains(err.Error(), `target "livekit-dev" uses livekit`) || !strings.Contains(err.Error(), "unmute compile") {
-		t.Fatalf("livekit dev error = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "brew install livekit") || !strings.Contains(err.Error(), "--console") {
+		t.Fatalf("livekit web install-prompt error = %v", err)
 	}
 	_, err = run(t, "dev", dir, "--target", "elevenlabs-prod")
 	if err == nil || !strings.Contains(err.Error(), `target "elevenlabs-prod" uses managed ElevenLabs`) || !strings.Contains(err.Error(), "unmute apply") {
@@ -163,6 +177,113 @@ func TestSelectDevTargetRejectsUnknownInstance(t *testing.T) {
 	_, err := selectDevTarget(cmd, dir, "missing")
 	if err == nil || !strings.Contains(err.Error(), `target instance "missing" is not declared`) {
 		t.Fatalf("selectDevTarget() error = %v", err)
+	}
+}
+
+func TestConsolePlan(t *testing.T) {
+	for _, tc := range []struct {
+		provider ir.Provider
+		want     string // space-joined uv args
+		errSub   string
+	}{
+		{ir.ProviderPipecat, "run --extra console bot.py console", ""},
+		{ir.ProviderLiveKit, "run agent.py console", ""},
+		{ir.ProviderElevenLabs, "", "unmute apply"},
+		{ir.ProviderVapi, "", "not implemented"},
+	} {
+		got, err := consolePlan(tc.provider)
+		if tc.errSub != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.errSub) {
+				t.Errorf("consolePlan(%s) err = %v, want contains %q", tc.provider, err, tc.errSub)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("consolePlan(%s): %v", tc.provider, err)
+		}
+		if strings.Join(got, " ") != tc.want {
+			t.Errorf("consolePlan(%s) = %v, want %q", tc.provider, got, tc.want)
+		}
+	}
+}
+
+func TestRequireInferenceCreds(t *testing.T) {
+	// Hermetic: force the ambient LiveKit creds empty so the machine's real
+	// env can't mask the missing case.
+	t.Setenv("LIVEKIT_API_KEY", "")
+	t.Setenv("LIVEKIT_API_SECRET", "")
+	uses := []string{`reason provider "livekit"`}
+
+	dir := t.TempDir()
+	err := requireInferenceCreds(dir, uses)
+	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_API_KEY") ||
+		!strings.Contains(err.Error(), "LIVEKIT_API_SECRET") || !strings.Contains(err.Error(), "reason") {
+		t.Fatalf("missing-creds error = %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, ".env"),
+		[]byte("LIVEKIT_API_KEY=k\nLIVEKIT_API_SECRET=s\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireInferenceCreds(dir, uses); err != nil {
+		t.Errorf("creds present in .env, want nil; got %v", err)
+	}
+}
+
+func TestDevConsoleRefusesManaged(t *testing.T) {
+	dir := copySafeCore(t)
+	_, err := run(t, "dev", dir, "--target", "elevenlabs-prod", "--console")
+	if err == nil || !strings.Contains(err.Error(), "managed ElevenLabs") || !strings.Contains(err.Error(), "unmute apply") {
+		t.Fatalf("elevenlabs console error = %v", err)
+	}
+}
+
+// TestDevConsoleRoutesRegardlessOfWebFlags: --console takes over the dispatch,
+// and the web-only flags are inert. A vapi target gives the console-specific
+// "console mode is not implemented" (not the web path's "dev runner is not
+// implemented"), even with --port passed, proving the route and the inertness.
+func TestDevConsoleRoutesRegardlessOfWebFlags(t *testing.T) {
+	dir := copySafeCore(t)
+	_, err := run(t, "dev", dir, "--target", "vapi-prod", "--console", "--port", "1", "--no-open")
+	if err == nil || !strings.Contains(err.Error(), "console mode is not implemented") {
+		t.Fatalf("vapi console route error = %v", err)
+	}
+	// The web path for the same target uses the other wording.
+	_, err = run(t, "dev", dir, "--target", "vapi-prod")
+	if err == nil || !strings.Contains(err.Error(), "its dev runner is not implemented") {
+		t.Fatalf("vapi web route error = %v", err)
+	}
+}
+
+// TestDevConsoleLiveKitInferenceRequiresCreds (V7, C7): a livekit console target
+// that routes a role through LiveKit Inference fails the preflight naming the
+// missing creds and the reason, before the TUI launches. Flips a scaffolded
+// agent's reason binding to provider: livekit (the Inference wildcard).
+func TestDevConsoleLiveKitInferenceRequiresCreds(t *testing.T) {
+	t.Setenv("LIVEKIT_API_KEY", "")
+	t.Setenv("LIVEKIT_API_SECRET", "")
+	data := scaffold.Data{Name: "agent"}
+	data.SetTarget("livekit")
+	dir := filepath.Join(t.TempDir(), "agent")
+	if _, err := scaffold.Write(dir, data); err != nil {
+		t.Fatal(err)
+	}
+	tgtPath := filepath.Join(dir, "targets.yaml")
+	raw, err := os.ReadFile(tgtPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flipped := strings.ReplaceAll(string(raw), "provider: openai", "provider: livekit")
+	if flipped == string(raw) {
+		t.Fatal("expected an openai reason binding to flip to livekit inference")
+	}
+	if err := os.WriteFile(tgtPath, []byte(flipped), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = run(t, "dev", dir, "--target", "livekit-dev", "--console")
+	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_API_KEY") || !strings.Contains(err.Error(), "Inference") {
+		t.Fatalf("console inference preflight error = %v", err)
 	}
 }
 

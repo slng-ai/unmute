@@ -6,12 +6,14 @@ not edit by hand — change the source spec and recompile.
 ## Quickstart
 
 ```sh
-cp .env.example .env    # then fill in your keys
-uv run bot.py           # open the URL it prints to talk to the agent
+cp .env.example .env                      # then fill in your keys
+uv run bot.py                             # web: open the URL it prints
+uv run --extra console bot.py console     # terminal: talk over local mic/speaker
 ```
 
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner
-serves a WebRTC test client you can open in the browser.
+serves a WebRTC test client you can open in the browser. Console mode needs the
+`console` extra (pyaudio; `brew install portaudio` first on macOS).
 
 While iterating on the source spec, `unmute dev <source-dir>` recompiles this
 project and runs it for you behind a dev client.
