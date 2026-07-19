@@ -53,6 +53,74 @@ func liveKitCredsFromEnv(env []string) liveKitCreds {
 	}
 }
 
+// Local fallback server (C5/V9): the open-source `livekit-server --dev`
+// binds 127.0.0.1:7880 with fixed dev credentials (doc-verified 2026-07-20,
+// docs.livekit.io/home/self-hosting/local).
+const (
+	liveKitLocalAddr   = "127.0.0.1:7880"
+	liveKitLocalURL    = "ws://127.0.0.1:7880"
+	liveKitDevKey      = "devkey"
+	liveKitDevSecret   = "secret"
+	liveKitInstallHint = "install the open-source dev server and rerun — `unmute dev` starts it for you (macOS: `brew install livekit`; Linux: `curl -sSL https://get.livekit.io | bash`); or set LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET in .env"
+)
+
+// lkServerPlan is how web mode reaches a LiveKit server (V9): the creds for the
+// worker + token mint, whether they must be injected into the worker env (the
+// local fallback), and the binary to spawn (empty when nothing needs starting).
+type lkServerPlan struct {
+	creds     liveKitCreds
+	inject    bool
+	reused    bool   // a server already listens on the local port
+	spawnPath string // non-empty: run `<spawnPath> --dev`
+}
+
+// liveKitServerPlan resolves the server deterministically (V9): explicit
+// LIVEKIT_URL wins verbatim (key/secret must accompany it, C7); no URL falls
+// back to the local dev server — reuse a listener already on :7880, else spawn
+// `livekit-server --dev`, else the C7 install prompt. The port and PATH probes
+// are parameters so tests are hermetic on machines with or without a real
+// server (V10).
+func liveKitServerPlan(env []string, portOpen func(addr string) bool, lookPath func(file string) (string, error)) (lkServerPlan, error) {
+	creds := liveKitCredsFromEnv(env)
+	if creds.URL != "" {
+		if missing := creds.missing(); len(missing) > 0 {
+			return lkServerPlan{}, fmt.Errorf("livekit web mode needs %s alongside LIVEKIT_URL in the environment or .env", strings.Join(missing, " and "))
+		}
+		return lkServerPlan{creds: creds}, nil
+	}
+	local := lkServerPlan{
+		creds:  liveKitCreds{URL: liveKitLocalURL, APIKey: liveKitDevKey, APISecret: liveKitDevSecret},
+		inject: true,
+	}
+	if portOpen(liveKitLocalAddr) {
+		local.reused = true
+		return local, nil
+	}
+	path, err := lookPath("livekit-server")
+	if err != nil {
+		return lkServerPlan{}, fmt.Errorf("livekit web mode needs a LiveKit server and none is reachable: %s", liveKitInstallHint)
+	}
+	local.spawnPath = path
+	return local, nil
+}
+
+// Prod probes behind vars so L2 tests are hermetic (V10): a real dev server on
+// :7880 or an installed livekit-server must never change a test's branch.
+var (
+	liveKitPortProbe = liveKitPortOpen
+	liveKitLookPath  = exec.LookPath
+)
+
+// liveKitPortOpen reports whether something accepts connections on addr.
+func liveKitPortOpen(addr string) bool {
+	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
 // missing lists which required creds are empty, for a preflight error (C7).
 func (c liveKitCreds) missing() []string {
 	var out []string
@@ -94,17 +162,48 @@ func runLiveKitWeb(cmd *cobra.Command, root, targetName, uiPort string, noOpen, 
 	fmt.Fprintf(cmd.OutOrStdout(), "compiled %s\n", outDir)
 
 	childEnv := devChildEnv(root, cmd.ErrOrStderr())
-	creds := liveKitCredsFromEnv(childEnv)
-	if missing := creds.missing(); len(missing) > 0 {
-		return fmt.Errorf("dev %s: livekit web mode needs %s in the environment or .env (LiveKit Cloud or a self-hosted server); the browser client connects to that server. To talk without any LiveKit credentials, use the terminal instead: `unmute dev %s --console`",
-			root, strings.Join(missing, ", "), root)
+	plan, err := liveKitServerPlan(childEnv, liveKitPortProbe, liveKitLookPath)
+	if err != nil {
+		return fmt.Errorf("dev %s: %w (or talk in the terminal instead: `unmute dev %s --console`)", root, err, root)
 	}
+	if plan.inject {
+		// The worker must register against the same server the token points at.
+		childEnv = append(childEnv,
+			"LIVEKIT_URL="+plan.creds.URL,
+			"LIVEKIT_API_KEY="+plan.creds.APIKey,
+			"LIVEKIT_API_SECRET="+plan.creds.APISecret)
+	}
+	creds := plan.creds
 	if _, err := exec.LookPath("uv"); err != nil {
 		return fmt.Errorf("dev %s: uv not found on PATH; install uv to run the agent locally (https://docs.astral.sh/uv/)", root)
 	}
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if plan.spawnPath != "" {
+		lkLogPath := filepath.Join(outDir, "livekit-server.log")
+		lkLog, err := os.Create(lkLogPath)
+		if err != nil {
+			return fmt.Errorf("dev %s: open livekit-server log: %w", root, err)
+		}
+		defer func() { _ = lkLog.Close() }()
+		lkServer := exec.Command(plan.spawnPath, "--dev")
+		lkServer.Stdout, lkServer.Stderr = lkLog, lkLog
+		lkServer.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		if err := lkServer.Start(); err != nil {
+			return fmt.Errorf("dev %s: start livekit-server: %w", root, err)
+		}
+		defer killGroup(lkServer)
+		lkDone := make(chan error, 1)
+		go func() { lkDone <- lkServer.Wait() }()
+		fmt.Fprintf(cmd.ErrOrStderr(), "started livekit-server --dev (logs: %s)\n", lkLogPath)
+		if err := waitPort(ctx, liveKitLocalAddr, lkDone, 30*time.Second); err != nil {
+			return fmt.Errorf("dev %s: livekit-server not ready: %w (logs: %s)", root, err, lkLogPath)
+		}
+	} else if plan.reused {
+		fmt.Fprintf(cmd.ErrOrStderr(), "using the LiveKit dev server already listening on %s\n", liveKitLocalAddr)
+	}
 
 	logPath := filepath.Join(outDir, "agent.log")
 	logFile, err := os.Create(logPath)

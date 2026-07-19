@@ -72,7 +72,7 @@ The fastest loop for a **Pipecat or LiveKit** instance: compiles the selected ta
 
 **Web (default).** Opens a browser client:
 - Pipecat: runs `uv run bot.py`, proxies WebRTC to the local runner, serves the client.
-- LiveKit: needs `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` (LiveKit Cloud or a self-hosted server) in the environment or `.env`; runs `uv run agent.py dev`, waits for the worker to register, then serves a client that mints a token and joins the room (the agent joins the same room automatically). Missing creds fail with a message pointing you at `--console`.
+- LiveKit: runs `uv run agent.py dev`, waits for the worker to register, then serves a client that mints a token and joins the room (the agent joins the same room automatically). Zero-config by default: with no `LIVEKIT_URL` set, `unmute dev` uses the open-source dev server locally — reusing one already listening on `:7880`, or starting `livekit-server --dev` itself and stopping it when you quit. Install it once (`brew install livekit` on macOS; `curl -sSL https://get.livekit.io | bash` on Linux). Explicit `LIVEKIT_URL`/`LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` in the environment or `.env` (LiveKit Cloud or self-hosted) always win. With no creds and no binary, the error names the install command and points at `--console`.
 
 **Console (`--console`).** Talk in the terminal over your local mic and speaker — no browser, no dev server:
 - Pipecat: `uv run --extra console bot.py console`. The `console` extra pulls in pyaudio; on macOS run `brew install portaudio` first.

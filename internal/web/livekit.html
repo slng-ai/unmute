@@ -95,10 +95,16 @@ async function connect(){
   try {
     setState("connecting", "connecting to room…");
     await room.connect(cfg.url, cfg.token);
-    await room.localParticipant.setMicrophoneEnabled(true);
     setState("connected", "connected — waiting for the agent…");
   } catch(e){
     setState("error", "connect failed: " + e.message);
+    return;
+  }
+  // Mic failure must not mask a successful join: you can still hear the agent.
+  try {
+    await room.localParticipant.setMicrophoneEnabled(true);
+  } catch(e){
+    $("state").textContent = "connected — microphone blocked (" + e.message + "); allow mic access and reconnect";
   }
 }
 

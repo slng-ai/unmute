@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,15 +147,21 @@ func TestCompileTargetForDevUsesExactInstance(t *testing.T) {
 
 func TestDevSelectedTargetReportsProviderSpecificRunner(t *testing.T) {
 	dir := copySafeCore(t)
-	// livekit web mode now runs, gated on LiveKit creds: with none present it
-	// fails the preflight and points at --console (C7). Force the ambient creds
-	// empty so the machine's real env can't satisfy the preflight.
+	// livekit web with no URL now tries the local dev-server fallback; force
+	// both probes negative (no server on :7880, no binary) so the machine's
+	// real state can't change the branch (V10), and force the ambient creds
+	// empty. Expect the C7 install prompt pointing at --console.
 	t.Setenv("LIVEKIT_URL", "")
 	t.Setenv("LIVEKIT_API_KEY", "")
 	t.Setenv("LIVEKIT_API_SECRET", "")
+	restorePort, restoreLook := liveKitPortProbe, liveKitLookPath
+	liveKitPortProbe = func(string) bool { return false }
+	liveKitLookPath = func(string) (string, error) { return "", errors.New("not found") }
+	t.Cleanup(func() { liveKitPortProbe, liveKitLookPath = restorePort, restoreLook })
+
 	_, err := run(t, "dev", dir, "--target", "livekit-dev")
-	if err == nil || !strings.Contains(err.Error(), "livekit web mode needs") || !strings.Contains(err.Error(), "--console") {
-		t.Fatalf("livekit web preflight error = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "brew install livekit") || !strings.Contains(err.Error(), "--console") {
+		t.Fatalf("livekit web install-prompt error = %v", err)
 	}
 	_, err = run(t, "dev", dir, "--target", "elevenlabs-prod")
 	if err == nil || !strings.Contains(err.Error(), `target "elevenlabs-prod" uses managed ElevenLabs`) || !strings.Contains(err.Error(), "unmute apply") {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -131,6 +132,57 @@ func TestReadyWatcher(t *testing.T) {
 	}
 	if s := sink.String(); !strings.Contains(s, "booting up") || !strings.Contains(s, "id=xyz") {
 		t.Errorf("passthrough lost data: %q", s)
+	}
+}
+
+// TestLiveKitServerPlan (V9/V10): explicit creds win and spawn nothing; no URL
+// falls back to the local dev server — reuse an open :7880, else spawn the
+// binary, else the install prompt. All probes faked, hermetic by construction.
+func TestLiveKitServerPlan(t *testing.T) {
+	closed := func(string) bool { return false }
+	open := func(string) bool { return true }
+	found := func(string) (string, error) { return "/opt/bin/livekit-server", nil }
+	absent := func(string) (string, error) { return "", errors.New("not in PATH") }
+
+	explicit := []string{"LIVEKIT_URL=wss://x.cloud", "LIVEKIT_API_KEY=k", "LIVEKIT_API_SECRET=s"}
+	plan, err := liveKitServerPlan(explicit, closed, absent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.creds.URL != "wss://x.cloud" || plan.inject || plan.spawnPath != "" || plan.reused {
+		t.Errorf("explicit creds plan = %+v, want verbatim creds and nothing local", plan)
+	}
+
+	// URL set but secret missing: naming error, never the local fallback (C7).
+	_, err = liveKitServerPlan([]string{"LIVEKIT_URL=wss://x.cloud", "LIVEKIT_API_KEY=k"}, open, found)
+	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_API_SECRET") {
+		t.Errorf("partial creds error = %v", err)
+	}
+
+	// No URL, something already on :7880 → reuse with dev creds, no spawn.
+	plan, err = liveKitServerPlan(nil, open, absent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.reused || !plan.inject || plan.spawnPath != "" ||
+		plan.creds.URL != liveKitLocalURL || plan.creds.APIKey != liveKitDevKey {
+		t.Errorf("reuse plan = %+v", plan)
+	}
+
+	// No URL, port closed, binary present → spawn it.
+	plan, err = liveKitServerPlan(nil, closed, found)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.spawnPath != "/opt/bin/livekit-server" || !plan.inject || plan.reused {
+		t.Errorf("spawn plan = %+v", plan)
+	}
+
+	// No URL, port closed, no binary → the V10 install prompt.
+	_, err = liveKitServerPlan(nil, closed, absent)
+	if err == nil || !strings.Contains(err.Error(), "brew install livekit") ||
+		!strings.Contains(err.Error(), "get.livekit.io") || !strings.Contains(err.Error(), "LIVEKIT_URL") {
+		t.Errorf("install prompt = %v", err)
 	}
 }
 

@@ -437,12 +437,22 @@ LiveKit credentials** — it never connects to LiveKit Cloud. It asks for
 Inference (a `provider: livekit` reason, or the cloud `turn-detector`); the
 preflight names what it needs.
 
-**Web** needs a LiveKit server: set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
-`LIVEKIT_API_SECRET` (LiveKit Cloud or self-hosted) in a `.env` at the package
-root. `unmute dev` runs `uv run agent.py dev`, waits for the worker to register,
-then opens a browser client that joins a fresh room; your agent is dispatched to
-that room automatically. With no creds, it fails with a message pointing you at
-`--console`.
+**Web** needs a LiveKit server, and the default is fully local: LiveKit's
+server is open source, so with no `LIVEKIT_URL` set, `unmute dev` starts
+`livekit-server --dev` for you (or reuses one already on `:7880`) and stops it
+when you quit — no cloud account, no cost. Install it once:
+
+```sh
+brew install livekit                        # macOS
+curl -sSL https://get.livekit.io | bash     # Linux
+```
+
+To use LiveKit Cloud or your own deployment instead, set `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in a `.env` at the package root —
+explicit credentials always win. Either way, `unmute dev` runs
+`uv run agent.py dev`, waits for the worker to register, then opens a browser
+client that joins a fresh room; your agent is dispatched to that room
+automatically.
 
 Both read keys from `.env`; press `ctrl-c` to stop. See the
 [dev command reference](../reference/cli.md#dev) for all flags.
