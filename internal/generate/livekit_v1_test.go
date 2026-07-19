@@ -365,7 +365,7 @@ func TestLiveKitV1PerTaskModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent.Models["fast"] = ir.ModelProfile{Placement: ir.PlacementAPI}
+	agent.Models["fast"] = ir.ModelDef{Kind: ir.KindThink, Placement: ir.PlacementAPI}
 	task := agent.Tasks["find_slot"]
 	task.Model = "fast"
 	agent.Tasks["find_slot"] = task
@@ -403,7 +403,7 @@ func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 	profile := agent.Models["reasoning"]
 	profile.Fallback = []string{"backup"}
 	agent.Models["reasoning"] = profile
-	agent.Models["backup"] = ir.ModelProfile{Placement: ir.PlacementAPI}
+	agent.Models["backup"] = ir.ModelDef{Kind: ir.KindThink, Placement: ir.PlacementAPI}
 	// Shape each transfer differently.
 	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
 	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
@@ -672,7 +672,7 @@ func TestLiveKitV1PinsAndSDKLanguage(t *testing.T) {
 	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, `"livekit-plugins-slng>=1.7.0"`) {
 		t.Errorf("pin did not raise the plugin floor:\n%s", pyproject)
 	}
-	if !strings.Contains(artifactFile(t, artifact, "livekit.toml"), `id = "livekit-dev"`) {
+	if !strings.Contains(artifactFile(t, artifact, "livekit.toml"), `id = "livekit"`) {
 		t.Error("livekit.toml missing the agent id")
 	}
 
@@ -780,7 +780,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	agent.Conversation.Interruption = &ir.Interruption{Enabled: &enabled, MinimumWords: 2, IgnorePhrases: []string{"uh-huh"}}
 	agent.Conversation.ThinkingAudio = ir.ThinkingSubtle
 	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
-	agent.Models["backup"] = ir.ModelProfile{Placement: ir.PlacementAPI}
+	agent.Models["backup"] = ir.ModelDef{Kind: ir.KindThink, Placement: ir.PlacementAPI}
 	profile := agent.Models["reasoning"]
 	profile.Fallback = []string{"backup"}
 	agent.Models["reasoning"] = profile

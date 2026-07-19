@@ -121,7 +121,7 @@ note: reconcile comparison: modeled fields diffed normally; forwarded params com
       "silence_end_call_timeout": 45
     }
   },
-  "name": "elevenlabs-prod-billing"
+  "name": "elevenlabs-billing"
 }
 
 === step 5: POST /v1/convai/agents/create (capture=intake) ===
@@ -171,7 +171,7 @@ note: reconcile comparison: modeled fields diffed normally; forwarded params com
       "silence_end_call_timeout": 45
     }
   },
-  "name": "elevenlabs-prod-intake",
+  "name": "elevenlabs-intake",
   "workflow": {
     "edges": {
       "entry_node_to_group_triage_0_collect": {

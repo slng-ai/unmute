@@ -142,13 +142,12 @@ func sizing(agent *Agent, resolved Target) []Sizing {
 	return result
 }
 
-// resolvedHasLocal reports whether any effective binding runs on local hardware,
-// the GPU-sizing input (N15: sizing reads each target's effective models).
+// resolvedHasLocal reports whether any GPU-bearing effective binding runs on
+// local hardware, the GPU-sizing input (N15: sizing reads each target's
+// effective models). Turn is excluded: a local turn model is CPU-side VAD, not
+// a GPU workload, matching the pre-N15 sizing.
 func resolvedHasLocal(resolved Target) bool {
 	if b := resolved.Models.Listen; b != nil && b.Placement == PlacementLocal {
-		return true
-	}
-	if b := resolved.Models.Turn; b != nil && b.Placement == PlacementLocal {
 		return true
 	}
 	for _, b := range resolved.Models.Speak {
