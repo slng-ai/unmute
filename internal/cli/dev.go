@@ -35,7 +35,7 @@ func newDevCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "dev <agent-dir>",
-		Short: "Compile, run the agent locally, and talk to it in the browser.",
+		Short: "Compile, run the agent locally, and talk to it in the browser or terminal (--console).",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := args[0]

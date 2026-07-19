@@ -421,6 +421,32 @@ Warm transfer is Beta in the Python SDK. Outbound calls support
 `on_voicemail: hangup` and `on_voicemail: leave_message`, and require the
 LiveKit outbound SIP trunk environment setting.
 
+## Run it and talk to the agent
+
+Like Pipecat, a LiveKit target runs locally with `unmute dev` — two ways:
+
+```sh
+unmute dev acme --console   # talk in the terminal, over your mic and speaker
+unmute dev acme             # talk in the browser
+```
+
+**Console** runs `uv run agent.py console` entirely on your machine. A
+scaffold-default agent (native providers + local turn detection) needs **no
+LiveKit credentials** — it never connects to LiveKit Cloud. It asks for
+`LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` only if a binding routes through LiveKit
+Inference (a `provider: livekit` reason, or the cloud `turn-detector`); the
+preflight names what it needs.
+
+**Web** needs a LiveKit server: set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
+`LIVEKIT_API_SECRET` (LiveKit Cloud or self-hosted) in a `.env` at the package
+root. `unmute dev` runs `uv run agent.py dev`, waits for the worker to register,
+then opens a browser client that joins a fresh room; your agent is dispatched to
+that room automatically. With no creds, it fails with a message pointing you at
+`--console`.
+
+Both read keys from `.env`; press `ctrl-c` to stop. See the
+[dev command reference](../reference/cli.md#dev) for all flags.
+
 ## Know the LiveKit boundaries
 
 The driver covers every LiveKit capability that passes target validation. The
