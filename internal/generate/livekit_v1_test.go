@@ -300,6 +300,59 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 	}
 }
 
+// TestV4_LiveKitInferenceFact (parity V4/C2): the artifact flags exactly the
+// bindings that route through LiveKit Inference, so console mode knows when it
+// needs LiveKit creds. safe_core's default (native deepgram/elevenlabs/openai +
+// local turn-detector-mini) flags nothing; the Inference wildcard reason
+// (provider: livekit) and the cloud turn detector each flag.
+func TestV4_LiveKitInferenceFact(t *testing.T) {
+	load := func() *ir.Agent {
+		t.Helper()
+		pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent, err := ir.Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return agent
+	}
+
+	agent := load()
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate default: %v", err)
+	}
+	if len(artifact.LiveKitInference) != 0 {
+		t.Errorf("scaffold-default livekit must not route through Inference; got %v", artifact.LiveKitInference)
+	}
+
+	agent = load()
+	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+	for profile := range tgt.Models.Reason {
+		tgt.Models.Reason[profile] = ir.Binding{Provider: "livekit", Model: "openai/gpt-4o-mini"}
+	}
+	artifact, err = Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatalf("generate wildcard reason: %v", err)
+	}
+	if !strings.Contains(strings.Join(artifact.LiveKitInference, " "), "reason") {
+		t.Errorf("provider: livekit reason must flag Inference; got %v", artifact.LiveKitInference)
+	}
+
+	agent = load()
+	tgt = targetByProvider(t, agent, ir.ProviderLiveKit)
+	tgt.Models.Turn = &ir.Binding{Provider: "livekit", Model: "turn-detector"}
+	artifact, err = Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatalf("generate cloud turn: %v", err)
+	}
+	if !strings.Contains(strings.Join(artifact.LiveKitInference, " "), "turn") {
+		t.Errorf("cloud turn-detector must flag Inference; got %v", artifact.LiveKitInference)
+	}
+}
+
 // TestLiveKitV1PerTaskModel covers the T14 lowering (B1/V1/V15): a task with
 // its own model profile gets llm= on the AgentTask, resolved through the
 // catalogue; a task on the entry agent's profile stays on the session LLM.

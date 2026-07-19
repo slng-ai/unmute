@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/scaffold"
 )
 
@@ -163,6 +164,64 @@ func TestSelectDevTargetRejectsUnknownInstance(t *testing.T) {
 	_, err := selectDevTarget(cmd, dir, "missing")
 	if err == nil || !strings.Contains(err.Error(), `target instance "missing" is not declared`) {
 		t.Fatalf("selectDevTarget() error = %v", err)
+	}
+}
+
+func TestConsolePlan(t *testing.T) {
+	for _, tc := range []struct {
+		provider ir.Provider
+		want     string // space-joined uv args
+		errSub   string
+	}{
+		{ir.ProviderPipecat, "run --extra console bot.py console", ""},
+		{ir.ProviderLiveKit, "run agent.py console", ""},
+		{ir.ProviderElevenLabs, "", "unmute apply"},
+		{ir.ProviderVapi, "", "not implemented"},
+	} {
+		got, err := consolePlan(tc.provider)
+		if tc.errSub != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.errSub) {
+				t.Errorf("consolePlan(%s) err = %v, want contains %q", tc.provider, err, tc.errSub)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("consolePlan(%s): %v", tc.provider, err)
+		}
+		if strings.Join(got, " ") != tc.want {
+			t.Errorf("consolePlan(%s) = %v, want %q", tc.provider, got, tc.want)
+		}
+	}
+}
+
+func TestRequireInferenceCreds(t *testing.T) {
+	// Hermetic: force the ambient LiveKit creds empty so the machine's real
+	// env can't mask the missing case.
+	t.Setenv("LIVEKIT_API_KEY", "")
+	t.Setenv("LIVEKIT_API_SECRET", "")
+	uses := []string{`reason provider "livekit"`}
+
+	dir := t.TempDir()
+	err := requireInferenceCreds(dir, uses)
+	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_API_KEY") ||
+		!strings.Contains(err.Error(), "LIVEKIT_API_SECRET") || !strings.Contains(err.Error(), "reason") {
+		t.Fatalf("missing-creds error = %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, ".env"),
+		[]byte("LIVEKIT_API_KEY=k\nLIVEKIT_API_SECRET=s\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := requireInferenceCreds(dir, uses); err != nil {
+		t.Errorf("creds present in .env, want nil; got %v", err)
+	}
+}
+
+func TestDevConsoleRefusesManaged(t *testing.T) {
+	dir := copySafeCore(t)
+	_, err := run(t, "dev", dir, "--target", "elevenlabs-prod", "--console")
+	if err == nil || !strings.Contains(err.Error(), "managed ElevenLabs") || !strings.Contains(err.Error(), "unmute apply") {
+		t.Fatalf("elevenlabs console error = %v", err)
 	}
 }
 

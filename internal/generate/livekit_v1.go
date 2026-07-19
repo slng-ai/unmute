@@ -226,6 +226,7 @@ type livekitData struct {
 	Deps          []string
 	RequiredEnv   []string
 	Notes         []string
+	InferenceUses []string // bindings routed through LiveKit Inference (console needs cloud creds, C2/C7)
 
 	NeedsTasks      bool // AgentTask import
 	NeedsTaskGroups bool // beta.workflows TaskGroup import
@@ -310,9 +311,10 @@ func GenerateLiveKit(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedB
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 
 	return Artifact{
-		Kind:  CodeTarget,
-		Files: files,
-		Notes: GenerateReport{Notes: data.Notes},
+		Kind:             CodeTarget,
+		Files:            files,
+		Notes:            GenerateReport{Notes: data.Notes},
+		LiveKitInference: data.InferenceUses,
 	}, nil
 }
 
