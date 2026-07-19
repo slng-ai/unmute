@@ -231,6 +231,55 @@ func TestDevConsoleRefusesManaged(t *testing.T) {
 	}
 }
 
+// TestDevConsoleRoutesRegardlessOfWebFlags: --console takes over the dispatch,
+// and the web-only flags are inert. A vapi target gives the console-specific
+// "console mode is not implemented" (not the web path's "dev runner is not
+// implemented"), even with --port passed, proving the route and the inertness.
+func TestDevConsoleRoutesRegardlessOfWebFlags(t *testing.T) {
+	dir := copySafeCore(t)
+	_, err := run(t, "dev", dir, "--target", "vapi-prod", "--console", "--port", "1", "--no-open")
+	if err == nil || !strings.Contains(err.Error(), "console mode is not implemented") {
+		t.Fatalf("vapi console route error = %v", err)
+	}
+	// The web path for the same target uses the other wording.
+	_, err = run(t, "dev", dir, "--target", "vapi-prod")
+	if err == nil || !strings.Contains(err.Error(), "its dev runner is not implemented") {
+		t.Fatalf("vapi web route error = %v", err)
+	}
+}
+
+// TestDevConsoleLiveKitInferenceRequiresCreds (V7, C7): a livekit console target
+// that routes a role through LiveKit Inference fails the preflight naming the
+// missing creds and the reason, before the TUI launches. Flips a scaffolded
+// agent's reason binding to provider: livekit (the Inference wildcard).
+func TestDevConsoleLiveKitInferenceRequiresCreds(t *testing.T) {
+	t.Setenv("LIVEKIT_API_KEY", "")
+	t.Setenv("LIVEKIT_API_SECRET", "")
+	data := scaffold.Data{Name: "agent"}
+	data.SetTarget("livekit")
+	dir := filepath.Join(t.TempDir(), "agent")
+	if _, err := scaffold.Write(dir, data); err != nil {
+		t.Fatal(err)
+	}
+	tgtPath := filepath.Join(dir, "targets.yaml")
+	raw, err := os.ReadFile(tgtPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flipped := strings.ReplaceAll(string(raw), "provider: openai", "provider: livekit")
+	if flipped == string(raw) {
+		t.Fatal("expected an openai reason binding to flip to livekit inference")
+	}
+	if err := os.WriteFile(tgtPath, []byte(flipped), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = run(t, "dev", dir, "--target", "livekit-dev", "--console")
+	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_API_KEY") || !strings.Contains(err.Error(), "Inference") {
+		t.Fatalf("console inference preflight error = %v", err)
+	}
+}
+
 func contains(s []string, want string) bool {
 	for _, v := range s {
 		if v == want {
