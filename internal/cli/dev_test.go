@@ -146,9 +146,15 @@ func TestCompileTargetForDevUsesExactInstance(t *testing.T) {
 
 func TestDevSelectedTargetReportsProviderSpecificRunner(t *testing.T) {
 	dir := copySafeCore(t)
+	// livekit web mode now runs, gated on LiveKit creds: with none present it
+	// fails the preflight and points at --console (C7). Force the ambient creds
+	// empty so the machine's real env can't satisfy the preflight.
+	t.Setenv("LIVEKIT_URL", "")
+	t.Setenv("LIVEKIT_API_KEY", "")
+	t.Setenv("LIVEKIT_API_SECRET", "")
 	_, err := run(t, "dev", dir, "--target", "livekit-dev")
-	if err == nil || !strings.Contains(err.Error(), `target "livekit-dev" uses livekit`) || !strings.Contains(err.Error(), "unmute compile") {
-		t.Fatalf("livekit dev error = %v", err)
+	if err == nil || !strings.Contains(err.Error(), "livekit web mode needs") || !strings.Contains(err.Error(), "--console") {
+		t.Fatalf("livekit web preflight error = %v", err)
 	}
 	_, err = run(t, "dev", dir, "--target", "elevenlabs-prod")
 	if err == nil || !strings.Contains(err.Error(), `target "elevenlabs-prod" uses managed ElevenLabs`) || !strings.Contains(err.Error(), "unmute apply") {

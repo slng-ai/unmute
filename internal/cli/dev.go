@@ -47,6 +47,13 @@ func newDevCmd() *cobra.Command {
 			if console {
 				return runDevConsole(cmd, root, selected)
 			}
+			// livekit web mode has its own runner (LiveKit server + token, no
+			// local Pipecat proxy); every other provider stays on the flow below.
+			if prov, err := devTargetProvider(root, selected); err != nil {
+				return err
+			} else if prov == ir.ProviderLiveKit {
+				return runLiveKitWeb(cmd, root, selected, uiPort, noOpen, verbose)
+			}
 			outDir, err := compileTargetForDev(cmd, root, selected)
 			if err != nil {
 				return err
@@ -342,9 +349,20 @@ func selectDevTarget(cmd *cobra.Command, root, requested string) (string, error)
 	return selected, nil
 }
 
-// compileTargetForDev dispatches the chosen instance. The bundled browser
-// runner speaks Pipecat WebRTC today; other shipped targets fail with their
-// specific next command instead of being silently replaced.
+// devTargetProvider resolves the chosen instance's provider without generating,
+// so RunE can route livekit web to its own runner before the pipecat flow.
+func devTargetProvider(root, targetName string) (ir.Provider, error) {
+	_, targets, err := loadPackage(root, []string{targetName})
+	if err != nil {
+		return "", fmt.Errorf("dev %s: %w", root, err)
+	}
+	return targets[0].Provider, nil
+}
+
+// compileTargetForDev dispatches the chosen instance for the Pipecat web runner.
+// livekit web is handled by runLiveKitWeb before this is reached; the remaining
+// non-pipecat targets fail with their specific next command instead of being
+// silently replaced.
 func compileTargetForDev(cmd *cobra.Command, root, targetName string) (string, error) {
 	agent, targets, err := loadPackage(root, []string{targetName})
 	if err != nil {
@@ -353,8 +371,6 @@ func compileTargetForDev(cmd *cobra.Command, root, targetName string) (string, e
 	resolved := targets[0]
 	if resolved.Provider != ir.ProviderPipecat {
 		switch resolved.Provider {
-		case ir.ProviderLiveKit:
-			return "", fmt.Errorf("dev %s: target %q uses livekit; no LiveKit local browser runner is shipped—use `unmute compile %s --target %s`", root, resolved.Name, root, resolved.Name)
 		case ir.ProviderElevenLabs:
 			return "", fmt.Errorf("dev %s: target %q uses managed ElevenLabs; no local runner exists—use `unmute apply %s --target %s`", root, resolved.Name, root, resolved.Name)
 		default:

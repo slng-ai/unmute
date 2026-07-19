@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"io/fs"
@@ -78,6 +79,58 @@ func TestLiveKitCredsFromEnv(t *testing.T) {
 	over := liveKitCredsFromEnv([]string{"LIVEKIT_API_KEY=old", "LIVEKIT_API_KEY=new"})
 	if over.APIKey != "new" {
 		t.Errorf("APIKey = %q, want new (last wins)", over.APIKey)
+	}
+}
+
+// TestLiveKitDevMux (V5): the dev server serves the livekit client at /, the
+// vendored UMD next to it, the token endpoint, and 404s elsewhere.
+func TestLiveKitDevMux(t *testing.T) {
+	mux := liveKitDevMux(liveKitCreds{URL: "wss://x", APIKey: "k", APISecret: "s"}, "remy-dev")
+	get := func(path string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		return rr
+	}
+	for _, tc := range []struct{ path, want string }{
+		{"/", "unmute dev"},
+		{"/livekit-client.umd.js", "LivekitClient"},
+		{"/api/token", `"room"`},
+	} {
+		rr := get(tc.path)
+		if rr.Code != http.StatusOK {
+			t.Errorf("GET %s = %d, want 200", tc.path, rr.Code)
+		}
+		if !strings.Contains(rr.Body.String(), tc.want) {
+			t.Errorf("GET %s body missing %q", tc.path, tc.want)
+		}
+	}
+	if rr := get("/nope"); rr.Code != http.StatusNotFound {
+		t.Errorf("GET /nope = %d, want 404", rr.Code)
+	}
+}
+
+// TestReadyWatcher: fires once when the marker appears (even split across
+// writes) and passes every byte through to the underlying writer.
+func TestReadyWatcher(t *testing.T) {
+	var sink bytes.Buffer
+	count := 0
+	rw := &readyWatcher{w: &sink, marker: []byte("registered worker"), fire: func() { count++ }}
+
+	_, _ = rw.Write([]byte("booting up\n"))
+	if count != 0 {
+		t.Fatalf("fired before marker; count = %d", count)
+	}
+	_, _ = rw.Write([]byte("... registered wor")) // marker split across writes
+	_, _ = rw.Write([]byte("ker id=xyz\n"))
+	if count != 1 {
+		t.Fatalf("fire count = %d, want 1", count)
+	}
+	_, _ = rw.Write([]byte("another registered worker line\n"))
+	if count != 1 {
+		t.Fatalf("fire must be once; count = %d", count)
+	}
+	if s := sink.String(); !strings.Contains(s, "booting up") || !strings.Contains(s, "id=xyz") {
+		t.Errorf("passthrough lost data: %q", s)
 	}
 }
 
