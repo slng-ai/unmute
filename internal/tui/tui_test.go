@@ -1351,13 +1351,13 @@ func TestV33ValidateStaysInConsole(t *testing.T) {
 		if action != "validate" || path != agent.path {
 			t.Fatalf("action = %q, path = %q", action, path)
 		}
-		_, _ = io.WriteString(out, "TARGET\tPROVIDER\tRESULT\npipecat-dev\tpipecat\tpass\n")
+		_, _ = io.WriteString(out, "TARGET\tPROVIDER\tRESULT\npipecat\tpipecat\tpass\n")
 		return nil
 	}
 	if err := editMaintained(runner, &agent); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "pipecat-dev") || strings.Count(output.String(), "Enter a number between 1 and 9") < 2 {
+	if !strings.Contains(output.String(), "pipecat") || strings.Count(output.String(), "Enter a number between 1 and 9") < 2 {
 		t.Fatalf("Validate report did not return to maintain menu:\n%s", output.String())
 	}
 }
@@ -1370,13 +1370,13 @@ func TestV33CompileStaysInConsole(t *testing.T) {
 		if action != "compile" || path != agent.path {
 			t.Fatalf("action = %q, path = %q", action, path)
 		}
-		_, _ = io.WriteString(out, "generated build/pipecat-dev/agent.py\n")
+		_, _ = io.WriteString(out, "generated build/pipecat/agent.py\n")
 		return nil
 	}
 	if err := editMaintained(runner, &agent); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "generated build/pipecat-dev/agent.py") || strings.Count(output.String(), "Enter a number between 1 and 9") < 2 {
+	if !strings.Contains(output.String(), "generated build/pipecat/agent.py") || strings.Count(output.String(), "Enter a number between 1 and 9") < 2 {
 		t.Fatalf("Compile report did not return to maintain menu:\n%s", output.String())
 	}
 }
@@ -1403,12 +1403,14 @@ func TestOpenReportsUnrepresentableFieldPath(t *testing.T) {
 	if _, err := scaffold.Write(root, data); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root, "targets.yaml")
+	// Model definitions live in agent.yaml now (N15); endpoint_env is a field the
+	// scaffold editor cannot represent, so opening the package must report it lost.
+	path := filepath.Join(root, "agent.yaml")
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	content = bytes.Replace(content, []byte(`model: "gpt-4.1-mini"`), []byte(`model: "gpt-4.1-mini", endpoint_env: CUSTOM_LLM_URL`), 1)
+	content = bytes.Replace(content, []byte(`model: "gpt-4.1-mini"`), []byte(`model: "gpt-4.1-mini"`+"\n    endpoint_env: CUSTOM_LLM_URL"), 1)
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1416,7 +1418,7 @@ func TestOpenReportsUnrepresentableFieldPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(agent.losses, "\n"); !strings.Contains(got, "endpoint_env") || !strings.Contains(got, "targets.yaml") {
+	if got := strings.Join(agent.losses, "\n"); !strings.Contains(got, "endpoint_env") || !strings.Contains(got, "agent.yaml") {
 		t.Fatalf("loss report = %q", got)
 	}
 }

@@ -34,21 +34,21 @@ func runCompileCommand(t *testing.T, args ...string) (string, string, error) {
 // compile-report.json on disk — SCHEMA.md §6.2 rule 6, §5.1 ("the contract").
 func TestCompilePrintsBindingsAndSizing(t *testing.T) {
 	dir := copySafeCore(t)
-	stdout, _, err := runCompileCommand(t, "--target", "pipecat-dev", dir)
+	stdout, _, err := runCompileCommand(t, "--target", "pipecat", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"pipecat-dev: binding listen provider=deepgram model=nova-3 (forwarded as-is, not validated)",
-		"pipecat-dev:   param temperature=0.4",
-		"pipecat-dev: sizing workers=60 [unbenchmarked]",
+		"pipecat: binding listen provider=deepgram model=nova-3 (forwarded as-is, not validated)",
+		"pipecat:   param temperature=0.4",
+		"pipecat: sizing workers=60 [unbenchmarked]",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout missing %q:\n%s", want, stdout)
 		}
 	}
 
-	report, err := os.ReadFile(filepath.Join(dir, "build", "pipecat-dev", "compile-report.json"))
+	report, err := os.ReadFile(filepath.Join(dir, "build", "pipecat", "compile-report.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestCompileSurfacesPerTargetDiagnostics(t *testing.T) {
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = runCompileCommand(t, "--target", "vapi-prod", dir)
+	_, _, err = runCompileCommand(t, "--target", "vapi", dir)
 	if err == nil || !strings.Contains(err.Error(), "Vapi has no faithful thinking-audio lowering") {
 		t.Fatalf("err = %v", err)
 	}

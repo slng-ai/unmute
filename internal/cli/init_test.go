@@ -58,7 +58,7 @@ func TestInit_scaffoldsValidV1Package(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validate scaffold: %v\n%s", err, vout)
 	}
-	if !strings.Contains(vout, "pipecat-dev") || !strings.Contains(vout, "pass") {
+	if !strings.Contains(vout, "pipecat") || !strings.Contains(vout, "pass") {
 		t.Fatalf("scaffold did not validate clean:\n%s", vout)
 	}
 }

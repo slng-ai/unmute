@@ -112,7 +112,7 @@ func TestSelectDevTargetAutoSelectsSoleInstance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name != "livekit-dev" {
+	if name != "livekit" {
 		t.Fatalf("selected target = %q", name)
 	}
 }
@@ -123,7 +123,7 @@ func TestSelectDevTargetRequiresNameForMultipleWithoutTTY(t *testing.T) {
 	cmd.SetIn(strings.NewReader(""))
 	cmd.SetOut(&bytes.Buffer{})
 	_, err := selectDevTarget(cmd, dir, "")
-	if err == nil || !strings.Contains(err.Error(), "multiple targets declared; pass --target <name>") || !strings.Contains(err.Error(), "pipecat-dev (pipecat)") {
+	if err == nil || !strings.Contains(err.Error(), "multiple targets declared; pass --target <name>") || !strings.Contains(err.Error(), "pipecat (pipecat)") {
 		t.Fatalf("selectDevTarget() error = %v", err)
 	}
 }
@@ -133,11 +133,11 @@ func TestCompileTargetForDevUsesExactInstance(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
-	outDir, err := compileTargetForDev(cmd, dir, "pipecat-dev")
+	outDir, err := compileTargetForDev(cmd, dir, "pipecat")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if outDir != filepath.Join(dir, "build", "pipecat-dev") {
+	if outDir != filepath.Join(dir, "build", "pipecat") {
 		t.Fatalf("outDir = %q", outDir)
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "bot.py")); err != nil {
@@ -159,12 +159,12 @@ func TestDevSelectedTargetReportsProviderSpecificRunner(t *testing.T) {
 	liveKitLookPath = func(string) (string, error) { return "", errors.New("not found") }
 	t.Cleanup(func() { liveKitPortProbe, liveKitLookPath = restorePort, restoreLook })
 
-	_, err := run(t, "dev", dir, "--target", "livekit-dev")
+	_, err := run(t, "dev", dir, "--target", "livekit")
 	if err == nil || !strings.Contains(err.Error(), "brew install livekit") || !strings.Contains(err.Error(), "--console") {
 		t.Fatalf("livekit web install-prompt error = %v", err)
 	}
-	_, err = run(t, "dev", dir, "--target", "elevenlabs-prod")
-	if err == nil || !strings.Contains(err.Error(), `target "elevenlabs-prod" uses managed ElevenLabs`) || !strings.Contains(err.Error(), "unmute apply") {
+	_, err = run(t, "dev", dir, "--target", "elevenlabs")
+	if err == nil || !strings.Contains(err.Error(), `target "elevenlabs" uses managed ElevenLabs`) || !strings.Contains(err.Error(), "unmute apply") {
 		t.Fatalf("elevenlabs dev error = %v", err)
 	}
 }
@@ -232,7 +232,7 @@ func TestRequireInferenceCreds(t *testing.T) {
 
 func TestDevConsoleRefusesManaged(t *testing.T) {
 	dir := copySafeCore(t)
-	_, err := run(t, "dev", dir, "--target", "elevenlabs-prod", "--console")
+	_, err := run(t, "dev", dir, "--target", "elevenlabs", "--console")
 	if err == nil || !strings.Contains(err.Error(), "managed ElevenLabs") || !strings.Contains(err.Error(), "unmute apply") {
 		t.Fatalf("elevenlabs console error = %v", err)
 	}
@@ -244,12 +244,12 @@ func TestDevConsoleRefusesManaged(t *testing.T) {
 // implemented"), even with --port passed, proving the route and the inertness.
 func TestDevConsoleRoutesRegardlessOfWebFlags(t *testing.T) {
 	dir := copySafeCore(t)
-	_, err := run(t, "dev", dir, "--target", "vapi-prod", "--console", "--port", "1", "--no-open")
+	_, err := run(t, "dev", dir, "--target", "vapi", "--console", "--port", "1", "--no-open")
 	if err == nil || !strings.Contains(err.Error(), "console mode is not implemented") {
 		t.Fatalf("vapi console route error = %v", err)
 	}
 	// The web path for the same target uses the other wording.
-	_, err = run(t, "dev", dir, "--target", "vapi-prod")
+	_, err = run(t, "dev", dir, "--target", "vapi")
 	if err == nil || !strings.Contains(err.Error(), "its dev runner is not implemented") {
 		t.Fatalf("vapi web route error = %v", err)
 	}
@@ -268,8 +268,8 @@ func TestDevConsoleLiveKitInferenceRequiresCreds(t *testing.T) {
 	if _, err := scaffold.Write(dir, data); err != nil {
 		t.Fatal(err)
 	}
-	tgtPath := filepath.Join(dir, "targets.yaml")
-	raw, err := os.ReadFile(tgtPath)
+	agentPath := filepath.Join(dir, "agent.yaml")
+	raw, err := os.ReadFile(agentPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,11 +277,11 @@ func TestDevConsoleLiveKitInferenceRequiresCreds(t *testing.T) {
 	if flipped == string(raw) {
 		t.Fatal("expected an openai reason binding to flip to livekit inference")
 	}
-	if err := os.WriteFile(tgtPath, []byte(flipped), 0o644); err != nil {
+	if err := os.WriteFile(agentPath, []byte(flipped), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = run(t, "dev", dir, "--target", "livekit-dev", "--console")
+	_, err = run(t, "dev", dir, "--target", "livekit", "--console")
 	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_API_KEY") || !strings.Contains(err.Error(), "Inference") {
 		t.Fatalf("console inference preflight error = %v", err)
 	}

@@ -5,24 +5,30 @@ version: 1
 language: [[ yaml .Language ]]
 entry_agent: [[.EntryAgent]]
 
-pipeline:
-  listen: { placement: api }
-  turn:   { placement: local }
-  speak:  { placement: api }
-
+# Every model is defined here once, concretely (N15). A model's kind follows
+# from where it is referenced: an agent's `model:` names a think model, its
+# `voice:` a speak model. targets.yaml carries only per-target listen/turn
+# plumbing and any overrides.
 models:
 [[range .AllAgents]]  [[.ModelProfile]]:
     description: [[.ModelDescription]]
-    placement: api
-[[$fallbacks := $.FallbacksFor .ModelProfile]][[if $fallbacks]]    fallback:
+[[if .Reason.Provider]]    provider: [[.Reason.Provider]]
+[[end]][[if .Reason.Model]]    model: [[quote .Reason.Model]]
+[[end]][[if .Reason.Params]]    params: [[.Reason.Params]]
+[[end]][[$fallbacks := $.FallbacksFor .ModelProfile]][[if $fallbacks]]    fallback:
 [[range $fallbacks]]      - [[.]]
-[[end]][[end]][[end]][[range .Fallbacks]]  [[.Name]]:
+[[end]][[end]]  [[.VoiceProfile]]:
+    description: [[.VoiceDescription]]
+[[if .Speak.Provider]]    provider: [[.Speak.Provider]]
+[[end]][[if .Speak.Model]]    model: [[quote .Speak.Model]]
+[[end]]    voice: [[quote .Speak.Voice]]
+[[if .Speak.Params]]    params: [[.Speak.Params]]
+[[end]][[end]][[range .Fallbacks]]  [[.Name]]:
     description: fallback reasoning model
-    placement: api
-[[end]]
-voices:
-[[range .AllAgents]]  [[.VoiceProfile]]: { description: [[.VoiceDescription]] }
-[[end]]
+[[if .Binding.Provider]]    provider: [[.Binding.Provider]]
+[[end]][[if .Binding.Model]]    model: [[quote .Binding.Model]]
+[[end]][[if .Binding.Params]]    params: [[.Binding.Params]]
+[[end]][[end]]
 [[if .Variables]]variables:
 [[range .Variables]]  [[.Name]]:
     type: [[.Type]]

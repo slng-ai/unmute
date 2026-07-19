@@ -284,21 +284,22 @@ func convertModelDef(raw packagespec.ModelDef, kind ModelKind, fallback []string
 	}
 }
 
-// derivePlacement: explicit wins, else provider local means local, else api for a
-// hosted provider. A settings-only entry (no provider) has no placement, so an
-// integrated-role binding stays identity-free (N15).
+// derivePlacement: explicit wins, else provider local means local. A hosted
+// entry is api even when the provider is left implicit (a managed model named by
+// id alone, like an ElevenLabs supported-list LLM). Only a pure settings-only
+// entry (no provider, no model, no voice) has no placement, so an integrated
+// listen binding stays identity-free (N15).
 func derivePlacement(raw packagespec.ModelDef) Placement {
 	if raw.Placement != "" {
 		return Placement(raw.Placement)
 	}
-	switch raw.Provider {
-	case "":
-		return ""
-	case "local":
+	if raw.Provider == "local" {
 		return PlacementLocal
-	default:
-		return PlacementAPI
 	}
+	if raw.Provider == "" && raw.Model == "" && raw.Voice == "" {
+		return ""
+	}
+	return PlacementAPI
 }
 
 func flattenFallback(pkg *packagespec.Package, name string, stack []string, memo map[string][]string) ([]string, error) {

@@ -28,21 +28,21 @@ func (p *Package) Location(file, token string) string {
 }
 
 type AgentFile struct {
-	Version      int                 `json:"version" yaml:"version"`
-	Language     string              `json:"language,omitempty" yaml:"language,omitempty"`
-	EntryAgent   string              `json:"entry_agent" yaml:"entry_agent"`
-	Models       map[string]ModelDef `json:"models" yaml:"models"`
-	Listen       *ModelDef           `json:"listen,omitempty" yaml:"listen,omitempty"`
-	Turn         *ModelDef           `json:"turn,omitempty" yaml:"turn,omitempty"`
-	Variables    map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
-	Agents       map[string]AgentDef `json:"agents" yaml:"agents"`
-	Tasks        map[string]Task     `json:"tasks,omitempty" yaml:"tasks,omitempty"`
+	Version      int                  `json:"version" yaml:"version"`
+	Language     string               `json:"language,omitempty" yaml:"language,omitempty"`
+	EntryAgent   string               `json:"entry_agent" yaml:"entry_agent"`
+	Models       map[string]ModelDef  `json:"models" yaml:"models"`
+	Listen       *ModelDef            `json:"listen,omitempty" yaml:"listen,omitempty"`
+	Turn         *ModelDef            `json:"turn,omitempty" yaml:"turn,omitempty"`
+	Variables    map[string]Variable  `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Agents       map[string]AgentDef  `json:"agents" yaml:"agents"`
+	Tasks        map[string]Task      `json:"tasks,omitempty" yaml:"tasks,omitempty"`
 	TaskGroups   map[string]TaskGroup `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
-	Controls     map[string]Control  `json:"controls,omitempty" yaml:"controls,omitempty"`
-	Tools        []string            `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Conversation *Conversation       `json:"conversation,omitempty" yaml:"conversation,omitempty"`
-	Channels     map[string]Channel  `json:"channels" yaml:"channels"`
-	Capacity     *Capacity           `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	Controls     map[string]Control   `json:"controls,omitempty" yaml:"controls,omitempty"`
+	Tools        []string             `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Conversation *Conversation        `json:"conversation,omitempty" yaml:"conversation,omitempty"`
+	Channels     map[string]Channel   `json:"channels" yaml:"channels"`
+	Capacity     *Capacity            `json:"capacity,omitempty" yaml:"capacity,omitempty"`
 }
 
 // ModelDef is the unified model definition (N15): one shape for the models map,

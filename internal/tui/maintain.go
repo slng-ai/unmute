@@ -137,8 +137,8 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		Edition:       tgt.Edition,
 	}
 	data.Pins = jsonText(tgt.Pins)
-	if tgt.Models.Listen != nil {
-		data.Listen = scaffoldBinding(*tgt.Models.Listen)
+	if def, ok := effectiveModelDef(pkg, tgt, "listen"); ok {
+		data.Listen = scaffoldBinding(def)
 	}
 
 	agentNames := slices.Sorted(maps.Keys(pkg.Agent.Agents))
@@ -159,8 +159,12 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	for _, name := range agentNames {
 		definition := pkg.Agent.Agents[name]
 		agent := scaffold.Agent{Name: name, Instructions: pkg.Markdown[definition.Instructions]}
-		agent.Reason = scaffoldBinding(tgt.Models.Reason[definition.Model])
-		agent.Speak = scaffoldBinding(tgt.Models.Speak[definition.Voice])
+		if def, ok := effectiveModelDef(pkg, tgt, definition.Model); ok {
+			agent.Reason = scaffoldBinding(def)
+		}
+		if def, ok := effectiveModelDef(pkg, tgt, definition.Voice); ok {
+			agent.Speak = scaffoldBinding(def)
+		}
 		if name == "assistant" {
 			data.Instructions, data.Reason, data.Speak = agent.Instructions, agent.Reason, agent.Speak
 			continue
@@ -260,7 +264,8 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 
 	for profile, model := range pkg.Agent.Models {
 		for _, fallback := range model.Fallback {
-			data.Fallbacks = append(data.Fallbacks, scaffold.ModelFallback{Name: fallback, Profile: profile, Binding: scaffoldBinding(tgt.Models.Reason[fallback])})
+			def, _ := effectiveModelDef(pkg, tgt, fallback)
+			data.Fallbacks = append(data.Fallbacks, scaffold.ModelFallback{Name: fallback, Profile: profile, Binding: scaffoldBinding(def)})
 		}
 	}
 	sort.Slice(data.Fallbacks, func(i, j int) bool { return data.Fallbacks[i].Name < data.Fallbacks[j].Name })
@@ -291,12 +296,58 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	return data, nil
 }
 
-func scaffoldBinding(binding packagespec.Binding) scaffold.Binding {
-	voice := binding.Voice
-	if voice == "" {
-		voice = binding.VoiceID
+// effectiveModelDef resolves a model name to its per-target definition (N15): a
+// target override wins, else the agent.yaml definition. "listen"/"turn" resolve
+// against the target override map or the top-level agent blocks.
+func effectiveModelDef(pkg *packagespec.Package, tgt packagespec.Target, name string) (packagespec.ModelDef, bool) {
+	if def, ok := tgt.Models[name]; ok {
+		return def, true
 	}
-	return scaffold.Binding{Provider: binding.Provider, Model: binding.Model, Voice: voice, Params: jsonText(binding.Params)}
+	switch name {
+	case "listen":
+		if pkg.Agent.Listen != nil {
+			return *pkg.Agent.Listen, true
+		}
+	case "turn":
+		if pkg.Agent.Turn != nil {
+			return *pkg.Agent.Turn, true
+		}
+	default:
+		if def, ok := pkg.Agent.Models[name]; ok {
+			return def, true
+		}
+	}
+	return packagespec.ModelDef{}, false
+}
+
+func scaffoldBinding(def packagespec.ModelDef) scaffold.Binding {
+	// Carry the typed generation fields through the maintain round-trip as
+	// params, so re-saving a package never silently drops temperature et al.
+	params := def.Params
+	if def.Temperature != nil || def.TopP != nil || def.TopK != nil || def.Speed != nil {
+		params = maps.Clone(params)
+		if params == nil {
+			params = map[string]any{}
+		}
+		setIfAbsent := func(key string, value any) {
+			if _, ok := params[key]; !ok {
+				params[key] = value
+			}
+		}
+		if def.Temperature != nil {
+			setIfAbsent("temperature", *def.Temperature)
+		}
+		if def.TopP != nil {
+			setIfAbsent("top_p", *def.TopP)
+		}
+		if def.TopK != nil {
+			setIfAbsent("top_k", *def.TopK)
+		}
+		if def.Speed != nil {
+			setIfAbsent("speed", *def.Speed)
+		}
+	}
+	return scaffold.Binding{Provider: def.Provider, Model: def.Model, Voice: def.Voice, Params: jsonText(params)}
 }
 
 func jsonText(value any) string {

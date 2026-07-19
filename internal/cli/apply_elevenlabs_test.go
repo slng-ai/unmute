@@ -59,7 +59,7 @@ func TestApplyElevenLabsPushesToolThenAgentPlan(t *testing.T) {
 	t.Setenv("GET_INVOICE_URL", "https://hooks.example/invoice")
 
 	safe := filepath.Join("..", "..", "examples", "safe_core")
-	out, err := run(t, "apply", safe, "--target", "elevenlabs-prod")
+	out, err := run(t, "apply", safe, "--target", "elevenlabs")
 	if err != nil {
 		t.Fatalf("apply: %v\n%s", err, out)
 	}
@@ -82,21 +82,21 @@ func TestApplyElevenLabsPushesToolThenAgentPlan(t *testing.T) {
 	}
 
 	// billing is created before intake (its captured id is referenced there).
-	if len(agentOrder) != 2 || agentOrder[0] != "elevenlabs-prod-billing" || agentOrder[1] != "elevenlabs-prod-intake" {
+	if len(agentOrder) != 2 || agentOrder[0] != "elevenlabs-billing" || agentOrder[1] != "elevenlabs-intake" {
 		t.Fatalf("agent create order = %v, want billing then intake", agentOrder)
 	}
 
 	// intake's transfer_to_agent carries billing's captured agent id, not a placeholder.
-	rule := transferRule(t, agentBodies["elevenlabs-prod-intake"], "transfer_to_agent")
-	if got := rule["agent_id"]; got != "agentid_elevenlabs-prod-billing" {
+	rule := transferRule(t, agentBodies["elevenlabs-intake"], "transfer_to_agent")
+	if got := rule["agent_id"]; got != "agentid_elevenlabs-billing" {
 		t.Fatalf("transfer_to_agent agent_id = %v, want captured billing id", got)
 	}
 
 	// prompt.tool_ids reference the captured workspace tool ids, not tool names.
-	if ids := toolIDs(t, agentBodies["elevenlabs-prod-billing"]); len(ids) != 1 || ids[0] != "toolid_get_invoice" {
+	if ids := toolIDs(t, agentBodies["elevenlabs-billing"]); len(ids) != 1 || ids[0] != "toolid_get_invoice" {
 		t.Fatalf("billing tool_ids = %v, want [toolid_get_invoice]", ids)
 	}
-	if ids := toolIDs(t, agentBodies["elevenlabs-prod-intake"]); len(ids) != 1 || ids[0] != "toolid_lookup_customer" {
+	if ids := toolIDs(t, agentBodies["elevenlabs-intake"]); len(ids) != 1 || ids[0] != "toolid_lookup_customer" {
 		t.Fatalf("intake tool_ids = %v, want [toolid_lookup_customer]", ids)
 	}
 }
