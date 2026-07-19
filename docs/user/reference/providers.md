@@ -1,19 +1,29 @@
 # Reference: providers
 
-Which STT, TTS, and LLM providers each target accepts, what to write in [targets.yaml](targets-yaml.md), and what the compiler emits for each choice. The tables below are generated knowledge from the provider catalogue (`internal/target/catalog_*.go`), the single source both validation and code generation read, so what validates green here is exactly what compiles.
+This page lists the STT, TTS, and LLM providers each target accepts, what to
+write in [`agent.yaml`](agent-yaml.md), and what the compiler emits. The tables
+come from the provider catalogue (`internal/target/catalog_*.go`), which both
+validation and generation use.
 
 Two rules frame everything:
 
 1. **The provider picks the code slot; the model stays yours.** `provider:` decides which integration is emitted (import, dependency, constructor, key env). `model:`, `voice:`, and `params:` are forwarded to that integration verbatim and never validated (SCHEMA.md D10). A typo in a provider name fails at `validate`; a typo in a model name fails at the provider, with its error relayed.
-2. **Unknown providers fail closed, with the matrix quoted.** For example: `livekit listen binding provider "acme" has no slot; listen providers on livekit: assemblyai, cartesia, deepgram, ...`. On Pipecat, an unknown provider is allowed in exactly one case: as a genuinely OpenAI-compatible custom endpoint (see below).
+2. **Unknown providers fail closed, with the matrix quoted.** On Pipecat, an
+   unknown provider is allowed only as an OpenAI-compatible custom endpoint
+   with `endpoint_env`.
 
-Swapping providers is a one-line change per binding. Rebinding LiveKit speak from SLNG to ElevenLabs swaps one constructor, one import, one dependency, and one env var in the emitted project; nothing else moves.
+Changing a model's `provider` is a one-line edit. For example, changing a
+LiveKit speak model from SLNG to ElevenLabs swaps one constructor, one import,
+one dependency, and one environment variable in the emitted project.
 
 ## Pipecat
 
-All four roles are open. Official Pipecat services install as extras on the `pipecat-ai` pin and take model/voice/params nested in `Class.Settings(...)` (the current Pipecat API; flat forms are deprecated upstream). The SLNG plugin is its own package with flat kwargs.
+All four model kinds are open. Official Pipecat services install as extras on
+the `pipecat-ai` pin and take model, voice, and params nested in
+`Class.Settings(...)`. The SLNG plugin is a separate package with flat keyword
+arguments.
 
-| Role | `provider:` | Binding fields | Key env | Installed as |
+| Kind | `provider:` | Model fields | Key env | Installed as |
 |---|---|---|---|---|
 | listen | `assemblyai` | `model` | `ASSEMBLYAI_API_KEY` | `pipecat-ai[assemblyai]` |
 | listen | `cartesia` | `model` | `CARTESIA_API_KEY` | `pipecat-ai[cartesia]` |
@@ -34,21 +44,22 @@ All four roles are open. Official Pipecat services install as extras on the `pip
 | speak | `sarvam` | `voice`, optional `model` | `SARVAM_API_KEY` | `pipecat-ai[sarvam]` |
 | speak | `slng` | `model` (route), `voice` | `SLNG_API_KEY` | `pipecat-slng>=0.4.0` |
 | speak | `soniox` | `voice`, optional `model` | `SONIOX_API_KEY` | `pipecat-ai[soniox]` |
-| reason | `anthropic` | `model` | `ANTHROPIC_API_KEY` | `pipecat-ai[anthropic]` |
-| reason | `deepseek` | `model`, optional `endpoint_env` | `DEEPSEEK_API_KEY` | `pipecat-ai[deepseek]` |
-| reason | `google` | `model` (Gemini via GenAI) | `GOOGLE_API_KEY` | `pipecat-ai[google]` |
-| reason | `groq` | `model`, optional `endpoint_env` | `GROQ_API_KEY` | `pipecat-ai[groq]` |
-| reason | `mistral` | `model`, optional `endpoint_env` | `MISTRAL_API_KEY` | `pipecat-ai[mistral]` |
-| reason | `openai` (default when omitted) | `model`, optional `endpoint_env` | `OPENAI_API_KEY` | `pipecat-ai[openai]` |
-| reason | `openrouter` | `model`, optional `endpoint_env` | `OPENROUTER_API_KEY` | `pipecat-ai[openrouter]` |
-| reason | `qwen` | `model`, optional `endpoint_env` | `QWEN_API_KEY` | `pipecat-ai[qwen]` |
+| think | `anthropic` | `model` | `ANTHROPIC_API_KEY` | `pipecat-ai[anthropic]` |
+| think | `deepseek` | `model`, optional `endpoint_env` | `DEEPSEEK_API_KEY` | `pipecat-ai[deepseek]` |
+| think | `google` | `model` (Gemini via GenAI) | `GOOGLE_API_KEY` | `pipecat-ai[google]` |
+| think | `groq` | `model`, optional `endpoint_env` | `GROQ_API_KEY` | `pipecat-ai[groq]` |
+| think | `mistral` | `model`, optional `endpoint_env` | `MISTRAL_API_KEY` | `pipecat-ai[mistral]` |
+| think | `openai` (default when omitted) | `model`, optional `endpoint_env` | `OPENAI_API_KEY` | `pipecat-ai[openai]` |
+| think | `openrouter` | `model`, optional `endpoint_env` | `OPENROUTER_API_KEY` | `pipecat-ai[openrouter]` |
+| think | `qwen` | `model`, optional `endpoint_env` | `QWEN_API_KEY` | `pipecat-ai[qwen]` |
 | any of the three | *any other name* + `endpoint_env` | OpenAI-compatible custom endpoint | `<NAME>_API_KEY` | `pipecat-ai[openai]` |
 
-Example bindings and what they emit:
+This example defines listen and speak models and shows the emitted services:
 
 ```yaml
 models:
-  listen: { provider: deepgram, model: nova-3 }
+  listen:
+    transcriber: { provider: deepgram, model: nova-3 }
   speak:
     front_desk: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
 ```
@@ -68,15 +79,24 @@ SlngTTSService(
 )
 ```
 
-**Custom OpenAI-compatible endpoints.** Any provider name outside the table is legal only with `endpoint_env`, and lowers to the OpenAI service with a `base_url` override. The key env follows the name: `provider: fireworks, endpoint_env: FIREWORKS_URL` reads `FIREWORKS_API_KEY`. This is also the documented path for SLNG as a `reason` model. Without `endpoint_env`, the unknown name is an error, never a silent substitution.
+**Custom OpenAI-compatible endpoints.** Any provider name outside the table is
+legal only with `endpoint_env`, and lowers to the OpenAI service with a
+`base_url` override. The key environment variable follows the name:
+`provider: fireworks, endpoint_env: FIREWORKS_URL` reads
+`FIREWORKS_API_KEY`. This is also the path for SLNG as a think model. Without
+`endpoint_env`, the unknown name is an error.
 
-**SLNG notes.** The model keeps its full `slng/<vendor>/<model>` route on Pipecat. `endpoint_env` has no slot on SLNG bindings (routing is by api key and region params) and is rejected rather than ignored.
+**SLNG notes.** The model keeps its full `slng/<vendor>/<model>` route on
+Pipecat. `endpoint_env` has no SLNG slot because routing uses the API key and
+region parameters, so validation rejects it.
 
 ## LiveKit
 
-`listen` and `speak` resolve to plugins; `reason` resolves to a native per-vendor LLM plugin where one exists, and to LiveKit Inference for everything else. SLNG is what `unmute init` scaffolds, not a constraint.
+Listen and speak models resolve to plugins. Think models resolve to native
+vendor plugins where available and to LiveKit Inference otherwise. SLNG is the
+`unmute init` default, not a constraint.
 
-| Role | `provider:` | Binding fields | Key env | Installed as |
+| Kind | `provider:` | Model fields | Key env | Installed as |
 |---|---|---|---|---|
 | listen | `assemblyai` | `model` | `ASSEMBLYAI_API_KEY` | `livekit-agents[assemblyai]` |
 | listen | `cartesia` | `model` | `CARTESIA_API_KEY` | `livekit-agents[cartesia]` |
@@ -97,45 +117,55 @@ SlngTTSService(
 | speak | `sarvam` | `voice` (emitted as `speaker`), optional `model` | `SARVAM_API_KEY` | `livekit-agents[sarvam]` |
 | speak | `slng` | `model` (route), `voice` | `SLNG_API_KEY` | `livekit-plugins-slng>=1.6.1` |
 | speak | `soniox` | `voice`, optional `model` | `SONIOX_API_KEY` | `livekit-agents[soniox]` |
-| reason | `anthropic` | `model`, optional `endpoint_env` | `ANTHROPIC_API_KEY` | `livekit-agents[anthropic]` |
-| reason | `aws` | `model` (Bedrock; region via params or `AWS_REGION`) | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | `livekit-agents[aws]` |
-| reason | `azure` | `model`, `endpoint_env` (emitted as `azure_endpoint`) | `AZURE_OPENAI_API_KEY` | `livekit-agents[openai]` |
-| reason | `groq` | `model`, optional `endpoint_env` | `GROQ_API_KEY` | `livekit-agents[groq]` |
-| reason | `mistralai` (also `mistral`) | `model` | `MISTRAL_API_KEY` | `livekit-agents[mistralai]` |
-| reason | `openai` | `model`, optional `endpoint_env` | `OPENAI_API_KEY` | `livekit-agents[openai]` |
-| reason | `openrouter` | `model`, optional `endpoint_env` | `OPENROUTER_API_KEY` | `livekit-agents[openai]` |
-| reason | `sarvam` | `model`, optional `endpoint_env` | `SARVAM_API_KEY` | `livekit-agents[sarvam]` |
-| reason | any other (LiveKit Inference) | `model`; emitted as `"<provider>/<model>"` | none (LiveKit Cloud credentials) | ships with `livekit-agents` |
+| think | `anthropic` | `model`, optional `endpoint_env` | `ANTHROPIC_API_KEY` | `livekit-agents[anthropic]` |
+| think | `aws` | `model` (Bedrock; region via params or `AWS_REGION`) | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | `livekit-agents[aws]` |
+| think | `azure` | `model`, `endpoint_env` (emitted as `azure_endpoint`) | `AZURE_OPENAI_API_KEY` | `livekit-agents[openai]` |
+| think | `groq` | `model`, optional `endpoint_env` | `GROQ_API_KEY` | `livekit-agents[groq]` |
+| think | `mistralai` (also `mistral`) | `model` | `MISTRAL_API_KEY` | `livekit-agents[mistralai]` |
+| think | `openai` | `model`, optional `endpoint_env` | `OPENAI_API_KEY` | `livekit-agents[openai]` |
+| think | `openrouter` | `model`, optional `endpoint_env` | `OPENROUTER_API_KEY` | `livekit-agents[openai]` |
+| think | `sarvam` | `model`, optional `endpoint_env` | `SARVAM_API_KEY` | `livekit-agents[sarvam]` |
+| think | any other (LiveKit Inference) | `model`; emitted as `"<provider>/<model>"` | none (LiveKit Cloud credentials) | ships with `livekit-agents` |
 
-Example: the same two roles bound to per-vendor plugins, then to SLNG:
+This example defines LiveKit models backed by vendor plugins:
 
 ```yaml
-listen: { provider: deepgram, model: nova-3 }         # deepgram.STT(model="nova-3")
-speak:
-  front_desk: { provider: elevenlabs, voice: cgSgspJ2msm6clMCkdW9 }
-                                                      # elevenlabs.TTS(voice_id="cgSg...")
-# or the SLNG execution layer (the route passes through verbatim):
-listen: { provider: slng, model: "slng/deepgram/nova:3-en" }   # slng.STT(model="slng/deepgram/nova:3-en")
+models:
+  listen:
+    transcriber: { provider: deepgram, model: nova-3 }
+  speak:
+    front_desk: { provider: elevenlabs, voice: cgSgspJ2msm6clMCkdW9 }
 ```
 
 Watch the env names: the LiveKit ElevenLabs plugin reads `ELEVEN_API_KEY`, not `ELEVENLABS_API_KEY`. The emitted `.env.example` and compile report always list exactly what the project reads.
 
-A reason vendor with a row above binds its native plugin and its own key: `{ provider: openai, model: gpt-4o-mini }` emits `openai.LLM(...)` reading `OPENAI_API_KEY`, so a local `console` run needs no LiveKit Cloud credentials. Vendors without a row route through LiveKit Inference, and `{ provider: livekit, model: "openai/gpt-4o-mini" }` picks Inference deliberately — the model passes verbatim, billed through LiveKit Cloud, `params` ride `extra_kwargs`. There is no custom-endpoint wildcard on LiveKit listen/speak: unknown vendors fail.
+A catalogued think provider uses its native plugin and key. For example,
+`{ provider: openai, model: gpt-4o-mini }` emits `openai.LLM(...)` and reads
+`OPENAI_API_KEY`, so a local console run needs no LiveKit Cloud credentials.
+Uncatalogued think providers use LiveKit Inference. The explicit
+`{ provider: livekit, model: "openai/gpt-4o-mini" }` form also selects
+Inference. LiveKit listen and speak models have no custom-endpoint wildcard.
 
 ## Managed targets
 
 No code is injected; the provider name is forwarded into the platform's own config, and the matrix only guards what each platform can actually run:
 
-- **ElevenLabs**: `speak` accepts ElevenLabs voices only (usually written with no `provider:` at all, just `voice_id:`). `listen` and `turn` are integrated (settings-only bindings). `reason` takes the platform's supported model list or a custom LLM endpoint; names are forwarded, not validated.
-- **Deepgram**: `listen` accepts Deepgram only. `speak` accepts `deepgram`, `elevenlabs`, `cartesia`, `openai`, `aws_polly` (Deepgram's own spellings `eleven_labs` and `open_ai` are accepted too). `reason` is open, custom endpoints allowed.
+- **ElevenLabs**: Speak accepts ElevenLabs voices only, usually with just a
+  `voice` field. Listen and turn are integrated, so their target overrides can
+  contain settings only. Think accepts the platform's model list or a custom
+  LLM endpoint.
+- **Deepgram**: Listen accepts Deepgram only. Speak accepts `deepgram`,
+  `elevenlabs`, `cartesia`, `openai`, and `aws_polly`; the aliases
+  `eleven_labs` and `open_ai` also work. Think is open and accepts custom
+  endpoints.
 - **Vapi**: unrestricted at this layer; Vapi's API is the validator.
 
 ## Errors you will see
 
-```
-pipecat reason binding provider "slng" has no slot; reason providers on pipecat: openai;
-  an unlisted provider needs endpoint_env (an OpenAI-compatible endpoint) ("slng" provides listen, speak on pipecat)
+Provider errors name the selected target and model kind, then list the accepted
+providers or the unsupported field:
 
+```
 livekit listen binding provider "acme" has no slot; listen providers on livekit: assemblyai, cartesia, deepgram, elevenlabs, gradium, sarvam, slng, soniox, speechmatics
 
 pipecat speak binding provider "slng": endpoint_env has no slot here; drop it or use an OpenAI-compatible provider

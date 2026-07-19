@@ -3,8 +3,8 @@
 Unmute is SLNG's portability layer for voice agents: author the agent once as
 a directory of declarative YAML, then compile or apply it to the orchestration
 layer you choose. `unmute init` scaffolds an SLNG-bound project (one
-`SLNG_API_KEY` covers hosted STT and TTS) unless you rebind; any provider a
-framework integrates is a one-line binding change
+`SLNG_API_KEY` covers hosted STT and TTS) unless you change a model; any
+provider a framework integrates is a one-line model change
 (docs/user/reference/providers.md).
 
 Commands: `init`, `validate`, `compile`, `apply`, `dev`
@@ -67,10 +67,13 @@ bin/unmute init demo-agent          # SLNG-bound v1 package: agent.yaml,
 bin/unmute validate demo-agent      # schema + capability + provider-matrix checks
 bin/unmute compile demo-agent       # writes build/pipecat/ (bot.py, pyproject, ...)
 bin/unmute dev demo-agent           # runs it with uv and opens a web client
+bin/unmute dev demo-agent --console # talks through your terminal mic/speaker
 ```
 
 `dev` needs `uv` on your PATH and keys in a `.env` at the package root; the
-scaffold's `.env.example` lists exactly what the project reads.
+scaffold's `.env.example` lists exactly what the project reads. LiveKit web
+mode also needs a LiveKit server; with no configured server, `unmute dev`
+reuses or starts a local `livekit-server --dev` process.
 
 The tracked examples exercise more of the schema:
 
@@ -89,7 +92,11 @@ no live call).
 
 ## Not implemented yet
 
-- Vapi and Deepgram drivers (specs exist in docs/spec/; both fail loud today).
+Validation covers all five targets. These drivers still lack an executable
+generation or apply path:
+
+- Vapi and Deepgram drivers (specs exist in `docs/spec/`; generation fails
+  clearly today).
 - Per-driver maturity gates are listed on each target page in
   [docs/user/targets/](docs/user/targets/) and fail loud rather than silently
   dropping behavior.

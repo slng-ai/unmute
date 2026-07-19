@@ -26,7 +26,9 @@ Rules that hold across the whole package:
 - Secrets never appear in any file. `targets.yaml` carries environment variable names and secret references only, never values.
 - Remote ids, regions, editions, SDK language, version pins, and carriers live in `targets.yaml`. Model definitions live in `agent.yaml`; a target only overrides one it cannot run.
 - Machine sizes, replica counts, and GPU counts appear in neither file. They are derived, not stored.
-- All names (agents, tasks, groups, tools, controls, models, voices, variables, destinations) are lowercase `snake_case`. A name starting with an underscore is reserved by providers and rejected.
+- All names (agents, tasks, groups, tools, controls, models, variables, and
+  destinations) are lowercase `snake_case`. A name starting with an underscore
+  is reserved by providers and rejected.
 - Durations use Go syntax: `90s`, `15m`, `1h30m`.
 
 ## Top-level fields
@@ -57,7 +59,10 @@ Required: yes. Values: the integer `1`. Default: none. Targets: all five, core.
 
 ### language
 
-The primary spoken language for STT and TTS. Pipecat and LiveKit lower it through the selected catalogue integrations; ElevenLabs uses its unified agent language. A target-specific `params.language` overrides it for that one binding.
+The primary spoken language for STT and TTS. Pipecat and LiveKit lower it
+through the selected catalogue integrations; ElevenLabs uses its unified agent
+language. A model's `language` or `params.language` overrides it for that
+model.
 
 Required: no. Values: a BCP-47 tag. Default: `en`. Targets: shipped generators; Vapi and Deepgram stay unavailable until their generators ship.
 

@@ -1,6 +1,8 @@
 # Pipecat
 
-Pipecat is the target these docs build toward, and the most complete one today. This page shows what kind of target it is, what your spec turns into, how to bind models to it, exactly which features it emits, and how to run and deploy the result.
+Pipecat is the target these docs build toward, and the most complete one today.
+This page shows what kind of target it is, how it maps your models, which
+features it emits, and how to run and deploy the result.
 
 ## What kind of target
 
@@ -12,7 +14,7 @@ What it means for you:
 
 - You get a folder of code you can read, run, and deploy without Unmute present.
 - You host it yourself (locally with `unmute dev`, or on your own infrastructure or Pipecat Cloud).
-- You need the keys for whichever providers your bindings use.
+- You need the keys for the providers your selected models use.
 - Because you host it, `capacity` in `agent.yaml` is required: Unmute uses it to size the deployment.
 
 ## The agency model: workers
@@ -42,11 +44,19 @@ So a two-agent, one-task spec becomes a main worker plus two agent workers, wire
 
 The output folder is rewritten from scratch on every compile, so never edit it by hand. `bot.py` carries only the imports and code your spec actually exercises: no tools means no HTTP client import, no tasks means no task machinery. The emitted pipeline stays clean.
 
-The `compile-report.json` is worth reading after a compile. It lists every required environment variable and every binding that was forwarded, so you can always see what was sent to the platform, which matters because bindings are [never validated](../concepts/profiles-and-bindings.md).
+The `compile-report.json` is worth reading after a compile. It lists every
+required environment variable and every forwarded model, so you can see what
+was sent to the platform. Provider model IDs and parameters are
+[forwarded without validation](../concepts/profiles-and-bindings.md).
 
 ## Models on Pipecat
 
-All four roles are **open** on Pipecat: you choose the listen model, the voice, and the think model freely, and the turn role runs on your machine. Every model is defined in `agent.yaml`'s kind sections; the Pipecat target carries infrastructure and any by-name overrides. The accepted `provider:` values per role, their key envs, and what each choice installs and emits are in the [providers reference](../reference/providers.md).
+All four model kinds are **open** on Pipecat: you choose listen, speak, and
+think models freely, and turn runs on your machine. Every model is defined in
+`agent.yaml`'s kind sections; the Pipecat target carries infrastructure and
+optional by-name overrides. The accepted providers, required keys, installed
+packages, and emitted services are in the
+[providers reference](../reference/providers.md#pipecat).
 
 ```yaml
 # agent.yaml — models defined once, by kind
@@ -70,28 +80,24 @@ targets:
     transport: daily-sip
 ```
 
-### Which provider maps to which service
+### Map providers to services
 
-The `provider` on each model selects the Pipecat service class. Unmute knows these:
+The `provider` on each model selects a Pipecat service. Listen and speak support
+the catalogued vendors for those kinds. Think models have native entries for
+OpenAI, Anthropic, DeepSeek, Google, Groq, Mistral, OpenRouter, and Qwen. An
+unlisted provider is legal only with `endpoint_env`, which selects the
+OpenAI-compatible service and passes that environment variable as `base_url`.
 
-| Role | `provider` | Service used | Key needed |
-|---|---|---|---|
-| listen | `deepgram` | Deepgram STT | `DEEPGRAM_API_KEY` |
-| listen | `slng` | SLNG STT (via the `pipecat-slng` package) | `SLNG_API_KEY` |
-| listen | `openai` or other | OpenAI-compatible STT | `OPENAI_API_KEY` |
-| reason | any | OpenAI-compatible LLM | `<PROVIDER>_API_KEY` |
-| speak | `elevenlabs` | ElevenLabs TTS | `ELEVENLABS_API_KEY` |
-| speak | `cartesia` | Cartesia TTS | `CARTESIA_API_KEY` |
-| speak | `slng` | SLNG TTS (via `pipecat-slng`) | `SLNG_API_KEY` |
-| speak | `openai` or other | OpenAI-compatible TTS | `OPENAI_API_KEY` |
-
-The API key variable is the provider name uppercased with `_API_KEY`, so `openai` needs `OPENAI_API_KEY`. Unmute lists the exact set in `.env.example` and in the compile report; you never guess.
-
-The reasoning role always uses an OpenAI-compatible client. To point it at a non-OpenAI, OpenAI-compatible endpoint, your binding supplies an endpoint environment variable and Unmute passes it as `base_url`. (SLNG routes by key and region, not a `base_url`.)
+See the [providers reference](../reference/providers.md#pipecat) for the full
+matrix, installed extras, and environment variable names. The generated
+`.env.example` and compile report list the exact keys your package needs.
 
 ### The turn role and Silero
 
-The turn model is `{ provider: local, model: silero }`. End-of-turn detection runs on-device with a Silero voice-activity detector: no key, no network hop. The turn binding is **advisory** on Pipecat: it tells Unmute your intent, but the actual detection is the local VAD. Semantic-endpointing preferences are advisory too.
+The turn model is `{ provider: local, model: silero }`. End-of-turn detection
+runs on-device with a Silero voice-activity detector: no key and no network
+hop. The selected turn model is **advisory** on Pipecat; the generated runtime
+uses the local VAD. Semantic endpointing is also advisory.
 
 ### Transport
 
@@ -104,7 +110,10 @@ The turn model is `{ provider: local, model: silero }`. End-of-turn detection ru
 
 ### The SLNG plugin
 
-`provider: slng` bindings use `pipecat-slng`, a small package that routes speech-to-text and voice through SLNG's hosted models with one `SLNG_API_KEY`. When your spec uses it, Unmute adds it to `pyproject.toml` automatically. Model ids look like `slng/deepgram/nova:3-en`.
+Models with `provider: slng` use `pipecat-slng`, which routes speech-to-text
+and voice through SLNG's hosted models with one `SLNG_API_KEY`. Unmute adds it
+to `pyproject.toml` automatically. Model IDs look like
+`slng/deepgram/nova:3-en`.
 
 ## Feature support on Pipecat
 
@@ -140,7 +149,8 @@ Some features are in the schema and Pipecat itself supports them, but this first
 - **Per-task `model:`.** Pipecat's mechanism for switching models mid-call stalls the conversation in the current release, so there is nothing safe to emit yet. Drop the override and the task runs on the delegating agent's model.
 - **`thinking_audio`.**
 - **Outbound calls and voicemail** (`outbound: true`, `on_voicemail`).
-- **`local` Python-handler tools and `mcp` tools.** Use `webhook` tools, which are emitted.
+- **`mcp` tools.** Use `webhook` or `local` Python-handler tools, which are
+  emitted.
 - **Warm human transfer.** Pipecat ships warm transfer, but the driver emits `cold` only.
 - **Handoff and task context shaping beyond the defaults:** any `history` other than `full`, a subset `context.variables` list rather than `all`, and `include_tool_calls: false`. The handoff carries the running context; finer shaping is not written yet.
 
@@ -178,7 +188,13 @@ unmute dev acme             # talk in the browser
 unmute dev acme --console   # talk in the terminal, over your mic and speaker
 ```
 
-The default compiles the first Pipecat target, runs `bot.py` with `uv`, and opens a browser client so you can talk to the agent. `--console` instead runs `uv run --extra console bot.py console`, which talks over your local mic and speaker with no browser — the `console` extra pulls in pyaudio, so on macOS run `brew install portaudio` first. Both read your keys from a `.env` at the package root. Web logs go to `build/<target>/bot.log` (add `--verbose` to stream them); console streams to your terminal.
+The command selects the only target automatically; with multiple targets, it
+prompts in a terminal or requires `--target <name>` in a noninteractive shell.
+Browser mode runs `bot.py` with uv and opens the web client. `--console` runs
+`uv run --extra console bot.py console` over your local microphone and speaker.
+On macOS, install PortAudio first with `brew install portaudio`. Both modes read
+keys from `.env`. Browser logs go to `build/<target>/bot.log`; add `--verbose`
+to stream them. Console mode streams directly to the terminal.
 
 **Compile only, to inspect or deploy the project:**
 
@@ -198,6 +214,7 @@ For hosting, the project ships a `Dockerfile` and a `pcc-deploy.toml` for Pipeca
 ## Where to go next
 
 - Build the agent step by step: the [learn pages](../learn/01-one-agent.md), 01 through 06.
-- Understand the binding split: [profiles and bindings](../concepts/profiles-and-bindings.md).
+- Understand the model split:
+  [models and overrides](../concepts/profiles-and-bindings.md).
 - Understand why features are gated: [tags and gating](../concepts/tags-and-gating.md).
 - The exact per-target contract for every field: `SCHEMA.md` in the repository.

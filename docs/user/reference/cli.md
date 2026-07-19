@@ -1,6 +1,11 @@
 # Reference: the CLI
 
-`unmute` has five commands: `init`, `validate`, `compile`, `apply`, and `dev`. All of them except `init` read a v1 package (see [agent.yaml](agent-yaml.md)). Three drivers are shipped: **Pipecat** and **LiveKit** (code targets, `compile` writes a runnable project) and **ElevenLabs** (managed target, `apply` reconciles the provider's config). Vapi and Deepgram report `driver is not implemented` until theirs land.
+`unmute` has five commands: `init`, `validate`, `compile`, `apply`, and `dev`.
+All except `init` read a v1 package; see [agent.yaml](agent-yaml.md). Three
+drivers are shipped: **Pipecat** and **LiveKit** are code targets, and
+**ElevenLabs** is a managed target. Validation works for all five providers.
+Generation, apply, or development commands report `driver is not implemented`
+for Vapi and Deepgram until their drivers land.
 
 **Exit codes:** `0` on success, `1` on error. Warnings go to standard error and still exit `0`; they never silently downgrade a result.
 
@@ -13,13 +18,26 @@ unmute init [name]
 Scaffolds a new v1 package. The noninteractive default is exactly `agent.yaml`, `instructions.md`, `targets.yaml`, and `.env.example`, with a ready-to-run `pipecat` target. Extra agents, tasks, and tools add their prompt or manifest files. Prints a `created <path>` line for each file.
 
 - With a `name`, writes the package to that directory.
-- With no argument on an interactive terminal, opens the creation wizard. Start with target, language, STT/LLM/TTS bindings, prompt, and greeting; optionally add variables, tools, agents, directional handoffs, typed tasks, ordered task groups, web/phone channels, and human transfers. Saved items remain visible in their section and open into one edit screen with a delete action; deleting also removes or resets dependent references. The required starter agent and default models offer **Reset** instead. Every reference picker lists the compatible items already created. Advanced conversation, fallback, capacity, and target settings stay under **Customize**.
+- With no argument on an interactive terminal, opens the creation wizard. Start
+  with target, language, STT/LLM/TTS models, prompt, and greeting; optionally
+  add variables, tools, agents, directional handoffs, typed tasks, ordered task
+  groups, web/phone channels, and human transfers. Saved items remain visible
+  in their section and open into one edit screen with a delete action; deleting
+  also removes or resets dependent references. The required starter agent and
+  default models offer **Reset** instead. Every reference picker lists the
+  compatible items already created. Advanced conversation, fallback, capacity,
+  and target settings stay under **Customize**.
 - Provider choices come from the selected target's catalogue and each provider brand appears once. When a brand is available through more than one distributor, such as Cartesia directly or through SLNG, the wizard asks for the distributor next. Model ids, voice ids, and provider params remain forwarded text; the wizard does not invent an allowlist for them.
 - A failed preflight opens a dedicated repair menu instead of printing above the creation menu. From there you can open the relevant saved-resource screens to edit or delete the failing configuration, then retry creation.
 - Tools are execution-neutral in the menu. Webhook is available in shipped starters; Local Python remains visible with the selected driver's exact support limitation when that driver cannot emit a handler.
 - Task results start as `{"result":"string"}`. Each key is one returned field whose value is a primitive type (`string`, `number`, `boolean`, or `integer`) or an enum; result-to-variable assignment uses pickers rather than handwritten JSON.
 - Handoffs stay unavailable until two agents exist. Task groups stay unavailable until a task exists. Telephony declares required behavior and target transport/carrier only—it does not provision a phone number, SIP trunk, room, or carrier account.
-- Before the review screen, the candidate is rendered in a temporary directory and sent through the real load, build, and selected-target generator. The review shows target warnings, required env names, and forwarded bindings. A failing candidate is not written; its exact cause appears on a dedicated **Cannot create agent** screen with Back, rather than above the editor. Nothing reaches the destination until final confirmation.
+- Before the review screen, the candidate is rendered in a temporary directory
+  and sent through the real load, build, and selected-target generator. The
+  review shows target warnings, required environment names, and forwarded
+  models. A failing candidate is not written; its exact cause appears on a
+  dedicated **Cannot create agent** screen with **Back**. Nothing reaches the
+  destination until final confirmation.
 - **Back** preserves earlier edits. In accessible mode, enter `:back`; in the keyboard UI, press Esc.
 - It refuses to write into a directory that already exists and is non-empty, rather than overwrite an agent.
 
@@ -76,7 +94,11 @@ The fastest loop for a **Pipecat or LiveKit** instance: compiles the selected ta
 
 **Console (`--console`).** Talk in the terminal over your local mic and speaker — no browser, no dev server:
 - Pipecat: `uv run --extra console bot.py console`. The `console` extra pulls in pyaudio; on macOS run `brew install portaudio` first.
-- LiveKit: `uv run agent.py console`. Needs **no** LiveKit credentials for a scaffold-default agent (native providers + local turn). It only needs `LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` if a binding routes through LiveKit Inference (`provider: livekit` reason, or the cloud `turn-detector`); the preflight tells you which.
+- LiveKit: `uv run agent.py console`. Needs **no** LiveKit credentials for a
+  scaffold-default agent with native providers and local turn detection. It
+  only needs `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` if a model routes
+  through LiveKit Inference, such as a think model with `provider: livekit` or
+  the cloud `turn-detector`. The preflight tells you which.
 
 - Requires `uv` on your `PATH` (see [install](../start/install.md)). Reads keys from a `.env` at the package root.
 - `--port` sets the dev UI port (default 8765); `--bot-port` sets the Pipecat runner port (default 7860). Both are web-only — `--console` and `--no-open` ignore them.

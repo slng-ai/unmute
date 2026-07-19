@@ -1,6 +1,11 @@
 # Reference: models
 
-`models` is the central map, grouped into four kind sections: `think` (LLM), `speak` (TTS), `listen` (STT), `turn` (VAD/end-of-turn). Every model the package can use is defined here once, fully and concretely; there is no separate `voices` block. A model's kind is its section. Each entry carries `provider` + `model` — the same pairing the old target bindings used — plus the settings for its kind. A target may override an entry for a provider it cannot run (see [targets.yaml](targets-yaml.md)); the split is explained in [models and overrides](../concepts/profiles-and-bindings.md).
+`models` is the central map, grouped into four kind sections: `think` (LLM),
+`speak` (TTS), `listen` (STT), and `turn` (VAD/end-of-turn). Every model the
+package can use is defined here once; there is no separate `voices` block. A
+model's kind is its section. Each entry carries `provider`, `model`, and the
+settings for its kind. A target may override an entry it cannot run as defined;
+see [models and overrides](../concepts/profiles-and-bindings.md).
 
 ```yaml
 models:
@@ -144,6 +149,6 @@ Required: no. Values: `api | local`. Default: derived.
 | Pipecat | hosted and `local` both work | gated |
 | Vapi | `local` think fails (custom LLM endpoint unverified) | gated |
 | ElevenLabs | `local` think works only through its documented custom LLM endpoint | gated |
-| Deepgram | `local` think works (a custom reason endpoint is fine) | gated |
+| Deepgram | `local` think works through a custom LLM endpoint | gated |
 
 A hosted provider is the portable choice. A `local` think model needs somewhere to run: fine on code targets, and on ElevenLabs only via its custom LLM endpoint.

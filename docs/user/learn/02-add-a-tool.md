@@ -111,6 +111,8 @@ Not much, on purpose:
 - `output:` is `warn` on managed targets (Vapi, ElevenLabs), because they cannot enforce it. On Pipecat it is enforced.
 - `interruption: provider_default` and `effect` are `core`.
 
-Keep tools webhook-based and they stay in the safe core. On Pipecat you could also use `local` Python handlers and `mcp` tools, but the Pipecat driver does not emit those yet (see the [Pipecat target page](../targets/pipecat.md)), so stick with webhook for now.
+Keep tools webhook-based and they stay in the safe core. Pipecat also emits
+`local` Python handlers. It doesn't emit `mcp` tools yet; see the
+[Pipecat target page](../targets/pipecat.md).
 
 Next: [03. Variables](03-variables.md), so the agent can remember what it looked up.

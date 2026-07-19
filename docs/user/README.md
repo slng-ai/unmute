@@ -10,7 +10,7 @@ The shortest path starts with one agent and expands the same files as your
 agent grows.
 
 1. [Build your first YAML package](start/first-agent.md) to learn the package
-   boundary and the difference between portable behavior and target bindings.
+   boundary and the difference between portable models and target overrides.
 2. Follow the [learn series](learn/01-one-agent.md) to add tools, variables,
    agents, tasks, task groups, and phone calls.
 3. Read the [LiveKit YAML guide](targets/livekit.md) when LiveKit is one of your
@@ -24,7 +24,7 @@ changes belong in one of three YAML surfaces.
 ```text
 your-agent/
 ├── agent.yaml          # portable behavior
-├── targets.yaml        # target-specific bindings
+├── targets.yaml        # target infrastructure and optional model overrides
 ├── tools/
 │   └── lookup_order.yaml
 ├── instructions.md     # entry-agent instructions
@@ -34,11 +34,11 @@ your-agent/
 
 The files have distinct responsibilities:
 
-- `agent.yaml` describes the pipeline, profiles, agents, tasks, controls,
+- `agent.yaml` defines models and describes agents, tasks, controls,
   conversation behavior, channels, and capacity.
 - `tools/*.yaml` describes each tool contract and where the tool executes.
-- `targets.yaml` binds the portable profiles to LiveKit, Pipecat, or a managed
-  target.
+- `targets.yaml` selects LiveKit, Pipecat, or a managed target and carries its
+  infrastructure settings and optional model overrides.
 - Markdown files contain instructions. YAML points to them by path, which keeps
   long prompts out of the structural configuration.
 
@@ -50,7 +50,7 @@ around implementation packages.
 - **Start** introduces the package and its YAML files.
 - **Learn** changes one part of the package at a time, from a single agent to
   telephony.
-- **Concepts** explains profiles, bindings, portability, tiers, and feature
+- **Concepts** explains models, overrides, portability, tiers, and feature
   gates.
 - **Reference** defines every YAML field and its target-specific behavior.
 - **Targets** gathers the YAML choices and limitations for one platform.
@@ -61,9 +61,10 @@ The LiveKit driver covers model routing, tools, tasks, conversation shaping,
 and telephony. Use these pages when you need one exact field rather than the
 full guide.
 
-- [Models and voices](reference/models-and-voices.md) covers fallback chains.
+- [Models](reference/models-and-voices.md) covers model fields and fallback
+  chains.
 - [Targets YAML](reference/targets-yaml.md) and
-  [providers](reference/providers.md) cover model bindings, plugin pins, and
+  [providers](reference/providers.md) cover model routing, plugin pins, and
   provider choices.
 - [Tools YAML](reference/tools.md) covers webhook, local, and MCP tools.
 - [Tasks](reference/tasks.md) and [controls](reference/controls.md) cover

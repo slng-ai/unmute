@@ -6,7 +6,7 @@ starting from command-line behavior or generated code.
 
 ## Create the package structure
 
-Keep portable behavior, provider bindings, and long-form instructions in
+Keep portable behavior, target infrastructure, and long-form instructions in
 separate files.
 
 ```text

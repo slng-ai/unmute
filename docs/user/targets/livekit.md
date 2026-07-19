@@ -1,13 +1,14 @@
 # Configure LiveKit in YAML
 
 LiveKit is a code target with a complete Python driver. This guide covers its
-YAML surface: provider bindings, fallback models, tools, tasks, context
-shaping, conversation controls, and telephony.
+YAML surface: models, target infrastructure, fallback chains, tools, tasks,
+context shaping, conversation controls, and telephony.
 
 ## Start with the package boundary
 
-Portable behavior stays in `agent.yaml` and `tools/*.yaml`. LiveKit-specific
-model bindings, versions, pins, and destinations stay in `targets.yaml`.
+Portable behavior and model definitions stay in `agent.yaml` and
+`tools/*.yaml`. LiveKit-specific versions, pins, transports, destinations, and
+optional model overrides stay in `targets.yaml`.
 
 ```text
 your-agent/
@@ -24,7 +25,7 @@ your-agent/
 This boundary lets you add or replace a target without rewriting the agents,
 tasks, controls, or conversation outcomes.
 
-## Define models and voices
+## Define models
 
 Define every model concretely in `agent.yaml`'s kind sections; a LiveKit target
 then carries infrastructure and any by-name overrides.
@@ -81,7 +82,8 @@ targets:
 
 Every model comes straight from `agent.yaml`; add an override under this
 instance's `models:` (keyed by model name) only if LiveKit needs a different
-one. LiveKit accepts the following provider choices through its provider
+one. This table highlights the common scaffold routes. The
+[providers reference](../reference/providers.md#livekit) contains the complete
 catalogue.
 
 | Role | `provider` | Required environment |
@@ -91,8 +93,8 @@ catalogue.
 | `speak` | `cartesia` | `CARTESIA_API_KEY` |
 | `speak` | `elevenlabs` | `ELEVEN_API_KEY` |
 | `speak` | `slng` | `SLNG_API_KEY` |
-| `reason` | `openai` | `OPENAI_API_KEY` |
-| `reason` | Any other LiveKit Inference provider, or `livekit` explicitly | LiveKit Cloud credentials |
+| `think` | `openai` | `OPENAI_API_KEY` |
+| `think` | Any other LiveKit Inference provider, or `livekit` explicitly | LiveKit Cloud credentials |
 | `turn` | `livekit` + `turn-detector-mini` | none (runs locally) |
 | `turn` | `livekit` + `turn-detector` | LiveKit Cloud credentials |
 
@@ -100,7 +102,7 @@ SLNG remains the default route, not the only route. Its model value keeps the
 `slng/<vendor>/<model>` form in YAML and passes to the plugin verbatim — the
 `slng/` prefix names the SLNG-hosted route family and is part of the API path.
 
-The `turn` binding expresses intent rather than selecting a replaceable
+The selected turn model expresses intent rather than choosing an arbitrary
 service: `turn-detector-mini` runs the local model with no cloud credentials,
 `turn-detector` uses the LiveKit Cloud model. Its placement and
 `semantic_endpointing` values remain preferences on LiveKit.
@@ -419,9 +421,9 @@ unmute dev acme             # talk in the browser
 **Console** runs `uv run agent.py console` entirely on your machine. A
 scaffold-default agent (native providers + local turn detection) needs **no
 LiveKit credentials** — it never connects to LiveKit Cloud. It asks for
-`LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` only if a binding routes through LiveKit
-Inference (a `provider: livekit` reason, or the cloud `turn-detector`); the
-preflight names what it needs.
+`LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` only if a model routes through LiveKit
+Inference (a think model with `provider: livekit`, or the cloud
+`turn-detector`); the preflight names what it needs.
 
 **Web** needs a LiveKit server, and the default is fully local: LiveKit's
 server is open source, so with no `LIVEKIT_URL` set, `unmute dev` starts
@@ -472,7 +474,7 @@ Use the focused reference pages when you need the full value set or want to
 compare LiveKit with another target.
 
 - [Targets YAML](../reference/targets-yaml.md) defines target instances and
-  binding rules.
+  model override rules.
 - [Providers](../reference/providers.md) lists the accepted LiveKit provider
   names and required environment variables.
 - [Tools](../reference/tools.md), [tasks](../reference/tasks.md), and

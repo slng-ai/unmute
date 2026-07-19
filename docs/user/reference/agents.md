@@ -27,15 +27,22 @@ Required: yes. Values: a path to a `.md` file. Default: none. Targets: all five,
 
 ### model
 
-The reasoning model this agent uses. Must name a profile in the top-level [`models`](models-and-voices.md) map.
+The reasoning model this agent uses. It must name an entry in the top-level
+`models.think` section.
 
-Required: yes. Values: a model profile name. Default: none. Targets: all five, core.
+Required: yes. Values: a
+[think model name](models-and-voices.md). Default: none. Targets: all five,
+core.
 
 ### voice
 
-The voice this agent speaks with. Must name a profile in the top-level [`voices`](models-and-voices.md) map.
+The voice this agent speaks with. It must name an entry in the top-level
+`models.speak` section.
 
-Required: yes. Values: a voice profile name. Default: none. Targets: all five, core. Per-agent voices are native on LiveKit, Pipecat, and ElevenLabs, and work on all five.
+Required: yes. Values: a
+[speak model name](models-and-voices.md). Default: none. Targets: all five,
+core. Per-agent voices are native on LiveKit, Pipecat, and ElevenLabs, and work
+on all five.
 
 ### tools
 

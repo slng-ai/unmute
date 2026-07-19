@@ -46,7 +46,10 @@ Required: no. Values: a list of names. Default: none.
 
 A per-task model override. Omit it and the task uses the entry agent's model.
 
-Required: no. Values: a model profile name. Default: the entry agent's model. Tag: gated. **Fails on Pipecat**: the framework's mid-call model switch stalls the conversation in the current release, so the driver refuses it until a working lowering exists. Works on LiveKit.
+Required: no. Values: a `models.think` entry name. Default: the entry agent's
+model. Tag: gated. **Fails on Pipecat**: the framework's mid-call model switch
+stalls the conversation in the current release, so the driver refuses it until
+a working lowering exists. Works on LiveKit.
 
 ### result
 

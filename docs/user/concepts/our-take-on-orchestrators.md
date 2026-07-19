@@ -35,7 +35,11 @@ You still describe the agent only once. You do not write five versions. What cha
 Three rules hold this together, and they are worth stating plainly:
 
 1. **The five targets decide the schema.** A feature is only in Unmute's vocabulary if all five can honor what it promises, whether natively, conditionally, or through generated code. Nothing is in the schema that no platform can do.
-2. **You describe behavior, never provider settings.** `agent.yaml` never contains a platform's option names. The one exception is `params` inside a target binding, which is passed straight to the provider and never checked. See [profiles and bindings](profiles-and-bindings.md).
+2. **You describe behavior, never platform infrastructure.** Model entries in
+   `agent.yaml` name their provider and can carry `params`, an open map passed
+   straight to that model's provider and never checked. Platform versions,
+   transports, carriers, and destinations stay in `targets.yaml`. See
+   [models and overrides](profiles-and-bindings.md).
 3. **Fail loud, never average.** Covered in [how Unmute works](how-unmute-works.md). No silent drops, no silent downgrades.
 
 ## What this means for you

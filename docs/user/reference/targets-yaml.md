@@ -1,6 +1,12 @@
 # Reference: targets.yaml
 
-`targets.yaml` holds named **target instances**. Each carries the infrastructure that only makes sense per target — the platform, version pins, transport, destinations — plus an optional `models:` **override** map for the entries a given target cannot run as [defined in agent.yaml](models-and-voices.md). Model definitions themselves live in `agent.yaml`; this file never defines a model, it only overrides one. The same `agent.yaml` compiles to every instance. See [profiles and bindings](../concepts/profiles-and-bindings.md).
+`targets.yaml` holds named **target instances**. Each carries the infrastructure
+that only makes sense per target—the platform, version pins, transport, and
+destinations—plus an optional `models:` **override** map for entries a target
+cannot run as [defined in agent.yaml](models-and-voices.md). Model definitions
+live in `agent.yaml`; this file only overrides them. The same `agent.yaml`
+compiles to every instance. See
+[models and overrides](../concepts/profiles-and-bindings.md).
 
 Instances are named after the provider, not a `-dev` suffix: what you test is what you deploy. Add a second instance only when you have a real second environment.
 

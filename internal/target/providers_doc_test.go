@@ -21,8 +21,10 @@ func TestProvidersDocMatchesCatalog(t *testing.T) {
 	}
 
 	sections := map[string]Provider{"## Pipecat": Pipecat, "## LiveKit": LiveKit}
-	roles := map[string]Role{"listen": Listen, "speak": Speak, "reason": Reason}
-	row := regexp.MustCompile("^\\| (listen|speak|reason) \\| `([a-z_]+)`")
+	// N15 calls the author-facing model kind "think" while the resolved
+	// catalogue deliberately keeps the internal role name "reason".
+	roles := map[string]Role{"listen": Listen, "speak": Speak, "think": Reason}
+	row := regexp.MustCompile("^\\| (listen|speak|think) \\| `([a-z_]+)`")
 
 	type key struct {
 		fw     Provider

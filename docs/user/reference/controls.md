@@ -92,9 +92,11 @@ Required: conditional (iff `history: last_n`). Values: int. Default: none. Illeg
 
 ### context.summarizer
 
-The model profile used to write the summary, so it is declared, bound, and counted by sizing.
+The `models.think` entry used to write the summary. It is resolved and counted
+by sizing like any other used model.
 
-Required: conditional (iff `history: summary` is generated). Values: a model profile name. Default: none.
+Required: conditional when `history: summary` is generated. Values: a think
+model name. Default: none.
 
 ### context.include_tool_calls
 

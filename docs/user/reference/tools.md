@@ -56,7 +56,8 @@ Required: yes. Values: `local | client | webhook | provider_hosted | builtin | m
 | `mcp` | fails on Deepgram (no runtime MCP client); on LiveKit needs SDK language `python` |
 | `client`, `provider_hosted`, `builtin` | gated per driver; each driver documents what it can host |
 
-On Pipecat the driver emits `webhook` tools only today; `local` and `mcp` are driver maturity gates.
+On Pipecat, the driver emits `webhook` and `local` tools. `mcp` remains a driver
+maturity gate.
 
 ### handler
 

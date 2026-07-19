@@ -44,8 +44,8 @@ Required: no. Values: a `provider`/`model` pair plus an optional `semantic_endpo
 
 | Target | What happens | Tag |
 |---|---|---|
-| LiveKit | the full turn model is a Cloud feature, so the binding is a preference | warn |
-| Pipecat | end-of-turn runs on-device (Silero VAD); the binding is advisory | warn |
+| LiveKit | the full turn model is a Cloud feature, so the selection is a preference | warn |
+| Pipecat | end-of-turn runs on-device (Silero VAD); the selection is advisory | warn |
 | Vapi | turn is built in; a turn model is ignored with a warning | warn |
 | ElevenLabs | turn is built in; a turn model is ignored with a warning | warn |
 | Deepgram | turn is built into listen; a turn model is ignored with a warning | warn |
