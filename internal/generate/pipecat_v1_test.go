@@ -309,9 +309,22 @@ func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
 			t.Errorf("bot.py missing %q", want)
 		}
 	}
-	gate := strings.Index(bot, "await pipeline_started.wait()")
-	activate := strings.Index(bot, "await main.activate_worker(")
-	if gate == -1 || activate == -1 || gate > activate {
-		t.Errorf("activation must await pipeline_started before activate_worker (gate=%d, activate=%d)", gate, activate)
+	// Entry activation is centralised in the activate_entry helper: the web path
+	// awaits pipeline_started before calling it, the console path calls it from
+	// on_pipeline_started (post-start by definition). Assert the client-connected
+	// handler waits before invoking the helper — refactor-stable, unlike an
+	// absolute source order (agent-transfer handoffs also call activate_worker).
+	if !strings.Contains(bot, "async def activate_entry():") {
+		t.Errorf("bot.py missing activate_entry helper (entry activation must be centralised)")
+	}
+	conn := strings.Index(bot, "async def on_client_connected(")
+	if conn == -1 {
+		t.Fatalf("bot.py missing on_client_connected handler")
+	}
+	block := bot[conn:]
+	gate := strings.Index(block, "await pipeline_started.wait()")
+	call := strings.Index(block, "await activate_entry()")
+	if gate == -1 || call == -1 || gate > call {
+		t.Errorf("on_client_connected must await pipeline_started before activate_entry (gate=%d, call=%d)", gate, call)
 	}
 }
