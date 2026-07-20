@@ -9,4 +9,4 @@ examples/*/build/
 SPEC.md
 .codex/worktrees/
 .firecrawl
-bin/unmute
+bin/
