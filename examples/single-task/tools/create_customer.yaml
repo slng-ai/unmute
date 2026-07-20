@@ -1,0 +1,21 @@
+description: Create a Sage and Stone customer after the caller gives permission.
+
+input:
+  type: object
+  properties:
+    name: { type: string, description: Customer full name }
+    phone: { type: string, description: Customer phone number }
+  required: [name, phone]
+
+output:
+  type: object
+  properties:
+    customer_id: { type: string }
+    name: { type: string }
+    created: { type: boolean }
+  required: [customer_id, name, created]
+
+execution: local
+handler: tools/create_customer.py
+interruption: provider_default
+effect: returns_data

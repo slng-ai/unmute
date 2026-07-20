@@ -1,7 +1,7 @@
-# One agent delegates two ordered tasks that share context, then resumes.
+# One agent delegates three ordered appointment tasks with shared context.
 version: 1
 language: en
-entry_agent: event_planner
+entry_agent: appointment_desk
 
 models:
   think:
@@ -24,45 +24,68 @@ models:
       model: silero
 
 agents:
-  event_planner:
+  appointment_desk:
     instructions: instructions.md
     model: reasoning
     voice: voice
-    tools: [plan_event]
+    tools: [manage_appointment]
 
 tasks:
-  collect_event:
-    instructions: tasks/collect-event.md
+  identify_customer:
+    instructions: tasks/identify-customer.md
+    tools: [lookup_customer, create_customer]
     result:
-      occasion: string
-      guests: integer
+      action: string
+      customer_id: string
+      customer_name: string
+      existing_appointment_id: string
     context:
       history: full
 
-  confirm_event:
-    instructions: tasks/confirm-event.md
+  select_appointment:
+    instructions: tasks/select-appointment.md
+    tools: [check_availability]
     result:
-      confirmed: boolean
+      service: string
+      slot_id: string
+      start_time: string
+    context:
+      history: full
+
+  finalize_appointment:
+    instructions: tasks/finalize-appointment.md
+    tools: [book_appointment, cancel_appointment]
+    result:
+      action: string
+      status: string
+      appointment_id: string
     context:
       history: full
 
 task_groups:
-  event_intake:
-    steps: [collect_event, confirm_event]
+  appointment_flow:
+    steps: [identify_customer, select_appointment, finalize_appointment]
     context_scope: shared
     then: return
     merge: results
 
 controls:
-  plan_event:
+  manage_appointment:
     kind: delegate
-    group: event_intake
-    when: The caller wants to plan an event; run the two-step intake flow.
+    group: appointment_flow
+    when: The caller wants to book, reschedule, or cancel an appointment.
+
+tools:
+  - lookup_customer
+  - create_customer
+  - check_availability
+  - book_appointment
+  - cancel_appointment
 
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, I can help plan an event. What are you celebrating?"
+    text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
   interruption: { enabled: true }
 
 channels:

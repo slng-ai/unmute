@@ -1,7 +1,7 @@
-# Smallest runnable example: one prompt, one agent, and no tools or handoffs.
+# One agent owns every appointment workflow and tool.
 version: 1
 language: en
-entry_agent: welcome_agent
+entry_agent: appointment_desk
 
 models:
   think:
@@ -24,15 +24,28 @@ models:
       model: silero
 
 agents:
-  welcome_agent:
+  appointment_desk:
     instructions: instructions.md
     model: reasoning
     voice: voice
+    tools:
+      - lookup_customer
+      - create_customer
+      - check_availability
+      - book_appointment
+      - cancel_appointment
+
+tools:
+  - lookup_customer
+  - create_customer
+  - check_availability
+  - book_appointment
+  - cancel_appointment
 
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, I am the example assistant. What would you like to test?"
+    text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
   interruption: { enabled: true }
 
 channels:

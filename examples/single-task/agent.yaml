@@ -1,7 +1,7 @@
-# One agent delegates a bounded intake task, then resumes with its typed result.
+# One agent delegates the whole appointment workflow to one bounded task.
 version: 1
 language: en
-entry_agent: triage_agent
+entry_agent: appointment_desk
 
 models:
   think:
@@ -24,31 +24,47 @@ models:
       model: silero
 
 agents:
-  triage_agent:
+  appointment_desk:
     instructions: instructions.md
     model: reasoning
     voice: voice
-    tools: [collect_request]
+    tools: [manage_appointment]
 
 tasks:
-  request_details:
-    instructions: tasks/request-details.md
+  appointment_request:
+    instructions: tasks/manage-appointment.md
+    tools:
+      - lookup_customer
+      - create_customer
+      - check_availability
+      - book_appointment
+      - cancel_appointment
     result:
+      action: string
+      status: string
+      customer_id: string
+      appointment_id: string
       summary: string
-      urgency: string
     context:
       history: full
 
 controls:
-  collect_request:
+  manage_appointment:
     kind: delegate
-    task: request_details
-    when: The caller has a support request that needs structured details.
+    task: appointment_request
+    when: The caller wants to book, reschedule, or cancel an appointment.
+
+tools:
+  - lookup_customer
+  - create_customer
+  - check_availability
+  - book_appointment
+  - cancel_appointment
 
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, I can capture a support request. What happened?"
+    text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
   interruption: { enabled: true }
 
 channels:

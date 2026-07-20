@@ -16,8 +16,8 @@ func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 	}{
 		{"simple-prompt", 1, 0, 0},
 		{"single-task", 1, 1, 0},
-		{"task-groups", 1, 2, 1},
-		{"subagents", 3, 0, 0},
+		{"task-groups", 1, 3, 1},
+		{"subagents", 2, 0, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -31,6 +31,14 @@ func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 			}
 			if len(agent.Agents) != tc.agents || len(agent.Tasks) != tc.tasks || len(agent.TaskGroups) != tc.groups {
 				t.Fatalf("got agents/tasks/groups %d/%d/%d, want %d/%d/%d", len(agent.Agents), len(agent.Tasks), len(agent.TaskGroups), tc.agents, tc.tasks, tc.groups)
+			}
+			if len(agent.Tools) != 5 {
+				t.Fatalf("got %d tools, want 5", len(agent.Tools))
+			}
+			for name, tool := range agent.Tools {
+				if tool.Execution != ir.ToolLocal || tool.URLEnv != "" {
+					t.Errorf("tool %q execution/url = %q/%q, want local/empty", name, tool.Execution, tool.URLEnv)
+				}
 			}
 			for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
 				t.Run(string(provider), func(t *testing.T) {

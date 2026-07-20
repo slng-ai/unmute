@@ -1,7 +1,7 @@
-# A front desk hands the same conversation to one of two specialist agents.
+# Two agents share appointment tools and hand the conversation back and forth.
 version: 1
 language: en
-entry_agent: front_desk
+entry_agent: booking_desk
 
 models:
   think:
@@ -24,43 +24,56 @@ models:
       model: silero
 
 agents:
-  front_desk:
+  booking_desk:
     instructions: instructions.md
     model: reasoning
     voice: voice
-    tools: [to_sales, to_support]
+    tools:
+      - lookup_customer
+      - create_customer
+      - check_availability
+      - book_appointment
+      - to_appointment_manager
 
-  sales_specialist:
-    instructions: agents/sales-specialist.md
+  appointment_manager:
+    instructions: agents/appointment-manager.md
     model: reasoning
     voice: voice
-
-  support_specialist:
-    instructions: agents/support-specialist.md
-    model: reasoning
-    voice: voice
+    tools:
+      - lookup_customer
+      - check_availability
+      - book_appointment
+      - cancel_appointment
+      - to_booking_desk
 
 controls:
-  to_sales:
+  to_appointment_manager:
     kind: agent_transfer
-    to: sales_specialist
-    when: The caller asks about plans, pricing, or buying.
+    to: appointment_manager
+    when: The caller wants to reschedule or cancel an existing appointment.
     context:
       history: full
       variables: all
 
-  to_support:
+  to_booking_desk:
     kind: agent_transfer
-    to: support_specialist
-    when: The caller needs help with an existing account or product.
+    to: booking_desk
+    when: The caller wants to make a new appointment instead.
     context:
       history: full
       variables: all
+
+tools:
+  - lookup_customer
+  - create_customer
+  - check_availability
+  - book_appointment
+  - cancel_appointment
 
 conversation:
   greeting:
     speaks_first: agent
-    text: "Hi, do you need sales or product support?"
+    text: "Hi, this is Sage and Stone Salon. Are you booking or changing an appointment?"
   interruption: { enabled: true }
 
 channels:
