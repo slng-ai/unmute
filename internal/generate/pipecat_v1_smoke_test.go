@@ -15,6 +15,13 @@ import (
 	"github.com/slng/unmute/internal/target"
 )
 
+func examplePackagePath(name string) string {
+	if name == "remy" || name == "safe_core" {
+		return filepath.Join("..", "testdata", name)
+	}
+	return filepath.Join("..", "..", "examples", name)
+}
+
 // consoleCheckScript proves the console extra (T8, V8): after `uv run --extra
 // console`, pyaudio is installed (importing the local-audio transport runs its
 // `import pyaudio` guard), bot.py imports, and console_main is present. It does

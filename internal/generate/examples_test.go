@@ -11,13 +11,6 @@ import (
 	"github.com/slng/unmute/internal/target"
 )
 
-func examplePackagePath(name string) string {
-	if name == "remy" || name == "safe_core" {
-		return filepath.Join("..", "testdata", name)
-	}
-	return filepath.Join("..", "..", "examples", name)
-}
-
 func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 	cases := []struct {
 		name                  string
