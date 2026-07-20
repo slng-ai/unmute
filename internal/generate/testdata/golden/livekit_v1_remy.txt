@@ -86,6 +86,7 @@ from livekit.agents import (
 )
 from livekit.agents.beta.workflows import TaskGroup
 from livekit.agents.telemetry import set_tracer_provider
+from livekit.agents.metrics import STTMetrics, TTSMetrics
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import openai, silero, slng
 
@@ -120,6 +121,44 @@ def setup_langfuse(
         should_export_span=lambda span: True,
     )
     return trace_provider
+
+
+def trace_speech_metric(
+    trace_provider: TracerProvider | None,
+    metric: STTMetrics | TTSMetrics,
+) -> None:
+    if trace_provider is None or not isinstance(metric, (STTMetrics, TTSMetrics)):
+        return
+
+    operation = "stt" if isinstance(metric, STTMetrics) else "tts"
+    attributes: dict[str, AttributeValue] = {
+        "langfuse.observation.type": "generation",
+        "gen_ai.operation.name": operation,
+        "gen_ai.output.type": "text" if operation == "stt" else "speech",
+        "metrics.duration": metric.duration,
+        "metrics.audio_duration": metric.audio_duration,
+        "metrics.streamed": metric.streamed,
+    }
+    if metric.metadata:
+        attributes["gen_ai.request.model"] = metric.metadata.model_name
+        attributes["gen_ai.provider.name"] = metric.metadata.model_provider
+    if metric.request_id:
+        attributes["lk.request_id"] = metric.request_id
+    if isinstance(metric, TTSMetrics):
+        attributes["metrics.ttfb"] = metric.ttfb
+        attributes["metrics.character_count"] = metric.characters_count
+    else:
+        attributes["gen_ai.usage.input_tokens"] = metric.input_tokens
+        attributes["gen_ai.usage.output_tokens"] = metric.output_tokens
+
+    end_time = int(metric.timestamp * 1_000_000_000)
+    start_time = end_time - int(max(metric.duration, 0.0) * 1_000_000_000)
+    span = trace_provider.get_tracer("unmute").start_span(
+        operation,
+        attributes=attributes,
+        start_time=start_time,
+    )
+    span.end(end_time=end_time)
 
 
 # --- prompts ---------------------------------------------------------------
@@ -421,6 +460,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
+        trace_speech_metric(trace_provider, ev.metrics)
         metrics.log_metrics(ev.metrics)
 
     async def _end_if_still_away() -> None:

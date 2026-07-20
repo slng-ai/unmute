@@ -125,9 +125,9 @@ print("smoke ok:", ", ".join(builders))
 `
 
 // pipecatRequestTracingSmokeScript drives the generated worker/bus topology
-// through one deterministic LLM request. V16 requires the request span to be a
-// child of the conversation; a hand-made root span cannot pass this check.
-const pipecatRequestTracingSmokeScript = `"""Smoke check: a real worker turn emits a nested LLM request span."""
+// through deterministic STT, LLM, and TTS services. V17 requires all three
+// request spans to share the conversation trace.
+const pipecatRequestTracingSmokeScript = `"""Smoke check: a real worker turn emits nested speech and LLM spans."""
 import asyncio
 import json
 import os
@@ -141,10 +141,14 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from pipecat.bus import BusBridgeProcessor  # noqa: E402
 from pipecat.frames.frames import (  # noqa: E402
     Frame,
+    InputAudioRawFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
+    TTSAudioRawFrame,
+    TTSStoppedFrame,
+    TranscriptionFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker  # noqa: E402
@@ -152,8 +156,10 @@ from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair  # noqa: E402
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor  # noqa: E402
 from pipecat.services.llm_service import LLMService  # noqa: E402
-from pipecat.services.settings import LLMSettings  # noqa: E402
-from pipecat.utils.tracing.service_decorators import traced_llm  # noqa: E402
+from pipecat.services.settings import LLMSettings, STTSettings, TTSSettings  # noqa: E402
+from pipecat.services.stt_service import STTService  # noqa: E402
+from pipecat.services.tts_service import TTSService  # noqa: E402
+from pipecat.utils.tracing.service_decorators import traced_llm, traced_stt, traced_tts  # noqa: E402
 from pipecat.utils.tracing.setup import setup_tracing  # noqa: E402
 from pipecat.workers.llm import LLMWorkerActivationArgs  # noqa: E402
 from pipecat.workers.runner import WorkerRunner  # noqa: E402
@@ -179,7 +185,7 @@ class FakeLLM(LLMService):
 
     @traced_llm
     async def _process_context(self, context: LLMContext) -> None:
-        await self.push_frame(LLMTextFrame("traced"))
+        await self.push_frame(LLMTextFrame("traced."))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
@@ -191,21 +197,59 @@ class FakeLLM(LLMService):
             await self.push_frame(frame, direction)
 
 
+class FakeSTT(STTService):
+    def __init__(self) -> None:
+        super().__init__(
+            audio_passthrough=False,
+            sample_rate=16000,
+            settings=STTSettings(model="probe-stt", language="en"),
+        )
+
+    @traced_stt
+    async def run_stt(self, audio: bytes):
+        yield TranscriptionFrame(
+            "trace this request",
+            user_id="probe-user",
+            timestamp="2026-07-20T00:00:00Z",
+            finalized=True,
+        )
+
+
+class FakeTTS(TTSService):
+    def __init__(self) -> None:
+        super().__init__(
+            push_start_frame=True,
+            push_stop_frames=True,
+            push_text_frames=False,
+            sample_rate=16000,
+            settings=TTSSettings(model="probe-tts", voice="probe-voice", language="en"),
+        )
+
+    @traced_tts
+    async def run_tts(self, text: str, context_id: str):
+        yield TTSAudioRawFrame(
+            audio=b"\x00\x00" * 160,
+            sample_rate=16000,
+            num_channels=1,
+            context_id=context_id,
+        )
+
+
 class Passthrough(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
 
 
-class StopAfterRequest(Passthrough):
+class StopAfterSpeech(Passthrough):
     def __init__(self, runner: WorkerRunner) -> None:
         super().__init__()
         self.runner = runner
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
-        if isinstance(frame, LLMFullResponseEndFrame):
-            asyncio.create_task(self.runner.cancel(reason="request traced"))
+        if isinstance(frame, TTSStoppedFrame):
+            asyncio.create_task(self.runner.cancel(reason="speech traced"))
 
 
 async def main() -> None:
@@ -214,7 +258,7 @@ async def main() -> None:
     provider = trace.get_tracer_provider()
 
     bot.build_welcome_agent_llm = FakeLLM
-    bot.build_welcome_agent_tts = Passthrough
+    bot.build_welcome_agent_tts = FakeTTS
 
     runner = WorkerRunner()
     context = LLMContext()
@@ -222,9 +266,10 @@ async def main() -> None:
     main_worker = PipelineWorker(
         Pipeline(
             [
+                FakeSTT(),
                 user_aggregator,
                 BusBridgeProcessor(bus=runner.bus, worker_name="trace-main"),
-                StopAfterRequest(runner),
+                StopAfterSpeech(runner),
                 assistant_aggregator,
             ]
         ),
@@ -237,6 +282,13 @@ async def main() -> None:
 
     @main_worker.event_handler("on_pipeline_started")
     async def on_pipeline_started(worker, frame):
+        await main_worker.queue_frame(
+            InputAudioRawFrame(
+                audio=b"\x00\x00" * 160,
+                sample_rate=16000,
+                num_channels=1,
+            )
+        )
         await main_worker.activate_worker(
             request_agent.name,
             args=LLMWorkerActivationArgs(
@@ -251,10 +303,14 @@ async def main() -> None:
 
     spans = memory.get_finished_spans()
     conversation = next(span for span in spans if span.name == "conversation")
-    request = next(span for span in spans if span.name == "llm")
-    assert request.attributes["gen_ai.request.model"] == "probe-model"
-    assert request.context.trace_id == conversation.context.trace_id
-    print("pipecat request tracing smoke ok")
+    requests = {span.name: span for span in spans if span.name in {"stt", "llm", "tts"}}
+    assert requests.keys() == {"stt", "llm", "tts"}
+    assert requests["stt"].attributes["gen_ai.request.model"] == "probe-stt"
+    assert requests["llm"].attributes["gen_ai.request.model"] == "probe-model"
+    assert requests["tts"].attributes["gen_ai.request.model"] == "probe-tts"
+    assert all(span.context.trace_id == conversation.context.trace_id for span in requests.values())
+    assert all(span.end_time > span.start_time for span in requests.values())
+    print("pipecat speech tracing smoke ok")
 
 
 asyncio.run(main())
@@ -329,9 +385,9 @@ func TestSmokePipecatV1LocalToolInstantiates(t *testing.T) {
 	})
 }
 
-// TestSmokeV16PipecatRequestTracing proves the 1.5 worker compatibility shim
-// sends service requests into the main conversation trace.
-func TestSmokeV16PipecatRequestTracing(t *testing.T) {
+// TestSmokeV17PipecatSpeechTracing proves the 1.5 worker compatibility shim
+// sends STT, LLM, and TTS requests into the main conversation trace.
+func TestSmokeV17PipecatSpeechTracing(t *testing.T) {
 	runPipecatSmokeScript(t, "simple-prompt", nil, nil, pipecatRequestTracingSmokeScript)
 }
 
