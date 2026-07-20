@@ -42,6 +42,23 @@ func TestBuildDefaultsLanguage(t *testing.T) {
 	}
 }
 
+func TestBuildTracing(t *testing.T) { // V25
+	pkg := loadSafeCore(t)
+	pkg.Agent.Tracing = &packagespec.Tracing{Provider: "langfuse"}
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.Tracing == nil || agent.Tracing.Provider != "langfuse" {
+		t.Fatalf("tracing = %#v", agent.Tracing)
+	}
+
+	pkg.Agent.Tracing.Provider = "other"
+	if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), `unsupported tracing provider "other"`) {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestBuildReportsUnresolvedReferenceAtSource(t *testing.T) { // V1
 	pkg := loadSafeCore(t)
 	intake := pkg.Agent.Agents["intake"]

@@ -1,6 +1,9 @@
 # Reference: agent.yaml
 
-`agent.yaml` is the portable description of your agent. It never contains provider settings; those live in [targets.yaml](targets-yaml.md). This page is the top-level map. Each block links to its own reference page.
+`agent.yaml` is the portable description of your agent. Runtime target settings
+live in [targets.yaml](targets-yaml.md); portable integrations such as tracing
+are selected here. This page is the top-level map. Each block links to its own
+reference page.
 
 ## How to read these reference pages
 
@@ -48,6 +51,7 @@ Rules that hold across the whole package:
 | `controls` | no | map | per kind |
 | `tools` | no | list of tool names | core |
 | `conversation` | no | block | mixed |
+| `tracing` | no | block | gated |
 | `channels` | yes, at least one | map | core |
 | `capacity` | conditional | block | core |
 
@@ -72,6 +76,25 @@ The name of the agent that answers first. Must be a key in the `agents` map.
 
 Required: yes. Values: an agent name. Default: none. Targets: all five, core.
 
+### tracing
+
+Tracing is an optional package-wide integration. Langfuse is the only
+supported provider:
+
+```yaml
+tracing:
+  provider: langfuse
+```
+
+LiveKit and Pipecat emit the integration. Vapi, ElevenLabs, and Deepgram fail
+validation. Generated agents require `LANGFUSE_PUBLIC_KEY`,
+`LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL` when configured. Omitting the
+block emits no tracing code, dependencies, environment keys, or documentation.
+
+This is a schema-version-1 change. Existing packages that want the tracing
+previously emitted automatically can add the block above; `unmute init` omits
+it.
+
 ### The blocks
 
 Each block has its own reference page with every field:
@@ -84,6 +107,7 @@ Each block has its own reference page with every field:
 - **`controls`**: transfers and delegates the model can invoke. See [controls](controls.md).
 - **`tools`**: the top-level load manifest (which tool files compile in). Each file is defined in [tools/*.yaml](tools.md). Which agent can call a tool is set by that agent's own `tools:` list, not here.
 - **`conversation`**: greeting, interruption, inactivity, duration, thinking audio. See [conversation](conversation.md).
+- **`tracing`**: optional Langfuse integration for LiveKit and Pipecat. See [tracing](#tracing).
 - **`channels`**: how callers reach the agent. See [channels and capacity](channels-and-capacity.md).
 - **`capacity`**: declared traffic, required on code targets and telephony. See [channels and capacity](channels-and-capacity.md).
 

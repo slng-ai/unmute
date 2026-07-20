@@ -23,8 +23,14 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		EntryAgent: agent.EntryAgent,
 		EntryClass: pyName(agent.EntryAgent),
 		Transport:  target.Transport,
+		Tracing:    agent.Tracing != nil && agent.Tracing.Provider == "langfuse",
 	}
 	env := newEnvSet()
+	if data.Tracing {
+		for _, name := range []string{"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"} {
+			env.add(name)
+		}
+	}
 
 	stt, err := sttService(target.Models.Listen, agent.Language, env)
 	if err != nil {

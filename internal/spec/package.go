@@ -44,8 +44,13 @@ type AgentFile struct {
 	Controls     map[string]Control   `json:"controls,omitempty" yaml:"controls,omitempty"`
 	Tools        []string             `json:"tools,omitempty" yaml:"tools,omitempty"`
 	Conversation *Conversation        `json:"conversation,omitempty" yaml:"conversation,omitempty"`
+	Tracing      *Tracing             `json:"tracing,omitempty" yaml:"tracing,omitempty"`
 	Channels     map[string]Channel   `json:"channels" yaml:"channels"`
 	Capacity     *Capacity            `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+}
+
+type Tracing struct {
+	Provider string `json:"provider" yaml:"provider"`
 }
 
 // ModelSections is the central models map, grouped by kind (N15): the section

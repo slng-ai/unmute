@@ -76,6 +76,9 @@ conversation:
     text: "Hi, this is Sage and Stone Salon. Are you booking or changing an appointment?"
   interruption: { enabled: true }
 
+tracing:
+  provider: langfuse
+
 channels:
   web: { kind: realtime_audio }
 

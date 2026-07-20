@@ -178,6 +178,7 @@ type pipecatData struct {
 	Deps                []string // standalone pip deps for plugin services (e.g. pipecat-slng)
 	RequiredEnv         []string
 	Notes               []string
+	Tracing             bool
 
 	// Import needs: keep bot.py free of unused imports (only what a given spec
 	// actually exercises), so the emitted pipeline reads clean.
@@ -234,6 +235,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolOutput:           true, // tool returns response.json()
 	targetcap.FieldToolLocal:            true, // @tool awaiting tools/<name>.py (T14, V13)
 	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
+	targetcap.FieldTracingLangfuse:      true,
 }
 
 // GeneratePipecat lowers a validated agent + pipecat target into a project.

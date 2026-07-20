@@ -42,6 +42,12 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		EntryClass:  pyName(agent.EntryAgent),
 		TurnVersion: turnVersion,
 		Pins:        tgt.Pins,
+		Tracing:     agent.Tracing != nil && agent.Tracing.Provider == "langfuse",
+	}
+	if data.Tracing {
+		for _, name := range []string{"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"} {
+			env.add(name)
+		}
 	}
 
 	entry := agent.Agents[agent.EntryAgent]
@@ -780,11 +786,12 @@ func livekitDeps(data livekitData) []string {
 	}
 	deps := append([]string{
 		base,
-		"langfuse>=3",
-		"opentelemetry-sdk>=1.33,<2",
 		pinned("livekit-plugins-silero", ">=1.6.1"),
 		"python-dotenv",
 	}, sortedKeys(packages)...)
+	if data.Tracing {
+		deps = append(deps, "langfuse>=3", "opentelemetry-sdk>=1.33,<2")
+	}
 	if data.NeedsHTTPX {
 		deps = append(deps, "httpx")
 	}

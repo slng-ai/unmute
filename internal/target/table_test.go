@@ -35,6 +35,14 @@ func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	if table.Capability(FieldInactivity, LiveKit).Tag != Warn || table.Capability(FieldMaxDuration, Deepgram).Tag != Warn {
 		t.Fatal("warn-tagged lifecycle fields must produce target warnings")
 	}
+	if table.Capability(FieldTracingLangfuse, LiveKit).Tag != Core || table.Capability(FieldTracingLangfuse, Pipecat).Tag != Core {
+		t.Fatal("Langfuse tracing must pass on code drivers")
+	}
+	for _, provider := range []Provider{Vapi, ElevenLabs, Deepgram} {
+		if table.Capability(FieldTracingLangfuse, provider).Tag != Gated {
+			t.Errorf("Langfuse tracing passed on %s", provider)
+		}
+	}
 }
 
 func TestTelephonyControlsResolveCarrierAndTransport(t *testing.T) {

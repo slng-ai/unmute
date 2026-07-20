@@ -34,6 +34,9 @@ func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 			if len(agent.Agents) != tc.agents || len(agent.Tasks) != tc.tasks || len(agent.TaskGroups) != tc.groups {
 				t.Fatalf("got agents/tasks/groups %d/%d/%d, want %d/%d/%d", len(agent.Agents), len(agent.Tasks), len(agent.TaskGroups), tc.agents, tc.tasks, tc.groups)
 			}
+			if agent.Tracing == nil || agent.Tracing.Provider != "langfuse" {
+				t.Fatalf("tracing = %#v, want langfuse", agent.Tracing)
+			}
 			if len(agent.Tools) != 5 {
 				t.Fatalf("got %d tools, want 5", len(agent.Tools))
 			}

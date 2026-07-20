@@ -108,6 +108,7 @@ Named maps instead of lists, so every item has a stable identity and diffs stay 
 | `controls` | no | map, see 4.7 | per kind |
 | `tools` | no | list of plain tool names | core |
 | `conversation` | no | block, see 4.8 | mixed |
+| `tracing` | no | block, see 4.11 | gated |
 | `channels` | yes, at least one | map, see 4.9 | core |
 | `capacity` | see 4.10 | block | core |
 
@@ -323,6 +324,36 @@ The declared half of the resource model. Required whenever `channels` has a tele
 
 Sizing depends on concurrency, placement, and channels. It does not depend on how many agents are in the file, and never on the provider brand alone. Derived numbers (workers, GPUs, quotas) are printed in the compile or plan report with dated benchmark coefficients, marked `unbenchmarked` until measured.
 
+### 4.11 tracing (added 2026-07-20)
+
+Tracing is package-wide and strictly opt-in. The only v1 shape is one object,
+not a list:
+
+```yaml
+tracing:
+  provider: langfuse
+```
+
+| Field | Required | Values | Tag | Notes |
+|---|---|---|---|---|
+| `provider` | yes | `langfuse` | gated | LiveKit and Pipecat emit the integration. Vapi, ElevenLabs, and Deepgram fail validation before any artifact. |
+
+With no `tracing` block, generated projects contain no Unmute tracing setup,
+Langfuse/OpenTelemetry-only imports or dependencies, Langfuse environment
+variables, tracing hooks, or tracing documentation. Environment variables do
+not enable an integration the package did not request.
+
+With `provider: langfuse`, the generated runtime requires
+`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL`. Missing
+or empty values fail agent startup, including when all three are absent. The
+credentials select the Langfuse project; v1 adds no project name, trace name,
+sampling, endpoint, or environment-variable override fields. Drivers keep
+their existing trace/session naming and span mappings.
+
+This stays schema version 1. Existing packages that want to retain the former
+automatic tracing output add the block above. `unmute init` omits it; the
+checked-in packages under `examples/` include it.
+
 ---
 
 ## 5. tools/*.yaml
@@ -407,7 +438,7 @@ follows these rules exactly.
 4. Human transfer: `mode: cold` only. Pipecat needs the Daily SIP transport; Deepgram needs a carrier in its target instance.
 5. Hosted providers only for listen and speak models (no `provider: local`). `turn` is a preference anyway.
 6. If the agent speaks first, give it a fixed `greeting.text`. A model-written opening is conditional on ElevenLabs (workflow node) and generated-with-warning on Deepgram (review-corrected 2026-07-15); a fixed line stays the zero-warning safe choice.
-7. Skip for now: single `tasks` (return to owner unverified on Vapi) and `task_groups` with `then: return` (fails on Vapi). A `task_group` with `then: transfer` or `end` does pass on all five (warning on LiveKit: TaskGroup experimental). Also skip `requires`, `thinking_audio`, warm transfer, `mcp` and `local` tools, and any history other than `full`. `fallback` passes everywhere when the chain stays within one provider on Vapi and the fallback models carry no settings beyond the ID on ElevenLabs. `outbound: true` with `on_voicemail` passes everywhere; on Deepgram it is generated with a warning (review-corrected 2026-07-15), so keep it out of the zero-warning safe core if you want no warnings.
+7. Skip for now: single `tasks` (return to owner unverified on Vapi) and `task_groups` with `then: return` (fails on Vapi). A `task_group` with `then: transfer` or `end` does pass on all five (warning on LiveKit: TaskGroup experimental). Also skip `requires`, `thinking_audio`, warm transfer, `mcp` and `local` tools, tracing, and any history other than `full`. `fallback` passes everywhere when the chain stays within one provider on Vapi and the fallback models carry no settings beyond the ID on ElevenLabs. `outbound: true` with `on_voicemail` passes everywhere; on Deepgram it is generated with a warning (review-corrected 2026-07-15), so keep it out of the zero-warning safe core if you want no warnings.
 8. Accept warnings: `minimum_words` on ElevenLabs, interruption tuning on Deepgram, turn model notes.
 
 Feature by feature:
@@ -434,6 +465,7 @@ Feature by feature:
 | webhook tools | ok | ok | ok | ok | ok |
 | mcp tools | Python only | gated (v1) | ok | ok | fail |
 | outbound + `on_voicemail` | ok | gated (v1) | ok | ok | generated (warn) |
+| tracing `provider: langfuse` | ok | ok | fail | fail | fail |
 
 ---
 
@@ -444,6 +476,8 @@ Feature by feature:
 - Parallel conversational agents and supervisor logic as schema constructs.
 - `merge: summary` and any automatic transfer summarization.
 - Cross-session variable persistence and history retention toggles.
+- Multiple tracing providers, simultaneous trace export, provider options, and
+  a generic module registry.
 - Force-interrupt phrase lists, pacing knobs, canned audio steps, external mid-call event injection. All target native.
 - Messaging channels, batch outbound campaigns, IVR navigation as behavior.
 - Machine sizes, replica counts, GPU types or counts, anywhere.

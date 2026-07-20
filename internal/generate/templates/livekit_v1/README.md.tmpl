@@ -15,11 +15,11 @@ uv run agent.py console       # local terminal session
 uv run agent.py dev           # LiveKit development worker
 ```
 
+{{if .Tracing}}
 ## Trace with Langfuse
 
-Tracing is optional. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
-`LANGFUSE_BASE_URL` together in `.env.local` to export LiveKit spans. Leaving
-all three empty disables tracing. The trace name is
+Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
+`LANGFUSE_BASE_URL` in `.env.local`; all three are required. The trace name is
 `{{.EntryClass}}-{{.Project}}`; the LiveKit room name becomes the Langfuse
 session ID.
 
@@ -28,5 +28,6 @@ Complete at least one user turn before reviewing the trace. A traced request
 contains `llm_node` and `llm_request` generation observations in addition to
 the session and agent spans.
 
+{{end}}
 Do not edit this project by hand — it is regenerated from the agent spec.
 Change the spec and recompile.

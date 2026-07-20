@@ -105,18 +105,15 @@ for name in json.load(open("compile-report.json"))["required_env"]:
 
 import bot  # noqa: E402  (module import already constructs the agent workers)
 
-for name in ("LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_BASE_URL"):
-    os.environ.pop(name, None)
-assert bot.setup_langfuse_tracing() is False
-os.environ["LANGFUSE_PUBLIC_KEY"] = "partial"
-try:
-    bot.setup_langfuse_tracing()
-except ValueError:
-    pass
-else:
-    raise AssertionError("partial Langfuse configuration must fail")
-finally:
-    os.environ.pop("LANGFUSE_PUBLIC_KEY")
+if hasattr(bot, "setup_langfuse_tracing"):
+    for name in ("LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_BASE_URL"):
+        os.environ.pop(name, None)
+    try:
+        bot.setup_langfuse_tracing()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("configured Langfuse tracing requires all credentials")
 
 builders = sorted(n for n in vars(bot) if n.startswith("build_") and callable(getattr(bot, n)))
 assert builders, "no service builders found in bot.py"
@@ -265,8 +262,9 @@ async def main() -> None:
     provider = trace.get_tracer_provider()
     provider.add_span_processor(bot.LangfuseAttributeProcessor())
 
-    bot.build_welcome_agent_llm = FakeLLM
-    bot.build_welcome_agent_tts = FakeTTS
+    agent_name = bot.AGENTS[0].name
+    setattr(bot, f"build_{agent_name}_llm", FakeLLM)
+    setattr(bot, f"build_{agent_name}_tts", FakeTTS)
 
     runner = WorkerRunner()
     context = LLMContext()
@@ -285,7 +283,7 @@ async def main() -> None:
         enable_tracing=True,
         params=PipelineParams(enable_metrics=True),
     )
-    request_agent = bot.WelcomeAgentAgent()
+    request_agent = type(bot.AGENTS[0])()
     bot._enable_agent_tracing(main_worker, [request_agent])
 
     @main_worker.event_handler("on_pipeline_started")

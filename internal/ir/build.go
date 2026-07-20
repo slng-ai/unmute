@@ -28,6 +28,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	if _, ok := pkg.Agent.Agents[pkg.Agent.EntryAgent]; !ok {
 		return nil, missing(pkg, "agent.yaml", "entry_agent", pkg.Agent.EntryAgent)
 	}
+	if pkg.Agent.Tracing != nil && pkg.Agent.Tracing.Provider != "langfuse" {
+		return nil, fmt.Errorf("%s: unsupported tracing provider %q; supported provider: langfuse", pkg.Location("agent.yaml", "tracing:"), pkg.Agent.Tracing.Provider)
+	}
 
 	models, err := buildModels(pkg)
 	if err != nil {
@@ -64,6 +67,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		Conversation: buildConversation(pkg.Agent.Conversation),
 		Channels:     make(map[string]Channel, len(pkg.Agent.Channels)),
 		Targets:      make(map[string]Target, len(pkg.Targets)),
+	}
+	if pkg.Agent.Tracing != nil {
+		out.Tracing = &Tracing{Provider: pkg.Agent.Tracing.Provider}
 	}
 	for name, variable := range pkg.Agent.Variables {
 		out.Variables[name] = Variable{Type: PrimitiveType(variable.Type), Default: variable.Default, Source: VariableSource(variable.Source)}

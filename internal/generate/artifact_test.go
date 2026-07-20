@@ -93,3 +93,7 @@ func compilerTarget(agent *ir.Agent, provider ir.Provider) ir.Target {
 	}
 	panic("target not found: " + provider)
 }
+
+func enableLangfuse(agent *ir.Agent) {
+	agent.Tracing = &ir.Tracing{Provider: "langfuse"}
+}

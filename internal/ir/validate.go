@@ -206,6 +206,9 @@ func validateStructure(agent *Agent) []string {
 	if agent.Language != "" && !languagePattern.MatchString(agent.Language) {
 		errors = add(errors, "language must be a BCP-47 language tag such as en or en-US")
 	}
+	if agent.Tracing != nil && agent.Tracing.Provider != "langfuse" {
+		errors = add(errors, "tracing provider must be langfuse")
+	}
 	if len(agent.Models) == 0 {
 		errors = add(errors, "models must contain at least one model")
 	}
@@ -410,6 +413,9 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	}
 	if targetcap.IsCode(provider) && resolved.Version == "" {
 		row.Errors = add(row.Errors, fmt.Sprintf("%s code target requires version", resolved.Provider))
+	}
+	if agent.Tracing != nil {
+		applyCapability(caps, targetcap.FieldTracingLangfuse, provider, row)
 	}
 	// Placement gates read the resolved per-target bindings (N15): a per-target
 	// override can change where a model runs, so the effective binding decides.

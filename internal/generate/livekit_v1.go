@@ -229,6 +229,7 @@ type livekitData struct {
 	RequiredEnv   []string
 	Notes         []string
 	InferenceUses []string // bindings routed through LiveKit Inference (console needs cloud creds, C2/C7)
+	Tracing       bool
 
 	NeedsTasks      bool // AgentTask import
 	NeedsTaskGroups bool // beta.workflows TaskGroup import
@@ -289,6 +290,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolInterruption:      true, // warn: runs to completion
 	targetcap.FieldOutbound:              true, // SIP dial-out off job metadata
 	targetcap.FieldVoicemail:             true, // AMD machine-vm branches (N6)
+	targetcap.FieldTracingLangfuse:       true,
 }
 
 // GenerateLiveKit lowers a validated agent + livekit target into a project. The
