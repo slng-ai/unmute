@@ -72,6 +72,39 @@ func TestApplyPlanIsOrdered(t *testing.T) {
 	}
 }
 
+func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { // telephony V7, V19
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = "twilio"
+	configured.Connection = "primary_phone"
+	pkg.Targets["pipecat"] = configured
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := buildTelephonyRuntimePlan(agent.Targets["pipecat"])
+	if plan == nil || len(plan.Processes) != 1 || len(plan.PublicEndpoints) != 4 {
+		t.Fatalf("runtime plan = %#v", plan)
+	}
+	if strings.Join(plan.RequiredEnv, ",") != "TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER" {
+		t.Fatalf("required env = %v", plan.RequiredEnv)
+	}
+	files, err := withTelephonyReport([]File{{Path: "compile-report.json", Content: []byte(`{"target":"pipecat"}`)}}, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := string(files[0].Content)
+	for _, want := range []string{`"telephony"`, `"carrier": "twilio"`, `"coordination": "local"`, `"smoke": false`} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report missing %s:\n%s", want, report)
+		}
+	}
+}
+
 func loadCompilerAgent(t *testing.T) *ir.Agent {
 	t.Helper()
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))

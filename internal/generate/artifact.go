@@ -17,10 +17,11 @@ const (
 )
 
 type Artifact struct {
-	Kind  ArtifactKind
-	Files []File
-	Apply *ApplyPlan
-	Notes GenerateReport
+	Kind      ArtifactKind
+	Files     []File
+	Apply     *ApplyPlan
+	Notes     GenerateReport
+	Telephony *TelephonyRuntimePlan
 
 	// LiveKitInference lists the bindings that route through LiveKit Inference
 	// (each a human-readable phrase). Non-empty means console mode needs
@@ -65,7 +66,7 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		}
 		return Artifact{}, fmt.Errorf("generate %s: %w", resolved.Name, err)
 	}
-	artifact := Artifact{Kind: artifactKind(resolved.Provider)}
+	artifact := Artifact{Kind: artifactKind(resolved.Provider), Telephony: buildTelephonyRuntimePlan(resolved)}
 	artifact.Notes.ForwardedBindings = report.ForwardedBindings
 	artifact.Notes.Sizing = report.Sizing
 	for _, row := range report.PerTarget {
@@ -77,7 +78,10 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		if err != nil {
 			return Artifact{}, fmt.Errorf("generate %s livekit: %w", resolved.Name, err)
 		}
-		artifact.Files = emitted.Files
+		artifact.Files, err = withTelephonyReport(emitted.Files, artifact.Telephony)
+		if err != nil {
+			return Artifact{}, fmt.Errorf("generate %s livekit: %w", resolved.Name, err)
+		}
 		artifact.LiveKitInference = emitted.LiveKitInference
 		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
@@ -87,7 +91,10 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		if err != nil {
 			return Artifact{}, fmt.Errorf("generate %s pipecat: %w", resolved.Name, err)
 		}
-		artifact.Files = emitted.Files
+		artifact.Files, err = withTelephonyReport(emitted.Files, artifact.Telephony)
+		if err != nil {
+			return Artifact{}, fmt.Errorf("generate %s pipecat: %w", resolved.Name, err)
+		}
 		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
 		return artifact, nil

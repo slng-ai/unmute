@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/slng/unmute/internal/generate"
+	"github.com/slng/unmute/internal/ir"
 )
 
 // copySafeCore copies the example package into a temp dir so compile can write
@@ -17,6 +20,20 @@ func copySafeCore(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+func TestPrintTelephonyPlanUsesArtifactWithoutCarrierDispatch(t *testing.T) {
+	plan := &generate.TelephonyRuntimePlan{
+		Route:       ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "carrier-websocket", Carrier: "twilio"},
+		RequiredEnv: []string{"TWILIO_AUTH_TOKEN"}, Coordination: "local", AdmissionOwner: "generated_runtime",
+	}
+	var out bytes.Buffer
+	printTelephonyPlan(&out, "phone", plan)
+	for _, want := range []string{"provider=pipecat", "transport=carrier-websocket", "carrier=twilio", "required env TWILIO_AUTH_TOKEN"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q: %s", want, out.String())
+		}
+	}
 }
 
 func runCompileCommand(t *testing.T, args ...string) (string, string, error) {
