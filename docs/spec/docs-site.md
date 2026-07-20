@@ -1,6 +1,6 @@
 # SPEC — docs site (localhost guide viewer)
 
-Scope: browse the user-facing guides under `docs/user/**` as a rendered site on localhost. Quick and dirty, open source, zero build step. Tool: [docsify v5](https://docsify.js.org) — renders raw markdown in the browser, no generated output, no site pipeline (verified against docsify docs 2026-07-20).
+Scope: browse the user-facing guides under `docs/user/**` as a rendered site on localhost. Quick and dirty, open source, zero build step. Tool: [docsify v4](https://docsify.js.org) — renders raw markdown in the browser, no generated output, no site pipeline. v4 is the latest published release (4.13.1); **there is no docsify v5 on npm** — see B1.
 
 Internal engineering specs (`docs/spec/*.md`) are **out of the site** — docsify serves only `docs/user/`, so the specs are never injected. They stay where they are; no move, no broken cross-links.
 
@@ -15,14 +15,14 @@ One static `docs/user/index.html` + one `docs/user/_sidebar.md` + one `make docs
 - C5: guides = every `*.md` under `docs/user/` (start/, learn/, concepts/, reference/, targets/). Internal specs `docs/spec/*.md` and root `*.md` (README, SCHEMA, …) are NOT in the site — the serve root is `docs/user/`, above which docsify does not reach. Sidebar is hand-curated (grouped by the five sections), not auto-generated.
 
 ## §I surfaces
-- I.index: `/docs/user/index.html` — `window.$docsify = { name: 'Unmute CLI', loadSidebar: true, auto2top: true, subMaxLevel: 2 }`; docsify v5 core CSS + JS + search plugin from `cdn.jsdelivr.net/npm/docsify@5`.
+- I.index: `/docs/user/index.html` — `window.$docsify = { name: 'Unmute CLI', loadSidebar: true, auto2top: true, subMaxLevel: 2, search: 'auto' }`; docsify v4 from `cdn.jsdelivr.net/npm/docsify@4` — theme `lib/themes/vue.css`, core `docsify@4`, search plugin `lib/plugins/search.min.js` (v4 uses `lib/`, not `dist/`).
 - I.sidebar: `/docs/user/_sidebar.md` — curated link tree grouped Start / Learn / Concepts / Reference / Targets; `README.md` is the docsify default homepage.
 - I.make: `make docs` → `npx --yes docsify-cli serve docs/user --port 3000` (live reload included).
 - I.url: `http://localhost:3000`.
 
 ## §V invariants
 V1: `go test ./...`, `make build`, `make lint` unaffected — the site files are inert data under `docs/user/`, invisible to the Go toolchain.
-V2: `index.html` pins docsify major version 5 via CDN URL; no minified JS committed to the repo.
+V2: `index.html` pins a docsify major version that actually resolves on the CDN (currently `@4`), with paths matching that major (`lib/` for v4); no minified JS committed to the repo. A CDN URL that 404s leaves the page stuck on "Loading…" — a pinned version must be verified to resolve, not assumed (B1).
 V3: every path linked in `_sidebar.md` exists under `docs/user/` — no dead sidebar entries.
 V4: every `*.md` under `docs/user/` (except `_sidebar.md`) appears in `_sidebar.md` — a guide missing from the sidebar is a spec violation, not a judgment call.
 V5: the site never mutates the tree — serving is read-only; `git status` clean before and after `make docs`. `docs/spec/*.md` is never served.
@@ -35,3 +35,4 @@ T3|x|add `make docs` target (`npx --yes docsify-cli serve docs/user --port 3000`
 
 ## §B bugs
 id|date|cause|fix
+B1|2026-07-20|`index.html` pinned `docsify@5` with `dist/` paths; docsify has no v5 on npm (latest 4.13.1), so every CDN asset 404'd and the page hung on "Loading…" forever. context7 docs described an unreleased v5|V2 (verify the CDN URL resolves; repin to `@4` with `lib/` paths)
