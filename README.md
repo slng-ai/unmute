@@ -29,6 +29,23 @@ make install      # into your Go bin path
 
 Direct equivalent: `CGO_ENABLED=0 go build -o bin/unmute .`
 
+## Docs
+
+The user guides in [docs/user/](docs/user/README.md) render as a searchable
+site with no build step — [docsify](https://docsify.js.org) serves the Markdown
+in place from a CDN (needs `npx` on your PATH).
+
+```sh
+make docs          # serves docs/user/ on http://localhost:3000
+```
+
+Then open `http://localhost:3000` and browse the Start / Learn / Concepts /
+Reference / Targets sidebar. Edit any `docs/user/**/*.md` and the open page
+live-reloads on save. Only `docs/user/` is served, so the engineering specs in
+`docs/spec/` stay out of the site.
+
+Direct equivalent: `npx --yes docsify-cli serve docs/user --port 3000`.
+
 ## Test
 
 The default gate is pure Go and needs zero Python:

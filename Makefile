@@ -6,5 +6,6 @@ smoke:   ; go test -tags smoke ./...
 lint:    ; golangci-lint run
 fmt:     ; gofmt -w . && go vet ./...
 install: ; go install -ldflags "$(LDFLAGS)" .
+docs:    ; npx --yes docsify-cli serve docs/user --port 3000
 
-.PHONY: build test smoke lint fmt install
+.PHONY: build test smoke lint fmt install docs
