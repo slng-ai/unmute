@@ -5,10 +5,11 @@ a directory of declarative YAML, then compile or apply it to the orchestration
 layer you choose. `unmute init` scaffolds an SLNG-bound project (one
 `SLNG_API_KEY` covers hosted STT and TTS) unless you change a model; any
 provider a framework integrates is a one-line model change
-(docs/user/reference/providers.md).
+([provider reference](docs/user/reference/providers.md)).
 
 Commands: `init`, `validate`, `compile`, `apply`, `dev`
-(docs/user/reference/cli.md). Drivers shipped today: **Pipecat** and
+([CLI reference](docs/user/reference/cli.md)). Drivers shipped today:
+**Pipecat** and
 **LiveKit** (code targets, `compile` writes a runnable Python project) and
 **ElevenLabs** (managed target, `apply` reconciles the provider config). Vapi
 and Deepgram fail with `driver is not implemented` until theirs land.
@@ -76,31 +77,135 @@ generated `bot.py`, and instantiates every emitted service constructor against
 the installed packages, so provider kwarg drift fails here rather than at a
 user's first run.
 
-## Try it
+## Try the CLI end to end
+
+The following workflow covers the current architecture: author a portable
+package, validate it, compile platform-native projects, and run those generated
+projects either directly or through `unmute dev`.
+
+### Initialize and compile a package
+
+Run these commands from the repository root. The default scaffold declares one
+Pipecat target named `pipecat`.
 
 ```sh
-bin/unmute init demo-agent          # SLNG-bound v1 package: agent.yaml,
-                                    # instructions.md, targets.yaml, .env.example
-bin/unmute validate demo-agent      # schema + capability + provider-matrix checks
-bin/unmute compile demo-agent       # writes build/pipecat/ (bot.py, pyproject, ...)
-bin/unmute dev demo-agent           # runs it with uv and opens a web client
-bin/unmute dev demo-agent --console # talks through your terminal mic/speaker
+make build
+bin/unmute init demo-agent
+bin/unmute validate demo-agent
+bin/unmute compile demo-agent
 ```
 
-`dev` needs `uv` on your PATH and keys in a `.env` at the package root; the
-scaffold's `.env.example` lists exactly what the project reads. LiveKit web
-mode also needs a LiveKit server; with no configured server, `unmute dev`
-reuses or starts a local `livekit-server --dev` process.
+`init` writes `agent.yaml`, `instructions.md`, `targets.yaml`, and
+`.env.example`. `compile` writes the native project to
+`demo-agent/build/pipecat/`; the generated project does not import or require
+Unmute at runtime.
 
-The [example matrix](examples/README.md) isolates prompts, tasks, task groups,
-and sub-agent handoffs for LiveKit and Pipecat:
+### Validate and compile every example
+
+The [example matrix](examples/README.md) covers one large prompt, one task,
+ordered task groups, and sub-agent handoffs. Every package declares both
+`pipecat` and `livekit`, so omitting `--target` validates and compiles both.
 
 ```sh
-bin/unmute validate examples/simple-prompt
-bin/unmute compile examples/single-task
-bin/unmute compile examples/task-groups
-bin/unmute compile examples/subagents
+for EXAMPLE in simple-prompt single-task task-groups subagents; do
+  bin/unmute validate "examples/$EXAMPLE"
+  bin/unmute compile "examples/$EXAMPLE"
+done
 ```
+
+Compilation replaces each selected `build/<target>/` directory. Compile before
+copying credentials or running `uv`; recompiling removes files such as `.env`,
+`.env.local`, and `.venv` from the generated directory.
+
+### Configure credentials for the examples
+
+Keep shared credentials in the ignored repository-root `.env.local`. Use the
+generated `.env.example` files as the exact list of variables, and fill in the
+values before running an agent.
+
+```sh
+EXAMPLE=simple-prompt
+
+sed -n '1,200p' "examples/$EXAMPLE/build/pipecat/.env.example"
+sed -n '1,200p' "examples/$EXAMPLE/build/livekit/.env.example"
+```
+
+Set `EXAMPLE` to `simple-prompt`, `single-task`, `task-groups`, or `subagents`
+and repeat the run commands below to test each orchestration structure.
+
+### Run the generated Pipecat project
+
+Pipecat loads `.env` from its generated project directory. The default command
+starts a WebRTC test client and prints the URL to open.
+
+```sh
+EXAMPLE=simple-prompt
+cp .env.local "examples/$EXAMPLE/build/pipecat/.env"
+(
+  cd "examples/$EXAMPLE/build/pipecat"
+  uv run bot.py
+)
+```
+
+To use your terminal microphone and speaker instead, install PortAudio first
+and run the console extra.
+
+```sh
+EXAMPLE=simple-prompt
+cp .env.local "examples/$EXAMPLE/build/pipecat/.env"
+(
+  cd "examples/$EXAMPLE/build/pipecat"
+  uv run --extra console bot.py console
+)
+```
+
+### Run the generated LiveKit project
+
+LiveKit loads `.env.local` from its generated project directory. Console mode
+is the shortest direct test of the emitted agent.
+
+```sh
+EXAMPLE=simple-prompt
+cp .env.local "examples/$EXAMPLE/build/livekit/.env.local"
+(
+  cd "examples/$EXAMPLE/build/livekit"
+  uv run agent.py console
+)
+```
+
+To register the generated agent as a LiveKit development worker, run its
+development command against the LiveKit server configured in `.env.local`.
+
+```sh
+EXAMPLE=simple-prompt
+cp .env.local "examples/$EXAMPLE/build/livekit/.env.local"
+(
+  cd "examples/$EXAMPLE/build/livekit"
+  uv run agent.py dev
+)
+```
+
+### Run an example through `unmute dev`
+
+`dev` is implemented in the current CLI. It recompiles the selected target,
+runs the generated project with `uv`, and opens a browser client by default.
+Unlike direct generated-project runs, it reads `.env` from the source package
+root.
+
+```sh
+EXAMPLE=simple-prompt
+cp .env.local "examples/$EXAMPLE/.env"
+
+# Run one command at a time. Press ctrl-c before trying another mode.
+bin/unmute dev "examples/$EXAMPLE" --target pipecat
+bin/unmute dev "examples/$EXAMPLE" --target pipecat --console
+bin/unmute dev "examples/$EXAMPLE" --target livekit
+bin/unmute dev "examples/$EXAMPLE" --target livekit --console
+```
+
+`dev` needs `uv` on your `PATH`. Pipecat console mode also needs PortAudio.
+LiveKit web mode uses configured LiveKit credentials or reuses or starts a
+local `livekit-server --dev` process.
 
 The public packages use one salon workflow to show increasing orchestration
 structure. Five-target portability and the legacy combined handoff/task-group
