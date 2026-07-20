@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	packagespec "github.com/slng/unmute/internal/spec"
+	targetcap "github.com/slng/unmute/internal/target"
 )
 
 var (
@@ -689,13 +690,17 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 			return Target{}, missing(pkg, "targets.yaml", "connection", raw.Connection)
 		}
 	}
-	return Target{
+	built := Target{
 		Name: name, Provider: Provider(raw.Provider), Version: raw.Version, Pins: raw.Pins,
 		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier, Connection: raw.Connection,
 		Region: raw.Region, Edition: raw.Edition,
 		Models:       resolveBindings(agent, used, raw.Models),
 		Destinations: raw.Destinations,
-	}, nil
+	}
+	if raw.Connection != "" && hasTelephonyChannel(agent) {
+		built.Telephony = buildTelephonyPlan(pkg, agent, built)
+	}
+	return built, nil
 }
 
 func hasTelephonyChannel(agent *Agent) bool {
@@ -705,6 +710,74 @@ func hasTelephonyChannel(agent *Agent) bool {
 		}
 	}
 	return false
+}
+
+func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target) *TelephonyPlan {
+	features := map[targetcap.TelephonyFeature]bool{targetcap.TelephonyRouteSelected: true}
+	var channels []string
+	for _, name := range slices.Sorted(maps.Keys(agent.Channels)) {
+		channel := agent.Channels[name]
+		if channel.Kind != ChannelTelephony {
+			continue
+		}
+		channels = append(channels, name)
+		if channel.Inbound != nil && *channel.Inbound {
+			features[targetcap.TelephonyInbound] = true
+		}
+		if channel.Outbound != nil && *channel.Outbound {
+			features[targetcap.TelephonyOutbound] = true
+			if channel.OnVoicemail != "" {
+				features[targetcap.TelephonyFeature(targetcap.VoicemailDetection)] = true
+			}
+		}
+		for _, control := range channel.RequiredControls {
+			features[targetcap.TelephonyFeature(control)] = true
+		}
+	}
+	for _, control := range pkg.Agent.Controls {
+		if control.Kind != string(ControlHumanTransfer) {
+			continue
+		}
+		mode := stringValue(control.Mode)
+		if mode == "" {
+			mode = string(TransferCold)
+		}
+		features[targetcap.TelephonyFeature(mode+"_transfer")] = true
+		switch stringValue(control.Briefing) {
+		case string(BriefingSummary):
+			features[targetcap.TelephonyBriefingSummary] = true
+		case string(BriefingMessage):
+			features[targetcap.TelephonyBriefingMessage] = true
+		case string(BriefingWait):
+			features[targetcap.TelephonyBriefingWait] = true
+		}
+	}
+	sources := make(map[string]VariableSource)
+	for name, variable := range agent.Variables {
+		if variable.Source == "" || variable.Source == VariableSourceCallStart {
+			continue
+		}
+		sources[name] = variable.Source
+		features[targetcap.TelephonyFeature(targetcap.TelephonySourcePrefix+string(variable.Source))] = true
+	}
+	key := targetcap.TelephonyKey{
+		Provider: targetcap.Provider(resolved.Provider), Transport: resolved.Transport, Carrier: resolved.Carrier,
+	}
+	evidence := make([]TelephonyFeatureEvidence, 0, len(features))
+	for _, feature := range slices.Sorted(maps.Keys(features)) {
+		row := targetcap.ResolveTelephonyFeature(key, feature)
+		evidence = append(evidence, TelephonyFeatureEvidence{
+			Feature: string(row.Feature), Tag: string(row.Tag), Note: row.Note,
+			Docs: row.Docs, Verified: row.Verified, Smoke: row.Smoke,
+		})
+	}
+	connection := agent.Connections[resolved.Connection]
+	return &TelephonyPlan{
+		Channels: channels, Connection: resolved.Connection,
+		Key:         TelephonyKey{Provider: resolved.Provider, Transport: resolved.Transport, Carrier: resolved.Carrier},
+		Environment: maps.Clone(connection.Environment), Destinations: maps.Clone(resolved.Destinations),
+		SystemSources: sources, Evidence: evidence, Coordination: "local", AdmissionOwner: "generated_runtime",
+	}
 }
 
 func validDestination(value string) bool {

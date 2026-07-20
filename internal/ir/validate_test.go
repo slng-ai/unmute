@@ -289,7 +289,25 @@ func TestValidateResolvesRequiredControlsAgainstTargetRoute(t *testing.T) {
 	target := targetFor(agent, ProviderLiveKit)
 	target.Carrier = ""
 	report, err := Validate(agent, []Target{target}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "proven only for carrier Twilio") {
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "exact carrier Twilio") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateTelephonyPlanFailsClosedWithoutRouteSmoke(t *testing.T) { // telephony V4-V6
+	pkg := loadSafeCore(t)
+	target := pkg.Targets["pipecat"]
+	target.Transport = "carrier-websocket"
+	target.Carrier = "twilio"
+	target.Connection = "primary_phone"
+	pkg.Targets["pipecat"] = target
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["pipecat"]
+	report, err := Validate(agent, []Target{resolved}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "has not passed its credentialed smoke") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}
 }

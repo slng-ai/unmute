@@ -349,6 +349,33 @@ type Connection struct {
 	Environment map[string]string `json:"environment" yaml:"environment"`
 }
 
+type TelephonyPlan struct {
+	Channels       []string                   `json:"channels" yaml:"channels"`
+	Connection     string                     `json:"connection" yaml:"connection"`
+	Key            TelephonyKey               `json:"key" yaml:"key"`
+	Environment    map[string]string          `json:"environment" yaml:"environment"`
+	Destinations   map[string]string          `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	SystemSources  map[string]VariableSource  `json:"system_sources,omitempty" yaml:"system_sources,omitempty"`
+	Evidence       []TelephonyFeatureEvidence `json:"evidence" yaml:"evidence"`
+	Coordination   string                     `json:"coordination" yaml:"coordination"`
+	AdmissionOwner string                     `json:"admission_owner" yaml:"admission_owner"`
+}
+
+type TelephonyKey struct {
+	Provider  Provider `json:"provider" yaml:"provider"`
+	Transport string   `json:"transport" yaml:"transport"`
+	Carrier   string   `json:"carrier" yaml:"carrier"`
+}
+
+type TelephonyFeatureEvidence struct {
+	Feature  string `json:"feature" yaml:"feature"`
+	Tag      string `json:"tag" yaml:"tag"`
+	Note     string `json:"note,omitempty" yaml:"note,omitempty"`
+	Docs     string `json:"docs,omitempty" yaml:"docs,omitempty"`
+	Verified string `json:"verified,omitempty" yaml:"verified,omitempty"`
+	Smoke    bool   `json:"smoke" yaml:"smoke"`
+}
+
 type Target struct {
 	Name         string            `json:"name" yaml:"name"`
 	Provider     Provider          `json:"provider" yaml:"provider"`
@@ -362,6 +389,7 @@ type Target struct {
 	Edition      string            `json:"edition,omitempty" yaml:"edition,omitempty"`
 	Models       Bindings          `json:"models" yaml:"models"`
 	Destinations map[string]string `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	Telephony    *TelephonyPlan    `json:"telephony,omitempty" yaml:"telephony,omitempty"`
 }
 
 type Provider string

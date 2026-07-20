@@ -60,7 +60,8 @@ func TestTelephonyControlsResolveCarrierAndTransport(t *testing.T) {
 		{"vapi warm wrong carrier", WarmTransfer, Vapi, "", "telnyx", Gated},
 		{"vapi warm Twilio", WarmTransfer, Vapi, "", "twilio", Core},
 		{"DTMF missing route", DTMFSend, LiveKit, "", "", Gated},
-		{"DTMF carrier route", DTMFSend, LiveKit, "", "twilio", Core},
+		{"DTMF carrier only", DTMFSend, LiveKit, "", "twilio", Gated},
+		{"DTMF exact route", DTMFSend, LiveKit, "daily-sip", "twilio", Core},
 		{"DTMF unknown carrier", DTMFSend, LiveKit, "", "made-up", Gated},
 		{"Deepgram voicemail missing carrier", VoicemailDetection, Deepgram, "", "", Gated},
 	}
@@ -70,6 +71,44 @@ func TestTelephonyControlsResolveCarrierAndTransport(t *testing.T) {
 				t.Fatalf("capability = %#v", got)
 			}
 		})
+	}
+}
+
+func TestTelephonyControlRequiresExactCarrierAndTransport(t *testing.T) {
+	table := Table{Controls: map[TelephonyControl]map[Provider]ControlCapability{
+		ColdTransfer: {
+			Pipecat: {
+				Capability: Capability{Tag: Core}, Carrier: "twilio", Transport: "carrier-websocket",
+				ConditionNote: "exact route required",
+			},
+		},
+	}}
+	for _, route := range []struct{ transport, carrier string }{
+		{"carrier-websocket", "telnyx"},
+		{"sip", "twilio"},
+	} {
+		if got := table.Control(ColdTransfer, Pipecat, route.transport, route.carrier); got.Tag != Gated {
+			t.Fatalf("partial route match passed: %#v", got)
+		}
+	}
+}
+
+func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
+	exact := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}
+	if got := ResolveTelephonyFeature(exact, TelephonyInbound); got.Tag != Provisional || got.Docs == "" || got.Verified == "" || got.Smoke {
+		t.Fatalf("exact route evidence = %#v", got)
+	}
+	for _, key := range []TelephonyKey{
+		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"},
+		{Provider: Pipecat, Transport: "sip", Carrier: "twilio"},
+	} {
+		if got := ResolveTelephonyFeature(key, TelephonyBriefingMessage); got.Tag != Gated {
+			t.Fatalf("partial or unsupported route passed: %#v", got)
+		}
+	}
+	connector := TelephonyKey{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}
+	if got := ResolveTelephonyFeature(connector, TelephonyFeature(WarmTransfer)); got.Tag != Gated {
+		t.Fatalf("connector inherited SIP warm transfer: %#v", got)
 	}
 }
 

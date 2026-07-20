@@ -31,8 +31,29 @@ func TestBuildSafeCore(t *testing.T) {
 	if got := agent.Connections["primary_phone"].Environment["account_sid"]; got != "TWILIO_ACCOUNT_SID" {
 		t.Fatalf("resolved connection account_sid = %q", got)
 	}
-	if got := agent.Targets["pipecat"].Connection; got != "primary_phone" {
-		t.Fatalf("pipecat connection = %q", got)
+}
+
+func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
+	pkg := loadSafeCore(t)
+	target := pkg.Targets["pipecat"]
+	target.Transport = "carrier-websocket"
+	target.Carrier = "twilio"
+	target.Connection = "primary_phone"
+	pkg.Targets["pipecat"] = target
+
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := agent.Targets["pipecat"].Telephony
+	if plan == nil {
+		t.Fatal("telephony plan was not resolved")
+	}
+	if plan.Key.Transport != "carrier-websocket" || plan.Key.Carrier != "twilio" || plan.Connection != "primary_phone" {
+		t.Fatalf("route = %#v", plan)
+	}
+	if plan.AdmissionOwner != "generated_runtime" || len(plan.Evidence) == 0 {
+		t.Fatalf("incomplete plan = %#v", plan)
 	}
 }
 

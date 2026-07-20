@@ -490,6 +490,7 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	}
 	validateTools(agent, resolved, provider, caps, row)
 	validateConversation(agent.Conversation, provider, caps, row)
+	validateTelephonyPlan(resolved.Telephony, row)
 	validateCapacity(agent, resolved, provider, row)
 	validateChannels(agent, resolved, provider, caps, row)
 }
@@ -724,6 +725,14 @@ func validateFallbacks(agent *Agent, resolved Target, caps targetcap.Table, row 
 }
 
 func validateHumanTransfer(control *HumanTransfer, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
+	if resolved.Telephony != nil {
+		switch control.Briefing {
+		case "", BriefingSummary, BriefingMessage, BriefingWait:
+		default:
+			row.Errors = add(row.Errors, fmt.Sprintf("unknown warm-transfer briefing %q", control.Briefing))
+		}
+		return
+	}
 	required := targetcap.ColdTransfer
 	if control.Mode == TransferWarm {
 		required = targetcap.WarmTransfer
@@ -828,8 +837,10 @@ func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider
 			if !validRequiredControl(control) {
 				continue
 			}
-			name := targetcap.TelephonyControl(control)
-			applyResolvedCapability(caps.Control(name, provider, resolved.Transport, resolved.Carrier), name, provider, row)
+			if resolved.Telephony == nil {
+				name := targetcap.TelephonyControl(control)
+				applyResolvedCapability(caps.Control(name, provider, resolved.Transport, resolved.Carrier), name, provider, row)
+			}
 		}
 		if channel.Kind != ChannelTelephony || channel.Outbound == nil || !*channel.Outbound {
 			continue
@@ -842,10 +853,32 @@ func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider
 				row.Errors = add(row.Errors, fmt.Sprintf("outbound call_start variable %q is not satisfiable", name))
 			}
 		}
-		applyCapability(caps, targetcap.FieldOutbound, provider, row)
-		if channel.OnVoicemail != "" {
-			applyCapability(caps, targetcap.FieldVoicemail, provider, row)
-			applyResolvedCapability(caps.Control(targetcap.VoicemailDetection, provider, resolved.Transport, resolved.Carrier), targetcap.VoicemailDetection, provider, row)
+		if resolved.Telephony == nil {
+			applyCapability(caps, targetcap.FieldOutbound, provider, row)
+			if channel.OnVoicemail != "" {
+				applyCapability(caps, targetcap.FieldVoicemail, provider, row)
+				applyResolvedCapability(caps.Control(targetcap.VoicemailDetection, provider, resolved.Transport, resolved.Carrier), targetcap.VoicemailDetection, provider, row)
+			}
+		}
+	}
+}
+
+func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
+	if plan == nil {
+		return
+	}
+	for _, evidence := range plan.Evidence {
+		switch targetcap.Tag(evidence.Tag) {
+		case targetcap.Core:
+			if evidence.Docs == "" || evidence.Verified == "" || !evidence.Smoke {
+				row.Errors = add(row.Errors, fmt.Sprintf("telephony feature %s lacks complete route evidence", evidence.Feature))
+			}
+		case targetcap.Warn:
+			row.Warnings = add(row.Warnings, evidence.Note)
+		case targetcap.Gated, targetcap.Provisional:
+			row.Errors = add(row.Errors, fmt.Sprintf("telephony %s: %s", evidence.Feature, evidence.Note))
+		default:
+			row.Errors = add(row.Errors, fmt.Sprintf("telephony feature %s has no capability tag", evidence.Feature))
 		}
 	}
 }
