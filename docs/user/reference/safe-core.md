@@ -1,6 +1,11 @@
 # Reference: the safe core
 
-The **safe core** is the subset of the schema that passes validation on every one of the five targets. Write inside it and the same package runs on LiveKit, Pipecat, Vapi, ElevenLabs, and Deepgram, with warnings at most, never a failure. The example in `examples/safe_core/` follows these rules exactly. This page is the authoritative list, from `SCHEMA.md` section 7.
+The **safe core** is the subset of the schema that passes validation on every
+one of the five targets. Write inside it and the same package runs on LiveKit,
+Pipecat, Vapi, ElevenLabs, and Deepgram, with warnings at most, never a failure.
+The compiler's [safe-core regression fixture](../../../internal/testdata/safe_core/)
+follows these rules exactly. This page is the authoritative list from
+`SCHEMA.md` section 7.
 
 ## The rules
 

@@ -147,8 +147,9 @@ go test ./internal/generate  -update-pipecat    # pipecat_v1.txt + pipecat_v1_ta
 ```
 
 The Pipecat goldens live at
-`internal/generate/testdata/golden/pipecat_v1.txt` (the full safe_core file set)
-and `pipecat_v1_tasks_bot.py` (the tasks / task-group / delegate agency level).
+`internal/generate/testdata/golden/pipecat_v1.txt` (the full internal
+`safe_core` fixture) and `pipecat_v1_tasks_bot.py` (the tasks, task-group, and
+delegate agency levels).
 
 ## Smoke tests (L4)
 
@@ -156,15 +157,16 @@ and `pipecat_v1_tasks_bot.py` (the tasks / task-group / delegate agency level).
 make smoke        # == go test -tags smoke ./...
 ```
 
-Opt-in, not part of the default gate. It emits the safe_core Pipecat project and
-proves the generated `bot.py` is valid Python via
-`uv run --no-project python -m py_compile`. If `uv` is unavailable, the smoke
-test skips rather than fails.
+Opt-in, not part of the default gate. It emits projects from the internal
+`safe_core` and `remy` fixtures plus public task-group and local-tool cases.
+Using `uv`, it resolves the generated dependencies, imports the generated
+Python, and instantiates framework services and agents. If `uv` is unavailable,
+the smoke test skips rather than fails.
 
 Run it directly:
 
 ```sh
-go test -tags smoke ./internal/generate -run TestSmokePipecatV1BotPyCompiles
+go test -tags smoke ./internal/generate -run TestSmokePipecatV1ServicesInstantiate
 ```
 
 ## End-to-end manual verification

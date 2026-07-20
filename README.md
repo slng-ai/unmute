@@ -102,8 +102,9 @@ bin/unmute compile examples/task-groups
 bin/unmute compile examples/subagents
 ```
 
-The existing `safe_core` package remains the five-target portability fixture,
-and `remy` remains the combined LiveKit handoff and task-group fixture.
+The public packages use one salon workflow to show increasing orchestration
+structure. Five-target portability and the legacy combined handoff/task-group
+case remain internal fixtures under `internal/testdata/`.
 
 For a managed target, `apply` executes the plan against the provider
 (ElevenLabs needs `ELEVENLABS_API_KEY`; it creates or PATCHes one agent
