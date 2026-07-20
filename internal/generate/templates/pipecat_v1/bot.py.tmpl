@@ -460,7 +460,7 @@ async def _flow_tool_{{.Name}}(args, flow_manager):
 transport_params: dict = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
-{{if .Telephony}}    "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True),
+{{if .Telephony}}    {{pyq .Telephony.Carrier}}: lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True),
 {{end}}
 }
 

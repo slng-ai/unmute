@@ -196,7 +196,8 @@ and
 [LiveKit self-hosted SIP guide](https://docs.livekit.io/transport/self-hosting/sip-server/).
 
 No carrier or LiveKit credentials were available during the initial build.
-Every live route therefore stays provisional until its corresponding inbound,
+The generated Pipecat Twilio and Telnyx adapters therefore have offline tests
+only. Every live route stays provisional until its corresponding inbound,
 outbound, hangup, authentication, and advertised-control smoke completes.
 
 ## Architecture

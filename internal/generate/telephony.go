@@ -49,6 +49,13 @@ func TelephonyRuntimePlanFor(target ir.Target) *TelephonyRuntimePlan {
 			"configure Twilio call status callbacks as POST to the reported status endpoint",
 		}
 	}
+	if plan.Key.Provider == ir.ProviderPipecat && plan.Key.Transport == "carrier-websocket" && plan.Key.Carrier == "telnyx" {
+		runtime.ManualSteps = []string{
+			"get an API key and public key from Telnyx Mission Control, then select a Voice API Application and phone number",
+			"set the Voice API Application webhook URL to the reported inbound endpoint and use API version 2",
+			"assign the selected phone number to that Voice API Application; generated outbound calls report status to the reported status endpoint",
+		}
+	}
 	for _, name := range plan.Environment {
 		runtime.RequiredEnv = append(runtime.RequiredEnv, name)
 	}

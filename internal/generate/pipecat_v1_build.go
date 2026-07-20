@@ -85,7 +85,12 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	setImportNeeds(&data)
 	data.Imports, data.Extras, data.Deps = collectImportsExtras(data)
 	if data.Telephony != nil {
-		data.Deps = append(data.Deps, "twilio>=9,<10")
+		switch data.Telephony.Carrier {
+		case "twilio":
+			data.Deps = append(data.Deps, "twilio>=9,<10")
+		case "telnyx":
+			data.Deps = append(data.Deps, "cryptography>=45,<47")
+		}
 		slices.Sort(data.Deps)
 	}
 	data.RequiredEnv = env.sorted()
@@ -97,10 +102,18 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 	if plan == nil {
 		return nil, nil
 	}
-	if plan.Key.Provider != ir.ProviderPipecat || plan.Key.Transport != "carrier-websocket" || plan.Key.Carrier != "twilio" {
+	if plan.Key.Provider != ir.ProviderPipecat || plan.Key.Transport != "carrier-websocket" {
 		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no emitted adapter", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
 	}
-	required := []string{"account_sid", "auth_token", "from_number"}
+	var required []string
+	switch plan.Key.Carrier {
+	case "twilio":
+		required = []string{"account_sid", "auth_token", "from_number"}
+	case "telnyx":
+		required = []string{"api_key", "public_key", "connection_id", "from_number"}
+	default:
+		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no emitted adapter", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+	}
 	allowed := map[string]bool{}
 	for _, key := range required {
 		allowed[key] = true
@@ -120,7 +133,8 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 	telephony := &pipecatTelephony{
 		Carrier: plan.Key.Carrier, Connection: plan.Connection,
 		AccountSIDEnv: plan.Environment["account_sid"], AuthTokenEnv: plan.Environment["auth_token"],
-		FromNumberEnv: plan.Environment["from_number"],
+		APIKeyEnv: plan.Environment["api_key"], PublicKeyEnv: plan.Environment["public_key"],
+		ConnectionEnv: plan.Environment["connection_id"], FromNumberEnv: plan.Environment["from_number"],
 	}
 	for _, evidence := range plan.Evidence {
 		switch evidence.Feature {

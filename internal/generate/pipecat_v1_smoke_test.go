@@ -91,6 +91,20 @@ func TestSmokePipecatV1ConsoleExtraResolves(t *testing.T) {
 }
 
 func TestSmokePipecatTwilioTemplatesCompileWithoutCredentials(t *testing.T) { // telephony V20
+	testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t, "twilio", map[string]string{
+		"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN", "from_number": "TWILIO_PHONE_NUMBER",
+	})
+}
+
+func TestSmokePipecatTelnyxTemplatesCompileWithoutCredentials(t *testing.T) { // telephony T8, V20
+	testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t, "telnyx", map[string]string{
+		"api_key": "TELNYX_API_KEY", "public_key": "TELNYX_PUBLIC_KEY",
+		"connection_id": "TELNYX_CONNECTION_ID", "from_number": "TELNYX_PHONE_NUMBER",
+	})
+}
+
+func testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t *testing.T, carrier string, environment map[string]string) {
+	t.Helper()
 	python, err := exec.LookPath("python3")
 	if err != nil {
 		t.Skip("python3 not available")
@@ -101,9 +115,12 @@ func TestSmokePipecatTwilioTemplatesCompileWithoutCredentials(t *testing.T) { //
 	}
 	configured := pkg.Targets["pipecat"]
 	configured.Transport = "carrier-websocket"
-	configured.Carrier = "twilio"
+	configured.Carrier = carrier
 	configured.Connection = "primary_phone"
 	pkg.Targets["pipecat"] = configured
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment = environment
+	pkg.Connections["primary_phone"] = connection
 	agent, err := ir.Build(pkg)
 	if err != nil {
 		t.Fatal(err)

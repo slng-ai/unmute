@@ -162,6 +162,9 @@ type pipecatTelephony struct {
 	Connection    string
 	AccountSIDEnv string
 	AuthTokenEnv  string
+	APIKeyEnv     string
+	PublicKeyEnv  string
+	ConnectionEnv string
 	FromNumberEnv string
 	HasInbound    bool
 	HasOutbound   bool
@@ -321,7 +324,11 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		{"env.example", ".env.example"},
 	}
 	if data.Telephony != nil {
-		outputs = append(outputs, struct{ tmpl, path string }{"telephony.py", "telephony.py"})
+		templateName := "telephony.py"
+		if data.Telephony.Carrier == "telnyx" {
+			templateName = "telephony_telnyx.py"
+		}
+		outputs = append(outputs, struct{ tmpl, path string }{templateName, "telephony.py"})
 	} else {
 		outputs = append(outputs, struct{ tmpl, path string }{"pcc-deploy.toml", "pcc-deploy.toml"})
 	}

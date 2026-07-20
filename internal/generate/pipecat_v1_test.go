@@ -474,6 +474,79 @@ func TestPipecatTwilioTelephonyRejectsConnectionVocabularyDrift(t *testing.T) { 
 	}
 }
 
+func TestPipecatTelnyxTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T) { // telephony T8, V7-V14
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = "telnyx"
+	configured.Connection = "primary_phone"
+	pkg.Targets["pipecat"] = configured
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment = map[string]string{
+		"api_key":       "TELNYX_API_KEY",
+		"public_key":    "TELNYX_PUBLIC_KEY",
+		"connection_id": "TELNYX_CONNECTION_ID",
+		"from_number":   "TELNYX_PHONE_NUMBER",
+	}
+	pkg.Connections["primary_phone"] = connection
+	outbound := true
+	phone := pkg.Agent.Channels["phone"]
+	phone.Outbound = &outbound
+	pkg.Agent.Channels["phone"] = phone
+	pkg.Agent.Variables["campaign_id"] = spec.Variable{Type: "string", Source: "call_start"}
+
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := artifactFile(t, artifact, "telephony.py")
+	for _, want := range []string{
+		`Ed25519PublicKey.from_public_bytes`,
+		`abs(int(time.time()) - signed_at) > WEBHOOK_TOLERANCE_SECS`,
+		`timestamp.encode() + b"|" + raw`,
+		`data["id"] in _seen_events`,
+		`"stream_bidirectional_mode": "rtp"`,
+		`"stream_bidirectional_codec": "PCMU"`,
+		`"command_id": secrets.token_urlsafe(24)`,
+		`pending = _pending.pop(token, None)`,
+		`hmac.compare_digest(request.headers.get("Authorization", ""), expected)`,
+		`"carrier": "telnyx"`,
+	} {
+		if !strings.Contains(adapter, want) {
+			t.Errorf("telephony.py missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"RequestValidator", "Twilio", "Plivo", "Exotel", "media.payload", "audio/x-mulaw"} {
+		if strings.Contains(adapter, forbidden) {
+			t.Errorf("telephony.py contains unselected or media implementation %q", forbidden)
+		}
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	if !strings.Contains(bot, `"telnyx": lambda: FastAPIWebsocketParams`) {
+		t.Error("bot.py does not select the Telnyx Pipecat serializer")
+	}
+	if strings.Contains(bot, `"twilio": lambda: FastAPIWebsocketParams`) {
+		t.Error("bot.py contains the unselected Twilio telephony transport")
+	}
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !strings.Contains(pyproject, `"cryptography>=45,<47"`) || strings.Contains(pyproject, `"twilio>=9,<10"`) {
+		t.Errorf("pyproject.toml has the wrong carrier dependencies:\n%s", pyproject)
+	}
+	report := artifactFile(t, artifact, "compile-report.json")
+	for _, want := range []string{"TELNYX_API_KEY", "TELNYX_PUBLIC_KEY", "TELNYX_CONNECTION_ID", "TELNYX_PHONE_NUMBER"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("compile report missing %s", want)
+		}
+	}
+}
+
 // TestPipecatV1LocalTool covers execution: local (T14, V13): the same @tool
 // shape as webhook whose body imports + awaits the user handler from
 // tools/<name>.py, at both sites — agent @tool method and flows handler. The

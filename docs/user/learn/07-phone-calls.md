@@ -6,9 +6,9 @@ environment variables, and the target selects one exact media route. Unmute
 does not buy a number, create a trunk, or copy credentials into generated code.
 
 All carrier routes are currently **provisional**. The compiler and generated
-Pipecat/Twilio adapter have credential-free tests, but validation continues to
-fail closed until the route passes real inbound, outbound, authentication,
-hangup, and transfer smokes.
+Pipecat Twilio and Telnyx adapters have credential-free tests, but validation
+continues to fail closed until each exact route passes real inbound, outbound,
+authentication, hangup, and transfer smokes.
 
 ## Declare the phone channel
 
@@ -56,9 +56,11 @@ targets:
 ```
 
 Pipecat uses one WebSocket per carrier call and delegates media framing to the
-Pipecat Twilio serializer. The generated `telephony.py` owns signed webhooks,
-one-use outbound context, normalized call metadata, and Twilio REST call
-control. It does not parse or emit audio frames.
+selected Pipecat carrier serializer. The generated `telephony.py` owns signed
+webhooks, one-use outbound context, normalized call metadata, and selected
+carrier call control. It does not parse or emit audio frames. The Twilio and
+Telnyx files are separate generated adapters because their signatures and call
+control APIs differ; selecting one never emits the other's SDK or credentials.
 
 LiveKit uses either `transport: sip` or the distinct Beta
 `transport: connector` route. The Connector is Twilio-only and cannot inherit
@@ -87,6 +89,11 @@ you generate yourself. It is never a carrier credential.
 
 The complete credential links and self-hosted topology are in
 [TELEPHONY.md](../../../TELEPHONY.md#credentials).
+
+For Telnyx, configure the Voice API Application for API version 2 and point its
+webhook URL at the inbound endpoint printed by `unmute dev --telephony`. Assign
+the phone number to that application. Telnyx signs HTTP events with the public
+key; the generated WebSocket URL carries a short-lived, one-use opaque token.
 
 ## Transfer to a person
 

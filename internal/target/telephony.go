@@ -77,6 +77,10 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	warm.Docs = "https://www.twilio.com/docs/voice/conference"
 	route.Features[TelephonyFeature(WarmTransfer)] = warm
 	routes[twilio] = route
+	telnyx := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"}
+	route = routes[telnyx]
+	route.RequiredEnvironment = []string{"api_key", "public_key", "connection_id", "from_number"}
+	routes[telnyx] = route
 	sip := "https://docs.livekit.io/transport/self-hosting/sip-server/"
 	for _, carrier := range []string{"twilio", "telnyx", "plivo", "exotel"} {
 		features := append([]TelephonyFeature{

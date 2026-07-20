@@ -138,7 +138,7 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | `inactivity` nudge and end | ok |
 | `max_duration` | ok |
 | `provider: local` for listen and speak | ok |
-| carrier WebSocket telephony | provisional; generated Twilio adapter has offline tests but no credentialed route smoke |
+| carrier WebSocket telephony | provisional; generated Twilio and Telnyx adapters have offline tests but no credentialed route smoke |
 
 Everything in the [learn pages](../learn/01-one-agent.md), including the guarded handoff, the task, and the task group, runs here. The one hard `fail` is the per-task `model:` override; it sits with the driver gates below.
 
