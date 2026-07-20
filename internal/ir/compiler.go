@@ -10,19 +10,20 @@ type Agent struct {
 	// entry's Kind records its section (names are one namespace, N15).
 	Models map[string]ModelDef `json:"models" yaml:"models"`
 	// Listen/Turn are the resolved selection names into Models ("" = none).
-	Listen       string               `json:"listen,omitempty" yaml:"listen,omitempty"`
-	Turn         string               `json:"turn,omitempty" yaml:"turn,omitempty"`
-	Variables    map[string]Variable  `json:"variables,omitempty" yaml:"variables,omitempty"`
-	Agents       map[string]AgentDef  `json:"agents" yaml:"agents"`
-	Tasks        map[string]Task      `json:"tasks,omitempty" yaml:"tasks,omitempty"`
-	TaskGroups   map[string]TaskGroup `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
-	Controls     map[string]Control   `json:"controls,omitempty" yaml:"controls,omitempty"`
-	Tools        map[string]Tool      `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Conversation *Conversation        `json:"conversation,omitempty" yaml:"conversation,omitempty"`
-	Tracing      *Tracing             `json:"tracing,omitempty" yaml:"tracing,omitempty"`
-	Channels     map[string]Channel   `json:"channels" yaml:"channels"`
-	Capacity     *Capacity            `json:"capacity,omitempty" yaml:"capacity,omitempty"`
-	Targets      map[string]Target    `json:"targets" yaml:"targets"`
+	Listen       string                `json:"listen,omitempty" yaml:"listen,omitempty"`
+	Turn         string                `json:"turn,omitempty" yaml:"turn,omitempty"`
+	Variables    map[string]Variable   `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Agents       map[string]AgentDef   `json:"agents" yaml:"agents"`
+	Tasks        map[string]Task       `json:"tasks,omitempty" yaml:"tasks,omitempty"`
+	TaskGroups   map[string]TaskGroup  `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
+	Controls     map[string]Control    `json:"controls,omitempty" yaml:"controls,omitempty"`
+	Tools        map[string]Tool       `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Conversation *Conversation         `json:"conversation,omitempty" yaml:"conversation,omitempty"`
+	Tracing      *Tracing              `json:"tracing,omitempty" yaml:"tracing,omitempty"`
+	Channels     map[string]Channel    `json:"channels" yaml:"channels"`
+	Capacity     *Capacity             `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	Connections  map[string]Connection `json:"connections,omitempty" yaml:"connections,omitempty"`
+	Targets      map[string]Target     `json:"targets" yaml:"targets"`
 }
 
 type Tracing struct {
@@ -92,7 +93,17 @@ const (
 
 type VariableSource string
 
-const VariableSourceCallStart VariableSource = "call_start"
+const (
+	VariableSourceCallStart  VariableSource = "call_start"
+	VariableSourceSessionID  VariableSource = "session_id"
+	VariableSourceCarrier    VariableSource = "carrier"
+	VariableSourceConnection VariableSource = "connection"
+	VariableSourceCallID     VariableSource = "call_id"
+	VariableSourceStreamID   VariableSource = "stream_id"
+	VariableSourceDirection  VariableSource = "direction"
+	VariableSourceFromNumber VariableSource = "from_number"
+	VariableSourceToNumber   VariableSource = "to_number"
+)
 
 type AgentDef struct {
 	Instructions string   `json:"instructions" yaml:"instructions"`
@@ -327,9 +338,15 @@ const (
 )
 
 type Capacity struct {
-	PeakSessions       int      `json:"peak_sessions" yaml:"peak_sessions"`
-	MaxSessions        int      `json:"max_sessions" yaml:"max_sessions"`
-	AvgSessionDuration Duration `json:"avg_session_duration" yaml:"avg_session_duration"`
+	PeakSessions        int      `json:"peak_sessions" yaml:"peak_sessions"`
+	MaxSessions         int      `json:"max_sessions" yaml:"max_sessions"`
+	PeakStartsPerSecond float64  `json:"peak_starts_per_second,omitempty" yaml:"peak_starts_per_second,omitempty"`
+	AvgSessionDuration  Duration `json:"avg_session_duration" yaml:"avg_session_duration"`
+}
+
+type Connection struct {
+	Kind        string            `json:"kind" yaml:"kind"`
+	Environment map[string]string `json:"environment" yaml:"environment"`
 }
 
 type Target struct {
@@ -340,6 +357,7 @@ type Target struct {
 	SDKLanguage  string            `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
 	Transport    string            `json:"transport,omitempty" yaml:"transport,omitempty"`
 	Carrier      string            `json:"carrier,omitempty" yaml:"carrier,omitempty"`
+	Connection   string            `json:"connection,omitempty" yaml:"connection,omitempty"`
 	Region       string            `json:"region,omitempty" yaml:"region,omitempty"`
 	Edition      string            `json:"edition,omitempty" yaml:"edition,omitempty"`
 	Models       Bindings          `json:"models" yaml:"models"`

@@ -19,9 +19,57 @@ func TestLoadSafeCore(t *testing.T) { // V3, V14
 	if _, ok := pkg.Tools["lookup_customer"]; !ok {
 		t.Fatal("tool filename was not used as its name")
 	}
+	if got := pkg.Connections["primary_phone"].Environment["auth_token"]; got != "TWILIO_AUTH_TOKEN" {
+		t.Fatalf("connection auth_token = %q", got)
+	}
 	if !strings.Contains(pkg.Markdown["instructions.md"], "front desk") {
 		t.Fatal("instructions.md was not loaded by path")
 	}
+}
+
+func TestLoadConnectionsStrictAndPathSafe(t *testing.T) { // telephony V1, V3
+	newPackage := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "connections"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for name, content := range map[string]string{
+			"agent.yaml":   "version: 1\nentry_agent: intake\nmodels: {}\nagents: {}\nchannels: {}\n",
+			"targets.yaml": "targets: {}\n",
+		} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
+
+	t.Run("strict fields", func(t *testing.T) {
+		dir := newPackage(t)
+		path := filepath.Join(dir, "connections", "primary.yaml")
+		if err := os.WriteFile(path, []byte("kind: telephony\nprovider: twilio\nenvironment: {}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(dir)
+		if err == nil || !strings.Contains(err.Error(), "connections/primary.yaml") || !strings.Contains(err.Error(), "provider") {
+			t.Fatalf("want positioned unknown-field error, got %v", err)
+		}
+	})
+
+	t.Run("symlink escape", func(t *testing.T) {
+		dir := newPackage(t)
+		outside := filepath.Join(t.TempDir(), "outside.yaml")
+		if err := os.WriteFile(outside, []byte("kind: telephony\nenvironment: {token: TOKEN}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(dir, "connections", "escape.yaml")); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "escape.yaml") {
+			t.Fatalf("want path escape error, got %v", err)
+		}
+	})
 }
 
 func TestLoadRejectsUnknownFieldWithPosition(t *testing.T) { // V3
@@ -79,7 +127,7 @@ func TestSchemaIsDerivedFromPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if schema.Properties["agent"] == nil || schema.Properties["targets"] == nil {
+	if schema.Properties["agent"] == nil || schema.Properties["connections"] == nil || schema.Properties["targets"] == nil {
 		t.Fatal("derived authoring schema is missing package files")
 	}
 	content, err := json.Marshal(schema)

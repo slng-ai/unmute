@@ -66,6 +66,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		Tools:        make(map[string]Tool, len(pkg.Tools)),
 		Conversation: buildConversation(pkg.Agent.Conversation),
 		Channels:     make(map[string]Channel, len(pkg.Agent.Channels)),
+		Connections:  make(map[string]Connection, len(pkg.Connections)),
 		Targets:      make(map[string]Target, len(pkg.Targets)),
 	}
 	if pkg.Agent.Tracing != nil {
@@ -85,10 +86,30 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 			RequiredControls: channel.RequiredControls, OnVoicemail: VoicemailAction(channel.OnVoicemail),
 		}
 	}
+	for _, name := range sortedKeys(pkg.Connections) {
+		raw := pkg.Connections[name]
+		path := filepath.Join("connections", name+".yaml")
+		if raw.Kind != "telephony" {
+			return nil, fmt.Errorf("%s: connection %q kind must be telephony", pkg.Location(path, "kind:"), name)
+		}
+		if len(raw.Environment) == 0 {
+			return nil, fmt.Errorf("%s: connection %q environment must not be empty", pkg.Location(path, "environment:"), name)
+		}
+		for key, value := range raw.Environment {
+			if !namePattern.MatchString(key) {
+				return nil, fmt.Errorf("%s: connection %q environment key %q must be lowercase snake_case", pkg.Location(path, key), name, key)
+			}
+			if !envNamePattern.MatchString(value) {
+				return nil, fmt.Errorf("%s: connection %q environment value for %q must be an environment variable name", pkg.Location(path, value), name, key)
+			}
+		}
+		out.Connections[name] = Connection{Kind: raw.Kind, Environment: maps.Clone(raw.Environment)}
+	}
 	if pkg.Agent.Capacity != nil {
 		out.Capacity = &Capacity{
 			PeakSessions: pkg.Agent.Capacity.PeakSessions, MaxSessions: pkg.Agent.Capacity.MaxSessions,
-			AvgSessionDuration: Duration(pkg.Agent.Capacity.AvgSessionDuration),
+			PeakStartsPerSecond: pkg.Agent.Capacity.PeakStartsPerSecond,
+			AvgSessionDuration:  Duration(pkg.Agent.Capacity.AvgSessionDuration),
 		}
 	}
 
@@ -198,6 +219,12 @@ func checkNames(pkg *packagespec.Package) error {
 	for name := range pkg.Agent.Controls {
 		if _, ok := pkg.Tools[name]; ok {
 			return fmt.Errorf("%s: tool and control name %q collide", pkg.Location("agent.yaml", name), name)
+		}
+	}
+	for _, name := range sortedKeys(pkg.Connections) {
+		if !namePattern.MatchString(name) {
+			path := filepath.Join("connections", name+".yaml")
+			return fmt.Errorf("%s: connection name %q must be lowercase snake_case and cannot start with underscore", path, name)
 		}
 	}
 	for _, raw := range pkg.Targets {
@@ -657,13 +684,27 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 			return Target{}, fmt.Errorf("%s: destination %q must be an E.164 phone number or SIP URI", pkg.Location("targets.yaml", destination), destination)
 		}
 	}
+	if raw.Connection != "" {
+		if _, ok := agent.Connections[raw.Connection]; !ok {
+			return Target{}, missing(pkg, "targets.yaml", "connection", raw.Connection)
+		}
+	}
 	return Target{
 		Name: name, Provider: Provider(raw.Provider), Version: raw.Version, Pins: raw.Pins,
-		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier,
+		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier, Connection: raw.Connection,
 		Region: raw.Region, Edition: raw.Edition,
 		Models:       resolveBindings(agent, used, raw.Models),
 		Destinations: raw.Destinations,
 	}, nil
+}
+
+func hasTelephonyChannel(agent *Agent) bool {
+	for _, channel := range agent.Channels {
+		if channel.Kind == ChannelTelephony {
+			return true
+		}
+	}
+	return false
 }
 
 func validDestination(value string) bool {

@@ -231,7 +231,6 @@ values:
 ```yaml
 # connections/primary_phone.yaml
 kind: telephony
-provider: twilio
 environment:
   account_sid: TWILIO_ACCOUNT_SID
   auth_token: TWILIO_AUTH_TOKEN

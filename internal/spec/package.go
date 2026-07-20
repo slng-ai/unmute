@@ -7,9 +7,10 @@ import (
 
 // Package is the decoded, unresolved v1 package assembled from its files.
 type Package struct {
-	Agent   AgentFile         `json:"agent" yaml:"agent"`
-	Tools   map[string]Tool   `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Targets map[string]Target `json:"targets" yaml:"targets"`
+	Agent       AgentFile             `json:"agent" yaml:"agent"`
+	Tools       map[string]Tool       `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Connections map[string]Connection `json:"connections,omitempty" yaml:"connections,omitempty"`
+	Targets     map[string]Target     `json:"targets" yaml:"targets"`
 
 	Root     string            `json:"-" yaml:"-"`
 	Markdown map[string]string `json:"-" yaml:"-"`
@@ -188,9 +189,15 @@ type Channel struct {
 }
 
 type Capacity struct {
-	PeakSessions       int    `json:"peak_sessions" yaml:"peak_sessions"`
-	MaxSessions        int    `json:"max_sessions" yaml:"max_sessions"`
-	AvgSessionDuration string `json:"avg_session_duration" yaml:"avg_session_duration"`
+	PeakSessions        int     `json:"peak_sessions" yaml:"peak_sessions"`
+	MaxSessions         int     `json:"max_sessions" yaml:"max_sessions"`
+	PeakStartsPerSecond float64 `json:"peak_starts_per_second,omitempty" yaml:"peak_starts_per_second,omitempty"`
+	AvgSessionDuration  string  `json:"avg_session_duration" yaml:"avg_session_duration"`
+}
+
+type Connection struct {
+	Kind        string            `json:"kind" yaml:"kind"`
+	Environment map[string]string `json:"environment" yaml:"environment"`
 }
 
 type TargetsFile struct {
@@ -204,6 +211,7 @@ type Target struct {
 	SDKLanguage  string              `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
 	Transport    string              `json:"transport,omitempty" yaml:"transport,omitempty"`
 	Carrier      string              `json:"carrier,omitempty" yaml:"carrier,omitempty"`
+	Connection   string              `json:"connection,omitempty" yaml:"connection,omitempty"`
 	Region       string              `json:"region,omitempty" yaml:"region,omitempty"`
 	Edition      string              `json:"edition,omitempty" yaml:"edition,omitempty"`
 	Models       map[string]ModelDef `json:"models,omitempty" yaml:"models,omitempty"` // per-target overrides (N15), keyed by model name / listen / turn

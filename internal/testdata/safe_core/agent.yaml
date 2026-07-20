@@ -109,4 +109,5 @@ channels:
 capacity:
   peak_sessions: 40
   max_sessions: 60
+  peak_starts_per_second: 4
   avg_session_duration: 6m

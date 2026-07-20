@@ -28,6 +28,48 @@ func TestBuildSafeCore(t *testing.T) {
 	if agent.Tools["lookup_customer"].Effect != ToolReturnsData {
 		t.Fatal("tool defaults were not applied")
 	}
+	if got := agent.Connections["primary_phone"].Environment["account_sid"]; got != "TWILIO_ACCOUNT_SID" {
+		t.Fatalf("resolved connection account_sid = %q", got)
+	}
+	if got := agent.Targets["pipecat"].Connection; got != "primary_phone" {
+		t.Fatalf("pipecat connection = %q", got)
+	}
+}
+
+func TestBuildRejectsUnknownOrInvalidConnection(t *testing.T) { // telephony V1-V3
+	tests := []struct {
+		name   string
+		mutate func(*packagespec.Package)
+		want   string
+	}{
+		{
+			name: "missing reference",
+			mutate: func(pkg *packagespec.Package) {
+				target := pkg.Targets["pipecat"]
+				target.Connection = "missing_phone"
+				pkg.Targets["pipecat"] = target
+			},
+			want: "missing_phone",
+		},
+		{
+			name: "invalid environment name",
+			mutate: func(pkg *packagespec.Package) {
+				connection := pkg.Connections["primary_phone"]
+				connection.Environment["auth_token"] = "not-a-name"
+				pkg.Connections["primary_phone"] = connection
+			},
+			want: "environment variable name",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			test.mutate(pkg)
+			if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("got %v", err)
+			}
+		})
+	}
 }
 
 func TestBuildDefaultsLanguage(t *testing.T) {

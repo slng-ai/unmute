@@ -230,8 +230,8 @@ func validateStructure(agent *Agent) []string {
 		if !validPrimitive(variable.Type) {
 			errors = add(errors, fmt.Sprintf("variable %q has invalid type %q", name, variable.Type))
 		}
-		if variable.Source != "" && variable.Source != VariableSourceCallStart {
-			errors = add(errors, fmt.Sprintf("variable %q source must be call_start", name))
+		if variable.Source != "" && !validVariableSource(variable.Source) {
+			errors = add(errors, fmt.Sprintf("variable %q has invalid source %q", name, variable.Source))
 		}
 		if variable.Default != nil && !defaultMatches(variable.Type, variable.Default) {
 			errors = add(errors, fmt.Sprintf("variable %q default does not match type %q", name, variable.Type))
@@ -490,7 +490,7 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	}
 	validateTools(agent, resolved, provider, caps, row)
 	validateConversation(agent.Conversation, provider, caps, row)
-	validateCapacity(agent, provider, row)
+	validateCapacity(agent, resolved, provider, row)
 	validateChannels(agent, resolved, provider, caps, row)
 }
 
@@ -797,7 +797,7 @@ func validateConversation(conversation *Conversation, provider targetcap.Provide
 	}
 }
 
-func validateCapacity(agent *Agent, provider targetcap.Provider, row *TargetValidation) {
+func validateCapacity(agent *Agent, resolved Target, provider targetcap.Provider, row *TargetValidation) {
 	required := targetcap.IsCode(provider)
 	for _, channel := range agent.Channels {
 		required = required || channel.Kind == ChannelTelephony
@@ -810,6 +810,9 @@ func validateCapacity(agent *Agent, provider targetcap.Provider, row *TargetVali
 	}
 	if agent.Capacity.PeakSessions <= 0 || agent.Capacity.MaxSessions <= 0 {
 		row.Errors = add(row.Errors, "capacity peak_sessions and max_sessions must be positive")
+	}
+	if hasTelephonyChannel(agent) && resolved.Connection != "" && agent.Capacity.PeakStartsPerSecond <= 0 {
+		row.Errors = add(row.Errors, "capacity.peak_starts_per_second must be positive for telephony")
 	}
 	if agent.Capacity.PeakSessions > agent.Capacity.MaxSessions {
 		row.Errors = add(row.Errors, "capacity.peak_sessions must not exceed max_sessions")
@@ -908,6 +911,17 @@ func validateModelKind(name string, model ModelDef) []string {
 
 func validPlacement(value Placement) bool {
 	return value == PlacementAPI || value == PlacementLocal
+}
+
+func validVariableSource(value VariableSource) bool {
+	switch value {
+	case VariableSourceCallStart, VariableSourceSessionID, VariableSourceCarrier,
+		VariableSourceConnection, VariableSourceCallID, VariableSourceStreamID,
+		VariableSourceDirection, VariableSourceFromNumber, VariableSourceToNumber:
+		return true
+	default:
+		return false
+	}
 }
 
 func validPrimitive(value PrimitiveType) bool {

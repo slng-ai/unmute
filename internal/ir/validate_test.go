@@ -286,7 +286,9 @@ func TestValidateResolvesRequiredControlsAgainstTargetRoute(t *testing.T) {
 	phone := agent.Channels["phone"]
 	phone.RequiredControls = append(phone.RequiredControls, "dtmf_send")
 	agent.Channels["phone"] = phone
-	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	target := targetFor(agent, ProviderLiveKit)
+	target.Carrier = ""
+	report, err := Validate(agent, []Target{target}, targetcap.Default())
 	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "proven only for carrier Twilio") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}

@@ -11,6 +11,9 @@ targets:
     provider: livekit
     version: "1.5.2"            # framework pin; the driver checks its range (>=1.5, <2.0)
     sdk_language: python
+    transport: sip
+    carrier: twilio
+    connection: primary_phone
     models:
       # override the vad entry: LiveKit runs its own turn model, not Silero
       vad: { provider: livekit, model: turn-detector-mini, semantic_endpointing: preferred }
@@ -23,6 +26,8 @@ targets:
     provider: pipecat
     version: "1.5.0"
     transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat
+    carrier: twilio
+    connection: primary_phone
     # no model overrides: the agent.yaml defaults (SLNG + OpenAI + deepgram STT
     # + local silero VAD) run as defined
     destinations:
