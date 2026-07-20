@@ -9,7 +9,7 @@ import (
 )
 
 func TestValidateCommandPrintsEveryTargetAndWarnings(t *testing.T) { // V16, V18
-	stdout, stderr, err := runValidateCommand(t, filepath.Join("..", "..", "examples", "safe_core"))
+	stdout, stderr, err := runValidateCommand(t, filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestValidateCommandPrintsEveryTargetAndWarnings(t *testing.T) { // V16, V18
 }
 
 func TestValidateCommandFiltersTargetInstances(t *testing.T) { // V18
-	stdout, _, err := runValidateCommand(t, "--target", "vapi", filepath.Join("..", "..", "examples", "safe_core"))
+	stdout, _, err := runValidateCommand(t, "--target", "vapi", filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestValidateCommandFiltersTargetInstances(t *testing.T) { // V18
 
 func TestValidateCommandReturnsErrorForGatedTarget(t *testing.T) { // V16
 	dir := filepath.Join(t.TempDir(), "agent")
-	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "..", "examples", "safe_core"))); err != nil {
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "safe_core"))); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "agent.yaml")

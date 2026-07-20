@@ -8,7 +8,7 @@ import (
 )
 
 func TestLoadSafeCore(t *testing.T) { // V3, V14
-	pkg, err := Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}

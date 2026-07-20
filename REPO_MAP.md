@@ -80,14 +80,15 @@ Golden outputs live in [internal/generate/testdata/golden/](internal/generate/te
 `catalog_resolution.txt` is the single best file to *read* to see exactly what
 every provider binding emits.
 
-## Examples (real specs to compile)
+## Public examples and internal fixtures
 
 - [examples/README.md](examples/README.md) — runnable LiveKit/Pipecat matrix
-  for a simple prompt, one task, a task group, and sub-agent handoffs.
-- [examples/safe_core/](examples/safe_core/) — the five-target portable
-  example; every primary validates.
-- [examples/remy/](examples/remy/) — handoff + task groups on LiveKit (the
-  driver golden fixture).
+  using one salon workflow across a large prompt, one task, a task group, and
+  two-agent handoffs.
+- [internal/testdata/safe_core/](internal/testdata/safe_core/) — internal
+  five-target portability fixture; every primary validates.
+- [internal/testdata/remy/](internal/testdata/remy/) — internal legacy handoff
+  and task-group fixture for the LiveKit driver golden.
 
 ## Docs
 

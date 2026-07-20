@@ -13,7 +13,7 @@ import (
 func copySafeCore(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "agent")
-	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "..", "examples", "safe_core"))); err != nil {
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "safe_core"))); err != nil {
 		t.Fatal(err)
 	}
 	return dir

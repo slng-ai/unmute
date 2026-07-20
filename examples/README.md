@@ -1,17 +1,31 @@
 # Examples
 
-These source packages isolate each supported orchestration shape so you can
-compare the generated LiveKit and Pipecat traces without unrelated behavior.
-Generated Python belongs in each package's ignored `build/` directory.
+These four packages apply the same Sage and Stone Salon appointment workflow
+to progressively stronger orchestration. Compare them to see when one large
+prompt stops being enough and tasks, task groups, or agent handoffs help.
 
-| Package | Behavior under test | LiveKit trace | Pipecat trace |
-|---|---|---|---|
-| [`simple-prompt`](simple-prompt/) | One agent with one prompt | `welcome_agent-livekit` | `welcome_agent-pipecat` |
-| [`single-task`](single-task/) | One delegate-and-return task | `triage_agent-livekit` | `triage_agent-pipecat` |
-| [`task-groups`](task-groups/) | Two ordered tasks with shared context | `event_planner-livekit` | `event_planner-pipecat` |
-| [`subagents`](subagents/) | Router handoff to two specialist agents | `front_desk-livekit` | `front_desk-pipecat` |
-| [`remy`](remy/) | Combined handoffs and task groups | `greeter-livekit` | Not declared |
-| [`safe_core`](safe_core/) | Portable multi-target support agent | `intake-livekit` | `intake-pipecat` |
+Each package contains the same five deterministic local Python tools for
+customer lookup and creation, availability, booking, and cancellation. The
+tools use no network or durable storage; they are fixtures for local LiveKit
+and Pipecat runs.
+
+| Package | Structure | Responsibility split |
+|---|---|---|
+| [`simple-prompt`](simple-prompt/) | One agent and one large prompt | One agent owns every workflow and tool. |
+| [`single-task`](single-task/) | One agent and one task | The agent delegates the complete appointment request, then resumes. |
+| [`task-groups`](task-groups/) | One agent and three ordered tasks | Shared context moves through customer identification, slot selection, and finalization. |
+| [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |
+
+## Test the tools
+
+Run the shared behavior and drift check directly with Python:
+
+```sh
+python3 examples/test_tools.py
+```
+
+The check executes every handler in every package, including invalid input and
+not-found cases. The default Go suite still needs zero Python.
 
 ## Compile an example
 

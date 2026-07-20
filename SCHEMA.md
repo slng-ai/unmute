@@ -397,7 +397,9 @@ Why never validated: provider model lists change faster than any shipped catalog
 
 ## 7. The safe core: write this and it runs on all five
 
-The subset that passes validation on every primary target. The example package in [examples/safe_core/](./examples/safe_core/) follows these rules exactly.
+The subset that passes validation on every primary target. The regression
+fixture in [internal/testdata/safe_core/](./internal/testdata/safe_core/)
+follows these rules exactly.
 
 1. Any number of agents with `agent_transfer` between them (T0 + T2).
 2. Every transfer context: `history: full`, `variables: all`.

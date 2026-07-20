@@ -58,7 +58,7 @@ func TestApplyElevenLabsPushesToolThenAgentPlan(t *testing.T) {
 	t.Setenv("LOOKUP_CUSTOMER_URL", "https://hooks.example/lookup")
 	t.Setenv("GET_INVOICE_URL", "https://hooks.example/invoice")
 
-	safe := filepath.Join("..", "..", "examples", "safe_core")
+	safe := filepath.Join("..", "testdata", "safe_core")
 	out, err := run(t, "apply", safe, "--target", "elevenlabs")
 	if err != nil {
 		t.Fatalf("apply: %v\n%s", err, out)

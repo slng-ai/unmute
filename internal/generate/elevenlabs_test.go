@@ -18,7 +18,7 @@ var updateElevenLabs = flag.Bool("update-elevenlabs", false, "rewrite the eleven
 // TestElevenLabsGolden emits the safe_core package to elevenlabs and locks the
 // full branch-aware ApplyPlan (driver-elevenlabs T7, V10). Zero Python.
 func TestElevenLabsGolden(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestElevenLabsGolden(t *testing.T) {
 // a task (assign via a JSON-returning tool), a task_group (then: return), and a
 // model-written opening, built in-code (driver-elevenlabs T4/T5, V1/V2/V6).
 func TestElevenLabsWorkflowGolden(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestElevenLabsWorkflowGolden(t *testing.T) {
 // TestElevenLabsAssignNeedsJSONTool gates a delegate assign with no JSON-returning
 // tool on the task (C3/V1): there is no other mid-call variable write path.
 func TestElevenLabsAssignNeedsJSONTool(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func builtInToolNamed(t *testing.T, body map[string]any, name string) map[string
 // elWorkAgent is safe_core built for in-code mutation by the T5 unit tests.
 func elWorkAgent(t *testing.T) *ir.Agent {
 	t.Helper()
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}

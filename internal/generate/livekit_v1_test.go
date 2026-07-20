@@ -18,7 +18,7 @@ var updateLiveKitV1 = flag.Bool("update-livekit", false, "rewrite the livekit v1
 // the SLNG plugin) to LiveKit and compares the full file set byte-for-byte
 // (driver-livekit T8/T9/T10, V11/V12). Zero Python.
 func TestLiveKitV1RemyGolden(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestLiveKitV1RemyGolden(t *testing.T) {
 // stays a real SLNG agent (driver-livekit V12). Since the C8 amendment SLNG is
 // the default, not the only route; TestLiveKitV1MultiVendor covers the rest.
 func TestLiveKitV1EmitsSlngPlugin(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestLiveKitV1EmitsSlngPlugin(t *testing.T) {
 }
 
 func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 }
 
 func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
 // plugins), one voice is rebound to Cartesia in-code, and the emitted project
 // carries the right constructors, merged plugin import, extras dep, and env.
 func TestLiveKitV1MultiVendor(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 // 2026-07-19), with both services resolved through the catalogue and the
 // stt module imported.
 func TestT16_LiveKitEmitsListenFallbackAdapter(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func artifactFile(t *testing.T, artifact Artifact, path string) string {
 // results, and its tool description must say control does not come back. Reuses
 // the Remy package and rewrites its two groups' `then` in-memory.
 func TestLiveKitV1DelegateThenTransferAndEnd(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestLiveKitV1DelegateThenTransferAndEnd(t *testing.T) {
 // with `task:` awaits the AgentTask directly, applies `assign` into the typed
 // userdata, and returns the typed result to the owner — no TaskGroup involved.
 func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 // task_group compiles to a sequence of standalone AgentTasks, each starting
 // with a fresh context — never a TaskGroup, which always shares context.
 func TestLiveKitV1IsolatedGroup(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +434,7 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 func TestV4_LiveKitInferenceFact(t *testing.T) {
 	load := func() *ir.Agent {
 		t.Helper()
-		pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+		pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -483,7 +483,7 @@ func TestV4_LiveKitInferenceFact(t *testing.T) {
 // its own model profile gets llm= on the AgentTask, resolved through the
 // catalogue; a task on the entry agent's profile stays on the session LLM.
 func TestLiveKitV1PerTaskModel(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,7 +517,7 @@ func TestLiveKitV1PerTaskModel(t *testing.T) {
 // every history value compiles, include_tool_calls and variables subsets
 // shape the handoff, and a fallback chain lowers to llm.FallbackAdapter.
 func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -573,7 +573,7 @@ func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 // include_tool_calls: false (V5): reset hands the target a fresh context;
 // exclude_function_call strips tool traffic from a full handoff.
 func TestLiveKitV1HistoryResetAndToolCallShaping(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,7 +609,7 @@ func TestLiveKitV1HistoryResetAndToolCallShaping(t *testing.T) {
 // TurnHandlingOptions, the generated ignore-phrase stt_node filter, thinking
 // audio via BackgroundAudioPlayer, and effect: ends_conversation.
 func TestLiveKitV1ConversationShapingAndAgentTools(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -661,7 +661,7 @@ func TestLiveKitV1ConversationShapingAndAgentTools(t *testing.T) {
 // cold is a SIP REFER through the job context with the resolved destination;
 // warm awaits the prebuilt WarmTransferTask and registers the trunk env.
 func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,7 +710,7 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 // TestLiveKitV1RequiresGuard covers V7: a transfer with requires: emits a
 // machine-checked guard that refuses and names the unmet variables.
 func TestLiveKitV1RequiresGuard(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -746,7 +746,7 @@ func TestLiveKitV1OutboundVoicemail(t *testing.T) {
 		{ir.VoicemailLeaveMessage, `ctx.shutdown("voicemail: left a message")  # on_voicemail: leave_message`},
 		{ir.VoicemailHangup, `ctx.shutdown("voicemail detected")  # on_voicemail: hangup`},
 	} {
-		pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+		pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -781,7 +781,7 @@ func TestLiveKitV1OutboundVoicemail(t *testing.T) {
 // pins raise dep floors and are range-checked; a non-python sdk_language
 // fails loud instead of emitting a silently-wrong Python project.
 func TestLiveKitV1PinsAndSDKLanguage(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -822,7 +822,7 @@ func TestLiveKitV1PinsAndSDKLanguage(t *testing.T) {
 // §5, code targets); mcp mounts MCPServerHTTP off url_env with allowed_tools
 // (B3/D8). The local handler rides spec.Load like instructions do.
 func TestLiveKitV1LocalAndMCPTools(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -893,7 +893,7 @@ func TestLiveKitEmitterMatchesCapabilityTable(t *testing.T) {
 // SCHEMA §7 livekit-ok feature at once must validate green AND generate — no
 // validate-green/generate-fail is representable (B2's class).
 func TestLiveKitV1ParityFixture(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
 	}

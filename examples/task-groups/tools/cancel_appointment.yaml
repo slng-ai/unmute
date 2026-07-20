@@ -1,0 +1,19 @@
+description: Cancel one confirmed Sage and Stone appointment.
+
+input:
+  type: object
+  properties:
+    appointment_id: { type: string, description: Appointment ID to cancel }
+  required: [appointment_id]
+
+output:
+  type: object
+  properties:
+    appointment_id: { type: string }
+    status: { type: string }
+  required: [appointment_id, status]
+
+execution: local
+handler: tools/cancel_appointment.py
+interruption: provider_default
+effect: returns_data

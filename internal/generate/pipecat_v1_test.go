@@ -17,7 +17,7 @@ var updatePipecatV1 = flag.Bool("update-pipecat", false, "rewrite the pipecat v1
 // TestPipecatV1Golden emits the safe_core project to pipecat and compares the
 // full file set byte-for-byte (driver-pipecat T8, V10). Zero Python.
 func TestPipecatV1Golden(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestPipecatV1Golden(t *testing.T) {
 }
 
 func TestV16PipecatRequestTracingWiring(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 }
 
 func TestV18PipecatLangfuseObservationMapping(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestV18PipecatLangfuseObservationMapping(t *testing.T) {
 // TestPipecatV1TasksGolden exercises the T4 agency level (tasks, task_group,
 // delegates) that safe_core omits, by building the IR in-code (driver-pipecat T4).
 func TestPipecatV1TasksGolden(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 // tools/<name>.py, at both sites — agent @tool method and flows handler. The
 // handler file rides the artifact verbatim, mirroring the LiveKit driver.
 func TestPipecatV1LocalTool(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestPipecatUnknownProviderFailsClosed(t *testing.T) {
 // listen binding into the Settings-style constructor, its import, its extra,
 // and its env — with no driver or template change.
 func TestPipecatListenAssemblyAI(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func targetByProvider(t *testing.T, agent *ir.Agent, provider ir.Provider) ir.Ta
 // The generated bot gates on_client_connected on an asyncio.Event set by
 // main's on_pipeline_started handler.
 func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
