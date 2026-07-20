@@ -86,7 +86,7 @@ func TestLiveKitV1EmitsSlngPlugin(t *testing.T) {
 	}
 }
 
-func TestV21LiveKitRequestTracingWiring(t *testing.T) {
+func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
 	if err != nil {
 		t.Fatal(err)
@@ -103,11 +103,13 @@ func TestV21LiveKitRequestTracingWiring(t *testing.T) {
 	bot := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		"def setup_langfuse(",
+		"def trace_speech_metric(",
 		"set_tracer_provider(trace_provider, metadata=metadata)",
 		"should_export_span=lambda span: True",
 		`"langfuse.session.id": ctx.room.name`,
 		`"langfuse.trace.name": "greeter" + "-" + "livekit"`,
 		"ctx.add_shutdown_callback(flush_trace)",
+		"trace_speech_metric(trace_provider, ev.metrics)",
 		"await session.start(agent=Greeter(), room=ctx.room)",
 	} {
 		if !strings.Contains(bot, want) {

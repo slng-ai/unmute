@@ -62,14 +62,25 @@ asyncio.run(_instantiate())
 print("smoke ok:", ", ".join(classes))
 `
 
-// livekitRequestTracingSmokeScript drives a real AgentSession turn with a
-// deterministic fake LLM. The in-memory exporter must receive the framework's
-// request spans; a hand-made root span would not satisfy V21.
-const livekitRequestTracingSmokeScript = `"""Smoke check: a real agent turn emits request spans."""
+// livekitRequestTracingSmokeScript drives a real AgentSession through fake
+// STT, LLM, and TTS services. The in-memory exporter must receive all three
+// speech-pipeline observations under the framework's session trace (V21/V22).
+const livekitRequestTracingSmokeScript = `"""Smoke check: a real agent session traces STT, LLM, and TTS."""
 import asyncio
+import time
 
 import agent
-from livekit.agents import Agent, AgentSession, DEFAULT_API_CONNECT_OPTIONS, llm
+from livekit import rtc
+from livekit.agents import (
+    Agent,
+    AgentSession,
+    DEFAULT_API_CONNECT_OPTIONS,
+    NOT_GIVEN,
+    io,
+    llm,
+    stt,
+    tts,
+)
 from livekit.agents.telemetry import set_tracer_provider
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -111,6 +122,126 @@ class FakeLLM(llm.LLM):
         )
 
 
+class FakeRecognizeStream(stt.RecognizeStream):
+    async def _run(self) -> None:
+        async for item in self._input_ch:
+            if not isinstance(item, rtc.AudioFrame):
+                continue
+            self._event_ch.send_nowait(
+                stt.SpeechEvent(
+                    type=stt.SpeechEventType.FINAL_TRANSCRIPT,
+                    request_id="stt-probe",
+                    alternatives=[stt.SpeechData(language="en", text="trace this request")],
+                )
+            )
+            self._event_ch.send_nowait(
+                stt.SpeechEvent(
+                    type=stt.SpeechEventType.RECOGNITION_USAGE,
+                    request_id="stt-probe",
+                    recognition_usage=stt.RecognitionUsage(audio_duration=item.duration),
+                )
+            )
+            await asyncio.Future()
+
+
+class FakeSTT(stt.STT):
+    def __init__(self) -> None:
+        super().__init__(capabilities=stt.STTCapabilities(streaming=True, interim_results=False))
+
+    @property
+    def model(self) -> str:
+        return "probe-stt-model"
+
+    @property
+    def provider(self) -> str:
+        return "probe-provider"
+
+    async def _recognize_impl(self, buffer, *, language, conn_options):
+        raise NotImplementedError
+
+    def stream(
+        self,
+        *,
+        language=NOT_GIVEN,
+        conn_options=DEFAULT_API_CONNECT_OPTIONS,
+    ) -> stt.RecognizeStream:
+        return FakeRecognizeStream(stt=self, conn_options=conn_options)
+
+
+class FakeChunkedStream(tts.ChunkedStream):
+    async def _run(self, output_emitter) -> None:
+        output_emitter.initialize(
+            request_id="tts-probe",
+            sample_rate=16000,
+            num_channels=1,
+            mime_type="audio/pcm",
+        )
+        output_emitter.push(b"\x00\x00" * 160)
+
+
+class FakeTTS(tts.TTS):
+    def __init__(self) -> None:
+        super().__init__(
+            capabilities=tts.TTSCapabilities(streaming=False),
+            sample_rate=16000,
+            num_channels=1,
+        )
+
+    @property
+    def model(self) -> str:
+        return "probe-tts-model"
+
+    @property
+    def provider(self) -> str:
+        return "probe-provider"
+
+    def synthesize(
+        self,
+        text,
+        *,
+        conn_options=DEFAULT_API_CONNECT_OPTIONS,
+    ) -> tts.ChunkedStream:
+        return FakeChunkedStream(tts=self, input_text=text, conn_options=conn_options)
+
+
+class FakeAudioInput(io.AudioInput):
+    def __init__(self) -> None:
+        super().__init__(label="probe-input")
+        self._queue = asyncio.Queue()
+
+    def push(self, frame: rtc.AudioFrame) -> None:
+        self._queue.put_nowait(frame)
+
+    async def __anext__(self) -> rtc.AudioFrame:
+        return await self._queue.get()
+
+
+class FakeAudioOutput(io.AudioOutput):
+    def __init__(self) -> None:
+        super().__init__(
+            label="probe-output",
+            capabilities=io.AudioOutputCapabilities(pause=False),
+        )
+        self._playback_position = 0.0
+
+    async def capture_frame(self, frame: rtc.AudioFrame) -> None:
+        first = self._playback_position == 0.0
+        await super().capture_frame(frame)
+        self._playback_position += frame.duration
+        if first:
+            self.on_playback_started(created_at=time.time())
+
+    def flush(self) -> None:
+        super().flush()
+        if self._playback_position:
+            position = self._playback_position
+            self._playback_position = 0.0
+            self.on_playback_finished(playback_position=position, interrupted=False)
+
+    def clear_buffer(self) -> None:
+        self._playback_position = 0.0
+
+
 class ProbeAgent(Agent):
     def __init__(self) -> None:
         super().__init__(instructions=agent.WELCOME_AGENT_PROMPT)
@@ -122,16 +253,53 @@ async def main() -> None:
     provider.add_span_processor(SimpleSpanProcessor(memory))
     set_tracer_provider(provider)
 
-    async with AgentSession(llm=FakeLLM()) as session:
+    audio_input = FakeAudioInput()
+    audio_output = FakeAudioOutput()
+    async with AgentSession(
+        stt=FakeSTT(),
+        llm=FakeLLM(),
+        tts=FakeTTS(),
+        turn_handling={"turn_detection": "manual"},
+    ) as session:
+        session.input.audio = audio_input
+        session.output.audio = audio_output
+
+        @session.on("metrics_collected")
+        def _trace_speech(ev) -> None:
+            agent.trace_speech_metric(provider, ev.metrics)
+
         await session.start(ProbeAgent())
+        audio_input.push(
+            rtc.AudioFrame(
+                data=b"\x00\x00" * 160,
+                sample_rate=16000,
+                num_channels=1,
+                samples_per_channel=160,
+            )
+        )
+
+        for _ in range(100):
+            if any(span.name == "stt" for span in memory.get_finished_spans()):
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("STT service path did not emit an observation")
+
         await session.run(user_input="trace this request")
 
     spans = memory.get_finished_spans()
-    request = next(span for span in spans if span.name == "llm_request")
-    node = next(span for span in spans if span.name == "llm_node")
-    assert request.attributes["gen_ai.request.model"] == "probe-model"
-    assert request.context.trace_id == node.context.trace_id
-    print("livekit request tracing smoke ok")
+    by_name = {span.name: span for span in spans}
+    required = {"agent_session", "stt", "llm_request", "llm_node", "tts", "tts_node"}
+    assert required <= by_name.keys(), required - by_name.keys()
+    assert by_name["stt"].attributes["gen_ai.request.model"] == "probe-stt-model"
+    assert by_name["llm_request"].attributes["gen_ai.request.model"] == "probe-model"
+    assert by_name["tts"].attributes["gen_ai.request.model"] == "probe-tts-model"
+    assert by_name["stt"].attributes["metrics.audio_duration"] > 0
+    assert by_name["tts"].attributes["metrics.audio_duration"] > 0
+    assert by_name["tts"].attributes["metrics.ttfb"] >= 0
+    session_trace = by_name["agent_session"].context.trace_id
+    assert all(by_name[name].context.trace_id == session_trace for name in required)
+    print("livekit speech tracing smoke ok")
 
 
 asyncio.run(main())
@@ -178,9 +346,9 @@ func TestSmokeLiveKitV1RestoredVendorsInstantiates(t *testing.T) {
 	})
 }
 
-// TestSmokeV21LiveKitRequestTracing proves request instrumentation, not only
-// exporter connectivity: AgentSession.run must emit the LLM node and request.
-func TestSmokeV21LiveKitRequestTracing(t *testing.T) {
+// TestSmokeV22LiveKitSpeechTracing proves request instrumentation, not only
+// exporter connectivity: one AgentSession must trace its STT, LLM, and TTS paths.
+func TestSmokeV22LiveKitSpeechTracing(t *testing.T) {
 	runLiveKitSmokeScript(t, "simple-prompt", nil, livekitRequestTracingSmokeScript)
 }
 
