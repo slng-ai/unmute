@@ -32,7 +32,7 @@ type TelephonyEndpoint struct {
 	Path   string `json:"path"`
 }
 
-func buildTelephonyRuntimePlan(target ir.Target) *TelephonyRuntimePlan {
+func TelephonyRuntimePlanFor(target ir.Target) *TelephonyRuntimePlan {
 	plan := target.Telephony
 	if plan == nil {
 		return nil
@@ -41,6 +41,13 @@ func buildTelephonyRuntimePlan(target ir.Target) *TelephonyRuntimePlan {
 		Route: plan.Key, Evidence: slices.Clone(plan.Evidence), Coordination: plan.Coordination,
 		AdmissionOwner: plan.AdmissionOwner,
 		ManualSteps:    []string{"configure the selected carrier or SIP trunk to the reported public endpoints"},
+	}
+	if plan.Key.Provider == ir.ProviderPipecat && plan.Key.Transport == "carrier-websocket" && plan.Key.Carrier == "twilio" {
+		runtime.ManualSteps = []string{
+			"get the Account SID and Auth Token from the Twilio Console account dashboard and select a Voice-capable number",
+			"configure the Twilio number voice webhook as POST to the reported inbound endpoint",
+			"configure Twilio call status callbacks as POST to the reported status endpoint",
+		}
 	}
 	for _, name := range plan.Environment {
 		runtime.RequiredEnv = append(runtime.RequiredEnv, name)
@@ -113,6 +120,20 @@ func withTelephonyReport(files []File, plan *TelephonyRuntimePlan) ([]File, erro
 		var report map[string]any
 		if err := json.Unmarshal(files[i].Content, &report); err != nil {
 			return nil, fmt.Errorf("decode compile report: %w", err)
+		}
+		seen := make(map[string]bool, len(plan.RequiredEnv))
+		for _, name := range plan.RequiredEnv {
+			seen[name] = true
+		}
+		if required, ok := report["required_env"].([]any); ok {
+			for _, value := range required {
+				name, ok := value.(string)
+				if ok && !seen[name] {
+					seen[name] = true
+					plan.RequiredEnv = append(plan.RequiredEnv, name)
+				}
+			}
+			slices.Sort(plan.RequiredEnv)
 		}
 		report["telephony"] = plan
 		content, err := json.MarshalIndent(report, "", "  ")

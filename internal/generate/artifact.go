@@ -66,7 +66,7 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		}
 		return Artifact{}, fmt.Errorf("generate %s: %w", resolved.Name, err)
 	}
-	artifact := Artifact{Kind: artifactKind(resolved.Provider), Telephony: buildTelephonyRuntimePlan(resolved)}
+	artifact := Artifact{Kind: artifactKind(resolved.Provider), Telephony: TelephonyRuntimePlanFor(resolved)}
 	artifact.Notes.ForwardedBindings = report.ForwardedBindings
 	artifact.Notes.Sizing = report.Sizing
 	for _, row := range report.PerTarget {

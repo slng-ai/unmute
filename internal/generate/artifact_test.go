@@ -2,6 +2,7 @@ package generate
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -86,7 +87,7 @@ func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { //
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := buildTelephonyRuntimePlan(agent.Targets["pipecat"])
+	plan := TelephonyRuntimePlanFor(agent.Targets["pipecat"])
 	if plan == nil || len(plan.Processes) != 1 || len(plan.PublicEndpoints) != 3 {
 		t.Fatalf("runtime plan = %#v", plan)
 	}
@@ -96,7 +97,7 @@ func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { //
 	if got := strings.Join(plan.Processes[0].Command, " "); got != "uv run uvicorn telephony:app --host 0.0.0.0 --port 7860" {
 		t.Fatalf("process command = %q", got)
 	}
-	files, err := withTelephonyReport([]File{{Path: "compile-report.json", Content: []byte(`{"target":"pipecat"}`)}}, plan)
+	files, err := withTelephonyReport([]File{{Path: "compile-report.json", Content: []byte(`{"target":"pipecat","required_env":["OPENAI_API_KEY"]}`)}}, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,6 +106,9 @@ func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { //
 		if !strings.Contains(report, want) {
 			t.Errorf("report missing %s:\n%s", want, report)
 		}
+	}
+	if !slices.Contains(plan.RequiredEnv, "OPENAI_API_KEY") {
+		t.Fatalf("runtime plan did not merge generated environment: %v", plan.RequiredEnv)
 	}
 }
 

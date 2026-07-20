@@ -2,12 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/slng/unmute/internal/generate"
 	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/scaffold"
 )
@@ -91,10 +96,100 @@ func TestDev_help(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--no-open", "--bot-port", "--target", "talk to it"} {
+	for _, want := range []string{"--no-open", "--bot-port", "--target", "--telephony", "--public-url", "talk to it"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("dev --help missing %q; got:\n%s", want, out.String())
 		}
+	}
+}
+
+func TestTelephonyDevPlanUsesExactPublicURLAndResolvedArtifact(t *testing.T) { // telephony V11, V17
+	public, err := parseTelephonyPublicURL("https://voice.example.com/unmute/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := &generate.TelephonyRuntimePlan{
+		Route: ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "carrier-websocket", Carrier: "twilio"},
+		PublicEndpoints: []generate.TelephonyEndpoint{
+			{Name: "inbound", Method: "POST", Path: "/telephony/inbound"},
+			{Name: "media", Method: "WS", Path: "/telephony/ws/{token}"},
+		},
+		ManualSteps: []string{"configure signed callbacks"}, Coordination: "local",
+	}
+	var out bytes.Buffer
+	printDevTelephonyPlan(&out, "phone", plan, public)
+	for _, want := range []string{
+		"provider=pipecat transport=carrier-websocket carrier=twilio coordination=local",
+		"POST https://voice.example.com/unmute/telephony/inbound",
+		"WS wss://voice.example.com/unmute/telephony/ws/{token}",
+		"setup: configure signed callbacks",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("plan missing %q:\n%s", want, out.String())
+		}
+	}
+	if got := strings.Join(devTelephonyCommand([]string{"uv", "run", "uvicorn", "telephony:app", "--port", "7860"}, "9000"), " "); got != "uv run uvicorn telephony:app --port 9000" {
+		t.Fatalf("dev command = %q", got)
+	}
+}
+
+func TestTelephonyDevRejectsUnsafePublicURLAndNamesMissingCredentials(t *testing.T) { // telephony V11
+	for _, value := range []string{"", "http://voice.example.com", "https://user@example.com", "https://voice.example.com?host=wrong"} {
+		if _, err := parseTelephonyPublicURL(value); err == nil {
+			t.Errorf("parseTelephonyPublicURL(%q) passed", value)
+		}
+	}
+	env := setChildEnv([]string{"TWILIO_ACCOUNT_SID=account", "TWILIO_AUTH_TOKEN="}, "UNMUTE_PUBLIC_URL", "https://voice.example.com")
+	missing := missingEnvironment([]string{"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "UNMUTE_PUBLIC_URL"}, env)
+	if strings.Join(missing, ",") != "TWILIO_AUTH_TOKEN" {
+		t.Fatalf("missing environment = %v", missing)
+	}
+}
+
+func TestWaitHTTPReadyRequiresSuccessfulReadiness(t *testing.T) { // telephony V16
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	done := make(chan error)
+	if err := waitHTTPReady(context.Background(), server.URL, done, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	exited <- errors.New("boom")
+	if err := waitHTTPReady(context.Background(), "http://127.0.0.1:1/readyz", exited, time.Second); err == nil || !strings.Contains(err.Error(), "exited before ready") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestDevTelephonyPreflightStopsBeforeCredentialsOrProvisionalRoute(t *testing.T) { // telephony V11, V17
+	dir := copySafeCore(t)
+	targetsPath := filepath.Join(dir, "targets.yaml")
+	raw, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := strings.Replace(string(raw),
+		"    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat",
+		"    transport: carrier-websocket\n    carrier: twilio\n    connection: primary_phone", 1)
+	if configured == string(raw) {
+		t.Fatal("pipecat target fixture did not change")
+	}
+	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"} {
+		t.Setenv(name, "")
+	}
+	out, err := run(t, "dev", dir, "--target", "pipecat", "--telephony", "--public-url", "https://voice.example.com")
+	if err == nil || !strings.Contains(err.Error(), "TWILIO_ACCOUNT_SID") || !strings.Contains(err.Error(), "TELEPHONY.md#credentials") {
+		t.Fatalf("preflight error = %v", err)
+	}
+	if !strings.Contains(out, "wss://voice.example.com/telephony/ws/{token}") || !strings.Contains(out, "Twilio Console account dashboard") {
+		t.Fatalf("setup output =\n%s", out)
+	}
+	if _, err := run(t, "dev", dir, "--target", "pipecat", "--public-url", "https://voice.example.com"); err == nil || !strings.Contains(err.Error(), "requires --telephony") {
+		t.Fatalf("standalone --public-url error = %v", err)
 	}
 }
 
