@@ -2,6 +2,7 @@ package generate
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/slng/unmute/internal/ir"
@@ -46,6 +47,64 @@ func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 						t.Fatal(err)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestExampleToolExposure(t *testing.T) {
+	domainTools := []string{"lookup_customer", "create_customer", "check_availability", "book_appointment", "cancel_appointment"}
+	cases := []struct {
+		name       string
+		agentTools map[string][]string
+		taskTools  map[string][]string
+	}{
+		{
+			name:       "simple-prompt",
+			agentTools: map[string][]string{"appointment_desk": domainTools},
+		},
+		{
+			name:       "single-task",
+			agentTools: map[string][]string{"appointment_desk": {"manage_appointment"}},
+			taskTools:  map[string][]string{"appointment_request": domainTools},
+		},
+		{
+			name:       "task-groups",
+			agentTools: map[string][]string{"appointment_desk": {"manage_appointment"}},
+			taskTools: map[string][]string{
+				"identify_customer":    {"lookup_customer", "create_customer"},
+				"select_appointment":   {"check_availability"},
+				"finalize_appointment": {"book_appointment", "cancel_appointment"},
+			},
+		},
+		{
+			name: "subagents",
+			agentTools: map[string][]string{
+				"booking_desk":        {"lookup_customer", "create_customer", "check_availability", "book_appointment", "to_appointment_manager"},
+				"appointment_manager": {"lookup_customer", "check_availability", "book_appointment", "cancel_appointment", "to_booking_desk"},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join("..", "..", "examples", tc.name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, want := range tc.agentTools {
+				if got := agent.Agents[name].Tools; !slices.Equal(got, want) {
+					t.Errorf("agent %q tools = %v, want %v", name, got, want)
+				}
+			}
+			for name, want := range tc.taskTools {
+				if got := agent.Tasks[name].Tools; !slices.Equal(got, want) {
+					t.Errorf("task %q tools = %v, want %v", name, got, want)
+				}
 			}
 		})
 	}
