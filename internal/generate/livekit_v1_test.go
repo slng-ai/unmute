@@ -103,13 +103,13 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	bot := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		"def setup_langfuse(",
-		"def trace_speech_metric(",
+		"def trace_speech_metrics(",
 		"set_tracer_provider(trace_provider, metadata=metadata)",
 		"should_export_span=lambda span: True",
 		`"langfuse.session.id": ctx.room.name`,
 		`"langfuse.trace.name": "greeter" + "-" + "livekit"`,
 		"ctx.add_shutdown_callback(flush_trace)",
-		"trace_speech_metric(trace_provider, ev.metrics)",
+		`@session.on("conversation_item_added")`,
 		"await session.start(agent=Greeter(), room=ctx.room)",
 	} {
 		if !strings.Contains(bot, want) {
@@ -136,6 +136,41 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 		if !strings.Contains(env, name) {
 			t.Errorf(".env.example missing %s", name)
 		}
+	}
+}
+
+func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bot := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		"from livekit.agents.voice import ConversationItemAddedEvent, MetricsCollectedEvent",
+		"def trace_speech_metrics(",
+		`"langfuse.observation.input": input_value`,
+		`"langfuse.observation.output": output_value`,
+		`attributes["langfuse.trace.input"] = output_value`,
+		`attributes["langfuse.trace.output"] = input_value`,
+		"pending_stt_metrics: list[STTMetrics] = []",
+		"pending_tts_metrics: list[TTSMetrics] = []",
+		`@session.on("conversation_item_added")`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	if strings.Contains(bot, "trace_speech_metric(trace_provider, ev.metrics)") {
+		t.Error("speech generations must not be emitted for each metrics event")
 	}
 }
 

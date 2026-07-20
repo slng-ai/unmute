@@ -256,6 +256,7 @@ async def main() -> None:
     memory = InMemorySpanExporter()
     assert setup_tracing(exporter=memory)
     provider = trace.get_tracer_provider()
+    provider.add_span_processor(bot.LangfuseAttributeProcessor())
 
     bot.build_welcome_agent_llm = FakeLLM
     bot.build_welcome_agent_tts = FakeTTS
@@ -308,6 +309,12 @@ async def main() -> None:
     assert requests["stt"].attributes["gen_ai.request.model"] == "probe-stt"
     assert requests["llm"].attributes["gen_ai.request.model"] == "probe-model"
     assert requests["tts"].attributes["gen_ai.request.model"] == "probe-tts"
+    assert requests["stt"].attributes["langfuse.observation.input"] == "audio"
+    assert requests["stt"].attributes["langfuse.observation.output"] == "trace this request"
+    assert requests["tts"].attributes["langfuse.observation.input"] == "traced."
+    assert requests["tts"].attributes["langfuse.observation.output"] == "audio"
+    assert conversation.attributes["langfuse.observation.input"] == "trace this request", dict(conversation.attributes)
+    assert conversation.attributes["langfuse.observation.output"] == "traced.", dict(conversation.attributes)
     assert all(span.context.trace_id == conversation.context.trace_id for span in requests.values())
     assert all(span.end_time > span.start_time for span in requests.values())
     print("pipecat speech tracing smoke ok")

@@ -264,9 +264,38 @@ async def main() -> None:
         session.input.audio = audio_input
         session.output.audio = audio_output
 
+        pending_stt_metrics = []
+        pending_tts_metrics = []
+
         @session.on("metrics_collected")
         def _trace_speech(ev) -> None:
-            agent.trace_speech_metric(provider, ev.metrics)
+            if isinstance(ev.metrics, agent.STTMetrics):
+                pending_stt_metrics.append(ev.metrics)
+            elif isinstance(ev.metrics, agent.TTSMetrics):
+                pending_tts_metrics.append(ev.metrics)
+
+        @session.on("conversation_item_added")
+        def _trace_speech_item(ev) -> None:
+            text = getattr(ev.item, "raw_text_content", None)
+            role = getattr(ev.item, "role", None)
+            if role == "user" and text and pending_stt_metrics:
+                agent.trace_speech_metrics(
+                    provider,
+                    pending_stt_metrics,
+                    input_value="audio",
+                    output_value=text,
+                    ended_at=ev.created_at,
+                )
+                pending_stt_metrics.clear()
+            elif role == "assistant" and text and pending_tts_metrics:
+                agent.trace_speech_metrics(
+                    provider,
+                    pending_tts_metrics,
+                    input_value=text,
+                    output_value="audio",
+                    ended_at=ev.created_at,
+                )
+                pending_tts_metrics.clear()
 
         await session.start(ProbeAgent())
         audio_input.push(
@@ -279,24 +308,34 @@ async def main() -> None:
         )
 
         for _ in range(100):
-            if any(span.name == "stt" for span in memory.get_finished_spans()):
+            if pending_stt_metrics:
                 break
             await asyncio.sleep(0.01)
         else:
-            raise AssertionError("STT service path did not emit an observation")
+            raise AssertionError("STT service path did not emit metrics")
 
         await session.run(user_input="trace this request")
 
     spans = memory.get_finished_spans()
     by_name = {span.name: span for span in spans}
+    speech = {
+        name: [span for span in spans if span.name == name]
+        for name in ("stt", "tts")
+    }
     required = {"agent_session", "stt", "llm_request", "llm_node", "tts", "tts_node"}
     assert required <= by_name.keys(), required - by_name.keys()
+    assert len(speech["stt"]) == 1, len(speech["stt"])
+    assert len(speech["tts"]) == 1, len(speech["tts"])
     assert by_name["stt"].attributes["gen_ai.request.model"] == "probe-stt-model"
     assert by_name["llm_request"].attributes["gen_ai.request.model"] == "probe-model"
     assert by_name["tts"].attributes["gen_ai.request.model"] == "probe-tts-model"
     assert by_name["stt"].attributes["metrics.audio_duration"] > 0
     assert by_name["tts"].attributes["metrics.audio_duration"] > 0
     assert by_name["tts"].attributes["metrics.ttfb"] >= 0
+    assert by_name["stt"].attributes["langfuse.observation.input"] == "audio"
+    assert by_name["stt"].attributes["langfuse.observation.output"] == "trace this request"
+    assert by_name["tts"].attributes["langfuse.observation.input"] == "traced"
+    assert by_name["tts"].attributes["langfuse.observation.output"] == "audio"
     session_trace = by_name["agent_session"].context.trace_id
     assert all(by_name[name].context.trace_id == session_trace for name in required)
     print("livekit speech tracing smoke ok")
