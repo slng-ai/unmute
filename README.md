@@ -29,6 +29,9 @@ make install      # into your Go bin path
 
 Direct equivalent: `CGO_ENABLED=0 go build -o bin/unmute .`
 
+Browse the user docs locally: `make docs` serves [docs/user/](docs/user/README.md)
+on `http://localhost:3000` via [docsify](https://docsify.js.org) (needs `npx`).
+
 ## Test
 
 The default gate is pure Go and needs zero Python:
