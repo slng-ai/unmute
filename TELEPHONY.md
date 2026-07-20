@@ -180,6 +180,12 @@ secure password generator; it does not come from a carrier. A multi-replica
 route with mutable callback or transfer state requires `REDIS_URL` even when
 the media path itself does not.
 
+Direct carrier WebSocket routes also require `UNMUTE_PUBLIC_URL`. Set it to the
+exact externally visible HTTPS origin (including any fixed path prefix, but no
+query or fragment). It is not a credential. Generated signature validation
+derives its HTTP and WSS callback URLs only from this value and never trusts a
+forwarded host header.
+
 The source pages are the
 [Twilio credential guide](https://www.twilio.com/docs/iam/api-keys),
 [Telnyx Voice API guide](https://developers.telnyx.com/docs/voice/programmable-voice/get-started),

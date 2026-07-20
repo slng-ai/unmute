@@ -7,13 +7,27 @@ not edit by hand — change the source spec and recompile.
 
 ```sh
 cp .env.example .env                      # then fill in your keys
+{{if .Telephony}}uv run uvicorn telephony:app --host 0.0.0.0 --port 7860
+{{else}}
 uv run bot.py                             # web: open the URL it prints
 uv run --extra console bot.py console     # terminal: talk over local mic/speaker
+{{end}}
 ```
 
+{{if .Telephony}}The server exposes signed carrier ingress at
+`/telephony/inbound`, one-use media URLs under `/telephony/ws/{token}`,
+authenticated outbound start at `/telephony/outbound`, and signed status
+callbacks at `/telephony/status`. Configure the Twilio phone-number voice
+webhook to the inbound URL and its status callback to the status URL. The
+public origin must exactly match `UNMUTE_PUBLIC_URL` or signature validation
+will reject the request.
+
+This route remains provisional until its credentialed smoke passes.
+{{else}}
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner
 serves a WebRTC test client you can open in the browser. Console mode needs the
 `console` extra (pyaudio; `brew install portaudio` first on macOS).
+{{end}}
 
 While iterating on the source spec, `unmute dev <source-dir>` recompiles this
 project and runs it for you behind a dev client.

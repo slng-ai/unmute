@@ -127,6 +127,7 @@ type pipecatTool struct {
 	EndsCall        bool
 	Interruption    string // "cancel" | "continue" | "" (provider default)
 	ColdDestination string // set for a cold human_transfer: the resolved number/SIP URI
+	CarrierTransfer bool   // carrier call-control adapter, not Daily SIP
 }
 
 // pipecatLocalTool is a copied handler file: tools/<name>.py in the project.
@@ -153,6 +154,30 @@ type pipecatVariable struct {
 	Name    string
 	PyType  string
 	Default string // Python literal
+	Source  string
+}
+
+type pipecatTelephony struct {
+	Carrier       string
+	Connection    string
+	AccountSIDEnv string
+	AuthTokenEnv  string
+	FromNumberEnv string
+	HasInbound    bool
+	HasOutbound   bool
+	SystemSources []pipecatSystemSource
+	CallStart     []pipecatCallStart
+}
+
+type pipecatSystemSource struct {
+	Variable string
+	Source   string
+}
+
+type pipecatCallStart struct {
+	Name     string
+	Type     string
+	Required bool
 }
 
 type pipecatData struct {
@@ -179,6 +204,7 @@ type pipecatData struct {
 	RequiredEnv         []string
 	Notes               []string
 	Tracing             bool
+	Telephony           *pipecatTelephony
 
 	// Import needs: keep bot.py free of unused imports (only what a given spec
 	// actually exercises), so the emitted pipeline reads clean.
@@ -292,8 +318,12 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		{"pyproject.toml", "pyproject.toml"},
 		{"Dockerfile", "Dockerfile"},
 		{"README.md", "README.md"},
-		{"pcc-deploy.toml", "pcc-deploy.toml"},
 		{"env.example", ".env.example"},
+	}
+	if data.Telephony != nil {
+		outputs = append(outputs, struct{ tmpl, path string }{"telephony.py", "telephony.py"})
+	} else {
+		outputs = append(outputs, struct{ tmpl, path string }{"pcc-deploy.toml", "pcc-deploy.toml"})
 	}
 	var files []File
 	for _, o := range outputs {

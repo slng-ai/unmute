@@ -372,6 +372,108 @@ func TestPipecatV1OmitsTracingUnlessConfigured(t *testing.T) { // V19
 	}
 }
 
+func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T) { // telephony V7-V14, V20
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = "twilio"
+	configured.Connection = "primary_phone"
+	pkg.Targets["pipecat"] = configured
+	outbound := true
+	phone := pkg.Agent.Channels["phone"]
+	phone.Outbound = &outbound
+	phone.OnVoicemail = "hangup"
+	pkg.Agent.Channels["phone"] = phone
+	pkg.Agent.Variables["campaign_id"] = spec.Variable{Type: "string", Source: "call_start"}
+	pkg.Agent.Variables["provider_call"] = spec.Variable{Type: "string", Source: "call_id"}
+
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["pipecat"]
+	artifact, err := GeneratePipecat(agent, resolved, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := artifactFile(t, artifact, "telephony.py")
+	for _, want := range []string{
+		`RequestValidator(_env(AUTH_TOKEN_ENV))`,
+		`_validator().validate(_http_url(request.url.path), form, signature)`,
+		`_validator().validate(`,
+		`pending = _pending.pop(token, None)`,
+		`hmac.compare_digest(request.headers.get("Authorization", ""), expected)`,
+		`status_callback_event=["initiated", "ringing", "answered", "completed"]`,
+		`await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))`,
+		`"campaign_id": "string"`,
+		`CALL_START_REQUIRED = {`,
+	} {
+		if !strings.Contains(adapter, want) {
+			t.Errorf("telephony.py missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"Telnyx", "Plivo", "Exotel", "audio/x-mulaw", "media.payload"} {
+		if strings.Contains(adapter, forbidden) {
+			t.Errorf("telephony.py contains unselected or media implementation %q", forbidden)
+		}
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		`"twilio": lambda: FastAPIWebsocketParams`,
+		`telephony.configure_pipecat_env()`,
+		`call_context = telephony.normalized_context(runner_args)`,
+		`agents = [BillingAgent(state=state, context=context, call_context=call_context), IntakeAgent(state=state, context=context, call_context=call_context)]`,
+		`await telephony.cold_transfer(self.call_context["call_id"], "+14155550123")`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing %q", want)
+		}
+	}
+	if strings.Contains(bot, "STATE = State()") || strings.Contains(bot, "AGENTS = [") {
+		t.Error("per-call state or workers escaped into module globals")
+	}
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !strings.Contains(pyproject, `"twilio>=9,<10"`) {
+		t.Error("pyproject.toml missing selected Twilio SDK")
+	}
+	report := artifactFile(t, artifact, "compile-report.json")
+	if !strings.Contains(report, `"telephony.py"`) {
+		t.Error("compile report missing selected adapter")
+	}
+	if strings.Contains(report, `"pcc-deploy.toml"`) {
+		t.Error("direct carrier server must not advertise the incompatible Pipecat Cloud runner manifest")
+	}
+	if docker := artifactFile(t, artifact, "Dockerfile"); !strings.Contains(docker, `CMD ["uvicorn", "telephony:app"`) {
+		t.Error("Dockerfile does not start the selected telephony server")
+	}
+}
+
+func TestPipecatTwilioTelephonyRejectsConnectionVocabularyDrift(t *testing.T) { // telephony V3, V7
+	agent := loadCompilerAgent(t)
+	resolved := targetByProvider(t, agent, ir.ProviderPipecat)
+	resolved.Transport = "carrier-websocket"
+	resolved.Carrier = "twilio"
+	resolved.Connection = "primary_phone"
+	resolved.Telephony = &ir.TelephonyPlan{
+		Connection:  "primary_phone",
+		Key:         ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "carrier-websocket", Carrier: "twilio"},
+		Environment: map[string]string{"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN", "from_number": "TWILIO_PHONE_NUMBER", "api_key": "WRONG"},
+	}
+	_, err := GeneratePipecat(agent, resolved, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), `does not accept connection environment key "api_key"`) {
+		t.Fatalf("got %v", err)
+	}
+	delete(resolved.Telephony.Environment, "api_key")
+	delete(resolved.Telephony.Environment, "auth_token")
+	_, err = GeneratePipecat(agent, resolved, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), `requires connection environment key "auth_token"`) {
+		t.Fatalf("got %v", err)
+	}
+}
+
 // TestPipecatV1LocalTool covers execution: local (T14, V13): the same @tool
 // shape as webhook whose body imports + awaits the user handler from
 // tools/<name>.py, at both sites — agent @tool method and flows handler. The

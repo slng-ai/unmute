@@ -1,6 +1,9 @@
 package target
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 type TelephonyKey struct {
 	Provider  Provider `json:"provider"`
@@ -30,8 +33,10 @@ type TelephonyEvidence struct {
 }
 
 type TelephonyRoute struct {
-	Key      TelephonyKey
-	Features map[TelephonyFeature]TelephonyEvidence
+	Key                 TelephonyKey
+	Features            map[TelephonyFeature]TelephonyEvidence
+	RequiredEnvironment []string
+	OptionalEnvironment []string
 }
 
 func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
@@ -64,6 +69,10 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		}
 		add(Pipecat, "carrier-websocket", carrier, pipecat, features...)
 	}
+	twilio := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}
+	route := routes[twilio]
+	route.RequiredEnvironment = []string{"account_sid", "auth_token", "from_number"}
+	routes[twilio] = route
 	sip := "https://docs.livekit.io/transport/self-hosting/sip-server/"
 	for _, carrier := range []string{"twilio", "telnyx", "plivo", "exotel"} {
 		features := append([]TelephonyFeature{
@@ -78,6 +87,14 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		append([]TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)}, sourcesWithoutStream...)...,
 	)
 	return routes
+}
+
+func TelephonyEnvironment(key TelephonyKey) (required, optional []string, ok bool) {
+	route, ok := TelephonyRoutes()[key]
+	if !ok {
+		return nil, nil, false
+	}
+	return slices.Clone(route.RequiredEnvironment), slices.Clone(route.OptionalEnvironment), true
 }
 
 func ResolveTelephonyFeature(key TelephonyKey, feature TelephonyFeature) TelephonyEvidence {

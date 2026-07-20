@@ -30,9 +30,12 @@ Required: no. Values: a value of the declared `type`. Default: none. Targets: al
 
 Marks a variable that must be supplied when the call starts, for example a customer id passed by an outbound dialer or a web session.
 
-Required: no. Values: `call_start`. Default: none. Targets: all five, core.
+Required: no. Values: `call_start | session_id | carrier | connection | call_id | stream_id | direction | from_number | to_number`. Default: none.
 
-Unmute checks that every `source: call_start` variable can actually be satisfied on the channels you use. Outbound telephony in particular requires all `call_start` variables to be satisfiable.
+Unmute checks every source against the selected route. An outbound start request
+must provide each non-defaulted `call_start` variable. An inbound channel can
+use `call_start` only with a default. System sources come from authenticated
+route metadata before the greeting; variable names never imply a source.
 
 ## How variables change
 

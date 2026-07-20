@@ -70,7 +70,11 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		if v.Default == nil {
 			pt, def = pt+" | None", "None"
 		}
-		data.Variables = append(data.Variables, pipecatVariable{Name: name, PyType: pt, Default: def})
+		data.Variables = append(data.Variables, pipecatVariable{Name: name, PyType: pt, Default: def, Source: string(v.Source)})
+	}
+	data.Telephony, err = buildPipecatTelephony(agent, target, env)
+	if err != nil {
+		return pipecatData{}, err
 	}
 
 	applyConversation(agent.Conversation, &data)
@@ -80,8 +84,66 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	}
 	setImportNeeds(&data)
 	data.Imports, data.Extras, data.Deps = collectImportsExtras(data)
+	if data.Telephony != nil {
+		data.Deps = append(data.Deps, "twilio>=9,<10")
+		slices.Sort(data.Deps)
+	}
 	data.RequiredEnv = env.sorted()
 	return data, nil
+}
+
+func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*pipecatTelephony, error) {
+	plan := resolved.Telephony
+	if plan == nil {
+		return nil, nil
+	}
+	if plan.Key.Provider != ir.ProviderPipecat || plan.Key.Transport != "carrier-websocket" || plan.Key.Carrier != "twilio" {
+		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no emitted adapter", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+	}
+	required := []string{"account_sid", "auth_token", "from_number"}
+	allowed := map[string]bool{}
+	for _, key := range required {
+		allowed[key] = true
+		name := plan.Environment[key]
+		if name == "" {
+			return nil, fmt.Errorf("pipecat telephony route %s requires connection environment key %q", plan.Key.Carrier, key)
+		}
+		env.add(name)
+	}
+	for key := range plan.Environment {
+		if !allowed[key] {
+			return nil, fmt.Errorf("pipecat telephony route %s does not accept connection environment key %q", plan.Key.Carrier, key)
+		}
+	}
+	env.add("UNMUTE_PUBLIC_URL")
+
+	telephony := &pipecatTelephony{
+		Carrier: plan.Key.Carrier, Connection: plan.Connection,
+		AccountSIDEnv: plan.Environment["account_sid"], AuthTokenEnv: plan.Environment["auth_token"],
+		FromNumberEnv: plan.Environment["from_number"],
+	}
+	for _, evidence := range plan.Evidence {
+		switch evidence.Feature {
+		case "inbound":
+			telephony.HasInbound = true
+		case "outbound":
+			telephony.HasOutbound = true
+		}
+	}
+	if telephony.HasOutbound {
+		env.add("UNMUTE_OUTBOUND_TOKEN")
+	}
+	for _, variable := range sortedVarNames(agent) {
+		def := agent.Variables[variable]
+		if def.Source == ir.VariableSourceCallStart {
+			telephony.CallStart = append(telephony.CallStart, pipecatCallStart{Name: variable, Type: string(def.Type), Required: def.Default == nil})
+			continue
+		}
+		if def.Source != "" {
+			telephony.SystemSources = append(telephony.SystemSources, pipecatSystemSource{Variable: variable, Source: string(def.Source)})
+		}
+	}
+	return telephony, nil
 }
 
 // setImportNeeds inspects the built model so bot.py imports only what this spec
@@ -98,9 +160,9 @@ func setImportNeeds(data *pipecatData) {
 		}
 		for _, t := range a.Tools {
 			if t.ColdDestination != "" {
-				data.HasColdTransfer = true
+				data.HasColdTransfer = data.HasColdTransfer || !t.CarrierTransfer
 				data.NeedsAppendFrame = true // cold transfer prompts the caller
-				data.NeedsEndFrame = true    // on_dialout_answered ends the call
+				data.NeedsEndFrame = data.NeedsEndFrame || !t.CarrierTransfer
 				continue
 			}
 			if t.Local {
@@ -428,7 +490,11 @@ func humanTransferTool(name string, c *ir.HumanTransfer, target ir.Target, env *
 	if !ok {
 		return pipecatTool{}, fmt.Errorf("human transfer %q destination %q missing on target %q", name, c.Destination, target.Name)
 	}
-	env.add("DAILY_API_KEY")
+	carrierTransfer := target.Telephony != nil && target.Telephony.Key.Provider == ir.ProviderPipecat &&
+		target.Telephony.Key.Transport == "carrier-websocket"
+	if !carrierTransfer {
+		env.add("DAILY_API_KEY")
+	}
 	desc := c.When
 	if desc == "" {
 		desc = "Transfer the caller to a human."
@@ -437,7 +503,7 @@ func humanTransferTool(name string, c *ir.HumanTransfer, target ir.Target, env *
 		Name: name, MethodName: name, Description: desc,
 		URLEnv: "", Args: nil, EndsCall: true,
 		// The destination rides through as the tool's fixed target; rendered by the template.
-		ColdDestination: destination,
+		ColdDestination: destination, CarrierTransfer: carrierTransfer,
 	}, nil
 }
 

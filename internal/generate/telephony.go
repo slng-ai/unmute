@@ -50,14 +50,21 @@ func buildTelephonyRuntimePlan(target ir.Target) *TelephonyRuntimePlan {
 			runtime.RequiredEnv = append(runtime.RequiredEnv, "UNMUTE_OUTBOUND_TOKEN")
 		}
 	}
+	if target.Transport == "carrier-websocket" {
+		runtime.RequiredEnv = append(runtime.RequiredEnv, "UNMUTE_PUBLIC_URL")
+	}
 	if plan.Coordination == "shared" {
 		runtime.RequiredEnv = append(runtime.RequiredEnv, "REDIS_URL")
 	}
 	slices.Sort(runtime.RequiredEnv)
 	switch target.Provider {
 	case ir.ProviderPipecat:
+		command := []string{"uv", "run", "bot.py", "--host", "0.0.0.0", "--port", "7860"}
+		if target.Telephony != nil {
+			command = []string{"uv", "run", "uvicorn", "telephony:app", "--host", "0.0.0.0", "--port", "7860"}
+		}
 		runtime.Processes = []TelephonyProcess{{
-			Name: "agent", Command: []string{"uv", "run", "bot.py", "--host", "0.0.0.0", "--port", "7860"},
+			Name: "agent", Command: command,
 			Health: "/healthz", Readiness: "/readyz",
 		}}
 	case ir.ProviderLiveKit:
@@ -68,12 +75,14 @@ func buildTelephonyRuntimePlan(target ir.Target) *TelephonyRuntimePlan {
 	}
 	switch target.Transport {
 	case "carrier-websocket":
-		runtime.PublicEndpoints = []TelephonyEndpoint{
-			{Name: "inbound", Method: "POST", Path: "/telephony/inbound"},
-			{Name: "media", Method: "WS", Path: "/telephony/ws"},
-			{Name: "outbound", Method: "POST", Path: "/telephony/outbound"},
-			{Name: "status", Method: "POST", Path: "/telephony/status"},
+		if telephonyHasFeature(plan, "inbound") {
+			runtime.PublicEndpoints = append(runtime.PublicEndpoints, TelephonyEndpoint{Name: "inbound", Method: "POST", Path: "/telephony/inbound"})
 		}
+		runtime.PublicEndpoints = append(runtime.PublicEndpoints, TelephonyEndpoint{Name: "media", Method: "WS", Path: "/telephony/ws/{token}"})
+		if telephonyHasFeature(plan, "outbound") {
+			runtime.PublicEndpoints = append(runtime.PublicEndpoints, TelephonyEndpoint{Name: "outbound", Method: "POST", Path: "/telephony/outbound"})
+		}
+		runtime.PublicEndpoints = append(runtime.PublicEndpoints, TelephonyEndpoint{Name: "status", Method: "POST", Path: "/telephony/status"})
 	case "connector":
 		runtime.PublicEndpoints = []TelephonyEndpoint{
 			{Name: "inbound", Method: "POST", Path: "/telephony/inbound"},
@@ -82,6 +91,15 @@ func buildTelephonyRuntimePlan(target ir.Target) *TelephonyRuntimePlan {
 		}
 	}
 	return runtime
+}
+
+func telephonyHasFeature(plan *ir.TelephonyPlan, feature string) bool {
+	for _, evidence := range plan.Evidence {
+		if evidence.Feature == feature {
+			return true
+		}
+	}
+	return false
 }
 
 func withTelephonyReport(files []File, plan *TelephonyRuntimePlan) ([]File, error) {

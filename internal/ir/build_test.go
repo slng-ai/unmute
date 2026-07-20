@@ -81,6 +81,30 @@ func TestBuildRejectsUnknownOrInvalidConnection(t *testing.T) { // telephony V1-
 			},
 			want: "environment variable name",
 		},
+		{
+			name: "missing route environment key",
+			mutate: func(pkg *packagespec.Package) {
+				connection := pkg.Connections["primary_phone"]
+				delete(connection.Environment, "auth_token")
+				pkg.Connections["primary_phone"] = connection
+				target := pkg.Targets["pipecat"]
+				target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
+				pkg.Targets["pipecat"] = target
+			},
+			want: `requires environment key "auth_token"`,
+		},
+		{
+			name: "unknown route environment key",
+			mutate: func(pkg *packagespec.Package) {
+				connection := pkg.Connections["primary_phone"]
+				connection.Environment["api_key"] = "TWILIO_API_KEY"
+				pkg.Connections["primary_phone"] = connection
+				target := pkg.Targets["pipecat"]
+				target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
+				pkg.Targets["pipecat"] = target
+			},
+			want: `environment key "api_key" is not accepted`,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

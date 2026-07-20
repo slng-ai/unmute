@@ -1,6 +1,9 @@
 package target
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	table := Default()
@@ -109,6 +112,10 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	connector := TelephonyKey{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}
 	if got := ResolveTelephonyFeature(connector, TelephonyFeature(WarmTransfer)); got.Tag != Gated {
 		t.Fatalf("connector inherited SIP warm transfer: %#v", got)
+	}
+	required, optional, ok := TelephonyEnvironment(exact)
+	if !ok || len(optional) != 0 || strings.Join(required, ",") != "account_sid,auth_token,from_number" {
+		t.Fatalf("exact environment vocabulary = required %v optional %v ok %v", required, optional, ok)
 	}
 }
 

@@ -15,7 +15,9 @@ targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: daily-sip
+    transport: carrier-websocket
+    carrier: twilio
+    connection: primary_phone
     # no model overrides: everything runs as defined in agent.yaml
     destinations:
       billing_line: "+14155550123"
@@ -37,6 +39,7 @@ targets:
 | `pins` | no | independently versioned packages (for example LiveKit plugins) get their own entries |
 | `sdk_language` | no | the LiveKit driver currently accepts `python` only |
 | `transport`, `carrier` | no | driver vocabulary; telephony controls resolve against these, never the brand alone |
+| `connection` | telephony routes | name of one `connections/<name>.yaml`; all telephony channels on this v1 target share it |
 | `region`, `edition` | no | provider vocabulary; declared, never derived |
 | `models` | no | per-target overrides, keyed by model name, below |
 | `destinations` | if any `human_transfer` is used | map of symbolic name to phone number or SIP address |

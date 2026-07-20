@@ -34,6 +34,7 @@ import asyncio
 {{end}}{{if .NeedsHTTPX}}
 import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
+{{end}}{{if .Telephony}}import telephony
 {{end}}from dotenv import load_dotenv
 {{if .Tracing}}
 from opentelemetry import trace
@@ -58,6 +59,8 @@ from pipecat.runner.utils import create_transport
 {{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
 {{end}}from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+{{if .Telephony}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+{{end}}
 {{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
@@ -81,9 +84,6 @@ REQUIRED_ENV = [
 {{end}}{{end}}{{if .HasColdTransfer}}
 # Set once the transport exists, so an agent's cold-transfer @tool can reach it.
 _TRANSPORT: BaseTransport | None = None
-{{end}}{{if .HasFlows}}
-# Set once the shared context exists, so delegate flows can snapshot/restore it.
-_CONTEXT: LLMContext | None = None
 {{end}}
 
 def require_env() -> None:
@@ -284,7 +284,23 @@ class State:
 {{range .Variables}}    {{.Name}}: {{.PyType}} = {{.Default}}
 {{end}}
 
-STATE = State()
+def build_state(call_context: dict | None = None) -> State:
+    state = State()
+{{if .Telephony}}    context = call_context or {}
+    missing = []
+{{range .Telephony.SystemSources}}    value = context.get({{pyq .Source}})
+    if value in (None, ""):
+        missing.append({{pyq .Source}})
+    else:
+        setattr(state, {{pyq .Variable}}, value)
+{{end}}    call_start = context.get("call_start", {})
+{{range .Telephony.CallStart}}    if {{pyq .Name}} in call_start:
+        setattr(state, {{pyq .Name}}, call_start[{{pyq .Name}}])
+{{if .Required}}    else:
+        missing.append({{pyq .Name}})
+{{end}}{{end}}    if missing:
+        raise RuntimeError(f"Missing call context fields: {', '.join(missing)}")
+{{end}}    return state
 {{end}}{{if gt .MaxDurationSecs 0}}
 async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
     await asyncio.sleep(timeout_secs)
@@ -304,14 +320,18 @@ def build_{{.Name}}_tts():
 class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}_TracedLLMWorker{{else}}LLMWorker{{end}}):
     """Agent: {{.Name}}."""
 
-    def __init__(self) -> None:
+    def __init__(self, state=None, context=None, call_context=None) -> None:
+{{if $.Variables}}        self.state = state
+{{end}}{{if $.HasFlows}}        self.context = context
+{{end}}{{if $.Telephony}}        self.call_context = call_context
+{{end}}
         llm = build_{{.Name}}_llm()
         super().__init__({{pyq .Name}}, llm=llm, pipeline=Pipeline([llm, build_{{.Name}}_tts()]), bridged=())
 {{range .Transfers}}
     @tool(cancel_on_interruption=False)
     async def {{.MethodName}}(self, params: FunctionCallParams):
         """{{.When}}"""
-{{if .Requires}}        missing = [name for name in [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}] if getattr(STATE, name, None) in (None, "")]
+{{if .Requires}}        missing = [name for name in [{{range $i, $r := .Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}] if getattr(self.state, name, None) in (None, "")]
         if missing:
             await params.result_callback({"refused": f"Cannot transfer yet; still need: {', '.join(missing)}"})
             return
@@ -334,8 +354,10 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}_TracedLLMWorker{{else
                 run_llm=True,
             )
         )
-        if _TRANSPORT is not None:
+{{if .CarrierTransfer}}        await telephony.cold_transfer(self.call_context["call_id"], {{pyq .ColdDestination}})
+{{else}}        if _TRANSPORT is not None:
             await _TRANSPORT.sip_call_transfer({"toEndPoint": {{pyq .ColdDestination}}})
+{{end}}
         await params.result_callback({"transferred": True})
 {{else if .Local}}        result = tools.{{.Name}}.{{.Name}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Name}}={{$a.Name}}{{end}})
         if inspect.isawaitable(result):
@@ -357,10 +379,10 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}_TracedLLMWorker{{else
         self._{{$d.MethodName}}_results = {}
         # Snapshot the owner's context; the flow rewrites it per node and the
         # final step restores it (merge: results, N13).
-        self._{{$d.MethodName}}_snapshot = ([dict(m) for m in _CONTEXT.get_messages()], _CONTEXT.tools)
+        self._{{$d.MethodName}}_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
         flow = FlowManager(
             llm=self.llm,
-            context_aggregator=LLMContextAggregatorPair(_CONTEXT),
+            context_aggregator=LLMContextAggregatorPair(self.context),
             worker=self,
         )
         await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
@@ -393,14 +415,14 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}_TracedLLMWorker{{else
     async def _{{$d.MethodName}}_finish_{{$t.Name}}(self, args, flow_manager):
         self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
 {{if $t.NextName}}        return {"status": "ok"}, self._{{$d.MethodName}}_node_{{$t.NextName}}()
-{{else}}{{range $d.Assign}}        STATE.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
+{{else}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
 {{end}}{{if eq $d.Then "end"}}        await self.queue_frame(EndFrame())
         return {"status": "ok"}, None
 {{else}}        # then: {{$d.Then}} — restore the owner's pre-flow context (messages and
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._{{$d.MethodName}}_snapshot
-{{if eq $d.Then "transfer"}}        _CONTEXT.set_messages(messages)
-        _CONTEXT.set_tools(tools)
+{{if eq $d.Then "transfer"}}        self.context.set_messages(messages)
+        self.context.set_tools(tools)
         await self.activate_worker(
             {{pyq $d.ThenTarget}},
             args=LLMWorkerActivationArgs(
@@ -409,11 +431,11 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}_TracedLLMWorker{{else
             ),
             deactivate_self=True,
         )
-{{else}}        _CONTEXT.set_messages(messages + [{
+{{else}}        self.context.set_messages(messages + [{
             "role": "developer",
             "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + " Continue with the caller in one short line.",
         }])
-        _CONTEXT.set_tools(tools)
+        self.context.set_tools(tools)
 {{end}}        return {"status": "ok"}, None
 {{end}}{{end}}{{end}}{{end}}
 {{end}}{{if .FlowTools}}
@@ -438,9 +460,9 @@ async def _flow_tool_{{.Name}}(args, flow_manager):
 transport_params: dict = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+{{if .Telephony}}    "twilio": lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True),
+{{end}}
 }
-
-AGENTS = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(){{end}}]
 
 
 
@@ -460,9 +482,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
     # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
     # key, no network hop; the turn binding in targets.yaml is advisory.
     context = LLMContext()
-{{if .HasFlows}}    global _CONTEXT
-    _CONTEXT = context
-{{end}}    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+    call_context = None
+{{if .Telephony}}    call_context = telephony.normalized_context(runner_args)
+{{end}}{{if .Variables}}    state = build_state(call_context)
+{{else}}    state = None
+{{end}}    agents = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(state=state, context=context, call_context=call_context){{end}}]
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
@@ -495,7 +520,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
     )
 {{if .Tracing}}
     if tracing_enabled:
-        _enable_agent_tracing(main, AGENTS)
+        _enable_agent_tracing(main, agents)
 {{end}}
 {{if .Inactivity}}
     @user_aggregator.event_handler("on_user_turn_idle")
@@ -548,7 +573,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
         async def on_client_disconnected(transport, client):
             await runner.cancel()
 
-    await runner.add_workers(main, *AGENTS)
+    await runner.add_workers(main, *agents)
 {{if .Tracing}}
     try:
         await runner.run()
@@ -563,6 +588,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
 
 
 async def bot(runner_args: RunnerArguments) -> None:
+{{if .Telephony}}    require_env()
+    telephony.configure_pipecat_env()
+{{end}}
     transport = await create_transport(runner_args, transport_params)
     await run_bot(transport, runner_args)
 

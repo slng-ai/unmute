@@ -90,6 +90,44 @@ func TestSmokePipecatV1ConsoleExtraResolves(t *testing.T) {
 	}
 }
 
+func TestSmokePipecatTwilioTemplatesCompileWithoutCredentials(t *testing.T) { // telephony V20
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = "twilio"
+	configured.Connection = "primary_phone"
+	pkg.Targets["pipecat"] = configured
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	var paths []string
+	for _, name := range []string{"bot.py", "telephony.py"} {
+		content := []byte(artifactFile(t, artifact, name))
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+	}
+	args := append([]string{"-m", "py_compile"}, paths...)
+	if out, err := exec.Command(python, args...).CombinedOutput(); err != nil {
+		t.Fatalf("generated telephony syntax: %v\n%s", err, out)
+	}
+}
+
 // smokeCheckScript imports the emitted bot and instantiates every service
 // builder with placeholder env values. Importing alone proves the imports and
 // dependency set; calling the builders proves the constructor kwargs against

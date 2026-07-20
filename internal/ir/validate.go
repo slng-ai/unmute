@@ -842,18 +842,28 @@ func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider
 				applyResolvedCapability(caps.Control(name, provider, resolved.Transport, resolved.Carrier), name, provider, row)
 			}
 		}
-		if channel.Kind != ChannelTelephony || channel.Outbound == nil || !*channel.Outbound {
+		if channel.Kind != ChannelTelephony {
+			continue
+		}
+		if resolved.Telephony != nil && channel.Inbound != nil && *channel.Inbound {
+			for name, variable := range agent.Variables {
+				if variable.Source == VariableSourceCallStart && variable.Default == nil {
+					row.Errors = add(row.Errors, fmt.Sprintf("inbound call_start variable %q requires a default", name))
+				}
+			}
+		}
+		if channel.Outbound == nil || !*channel.Outbound {
 			continue
 		}
 		if channel.OnVoicemail == "" {
 			row.Errors = add(row.Errors, "outbound telephony requires on_voicemail")
 		}
-		for name, variable := range agent.Variables {
-			if variable.Source == VariableSourceCallStart && variable.Default == nil {
-				row.Errors = add(row.Errors, fmt.Sprintf("outbound call_start variable %q is not satisfiable", name))
-			}
-		}
 		if resolved.Telephony == nil {
+			for name, variable := range agent.Variables {
+				if variable.Source == VariableSourceCallStart && variable.Default == nil {
+					row.Errors = add(row.Errors, fmt.Sprintf("outbound call_start variable %q is not satisfiable", name))
+				}
+			}
 			applyCapability(caps, targetcap.FieldOutbound, provider, row)
 			if channel.OnVoicemail != "" {
 				applyCapability(caps, targetcap.FieldVoicemail, provider, row)

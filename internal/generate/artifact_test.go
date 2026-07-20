@@ -87,11 +87,14 @@ func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { //
 		t.Fatal(err)
 	}
 	plan := buildTelephonyRuntimePlan(agent.Targets["pipecat"])
-	if plan == nil || len(plan.Processes) != 1 || len(plan.PublicEndpoints) != 4 {
+	if plan == nil || len(plan.Processes) != 1 || len(plan.PublicEndpoints) != 3 {
 		t.Fatalf("runtime plan = %#v", plan)
 	}
-	if strings.Join(plan.RequiredEnv, ",") != "TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER" {
+	if strings.Join(plan.RequiredEnv, ",") != "TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,UNMUTE_PUBLIC_URL" {
 		t.Fatalf("required env = %v", plan.RequiredEnv)
+	}
+	if got := strings.Join(plan.Processes[0].Command, " "); got != "uv run uvicorn telephony:app --host 0.0.0.0 --port 7860" {
+		t.Fatalf("process command = %q", got)
 	}
 	files, err := withTelephonyReport([]File{{Path: "compile-report.json", Content: []byte(`{"target":"pipecat"}`)}}, plan)
 	if err != nil {

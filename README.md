@@ -141,3 +141,10 @@ Route support remains provisional until a real credentialed smoke passes.
 [TELEPHONY.md](TELEPHONY.md) documents the architecture, exact credential list,
 where to obtain each credential, local public-URL flow, deployment topology,
 and current verification policy.
+
+For the generated Pipecat/Twilio route, get the Account SID and Auth Token from
+the Twilio Console account dashboard and the caller ID from Phone Numbers. Set
+those three values under the names above, set `UNMUTE_PUBLIC_URL` to the exact
+public HTTPS origin, and generate a separate `UNMUTE_OUTBOUND_TOKEN` if the
+channel permits outbound calls. The Auth Token validates both HTTP webhook and
+WebSocket upgrade signatures.

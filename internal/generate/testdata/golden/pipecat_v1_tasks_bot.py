@@ -45,6 +45,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
@@ -78,9 +79,6 @@ IGNORE_PHRASES = ["okay", "right", "uh-huh"]
 
 # Set once the transport exists, so an agent's cold-transfer @tool can reach it.
 _TRANSPORT: BaseTransport | None = None
-
-# Set once the shared context exists, so delegate flows can snapshot/restore it.
-_CONTEXT: LLMContext | None = None
 
 
 def require_env() -> None:
@@ -282,7 +280,9 @@ class State:
     verified: bool = False
 
 
-STATE = State()
+def build_state(call_context: dict | None = None) -> State:
+    state = State()
+    return state
 
 async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
     await asyncio.sleep(timeout_secs)
@@ -313,7 +313,10 @@ def build_billing_tts():
 class BillingAgent(_TracedLLMWorker):
     """Agent: billing."""
 
-    def __init__(self) -> None:
+    def __init__(self, state=None, context=None, call_context=None) -> None:
+        self.state = state
+        self.context = context
+
         llm = build_billing_llm()
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
 
@@ -340,6 +343,7 @@ class BillingAgent(_TracedLLMWorker):
         )
         if _TRANSPORT is not None:
             await _TRANSPORT.sip_call_transfer({"toEndPoint": "+14155550123"})
+
         await params.result_callback({"transferred": True})
 
 
@@ -367,7 +371,10 @@ def build_intake_tts():
 class IntakeAgent(_TracedLLMWorker):
     """Agent: intake."""
 
-    def __init__(self) -> None:
+    def __init__(self, state=None, context=None, call_context=None) -> None:
+        self.state = state
+        self.context = context
+
         llm = build_intake_llm()
         super().__init__("intake", llm=llm, pipeline=Pipeline([llm, build_intake_tts()]), bridged=())
 
@@ -402,10 +409,10 @@ class IntakeAgent(_TracedLLMWorker):
         self._run_collect_results = {}
         # Snapshot the owner's context; the flow rewrites it per node and the
         # final step restores it (merge: results, N13).
-        self._run_collect_snapshot = ([dict(m) for m in _CONTEXT.get_messages()], _CONTEXT.tools)
+        self._run_collect_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
         flow = FlowManager(
             llm=self.llm,
-            context_aggregator=LLMContextAggregatorPair(_CONTEXT),
+            context_aggregator=LLMContextAggregatorPair(self.context),
             worker=self,
         )
         await flow.initialize(self._run_collect_node_collect())
@@ -436,15 +443,15 @@ class IntakeAgent(_TracedLLMWorker):
 
     async def _run_collect_finish_collect(self, args, flow_manager):
         self._run_collect_results["collect"] = dict(args)
-        STATE.verified = self._run_collect_results["collect"]["verified_flag"]
+        self.state.verified = self._run_collect_results["collect"]["verified_flag"]
         # then: return — restore the owner's pre-flow context (messages and
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._run_collect_snapshot
-        _CONTEXT.set_messages(messages + [{
+        self.context.set_messages(messages + [{
             "role": "developer",
             "content": "Task results: " + json.dumps(self._run_collect_results) + " Continue with the caller in one short line.",
         }])
-        _CONTEXT.set_tools(tools)
+        self.context.set_tools(tools)
         return {"status": "ok"}, None
 
     @tool()
@@ -453,10 +460,10 @@ class IntakeAgent(_TracedLLMWorker):
         self._run_triage_results = {}
         # Snapshot the owner's context; the flow rewrites it per node and the
         # final step restores it (merge: results, N13).
-        self._run_triage_snapshot = ([dict(m) for m in _CONTEXT.get_messages()], _CONTEXT.tools)
+        self._run_triage_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
         flow = FlowManager(
             llm=self.llm,
-            context_aggregator=LLMContextAggregatorPair(_CONTEXT),
+            context_aggregator=LLMContextAggregatorPair(self.context),
             worker=self,
         )
         await flow.initialize(self._run_triage_node_collect())
@@ -491,11 +498,11 @@ class IntakeAgent(_TracedLLMWorker):
         # then: return — restore the owner's pre-flow context (messages and
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._run_triage_snapshot
-        _CONTEXT.set_messages(messages + [{
+        self.context.set_messages(messages + [{
             "role": "developer",
             "content": "Task results: " + json.dumps(self._run_triage_results) + " Continue with the caller in one short line.",
         }])
-        _CONTEXT.set_tools(tools)
+        self.context.set_tools(tools)
         return {"status": "ok"}, None
 
 
@@ -516,9 +523,8 @@ async def _flow_tool_lookup_customer(args, flow_manager):
 transport_params: dict = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
-}
 
-AGENTS = [BillingAgent(), IntakeAgent()]
+}
 
 
 
@@ -544,8 +550,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
     # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
     # key, no network hop; the turn binding in targets.yaml is advisory.
     context = LLMContext()
-    global _CONTEXT
-    _CONTEXT = context
+    call_context = None
+    state = build_state(call_context)
+    agents = [BillingAgent(state=state, context=context, call_context=call_context), IntakeAgent(state=state, context=context, call_context=call_context)]
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -579,7 +586,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
     )
 
     if tracing_enabled:
-        _enable_agent_tracing(main, AGENTS)
+        _enable_agent_tracing(main, agents)
 
 
     @user_aggregator.event_handler("on_user_turn_idle")
@@ -631,7 +638,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
         async def on_client_disconnected(transport, client):
             await runner.cancel()
 
-    await runner.add_workers(main, *AGENTS)
+    await runner.add_workers(main, *agents)
 
     try:
         await runner.run()
@@ -644,6 +651,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
 
 
 async def bot(runner_args: RunnerArguments) -> None:
+
     transport = await create_transport(runner_args, transport_params)
     await run_bot(transport, runner_args)
 

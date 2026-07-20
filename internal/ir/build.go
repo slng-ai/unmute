@@ -699,8 +699,35 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 	}
 	if raw.Connection != "" && hasTelephonyChannel(agent) {
 		built.Telephony = buildTelephonyPlan(pkg, agent, built)
+		if err := validateTelephonyEnvironment(pkg, built.Telephony); err != nil {
+			return Target{}, err
+		}
 	}
 	return built, nil
+}
+
+func validateTelephonyEnvironment(pkg *packagespec.Package, plan *TelephonyPlan) error {
+	key := targetcap.TelephonyKey{Provider: targetcap.Provider(plan.Key.Provider), Transport: plan.Key.Transport, Carrier: plan.Key.Carrier}
+	required, optional, ok := targetcap.TelephonyEnvironment(key)
+	if !ok || len(required)+len(optional) == 0 {
+		return nil
+	}
+	allowed := make(map[string]bool, len(required)+len(optional))
+	path := filepath.Join("connections", plan.Connection+".yaml")
+	for _, name := range append(required, optional...) {
+		allowed[name] = true
+	}
+	for _, name := range required {
+		if plan.Environment[name] == "" {
+			return fmt.Errorf("%s: connection %q requires environment key %q for route (%s, %s, %s)", pkg.Location(path, "environment:"), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+		}
+	}
+	for name := range plan.Environment {
+		if !allowed[name] {
+			return fmt.Errorf("%s: connection %q environment key %q is not accepted by route (%s, %s, %s)", pkg.Location(path, name), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+		}
+	}
+	return nil
 }
 
 func hasTelephonyChannel(agent *Agent) bool {

@@ -403,11 +403,18 @@ targets:
       support_line: "+14155550123"
 ```
 
-Use `mode: cold` for a direct transfer. LiveKit warm transfer accepts
-`briefing: summary`; `message` and `wait` don't have faithful LiveKit mappings.
-Warm transfer is Beta in the Python SDK. Outbound calls support
-`on_voicemail: hangup` and `on_voicemail: leave_message`, and require the
-LiveKit outbound SIP trunk environment setting.
+Bind the target to either the self-hosted `sip` route or the distinct Beta
+Twilio `connector` route, plus one telephony Connection. These new routes are
+provisional until credentialed smokes pass. The Connector cannot inherit SIP
+transfer behavior.
+
+Self-hosted SIP runs LiveKit Server and LiveKit SIP against the same Redis.
+Redis is their shared datastore and message bus, so calls, SIP participants,
+and Agent dispatch remain coherent when either service has multiple replicas.
+It is not an audio buffer. This differs from a single-process Pipecat carrier
+WebSocket, where one long-lived connection and its call context can remain in
+one process; Pipecat also needs shared coordination once mutable call state can
+reach different replicas.
 
 ## Run it and talk to the agent
 
@@ -462,8 +469,8 @@ remaining boundaries are explicit YAML choices, not silent omissions.
 | Webhook, local, and MCP tools | Supported |
 | Non-default tool `interruption` | Warns; tools run to completion |
 | Conversation shaping block | Supported |
-| Cold and warm human transfer | Supported; warm summary is Beta |
-| Outbound calls and voicemail | Supported |
+| New `sip` telephony route | Provisional pending credentialed route smokes |
+| Beta Twilio `connector` route | Separate provisional route; never inherits SIP capabilities |
 | A `provider: local` model (listen, speak, or think) | Supported |
 | `speak.endpoint_env` | Rejected; no LiveKit integration slot |
 | Warm `briefing: message` or `wait` | Rejected; use `summary` |

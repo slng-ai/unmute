@@ -26,6 +26,8 @@ changes belong in one of three YAML surfaces.
 your-agent/
 ├── agent.yaml          # portable behavior
 ├── targets.yaml        # target infrastructure and optional model overrides
+├── connections/        # telephony environment-variable names
+│   └── primary_phone.yaml
 ├── tools/
 │   └── lookup_order.yaml
 ├── instructions.md     # entry-agent instructions
@@ -40,6 +42,8 @@ The files have distinct responsibilities:
 - `tools/*.yaml` describes each tool contract and where the tool executes.
 - `targets.yaml` selects LiveKit, Pipecat, or a managed target and carries its
   infrastructure settings and optional model overrides.
+- `connections/*.yaml` maps telephony route keys to environment-variable
+  names. Secret values stay in `.env` or the deployment secret store.
 - Markdown files contain instructions. YAML points to them by path, which keeps
   long prompts out of the structural configuration.
 

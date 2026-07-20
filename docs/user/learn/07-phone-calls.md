@@ -1,16 +1,20 @@
 # 07. Phone calls
 
-So far Acme's agent runs over a browser audio session. To take real phone calls it needs a **telephony** channel, and often a way to hand the caller to a human. This page adds both.
+Unmute compiles phone-call intent for two orchestrators: **Pipecat** and
+**LiveKit**. The Agent says what the call needs, a Connection names the secret
+environment variables, and the target selects one exact media route. Unmute
+does not buy a number, create a trunk, or copy credentials into generated code.
 
-This is also the page where the Pipecat driver's limits matter most, so it is honest about what works today: on Pipecat, **inbound calls and cold human transfer work now; outbound calls, voicemail, and warm transfer do not yet** and fail validation with a clear message.
+All carrier routes are currently **provisional**. The compiler and generated
+Pipecat/Twilio adapter have credential-free tests, but validation continues to
+fail closed until the route passes real inbound, outbound, authentication,
+hangup, and transfer smokes.
 
-## A telephony channel
-
-Add a phone channel next to the web one:
+## Declare the phone channel
 
 ```yaml
+# agent.yaml
 channels:
-  web: { kind: realtime_audio }
   phone:
     kind: telephony
     inbound: true
@@ -18,13 +22,78 @@ channels:
     required_controls: [cold_transfer, hangup]
 ```
 
-**`kind: telephony`** is a phone channel. **`inbound`** and **`outbound`** say which directions it handles; both are required on a telephony channel. **`required_controls`** lists the telephony capabilities the call needs, from a fixed vocabulary: `cold_transfer`, `warm_transfer`, `dtmf_send`, `dtmf_receive`, `hold`, `hangup`, `voicemail_detection`, `ivr_navigation`. These are resolved against the target's carrier and transport, not the provider name alone.
+`inbound` and `outbound` are required booleans. `required_controls` names only
+behavior the Agent actually needs. Each direction and control is checked
+against the exact `(orchestrator, transport, carrier)` route; support on
+LiveKit SIP never enables the LiveKit Connector, and Twilio support never
+enables another carrier.
 
-## Transferring to a human
+## Add a Connection
 
-A human handoff is a control, like an agent handoff, but the destination is a person on a phone:
+Connection files contain environment-variable **names**, not their values:
 
 ```yaml
+# connections/primary_phone.yaml
+kind: telephony
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+Bind that Connection to a route in `targets.yaml`:
+
+```yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: carrier-websocket
+    carrier: twilio
+    connection: primary_phone
+    destinations:
+      billing_line: "+14155550123"
+```
+
+Pipecat uses one WebSocket per carrier call and delegates media framing to the
+Pipecat Twilio serializer. The generated `telephony.py` owns signed webhooks,
+one-use outbound context, normalized call metadata, and Twilio REST call
+control. It does not parse or emit audio frames.
+
+LiveKit uses either `transport: sip` or the distinct Beta
+`transport: connector` route. The Connector is Twilio-only and cannot inherit
+SIP transfer behavior. Self-hosted LiveKit SIP also needs Redis because the
+LiveKit server and SIP service use it as a shared datastore and message bus;
+Pipecat's single-process adapter can keep one call's pending context local.
+
+## Configure credentials
+
+Keep values in the package's ignored `.env` for development or in the
+deployment secret store. Obtain them here:
+
+| Route | Required values | Where to find them |
+|---|---|---|
+| Twilio | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | Twilio Console → Account dashboard and Phone Numbers. The Auth Token also validates webhook and WebSocket signatures. |
+| Telnyx | `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_PHONE_NUMBER` | Telnyx Mission Control → API Keys, Public Key, Voice API Application, and Numbers. |
+| Plivo | `PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN`, `PLIVO_PHONE_NUMBER` | Plivo Console → API Keys and Phone Numbers. |
+| Exotel | `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`, `EXOTEL_ACCOUNT_SID`, `EXOTEL_SUBDOMAIN`, `EXOTEL_PHONE_NUMBER`, `EXOTEL_APP_ID` | Exotel Dashboard → API Settings, ExoPhones, and the Voice call-flow application. |
+| LiveKit Cloud or Connector | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | LiveKit Cloud project settings, or `lk app env -w`. Add the selected carrier values above. |
+| Self-hosted LiveKit SIP | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `REDIS_URL` | Create the key pair in the LiveKit Server configuration; use the same server and Redis deployment for LiveKit SIP. Add the selected carrier trunk credentials. |
+
+Carrier WebSocket deployments also set `UNMUTE_PUBLIC_URL` to the exact public
+HTTPS origin used in signature validation. It is configuration, not a secret.
+Outbound HTTP starts require a separate secret, `UNMUTE_OUTBOUND_TOKEN`, which
+you generate yourself. It is never a carrier credential.
+
+The complete credential links and self-hosted topology are in
+[TELEPHONY.md](../../../TELEPHONY.md#credentials).
+
+## Transfer to a person
+
+Author a symbolic destination in the portable control:
+
+```yaml
+# agent.yaml
 controls:
   to_human:
     kind: human_transfer
@@ -32,29 +101,14 @@ controls:
     mode: cold
 ```
 
-Give it to the billing agent by adding `to_human` to its `tools:` list, and add the number to the target so the symbolic name resolves:
+The target resolves `billing_line` to an E.164 number or SIP URI. The generated
+runtime never accepts a model-supplied arbitrary transfer destination. Warm
+transfer is a separate route feature and stays gated until that exact carrier
+and transport pass their state-machine smoke.
 
-```yaml
-targets:
-  pipecat:
-    provider: pipecat
-    version: "1.5.0"
-    transport: daily-sip          # cold transfer on Pipecat needs the Daily SIP transport
-    # ... models ...
-    destinations:
-      billing_line: "+14155550123"
-```
+## Start outbound calls
 
-Reading the control:
-
-- **`destination`** is a symbolic name, not a number. The real number (or SIP address) lives in each target's `destinations:` map, so the same spec dials your test line in dev and your real line in production.
-- **`mode`** is `cold` or `warm`. **Cold** transfers the caller and the agent drops off. **Warm** keeps the agent on to brief the human first (with an optional `briefing`). Cold is the portable choice.
-
-On Pipecat, a cold transfer needs `transport: daily-sip`. Unmute then adds `DAILY_API_KEY` to the required environment, and the generated tool dials the destination over SIP and leaves the call once the human answers.
-
-## Outbound calls and voicemail (not on Pipecat yet)
-
-The schema also describes **outbound** calling. When you set `outbound: true`, you must say what to do if a machine picks up:
+An outbound channel must declare voicemail policy:
 
 ```yaml
 channels:
@@ -62,29 +116,20 @@ channels:
     kind: telephony
     inbound: false
     outbound: true
-    on_voicemail: leave_message    # or: hangup
+    on_voicemail: hangup
+
+variables:
+  campaign_id: { type: string, source: call_start }
+  provider_call_id: { type: string, source: call_id }
 ```
 
-`on_voicemail` is required whenever `outbound: true`, and it is `hangup` or `leave_message`. Outbound also requires that every `source: call_start` variable can actually be supplied.
+The generated authenticated start operation requires every non-defaulted
+`source: call_start` field. It returns an Unmute `session_id`, the carrier call
+ID when available, and accepted status. Inbound calls can use a `call_start`
+variable only when it has a default.
 
-**On Pipecat today this fails validation.** The driver does not emit outbound or voicemail yet:
+System sources are explicit: `session_id`, `carrier`, `connection`, `call_id`,
+`stream_id`, `direction`, `from_number`, and `to_number`. A source that the
+selected route cannot provide fails validation before generation.
 
-```text
-error: pipecat: the Pipecat driver does not emit outbound calling yet
-error: pipecat: the Pipecat driver does not emit voicemail handling yet
-```
-
-This is the fail-loud rule doing its job: the feature is in the schema and Pipecat the platform can do it, but the driver has not shipped the lowering, so Unmute stops rather than pretend. When the driver adds it, the same spec will compile with no change. The same is true for **warm transfer**: Pipecat supports it, the driver does not emit it yet, so `mode: warm` fails today.
-
-## What just got harder
-
-Telephony is the most platform-specific area, so the differences are real:
-
-- **A telephony channel** is `core` in shape, but its options gate per target.
-- **Cold human transfer** works on Pipecat (via Daily SIP), LiveKit, Vapi, and ElevenLabs; it is carrier-conditional on Deepgram.
-- **Warm transfer** is supported by several platforms but **not emitted by the Pipecat driver yet.**
-- **Outbound and voicemail** are proven on four platforms but **not emitted by the Pipecat driver yet**, and generated with a warning on Deepgram.
-
-For a Pipecat deployment today, build around **inbound calls plus cold transfer.** Track the [Pipecat target page](../targets/pipecat.md) for when the rest lands.
-
-Next: [08. Going live](08-going-live.md), on running one spec across targets, capacity, and secrets.
+Next: [08. Going live](08-going-live.md), on capacity, deployment, and secrets.

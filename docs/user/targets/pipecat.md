@@ -77,7 +77,6 @@ targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: daily-sip
 ```
 
 ### Map providers to services
@@ -102,7 +101,9 @@ uses the local VAD. Semantic endpointing is also advisory.
 ### Transport
 
 - **WebRTC** is the default and is what `unmute dev` uses to serve a browser test client. You do not configure it.
-- **`transport: daily-sip`** is needed for a cold human transfer (dialing a real phone number over SIP). Set it on the target when you use `human_transfer`.
+- **`transport: carrier-websocket`** selects direct Twilio, Telnyx, Plivo, or
+  Exotel media streaming for telephony. It also requires `carrier` and
+  `connection`; support is resolved for that exact tuple.
 
 ### Version pin
 
@@ -137,7 +138,7 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | `inactivity` nudge and end | ok |
 | `max_duration` | ok |
 | `provider: local` for listen and speak | ok |
-| cold human transfer | ok, needs `transport: daily-sip` |
+| carrier WebSocket telephony | provisional; generated Twilio adapter has offline tests but no credentialed route smoke |
 
 Everything in the [learn pages](../learn/01-one-agent.md), including the guarded handoff, the task, and the task group, runs here. The one hard `fail` is the per-task `model:` override; it sits with the driver gates below.
 
@@ -148,10 +149,10 @@ Some features are in the schema and Pipecat itself supports them, but this first
 - **Model fallback** (`fallback` on a think model).
 - **Per-task `model:`.** Pipecat's mechanism for switching models mid-call stalls the conversation in the current release, so there is nothing safe to emit yet. Drop the override and the task runs on the delegating agent's model.
 - **`thinking_audio`.**
-- **Outbound calls and voicemail** (`outbound: true`, `on_voicemail`).
+- **Voicemail detection** (`on_voicemail`) on carrier WebSocket routes.
 - **`mcp` tools.** Use `webhook` or `local` Python-handler tools, which are
   emitted.
-- **Warm human transfer.** Pipecat ships warm transfer, but the driver emits `cold` only.
+- **Warm human transfer.** The direct-carrier state machine is not enabled.
 - **Handoff and task context shaping beyond the defaults:** any `history` other than `full`, a subset `context.variables` list rather than `all`, and `include_tool_calls: false`. The handoff carries the running context; finer shaping is not written yet.
 
 If you stay within the feature table above, you will not hit any of these. When you do use one, the failure names it, so you are never surprised.
