@@ -59,6 +59,7 @@ Do not edit this project by hand — it is regenerated from the agent spec.
 Change the spec and recompile.
 === agent.py ===
 import asyncio
+from collections.abc import Sequence
 import logging
 import os
 from dataclasses import dataclass
@@ -104,7 +105,7 @@ load_dotenv(".env.local")
 # --- tracing ---------------------------------------------------------------
 def setup_langfuse(
     metadata: dict[str, AttributeValue] | None = None,
-) -> TracerProvider | None:
+) -> TracerProvider:
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
     base_url = os.getenv("LANGFUSE_BASE_URL")
@@ -127,14 +128,14 @@ def setup_langfuse(
 
 
 def trace_speech_metrics(
-    trace_provider: TracerProvider | None,
-    speech_metrics: list[STTMetrics | TTSMetrics],
+    trace_provider: TracerProvider,
+    speech_metrics: Sequence[STTMetrics | TTSMetrics],
     *,
     input_value: str,
     output_value: str,
     ended_at: float,
 ) -> None:
-    if trace_provider is None or not speech_metrics:
+    if not speech_metrics:
         return
 
     metric = speech_metrics[-1]
@@ -281,7 +282,7 @@ class Events(Agent):
         super().__init__(
             instructions=EVENTS_PROMPT,
             chat_ctx=chat_ctx,
-            tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-orion-en", model="slng/deepgram/aura:2-en", language="en"),
+            tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-orion-en", model="slng/deepgram/aura:2-en", language="en"),
         )
 
     async def on_enter(self) -> None:
@@ -346,7 +347,7 @@ class Reservations(Agent):
         super().__init__(
             instructions=RESERVATIONS_PROMPT,
             chat_ctx=chat_ctx,
-            tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-orion-en", model="slng/deepgram/aura:2-en", language="en"),
+            tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-orion-en", model="slng/deepgram/aura:2-en", language="en"),
         )
 
     async def on_enter(self) -> None:
@@ -475,9 +476,9 @@ async def entrypoint(ctx: JobContext) -> None:
 
     session = AgentSession[Userdata](
         userdata=Userdata(),
-        stt=slng.STT(api_key=os.environ.get("SLNG_API_KEY"), model="slng/deepgram/nova:3-en", language="en"),
-        llm=openai.LLM(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-4o-mini", temperature=0.4),
-        tts=slng.TTS(api_key=os.environ.get("SLNG_API_KEY"), voice="aura-2-thalia-en", model="slng/deepgram/aura:2-en", language="en"),
+        stt=slng.STT(api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3-en", language="en"),
+        llm=openai.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o-mini", temperature=0.4),
+        tts=slng.TTS(api_key=os.environ["SLNG_API_KEY"], voice="aura-2-thalia-en", model="slng/deepgram/aura:2-en", language="en"),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(version="v1-mini"),
             interruption={"enabled": True},
@@ -703,4 +704,10 @@ dependencies = [
     "livekit-plugins-slng>=1.6.1",
     "opentelemetry-sdk>=1.33,<2",
     "python-dotenv",
+]
+
+[dependency-groups]
+dev = [
+    "ruff",
+    "ty",
 ]

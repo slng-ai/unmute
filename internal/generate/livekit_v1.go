@@ -231,18 +231,19 @@ type livekitData struct {
 	InferenceUses []string // bindings routed through LiveKit Inference (console needs cloud creds, C2/C7)
 	Tracing       bool
 
-	NeedsTasks      bool // AgentTask import
-	NeedsTaskGroups bool // beta.workflows TaskGroup import
-	NeedsHTTPX      bool // any webhook tool
-	HasVars         bool // Userdata dataclass + session userdata
-	NeedsLastN      bool // the _last_n history helper
-	NeedsSummarize  bool // the _summarize history helper
-	NeedsAsyncio    bool // inactivity end / max_duration timers
-	NeedsInspect    bool // local tool wrappers (isawaitable)
-	NeedsMCP        bool // mcp import (MCPServerHTTP)
-	HasColdTransfer bool // get_job_context import
-	HasWarmTransfer bool // WarmTransferTask import + trunk env
-	Outbound        *livekitOutbound
+	NeedsTasks         bool // AgentTask import
+	NeedsTaskGroups    bool // beta.workflows TaskGroup import
+	NeedsFunctionTools bool // RunContext + function_tool imports
+	NeedsHTTPX         bool // any webhook tool
+	HasVars            bool // Userdata dataclass + session userdata
+	NeedsLastN         bool // the _last_n history helper
+	NeedsSummarize     bool // the _summarize history helper
+	NeedsAsyncio       bool // inactivity end / max_duration timers
+	NeedsInspect       bool // local tool wrappers (isawaitable)
+	NeedsMCP           bool // mcp import (MCPServerHTTP)
+	HasColdTransfer    bool // get_job_context import
+	HasWarmTransfer    bool // WarmTransferTask import + trunk env
+	Outbound           *livekitOutbound
 
 	// Conversation shaping (V16).
 	ThinkingAudio          bool // subtle → BackgroundAudioPlayer thinking sound

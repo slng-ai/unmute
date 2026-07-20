@@ -378,6 +378,71 @@ func TestSmokeV22LiveKitSpeechTracing(t *testing.T) {
 	runLiveKitSmokeScript(t, "simple-prompt", nil, livekitRequestTracingSmokeScript)
 }
 
+func TestSmokeV26LiveKitExamplesStaticCheck(t *testing.T) {
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not available")
+	}
+	cases := []struct {
+		name     string
+		toolFree bool
+		tracing  bool
+	}{
+		{name: "simple-prompt"},
+		{name: "single-task"},
+		{name: "task-groups"},
+		{name: "subagents"},
+		{name: "simple-prompt-tool-free-unconfigured", toolFree: true},
+		{name: "simple-prompt-tool-free-tracing", toolFree: true, tracing: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			example := tc.name
+			if tc.toolFree {
+				example = "simple-prompt"
+			}
+			pkg, err := spec.Load(examplePackagePath(example))
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.toolFree {
+				entry := agent.Agents[agent.EntryAgent]
+				entry.Tools = nil
+				agent.Agents[agent.EntryAgent] = entry
+			}
+			if tc.tracing {
+				enableLangfuse(agent)
+			} else if tc.toolFree {
+				agent.Tracing = nil
+			}
+			artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			for _, file := range artifact.Files {
+				path := filepath.Join(dir, file.Path)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, file.Content, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, args := range [][]string{{"run", "ruff", "check", "."}, {"run", "ty", "check", "."}} {
+				cmd := exec.Command("uv", args...)
+				cmd.Dir = dir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("uv %v failed:\n%s", args, out)
+				}
+			}
+		})
+	}
+}
+
 func runLiveKitSmoke(t *testing.T, example string, mutate func(*ir.Target)) {
 	t.Helper()
 	runLiveKitSmokeScript(t, example, mutate, livekitSmokeScript)

@@ -110,6 +110,13 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.Tasks = append(data.Tasks, built)
 	}
 	data.NeedsTasks = len(data.Tasks) > 0
+	data.NeedsFunctionTools = data.NeedsTasks
+	for _, a := range data.Agents {
+		if len(a.Tools) > 0 || len(a.Transfers) > 0 || len(a.HumanTransfers) > 0 || len(a.Delegates) > 0 {
+			data.NeedsFunctionTools = true
+			break
+		}
+	}
 
 	// Local handler files ride the artifact (tools/<name>.py); mcp mounts and
 	// local wrappers pull their imports.
@@ -563,7 +570,7 @@ func buildLiveKitTool(name string, tool ir.Tool, env *envSet) (livekitTool, erro
 // provider/model).
 
 // livekitEnvRef renders the driver's environment-lookup idiom.
-func livekitEnvRef(name string) string { return "os.environ.get(" + pyQuote(name) + ")" }
+func livekitEnvRef(name string) string { return "os.environ[" + pyQuote(name) + "]" }
 
 func resolveLiveKitService(role targetcap.Role, binding ir.Binding, language string, env *envSet) (livekitService, error) {
 	call, entry, err := resolveService(defaultCatalog, targetcap.LiveKit, role, binding, language, livekitEnvRef, env)

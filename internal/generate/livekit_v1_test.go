@@ -222,6 +222,80 @@ func TestLiveKitV1UnconfiguredGolden(t *testing.T) { // V24
 	}
 }
 
+func TestV26LiveKitStaticCheckSurface(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+
+	withTools, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	withToolsAgent := artifactFile(t, withTools, "agent.py")
+	for _, want := range []string{"    RunContext,", "    function_tool,"} {
+		if !strings.Contains(withToolsAgent, want) {
+			t.Errorf("agent.py with tools missing %q", want)
+		}
+	}
+
+	entry := agent.Agents[agent.EntryAgent]
+	entry.Tools = nil
+	agent.Agents[agent.EntryAgent] = entry
+	agent.Tracing = nil
+	toolFree, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolFreeAgent := artifactFile(t, toolFree, "agent.py")
+	for _, forbidden := range []string{"    RunContext,", "    function_tool,", "from collections.abc import Sequence"} {
+		if strings.Contains(toolFreeAgent, forbidden) {
+			t.Errorf("unconfigured tool-free agent.py contains unused import %q", forbidden)
+		}
+	}
+	if !strings.Contains(toolFreeAgent, `api_key=os.environ["OPENAI_API_KEY"]`) {
+		t.Error("agent.py missing non-optional provider key lookup")
+	}
+	if strings.Contains(toolFreeAgent, `api_key=os.environ.get("OPENAI_API_KEY")`) {
+		t.Error("required provider key must not be typed as optional")
+	}
+	for _, want := range []string{"[dependency-groups]", `"ruff"`, `"ty"`} {
+		if !strings.Contains(artifactFile(t, toolFree, "pyproject.toml"), want) {
+			t.Errorf("pyproject.toml missing %q", want)
+		}
+	}
+
+	enableLangfuse(agent)
+	configured, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuredAgent := artifactFile(t, configured, "agent.py")
+	for _, forbidden := range []string{"    RunContext,", "    function_tool,"} {
+		if strings.Contains(configuredAgent, forbidden) {
+			t.Errorf("configured tool-free agent.py contains unused import %q", forbidden)
+		}
+	}
+	for _, want := range []string{
+		"from collections.abc import Sequence",
+		") -> TracerProvider:",
+		"trace_provider: TracerProvider,",
+		"speech_metrics: Sequence[STTMetrics | TTSMetrics]",
+	} {
+		if !strings.Contains(configuredAgent, want) {
+			t.Errorf("configured agent.py missing static-check-safe form %q", want)
+		}
+	}
+	if strings.Contains(configuredAgent, "TracerProvider | None") {
+		t.Error("configured tracing provider must not be typed as optional")
+	}
+}
+
 // TestLiveKitV1MultiVendor proves the catalogue path end to end: the safe_core
 // livekit target binds Deepgram listen and ElevenLabs speak (per-vendor
 // plugins), one voice is rebound to Cartesia in-code, and the emitted project
@@ -246,9 +320,9 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		"from livekit.plugins import cartesia, deepgram, elevenlabs, openai, silero",
-		`stt=deepgram.STT(api_key=os.environ.get("DEEPGRAM_API_KEY"), model="nova-3", language="en")`,
-		`tts=elevenlabs.TTS(api_key=os.environ.get("ELEVEN_API_KEY"), voice_id="cgSgspJ2msm6clMCkdW9", language="en")`,
-		`tts=cartesia.TTS(api_key=os.environ.get("CARTESIA_API_KEY"), voice="f786b574-daa5-4673-aa0c-cbe3e8534c02", model="sonic-3", language="en")`,
+		`stt=deepgram.STT(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3", language="en")`,
+		`tts=elevenlabs.TTS(api_key=os.environ["ELEVEN_API_KEY"], voice_id="cgSgspJ2msm6clMCkdW9", language="en")`,
+		`tts=cartesia.TTS(api_key=os.environ["CARTESIA_API_KEY"], voice="f786b574-daa5-4673-aa0c-cbe3e8534c02", model="sonic-3", language="en")`,
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -289,7 +363,7 @@ func TestT16_LiveKitEmitsListenFallbackAdapter(t *testing.T) {
 	for _, want := range []string{
 		"    stt,",
 		`stt=stt.FallbackAdapter(stt=[slng.STT(`,
-		`deepgram.STT(api_key=os.environ.get("DEEPGRAM_API_KEY"), model="nova-3", language="en")])`,
+		`deepgram.STT(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3", language="en")])`,
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -551,7 +625,7 @@ func TestLiveKitV1PerTaskModel(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
-	want := `super().__init__(instructions=FIND_SLOT_PROMPT, chat_ctx=chat_ctx, llm=openai.LLM(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-4o-mini"))`
+	want := `super().__init__(instructions=FIND_SLOT_PROMPT, chat_ctx=chat_ctx, llm=openai.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o-mini"))`
 	if !strings.Contains(botpy, want) {
 		t.Errorf("agent.py missing per-task llm override %q", want)
 	}
@@ -600,12 +674,12 @@ func TestLiveKitV1HistoryShapingAndFallback(t *testing.T) {
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		// V4: native adapter around the chain, everywhere the profile binds.
-		`llm=llm.FallbackAdapter(llm=[openai.LLM(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-4o-mini", temperature=0.4), openai.LLM(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-4o")])`,
+		`llm=llm.FallbackAdapter(llm=[openai.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o-mini", temperature=0.4), openai.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o")])`,
 		// V5: messages / last_n / summary shaping.
 		`return Reservations(chat_ctx=llm.ChatContext(items=[m for m in self.chat_ctx.messages() if m.role in ("user", "assistant")]))`,
 		`return Events(chat_ctx=_last_n(self.chat_ctx, 6))`,
 		"def _last_n(source: llm.ChatContext",
-		`summary_ctx = await _summarize(self.chat_ctx, openai.LLM(api_key=os.environ.get("OPENAI_API_KEY"), model="gpt-4o"))`,
+		`summary_ctx = await _summarize(self.chat_ctx, openai.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4o"))`,
 		"return Greeter(chat_ctx=summary_ctx)",
 		"async def _summarize(source: llm.ChatContext",
 		// D7: an uncarried variable resets on the transfer.
