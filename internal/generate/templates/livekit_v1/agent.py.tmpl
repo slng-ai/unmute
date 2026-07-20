@@ -53,9 +53,11 @@ import os
 {{end}}{{if .NeedsHTTPX}}import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
+{{if .Tracing}}
 from langfuse import Langfuse
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.util.types import AttributeValue
+{{end}}
 {{if .Outbound}}from livekit import api
 {{end}}from livekit.agents import (
 {{- if .Outbound}}
@@ -95,9 +97,13 @@ from opentelemetry.util.types import AttributeValue
 {{- if or .NeedsTaskGroups .HasWarmTransfer}}
 from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskGroup{{if .HasWarmTransfer}}, WarmTransferTask{{end}}{{else}}WarmTransferTask{{end}}
 {{- end}}
+{{if .Tracing}}
 from livekit.agents.telemetry import set_tracer_provider
 from livekit.agents.metrics import STTMetrics, TTSMetrics
 from livekit.agents.voice import ConversationItemAddedEvent, MetricsCollectedEvent
+{{else}}
+from livekit.agents.voice import MetricsCollectedEvent
+{{end}}
 from livekit.plugins import {{join .PluginModules ", "}}
 
 logger = logging.getLogger({{pyq .Project}})
@@ -106,6 +112,7 @@ logger.setLevel(logging.INFO)
 load_dotenv(".env.local")
 
 
+{{if .Tracing}}
 # --- tracing ---------------------------------------------------------------
 def setup_langfuse(
     metadata: dict[str, AttributeValue] | None = None,
@@ -114,8 +121,6 @@ def setup_langfuse(
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
     base_url = os.getenv("LANGFUSE_BASE_URL")
     values = (public_key, secret_key, base_url)
-    if not any(values):
-        return None
     if not all(values):
         raise ValueError(
             "LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and LANGFUSE_BASE_URL must all be set"
@@ -195,6 +200,7 @@ def trace_speech_metrics(
     span.end(end_time=end_time)
 
 
+{{end}}
 # --- prompts ---------------------------------------------------------------
 {{range .Prompts}}
 {{.Const}} = {{triple .Body}}
@@ -442,18 +448,19 @@ server.setup_fnc = prewarm
 
 @server.rtc_session(agent_name={{pyq .AgentName}})
 async def entrypoint(ctx: JobContext) -> None:
+{{if .Tracing}}
     trace_provider = setup_langfuse(
         metadata={
             "langfuse.session.id": ctx.room.name,
             "langfuse.trace.name": {{pyq .EntryAgent}} + "-" + {{pyq .Project}},
         }
     )
-    if trace_provider:
-        async def flush_trace() -> None:
-            trace_provider.force_flush()
+    async def flush_trace() -> None:
+        trace_provider.force_flush()
 
-        ctx.add_shutdown_callback(flush_trace)
+    ctx.add_shutdown_callback(flush_trace)
 
+{{end}}
     session = AgentSession{{if .HasVars}}[Userdata]{{end}}(
 {{- if .HasVars}}
         userdata=Userdata(),
@@ -479,17 +486,22 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- end}}
     )
 
+{{if .Tracing}}
     pending_stt_metrics: list[STTMetrics] = []
     pending_tts_metrics: list[TTSMetrics] = []
 
+{{end}}
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
+{{if .Tracing}}
         if isinstance(ev.metrics, STTMetrics):
             pending_stt_metrics.append(ev.metrics)
         elif isinstance(ev.metrics, TTSMetrics):
             pending_tts_metrics.append(ev.metrics)
+{{end}}
         metrics.log_metrics(ev.metrics)
 
+{{if .Tracing}}
     @session.on("conversation_item_added")
     def _on_conversation_item_added(ev: ConversationItemAddedEvent) -> None:
         text = getattr(ev.item, "raw_text_content", None)
@@ -514,6 +526,7 @@ async def entrypoint(ctx: JobContext) -> None:
                 ended_at=ev.created_at,
             )
             pending_tts_metrics.clear()
+{{end}}
 {{- if or .InactivityNudgeSecs .InactivityEndSecs}}
 {{- if and .InactivityNudgeSecs .InactivityEndSecs}}
 

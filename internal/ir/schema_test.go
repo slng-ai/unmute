@@ -24,6 +24,7 @@ func TestSchemaDerivesUnionEnumsAndNameReferences(t *testing.T) { // V2
 		`"items":{"type":"string"}`,
 		`"destinations"`,
 		`"url_env"`,
+		`"tracing"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("derived schema missing %s", want)

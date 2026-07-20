@@ -51,8 +51,9 @@ bin/unmute dev examples/simple-prompt --target pipecat
 ```
 
 Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_BASE_URL`
-together. Leaving all three unset disables tracing. The example also needs the
-model-provider keys listed in its generated `.env.example`.
+together; all three are required because the public examples configure
+`tracing.provider: langfuse`. The example also needs the model-provider keys
+listed in its generated `.env.example`.
 
 LiveKit creates one trace for the room and uses the room name as the Langfuse
 session ID. Pipecat creates one trace for the full conversation.

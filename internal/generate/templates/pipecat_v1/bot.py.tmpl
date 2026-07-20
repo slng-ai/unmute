@@ -22,7 +22,8 @@ the typed results.
 from __future__ import annotations
 
 import asyncio
-import base64
+{{if .Tracing}}import base64
+{{end}}
 {{if .NeedsInspect}}import inspect
 {{end}}import os
 {{if .HasFlows}}import json
@@ -31,9 +32,11 @@ import base64
 import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
+{{if .Tracing}}
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace import SpanProcessor
+{{end}}
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
 {{if .HasFlows}}from pipecat.flows import {{if .HasIsolated}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig
@@ -56,13 +59,17 @@ from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 {{end}}from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
 from pipecat.workers.runner import WorkerRunner
+{{if .Tracing}}
 from pipecat.utils.tracing.setup import setup_tracing
+{{end}}
 {{range .Imports}}{{.}}
 {{end}}
 load_dotenv()
 
 MAIN_NAME = {{pyq .MainName}}
+{{if .Tracing}}
 TRACE_NAME = {{pyq .EntryAgent}} + "-" + {{pyq .Project}}
+{{end}}
 REQUIRED_ENV = [
 {{range .RequiredEnv}}    {{pyq .}},
 {{end}}]
@@ -81,6 +88,7 @@ def require_env() -> None:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
 
+{{if .Tracing}}
 class LangfuseAttributeProcessor(SpanProcessor):
     """Map Pipecat's native speech attributes to Langfuse observation fields."""
 
@@ -150,8 +158,6 @@ def setup_langfuse_tracing() -> bool:
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
     base_url = os.getenv("LANGFUSE_BASE_URL")
     values = (public_key, secret_key, base_url)
-    if not any(values):
-        return False
     if not all(values):
         raise ValueError(
             "LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and LANGFUSE_BASE_URL must all be set"
@@ -175,6 +181,7 @@ def _enable_agent_tracing(main: PipelineWorker, agents: list[LLMWorker]) -> None
         agent._enable_tracing = True
         agent._tracing_context = main._tracing_context
 
+{{end}}
 {{if .Variables}}
 @dataclass
 class State:
@@ -348,7 +355,9 @@ def build_stt():
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activate_on_start: bool = False) -> None:
     require_env()
+{{if .Tracing}}
     tracing_enabled = setup_langfuse_tracing()
+{{end}}
 {{if .HasColdTransfer}}    global _TRANSPORT
     _TRANSPORT = transport
 {{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
@@ -383,12 +392,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
     main = PipelineWorker(
         pipeline,
         name=MAIN_NAME,
+{{if .Tracing}}
         enable_tracing=tracing_enabled,
         additional_span_attributes={"langfuse.trace.name": TRACE_NAME},
+{{end}}
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
+{{if .Tracing}}
     if tracing_enabled:
         _enable_agent_tracing(main, AGENTS)
+{{end}}
 {{if .Inactivity}}
     @user_aggregator.event_handler("on_user_turn_idle")
     async def on_user_turn_idle(aggregator):
@@ -441,11 +454,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
             await runner.cancel()
 
     await runner.add_workers(main, *AGENTS)
+{{if .Tracing}}
     try:
         await runner.run()
     finally:
         if tracing_enabled:
             trace.get_tracer_provider().force_flush()
+{{else}}
+    await runner.run()
+{{end}}
 
 
 async def bot(runner_args: RunnerArguments) -> None:

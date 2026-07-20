@@ -65,6 +65,7 @@ const (
 	FieldToolInterruption      Field = "tools.interruption.non_default"
 	FieldOutbound              Field = "channels.telephony.outbound"
 	FieldVoicemail             Field = "channels.telephony.on_voicemail"
+	FieldTracingLangfuse       Field = "tracing.provider.langfuse"
 	FieldFutureProvisional     Field = "future.provisional"
 )
 
@@ -379,6 +380,11 @@ func Default() Table {
 			FieldVoicemail: field(
 				deny(Pipecat, "the Pipecat driver does not emit voicemail handling yet"),
 				warn(Deepgram, "Deepgram voicemail handling uses carrier-conditional generated AMD"),
+			),
+			FieldTracingLangfuse: field(
+				deny(Vapi, "Vapi has no Langfuse tracing lowering"),
+				deny(ElevenLabs, "ElevenLabs has no Langfuse tracing lowering"),
+				deny(Deepgram, "the Deepgram driver does not emit Langfuse tracing"),
 			),
 			FieldFutureProvisional: provisional(),
 		},

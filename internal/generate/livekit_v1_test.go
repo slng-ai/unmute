@@ -26,6 +26,7 @@ func TestLiveKitV1RemyGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	enableLangfuse(agent)
 	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -95,6 +96,7 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	enableLangfuse(agent)
 	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
 		t.Fatal(err)
@@ -115,6 +117,9 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 		if !strings.Contains(bot, want) {
 			t.Errorf("agent.py missing %q", want)
 		}
+	}
+	if strings.Contains(bot, "if not any(values)") || !strings.Contains(bot, "if not all(values)") {
+		t.Error("configured tracing must reject missing credentials, including all three")
 	}
 	setupAt := strings.Index(bot, "trace_provider = setup_langfuse(")
 	startAt := strings.Index(bot, "await session.start(")
@@ -148,6 +153,7 @@ func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	enableLangfuse(agent)
 	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
 		t.Fatal(err)
@@ -171,6 +177,48 @@ func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
 	}
 	if strings.Contains(bot, "trace_speech_metric(trace_provider, ev.metrics)") {
 		t.Error("speech generations must not be emitted for each metrics event")
+	}
+}
+
+func TestLiveKitV1UnconfiguredGolden(t *testing.T) { // V24
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "agent.py")
+	path := filepath.Join("testdata", "golden", "livekit_v1_remy_unconfigured_agent.py")
+	if *updateLiveKitV1 {
+		if err := os.WriteFile(path, []byte(bot), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bot != string(want) {
+		t.Fatal("unconfigured livekit agent.py golden differs; run: go test ./internal/generate -run TestLiveKitV1UnconfiguredGolden -update-livekit")
+	}
+	for path, forbidden := range map[string][]string{
+		"agent.py":       {"Langfuse", "LANGFUSE_", "trace_speech_metrics", "set_tracer_provider"},
+		"pyproject.toml": {"langfuse", "opentelemetry"},
+		".env.example":   {"LANGFUSE_"},
+		"README.md":      {"Trace with Langfuse"},
+	} {
+		content := artifactFile(t, artifact, path)
+		for _, token := range forbidden {
+			if strings.Contains(content, token) {
+				t.Errorf("%s contains unconfigured tracing token %q", path, token)
+			}
+		}
 	}
 }
 

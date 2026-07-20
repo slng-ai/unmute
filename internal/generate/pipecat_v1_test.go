@@ -63,6 +63,7 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	enableLangfuse(agent)
 	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
 	if err != nil {
 		t.Fatal(err)
@@ -83,6 +84,9 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing %q", want)
 		}
+	}
+	if strings.Contains(bot, "if not any(values)") || !strings.Contains(bot, "if not all(values)") {
+		t.Error("configured tracing must reject missing credentials, including all three")
 	}
 
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
@@ -106,6 +110,7 @@ func TestV18PipecatLangfuseObservationMapping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	enableLangfuse(agent)
 	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
 	if err != nil {
 		t.Fatal(err)
@@ -137,6 +142,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	enableLangfuse(agent)
 
 	agent.Tasks["collect"] = ir.Task{
 		// A guided conversational step: it talks to the caller and uses a tool
@@ -188,6 +194,34 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	}
 	if bot != string(want) {
 		t.Fatalf("pipecat v1 tasks golden differs; run: go test ./internal/generate -run TestPipecatV1TasksGolden -update-pipecat")
+	}
+}
+
+func TestPipecatV1OmitsTracingUnlessConfigured(t *testing.T) { // V19
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, forbidden := range map[string][]string{
+		"bot.py":         {"Langfuse", "LANGFUSE_", "setup_tracing", "enable_tracing"},
+		"pyproject.toml": {"opentelemetry"},
+		".env.example":   {"LANGFUSE_"},
+		"README.md":      {"Trace with Langfuse"},
+	} {
+		content := artifactFile(t, artifact, path)
+		for _, token := range forbidden {
+			if strings.Contains(content, token) {
+				t.Errorf("%s contains unconfigured tracing token %q", path, token)
+			}
+		}
 	}
 }
 

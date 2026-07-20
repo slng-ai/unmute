@@ -32,6 +32,20 @@ func TestValidateLanguage(t *testing.T) {
 	}
 }
 
+func TestValidateLangfuseTracingByTarget(t *testing.T) { // V25
+	agent := safeAgent(t)
+	agent.Tracing = &Tracing{Provider: "langfuse"}
+	for provider, wantError := range map[Provider]bool{
+		ProviderLiveKit: false, ProviderPipecat: false,
+		ProviderVapi: true, ProviderElevenLabs: true, ProviderDeepgram: true,
+	} {
+		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
+		if (err != nil) != wantError {
+			t.Errorf("%s: err=%v report=%#v", provider, err, report.PerTarget)
+		}
+	}
+}
+
 func TestValidateUsesProviderVocabularyForGates(t *testing.T) { // V4, V11
 	agent := safeAgent(t)
 	agent.Conversation.ThinkingAudio = ThinkingSubtle

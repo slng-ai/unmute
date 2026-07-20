@@ -31,19 +31,6 @@ for name in json.load(open("compile-report.json"))["required_env"]:
 
 import agent as agent_module  # noqa: E402
 
-for name in ("LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_BASE_URL"):
-    os.environ.pop(name, None)
-assert agent_module.setup_langfuse() is None
-os.environ["LANGFUSE_PUBLIC_KEY"] = "partial"
-try:
-    agent_module.setup_langfuse()
-except ValueError:
-    pass
-else:
-    raise AssertionError("partial Langfuse configuration must fail")
-finally:
-    os.environ.pop("LANGFUSE_PUBLIC_KEY")
-
 from livekit.agents import Agent  # noqa: E402
 
 classes = sorted(
@@ -244,7 +231,7 @@ class FakeAudioOutput(io.AudioOutput):
 
 class ProbeAgent(Agent):
     def __init__(self) -> None:
-        super().__init__(instructions=agent.WELCOME_AGENT_PROMPT)
+        super().__init__(instructions="Trace the probe turn.")
 
 
 async def main() -> None:

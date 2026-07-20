@@ -24,11 +24,11 @@ Set these before running (values are never written into the project):
 
 {{range .RequiredEnv}}- `{{.}}`
 {{end}}
+{{if .Tracing}}
 ## Trace with Langfuse
 
-Tracing is optional. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
-`LANGFUSE_BASE_URL` together in `.env` to export Pipecat spans. Leaving all
-three empty disables tracing. The trace name is
+Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
+`LANGFUSE_BASE_URL` in `.env`; all three are required. The trace name is
 `{{.EntryAgent}}-{{.Project}}`; one trace contains the full conversation.
 
 Starting the worker or exporting a synthetic span proves connectivity only.
@@ -36,6 +36,7 @@ Complete at least one user turn before reviewing the trace. A traced request
 contains `conversation` and `turn` spans plus `llm` and `tts` generation
 observations.
 
+{{end}}
 ## Agents
 
 {{range .Agents}}- `{{.Name}}`

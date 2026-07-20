@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,18 @@ func TestLoadRejectsUnknownFieldWithPosition(t *testing.T) { // V3
 	_, err := Load(dir)
 	if err == nil || !strings.Contains(err.Error(), "agent.yaml") || !strings.Contains(err.Error(), "3:1") {
 		t.Fatalf("want filename and line:col, got %v", err)
+	}
+}
+
+func TestLoadRejectsUnknownTracingField(t *testing.T) { // V25
+	dir := t.TempDir()
+	yaml := "version: 1\nentry_agent: intake\ntracing:\n  provider: langfuse\n  sample_rate: 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil || !strings.Contains(err.Error(), "sample_rate") || !strings.Contains(err.Error(), "5:3") {
+		t.Fatalf("want unknown tracing field with position, got %v", err)
 	}
 }
 
@@ -68,5 +81,12 @@ func TestSchemaIsDerivedFromPackage(t *testing.T) {
 	}
 	if schema.Properties["agent"] == nil || schema.Properties["targets"] == nil {
 		t.Fatal("derived authoring schema is missing package files")
+	}
+	content, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), `"tracing"`) {
+		t.Fatal("derived authoring schema is missing tracing")
 	}
 }

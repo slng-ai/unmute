@@ -83,6 +83,15 @@ func TestWriteDefaultFileSet(t *testing.T) {
 	if !slices.Equal(names, want) {
 		t.Fatalf("default files = %v, want %v", names, want)
 	}
+	for path, forbidden := range map[string]string{"agent.yaml": "tracing:", ".env.example": "LANGFUSE_"} {
+		content, err := os.ReadFile(filepath.Join(dir, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(content), forbidden) {
+			t.Errorf("%s contains opt-in tracing token %q", path, forbidden)
+		}
+	}
 }
 
 func TestWrite_customData(t *testing.T) {

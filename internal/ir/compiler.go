@@ -19,9 +19,14 @@ type Agent struct {
 	Controls     map[string]Control   `json:"controls,omitempty" yaml:"controls,omitempty"`
 	Tools        map[string]Tool      `json:"tools,omitempty" yaml:"tools,omitempty"`
 	Conversation *Conversation        `json:"conversation,omitempty" yaml:"conversation,omitempty"`
+	Tracing      *Tracing             `json:"tracing,omitempty" yaml:"tracing,omitempty"`
 	Channels     map[string]Channel   `json:"channels" yaml:"channels"`
 	Capacity     *Capacity            `json:"capacity,omitempty" yaml:"capacity,omitempty"`
 	Targets      map[string]Target    `json:"targets" yaml:"targets"`
+}
+
+type Tracing struct {
+	Provider string `json:"provider" yaml:"provider"`
 }
 
 // ModelKind is resolved from a model's reference site in Build (N15).
