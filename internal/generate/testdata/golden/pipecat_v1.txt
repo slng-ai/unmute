@@ -64,6 +64,11 @@ Tracing is optional. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
 three empty disables tracing. The trace name is
 `intake-pipecat`; one trace contains the full conversation.
 
+Starting the worker or exporting a synthetic span proves connectivity only.
+Complete at least one user turn before reviewing the trace. A traced request
+contains `conversation` and `turn` spans plus `llm` and `tts` generation
+observations.
+
 ## Agents
 
 - `billing`
@@ -161,6 +166,14 @@ def setup_langfuse_tracing() -> bool:
     if not setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter()):
         raise RuntimeError("Pipecat OpenTelemetry tracing is unavailable")
     return True
+
+
+def _enable_agent_tracing(main: PipelineWorker, agents: list[LLMWorker]) -> None:
+    # ponytail: Pipecat 1.5 LLMWorker exposes no tracing kwargs. Share the main
+    # worker's context until its public constructor accepts them.
+    for agent in agents:
+        agent._enable_tracing = True
+        agent._tracing_context = main._tracing_context
 
 
 @dataclass
@@ -345,11 +358,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
     if tracing_enabled:
-        # ponytail: Pipecat 1.5 LLMWorker exposes no tracing kwargs. Share the
-        # main worker context until its public constructor accepts them.
-        for agent in AGENTS:
-            agent._enable_tracing = True
-            agent._tracing_context = main._tracing_context
+        _enable_agent_tracing(main, AGENTS)
 
     @user_aggregator.event_handler("on_user_turn_idle")
     async def on_user_turn_idle(aggregator):

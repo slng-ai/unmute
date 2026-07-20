@@ -54,7 +54,7 @@ func TestPipecatV1Golden(t *testing.T) {
 	}
 }
 
-func TestPipecatV1LangfuseTracing(t *testing.T) {
+func TestV16PipecatRequestTracingWiring(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,9 @@ func TestPipecatV1LangfuseTracing(t *testing.T) {
 		"setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter())",
 		"enable_tracing=tracing_enabled",
 		`additional_span_attributes={"langfuse.trace.name": TRACE_NAME}`,
+		"def _enable_agent_tracing(main: PipelineWorker, agents: list[LLMWorker]) -> None:",
 		"agent._tracing_context = main._tracing_context",
+		"_enable_agent_tracing(main, AGENTS)",
 		"trace.get_tracer_provider().force_flush()",
 	} {
 		if !strings.Contains(bot, want) {

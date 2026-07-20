@@ -42,3 +42,9 @@ model-provider keys listed in its generated `.env.example`.
 
 LiveKit creates one trace for the room and uses the room name as the Langfuse
 session ID. Pipecat creates one trace for the full conversation.
+
+Starting a worker or exporting a synthetic span only proves that credentials
+and transport work. Complete at least one user turn before reviewing Langfuse.
+LiveKit then records `llm_node` and `llm_request` generation observations;
+Pipecat records `llm` and `tts` generation observations under its conversation
+and turn spans.

@@ -86,7 +86,7 @@ func TestLiveKitV1EmitsSlngPlugin(t *testing.T) {
 	}
 }
 
-func TestLiveKitV1LangfuseTracing(t *testing.T) {
+func TestV21LiveKitRequestTracingWiring(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
 	if err != nil {
 		t.Fatal(err)
@@ -108,10 +108,16 @@ func TestLiveKitV1LangfuseTracing(t *testing.T) {
 		`"langfuse.session.id": ctx.room.name`,
 		`"langfuse.trace.name": "greeter" + "-" + "livekit"`,
 		"ctx.add_shutdown_callback(flush_trace)",
+		"await session.start(agent=Greeter(), room=ctx.room)",
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("agent.py missing %q", want)
 		}
+	}
+	setupAt := strings.Index(bot, "trace_provider = setup_langfuse(")
+	startAt := strings.Index(bot, "await session.start(")
+	if setupAt < 0 || startAt < 0 || setupAt > startAt {
+		t.Error("Langfuse tracing must be configured before AgentSession.start")
 	}
 
 	pyproject := artifactFile(t, artifact, "pyproject.toml")

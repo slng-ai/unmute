@@ -62,6 +62,81 @@ asyncio.run(_instantiate())
 print("smoke ok:", ", ".join(classes))
 `
 
+// livekitRequestTracingSmokeScript drives a real AgentSession turn with a
+// deterministic fake LLM. The in-memory exporter must receive the framework's
+// request spans; a hand-made root span would not satisfy V21.
+const livekitRequestTracingSmokeScript = `"""Smoke check: a real agent turn emits request spans."""
+import asyncio
+
+import agent
+from livekit.agents import Agent, AgentSession, DEFAULT_API_CONNECT_OPTIONS, llm
+from livekit.agents.telemetry import set_tracer_provider
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+
+class FakeStream(llm.LLMStream):
+    async def _run(self) -> None:
+        self._event_ch.send_nowait(
+            llm.ChatChunk(
+                id="probe",
+                delta=llm.ChoiceDelta(role="assistant", content="traced"),
+            )
+        )
+
+
+class FakeLLM(llm.LLM):
+    @property
+    def model(self) -> str:
+        return "probe-model"
+
+    @property
+    def provider(self) -> str:
+        return "probe-provider"
+
+    def chat(
+        self,
+        *,
+        chat_ctx,
+        tools=None,
+        conn_options=DEFAULT_API_CONNECT_OPTIONS,
+        **kwargs,
+    ) -> llm.LLMStream:
+        return FakeStream(
+            self,
+            chat_ctx=chat_ctx,
+            tools=tools or [],
+            conn_options=conn_options,
+        )
+
+
+class ProbeAgent(Agent):
+    def __init__(self) -> None:
+        super().__init__(instructions=agent.WELCOME_AGENT_PROMPT)
+
+
+async def main() -> None:
+    memory = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(memory))
+    set_tracer_provider(provider)
+
+    async with AgentSession(llm=FakeLLM()) as session:
+        await session.start(ProbeAgent())
+        await session.run(user_input="trace this request")
+
+    spans = memory.get_finished_spans()
+    request = next(span for span in spans if span.name == "llm_request")
+    node = next(span for span in spans if span.name == "llm_node")
+    assert request.attributes["gen_ai.request.model"] == "probe-model"
+    assert request.context.trace_id == node.context.trace_id
+    print("livekit request tracing smoke ok")
+
+
+asyncio.run(main())
+`
+
 // TestSmokeLiveKitV1RemyInstantiates proves the Remy emission end to end (V10,
 // L4): uv resolves the emitted pyproject (network), agent.py imports, and
 // every generated Agent/AgentTask instantiates against real livekit-agents +
@@ -103,7 +178,18 @@ func TestSmokeLiveKitV1RestoredVendorsInstantiates(t *testing.T) {
 	})
 }
 
+// TestSmokeV21LiveKitRequestTracing proves request instrumentation, not only
+// exporter connectivity: AgentSession.run must emit the LLM node and request.
+func TestSmokeV21LiveKitRequestTracing(t *testing.T) {
+	runLiveKitSmokeScript(t, "simple-prompt", nil, livekitRequestTracingSmokeScript)
+}
+
 func runLiveKitSmoke(t *testing.T, example string, mutate func(*ir.Target)) {
+	t.Helper()
+	runLiveKitSmokeScript(t, example, mutate, livekitSmokeScript)
+}
+
+func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target), script string) {
 	t.Helper()
 	if _, err := exec.LookPath("uv"); err != nil {
 		t.Skip("uv not available")
@@ -135,7 +221,7 @@ func runLiveKitSmoke(t *testing.T, example string, mutate func(*ir.Target)) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "smoke_check.py"), []byte(livekitSmokeScript), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "smoke_check.py"), []byte(script), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

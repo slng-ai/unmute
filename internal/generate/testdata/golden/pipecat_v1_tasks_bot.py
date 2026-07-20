@@ -96,6 +96,14 @@ def setup_langfuse_tracing() -> bool:
     return True
 
 
+def _enable_agent_tracing(main: PipelineWorker, agents: list[LLMWorker]) -> None:
+    # ponytail: Pipecat 1.5 LLMWorker exposes no tracing kwargs. Share the main
+    # worker's context until its public constructor accepts them.
+    for agent in agents:
+        agent._enable_tracing = True
+        agent._tracing_context = main._tracing_context
+
+
 @dataclass
 class State:
     """Typed call variables (SCHEMA 4.4), shared across agents."""
@@ -395,11 +403,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
     if tracing_enabled:
-        # ponytail: Pipecat 1.5 LLMWorker exposes no tracing kwargs. Share the
-        # main worker context until its public constructor accepts them.
-        for agent in AGENTS:
-            agent._enable_tracing = True
-            agent._tracing_context = main._tracing_context
+        _enable_agent_tracing(main, AGENTS)
 
     @user_aggregator.event_handler("on_user_turn_idle")
     async def on_user_turn_idle(aggregator):

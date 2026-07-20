@@ -11,7 +11,8 @@ the LiveKit development worker.
 ```sh
 uv sync                       # or: pip install -e .
 cp .env.example .env.local    # then fill in the selected provider values
-python agent.py dev
+uv run agent.py console       # local terminal session
+uv run agent.py dev           # LiveKit development worker
 ```
 
 ## Trace with Langfuse
@@ -21,6 +22,11 @@ Tracing is optional. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
 all three empty disables tracing. The trace name is
 `{{.EntryClass}}-{{.Project}}`; the LiveKit room name becomes the Langfuse
 session ID.
+
+Starting the worker or exporting a synthetic span proves connectivity only.
+Complete at least one user turn before reviewing the trace. A traced request
+contains `llm_node` and `llm_request` generation observations in addition to
+the session and agent spans.
 
 Do not edit this project by hand — it is regenerated from the agent spec.
 Change the spec and recompile.

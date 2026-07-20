@@ -124,6 +124,142 @@ asyncio.run(_run())
 print("smoke ok:", ", ".join(builders))
 `
 
+// pipecatRequestTracingSmokeScript drives the generated worker/bus topology
+// through one deterministic LLM request. V16 requires the request span to be a
+// child of the conversation; a hand-made root span cannot pass this check.
+const pipecatRequestTracingSmokeScript = `"""Smoke check: a real worker turn emits a nested LLM request span."""
+import asyncio
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot  # noqa: E402
+from opentelemetry import trace  # noqa: E402
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter  # noqa: E402
+from pipecat.bus import BusBridgeProcessor  # noqa: E402
+from pipecat.frames.frames import (  # noqa: E402
+    Frame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+)
+from pipecat.pipeline.pipeline import Pipeline  # noqa: E402
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair  # noqa: E402
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor  # noqa: E402
+from pipecat.services.llm_service import LLMService  # noqa: E402
+from pipecat.services.settings import LLMSettings  # noqa: E402
+from pipecat.utils.tracing.service_decorators import traced_llm  # noqa: E402
+from pipecat.utils.tracing.setup import setup_tracing  # noqa: E402
+from pipecat.workers.llm import LLMWorkerActivationArgs  # noqa: E402
+from pipecat.workers.runner import WorkerRunner  # noqa: E402
+
+
+class FakeLLM(LLMService):
+    def __init__(self) -> None:
+        super().__init__(
+            settings=LLMSettings(
+                model="probe-model",
+                system_instruction=None,
+                temperature=None,
+                max_tokens=None,
+                top_p=None,
+                top_k=None,
+                frequency_penalty=None,
+                presence_penalty=None,
+                seed=None,
+                filter_incomplete_user_turns=False,
+                user_turn_completion_config=None,
+            )
+        )
+
+    @traced_llm
+    async def _process_context(self, context: LLMContext) -> None:
+        await self.push_frame(LLMTextFrame("traced"))
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMContextFrame):
+            await self.push_frame(LLMFullResponseStartFrame())
+            await self._process_context(frame.context)
+            await self.push_frame(LLMFullResponseEndFrame())
+        else:
+            await self.push_frame(frame, direction)
+
+
+class Passthrough(FrameProcessor):
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+
+
+class StopAfterRequest(Passthrough):
+    def __init__(self, runner: WorkerRunner) -> None:
+        super().__init__()
+        self.runner = runner
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMFullResponseEndFrame):
+            asyncio.create_task(self.runner.cancel(reason="request traced"))
+
+
+async def main() -> None:
+    memory = InMemorySpanExporter()
+    assert setup_tracing(exporter=memory)
+    provider = trace.get_tracer_provider()
+
+    bot.build_welcome_agent_llm = FakeLLM
+    bot.build_welcome_agent_tts = Passthrough
+
+    runner = WorkerRunner()
+    context = LLMContext()
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(context)
+    main_worker = PipelineWorker(
+        Pipeline(
+            [
+                user_aggregator,
+                BusBridgeProcessor(bus=runner.bus, worker_name="trace-main"),
+                StopAfterRequest(runner),
+                assistant_aggregator,
+            ]
+        ),
+        name="trace-main",
+        enable_tracing=True,
+        params=PipelineParams(enable_metrics=True),
+    )
+    request_agent = bot.WelcomeAgentAgent()
+    bot._enable_agent_tracing(main_worker, [request_agent])
+
+    @main_worker.event_handler("on_pipeline_started")
+    async def on_pipeline_started(worker, frame):
+        await main_worker.activate_worker(
+            request_agent.name,
+            args=LLMWorkerActivationArgs(
+                messages=[{"role": "user", "content": "trace this request"}],
+                run_llm=True,
+            ),
+        )
+
+    await runner.add_workers(main_worker, request_agent)
+    await asyncio.wait_for(runner.run(), timeout=10)
+    provider.force_flush()
+
+    spans = memory.get_finished_spans()
+    conversation = next(span for span in spans if span.name == "conversation")
+    request = next(span for span in spans if span.name == "llm")
+    assert request.attributes["gen_ai.request.model"] == "probe-model"
+    assert request.context.trace_id == conversation.context.trace_id
+    print("pipecat request tracing smoke ok")
+
+
+asyncio.run(main())
+`
+
 // TestSmokePipecatV1ServicesInstantiate proves the safe_core emission end to
 // end (V9, L4): uv resolves the emitted pyproject (network), bot.py imports,
 // and every emitted service constructor accepts its emitted kwargs
@@ -193,7 +329,18 @@ func TestSmokePipecatV1LocalToolInstantiates(t *testing.T) {
 	})
 }
 
+// TestSmokeV16PipecatRequestTracing proves the 1.5 worker compatibility shim
+// sends service requests into the main conversation trace.
+func TestSmokeV16PipecatRequestTracing(t *testing.T) {
+	runPipecatSmokeScript(t, "simple-prompt", nil, nil, pipecatRequestTracingSmokeScript)
+}
+
 func runPipecatSmoke(t *testing.T, example string, mutate func(*ir.Target), mutateAgent func(*ir.Agent)) {
+	t.Helper()
+	runPipecatSmokeScript(t, example, mutate, mutateAgent, smokeCheckScript)
+}
+
+func runPipecatSmokeScript(t *testing.T, example string, mutate func(*ir.Target), mutateAgent func(*ir.Agent), script string) {
 	t.Helper()
 	if _, err := exec.LookPath("uv"); err != nil {
 		t.Skip("uv not available")
@@ -228,7 +375,7 @@ func runPipecatSmoke(t *testing.T, example string, mutate func(*ir.Target), muta
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "smoke_check.py"), []byte(smokeCheckScript), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "smoke_check.py"), []byte(script), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

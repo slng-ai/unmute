@@ -31,6 +31,11 @@ Tracing is optional. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
 three empty disables tracing. The trace name is
 `{{.EntryAgent}}-{{.Project}}`; one trace contains the full conversation.
 
+Starting the worker or exporting a synthetic span proves connectivity only.
+Complete at least one user turn before reviewing the trace. A traced request
+contains `conversation` and `turn` spans plus `llm` and `tts` generation
+observations.
+
 ## Agents
 
 {{range .Agents}}- `{{.Name}}`
