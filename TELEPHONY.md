@@ -369,6 +369,14 @@ The Pipecat adapter constructs the upstream serializer with the normalized
 stream and call identifiers. The serializer continues to own carrier audio
 messages and automatic call termination where Pipecat provides it.
 
+Warm transfer is not an automatic extension of that path. A Twilio call using
+bidirectional `<Connect><Stream>` cannot simultaneously be a Conference
+participant. The route must therefore prove a separate Pipecat media leg that
+can join the Conference, hold and restore the caller, brief the human, and
+remove only the AI leg. Until successful, declined, unanswered, failure, and
+duplicate-callback smokes prove that topology, `warm_transfer` remains
+provisional even if inbound, outbound, hangup, and cold transfer later pass.
+
 ### LiveKit routes
 
 LiveKit needs two explicit routes because its provider-neutral production path

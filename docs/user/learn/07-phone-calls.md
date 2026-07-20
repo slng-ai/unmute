@@ -104,7 +104,10 @@ controls:
 The target resolves `billing_line` to an E.164 number or SIP URI. The generated
 runtime never accepts a model-supplied arbitrary transfer destination. Warm
 transfer is a separate route feature and stays gated until that exact carrier
-and transport pass their state-machine smoke.
+and transport pass their state-machine smoke. In particular, Twilio's
+bidirectional Media Stream leg cannot also be a Conference participant, so the
+Pipecat route must prove a separate conference media leg before it can claim a
+warm transfer.
 
 ## Start outbound calls
 

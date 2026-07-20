@@ -72,6 +72,10 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	twilio := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}
 	route := routes[twilio]
 	route.RequiredEnvironment = []string{"account_sid", "auth_token", "from_number"}
+	warm := route.Features[TelephonyFeature(WarmTransfer)]
+	warm.Note = "Twilio warm transfer needs a separately proven Conference media-participant topology; a bidirectional Media Stream call cannot also join the Conference"
+	warm.Docs = "https://www.twilio.com/docs/voice/conference"
+	route.Features[TelephonyFeature(WarmTransfer)] = warm
 	routes[twilio] = route
 	sip := "https://docs.livekit.io/transport/self-hosting/sip-server/"
 	for _, carrier := range []string{"twilio", "telnyx", "plivo", "exotel"} {
