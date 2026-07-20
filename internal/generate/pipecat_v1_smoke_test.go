@@ -103,6 +103,12 @@ func TestSmokePipecatTelnyxTemplatesCompileWithoutCredentials(t *testing.T) { //
 	})
 }
 
+func TestSmokePipecatPlivoTemplatesCompileWithoutCredentials(t *testing.T) { // telephony T9, V20
+	testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t, "plivo", map[string]string{
+		"auth_id": "PLIVO_AUTH_ID", "auth_token": "PLIVO_AUTH_TOKEN", "from_number": "PLIVO_PHONE_NUMBER",
+	})
+}
+
 func testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t *testing.T, carrier string, environment map[string]string) {
 	t.Helper()
 	python, err := exec.LookPath("python3")

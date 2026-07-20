@@ -62,11 +62,9 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		"source.direction", "source.from_number", "source.to_number",
 	}
 	pipecat := "https://docs.pipecat.ai/pipecat/learn/transports"
-	for _, carrier := range []string{"twilio", "telnyx", "plivo", "exotel"} {
+	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
 		features := append([]TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)}, sourcesWithStream...)
-		if carrier != "exotel" {
-			features = append(features, TelephonyFeature(ColdTransfer), TelephonyFeature(WarmTransfer), TelephonyBriefingSummary)
-		}
+		features = append(features, TelephonyFeature(ColdTransfer), TelephonyFeature(WarmTransfer), TelephonyBriefingSummary)
 		add(Pipecat, "carrier-websocket", carrier, pipecat, features...)
 	}
 	twilio := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}
@@ -81,6 +79,14 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	route = routes[telnyx]
 	route.RequiredEnvironment = []string{"api_key", "public_key", "connection_id", "from_number"}
 	routes[telnyx] = route
+	plivo := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "plivo"}
+	route = routes[plivo]
+	route.RequiredEnvironment = []string{"auth_id", "auth_token", "from_number"}
+	routes[plivo] = route
+	exotel := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "exotel"}
+	routes[exotel] = TelephonyRoute{Key: exotel, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{
+		"api_key", "api_token", "account_sid", "subdomain", "from_number", "app_id",
+	}}
 	sip := "https://docs.livekit.io/transport/self-hosting/sip-server/"
 	for _, carrier := range []string{"twilio", "telnyx", "plivo", "exotel"} {
 		features := append([]TelephonyFeature{

@@ -142,11 +142,16 @@ Route support remains provisional until a real credentialed smoke passes.
 where to obtain each credential, local public-URL flow, deployment topology,
 and current verification policy.
 
-Generated Pipecat adapters currently cover Twilio and Telnyx offline; both stay
-provisional until credentialed smokes pass. For Twilio, get the Account SID and
-Auth Token from the Console account dashboard and the caller ID from Phone
-Numbers. For Telnyx, get an API key and webhook public key from Mission Control,
-then use a Voice API Application ID as `TELNYX_CONNECTION_ID`. In either case,
-set `UNMUTE_PUBLIC_URL` to the exact public HTTPS origin and generate a separate
-`UNMUTE_OUTBOUND_TOKEN` if the channel permits outbound calls. See the linked
-telephony guide for the exact Connection vocabulary and setup steps.
+Generated Pipecat adapters currently cover Twilio, Telnyx, and Plivo offline;
+all stay provisional until credentialed smokes pass. For Twilio, get the
+Account SID and Auth Token from the Console account dashboard and the caller ID
+from Phone Numbers. For Telnyx, get an API key and webhook public key from
+Mission Control, then use a Voice API Application ID as
+`TELNYX_CONNECTION_ID`. In either case, set `UNMUTE_PUBLIC_URL` to the exact
+public HTTPS origin and generate a separate `UNMUTE_OUTBOUND_TOKEN` if the
+channel permits outbound calls. See the linked telephony guide for the exact
+Connection vocabulary and setup steps.
+
+Exotel remains gated: its documented static Voicebot WebSocket flow does not
+yet provide a proven authenticated upgrade that satisfies Unmute's ingress
+policy.

@@ -312,6 +312,32 @@ func TestValidateTelephonyPlanFailsClosedWithoutRouteSmoke(t *testing.T) { // te
 	}
 }
 
+func TestValidateExotelTelephonyFailsClosedWithoutAuthenticatedWebSocket(t *testing.T) { // telephony T9, V4-V6
+	pkg := loadSafeCore(t)
+	target := pkg.Targets["pipecat"]
+	target.Transport = "carrier-websocket"
+	target.Carrier = "exotel"
+	target.Connection = "primary_phone"
+	pkg.Targets["pipecat"] = target
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment = map[string]string{
+		"api_key": "EXOTEL_API_KEY", "api_token": "EXOTEL_API_TOKEN",
+		"account_sid": "EXOTEL_ACCOUNT_SID", "subdomain": "EXOTEL_SUBDOMAIN",
+		"from_number": "EXOTEL_PHONE_NUMBER", "app_id": "EXOTEL_APP_ID",
+	}
+	pkg.Connections["primary_phone"] = connection
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["pipecat"]
+	report, err := Validate(agent, []Target{resolved}, targetcap.Default())
+	errors := strings.Join(report.PerTarget[0].Errors, "\n")
+	if err == nil || !strings.Contains(errors, "does not support route") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
 func TestValidateRejectsLiteralWebhookURL(t *testing.T) {
 	agent := safeAgent(t)
 	tool := agent.Tools["lookup_customer"]

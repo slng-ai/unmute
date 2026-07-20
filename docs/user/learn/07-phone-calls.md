@@ -6,9 +6,9 @@ environment variables, and the target selects one exact media route. Unmute
 does not buy a number, create a trunk, or copy credentials into generated code.
 
 All carrier routes are currently **provisional**. The compiler and generated
-Pipecat Twilio and Telnyx adapters have credential-free tests, but validation
-continues to fail closed until each exact route passes real inbound, outbound,
-authentication, hangup, and transfer smokes.
+Pipecat Twilio, Telnyx, and Plivo adapters have credential-free tests, but
+validation continues to fail closed until each exact route passes real inbound,
+outbound, authentication, hangup, and transfer smokes.
 
 ## Declare the phone channel
 
@@ -58,9 +58,10 @@ targets:
 Pipecat uses one WebSocket per carrier call and delegates media framing to the
 selected Pipecat carrier serializer. The generated `telephony.py` owns signed
 webhooks, one-use outbound context, normalized call metadata, and selected
-carrier call control. It does not parse or emit audio frames. The Twilio and
-Telnyx files are separate generated adapters because their signatures and call
-control APIs differ; selecting one never emits the other's SDK or credentials.
+carrier call control. It does not parse or emit audio frames. Twilio, Telnyx,
+and Plivo use separate generated adapters because their signatures and call
+control APIs differ; selecting one never emits another carrier's SDK or
+credentials.
 
 LiveKit uses either `transport: sip` or the distinct Beta
 `transport: connector` route. The Connector is Twilio-only and cannot inherit
@@ -94,6 +95,18 @@ For Telnyx, configure the Voice API Application for API version 2 and point its
 webhook URL at the inbound endpoint printed by `unmute dev --telephony`. Assign
 the phone number to that application. Telnyx signs HTTP events with the public
 key; the generated WebSocket URL carries a short-lived, one-use opaque token.
+
+For Plivo, create a Voice XML Application with its Answer URL set to the
+reported inbound endpoint using POST, assign the number, and set the
+Application Hangup URL to the reported status endpoint. Plivo V3 signs those
+HTTP callbacks; the returned XML embeds a short-lived, one-use WebSocket token.
+
+Exotel is not enabled yet. Its documented App Bazaar Voicebot flow uses a
+static WebSocket URL, while its Pipecat guide warns that custom URL data may be
+stripped. Until a carrier-authenticated upgrade or another replay-safe ingress
+pattern is proven, Unmute rejects the route before generation. The Exotel
+credentials in the table are the values a future outbound adapter needs, not a
+claim that they make the current route usable.
 
 ## Transfer to a person
 

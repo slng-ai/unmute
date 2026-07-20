@@ -101,9 +101,10 @@ uses the local VAD. Semantic endpointing is also advisory.
 ### Transport
 
 - **WebRTC** is the default and is what `unmute dev` uses to serve a browser test client. You do not configure it.
-- **`transport: carrier-websocket`** selects direct Twilio, Telnyx, Plivo, or
-  Exotel media streaming for telephony. It also requires `carrier` and
-  `connection`; support is resolved for that exact tuple.
+- **`transport: carrier-websocket`** selects direct Twilio, Telnyx, or Plivo
+  media streaming for telephony. It also requires `carrier` and `connection`;
+  support is resolved for that exact tuple. The Exotel value is recognized but
+  gated until authenticated WebSocket ingress is proven.
 
 ### Version pin
 
@@ -138,7 +139,7 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | `inactivity` nudge and end | ok |
 | `max_duration` | ok |
 | `provider: local` for listen and speak | ok |
-| carrier WebSocket telephony | provisional; generated Twilio and Telnyx adapters have offline tests but no credentialed route smoke |
+| carrier WebSocket telephony | provisional for generated Twilio, Telnyx, and Plivo adapters; Exotel is gated pending authenticated WebSocket ingress |
 
 Everything in the [learn pages](../learn/01-one-agent.md), including the guarded handoff, the task, and the task group, runs here. The one hard `fail` is the per-task `model:` override; it sits with the driver gates below.
 

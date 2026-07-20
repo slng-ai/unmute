@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -543,6 +544,89 @@ func TestPipecatTelnyxTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	for _, want := range []string{"TELNYX_API_KEY", "TELNYX_PUBLIC_KEY", "TELNYX_CONNECTION_ID", "TELNYX_PHONE_NUMBER"} {
 		if !strings.Contains(report, want) {
 			t.Errorf("compile report missing %s", want)
+		}
+	}
+}
+
+func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T) { // telephony T9, V7-V14
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = "plivo"
+	configured.Connection = "primary_phone"
+	pkg.Targets["pipecat"] = configured
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment = map[string]string{
+		"auth_id": "PLIVO_AUTH_ID", "auth_token": "PLIVO_AUTH_TOKEN", "from_number": "PLIVO_PHONE_NUMBER",
+	}
+	pkg.Connections["primary_phone"] = connection
+	outbound := true
+	phone := pkg.Agent.Channels["phone"]
+	phone.Outbound = &outbound
+	pkg.Agent.Channels["phone"] = phone
+	pkg.Agent.Variables["campaign_id"] = spec.Variable{Type: "string", Source: "call_start"}
+
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := artifactFile(t, artifact, "telephony.py")
+	for _, want := range []string{
+		`utils.validate_v3_signature(`,
+		`nonce in _seen_nonces`,
+		`pending = _pending.pop(token, None)`,
+		`bidirectional="true"`,
+		`keepCallAlive="true"`,
+		`contentType="audio/x-mulaw;rate=8000"`,
+		`answer_url=_http_url(f"/telephony/answer/{token}")`,
+		`_client().calls.transfer`,
+		`aleg_url=_http_url(f"/telephony/transfer/{token}")`,
+		`hmac.compare_digest(request.headers.get("Authorization", ""), expected)`,
+		`"carrier": "plivo"`,
+	} {
+		if !strings.Contains(adapter, want) {
+			t.Errorf("telephony.py missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"RequestValidator", "Twilio", "Telnyx", "Exotel", "media.payload"} {
+		if strings.Contains(adapter, forbidden) {
+			t.Errorf("telephony.py contains unselected or media implementation %q", forbidden)
+		}
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	if !strings.Contains(bot, `"plivo": lambda: FastAPIWebsocketParams`) {
+		t.Error("bot.py does not select the Plivo Pipecat serializer")
+	}
+	for _, carrier := range []string{"twilio", "telnyx", "exotel"} {
+		if strings.Contains(bot, `"`+carrier+`": lambda: FastAPIWebsocketParams`) {
+			t.Errorf("bot.py contains the unselected %s telephony transport", carrier)
+		}
+	}
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !strings.Contains(pyproject, `"plivo>=4,<5"`) || strings.Contains(pyproject, `"twilio>=9,<10"`) || strings.Contains(pyproject, `"cryptography>=45,<47"`) {
+		t.Errorf("pyproject.toml has the wrong carrier dependencies:\n%s", pyproject)
+	}
+	report := artifactFile(t, artifact, "compile-report.json")
+	for _, want := range []string{"PLIVO_AUTH_ID", "PLIVO_AUTH_TOKEN", "PLIVO_PHONE_NUMBER"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("compile report missing %s", want)
+		}
+	}
+	runtime := TelephonyRuntimePlanFor(agent.Targets["pipecat"])
+	var endpoints []string
+	for _, endpoint := range runtime.PublicEndpoints {
+		endpoints = append(endpoints, endpoint.Path)
+	}
+	for _, want := range []string{"/telephony/answer/{token}", "/telephony/transfer/{token}"} {
+		if !slices.Contains(endpoints, want) {
+			t.Errorf("runtime plan missing endpoint %s: %v", want, endpoints)
 		}
 	}
 }

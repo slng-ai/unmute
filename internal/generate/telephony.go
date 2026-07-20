@@ -56,6 +56,13 @@ func TelephonyRuntimePlanFor(target ir.Target) *TelephonyRuntimePlan {
 			"assign the selected phone number to that Voice API Application; generated outbound calls report status to the reported status endpoint",
 		}
 	}
+	if plan.Key.Provider == ir.ProviderPipecat && plan.Key.Transport == "carrier-websocket" && plan.Key.Carrier == "plivo" {
+		runtime.ManualSteps = []string{
+			"get the Auth ID and Auth Token from the Plivo Console dashboard and select a Voice-capable number",
+			"create a Voice XML Application whose Answer URL is POST to the reported inbound endpoint",
+			"assign the selected phone number to that XML Application and configure its Hangup URL as POST to the reported status endpoint",
+		}
+	}
 	for _, name := range plan.Environment {
 		runtime.RequiredEnv = append(runtime.RequiredEnv, name)
 	}
@@ -97,6 +104,12 @@ func TelephonyRuntimePlanFor(target ir.Target) *TelephonyRuntimePlan {
 			runtime.PublicEndpoints = append(runtime.PublicEndpoints, TelephonyEndpoint{Name: "outbound", Method: "POST", Path: "/telephony/outbound"})
 		}
 		runtime.PublicEndpoints = append(runtime.PublicEndpoints, TelephonyEndpoint{Name: "status", Method: "POST", Path: "/telephony/status"})
+		if plan.Key.Carrier == "plivo" && telephonyHasFeature(plan, "outbound") {
+			runtime.PublicEndpoints = append(runtime.PublicEndpoints, TelephonyEndpoint{Name: "outbound-answer", Method: "POST", Path: "/telephony/answer/{token}"})
+		}
+		if plan.Key.Carrier == "plivo" && telephonyHasFeature(plan, "cold_transfer") {
+			runtime.PublicEndpoints = append(runtime.PublicEndpoints, TelephonyEndpoint{Name: "transfer", Method: "POST", Path: "/telephony/transfer/{token}"})
+		}
 	case "connector":
 		runtime.PublicEndpoints = []TelephonyEndpoint{
 			{Name: "inbound", Method: "POST", Path: "/telephony/inbound"},

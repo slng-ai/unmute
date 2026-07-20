@@ -122,6 +122,15 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if !ok || len(optional) != 0 || strings.Join(required, ",") != "api_key,public_key,connection_id,from_number" {
 		t.Fatalf("Telnyx environment vocabulary = required %v optional %v ok %v", required, optional, ok)
 	}
+	plivo := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "plivo"}
+	required, optional, ok = TelephonyEnvironment(plivo)
+	if !ok || len(optional) != 0 || strings.Join(required, ",") != "auth_id,auth_token,from_number" {
+		t.Fatalf("Plivo environment vocabulary = required %v optional %v ok %v", required, optional, ok)
+	}
+	exotel := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "exotel"}
+	if got := ResolveTelephonyFeature(exotel, TelephonyRouteSelected); got.Tag != Gated || !strings.Contains(got.Note, "does not support route") {
+		t.Fatalf("Exotel unauthenticated WebSocket route = %#v", got)
+	}
 	if got := ResolveTelephonyFeature(exact, TelephonyFeature(WarmTransfer)); got.Tag != Provisional || !strings.Contains(got.Note, "cannot also join the Conference") {
 		t.Fatalf("Twilio warm-transfer evidence = %#v", got)
 	}

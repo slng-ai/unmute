@@ -90,6 +90,8 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 			data.Deps = append(data.Deps, "twilio>=9,<10")
 		case "telnyx":
 			data.Deps = append(data.Deps, "cryptography>=45,<47")
+		case "plivo":
+			data.Deps = append(data.Deps, "plivo>=4,<5")
 		}
 		slices.Sort(data.Deps)
 	}
@@ -111,6 +113,8 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 		required = []string{"account_sid", "auth_token", "from_number"}
 	case "telnyx":
 		required = []string{"api_key", "public_key", "connection_id", "from_number"}
+	case "plivo":
+		required = []string{"auth_id", "auth_token", "from_number"}
 	default:
 		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no emitted adapter", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
 	}
@@ -132,8 +136,9 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 
 	telephony := &pipecatTelephony{
 		Carrier: plan.Key.Carrier, Connection: plan.Connection,
-		AccountSIDEnv: plan.Environment["account_sid"], AuthTokenEnv: plan.Environment["auth_token"],
-		APIKeyEnv: plan.Environment["api_key"], PublicKeyEnv: plan.Environment["public_key"],
+		AccountSIDEnv: plan.Environment["account_sid"], AuthIDEnv: plan.Environment["auth_id"],
+		AuthTokenEnv: plan.Environment["auth_token"],
+		APIKeyEnv:    plan.Environment["api_key"], PublicKeyEnv: plan.Environment["public_key"],
 		ConnectionEnv: plan.Environment["connection_id"], FromNumberEnv: plan.Environment["from_number"],
 	}
 	for _, evidence := range plan.Evidence {
@@ -142,6 +147,8 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 			telephony.HasInbound = true
 		case "outbound":
 			telephony.HasOutbound = true
+		case "cold_transfer":
+			telephony.HasCold = true
 		}
 	}
 	if telephony.HasOutbound {

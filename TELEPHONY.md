@@ -131,8 +131,8 @@ tries to hide them behind unchecked configuration.
 | Outbound control | Calls resource | Voice Call Control | Calls resource | Voice call resource |
 | Pipecat serializer | Twilio | Telnyx | Plivo | Exotel |
 | Stream encoding | Carrier serializer owns it | Carrier serializer owns it | Carrier serializer owns it | Carrier serializer owns it |
-| Custom call data | Stream parameters | Query or encoded body | Query or encoded body | Limited; query data may be removed |
-| Cold transfer | Verified carrier control | Verified carrier control | Verified carrier control | Unverified |
+| Custom call data | Stream parameters | Query or encoded body | Query or encoded body | Gated; query data may be removed |
+| Cold transfer | Verified carrier control | Verified carrier control | Verified carrier control | Gated; unverified |
 | Warm primitives | Conference participants | Conference participants | Multi-party call | Unverified |
 
 The relevant Pipecat guides document inbound, outbound, local tunnel, and
@@ -196,8 +196,10 @@ and
 [LiveKit self-hosted SIP guide](https://docs.livekit.io/transport/self-hosting/sip-server/).
 
 No carrier or LiveKit credentials were available during the initial build.
-The generated Pipecat Twilio and Telnyx adapters therefore have offline tests
-only. Every live route stays provisional until its corresponding inbound,
+The generated Pipecat Twilio, Telnyx, and Plivo adapters therefore have offline
+tests only. Exotel remains gated because its documented static App Bazaar
+Voicebot URL does not provide a proven authenticated WebSocket upgrade and
+custom URL data may be stripped. Every live route stays provisional until its corresponding inbound,
 outbound, hangup, authentication, and advertised-control smoke completes.
 
 ## Architecture
@@ -747,13 +749,18 @@ gates.
 
 1. Add Plivo XML, serializer, call context, outbound, and verified controls.
 2. Prove Plivo multi-party warm transfer before enabling it.
-3. Add Exotel App Bazaar instructions, serializer, call context, and outbound.
-4. Keep Exotel cold and warm transfer gated until official behavior is proven.
-5. Document Exotel's custom outbound data limitation.
+3. Pressure-test Exotel's static App Bazaar Voicebot URL against the
+   authenticated-upgrade invariant.
+4. Keep the entire Exotel route gated until a carrier-authenticated WebSocket
+   pattern is proven; cold transfer, warm transfer, and custom outbound input
+   remain independently gated as well.
+5. Document Exotel's custom outbound data limitation and the credentials a
+   future outbound adapter will need.
 6. Run the shared contract and carrier-specific smoke scenarios.
 
-Acceptance requires no conditional carrier logic outside the telephony plan,
-carrier rendering, and generated carrier module.
+Acceptance requires a selected Plivo adapter with no conditional carrier logic
+outside the telephony plan, carrier rendering, and generated carrier module,
+plus a validation test proving Exotel fails before generation.
 
 ### Phase 6: Complete self-hosted LiveKit telephony
 
