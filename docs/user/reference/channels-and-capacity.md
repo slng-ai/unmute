@@ -60,7 +60,9 @@ Required: conditional (iff `outbound: true`). Values: `hangup | leave_message`. 
 
 ## capacity
 
-The declared half of the resource model. Required whenever `channels` has a telephony channel or the resolved target is a code target (so it is required on Pipecat).
+The declared half of the resource model. Required whenever `channels` has a
+telephony channel or the resolved target is a code target, including LiveKit
+and Pipecat.
 
 ```yaml
 capacity:

@@ -70,15 +70,28 @@ You do not need to understand every line yet. The point is the shape: the models
 
 ## What this documentation covers
 
-These docs take you from nothing to a complex agent running on Pipecat, one of the five platforms.
+These docs take you from nothing to a complex agent that can compile to both
+shipped Python code targets, LiveKit and Pipecat.
 
-- [start/](install.md) gets the tool installed and a first agent talking in minutes.
-- [learn/](../learn/01-one-agent.md) grows one small customer service agent, one new feature per page, until it has two agents, tools, shared state, handoffs, and delegated tasks.
-- [concepts/](../concepts/how-unmute-works.md) explains the ideas behind the fields, for when you are curious or confused.
-- [targets/pipecat.md](../targets/pipecat.md) shows exactly what your spec turns into on Pipecat.
+- [Start](install.md) gets the tool installed and a first agent talking.
+- [Learn](../learn/01-one-agent.md) grows one customer-service agent one feature
+  at a time. Its generated-code examples use Pipecat as one concrete lowering.
+- [Concepts](../concepts/how-unmute-works.md) explains the portable YAML and how
+  each target interprets it.
+- [LiveKit](../targets/livekit.md) and
+  [Pipecat](../targets/pipecat.md) show the two native generated projects,
+  local development paths, deployment files, and driver gates.
 
-Start with [Install](install.md), then build [your first agent](first-agent.md).
+Start with [Install](install.md), then build
+[your first agent](first-agent.md).
 
-## A note on other platforms
+## Know which drivers ship
 
-This documentation focuses on Pipecat, because that is the platform whose support is complete today. Unmute is designed for all five platforms, and each feature page tells you honestly how that feature behaves on every one of them. When a page says a feature "fails on Vapi" or "warns on Deepgram", that is a real fact from the Unmute schema, not a guess. You can rely on it.
+LiveKit and Pipecat are shipped code targets: `compile` writes a runnable
+Python project that you host. ElevenLabs is a shipped managed target: `apply`
+reconciles its hosted configuration. Vapi and Deepgram still validate against
+the shared schema, but their generators aren't implemented.
+
+Every feature page names the target-specific warning or failure when the
+frameworks differ. These outcomes come from the same capability table that
+guards generation, so a driver never silently drops an accepted field.

@@ -1,8 +1,8 @@
 # Build your first YAML package
 
 This page introduces the smallest useful Unmute package. You will define one
-portable agent in `agent.yaml` and bind it to LiveKit in `targets.yaml`, without
-starting from command-line behavior or generated code.
+portable agent in `agent.yaml` and bind it to LiveKit and Pipecat in
+`targets.yaml`, without starting from generated code.
 
 ## Create the package structure
 
@@ -47,7 +47,7 @@ models:
       provider: slng
       model: "slng/deepgram/nova:3-en"
   turn:
-    detector: { provider: livekit, model: turn-detector-mini }
+    detector: { provider: local, model: silero }
 
 agents:
   assistant:
@@ -78,23 +78,40 @@ Read this file from top to bottom as a behavior graph:
 3. `conversation` and `channels` describe what the caller experiences.
 4. `capacity` declares the expected concurrency for a code target.
 
-## Add the LiveKit target
+## Add both code targets
 
-Use `targets.yaml` to name the platform. The model definitions are already in
-`agent.yaml`; a target carries only its infrastructure and any overrides, by
-name, for models it cannot run as defined.
+Use `targets.yaml` to name each framework. The model definitions are already
+in `agent.yaml`; a target carries only its infrastructure and any whole-model
+overrides, by name, for models it cannot run as defined.
 
 ```yaml
 targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+
   livekit:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
+    models:
+      detector: { provider: livekit, model: turn-detector-mini }
 ```
 
-Every model comes straight from `agent.yaml`, so this target needs no
-overrides. Changing where a model runs doesn't change the agent's behavior or
-prompt.
+Pipecat uses the local Silero turn model from `agent.yaml`. LiveKit replaces
+that one entry with its own mini turn detector. Both targets use the same
+agents, prompts, listen model, think model, voice, conversation, and capacity.
+
+Validate both targets, then compile both native projects.
+
+```sh
+unmute validate support-agent
+unmute compile support-agent
+```
+
+The compile writes `build/pipecat/bot.py` and `build/livekit/agent.py`, plus
+each framework's dependencies, deployment files, environment example, and
+compile report.
 
 ## Keep the boundary clear
 
@@ -120,4 +137,7 @@ following pages continue from this boundary.
 - [Add another agent](../learn/04-two-agents.md) and a guarded handoff.
 - [Add a task](../learn/05-tasks.md) or an ordered
   [task group](../learn/06-task-groups.md).
-- [Configure LiveKit](../targets/livekit.md) for the full LiveKit YAML surface.
+- [Configure LiveKit](../targets/livekit.md) for its full YAML and deployment
+  surface.
+- [Configure Pipecat](../targets/pipecat.md) for its worker, Flow, transport,
+  and deployment surface.

@@ -51,6 +51,14 @@ targets:
     version: "1.5.0"
     # no overrides: every model runs as defined in agent.yaml
 
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    models:
+      # Replace the local VAD entry with LiveKit's turn detector.
+      vad: { provider: livekit, model: turn-detector-mini }
+
   elevenlabs:
     provider: elevenlabs
     models:
@@ -61,7 +69,8 @@ targets:
       transcriber: { params: { user_input_audio_format: ulaw_8000 } }  # settings-only: listen is integrated
 ```
 
-The instance is named after the provider (`pipecat`, not `pipecat-dev`): what you test is what you deploy.
+Each instance is named after its provider (`pipecat`, not `pipecat-dev`): what
+you test is what you deploy.
 
 ## Forwarded verbatim, never validated
 
@@ -92,8 +101,17 @@ fast_reasoning:
 
 Not every role is bindable on every target. A role is **open** (you name an outside model) or **integrated** (the platform builds it in and you cannot supply your own).
 
-On Pipecat, all four roles are open: you choose the listen model, the voice, and the think model freely, and `turn` runs on your machine with a local voice-activity detector. On managed targets, more roles are integrated. On ElevenLabs, for instance, listening is integrated: a `listen` override can only carry settings, never name an outside speech model. When a role is integrated, trying to name an outside model to it fails, because the value has nowhere to go.
+On LiveKit and Pipecat, all four roles are open: you choose listen, speak,
+think, and turn models. The example keeps Pipecat's turn detection local and
+uses a LiveKit override for that framework's detector. On managed targets,
+more roles are integrated. On ElevenLabs, for example, listening is integrated:
+a `listen` override can carry settings but cannot name an outside speech model.
+When a role is integrated, an outside model fails because the value has nowhere
+to go.
 
-For the full role-by-role table across all five targets, see the [Pipecat target page](../targets/pipecat.md) for Pipecat's column, or `SCHEMA.md` section 6 for all five.
+For the full role-by-role table, see
+[targets.yaml](../reference/targets-yaml.md). The
+[LiveKit guide](../targets/livekit.md) and
+[Pipecat guide](../targets/pipecat.md) explain each generated service.
 
 Next: [tiers](tiers.md), the three levels of agent ambition.

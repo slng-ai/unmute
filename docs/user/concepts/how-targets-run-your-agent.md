@@ -25,7 +25,7 @@ models:
   listen:
     transcriber: { provider: deepgram, model: nova-3 }
   turn:
-    detector: { provider: livekit, model: turn-detector-mini }
+    detector: { provider: local, model: silero }
 
 agents:
   greeter:
@@ -40,18 +40,23 @@ run as defined.
 
 ```yaml
 targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+
   livekit:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
     models:
-      # LiveKit runs a different voice, so override just that entry:
-      front_desk: { provider: elevenlabs, voice: cgSgspJ2msm6clMCkdW9 }
+      # LiveKit uses its own turn detector, so override just that entry.
+      detector: { provider: livekit, model: turn-detector-mini }
 ```
 
 The model name is the join between the files: `agent.yaml` defines it, an agent
 or a top-level selector references it, and a target may override it. The
-platform and version remain target-specific.
+platform and version remain target-specific. Pipecat uses the local turn model
+as defined; LiveKit replaces that entry without changing the portable agent.
 
 ## Follow the interpretation flow
 
@@ -63,9 +68,9 @@ mechanics differ.
 3. Reject any behavior that the target cannot represent faithfully.
 4. Map the accepted behavior to the target without dropping fields silently.
 
-For LiveKit, repository parity tests compare the accepted capability table to
-the emitted field set. A YAML field that passes the target rules must have a
-LiveKit lowering.
+For both shipped code drivers, repository parity tests compare the accepted
+capability table to the emitted field set. A YAML field that passes the target
+rules must have a LiveKit or Pipecat lowering.
 
 ## Transfer between agents
 
@@ -83,15 +88,15 @@ controls:
     when: The caller asks about billing or a refund.
     requires: [verified]
     context:
-      history: last_n
-      max_messages: 8
-      include_tool_calls: false
-      variables: [verified]
+      history: full
+      variables: all
 ```
 
-LiveKit changes which agent owns the conversation. Another target can use a
-different mechanism, but it must preserve the history and variable choices in
-the YAML.
+LiveKit hands the session to another `Agent`. Pipecat activates another worker
+and deactivates the current one. Both preserve the portable `full` history and
+`all` variables contract above. LiveKit also emits finer history and variable
+shaping; the Pipecat driver currently rejects those choices instead of
+dropping them.
 
 ## Delegate a task and receive typed data
 
@@ -102,12 +107,11 @@ typed result and can assign fields into shared variables.
 tasks:
   verify_customer:
     instructions: tasks/verify_customer.md
-    model: careful_model
     result:
       customer_id: string
       verified: boolean
     context:
-      history: messages
+      history: full
 
 controls:
   run_verification:
@@ -119,9 +123,11 @@ controls:
       verified: result.verified
 ```
 
-LiveKit gives the task its own task object and, when `model` is present, its
-own think model. The portable contract is simpler: the owner receives
-the declared result fields and the task's conversation doesn't leak back.
+LiveKit gives the task its own `AgentTask`. Pipecat runs the task as a Flow on
+the delegating worker. Both return the declared fields without leaking the
+task conversation into the owner's context. LiveKit can give a task its own
+think model; Pipecat currently rejects a per-task `model` and uses the
+delegating agent's model.
 
 ## Run tasks in order
 
@@ -137,10 +143,10 @@ task_groups:
     merge: results
 ```
 
-On LiveKit, a `shared` group uses the framework's task-group behavior. An
-`isolated` group runs each task with a fresh context because the native group
-always shares context. Both forms preserve `merge: results`: only typed results
-return to the owning agent.
+On LiveKit, a `shared` group uses `TaskGroup`, while an `isolated` group uses a
+generated sequence of standalone `AgentTask` objects. On Pipecat, both scopes
+use a Flow chain with different context strategies. Every form preserves
+`merge: results`: only typed results return to the owning agent.
 
 ## Expect target differences at explicit boundaries
 
@@ -149,6 +155,6 @@ differences are attached to named YAML fields rather than hidden in generated
 behavior.
 
 Use [tags and gating](tags-and-gating.md) to understand the outcome labels,
-then use the target or reference page for the exact field. The
-[LiveKit YAML guide](../targets/livekit.md) collects the complete LiveKit
-surface in one place.
+then use the [LiveKit guide](../targets/livekit.md) or
+[Pipecat guide](../targets/pipecat.md) for the exact native lowering and current
+driver gates.

@@ -101,7 +101,10 @@ unmute dev acme
 
 **`channels`** says how callers reach the agent. `realtime_audio` is a browser or app audio session. An agent needs at least one channel. Phone (`telephony`) is a later topic.
 
-**`capacity`** declares your expected traffic: concurrent calls at the busy hour, a hard limit, and average call length. Unmute uses these to size the deployment. It is required on Pipecat because Pipecat is a code target you host yourself.
+**`capacity`** declares your expected traffic: concurrent calls at the busy
+hour, a hard limit, and average call length. Unmute uses these to size the
+deployment. It is required on Pipecat and LiveKit because both are code targets
+you host yourself.
 
 ## What targets.yaml does
 
