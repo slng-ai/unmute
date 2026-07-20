@@ -23,7 +23,7 @@ func TestApply_codeTargetSaysUseCompile(t *testing.T) {
 }
 
 func TestApply_managedTargetNotImplementedYet(t *testing.T) {
-	safe := filepath.Join("..", "..", "examples", "safe_core")
+	safe := filepath.Join("..", "testdata", "safe_core")
 	out, err := run(t, "apply", safe, "--target", "vapi")
 	if err == nil {
 		t.Fatalf("expected managed driver not-implemented error; got:\n%s", out)

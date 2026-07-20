@@ -74,7 +74,7 @@ func TestApplyPlanIsOrdered(t *testing.T) {
 
 func loadCompilerAgent(t *testing.T) *ir.Agent {
 	t.Helper()
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}

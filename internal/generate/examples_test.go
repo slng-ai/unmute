@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -9,6 +10,13 @@ import (
 	"github.com/slng/unmute/internal/spec"
 	"github.com/slng/unmute/internal/target"
 )
+
+func examplePackagePath(name string) string {
+	if name == "remy" || name == "safe_core" {
+		return filepath.Join("..", "testdata", name)
+	}
+	return filepath.Join("..", "..", "examples", name)
+}
 
 func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 	cases := []struct {
@@ -49,6 +57,35 @@ func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestPublicExamplePackages(t *testing.T) {
+	root := filepath.Join("..", "..", "examples")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var directories []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			directories = append(directories, entry.Name())
+		}
+	}
+	want := []string{"simple-prompt", "single-task", "subagents", "task-groups"}
+	if !slices.Equal(directories, want) {
+		t.Fatalf("public example directories = %v, want %v", directories, want)
+	}
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Name() == ".DS_Store" || entry.IsDir() && entry.Name() == "build" {
+			t.Errorf("forbidden public example artifact: %s", path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

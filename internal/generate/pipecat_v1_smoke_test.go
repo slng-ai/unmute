@@ -42,7 +42,7 @@ func TestSmokePipecatV1ConsoleExtraResolves(t *testing.T) {
 	if _, err := exec.LookPath("uv"); err != nil {
 		t.Skip("uv not available")
 	}
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func runPipecatSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 	if _, err := exec.LookPath("uv"); err != nil {
 		t.Skip("uv not available")
 	}
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
+	pkg, err := spec.Load(examplePackagePath(example))
 	if err != nil {
 		t.Fatal(err)
 	}

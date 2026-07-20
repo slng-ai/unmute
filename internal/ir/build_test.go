@@ -282,7 +282,7 @@ func TestBuildValidatesDestinationValues(t *testing.T) {
 
 func loadSafeCore(t *testing.T) *packagespec.Package {
 	t.Helper()
-	pkg, err := packagespec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}
