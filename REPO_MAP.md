@@ -82,8 +82,12 @@ every provider binding emits.
 
 ## Examples (real specs to compile)
 
-- [examples/safe_core/](examples/safe_core/) — the five-target portable example; every primary validates.
-- [examples/remy/](examples/remy/) — handoff + task groups on LiveKit (the driver golden fixture).
+- [examples/README.md](examples/README.md) — runnable LiveKit/Pipecat matrix
+  for a simple prompt, one task, a task group, and sub-agent handoffs.
+- [examples/safe_core/](examples/safe_core/) — the five-target portable
+  example; every primary validates.
+- [examples/remy/](examples/remy/) — handoff + task groups on LiveKit (the
+  driver golden fixture).
 
 ## Docs
 

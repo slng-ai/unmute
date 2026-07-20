@@ -98,6 +98,19 @@ for name in json.load(open("compile-report.json"))["required_env"]:
 
 import bot  # noqa: E402  (module import already constructs the agent workers)
 
+for name in ("LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_BASE_URL"):
+    os.environ.pop(name, None)
+assert bot.setup_langfuse_tracing() is False
+os.environ["LANGFUSE_PUBLIC_KEY"] = "partial"
+try:
+    bot.setup_langfuse_tracing()
+except ValueError:
+    pass
+else:
+    raise AssertionError("partial Langfuse configuration must fail")
+finally:
+    os.environ.pop("LANGFUSE_PUBLIC_KEY")
+
 builders = sorted(n for n in vars(bot) if n.startswith("build_") and callable(getattr(bot, n)))
 assert builders, "no service builders found in bot.py"
 
@@ -117,13 +130,19 @@ print("smoke ok:", ", ".join(builders))
 // (deepgram Settings-style STT, slng flat-kwargs TTS, openai Settings LLM).
 // Opt-in (`make smoke` / -tags smoke), never in the default suite.
 func TestSmokePipecatV1ServicesInstantiate(t *testing.T) {
-	runPipecatSmoke(t, nil, nil)
+	runPipecatSmoke(t, "safe_core", nil, nil)
+}
+
+// TestSmokePipecatV1TaskGroupsInstantiate imports the generated FlowManager
+// lowering used by both standalone tasks and task groups.
+func TestSmokePipecatV1TaskGroupsInstantiate(t *testing.T) {
+	runPipecatSmoke(t, "task-groups", nil, nil)
 }
 
 // TestSmokePipecatV1MultiVendorInstantiates covers the remaining official
 // entries in one venv: assemblyai listen, elevenlabs + cartesia speak.
 func TestSmokePipecatV1MultiVendorInstantiates(t *testing.T) {
-	runPipecatSmoke(t, func(tgt *ir.Target) {
+	runPipecatSmoke(t, "safe_core", func(tgt *ir.Target) {
 		tgt.Models.Listen = &ir.Binding{Provider: "assemblyai", Model: "universal-3-5-pro"}
 		tgt.Models.Speak["front_desk"] = ir.Binding{
 			Provider: "elevenlabs", Model: "eleven_multilingual_v2", Voice: "21m00Tcm4TlvDq8ikWAM",
@@ -141,7 +160,7 @@ func TestSmokePipecatV1MultiVendorInstantiates(t *testing.T) {
 // (speechmatics speak was smoke-rejected here 2026-07-17: its service demands
 // a caller-supplied aiohttp_session, impossible at module import — T13.)
 func TestSmokePipecatV1RestoredVendorsInstantiates(t *testing.T) {
-	runPipecatSmoke(t, func(tgt *ir.Target) {
+	runPipecatSmoke(t, "safe_core", func(tgt *ir.Target) {
 		tgt.Models.Listen = &ir.Binding{Provider: "soniox", Model: "stt-rt-v5"}
 		tgt.Models.Speak["front_desk"] = ir.Binding{
 			Provider: "inworld", Model: "inworld-tts-2", Voice: "Ashley",
@@ -160,7 +179,7 @@ func TestSmokePipecatV1RestoredVendorsInstantiates(t *testing.T) {
 // the @tool wrapper class-collects and `import tools.fetch_notes` resolves the
 // copied handler file inside the venv.
 func TestSmokePipecatV1LocalToolInstantiates(t *testing.T) {
-	runPipecatSmoke(t, nil, func(agent *ir.Agent) {
+	runPipecatSmoke(t, "safe_core", nil, func(agent *ir.Agent) {
 		agent.Tools["fetch_notes"] = ir.Tool{
 			Description: "Fetch the caller's saved notes.",
 			Input:       map[string]any{"type": "object", "properties": map[string]any{"topic": map[string]any{"type": "string"}}, "required": []any{"topic"}},
@@ -174,12 +193,12 @@ func TestSmokePipecatV1LocalToolInstantiates(t *testing.T) {
 	})
 }
 
-func runPipecatSmoke(t *testing.T, mutate func(*ir.Target), mutateAgent func(*ir.Agent)) {
+func runPipecatSmoke(t *testing.T, example string, mutate func(*ir.Target), mutateAgent func(*ir.Agent)) {
 	t.Helper()
 	if _, err := exec.LookPath("uv"); err != nil {
 		t.Skip("uv not available")
 	}
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
 	if err != nil {
 		t.Fatal(err)
 	}

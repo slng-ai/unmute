@@ -212,6 +212,7 @@ type livekitData struct {
 	Project       string
 	Version       string
 	AgentName     string
+	EntryAgent    string
 	EntryClass    string
 	STT           livekitChain
 	SessionLLM    livekitChain

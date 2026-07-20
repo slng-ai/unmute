@@ -7,6 +7,11 @@ GET_INVOICE_URL=
 LOOKUP_CUSTOMER_URL=
 OPENAI_API_KEY=
 SLNG_API_KEY=
+
+# Optional Langfuse tracing. Set all three or leave all three empty.
+LANGFUSE_SECRET_KEY=
+LANGFUSE_PUBLIC_KEY=
+LANGFUSE_BASE_URL=
 === Dockerfile ===
 FROM python:3.12-slim
 
@@ -52,6 +57,13 @@ Set these before running (values are never written into the project):
 - `OPENAI_API_KEY`
 - `SLNG_API_KEY`
 
+## Trace with Langfuse
+
+Tracing is optional. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
+`LANGFUSE_BASE_URL` together in `.env` to export Pipecat spans. Leaving all
+three empty disables tracing. The trace name is
+`intake-pipecat`; one trace contains the full conversation.
+
 ## Agents
 
 - `billing`
@@ -73,11 +85,14 @@ the typed results.
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 from dataclasses import asdict, dataclass
 
 import httpx
 from dotenv import load_dotenv
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
 from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
@@ -97,6 +112,7 @@ from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
+from pipecat.utils.tracing.setup import setup_tracing
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat_slng import SlngTTSService
@@ -104,6 +120,7 @@ from pipecat_slng import SlngTTSService
 load_dotenv()
 
 MAIN_NAME = "main"
+TRACE_NAME = "intake" + "-" + "pipecat"
 REQUIRED_ENV = [
     "DAILY_API_KEY",
     "DEEPGRAM_API_KEY",
@@ -122,6 +139,28 @@ def require_env() -> None:
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+
+def setup_langfuse_tracing() -> bool:
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
+    base_url = os.getenv("LANGFUSE_BASE_URL")
+    values = (public_key, secret_key, base_url)
+    if not any(values):
+        return False
+    if not all(values):
+        raise ValueError(
+            "LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and LANGFUSE_BASE_URL must all be set"
+        )
+
+    auth = base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
+    os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = f"{base_url.rstrip('/')}/api/public/otel"
+    os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = (
+        f"Authorization=Basic%20{auth},x-langfuse-ingestion-version=4"
+    )
+    if not setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter()):
+        raise RuntimeError("Pipecat OpenTelemetry tracing is unavailable")
+    return True
 
 
 @dataclass
@@ -268,6 +307,7 @@ def build_stt():
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activate_on_start: bool = False) -> None:
     require_env()
+    tracing_enabled = setup_langfuse_tracing()
     global _TRANSPORT
     _TRANSPORT = transport
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
@@ -300,8 +340,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
     main = PipelineWorker(
         pipeline,
         name=MAIN_NAME,
+        enable_tracing=tracing_enabled,
+        additional_span_attributes={"langfuse.trace.name": TRACE_NAME},
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
+    if tracing_enabled:
+        # ponytail: Pipecat 1.5 LLMWorker exposes no tracing kwargs. Share the
+        # main worker context until its public constructor accepts them.
+        for agent in AGENTS:
+            agent._enable_tracing = True
+            agent._tracing_context = main._tracing_context
 
     @user_aggregator.event_handler("on_user_turn_idle")
     async def on_user_turn_idle(aggregator):
@@ -353,7 +401,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
             await runner.cancel()
 
     await runner.add_workers(main, *AGENTS)
-    await runner.run()
+    try:
+        await runner.run()
+    finally:
+        if tracing_enabled:
+            trace.get_tracer_provider().force_flush()
 
 
 async def bot(runner_args: RunnerArguments) -> None:
@@ -549,6 +601,7 @@ dependencies = [
     "pipecat-ai[daily,deepgram,openai,runner,silero,webrtc]==1.5.0",
     "pipecat-slng>=0.4.0",
     "python-dotenv>=1.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.33,<2",
     "httpx>=0.27",
 ]
 

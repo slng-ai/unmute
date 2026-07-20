@@ -24,6 +24,13 @@ Set these before running (values are never written into the project):
 
 {{range .RequiredEnv}}- `{{.}}`
 {{end}}
+## Trace with Langfuse
+
+Tracing is optional. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
+`LANGFUSE_BASE_URL` together in `.env` to export Pipecat spans. Leaving all
+three empty disables tracing. The trace name is
+`{{.EntryAgent}}-{{.Project}}`; one trace contains the full conversation.
+
 ## Agents
 
 {{range .Agents}}- `{{.Name}}`
