@@ -45,6 +45,7 @@ the file defines a callable named like the tool; sync or async). */ -}}
 url_env, allowed_tools keeping D8 visibility. */ -}}
 {{define "mcp_mounts"}}mcp_servers=[{{range $i, $s := .}}{{if $i}}, {{end}}mcp.MCPServerHTTP(url=os.environ[{{pyq $s.URLEnv}}], allowed_tools=[{{range $j, $t := $s.Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]){{end}}]{{end -}}
 {{if .NeedsAsyncio}}import asyncio
+{{end}}{{if .Tracing}}from collections.abc import Sequence
 {{end}}{{if .NeedsInspect}}import inspect
 {{end}}{{if .Outbound}}import json
 {{end}}import logging
@@ -77,10 +78,14 @@ from opentelemetry.util.types import AttributeValue
     JobContext,
     JobProcess,
     NotGivenOr,
+{{- if .NeedsFunctionTools}}
     RunContext,
+{{- end}}
     TurnHandlingOptions,
     cli,
+{{- if .NeedsFunctionTools}}
     function_tool,
+{{- end}}
 {{- if .HasColdTransfer}}
     get_job_context,
 {{- end}}
@@ -116,7 +121,7 @@ load_dotenv(".env.local")
 # --- tracing ---------------------------------------------------------------
 def setup_langfuse(
     metadata: dict[str, AttributeValue] | None = None,
-) -> TracerProvider | None:
+) -> TracerProvider:
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
     base_url = os.getenv("LANGFUSE_BASE_URL")
@@ -139,14 +144,14 @@ def setup_langfuse(
 
 
 def trace_speech_metrics(
-    trace_provider: TracerProvider | None,
-    speech_metrics: list[STTMetrics | TTSMetrics],
+    trace_provider: TracerProvider,
+    speech_metrics: Sequence[STTMetrics | TTSMetrics],
     *,
     input_value: str,
     output_value: str,
     ended_at: float,
 ) -> None:
-    if trace_provider is None or not speech_metrics:
+    if not speech_metrics:
         return
 
     metric = speech_metrics[-1]
