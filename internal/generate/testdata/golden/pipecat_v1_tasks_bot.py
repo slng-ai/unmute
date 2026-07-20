@@ -22,6 +22,7 @@ import httpx
 from dotenv import load_dotenv
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace import SpanProcessor
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, FlowsFunctionSchema, NodeConfig
@@ -74,6 +75,70 @@ def require_env() -> None:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
 
+class LangfuseAttributeProcessor(SpanProcessor):
+    """Map Pipecat's native speech attributes to Langfuse observation fields."""
+
+    def __init__(self) -> None:
+        self._conversation_spans = {}
+
+    def on_start(self, span, parent_context=None) -> None:
+        span_name = span.name
+        trace_id = span.get_span_context().trace_id
+        if span_name == "conversation":
+            self._conversation_spans[trace_id] = span
+            span.set_attribute("langfuse.observation.type", "span")
+        elif span_name in {"stt", "tts", "llm"}:
+            span.set_attribute("langfuse.observation.type", "generation")
+
+        if span_name == "stt":
+            span.set_attribute("langfuse.observation.input", "audio")
+        elif span_name == "tts":
+            span.set_attribute("langfuse.observation.output", "audio")
+
+        original_set_attribute = span.set_attribute
+
+        # ponytail: Pipecat 1.5 exposes semantic values only as generic span
+        # attributes. Mirror them until its tracing API accepts Langfuse fields.
+        def set_attribute(key, value):
+            original_set_attribute(key, value)
+            observation_key = None
+            trace_key = None
+            if key == "transcript" and span_name == "stt":
+                observation_key = "langfuse.observation.output"
+                trace_key = "langfuse.trace.input"
+            elif key == "text" and span_name == "tts":
+                observation_key = "langfuse.observation.input"
+                trace_key = "langfuse.trace.output"
+            elif key == "input":
+                observation_key = "langfuse.observation.input"
+            elif key == "output":
+                observation_key = "langfuse.observation.output"
+
+            if observation_key:
+                original_set_attribute(observation_key, value)
+            root = self._conversation_spans.get(trace_id)
+            if root is not None and trace_key:
+                root.set_attribute(trace_key, value)
+                root_observation_key = (
+                    "langfuse.observation.input"
+                    if trace_key == "langfuse.trace.input"
+                    else "langfuse.observation.output"
+                )
+                root.set_attribute(root_observation_key, value)
+
+        span.set_attribute = set_attribute
+
+    def on_end(self, span) -> None:
+        if span.name == "conversation":
+            self._conversation_spans.pop(span.get_span_context().trace_id, None)
+
+    def shutdown(self) -> None:
+        pass
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return True
+
+
 def setup_langfuse_tracing() -> bool:
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
@@ -93,6 +158,7 @@ def setup_langfuse_tracing() -> bool:
     )
     if not setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter()):
         raise RuntimeError("Pipecat OpenTelemetry tracing is unavailable")
+    trace.get_tracer_provider().add_span_processor(LangfuseAttributeProcessor())
     return True
 
 

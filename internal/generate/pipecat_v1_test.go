@@ -97,6 +97,35 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 	}
 }
 
+func TestV18PipecatLangfuseObservationMapping(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"class LangfuseAttributeProcessor(SpanProcessor):",
+		`"langfuse.observation.input"`,
+		`"langfuse.observation.output"`,
+		`"langfuse.trace.input"`,
+		`"langfuse.trace.output"`,
+		"trace.get_tracer_provider().add_span_processor(LangfuseAttributeProcessor())",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing %q", want)
+		}
+	}
+}
+
 // TestPipecatV1TasksGolden exercises the T4 agency level (tasks, task_group,
 // delegates) that safe_core omits, by building the IR in-code (driver-pipecat T4).
 func TestPipecatV1TasksGolden(t *testing.T) {
