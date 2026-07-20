@@ -8,7 +8,10 @@ The interesting question is not "how do we support five platforms". It is "what 
 
 The five split into two groups, and the split explains almost every difference you will meet.
 
-**Code targets: LiveKit, Pipecat, Deepgram.** Unmute writes the code that runs on these. For Pipecat, that is a Python project. Because Unmute owns the code, it can add logic the platform does not offer directly.
+**Code targets: LiveKit, Pipecat, Deepgram.** This category gives Unmute a
+project in which to generate missing logic. LiveKit and Pipecat have shipped
+Python generators today. Deepgram validates against the same schema, but its
+generator isn't implemented yet.
 
 **Managed targets: Vapi, ElevenLabs.** The provider runs the agent for you. You do not get a project to host; you get an API with a fixed set of settings. Unmute can only use what that API already exposes. There is nowhere to put extra logic.
 
@@ -20,9 +23,15 @@ From that split comes the rule that decides what compiles where:
 
 > If a feature is missing on a platform, Unmute may generate it on a code target. On a managed target the same feature fails.
 
-An example. A **guard** on a handoff (only hand off once the caller is verified) is not a built-in setting on any of the five. On Pipecat, a code target, Unmute writes the check into the generated Python, so the guard works. On Vapi and ElevenLabs, managed targets, there is no place to run that check, so using a guard **fails validation** there. Same spec, honest and different outcomes, each explained.
+For example, a **guard** on a handoff only transfers once the caller is
+verified. LiveKit and Pipecat don't need to share a built-in setting: each
+driver writes the check around its native handoff. Vapi and ElevenLabs have no
+place to run that check, so the same field **fails validation** there. Same
+spec, honest and different outcomes.
 
-This is why Pipecat, the focus of these docs, can do so much: it is a code target, so nearly every feature in the schema is available, either because Pipecat has it natively or because Unmute writes it.
+This is why the shipped code targets can support rich agents while keeping
+their runtimes native. LiveKit uses Agents, `AgentTask`, and `TaskGroup`;
+Pipecat uses workers and Flows. The YAML contract stays the same.
 
 ## One description, five outcomes
 
@@ -46,6 +55,9 @@ Three rules hold this together, and they are worth stating plainly:
 
 Pick your platform based on where you want to deploy, not on what you are allowed to ask for. Write the agent you actually want. Then let validation tell you, per platform, exactly what you get.
 
-If you are on a code target like Pipecat, expect almost everything to work. If you are on a managed target, expect the richer features (guards, fine-grained history, delegated tasks) to be limited, and expect Unmute to tell you which ones and why.
+If you use LiveKit or Pipecat, read its target page for the remaining driver
+gates. On a managed target, expect richer features such as guards,
+fine-grained history, and delegated tasks to be limited, with validation
+naming each difference.
 
 The exact per-feature outcomes live in [tiers](tiers.md) and on each feature's page. The vocabulary for those outcomes (core, warn, gated, provisional) is the next thing to learn: [tags and gating](tags-and-gating.md).

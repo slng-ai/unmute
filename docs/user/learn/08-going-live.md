@@ -31,7 +31,10 @@ Add a second instance of the *same* provider only when you have a real second en
 
 ## Check portability before you commit
 
-Here is the useful move before choosing a platform: **`validate` runs against all five targets even though only the Pipecat driver ships today.** Validation uses the schema's capability rules, not a driver, so it can tell you, per target, what would pass, warn, or fail:
+Here is the useful move before choosing a platform: **`validate` runs against
+all five targets, including providers without a generator.** Validation uses
+the schema's capability rules, so it can tell you what passes, warns, or fails
+before generation:
 
 ```sh
 unmute validate acme
@@ -40,11 +43,15 @@ unmute validate acme
 ```text
 TARGET            PROVIDER    RESULT
 elevenlabs   elevenlabs  pass
+livekit       livekit     pass
 pipecat       pipecat     pass
 vapi         vapi        fail
 ```
 
-with the warnings and errors printed per target. So you can declare a target for each of the five, run `validate`, and see exactly which features cost you a warning or a failure on each platform, before writing a line of platform code. Then `compile` the one whose driver is ready (Pipecat today). The other drivers error on `compile` until they ship; `validate` still tells you where you stand.
+Warnings and errors print per target. LiveKit and Pipecat have shipped code
+drivers, so `compile` writes both native projects. ElevenLabs has a shipped
+managed driver and uses `unmute apply`. Vapi and Deepgram still validate, but
+generation fails with `driver is not implemented` until their drivers ship.
 
 ## Capacity
 
@@ -57,9 +64,14 @@ capacity:
   avg_session_duration: 6m
 ```
 
-It is **required** on Pipecat, because a code target is something you host, and required whenever you have a telephony channel. `peak_sessions` must not exceed `max_sessions`. Capacity does not depend on how many agents are in the file, only on concurrency, model placement, and channels.
+It is **required** when the package has a code target, including LiveKit or
+Pipecat, or a telephony channel. `peak_sessions` must not exceed
+`max_sessions`. Capacity depends on concurrency, model placement, and channels,
+not the number of agents in the file.
 
-Capacity feeds Unmute's sizing (how many workers, how much GPU, which quotas). Be aware of the current limit: **the sizing numbers are derived internally but are not yet printed by the CLI.** Declaring capacity is validated and correct; a user-facing sizing report is not surfaced yet. Do not expect worker or GPU counts in the output today.
+Capacity feeds Unmute's worker, GPU, and provider quota sizing. `compile`
+prints each derived sizing line with its status and basis;
+`compile-report.json` records the same contract for the generated target.
 
 ## Secrets stay out of the files
 
@@ -71,10 +83,17 @@ None of your spec files ever hold a secret. This is a rule, not a convention:
 
 For local runs, put values in a `.env` at the package root; `unmute dev` reads it. When you `compile`, Unmute writes a `build/<target>/.env.example` listing the exact variables that target needs, so you always know what to provide. The `compile-report.json` lists the required environment too.
 
-For deployment, the generated Pipecat project ships a `Dockerfile` and a `pcc-deploy.toml` (Pipecat Cloud). Because the output is an ordinary Python project, you supply those same environment variables however your host does secrets, and run it.
+For deployment, both generated projects include a `Dockerfile`. Pipecat adds
+`pcc-deploy.toml` for Pipecat Cloud; LiveKit adds `livekit.toml`. Both are
+ordinary Python projects, so you can supply the listed environment variables
+through any host and run them without Unmute present.
 
 ## You have gone the whole way
 
-From [one agent](01-one-agent.md) to a complex, multi-agent, tool-using, task-delegating voice agent, described once and compiled to a real Pipecat project, checked for portability across all five platforms, and ready to host.
+From [one agent](01-one-agent.md) to a complex, multi-agent, tool-using,
+task-delegating voice agent, the package is described once, checked against all
+five platforms, and compiled to native LiveKit and Pipecat projects.
 
-To go deeper on any single field, the [reference](../reference/agent-yaml.md) pages give the exact contract, and the [Pipecat target page](../targets/pipecat.md) is your deployment companion.
+To go deeper, use the [YAML reference](../reference/agent-yaml.md),
+[LiveKit guide](../targets/livekit.md), or
+[Pipecat guide](../targets/pipecat.md).

@@ -1,8 +1,8 @@
 # Pipecat
 
-Pipecat is the target these docs build toward, and the most complete one today.
-This page shows what kind of target it is, how it maps your models, which
-features it emits, and how to run and deploy the result.
+Pipecat is one of Unmute's two shipped Python code targets. It compiles the
+same portable YAML as LiveKit, but lowers agents to workers and tasks to Flows.
+This page covers its models, emitted features, local runtime, and deployment.
 
 ## What kind of target
 

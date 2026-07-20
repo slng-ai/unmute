@@ -13,8 +13,9 @@ agent grows.
    boundary and the difference between portable models and target overrides.
 2. Follow the [learn series](learn/01-one-agent.md) to add tools, variables,
    agents, tasks, task groups, and phone calls.
-3. Read the [LiveKit YAML guide](targets/livekit.md) when LiveKit is one of your
-   targets. It collects the current LiveKit-specific choices in one place.
+3. Choose the [LiveKit guide](targets/livekit.md) or
+   [Pipecat guide](targets/pipecat.md) for framework-specific runtime and
+   deployment choices.
 
 ## Understand the package boundary
 
@@ -55,11 +56,21 @@ around implementation packages.
 - **Reference** defines every YAML field and its target-specific behavior.
 - **Targets** gathers the YAML choices and limitations for one platform.
 
-## Find the LiveKit features
+## Compare the shipped code targets
 
-The LiveKit driver covers model routing, tools, tasks, conversation shaping,
-and telephony. Use these pages when you need one exact field rather than the
-full guide.
+LiveKit and Pipecat compile the same portable YAML into different native
+Python projects. Both projects run in the browser or terminal with
+`unmute dev`; their internal agent and task mechanics remain framework-native.
+
+| Target | Entrypoint | Agent and task lowering |
+|---|---|---|
+| LiveKit | `agent.py` | Agents, handoffs, `AgentTask`, and `TaskGroup` |
+| Pipecat | `bot.py` | Workers, worker handoffs, and Flows |
+
+Use the [LiveKit guide](targets/livekit.md) and
+[Pipecat guide](targets/pipecat.md) for their generated files, provider
+catalogues, deployment paths, and current driver gates. Use these shared
+reference pages when you need one exact YAML field:
 
 - [Models](reference/models-and-voices.md) covers model fields and fallback
   chains.
