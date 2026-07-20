@@ -1,0 +1,60 @@
+# One agent delegates a bounded intake task, then resumes with its typed result.
+version: 1
+language: en
+entry_agent: triage_agent
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  triage_agent:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools: [collect_request]
+
+tasks:
+  request_details:
+    instructions: tasks/request-details.md
+    result:
+      summary: string
+      urgency: string
+    context:
+      history: full
+
+controls:
+  collect_request:
+    kind: delegate
+    task: request_details
+    when: The caller has a support request that needs structured details.
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, I can capture a support request. What happened?"
+  interruption: { enabled: true }
+
+channels:
+  web: { kind: realtime_audio }
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

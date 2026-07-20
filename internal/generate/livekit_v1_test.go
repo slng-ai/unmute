@@ -86,6 +86,57 @@ func TestLiveKitV1EmitsSlngPlugin(t *testing.T) {
 	}
 }
 
+func TestV21LiveKitRequestTracingWiring(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bot := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		"def setup_langfuse(",
+		"set_tracer_provider(trace_provider, metadata=metadata)",
+		"should_export_span=lambda span: True",
+		`"langfuse.session.id": ctx.room.name`,
+		`"langfuse.trace.name": "greeter" + "-" + "livekit"`,
+		"ctx.add_shutdown_callback(flush_trace)",
+		"await session.start(agent=Greeter(), room=ctx.room)",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	setupAt := strings.Index(bot, "trace_provider = setup_langfuse(")
+	startAt := strings.Index(bot, "await session.start(")
+	if setupAt < 0 || startAt < 0 || setupAt > startAt {
+		t.Error("Langfuse tracing must be configured before AgentSession.start")
+	}
+
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !strings.Contains(pyproject, `name = "unmute-livekit"`) {
+		t.Error("pyproject.toml distribution name shadows the livekit dependency")
+	}
+	for _, dep := range []string{`"langfuse>=3"`, `"opentelemetry-sdk>=1.33,<2"`} {
+		if !strings.Contains(pyproject, dep) {
+			t.Errorf("pyproject.toml missing %s", dep)
+		}
+	}
+	env := artifactFile(t, artifact, ".env.example")
+	for _, name := range []string{"LANGFUSE_SECRET_KEY=", "LANGFUSE_PUBLIC_KEY=", "LANGFUSE_BASE_URL="} {
+		if !strings.Contains(env, name) {
+			t.Errorf(".env.example missing %s", name)
+		}
+	}
+}
+
 // TestLiveKitV1MultiVendor proves the catalogue path end to end: the safe_core
 // livekit target binds Deepgram listen and ElevenLabs speak (per-vendor
 // plugins), one voice is rebound to Cartesia in-code, and the emitted project

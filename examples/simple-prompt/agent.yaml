@@ -1,0 +1,44 @@
+# Smallest runnable example: one prompt, one agent, and no tools or handoffs.
+version: 1
+language: en
+entry_agent: welcome_agent
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  welcome_agent:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, I am the example assistant. What would you like to test?"
+  interruption: { enabled: true }
+
+channels:
+  web: { kind: realtime_audio }
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

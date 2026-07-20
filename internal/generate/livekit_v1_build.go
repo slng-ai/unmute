@@ -38,6 +38,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		Project:     tgt.Name,
 		Version:     tgt.Version,
 		AgentName:   tgt.Name,
+		EntryAgent:  agent.EntryAgent,
 		EntryClass:  pyName(agent.EntryAgent),
 		TurnVersion: turnVersion,
 		Pins:        tgt.Pins,
@@ -777,7 +778,13 @@ func livekitDeps(data livekitData) []string {
 		base = fmt.Sprintf("livekit-agents[%s]>=%d.%d",
 			strings.Join(sortedKeys(extras), ","), livekitVersionMajor, livekitVersionMinMinor)
 	}
-	deps := append([]string{base, pinned("livekit-plugins-silero", ">=1.6.1"), "python-dotenv"}, sortedKeys(packages)...)
+	deps := append([]string{
+		base,
+		"langfuse>=3",
+		"opentelemetry-sdk>=1.33,<2",
+		pinned("livekit-plugins-silero", ">=1.6.1"),
+		"python-dotenv",
+	}, sortedKeys(packages)...)
 	if data.NeedsHTTPX {
 		deps = append(deps, "httpx")
 	}

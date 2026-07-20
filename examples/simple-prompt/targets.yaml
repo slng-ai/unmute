@@ -1,0 +1,12 @@
+# Both generated code targets use the same source prompt and model bindings.
+targets:
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    models:
+      detector: { provider: livekit, model: turn-detector-mini }
+
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"

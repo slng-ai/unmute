@@ -54,6 +54,49 @@ func TestPipecatV1Golden(t *testing.T) {
 	}
 }
 
+func TestV16PipecatRequestTracingWiring(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"def setup_langfuse_tracing() -> bool:",
+		`f"{base_url.rstrip('/')}/api/public/otel"`,
+		"setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter())",
+		"enable_tracing=tracing_enabled",
+		`additional_span_attributes={"langfuse.trace.name": TRACE_NAME}`,
+		"def _enable_agent_tracing(main: PipelineWorker, agents: list[LLMWorker]) -> None:",
+		"agent._tracing_context = main._tracing_context",
+		"_enable_agent_tracing(main, AGENTS)",
+		"trace.get_tracer_provider().force_flush()",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing %q", want)
+		}
+	}
+
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !strings.Contains(pyproject, `"opentelemetry-exporter-otlp-proto-http>=1.33,<2"`) {
+		t.Error("pyproject.toml missing the OpenTelemetry HTTP exporter")
+	}
+	env := artifactFile(t, artifact, ".env.example")
+	for _, name := range []string{"LANGFUSE_SECRET_KEY=", "LANGFUSE_PUBLIC_KEY=", "LANGFUSE_BASE_URL="} {
+		if !strings.Contains(env, name) {
+			t.Errorf(".env.example missing %s", name)
+		}
+	}
+}
+
 // TestPipecatV1TasksGolden exercises the T4 agency level (tasks, task_group,
 // delegates) that safe_core omits, by building the IR in-code (driver-pipecat T4).
 func TestPipecatV1TasksGolden(t *testing.T) {

@@ -1,0 +1,74 @@
+# One agent delegates two ordered tasks that share context, then resumes.
+version: 1
+language: en
+entry_agent: event_planner
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  event_planner:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools: [plan_event]
+
+tasks:
+  collect_event:
+    instructions: tasks/collect-event.md
+    result:
+      occasion: string
+      guests: integer
+    context:
+      history: full
+
+  confirm_event:
+    instructions: tasks/confirm-event.md
+    result:
+      confirmed: boolean
+    context:
+      history: full
+
+task_groups:
+  event_intake:
+    steps: [collect_event, confirm_event]
+    context_scope: shared
+    then: return
+    merge: results
+
+controls:
+  plan_event:
+    kind: delegate
+    group: event_intake
+    when: The caller wants to plan an event; run the two-step intake flow.
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, I can help plan an event. What are you celebrating?"
+  interruption: { enabled: true }
+
+channels:
+  web: { kind: realtime_audio }
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m

@@ -92,13 +92,18 @@ scaffold's `.env.example` lists exactly what the project reads. LiveKit web
 mode also needs a LiveKit server; with no configured server, `unmute dev`
 reuses or starts a local `livekit-server --dev` process.
 
-The tracked examples exercise more of the schema:
+The [example matrix](examples/README.md) isolates prompts, tasks, task groups,
+and sub-agent handoffs for LiveKit and Pipecat:
 
 ```sh
-bin/unmute validate examples/safe_core                       # five-target portable example
-bin/unmute compile examples/safe_core --target pipecat
-bin/unmute compile examples/remy --target livekit        # handoff + task groups on LiveKit
+bin/unmute validate examples/simple-prompt
+bin/unmute compile examples/single-task
+bin/unmute compile examples/task-groups
+bin/unmute compile examples/subagents
 ```
+
+The existing `safe_core` package remains the five-target portability fixture,
+and `remy` remains the combined LiveKit handoff and task-group fixture.
 
 For a managed target, `apply` executes the plan against the provider
 (ElevenLabs needs `ELEVENLABS_API_KEY`; it creates or PATCHes one agent
