@@ -88,3 +88,35 @@ func TestUserDocsRelativeLinksResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTelephonyDocsContract(t *testing.T) {
+	root := filepath.Join("..", "..")
+	checks := map[string][]string{
+		"README.md": {"## Telephony", "connections/<name>.yaml", "TELEPHONY.md"},
+		"SCHEMA.md": {
+			"peak_starts_per_second",
+			"(orchestrator, transport, carrier)",
+			"connections/primary_phone.yaml",
+		},
+		"CONTEXT.md": {"**Telephony route**", "**Coordination mode**"},
+		"TELEPHONY.md": {
+			"## Credentials",
+			"TWILIO_ACCOUNT_SID",
+			"TELNYX_API_KEY",
+			"PLIVO_AUTH_ID",
+			"EXOTEL_API_KEY",
+			"LIVEKIT_API_KEY",
+		},
+	}
+	for path, terms := range checks {
+		raw, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, term := range terms {
+			if !strings.Contains(string(raw), term) {
+				t.Errorf("%s does not document %q", path, term)
+			}
+		}
+	}
+}

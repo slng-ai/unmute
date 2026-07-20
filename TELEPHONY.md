@@ -1,6 +1,6 @@
 # Telephony architecture and implementation plan
 
-Status: Proposed. Updated July 20, 2026.
+Status: Adopted design; implementation in progress. Updated July 20, 2026.
 
 Unmute must share telephony intent, planning, and call context across
 orchestrators while keeping carrier media and call-control behavior in small,
@@ -11,9 +11,9 @@ a new media gateway.
 
 <!-- prettier-ignore -->
 > [!NOTE]
-> This design requires amendments to the locked v1 schema before implementation.
-> Until those amendments land, this file is a plan, not a statement of current
-> behavior.
+> Route support remains provisional until its credentialed L4 smoke passes.
+> L1–L3 tests do not require credentials and cannot promote a route by
+> themselves.
 
 ## Decision
 
@@ -156,6 +156,42 @@ Plivo documents
 [multi-party calling](https://docs.plivo.com/docs/voice/xml/conference). Exotel
 documents inbound and outbound streaming, but its warm-transfer behavior is not
 verified. Unmute must fail that capability until it is proven.
+
+## Credentials
+
+Unmute stores only environment variable names in Connection files. Put the
+values in the source package's ignored `.env` for `unmute dev`, or in your
+deployment secret store. Never commit them or copy them into `targets.yaml`.
+
+The initial route adapters use these names:
+
+| Route | Environment variables | Where to get them |
+|---|---|---|
+| Pipecat or LiveKit Connector with Twilio | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | Twilio Console → Account dashboard and Phone Numbers. The Auth Token is also required to validate Twilio webhook signatures. Twilio recommends scoped API keys for production REST calls, but the Auth Token remains necessary for request validation. |
+| Pipecat with Telnyx | `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_PHONE_NUMBER` | Telnyx Mission Control Portal → API Keys, Public Key, and the Voice API Application details page. The application ID is the Connection ID. |
+| Pipecat with Plivo | `PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN`, `PLIVO_PHONE_NUMBER` | Plivo Console dashboard → API Keys and Phone Numbers. The Auth Token validates V3 webhook signatures. |
+| Pipecat with Exotel | `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`, `EXOTEL_ACCOUNT_SID`, `EXOTEL_SUBDOMAIN`, `EXOTEL_PHONE_NUMBER`, `EXOTEL_APP_ID` | Exotel Dashboard → API Settings for the key, token, Account SID, and regional subdomain; use the ExoPhone and call-flow application ID from the Voice dashboard. |
+| LiveKit Cloud or Twilio Connector | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | LiveKit Cloud project settings, or run `lk app env -w`. The Connector also needs the Twilio variables above. |
+| Self-hosted LiveKit SIP | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `REDIS_URL` | Create the API key and secret in the LiveKit Server configuration and use the same pair in LiveKit SIP. Set `LIVEKIT_URL` to that server. Create `REDIS_URL` from your Redis deployment. Carrier SIP trunk usernames and passwords remain deployment secrets referenced by the generated trunk setup. |
+
+The generated outbound HTTP endpoint also requires
+`UNMUTE_OUTBOUND_TOKEN`. Generate this secret yourself with a cryptographically
+secure password generator; it does not come from a carrier. A multi-replica
+route with mutable callback or transfer state requires `REDIS_URL` even when
+the media path itself does not.
+
+The source pages are the
+[Twilio credential guide](https://www.twilio.com/docs/iam/api-keys),
+[Telnyx Voice API guide](https://developers.telnyx.com/docs/voice/programmable-voice/get-started),
+[Plivo Voice API guide](https://docs.plivo.com/docs/voice/api/overview),
+[Exotel Voice API guide](https://developer.exotel.com/api/outgoing-call-to-connect-number-to-a-call-flow),
+[LiveKit startup-mode guide](https://docs.livekit.io/agents/server/startup-modes/),
+and
+[LiveKit self-hosted SIP guide](https://docs.livekit.io/transport/self-hosting/sip-server/).
+
+No carrier or LiveKit credentials were available during the initial build.
+Every live route therefore stays provisional until its corresponding inbound,
+outbound, hangup, authentication, and advertised-control smoke completes.
 
 ## Architecture
 

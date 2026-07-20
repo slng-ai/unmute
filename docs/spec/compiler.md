@@ -26,10 +26,25 @@ Compile the SCHEMA.md v1 package (`agent.yaml` + `instructions.md` + `agents/` +
 - C10: all names lowercase snake_case; leading underscore is reserved by providers → rejected (N8). Tools and controls share ONE namespace (D8). Durations use Go syntax (`90s`, `15m`, `1h30m`).
 - C11: model routes, settings, and `params` are forwarded verbatim, never validated (D2/D10 as amended, SCHEMA.md §6.2). The compiler checks completeness + structure only, and lists every forwarded model/param in the report so what was sent is inspectable (rule 6). Identities and param values are relayed; provider API + generated project are the real validators.
 - C12: `capacity` is declared; worker/GPU/quota numbers are derived and printed in the report, never stored in the package (D11, N2). Sizing coefficients are dated and marked `unbenchmarked` until measured.
+- C13: telephony compilation is implemented only for LiveKit and Pipecat.
+  Build resolves one Connection and one exact
+  `(orchestrator, transport, carrier)` route per telephony target. Mutable
+  callback, outbound-correlation, or warm-transfer state uses shared
+  coordination when requests can reach different replicas; sticky routing is
+  not a correctness mechanism.
 
 ## §I surfaces
-- I.package: on-disk v1 layout (SCHEMA.md §3): `agent.yaml`, `instructions.md`, `agents/*.md`, `tasks/*.md`, `tools/<name>.yaml` (+ `<name>.py` handlers, code targets only), `targets.yaml`. Tool name = its file name (N4); no `name:` field inside the file.
+- I.package: on-disk v1 layout (SCHEMA.md §3): `agent.yaml`, `instructions.md`, `agents/*.md`, `tasks/*.md`, `tools/<name>.yaml` (+ `<name>.py` handlers, code targets only), `connections/<name>.yaml`, `targets.yaml`. Tool and Connection names come from their file names; neither has a `name:` field inside the file.
 - I.spec.Load: `internal/spec` — `Load(dir string) (*spec.Package, error)`. `goccy/go-yaml` strict decode of every package file with file:line:col errors. Returns raw decoded structs; NO cross-file resolution. Reads markdown prompt bodies by path.
+- I.telephony.connection: `connections/<name>.yaml` decodes to
+  `Connection{Kind, Environment}`. `Environment` maps route-owned keys to
+  environment variable names. The package contains no secret values and Load
+  never reads the environment.
+- I.telephony.route: Build resolves a LiveKit or Pipecat telephony target to
+  one `TelephonyPlan`. The plan carries its exact route, directions, controls,
+  variable sources, endpoints, evidence, coordination mode, admission owner,
+  required environment names, and manual steps. Validate and Generate consume
+  this same plan.
 - I.ir.types: `internal/ir` — v1 constructs as Go structs mirroring SCHEMA.md §4–6: `Agent` (top level; NO `Pipeline` struct, N15), `ModelDef` (one unified authoring type for every `models:` section entry + target overrides: `provider`, `model`, `voice`, `speed`, `language`, `temperature`, `top_p`, `top_k`, `params`, `fallback`, `placement` override, `semantic_endpointing`; kind — think/speak/listen/turn — is the section the entry sits in, fixed by Build and field-checked), `Variable` (`type`/`default`/`source`), `AgentDef`, `Task`, `TaskGroup`, `Control` (`Delegate|AgentTransfer|HumanTransfer`), `Tool` (`description`, `input`/`output`, `execution`, `handler` iff `local`, `url_env` iff `webhook`, `interruption`, `effect`), `Conversation` (`greeting`/`interruption`/`inactivity`/`max_duration`/`thinking_audio`), `Tracing` (`provider` only), `Channel`, `Capacity`, `Target`. `Target.Models` stays the **derived** `Bindings{Listen,Turn,Speak,Reason}` view (a `Binding` per effective model), which Build populates by resolving each target's overrides over the agent's `ModelDef`s — the generators and most of Validate consume this resolved view unchanged, so the unified `ModelDef` is an authoring-and-schema type, not a per-target one. (`Bindings`/`Binding` and the internal `reason` role identifier are retained deliberately: renaming a role that is no longer user-facing would be churn, N15.) All cross-references are stored as **names, not pointers** (C2, keeps the graph acyclic). jsonschema-go derives the authoring schema from `ModelDef` and the debug schema from the resolved IR, with manual `TypeSchemas` overrides for the `Control` union and enum result types (C2).
 - I.ir.Build: `internal/ir` — `Build(*spec.Package) (*ir.Agent, error)`. Resolves every reference (entry_agent; agent `model`/`voice` → models, fixing each entry's kind from its reference site (V22); tool + control names; `task`/`group` names; `then_target`; `fallback` chains; `summarizer`; `requires` variables; `destination`). Flattens + cycle-checks fallback. Enforces snake_case + reserved-underscore + shared-namespace uniqueness. Returns the resolved IR.
 - I.capability: `internal/target` (leaf package, C4) — the machine form of the SCHEMA.md §4–7 matrix. Not one scalar map but a small set of **typed per-provider matrices**, because Validate needs more than a tag: (a) the tag matrix `(field, provider) → core|warn|gated|provisional` + condition note; (b) the role matrix `(role, provider) → open|integrated` (§6.2, for V9); (c) the history matrix `(history-value, provider) → ok|fail|generated` (§4.7, for V8); (d) the fallback slot-kind per provider (for V10). One place; the gating engine reads only this. Condition notes carry provider vocabulary (e.g. "Vapi: return-to-prior-assistant unverified") — a deliberate trade: `internal/target` is provider-aware even though `ir` is not.
@@ -42,6 +57,14 @@ Compile the SCHEMA.md v1 package (`agent.yaml` + `instructions.md` + `agents/` +
 - V1: every referenced name (`tools`, `controls`, `task`, `group`, `to`, `then_target`, `model`, `voice`, `fallback`, `requires`, `summarizer`, `destination`) resolves in Build; unresolved → error naming the missing name and its file:line. (rule 1)
 - V2: the decode structs and IR structs are the only sources for their respective schemas (I.schema). jsonschema-go derives both by **runtime reflection** (`For[T]`, not codegen); no hand-authored `.json` schema exists. Adding a *plain* field changes its derived schema for free — with three resolved-IR exceptions that need manual hooks (C2): the `Control` union (`ForOptions.TypeSchemas`), enum result types (`TypeSchemas`), and cross-references, which must be stored as names not pointers to avoid a reflection cycle.
 - V3: an unknown or misspelled YAML field → parse error with file:line:col — goccy supplies line:col, the loader prepends the filename (it reads many files). Never silently ignored; a field never silently does nothing.
+- V27: Connection discovery is path-safe and strict. Missing files, duplicate
+  names, unknown fields, invalid environment variable names, unknown target
+  references, and missing or unknown route keys fail before generation.
+- V28: telephony support is keyed by the exact route and feature. A match on
+  only orchestrator, transport, or carrier cannot enable a direction, control,
+  briefing mode, or system variable source. A route without a current official
+  documentation URL, verification date, and successful smoke remains
+  provisional.
 - V4: a `gated` field on a target that cannot honor it → hard error before any artifact, message in that provider's own vocabulary (e.g. `history: messages` on ElevenLabs → "ElevenLabs always keeps the full transcript"). Multi-target: fails if ANY resolved target rejects.
 - V5: a `warn` field on a warning target → message to stderr, exit 0, IR still valid; never a silent downgrade (SCHEMA.md §1, D3).
 - V6: (forward-looking) a `provisional` field, when used, fails validation on every target until a driver clears its tag. No field in SCHEMA §4–6 currently carries `provisional`; this guards the tag for future use.

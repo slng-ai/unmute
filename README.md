@@ -120,3 +120,24 @@ cp .env.local "examples/$EXAMPLE/.env"
 bin/unmute dev "examples/$EXAMPLE" --target pipecat
 bin/unmute dev "examples/$EXAMPLE" --target livekit --console
 ```
+
+## Telephony
+
+Telephony compilation targets LiveKit and Pipecat. A target binds one
+`connections/<name>.yaml` file to an exact transport and carrier route. The
+Connection stores environment variable names only; credential values stay in
+an ignored `.env` file or your deployment secret store.
+
+```yaml
+# connections/primary_phone.yaml
+kind: telephony
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+Route support remains provisional until a real credentialed smoke passes.
+[TELEPHONY.md](TELEPHONY.md) documents the architecture, exact credential list,
+where to obtain each credential, local public-URL flow, deployment topology,
+and current verification policy.

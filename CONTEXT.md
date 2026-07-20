@@ -43,8 +43,27 @@ A function the model can call, declared one-per-file in `tools/` (filename = too
 _Avoid_: function (ambiguous), action
 
 **Connection**:
-An external service reference used by channels, tools, or model-facing capabilities for auth and provider config. Connections live in `agent/connections/*.yaml` and contain references to secrets, not secret values.
+An external service reference used by channels, tools, or model-facing capabilities for auth and provider config. Connections live in `connections/*.yaml` and contain environment variable names, not secret values. A telephony target binds one Connection to its selected carrier route.
 _Avoid_: secret value, environment variable, handler
+
+**Telephony route**:
+The exact Orchestrator, transport, and carrier path used for one target, such
+as Pipecat carrier WebSocket with Twilio or LiveKit SIP with Telnyx. Direction,
+controls, variable sources, and limits resolve against this complete route.
+_Avoid_: carrier capability, provider-wide support
+
+**Call-start rate**:
+The peak number of new calls admitted per second. It is separate from active
+session concurrency: a deployment may support many steady calls but still be
+unable to initialize a burst of new Agent sessions.
+_Avoid_: concurrency, requests per second
+
+**Coordination mode**:
+The state boundary required by a telephony route: `none` for stateless routes,
+`local` when state remains on one process, or `shared` when callbacks,
+outbound correlation, or warm transfers can reach different replicas. Shared
+coordination must be ready before a multi-replica route accepts calls.
+_Avoid_: cache, sticky sessions
 
 **Variable**:
 A named `{{variable}}` placeholder, written with no interior spaces, resolved at runtime for a call or web session. Variables live in `agent/variables.yaml`, not in `env/config.yaml`; `env/config.yaml` is static non-secret deployment config.

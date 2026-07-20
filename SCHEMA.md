@@ -64,6 +64,15 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
 - **N14.** `language` is the agent's primary spoken language, written as a BCP-47 tag and defaulting to `en`. It does not rewrite model routes. Pipecat and LiveKit lower it only through each catalogue entry's explicit `CallSpec.Language` slot: Pipecat official services place it in `Settings`, while SLNG and LiveKit plugins use constructor kwargs. An existing target `params.language` is an explicit per-integration override. ElevenLabs lowers it once to `conversation_config.agent.language`, which governs its integrated ASR and TTS. Vapi and Deepgram stay unavailable in `unmute init` until their generators ship; no generic parameter injection is invented for them. Verified against Pipecat, SLNG, LiveKit, and ElevenLabs provider docs 2026-07-16.
 - **N15 (amended 2026-07-19).** One definition per model, in `agent.yaml`. The old shape declared the same model in up to three places (`pipeline` role placement, an abstract profile, a target binding) and put the only real definition in `targets.yaml`; all three collapse into one unified `models:` map in `agent.yaml` where every model is defined fully and concretely (`provider`, `model`, `voice`, generation settings, `params`), with voice models and think models side by side. The `pipeline` and `voices` blocks are gone. A model's kind follows from where it is referenced: an agent's `voice:` names a speak model, an agent's or task's `model:` (or a `summarizer:`) names a think model; the referenced entry is validated against that kind's fields (section 4.3). `listen` and `turn` are small optional top-level blocks (section 4.2), because they are conversation plumbing shared by the whole package, not per-agent identity; `turn.semantic_endpointing` lives there. Each entry keeps the `provider` + `model` pairing the old target bindings used (the shape the author already liked) — `provider` names the catalogue vendor, `model` is the identity that vendor's SDK expects, and `placement` derives from `provider` (`local` runs on your machines; anything else is a hosted API; an explicit `placement:` overrides). No route-parsing: folding the provider into the `model` string was rejected during implementation because the forwarded model identity is not uniform across vendors (OpenAI wants `gpt-4.1-mini`, SLNG wants `slng/deepgram/nova:3-en`), so a parse would mangle what reaches the SDK. `targets.yaml` keeps infrastructure only (provider, version, pins, transport, carrier, destinations) plus an optional `models:` override map for a target that cannot run a defined entry (section 6.2); an override replaces the whole entry, no merge rules. Supersedes N9 and amends D2/D10. Both original jobs of declared placement survive, per target and more precise: `local` still fails loudly on managed targets, and sizing still reads placement from each target's effective models. Strict decode (compiler V3) makes old files fail with "unknown field pipeline" naming file and line. The `reason` role identifier stays internal-only (the `reason:` binding block is gone), so it is never renamed in the authoring surface — think/speak is the user vocabulary. Amended again 2026-07-19 (same day, review with the author): the map is grouped into four kind sections (`think`/`speak`/`listen`/`turn`) so kind is structural rather than inferred from reference sites; listen/turn entries live in the map like everything else and the top-level `listen:`/`turn:` fields select one by name (defaulting to a section's sole entry); unreferenced entries are legal palette alternates for fast model swapping, compiled only when selected. Per-agent listen/turn was considered and rejected: STT/VAD are call plumbing (the generated Pipecat main worker owns STT; the Deepgram bridge has one listen per session), and repeating the same reference on every agent recreates the duplication N15 removes. Scaffold names the generated target instance after the provider (`pipecat`, never `pipecat-dev`): users test exactly what they deploy, and extra instances are added only when a real second environment exists.
 
+- **N16 (added 2026-07-20).** Telephony compilation is scoped to
+  LiveKit and Pipecat. A telephony target selects exactly one Connection and
+  one exact `(orchestrator, transport, carrier)` route. Connections live in
+  `connections/<name>.yaml`, contain environment variable names rather than
+  values, and never repeat `carrier`; the target owns that choice. The first
+  version permits one telephony Connection per target. Capability support is
+  resolved per route and feature, never with carrier-wide booleans. See
+  [TELEPHONY.md](./TELEPHONY.md).
+
 ---
 
 ## 3. Package layout
@@ -76,12 +85,16 @@ tasks/                # one .md per task (T1)
 tools/
   lookup_customer.yaml  # contract: input, output, execution, interruption, effect
   lookup_customer.py    # handler, code targets only
+connections/
+  primary_phone.yaml    # external telephony account, env names only
 targets.yaml          # named target instances: provider, pins, destinations, model overrides
 ```
 
 Rules:
 
-- Secrets and credentials never appear in any file. `targets.yaml` carries env var names and secret references only, never values.
+- Secrets and credentials never appear in any file. Connection files and
+  `targets.yaml` carry environment variable names and secret references only,
+  never values.
 - Remote IDs, regions, editions, SDK language, version pins, and carriers live in `targets.yaml`, never in `agent.yaml`. Model definitions live in `agent.yaml` (N15); `targets.yaml` only overrides one for a target that cannot run it.
 - Machine sizes, replica counts, and GPU counts appear in neither file. They are derived and printed in reports.
 
@@ -185,7 +198,7 @@ Typed shared state. Task results, handoff payloads, and personalization all flow
 |---|---|---|---|---|
 | `type` | yes | `string \| number \| boolean \| integer` | core | |
 | `default` | no | value of that type | core | |
-| `source` | no | `call_start` | core | Must be supplied when the call starts. Checked as satisfiable on outbound channels. |
+| `source` | no | `call_start \| session_id \| carrier \| connection \| call_id \| stream_id \| direction \| from_number \| to_number` | gated | `call_start` is caller input. The remaining values are runtime-owned system sources and must be available on the exact route before the greeting. `stream_id` is optional only when no variable requests it. |
 
 Notes that drivers must respect: on ElevenLabs the only mid-call write path is a tool returning JSON. On Deepgram, live state lives in the generated bridge, never in template variables (those are substitution-time only and visible to project members; never route secrets through them).
 
@@ -319,7 +332,8 @@ The declared half of the resource model. Required whenever `channels` has a tele
 | Field | Required | Type | Notes |
 |---|---|---|---|
 | `peak_sessions` | yes | int | Concurrent conversations at busy hour. Must not exceed `max_sessions`. |
-| `max_sessions` | yes | int | Hard admission limit. Reject or queue above it. |
+| `max_sessions` | yes | int | Hard admission limit. Reject above it before Agent allocation; don't queue. |
+| `peak_starts_per_second` | yes for telephony | number, greater than zero | Peak call-start rate. Report separately from concurrent sessions. |
 | `avg_session_duration` | yes | duration | Sizing and quota input. |
 
 Sizing depends on concurrency, placement, and channels. It does not depend on how many agents are in the file, and never on the provider brand alone. Derived numbers (workers, GPUs, quotas) are printed in the compile or plan report with dated benchmark coefficients, marked `unbenchmarked` until measured.
@@ -394,7 +408,7 @@ Named target instances: which orchestrator runs the package, and the infrastruct
 | `version` | code targets | Framework pin. The driver checks it against the range its templates support. A codegen check, not model validation. |
 | `pins` | no | Independently versioned packages (LiveKit plugins) get their own entries. Pipecat Flows no longer qualifies: it ships inside `pipecat-ai` core since 1.5.0; never pin the deprecated standalone `pipecat-ai-flows`. |
 | `sdk_language` | no | LiveKit: warm transfer and MCP need `python`. |
-| `transport`, `carrier` | no | Driver vocabulary. Telephony controls resolve against these, never the brand alone. |
+| `transport`, `carrier`, `connection` | required for LiveKit or Pipecat telephony | Driver route vocabulary and a Connection name. Telephony features resolve against the exact tuple, never the orchestrator or carrier alone. |
 | `region`, `edition` | no | Provider vocabulary. Declared, never derived. |
 | `models` | no | Per-target overrides, see 6.2. |
 | `destinations` | if any `human_transfer` is used | Map of symbolic name to phone number or SIP URI. |
@@ -423,6 +437,43 @@ Rules:
 7. An override naming a model that `agent.yaml` does not define, or changing its kind, is an error.
 
 Why never validated: provider model lists change faster than any shipped catalog, the valid set on code targets depends on the pinned versions, and the real validators already exist (the provider API at plan/apply, the generated project at startup). Unmute relays those errors word for word.
+
+### 6.3 Telephony connections and routes
+
+Telephony Connections keep account-specific environment names outside the
+portable Agent and outside target route selection:
+
+```yaml
+# connections/primary_phone.yaml
+kind: telephony
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+The target binds that Connection to an exact route:
+
+```yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: carrier-websocket
+    carrier: twilio
+    connection: primary_phone
+```
+
+The Connection's keys use carrier route vocabulary. Its values must be valid
+environment variable names. Unknown keys, a missing required key, an unknown
+Connection, or a route mismatch fails before generation. The loader never
+reads the named environment values.
+
+The compiler resolves directions, controls, briefing behavior, system variable
+sources, evidence, public endpoints, coordination, and admission ownership for
+the exact route. A feature is enabled only when its row has current official
+documentation and a successful route smoke. Without a live smoke, the row
+remains provisional and validation fails when the Agent requests it.
 
 ---
 
