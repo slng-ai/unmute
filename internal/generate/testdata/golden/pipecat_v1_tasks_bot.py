@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 
 import os
 import json
@@ -113,6 +114,75 @@ def _enable_agent_tracing(main: PipelineWorker, agents: list[LLMWorker]) -> None
         agent._tracing_context = main._tracing_context
 
 
+# ponytail: Pipecat 1.5 has no standard-tool tracing hook. Remove this
+# subclass when ordinary LLMWorker tools gain native spans.
+class _TracedLLMWorker(LLMWorker):
+    """Add the tool spans missing from Pipecat's standard LLM tracing."""
+
+    async def _trace_tool(self, name, arguments, call, tool_call_id=None):
+        if not self._enable_tracing:
+            return await call(None)
+        parent = (
+            self._tracing_context.get_turn_context()
+            or self._tracing_context.get_conversation_context()
+        )
+        with trace.get_tracer("unmute.pipecat.tools").start_as_current_span(
+            f"tool:{name}", context=parent
+        ) as span:
+            span.set_attribute("tool.function_name", name)
+            span.set_attribute("langfuse.observation.input", json.dumps(arguments, default=str))
+            if tool_call_id:
+                span.set_attribute("tool.call_id", tool_call_id)
+            try:
+                result = await call(span)
+            except Exception:
+                span.set_attribute("tool.result_status", "error")
+                raise
+            if result is not None:
+                span.set_attribute("langfuse.observation.output", json.dumps(result, default=str))
+            span.set_attribute("tool.result_status", "completed")
+            return result
+
+    def _track_tool_call(self, method):
+        tracked = super()._track_tool_call(method)
+
+        @functools.wraps(tracked)
+        async def wrapper(params, *args, **kwargs):
+            async def call(span):
+                if span:
+                    result_callback = params.result_callback
+
+                    async def traced_result_callback(result, **callback_kwargs):
+                        span.set_attribute(
+                            "langfuse.observation.output", json.dumps(result, default=str)
+                        )
+                        return await result_callback(result, **callback_kwargs)
+
+                    params.result_callback = traced_result_callback
+                return await tracked(params, *args, **kwargs)
+
+            return await self._trace_tool(
+                params.function_name,
+                dict(params.arguments),
+                call,
+                tool_call_id=params.tool_call_id,
+            )
+
+        return wrapper
+
+    def _trace_flow_tool(self, name, method):
+        @functools.wraps(method)
+        async def wrapper(args, flow_manager):
+            async def call(_span):
+                return await method(args, flow_manager)
+
+            return await self._trace_tool(name, dict(args), call)
+
+        return wrapper
+
+
+
+
 
 @dataclass
 class State:
@@ -149,7 +219,7 @@ def build_billing_tts():
     )
 
 
-class BillingAgent(LLMWorker):
+class BillingAgent(_TracedLLMWorker):
     """Agent: billing."""
 
     def __init__(self) -> None:
@@ -203,7 +273,7 @@ def build_intake_tts():
     )
 
 
-class IntakeAgent(LLMWorker):
+class IntakeAgent(_TracedLLMWorker):
     """Agent: intake."""
 
     def __init__(self) -> None:
@@ -260,14 +330,14 @@ class IntakeAgent(LLMWorker):
                     description="Look up a customer record by phone number or email. Returns the customer id and name.",
                     properties={"email": {"description": "Caller email address", "type": "string"}, "phone": {"description": "Caller phone number in E.164 form", "type": "string"}},
                     required=[],
-                    handler=_flow_tool_lookup_customer,
+                    handler=self._trace_flow_tool("lookup_customer", _flow_tool_lookup_customer),
                 ),
                 FlowsFunctionSchema(
                     name="finish_run_collect_collect",
                     description="Record the result of this step and finish.",
                     properties={"tier": {"enum": ["free", "pro"], "type": "string"}, "verified_flag": {"type": "boolean"}},
                     required=["tier", "verified_flag"],
-                    handler=self._run_collect_finish_collect,
+                    handler=self._trace_flow_tool("finish_run_collect_collect", self._run_collect_finish_collect),
                 ),
             ],
             respond_immediately=True,
@@ -311,14 +381,14 @@ class IntakeAgent(LLMWorker):
                     description="Look up a customer record by phone number or email. Returns the customer id and name.",
                     properties={"email": {"description": "Caller email address", "type": "string"}, "phone": {"description": "Caller phone number in E.164 form", "type": "string"}},
                     required=[],
-                    handler=_flow_tool_lookup_customer,
+                    handler=self._trace_flow_tool("lookup_customer", _flow_tool_lookup_customer),
                 ),
                 FlowsFunctionSchema(
                     name="finish_run_triage_collect",
                     description="Record the result of this step and finish.",
                     properties={"tier": {"enum": ["free", "pro"], "type": "string"}, "verified_flag": {"type": "boolean"}},
                     required=["tier", "verified_flag"],
-                    handler=self._run_triage_finish_collect,
+                    handler=self._trace_flow_tool("finish_run_triage_collect", self._run_triage_finish_collect),
                 ),
             ],
             context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
