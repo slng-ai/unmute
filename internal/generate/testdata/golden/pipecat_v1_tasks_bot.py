@@ -18,6 +18,7 @@ import functools
 
 import os
 import json
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
@@ -26,6 +27,7 @@ from dotenv import load_dotenv
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace import TracerProvider
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
@@ -41,6 +43,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
@@ -87,8 +90,8 @@ def require_env() -> None:
 
 
 
-def _patch_pipecat_speech_tracing() -> None:
-    """Expose Pipecat's speech payloads and metrics to Langfuse."""
+def _patch_pipecat_tracing() -> None:
+    """Expose Pipecat's system prompt, speech payloads, and metrics to Langfuse."""
     from pipecat.frames.frames import TTSAudioRawFrame
     from pipecat.services.tts_service import TTSService
     from pipecat.utils.tracing import service_decorators
@@ -131,7 +134,7 @@ def _patch_pipecat_speech_tracing() -> None:
                 json.dumps("audio"),
             )
 
-        patched.__langfuse_patch__ = True
+        setattr(patched, "__langfuse_patch__", True)
         return patched
 
     service_decorators.add_stt_span_attributes = patch(
@@ -141,9 +144,23 @@ def _patch_pipecat_speech_tracing() -> None:
         service_decorators.add_tts_span_attributes, "tts"
     )
 
+    original_add_llm_span_attributes = service_decorators.add_llm_span_attributes
+
+    def patched_llm(span, *args, **kwargs):
+        original_add_llm_span_attributes(span, *args, **kwargs)
+        messages = json.loads(kwargs.get("messages") or "[]")
+        system_instruction = kwargs.get("system_instructions")
+        if system_instruction:
+            messages.insert(0, {"role": "system", "content": system_instruction})
+        if messages:
+            span.set_attribute("langfuse.observation.input", json.dumps(messages, default=str))
+
+    setattr(patched_llm, "__langfuse_patch__", True)
+    setattr(service_decorators, "add_llm_span_attributes", patched_llm)
+
     original_append_to_audio_context = TTSService.append_to_audio_context
 
-    async def append_to_audio_context(self, context_id, frame):
+    async def patched_append_to_audio_context(self, context_id, frame):
         entry = getattr(self, "_tts_spans", {}).get(context_id)
         if isinstance(frame, TTSAudioRawFrame) and entry and not entry.get("ttfb_recorded"):
             started_at = getattr(getattr(self, "_metrics", None), "_start_ttfb_time", 0)
@@ -156,16 +173,14 @@ def _patch_pipecat_speech_tracing() -> None:
                 entry["ttfb_recorded"] = True
         return await original_append_to_audio_context(self, context_id, frame)
 
-    append_to_audio_context.__langfuse_patch__ = True
-    TTSService.append_to_audio_context = append_to_audio_context
+    setattr(TTSService, "append_to_audio_context", patched_append_to_audio_context)
 
 
 def setup_langfuse_tracing() -> bool:
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
     base_url = os.getenv("LANGFUSE_BASE_URL")
-    values = (public_key, secret_key, base_url)
-    if not all(values):
+    if not public_key or not secret_key or not base_url:
         raise ValueError(
             "LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and LANGFUSE_BASE_URL must all be set"
         )
@@ -175,13 +190,13 @@ def setup_langfuse_tracing() -> bool:
     os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = (
         f"Authorization=Basic%20{auth},x-langfuse-ingestion-version=4"
     )
-    _patch_pipecat_speech_tracing()
+    _patch_pipecat_tracing()
     if not setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter()):
         raise RuntimeError("Pipecat OpenTelemetry tracing is unavailable")
     return True
 
 
-def _enable_agent_tracing(main: PipelineWorker, agents: list[LLMWorker]) -> None:
+def _enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:
     # ponytail: Pipecat 1.5 LLMWorker exposes no tracing kwargs. Share the main
     # worker's context until its public constructor accepts them.
     for agent in agents:
@@ -195,11 +210,12 @@ class _TracedLLMWorker(LLMWorker):
     """Add the tool spans missing from Pipecat's standard LLM tracing."""
 
     async def _trace_tool(self, name, arguments, call, tool_call_id=None):
-        if not self._enable_tracing:
+        context = self._tracing_context
+        if not self._enable_tracing or context is None:
             return await call(None)
         parent = (
-            self._tracing_context.get_turn_context()
-            or self._tracing_context.get_conversation_context()
+            context.get_turn_context()
+            or context.get_conversation_context()
         )
         with trace.get_tracer("unmute.pipecat.tools").start_as_current_span(
             f"tool:{name}", context=parent
@@ -290,7 +306,7 @@ def build_billing_tts():
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-orion-en",
         model="slng/deepgram/aura:2-en",
-        language="en",
+        language=Language("en"),
     )
 
 
@@ -344,7 +360,7 @@ def build_intake_tts():
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-thalia-en",
         model="slng/deepgram/aura:2-en",
-        language="en",
+        language=Language("en"),
     )
 
 
@@ -511,7 +527,7 @@ def build_stt():
         api_key=os.environ["DEEPGRAM_API_KEY"],
         settings=DeepgramSTTService.Settings(
             model="nova-3",
-            language="en",
+            language=Language("en"),
         ),
     )
 
@@ -621,7 +637,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
         await runner.run()
     finally:
         if tracing_enabled:
-            trace.get_tracer_provider().force_flush()
+            trace_provider = trace.get_tracer_provider()
+            if isinstance(trace_provider, TracerProvider):
+                trace_provider.force_flush()
 
 
 

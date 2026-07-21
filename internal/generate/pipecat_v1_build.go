@@ -529,6 +529,13 @@ func resolvePipecatService(role targetcap.Role, binding ir.Binding, language str
 	if err != nil {
 		return pipecatService{}, err
 	}
+	for _, args := range [][]pyKV{call.Args, call.SettingsArgs} {
+		for i := range args {
+			if args[i].Key == "language" {
+				args[i].Value = "Language(" + args[i].Value + ")"
+			}
+		}
+	}
 	svc := pipecatService{Call: call, Entry: entry, Model: binding.Model, BaseURL: binding.EndpointEnv,
 		Vendor: firstNonEmpty(binding.Provider, "openai")}
 	if spec := entry.Call; spec.APIKeyArg != "" {
