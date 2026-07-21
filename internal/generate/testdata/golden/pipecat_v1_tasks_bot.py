@@ -32,6 +32,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, FlowsFunctionSchema, NodeConfig
 from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -604,15 +605,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
         await main.queue_frame(EndFrame())
 
     pipeline_started = asyncio.Event()
+    entry_started = False
 
     async def activate_entry():
+        nonlocal entry_started
+        if entry_started:
+            return
+        entry_started = True
         await main.activate_worker(
             "intake",
-            args=LLMWorkerActivationArgs(
-                messages=[{"role": "developer", "content": "Begin the conversation by saying, word for word: Hi, you have reached Acme Support. How can I help you today?"}],
-                run_llm=True,
-            ),
+            args=LLMWorkerActivationArgs(run_llm=False),
         )
+        await next(agent for agent in AGENTS if agent.name == "intake").queue_frame(
+            TTSSpeakFrame("Hi, you have reached Acme Support. How can I help you today?")
+        )
+
         asyncio.create_task(_end_after(main, 1200))
 
     @main.event_handler("on_pipeline_started")
@@ -628,11 +635,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
-            # Activation frames (greeting, tools) are dropped by BusBridge until
-            # main's StartFrame has traversed; SmallWebRTC only starts the
-            # pipeline at connect, so gate on on_pipeline_started (B8/V14).
+            # Daily SIP has no RTVI client-ready handshake. Start once its
+            # participant is connected and main's StartFrame has traversed.
             await pipeline_started.wait()
             await activate_entry()
+
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):
