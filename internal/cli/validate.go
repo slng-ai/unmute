@@ -39,18 +39,31 @@ func runValidate(cmd *cobra.Command, dir string, names []string) error {
 		return fmt.Errorf("validate %s: %w", dir, err)
 	}
 	report, validateErr := ir.Validate(agent, targets, target.Default())
-	fmt.Fprintln(cmd.OutOrStdout(), "TARGET\tPROVIDER\tRESULT")
 	for _, row := range report.PerTarget {
-		status := "pass"
+		status := "✓"
 		if len(row.Errors) > 0 {
-			status = "fail"
+			status = "✗"
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\n", row.Name, row.Provider, status)
+		fmt.Fprintf(cmd.OutOrStdout(), "%s %s (%s)\n", status, row.Name, row.Provider)
+	}
+	wroteWarnings := false
+	for _, row := range report.PerTarget {
 		for _, warning := range row.Warnings {
-			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s: %s\n", row.Name, warning)
+			if !wroteWarnings {
+				fmt.Fprintln(cmd.ErrOrStderr(), "\nWarnings:")
+				wroteWarnings = true
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "  %s: %s\n", row.Name, warning)
 		}
+	}
+	wroteErrors := false
+	for _, row := range report.PerTarget {
 		for _, validationError := range row.Errors {
-			fmt.Fprintf(cmd.ErrOrStderr(), "error: %s: %s\n", row.Name, validationError)
+			if !wroteErrors {
+				fmt.Fprintln(cmd.ErrOrStderr(), "\nErrors:")
+				wroteErrors = true
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "  %s: %s\n", row.Name, validationError)
 		}
 	}
 	if validateErr != nil {

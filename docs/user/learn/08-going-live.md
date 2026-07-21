@@ -41,11 +41,10 @@ unmute validate acme
 ```
 
 ```text
-TARGET            PROVIDER    RESULT
-elevenlabs   elevenlabs  pass
-livekit       livekit     pass
-pipecat       pipecat     pass
-vapi         vapi        fail
+✓ elevenlabs (elevenlabs)
+✓ livekit (livekit)
+✓ pipecat (pipecat)
+✗ vapi (vapi)
 ```
 
 Warnings and errors print per target. LiveKit and Pipecat have shipped code
