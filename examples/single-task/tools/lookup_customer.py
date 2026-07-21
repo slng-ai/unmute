@@ -4,9 +4,8 @@ _CUSTOMERS = {
 
 
 def lookup_customer(phone):
+    # ponytail: mock tool, no phone validation — look up by digits, miss is fine
     digits = "".join(character for character in phone if character.isdigit())
-    if not 10 <= len(digits) <= 15:
-        raise ValueError("phone must contain 10 to 15 digits")
     customer = _CUSTOMERS.get(f"+{digits}")
     return {
         "found": customer is not None,

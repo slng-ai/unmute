@@ -79,152 +79,44 @@ user's first run.
 
 ## Try the CLI end to end
 
-The following workflow covers the current architecture: author a portable
-package, validate it, compile platform-native projects, and run those generated
-projects either directly or through `unmute dev`.
-
-### Initialize and compile a package
-
-Run these commands from the repository root. The default scaffold declares one
-Pipecat target named `pipecat`.
+Every [example](examples/README.md) declares both `pipecat` and `livekit`, so
+`validate` and `compile` cover both targets. Runs need `uv` on your PATH. Keep
+credentials in the ignored repo-root `.env.local` (the generated
+`.env.example` files list the exact variables), and copy them after compiling,
+because recompiling replaces `build/<target>/`.
 
 ```sh
 make build
-bin/unmute init demo-agent
-bin/unmute validate demo-agent
-bin/unmute compile demo-agent
-```
 
-`init` writes `agent.yaml`, `instructions.md`, `targets.yaml`, and
-`.env.example`. `compile` writes the native project to
-`demo-agent/build/pipecat/`; the generated project does not import or require
-Unmute at runtime.
-
-### Validate and compile every example
-
-The [example matrix](examples/README.md) covers one large prompt, one task,
-ordered task groups, and sub-agent handoffs. Every package declares both
-`pipecat` and `livekit`, so omitting `--target` validates and compiles both.
-
-```sh
-for EXAMPLE in simple-prompt single-task task-groups subagents; do
-  bin/unmute validate "examples/$EXAMPLE"
-  bin/unmute compile "examples/$EXAMPLE"
-done
-```
-
-Compilation replaces each selected `build/<target>/` directory. Compile before
-copying credentials or running `uv`; recompiling removes files such as `.env`,
-`.env.local`, and `.venv` from the generated directory.
-
-### Configure credentials for the examples
-
-Keep shared credentials in the ignored repository-root `.env.local`. Use the
-generated `.env.example` files as the exact list of variables, and fill in the
-values before running an agent.
-
-```sh
+# Choose: simple-prompt, single-task, task-groups, or subagents
 EXAMPLE=simple-prompt
 
-sed -n '1,200p' "examples/$EXAMPLE/build/pipecat/.env.example"
-sed -n '1,200p' "examples/$EXAMPLE/build/livekit/.env.example"
+bin/unmute validate "examples/$EXAMPLE"
+bin/unmute compile "examples/$EXAMPLE"
 ```
 
-Set `EXAMPLE` to `simple-prompt`, `single-task`, `task-groups`, or `subagents`
-and repeat the run commands below to test each orchestration structure.
-
-### Run the generated Pipecat project
-
-Pipecat loads `.env` from its generated project directory. The default command
-starts a WebRTC test client and prints the URL to open.
+Test the generated LiveKit project in console mode (terminal mic and speaker):
 
 ```sh
-EXAMPLE=simple-prompt
-cp .env.local "examples/$EXAMPLE/build/pipecat/.env"
-(
-  cd "examples/$EXAMPLE/build/pipecat"
-  uv run bot.py
-)
-```
-
-To use your terminal microphone and speaker instead, install PortAudio first
-and run the console extra.
-
-```sh
-EXAMPLE=simple-prompt
-cp .env.local "examples/$EXAMPLE/build/pipecat/.env"
-(
-  cd "examples/$EXAMPLE/build/pipecat"
-  uv run --extra console bot.py console
-)
-```
-
-### Run the generated LiveKit project
-
-LiveKit loads `.env.local` from its generated project directory. Console mode
-is the shortest direct test of the emitted agent.
-
-```sh
-EXAMPLE=simple-prompt
 cp .env.local "examples/$EXAMPLE/build/livekit/.env.local"
-(
-  cd "examples/$EXAMPLE/build/livekit"
-  uv run agent.py console
-)
+cd "examples/$EXAMPLE/build/livekit"
+uv run agent.py console
 ```
 
-To register the generated agent as a LiveKit development worker, run its
-development command against the LiveKit server configured in `.env.local`.
+Test the generated Pipecat project (starts a WebRTC test client and prints the
+URL to open). Run from the repo root:
 
 ```sh
-EXAMPLE=simple-prompt
-cp .env.local "examples/$EXAMPLE/build/livekit/.env.local"
-(
-  cd "examples/$EXAMPLE/build/livekit"
-  uv run agent.py dev
-)
+cp .env.local "examples/$EXAMPLE/build/pipecat/.env"
+cd "examples/$EXAMPLE/build/pipecat"
+uv run bot.py
 ```
 
-### Run an example through `unmute dev`
-
-`dev` is implemented in the current CLI. It recompiles the selected target,
-runs the generated project with `uv`, and opens a browser client by default.
-Unlike direct generated-project runs, it reads `.env` from the source package
-root.
+`unmute dev` does the recompile-and-run loop in one command, reading `.env`
+from the package root:
 
 ```sh
-EXAMPLE=simple-prompt
 cp .env.local "examples/$EXAMPLE/.env"
-
-# Run one command at a time. Press ctrl-c before trying another mode.
 bin/unmute dev "examples/$EXAMPLE" --target pipecat
-bin/unmute dev "examples/$EXAMPLE" --target pipecat --console
-bin/unmute dev "examples/$EXAMPLE" --target livekit
 bin/unmute dev "examples/$EXAMPLE" --target livekit --console
 ```
-
-`dev` needs `uv` on your `PATH`. Pipecat console mode also needs PortAudio.
-LiveKit web mode uses configured LiveKit credentials or reuses or starts a
-local `livekit-server --dev` process.
-
-The public packages use one salon workflow to show increasing orchestration
-structure. Five-target portability and the legacy combined handoff/task-group
-case remain internal fixtures under `internal/testdata/`.
-
-For a managed target, `apply` executes the plan against the provider
-(ElevenLabs needs `ELEVENLABS_API_KEY`; it creates or PATCHes one agent
-resource per Unmute agent). Run `compile` first if you want to inspect what
-validate reports before touching a live account. The safe automated
-equivalent is `go test ./internal/cli -run TestApplyElevenLabs` (mocked HTTP,
-no live call).
-
-## Not implemented yet
-
-Validation covers all five targets. These drivers still lack an executable
-generation or apply path:
-
-- Vapi and Deepgram drivers (specs exist in `docs/spec/`; generation fails
-  clearly today).
-- Per-driver maturity gates are listed on each target page in
-  [docs/user/targets/](docs/user/targets/) and fail loud rather than silently
-  dropping behavior.
