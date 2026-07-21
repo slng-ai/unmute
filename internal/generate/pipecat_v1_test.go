@@ -1044,8 +1044,8 @@ func enablePackageTelephony(pkg *spec.Package) {
 // TestV14_ActivationGatedOnPipelineStart (driver-pipecat V14, B8): the entry
 // agent's activation must not race main's StartFrame — frames pushed into
 // BusBridge before it are dropped (greeting lost, tools never registered).
-// The generated bot gates on_client_connected on an asyncio.Event set by
-// main's on_pipeline_started handler.
+// The generated Daily SIP bot gates on_client_connected on an asyncio.Event set
+// by main's on_pipeline_started handler.
 func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
@@ -1062,6 +1062,9 @@ func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
 	bot := artifactFile(t, artifact, "bot.py")
 	for _, want := range []string{
 		"pipeline_started = asyncio.Event()",
+		"entry_started = False",
+		"nonlocal entry_started",
+		"if entry_started:",
 		`@main.event_handler("on_pipeline_started")`,
 		"pipeline_started.set()",
 	} {
@@ -1086,5 +1089,45 @@ func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
 	call := strings.Index(block, "await activate_entry()")
 	if gate == -1 || call == -1 || gate > call {
 		t.Errorf("on_client_connected must await pipeline_started before activate_entry (gate=%d, call=%d)", gate, call)
+	}
+}
+
+// TestPipecatWebWaitsForRTVIClientReady (SPEC V2): web agents activate and
+// greet from the PipelineWorker's RTVI readiness event, never the earlier
+// transport connection event.
+func TestPipecatWebWaitsForRTVIClientReady(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(agent.Channels, "phone")
+	delete(agent.Controls, "to_human")
+	billing := agent.Agents["billing"]
+	billing.Tools = []string{"get_invoice"}
+	agent.Agents["billing"] = billing
+	tgt := targetByProvider(t, agent, ir.ProviderPipecat)
+	tgt.Transport = ""
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+
+	if strings.Contains(bot, `@transport.event_handler("on_client_connected")`) {
+		t.Error("web bot must not greet from on_client_connected")
+	}
+	ready := strings.Index(bot, `@main.rtvi.event_handler("on_client_ready")`)
+	if ready == -1 {
+		t.Fatal("web bot missing main.rtvi on_client_ready handler")
+	}
+	block := bot[ready:]
+	gate := strings.Index(block, "await pipeline_started.wait()")
+	call := strings.Index(block, "await activate_entry()")
+	if gate == -1 || call == -1 || gate > call {
+		t.Errorf("on_client_ready must await pipeline_started before activate_entry (gate=%d, call=%d)", gate, call)
 	}
 }
