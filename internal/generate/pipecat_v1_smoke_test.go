@@ -128,6 +128,12 @@ asyncio.run(_run())
 print("smoke ok:", ", ".join(builders))
 `
 
+const pipecatStaticCheckScript = `"""Smoke check: the generated project passes ty."""
+import subprocess
+
+subprocess.run(["ty", "check", "."], check=True)
+`
+
 // pipecatRequestTracingSmokeScript drives the generated worker/bus topology
 // through deterministic STT, LLM, and TTS services. V17 requires all three
 // request spans to share the conversation trace.
@@ -197,7 +203,7 @@ class FakeLLM(LLMService):
         super().__init__(
             settings=LLMSettings(
                 model="probe-model",
-                system_instruction=None,
+                system_instruction="You are the tracing probe.",
                 temperature=None,
                 max_tokens=None,
                 top_p=None,
@@ -368,6 +374,10 @@ async def main() -> None:
     assert requests["stt"].attributes["language"] == "en"
     assert requests["stt"].attributes["is_final"] is True
     assert requests["llm"].attributes["output"] == "traced."
+    assert requests["llm"].attributes["gen_ai.system_instructions"] == "You are the tracing probe."
+    llm_input = json.loads(requests["llm"].attributes["langfuse.observation.input"])
+    assert llm_input[0] == {"role": "system", "content": "You are the tracing probe."}
+    assert {"role": "user", "content": "trace this request"} in llm_input
     assert requests["tts"].attributes["text"] == "traced."
     assert requests["tts"].attributes["voice_id"] == "probe-voice"
     assert requests["tts"].attributes["metrics.character_count"] == len("traced.")
@@ -484,6 +494,10 @@ func TestSmokePipecatV1LocalToolInstantiates(t *testing.T) {
 // native STT, LLM, and TTS tree under the named conversation trace (V21).
 func TestSmokeV17PipecatSpeechTracing(t *testing.T) {
 	runPipecatSmokeScript(t, "simple-prompt", nil, nil, pipecatRequestTracingSmokeScript)
+}
+
+func TestSmokeV24PipecatSimplePromptStaticCheck(t *testing.T) {
+	runPipecatSmokeScript(t, "simple-prompt", nil, nil, pipecatStaticCheckScript)
 }
 
 func runPipecatSmoke(t *testing.T, example string, mutate func(*ir.Target), mutateAgent func(*ir.Agent)) {

@@ -76,16 +76,16 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 		"setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter())",
 		"enable_tracing=tracing_enabled",
 		`additional_span_attributes={"langfuse.trace.name": TRACE_NAME}`,
-		"def _enable_agent_tracing(main: PipelineWorker, agents: list[LLMWorker]) -> None:",
+		"def _enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:",
 		"agent._tracing_context = main._tracing_context",
 		"_enable_agent_tracing(main, AGENTS)",
-		"trace.get_tracer_provider().force_flush()",
+		"trace_provider.force_flush()",
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing %q", want)
 		}
 	}
-	if strings.Contains(bot, "if not any(values)") || !strings.Contains(bot, "if not all(values)") {
+	if !strings.Contains(bot, "if not public_key or not secret_key or not base_url:") {
 		t.Error("configured tracing must reject missing credentials, including all three")
 	}
 
@@ -147,7 +147,7 @@ func TestV23PipecatSpeechObservationsAreRich(t *testing.T) {
 
 	bot := artifactFile(t, artifact, "bot.py")
 	for _, want := range []string{
-		"def _patch_pipecat_speech_tracing() -> None:",
+		"def _patch_pipecat_tracing() -> None:",
 		"service_decorators.add_stt_span_attributes",
 		"service_decorators.add_tts_span_attributes",
 		"TTSService.append_to_audio_context",
@@ -159,11 +159,89 @@ func TestV23PipecatSpeechObservationsAreRich(t *testing.T) {
 		`"langfuse.observation.usage_details"`,
 		`"langfuse.observation.metadata.ttfb_seconds"`,
 		`"langfuse.observation.metadata.character_count"`,
-		"_patch_pipecat_speech_tracing()",
+		"_patch_pipecat_tracing()",
 		"PipelineParams(enable_metrics=True, enable_usage_metrics=True)",
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing %q", want)
+		}
+	}
+}
+
+func TestV24PipecatStaticCheckSurface(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"from collections.abc import Sequence",
+		"from opentelemetry.sdk.trace import TracerProvider",
+		"from pipecat.transcriptions.language import Language",
+		`Language("en")`,
+		`setattr(patched, "__langfuse_patch__", True)`,
+		`setattr(service_decorators, "add_llm_span_attributes", patched_llm)`,
+		`setattr(TTSService, "append_to_audio_context", patched_append_to_audio_context)`,
+		"if not public_key or not secret_key or not base_url:",
+		"def _enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:",
+		"context = self._tracing_context",
+		"if not self._enable_tracing or context is None:",
+		"if isinstance(trace_provider, TracerProvider):",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing static-check-safe form %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"patched.__langfuse_patch__",
+		"append_to_audio_context.__langfuse_patch__",
+		"TTSService.append_to_audio_context =",
+		"trace.get_tracer_provider().force_flush()",
+	} {
+		if strings.Contains(bot, forbidden) {
+			t.Errorf("bot.py contains ty-unsafe form %q", forbidden)
+		}
+	}
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	for _, want := range []string{"[dependency-groups]", `"ty"`} {
+		if !strings.Contains(pyproject, want) {
+			t.Errorf("pyproject.toml missing %q", want)
+		}
+	}
+}
+
+func TestV25PipecatTracesConfiguredSystemInstruction(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"service_decorators.add_llm_span_attributes",
+		`kwargs.get("system_instructions")`,
+		`{"role": "system", "content": system_instruction}`,
+		`span.set_attribute("langfuse.observation.input", json.dumps(messages, default=str))`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing system-instruction tracing form %q", want)
 		}
 	}
 }
