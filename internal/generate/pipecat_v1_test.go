@@ -59,7 +59,7 @@ func TestPipecatV1Golden(t *testing.T) {
 // TestPipecatGreetingModes covers the three SCHEMA.md 4.8 combinations. Fixed
 // text bypasses the LLM; an omitted text still asks the model; user-first stays
 // silent (SPEC V1, V4, V5).
-func TestPipecatGreetingModes(t *testing.T) {
+func TestV32PipecatGreetingModes(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
@@ -85,9 +85,10 @@ func TestPipecatGreetingModes(t *testing.T) {
 			want: []string{
 				"from pipecat.frames.frames import TTSSpeakFrame",
 				`TTSSpeakFrame("Hi, this is Sage and Stone Salon.")`,
+				"next(agent for agent in agents",
 				"args=LLMWorkerActivationArgs(run_llm=False)",
 			},
-			forbidden: []string{"Begin the conversation by saying, word for word:"},
+			forbidden: []string{"Begin the conversation by saying, word for word:", "agent in AGENTS"},
 		},
 		{
 			name:     "model written",
@@ -145,22 +146,31 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, "bot.py")
+	tracing := artifactFile(t, artifact, "tracing.py")
 	for _, want := range []string{
-		"def setup_langfuse_tracing() -> bool:",
-		`f"{base_url.rstrip('/')}/api/public/otel"`,
-		"setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter())",
+		"from tracing import (",
 		"enable_tracing=tracing_enabled",
 		`additional_span_attributes={"langfuse.trace.name": TRACE_NAME}`,
-		"def _enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:",
-		"agent._tracing_context = main._tracing_context",
-		"_enable_agent_tracing(main, agents)",
-		"trace_provider.force_flush()",
+		"enable_agent_tracing(main, agents)",
+		"flush_tracing()",
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing %q", want)
 		}
 	}
-	if !strings.Contains(bot, "if not public_key or not secret_key or not base_url:") {
+	for _, want := range []string{
+		"def setup_langfuse_tracing() -> bool:",
+		`f"{base_url.rstrip('/')}/api/public/otel"`,
+		"setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter())",
+		"def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:",
+		"agent._tracing_context = main._tracing_context",
+		"trace_provider.force_flush()",
+	} {
+		if !strings.Contains(tracing, want) {
+			t.Errorf("tracing.py missing %q", want)
+		}
+	}
+	if !strings.Contains(tracing, "if not public_key or not secret_key or not base_url:") {
 		t.Error("configured tracing must reject missing credentials, including all three")
 	}
 
@@ -179,7 +189,7 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 	}
 }
 
-func TestV21PipecatUsesNativeTracing(t *testing.T) {
+func TestV31PipecatTracingIsIsolated(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
@@ -195,12 +205,39 @@ func TestV21PipecatUsesNativeTracing(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, "bot.py")
+	if !strings.Contains(bot, "from tracing import (") {
+		t.Fatal("bot.py missing tracing import")
+	}
+	for _, forbidden := range []string{"def setup_langfuse_tracing", "def _patch_pipecat_tracing", "class TracedLLMWorker"} {
+		if strings.Contains(bot, forbidden) {
+			t.Errorf("bot.py contains tracing implementation %q", forbidden)
+		}
+	}
+	_ = artifactFile(t, artifact, "tracing.py")
+}
+
+func TestV21PipecatUsesNativeTracing(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enableLangfuse(agent)
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tracing := artifactFile(t, artifact, "tracing.py")
 	for _, forbidden := range []string{
 		"SpanProcessor",
 		"LangfuseAttributeProcessor",
 	} {
-		if strings.Contains(bot, forbidden) {
-			t.Errorf("bot.py contains custom tracing hook %q", forbidden)
+		if strings.Contains(tracing, forbidden) {
+			t.Errorf("tracing.py contains custom tracing hook %q", forbidden)
 		}
 	}
 }
@@ -221,6 +258,7 @@ func TestV23PipecatSpeechObservationsAreRich(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, "bot.py")
+	tracing := artifactFile(t, artifact, "tracing.py")
 	for _, want := range []string{
 		"def _patch_pipecat_tracing() -> None:",
 		"service_decorators.add_stt_span_attributes",
@@ -235,11 +273,13 @@ func TestV23PipecatSpeechObservationsAreRich(t *testing.T) {
 		`"langfuse.observation.metadata.ttfb_seconds"`,
 		`"langfuse.observation.metadata.character_count"`,
 		"_patch_pipecat_tracing()",
-		"PipelineParams(enable_metrics=True, enable_usage_metrics=True)",
 	} {
-		if !strings.Contains(bot, want) {
-			t.Errorf("bot.py missing %q", want)
+		if !strings.Contains(tracing, want) {
+			t.Errorf("tracing.py missing %q", want)
 		}
+	}
+	if !strings.Contains(bot, "PipelineParams(enable_metrics=True, enable_usage_metrics=True)") {
+		t.Error("bot.py missing tracing metrics configuration")
 	}
 }
 
@@ -258,22 +298,30 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, "bot.py")
+	tracing := artifactFile(t, artifact, "tracing.py")
+	for _, want := range []string{
+		"from tracing import (",
+		"from pipecat.transcriptions.language import Language",
+		`Language("en")`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing static-check-safe form %q", want)
+		}
+	}
 	for _, want := range []string{
 		"from collections.abc import Sequence",
 		"from opentelemetry.sdk.trace import TracerProvider",
-		"from pipecat.transcriptions.language import Language",
-		`Language("en")`,
 		`setattr(patched, "__langfuse_patch__", True)`,
 		`setattr(service_decorators, "add_llm_span_attributes", patched_llm)`,
 		`setattr(TTSService, "append_to_audio_context", patched_append_to_audio_context)`,
 		"if not public_key or not secret_key or not base_url:",
-		"def _enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:",
+		"def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:",
 		"context = self._tracing_context",
 		"if not self._enable_tracing or context is None:",
 		"if isinstance(trace_provider, TracerProvider):",
 	} {
-		if !strings.Contains(bot, want) {
-			t.Errorf("bot.py missing static-check-safe form %q", want)
+		if !strings.Contains(tracing, want) {
+			t.Errorf("tracing.py missing static-check-safe form %q", want)
 		}
 	}
 	for _, forbidden := range []string{
@@ -282,8 +330,8 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 		"TTSService.append_to_audio_context =",
 		"trace.get_tracer_provider().force_flush()",
 	} {
-		if strings.Contains(bot, forbidden) {
-			t.Errorf("bot.py contains ty-unsafe form %q", forbidden)
+		if strings.Contains(tracing, forbidden) {
+			t.Errorf("tracing.py contains ty-unsafe form %q", forbidden)
 		}
 	}
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
@@ -308,7 +356,7 @@ func TestV25PipecatTracesConfiguredSystemInstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bot := artifactFile(t, artifact, "bot.py")
+	tracing := artifactFile(t, artifact, "tracing.py")
 	for _, want := range []string{
 		"service_decorators.add_llm_span_attributes",
 		`kwargs.get("system_instructions")`,
@@ -316,8 +364,8 @@ func TestV25PipecatTracesConfiguredSystemInstruction(t *testing.T) {
 		`span.set_attribute("input", encoded)`,
 		`span.set_attribute("langfuse.observation.input", encoded)`,
 	} {
-		if !strings.Contains(bot, want) {
-			t.Errorf("bot.py missing system-instruction tracing form %q", want)
+		if !strings.Contains(tracing, want) {
+			t.Errorf("tracing.py missing system-instruction tracing form %q", want)
 		}
 	}
 }
@@ -338,19 +386,22 @@ func TestV22PipecatToolCallsAreTraced(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, "bot.py")
+	tracing := artifactFile(t, artifact, "tracing.py")
 	for _, want := range []string{
-		"class _TracedLLMWorker(LLMWorker):",
+		"class TracedLLMWorker(LLMWorker):",
 		"start_as_current_span(",
 		`f"tool:{name}", context=parent`,
 		`"langfuse.observation.input"`,
 		`"langfuse.observation.output"`,
 		`"tool.function_name"`,
 		`"tool.call_id"`,
-		"class IntakeAgent(_TracedLLMWorker):",
 	} {
-		if !strings.Contains(bot, want) {
-			t.Errorf("bot.py missing %q", want)
+		if !strings.Contains(tracing, want) {
+			t.Errorf("tracing.py missing %q", want)
 		}
+	}
+	if !strings.Contains(bot, "class IntakeAgent(TracedLLMWorker):") {
+		t.Error("bot.py missing traced agent base")
 	}
 }
 
@@ -420,7 +471,7 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	}
 }
 
-func TestPipecatV1OmitsTracingUnlessConfigured(t *testing.T) { // V19
+func TestPipecatV1OmitsTracingUnlessConfigured(t *testing.T) { // V19, V31
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
@@ -432,6 +483,9 @@ func TestPipecatV1OmitsTracingUnlessConfigured(t *testing.T) { // V19
 	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if artifactHasFile(artifact, "tracing.py") {
+		t.Fatal("unconfigured artifact emitted tracing.py")
 	}
 	for path, forbidden := range map[string][]string{
 		"bot.py":         {"Langfuse", "LANGFUSE_", "setup_tracing", "enable_tracing"},

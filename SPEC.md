@@ -271,6 +271,12 @@ These invariants are the executable pressure-test result.
   while its call is alive (liveness refresh or a TTL that bounds real call
   duration), and worker load thresholds never shrink effective capacity below
   the declared limit.
+- V31: configured LiveKit/Pipecat Langfuse code lives in emitted `tracing.py`;
+  `agent.py`/`bot.py` keep imports + wiring only. Unconfigured artifacts emit
+  neither file nor import. Existing driver trace behavior, static checks,
+  goldens, and L4 smokes stay green.
+- V32: generated Pipecat fixed greetings target session-local `agents`; no
+  undefined/module-global worker collection.
 
 ## §T tasks
 
@@ -298,6 +304,7 @@ T19|x|capacity exactness: fix LiveKit `load_threshold` off-by-one, admission slo
 T20|x|lifecycle: real drain (readiness flips before stop, Compose `stop_grace_period`, forced-termination report), emitted log level and redaction configuration, clean ctrl-c exit codes, configurable host ports so two local stacks coexist|V16,V19,V24,B9,B10
 T21|x|move runtime-plan facts (endpoints, manual steps, processes, local env defaults) onto the ir plan or carrier definition so generate and the CLI stop re-deriving them; extract the triplicated adapter template helpers per C9; deepen telephony L4 beyond `py_compile`|C8,C9,I.plan,V20,B11
 T22|x|truth pass: align TELEPHONY.md current-state and user docs with the fail-closed reality, run the credential preflight after validation, document or bootstrap the LiveKit SIP local trunk-ID ordering, and track this spec in git (untracked today while tests cite V11/V17/V24-V26)|C15,V17,B12
+T23|x|extract conditional LiveKit/Pipecat Langfuse runtime code into emitted `tracing.py`; leave entry files with agent logic + narrow wiring; preserve tracing behavior and checks; fix static-check-found fixed-greeting scope bug|V31,V32
 
 ## §B bugs
 
@@ -319,3 +326,5 @@ B10|2026-07-21|pipecat's runner logs caller numbers at DEBUG via loguru and the 
 B11|2026-07-21|endpoints, manual steps, and required env are re-derived per carrier in `generate.TelephonyRuntimePlanFor` instead of riding the ir plan; the CLI infers local topology env from the `livekit_server` service name; both generators re-hardcode the env vocabulary beside the rulebook|I.plan,C8,T21
 B12|2026-07-21|TELEPHONY.md "current repository state" and three user-doc how-tos present a runnable `dev --telephony` flow while every route is provisional, so no public command can emit or run any telephony artifact; the documented "run the emitted Compose file directly" escape hatch is unobtainable|C15,T22
 B13|2026-07-21|`peak_starts_per_second` is enforced only when a Connection is bound, narrower than SCHEMA §4.10's unconditional telephony requirement|V21,T17
+B14|2026-07-21|tracing tests pinned Langfuse internals to `agent.py`/`bot.py`, so clean module extraction failed despite unchanged behavior|V31,T23
+B15|2026-07-21|Pipecat fixed greeting referenced removed module-global `AGENTS` instead of session-local `agents`|V32,T23

@@ -344,6 +344,9 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		{"README.md", "README.md"},
 		{"env.example", ".env.example"},
 	}
+	if data.Tracing {
+		outputs = append(outputs, struct{ tmpl, path string }{"tracing.py", "tracing.py"})
+	}
 	if data.Telephony != nil {
 		templateName := "telephony_twilio.py"
 		switch data.Telephony.Carrier {

@@ -45,7 +45,6 @@ the file defines a callable named like the tool; sync or async). */ -}}
 url_env, allowed_tools keeping D8 visibility. */ -}}
 {{define "mcp_mounts"}}mcp_servers=[{{range $i, $s := .}}{{if $i}}, {{end}}mcp.MCPServerHTTP(url=os.environ[{{pyq $s.URLEnv}}], allowed_tools=[{{range $j, $t := $s.Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]){{end}}]{{end -}}
 {{if .NeedsAsyncio}}import asyncio
-{{end}}{{if .Tracing}}from collections.abc import Sequence
 {{end}}{{if .NeedsInspect}}import inspect
 {{end}}{{if or .Outbound .Telephony}}import json
 {{end}}import logging
@@ -54,11 +53,6 @@ import os
 {{end}}{{if .NeedsHTTPX}}import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
-{{if .Tracing}}
-from langfuse import Langfuse
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.util.types import AttributeValue
-{{end}}
 {{if .Outbound}}from livekit import api
 {{end}}from livekit.agents import (
 {{- if .Outbound}}
@@ -102,14 +96,10 @@ from opentelemetry.util.types import AttributeValue
 {{- if or .NeedsTaskGroups .HasWarmTransfer}}
 from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskGroup{{if .HasWarmTransfer}}, WarmTransferTask{{end}}{{else}}WarmTransferTask{{end}}
 {{- end}}
-{{if .Tracing}}
-from livekit.agents.telemetry import set_tracer_provider
-from livekit.agents.metrics import STTMetrics, TTSMetrics
-from livekit.agents.voice import ConversationItemAddedEvent, MetricsCollectedEvent
-{{else}}
 from livekit.agents.voice import MetricsCollectedEvent
-{{end}}
 from livekit.plugins import {{join .PluginModules ", "}}
+{{if .Tracing}}from tracing import setup_langfuse
+{{end}}
 
 logger = logging.getLogger({{pyq .Project}})
 logger.setLevel(logging.INFO)
@@ -117,95 +107,6 @@ logger.setLevel(logging.INFO)
 load_dotenv(".env.local")
 
 
-{{if .Tracing}}
-# --- tracing ---------------------------------------------------------------
-def setup_langfuse(
-    metadata: dict[str, AttributeValue] | None = None,
-) -> TracerProvider:
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
-    base_url = os.getenv("LANGFUSE_BASE_URL")
-    values = (public_key, secret_key, base_url)
-    if not all(values):
-        raise ValueError(
-            "LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and LANGFUSE_BASE_URL must all be set"
-        )
-
-    trace_provider = TracerProvider()
-    set_tracer_provider(trace_provider, metadata=metadata)
-    Langfuse(
-        public_key=public_key,
-        secret_key=secret_key,
-        base_url=base_url,
-        tracer_provider=trace_provider,
-        should_export_span=lambda span: True,
-    )
-    return trace_provider
-
-
-def trace_speech_metrics(
-    trace_provider: TracerProvider,
-    speech_metrics: Sequence[STTMetrics | TTSMetrics],
-    *,
-    input_value: str,
-    output_value: str,
-    ended_at: float,
-) -> None:
-    if not speech_metrics:
-        return
-
-    metric = speech_metrics[-1]
-    operation = "stt" if isinstance(metric, STTMetrics) else "tts"
-    duration = sum(item.duration for item in speech_metrics)
-    audio_duration = sum(item.audio_duration for item in speech_metrics)
-    attributes: dict[str, AttributeValue] = {
-        "langfuse.observation.type": "generation",
-        "langfuse.observation.input": input_value,
-        "langfuse.observation.output": output_value,
-        "gen_ai.operation.name": operation,
-        "gen_ai.output.type": "text" if operation == "stt" else "speech",
-        "metrics.duration": duration,
-        "metrics.audio_duration": audio_duration,
-        "metrics.streamed": any(item.streamed for item in speech_metrics),
-        "metrics.segment_count": len(speech_metrics),
-    }
-    if operation == "stt":
-        attributes["langfuse.trace.input"] = output_value
-    else:
-        attributes["langfuse.trace.output"] = input_value
-    metadata = next((item.metadata for item in reversed(speech_metrics) if item.metadata), None)
-    if metadata and metadata.model_name:
-        attributes["gen_ai.request.model"] = metadata.model_name
-    if metadata and metadata.model_provider:
-        attributes["gen_ai.provider.name"] = metadata.model_provider
-    if metric.request_id:
-        attributes["lk.request_id"] = metric.request_id
-    if isinstance(metric, TTSMetrics):
-        attributes["metrics.ttfb"] = next(
-            (item.ttfb for item in speech_metrics if isinstance(item, TTSMetrics) and item.ttfb >= 0),
-            -1.0,
-        )
-        attributes["metrics.character_count"] = sum(
-            item.characters_count for item in speech_metrics if isinstance(item, TTSMetrics)
-        )
-    else:
-        attributes["gen_ai.usage.input_tokens"] = sum(item.input_tokens for item in speech_metrics)
-        attributes["gen_ai.usage.output_tokens"] = sum(item.output_tokens for item in speech_metrics)
-
-    start_time = int(
-        min(item.timestamp - max(item.duration, 0.0) for item in speech_metrics)
-        * 1_000_000_000
-    )
-    end_time = int(max(ended_at, max(item.timestamp for item in speech_metrics)) * 1_000_000_000)
-    span = trace_provider.get_tracer("unmute").start_span(
-        operation,
-        attributes=attributes,
-        start_time=start_time,
-    )
-    span.end(end_time=end_time)
-
-
-{{end}}
 # --- prompts ---------------------------------------------------------------
 {{range .Prompts}}
 {{.Const}} = {{triple .Body}}
@@ -557,19 +458,6 @@ server.setup_fnc = prewarm
 
 @server.rtc_session(agent_name={{pyq .AgentName}})
 async def entrypoint(ctx: JobContext) -> None:
-{{if .Tracing}}
-    trace_provider = setup_langfuse(
-        metadata={
-            "langfuse.session.id": ctx.room.name,
-            "langfuse.trace.name": {{pyq .EntryAgent}} + "-" + {{pyq .Project}},
-        }
-    )
-    async def flush_trace() -> None:
-        trace_provider.force_flush()
-
-    ctx.add_shutdown_callback(flush_trace)
-
-{{end}}
     session = AgentSession{{if .HasVars}}[Userdata]{{end}}(
 {{- if .HasVars}}
         userdata=Userdata(),
@@ -596,46 +484,20 @@ async def entrypoint(ctx: JobContext) -> None:
     )
 
 {{if .Tracing}}
-    pending_stt_metrics: list[STTMetrics] = []
-    pending_tts_metrics: list[TTSMetrics] = []
+    setup_langfuse(
+        ctx,
+        session,
+        metadata={
+            "langfuse.session.id": ctx.room.name,
+            "langfuse.trace.name": {{pyq .EntryAgent}} + "-" + {{pyq .Project}},
+        },
+    )
 
 {{end}}
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
-{{if .Tracing}}
-        if isinstance(ev.metrics, STTMetrics):
-            pending_stt_metrics.append(ev.metrics)
-        elif isinstance(ev.metrics, TTSMetrics):
-            pending_tts_metrics.append(ev.metrics)
-{{end}}
         metrics.log_metrics(ev.metrics)
 
-{{if .Tracing}}
-    @session.on("conversation_item_added")
-    def _on_conversation_item_added(ev: ConversationItemAddedEvent) -> None:
-        text = getattr(ev.item, "raw_text_content", None)
-        role = getattr(ev.item, "role", None)
-        if not text or role is None:
-            return
-        if role == "user" and pending_stt_metrics:
-            trace_speech_metrics(
-                trace_provider,
-                pending_stt_metrics,
-                input_value="audio",
-                output_value=text,
-                ended_at=ev.created_at,
-            )
-            pending_stt_metrics.clear()
-        elif role == "assistant" and pending_tts_metrics:
-            trace_speech_metrics(
-                trace_provider,
-                pending_tts_metrics,
-                input_value=text,
-                output_value="audio",
-                ended_at=ev.created_at,
-            )
-            pending_tts_metrics.clear()
-{{end}}
 {{- if or .InactivityNudgeSecs .InactivityEndSecs}}
 {{- if and .InactivityNudgeSecs .InactivityEndSecs}}
 

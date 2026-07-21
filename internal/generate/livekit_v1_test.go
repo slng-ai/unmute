@@ -105,25 +105,33 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, "agent.py")
+	tracing := artifactFile(t, artifact, "tracing.py")
 	for _, want := range []string{
-		"def setup_langfuse(",
-		"def trace_speech_metrics(",
-		"set_tracer_provider(trace_provider, metadata=metadata)",
-		"should_export_span=lambda span: True",
+		"from tracing import setup_langfuse",
 		`"langfuse.session.id": ctx.room.name`,
 		`"langfuse.trace.name": "greeter" + "-" + "livekit"`,
-		"ctx.add_shutdown_callback(flush_trace)",
-		`@session.on("conversation_item_added")`,
 		"await session.start(agent=Greeter(), room=ctx.room)",
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("agent.py missing %q", want)
 		}
 	}
-	if strings.Contains(bot, "if not any(values)") || !strings.Contains(bot, "if not all(values)") {
+	for _, want := range []string{
+		"def setup_langfuse(",
+		"def trace_speech_metrics(",
+		"set_tracer_provider(trace_provider, metadata=metadata)",
+		"should_export_span=lambda span: True",
+		"ctx.add_shutdown_callback(flush_trace)",
+		`@session.on("conversation_item_added")`,
+	} {
+		if !strings.Contains(tracing, want) {
+			t.Errorf("tracing.py missing %q", want)
+		}
+	}
+	if strings.Contains(tracing, "if not any(values)") || !strings.Contains(tracing, "if not all(values)") {
 		t.Error("configured tracing must reject missing credentials, including all three")
 	}
-	setupAt := strings.Index(bot, "trace_provider = setup_langfuse(")
+	setupAt := strings.Index(bot, "    setup_langfuse(")
 	startAt := strings.Index(bot, "await session.start(")
 	if setupAt < 0 || startAt < 0 || setupAt > startAt {
 		t.Error("Langfuse tracing must be configured before AgentSession.start")
@@ -146,7 +154,7 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	}
 }
 
-func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
+func TestV31LiveKitTracingIsIsolated(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
@@ -162,6 +170,33 @@ func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, "agent.py")
+	if !strings.Contains(bot, "from tracing import setup_langfuse") {
+		t.Fatal("agent.py missing tracing import")
+	}
+	for _, forbidden := range []string{"def setup_langfuse", "def trace_speech_metrics", "Langfuse("} {
+		if strings.Contains(bot, forbidden) {
+			t.Errorf("agent.py contains tracing implementation %q", forbidden)
+		}
+	}
+	_ = artifactFile(t, artifact, "tracing.py")
+}
+
+func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enableLangfuse(agent)
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tracing := artifactFile(t, artifact, "tracing.py")
 	for _, want := range []string{
 		"from livekit.agents.voice import ConversationItemAddedEvent, MetricsCollectedEvent",
 		"def trace_speech_metrics(",
@@ -173,11 +208,11 @@ func TestV23LiveKitSpeechObservationsAreUtteranceScoped(t *testing.T) {
 		"pending_tts_metrics: list[TTSMetrics] = []",
 		`@session.on("conversation_item_added")`,
 	} {
-		if !strings.Contains(bot, want) {
-			t.Errorf("agent.py missing %q", want)
+		if !strings.Contains(tracing, want) {
+			t.Errorf("tracing.py missing %q", want)
 		}
 	}
-	if strings.Contains(bot, "trace_speech_metric(trace_provider, ev.metrics)") {
+	if strings.Contains(tracing, "trace_speech_metric(trace_provider, ev.metrics)") {
 		t.Error("speech generations must not be emitted for each metrics event")
 	}
 }
@@ -208,6 +243,9 @@ func TestLiveKitV1UnconfiguredGolden(t *testing.T) { // V24
 	}
 	if bot != string(want) {
 		t.Fatal("unconfigured livekit agent.py golden differs; run: go test ./internal/generate -run TestLiveKitV1UnconfiguredGolden -update-livekit")
+	}
+	if artifactHasFile(artifact, "tracing.py") {
+		t.Fatal("unconfigured artifact emitted tracing.py")
 	}
 	for path, forbidden := range map[string][]string{
 		"agent.py":       {"Langfuse", "LANGFUSE_", "trace_speech_metrics", "set_tracer_provider"},
@@ -278,6 +316,7 @@ func TestV26LiveKitStaticCheckSurface(t *testing.T) {
 		t.Fatal(err)
 	}
 	configuredAgent := artifactFile(t, configured, "agent.py")
+	configuredTracing := artifactFile(t, configured, "tracing.py")
 	for _, forbidden := range []string{"    RunContext,", "    function_tool,"} {
 		if strings.Contains(configuredAgent, forbidden) {
 			t.Errorf("configured tool-free agent.py contains unused import %q", forbidden)
@@ -289,11 +328,11 @@ func TestV26LiveKitStaticCheckSurface(t *testing.T) {
 		"trace_provider: TracerProvider,",
 		"speech_metrics: Sequence[STTMetrics | TTSMetrics]",
 	} {
-		if !strings.Contains(configuredAgent, want) {
-			t.Errorf("configured agent.py missing static-check-safe form %q", want)
+		if !strings.Contains(configuredTracing, want) {
+			t.Errorf("configured tracing.py missing static-check-safe form %q", want)
 		}
 	}
-	if strings.Contains(configuredAgent, "TracerProvider | None") {
+	if strings.Contains(configuredTracing, "TracerProvider | None") {
 		t.Error("configured tracing provider must not be typed as optional")
 	}
 }
@@ -396,6 +435,15 @@ func artifactFile(t *testing.T, artifact Artifact, path string) string {
 	}
 	t.Fatalf("%s not emitted", path)
 	return ""
+}
+
+func artifactHasFile(artifact Artifact, path string) bool {
+	for _, file := range artifact.Files {
+		if file.Path == path {
+			return true
+		}
+	}
+	return false
 }
 
 // TestLiveKitV1DelegateThenTransferAndEnd covers the two non-return `then`

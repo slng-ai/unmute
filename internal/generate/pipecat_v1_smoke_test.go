@@ -452,17 +452,20 @@ const smokeCheckScript = `"""Smoke check: import the generated bot and instantia
 import asyncio
 import json
 import os
+from pathlib import Path
 
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
 import bot  # noqa: E402
 
-if hasattr(bot, "setup_langfuse_tracing"):
+if Path("tracing.py").exists():
+    import tracing
+
     for name in ("LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_BASE_URL"):
         os.environ.pop(name, None)
     try:
-        bot.setup_langfuse_tracing()
+        tracing.setup_langfuse_tracing()
     except ValueError:
         pass
     else:
@@ -521,6 +524,7 @@ os.environ["LANGFUSE_SECRET_KEY"] = "sk-smoke"
 os.environ["LANGFUSE_BASE_URL"] = f"http://127.0.0.1:{receiver.server_port}"
 
 import bot  # noqa: E402
+import tracing as tracing_config  # noqa: E402
 from opentelemetry import trace  # noqa: E402
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor  # noqa: E402
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter  # noqa: E402
@@ -662,7 +666,7 @@ class StopAfterSpeech(Passthrough):
 
 async def main() -> None:
     memory = InMemorySpanExporter()
-    assert bot.setup_langfuse_tracing()
+    assert tracing_config.setup_langfuse_tracing()
     provider = trace.get_tracer_provider()
     provider.add_span_processor(SimpleSpanProcessor(memory))
 
@@ -691,7 +695,7 @@ async def main() -> None:
         ),
         name="trace-main",
         enable_tracing=True,
-        additional_span_attributes={"langfuse.trace.name": bot.TRACE_NAME},
+        additional_span_attributes={"langfuse.trace.name": tracing_config.TRACE_NAME},
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
     agent_types = [
@@ -704,7 +708,7 @@ async def main() -> None:
     ]
     assert len(agent_types) == 1, agent_types
     request_agent = agent_types[0]()
-    bot._enable_agent_tracing(main_worker, [request_agent])
+    tracing_config.enable_agent_tracing(main_worker, [request_agent])
 
     @main_worker.event_handler("on_pipeline_started")
     async def on_pipeline_started(worker, frame):
@@ -766,8 +770,8 @@ async def main() -> None:
     assert json.loads(requests["tts"].attributes["langfuse.observation.usage_details"]) == {
         "characters": len("traced.")
     }
-    assert conversation.attributes["langfuse.trace.name"] == bot.TRACE_NAME
-    assert conversation.resource.attributes["service.name"] == bot.TRACE_NAME
+    assert conversation.attributes["langfuse.trace.name"] == tracing_config.TRACE_NAME
+    assert conversation.resource.attributes["service.name"] == tracing_config.TRACE_NAME
     assert all(span.context.trace_id == conversation.context.trace_id for span in requests.values())
     assert tool_call.context.trace_id == conversation.context.trace_id
     assert tool_call.parent.span_id == turn.context.span_id
