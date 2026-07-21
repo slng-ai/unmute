@@ -109,7 +109,9 @@ uses the local VAD. Semantic endpointing is also advisory.
 - **`transport: carrier-websocket`** selects direct Twilio, Telnyx, or Plivo
   media streaming for telephony. It also requires `carrier` and `connection`;
   support is resolved for that exact tuple. The Exotel value is recognized but
-  gated until authenticated WebSocket ingress is proven.
+  gated until authenticated WebSocket ingress is proven. Pipecat does not use
+  a SIP trunk for these routes; see the
+  [orchestrator comparison](../learn/07-phone-calls.md#configure-telephony-by-orchestrator).
 
 ### Telephony carrier integrations
 

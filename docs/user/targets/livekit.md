@@ -420,6 +420,9 @@ Every SIP row still fails public validation until its credentialed route smoke
 passes. The SIP emitter contains inbound, outbound, voicemail, hangup,
 cold-transfer, and warm-transfer paths. The Twilio Connector currently has only
 route and credential vocabulary; Unmute does not emit a Connector adapter.
+Follow the
+[SIP trunking guide](../learn/07-phone-calls.md#configure-telephony-by-orchestrator)
+for the complete Twilio, Telnyx, and Plivo setup.
 
 Bind the Connection and symbolic destinations to the exact route.
 
