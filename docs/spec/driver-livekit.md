@@ -1,6 +1,6 @@
 # SPEC — LiveKit driver (generate.Artifact case)
 
-Consumes the core: [compiler.md](compiler.md). Schema truth: [SCHEMA.md](../../SCHEMA.md). LiveKit facts: SCHEMA.md conditions ⁰ + ORCHESTRATOR footnote ⁰. SCHEMA.md wins on disagreement.
+Consumes the core: [compiler.md](compiler.md). Schema truth: [SCHEMA.md](../SCHEMA.md). LiveKit facts: SCHEMA.md conditions ⁰ + ORCHESTRATOR footnote ⁰. SCHEMA.md wins on disagreement.
 
 Type: **code target**. Emits a LiveKit Agents project on disk (`Artifact.Files`). No generator today. SDK language matters: `sdk_language: python` is required for warm transfer and MCP.
 

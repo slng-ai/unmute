@@ -1,6 +1,6 @@
 # SPEC — ElevenLabs driver (generate.Artifact case)
 
-Consumes the core: [compiler.md](compiler.md). Schema truth: [SCHEMA.md](../../SCHEMA.md). ElevenLabs facts: SCHEMA.md conditions ³ + ORCHESTRATOR footnote ³. SCHEMA.md wins on disagreement.
+Consumes the core: [compiler.md](compiler.md). Schema truth: [SCHEMA.md](../SCHEMA.md). ElevenLabs facts: SCHEMA.md conditions ³ + ORCHESTRATOR footnote ³. SCHEMA.md wins on disagreement.
 
 Type: **managed target**. Emits an agent-config API payload (`Artifact.Payload`) plus an `ApplyPlan`. No generator today; follow the SLNG managed pattern (`internal/generate/slng.go` + `internal/cli/apply.go`).
 

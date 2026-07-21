@@ -6,9 +6,9 @@ the selected orchestrator runs natively. Unmute is not part of the generated
 agent's production process.
 
 This document defines the system boundaries, compiler flow, and runtime
-topologies. [SCHEMA.md](../SCHEMA.md) defines the authoring contract,
+topologies. [SCHEMA.md](SCHEMA.md) defines the authoring contract,
 [CONTEXT.md](../CONTEXT.md) defines the shared vocabulary, and
-[TELEPHONY.md](../TELEPHONY.md) contains the detailed telephony design and
+[TELEPHONY.md](TELEPHONY.md) contains the detailed telephony design and
 verification state.
 
 ## System boundary
@@ -256,7 +256,7 @@ telephony route has passed its exact credentialed smoke test. Therefore,
 an artifact or invoking Docker.
 
 Treat the Compose topologies in this document as the intended post-promotion
-runtime, not an available workaround. [TELEPHONY.md](../TELEPHONY.md) records
+runtime, not an available workaround. [TELEPHONY.md](TELEPHONY.md) records
 the exact route matrix and promotion requirements.
 
 ## Architectural invariants
@@ -280,11 +280,11 @@ Changes must preserve these boundaries:
 Use these documents for details that this architecture deliberately does not
 repeat:
 
-- [SCHEMA.md](../SCHEMA.md) for package fields, validation rules, and target
+- [SCHEMA.md](SCHEMA.md) for package fields, validation rules, and target
   capability contracts.
 - [CONTEXT.md](../CONTEXT.md) for domain terms and the compile-versus-runtime
   vocabulary.
-- [TELEPHONY.md](../TELEPHONY.md) for carrier routes, credentials, ports,
+- [TELEPHONY.md](TELEPHONY.md) for carrier routes, credentials, ports,
   generated services, and verification requirements.
 - [LiveKit target guide](user/targets/livekit.md) and
   [Pipecat target guide](user/targets/pipecat.md) for user-facing runtime

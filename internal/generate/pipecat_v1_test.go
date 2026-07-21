@@ -405,8 +405,8 @@ func TestV22PipecatToolCallsAreTraced(t *testing.T) {
 	}
 }
 
-// TestPipecatV1TasksGolden exercises the T4 agency level (tasks, task_group,
-// delegates) that safe_core omits, by building the IR in-code (driver-pipecat T4).
+// TestPipecatV1TasksGolden exercises tasks, task groups, and delegates that
+// safe_core omits, including the task-only role boundary (V26).
 func TestPipecatV1TasksGolden(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
@@ -455,6 +455,26 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	if bot == "" {
 		t.Fatal("bot.py not emitted")
 	}
+	for _, want := range []string{
+		"from pipecat.frames.frames import LLMUpdateSettingsFrame",
+		"from pipecat.services.settings import LLMSettings",
+		`role_message="Ask for the caller's email, look them up, and confirm their account tier."`,
+		`task_messages=[{"role": "developer", "content": "Begin this step."}]`,
+		`delta=LLMSettings(system_instruction="# Intake agent`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing task role boundary %q", want)
+		}
+	}
+	if strings.Contains(bot, `task_messages=[{"role": "system"`) {
+		t.Error("bot.py still sends task instructions as a second system message")
+	}
+	if got := strings.Count(bot, "await self.queue_frame(LLMUpdateSettingsFrame("); got != 2 {
+		t.Errorf("bot.py restores the owner role %d times, want 2", got)
+	}
+	if got := strings.Count(bot, "await self.flush_pipeline()"); got != 2 {
+		t.Errorf("bot.py drains the owner role update %d times, want 2", got)
+	}
 
 	path := filepath.Join("testdata", "golden", "pipecat_v1_tasks_bot.py")
 	if *updatePipecatV1 {
@@ -468,6 +488,72 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	}
 	if bot != string(want) {
 		t.Fatalf("pipecat v1 tasks golden differs; run: go test ./internal/generate -run TestPipecatV1TasksGolden -update-pipecat")
+	}
+
+	// The restore is shared by return and transfer, while end needs neither the
+	// restore nor its imports (V12, V28).
+	delete(agent.Controls, "run_collect")
+	intake = agent.Agents["intake"]
+	intake.Tools = slices.DeleteFunc(intake.Tools, func(name string) bool { return name == "run_collect" })
+	agent.Agents["intake"] = intake
+	triage := agent.TaskGroups["triage"]
+	triage.Then = ir.GroupTransfer
+	triage.ThenTarget = "billing"
+	agent.TaskGroups["triage"] = triage
+	transferArtifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate transfer task group: %v", err)
+	}
+	transferBot := artifactFile(t, transferArtifact, "bot.py")
+	finish := strings.Index(transferBot, "async def _run_triage_finish_collect")
+	if finish < 0 {
+		t.Fatal("transfer task group missing final handler")
+	}
+	finishBody := transferBot[finish:]
+	restore := strings.Index(finishBody, "await self.queue_frame(LLMUpdateSettingsFrame(")
+	flush := strings.Index(finishBody, "await self.flush_pipeline()")
+	activate := strings.Index(finishBody, "await self.activate_worker(")
+	if restore < 0 || flush < restore || activate < flush {
+		t.Fatalf("transfer must drain owner-role restoration before activation: finish=%d restore=%d flush=%d activate=%d", finish, restore, flush, activate)
+	}
+
+	triage.Then = ir.GroupEnd
+	triage.ThenTarget = ""
+	agent.TaskGroups["triage"] = triage
+	endArtifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate end-only task group: %v", err)
+	}
+	endBot := artifactFile(t, endArtifact, "bot.py")
+	for _, forbidden := range []string{"LLMUpdateSettingsFrame", "LLMSettings"} {
+		if strings.Contains(endBot, forbidden) {
+			t.Errorf("end-only task group has unused restoration import %q", forbidden)
+		}
+	}
+}
+
+func TestPipecatRejectsBlankTaskInstructions(t *testing.T) { // V27
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tasks["blank"] = ir.Task{
+		Instructions: " \n\t",
+		Result:       map[string]ir.ResultField{"done": {Type: ir.PrimitiveBoolean}},
+		Context:      ir.TaskContext{History: ir.HistoryFull},
+	}
+	agent.Controls["run_blank"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "blank", When: "Run the blank task."}
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "run_blank")
+	agent.Agents["intake"] = intake
+
+	_, err = GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err == nil || !strings.Contains(err.Error(), `task "blank" instructions must not be empty`) {
+		t.Fatalf("blank task instructions must fail closed, got %v", err)
 	}
 }
 

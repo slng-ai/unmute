@@ -72,17 +72,20 @@ Required: no. Values: a list of variable names. Default: none.
 
 ### context.history
 
-How much of the conversation carries to the new agent. There is no default, because providers disagree about their own defaults, so you must state it.
+How much of the conversation carries to the new agent. There is no default,
+because providers disagree about their own defaults, so you must state it. See
+the [LiveKit and Pipecat context map](../concepts/how-targets-run-your-agent.md#compare-context-strategies)
+for the exact prompt and history boundaries.
 
 Required: yes. Values: `full | messages | last_n | summary | reset`. Default: none.
 
 | Value | LiveKit | Pipecat | Vapi | ElevenLabs | Deepgram |
 |---|---|---|---|---|---|
 | `full` | ok | ok | ok | ok | ok |
-| `messages` | ok | ok | ok | fails | ok |
-| `last_n` | ok | ok | ok | fails | ok |
-| `summary` | ok (generated) | ok (generated) | fails | fails | ok (generated) |
-| `reset` | ok | ok | ok | fails | ok |
+| `messages` | ok | driver gate | ok | fails | ok |
+| `last_n` | ok | driver gate | ok | fails | ok |
+| `summary` | ok (generated) | driver gate | fails | fails | ok (generated) |
+| `reset` | ok | driver gate | ok | fails | ok |
 
 ElevenLabs always keeps the full transcript, so only `full` works there. `reset` never promises a literally empty context (on LiveKit a handoff marker still lands in the new context). **On Pipecat the driver emits `history: full` only today**; the other values are a driver maturity gate.
 

@@ -57,8 +57,14 @@ The group runs as a **Pipecat Flow** on the agent that delegated it, the same wa
 async def run_triage(self, params: FunctionCallParams):
     """Run the triage steps before helping the caller."""
     self._run_triage_results = {}
-    self._run_triage_snapshot = ([dict(m) for m in _CONTEXT.get_messages()], _CONTEXT.tools)
-    flow = FlowManager(llm=self.llm, context_aggregator=LLMContextAggregatorPair(_CONTEXT), worker=self)
+    self._run_triage_snapshot = (
+        [dict(m) for m in self.context.get_messages()], self.context.tools
+    )
+    flow = FlowManager(
+        llm=self.llm,
+        context_aggregator=LLMContextAggregatorPair(self.context),
+        worker=self,
+    )
     await flow.initialize(self._run_triage_node_collect())
     return {"status": "running the triage flow"}
 ```
@@ -71,13 +77,24 @@ async def _run_triage_finish_collect(self, args, flow_manager):
     return {"status": "ok"}, self._run_triage_node_classify()   # step 2 comes next
 ```
 
-`context_scope` shows up on each step's configuration. A `shared` group lets every step see the conversation so far, including the earlier steps' turns. An `isolated` group starts each step from a clean context:
+`context_scope` shows up on each step's configuration. Every step sets its task
+instructions as the current `role_message`. A `shared` group lets every step
+see the conversation so far, including the earlier steps' turns. An `isolated`
+group starts each step from a clean context:
 
 ```python
+role_message=STEP_PROMPT,
+task_messages=[{"role": "developer", "content": "Begin this step."}],
 context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),   # isolated only
 ```
 
-The last step's `finish` does the `then`. For `then: return` it restores the agent's saved prompt and tools and hands back only the typed results. For `then: transfer` it activates the target worker instead, and for `then: end` it ends the call. You never write any of this; it follows from the four fields above. (LiveKit compiles the same yaml to completely different machinery with the same behavior; see [how targets run your agent](../concepts/how-targets-run-your-agent.md).)
+The last step's `finish` does the `then`. For `then: return` it restores the
+agent's saved system instruction, messages, and tools, then hands back only the
+typed results. For `then: transfer` it restores the owner before activating the
+target worker. For `then: end` it ends the call. You never write any of this;
+it follows from the four fields above. LiveKit compiles the same YAML to
+different machinery with the same behavior; see
+[how targets run your agent](../concepts/how-targets-run-your-agent.md).
 
 ## What just got harder
 

@@ -1,6 +1,6 @@
 # SPEC — Deepgram driver (generate.Artifact case)
 
-Consumes the core: [compiler.md](compiler.md). Schema truth: [SCHEMA.md](../../SCHEMA.md). Deepgram facts: SCHEMA.md conditions ⁴ + ORCHESTRATOR footnote ⁴. SCHEMA.md wins on disagreement.
+Consumes the core: [compiler.md](compiler.md). Schema truth: [SCHEMA.md](../SCHEMA.md). Deepgram facts: SCHEMA.md conditions ⁴ + ORCHESTRATOR footnote ⁴. SCHEMA.md wins on disagreement.
 
 Type: **code target — session bridge**. Emits a generated media/telephony bridge (`Artifact.Files`) plus an inline agent `Settings` JSON. No generator today. It is a code target (Unmute owns the bridge code), NOT managed.
 

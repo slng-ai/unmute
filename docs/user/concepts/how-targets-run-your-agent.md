@@ -123,11 +123,13 @@ controls:
       verified: result.verified
 ```
 
-LiveKit gives the task its own `AgentTask`. Pipecat runs the task as a Flow on
-the delegating worker. Both return the declared fields without leaking the
-task conversation into the owner's context. LiveKit can give a task its own
-think model; Pipecat currently rejects a per-task `model` and uses the
-delegating agent's model.
+LiveKit gives the task its own `AgentTask` and excludes the delegating agent's
+instructions from the context passed into it. Pipecat runs the task as a Flow
+on the delegating worker. Each Flow node replaces the worker's current system
+instruction with the task prompt through `role_message`, so the task call does
+not receive the agent prompt. LiveKit can give a task its own think model;
+Pipecat currently rejects a per-task `model` and uses the delegating agent's
+model.
 
 ## Run tasks in order
 
@@ -147,6 +149,93 @@ On LiveKit, a `shared` group uses `TaskGroup`, while an `isolated` group uses a
 generated sequence of standalone `AgentTask` objects. On Pipecat, both scopes
 use a Flow chain with different context strategies. Every form preserves
 `merge: results`: only typed results return to the owning agent.
+
+## Compare context strategies
+
+Context settings control three separate boundaries: what enters a task or
+agent, which instructions the model sees, and what returns to the owner. The
+tables below show where each target uses a different native mechanism or
+currently produces a different boundary.
+
+### Enter a single task
+
+A task always gets its own instructions and tools. Its `context.history` value
+selects the earlier conversation that accompanies those instructions.
+Both generated targets add the short step instruction `Begin this step.`; they
+don't add the parent prompt.
+
+| `context.history` | LiveKit task input | Pipecat task input today |
+|---|---|---|
+| `full` | Copies the parent conversation and tool history, but excludes the parent agent's instructions. The task model sees the task prompt as its system prompt. | Uses Pipecat Flow `APPEND` for context messages and the task prompt as `role_message`. The model sees the running conversation with the task system instruction, not the agent system instruction. |
+| `messages` | Keeps user and assistant messages only. It excludes prior instructions and tool calls. | Driver gate. The compile fails because this shaping isn't emitted yet. |
+| `last_n` | Keeps the newest `max_messages` context items after excluding the parent instructions. Function-call pairs stay intact. | Driver gate. The compile fails because this shaping isn't emitted yet. |
+| `summary` | Runs the named `summarizer` think model, then starts the task with the summary and the task prompt. | Driver gate. The compile fails because this shaping isn't emitted yet. |
+| `reset` | Starts with the task prompt and no parent conversation. | Driver gate for a single task. Pipecat `RESET` is available for isolated task-group steps. |
+
+Set `include_tool_calls: false` to remove function calls and outputs from a
+LiveKit `full` or `last_n` context. The Pipecat driver rejects this option until
+it emits the corresponding filter.
+
+<!-- prettier-ignore -->
+> [!NOTE]
+> Pipecat `APPEND` preserves context messages, not the previous
+> `role_message`. The task role replaces the agent system instruction.
+
+On return, Pipecat restores the owner's system instruction, pre-task messages,
+and tools, then adds the typed task result as a developer message. LiveKit
+keeps the parent prompt out of the task input, but the current standalone
+`AgentTask` completion path merges the task's user and assistant turns back
+into the owner. It excludes the task instructions and, by default, task tool
+calls. This return merge is separate from the task-entry prompt boundary.
+
+### Enter task-group steps
+
+The group-level `context_scope` overrides each member task's own
+`context.history` setting.
+
+| `context_scope` | LiveKit | Pipecat |
+|---|---|---|
+| `shared` | Uses `TaskGroup` with the owner instructions excluded. Steps share the group's conversation. Unmute disables LiveKit's automatic group summary call. | Uses Flow `APPEND`. Each step retains the owner context and earlier step context, then replaces the previous role with its own task prompt. |
+| `isolated` | Runs standalone `AgentTask` objects with no owner or earlier-step conversation. Each step sees only its own prompt. | Uses Flow `RESET` for every step. Each step sees only its current task role, task message, and tools. |
+
+For `then: return`, both targets restore the owner's pre-group context and
+return only the typed step results. LiveKit restores a copied `ChatContext`.
+Pipecat restores the agent system instruction plus its message-and-tool
+snapshot, then adds the results as a developer message.
+
+### Transfer between agents
+
+Agent transfers use the same five `history` values, but they start another
+agent instead of a temporary task.
+
+| `context.history` | LiveKit transfer | Pipecat transfer today |
+|---|---|---|
+| `full` | Copies the full conversation without the source agent's instructions. The destination uses its own instructions. | Uses the native worker handoff with the running context. This is the only history mode the current driver emits. |
+| `messages` | Keeps user and assistant messages only. | Driver gate. |
+| `last_n` | Keeps the newest `max_messages` context items. | Driver gate. |
+| `summary` | Runs the named summarizer and gives the destination its result. | Driver gate. |
+| `reset` | Starts the destination without prior conversation; a handoff marker can still be present. | Driver gate. |
+
+LiveKit also emits `include_tool_calls: false` and a subset list for
+`context.variables`. Pipecat currently accepts tool calls and
+`context.variables: all` only. See the complete field rules in the
+[controls reference](../reference/controls.md) and the
+[tasks reference](../reference/tasks.md).
+
+### Choose the smallest useful context
+
+Use the narrowest history that still contains the facts the receiver needs.
+
+- Use `reset` when the task is self-contained.
+- Use `messages` when dialogue matters but tool history doesn't.
+- Use `last_n` when only recent turns matter.
+- Use `summary` for long conversations when an extra summarizer call costs less
+  than repeatedly sending the full transcript.
+- Use `full` when the receiver needs the complete conversation or tool history.
+
+On Pipecat today, single tasks and transfers require `full`. Use an isolated
+task group only when its steps genuinely don't need the earlier conversation;
+`RESET` reduces tokens by discarding that context, not by compressing it.
 
 ## Expect target differences at explicit boundaries
 

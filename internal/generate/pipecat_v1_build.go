@@ -213,6 +213,8 @@ func setImportNeeds(data *pipecatData) {
 			data.HasFlows = true // tasks run as Flows on the owning worker (C8)
 			if d.Then == "end" {
 				data.NeedsEndFrame = true
+			} else {
+				data.NeedsRoleRestore = true
 			}
 			if d.Isolated {
 				data.HasIsolated = true
@@ -411,6 +413,9 @@ func buildDelegate(agent *ir.Agent, ref string, c *ir.Delegate, env *envSet) (pi
 // finish-function schema derived from the typed result (V1). The node runs on
 // the owning agent's LLM; per-task model is gated (no LLMSwitcher, B7).
 func buildTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (pipecatTask, error) {
+	if strings.TrimSpace(task.Instructions) == "" {
+		return pipecatTask{}, fmt.Errorf("task %q instructions must not be empty", name)
+	}
 	built := pipecatTask{
 		Name: name, Prompt: task.Instructions,
 		ResultProps:    pyLiteral(resultProperties(task.Result)),

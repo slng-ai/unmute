@@ -44,7 +44,11 @@ Then add `run_collect` to the intake agent's `tools:` list, exactly like any oth
 
 ## Reading the pieces
 
-**`instructions`** is the task's own prompt. The task is a fresh worker with this prompt, not the calling agent.
+**`instructions`** is the task's own prompt. LiveKit and Pipecat use it instead
+of the calling agent's instructions while the task runs. Pipecat emits it as
+the Flow node's `role_message`. The
+[context strategy map](../concepts/how-targets-run-your-agent.md#compare-context-strategies)
+shows every supported value.
 
 **`model`** is optional and not shown here. Leave it out and the task runs on the delegating agent's model. Set it to run the task on a specific model, for example a stronger one for a careful extraction. Know that this override currently **fails on Pipecat** (the compiler tells you; see the [tasks reference](../reference/tasks.md)), which is why this page leaves it out.
 
@@ -58,13 +62,18 @@ Then add `run_collect` to the intake agent's `tools:` list, exactly like any oth
 
 ## What Pipecat generates
 
-The task runs as a **Pipecat Flow** on the agent that delegated it. Nothing new starts talking: for the duration of the task, the agent's own prompt and tools are swapped for the task's prompt, the task's tools, and one extra `finish` function whose arguments are exactly your `result` map:
+The task runs as a **Pipecat Flow** on the agent that delegated it. Nothing new
+starts talking. The Flow keeps the running context, replaces the current system
+instruction with the task prompt, and replaces the agent's tools with the
+task's tools plus one extra `finish` function whose arguments are exactly your
+`result` map:
 
 ```python
 def _run_collect_node_collect(self) -> NodeConfig:
     return NodeConfig(
         name="collect",
-        task_messages=[{"role": "system", "content": "Read the conversation so far..."}],
+        role_message="Read the conversation so far...",
+        task_messages=[{"role": "developer", "content": "Begin this step."}],
         functions=[FlowsFunctionSchema(
             name="finish_run_collect_collect",
             description="Record the result of this step and finish.",
@@ -84,8 +93,14 @@ Your `result` map became the `finish` function's strict schema, so the answer re
 async def run_collect(self, params: FunctionCallParams):
     """Collect the caller's account details."""
     self._run_collect_results = {}
-    self._run_collect_snapshot = ([dict(m) for m in _CONTEXT.get_messages()], _CONTEXT.tools)
-    flow = FlowManager(llm=self.llm, context_aggregator=LLMContextAggregatorPair(_CONTEXT), worker=self)
+    self._run_collect_snapshot = (
+        [dict(m) for m in self.context.get_messages()], self.context.tools
+    )
+    flow = FlowManager(
+        llm=self.llm,
+        context_aggregator=LLMContextAggregatorPair(self.context),
+        worker=self,
+    )
     await flow.initialize(self._run_collect_node_collect())
     return {"status": "running the collect task"}
 ```
@@ -95,18 +110,26 @@ And when the model calls `finish`, the handler records the result, runs your `as
 ```python
 async def _run_collect_finish_collect(self, args, flow_manager):
     self._run_collect_results["collect"] = dict(args)
-    STATE.verified = self._run_collect_results["collect"]["verified_flag"]
+    self.state.verified = self._run_collect_results["collect"]["verified_flag"]
     messages, tools = self._run_collect_snapshot
-    _CONTEXT.set_messages(messages + [{
+    await self.queue_frame(LLMUpdateSettingsFrame(
+        delta=LLMSettings(system_instruction="You are the intake agent."),
+    ))
+    self.context.set_messages(messages + [{
         "role": "developer",
         "content": "Task results: " + json.dumps(self._run_collect_results)
         + " Continue with the caller in one short line.",
     }])
-    _CONTEXT.set_tools(tools)
+    self.context.set_tools(tools)
     return {"status": "ok"}, None
 ```
 
-The `STATE.verified = ...` line is your `assign` in action, and the snapshot-restore around the flow is why the agent's memory only ever gains the results, never the task's inner back-and-forth. LiveKit gets the same guarantees through completely different machinery; if you are curious, read [how targets run your agent](../concepts/how-targets-run-your-agent.md).
+The `self.state.verified = ...` line is your `assign` in action. Pipecat's
+snapshot-restore means the agent's memory gains the results, not the task's
+inner back-and-forth. LiveKit isolates the task's entry prompt, but its current
+standalone-task completion path merges user and assistant task turns back into
+the owner. See [how targets run your agent](../concepts/how-targets-run-your-agent.md)
+for the complete boundary map.
 
 ## What just got harder
 

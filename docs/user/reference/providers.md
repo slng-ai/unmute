@@ -207,4 +207,4 @@ These fire at `unmute validate`, and the same rulebook backs generation, so a sp
 
 ## Adding a provider
 
-If a framework already integrates a provider that is missing here, adding it is one catalogue entry plus tests; see the recipe in [PROVIDER_CATALOG.md](../../../PROVIDER_CATALOG.md). Every entry carries a verification date and a docs URL, and the resolution golden (`internal/generate/testdata/golden/catalog_resolution.txt`) shows the exact emitted call for every entry.
+If a framework already integrates a provider that is missing here, adding it is one catalogue entry plus tests; see the recipe in [PROVIDER_CATALOG.md](../../PROVIDER_CATALOG.md). Every entry carries a verification date and a docs URL, and the resolution golden (`internal/generate/testdata/golden/catalog_resolution.txt`) shows the exact emitted call for every entry.

@@ -24,7 +24,11 @@ Everything Unmute generates for Pipecat is built on Pipecat's **workers** model.
 - A single **main worker** owns the transport and the listen (speech-to-text) step. It hears the caller.
 - **Each agent is its own worker**, with its own reasoning model and its own voice. Only one agent is active at a time.
 - **A handoff** (`agent_transfer`) is one worker activating another and stepping aside.
-- **A task or task group** runs as a Pipecat Flow on the agent that delegated it: the agent's prompt and tools are swapped for the step's, then restored when the step finishes with its typed result. No extra worker is involved.
+- **A task or task group** runs as a Pipecat Flow on the agent that delegated
+  it. With `history: full`, the Flow keeps the agent's running context and
+  replaces its system instruction with the current task prompt. It replaces
+  the tools for the step, then restores the owner's system instruction,
+  messages, and tools when the step finishes. No extra worker is involved.
 
 So a two-agent, one-task spec becomes a main worker plus two agent workers, wired together, with the task living inside its delegating agent. You never edit this; you change the spec and recompile. (For how the same yaml lowers on LiveKit, see [how targets run your agent](../concepts/how-targets-run-your-agent.md).)
 
@@ -191,7 +195,12 @@ Some features are in the schema and Pipecat itself supports them, but this first
 - **`mcp` tools.** Use `webhook` or `local` Python-handler tools, which are
   emitted.
 - **Warm human transfer.** The direct-carrier state machine is not enabled.
-- **Handoff and task context shaping beyond the defaults:** any `history` other than `full`, a subset `context.variables` list rather than `all`, and `include_tool_calls: false`. The handoff carries the running context; finer shaping is not written yet.
+- **Handoff and task context shaping beyond the defaults:** any `history` other
+  than `full`, a subset `context.variables` list rather than `all`, and
+  `include_tool_calls: false`. The handoff carries the running context; finer
+  shaping is not written yet. The
+  [context strategy map](../concepts/how-targets-run-your-agent.md#compare-context-strategies)
+  shows the exact task, group, and transfer boundaries.
 
 If you stay within the feature table above, you will not hit any of these. When you do use one, the failure names it, so you are never surprised.
 

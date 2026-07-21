@@ -25,6 +25,7 @@ from pipecat.bus import BusBridgeProcessor
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, FlowsFunctionSchema, NodeConfig
 from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
 from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.frames.frames import LLMUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -35,6 +36,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
+from pipecat.services.settings import LLMSettings
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
@@ -230,7 +232,8 @@ class IntakeAgent(TracedLLMWorker):
     def _run_collect_node_collect(self) -> NodeConfig:
         return NodeConfig(
             name="collect",
-            task_messages=[{"role": "system", "content": "Ask for the caller's email, look them up, and confirm their account tier."}],
+            role_message="Ask for the caller's email, look them up, and confirm their account tier.",
+            task_messages=[{"role": "developer", "content": "Begin this step."}],
             functions=[
                 FlowsFunctionSchema(
                     name="lookup_customer",
@@ -256,6 +259,10 @@ class IntakeAgent(TracedLLMWorker):
         # then: return — restore the owner's pre-flow context (messages and
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._run_collect_snapshot
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(system_instruction="# Intake agent (placeholder prompt)\n\nYou are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.\n\n- Greet the caller and find out what they need.\n- When they give a phone number or email, use `lookup_customer` to find their record.\n- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.\n- Never guess account details. If you cannot find the customer, say so and ask again.\n"),
+        ))
+        await self.flush_pipeline()
         self.context.set_messages(messages + [{
             "role": "developer",
             "content": "Task results: " + json.dumps(self._run_collect_results) + " Continue with the caller in one short line.",
@@ -281,7 +288,8 @@ class IntakeAgent(TracedLLMWorker):
     def _run_triage_node_collect(self) -> NodeConfig:
         return NodeConfig(
             name="collect",
-            task_messages=[{"role": "system", "content": "Ask for the caller's email, look them up, and confirm their account tier."}],
+            role_message="Ask for the caller's email, look them up, and confirm their account tier.",
+            task_messages=[{"role": "developer", "content": "Begin this step."}],
             functions=[
                 FlowsFunctionSchema(
                     name="lookup_customer",
@@ -307,6 +315,10 @@ class IntakeAgent(TracedLLMWorker):
         # then: return — restore the owner's pre-flow context (messages and
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._run_triage_snapshot
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(system_instruction="# Intake agent (placeholder prompt)\n\nYou are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.\n\n- Greet the caller and find out what they need.\n- When they give a phone number or email, use `lookup_customer` to find their record.\n- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.\n- Never guess account details. If you cannot find the customer, say so and ask again.\n"),
+        ))
+        await self.flush_pipeline()
         self.context.set_messages(messages + [{
             "role": "developer",
             "content": "Task results: " + json.dumps(self._run_triage_results) + " Continue with the caller in one short line.",

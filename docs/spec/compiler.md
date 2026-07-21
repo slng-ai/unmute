@@ -1,6 +1,6 @@
 # SPEC — unmute v1 compiler core (Load → Build → Validate)
 
-Source of truth for the schema: [SCHEMA.md](../../SCHEMA.md) (locked v1). Reasons/research: [ORCHESTRATOR_SHARED_CONFIGURATION.md](../../ORCHESTRATOR_SHARED_CONFIGURATION.md). When code and SCHEMA.md disagree, SCHEMA.md wins (CLAUDE.md).
+Source of truth for the schema: [SCHEMA.md](../SCHEMA.md) (locked v1). Reasons/research: [ORCHESTRATOR_SHARED_CONFIGURATION.md](../ORCHESTRATOR_SHARED_CONFIGURATION.md). When code and SCHEMA.md disagree, SCHEMA.md wins (CLAUDE.md).
 
 Scope of THIS spec: the target-independent core — `spec.Load → ir.Build → ir.Validate` — plus jsonschema-go schema derivation, the per-target capability-gating engine, and the shared **generation socket** (the `Generate` dispatch function and the rule that generation only runs after a clean validate). The five per-target emitters live in sibling driver specs, each consuming this core:
 

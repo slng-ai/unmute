@@ -1,6 +1,6 @@
 # SPEC — Unmute console (create + maintain)
 
-Consumes the core: [compiler.md](compiler.md). Driver lowering stays in [driver-pipecat.md](driver-pipecat.md), [driver-livekit.md](driver-livekit.md), [driver-deepgram.md](driver-deepgram.md), [driver-vapi.md](driver-vapi.md), and [driver-elevenlabs.md](driver-elevenlabs.md). Provider facts live in [PROVIDER_CATALOG.md](../../PROVIDER_CATALOG.md) + `internal/target/catalog_*.go`; schema truth remains [SCHEMA.md](../../SCHEMA.md). This spec owns the interactive console in `internal/tui` + its `internal/cli` entry/actions, not schema or driver lowering.
+Consumes the core: [compiler.md](compiler.md). Driver lowering stays in [driver-pipecat.md](driver-pipecat.md), [driver-livekit.md](driver-livekit.md), [driver-deepgram.md](driver-deepgram.md), [driver-vapi.md](driver-vapi.md), and [driver-elevenlabs.md](driver-elevenlabs.md). Provider facts live in [PROVIDER_CATALOG.md](../PROVIDER_CATALOG.md) + `internal/target/catalog_*.go`; schema truth remains [SCHEMA.md](../SCHEMA.md). This spec owns the interactive console in `internal/tui` + its `internal/cli` entry/actions, not schema or driver lowering.
 
 ## §G goal
 Make the TUI the Unmute console: bare `unmute` on a TTY opens **Create a new agent | Open an existing agent | Quit**. Create edits `scaffold.Data` in memory and writes only after confirmation. Open discovers an existing v1 package, loads it through `spec.Load`, exposes the same section editors, and adds Validate / Compile / Save without leaving the console.

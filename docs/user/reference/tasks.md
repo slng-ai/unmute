@@ -32,7 +32,9 @@ Tier support for a single task across the five:
 
 ### instructions
 
-Path to the task's own prompt. The task runs as a fresh worker with this prompt, not the calling agent.
+Path to the task's own prompt. LiveKit uses it instead of the calling agent's
+instructions. Pipecat emits it as the Flow node's `role_message`, which
+replaces the owning agent's system instruction while the task runs.
 
 Required: yes. Values: a path. Default: none.
 
@@ -59,7 +61,10 @@ Required: yes. Values: a flat map, each field one of `string | number | boolean 
 
 ### context
 
-What the task can see. It is the transfer context block **without** `variables` (a task shares the call state automatically), with `history` required.
+What the task can see. It is the transfer context block **without** `variables`
+(a task shares the call state automatically), with `history` required. See the
+[single-task context map](../concepts/how-targets-run-your-agent.md#enter-a-single-task)
+for the exact LiveKit and Pipecat inputs.
 
 Required: yes. Values: see [controls](controls.md) history values. Default: none. Tag: gated.
 
