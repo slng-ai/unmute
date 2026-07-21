@@ -57,6 +57,7 @@ import asyncio
 import time
 
 import agent
+import tracing
 from livekit import rtc
 from livekit.agents import (
     Agent,
@@ -256,9 +257,9 @@ async def main() -> None:
 
         @session.on("metrics_collected")
         def _trace_speech(ev) -> None:
-            if isinstance(ev.metrics, agent.STTMetrics):
+            if isinstance(ev.metrics, tracing.STTMetrics):
                 pending_stt_metrics.append(ev.metrics)
-            elif isinstance(ev.metrics, agent.TTSMetrics):
+            elif isinstance(ev.metrics, tracing.TTSMetrics):
                 pending_tts_metrics.append(ev.metrics)
 
         @session.on("conversation_item_added")
@@ -266,7 +267,7 @@ async def main() -> None:
             text = getattr(ev.item, "raw_text_content", None)
             role = getattr(ev.item, "role", None)
             if role == "user" and text and pending_stt_metrics:
-                agent.trace_speech_metrics(
+                tracing.trace_speech_metrics(
                     provider,
                     pending_stt_metrics,
                     input_value="audio",
@@ -275,7 +276,7 @@ async def main() -> None:
                 )
                 pending_stt_metrics.clear()
             elif role == "assistant" and text and pending_tts_metrics:
-                agent.trace_speech_metrics(
+                tracing.trace_speech_metrics(
                     provider,
                     pending_tts_metrics,
                     input_value=text,

@@ -113,7 +113,6 @@ from pipecat_slng import SlngTTSService
 load_dotenv()
 
 MAIN_NAME = "main"
-
 REQUIRED_ENV = [
     "DAILY_API_KEY",
     "DEEPGRAM_API_KEY",
@@ -132,7 +131,6 @@ def require_env() -> None:
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
-
 
 
 
@@ -353,7 +351,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
             "intake",
             args=LLMWorkerActivationArgs(run_llm=False),
         )
-        await next(agent for agent in AGENTS if agent.name == "intake").queue_frame(
+        await next(agent for agent in agents if agent.name == "intake").queue_frame(
             TTSSpeakFrame("Hi, you have reached Acme Support. How can I help you today?")
         )
 

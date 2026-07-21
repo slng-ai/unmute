@@ -458,6 +458,9 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		{"Dockerfile", "Dockerfile"},
 		{"livekit.toml", "livekit.toml"},
 	}
+	if data.Tracing {
+		outputs = append(outputs, struct{ tmpl, path string }{"tracing.py", "tracing.py"})
+	}
 	if data.Telephony != nil {
 		outputs = append(outputs, struct{ tmpl, path string }{"compose.telephony.yaml", "compose.telephony.yaml"})
 	}

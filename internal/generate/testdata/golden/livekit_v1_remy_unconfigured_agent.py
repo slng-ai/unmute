@@ -4,7 +4,6 @@ import os
 from dataclasses import dataclass
 import httpx
 from dotenv import load_dotenv
-
 from livekit.agents import (
     NOT_GIVEN,
     Agent,
@@ -23,16 +22,14 @@ from livekit.agents import (
     metrics,
 )
 from livekit.agents.beta.workflows import TaskGroup
-
 from livekit.agents.voice import MetricsCollectedEvent
-
 from livekit.plugins import openai, silero, slng
+
 
 logger = logging.getLogger("livekit")
 logger.setLevel(logging.INFO)
 
 load_dotenv(".env.local")
-
 
 
 # --- prompts ---------------------------------------------------------------
@@ -304,7 +301,6 @@ server.setup_fnc = prewarm
 
 @server.rtc_session(agent_name="livekit")
 async def entrypoint(ctx: JobContext) -> None:
-
     session = AgentSession[Userdata](
         userdata=Userdata(),
         stt=slng.STT(api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3-en", language="en"),
@@ -322,10 +318,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
-
         metrics.log_metrics(ev.metrics)
-
-
 
     async def _end_if_still_away() -> None:
         await asyncio.sleep(30)  # inactivity.end_after
