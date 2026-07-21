@@ -47,7 +47,7 @@ url_env, allowed_tools keeping D8 visibility. */ -}}
 {{if .NeedsAsyncio}}import asyncio
 {{end}}{{if .Tracing}}from collections.abc import Sequence
 {{end}}{{if .NeedsInspect}}import inspect
-{{end}}{{if .Outbound}}import json
+{{end}}{{if or .Outbound .Telephony}}import json
 {{end}}import logging
 import os
 {{if .HasVars}}from dataclasses import dataclass
@@ -251,6 +251,94 @@ class Userdata:
 {{- end}}
 
 {{end}}
+{{- if .Telephony}}
+# --- LiveKit SIP call context -----------------------------------------------
+# UNVERIFIED: Recheck these LiveKit-specific APIs with the LiveKit docs MCP.
+# They were verified against docs.livekit.io on 2026-07-20 because MCP was not
+# available during generation.
+def _livekit_job_metadata(raw: str) -> dict:
+    if not raw:
+        return {}
+    try:
+        metadata = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("LiveKit job metadata must be valid JSON") from exc
+    if not isinstance(metadata, dict):
+        raise RuntimeError("LiveKit job metadata must be a JSON object")
+    return metadata
+
+
+def _livekit_call_start(metadata: dict) -> dict:
+    call_start = metadata.get("call_start", {})
+    if not isinstance(call_start, dict):
+        raise RuntimeError("call_start must be a JSON object")
+    missing = []
+{{- range .Telephony.CallStart}}
+    if {{pyq .Name}} in call_start:
+        value = call_start[{{pyq .Name}}]
+        if not ({{.TypeCheck}}):
+            raise RuntimeError({{pyq (printf "call_start.%s must be %s" .Name .Type)}})
+{{- if .Required}}
+    else:
+        missing.append({{pyq .Name}})
+{{- end}}
+{{- end}}
+    if missing:
+        raise RuntimeError("Missing call_start fields: " + ", ".join(missing))
+    return call_start
+
+
+def _livekit_call_context(room_name: str, participant, metadata: dict) -> dict:
+    expected_direction = (
+        "outbound" if "phone_number" in metadata else "inbound"
+    )
+    direction = metadata.get("direction") or expected_direction
+    if direction != expected_direction:
+        raise RuntimeError("call direction does not match the LiveKit job")
+    attributes = participant.attributes
+    remote_number = attributes.get("sip.phoneNumber")
+    trunk_number = attributes.get("sip.trunkPhoneNumber")
+    return {
+        "session_id": room_name,
+        "carrier": {{pyq .Telephony.Carrier}},
+        "connection": {{pyq .Telephony.Connection}},
+        "call_id": attributes.get("sip.callID"),
+        "direction": direction,
+        "from_number": trunk_number if direction == "outbound" else remote_number,
+        "to_number": remote_number if direction == "outbound" else trunk_number,
+    }
+
+
+{{- if .HasVars}}
+def _hydrate_livekit_context(userdata: Userdata, context: dict, call_start: dict) -> None:
+    missing = []
+{{- range .Telephony.SystemSources}}
+    value = context.get({{pyq .Source}})
+    if value in (None, ""):
+        missing.append({{pyq .Source}})
+    else:
+        userdata.{{.Variable}} = value
+{{- end}}
+{{- range .Telephony.CallStart}}
+    if {{pyq .Name}} in call_start:
+        userdata.{{.Name}} = call_start[{{pyq .Name}}]
+{{- end}}
+    if missing:
+        raise RuntimeError("Missing LiveKit SIP context fields: " + ", ".join(missing))
+
+
+{{- end}}
+async def _livekit_entry_greeting(session: AgentSession) -> None:
+{{- if .Telephony.Greeting.Say}}
+    await session.say({{pyq .Telephony.Greeting.Say}})
+{{- else if .Telephony.Greeting.RunLLM}}
+    session.generate_reply(instructions="Greet the caller and offer to help.")
+{{- else}}
+    pass  # the caller speaks first
+{{- end}}
+
+
+{{- end}}
 {{- if .IgnorePhrases}}
 # --- interruption shaping ----------------------------------------------------
 IGNORE_PHRASES = [{{range $i, $p := .IgnorePhrases}}{{if $i}}, {{end}}{{pyq $p}}{{end}}]
@@ -447,7 +535,23 @@ def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
 
 
+{{- if .Telephony}}
+MAX_SESSIONS = {{.MaxSessions}}
+
+
+def telephony_load(agent_server: AgentServer) -> float:
+    return min(len(agent_server.active_jobs) / MAX_SESSIONS, 1.0)
+
+
+server = AgentServer(
+    port=int(os.getenv("UNMUTE_AGENT_HEALTH_PORT", "8081")),
+    drain_timeout={{.DrainTimeoutSecs}},
+    load_threshold=1.0,
+)
+server.load_fnc = telephony_load
+{{- else}}
 server = AgentServer()
+{{- end}}
 server.setup_fnc = prewarm
 
 
@@ -556,7 +660,73 @@ async def entrypoint(ctx: JobContext) -> None:
         session.shutdown()  # inactivity.end_after with no nudge
 {{- end}}
 {{- end}}
+{{if .Telephony}}
+    metadata = _livekit_job_metadata(ctx.job.metadata)
+    call_start = _livekit_call_start(metadata)
+    outbound_job = "phone_number" in metadata
+    phone_number = metadata.get("phone_number")
+    await ctx.connect()
 
+    if outbound_job:
+{{- if .Outbound}}
+        if (
+            not isinstance(phone_number, str)
+            or not phone_number.startswith("+")
+            or not phone_number[1:].isdigit()
+            or not 8 <= len(phone_number) <= 16
+        ):
+            raise RuntimeError("phone_number must be an E.164 number")
+        await session.start(agent={{.EntryClass}}(), room=ctx.room)
+        if not session.room_io:
+            raise RuntimeError("session room_io is unavailable")
+        session.room_io.set_participant("phone_user")
+        async with AMD(session, participant_identity="phone_user") as detector:
+            await ctx.api.sip.create_sip_participant(
+                api.CreateSIPParticipantRequest(
+                    room_name=ctx.room.name,
+                    sip_trunk_id=os.environ["LIVEKIT_SIP_OUTBOUND_TRUNK"],
+                    sip_call_to=phone_number,
+                    participant_identity="phone_user",
+                    wait_until_answered=True,
+                )
+            )
+            participant = await ctx.wait_for_participant(identity="phone_user")
+            amd_result = await detector.execute()
+{{- else}}
+        raise RuntimeError("this LiveKit SIP route does not accept outbound jobs")
+{{- end}}
+    else:
+{{- if .Telephony.HasInbound}}
+        participant = await ctx.wait_for_participant()
+{{- else}}
+        raise RuntimeError("outbound LiveKit SIP job metadata requires phone_number")
+{{- end}}
+
+    call_context = _livekit_call_context(ctx.room.name, participant, metadata)
+{{- if .HasVars}}
+    _hydrate_livekit_context(session.userdata, call_context, call_start)
+{{- end}}
+    if not outbound_job:
+        await session.start(agent={{.EntryClass}}(), room=ctx.room)
+{{- if .Outbound}}
+    else:
+        if amd_result.category == "machine-vm":
+{{- if .Outbound.LeaveMessage}}
+            handle = session.generate_reply(
+                instructions="You reached voicemail. Leave a brief message and say you will call back."
+            )
+            await handle.wait_for_playout()
+            ctx.shutdown("voicemail: left a message")  # on_voicemail: leave_message
+{{- else}}
+            ctx.shutdown("voicemail detected")  # on_voicemail: hangup
+{{- end}}
+            return
+        if amd_result.category == "machine-unavailable":
+            ctx.shutdown("mailbox unavailable")
+            return
+{{- end}}
+    await _livekit_entry_greeting(session)
+{{- else}}
     await session.start(agent={{.EntryClass}}(), room=ctx.room)
     await ctx.connect()
 {{- if .Outbound}}
@@ -595,6 +765,7 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- end}}
         elif result.category == "machine-unavailable":
             ctx.shutdown("mailbox unavailable")
+{{- end}}
 {{- end}}
 {{- if .MaxDurationSecs}}
 

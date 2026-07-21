@@ -393,21 +393,126 @@ channels:
     on_voicemail: leave_message
 ```
 
-Resolve the symbolic destination for each LiveKit target.
+Declare one SIP Connection. The keys stay the same across supported SIP
+carriers; only their environment-variable names and values change.
+
+```yaml
+# connections/primary_phone.yaml
+kind: telephony
+environment:
+  sip_address: TWILIO_SIP_ADDRESS
+  sip_username: TWILIO_SIP_USERNAME
+  sip_password: TWILIO_SIP_PASSWORD
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+The carrier matrix makes those values explicit:
+
+| Route | Carrier | Connection environment values | Generated integration | Status |
+|---|---|---|---|---|
+| `sip` | Twilio | `TWILIO_SIP_ADDRESS`, `TWILIO_SIP_USERNAME`, `TWILIO_SIP_PASSWORD`, `TWILIO_PHONE_NUMBER` | Self-hosted LiveKit SIP and Twilio trunk inputs | Offline-tested; provisional |
+| `sip` | Telnyx | `TELNYX_SIP_ADDRESS`, `TELNYX_SIP_USERNAME`, `TELNYX_SIP_PASSWORD`, `TELNYX_PHONE_NUMBER` | Self-hosted LiveKit SIP and Telnyx trunk inputs | Offline-tested; provisional |
+| `sip` | Plivo | `PLIVO_SIP_ADDRESS`, `PLIVO_SIP_USERNAME`, `PLIVO_SIP_PASSWORD`, `PLIVO_PHONE_NUMBER` | Self-hosted LiveKit SIP and Plivo trunk inputs | Offline-tested; provisional |
+| `sip` | Exotel | Exotel SIP values | No emitted setup | Gated pending provider-specific proof |
+| `connector` | Twilio | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | No emitted adapter | Recognized Beta route; gated |
+
+Every SIP row still fails public validation until its credentialed route smoke
+passes. The SIP emitter contains inbound, outbound, voicemail, hangup,
+cold-transfer, and warm-transfer paths. The Twilio Connector currently has only
+route and credential vocabulary; Unmute does not emit a Connector adapter.
+
+Bind the Connection and symbolic destinations to the exact route.
 
 ```yaml
 # targets.yaml
 targets:
   livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    transport: sip
+    carrier: twilio
+    connection: primary_phone
     destinations:
       support_line: "+14155550123"
 ```
 
-Use `mode: cold` for a direct transfer. LiveKit warm transfer accepts
-`briefing: summary`; `message` and `wait` don't have faithful LiveKit mappings.
-Warm transfer is Beta in the Python SDK. Outbound calls support
-`on_voicemail: hangup` and `on_voicemail: leave_message`, and require the
-LiveKit outbound SIP trunk environment setting.
+Bind a target to the self-hosted `sip` route and one telephony Connection. The
+distinct Beta Twilio `connector` route remains gated and cannot inherit SIP
+transfer behavior.
+
+To configure several carriers, declare several LiveKit targets, such as
+`livekit_twilio` and `livekit_plivo`, and bind each to its own Connection. Each
+will compile to a separate project and SIP setup after its exact route is
+promoted; today each fails closed independently. See
+[phone calls](../learn/07-phone-calls.md#configure-multiple-carriers) for a full
+Pipecat and LiveKit example.
+
+The offline emitter's `.env.example` names every deployment value. It is
+visible in generator tests but is not obtainable through public compilation
+while the route is provisional. After promotion, get the LiveKit API key pair
+from the self-hosted server's `keys` configuration, set `LIVEKIT_URL` to that
+server, and set `REDIS_URL` to the Redis deployment shared by LiveKit Server
+and LiveKit SIP. Set `LIVEKIT_SIP_URI` to the SIP service's public DNS name or
+SIP URI. Local `unmute dev --telephony` will supply its own clearly
+non-production LiveKit key pair and Redis connection instead.
+
+For Twilio, get the SIP address, Credential List username and password, and
+associated number from **Elastic SIP Trunking** in the Twilio Console. For
+Telnyx, use the SIP connection address, credentials, and assigned number from
+Telnyx Mission Control. For Plivo, use the Zentrunk termination domain,
+outbound credential, and linked number from the Plivo Console.
+
+After promotion, compilation will emit the selected
+`sip-inbound-trunk.json`, `sip-outbound-trunk.json`, and
+`sip-dispatch-rule.json` inputs. Materialize their environment placeholders
+with `envsubst`, then run the `lk sip ... create` commands in the generated
+README. Copy the returned IDs to `LIVEKIT_SIP_INBOUND_TRUNK` and
+`LIVEKIT_SIP_OUTBOUND_TRUNK` as requested by `.env.example`.
+
+Self-hosted SIP runs LiveKit Server and LiveKit SIP against the same Redis.
+Redis is their shared datastore and message bus, so calls, SIP participants,
+and Agent dispatch remain coherent when either service has multiple replicas.
+It is not an audio buffer. Audio flows through SIP/RTP and LiveKit's media
+services. Pipecat's media and conversation remain in one long-lived worker too,
+but its generated telephony application uses Redis for correlation, callback
+idempotency, transfer locks, and admission. LiveKit's generated Agent does not
+use Redis; LiveKit Server and LiveKit SIP are the consumers.
+
+An HTTPS development tunnel isn't enough for LiveKit SIP. The carrier must
+reach SIP signaling and RTP directly; the local defaults are SIP port `5060`
+and UDP RTP ports `10000-10100`. Production must configure a range sized for
+its traffic. The generated worker itself exposes LiveKit's `/` health endpoint,
+which returns success only while the worker is connected and operating
+normally.
+
+This is the intended local SIP command after promotion:
+
+```sh
+unmute dev acme --target livekit --telephony
+```
+
+Today it reports the provisional route before checking credentials or Docker
+and does not emit the Compose graph. Once the route is promoted, Docker Compose
+will build the Agent and start Redis, LiveKit Server, and LiveKit SIP, then wait
+for every health check. Non-empty external `LIVEKIT_URL`, API key/secret, or
+`REDIS_URL` values will conflict with this local graph and be rejected.
+`--verbose` will follow Compose logs; normal output will be retained in
+`build/livekit/telephony.log`. Stopping will preserve the named Redis volume.
+
+The local trunk IDs come from the local server, so bootstrap the promoted
+artifact in two phases. From its generated directory, first run:
+
+```sh
+docker compose -f compose.telephony.yaml up -d redis livekit_server livekit_sip
+```
+
+Point `lk` at that server using the generated development key pair, create the
+needed trunks and dispatch rule, export the returned
+`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK`, and then run the
+full command. The current validation gate prevents obtaining this Compose file
+through `unmute compile`; these steps describe the post-promotion bootstrap,
+not a workaround around the gate.
 
 ## Run it and talk to the agent
 
@@ -462,8 +567,8 @@ remaining boundaries are explicit YAML choices, not silent omissions.
 | Webhook, local, and MCP tools | Supported |
 | Non-default tool `interruption` | Warns; tools run to completion |
 | Conversation shaping block | Supported |
-| Cold and warm human transfer | Supported; warm summary is Beta |
-| Outbound calls and voicemail | Supported |
+| New `sip` telephony route | Provisional pending credentialed route smokes |
+| Beta Twilio `connector` route | Recognized but gated; no emitted adapter, and never inherits SIP capabilities |
 | A `provider: local` model (listen, speak, or think) | Supported |
 | `speak.endpoint_env` | Rejected; no LiveKit integration slot |
 | Warm `briefing: message` or `wait` | Rejected; use `summary` |

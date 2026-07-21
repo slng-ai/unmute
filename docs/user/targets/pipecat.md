@@ -37,10 +37,15 @@ So a two-agent, one-task spec becomes a main worker plus two agent workers, wire
 | `bot.py` | The whole agent: the pipeline, every agent worker, every task flow, tools, handoffs. |
 | `pyproject.toml` | Pinned dependencies. Only the services your spec uses are included. |
 | `Dockerfile` | A container image for deployment. |
-| `pcc-deploy.toml` | Pipecat Cloud deploy config. |
+| `pcc-deploy.toml` | Pipecat Cloud deploy config for non-telephony targets. |
+| `compose.telephony.yaml` | The generated application plus version-pinned Redis for telephony targets. |
 | `README.md` | A quickstart for the generated project. |
 | `.env.example` | The exact environment variables this spec needs, ready to copy to `.env`. |
 | `compile-report.json` | A machine-readable record of what was compiled: target, version, agents, required env, and any warnings. |
+
+That command works for non-telephony Pipecat targets. Telephony targets are
+currently provisional or gated, so public validation stops before any of their
+offline-tested files, including `compose.telephony.yaml`, are written.
 
 The output folder is rewritten from scratch on every compile, so never edit it by hand. `bot.py` carries only the imports and code your spec actually exercises: no tools means no HTTP client import, no tasks means no task machinery. The emitted pipeline stays clean.
 
@@ -77,7 +82,6 @@ targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: daily-sip
 ```
 
 ### Map providers to services
@@ -102,7 +106,40 @@ uses the local VAD. Semantic endpointing is also advisory.
 ### Transport
 
 - **WebRTC** is the default and is what `unmute dev` uses to serve a browser test client. You do not configure it.
-- **`transport: daily-sip`** is needed for a cold human transfer (dialing a real phone number over SIP). Set it on the target when you use `human_transfer`.
+- **`transport: carrier-websocket`** selects direct Twilio, Telnyx, or Plivo
+  media streaming for telephony. It also requires `carrier` and `connection`;
+  support is resolved for that exact tuple. The Exotel value is recognized but
+  gated until authenticated WebSocket ingress is proven.
+
+### Telephony carrier integrations
+
+Pipecat uses a separate generated adapter for each carrier. A target emits only
+the selected adapter, serializer, dependency, and Connection vocabulary.
+
+| Carrier | Connection keys | Generated integration | Status |
+|---|---|---|---|
+| Twilio | `account_sid`, `auth_token`, `from_number` | Signed webhooks and WebSocket, Twilio serializer, REST call control | Offline-tested; provisional |
+| Telnyx | `api_key`, `public_key`, `connection_id`, `from_number` | Signed webhooks, one-use WebSocket, Telnyx serializer, Call Control API | Offline-tested; provisional |
+| Plivo | `auth_id`, `auth_token`, `from_number` | Signed webhooks, one-use WebSocket, Plivo serializer, Calls API | Offline-tested; provisional |
+| Exotel | `api_key`, `api_token`, `account_sid`, `subdomain`, `from_number`, `app_id` | None | Gated pending authenticated WebSocket ingress |
+
+Use `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER` for
+the Twilio Connection; `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`,
+`TELNYX_CONNECTION_ID`, and `TELNYX_PHONE_NUMBER` for Telnyx; and
+`PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN`, and `PLIVO_PHONE_NUMBER` for Plivo. The
+Connection stores these names, while `.env` stores their values.
+
+Every generated row still fails public validation until its credentialed route
+smoke passes. The adapters contain inbound, outbound, hangup, and cold-transfer
+paths. Voicemail handling and warm transfer remain gated, so outbound cannot
+validate yet because every outbound channel must declare a voicemail policy.
+
+To configure several carriers, declare several Pipecat target instances, such
+as `pipecat_twilio` and `pipecat_telnyx`, and bind each to its own Connection.
+After promotion, each will compile to a separate project; today each fails
+closed independently. See
+[phone calls](../learn/07-phone-calls.md#configure-multiple-carriers) for a full
+Pipecat and LiveKit example.
 
 ### Version pin
 
@@ -137,7 +174,7 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | `inactivity` nudge and end | ok |
 | `max_duration` | ok |
 | `provider: local` for listen and speak | ok |
-| cold human transfer | ok, needs `transport: daily-sip` |
+| carrier WebSocket telephony | provisional for generated Twilio, Telnyx, and Plivo adapters; Exotel is gated pending authenticated WebSocket ingress |
 
 Everything in the [learn pages](../learn/01-one-agent.md), including the guarded handoff, the task, and the task group, runs here. The one hard `fail` is the per-task `model:` override; it sits with the driver gates below.
 
@@ -148,10 +185,10 @@ Some features are in the schema and Pipecat itself supports them, but this first
 - **Model fallback** (`fallback` on a think model).
 - **Per-task `model:`.** Pipecat's mechanism for switching models mid-call stalls the conversation in the current release, so there is nothing safe to emit yet. Drop the override and the task runs on the delegating agent's model.
 - **`thinking_audio`.**
-- **Outbound calls and voicemail** (`outbound: true`, `on_voicemail`).
+- **Voicemail detection** (`on_voicemail`) on carrier WebSocket routes.
 - **`mcp` tools.** Use `webhook` or `local` Python-handler tools, which are
   emitted.
-- **Warm human transfer.** Pipecat ships warm transfer, but the driver emits `cold` only.
+- **Warm human transfer.** The direct-carrier state machine is not enabled.
 - **Handoff and task context shaping beyond the defaults:** any `history` other than `full`, a subset `context.variables` list rather than `all`, and `include_tool_calls: false`. The handoff carries the running context; finer shaping is not written yet.
 
 If you stay within the feature table above, you will not hit any of these. When you do use one, the failure names it, so you are never surprised.
@@ -186,6 +223,8 @@ Read both, then test the exact behavior they point at.
 ```sh
 unmute dev acme             # talk in the browser
 unmute dev acme --console   # talk in the terminal, over your mic and speaker
+unmute dev acme --target pipecat --telephony \
+  --public-url https://agent-test.example-tunnel.dev
 ```
 
 The command selects the only target automatically; with multiple targets, it
@@ -196,13 +235,27 @@ On macOS, install PortAudio first with `brew install portaudio`. Both modes read
 keys from `.env`. Browser logs go to `build/<target>/bot.log`; add `--verbose`
 to stream them. Console mode streams directly to the terminal.
 
-**Compile only, to inspect or deploy the project:**
+The telephony command is the intended promoted-route interface. Today it fails
+with the route's credentialed-smoke diagnostic before checking
+`--public-url`, carrier credentials, or Docker, and it emits no Compose file.
+Once that exact carrier route is promoted, the command will build and run the
+emitted Docker Compose graph, wait for the Pipecat application and Redis health
+checks, and pass `--bot-port` to Compose as `UNMUTE_TELEPHONY_PORT`. Redis will
+store only bounded telephony control records; audio, transcripts, prompts,
+task state, and worker handoffs stay in the active process. Docker will not
+create public ingress, so the HTTPS/WSS tunnel named by `--public-url` must
+remain running. Telephony logs will go to `build/<target>/telephony.log`;
+`--verbose` will follow them in the terminal.
+
+**Compile only, to inspect or deploy a non-telephony project:**
 
 ```sh
 unmute compile acme --target pipecat
 ```
 
-Then, in `acme/build/pipecat/`, the generated `README.md` shows the quickstart the project supports directly:
+For a non-telephony target, `acme/build/pipecat/README.md` shows the quickstart
+the project supports directly. A telephony target does not create that
+directory until its route is promoted.
 
 ```sh
 cp .env.example .env    # fill in your keys

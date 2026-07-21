@@ -82,7 +82,7 @@ For **managed** targets: reconcile the provider's live config to your spec. Run 
 ## dev
 
 ```sh
-unmute dev <agent-dir> [--target <name>] [--console] [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
+unmute dev <agent-dir> [--target <name>] [--console | --telephony [--public-url <https-url>]] [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
 ```
 
 The fastest loop for a **Pipecat or LiveKit** instance: compiles the selected target to `build/<name>/`, runs it locally, and lets you talk to the agent — in the browser (default) or in your terminal (`--console`). Whatever you build, you can speak to.
@@ -103,8 +103,54 @@ The fastest loop for a **Pipecat or LiveKit** instance: compiles the selected ta
   through LiveKit Inference, such as a think model with `provider: livekit` or
   the cloud `turn-detector`. The preflight tells you which.
 
-- Requires `uv` on your `PATH` (see [install](../start/install.md)). Reads keys from a `.env` at the package root.
-- `--port` sets the dev UI port (default 8765); `--bot-port` sets the Pipecat runner port (default 7860). Both are web-only — `--console` and `--no-open` ignore them.
+**Telephony (`--telephony`).** All current routes are provisional or gated, so
+validation and generation fail before a Compose file is written, a public URL
+or credentials are checked, or Docker is invoked. The diagnostic names the
+exact route and its missing credentialed smoke. There is no direct-Compose
+escape hatch through the public CLI today.
+
+After an exact route is promoted, telephony mode will always run the generated
+`compose.telephony.yaml`; there is no host-process fallback or infrastructure
+flag. Every route will build the generated application and version-pinned
+Redis. LiveKit SIP will additionally start version-pinned LiveKit Server and
+LiveKit SIP. Unmute will preflight Docker Compose, wait for declared health
+checks, print the resolved service graph and carrier setup, follow Compose logs
+under `--verbose`, and stop only its deterministic project on `ctrl-c` without
+removing data volumes.
+
+`--public-url` is required only when the resolved route reports public HTTP/WSS
+endpoints, such as Pipecat carrier WebSockets. It must be the exact public HTTPS
+origin used for carrier signatures. LiveKit SIP has no HTTP callback URL; it
+instead needs carrier-reachable SIP and RTP networking. For a promoted route,
+Unmute will name missing carrier/model configuration after successful
+generation and point to the credential guide without printing values. Local
+Compose will supply Redis for both targets and the local LiveKit Server key
+pair. Explicit external LiveKit or Redis values will be rejected in LiveKit
+SIP dev mode rather than silently ignored.
+
+When a package declares several carrier routes, each one is a separate target
+and, after promotion, a separate generated Compose project. The package and
+schema can hold any number of supported routes. Today each telephony target
+fails closed; after promotion, `compile` can select several targets or all of
+them, while `dev --telephony` runs one exact route at a time. Pass its instance
+name, such as `--target pipecat_twilio` or `--target livekit_plivo`.
+
+- Browser and console modes require `uv` on your `PATH` (see
+  [install](../start/install.md)); telephony mode requires Docker with the
+  Compose plugin. All modes read keys from a `.env` at the package root.
+- `--port` sets the dev UI port (default 8765). `--bot-port` sets the generated
+  agent host port (default 7860); in telephony mode the CLI passes it to
+  Compose as `UNMUTE_TELEPHONY_PORT`. `--console` ignores both web ports.
+- Telephony Compose projects use
+  `unmute-<source-dir>-<target>-<path-hash>`. Separate projects still need
+  distinct host ports; LiveKit accepts `UNMUTE_LIVEKIT_PORT`,
+  `UNMUTE_LIVEKIT_SIP_PORT`, and `UNMUTE_LIVEKIT_RTP_PORT_RANGE` in addition to
+  `UNMUTE_TELEPHONY_PORT`.
 - `--no-open` skips opening the browser; `--verbose` streams agent logs to your terminal.
-- Web-mode agent logs are written to `build/<name>/bot.log` (Pipecat) or `agent.log` (LiveKit); console mode streams straight to your terminal. Press `ctrl-c` to stop.
-- Fails clearly if no target is declared, the selected provider has no local runner, LiveKit creds are missing where required, or `uv` is not installed.
+- Web-mode agent logs are written to `build/<name>/bot.log` (Pipecat) or
+  `agent.log` (LiveKit); telephony logs use `telephony.log`; console mode streams
+  straight to your terminal. Press `ctrl-c` to stop.
+- Fails clearly if no target is declared, the selected provider has no local
+  runner, required credentials are missing, Docker Compose or its daemon is
+  unavailable for telephony, a declared service is unhealthy, local LiveKit
+  settings conflict, or `uv` is unavailable for browser/console mode.

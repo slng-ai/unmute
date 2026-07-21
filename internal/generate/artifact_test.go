@@ -1,7 +1,10 @@
 package generate
 
 import (
+	"maps"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -9,6 +12,25 @@ import (
 	"github.com/slng/unmute/internal/spec"
 	"github.com/slng/unmute/internal/target"
 )
+
+var composeInjectedEnvironment = regexp.MustCompile(`(?m)^      - ([A-Z][A-Z0-9_]*)=.*$`)
+
+func assertComposeLocalEnvironment(t *testing.T, compose string, plan *TelephonyRuntimePlan) {
+	t.Helper()
+	seen := make(map[string]bool)
+	for _, match := range composeInjectedEnvironment.FindAllStringSubmatch(compose, -1) {
+		seen[match[1]] = true
+	}
+	if strings.Contains(compose, "redis:6379") {
+		seen["REDIS_URL"] = true
+	}
+	got := slices.Sorted(maps.Keys(seen))
+	want := slices.Clone(plan.LocalEnvironment)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("Compose injected environment %v drifts from telephony plan %v", got, want)
+	}
+}
 
 func TestGenerateValidatesBeforeProviderDispatch(t *testing.T) { // V17
 	agent := loadCompilerAgent(t)
@@ -69,6 +91,70 @@ func TestApplyPlanIsOrdered(t *testing.T) {
 	}}
 	if plan.Steps[0].CaptureID != "assistant" || plan.Steps[1].Endpoint != "/squads" {
 		t.Fatalf("plan = %#v", plan)
+	}
+}
+
+func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { // telephony V7, V19
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enablePackageTelephony(pkg)
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = "twilio"
+	configured.Connection = "primary_phone"
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := TelephonyRuntimePlanFor(agent.Targets["pipecat"])
+	if plan == nil || len(plan.Processes) != 1 || len(plan.PublicEndpoints) != 3 {
+		t.Fatalf("runtime plan = %#v", plan)
+	}
+	if strings.Join(plan.RequiredEnv, ",") != "REDIS_URL,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,UNMUTE_PUBLIC_URL" {
+		t.Fatalf("required env = %v", plan.RequiredEnv)
+	}
+	if got := strings.Join(plan.Processes[0].Command, " "); got != "uv run uvicorn telephony:app --host 0.0.0.0 --port 7860" {
+		t.Fatalf("process command = %q", got)
+	}
+	if got := strings.Join(plan.Services, ","); got != "application,redis" || len(plan.Reasons) == 0 {
+		t.Fatalf("coordination graph = %#v", plan)
+	}
+	files, err := withTelephonyReport([]File{{Path: "compile-report.json", Content: []byte(`{"target":"pipecat","required_env":["OPENAI_API_KEY"]}`)}}, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := string(files[0].Content)
+	for _, want := range []string{`"telephony"`, `"carrier": "twilio"`, `"services"`, `"coordination_reasons"`, `"coordination": "shared"`, `"smoke": false`} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report missing %s:\n%s", want, report)
+		}
+	}
+	if !slices.Contains(plan.RequiredEnv, "OPENAI_API_KEY") {
+		t.Fatalf("runtime plan did not merge generated environment: %v", plan.RequiredEnv)
+	}
+}
+
+func TestTelephonyRuntimePlanForIsAThinCopy(t *testing.T) { // telephony I.plan, B11
+	resolved := ir.Target{Telephony: &ir.TelephonyPlan{
+		Key:                 ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "custom", Carrier: "custom"},
+		Processes:           []ir.TelephonyProcess{{Name: "custom", Command: []string{"custom-command"}}},
+		PublicEndpoints:     []ir.TelephonyEndpoint{{Name: "custom", Method: "PATCH", Path: "/custom"}},
+		RequiredEnvironment: []string{"CUSTOM_REQUIRED"}, LocalEnvironment: []string{"CUSTOM_REQUIRED"},
+		ManualSteps: []string{"custom setup"}, Services: []string{"custom-service"},
+	}}
+	runtime := TelephonyRuntimePlanFor(resolved)
+	if runtime == nil || runtime.Processes[0].Command[0] != "custom-command" || runtime.PublicEndpoints[0].Path != "/custom" {
+		t.Fatalf("runtime plan re-derived resolved facts: %#v", runtime)
+	}
+	if strings.Join(runtime.RequiredEnv, ",") != "CUSTOM_REQUIRED" || strings.Join(runtime.LocalEnvironment, ",") != "CUSTOM_REQUIRED" || strings.Join(runtime.ManualSteps, ",") != "custom setup" {
+		t.Fatalf("runtime plan did not copy resolved facts: %#v", runtime)
+	}
+	runtime.Processes[0].Command[0] = "mutated"
+	if resolved.Telephony.Processes[0].Command[0] != "custom-command" {
+		t.Fatal("runtime plan aliases the IR process command slice")
 	}
 }
 

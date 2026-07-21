@@ -58,8 +58,27 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s: managed target — run `unmute apply %s --target %s`\n", resolved.Name, dir, resolved.Name)
 		}
 		printContract(cmd.OutOrStdout(), resolved.Name, artifact.Notes)
+		printTelephonyPlan(cmd.OutOrStdout(), resolved.Name, artifact.Telephony)
 	}
 	return nil
+}
+
+func printTelephonyPlan(out io.Writer, name string, plan *generate.TelephonyRuntimePlan) {
+	if plan == nil {
+		return
+	}
+	fmt.Fprintf(out, "%s: telephony route provider=%s transport=%s carrier=%s coordination=%s admission=%s\n",
+		name, plan.Route.Provider, plan.Route.Transport, plan.Route.Carrier, plan.Coordination, plan.AdmissionOwner)
+	for _, endpoint := range plan.PublicEndpoints {
+		fmt.Fprintf(out, "%s: telephony endpoint %s %s %s\n", name, endpoint.Name, endpoint.Method, endpoint.Path)
+	}
+	for _, env := range plan.RequiredEnv {
+		fmt.Fprintf(out, "%s: telephony required env %s\n", name, env)
+	}
+	for _, evidence := range plan.Evidence {
+		fmt.Fprintf(out, "%s: telephony evidence %s=%s docs=%s verified=%s smoke=%t\n",
+			name, evidence.Feature, evidence.Tag, evidence.Docs, evidence.Verified, evidence.Smoke)
+	}
 }
 
 // printContract prints every forwarded binding/param and derived sizing line.

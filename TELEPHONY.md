@@ -1,6 +1,6 @@
 # Telephony architecture and implementation plan
 
-Status: Proposed. Updated July 20, 2026.
+Status: Adopted design; implementation in progress. Updated July 21, 2026.
 
 Unmute must share telephony intent, planning, and call context across
 orchestrators while keeping carrier media and call-control behavior in small,
@@ -11,9 +11,9 @@ a new media gateway.
 
 <!-- prettier-ignore -->
 > [!NOTE]
-> This design requires amendments to the locked v1 schema before implementation.
-> Until those amendments land, this file is a plan, not a statement of current
-> behavior.
+> Route support remains provisional until its credentialed L4 smoke passes.
+> L1–L3 tests do not require credentials and cannot promote a route by
+> themselves.
 
 ## Decision
 
@@ -25,10 +25,13 @@ orchestrator's supported transport. The implementation follows these rules:
   carrier adapters.
 - Reuse Pipecat's existing carrier serializers inside the Pipecat target only.
 - Use self-hosted LiveKit SIP as the default multi-carrier LiveKit route.
+- Run every local telephony target through a route-derived Docker Compose graph.
+  Every graph gets its generated application and Redis. LiveKit SIP also gets
+  LiveKit Server and LiveKit SIP.
 - Treat LiveKit's Twilio Connector as an optional Twilio-only route while it is
   Beta.
-- Run the same generated artifact locally and in production. Only the public
-  URL and deployment environment change.
+- Run the same generated application files locally and in production. Public
+  ingress, environment values, and infrastructure remain deployment concerns.
 - Fail during validation when a carrier and route cannot provide a requested
   direction or control.
 - Don't create a universal audio gateway or reimplement carrier serializers.
@@ -52,10 +55,16 @@ The implementation must provide the following behavior:
 - Perform cold human transfers where the selected route supports them.
 - Perform warm human transfers where the selected route supports them.
 - Detect voicemail for outbound calls where the selected route supports it.
-- Run locally through a public tunnel.
-- Run on customer infrastructure through public TLS ingress.
-- Scale horizontally for ordinary calls and document the extra coordination
-  required for warm transfers.
+- Run carrier WebSocket routes locally through a public HTTPS/WSS tunnel.
+- Start generated Pipecat and LiveKit telephony applications through Docker
+  Compose whenever `unmute dev --telephony` runs.
+- Run LiveKit SIP only where the carrier can reach public SIP signaling and
+  RTP; an HTTPS tunnel is insufficient.
+- Boot and fault-test the local LiveKit SIP control topology without LiveKit
+  Cloud or carrier credentials.
+- Run on customer infrastructure through route-appropriate public ingress.
+- Scale horizontally with shared Redis coordination while keeping the media and
+  conversation session in the active worker.
 - Emit all Python code through Go `text/template` files.
 
 ### Non-goals
@@ -66,6 +75,7 @@ orchestrator already performs.
 - Unmute does not provision phone numbers, carrier applications, or SIP trunks.
 - Unmute does not proxy or transcode audio between Pipecat and LiveKit.
 - Unmute does not provide a built-in tunnel client in the first release.
+- The local Compose file is not a production deployment recipe.
 - Unmute does not promise the same transfer implementation on every route.
 - Unmute does not expose raw carrier webhook payloads to agent prompts or tools.
 - Unmute does not claim a carrier capability until an official source and a
@@ -73,30 +83,75 @@ orchestrator already performs.
 
 ## Current repository state
 
-The repository already contains the compiler seams needed for this work, but
-the generated artifacts don't yet form a complete telephony runtime.
+Telephony is fail-closed in the public CLI. The compiler internals and offline
+emitters exist, but no selectable Pipecat or LiveKit telephony route has passed
+its exact credentialed L4 smoke. Consequently, `unmute validate`, `unmute
+compile`, and `unmute dev --telephony` reject every telephony target before an
+artifact is written or Docker is invoked.
 
-- `internal/spec/package.go` declares telephony channel direction and target
-  strings for `transport`, `carrier`, and `destinations`.
-- `internal/ir/build.go` resolves destinations but mostly copies carrier and
-  transport strings into the IR.
-- `internal/target/table.go` gates controls by orchestrator, carrier, and
-  transport.
-- `internal/generate/artifact.go` already emits multiple deterministic files
-  and a compile report.
-- The Pipecat template currently registers WebRTC and Daily transport
-  parameters, but it doesn't emit carrier WebSocket ingress, inbound markup,
-  outbound call creation, or call-context hydration.
-- The LiveKit template currently emits SIP outbound calls and native SIP
-  transfers, but it doesn't emit inbound trunk or dispatch configuration.
-- `unmute dev` starts a browser or console runtime. It doesn't expose a public
-  telephony endpoint or run a telephony deployment plan.
-- Variables with `source: call_start` aren't hydrated from carrier call data.
-- `CONTEXT.md` defines a Connection, but `SCHEMA.md` and the implementation have
-  no Connection surface.
+- Strict Connection loading and exact route resolution produce one
+  `TelephonyPlan` per selected target.
+- Pipecat emits selected Twilio, Telnyx, or Plivo carrier WebSocket ingress,
+  outbound control, authentication, and normalized context. Exotel is gated.
+- LiveKit emits selected Twilio, Telnyx, or Plivo SIP trunk and dispatch inputs,
+  native outbound/voicemail/transfers, and normalized SIP participant context.
+  Exotel and the separate Twilio Connector remain gated.
+- Direct generator tests render the Pipecat and LiveKit artifacts described in
+  this document. Those test artifacts are implementation evidence, not an
+  obtainable or supported deployment escape hatch.
+- `unmute dev --telephony` validates and attempts generation before checking a
+  public URL, credentials, local topology conflicts, or Docker. The current
+  error therefore explains the provisional or gated route instead of asking a
+  user to provision credentials for an unusable path.
+- Generated and compile-report files contain environment-variable names, not
+  credential values.
+- Every implemented carrier route remains provisional until its credentialed
+  inbound, outbound, authentication, hangup, and advertised-control smokes
+  pass.
+- The offline LiveKit SIP and Pipecat projects include
+  `compose.telephony.yaml`, and their plans report exact services plus closed
+  coordination reasons and consumers. Once an exact route is promoted, the
+  dev command will execute that file, wait for Compose health, follow logs, and
+  perform project-scoped cleanup without deleting volumes.
+- Promotion requires the exact framework/transport/carrier route to pass
+  credentialed inbound, outbound, signature/authentication, hangup, and every
+  advertised control smoke, with its capability evidence changed from
+  provisional to enabled. Credential-free generation and syntax tests alone
+  cannot promote a route.
 
-The first schema task must reconcile Connection ownership. The implementation
-must not add more provider-specific strings directly to `Artifact` or the CLI.
+## Route matrix and package cardinality
+
+A package can declare any number of named telephony targets and Connections.
+Each target still selects exactly one Connection and one route, so every build
+contains one carrier adapter and one credential vocabulary. To use several
+carriers, add several target instances, such as `pipecat_twilio`,
+`pipecat_telnyx`, and `livekit_plivo`. After those routes are promoted,
+`unmute compile` will write each one to its own `build/<target-name>/`
+directory and `unmute dev --telephony` will run one selected target at a time.
+Today, each telephony target fails closed before either action.
+
+The compiler has no package-level carrier count limit. The closed route matrix,
+not the number of targets, is the limit:
+
+| Framework | Transport | Carrier | Emitted integration | Current status |
+|---|---|---|---|---|
+| Pipecat | `carrier-websocket` | Twilio | Direct carrier adapter and Pipecat Twilio serializer | Generated in offline tests; provisional |
+| Pipecat | `carrier-websocket` | Telnyx | Direct carrier adapter and Pipecat Telnyx serializer | Generated in offline tests; provisional |
+| Pipecat | `carrier-websocket` | Plivo | Direct carrier adapter and Pipecat Plivo serializer | Generated in offline tests; provisional |
+| Pipecat | `carrier-websocket` | Exotel | None | Gated |
+| LiveKit | `sip` | Twilio | Self-hosted LiveKit SIP and Twilio trunk inputs | Generated in offline tests; provisional |
+| LiveKit | `sip` | Telnyx | Self-hosted LiveKit SIP and Telnyx trunk inputs | Generated in offline tests; provisional |
+| LiveKit | `sip` | Plivo | Self-hosted LiveKit SIP and Plivo trunk inputs | Generated in offline tests; provisional |
+| LiveKit | `sip` | Exotel | None | Gated |
+| LiveKit | `connector` | Twilio | No generated adapter | Recognized Beta route; gated |
+
+"Generated in offline tests" does not mean the route is enabled. Every
+generated row still fails public validation until its exact credentialed smoke
+promotes the requested features. The Pipecat adapters contain inbound,
+outbound, hangup, and cold-transfer paths; voicemail and warm transfer remain
+gated. The LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
+cold-transfer, and warm-transfer paths. The Twilio Connector has only route and
+credential vocabulary today, so validation stops before generation.
 
 ## What scales across carriers
 
@@ -131,8 +186,8 @@ tries to hide them behind unchecked configuration.
 | Outbound control | Calls resource | Voice Call Control | Calls resource | Voice call resource |
 | Pipecat serializer | Twilio | Telnyx | Plivo | Exotel |
 | Stream encoding | Carrier serializer owns it | Carrier serializer owns it | Carrier serializer owns it | Carrier serializer owns it |
-| Custom call data | Stream parameters | Query or encoded body | Query or encoded body | Limited; query data may be removed |
-| Cold transfer | Verified carrier control | Verified carrier control | Verified carrier control | Unverified |
+| Custom call data | Stream parameters | Query or encoded body | Query or encoded body | Gated; query data may be removed |
+| Cold transfer | Verified carrier control | Verified carrier control | Verified carrier control | Gated; unverified |
 | Warm primitives | Conference participants | Conference participants | Multi-party call | Unverified |
 
 The relevant Pipecat guides document inbound, outbound, local tunnel, and
@@ -156,6 +211,67 @@ Plivo documents
 [multi-party calling](https://docs.plivo.com/docs/voice/xml/conference). Exotel
 documents inbound and outbound streaming, but its warm-transfer behavior is not
 verified. Unmute must fail that capability until it is proven.
+
+## Credentials
+
+Unmute stores only environment variable names in Connection files. Put the
+values in the source package's ignored `.env` for `unmute dev`, or in your
+deployment secret store. Never commit them or copy them into `targets.yaml`.
+
+The initial route adapters use these names:
+
+| Route | Environment variables | Where to get them |
+|---|---|---|
+| Pipecat or LiveKit Connector with Twilio | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | Twilio Console → Account dashboard and Phone Numbers. The Auth Token is also required to validate Twilio webhook signatures. Twilio recommends scoped API keys for production REST calls, but the Auth Token remains necessary for request validation. |
+| Pipecat with Telnyx | `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_PHONE_NUMBER` | Telnyx Mission Control Portal → API Keys, Public Key, and the Voice API Application details page. The application ID is the Connection ID. |
+| Pipecat with Plivo | `PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN`, `PLIVO_PHONE_NUMBER` | Plivo Console dashboard → API Keys and Phone Numbers. The Auth Token validates V3 webhook signatures. |
+| Pipecat with Exotel | `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`, `EXOTEL_ACCOUNT_SID`, `EXOTEL_SUBDOMAIN`, `EXOTEL_PHONE_NUMBER`, `EXOTEL_APP_ID` | Exotel Dashboard → API Settings for the key, token, Account SID, and regional subdomain; use the ExoPhone and call-flow application ID from the Voice dashboard. |
+| All Pipecat telephony routes | `REDIS_URL` | Generated Compose supplies the local value. In production, use the connection URL from the Redis service managed by your infrastructure operator. Store any password in the deployment secret store. |
+| LiveKit Cloud or Twilio Connector | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | LiveKit Cloud project settings, or run `lk app env -w`. The Connector also needs the Twilio variables above. |
+| Self-hosted LiveKit SIP topology | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `REDIS_URL`, `LIVEKIT_SIP_URI` | Create the API key and secret in the LiveKit Server `keys` configuration and use the same pair in LiveKit SIP. Set `LIVEKIT_URL` to that server, `REDIS_URL` to their shared Redis deployment, and `LIVEKIT_SIP_URI` to the SIP service's public DNS name or SIP URI. |
+| LiveKit SIP with Twilio | `TWILIO_SIP_ADDRESS`, `TWILIO_SIP_USERNAME`, `TWILIO_SIP_PASSWORD`, `TWILIO_PHONE_NUMBER` | Twilio Console → Elastic SIP Trunking. Use the termination URI, Credential List username and password, and associated number. |
+| LiveKit SIP with Telnyx | `TELNYX_SIP_ADDRESS`, `TELNYX_SIP_USERNAME`, `TELNYX_SIP_PASSWORD`, `TELNYX_PHONE_NUMBER` | Telnyx Mission Control → SIP Trunking. Use the SIP connection address and credentials, and its assigned number. |
+| LiveKit SIP with Plivo | `PLIVO_SIP_ADDRESS`, `PLIVO_SIP_USERNAME`, `PLIVO_SIP_PASSWORD`, `PLIVO_PHONE_NUMBER` | Plivo Console → Zentrunk. Use the termination domain, outbound credential, and linked number. |
+| LiveKit SIP resource IDs | `LIVEKIT_SIP_INBOUND_TRUNK`, `LIVEKIT_SIP_OUTBOUND_TRUNK` | Copy each `SIPTrunkID` printed by the generated `lk sip ... create` setup commands. Only requested directions and controls require their corresponding ID. |
+
+The generated Pipecat carrier-WebSocket outbound HTTP endpoint also requires
+`UNMUTE_OUTBOUND_TOKEN`. Generate this secret yourself with a cryptographically
+secure password generator; it does not come from a carrier. LiveKit SIP doesn't
+use this token. Every generated telephony Compose graph also supplies
+`REDIS_URL`. Redis is always present so the same application remains correct
+across independently routed requests and multiple replicas; it is never part
+of the media path.
+
+The local LiveKit SIP Compose stack needs no LiveKit Cloud or carrier
+credentials to boot. It supplies an obvious non-production LiveKit API key pair
+to its own services and local Agent process. Those values must never be reused
+outside the generated local stack. Starting a conversational Agent may still
+require the selected model providers' credentials. Placing a real phone call
+still requires the selected carrier credentials and public SIP/RTP reachability.
+
+Direct carrier WebSocket routes also require `UNMUTE_PUBLIC_URL`. Set it to the
+exact externally visible HTTPS origin (including any fixed path prefix, but no
+query or fragment). It is not a credential. Generated signature validation
+derives its HTTP and WSS callback URLs only from this value and never trusts a
+forwarded host header.
+
+The source pages are the
+[Twilio credential guide](https://www.twilio.com/docs/iam/api-keys),
+[Telnyx Voice API guide](https://developers.telnyx.com/docs/voice/programmable-voice/get-started),
+[Plivo Voice API guide](https://docs.plivo.com/docs/voice/api/overview),
+[Exotel Voice API guide](https://developer.exotel.com/api/outgoing-call-to-connect-number-to-a-call-flow),
+[LiveKit startup-mode guide](https://docs.livekit.io/agents/server/startup-modes/),
+and
+[LiveKit self-hosted SIP guide](https://docs.livekit.io/transport/self-hosting/sip-server/).
+
+No carrier or LiveKit credentials were available during the initial build.
+The generated Pipecat Twilio, Telnyx, and Plivo adapters and LiveKit SIP
+topology therefore have offline tests only. Exotel remains gated because its
+documented static App Bazaar Voicebot URL doesn't provide a proven
+authenticated WebSocket upgrade, custom URL data may be stripped, and no
+provider-specific LiveKit SIP route has been proven. Every live route stays
+provisional until its corresponding inbound, outbound, hangup,
+authentication, and advertised-control smoke completes.
 
 ## Architecture
 
@@ -182,20 +298,18 @@ The Agent declares what a phone channel must do. A Connection declares which
 carrier account supplies it. The target selects the media route used by the
 orchestrator.
 
-The proposed package addition is one file per external connection:
+The package uses one file per external connection:
 
 ```text
 connections/
   primary_phone.yaml
 ```
 
-The proposed connection shape stores environment variable names, never secret
-values:
+The connection shape stores environment variable names, never secret values:
 
 ```yaml
 # connections/primary_phone.yaml
 kind: telephony
-provider: twilio
 environment:
   account_sid: TWILIO_ACCOUNT_SID
   auth_token: TWILIO_AUTH_TOKEN
@@ -219,10 +333,14 @@ The `environment` keys are provider vocabulary. Build validates required and
 unknown keys against the selected carrier definition. The values are
 environment variable names and remain safe to commit.
 
-The first implementation supports one telephony Connection per target. It must
-fail clearly when a package requests multiple telephony channels that need
-different connections. Add per-channel target bindings only when a real agent
-needs that topology.
+The first implementation supports one telephony Connection per target. A
+package can add any number of targets and Connections for supported routes, but
+one generated target never combines carriers. It must fail clearly when a
+single target requests multiple telephony channels that need different
+connections. A LiveKit or Pipecat target with a telephony channel must bind a
+Connection, and a target cannot bind a telephony Connection when the package
+has no telephony channel. Add per-channel target bindings only when a real
+agent needs that topology.
 
 ### Resolved telephony plan
 
@@ -237,11 +355,14 @@ The plan contains the following resolved facts:
 - Required controls and their proven capability results.
 - Symbolic transfer destinations resolved for the target.
 - Required environment variable names.
+- Environment names supplied by the generated local topology rather than by
+  the operator.
 - Public HTTP and WSS endpoint descriptions.
 - Normalized call-context sources.
 - Generated process and file requirements.
 - Manual carrier or trunk configuration steps.
-- Capacity and coordination requirements.
+- Capacity ownership, `coordination: shared`, and the applicable reasons and
+  consuming services from the closed coordination-reason set.
 
 The plan belongs in `internal/ir`, close to the other resolved target facts.
 The existing `internal/target` table remains the single capability rulebook.
@@ -258,6 +379,9 @@ Each definition records these facts:
 - Required and optional Connection environment keys.
 - Supported Pipecat serializer and package extra.
 - Supported media routes.
+- Runtime process, endpoint, required-environment, local-environment, and
+  manual-setup facts, with feature conditions where a route emits them only
+  for inbound, outbound, or transfer use.
 - Inbound and outbound support.
 - Control support by route.
 - Call-context field mapping.
@@ -294,7 +418,8 @@ Carrier payloads use different names and identifiers. The adapter normalizes
 only the fields the Agent can use portably.
 
 ```text
-provider
+session_id
+carrier
 connection
 call_id
 stream_id
@@ -307,9 +432,10 @@ Transfer coordination may also retain provider-private call-leg and conference
 IDs. Those values stay inside the telephony runtime and never become portable
 Agent variables.
 
-The normalized values hydrate matching `source: call_start` system variables
-before the greeting or first model turn runs. Missing required values cause the
-call to fail before conversation starts.
+The normalized values hydrate matching explicit system sources before the
+greeting or first model turn runs. Authored `source: call_start` variables come
+from outbound job input instead. Missing requested values cause the call to
+fail before conversation starts.
 
 ### Pipecat route
 
@@ -327,6 +453,14 @@ The generated Pipecat project adds these routes to its existing application:
 The Pipecat adapter constructs the upstream serializer with the normalized
 stream and call identifiers. The serializer continues to own carrier audio
 messages and automatic call termination where Pipecat provides it.
+
+Warm transfer is not an automatic extension of that path. A Twilio call using
+bidirectional `<Connect><Stream>` cannot simultaneously be a Conference
+participant. The route must therefore prove a separate Pipecat media leg that
+can join the Conference, hold and restore the caller, brief the human, and
+remove only the AI leg. Until successful, declined, unanswered, failure, and
+duplicate-callback smokes prove that topology, `warm_transfer` remains
+provisional even if inbound, outbound, hangup, and cold transfer later pass.
 
 ### LiveKit routes
 
@@ -347,11 +481,38 @@ processes:
 - LiveKit SIP.
 - The generated LiveKit Agent worker.
 
+For local development, it also emits `compose.telephony.yaml` based on
+LiveKit's official
+[self-hosting overview](https://docs.livekit.io/transport/self-hosting/) and
+[SIP Docker Compose guide](https://docs.livekit.io/transport/self-hosting/sip-server/).
+The file runs all four services, including the generated Agent. Compose passes
+runtime environment values into the Agent container without baking them into
+the image.
+
+The Compose images use explicit versions, not `latest`. The stack exposes the
+local LiveKit endpoint plus SIP signaling and the documented RTP range. It uses
+one named Redis data volume so a normal stop and restart doesn't discard local
+trunk and dispatch state. The generated non-production API key pair is local
+configuration, not a user credential.
+
 Carrier trunk and number changes remain manual. Unmute may emit deterministic
 trunk and dispatch configuration files or commands, but it doesn't execute
 them automatically. See the
 [LiveKit SIP server guide](https://docs.livekit.io/transport/self-hosting/sip-server/)
 for the underlying deployment topology and public SIP and RTP requirements.
+
+The implemented route uses one Connection vocabulary for Twilio, Telnyx, and
+Plivo: `sip_address`, `sip_username`, `sip_password`, and `from_number`. It
+emits inbound-trunk, outbound-trunk, and individual-room dispatch JSON only
+when the authored directions and controls need them. Credentials remain
+environment placeholders; outbound authentication is passed to `lk` rather
+than written into the generated JSON.
+
+The Agent waits for the SIP participant and normalizes LiveKit's
+`sip.callID`, `sip.phoneNumber`, and `sip.trunkPhoneNumber` attributes before
+the entry greeting. Outbound jobs use authenticated LiveKit Agent dispatch
+metadata with `direction`, `phone_number`, and authored `call_start` values.
+The route remains provisional until credentialed smokes prove these paths.
 
 #### Twilio Connector
 
@@ -423,49 +584,134 @@ establish the required operations.
 
 ### Transfer coordination state
 
-Ordinary inbound, outbound, hangup, and cold-transfer calls can remain
-stateless across replicas because the active WebSocket stays on one process and
-the carrier owns call state.
+Pipecat keeps the active media WebSocket, conversation state, tasks, and agent
+handoffs inside one worker. Redis does not move those objects between workers.
+It exists because telephony control crosses independent HTTP requests,
+WebSockets, callbacks, call legs, and admission decisions even when the audio
+session itself stays on one process.
 
-Warm transfer needs idempotent coordination across asynchronous callbacks. The
-first local implementation may use an in-memory call registry. A deployment
-with warm transfer and more than one replica must use Redis for callback
-deduplication, state transitions, and short-lived locks. This is a known
-ceiling, not a reason to require Redis for simple calls.
+Generated Pipecat code uses Redis only for these bounded records:
 
-The state key uses the carrier and call ID. Records expire after the maximum
-call duration plus a short cleanup window. Provider callbacks may be retried,
-so every transition must be idempotent.
+- Pending-call correlation and the minimum normalized call-start context.
+- Callback replay and idempotency markers.
+- Human-transfer state transitions and short-lived locks.
+- Active-session admission counters.
+
+Every record expires. Phone numbers and call-start values never appear in key
+names or logs. Redis never stores credentials, raw webhook bodies, audio,
+transcripts, prompts, model context, task state, or agent-handoff state.
+
+LiveKit SIP is different: Redis is required by the self-hosted LiveKit Server
+and SIP service topology even for simple calls. They use it for distributed
+room state, routing, and service coordination. Redis isn't in the RTP or
+LiveKit audio path, and the generated Agent worker doesn't use it as an audio
+buffer.
+
+Both orchestrators select the same version-pinned Redis service definition, but
+different components consume it. Generated Pipecat code uses it for Unmute's
+telephony control records. LiveKit Server and LiveKit SIP use it for LiveKit's
+distributed control plane.
+
+The reason-to-consumer mapping is closed and inspectable:
+
+| Coordination reason | Consumer |
+|---|---|
+| `livekit_control_plane` | LiveKit Server and LiveKit SIP |
+| `call_correlation` | Generated telephony application |
+| `callback_idempotency` | Generated telephony application |
+| `human_transfer` | Generated telephony application |
+| `admission` | Generated Pipecat telephony application |
+
+Every emitted plan has at least one applicable reason. Each reason's consumer
+must be present in the Compose graph, receive the Redis connection, and fail
+readiness when Redis is unavailable. A route cannot emit Redis as an unused
+sidecar merely to satisfy the common graph shape.
+
+Redis key identities are opaque hashes of route-native IDs. Records expire
+after the maximum call duration plus a short cleanup window. Provider callbacks
+may be retried, so every transition must be idempotent.
+
+An admitted Pipecat session refreshes its Redis lease while the media WebSocket
+is alive and releases it when the session ends. LiveKit reports a worker full
+only when active jobs reach `capacity.max_sessions`, so both runtimes accept
+exactly the declared number of concurrent sessions, including a limit of one.
 
 ## Local development
 
-Local telephony uses the same generated application as deployment. A tunnel is
-the only extra network hop.
-
-The first CLI implementation adds this form:
+The intended promoted-route interface is:
 
 ```text
 unmute dev ./agent --target pipecat --telephony \
   --public-url https://agent-test.example-tunnel.dev
+
+unmute dev ./agent --target livekit --telephony
 ```
 
-The command performs these steps:
+Both commands currently stop at route validation because every emitted route
+is provisional and the remaining recognized routes are gated. They do not
+write `compose.telephony.yaml`, check credentials, or invoke Docker. There is
+no emitted Compose file to run directly through a supported CLI flow.
 
-1. Compile the selected target.
-2. Validate required carrier and model environment variables.
-3. Start the generated telephony process or processes.
-4. Wait for local readiness.
-5. Print the exact inbound webhook, WSS, outbound trigger, and status URLs.
-6. Print the manual carrier configuration required for the selected adapter.
-7. Stream or retain logs using the existing `--verbose` behavior.
-8. Stop the complete process group on interruption.
+Once an exact route is promoted, Docker Compose is the required local executor
+for both orchestrators. The first command will build and start the generated
+Pipecat application with Redis. The second will build and start the generated
+LiveKit Agent, Redis, LiveKit Server, and LiveKit SIP in one Compose project.
+Pipecat carrier WebSocket routes still need an HTTPS/WSS tunnel. LiveKit SIP
+instead needs carrier-reachable SIP and RTP; `--public-url` is neither required
+nor sufficient for that route.
 
-The CLI doesn't install or run ngrok in the first release. You run any tunnel
-you prefer and pass its stable HTTPS URL. Add managed tunnel support only when
-repeated user friction justifies another dependency and credential path.
+`UNMUTE_TELEPHONY_PORT` selects the generated application health/API host port
+for either route. LiveKit local topology also accepts `UNMUTE_LIVEKIT_PORT`,
+`UNMUTE_LIVEKIT_SIP_PORT`, and `UNMUTE_LIVEKIT_RTP_PORT_RANGE`. Its local RTP
+default is the smaller `10000-10100` range; production must configure and expose
+the range sized for its traffic. Set distinct values for all occupied host
+ports when running two stacks. Compose project names use
+`unmute-<source-dir>-<target>-<path-hash>`, so networks and preserved volumes
+remain isolated after ports are separated.
 
-A container alone is insufficient. The carrier must still have credentials, a
-voice-enabled number, and a configured route to the public URL.
+For a promoted route, the command performs these steps in this order:
+
+1. Validate and generate the selected target.
+2. Resolve and print the provider-neutral runtime plan.
+3. Validate required carrier and model environment variables.
+4. Verify Docker Compose is available.
+5. Build or update the exact generated Compose graph.
+6. Wait for every declared service health check and application readiness.
+7. Print the exact inbound webhook, WSS, outbound trigger, and status URLs.
+8. Print the manual carrier configuration required for the selected adapter.
+9. Stream Compose logs using the existing `--verbose` behavior.
+10. Stop only the project-scoped Compose stack on interruption and preserve its
+   named data volumes.
+
+After promotion, `unmute dev --telephony` will fail before application
+readiness if Docker Compose is unavailable, a service is unhealthy, or
+explicit external LiveKit values conflict with the generated local topology.
+There is no flag or native-process fallback for local telephony in v1.
+
+LiveKit SIP trunk IDs create a local bootstrap dependency. After a LiveKit SIP
+route is promoted and its artifact is obtainable, start the infrastructure
+services first:
+
+```sh
+docker compose -f compose.telephony.yaml up -d redis livekit_server livekit_sip
+```
+
+Then point `lk` at the local server with the generated development key pair,
+create the required inbound/outbound trunks and dispatch rule, export the
+returned `LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` values,
+and start the full telephony command. This component-only bootstrap is a future
+promoted-route procedure; the current validation gate prevents obtaining that
+Compose file through `unmute compile`.
+
+The CLI doesn't install or run ngrok in the first release. For carrier
+WebSocket routes, you run any tunnel you prefer and pass its stable HTTPS URL.
+Add managed tunnel support only when repeated user friction justifies another
+dependency and credential path.
+
+A healthy local stack proves process wiring, not telephony reachability. A real
+call still needs carrier credentials, a voice-enabled number, and the route's
+public HTTP/WSS or SIP/RTP ingress. Docker Desktop and NAT behavior may prevent
+carrier-reachable SIP even when every local health check passes.
 
 ## Self-hosted deployment
 
@@ -481,15 +727,23 @@ The deployment must provide the following runtime behavior:
 - Public HTTPS and WSS on TCP 443.
 - WebSocket upgrade support and timeouts longer than the maximum call duration.
 - Graceful shutdown that stops accepting calls and drains active streams.
+- A stop grace period at least as long as the compiled call duration. The
+  generated adapter rejects new calls as soon as SIGTERM arrives and reports
+  any active sessions it must force-close at its drain deadline.
 - Horizontal scaling based on active sessions, not HTTP request rate alone.
 - Carrier credentials and model credentials through environment secrets.
-- Redis only when multi-replica warm transfer is enabled.
+- Redis for pending-call correlation, callback idempotency, human-transfer
+  state, and admission.
+- `INFO` logging by default. `UNMUTE_LOG_LEVEL=DEBUG` can expose phone numbers
+  through upstream Pipecat parser diagnostics and is only for controlled use.
 
 ### LiveKit deployment
 
 The LiveKit Agent worker connects to the selected self-hosted LiveKit Server.
 The SIP route additionally requires reachable SIP and RTP infrastructure. An
 HTTP tunnel alone doesn't make a local SIP deployment reachable from a carrier.
+The generated Compose file is for local development and L4 topology smokes;
+production uses the deployment model selected by the operator.
 
 The Twilio Connector route requires public webhook ingress, but Twilio sends
 media to the connector URL returned by LiveKit. It doesn't send media to the
@@ -507,8 +761,8 @@ The first production implementation uses these scaling rules:
 - Scale LiveKit Agent workers with LiveKit's worker dispatch model.
 - Scale stateless webhook handlers by request load.
 - Keep a WebSocket on the replica that accepted it for its lifetime.
-- Use Redis only for warm-transfer coordination or the selected LiveKit
-  topology.
+- Use Redis for every telephony control plane while keeping audio and
+  conversation state on the active worker.
 - Use carrier call IDs as correlation IDs in logs and traces.
 
 ## Security and reliability
@@ -524,6 +778,9 @@ of the minimum implementation and cannot be deferred.
 - Redact credentials, phone numbers, and raw webhook bodies from normal logs.
 - Treat duplicate carrier callbacks as normal and process them idempotently.
 - Apply short request timeouts to carrier control calls.
+- Document when a carrier route cannot restore the original media stream after
+  a failed cold transfer; the generated Pipecat READMEs currently identify
+  that limitation for Twilio, Telnyx, and Plivo.
 - Retry only operations documented as safe to retry.
 - Return provider-appropriate success responses quickly, then process status
   events asynchronously when the carrier requires it.
@@ -582,14 +839,18 @@ notes. It records only portable runtime facts:
 - Public endpoint paths and protocols.
 - Required environment names.
 - Manual carrier configuration steps.
-- Whether shared transfer coordination is required.
+- Compose application and route-dependency services, health checks, and local
+  environment defaults.
+- `coordination: shared` and the applicable reasons and consuming services from
+  the closed coordination-reason set.
 
 The CLI consumes this plan. It must not infer Twilio, Telnyx, Pipecat, or
 LiveKit behavior from provider names.
 
 `compile-report.json` must include the resolved telephony route, required
-environment names, public endpoints, manual steps, and coordination
-requirements. It must never include secret values.
+environment names, public endpoints, manual steps, Compose service names,
+`coordination: shared`, and the applicable closed coordination reasons with
+their consuming service names. It must never include secret values.
 
 ### Templates
 
@@ -604,6 +865,7 @@ to match each target's existing project layout:
 - LiveKit Agent worker.
 - LiveKit connector webhook when selected.
 - Self-hosted LiveKit and SIP configuration when selected.
+- `compose.telephony.yaml` for every generated telephony target.
 - Environment example and compile report.
 - Deployment README with provider-specific manual steps.
 
@@ -669,7 +931,7 @@ carriers.
 3. Dial and brief the human.
 4. Remove the AI without ending the human call.
 5. Restore or terminate cleanly after failure.
-6. Add Redis coordination for multi-replica deployment.
+6. Add warm-transfer state and locks to the existing Redis control store.
 7. Record the supported briefing modes in the capability table.
 
 Acceptance requires successful, declined, unanswered, and failed warm-transfer
@@ -697,27 +959,35 @@ gates.
 
 1. Add Plivo XML, serializer, call context, outbound, and verified controls.
 2. Prove Plivo multi-party warm transfer before enabling it.
-3. Add Exotel App Bazaar instructions, serializer, call context, and outbound.
-4. Keep Exotel cold and warm transfer gated until official behavior is proven.
-5. Document Exotel's custom outbound data limitation.
+3. Pressure-test Exotel's static App Bazaar Voicebot URL against the
+   authenticated-upgrade invariant.
+4. Keep the entire Exotel route gated until a carrier-authenticated WebSocket
+   pattern is proven; cold transfer, warm transfer, and custom outbound input
+   remain independently gated as well.
+5. Document Exotel's custom outbound data limitation and the credentials a
+   future outbound adapter will need.
 6. Run the shared contract and carrier-specific smoke scenarios.
 
-Acceptance requires no conditional carrier logic outside the telephony plan,
-carrier rendering, and generated carrier module.
+Acceptance requires a selected Plivo adapter with no conditional carrier logic
+outside the telephony plan, carrier rendering, and generated carrier module,
+plus a validation test proving Exotel fails before generation.
 
 ### Phase 6: Complete self-hosted LiveKit telephony
 
 This phase makes LiveKit Cloud optional for the supported SIP route.
 
-1. Emit or document self-hosted LiveKit Server, Redis, and SIP topology.
-2. Emit deterministic trunk and dispatch inputs without applying them.
-3. Hydrate call-start variables from the SIP participant.
-4. Verify inbound, outbound, voicemail, cold transfer, and warm transfer.
-5. Extend `unmute dev --telephony` to run the local worker and report which
-   public SIP and RTP endpoints remain external.
+1. Emit version-pinned local Redis, LiveKit Server, and LiveKit SIP Compose
+   services with health checks and non-production local API credentials.
+2. Prove credential-free startup, Redis failure propagation, and clean restart.
+3. Emit deterministic trunk and dispatch inputs without applying them.
+4. Hydrate call-start variables from the SIP participant.
+5. Verify inbound, outbound, voicemail, cold transfer, and warm transfer.
+6. Extend `unmute dev --telephony` to run the complete Compose graph and report
+   which public SIP and RTP endpoints remain external.
 
-Acceptance requires the generated Agent to run against self-hosted LiveKit and
-LiveKit SIP without LiveKit Cloud.
+Acceptance requires the generated Agent to run against the emitted self-hosted
+LiveKit and LiveKit SIP stack without LiveKit Cloud. This does not promote a
+carrier route until its credentialed call smoke also passes.
 
 ### Phase 7: Spike the LiveKit Twilio Connector
 
@@ -740,7 +1010,8 @@ ship SIP only and keep the Connector experimental.
 This phase removes repeated manual work after both orchestrators have a proven
 route.
 
-1. Add `unmute dev --telephony --public-url` as a plan executor.
+1. Make the provider-neutral plan executor always use Compose for telephony and
+   keep `--public-url` route-specific.
 2. Print exact carrier configuration and test-call steps.
 3. Add graceful multi-process shutdown.
 4. Add deployment health, readiness, and drain behavior.
@@ -767,6 +1038,9 @@ L1 verifies the resolved plan and capability rulebook.
 - Required environment collection.
 - One-telephony-connection invariant.
 - Carrier definition metadata and verification links.
+- Redis in every Compose graph, a non-empty reason set, matching consumers, and
+  exact additional dependencies by route.
+- Closed coordination reasons for each selected route and feature set.
 
 ### L2: Command tests
 
@@ -774,8 +1048,10 @@ L2 verifies the CLI without starting real carrier or Python processes.
 
 - `unmute validate` diagnostics for unsupported carrier routes.
 - `unmute compile` reports and generated file selection.
-- `unmute dev --telephony` process planning.
+- `unmute dev --telephony` always selects Compose and fails when it is missing.
 - Missing public URL and environment errors.
+- Docker-disabled behavior, Compose preflight, health failure, and
+  project-scoped cleanup.
 - Process shutdown and readiness failures.
 
 ### L3: Golden tests
@@ -785,7 +1061,11 @@ L3 verifies deterministic generated projects.
 - One golden for every enabled carrier and orchestrator route.
 - Provider-specific routes, environment names, and manual steps.
 - No unselected carrier dependency or code.
-- Compile-report endpoints and coordination requirements.
+- Compile-report endpoints, `coordination: shared`, and closed coordination
+  reasons with their consuming service names.
+- Compose files contain the generated application plus only selected route
+  dependencies, explicit image versions, and no carrier or model credential
+  values.
 - Static Python syntax through the existing opt-in checks where applicable.
 
 ### L4: Smoke tests
@@ -796,10 +1076,16 @@ sandboxes or test accounts.
 - Import and instantiate every selected Pipecat serializer.
 - Validate signed webhook fixtures.
 - Exercise inbound stream start parsing.
+- Execute the generated Redis Lua admission boundary against a real Redis
+  server.
 - Create and cancel an outbound test call.
 - End and cold-transfer an active call.
 - Exercise warm-transfer success and failure when enabled.
 - Run LiveKit SIP against self-hosted LiveKit.
+- Boot the local LiveKit SIP Compose stack without credentials, stop Redis, and
+  prove readiness fails before restarting cleanly.
+- Boot Pipecat with Redis, stop Redis, and prove readiness fails before
+  restarting without losing an active media process silently.
 - Run the Twilio Connector only when that route is selected.
 
 Credentialed carrier smokes remain opt-in and never enter the default PR gate.
@@ -838,8 +1124,9 @@ The plan keeps uncertain behavior gated rather than designing around guesses.
 - **Multiple phone channels:** The first implementation supports one telephony
   Connection per target. Add channel-to-connection target bindings when a real
   package needs more.
-- **Shared coordination:** Redis is required only for multi-replica warm
-  transfer or by the selected LiveKit topology.
+- **Shared coordination:** Every v1 telephony Compose graph includes Redis.
+  Pipecat uses it for bounded Unmute control records; LiveKit Server and SIP use
+  it as platform infrastructure. Agent handoff and media remain call-local.
 - **Automatic provisioning:** It remains excluded. Reopen the schema decision
   only if generated manual steps become the dominant source of setup failures.
 - **Universal gateway:** It remains excluded unless native Pipecat serializers,
@@ -847,11 +1134,9 @@ The plan keeps uncertain behavior gated rather than designing around guesses.
 
 ## Next steps
 
-Implementation starts with a decision change, not runtime code.
+The plans, reports, provisional route emitters, Compose artifacts, and local
+executor exist.
 
-1. Review and approve the proposed Connection and target-binding shape.
-2. Amend `SCHEMA.md` and the compiler specification.
-3. Implement the resolved telephony plan with all new capabilities gated.
-4. Build Pipecat plus Twilio end to end.
-5. Prove warm transfer, then add Telnyx as the second carrier and extract the
-   demonstrated seam.
+1. Run the credential-free topology smoke, including Redis failure and restart.
+2. Keep every carrier feature provisional until its separate real-call smoke
+   passes.

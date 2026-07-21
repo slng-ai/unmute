@@ -4,16 +4,171 @@ package generate
 
 import (
 	"bytes"
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/spec"
 	"github.com/slng/unmute/internal/target"
 )
+
+const telephonyDeepSmokeScript = `"""Exercise generated carrier ingress, serializer selection, and Redis admission."""
+import asyncio
+import base64
+import json
+import os
+import time
+from urllib.parse import urlencode
+
+carrier = os.environ["UNMUTE_SMOKE_CARRIER"]
+os.environ["UNMUTE_PUBLIC_URL"] = "https://voice.example"
+os.environ["UNMUTE_OUTBOUND_TOKEN"] = "outbound-smoke"
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+telnyx_private_key = None
+if carrier == "telnyx":
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    telnyx_private_key = Ed25519PrivateKey.generate()
+    public_key = telnyx_private_key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+    os.environ["TELNYX_PUBLIC_KEY"] = base64.b64encode(public_key).decode()
+
+import bot
+import telephony as adapter
+from pipecat.runner.types import WebSocketRunnerArguments
+from pipecat.runner.utils import create_transport
+from starlette.requests import Request
+from telephony_state import TelephonyState
+
+
+class FakeWebSocket:
+    def __init__(self, messages):
+        self.messages = messages
+        self.headers = {}
+
+    def iter_text(self):
+        async def iterate():
+            for message in self.messages:
+                yield json.dumps(message)
+        return iterate()
+
+
+def request(path, body, headers):
+    sent = False
+
+    async def receive():
+        nonlocal sent
+        if sent:
+            return {"type": "http.disconnect"}
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "https",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": [(name.lower().encode(), value.encode()) for name, value in headers.items()],
+        "server": ("voice.example", 443),
+        "client": ("127.0.0.1", 1),
+    }
+    return Request(scope, receive)
+
+
+async def signed_fixture():
+    path = "/telephony/inbound"
+    if carrier == "twilio":
+        from twilio.request_validator import RequestValidator
+
+        form = {"CallSid": "CA-smoke", "From": "+14155550100", "To": "+14155550101"}
+        body = urlencode(form).encode()
+        signature = RequestValidator(os.environ["TWILIO_AUTH_TOKEN"]).compute_signature(
+            "https://voice.example" + path, form
+        )
+        parsed = await adapter._signed_form(request(path, body, {"X-Twilio-Signature": signature}))
+        assert parsed["CallSid"] == "CA-smoke"
+    elif carrier == "telnyx":
+        body = json.dumps({"data": {"id": "event-smoke", "event_type": "test"}}, separators=(",", ":")).encode()
+        timestamp = str(int(time.time()))
+        signature = base64.b64encode(
+            telnyx_private_key.sign(timestamp.encode() + b"|" + body)
+        ).decode()
+        parsed = await adapter._signed_event(request(path, body, {
+            "Telnyx-Signature-Ed25519": signature,
+            "Telnyx-Timestamp": timestamp,
+        }))
+        assert parsed["id"] == "event-smoke"
+    else:
+        from plivo.utils.signature_v3 import construct_post_url, get_signature_v3
+
+        form = {"CallUUID": "plivo-smoke", "From": "+14155550100", "To": "+14155550101"}
+        body = urlencode(form).encode()
+        nonce = "nonce-smoke"
+        base_url = construct_post_url("https://voice.example" + path, dict(form)).decode()
+        signature = get_signature_v3(
+            os.environ["PLIVO_AUTH_TOKEN"].encode(), base_url, nonce
+        ).decode()
+        parsed = await adapter._signed_form(request(path, body, {
+            "X-Plivo-Signature-V3": signature,
+            "X-Plivo-Signature-V3-Nonce": nonce,
+        }))
+        assert parsed["CallUUID"] == "plivo-smoke"
+
+
+async def serializer_fixture():
+    fixtures = {
+        "twilio": {"event": "start", "start": {"streamSid": "MZ-smoke", "callSid": "CA-smoke"}},
+        "telnyx": {"stream_id": "stream-smoke", "start": {
+            "call_control_id": "call-smoke", "media_format": {"encoding": "PCMU"}
+        }},
+        "plivo": {"start": {"streamId": "stream-smoke", "callId": "call-smoke"}},
+    }
+    websocket = FakeWebSocket([fixtures[carrier]])
+    runner_args = WebSocketRunnerArguments(websocket=websocket)
+    transport = await create_transport(runner_args, bot.transport_params)
+    expected = {
+        "twilio": "TwilioFrameSerializer",
+        "telnyx": "TelnyxFrameSerializer",
+        "plivo": "PlivoFrameSerializer",
+    }[carrier]
+    assert transport._params.serializer.__class__.__name__ == expected
+
+
+async def admission_fixture():
+    state = TelephonyState(os.environ["REDIS_URL"], "deep-smoke-" + carrier, 1, 30)
+    assert await state.ping()
+    assert await state.admit("first")
+    assert await state.admit("first")
+    assert not await state.admit("second")
+    await state.release("first")
+    assert await state.admit("second")
+    await state.release("second")
+    await state.close()
+
+
+async def main():
+    await signed_fixture()
+    await serializer_fixture()
+    await admission_fixture()
+    await adapter.STATE.close()
+    print("telephony deep smoke ok:", carrier)
+
+
+asyncio.run(main())
+`
 
 func examplePackagePath(name string) string {
 	if name == "remy" || name == "safe_core" {
@@ -90,6 +245,204 @@ func TestSmokePipecatV1ConsoleExtraResolves(t *testing.T) {
 	}
 }
 
+func TestSmokePipecatTwilioTemplatesCompileWithoutCredentials(t *testing.T) { // telephony V20
+	testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t, "twilio", map[string]string{
+		"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN", "from_number": "TWILIO_PHONE_NUMBER",
+	})
+}
+
+func TestSmokePipecatTelnyxTemplatesCompileWithoutCredentials(t *testing.T) { // telephony T8, V20
+	testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t, "telnyx", map[string]string{
+		"api_key": "TELNYX_API_KEY", "public_key": "TELNYX_PUBLIC_KEY",
+		"connection_id": "TELNYX_CONNECTION_ID", "from_number": "TELNYX_PHONE_NUMBER",
+	})
+}
+
+func TestSmokePipecatPlivoTemplatesCompileWithoutCredentials(t *testing.T) { // telephony T9, V20
+	testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t, "plivo", map[string]string{
+		"auth_id": "PLIVO_AUTH_ID", "auth_token": "PLIVO_AUTH_TOKEN", "from_number": "PLIVO_PHONE_NUMBER",
+	})
+}
+
+func testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t *testing.T, carrier string, environment map[string]string) {
+	t.Helper()
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enablePackageTelephony(pkg)
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = carrier
+	configured.Connection = "primary_phone"
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment = environment
+	pkg.Connections["primary_phone"] = connection
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	var paths []string
+	for _, name := range []string{"bot.py", "telephony.py", "telephony_shared.py", "telephony_state.py"} {
+		content := []byte(artifactFile(t, artifact, name))
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+	}
+	args := append([]string{"-m", "py_compile"}, paths...)
+	if out, err := exec.Command(python, args...).CombinedOutput(); err != nil {
+		t.Fatalf("generated telephony syntax: %v\n%s", err, out)
+	}
+}
+
+func TestSmokePipecatTelephonyRuntimeContracts(t *testing.T) { // telephony V20
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not available")
+	}
+	redisURL := startSmokeRedis(t)
+	carriers := map[string]map[string]string{
+		"twilio": {
+			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN", "from_number": "TWILIO_PHONE_NUMBER",
+		},
+		"telnyx": {
+			"api_key": "TELNYX_API_KEY", "public_key": "TELNYX_PUBLIC_KEY",
+			"connection_id": "TELNYX_CONNECTION_ID", "from_number": "TELNYX_PHONE_NUMBER",
+		},
+		"plivo": {
+			"auth_id": "PLIVO_AUTH_ID", "auth_token": "PLIVO_AUTH_TOKEN", "from_number": "PLIVO_PHONE_NUMBER",
+		},
+	}
+	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
+		t.Run(carrier, func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			enablePackageTelephony(pkg)
+			configured := pkg.Targets["pipecat"]
+			configured.Transport, configured.Carrier, configured.Connection = "carrier-websocket", carrier, "primary_phone"
+			pkg.Targets = map[string]spec.Target{"pipecat": configured}
+			connection := pkg.Connections["primary_phone"]
+			connection.Environment = carriers[carrier]
+			pkg.Connections["primary_phone"] = connection
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			for _, file := range artifact.Files {
+				path := filepath.Join(dir, file.Path)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, file.Content, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(dir, "telephony_deep_smoke.py"), []byte(telephonyDeepSmokeScript), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("uv", "run", "python", "telephony_deep_smoke.py")
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(), "REDIS_URL="+redisURL, "UNMUTE_SMOKE_CARRIER="+carrier)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("%s telephony runtime smoke: %v\n%s", carrier, err, out)
+			}
+			if !bytes.Contains(out, []byte("telephony deep smoke ok: "+carrier)) {
+				t.Fatalf("unexpected %s telephony smoke output:\n%s", carrier, out)
+			}
+		})
+	}
+}
+
+func TestSmokePipecatTelephonyRuntimeScriptCompiles(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+	path := filepath.Join(t.TempDir(), "telephony_deep_smoke.py")
+	if err := os.WriteFile(path, []byte(telephonyDeepSmokeScript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(python, "-m", "py_compile", path).CombinedOutput(); err != nil {
+		t.Fatalf("telephony runtime smoke syntax: %v\n%s", err, out)
+	}
+}
+
+func startSmokeRedis(t *testing.T) string {
+	t.Helper()
+	if configured := os.Getenv("UNMUTE_SMOKE_REDIS_URL"); configured != "" {
+		return configured
+	}
+	binary, err := exec.LookPath("redis-server")
+	if err != nil {
+		t.Skip("redis-server is unavailable and UNMUTE_SMOKE_REDIS_URL is not set")
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	cmd := exec.Command(binary,
+		"--bind", "127.0.0.1", "--port", fmt.Sprint(port),
+		"--save", "", "--appendonly", "no", "--dir", t.TempDir(),
+	)
+	cmd.Stdout, cmd.Stderr = &output, &output
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start redis-server: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Signal(os.Interrupt)
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			_ = cmd.Process.Kill()
+			<-done
+		}
+	})
+	address := fmt.Sprintf("127.0.0.1:%d", port)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		connection, dialErr := net.DialTimeout("tcp", address, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = connection.Close()
+			return "redis://" + address + "/0"
+		}
+		select {
+		case err := <-done:
+			done <- err
+			t.Fatalf("redis-server exited during startup: %v\n%s", err, output.String())
+		default:
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("redis-server did not become ready:\n%s", output.String())
+	return ""
+}
+
 // smokeCheckScript imports the emitted bot and instantiates every service
 // builder with placeholder env values. Importing alone proves the imports and
 // dependency set; calling the builders proves the constructor kwargs against
@@ -103,7 +456,7 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import bot  # noqa: E402  (module import already constructs the agent workers)
+import bot  # noqa: E402
 
 if hasattr(bot, "setup_langfuse_tracing"):
     for name in ("LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_BASE_URL"):
@@ -313,7 +666,13 @@ async def main() -> None:
     provider = trace.get_tracer_provider()
     provider.add_span_processor(SimpleSpanProcessor(memory))
 
-    agent_name = bot.AGENTS[0].name
+    agent_names = sorted(
+        name.removeprefix("build_").removesuffix("_llm")
+        for name in vars(bot)
+        if name.startswith("build_") and name.endswith("_llm")
+    )
+    assert len(agent_names) == 1, agent_names
+    agent_name = agent_names[0]
     setattr(bot, f"build_{agent_name}_llm", FakeLLM)
     setattr(bot, f"build_{agent_name}_tts", FakeTTS)
 
@@ -335,7 +694,16 @@ async def main() -> None:
         additional_span_attributes={"langfuse.trace.name": bot.TRACE_NAME},
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
-    request_agent = type(bot.AGENTS[0])()
+    agent_types = [
+        value
+        for value in vars(bot).values()
+        if isinstance(value, type)
+        and issubclass(value, bot.LLMWorker)
+        and value is not bot.LLMWorker
+        and value.__module__ == "bot"
+    ]
+    assert len(agent_types) == 1, agent_types
+    request_agent = agent_types[0]()
     bot._enable_agent_tracing(main_worker, [request_agent])
 
     @main_worker.event_handler("on_pipeline_started")
@@ -472,9 +840,9 @@ func TestSmokePipecatV1RestoredVendorsInstantiates(t *testing.T) {
 }
 
 // TestSmokePipecatV1LocalToolInstantiates proves the local-tool lowering (T14,
-// V13) against real pipecat-ai: importing bot constructs the agent workers, so
-// the @tool wrapper class-collects and `import tools.fetch_notes` resolves the
-// copied handler file inside the venv.
+// V13) against real pipecat-ai: importing bot defines the call-local worker
+// classes, so the @tool wrapper class-collects and `import tools.fetch_notes`
+// resolves the copied handler file inside the venv.
 func TestSmokePipecatV1LocalToolInstantiates(t *testing.T) {
 	runPipecatSmoke(t, "safe_core", nil, func(agent *ir.Agent) {
 		agent.Tools["fetch_notes"] = ir.Tool{

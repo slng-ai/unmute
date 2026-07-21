@@ -212,9 +212,10 @@ type ModelFallback struct {
 }
 
 type Capacity struct {
-	PeakSessions       int
-	MaxSessions        int
-	AvgSessionDuration string
+	PeakSessions        int
+	MaxSessions         int
+	PeakStartsPerSecond float64
+	AvgSessionDuration  string
 }
 
 // SetTarget selects an orchestrator and resets its target-dependent defaults.
@@ -276,6 +277,14 @@ func (d Data) withDefaults() Data {
 	}
 	if d.Capacity.MaxSessions == 0 {
 		d.Capacity.MaxSessions = 20
+	}
+	if d.Capacity.PeakStartsPerSecond == 0 {
+		for _, channel := range d.AllChannels() {
+			if channel.Kind == "telephony" {
+				d.Capacity.PeakStartsPerSecond = 1
+				break
+			}
+		}
 	}
 	if d.Capacity.AvgSessionDuration == "" {
 		d.Capacity.AvgSessionDuration = "5m"

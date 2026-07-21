@@ -111,6 +111,38 @@ type livekitOutbound struct {
 	LeaveMessage bool // on_voicemail: leave_message (false = hangup)
 }
 
+// livekitTelephony is the exact self-hosted SIP route selected by Build. It
+// contains environment-variable names and normalized variable mappings only;
+// secret values never enter generation.
+type livekitTelephony struct {
+	Carrier        string
+	Connection     string
+	ProviderDocs   string
+	CredentialHint string
+	SIPAddressEnv  string
+	SIPUsernameEnv string
+	SIPPasswordEnv string
+	FromNumberEnv  string
+	HasInbound     bool
+	HasOutbound    bool
+	HasWarm        bool
+	Greeting       *livekitGreeting
+	SystemSources  []livekitSystemSource
+	CallStart      []livekitCallStart
+}
+
+type livekitSystemSource struct {
+	Variable string
+	Source   string
+}
+
+type livekitCallStart struct {
+	Name      string
+	Type      string
+	TypeCheck string
+	Required  bool
+}
+
 // livekitDelegate lowers a delegate control. A single task awaits its
 // AgentTask directly (typed-result-only return, C4) and applies `assign`; a
 // group builds a TaskGroup, awaits it, and hands control on per the group's
@@ -244,6 +276,7 @@ type livekitData struct {
 	HasColdTransfer    bool // get_job_context import
 	HasWarmTransfer    bool // WarmTransferTask import + trunk env
 	Outbound           *livekitOutbound
+	Telephony          *livekitTelephony
 
 	// Conversation shaping (V16).
 	ThinkingAudio          bool // subtle → BackgroundAudioPlayer thinking sound
@@ -253,6 +286,8 @@ type livekitData struct {
 	InactivityEndSecs      int
 	InactivityEndDeltaSecs int // end_after minus nudge_after, floored at 1s
 	MaxDurationSecs        int
+	MaxSessions            int // telephony worker admission cap
+	DrainTimeoutSecs       int // bound graceful shutdown by the longest session
 }
 
 // livekitEmittedFields declares every capability field the LiveKit emitter has
@@ -292,6 +327,24 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldOutbound:              true, // SIP dial-out off job metadata
 	targetcap.FieldVoicemail:             true, // AMD machine-vm branches (N6)
 	targetcap.FieldTracingLangfuse:       true,
+}
+
+var livekitEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
+	targetcap.TelephonyRouteSelected:                         true,
+	targetcap.TelephonyInbound:                               true,
+	targetcap.TelephonyOutbound:                              true,
+	targetcap.TelephonyFeature(targetcap.Hangup):             true,
+	targetcap.TelephonyFeature(targetcap.ColdTransfer):       true,
+	targetcap.TelephonyFeature(targetcap.WarmTransfer):       true,
+	targetcap.TelephonyFeature(targetcap.VoicemailDetection): true,
+	targetcap.TelephonyBriefingSummary:                       true,
+	"source.session_id":                                      true,
+	"source.carrier":                                         true,
+	"source.connection":                                      true,
+	"source.call_id":                                         true,
+	"source.direction":                                       true,
+	"source.from_number":                                     true,
+	"source.to_number":                                       true,
 }
 
 // GenerateLiveKit lowers a validated agent + livekit target into a project. The
@@ -405,6 +458,9 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		{"Dockerfile", "Dockerfile"},
 		{"livekit.toml", "livekit.toml"},
 	}
+	if data.Telephony != nil {
+		outputs = append(outputs, struct{ tmpl, path string }{"compose.telephony.yaml", "compose.telephony.yaml"})
+	}
 	var files []File
 	for _, o := range outputs {
 		content, err := renderLiveKitV1(o.tmpl, data)
@@ -413,6 +469,11 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		}
 		files = append(files, File{Path: o.path, Content: content})
 	}
+	sipFiles, err := livekitSIPFiles(data)
+	if err != nil {
+		return nil, err
+	}
+	files = append(files, sipFiles...)
 	// Local tool handlers are copied verbatim from the source package (SCHEMA
 	// §5: code targets host the handler).
 	if len(data.LocalTools) > 0 {
@@ -420,6 +481,71 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		for _, lt := range data.LocalTools {
 			files = append(files, File{Path: "tools/" + lt.Name + ".py", Content: []byte(lt.Source)})
 		}
+	}
+	return files, nil
+}
+
+// livekitSIPFiles emits provisioner inputs rather than provisioning external
+// state. UNVERIFIED: recheck the JSON shapes with the LiveKit docs MCP before
+// promoting this route; they were verified against docs.livekit.io on
+// 2026-07-20 because the MCP server was unavailable.
+func livekitSIPFiles(data livekitData) ([]File, error) {
+	telephony := data.Telephony
+	if telephony == nil {
+		return nil, nil
+	}
+	placeholder := func(name string) string { return "${" + name + "}" }
+	encode := func(path string, value any) (File, error) {
+		content, err := json.MarshalIndent(value, "", "  ")
+		if err != nil {
+			return File{}, fmt.Errorf("encode %s: %w", path, err)
+		}
+		return File{Path: path, Content: append(content, '\n')}, nil
+	}
+	var files []File
+	if telephony.HasInbound {
+		file, err := encode("sip-inbound-trunk.json", map[string]any{
+			"trunk": map[string]any{
+				"name":    data.Project + " " + telephony.Carrier + " inbound",
+				"numbers": []string{placeholder(telephony.FromNumberEnv)},
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, file)
+		file, err = encode("sip-dispatch-rule.json", map[string]any{
+			"dispatch_rule": map[string]any{
+				"name":      data.Project + " inbound",
+				"trunk_ids": []string{placeholder("LIVEKIT_SIP_INBOUND_TRUNK")},
+				"rule": map[string]any{
+					"dispatchRuleIndividual": map[string]any{"roomPrefix": "call-"},
+				},
+				"roomConfig": map[string]any{
+					"agents": []map[string]any{{
+						"agentName": data.AgentName,
+						"metadata":  `{"direction":"inbound"}`,
+					}},
+				},
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, file)
+	}
+	if telephony.HasOutbound || telephony.HasWarm {
+		file, err := encode("sip-outbound-trunk.json", map[string]any{
+			"trunk": map[string]any{
+				"name":    data.Project + " " + telephony.Carrier + " outbound",
+				"address": placeholder(telephony.SIPAddressEnv),
+				"numbers": []string{placeholder(telephony.FromNumberEnv)},
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, file)
 	}
 	return files, nil
 }

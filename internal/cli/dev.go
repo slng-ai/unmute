@@ -30,8 +30,8 @@ import (
 )
 
 func newDevCmd() *cobra.Command {
-	var uiPort, botPort, targetName string
-	var noOpen, verbose, console bool
+	var uiPort, botPort, targetName, publicURL string
+	var noOpen, verbose, console, telephony bool
 
 	cmd := &cobra.Command{
 		Use:   "dev <agent-dir>",
@@ -39,13 +39,22 @@ func newDevCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := args[0]
+			if !telephony && publicURL != "" {
+				return errors.New("dev: --public-url requires --telephony")
+			}
 
 			selected, err := selectDevTarget(cmd, root, targetName)
 			if err != nil {
 				return err
 			}
 			if console {
+				if telephony {
+					return errors.New("dev: --console and --telephony cannot be used together")
+				}
 				return runDevConsole(cmd, root, selected)
+			}
+			if telephony {
+				return runDevTelephony(cmd, root, selected, publicURL, botPort, verbose)
 			}
 			// livekit web mode has its own runner (LiveKit server + token, no
 			// local Pipecat proxy); every other provider stays on the flow below.
@@ -145,12 +154,144 @@ func newDevCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&uiPort, "port", "8765", "port for the local dev UI")
-	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "port the Pipecat runner listens on")
+	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "host port for the generated agent; with --telephony, passed to Compose as UNMUTE_TELEPHONY_PORT")
 	cmd.Flags().StringVar(&targetName, "target", "", "target instance name (required without a TTY when multiple exist)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open the browser automatically")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "stream agent logs to stderr (default: write to bot.log only)")
 	cmd.Flags().BoolVar(&console, "console", false, "talk to the agent in the terminal over the local mic/speaker (no browser or dev server; --port/--bot-port/--no-open are ignored)")
+	cmd.Flags().BoolVar(&telephony, "telephony", false, "run the selected target's resolved telephony route (no browser UI)")
+	cmd.Flags().StringVar(&publicURL, "public-url", "", "exact public HTTPS origin for routes with carrier callbacks (requires --telephony)")
 	return cmd
+}
+
+func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort string, verbose bool) error {
+	agent, targets, err := loadPackage(root, []string{targetName})
+	if err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
+	}
+	resolved := targets[0]
+	plan := generate.TelephonyRuntimePlanFor(resolved)
+	if plan == nil {
+		return fmt.Errorf("dev %s: target %q has no resolved telephony route", root, resolved.Name)
+	}
+	artifact, err := generate.Generate(agent, resolved, target.Default())
+	if err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
+	}
+	if artifact.Telephony == nil || len(artifact.Telephony.Services) == 0 {
+		return fmt.Errorf("dev %s: target %q has no executable telephony topology", root, resolved.Name)
+	}
+	plan = artifact.Telephony
+	var public *url.URL
+	if len(plan.PublicEndpoints) > 0 || publicValue != "" {
+		public, err = parseTelephonyPublicURL(publicValue)
+		if err != nil {
+			return fmt.Errorf("dev %s: %w", root, err)
+		}
+	}
+	printDevTelephonyPlan(cmd.OutOrStdout(), resolved.Name, plan, public)
+
+	childEnv := devChildEnv(root, cmd.ErrOrStderr())
+	if err := rejectLocalTopologyConflicts(plan, childEnv); err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
+	}
+	if public != nil {
+		childEnv = setChildEnv(childEnv, "UNMUTE_PUBLIC_URL", public.String())
+	}
+	childEnv = setChildEnv(childEnv, "UNMUTE_TELEPHONY_PORT", botPort)
+	if missing := missingEnvironment(externalTelephonyEnv(plan), childEnv); len(missing) > 0 {
+		return fmt.Errorf("dev %s: missing telephony credentials/configuration: %s; see TELEPHONY.md#credentials for where to obtain them", root, strings.Join(missing, ", "))
+	}
+	if err := composePreflight(cmd.Context(), childEnv); err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
+	}
+	outDir := filepath.Join(root, "build", resolved.Name)
+	if err := writeArtifactFiles(outDir, artifact.Files); err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "compiled %s\n", outDir)
+	composePath := filepath.Join(outDir, "compose.telephony.yaml")
+	if _, err := os.Stat(composePath); err != nil {
+		return fmt.Errorf("dev %s: generated telephony Compose file: %w", root, err)
+	}
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	logPath := filepath.Join(outDir, "telephony.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		return fmt.Errorf("dev %s: open log: %w", root, err)
+	}
+	defer func() { _ = logFile.Close() }()
+	var processOut io.Writer = logFile
+	if verbose {
+		processOut = io.MultiWriter(logFile, cmd.ErrOrStderr())
+	}
+	project := composeProjectName(root, resolved.Name)
+	if err := runTelephonyCompose(ctx, outDir, composePath, project, childEnv, processOut, cmd.OutOrStdout(), cmd.ErrOrStderr(), logPath); err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
+	}
+	return nil
+}
+
+func parseTelephonyPublicURL(value string) (*url.URL, error) {
+	if value == "" {
+		return nil, errors.New("--telephony requires --public-url <https-url>")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, fmt.Errorf("--public-url must be an HTTPS origin with an optional path, got %q", value)
+	}
+	parsed.Path = strings.TrimSuffix(parsed.Path, "/")
+	return parsed, nil
+}
+
+func printDevTelephonyPlan(out io.Writer, name string, plan *generate.TelephonyRuntimePlan, public *url.URL) {
+	fmt.Fprintf(out, "%s: telephony route provider=%s transport=%s carrier=%s coordination=%s\n", name, plan.Route.Provider, plan.Route.Transport, plan.Route.Carrier, plan.Coordination)
+	for _, endpoint := range plan.PublicEndpoints {
+		if public == nil {
+			continue
+		}
+		base := strings.TrimSuffix(public.String(), "/")
+		if endpoint.Method == "WS" {
+			base = "wss" + strings.TrimPrefix(base, "https")
+		}
+		fmt.Fprintf(out, "%s: %s %s %s%s\n", name, endpoint.Name, endpoint.Method, base, endpoint.Path)
+	}
+	for _, step := range plan.ManualSteps {
+		fmt.Fprintf(out, "%s: setup: %s\n", name, step)
+	}
+	fmt.Fprintf(out, "%s: local services: %s\n", name, strings.Join(plan.Services, ", "))
+	for _, reason := range plan.Reasons {
+		fmt.Fprintf(out, "%s: coordination reason %s -> %s\n", name, reason.Name, strings.Join(reason.Consumers, ", "))
+	}
+}
+
+func setChildEnv(env []string, name, value string) []string {
+	prefix := name + "="
+	filtered := env[:0]
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return append(filtered, prefix+value)
+}
+
+func missingEnvironment(names, env []string) []string {
+	values := make(map[string]bool, len(env))
+	for _, entry := range env {
+		name, value, ok := strings.Cut(entry, "=")
+		if ok && value != "" {
+			values[name] = true
+		}
+	}
+	var missing []string
+	for _, name := range names {
+		if !values[name] {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
 
 // runDevConsole compiles the selected target and hands the terminal to its
@@ -405,7 +546,7 @@ func devChildEnv(root string, warn io.Writer) []string {
 	}
 	for name, value := range vals {
 		if value != "" {
-			env = append(env, name+"="+value)
+			env = setChildEnv(env, name, value)
 		}
 	}
 	return env

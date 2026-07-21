@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	packagespec "github.com/slng/unmute/internal/spec"
+	targetcap "github.com/slng/unmute/internal/target"
 )
 
 var (
@@ -66,6 +67,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		Tools:        make(map[string]Tool, len(pkg.Tools)),
 		Conversation: buildConversation(pkg.Agent.Conversation),
 		Channels:     make(map[string]Channel, len(pkg.Agent.Channels)),
+		Connections:  make(map[string]Connection, len(pkg.Connections)),
 		Targets:      make(map[string]Target, len(pkg.Targets)),
 	}
 	if pkg.Agent.Tracing != nil {
@@ -85,10 +87,31 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 			RequiredControls: channel.RequiredControls, OnVoicemail: VoicemailAction(channel.OnVoicemail),
 		}
 	}
+	for _, name := range sortedKeys(pkg.Connections) {
+		raw := pkg.Connections[name]
+		path := filepath.Join("connections", name+".yaml")
+		if raw.Kind != "telephony" {
+			return nil, fmt.Errorf("%s: connection %q kind must be telephony", pkg.Location(path, "kind:"), name)
+		}
+		if len(raw.Environment) == 0 {
+			return nil, fmt.Errorf("%s: connection %q environment must not be empty", pkg.Location(path, "environment:"), name)
+		}
+		for _, key := range sortedKeys(raw.Environment) {
+			value := raw.Environment[key]
+			if !namePattern.MatchString(key) {
+				return nil, fmt.Errorf("%s: connection %q environment key %q must be lowercase snake_case", pkg.Location(path, key), name, key)
+			}
+			if !envNamePattern.MatchString(value) {
+				return nil, fmt.Errorf("%s: connection %q environment value for %q must be an environment variable name", pkg.Location(path, value), name, key)
+			}
+		}
+		out.Connections[name] = Connection{Kind: raw.Kind, Environment: maps.Clone(raw.Environment)}
+	}
 	if pkg.Agent.Capacity != nil {
 		out.Capacity = &Capacity{
 			PeakSessions: pkg.Agent.Capacity.PeakSessions, MaxSessions: pkg.Agent.Capacity.MaxSessions,
-			AvgSessionDuration: Duration(pkg.Agent.Capacity.AvgSessionDuration),
+			PeakStartsPerSecond: pkg.Agent.Capacity.PeakStartsPerSecond,
+			AvgSessionDuration:  Duration(pkg.Agent.Capacity.AvgSessionDuration),
 		}
 	}
 
@@ -198,6 +221,12 @@ func checkNames(pkg *packagespec.Package) error {
 	for name := range pkg.Agent.Controls {
 		if _, ok := pkg.Tools[name]; ok {
 			return fmt.Errorf("%s: tool and control name %q collide", pkg.Location("agent.yaml", name), name)
+		}
+	}
+	for _, name := range sortedKeys(pkg.Connections) {
+		if !namePattern.MatchString(name) {
+			path := filepath.Join("connections", name+".yaml")
+			return fmt.Errorf("%s: connection name %q must be lowercase snake_case and cannot start with underscore", path, name)
 		}
 	}
 	for _, raw := range pkg.Targets {
@@ -647,23 +676,205 @@ func stringSlice(value any) ([]string, error) {
 // Only used models and the listen/turn selections resolve; palette alternates
 // stay inert.
 func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, agent *Agent, used map[string]bool) (Target, error) {
-	for key := range raw.Models {
+	for _, key := range sortedKeys(raw.Models) {
 		if _, ok := agent.Models[key]; !ok {
 			return Target{}, fmt.Errorf("%s: target %q overrides %q, which is not a defined model", pkg.Location("targets.yaml", key), name, key)
 		}
 	}
-	for destination, value := range raw.Destinations {
+	for _, destination := range sortedKeys(raw.Destinations) {
+		value := raw.Destinations[destination]
 		if !validDestination(value) {
 			return Target{}, fmt.Errorf("%s: destination %q must be an E.164 phone number or SIP URI", pkg.Location("targets.yaml", destination), destination)
 		}
 	}
-	return Target{
+	if raw.Connection != "" {
+		if _, ok := agent.Connections[raw.Connection]; !ok {
+			return Target{}, missing(pkg, "targets.yaml", "connection", raw.Connection)
+		}
+	}
+	telephony := hasTelephonyChannel(agent)
+	if telephony && (raw.Provider == string(ProviderLiveKit) || raw.Provider == string(ProviderPipecat)) && raw.Connection == "" {
+		return Target{}, fmt.Errorf("%s: target %q requires connection for telephony", pkg.Location("targets.yaml", name+":"), name)
+	}
+	if !telephony && raw.Connection != "" {
+		return Target{}, fmt.Errorf("%s: target %q sets connection but has no telephony channel", pkg.Location("targets.yaml", "connection:"), name)
+	}
+	built := Target{
 		Name: name, Provider: Provider(raw.Provider), Version: raw.Version, Pins: raw.Pins,
-		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier,
+		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier, Connection: raw.Connection,
 		Region: raw.Region, Edition: raw.Edition,
 		Models:       resolveBindings(agent, used, raw.Models),
 		Destinations: raw.Destinations,
-	}, nil
+	}
+	if raw.Connection != "" && telephony {
+		built.Telephony = buildTelephonyPlan(pkg, agent, built)
+		if err := validateTelephonyEnvironment(pkg, built.Telephony); err != nil {
+			return Target{}, err
+		}
+	}
+	return built, nil
+}
+
+func validateTelephonyEnvironment(pkg *packagespec.Package, plan *TelephonyPlan) error {
+	key := targetcap.TelephonyKey{Provider: targetcap.Provider(plan.Key.Provider), Transport: plan.Key.Transport, Carrier: plan.Key.Carrier}
+	required, optional, ok := targetcap.TelephonyEnvironment(key)
+	if !ok || len(required)+len(optional) == 0 {
+		return nil
+	}
+	allowed := make(map[string]bool, len(required)+len(optional))
+	path := filepath.Join("connections", plan.Connection+".yaml")
+	for _, name := range append(required, optional...) {
+		allowed[name] = true
+	}
+	for _, name := range required {
+		if plan.Environment[name] == "" {
+			return fmt.Errorf("%s: connection %q requires environment key %q for route (%s, %s, %s)", pkg.Location(path, "environment:"), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+		}
+	}
+	for _, name := range sortedKeys(plan.Environment) {
+		if !allowed[name] {
+			return fmt.Errorf("%s: connection %q environment key %q is not accepted by route (%s, %s, %s)", pkg.Location(path, name), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+		}
+	}
+	return nil
+}
+
+func hasTelephonyChannel(agent *Agent) bool {
+	for _, channel := range agent.Channels {
+		if channel.Kind == ChannelTelephony {
+			return true
+		}
+	}
+	return false
+}
+
+func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target) *TelephonyPlan {
+	features := map[targetcap.TelephonyFeature]bool{targetcap.TelephonyRouteSelected: true}
+	var channels []string
+	for _, name := range slices.Sorted(maps.Keys(agent.Channels)) {
+		channel := agent.Channels[name]
+		if channel.Kind != ChannelTelephony {
+			continue
+		}
+		channels = append(channels, name)
+		if channel.Inbound != nil && *channel.Inbound {
+			features[targetcap.TelephonyInbound] = true
+		}
+		if channel.Outbound != nil && *channel.Outbound {
+			features[targetcap.TelephonyOutbound] = true
+			if channel.OnVoicemail != "" {
+				features[targetcap.TelephonyFeature(targetcap.VoicemailDetection)] = true
+			}
+		}
+		for _, control := range channel.RequiredControls {
+			features[targetcap.TelephonyFeature(control)] = true
+		}
+	}
+	for _, control := range pkg.Agent.Controls {
+		if control.Kind != string(ControlHumanTransfer) {
+			continue
+		}
+		mode := stringValue(control.Mode)
+		features[targetcap.TelephonyFeature(mode+"_transfer")] = true
+		switch stringValue(control.Briefing) {
+		case string(BriefingSummary):
+			features[targetcap.TelephonyBriefingSummary] = true
+		case string(BriefingMessage):
+			features[targetcap.TelephonyBriefingMessage] = true
+		case string(BriefingWait):
+			features[targetcap.TelephonyBriefingWait] = true
+		}
+	}
+	sources := make(map[string]VariableSource)
+	for name, variable := range agent.Variables {
+		if variable.Source == "" || variable.Source == VariableSourceCallStart {
+			continue
+		}
+		sources[name] = variable.Source
+		features[targetcap.TelephonyFeature(targetcap.TelephonySourcePrefix+string(variable.Source))] = true
+	}
+	key := targetcap.TelephonyKey{
+		Provider: targetcap.Provider(resolved.Provider), Transport: resolved.Transport, Carrier: resolved.Carrier,
+	}
+	route := targetcap.TelephonyRoutes()[key]
+	evidence := make([]TelephonyFeatureEvidence, 0, len(features))
+	for _, feature := range slices.Sorted(maps.Keys(features)) {
+		row := targetcap.ResolveTelephonyFeature(key, feature)
+		evidence = append(evidence, TelephonyFeatureEvidence{
+			Feature: string(row.Feature), Tag: string(row.Tag), Note: row.Note,
+			Docs: row.Docs, Verified: row.Verified, Smoke: row.Smoke,
+		})
+	}
+	connection := agent.Connections[resolved.Connection]
+	hasAnyFeature := func(required []targetcap.TelephonyFeature) bool {
+		if len(required) == 0 {
+			return true
+		}
+		for _, feature := range required {
+			if features[feature] {
+				return true
+			}
+		}
+		return false
+	}
+	processes := make([]TelephonyProcess, 0, len(route.Processes))
+	for _, process := range route.Processes {
+		processes = append(processes, TelephonyProcess{
+			Name: process.Name, Command: slices.Clone(process.Command), Health: process.Health, Readiness: process.Readiness,
+		})
+	}
+	endpoints := make([]TelephonyEndpoint, 0, len(route.PublicEndpoints))
+	for _, endpoint := range route.PublicEndpoints {
+		if hasAnyFeature(endpoint.AnyFeatures) {
+			endpoints = append(endpoints, TelephonyEndpoint{Name: endpoint.Name, Method: endpoint.Method, Path: endpoint.Path})
+		}
+	}
+	requiredEnvironment := make([]string, 0, len(connection.Environment)+len(route.RuntimeEnvironment))
+	for _, name := range connection.Environment {
+		if name != "" {
+			requiredEnvironment = append(requiredEnvironment, name)
+		}
+	}
+	for _, requirement := range route.RuntimeEnvironment {
+		if hasAnyFeature(requirement.AnyFeatures) {
+			requiredEnvironment = append(requiredEnvironment, requirement.Name)
+		}
+	}
+	slices.Sort(requiredEnvironment)
+	requiredEnvironment = slices.Compact(requiredEnvironment)
+	coordination, admissionOwner := "shared", "generated_runtime"
+	services := []string{"application", "redis"}
+	reasons := []TelephonyCoordinationReason{
+		{Name: "admission", Consumers: []string{"application"}},
+	}
+	if resolved.Provider == ProviderPipecat {
+		reasons = append(reasons,
+			TelephonyCoordinationReason{Name: "call_correlation", Consumers: []string{"application"}},
+			TelephonyCoordinationReason{Name: "callback_idempotency", Consumers: []string{"application"}},
+		)
+		if features[targetcap.TelephonyFeature(targetcap.ColdTransfer)] || features[targetcap.TelephonyFeature(targetcap.WarmTransfer)] {
+			reasons = append(reasons, TelephonyCoordinationReason{Name: "human_transfer", Consumers: []string{"application"}})
+		}
+	}
+	if resolved.Provider == ProviderLiveKit && resolved.Transport == "sip" {
+		admissionOwner = "livekit_dispatch"
+		services = append(services, "livekit_server", "livekit_sip")
+		reasons = []TelephonyCoordinationReason{
+			{Name: "livekit_control_plane", Consumers: []string{"livekit_server", "livekit_sip"}},
+		}
+	}
+	slices.Sort(services)
+	slices.SortFunc(reasons, func(a, b TelephonyCoordinationReason) int { return strings.Compare(a.Name, b.Name) })
+	return &TelephonyPlan{
+		Channels: channels, Connection: resolved.Connection,
+		Key:         TelephonyKey{Provider: resolved.Provider, Transport: resolved.Transport, Carrier: resolved.Carrier},
+		Environment: maps.Clone(connection.Environment), Destinations: maps.Clone(resolved.Destinations),
+		SystemSources: sources, Evidence: evidence,
+		Processes: processes, PublicEndpoints: endpoints, RequiredEnvironment: requiredEnvironment,
+		LocalEnvironment: slices.Clone(route.LocallySuppliedEnvironment), ManualSteps: slices.Clone(route.ManualSteps),
+		Services: services, Coordination: coordination,
+		CoordinationReasons: reasons, AdmissionOwner: admissionOwner,
+	}
 }
 
 func validDestination(value string) bool {

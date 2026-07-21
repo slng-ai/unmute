@@ -1,7 +1,9 @@
 package generate
 
 import (
+	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -868,18 +870,12 @@ func TestLiveKitV1OutboundVoicemail(t *testing.T) {
 		{ir.VoicemailLeaveMessage, `ctx.shutdown("voicemail: left a message")  # on_voicemail: leave_message`},
 		{ir.VoicemailHangup, `ctx.shutdown("voicemail detected")  # on_voicemail: hangup`},
 	} {
-		pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		agent, err := ir.Build(pkg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		inbound, outbound := false, true
-		agent.Channels["phone"] = ir.Channel{Kind: ir.ChannelTelephony, Inbound: &inbound, Outbound: &outbound, OnVoicemail: tc.action}
+		agent, resolved := configuredLiveKitSIP(t)
+		phone := agent.Channels["phone"]
+		phone.OnVoicemail = tc.action
+		agent.Channels["phone"] = phone
 
-		artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+		artifact, err := GenerateLiveKit(agent, resolved, nil, nil)
 		if err != nil {
 			t.Fatalf("generate %s: %v", tc.action, err)
 		}
@@ -897,6 +893,202 @@ func TestLiveKitV1OutboundVoicemail(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) { // telephony T10, V7, V9-V10, V13, V17-V20
+	agent, resolved := configuredLiveKitSIP(t)
+	artifact, err := GenerateLiveKit(agent, resolved, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{"sip-inbound-trunk.json", "sip-outbound-trunk.json", "sip-dispatch-rule.json"} {
+		content := artifactFile(t, artifact, path)
+		if !json.Valid([]byte(content)) {
+			t.Errorf("%s is not valid JSON:\n%s", path, content)
+		}
+	}
+	for path, wants := range map[string][]string{
+		"sip-inbound-trunk.json":  {`${TWILIO_PHONE_NUMBER}`, `twilio inbound`},
+		"sip-outbound-trunk.json": {`${TWILIO_SIP_ADDRESS}`, `${TWILIO_PHONE_NUMBER}`},
+		"sip-dispatch-rule.json":  {`${LIVEKIT_SIP_INBOUND_TRUNK}`, `"agentName": "livekit"`, `\"direction\":\"inbound\"`},
+	} {
+		content := artifactFile(t, artifact, path)
+		for _, want := range wants {
+			if !strings.Contains(content, want) {
+				t.Errorf("%s missing %q:\n%s", path, want, content)
+			}
+		}
+		if strings.Contains(content, "secret-value") {
+			t.Errorf("%s contains a secret value", path)
+		}
+	}
+	for _, file := range artifact.Files {
+		for _, forbidden := range []string{"TELNYX_SIP_", "PLIVO_SIP_", "EXOTEL_SIP_"} {
+			if strings.Contains(string(file.Content), forbidden) {
+				t.Errorf("%s contains unselected carrier environment %s", file.Path, forbidden)
+			}
+		}
+	}
+
+	agentPy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		`MAX_SESSIONS = 60`,
+		`len(agent_server.active_jobs) / MAX_SESSIONS`,
+		`drain_timeout=1200`,
+		`load_threshold=1.0`,
+		`"call_id": attributes.get("sip.callID")`,
+		`"from_number": trunk_number if direction == "outbound" else remote_number`,
+		`raise RuntimeError("phone_number must be an E.164 number")`,
+		`raise RuntimeError("call_start.campaign_id must be string")`,
+		`userdata.provider_call_id = value`,
+		`userdata.call_direction = value`,
+		`_hydrate_livekit_context(session.userdata, call_context, call_start)`,
+		`await _livekit_entry_greeting(session)`,
+		`result = await WarmTransferTask(sip_call_to="+14155550123")`,
+	} {
+		if !strings.Contains(agentPy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	hydrateAt := strings.Index(agentPy, "_hydrate_livekit_context(session.userdata")
+	greetAt := strings.Index(agentPy, "await _livekit_entry_greeting(session)")
+	if hydrateAt < 0 || greetAt < 0 || hydrateAt > greetAt {
+		t.Error("LiveKit SIP context must hydrate before the first greeting")
+	}
+	env := artifactFile(t, artifact, ".env.example")
+	for _, name := range []string{
+		"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "REDIS_URL",
+		"LIVEKIT_SIP_URI", "LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK",
+		"TWILIO_SIP_ADDRESS", "TWILIO_SIP_USERNAME", "TWILIO_SIP_PASSWORD", "TWILIO_PHONE_NUMBER",
+	} {
+		if !strings.Contains(env, name+"=") {
+			t.Errorf(".env.example missing %s", name)
+		}
+	}
+	readme := artifactFile(t, artifact, "README.md")
+	for _, want := range []string{
+		"Configure self-hosted LiveKit SIP", "SIP trunking console", "twilio provider guide", "REDIS_URL", "not an audio hop",
+		`--auth-user "$TWILIO_SIP_USERNAME"`, `--auth-pass "$TWILIO_SIP_PASSWORD"`,
+		"UNMUTE_LIVEKIT_SIP_PORT", "UNMUTE_LIVEKIT_RTP_PORT_RANGE", "UNMUTE_LIVEKIT_PORT",
+	} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README.md missing %q", want)
+		}
+	}
+	compose := artifactFile(t, artifact, "compose.telephony.yaml")
+	assertValidYAML(t, compose)
+	assertComposeLocalEnvironment(t, compose, TelephonyRuntimePlanFor(resolved))
+	assertGoldenFile(t, filepath.Join("testdata", "golden", "livekit_v1_telephony_compose.yaml"), compose, *updateLiveKitV1)
+	for _, want := range []string{
+		"image: redis:7.4.9-alpine", "image: livekit/livekit-server:v1.13.4", "image: livekit/sip:v1.7.0",
+		"LIVEKIT_API_SECRET=devsecret-local-only", "address: redis:6379",
+		`stop_grace_period: "1200s"`, `"${UNMUTE_LIVEKIT_PORT:-7880}:7880"`,
+		`"${UNMUTE_LIVEKIT_SIP_PORT:-5060}:5060/udp"`,
+		`rtp_port: ${UNMUTE_LIVEKIT_RTP_PORT_RANGE:-10000-10100}`,
+		`"${UNMUTE_LIVEKIT_RTP_PORT_RANGE:-10000-10100}:${UNMUTE_LIVEKIT_RTP_PORT_RANGE:-10000-10100}/udp"`,
+		"condition: service_healthy", "redis_data:/data",
+	} {
+		if !strings.Contains(compose, want) {
+			t.Errorf("compose.telephony.yaml missing %q:\n%s", want, compose)
+		}
+	}
+	for _, forbidden := range []string{"image: livekit/livekit-server:latest", "image: livekit/sip:latest", "secret-value", "TWILIO_SIP_PASSWORD=", "REDIS_URL=redis"} {
+		if strings.Contains(compose, forbidden) {
+			t.Errorf("compose.telephony.yaml contains %q", forbidden)
+		}
+	}
+
+	runtime := TelephonyRuntimePlanFor(resolved)
+	if runtime.Coordination != "shared" || runtime.AdmissionOwner != "livekit_dispatch" {
+		t.Fatalf("runtime coordination = %#v", runtime)
+	}
+	if len(runtime.Processes) != 1 || runtime.Processes[0].Readiness != "/" {
+		t.Fatalf("runtime process = %#v", runtime.Processes)
+	}
+	required := strings.Join(runtime.RequiredEnv, ",")
+	for _, want := range []string{"REDIS_URL", "LIVEKIT_SIP_URI", "LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK", "TWILIO_SIP_PASSWORD"} {
+		if !strings.Contains(required, want) {
+			t.Errorf("runtime required env missing %s: %s", want, required)
+		}
+	}
+	if strings.Contains(required, "UNMUTE_OUTBOUND_TOKEN") {
+		t.Errorf("LiveKit SIP runtime requires unused outbound token: %s", required)
+	}
+	if len(runtime.PublicEndpoints) != 0 {
+		t.Fatalf("LiveKit SIP must not report HTTP callback endpoints: %#v", runtime.PublicEndpoints)
+	}
+}
+
+func TestLiveKitSIPCapacityIsExactAtOneAndN(t *testing.T) { // telephony V22, V30
+	for _, maxSessions := range []int{1, 60} {
+		t.Run(fmt.Sprintf("max_%d", maxSessions), func(t *testing.T) {
+			agent, resolved := configuredLiveKitSIP(t)
+			agent.Capacity.MaxSessions = maxSessions
+			artifact, err := GenerateLiveKit(agent, resolved, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			agentPy := artifactFile(t, artifact, "agent.py")
+			for _, want := range []string{
+				fmt.Sprintf("MAX_SESSIONS = %d", maxSessions),
+				`return min(len(agent_server.active_jobs) / MAX_SESSIONS, 1.0)`,
+				`load_threshold=1.0`,
+			} {
+				if !strings.Contains(agentPy, want) {
+					t.Errorf("agent.py missing exact-capacity expression %q", want)
+				}
+			}
+			if strings.Contains(agentPy, `load_threshold=(MAX_SESSIONS - 1) / MAX_SESSIONS`) {
+				t.Error("agent.py retains the capacity-shrinking threshold")
+			}
+
+			load := func(active int) float64 {
+				return min(float64(active)/float64(maxSessions), 1)
+			}
+			if load(maxSessions-1) >= 1 {
+				t.Fatalf("worker becomes full before session %d", maxSessions)
+			}
+			if load(maxSessions) != 1 {
+				t.Fatalf("worker is not full at session %d", maxSessions)
+			}
+		})
+	}
+}
+
+func configuredLiveKitSIP(t *testing.T) (*ir.Agent, ir.Target) {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enablePackageTelephony(pkg)
+	configured := pkg.Targets["livekit"]
+	configured.Transport, configured.Carrier, configured.Connection = "sip", "twilio", "primary_phone"
+	pkg.Targets = map[string]spec.Target{"livekit": configured}
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment = map[string]string{
+		"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
+		"sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
+	}
+	pkg.Connections["primary_phone"] = connection
+	outbound := true
+	phone := pkg.Agent.Channels["phone"]
+	phone.Outbound, phone.OnVoicemail = &outbound, "hangup"
+	pkg.Agent.Channels["phone"] = phone
+	pkg.Agent.Variables["campaign_id"] = spec.Variable{Type: "string", Source: "call_start", Default: "manual"}
+	pkg.Agent.Variables["provider_call_id"] = spec.Variable{Type: "string", Source: "call_id"}
+	pkg.Agent.Variables["call_direction"] = spec.Variable{Type: "string", Source: "direction"}
+	warm, summary := "warm", "summary"
+	human := pkg.Agent.Controls["to_human"]
+	human.Mode, human.Briefing = &warm, &summary
+	pkg.Agent.Controls["to_human"] = human
+
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return agent, agent.Targets["livekit"]
 }
 
 // TestLiveKitV1PinsAndSDKLanguage covers the T7 remainders (C6/C1): plugin
@@ -1023,8 +1215,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbound, outbound, enabled, noCalls := false, true, true, false
-	agent.Channels["phone"] = ir.Channel{Kind: ir.ChannelTelephony, Inbound: &inbound, Outbound: &outbound, OnVoicemail: ir.VoicemailLeaveMessage}
+	enabled, noCalls := true, false
 	agent.Conversation.Interruption = &ir.Interruption{Enabled: &enabled, MinimumWords: 2, IgnorePhrases: []string{"uh-huh"}}
 	agent.Conversation.ThinkingAudio = ir.ThinkingSubtle
 	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}

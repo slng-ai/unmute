@@ -4,9 +4,11 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/spec"
 	"github.com/slng/unmute/internal/target"
@@ -78,7 +80,7 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 		`additional_span_attributes={"langfuse.trace.name": TRACE_NAME}`,
 		"def _enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:",
 		"agent._tracing_context = main._tracing_context",
-		"_enable_agent_tracing(main, AGENTS)",
+		"_enable_agent_tracing(main, agents)",
 		"trace_provider.force_flush()",
 	} {
 		if !strings.Contains(bot, want) {
@@ -372,6 +374,411 @@ func TestPipecatV1OmitsTracingUnlessConfigured(t *testing.T) { // V19
 	}
 }
 
+func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T) { // telephony V7-V14, V20
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enablePackageTelephony(pkg)
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = "twilio"
+	configured.Connection = "primary_phone"
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
+	outbound := true
+	phone := pkg.Agent.Channels["phone"]
+	phone.Outbound = &outbound
+	phone.OnVoicemail = "hangup"
+	pkg.Agent.Channels["phone"] = phone
+	pkg.Agent.Variables["campaign_id"] = spec.Variable{Type: "string", Source: "call_start"}
+	pkg.Agent.Variables["provider_call"] = spec.Variable{Type: "string", Source: "call_id"}
+
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["pipecat"]
+	artifact, err := GeneratePipecat(agent, resolved, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := artifactFile(t, artifact, "telephony.py")
+	for _, want := range []string{
+		`RequestValidator(_env(AUTH_TOKEN_ENV))`,
+		`TwilioHttpClient(timeout=CONTROL_TIMEOUT_SECS)`,
+		`_validator().validate(_http_url(request.url.path), form, signature)`,
+		`_validator().validate(`,
+		`STATE.mark_once("inbound", call_id, SESSION_TTL_SECS)`,
+		`STATE.mark_once("transfer", call_id, SESSION_TTL_SECS)`,
+		`STATE.mark_once("status", event_id, SESSION_TTL_SECS)`,
+		`status_callback_event=["initiated", "ringing", "answered", "completed"]`,
+		`await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))`,
+		`destination, call_start = await _outbound_request(request)`,
+		`await handle_media(websocket, token, _validate_websocket)`,
+	} {
+		if !strings.Contains(adapter, want) {
+			t.Errorf("telephony.py missing %q", want)
+		}
+	}
+	shared := artifactFile(t, artifact, "telephony_shared.py")
+	for _, want := range []string{
+		`CONTROL_TIMEOUT_SECS = 10`,
+		`SESSION_TTL_SECS = 1260`,
+		`DRAIN_TIMEOUT_SECS = max(1, SESSION_TTL_SECS - 30)`,
+		`app = FastAPI(lifespan=lifespan)`,
+		`signal.signal(signal.SIGTERM, begin_drain)`,
+		`STATE.begin_drain()`,
+		`telephony forced termination after drain timeout; active_sessions={}`,
+		`websocket.close(code=1012)`,
+		`def _env(name: str) -> str:`,
+		`def _public_url() -> str:`,
+		`async def _remember(`,
+		`async def _outbound_request(request: Request)`,
+		`hmac.compare_digest(request.headers.get("Authorization", ""), expected)`,
+		`pending = await STATE.pending(token, consume=True)`,
+		`await STATE.admit(pending["session_id"])`,
+		`async with asyncio.TaskGroup() as tasks:`,
+		`_refresh_admission(pending["session_id"])`,
+		`await asyncio.sleep(max(1, SESSION_TTL_SECS // 3))`,
+		`raise RuntimeError("active telephony admission lease was lost")`,
+		`if STATE.draining:`,
+		`await websocket.close(code=1013)`,
+		`"campaign_id": "string"`,
+		`CALL_START_REQUIRED = {`,
+	} {
+		if !strings.Contains(shared, want) {
+			t.Errorf("telephony_shared.py missing %q", want)
+		}
+	}
+	state := artifactFile(t, artifact, "telephony_state.py")
+	for _, want := range []string{"hashlib.sha256", "setex", "getdel", "ZREMRANGEBYSCORE", "ZADD", "EXPIRE", "zrem"} {
+		if !strings.Contains(state, want) {
+			t.Errorf("telephony_state.py missing %q", want)
+		}
+	}
+	if strings.Index(state, "redis.call('ZADD'") > strings.Index(state, "redis.call('EXPIRE'") {
+		t.Error("admission refresh must extend the Redis key lifetime after re-scoring the active session")
+	}
+	for _, forbidden := range []string{"from_number", "to_number", "call_start", "credential", "transcript", "audio"} {
+		if strings.Contains(state, forbidden) {
+			t.Errorf("telephony_state.py leaks disallowed state field %q", forbidden)
+		}
+	}
+	for _, forbidden := range []string{"Telnyx", "Plivo", "Exotel", "audio/x-mulaw", "media.payload"} {
+		if strings.Contains(adapter, forbidden) {
+			t.Errorf("telephony.py contains unselected or media implementation %q", forbidden)
+		}
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		`"twilio": lambda: FastAPIWebsocketParams`,
+		`telephony.configure_pipecat_env()`,
+		`call_context = telephony.normalized_context(runner_args)`,
+		`agents = [BillingAgent(state=state, context=context, call_context=call_context), IntakeAgent(state=state, context=context, call_context=call_context)]`,
+		`await telephony.cold_transfer(self.call_context["call_id"], "+14155550123")`,
+		`logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing %q", want)
+		}
+	}
+	if strings.Contains(bot, "STATE = State()") || strings.Contains(bot, "AGENTS = [") {
+		t.Error("per-call state or workers escaped into module globals")
+	}
+	if strings.Contains(shared, `@app.on_event("shutdown")`) {
+		t.Error("telephony_shared.py retains deprecated post-stop shutdown draining")
+	}
+	beginDrainAt := strings.Index(shared, "STATE.begin_drain()")
+	stopServerAt := strings.Index(shared, "previous_sigterm(signum, frame)")
+	if beginDrainAt < 0 || stopServerAt < 0 || beginDrainAt > stopServerAt {
+		t.Error("SIGTERM must flip readiness before asking Uvicorn to stop")
+	}
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !strings.Contains(pyproject, `"twilio>=9,<10"`) {
+		t.Error("pyproject.toml missing selected Twilio SDK")
+	}
+	report := artifactFile(t, artifact, "compile-report.json")
+	for _, path := range []string{`"telephony.py"`, `"telephony_shared.py"`} {
+		if !strings.Contains(report, path) {
+			t.Errorf("compile report missing generated file %s", path)
+		}
+	}
+	if strings.Contains(report, `"pcc-deploy.toml"`) {
+		t.Error("direct carrier server must not advertise the incompatible Pipecat Cloud runner manifest")
+	}
+	if docker := artifactFile(t, artifact, "Dockerfile"); !strings.Contains(docker, `CMD ["uvicorn", "telephony:app"`) {
+		t.Error("Dockerfile does not start the selected telephony server")
+	}
+	readme := artifactFile(t, artifact, "README.md")
+	for _, want := range []string{
+		"pipecat/carrier-websocket/twilio",
+		"Twilio phone-number voice",
+		"Cold transfer is destructive on this generated\nTwilio\nroute",
+		"UNMUTE_LOG_LEVEL=DEBUG",
+	} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README.md missing Twilio setup %q", want)
+		}
+	}
+	compose := artifactFile(t, artifact, "compose.telephony.yaml")
+	assertValidYAML(t, compose)
+	assertComposeLocalEnvironment(t, compose, TelephonyRuntimePlanFor(resolved))
+	assertGoldenFile(t, filepath.Join("testdata", "golden", "pipecat_v1_telephony_compose.yaml"), compose, *updatePipecatV1)
+	for _, want := range []string{
+		"build:\n      context: .", "image: redis:7.4.9-alpine", "condition: service_healthy",
+		"REDIS_URL=redis://redis:6379/0", "redis_data:/data", "UNMUTE_TELEPHONY_PORT:-7860",
+		`stop_grace_period: "1260s"`,
+	} {
+		if !strings.Contains(compose, want) {
+			t.Errorf("compose.telephony.yaml missing %q:\n%s", want, compose)
+		}
+	}
+	for _, forbidden := range []string{"image: redis:latest", "secret-value", "+14155550123"} {
+		if strings.Contains(compose, forbidden) {
+			t.Errorf("compose.telephony.yaml contains %q", forbidden)
+		}
+	}
+}
+
+func assertValidYAML(t *testing.T, content string) {
+	t.Helper()
+	var decoded map[string]any
+	if err := yaml.Unmarshal([]byte(content), &decoded); err != nil {
+		t.Fatalf("invalid generated YAML: %v\n%s", err, content)
+	}
+}
+
+func assertGoldenFile(t *testing.T, path, got string, update bool) {
+	t.Helper()
+	if update {
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != string(want) {
+		t.Fatalf("golden differs; rerun the test with its update flag")
+	}
+}
+
+func TestPipecatTwilioTelephonyRejectsConnectionVocabularyDrift(t *testing.T) { // telephony V3, V7
+	agent := loadCompilerAgent(t)
+	resolved := targetByProvider(t, agent, ir.ProviderPipecat)
+	resolved.Transport = "carrier-websocket"
+	resolved.Carrier = "twilio"
+	resolved.Connection = "primary_phone"
+	resolved.Telephony = &ir.TelephonyPlan{
+		Connection:  "primary_phone",
+		Key:         ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "carrier-websocket", Carrier: "twilio"},
+		Environment: map[string]string{"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN", "from_number": "TWILIO_PHONE_NUMBER", "api_key": "WRONG"},
+	}
+	_, err := GeneratePipecat(agent, resolved, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), `does not accept connection environment key "api_key"`) {
+		t.Fatalf("got %v", err)
+	}
+	delete(resolved.Telephony.Environment, "api_key")
+	delete(resolved.Telephony.Environment, "auth_token")
+	_, err = GeneratePipecat(agent, resolved, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), `requires connection environment key "auth_token"`) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestPipecatTelnyxTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T) { // telephony T8, V7-V14
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enablePackageTelephony(pkg)
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = "telnyx"
+	configured.Connection = "primary_phone"
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment = map[string]string{
+		"api_key":       "TELNYX_API_KEY",
+		"public_key":    "TELNYX_PUBLIC_KEY",
+		"connection_id": "TELNYX_CONNECTION_ID",
+		"from_number":   "TELNYX_PHONE_NUMBER",
+	}
+	pkg.Connections["primary_phone"] = connection
+	outbound := true
+	phone := pkg.Agent.Channels["phone"]
+	phone.Outbound = &outbound
+	pkg.Agent.Channels["phone"] = phone
+	pkg.Agent.Variables["campaign_id"] = spec.Variable{Type: "string", Source: "call_start"}
+
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := artifactFile(t, artifact, "telephony.py")
+	for _, want := range []string{
+		`Ed25519PublicKey.from_public_bytes`,
+		`aiohttp.ClientTimeout(total=CONTROL_TIMEOUT_SECS)`,
+		`aiohttp.ClientSession(headers=headers, timeout=timeout)`,
+		`abs(int(time.time()) - signed_at) > WEBHOOK_TOLERANCE_SECS`,
+		`timestamp.encode() + b"|" + raw`,
+		`STATE.mark_once("event", data["id"], SESSION_TTL_SECS)`,
+		`"stream_bidirectional_mode": "rtp"`,
+		`"stream_bidirectional_codec": "PCMU"`,
+		`"command_id": secrets.token_urlsafe(24)`,
+		`task = asyncio.create_task(`,
+		`await STATE.forget("event", event_id)`,
+		`destination, call_start = await _outbound_request(request)`,
+		`await handle_media(websocket, token)`,
+		`"carrier": "telnyx"`,
+	} {
+		if !strings.Contains(adapter, want) {
+			t.Errorf("telephony.py missing %q", want)
+		}
+	}
+	statusCheck := strings.Index(adapter, `if response.status < 200 or response.status >= 300:`)
+	jsonDecode := strings.Index(adapter, `return await response.json()`)
+	if statusCheck < 0 || jsonDecode < 0 || statusCheck > jsonDecode {
+		t.Error("Telnyx adapter must check response status before decoding JSON")
+	}
+	artifactFile(t, artifact, "telephony_shared.py")
+	for _, forbidden := range []string{"RequestValidator", "Twilio", "Plivo", "Exotel", "media.payload", "audio/x-mulaw"} {
+		if strings.Contains(adapter, forbidden) {
+			t.Errorf("telephony.py contains unselected or media implementation %q", forbidden)
+		}
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	if !strings.Contains(bot, `"telnyx": lambda: FastAPIWebsocketParams`) {
+		t.Error("bot.py does not select the Telnyx Pipecat serializer")
+	}
+	if strings.Contains(bot, `"twilio": lambda: FastAPIWebsocketParams`) {
+		t.Error("bot.py contains the unselected Twilio telephony transport")
+	}
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !strings.Contains(pyproject, `"cryptography>=45,<47"`) || strings.Contains(pyproject, `"twilio>=9,<10"`) {
+		t.Errorf("pyproject.toml has the wrong carrier dependencies:\n%s", pyproject)
+	}
+	report := artifactFile(t, artifact, "compile-report.json")
+	for _, want := range []string{"TELNYX_API_KEY", "TELNYX_PUBLIC_KEY", "TELNYX_CONNECTION_ID", "TELNYX_PHONE_NUMBER"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("compile report missing %s", want)
+		}
+	}
+	readme := artifactFile(t, artifact, "README.md")
+	for _, want := range []string{
+		"pipecat/carrier-websocket/telnyx",
+		"Telnyx Voice API",
+		"API version 2",
+		"Cold transfer is destructive on this generated\nTelnyx\nroute",
+	} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README.md missing Telnyx setup %q", want)
+		}
+	}
+}
+
+func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T) { // telephony T9, V7-V14
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enablePackageTelephony(pkg)
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = "plivo"
+	configured.Connection = "primary_phone"
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment = map[string]string{
+		"auth_id": "PLIVO_AUTH_ID", "auth_token": "PLIVO_AUTH_TOKEN", "from_number": "PLIVO_PHONE_NUMBER",
+	}
+	pkg.Connections["primary_phone"] = connection
+	outbound := true
+	phone := pkg.Agent.Channels["phone"]
+	phone.Outbound = &outbound
+	pkg.Agent.Channels["phone"] = phone
+	pkg.Agent.Variables["campaign_id"] = spec.Variable{Type: "string", Source: "call_start"}
+
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := artifactFile(t, artifact, "telephony.py")
+	for _, want := range []string{
+		`utils.validate_v3_signature(`,
+		`STATE.mark_once("nonce", nonce, SESSION_TTL_SECS)`,
+		`timeout=CONTROL_TIMEOUT_SECS`,
+		`bidirectional="true"`,
+		`keepCallAlive="true"`,
+		`contentType="audio/x-mulaw;rate=8000"`,
+		`answer_url=_http_url(f"/telephony/answer/{token}")`,
+		`_client().calls.transfer`,
+		`aleg_url=_http_url(f"/telephony/transfer/{token}")`,
+		`destination, call_start = await _outbound_request(request)`,
+		`await handle_media(websocket, token)`,
+		`"carrier": "plivo"`,
+	} {
+		if !strings.Contains(adapter, want) {
+			t.Errorf("telephony.py missing %q", want)
+		}
+	}
+	artifactFile(t, artifact, "telephony_shared.py")
+	for _, forbidden := range []string{"RequestValidator", "Twilio", "Telnyx", "Exotel", "media.payload"} {
+		if strings.Contains(adapter, forbidden) {
+			t.Errorf("telephony.py contains unselected or media implementation %q", forbidden)
+		}
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	if !strings.Contains(bot, `"plivo": lambda: FastAPIWebsocketParams`) {
+		t.Error("bot.py does not select the Plivo Pipecat serializer")
+	}
+	for _, carrier := range []string{"twilio", "telnyx", "exotel"} {
+		if strings.Contains(bot, `"`+carrier+`": lambda: FastAPIWebsocketParams`) {
+			t.Errorf("bot.py contains the unselected %s telephony transport", carrier)
+		}
+	}
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !strings.Contains(pyproject, `"plivo>=4,<5"`) || strings.Contains(pyproject, `"twilio>=9,<10"`) || strings.Contains(pyproject, `"cryptography>=45,<47"`) {
+		t.Errorf("pyproject.toml has the wrong carrier dependencies:\n%s", pyproject)
+	}
+	report := artifactFile(t, artifact, "compile-report.json")
+	for _, want := range []string{"PLIVO_AUTH_ID", "PLIVO_AUTH_TOKEN", "PLIVO_PHONE_NUMBER"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("compile report missing %s", want)
+		}
+	}
+	readme := artifactFile(t, artifact, "README.md")
+	for _, want := range []string{
+		"pipecat/carrier-websocket/plivo",
+		"Plivo Voice XML",
+		"Hangup URL",
+		"Cold transfer is destructive on this generated\nPlivo\nroute",
+	} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README.md missing Plivo setup %q", want)
+		}
+	}
+	runtime := TelephonyRuntimePlanFor(agent.Targets["pipecat"])
+	var endpoints []string
+	for _, endpoint := range runtime.PublicEndpoints {
+		endpoints = append(endpoints, endpoint.Path)
+	}
+	for _, want := range []string{"/telephony/answer/{token}", "/telephony/transfer/{token}"} {
+		if !slices.Contains(endpoints, want) {
+			t.Errorf("runtime plan missing endpoint %s: %v", want, endpoints)
+		}
+	}
+}
+
 // TestPipecatV1LocalTool covers execution: local (T14, V13): the same @tool
 // shape as webhook whose body imports + awaits the user handler from
 // tools/<name>.py, at both sites — agent @tool method and flows handler. The
@@ -439,6 +846,24 @@ func TestPipecatEmitterMatchesCapabilityTable(t *testing.T) {
 			t.Errorf("field %q: emitter emits=%v, table supported=%v (tag %q) — implement or gate to reconcile",
 				field, pipecatEmittedFields[field], supported, capability.Tag)
 		}
+	}
+}
+
+func TestPipecatWarmHumanTransferFailsGeneration(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	human := agent.Controls["to_human"].(*ir.HumanTransfer)
+	human.Mode = ir.TransferWarm
+	human.Briefing = ir.BriefingSummary
+	_, err = GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err == nil || !strings.Contains(err.Error(), `mode "warm" has no Pipecat lowering`) {
+		t.Fatalf("warm transfer must fail instead of lowering cold, got %v", err)
 	}
 }
 
@@ -532,6 +957,14 @@ func targetByProvider(t *testing.T, agent *ir.Agent, provider ir.Provider) ir.Ta
 	}
 	t.Fatalf("no target for provider %q", provider)
 	return ir.Target{}
+}
+
+func enablePackageTelephony(pkg *spec.Package) {
+	inbound, outbound := true, false
+	pkg.Agent.Channels["phone"] = spec.Channel{
+		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
+		RequiredControls: []string{"cold_transfer", "hangup"},
+	}
 }
 
 // TestV14_ActivationGatedOnPipelineStart (driver-pipecat V14, B8): the entry

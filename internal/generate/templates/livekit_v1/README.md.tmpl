@@ -29,5 +29,96 @@ contains `llm_node` and `llm_request` generation observations in addition to
 the session and agent spans.
 
 {{end}}
+{{if .Telephony}}
+## Configure self-hosted LiveKit SIP
+
+This project uses the `livekit/sip/{{.Telephony.Carrier}}` route. Unmute emits
+the selected worker and SIP setup inputs. The generated Compose file starts
+local LiveKit, Redis, and LiveKit SIP services for development; it does not
+provision production infrastructure or carrier resources. This route was
+checked against the official web documentation on July 20, 2026, but not
+through the LiveKit docs MCP server.
+
+### Required configuration and credentials
+
+Set these values in `.env.local` or your deployment secret store:
+
+- `LIVEKIT_URL`: the WebSocket URL of your self-hosted LiveKit Server.
+- `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`: a key pair from the `keys`
+  section of that server's configuration. LiveKit SIP uses the same pair.
+- `REDIS_URL`: the Redis deployment shared by LiveKit Server and LiveKit SIP.
+- `LIVEKIT_SIP_URI`: the public DNS name or SIP URI of LiveKit SIP. Your
+  carrier sends SIP traffic here.
+- `{{.Telephony.SIPAddressEnv}}`, `{{.Telephony.SIPUsernameEnv}}`, and
+  `{{.Telephony.SIPPasswordEnv}}`: {{.Telephony.CredentialHint}}.
+- `{{.Telephony.FromNumberEnv}}`: the phone number linked to that SIP trunk.
+{{if .Telephony.HasInbound}}- `LIVEKIT_SIP_INBOUND_TRUNK`: the ID printed by
+  `lk sip inbound create`.
+{{end}}{{if or .Telephony.HasOutbound .Telephony.HasWarm}}- `LIVEKIT_SIP_OUTBOUND_TRUNK`: the ID printed by
+  `lk sip outbound create`.
+{{end}}
+Use the
+[{{.Telephony.Carrier}} provider guide]({{.Telephony.ProviderDocs}}) for the
+carrier-side trunk fields. A normal HTTPS tunnel doesn't expose SIP signaling
+or RTP. Generated local Compose defaults to SIP port `5060` and UDP RTP ports
+`10000-10100`; set `UNMUTE_LIVEKIT_SIP_PORT` and
+`UNMUTE_LIVEKIT_RTP_PORT_RANGE` when those host ports are unavailable. Set
+`UNMUTE_LIVEKIT_PORT` to move the host-side LiveKit API port from `7880`.
+
+### Create the LiveKit SIP resources
+
+Materialize the generated JSON before passing it to `lk`. The committed inputs
+contain variable names only; the `/tmp` copies contain resolved configuration
+and must not be committed. Export the values in your shell first;
+`envsubst` doesn't read `.env.local` itself.
+
+{{if .Telephony.HasInbound}}
+```sh
+envsubst < sip-inbound-trunk.json > /tmp/unmute-sip-inbound-trunk.json
+lk sip inbound create /tmp/unmute-sip-inbound-trunk.json
+# Set LIVEKIT_SIP_INBOUND_TRUNK to the returned SIPTrunkID.
+
+envsubst < sip-dispatch-rule.json > /tmp/unmute-sip-dispatch-rule.json
+lk sip dispatch create /tmp/unmute-sip-dispatch-rule.json
+```
+
+Configure the carrier's origination URI to `LIVEKIT_SIP_URI`. The dispatch rule
+creates one `call-*` room per inbound call and dispatches the `{{.AgentName}}`
+worker with `direction: inbound` metadata.
+{{end}}
+{{if or .Telephony.HasOutbound .Telephony.HasWarm}}
+```sh
+envsubst < sip-outbound-trunk.json > /tmp/unmute-sip-outbound-trunk.json
+lk sip outbound create /tmp/unmute-sip-outbound-trunk.json \
+  --auth-user "${{.Telephony.SIPUsernameEnv}}" \
+  --auth-pass "${{.Telephony.SIPPasswordEnv}}"
+# Set LIVEKIT_SIP_OUTBOUND_TRUNK to the returned SIPTrunkID.
+```
+
+For an outbound call, dispatch this agent to a new room with JSON job metadata
+in this shape:
+
+```json
+{
+  "direction": "outbound",
+  "phone_number": "+14155550123",
+  "call_start": {}
+}
+```
+
+The worker validates the E.164 destination and authored `call_start` fields
+before dialing. It uses the stored outbound trunk for outbound calls and warm
+transfers.
+{{end}}
+
+### Scale the route
+
+Redis is control-plane infrastructure, not an audio hop. LiveKit Server uses
+it for distributed room state and routing; LiveKit SIP uses the same Redis
+deployment to coordinate SIP participants with the server. Audio still flows
+through the SIP/RTP and LiveKit media services. Scale worker replicas on active
+jobs, keep the shared Redis available, and drain active calls before shutdown.
+
+{{end -}}
 Do not edit this project by hand — it is regenerated from the agent spec.
 Change the spec and recompile.

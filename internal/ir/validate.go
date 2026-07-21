@@ -143,6 +143,12 @@ func sizing(agent *Agent, resolved Target) []Sizing {
 			})
 		}
 	}
+	if channelKinds[string(ChannelTelephony)] {
+		result = append(result, Sizing{
+			Target: resolved.Name, Metric: "provider_call_start_rate.telephony",
+			Value: fmt.Sprint(agent.Capacity.PeakStartsPerSecond), Status: "unbenchmarked", Basis: basis,
+		})
+	}
 	return result
 }
 
@@ -230,8 +236,8 @@ func validateStructure(agent *Agent) []string {
 		if !validPrimitive(variable.Type) {
 			errors = add(errors, fmt.Sprintf("variable %q has invalid type %q", name, variable.Type))
 		}
-		if variable.Source != "" && variable.Source != VariableSourceCallStart {
-			errors = add(errors, fmt.Sprintf("variable %q source must be call_start", name))
+		if variable.Source != "" && !validVariableSource(variable.Source) {
+			errors = add(errors, fmt.Sprintf("variable %q has invalid source %q", name, variable.Source))
 		}
 		if variable.Default != nil && !defaultMatches(variable.Type, variable.Default) {
 			errors = add(errors, fmt.Sprintf("variable %q default does not match type %q", name, variable.Type))
@@ -490,7 +496,8 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	}
 	validateTools(agent, resolved, provider, caps, row)
 	validateConversation(agent.Conversation, provider, caps, row)
-	validateCapacity(agent, provider, row)
+	validateTelephonyPlan(resolved.Telephony, row)
+	validateCapacity(agent, resolved, provider, row)
 	validateChannels(agent, resolved, provider, caps, row)
 }
 
@@ -724,6 +731,14 @@ func validateFallbacks(agent *Agent, resolved Target, caps targetcap.Table, row 
 }
 
 func validateHumanTransfer(control *HumanTransfer, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
+	if resolved.Telephony != nil {
+		switch control.Briefing {
+		case "", BriefingSummary, BriefingMessage, BriefingWait:
+		default:
+			row.Errors = add(row.Errors, fmt.Sprintf("unknown warm-transfer briefing %q", control.Briefing))
+		}
+		return
+	}
 	required := targetcap.ColdTransfer
 	if control.Mode == TransferWarm {
 		required = targetcap.WarmTransfer
@@ -797,7 +812,7 @@ func validateConversation(conversation *Conversation, provider targetcap.Provide
 	}
 }
 
-func validateCapacity(agent *Agent, provider targetcap.Provider, row *TargetValidation) {
+func validateCapacity(agent *Agent, resolved Target, provider targetcap.Provider, row *TargetValidation) {
 	required := targetcap.IsCode(provider)
 	for _, channel := range agent.Channels {
 		required = required || channel.Kind == ChannelTelephony
@@ -811,6 +826,9 @@ func validateCapacity(agent *Agent, provider targetcap.Provider, row *TargetVali
 	if agent.Capacity.PeakSessions <= 0 || agent.Capacity.MaxSessions <= 0 {
 		row.Errors = add(row.Errors, "capacity peak_sessions and max_sessions must be positive")
 	}
+	if hasTelephonyChannel(agent) && agent.Capacity.PeakStartsPerSecond <= 0 {
+		row.Errors = add(row.Errors, "capacity.peak_starts_per_second must be positive for telephony")
+	}
 	if agent.Capacity.PeakSessions > agent.Capacity.MaxSessions {
 		row.Errors = add(row.Errors, "capacity.peak_sessions must not exceed max_sessions")
 	}
@@ -821,28 +839,187 @@ func validateCapacity(agent *Agent, provider targetcap.Provider, row *TargetVali
 
 func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
 	for _, channel := range agent.Channels {
+		if channel.Kind == ChannelTelephony && (provider == targetcap.LiveKit || provider == targetcap.Pipecat) && resolved.Telephony == nil {
+			row.Errors = add(row.Errors, "telephony channel requires a resolved Connection plan")
+			continue
+		}
 		for _, control := range channel.RequiredControls {
 			if !validRequiredControl(control) {
 				continue
 			}
-			name := targetcap.TelephonyControl(control)
-			applyResolvedCapability(caps.Control(name, provider, resolved.Transport, resolved.Carrier), name, provider, row)
+			if resolved.Telephony == nil {
+				name := targetcap.TelephonyControl(control)
+				applyResolvedCapability(caps.Control(name, provider, resolved.Transport, resolved.Carrier), name, provider, row)
+			}
 		}
-		if channel.Kind != ChannelTelephony || channel.Outbound == nil || !*channel.Outbound {
+		if channel.Kind != ChannelTelephony {
+			continue
+		}
+		if resolved.Telephony != nil && channel.Inbound != nil && *channel.Inbound {
+			for name, variable := range agent.Variables {
+				if variable.Source == VariableSourceCallStart && variable.Default == nil {
+					row.Errors = add(row.Errors, fmt.Sprintf("inbound call_start variable %q requires a default", name))
+				}
+			}
+		}
+		if channel.Outbound == nil || !*channel.Outbound {
 			continue
 		}
 		if channel.OnVoicemail == "" {
 			row.Errors = add(row.Errors, "outbound telephony requires on_voicemail")
 		}
-		for name, variable := range agent.Variables {
-			if variable.Source == VariableSourceCallStart && variable.Default == nil {
-				row.Errors = add(row.Errors, fmt.Sprintf("outbound call_start variable %q is not satisfiable", name))
+		if resolved.Telephony == nil {
+			for name, variable := range agent.Variables {
+				if variable.Source == VariableSourceCallStart && variable.Default == nil {
+					row.Errors = add(row.Errors, fmt.Sprintf("outbound call_start variable %q is not satisfiable", name))
+				}
+			}
+			applyCapability(caps, targetcap.FieldOutbound, provider, row)
+			if channel.OnVoicemail != "" {
+				applyCapability(caps, targetcap.FieldVoicemail, provider, row)
+				applyResolvedCapability(caps.Control(targetcap.VoicemailDetection, provider, resolved.Transport, resolved.Carrier), targetcap.VoicemailDetection, provider, row)
 			}
 		}
-		applyCapability(caps, targetcap.FieldOutbound, provider, row)
-		if channel.OnVoicemail != "" {
-			applyCapability(caps, targetcap.FieldVoicemail, provider, row)
-			applyResolvedCapability(caps.Control(targetcap.VoicemailDetection, provider, resolved.Transport, resolved.Carrier), targetcap.VoicemailDetection, provider, row)
+	}
+}
+
+func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
+	if plan == nil {
+		return
+	}
+	if plan.Coordination != "shared" {
+		row.Errors = add(row.Errors, "telephony coordination must be shared")
+	}
+	if len(plan.Processes) == 0 {
+		row.Errors = add(row.Errors, "telephony plan has no runtime process")
+	}
+	seenProcesses := make(map[string]bool, len(plan.Processes))
+	for _, process := range plan.Processes {
+		if process.Name == "" || len(process.Command) == 0 || seenProcesses[process.Name] {
+			row.Errors = add(row.Errors, "telephony runtime processes must have unique names and non-empty commands")
+		}
+		seenProcesses[process.Name] = true
+	}
+	seenEndpoints := make(map[string]bool, len(plan.PublicEndpoints))
+	for _, endpoint := range plan.PublicEndpoints {
+		if endpoint.Name == "" || endpoint.Method == "" || endpoint.Path == "" || seenEndpoints[endpoint.Name] {
+			row.Errors = add(row.Errors, "telephony public endpoints must have unique names, methods, and paths")
+		}
+		seenEndpoints[endpoint.Name] = true
+	}
+	requiredEnvironment := make(map[string]bool, len(plan.RequiredEnvironment))
+	for _, name := range plan.RequiredEnvironment {
+		if name == "" || requiredEnvironment[name] {
+			row.Errors = add(row.Errors, "telephony required environment must be non-empty and unique")
+		}
+		requiredEnvironment[name] = true
+	}
+	localEnvironment := make(map[string]bool, len(plan.LocalEnvironment))
+	for _, name := range plan.LocalEnvironment {
+		if name == "" || localEnvironment[name] || !requiredEnvironment[name] {
+			row.Errors = add(row.Errors, "telephony locally supplied environment must be unique and required by the runtime")
+		}
+		localEnvironment[name] = true
+	}
+	if len(plan.ManualSteps) == 0 {
+		row.Errors = add(row.Errors, "telephony plan has no route setup instructions")
+	}
+	services := make(map[string]bool, len(plan.Services))
+	allowedServices := map[string]bool{"application": true, "redis": true}
+	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {
+		allowedServices["livekit_server"] = true
+		allowedServices["livekit_sip"] = true
+	}
+	for _, service := range plan.Services {
+		if service == "" || services[service] {
+			row.Errors = add(row.Errors, "telephony services must be non-empty and unique")
+			continue
+		}
+		if !allowedServices[service] {
+			row.Errors = add(row.Errors, fmt.Sprintf("telephony route declares unexpected service %q", service))
+		}
+		services[service] = true
+	}
+	for _, required := range []string{"application", "redis"} {
+		if !services[required] {
+			row.Errors = add(row.Errors, fmt.Sprintf("telephony service %s is required", required))
+		}
+	}
+	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {
+		for _, required := range []string{"livekit_server", "livekit_sip"} {
+			if !services[required] {
+				row.Errors = add(row.Errors, fmt.Sprintf("livekit SIP service %s is required", required))
+			}
+		}
+	} else if services["livekit_server"] || services["livekit_sip"] {
+		row.Errors = add(row.Errors, "LiveKit Server and SIP services require the livekit/sip route")
+	}
+	closedReasons := map[string]bool{
+		"livekit_control_plane": true, "call_correlation": true, "callback_idempotency": true,
+		"human_transfer": true, "admission": true,
+	}
+	if len(plan.CoordinationReasons) == 0 {
+		row.Errors = add(row.Errors, "telephony Redis service has no coordination consumer")
+	}
+	seenReasons := make(map[string]bool, len(plan.CoordinationReasons))
+	for _, reason := range plan.CoordinationReasons {
+		if !closedReasons[reason.Name] {
+			row.Errors = add(row.Errors, fmt.Sprintf("unknown telephony coordination reason %q", reason.Name))
+		}
+		if seenReasons[reason.Name] {
+			row.Errors = add(row.Errors, fmt.Sprintf("duplicate telephony coordination reason %q", reason.Name))
+		}
+		seenReasons[reason.Name] = true
+		if len(reason.Consumers) == 0 {
+			row.Errors = add(row.Errors, fmt.Sprintf("telephony coordination reason %q has no consumers", reason.Name))
+		}
+		for _, consumer := range reason.Consumers {
+			if consumer == "redis" || !services[consumer] {
+				row.Errors = add(row.Errors, fmt.Sprintf("telephony coordination reason %q has undeclared consumer %q", reason.Name, consumer))
+			}
+		}
+		if plan.Key.Provider == ProviderPipecat && (len(reason.Consumers) != 1 || reason.Consumers[0] != "application") {
+			row.Errors = add(row.Errors, fmt.Sprintf("Pipecat coordination reason %q must be consumed by application", reason.Name))
+		}
+	}
+	if plan.Key.Provider == ProviderPipecat {
+		for _, required := range []string{"admission", "call_correlation", "callback_idempotency"} {
+			if !seenReasons[required] {
+				row.Errors = add(row.Errors, fmt.Sprintf("Pipecat coordination reason %q is required", required))
+			}
+		}
+		needsHumanTransfer := false
+		for _, evidence := range plan.Evidence {
+			needsHumanTransfer = needsHumanTransfer || evidence.Feature == string(targetcap.ColdTransfer) || evidence.Feature == string(targetcap.WarmTransfer)
+		}
+		if needsHumanTransfer != seenReasons["human_transfer"] {
+			row.Errors = add(row.Errors, "Pipecat human_transfer coordination reason must match the selected transfer features")
+		}
+	}
+	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {
+		if len(seenReasons) != 1 || !seenReasons["livekit_control_plane"] {
+			row.Errors = add(row.Errors, "LiveKit SIP coordination reason must be livekit_control_plane")
+		}
+		for _, reason := range plan.CoordinationReasons {
+			consumers := slices.Clone(reason.Consumers)
+			slices.Sort(consumers)
+			if reason.Name == "livekit_control_plane" && !slices.Equal(consumers, []string{"livekit_server", "livekit_sip"}) {
+				row.Errors = add(row.Errors, "LiveKit control-plane coordination consumers must be livekit_server and livekit_sip")
+			}
+		}
+	}
+	for _, evidence := range plan.Evidence {
+		switch targetcap.Tag(evidence.Tag) {
+		case targetcap.Core:
+			if evidence.Docs == "" || evidence.Verified == "" || !evidence.Smoke {
+				row.Errors = add(row.Errors, fmt.Sprintf("telephony feature %s lacks complete route evidence", evidence.Feature))
+			}
+		case targetcap.Warn:
+			row.Warnings = add(row.Warnings, evidence.Note)
+		case targetcap.Gated, targetcap.Provisional:
+			row.Errors = add(row.Errors, fmt.Sprintf("telephony %s: %s", evidence.Feature, evidence.Note))
+		default:
+			row.Errors = add(row.Errors, fmt.Sprintf("telephony feature %s has no capability tag", evidence.Feature))
 		}
 	}
 }
@@ -908,6 +1085,17 @@ func validateModelKind(name string, model ModelDef) []string {
 
 func validPlacement(value Placement) bool {
 	return value == PlacementAPI || value == PlacementLocal
+}
+
+func validVariableSource(value VariableSource) bool {
+	switch value {
+	case VariableSourceCallStart, VariableSourceSessionID, VariableSourceCarrier,
+		VariableSourceConnection, VariableSourceCallID, VariableSourceStreamID,
+		VariableSourceDirection, VariableSourceFromNumber, VariableSourceToNumber:
+		return true
+	default:
+		return false
+	}
 }
 
 func validPrimitive(value PrimitiveType) bool {

@@ -7,14 +7,54 @@ not edit by hand — change the source spec and recompile.
 
 ```sh
 cp .env.example .env                      # then fill in your keys
+{{if .Telephony}}uv run uvicorn telephony:app --host 0.0.0.0 --port 7860
+{{else}}
 uv run bot.py                             # web: open the URL it prints
 uv run --extra console bot.py console     # terminal: talk over local mic/speaker
+{{end}}
 ```
+{{if .Telephony}}
+This project uses the
+`pipecat/carrier-websocket/{{.Telephony.Carrier}}` route and contains only that
+carrier adapter.
 
+The server exposes only the endpoints selected by the source channel:
+
+{{if .Telephony.HasInbound}}- Signed carrier ingress at `/telephony/inbound`.
+{{end}}{{if .Telephony.HasOutbound}}- Authenticated outbound start at
+  `/telephony/outbound`.
+{{end}}- One-use media URLs under `/telephony/ws/{token}`.
+- Signed status callbacks at `/telephony/status`.
+
+{{if .Telephony.HasInbound}}
+{{if eq .Telephony.Carrier "twilio"}}Configure the Twilio phone-number voice
+webhook to the inbound URL and its status callback to the status URL.
+{{else if eq .Telephony.Carrier "telnyx"}}Configure a Telnyx Voice API
+Application for API version 2, point its webhook URL at the inbound URL, and
+assign the phone number to that application.
+{{else if eq .Telephony.Carrier "plivo"}}Configure a Plivo Voice XML
+Application with its POST Answer URL set to the inbound URL and its Hangup URL
+set to the status URL, then assign the phone number to that application.
+{{end}}
+{{end}}The public origin must exactly match `UNMUTE_PUBLIC_URL` or signature
+validation will reject the request.
+
+Normal logs default to `INFO`. Setting `UNMUTE_LOG_LEVEL=DEBUG` also enables
+upstream Pipecat parser diagnostics, which may include caller phone numbers;
+use debug logging only in a controlled environment.
+
+{{if .Telephony.HasCold}}Cold transfer is destructive on this generated
+{{if eq .Telephony.Carrier "twilio"}}Twilio{{else if eq .Telephony.Carrier "telnyx"}}Telnyx{{else if eq .Telephony.Carrier "plivo"}}Plivo{{end}}
+route: the adapter does not restore the original AI media stream when the
+destination fails. Treat transfer failure as call-ending behavior.
+
+{{end}}
+This route remains provisional until its credentialed smoke passes.
+{{else}}
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner
 serves a WebRTC test client you can open in the browser. Console mode needs the
 `console` extra (pyaudio; `brew install portaudio` first on macOS).
-
+{{end}}
 While iterating on the source spec, `unmute dev <source-dir>` recompiles this
 project and runs it for you behind a dev client.
 

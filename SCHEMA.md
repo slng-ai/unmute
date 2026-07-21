@@ -64,6 +64,17 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
 - **N14.** `language` is the agent's primary spoken language, written as a BCP-47 tag and defaulting to `en`. It does not rewrite model routes. Pipecat and LiveKit lower it only through each catalogue entry's explicit `CallSpec.Language` slot: Pipecat official services place it in `Settings`, while SLNG and LiveKit plugins use constructor kwargs. An existing target `params.language` is an explicit per-integration override. ElevenLabs lowers it once to `conversation_config.agent.language`, which governs its integrated ASR and TTS. Vapi and Deepgram stay unavailable in `unmute init` until their generators ship; no generic parameter injection is invented for them. Verified against Pipecat, SLNG, LiveKit, and ElevenLabs provider docs 2026-07-16.
 - **N15 (amended 2026-07-19).** One definition per model, in `agent.yaml`. The old shape declared the same model in up to three places (`pipeline` role placement, an abstract profile, a target binding) and put the only real definition in `targets.yaml`; all three collapse into one unified `models:` map in `agent.yaml` where every model is defined fully and concretely (`provider`, `model`, `voice`, generation settings, `params`), with voice models and think models side by side. The `pipeline` and `voices` blocks are gone. A model's kind follows from where it is referenced: an agent's `voice:` names a speak model, an agent's or task's `model:` (or a `summarizer:`) names a think model; the referenced entry is validated against that kind's fields (section 4.3). `listen` and `turn` are small optional top-level blocks (section 4.2), because they are conversation plumbing shared by the whole package, not per-agent identity; `turn.semantic_endpointing` lives there. Each entry keeps the `provider` + `model` pairing the old target bindings used (the shape the author already liked) — `provider` names the catalogue vendor, `model` is the identity that vendor's SDK expects, and `placement` derives from `provider` (`local` runs on your machines; anything else is a hosted API; an explicit `placement:` overrides). No route-parsing: folding the provider into the `model` string was rejected during implementation because the forwarded model identity is not uniform across vendors (OpenAI wants `gpt-4.1-mini`, SLNG wants `slng/deepgram/nova:3-en`), so a parse would mangle what reaches the SDK. `targets.yaml` keeps infrastructure only (provider, version, pins, transport, carrier, destinations) plus an optional `models:` override map for a target that cannot run a defined entry (section 6.2); an override replaces the whole entry, no merge rules. Supersedes N9 and amends D2/D10. Both original jobs of declared placement survive, per target and more precise: `local` still fails loudly on managed targets, and sizing still reads placement from each target's effective models. Strict decode (compiler V3) makes old files fail with "unknown field pipeline" naming file and line. The `reason` role identifier stays internal-only (the `reason:` binding block is gone), so it is never renamed in the authoring surface — think/speak is the user vocabulary. Amended again 2026-07-19 (same day, review with the author): the map is grouped into four kind sections (`think`/`speak`/`listen`/`turn`) so kind is structural rather than inferred from reference sites; listen/turn entries live in the map like everything else and the top-level `listen:`/`turn:` fields select one by name (defaulting to a section's sole entry); unreferenced entries are legal palette alternates for fast model swapping, compiled only when selected. Per-agent listen/turn was considered and rejected: STT/VAD are call plumbing (the generated Pipecat main worker owns STT; the Deepgram bridge has one listen per session), and repeating the same reference on every agent recreates the duplication N15 removes. Scaffold names the generated target instance after the provider (`pipecat`, never `pipecat-dev`): users test exactly what they deploy, and extra instances are added only when a real second environment exists.
 
+- **N16 (added 2026-07-20).** Telephony compilation is scoped to
+  LiveKit and Pipecat. A telephony target selects exactly one Connection and
+  one exact `(orchestrator, transport, carrier)` route. Connections live in
+  `connections/<name>.yaml`, contain environment variable names rather than
+  values, and never repeat `carrier`; the target owns that choice. The first
+  version permits one telephony Connection per target, but a package may
+  declare any number of named targets and Connections. Each target produces a
+  separate single-route artifact. Capability support is resolved per route and
+  feature, never with carrier-wide booleans. See
+  [TELEPHONY.md](./TELEPHONY.md).
+
 ---
 
 ## 3. Package layout
@@ -76,12 +87,16 @@ tasks/                # one .md per task (T1)
 tools/
   lookup_customer.yaml  # contract: input, output, execution, interruption, effect
   lookup_customer.py    # handler, code targets only
+connections/
+  primary_phone.yaml    # external telephony account, env names only
 targets.yaml          # named target instances: provider, pins, destinations, model overrides
 ```
 
 Rules:
 
-- Secrets and credentials never appear in any file. `targets.yaml` carries env var names and secret references only, never values.
+- Secrets and credentials never appear in any file. Connection files and
+  `targets.yaml` carry environment variable names and secret references only,
+  never values.
 - Remote IDs, regions, editions, SDK language, version pins, and carriers live in `targets.yaml`, never in `agent.yaml`. Model definitions live in `agent.yaml` (N15); `targets.yaml` only overrides one for a target that cannot run it.
 - Machine sizes, replica counts, and GPU counts appear in neither file. They are derived and printed in reports.
 
@@ -185,7 +200,7 @@ Typed shared state. Task results, handoff payloads, and personalization all flow
 |---|---|---|---|---|
 | `type` | yes | `string \| number \| boolean \| integer` | core | |
 | `default` | no | value of that type | core | |
-| `source` | no | `call_start` | core | Must be supplied when the call starts. Checked as satisfiable on outbound channels. |
+| `source` | no | `call_start \| session_id \| carrier \| connection \| call_id \| stream_id \| direction \| from_number \| to_number` | gated | `call_start` is caller input. The remaining values are runtime-owned system sources and must be available on the exact route before the greeting. `stream_id` is optional only when no variable requests it. |
 
 Notes that drivers must respect: on ElevenLabs the only mid-call write path is a tool returning JSON. On Deepgram, live state lives in the generated bridge, never in template variables (those are substitution-time only and visible to project members; never route secrets through them).
 
@@ -277,7 +292,7 @@ Vapi lowering, literal spellings verified 2026-07-15: `contextEngineeringPlan` i
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
 | `destination` | yes | symbolic name | core | Resolves through the target instance's `destinations:` map to a number or SIP URI. |
-| `mode` | yes | `cold \| warm` | gated | `cold`: LiveKit native, Vapi native, ElevenLabs native, Pipecat only on Daily SIP transport, Deepgram carrier-conditional in the bridge. **`warm`** (review-corrected 2026-07-15): LiveKit native — stable on Node, `beta.workflows` on Python (NOT Python-only); **Pipecat ships it** (custom `TransferCoordinator` + hold music on Daily PSTN, official `warm_transfer.py`) but the driver does not emit it yet (a maturity gate, not "never implemented"); on Vapi the stable `transferPlan` path needs carrier Twilio. |
+| `mode` | yes | `cold \| warm` | gated | `cold`: LiveKit native, Vapi native, ElevenLabs native, and Pipecat native on Daily SIP. Pipecat's exact Twilio, Telnyx, and Plivo carrier-WebSocket adapters also emit out-of-band carrier-REST cold transfer, but remain provisional. Deepgram is carrier-conditional in the bridge. **`warm`** (review-corrected 2026-07-15): LiveKit native — stable on Node, `beta.workflows` on Python (NOT Python-only); **Pipecat ships it** (custom `TransferCoordinator` + hold music on Daily PSTN, official `warm_transfer.py`) but the driver does not emit it yet (a maturity gate, not "never implemented"); on Vapi the stable `transferPlan` path needs carrier Twilio. |
 | `briefing` | no, warm only | `summary \| message \| wait` | gated | Vapi: all three. LiveKit: `summary`. ElevenLabs: `message`. Everywhere else: fails. |
 
 ### 4.8 conversation
@@ -308,9 +323,9 @@ If the `greeting` block is absent, the target's own default applies and the driv
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
 | `kind` | yes | `realtime_audio \| telephony` | core | |
-| `inbound`, `outbound` | yes, telephony only | bool | gated | `outbound: true` requires `on_voicemail` and all `source: call_start` variables satisfiable. Verified on LiveKit, Pipecat, Vapi, ElevenLabs (N6); the Pipecat driver v1 does not emit `outbound`/`on_voicemail` yet (a maturity gate); **generated with a warning on Deepgram** (review-corrected 2026-07-15: Deepgram ships an official AMD-bridge outbound reference impl — carrier AMD in the bridge — so the lowering is proven, carrier-conditional). |
+| `inbound`, `outbound` | yes, telephony only | bool | gated | `outbound: true` requires `on_voicemail` and all `source: call_start` variables satisfiable. LiveKit SIP emits both directions offline for Twilio, Telnyx, and Plivo; each exact route remains provisional. Pipecat's carrier-WebSocket adapters emit inbound and outbound paths offline for those carriers, but outbound cannot validate until voicemail handling is emitted. Vapi and ElevenLabs support both directions; Deepgram emits outbound with a carrier-conditional warning. |
 | `required_controls` | no | list from the control vocabulary | gated | Vocabulary: `cold_transfer, warm_transfer, dtmf_send, dtmf_receive, hold, hangup, voicemail_detection, ivr_navigation`. Resolved against the target's carrier and transport, never the provider brand alone. |
-| `on_voicemail` | iff `outbound: true` | `hangup \| leave_message` | gated | Both values verified 2026-07-15 on LiveKit (`AMD`), Pipecat (`VoicemailDetector`), Vapi (`voicemailDetection` + `voicemailMessage`), ElevenLabs (`voicemail_detection` system tool + `voicemail_message`). **Generated with a warning on Deepgram** (review-corrected 2026-07-15: official AMD-bridge reference impl covers both values, carrier-conditional). |
+| `on_voicemail` | iff `outbound: true` | `hangup \| leave_message` | gated | LiveKit SIP emits both values through answering-machine detection for Twilio, Telnyx, and Plivo, with each exact route provisional. Pipecat has a verified `VoicemailDetector` platform path, but its carrier-WebSocket adapters do not emit that lowering yet. Vapi and ElevenLabs support both values; Deepgram emits them with a carrier-conditional warning. |
 
 ### 4.10 capacity
 
@@ -319,7 +334,8 @@ The declared half of the resource model. Required whenever `channels` has a tele
 | Field | Required | Type | Notes |
 |---|---|---|---|
 | `peak_sessions` | yes | int | Concurrent conversations at busy hour. Must not exceed `max_sessions`. |
-| `max_sessions` | yes | int | Hard admission limit. Reject or queue above it. |
+| `max_sessions` | yes | int | Hard admission limit. Reject above it before Agent allocation; don't queue. |
+| `peak_starts_per_second` | yes for telephony | number, greater than zero | Peak call-start rate. Report separately from concurrent sessions. |
 | `avg_session_duration` | yes | duration | Sizing and quota input. |
 
 Sizing depends on concurrency, placement, and channels. It does not depend on how many agents are in the file, and never on the provider brand alone. Derived numbers (workers, GPUs, quotas) are printed in the compile or plan report with dated benchmark coefficients, marked `unbenchmarked` until measured.
@@ -394,7 +410,7 @@ Named target instances: which orchestrator runs the package, and the infrastruct
 | `version` | code targets | Framework pin. The driver checks it against the range its templates support. A codegen check, not model validation. |
 | `pins` | no | Independently versioned packages (LiveKit plugins) get their own entries. Pipecat Flows no longer qualifies: it ships inside `pipecat-ai` core since 1.5.0; never pin the deprecated standalone `pipecat-ai-flows`. |
 | `sdk_language` | no | LiveKit: warm transfer and MCP need `python`. |
-| `transport`, `carrier` | no | Driver vocabulary. Telephony controls resolve against these, never the brand alone. |
+| `transport`, `carrier`, `connection` | required for LiveKit or Pipecat telephony | Driver route vocabulary and a Connection name. Telephony features resolve against the exact tuple, never the orchestrator or carrier alone. |
 | `region`, `edition` | no | Provider vocabulary. Declared, never derived. |
 | `models` | no | Per-target overrides, see 6.2. |
 | `destinations` | if any `human_transfer` is used | Map of symbolic name to phone number or SIP URI. |
@@ -424,6 +440,59 @@ Rules:
 
 Why never validated: provider model lists change faster than any shipped catalog, the valid set on code targets depends on the pinned versions, and the real validators already exist (the provider API at plan/apply, the generated project at startup). Unmute relays those errors word for word.
 
+### 6.3 Telephony connections and routes
+
+Telephony Connections keep account-specific environment names outside the
+portable Agent and outside target route selection:
+
+```yaml
+# connections/primary_phone.yaml
+kind: telephony
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+The target binds that Connection to an exact route:
+
+```yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: carrier-websocket
+    carrier: twilio
+    connection: primary_phone
+```
+
+A package may add more named targets and Connections for every supported
+carrier route it needs. There is no package-level route-count field. The
+one-Connection rule applies to each target, not to the whole package, and each
+target writes a separate `build/<target-name>/` artifact. One target never
+combines carriers or their route-specific limits.
+
+The Connection's keys use carrier route vocabulary. Its values must be valid
+environment variable names. Unknown keys, a missing required key, an unknown
+Connection, or a route mismatch fails before generation. The loader never
+reads the named environment values.
+
+The compiler resolves directions, controls, briefing behavior, system variable
+sources, evidence, public endpoints, coordination, and admission ownership for
+the exact route. Every LiveKit or Pipecat v1 telephony plan resolves shared
+coordination and emits Redis. LiveKit Server and LiveKit SIP use it as platform
+infrastructure. Generated Pipecat code uses it only for pending-call
+correlation, callback replay protection, human-transfer state, and admission;
+agent handoff, tasks, transcripts, prompts, model context, and audio stay in the
+active worker. The plan and compile report name the applicable reasons from the
+closed set `livekit_control_plane`, `call_correlation`,
+`callback_idempotency`, `human_transfer`, and `admission`. A feature is enabled
+only when its row has current official documentation and a successful route
+smoke. The reason set is non-empty and every reason maps to a declared service
+that consumes the Redis connection; an idle Redis sidecar is invalid. Without a
+live smoke, the row remains provisional and validation fails when the Agent
+requests it.
+
 ---
 
 ## 7. The safe core: write this and it runs on all five
@@ -435,10 +504,12 @@ follows these rules exactly.
 1. Any number of agents with `agent_transfer` between them (T0 + T2).
 2. Every transfer context: `history: full`, `variables: all`.
 3. Tools: `execution: webhook`, `interruption: provider_default`, `effect: returns_data`.
-4. Human transfer: `mode: cold` only. Pipecat needs the Daily SIP transport; Deepgram needs a carrier in its target instance.
+4. Omit human transfer while the exact LiveKit and Pipecat telephony routes are
+   provisional. Their platform-level and offline-emitted capabilities remain
+   visible in the matrix below, but are not part of the validation-safe core.
 5. Hosted providers only for listen and speak models (no `provider: local`). `turn` is a preference anyway.
 6. If the agent speaks first, give it a fixed `greeting.text`. A model-written opening is conditional on ElevenLabs (workflow node) and generated-with-warning on Deepgram (review-corrected 2026-07-15); a fixed line stays the zero-warning safe choice.
-7. Skip for now: single `tasks` (return to owner unverified on Vapi) and `task_groups` with `then: return` (fails on Vapi). A `task_group` with `then: transfer` or `end` does pass on all five (warning on LiveKit: TaskGroup experimental). Also skip `requires`, `thinking_audio`, warm transfer, `mcp` and `local` tools, tracing, and any history other than `full`. `fallback` passes everywhere when the chain stays within one provider on Vapi and the fallback models carry no settings beyond the ID on ElevenLabs. `outbound: true` with `on_voicemail` passes everywhere; on Deepgram it is generated with a warning (review-corrected 2026-07-15), so keep it out of the zero-warning safe core if you want no warnings.
+7. Skip for now: single `tasks` (return to owner unverified on Vapi) and `task_groups` with `then: return` (fails on Vapi). A `task_group` with `then: transfer` or `end` does pass on all five (warning on LiveKit: TaskGroup experimental). Also skip `requires`, `thinking_audio`, telephony routes, warm transfer, `mcp` and `local` tools, tracing, and any history other than `full`. `fallback` passes everywhere when the chain stays within one provider on Vapi and the fallback models carry no settings beyond the ID on ElevenLabs. Pipecat's current carrier routes do not emit the required voicemail handling, and every exact telephony route remains provisional until its credentialed smoke passes.
 8. Accept warnings: `minimum_words` on ElevenLabs, interruption tuning on Deepgram, turn model notes.
 
 Feature by feature:
@@ -458,7 +529,7 @@ Feature by feature:
 | `requires:` | ok | ok | fail | fail | ok |
 | `fallback:` (think) | ok | gated (v1) | conditional | ok | ok |
 | `fallback:` (listen) | ok | gated (v1) | fail | fail | fail |
-| human_transfer cold | ok | Daily SIP only | ok | ok | carrier-conditional |
+| human_transfer cold | ok | Daily SIP, or provisional carrier REST on Twilio/Telnyx/Plivo | ok | ok | carrier-conditional |
 | human_transfer warm | native (Node stable, Python Beta) | ships, not emitted yet | Twilio only (stable path) | ok | carrier-conditional |
 | `thinking_audio` | ok | gated (v1) | fail | ok | fail |
 | `provider: local` (listen/speak) | ok | ok | fail | fail | fail |

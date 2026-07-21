@@ -120,3 +120,79 @@ cp .env.local "examples/$EXAMPLE/.env"
 bin/unmute dev "examples/$EXAMPLE" --target pipecat
 bin/unmute dev "examples/$EXAMPLE" --target livekit --console
 ```
+
+## Telephony
+
+Telephony compilation targets LiveKit and Pipecat. A target binds one
+`connections/<name>.yaml` file to an exact transport and carrier route. The
+Connection stores environment variable names only; credential values stay in
+an ignored `.env` file or your deployment secret store.
+
+A package may declare any number of supported carrier routes. Give each one a
+named target, such as `pipecat_twilio`, `pipecat_telnyx`, or `livekit_plivo`,
+and bind each target to one Connection. Every target produces a separate,
+single-carrier project in `build/<target-name>/`; Unmute never combines carrier
+SDKs or route-specific limits inside one generated runtime.
+
+```yaml
+# connections/primary_phone.yaml
+kind: telephony
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+Route support remains provisional until a real credentialed smoke passes.
+[TELEPHONY.md](TELEPHONY.md) documents the architecture, exact credential list,
+where to obtain each credential, local public-URL flow, deployment topology,
+and current verification policy.
+
+Every generated telephony project includes `compose.telephony.yaml`, and
+`unmute dev <agent> --target <name> --telephony` always executes it. Pipecat
+runs the generated application plus Redis. LiveKit SIP runs the generated
+Agent, Redis, LiveKit Server, and LiveKit SIP. Compose supplies local Redis and
+the conspicuous non-production LiveKit key pair; put carrier and model keys in
+the package's ignored `.env`. A normal `ctrl-c` stops only that package's
+Compose project and preserves its Redis volume.
+
+Generated Pipecat adapters currently cover Twilio, Telnyx, and Plivo offline;
+all stay provisional until credentialed smokes pass. For Twilio, get the
+Account SID and Auth Token from the Console account dashboard and the caller ID
+from Phone Numbers. For Telnyx, get an API key and webhook public key from
+Mission Control, then use a Voice API Application ID as
+`TELNYX_CONNECTION_ID`. For Plivo, get the Auth ID and Auth Token from the
+Console dashboard and the caller ID from Phone Numbers. Every Pipecat carrier
+WebSocket route needs `UNMUTE_PUBLIC_URL` set to the exact public HTTPS origin;
+generate a separate `UNMUTE_OUTBOUND_TOKEN` if the channel permits outbound
+calls. See the linked telephony guide for the exact Connection vocabulary and
+setup steps.
+
+Generated LiveKit SIP projects cover Twilio, Telnyx, and Plivo through the
+same `livekit/sip/<carrier>` plan. Their Connection vocabulary is:
+
+```yaml
+# connections/primary_phone.yaml
+kind: telephony
+environment:
+  sip_address: TWILIO_SIP_ADDRESS
+  sip_username: TWILIO_SIP_USERNAME
+  sip_password: TWILIO_SIP_PASSWORD
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+Set the target's `provider: livekit`, `transport: sip`, `carrier`, and
+`connection`. The generated project includes inbound-trunk, outbound-trunk,
+and dispatch-rule JSON inputs for the directions you request. Self-hosted SIP
+also requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`,
+`REDIS_URL`, and a public `LIVEKIT_SIP_URI` in deployment; local Compose
+supplies the Server, key pair, and Redis connection. The `lk` commands return
+the trunk IDs used at runtime. An HTTPS tunnel is enough for Pipecat callbacks,
+but not for LiveKit SIP signaling and RTP.
+
+Exotel remains gated: its documented static Voicebot WebSocket flow does not
+yet provide a proven authenticated upgrade that satisfies Unmute's ingress
+policy, and its LiveKit SIP route has no provider-specific proof. LiveKit's
+Beta Twilio Connector route is also gated: its route and credential vocabulary
+are recognized, but Unmute does not emit a Connector adapter or inherit SIP
+transfer capabilities.

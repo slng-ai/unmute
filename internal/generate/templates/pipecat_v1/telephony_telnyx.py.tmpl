@@ -1,0 +1,179 @@
+"""Generated Telnyx ingress and call control for {{.Project}}."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import binascii
+import json
+import os
+import secrets
+import time
+
+import aiohttp
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from fastapi import HTTPException, Request, WebSocket
+from pipecat.runner.types import WebSocketRunnerArguments
+
+from telephony_shared import (
+    CONNECTION,
+    CONTROL_TIMEOUT_SECS,
+    SESSION_TTL_SECS,
+    STATE,
+    _env,
+    _http_url,
+    _outbound_request,
+    _remember,
+    _require_accepting,
+    _valid_destination,
+    _websocket_url,
+    app,
+    handle_media,
+)
+
+
+API_KEY_ENV = {{pyq .Telephony.APIKeyEnv}}
+PUBLIC_KEY_ENV = {{pyq .Telephony.PublicKeyEnv}}
+CONNECTION_ID_ENV = {{pyq .Telephony.ConnectionEnv}}
+FROM_NUMBER_ENV = {{pyq .Telephony.FromNumberEnv}}
+WEBHOOK_TOLERANCE_SECS = 300
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+async def _signed_event(request: Request) -> dict:
+    raw = await request.body()
+    signature = request.headers.get("Telnyx-Signature-Ed25519", "")
+    timestamp = request.headers.get("Telnyx-Timestamp", "")
+    try:
+        signed_at = int(timestamp)
+        if abs(int(time.time()) - signed_at) > WEBHOOK_TOLERANCE_SECS:
+            raise ValueError("stale webhook")
+        key = Ed25519PublicKey.from_public_bytes(base64.b64decode(_env(PUBLIC_KEY_ENV), validate=True))
+        key.verify(base64.b64decode(signature, validate=True), timestamp.encode() + b"|" + raw)
+        event = json.loads(raw)
+    except (binascii.Error, InvalidSignature, ValueError, TypeError, json.JSONDecodeError):
+        raise HTTPException(status_code=403, detail="invalid carrier signature") from None
+    data = event.get("data")
+    if not isinstance(data, dict) or not isinstance(data.get("id"), str):
+        raise HTTPException(status_code=400, detail="invalid carrier event")
+    return data
+
+
+async def _call_api(method: str, path: str, body: dict) -> dict:
+    headers = {"Authorization": "Bearer " + _env(API_KEY_ENV), "Content-Type": "application/json"}
+    timeout = aiohttp.ClientTimeout(total=CONTROL_TIMEOUT_SECS)
+    async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+        async with session.request(method, "https://api.telnyx.com/v2" + path, json=body) as response:
+            if response.status < 200 or response.status >= 300:
+                raise RuntimeError(f"Telnyx call control failed with status {response.status}")
+            return await response.json()
+
+
+def configure_pipecat_env() -> None:
+    os.environ["TELNYX_API_KEY"] = _env(API_KEY_ENV)
+
+
+def normalized_context(runner_args: WebSocketRunnerArguments) -> dict:
+    pending = (runner_args.body or {}).get("telephony")
+    call_data = runner_args.call_data
+    if not pending or call_data is None:
+        raise RuntimeError("authenticated telephony context is unavailable")
+    return {
+        "session_id": pending["session_id"],
+        "carrier": "telnyx",
+        "connection": CONNECTION,
+        "call_id": call_data.call_id,
+        "stream_id": call_data.stream_id,
+        "direction": pending["direction"],
+        "from_number": pending["from_number"],
+        "to_number": pending["to_number"],
+        "call_start": pending["call_start"],
+    }
+
+
+async def cold_transfer(call_id: str, destination: str) -> None:
+    if not _valid_destination(destination):
+        raise RuntimeError("invalid compiled transfer destination")
+    if not await STATE.mark_once("transfer", call_id, SESSION_TTL_SECS):
+        return
+    try:
+        await _call_api("POST", f"/calls/{call_id}/actions/transfer", {
+            "to": destination,
+            "command_id": secrets.token_urlsafe(24),
+        })
+    except Exception:
+        await STATE.forget("transfer", call_id)
+        raise
+
+
+{{if .Telephony.HasInbound}}@app.post("/telephony/inbound")
+async def inbound(request: Request) -> dict[str, bool]:
+    data = await _signed_event(request)
+    await _require_accepting()
+    if not await STATE.mark_once("event", data["id"], SESSION_TTL_SECS):
+        return {"accepted": True, "duplicate": True}
+    payload = data.get("payload", {})
+    if data.get("event_type") != "call.initiated" or payload.get("direction") != "incoming":
+        return {"accepted": True, "duplicate": False}
+    from_number, to_number = payload.get("from", ""), payload.get("to", "")
+    call_id = payload.get("call_control_id")
+    if (
+        not isinstance(call_id, str)
+        or not _valid_destination(from_number)
+        or not _valid_destination(to_number)
+    ):
+        await STATE.forget("event", data["id"])
+        raise HTTPException(status_code=400, detail="invalid carrier call context")
+    task = asyncio.create_task(
+        _answer_inbound(data["id"], call_id, from_number, to_number)
+    )
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return {"accepted": True, "duplicate": False}
+
+
+async def _answer_inbound(
+    event_id: str, call_id: str, from_number: str, to_number: str
+) -> None:
+    try:
+        token, _ = await _remember("inbound", from_number, to_number, {})
+        await _call_api("POST", f"/calls/{call_id}/actions/answer", {
+            "command_id": secrets.token_urlsafe(24),
+            "stream_url": _websocket_url(f"/telephony/ws/{token}"),
+            "stream_track": "both_tracks",
+            "stream_bidirectional_mode": "rtp",
+            "stream_bidirectional_codec": "PCMU",
+        })
+    except Exception:
+        await STATE.forget("event", event_id)
+
+
+{{end}}{{if .Telephony.HasOutbound}}@app.post("/telephony/outbound")
+async def outbound(request: Request) -> dict[str, str]:
+    destination, call_start = await _outbound_request(request)
+    token, session_id = await _remember("outbound", _env(FROM_NUMBER_ENV), destination, call_start)
+    result = await _call_api("POST", "/calls", {
+        "connection_id": _env(CONNECTION_ID_ENV),
+        "from": _env(FROM_NUMBER_ENV),
+        "to": destination,
+        "command_id": secrets.token_urlsafe(24),
+        "stream_url": _websocket_url(f"/telephony/ws/{token}"),
+        "stream_track": "both_tracks",
+        "stream_bidirectional_mode": "rtp",
+        "stream_bidirectional_codec": "PCMU",
+        "webhook_url": _http_url("/telephony/status"),
+    })
+    return {"session_id": session_id, "call_id": result["data"]["call_control_id"], "status": "accepted"}
+
+
+{{end}}@app.post("/telephony/status")
+async def status(request: Request) -> dict[str, bool]:
+    data = await _signed_event(request)
+    duplicate = not await STATE.mark_once("event", data["id"], SESSION_TTL_SECS)
+    return {"accepted": True, "duplicate": duplicate}
+
+
+@app.websocket("/telephony/ws/{token}")
+async def media(websocket: WebSocket, token: str) -> None:
+    await handle_media(websocket, token)

@@ -21,6 +21,7 @@ COPY . .
 
 # Pipecat Cloud / the runner start bot.py; see `unmute dev` for local runs.
 CMD ["python", "bot.py"]
+
 === README.md ===
 # pipecat
 
@@ -31,8 +32,10 @@ not edit by hand — change the source spec and recompile.
 
 ```sh
 cp .env.example .env                      # then fill in your keys
+
 uv run bot.py                             # web: open the URL it prints
 uv run --extra console bot.py console     # terminal: talk over local mic/speaker
+
 ```
 
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner
@@ -75,7 +78,6 @@ the typed results.
 from __future__ import annotations
 
 import asyncio
-
 import os
 from dataclasses import asdict, dataclass
 
@@ -140,7 +142,9 @@ class State:
     verified: bool = False
 
 
-STATE = State()
+def build_state(call_context: dict | None = None) -> State:
+    state = State()
+    return state
 
 async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
     await asyncio.sleep(timeout_secs)
@@ -171,7 +175,9 @@ def build_billing_tts():
 class BillingAgent(LLMWorker):
     """Agent: billing."""
 
-    def __init__(self) -> None:
+    def __init__(self, state=None, context=None, call_context=None) -> None:
+        self.state = state
+
         llm = build_billing_llm()
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
 
@@ -198,6 +204,7 @@ class BillingAgent(LLMWorker):
         )
         if _TRANSPORT is not None:
             await _TRANSPORT.sip_call_transfer({"toEndPoint": "+14155550123"})
+
         await params.result_callback({"transferred": True})
 
 
@@ -225,7 +232,9 @@ def build_intake_tts():
 class IntakeAgent(LLMWorker):
     """Agent: intake."""
 
-    def __init__(self) -> None:
+    def __init__(self, state=None, context=None, call_context=None) -> None:
+        self.state = state
+
         llm = build_intake_llm()
         super().__init__("intake", llm=llm, pipeline=Pipeline([llm, build_intake_tts()]), bridged=())
 
@@ -259,9 +268,8 @@ class IntakeAgent(LLMWorker):
 transport_params: dict = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
-}
 
-AGENTS = [BillingAgent(), IntakeAgent()]
+}
 
 
 
@@ -285,6 +293,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
     # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
     # key, no network hop; the turn binding in targets.yaml is advisory.
     context = LLMContext()
+    call_context = None
+    state = build_state(call_context)
+    agents = [BillingAgent(state=state, context=context, call_context=call_context), IntakeAgent(state=state, context=context, call_context=call_context)]
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -364,13 +375,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
         async def on_client_disconnected(transport, client):
             await runner.cancel()
 
-    await runner.add_workers(main, *AGENTS)
+    await runner.add_workers(main, *agents)
 
     await runner.run()
 
 
 
 async def bot(runner_args: RunnerArguments) -> None:
+
     transport = await create_transport(runner_args, transport_params)
     await run_bot(transport, runner_args)
 
@@ -501,42 +513,28 @@ if __name__ == "__main__":
       "metric": "workers",
       "value": "60",
       "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
     },
     {
       "target": "pipecat",
       "metric": "gpus",
       "value": "0",
       "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
     },
     {
       "target": "pipecat",
       "metric": "provider_concurrency_quota.realtime_audio",
       "value": "40",
       "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
     },
     {
       "target": "pipecat",
       "metric": "provider_session_time_quota.realtime_audio",
       "value": "4h0m0s",
       "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
-    },
-    {
-      "target": "pipecat",
-      "metric": "provider_concurrency_quota.telephony",
-      "value": "40",
-      "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
-    },
-    {
-      "target": "pipecat",
-      "metric": "provider_session_time_quota.telephony",
-      "value": "4h0m0s",
-      "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
     }
   ],
   "notes": [

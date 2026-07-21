@@ -1,0 +1,193 @@
+"""Generated Plivo ingress and call control for {{.Project}}."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import secrets
+from urllib.parse import parse_qsl
+from xml.etree.ElementTree import Element, SubElement, tostring
+
+from fastapi import HTTPException, Request, WebSocket
+from fastapi.responses import Response
+from pipecat.runner.types import WebSocketRunnerArguments
+from plivo import RestClient, utils
+
+from telephony_shared import (
+    CONNECTION,
+    CONTROL_TIMEOUT_SECS,
+    PENDING_TTL_SECS,
+    SESSION_TTL_SECS,
+    STATE,
+    _env,
+    _http_url,
+    _outbound_request,
+    _remember,
+    _require_accepting,
+    _valid_destination,
+    _websocket_url,
+    app,
+    handle_media,
+)
+
+
+AUTH_ID_ENV = {{pyq .Telephony.AuthIDEnv}}
+AUTH_TOKEN_ENV = {{pyq .Telephony.AuthTokenEnv}}
+FROM_NUMBER_ENV = {{pyq .Telephony.FromNumberEnv}}
+
+
+async def _signed_form(request: Request) -> dict[str, str]:
+    form = dict(parse_qsl((await request.body()).decode("utf-8"), keep_blank_values=True))
+    signature = request.headers.get("X-Plivo-Signature-V3", "")
+    nonce = request.headers.get("X-Plivo-Signature-V3-Nonce", "")
+    if not signature or not nonce:
+        raise HTTPException(status_code=403, detail="invalid carrier signature")
+    valid = utils.validate_v3_signature(
+        "POST", _http_url(request.url.path), nonce, _env(AUTH_TOKEN_ENV), signature, form
+    )
+    if not valid:
+        raise HTTPException(status_code=403, detail="invalid carrier signature")
+    if not await STATE.mark_once("nonce", nonce, SESSION_TTL_SECS):
+        raise HTTPException(status_code=403, detail="invalid carrier signature")
+    return form
+
+
+def _stream_xml(token: str) -> str:
+    response = Element("Response")
+    stream = SubElement(
+        response,
+        "Stream",
+        bidirectional="true",
+        keepCallAlive="true",
+        contentType="audio/x-mulaw;rate=8000",
+    )
+    stream.text = _websocket_url(f"/telephony/ws/{token}")
+    return tostring(response, encoding="unicode")
+
+
+{{if .Telephony.HasCold}}def _dial_xml(destination: str) -> str:
+    response = Element("Response")
+    dial = SubElement(response, "Dial")
+    kind = "User" if destination.startswith("sip:") else "Number"
+    SubElement(dial, kind).text = destination
+    return tostring(response, encoding="unicode")
+
+
+{{end}}
+def _client() -> RestClient:
+    return RestClient(
+        _env(AUTH_ID_ENV), _env(AUTH_TOKEN_ENV), timeout=CONTROL_TIMEOUT_SECS
+    )
+
+
+def configure_pipecat_env() -> None:
+    """Pipecat's Plivo serializer reads canonical names; Connections may rename them."""
+    os.environ["PLIVO_AUTH_ID"] = _env(AUTH_ID_ENV)
+    os.environ["PLIVO_AUTH_TOKEN"] = _env(AUTH_TOKEN_ENV)
+
+
+def normalized_context(runner_args: WebSocketRunnerArguments) -> dict:
+    pending = (runner_args.body or {}).get("telephony")
+    call_data = runner_args.call_data
+    if not pending or call_data is None:
+        raise RuntimeError("authenticated telephony context is unavailable")
+    return {
+        "session_id": pending["session_id"],
+        "carrier": "plivo",
+        "connection": CONNECTION,
+        "call_id": call_data.call_id,
+        "stream_id": call_data.stream_id,
+        "direction": pending["direction"],
+        "from_number": pending["from_number"],
+        "to_number": pending["to_number"],
+        "call_start": pending["call_start"],
+    }
+
+
+{{if .Telephony.HasCold}}async def _start_transfer(call_id: str, destination: str) -> None:
+    token = secrets.token_urlsafe(32)
+    await STATE.remember_pending(token, {
+        "destination": destination,
+    }, PENDING_TTL_SECS)
+    await asyncio.to_thread(
+        _client().calls.transfer,
+        legs="aleg",
+        aleg_url=_http_url(f"/telephony/transfer/{token}"),
+        aleg_method="POST",
+        call_uuid=call_id,
+    )
+
+
+async def cold_transfer(call_id: str, destination: str) -> None:
+    if not _valid_destination(destination):
+        raise RuntimeError("invalid compiled transfer destination")
+    if not await STATE.mark_once("transfer", call_id, SESSION_TTL_SECS):
+        return
+    try:
+        await _start_transfer(call_id, destination)
+    except Exception:
+        await STATE.forget("transfer", call_id)
+        raise
+
+
+{{end}}
+{{if .Telephony.HasInbound}}@app.post("/telephony/inbound")
+async def inbound(request: Request) -> Response:
+    form = await _signed_form(request)
+    await _require_accepting()
+    from_number = form.get("From", "")
+    to_number = form.get("To", "")
+    if not _valid_destination(from_number) or not _valid_destination(to_number):
+        raise HTTPException(status_code=400, detail="invalid carrier call context")
+    token, _ = await _remember("inbound", from_number, to_number, {})
+    return Response(_stream_xml(token), media_type="application/xml")
+
+
+{{end}}{{if .Telephony.HasOutbound}}@app.post("/telephony/outbound")
+async def outbound(request: Request) -> dict[str, str]:
+    destination, call_start = await _outbound_request(request)
+    token, session_id = await _remember("outbound", _env(FROM_NUMBER_ENV), destination, call_start)
+    result = await asyncio.to_thread(
+        _client().calls.create,
+        from_=_env(FROM_NUMBER_ENV),
+        to_=destination,
+        answer_url=_http_url(f"/telephony/answer/{token}"),
+        answer_method="POST",
+        hangup_url=_http_url("/telephony/status"),
+        hangup_method="POST",
+    )
+    return {"session_id": session_id, "request_id": result.request_uuid, "status": "accepted"}
+
+
+@app.post("/telephony/answer/{token}")
+async def outbound_answer(request: Request, token: str) -> Response:
+    await _signed_form(request)
+    pending = await STATE.pending(token, consume=False)
+    if pending is None:
+        raise HTTPException(status_code=404, detail="unknown outbound call")
+    return Response(_stream_xml(token), media_type="application/xml")
+
+
+{{end}}@app.post("/telephony/status")
+async def status(request: Request) -> dict[str, bool]:
+    form = await _signed_form(request)
+    event_id = ":".join(
+        (form.get("CallUUID", ""), form.get("CallStatus", ""), form.get("HangupCauseCode", ""))
+    )
+    duplicate = not await STATE.mark_once("status", event_id, SESSION_TTL_SECS)
+    return {"accepted": True, "duplicate": duplicate}
+
+
+{{if .Telephony.HasCold}}@app.post("/telephony/transfer/{token}")
+async def transfer_instructions(request: Request, token: str) -> Response:
+    await _signed_form(request)
+    transfer = await STATE.pending(token, consume=True)
+    if transfer is None:
+        raise HTTPException(status_code=404, detail="unknown transfer")
+    return Response(_dial_xml(transfer["destination"]), media_type="application/xml")
+
+
+{{end}}
+@app.websocket("/telephony/ws/{token}")
+async def media(websocket: WebSocket, token: str) -> None:
+    await handle_media(websocket, token)

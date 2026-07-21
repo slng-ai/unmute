@@ -142,15 +142,21 @@ Required: yes. Values: a symbolic name. Default: none. Targets: all five, core (
 
 Required: yes. Values: `cold | warm`. Default: none.
 
-| Target | Cold | Warm |
+| Route | Cold | Warm |
 |---|---|---|
-| LiveKit | native | native |
-| Pipecat | Daily SIP transport only | ships, but the driver does not emit it yet |
+| LiveKit SIP with Twilio, Telnyx, or Plivo | Emitted offline; provisional | Emitted offline; provisional |
+| LiveKit Twilio Connector | No emitted adapter | No emitted adapter |
+| Pipecat carrier WebSocket with Twilio, Telnyx, or Plivo | Carrier REST path emitted offline; provisional | Not emitted |
+| Pipecat Daily SIP | Platform capability only; not an emitted v1 telephony route | Not emitted |
 | Vapi | native | needs the Twilio carrier (stable path) |
 | ElevenLabs | native | supported |
 | Deepgram | carrier-conditional | carrier-conditional |
 
-Cold transfers the caller and the agent drops off. Warm keeps the agent on to brief the human first. On Pipecat, cold works (with `transport: daily-sip`); warm fails today.
+Cold transfers the caller and the agent drops off. Warm keeps the agent on to
+brief the human first. See the
+[phone-call route matrix](../learn/07-phone-calls.md#choose-a-supported-carrier-route)
+before selecting either mode; all emitted Pipecat and LiveKit carrier routes
+remain provisional today.
 
 ### briefing
 
@@ -160,7 +166,7 @@ Required: conditional (warm only). Values: `summary | message | wait`. Default: 
 
 | Target | What happens | Tag |
 |---|---|---|
-| LiveKit | `summary` | gated |
+| LiveKit SIP with Twilio, Telnyx, or Plivo | `summary`, emitted offline on a provisional route | provisional |
 | Pipecat | fails (warm not emitted yet) | gated |
 | Vapi | all three | gated |
 | ElevenLabs | `message` | gated |

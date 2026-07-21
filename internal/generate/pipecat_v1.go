@@ -127,6 +127,7 @@ type pipecatTool struct {
 	EndsCall        bool
 	Interruption    string // "cancel" | "continue" | "" (provider default)
 	ColdDestination string // set for a cold human_transfer: the resolved number/SIP URI
+	CarrierTransfer bool   // carrier call-control adapter, not Daily SIP
 }
 
 // pipecatLocalTool is a copied handler file: tools/<name>.py in the project.
@@ -153,6 +154,37 @@ type pipecatVariable struct {
 	Name    string
 	PyType  string
 	Default string // Python literal
+	Source  string
+}
+
+type pipecatTelephony struct {
+	Carrier       string
+	Connection    string
+	MaxSessions   int
+	SessionTTL    int
+	AccountSIDEnv string
+	AuthIDEnv     string
+	AuthTokenEnv  string
+	APIKeyEnv     string
+	PublicKeyEnv  string
+	ConnectionEnv string
+	FromNumberEnv string
+	HasInbound    bool
+	HasOutbound   bool
+	HasCold       bool
+	SystemSources []pipecatSystemSource
+	CallStart     []pipecatCallStart
+}
+
+type pipecatSystemSource struct {
+	Variable string
+	Source   string
+}
+
+type pipecatCallStart struct {
+	Name     string
+	Type     string
+	Required bool
 }
 
 type pipecatData struct {
@@ -179,6 +211,7 @@ type pipecatData struct {
 	RequiredEnv         []string
 	Notes               []string
 	Tracing             bool
+	Telephony           *pipecatTelephony
 
 	// Import needs: keep bot.py free of unused imports (only what a given spec
 	// actually exercises), so the emitted pipeline reads clean.
@@ -238,6 +271,22 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTracingLangfuse:      true,
 }
 
+var pipecatEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
+	targetcap.TelephonyRouteSelected:                   true,
+	targetcap.TelephonyInbound:                         true,
+	targetcap.TelephonyOutbound:                        true,
+	targetcap.TelephonyFeature(targetcap.Hangup):       true,
+	targetcap.TelephonyFeature(targetcap.ColdTransfer): true,
+	"source.session_id":                                true,
+	"source.carrier":                                   true,
+	"source.connection":                                true,
+	"source.call_id":                                   true,
+	"source.stream_id":                                 true,
+	"source.direction":                                 true,
+	"source.from_number":                               true,
+	"source.to_number":                                 true,
+}
+
 // GeneratePipecat lowers a validated agent + pipecat target into a project.
 // The socket runs Validate(caps) first (V17), so this reads only agent+target.
 func GeneratePipecat(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedBinding, sizing []ir.Sizing) (Artifact, error) {
@@ -292,8 +341,22 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		{"pyproject.toml", "pyproject.toml"},
 		{"Dockerfile", "Dockerfile"},
 		{"README.md", "README.md"},
-		{"pcc-deploy.toml", "pcc-deploy.toml"},
 		{"env.example", ".env.example"},
+	}
+	if data.Telephony != nil {
+		templateName := "telephony_twilio.py"
+		switch data.Telephony.Carrier {
+		case "telnyx":
+			templateName = "telephony_telnyx.py"
+		case "plivo":
+			templateName = "telephony_plivo.py"
+		}
+		outputs = append(outputs, struct{ tmpl, path string }{templateName, "telephony.py"})
+		outputs = append(outputs, struct{ tmpl, path string }{"telephony_shared.py", "telephony_shared.py"})
+		outputs = append(outputs, struct{ tmpl, path string }{"telephony_state.py", "telephony_state.py"})
+		outputs = append(outputs, struct{ tmpl, path string }{"compose.telephony.yaml", "compose.telephony.yaml"})
+	} else {
+		outputs = append(outputs, struct{ tmpl, path string }{"pcc-deploy.toml", "pcc-deploy.toml"})
 	}
 	var files []File
 	for _, o := range outputs {

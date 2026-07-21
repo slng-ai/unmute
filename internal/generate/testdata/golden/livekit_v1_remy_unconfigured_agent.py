@@ -298,8 +298,6 @@ class QualifyEvent(AgentTask[dict]):
 # --- session ---------------------------------------------------------------
 def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
-
-
 server = AgentServer()
 server.setup_fnc = prewarm
 

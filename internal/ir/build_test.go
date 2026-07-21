@@ -28,6 +28,230 @@ func TestBuildSafeCore(t *testing.T) {
 	if agent.Tools["lookup_customer"].Effect != ToolReturnsData {
 		t.Fatal("tool defaults were not applied")
 	}
+	if got := agent.Connections["primary_phone"].Environment["account_sid"]; got != "TWILIO_ACCOUNT_SID" {
+		t.Fatalf("resolved connection account_sid = %q", got)
+	}
+}
+
+func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
+	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
+	target := pkg.Targets["pipecat"]
+	target.Transport = "carrier-websocket"
+	target.Carrier = "twilio"
+	target.Connection = "primary_phone"
+	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := agent.Targets["pipecat"].Telephony
+	if plan == nil {
+		t.Fatal("telephony plan was not resolved")
+	}
+	if plan.Key.Transport != "carrier-websocket" || plan.Key.Carrier != "twilio" || plan.Connection != "primary_phone" {
+		t.Fatalf("route = %#v", plan)
+	}
+	if plan.Coordination != "shared" || plan.AdmissionOwner != "generated_runtime" || len(plan.Evidence) == 0 {
+		t.Fatalf("incomplete plan = %#v", plan)
+	}
+	if got := strings.Join(plan.Services, ","); got != "application,redis" {
+		t.Fatalf("services = %s", got)
+	}
+	if len(plan.Processes) != 1 || len(plan.PublicEndpoints) != 3 || len(plan.ManualSteps) == 0 {
+		t.Fatalf("runtime facts = %#v", plan)
+	}
+	if got := strings.Join(plan.LocalEnvironment, ","); got != "REDIS_URL" {
+		t.Fatalf("locally supplied environment = %s", got)
+	}
+	if got := strings.Join(plan.RequiredEnvironment, ","); got != "REDIS_URL,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,UNMUTE_PUBLIC_URL" {
+		t.Fatalf("required environment = %s", got)
+	}
+	if got := coordinationReasonNames(plan.CoordinationReasons); got != "admission,call_correlation,callback_idempotency,human_transfer" {
+		t.Fatalf("coordination reasons = %s", got)
+	}
+}
+
+func TestBuildLiveKitSIPUsesSharedDispatchPlan(t *testing.T) { // telephony T10, V13, V18
+	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
+	target := pkg.Targets["livekit"]
+	target.Transport, target.Carrier, target.Connection = "sip", "twilio", "primary_phone"
+	pkg.Targets = map[string]packagespec.Target{"livekit": target}
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment = map[string]string{
+		"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
+		"sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
+	}
+	pkg.Connections["primary_phone"] = connection
+
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := agent.Targets["livekit"].Telephony
+	if plan == nil || plan.Coordination != "shared" || plan.AdmissionOwner != "livekit_dispatch" {
+		t.Fatalf("LiveKit SIP plan = %#v", plan)
+	}
+	if got := strings.Join(plan.Services, ","); got != "application,livekit_server,livekit_sip,redis" {
+		t.Fatalf("LiveKit SIP services = %s", got)
+	}
+	if len(plan.Processes) != 1 || len(plan.PublicEndpoints) != 0 || len(plan.ManualSteps) == 0 {
+		t.Fatalf("LiveKit SIP runtime facts = %#v", plan)
+	}
+	if got := strings.Join(plan.LocalEnvironment, ","); got != "LIVEKIT_API_KEY,LIVEKIT_API_SECRET,LIVEKIT_URL,REDIS_URL" {
+		t.Fatalf("LiveKit SIP locally supplied environment = %s", got)
+	}
+	if got := coordinationReasonNames(plan.CoordinationReasons); got != "livekit_control_plane" {
+		t.Fatalf("LiveKit SIP coordination reasons = %s", got)
+	}
+	if got := strings.Join(plan.CoordinationReasons[0].Consumers, ","); got != "livekit_server,livekit_sip" {
+		t.Fatalf("LiveKit SIP coordination consumers = %s", got)
+	}
+}
+
+func TestBuildSupportsMultipleCarrierTargets(t *testing.T) {
+	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
+	pipecat, livekit := pkg.Targets["pipecat"], pkg.Targets["livekit"]
+	pipecat.Transport, livekit.Transport = "carrier-websocket", "sip"
+	pkg.Targets = map[string]packagespec.Target{
+		"pipecat_twilio": withTelephonyRoute(pipecat, "twilio", "twilio_api"),
+		"pipecat_telnyx": withTelephonyRoute(pipecat, "telnyx", "telnyx_api"),
+		"livekit_twilio": withTelephonyRoute(livekit, "twilio", "twilio_sip"),
+		"livekit_plivo":  withTelephonyRoute(livekit, "plivo", "plivo_sip"),
+	}
+	pkg.Connections = map[string]packagespec.Connection{
+		"twilio_api": {Kind: "telephony", Environment: map[string]string{
+			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN", "from_number": "TWILIO_PHONE_NUMBER",
+		}},
+		"telnyx_api": {Kind: "telephony", Environment: map[string]string{
+			"api_key": "TELNYX_API_KEY", "public_key": "TELNYX_PUBLIC_KEY", "connection_id": "TELNYX_CONNECTION_ID", "from_number": "TELNYX_PHONE_NUMBER",
+		}},
+		"twilio_sip": {Kind: "telephony", Environment: map[string]string{
+			"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME", "sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
+		}},
+		"plivo_sip": {Kind: "telephony", Environment: map[string]string{
+			"sip_address": "PLIVO_SIP_ADDRESS", "sip_username": "PLIVO_SIP_USERNAME", "sip_password": "PLIVO_SIP_PASSWORD", "from_number": "PLIVO_PHONE_NUMBER",
+		}},
+	}
+
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"pipecat_twilio": "pipecat/carrier-websocket/twilio/twilio_api",
+		"pipecat_telnyx": "pipecat/carrier-websocket/telnyx/telnyx_api",
+		"livekit_twilio": "livekit/sip/twilio/twilio_sip",
+		"livekit_plivo":  "livekit/sip/plivo/plivo_sip",
+	} {
+		plan := agent.Targets[name].Telephony
+		if plan == nil {
+			t.Fatalf("%s has no telephony plan", name)
+		}
+		got := strings.Join([]string{string(plan.Key.Provider), plan.Key.Transport, plan.Key.Carrier, plan.Connection}, "/")
+		if got != want {
+			t.Errorf("%s route = %s, want %s", name, got, want)
+		}
+	}
+}
+
+func TestBuildRequiresTelephonyConnectionAndRejectsInverse(t *testing.T) {
+	t.Run("missing connection", func(t *testing.T) {
+		pkg := loadSafeCore(t)
+		enableTelephony(pkg)
+		pkg.Targets = map[string]packagespec.Target{"pipecat": pkg.Targets["pipecat"]}
+		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), `target "pipecat" requires connection for telephony`) {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("connection without channel", func(t *testing.T) {
+		pkg := loadSafeCore(t)
+		target := pkg.Targets["livekit"]
+		target.Connection = "primary_phone"
+		pkg.Targets = map[string]packagespec.Target{"livekit": target}
+		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), `sets connection but has no telephony channel`) {
+			t.Fatalf("got %v", err)
+		}
+	})
+}
+
+func withTelephonyRoute(target packagespec.Target, carrier, connection string) packagespec.Target {
+	target.Carrier, target.Connection = carrier, connection
+	return target
+}
+
+func coordinationReasonNames(reasons []TelephonyCoordinationReason) string {
+	names := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		names = append(names, reason.Name)
+	}
+	return strings.Join(names, ",")
+}
+
+func TestBuildRejectsUnknownOrInvalidConnection(t *testing.T) { // telephony V1-V3
+	tests := []struct {
+		name   string
+		mutate func(*packagespec.Package)
+		want   string
+	}{
+		{
+			name: "missing reference",
+			mutate: func(pkg *packagespec.Package) {
+				enableTelephony(pkg)
+				target := pkg.Targets["pipecat"]
+				target.Connection = "missing_phone"
+				pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+			},
+			want: "missing_phone",
+		},
+		{
+			name: "invalid environment name",
+			mutate: func(pkg *packagespec.Package) {
+				connection := pkg.Connections["primary_phone"]
+				connection.Environment["auth_token"] = "not-a-name"
+				pkg.Connections["primary_phone"] = connection
+			},
+			want: "environment variable name",
+		},
+		{
+			name: "missing route environment key",
+			mutate: func(pkg *packagespec.Package) {
+				enableTelephony(pkg)
+				connection := pkg.Connections["primary_phone"]
+				delete(connection.Environment, "auth_token")
+				pkg.Connections["primary_phone"] = connection
+				target := pkg.Targets["pipecat"]
+				target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
+				pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+			},
+			want: `requires environment key "auth_token"`,
+		},
+		{
+			name: "unknown route environment key",
+			mutate: func(pkg *packagespec.Package) {
+				enableTelephony(pkg)
+				connection := pkg.Connections["primary_phone"]
+				connection.Environment["api_key"] = "TWILIO_API_KEY"
+				pkg.Connections["primary_phone"] = connection
+				target := pkg.Targets["pipecat"]
+				target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
+				pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+			},
+			want: `environment key "api_key" is not accepted`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			test.mutate(pkg)
+			if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("got %v", err)
+			}
+		})
+	}
 }
 
 func TestBuildDefaultsLanguage(t *testing.T) {
@@ -304,4 +528,12 @@ func loadSafeCore(t *testing.T) *packagespec.Package {
 		t.Fatal(err)
 	}
 	return pkg
+}
+
+func enableTelephony(pkg *packagespec.Package) {
+	inbound, outbound := true, false
+	pkg.Agent.Channels["phone"] = packagespec.Channel{
+		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
+		RequiredControls: []string{"cold_transfer", "hangup"},
+	}
 }

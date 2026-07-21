@@ -763,6 +763,7 @@ func TestRunHumanTransfersRequireTelephony(t *testing.T) {
 func TestRunAddTelephonyAndHumanTransfer(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
+		"1\n1\n3\n" +
 		"4\n2\n1\n2\n5\n" +
 		"4\n3\n1\nto_human\n2\nCaller requests a person.\n3\nsupport_line\n4\n+14155550123\n8\n3\n" +
 		"7\n\n"
@@ -771,7 +772,7 @@ func TestRunAddTelephonyAndHumanTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, output.String())
 	}
-	if !hasTelephony(&got.Agent.Data) || len(got.Agent.Data.HumanTransfers) != 1 {
+	if got.Agent.Data.Target != "elevenlabs" || !hasTelephony(&got.Agent.Data) || len(got.Agent.Data.HumanTransfers) != 1 {
 		t.Fatalf("telephony result = %#v", got.Agent.Data)
 	}
 	if got.Agent.Data.HumanTransfers[0].Destination != "support_line" {

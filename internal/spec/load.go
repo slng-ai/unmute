@@ -1,7 +1,10 @@
 package spec
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,11 +19,12 @@ func Load(dir string) (*Package, error) {
 		return nil, fmt.Errorf("package path: %w", err)
 	}
 	pkg := &Package{
-		Root:     root,
-		Tools:    make(map[string]Tool),
-		Markdown: make(map[string]string),
-		Handlers: make(map[string]string),
-		files:    make(map[string][]byte),
+		Root:        root,
+		Tools:       make(map[string]Tool),
+		Connections: make(map[string]Connection),
+		Markdown:    make(map[string]string),
+		Handlers:    make(map[string]string),
+		files:       make(map[string][]byte),
 	}
 	if err := pkg.readYAML("agent.yaml", &pkg.Agent); err != nil {
 		return nil, err
@@ -55,6 +59,9 @@ func Load(dir string) (*Package, error) {
 		return nil, err
 	}
 	pkg.Targets = targets.Targets
+	if err := pkg.readConnections(); err != nil {
+		return nil, err
+	}
 
 	paths := make(map[string]bool)
 	for _, agent := range pkg.Agent.Agents {
@@ -76,6 +83,33 @@ func Load(dir string) (*Package, error) {
 	return pkg, nil
 }
 
+func (p *Package) readConnections() error {
+	root, err := os.OpenRoot(p.Root)
+	if err != nil {
+		return fmt.Errorf("package path: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	entries, err := fs.ReadDir(root.FS(), "connections")
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("connections: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".yaml" {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".yaml")
+		var connection Connection
+		if err := p.readYAML(filepath.Join("connections", entry.Name()), &connection); err != nil {
+			return err
+		}
+		p.Connections[name] = connection
+	}
+	return nil
+}
+
 func (p *Package) readYAML(name string, out any) error {
 	content, err := readWithin(p.Root, name)
 	if err != nil {
@@ -89,12 +123,17 @@ func (p *Package) readYAML(name string, out any) error {
 }
 
 func readWithin(root, name string) ([]byte, error) {
-	path := filepath.Join(root, filepath.Clean(name))
-	rel, err := filepath.Rel(root, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return nil, fmt.Errorf("%s: path escapes package", name)
+	packageRoot, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
-	content, err := os.ReadFile(path)
+	defer func() { _ = packageRoot.Close() }()
+	file, err := packageRoot.Open(name)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	defer func() { _ = file.Close() }()
+	content, err := io.ReadAll(file)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}

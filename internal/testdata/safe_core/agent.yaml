@@ -100,13 +100,9 @@ conversation:
 
 channels:
   web: { kind: realtime_audio }
-  phone:
-    kind: telephony
-    inbound: true
-    outbound: false
-    required_controls: [cold_transfer, hangup]
 
 capacity:
   peak_sessions: 40
   max_sessions: 60
+  peak_starts_per_second: 4
   avg_session_duration: 6m

@@ -8,5 +8,7 @@ RUN uv pip install --system .
 
 COPY . .
 
-# Pipecat Cloud / the runner start bot.py; see `unmute dev` for local runs.
+{{if .Telephony}}CMD ["uvicorn", "telephony:app", "--host", "0.0.0.0", "--port", "7860"]
+{{else}}# Pipecat Cloud / the runner start bot.py; see `unmute dev` for local runs.
 CMD ["python", "bot.py"]
+{{end}}

@@ -138,5 +138,6 @@ channels:
 [[with .EffectiveCapacity]]capacity:
   peak_sessions: [[.PeakSessions]]
   max_sessions: [[.MaxSessions]]
-  avg_session_duration: [[.AvgSessionDuration]]
+[[if .PeakStartsPerSecond]]  peak_starts_per_second: [[.PeakStartsPerSecond]]
+[[end]]  avg_session_duration: [[.AvgSessionDuration]]
 [[end -]]

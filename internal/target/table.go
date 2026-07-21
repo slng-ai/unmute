@@ -172,7 +172,7 @@ func (t Table) Control(control TelephonyControl, provider Provider, transport, c
 	conditionFailed := false
 	switch {
 	case support.Carrier != "" && support.Transport != "":
-		conditionFailed = support.Carrier != carrier && support.Transport != transport
+		conditionFailed = support.Carrier != carrier || support.Transport != transport
 	case support.Carrier != "":
 		conditionFailed = support.Carrier != carrier
 	case support.Transport != "":
@@ -464,7 +464,7 @@ func controlNamedCarrier(carrier, note string) ControlCapability {
 }
 
 func routedControls(name string) map[Provider]ControlCapability {
-	note := "required control " + name + " is proven only for carrier Twilio or transport Daily SIP"
+	note := "required control " + name + " is proven only for the exact carrier Twilio and transport Daily SIP route"
 	value := ControlCapability{Capability: Capability{Tag: Core}, Carrier: "twilio", Transport: "daily-sip", ConditionNote: note}
 	return controls(value, value, value, value, value)
 }
