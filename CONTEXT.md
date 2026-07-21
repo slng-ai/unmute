@@ -43,13 +43,15 @@ A function the model can call, declared one-per-file in `tools/` (filename = too
 _Avoid_: function (ambiguous), action
 
 **Connection**:
-An external service reference used by channels, tools, or model-facing capabilities for auth and provider config. Connections live in `connections/*.yaml` and contain environment variable names, not secret values. A telephony target binds one Connection to its selected carrier route.
+An external service reference used by channels, tools, or model-facing capabilities for auth and provider config. Connections live in `connections/*.yaml` and contain environment variable names, not secret values. Each telephony target binds one Connection to its selected carrier route; a package may declare many targets and Connections.
 _Avoid_: secret value, environment variable, handler
 
 **Telephony route**:
 The exact Orchestrator, transport, and carrier path used for one target, such
 as Pipecat carrier WebSocket with Twilio or LiveKit SIP with Telnyx. Direction,
-controls, variable sources, and limits resolve against this complete route.
+controls, variable sources, and limits resolve against this complete route. One
+target emits one route; multiple carrier routes use multiple named targets and
+produce separate artifacts.
 _Avoid_: carrier capability, provider-wide support
 
 **Call-start rate**:

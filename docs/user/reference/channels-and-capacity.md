@@ -28,15 +28,16 @@ Which call directions a telephony channel handles.
 
 Required: yes, on a telephony channel. Values: bool. Default: none.
 
-| Target | What happens | Tag |
+| Route | What happens | Tag |
 |---|---|---|
-| LiveKit | inbound and outbound work | gated |
-| Pipecat | inbound works; `outbound: true` fails (driver does not emit it yet) | gated |
-| Vapi | inbound and outbound work | gated |
-| ElevenLabs | inbound and outbound work | gated |
-| Deepgram | `outbound: true` generated with a warning (carrier-conditional) | gated |
+| LiveKit SIP with Twilio, Telnyx, or Plivo | Inbound and outbound paths are emitted offline; the exact route remains provisional | provisional |
+| LiveKit Twilio Connector | No adapter is emitted | gated |
+| Pipecat carrier WebSocket with Twilio, Telnyx, or Plivo | Inbound and outbound paths are emitted offline; outbound remains blocked until voicemail handling is emitted | provisional/gated |
+| Pipecat or LiveKit with Exotel | No route is emitted | gated |
 
-`outbound: true` requires `on_voicemail` and that all `source: call_start` variables are satisfiable. On Pipecat, outbound is a driver maturity gate today.
+`outbound: true` requires `on_voicemail` and that all `source: call_start`
+variables are satisfiable. Support is resolved against the exact route; see the
+[phone-call route matrix](../learn/07-phone-calls.md#choose-a-supported-carrier-route).
 
 ### required_controls
 
@@ -50,13 +51,12 @@ What to do when a machine answers an outbound call.
 
 Required: conditional (iff `outbound: true`). Values: `hangup | leave_message`. Default: none.
 
-| Target | What happens | Tag |
+| Route | What happens | Tag |
 |---|---|---|
-| LiveKit | both values work (`AMD`) | gated |
-| Pipecat | fails (driver does not emit voicemail yet) | gated |
-| Vapi | both values work | gated |
-| ElevenLabs | both values work | gated |
-| Deepgram | generated with a warning (carrier-conditional) | gated |
+| LiveKit SIP with Twilio, Telnyx, or Plivo | Both values are emitted through LiveKit answering-machine detection; each route remains provisional | provisional |
+| LiveKit Twilio Connector | No adapter is emitted | gated |
+| Pipecat carrier WebSocket with Twilio, Telnyx, or Plivo | Voicemail handling is not emitted | gated |
+| Pipecat or LiveKit with Exotel | No route is emitted | gated |
 
 ## capacity
 
@@ -68,13 +68,15 @@ and Pipecat.
 capacity:
   peak_sessions: 40
   max_sessions: 60
+  peak_starts_per_second: 4
   avg_session_duration: 6m
 ```
 
 | Field | Required | Type | Notes |
 |---|---|---|---|
 | `peak_sessions` | yes | int | concurrent conversations at the busy hour; must not exceed `max_sessions` |
-| `max_sessions` | yes | int | hard admission limit; reject or queue above it |
+| `max_sessions` | yes | int | hard admission limit; reject above it before agent allocation |
+| `peak_starts_per_second` | telephony only | number | peak new-call rate; must be greater than zero |
 | `avg_session_duration` | yes | duration | sizing and quota input |
 
 Targets: all five, core (as a declaration). Sizing depends on concurrency, placement, and channels, not on how many agents are in the file and never on the provider brand alone. The derived numbers (workers, GPUs, quotas) are not yet printed by the CLI; see [going live](../learn/08-going-live.md).

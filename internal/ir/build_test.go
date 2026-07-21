@@ -94,6 +94,57 @@ func TestBuildLiveKitSIPUsesSharedDispatchPlan(t *testing.T) { // telephony T10,
 	}
 }
 
+func TestBuildSupportsMultipleCarrierTargets(t *testing.T) {
+	pkg := loadSafeCore(t)
+	pipecat, livekit := pkg.Targets["pipecat"], pkg.Targets["livekit"]
+	pipecat.Transport, livekit.Transport = "carrier-websocket", "sip"
+	pkg.Targets = map[string]packagespec.Target{
+		"pipecat_twilio": withTelephonyRoute(pipecat, "twilio", "twilio_api"),
+		"pipecat_telnyx": withTelephonyRoute(pipecat, "telnyx", "telnyx_api"),
+		"livekit_twilio": withTelephonyRoute(livekit, "twilio", "twilio_sip"),
+		"livekit_plivo":  withTelephonyRoute(livekit, "plivo", "plivo_sip"),
+	}
+	pkg.Connections = map[string]packagespec.Connection{
+		"twilio_api": {Kind: "telephony", Environment: map[string]string{
+			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN", "from_number": "TWILIO_PHONE_NUMBER",
+		}},
+		"telnyx_api": {Kind: "telephony", Environment: map[string]string{
+			"api_key": "TELNYX_API_KEY", "public_key": "TELNYX_PUBLIC_KEY", "connection_id": "TELNYX_CONNECTION_ID", "from_number": "TELNYX_PHONE_NUMBER",
+		}},
+		"twilio_sip": {Kind: "telephony", Environment: map[string]string{
+			"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME", "sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
+		}},
+		"plivo_sip": {Kind: "telephony", Environment: map[string]string{
+			"sip_address": "PLIVO_SIP_ADDRESS", "sip_username": "PLIVO_SIP_USERNAME", "sip_password": "PLIVO_SIP_PASSWORD", "from_number": "PLIVO_PHONE_NUMBER",
+		}},
+	}
+
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"pipecat_twilio": "pipecat/carrier-websocket/twilio/twilio_api",
+		"pipecat_telnyx": "pipecat/carrier-websocket/telnyx/telnyx_api",
+		"livekit_twilio": "livekit/sip/twilio/twilio_sip",
+		"livekit_plivo":  "livekit/sip/plivo/plivo_sip",
+	} {
+		plan := agent.Targets[name].Telephony
+		if plan == nil {
+			t.Fatalf("%s has no telephony plan", name)
+		}
+		got := strings.Join([]string{string(plan.Key.Provider), plan.Key.Transport, plan.Key.Carrier, plan.Connection}, "/")
+		if got != want {
+			t.Errorf("%s route = %s, want %s", name, got, want)
+		}
+	}
+}
+
+func withTelephonyRoute(target packagespec.Target, carrier, connection string) packagespec.Target {
+	target.Carrier, target.Connection = carrier, connection
+	return target
+}
+
 func coordinationReasonNames(reasons []TelephonyCoordinationReason) string {
 	names := make([]string, 0, len(reasons))
 	for _, reason := range reasons {

@@ -5,6 +5,10 @@ write in [`agent.yaml`](agent-yaml.md), and what the compiler emits. The tables
 come from the provider catalogue (`internal/target/catalog_*.go`), which both
 validation and generation use.
 
+This page uses **provider** for model integrations. Telephony uses **carrier**
+for Twilio, Telnyx, Plivo, and Exotel; those combinations are in the
+[phone-call route matrix](../learn/07-phone-calls.md#choose-a-supported-carrier-route).
+
 Two rules frame everything:
 
 1. **The provider picks the code slot; the model stays yours.** `provider:` decides which integration is emitted (import, dependency, constructor, key env). `model:`, `voice:`, and `params:` are forwarded to that integration verbatim and never validated (SCHEMA.md D10). A typo in a provider name fails at `validate`; a typo in a model name fails at the provider, with its error relayed.
@@ -15,6 +19,34 @@ Two rules frame everything:
 Changing a model's `provider` is a one-line edit. For example, changing a
 LiveKit speak model from SLNG to ElevenLabs swaps one constructor, one import,
 one dependency, and one environment variable in the emitted project.
+
+## Use several providers in one target
+
+A package may define any number of model entries from the providers catalogued
+for its target. One LiveKit or Pipecat project can use different providers for
+listen, think, and speak, and different agents can select voices backed by
+different speak providers.
+
+```yaml
+models:
+  listen:
+    transcriber: { provider: deepgram, model: nova-3 }
+  think:
+    primary_reasoning: { provider: openai, model: gpt-4o-mini }
+  speak:
+    front_desk:
+      provider: elevenlabs
+      voice: cgSgspJ2msm6clMCkdW9
+    specialist:
+      provider: cartesia
+      model: sonic-3
+      voice: f786b574-daa5-4673-aa0c-cbe3e8534c02
+```
+
+Unmute emits only the integrations selected by the agents, listen/turn
+selection, tasks, and fallbacks in that target. Unused palette entries do not
+add packages or credentials. There is no provider-count field; every selected
+`(framework, role, provider)` tuple only needs a catalogue entry below.
 
 ## Pipecat
 

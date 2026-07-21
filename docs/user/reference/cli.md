@@ -122,6 +122,11 @@ and the local LiveKit Server key pair. Explicit external LiveKit or Redis
 values are rejected in LiveKit SIP dev mode rather than silently ignored. The
 current routes remain provisional until their credentialed smokes pass.
 
+When a package declares several carrier routes, each one is a separate target
+and generated Compose project. `compile` can select several targets or all of
+them, but `dev --telephony` runs one exact route at a time; pass its instance
+name, such as `--target pipecat_twilio` or `--target livekit_plivo`.
+
 - Browser and console modes require `uv` on your `PATH` (see
   [install](../start/install.md)); telephony mode requires Docker with the
   Compose plugin. All modes read keys from a `.env` at the package root.

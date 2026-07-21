@@ -47,6 +47,11 @@ The files have distinct responsibilities:
 - Markdown files contain instructions. YAML points to them by path, which keeps
   long prompts out of the structural configuration.
 
+A telephony package can declare several Pipecat and LiveKit carrier routes.
+Each route uses one named target and one Connection and produces a separate
+single-carrier project. The [phone-call guide](learn/07-phone-calls.md) lists
+the current Twilio, Telnyx, Plivo, and gated Exotel integrations.
+
 ## Choose the right section
 
 The documentation is organized around what you are trying to understand, not

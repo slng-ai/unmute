@@ -5,10 +5,11 @@ Unmute compiles phone-call intent for two orchestrators: **Pipecat** and
 environment variables, and the target selects one exact media route. Unmute
 does not buy a number, create a trunk, or copy credentials into generated code.
 
-All carrier routes are currently **provisional**. The compiler and generated
-Pipecat Twilio, Telnyx, and Plivo adapters have credential-free tests, but
-validation continues to fail closed until each exact route passes real inbound,
-outbound, authentication, hangup, and transfer smokes.
+All carrier routes are currently **provisional**. The generated Pipecat
+Twilio, Telnyx, and Plivo adapters and the LiveKit SIP routes have
+credential-free tests, but validation continues to fail closed until each exact
+route passes real inbound, outbound, authentication, hangup, and transfer
+smokes.
 
 ## Declare the phone channel
 
@@ -84,6 +85,79 @@ as a shared datastore and message bus. Pipecat also uses Redis, but only for
 opaque pending-call correlation, callback idempotency, human-transfer locks,
 and admission counters. Audio, transcripts, prompts, task state, and agent
 handoff remain inside the active call worker.
+
+## Choose a supported carrier route
+
+Telephony support belongs to an exact framework, transport, and carrier tuple.
+The Connection keys also belong to that tuple; a target never loads credentials
+for an unselected carrier.
+
+| Framework | Target route | Carrier | Required Connection keys | Status |
+|---|---|---|---|---|
+| Pipecat | `carrier-websocket` | Twilio | `account_sid`, `auth_token`, `from_number` | Generated offline; provisional |
+| Pipecat | `carrier-websocket` | Telnyx | `api_key`, `public_key`, `connection_id`, `from_number` | Generated offline; provisional |
+| Pipecat | `carrier-websocket` | Plivo | `auth_id`, `auth_token`, `from_number` | Generated offline; provisional |
+| Pipecat | `carrier-websocket` | Exotel | `api_key`, `api_token`, `account_sid`, `subdomain`, `from_number`, `app_id` | Gated; no emitted adapter |
+| LiveKit | `sip` | Twilio | `sip_address`, `sip_username`, `sip_password`, `from_number` | Generated offline; provisional |
+| LiveKit | `sip` | Telnyx | `sip_address`, `sip_username`, `sip_password`, `from_number` | Generated offline; provisional |
+| LiveKit | `sip` | Plivo | `sip_address`, `sip_username`, `sip_password`, `from_number` | Generated offline; provisional |
+| LiveKit | `sip` | Exotel | `sip_address`, `sip_username`, `sip_password`, `from_number` | Gated; no emitted setup |
+| LiveKit | `connector` | Twilio | `account_sid`, `auth_token`, `from_number` | Recognized Beta route; no emitted adapter |
+
+"Generated offline" means the emitter and credential-free checks exist. It
+does not promote the route: public validation, compilation, and telephony
+development still fail closed until the exact credentialed smoke passes. The
+Pipecat emitters contain inbound, outbound, hangup, and cold-transfer paths;
+voicemail and warm transfer remain gated. The LiveKit SIP emitter contains
+inbound, outbound, voicemail, hangup, cold-transfer, and warm-transfer paths.
+
+## Configure multiple carriers
+
+A package can declare any number of supported carrier routes. Give each route a
+named target and bind it to one Connection. Each target produces a separate,
+single-carrier project; Unmute never bundles several carrier SDKs or credential
+sets into one runtime.
+
+```yaml
+# targets.yaml
+targets:
+  pipecat_twilio:
+    provider: pipecat
+    version: "1.5.0"
+    transport: carrier-websocket
+    carrier: twilio
+    connection: twilio_api
+
+  pipecat_telnyx:
+    provider: pipecat
+    version: "1.5.0"
+    transport: carrier-websocket
+    carrier: telnyx
+    connection: telnyx_api
+
+  livekit_twilio:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    transport: sip
+    carrier: twilio
+    connection: twilio_sip
+
+  livekit_plivo:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    transport: sip
+    carrier: plivo
+    connection: plivo_sip
+```
+
+Create `connections/twilio_api.yaml`, `connections/telnyx_api.yaml`,
+`connections/twilio_sip.yaml`, and `connections/plivo_sip.yaml` with the keys
+from the matrix. `unmute compile` processes every declared target when you omit
+`--target`; `unmute dev --telephony` runs one selected target at a time. Adding
+another supported carrier is another target and Connection, not a schema
+change.
 
 ## Configure credentials
 

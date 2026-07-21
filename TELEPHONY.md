@@ -106,6 +106,39 @@ verification and production hardening remain incomplete.
   that file, waits for Compose health, follows logs, and performs project-scoped
   cleanup without deleting volumes.
 
+## Route matrix and package cardinality
+
+A package can declare any number of named telephony targets and Connections.
+Each target still selects exactly one Connection and one route, so every build
+contains one carrier adapter and one credential vocabulary. To use several
+carriers, add several target instances, such as `pipecat_twilio`,
+`pipecat_telnyx`, and `livekit_plivo`. `unmute compile` writes each one to its
+own `build/<target-name>/` directory; `unmute dev --telephony` runs one selected
+target at a time.
+
+The compiler has no package-level carrier count limit. The closed route matrix,
+not the number of targets, is the limit:
+
+| Framework | Transport | Carrier | Emitted integration | Current status |
+|---|---|---|---|---|
+| Pipecat | `carrier-websocket` | Twilio | Direct carrier adapter and Pipecat Twilio serializer | Generated in offline tests; provisional |
+| Pipecat | `carrier-websocket` | Telnyx | Direct carrier adapter and Pipecat Telnyx serializer | Generated in offline tests; provisional |
+| Pipecat | `carrier-websocket` | Plivo | Direct carrier adapter and Pipecat Plivo serializer | Generated in offline tests; provisional |
+| Pipecat | `carrier-websocket` | Exotel | None | Gated |
+| LiveKit | `sip` | Twilio | Self-hosted LiveKit SIP and Twilio trunk inputs | Generated in offline tests; provisional |
+| LiveKit | `sip` | Telnyx | Self-hosted LiveKit SIP and Telnyx trunk inputs | Generated in offline tests; provisional |
+| LiveKit | `sip` | Plivo | Self-hosted LiveKit SIP and Plivo trunk inputs | Generated in offline tests; provisional |
+| LiveKit | `sip` | Exotel | None | Gated |
+| LiveKit | `connector` | Twilio | No generated adapter | Recognized Beta route; gated |
+
+"Generated in offline tests" does not mean the route is enabled. Every
+generated row still fails public validation until its exact credentialed smoke
+promotes the requested features. The Pipecat adapters contain inbound,
+outbound, hangup, and cold-transfer paths; voicemail and warm transfer remain
+gated. The LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
+cold-transfer, and warm-transfer paths. The Twilio Connector has only route and
+credential vocabulary today, so validation stops before generation.
+
 ## What scales across carriers
 
 Twilio, Telnyx, Plivo, and Exotel share enough behavior for one plan and one
@@ -285,10 +318,12 @@ The `environment` keys are provider vocabulary. Build validates required and
 unknown keys against the selected carrier definition. The values are
 environment variable names and remain safe to commit.
 
-The first implementation supports one telephony Connection per target. It must
-fail clearly when a package requests multiple telephony channels that need
-different connections. Add per-channel target bindings only when a real agent
-needs that topology.
+The first implementation supports one telephony Connection per target. A
+package can add any number of targets and Connections for supported routes, but
+one generated target never combines carriers. It must fail clearly when a
+single target requests multiple telephony channels that need different
+connections. Add per-channel target bindings only when a real agent needs that
+topology.
 
 ### Resolved telephony plan
 

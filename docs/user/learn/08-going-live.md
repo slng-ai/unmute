@@ -4,7 +4,10 @@ The agent works in `dev`. This page covers the last mile: running one spec again
 
 ## One spec, many targets
 
-`targets.yaml` can hold several target instances, each named after its provider. They all compile from the same `agent.yaml` — the model definitions live there; each instance only carries its infrastructure and any by-name overrides for models that platform cannot run as defined. One instance per platform you are evaluating:
+`targets.yaml` can hold several target instances. They all compile from the
+same `agent.yaml`: model definitions live there, while each instance carries
+its infrastructure and any by-name overrides for models that platform cannot
+run as defined. Start with one instance per platform you are evaluating:
 
 ```yaml
 targets:
@@ -27,7 +30,12 @@ unmute compile acme --target livekit          # one target
 unmute compile acme                           # every declared target
 ```
 
-Add a second instance of the *same* provider only when you have a real second environment (a separate region or account, say); the default is one instance per provider, so what you test is what you deploy.
+Add another instance of the same framework when you have a real separate route,
+region, or account. Telephony is the common case: `pipecat_twilio` and
+`pipecat_telnyx` are separate single-carrier projects with separate Connections
+and route limits. A package may declare any number of supported routes, but one
+target never combines them. See
+[configure multiple carriers](07-phone-calls.md#configure-multiple-carriers).
 
 ## Check portability before you commit
 
@@ -59,14 +67,17 @@ Every package declares expected traffic in `capacity`:
 ```yaml
 capacity:
   peak_sessions: 40          # concurrent calls at the busy hour
-  max_sessions: 60           # hard limit; reject or queue above this
+  max_sessions: 60           # hard limit; reject above this
+  peak_starts_per_second: 4  # required for telephony
   avg_session_duration: 6m
 ```
 
 It is **required** when the package has a code target, including LiveKit or
 Pipecat, or a telephony channel. `peak_sessions` must not exceed
-`max_sessions`. Capacity depends on concurrency, model placement, and channels,
-not the number of agents in the file.
+`max_sessions`. A telephony package also declares a positive
+`peak_starts_per_second`; starting calls and keeping calls active are separate
+capacity constraints. Capacity depends on concurrency, model placement, and
+channels, not the number of agents or carrier targets in the file.
 
 Capacity feeds Unmute's worker, GPU, and provider quota sizing. `compile`
 prints each derived sizing line with its status and basis;

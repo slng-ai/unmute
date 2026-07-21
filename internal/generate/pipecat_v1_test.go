@@ -464,6 +464,12 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	if docker := artifactFile(t, artifact, "Dockerfile"); !strings.Contains(docker, `CMD ["uvicorn", "telephony:app"`) {
 		t.Error("Dockerfile does not start the selected telephony server")
 	}
+	readme := artifactFile(t, artifact, "README.md")
+	for _, want := range []string{"pipecat/carrier-websocket/twilio", "Twilio phone-number voice"} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README.md missing Twilio setup %q", want)
+		}
+	}
 	compose := artifactFile(t, artifact, "compose.telephony.yaml")
 	assertValidYAML(t, compose)
 	assertGoldenFile(t, filepath.Join("testdata", "golden", "pipecat_v1_telephony_compose.yaml"), compose, *updatePipecatV1)
@@ -601,6 +607,12 @@ func TestPipecatTelnyxTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 			t.Errorf("compile report missing %s", want)
 		}
 	}
+	readme := artifactFile(t, artifact, "README.md")
+	for _, want := range []string{"pipecat/carrier-websocket/telnyx", "Telnyx Voice API", "API version 2"} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README.md missing Telnyx setup %q", want)
+		}
+	}
 }
 
 func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T) { // telephony T9, V7-V14
@@ -673,6 +685,12 @@ func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T
 	for _, want := range []string{"PLIVO_AUTH_ID", "PLIVO_AUTH_TOKEN", "PLIVO_PHONE_NUMBER"} {
 		if !strings.Contains(report, want) {
 			t.Errorf("compile report missing %s", want)
+		}
+	}
+	readme := artifactFile(t, artifact, "README.md")
+	for _, want := range []string{"pipecat/carrier-websocket/plivo", "Plivo Voice XML", "Hangup URL"} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README.md missing Plivo setup %q", want)
 		}
 	}
 	runtime := TelephonyRuntimePlanFor(agent.Targets["pipecat"])

@@ -406,6 +406,21 @@ environment:
   from_number: TWILIO_PHONE_NUMBER
 ```
 
+The carrier matrix makes those values explicit:
+
+| Route | Carrier | Connection environment values | Generated integration | Status |
+|---|---|---|---|---|
+| `sip` | Twilio | `TWILIO_SIP_ADDRESS`, `TWILIO_SIP_USERNAME`, `TWILIO_SIP_PASSWORD`, `TWILIO_PHONE_NUMBER` | Self-hosted LiveKit SIP and Twilio trunk inputs | Offline-tested; provisional |
+| `sip` | Telnyx | `TELNYX_SIP_ADDRESS`, `TELNYX_SIP_USERNAME`, `TELNYX_SIP_PASSWORD`, `TELNYX_PHONE_NUMBER` | Self-hosted LiveKit SIP and Telnyx trunk inputs | Offline-tested; provisional |
+| `sip` | Plivo | `PLIVO_SIP_ADDRESS`, `PLIVO_SIP_USERNAME`, `PLIVO_SIP_PASSWORD`, `PLIVO_PHONE_NUMBER` | Self-hosted LiveKit SIP and Plivo trunk inputs | Offline-tested; provisional |
+| `sip` | Exotel | Exotel SIP values | No emitted setup | Gated pending provider-specific proof |
+| `connector` | Twilio | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | No emitted adapter | Recognized Beta route; gated |
+
+Every SIP row still fails public validation until its credentialed route smoke
+passes. The SIP emitter contains inbound, outbound, voicemail, hangup,
+cold-transfer, and warm-transfer paths. The Twilio Connector currently has only
+route and credential vocabulary; Unmute does not emit a Connector adapter.
+
 Bind the Connection and symbolic destinations to the exact route.
 
 ```yaml
@@ -422,10 +437,15 @@ targets:
       support_line: "+14155550123"
 ```
 
-Bind the target to either the self-hosted `sip` route or the distinct Beta
-Twilio `connector` route, plus one telephony Connection. These new routes are
-provisional until credentialed smokes pass. The Connector cannot inherit SIP
+Bind a target to the self-hosted `sip` route and one telephony Connection. The
+distinct Beta Twilio `connector` route remains gated and cannot inherit SIP
 transfer behavior.
+
+To configure several carriers, declare several LiveKit targets, such as
+`livekit_twilio` and `livekit_plivo`, and bind each to its own Connection. Each
+compiles to a separate project and SIP setup. See
+[phone calls](../learn/07-phone-calls.md#configure-multiple-carriers) for a full
+Pipecat and LiveKit example.
 
 The generated `.env.example` names every deployment value. Get the LiveKit API
 key pair from the self-hosted server's `keys` configuration, set `LIVEKIT_URL`
@@ -528,7 +548,7 @@ remaining boundaries are explicit YAML choices, not silent omissions.
 | Non-default tool `interruption` | Warns; tools run to completion |
 | Conversation shaping block | Supported |
 | New `sip` telephony route | Provisional pending credentialed route smokes |
-| Beta Twilio `connector` route | Separate provisional route; never inherits SIP capabilities |
+| Beta Twilio `connector` route | Recognized but gated; no emitted adapter, and never inherits SIP capabilities |
 | A `provider: local` model (listen, speak, or think) | Supported |
 | `speak.endpoint_env` | Rejected; no LiveKit integration slot |
 | Warm `briefing: message` or `wait` | Rejected; use `summary` |

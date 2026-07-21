@@ -107,6 +107,35 @@ uses the local VAD. Semantic endpointing is also advisory.
   support is resolved for that exact tuple. The Exotel value is recognized but
   gated until authenticated WebSocket ingress is proven.
 
+### Telephony carrier integrations
+
+Pipecat uses a separate generated adapter for each carrier. A target emits only
+the selected adapter, serializer, dependency, and Connection vocabulary.
+
+| Carrier | Connection keys | Generated integration | Status |
+|---|---|---|---|
+| Twilio | `account_sid`, `auth_token`, `from_number` | Signed webhooks and WebSocket, Twilio serializer, REST call control | Offline-tested; provisional |
+| Telnyx | `api_key`, `public_key`, `connection_id`, `from_number` | Signed webhooks, one-use WebSocket, Telnyx serializer, Call Control API | Offline-tested; provisional |
+| Plivo | `auth_id`, `auth_token`, `from_number` | Signed webhooks, one-use WebSocket, Plivo serializer, Calls API | Offline-tested; provisional |
+| Exotel | `api_key`, `api_token`, `account_sid`, `subdomain`, `from_number`, `app_id` | None | Gated pending authenticated WebSocket ingress |
+
+Use `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER` for
+the Twilio Connection; `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`,
+`TELNYX_CONNECTION_ID`, and `TELNYX_PHONE_NUMBER` for Telnyx; and
+`PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN`, and `PLIVO_PHONE_NUMBER` for Plivo. The
+Connection stores these names, while `.env` stores their values.
+
+Every generated row still fails public validation until its credentialed route
+smoke passes. The adapters contain inbound, outbound, hangup, and cold-transfer
+paths. Voicemail handling and warm transfer remain gated, so outbound cannot
+validate yet because every outbound channel must declare a voicemail policy.
+
+To configure several carriers, declare several Pipecat target instances, such
+as `pipecat_twilio` and `pipecat_telnyx`, and bind each to its own Connection.
+Each compiles to a separate project. See
+[phone calls](../learn/07-phone-calls.md#configure-multiple-carriers) for a full
+Pipecat and LiveKit example.
+
 ### Version pin
 
 `version` is required and must be in the range the driver's templates support: **`>= 1.5.0` and `< 2.0.0`.** Version 1.5.0 is the first release with the workers model and with Pipecat Flows shipped inside the core package. A version outside the range fails the compile with a clear message. This is a code check against the templates, not a guess about the platform.

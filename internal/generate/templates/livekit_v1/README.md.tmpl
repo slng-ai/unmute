@@ -33,10 +33,11 @@ the session and agent spans.
 ## Configure self-hosted LiveKit SIP
 
 This project uses the `livekit/sip/{{.Telephony.Carrier}}` route. Unmute emits
-the selected worker and SIP setup inputs, but it doesn't deploy LiveKit,
-Redis, LiveKit SIP, or carrier resources. This route was checked against the
-official web documentation on July 20, 2026, but not through the LiveKit docs
-MCP server.
+the selected worker and SIP setup inputs. The generated Compose file starts
+local LiveKit, Redis, and LiveKit SIP services for development; it does not
+provision production infrastructure or carrier resources. This route was
+checked against the official web documentation on July 20, 2026, but not
+through the LiveKit docs MCP server.
 
 ### Required configuration and credentials
 

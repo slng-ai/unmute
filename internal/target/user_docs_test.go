@@ -92,14 +92,16 @@ func TestUserDocsRelativeLinksResolve(t *testing.T) {
 func TestTelephonyDocsContract(t *testing.T) {
 	root := filepath.Join("..", "..")
 	checks := map[string][]string{
-		"README.md": {"## Telephony", "connections/<name>.yaml", "TELEPHONY.md"},
+		"README.md": {"## Telephony", "connections/<name>.yaml", "pipecat_twilio", "TELEPHONY.md"},
 		"SCHEMA.md": {
 			"peak_starts_per_second",
 			"(orchestrator, transport, carrier)",
 			"connections/primary_phone.yaml",
+			"any number of named targets and Connections",
 		},
 		"CONTEXT.md": {"**Telephony route**", "**Coordination mode**"},
 		"TELEPHONY.md": {
+			"## Route matrix and package cardinality",
 			"## Credentials",
 			"TWILIO_ACCOUNT_SID",
 			"TELNYX_API_KEY",
@@ -110,9 +112,18 @@ func TestTelephonyDocsContract(t *testing.T) {
 			"TWILIO_SIP_ADDRESS",
 			"TELNYX_SIP_ADDRESS",
 			"PLIVO_SIP_ADDRESS",
+			"No generated adapter",
 		},
-		"docs/user/learn/07-phone-calls.md": {"## Configure self-hosted LiveKit SIP", "LIVEKIT_SIP_INBOUND_TRUNK", "10000-20000"},
-		"docs/user/targets/livekit.md":      {"sip_address", "LIVEKIT_SIP_URI", "not an audio buffer"},
+		"docs/user/learn/07-phone-calls.md": {
+			"## Choose a supported carrier route", "## Configure multiple carriers",
+			"## Configure self-hosted LiveKit SIP", "LIVEKIT_SIP_INBOUND_TRUNK", "10000-20000",
+		},
+		"docs/user/reference/targets-yaml.md": {"## Multiple telephony routes", "pipecat_twilio", "livekit_telnyx"},
+		"docs/user/reference/providers.md":    {"## Use several providers in one target", "Telephony uses **carrier**"},
+		"docs/user/targets/pipecat.md":        {"### Telephony carrier integrations", "TELNYX_CONNECTION_ID", "PLIVO_AUTH_ID"},
+		"docs/user/targets/livekit.md": {
+			"TELNYX_SIP_ADDRESS", "PLIVO_SIP_ADDRESS", "LIVEKIT_SIP_URI", "not an audio buffer", "No emitted adapter",
+		},
 	}
 	for path, terms := range checks {
 		raw, err := os.ReadFile(filepath.Join(root, path))

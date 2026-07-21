@@ -128,6 +128,12 @@ Telephony compilation targets LiveKit and Pipecat. A target binds one
 Connection stores environment variable names only; credential values stay in
 an ignored `.env` file or your deployment secret store.
 
+A package may declare any number of supported carrier routes. Give each one a
+named target, such as `pipecat_twilio`, `pipecat_telnyx`, or `livekit_plivo`,
+and bind each target to one Connection. Every target produces a separate,
+single-carrier project in `build/<target-name>/`; Unmute never combines carrier
+SDKs or route-specific limits inside one generated runtime.
+
 ```yaml
 # connections/primary_phone.yaml
 kind: telephony
@@ -155,10 +161,12 @@ all stay provisional until credentialed smokes pass. For Twilio, get the
 Account SID and Auth Token from the Console account dashboard and the caller ID
 from Phone Numbers. For Telnyx, get an API key and webhook public key from
 Mission Control, then use a Voice API Application ID as
-`TELNYX_CONNECTION_ID`. In either case, set `UNMUTE_PUBLIC_URL` to the exact
-public HTTPS origin and generate a separate `UNMUTE_OUTBOUND_TOKEN` if the
-channel permits outbound calls. See the linked telephony guide for the exact
-Connection vocabulary and setup steps.
+`TELNYX_CONNECTION_ID`. For Plivo, get the Auth ID and Auth Token from the
+Console dashboard and the caller ID from Phone Numbers. Every Pipecat carrier
+WebSocket route needs `UNMUTE_PUBLIC_URL` set to the exact public HTTPS origin;
+generate a separate `UNMUTE_OUTBOUND_TOKEN` if the channel permits outbound
+calls. See the linked telephony guide for the exact Connection vocabulary and
+setup steps.
 
 Generated LiveKit SIP projects cover Twilio, Telnyx, and Plivo through the
 same `livekit/sip/<carrier>` plan. Their Connection vocabulary is:
@@ -184,4 +192,7 @@ but not for LiveKit SIP signaling and RTP.
 
 Exotel remains gated: its documented static Voicebot WebSocket flow does not
 yet provide a proven authenticated upgrade that satisfies Unmute's ingress
-policy, and its LiveKit SIP route has no provider-specific proof.
+policy, and its LiveKit SIP route has no provider-specific proof. LiveKit's
+Beta Twilio Connector route is also gated: its route and credential vocabulary
+are recognized, but Unmute does not emit a Connector adapter or inherit SIP
+transfer capabilities.

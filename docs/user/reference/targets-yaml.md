@@ -8,7 +8,10 @@ live in `agent.yaml`; this file only overrides them. The same `agent.yaml`
 compiles to every instance. See
 [models and overrides](../concepts/profiles-and-bindings.md).
 
-Instances are named after the provider, not a `-dev` suffix: what you test is what you deploy. Add a second instance only when you have a real second environment.
+Name a simple instance after its provider, not with a `-dev` suffix: what you
+test is what you deploy. When one framework has several real routes or accounts,
+include that distinction in the name, such as `pipecat_twilio` or
+`livekit_plivo`.
 
 ```yaml
 targets:
@@ -45,6 +48,38 @@ targets:
 | `destinations` | if any `human_transfer` is used | map of symbolic name to phone number or SIP address |
 
 Pipecat, LiveKit, and ElevenLabs have drivers today; Vapi and Deepgram instances error on `compile` until their driver ships. `validate` still checks any provider against the schema. See the [target pages](../targets/pipecat.md).
+
+## Multiple telephony routes
+
+A package may declare any number of telephony target instances and Connections.
+Each target binds exactly one Connection to one
+`(framework, transport, carrier)` route and produces its own
+`build/<target-name>/` project. This keeps route-specific credentials, limits,
+and generated dependencies separate.
+
+```yaml
+targets:
+  pipecat_twilio:
+    provider: pipecat
+    version: "1.5.0"
+    transport: carrier-websocket
+    carrier: twilio
+    connection: twilio_api
+
+  livekit_telnyx:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    transport: sip
+    carrier: telnyx
+    connection: telnyx_sip
+```
+
+Add another target and Connection for every additional supported carrier route.
+There is no package-level route-count setting and no multi-carrier target: one
+target always emits one adapter. See the
+[phone-call route matrix](../learn/07-phone-calls.md#choose-a-supported-carrier-route)
+for the accepted Pipecat and LiveKit combinations and Connection keys.
 
 ## Overrides
 

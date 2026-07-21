@@ -14,13 +14,30 @@ uv run --extra console bot.py console     # terminal: talk over local mic/speake
 {{end}}
 ```
 
-{{if .Telephony}}The server exposes signed carrier ingress at
-`/telephony/inbound`, one-use media URLs under `/telephony/ws/{token}`,
-authenticated outbound start at `/telephony/outbound`, and signed status
-callbacks at `/telephony/status`. Configure the Twilio phone-number voice
-webhook to the inbound URL and its status callback to the status URL. The
-public origin must exactly match `UNMUTE_PUBLIC_URL` or signature validation
-will reject the request.
+{{if .Telephony}}This project uses the
+`pipecat/carrier-websocket/{{.Telephony.Carrier}}` route and contains only that
+carrier adapter.
+
+The server exposes only the endpoints selected by the source channel:
+
+{{if .Telephony.HasInbound}}- Signed carrier ingress at `/telephony/inbound`.
+{{end}}{{if .Telephony.HasOutbound}}- Authenticated outbound start at
+  `/telephony/outbound`.
+{{end}}- One-use media URLs under `/telephony/ws/{token}`.
+- Signed status callbacks at `/telephony/status`.
+
+{{if .Telephony.HasInbound}}
+{{if eq .Telephony.Carrier "twilio"}}Configure the Twilio phone-number voice
+webhook to the inbound URL and its status callback to the status URL.
+{{else if eq .Telephony.Carrier "telnyx"}}Configure a Telnyx Voice API
+Application for API version 2, point its webhook URL at the inbound URL, and
+assign the phone number to that application.
+{{else if eq .Telephony.Carrier "plivo"}}Configure a Plivo Voice XML
+Application with its POST Answer URL set to the inbound URL and its Hangup URL
+set to the status URL, then assign the phone number to that application.
+{{end}}
+{{end}}The public origin must exactly match `UNMUTE_PUBLIC_URL` or signature
+validation will reject the request.
 
 This route remains provisional until its credentialed smoke passes.
 {{else}}
