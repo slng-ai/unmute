@@ -149,7 +149,9 @@ def _patch_pipecat_tracing() -> None:
         if system_instruction:
             messages.insert(0, {"role": "system", "content": system_instruction})
         if messages:
-            span.set_attribute("langfuse.observation.input", json.dumps(messages, default=str))
+            encoded = json.dumps(messages, default=str)
+            span.set_attribute("input", encoded)
+            span.set_attribute("langfuse.observation.input", encoded)
 
     setattr(patched_llm, "__langfuse_patch__", True)
     setattr(service_decorators, "add_llm_span_attributes", patched_llm)

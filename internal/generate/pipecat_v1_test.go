@@ -240,7 +240,8 @@ func TestV25PipecatTracesConfiguredSystemInstruction(t *testing.T) {
 		"service_decorators.add_llm_span_attributes",
 		`kwargs.get("system_instructions")`,
 		`{"role": "system", "content": system_instruction}`,
-		`span.set_attribute("langfuse.observation.input", json.dumps(messages, default=str))`,
+		`span.set_attribute("input", encoded)`,
+		`span.set_attribute("langfuse.observation.input", encoded)`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing system-instruction tracing form %q", want)

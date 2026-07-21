@@ -746,6 +746,7 @@ async def main() -> None:
     llm_input = json.loads(requests["llm"].attributes["langfuse.observation.input"])
     assert llm_input[0] == {"role": "system", "content": "You are the tracing probe."}
     assert {"role": "user", "content": "trace this request"} in llm_input
+    assert json.loads(requests["llm"].attributes["input"]) == llm_input
     assert requests["tts"].attributes["text"] == "traced."
     assert requests["tts"].attributes["voice_id"] == "probe-voice"
     assert requests["tts"].attributes["metrics.character_count"] == len("traced.")
