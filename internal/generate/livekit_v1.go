@@ -329,6 +329,24 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTracingLangfuse:       true,
 }
 
+var livekitEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
+	targetcap.TelephonyRouteSelected:                         true,
+	targetcap.TelephonyInbound:                               true,
+	targetcap.TelephonyOutbound:                              true,
+	targetcap.TelephonyFeature(targetcap.Hangup):             true,
+	targetcap.TelephonyFeature(targetcap.ColdTransfer):       true,
+	targetcap.TelephonyFeature(targetcap.WarmTransfer):       true,
+	targetcap.TelephonyFeature(targetcap.VoicemailDetection): true,
+	targetcap.TelephonyBriefingSummary:                       true,
+	"source.session_id":                                      true,
+	"source.carrier":                                         true,
+	"source.connection":                                      true,
+	"source.call_id":                                         true,
+	"source.direction":                                       true,
+	"source.from_number":                                     true,
+	"source.to_number":                                       true,
+}
+
 // GenerateLiveKit lowers a validated agent + livekit target into a project. The
 // socket runs Validate(caps) first (V17), so this reads only agent+target.
 func GenerateLiveKit(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedBinding, sizing []ir.Sizing) (Artifact, error) {

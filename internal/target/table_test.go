@@ -110,13 +110,10 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 		}
 	}
 	connector := TelephonyKey{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}
-	if got := ResolveTelephonyFeature(connector, TelephonyFeature(WarmTransfer)); got.Tag != Gated {
-		t.Fatalf("connector inherited SIP warm transfer: %#v", got)
-	}
-	for _, feature := range []TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)} {
+	for _, feature := range []TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup), TelephonyFeature(WarmTransfer)} {
 		got := ResolveTelephonyFeature(connector, feature)
-		if got.Tag != Provisional || got.Smoke || !strings.Contains(got.Docs, "/connectors/twilio/") {
-			t.Fatalf("unproven connector feature %s = %#v", feature, got)
+		if got.Tag != Gated {
+			t.Fatalf("connector route-recognition-only feature %s = %#v", feature, got)
 		}
 	}
 	required, optional, ok := TelephonyEnvironment(connector)
@@ -154,8 +151,10 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if got := ResolveTelephonyFeature(TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}, TelephonyRouteSelected); got.Tag != Gated {
 		t.Fatalf("unproven Exotel SIP route = %#v", got)
 	}
-	if got := ResolveTelephonyFeature(exact, TelephonyFeature(WarmTransfer)); got.Tag != Provisional || !strings.Contains(got.Note, "cannot also join the Conference") {
-		t.Fatalf("Twilio warm-transfer evidence = %#v", got)
+	for _, feature := range []TelephonyFeature{TelephonyFeature(WarmTransfer), TelephonyBriefingSummary} {
+		if got := ResolveTelephonyFeature(exact, feature); got.Tag != Gated {
+			t.Fatalf("Pipecat unemitted feature %s = %#v", feature, got)
+		}
 	}
 }
 

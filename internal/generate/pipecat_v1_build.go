@@ -518,6 +518,9 @@ func buildTool(name string, tool ir.Tool, env *envSet) pipecatTool {
 // humanTransferTool lowers a cold human_transfer to a @tool that dials the
 // resolved destination over the Daily SIP transport (V5, cold only).
 func humanTransferTool(name string, c *ir.HumanTransfer, target ir.Target, env *envSet) (pipecatTool, error) {
+	if c.Mode != ir.TransferCold {
+		return pipecatTool{}, fmt.Errorf("human transfer %q mode %q has no Pipecat lowering", name, c.Mode)
+	}
 	destination, ok := target.Destinations[c.Destination]
 	if !ok {
 		return pipecatTool{}, fmt.Errorf("human transfer %q destination %q missing on target %q", name, c.Destination, target.Name)

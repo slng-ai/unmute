@@ -775,6 +775,24 @@ func TestPipecatEmitterMatchesCapabilityTable(t *testing.T) {
 	}
 }
 
+func TestPipecatWarmHumanTransferFailsGeneration(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	human := agent.Controls["to_human"].(*ir.HumanTransfer)
+	human.Mode = ir.TransferWarm
+	human.Briefing = ir.BriefingSummary
+	_, err = GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err == nil || !strings.Contains(err.Error(), `mode "warm" has no Pipecat lowering`) {
+		t.Fatalf("warm transfer must fail instead of lowering cold, got %v", err)
+	}
+}
+
 // The serviceInfo coverage test (driver-pipecat V11) is superseded: class,
 // import, and install now travel together on one catalogue entry, so an
 // emitted class structurally cannot lose its import (TestCatalogInvariants in

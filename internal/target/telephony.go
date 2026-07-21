@@ -64,16 +64,12 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	pipecat := "https://docs.pipecat.ai/pipecat/learn/transports"
 	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
 		features := append([]TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)}, sourcesWithStream...)
-		features = append(features, TelephonyFeature(ColdTransfer), TelephonyFeature(WarmTransfer), TelephonyBriefingSummary)
+		features = append(features, TelephonyFeature(ColdTransfer))
 		add(Pipecat, "carrier-websocket", carrier, pipecat, features...)
 	}
 	twilio := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}
 	route := routes[twilio]
 	route.RequiredEnvironment = []string{"account_sid", "auth_token", "from_number"}
-	warm := route.Features[TelephonyFeature(WarmTransfer)]
-	warm.Note = "Twilio warm transfer needs a separately proven Conference media-participant topology; a bidirectional Media Stream call cannot also join the Conference"
-	warm.Docs = "https://www.twilio.com/docs/voice/conference"
-	route.Features[TelephonyFeature(WarmTransfer)] = warm
 	routes[twilio] = route
 	telnyx := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"}
 	route = routes[telnyx]
@@ -108,14 +104,10 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	routes[exotel] = TelephonyRoute{Key: exotel, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{
 		"sip_address", "sip_username", "sip_password", "from_number",
 	}}
-	connector := "https://docs.livekit.io/telephony/connectors/twilio/"
-	add(LiveKit, "connector", "twilio", connector,
-		append([]TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)}, sourcesWithoutStream...)...,
-	)
 	key := TelephonyKey{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}
-	route = routes[key]
-	route.RequiredEnvironment = []string{"account_sid", "auth_token", "from_number"}
-	routes[key] = route
+	routes[key] = TelephonyRoute{Key: key, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{
+		"account_sid", "auth_token", "from_number",
+	}}
 	return routes
 }
 

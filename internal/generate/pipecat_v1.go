@@ -271,6 +271,22 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTracingLangfuse:      true,
 }
 
+var pipecatEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
+	targetcap.TelephonyRouteSelected:                   true,
+	targetcap.TelephonyInbound:                         true,
+	targetcap.TelephonyOutbound:                        true,
+	targetcap.TelephonyFeature(targetcap.Hangup):       true,
+	targetcap.TelephonyFeature(targetcap.ColdTransfer): true,
+	"source.session_id":                                true,
+	"source.carrier":                                   true,
+	"source.connection":                                true,
+	"source.call_id":                                   true,
+	"source.stream_id":                                 true,
+	"source.direction":                                 true,
+	"source.from_number":                               true,
+	"source.to_number":                                 true,
+}
+
 // GeneratePipecat lowers a validated agent + pipecat target into a project.
 // The socket runs Validate(caps) first (V17), so this reads only agent+target.
 func GeneratePipecat(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedBinding, sizing []ir.Sizing) (Artifact, error) {
