@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/slng/unmute/internal/ir"
@@ -39,6 +40,16 @@ func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 			}
 			if len(agent.Tools) != 5 {
 				t.Fatalf("got %d tools, want 5", len(agent.Tools))
+			}
+			for name, def := range agent.Agents {
+				if !strings.Contains(def.Instructions, "## Voice contract") || !strings.Contains(def.Instructions, "Never speak or emit") {
+					t.Errorf("agent %q is missing the example voice contract", name)
+				}
+			}
+			for name, task := range agent.Tasks {
+				if !strings.Contains(task.Instructions, "## Voice contract") || !strings.Contains(task.Instructions, "Never speak or emit") || !strings.Contains(task.Instructions, "runtime-only") {
+					t.Errorf("task %q is missing the example voice and result contract", name)
+				}
 			}
 			for name, tool := range agent.Tools {
 				if tool.Execution != ir.ToolLocal || tool.URLEnv != "" {
