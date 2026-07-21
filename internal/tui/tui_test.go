@@ -1351,7 +1351,7 @@ func TestV33ValidateStaysInConsole(t *testing.T) {
 		if action != "validate" || path != agent.path {
 			t.Fatalf("action = %q, path = %q", action, path)
 		}
-		_, _ = io.WriteString(out, "TARGET\tPROVIDER\tRESULT\npipecat\tpipecat\tpass\n")
+		_, _ = io.WriteString(out, "✓ pipecat (pipecat)\n")
 		return nil
 	}
 	if err := editMaintained(runner, &agent); err != nil {

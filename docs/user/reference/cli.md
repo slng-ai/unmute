@@ -47,14 +47,17 @@ Scaffolds a new v1 package. The noninteractive default is exactly `agent.yaml`, 
 unmute validate <package-dir> [--target <name>]...
 ```
 
-Loads, builds, and checks the package against its targets, without generating anything. Prints one row per target:
+Loads, builds, and checks the package against its targets, without generating
+anything. Prints one status line per target:
 
 ```text
-TARGET        PROVIDER  RESULT
-pipecat   pipecat   pass
+✓ livekit (livekit)
+✓ pipecat (pipecat)
 ```
 
-Warnings and errors print to standard error, prefixed `warning:` and `error:`, each naming the target. Exits `1` if any target fails.
+The check mark becomes `✗` for a failing target. Warnings and errors print in
+separate, labeled blocks on standard error, with each message naming its target.
+The command exits `1` if any target fails.
 
 `validate` uses the schema's capability rules and the provider catalogue, not a driver, so it works for **all five providers** whether or not their driver is shipped. Use it to check portability across targets before you commit to one. Repeat `--target` to check specific instances, or omit it to check every declared target.
 

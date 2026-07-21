@@ -13,12 +13,12 @@ func TestValidateCommandPrintsEveryTargetAndWarnings(t *testing.T) { // V16, V18
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"TARGET\tPROVIDER\tRESULT", "livekit\tlivekit\tpass", "deepgram\tdeepgram\tpass"} {
+	for _, want := range []string{"✓ livekit (livekit)", "✓ deepgram (deepgram)"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout missing %q:\n%s", want, stdout)
 		}
 	}
-	if !strings.Contains(stderr, "warning:") || strings.Contains(stderr, "error:") {
+	if !strings.Contains(stderr, "Warnings:\n") || strings.Contains(stderr, "Errors:\n") {
 		t.Fatalf("stderr = %q", stderr)
 	}
 }
@@ -28,7 +28,7 @@ func TestValidateCommandFiltersTargetInstances(t *testing.T) { // V18
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout, "vapi\tvapi\tpass") || strings.Contains(stdout, "livekit") {
+	if !strings.Contains(stdout, "✓ vapi (vapi)") || strings.Contains(stdout, "livekit") {
 		t.Fatalf("stdout = %q", stdout)
 	}
 }
@@ -48,7 +48,7 @@ func TestValidateCommandReturnsErrorForGatedTarget(t *testing.T) { // V16
 		t.Fatal(err)
 	}
 	stdout, stderr, err := runValidateCommand(t, "--target", "vapi", dir)
-	if err == nil || !strings.Contains(stdout, "vapi\tvapi\tfail") || !strings.Contains(stderr, "Vapi has no faithful thinking-audio lowering") {
+	if err == nil || !strings.Contains(stdout, "✗ vapi (vapi)") || !strings.Contains(stderr, "Errors:\n") || !strings.Contains(stderr, "Vapi has no faithful thinking-audio lowering") {
 		t.Fatalf("err=%v stdout=%q stderr=%q", err, stdout, stderr)
 	}
 }
