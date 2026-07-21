@@ -112,6 +112,10 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	add(LiveKit, "connector", "twilio", connector,
 		append([]TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)}, sourcesWithoutStream...)...,
 	)
+	key := TelephonyKey{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}
+	route = routes[key]
+	route.RequiredEnvironment = []string{"account_sid", "auth_token", "from_number"}
+	routes[key] = route
 	return routes
 }
 

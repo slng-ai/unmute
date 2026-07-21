@@ -113,7 +113,17 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if got := ResolveTelephonyFeature(connector, TelephonyFeature(WarmTransfer)); got.Tag != Gated {
 		t.Fatalf("connector inherited SIP warm transfer: %#v", got)
 	}
-	required, optional, ok := TelephonyEnvironment(exact)
+	for _, feature := range []TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)} {
+		got := ResolveTelephonyFeature(connector, feature)
+		if got.Tag != Provisional || got.Smoke || !strings.Contains(got.Docs, "/connectors/twilio/") {
+			t.Fatalf("unproven connector feature %s = %#v", feature, got)
+		}
+	}
+	required, optional, ok := TelephonyEnvironment(connector)
+	if !ok || len(optional) != 0 || strings.Join(required, ",") != "account_sid,auth_token,from_number" {
+		t.Fatalf("connector environment vocabulary = required %v optional %v ok %v", required, optional, ok)
+	}
+	required, optional, ok = TelephonyEnvironment(exact)
 	if !ok || len(optional) != 0 || strings.Join(required, ",") != "account_sid,auth_token,from_number" {
 		t.Fatalf("exact environment vocabulary = required %v optional %v ok %v", required, optional, ok)
 	}
