@@ -577,8 +577,7 @@ func applyConversation(c *ir.Conversation, data *pipecatData) {
 	if c.Greeting != nil {
 		switch {
 		case c.Greeting.SpeaksFirst == ir.SpeaksFirstAgent && c.Greeting.Text != "":
-			data.GreetingInstruction = "Begin the conversation by saying, word for word: " + c.Greeting.Text
-			data.GreetingRunLLM = "True"
+			data.GreetingText = c.Greeting.Text
 		case c.Greeting.SpeaksFirst == ir.SpeaksFirstAgent:
 			data.GreetingInstruction = "Greet the caller and offer to help."
 			data.GreetingRunLLM = "True"

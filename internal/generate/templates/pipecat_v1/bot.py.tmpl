@@ -48,6 +48,7 @@ from pipecat.bus import BusBridgeProcessor
 {{end}}{{if and .NeedsEndFrame .NeedsAppendFrame}}from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
 {{else if .NeedsEndFrame}}from pipecat.frames.frames import EndFrame
 {{else if .NeedsAppendFrame}}from pipecat.frames.frames import LLMMessagesAppendFrame
+{{end}}{{if .GreetingText}}from pipecat.frames.frames import TTSSpeakFrame
 {{end}}from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -553,6 +554,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
             ),
 {{else}}            args=LLMWorkerActivationArgs(run_llm={{.GreetingRunLLM}}),
 {{end}}        )
+{{if .GreetingText}}        await next(agent for agent in AGENTS if agent.name == {{pyq .EntryAgent}}).queue_frame(
+            TTSSpeakFrame({{pyq .GreetingText}})
+        )
+{{end}}
 {{if gt .MaxDurationSecs 0}}        asyncio.create_task(_end_after(main, {{.MaxDurationSecs}}))
 {{end}}
     @main.event_handler("on_pipeline_started")

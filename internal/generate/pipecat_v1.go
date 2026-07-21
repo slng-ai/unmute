@@ -198,6 +198,7 @@ type pipecatData struct {
 	FlowTools           []pipecatTool      // deduped task tools, emitted as module-level flows handlers
 	LocalTools          []pipecatLocalTool // copied handler files (tools/<name>.py, V13)
 	Variables           []pipecatVariable
+	GreetingText        string
 	GreetingInstruction string
 	GreetingRunLLM      string // "True" or "False"
 	Interrupt           *pipecatInterrupt
