@@ -5,11 +5,11 @@ Unmute compiles phone-call intent for two orchestrators: **Pipecat** and
 environment variables, and the target selects one exact media route. Unmute
 does not buy a number, create a trunk, or copy credentials into generated code.
 
-All carrier routes are currently **provisional**. The generated Pipecat
-Twilio, Telnyx, and Plivo adapters and the LiveKit SIP routes have
-credential-free tests, but validation continues to fail closed until each exact
-route passes real inbound, outbound, authentication, hangup, and transfer
-smokes.
+All emitted carrier routes are currently **provisional**, and the remaining
+recognized routes are gated. The generated Pipecat Twilio, Telnyx, and Plivo
+adapters and the LiveKit SIP routes have credential-free tests, but validation
+continues to fail closed until each exact route passes real inbound, outbound,
+authentication, hangup, and transfer smokes.
 
 ## Declare the phone channel
 
@@ -154,10 +154,12 @@ targets:
 
 Create `connections/twilio_api.yaml`, `connections/telnyx_api.yaml`,
 `connections/twilio_sip.yaml`, and `connections/plivo_sip.yaml` with the keys
-from the matrix. `unmute compile` processes every declared target when you omit
-`--target`; `unmute dev --telephony` runs one selected target at a time. Adding
-another supported carrier is another target and Connection, not a schema
-change.
+from the matrix. The package can contain all of them, but every telephony
+target currently fails closed because its exact route is provisional or gated.
+After promotion, `unmute compile` will process every declared target when you
+omit `--target`, while `unmute dev --telephony` will run one selected target at
+a time. Adding another supported carrier is another target and Connection, not
+a schema change.
 
 ## Configure credentials
 
@@ -177,10 +179,16 @@ deployment secret store. Obtain them here:
 | LiveKit SIP with Plivo | `PLIVO_SIP_ADDRESS`, `PLIVO_SIP_USERNAME`, `PLIVO_SIP_PASSWORD`, `PLIVO_PHONE_NUMBER` | Plivo Console → Zentrunk. Use the termination domain, outbound credential, and linked number. |
 | LiveKit SIP resource IDs | `LIVEKIT_SIP_INBOUND_TRUNK`, `LIVEKIT_SIP_OUTBOUND_TRUNK` | Copy the `SIPTrunkID` values printed by the generated `lk sip ... create` setup commands. Only the directions and controls you request are required. |
 
-For local development, generated Compose supplies `REDIS_URL` on Pipecat and
+Do not buy a number or export these values merely to get past the current CLI
+gate. Validation and generation run first and report that the exact route has
+not passed its credentialed smoke. The credentials become necessary only
+after that route is promoted; the table records the names and sources so the
+future setup is explicit.
+
+After route promotion, generated Compose will supply `REDIS_URL` on Pipecat and
 the local `LIVEKIT_URL`, API key pair, and Redis connection on LiveKit SIP. Do
-not copy the generated `devkey`/`devsecret-local-only` pair into deployment.
-Production still needs the self-hosted values in the table. Carrier credentials,
+not copy its `devkey`/`devsecret-local-only` pair into deployment. Production
+will still need the self-hosted values in the table. Carrier credentials,
 model-provider keys, trunk IDs, and public ingress remain yours in both places.
 
 Carrier WebSocket deployments also set `UNMUTE_PUBLIC_URL` to the exact public
@@ -191,15 +199,17 @@ you generate yourself. It is never a carrier credential.
 The complete credential links and self-hosted topology are in
 [TELEPHONY.md](../../../TELEPHONY.md#credentials).
 
-For Telnyx, configure the Voice API Application for API version 2 and point its
-webhook URL at the inbound endpoint printed by `unmute dev --telephony`. Assign
-the phone number to that application. Telnyx signs HTTP events with the public
-key; the generated WebSocket URL carries a short-lived, one-use opaque token.
+After the Telnyx route is promoted, configure the Voice API Application for API
+version 2 and point its webhook URL at the inbound endpoint printed by `unmute
+dev --telephony`. Assign the phone number to that application. Telnyx signs
+HTTP events with the public key; the generated WebSocket URL carries a
+short-lived, one-use opaque token.
 
-For Plivo, create a Voice XML Application with its Answer URL set to the
-reported inbound endpoint using POST, assign the number, and set the
-Application Hangup URL to the reported status endpoint. Plivo V3 signs those
-HTTP callbacks; the returned XML embeds a short-lived, one-use WebSocket token.
+After the Plivo route is promoted, create a Voice XML Application with its
+Answer URL set to the reported inbound endpoint using POST, assign the number,
+and set the Application Hangup URL to the reported status endpoint. Plivo V3
+signs those HTTP callbacks; the returned XML embeds a short-lived, one-use
+WebSocket token.
 
 Exotel is not enabled yet. Its documented App Bazaar Voicebot flow uses a
 static WebSocket URL, while its Pipecat guide warns that custom URL data may be
@@ -211,28 +221,32 @@ gated until an official provider setup and credentialed route smoke prove it.
 
 ## Configure self-hosted LiveKit SIP
 
-The generated LiveKit project contains only the selected directions and
-carrier. It emits `sip-inbound-trunk.json`, `sip-outbound-trunk.json`, and
-`sip-dispatch-rule.json` as needed. These files contain environment
-placeholders, not credentials.
+The offline LiveKit emitter is designed to include only the selected
+directions and carrier. Its tests render `sip-inbound-trunk.json`,
+`sip-outbound-trunk.json`, and `sip-dispatch-rule.json` as needed, with
+environment placeholders rather than credentials. No public compile can emit
+those files yet because every LiveKit SIP route is provisional.
 
-For local development, run:
+This is the intended command after an exact route is promoted:
 
 ```sh
 unmute dev ./agent --target livekit --telephony
 ```
 
-This always builds and starts the generated Agent, Redis, LiveKit Server, and
-LiveKit SIP with Docker Compose. It rejects non-empty `LIVEKIT_URL`,
-`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, or `REDIS_URL` from the host because
-those values would conflict with the generated local topology. `ctrl-c` stops
-only this package's Compose project and preserves its Redis data volume.
+Today it fails during route validation, before trunk IDs, credentials, or
+Docker are checked. After promotion it will build and start the generated
+Agent, Redis, LiveKit Server, and LiveKit SIP with Docker Compose. It will
+reject non-empty `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, or
+`REDIS_URL` from the host because those values conflict with the generated
+local topology. `ctrl-c` will stop only this package's Compose project and
+preserve its Redis data volume.
 
 Complete real carrier setup in this order:
 
 1. Deploy LiveKit Server and LiveKit SIP against the same Redis deployment.
 2. Expose SIP signaling and RTP to the carrier. The defaults are SIP port
-   `5060` and UDP RTP ports `10000-20000`.
+   `5060` and the local UDP RTP range `10000-10100`; size a production range
+   for its expected traffic.
 3. Configure the carrier trunk to send inbound calls to `LIVEKIT_SIP_URI`.
 4. Materialize the generated JSON files with `envsubst` and run the documented
    `lk sip inbound create`, `lk sip outbound create`, and
@@ -241,31 +255,47 @@ Complete real carrier setup in this order:
 6. Start the local stack with `unmute dev --telephony`, or deploy the generated
    Agent against the production topology.
 
-`unmute dev --telephony` doesn't require `--public-url` for this route because
-there are no carrier HTTP callbacks. It still requires the public SIP/RTP
-deployment and the listed configuration. An HTTPS tunnel can't expose that
-media topology.
+For the future all-local topology, trunk IDs must be created against the local
+server before the full Agent can start. From the emitted project, first run:
+
+```sh
+docker compose -f compose.telephony.yaml up -d redis livekit_server livekit_sip
+```
+
+Point `lk` at that server with the generated local development key pair, create
+the trunk and dispatch resources, export the returned trunk IDs, and then run
+the full `unmute dev --telephony` command. This bootstrap is not available
+today because the provisional route prevents the CLI from emitting the Compose
+file.
+
+After promotion, `unmute dev --telephony` will not require `--public-url` for
+this route because there are no carrier HTTP callbacks. It will still require
+the public SIP/RTP deployment and listed configuration. An HTTPS tunnel cannot
+expose that media topology.
 
 ## Run Pipecat telephony locally
 
-Pipecat carrier WebSocket routes need Docker Compose and an externally visible
-HTTPS origin:
+After promotion, Pipecat carrier WebSocket routes will need Docker Compose and
+an externally visible HTTPS origin:
 
 ```sh
 unmute dev ./agent --target pipecat --telephony \
   --public-url https://agent-test.example-tunnel.dev
 ```
 
-The command builds the same generated application used in deployment, starts
-it with Redis, waits for both health checks, and prints the exact HTTP/WSS
-carrier endpoints. `--bot-port` selects the host port; it does not change the
-container's internal port. Add `--verbose` to follow Compose logs in the
-terminal; otherwise they remain in `build/<target>/telephony.log`.
+Today the command reports the provisional route before checking
+`--public-url`, carrier credentials, or Docker, and it emits no project. Once
+the route is promoted, the command will build the same generated application
+used in deployment, start it with Redis, wait for both health checks, and print
+the exact HTTP/WSS carrier endpoints. `--bot-port` becomes
+`UNMUTE_TELEPHONY_PORT` for Compose and selects the host port; it does not
+change the container's internal port. Add `--verbose` to follow Compose logs in
+the terminal; otherwise they remain in `build/<target>/telephony.log`.
 
 Docker does not provide public ingress. Keep your tunnel running for Pipecat.
-For LiveKit SIP, expose SIP `5060` and UDP RTP `10000-20000` through networking
-that the carrier can actually reach. A healthy local stack proves service
-wiring, not a real call.
+For LiveKit SIP, expose SIP `5060` and the configured UDP RTP range (local
+default `10000-10100`) through networking that the carrier can actually reach.
+A healthy local stack proves service wiring, not a real call.
 
 ## Transfer to a person
 

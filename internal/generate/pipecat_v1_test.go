@@ -80,7 +80,7 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 		`additional_span_attributes={"langfuse.trace.name": TRACE_NAME}`,
 		"def _enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:",
 		"agent._tracing_context = main._tracing_context",
-		"_enable_agent_tracing(main, AGENTS)",
+		"_enable_agent_tracing(main, agents)",
 		"trace_provider.force_flush()",
 	} {
 		if !strings.Contains(bot, want) {

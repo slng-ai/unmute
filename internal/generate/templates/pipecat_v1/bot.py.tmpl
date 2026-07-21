@@ -24,11 +24,10 @@ from __future__ import annotations
 import asyncio
 {{if .Tracing}}import base64
 {{end}}{{if and .Tracing .NeedsFunctionCalls}}import functools
-{{end}}
-{{if .NeedsInspect}}import inspect
+{{end}}{{if .NeedsInspect}}import inspect
+{{end}}{{if or .HasFlows .Tracing}}import json
 {{end}}import os
 {{if .Telephony}}import sys
-{{end}}{{if or .HasFlows .Tracing}}import json
 {{end}}{{if .Tracing}}from collections.abc import Sequence
 {{end}}{{if .Variables}}from dataclasses import asdict, dataclass
 {{end}}{{if .Tracing}}from datetime import datetime, timezone
@@ -62,8 +61,7 @@ from pipecat.runner.utils import create_transport
 {{end}}from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 {{if .Telephony}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
-{{end}}
-{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
+{{end}}{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 {{end}}from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}

@@ -154,7 +154,7 @@ func newDevCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&uiPort, "port", "8765", "port for the local dev UI")
-	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "port the generated agent health server listens on")
+	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "host port for the generated agent; with --telephony, passed to Compose as UNMUTE_TELEPHONY_PORT")
 	cmd.Flags().StringVar(&targetName, "target", "", "target instance name (required without a TTY when multiple exist)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open the browser automatically")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "stream agent logs to stderr (default: write to bot.log only)")
@@ -174,6 +174,14 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort 
 	if plan == nil {
 		return fmt.Errorf("dev %s: target %q has no resolved telephony route", root, resolved.Name)
 	}
+	artifact, err := generate.Generate(agent, resolved, target.Default())
+	if err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
+	}
+	if artifact.Telephony == nil || len(artifact.Telephony.Services) == 0 {
+		return fmt.Errorf("dev %s: target %q has no executable telephony topology", root, resolved.Name)
+	}
+	plan = artifact.Telephony
 	var public *url.URL
 	if len(plan.PublicEndpoints) > 0 || publicValue != "" {
 		public, err = parseTelephonyPublicURL(publicValue)
@@ -191,22 +199,11 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort 
 		childEnv = setChildEnv(childEnv, "UNMUTE_PUBLIC_URL", public.String())
 	}
 	childEnv = setChildEnv(childEnv, "UNMUTE_TELEPHONY_PORT", botPort)
-	if err := composePreflight(cmd.Context(), childEnv); err != nil {
-		return fmt.Errorf("dev %s: %w", root, err)
-	}
 	if missing := missingEnvironment(externalTelephonyEnv(plan), childEnv); len(missing) > 0 {
 		return fmt.Errorf("dev %s: missing telephony credentials/configuration: %s; see TELEPHONY.md#credentials for where to obtain them", root, strings.Join(missing, ", "))
 	}
-
-	artifact, err := generate.Generate(agent, resolved, target.Default())
-	if err != nil {
+	if err := composePreflight(cmd.Context(), childEnv); err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
-	}
-	if artifact.Telephony == nil || len(artifact.Telephony.Services) == 0 {
-		return fmt.Errorf("dev %s: target %q has no executable telephony topology", root, resolved.Name)
-	}
-	if missing := missingEnvironment(externalTelephonyEnv(artifact.Telephony), childEnv); len(missing) > 0 {
-		return fmt.Errorf("dev %s: missing generated runtime environment: %s", root, strings.Join(missing, ", "))
 	}
 	outDir := filepath.Join(root, "build", resolved.Name)
 	if err := writeArtifactFiles(outDir, artifact.Files); err != nil {

@@ -38,11 +38,9 @@ uv run --extra console bot.py console     # terminal: talk over local mic/speake
 
 ```
 
-
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner
 serves a WebRTC test client you can open in the browser. Console mode needs the
 `console` extra (pyaudio; `brew install portaudio` first on macOS).
-
 
 While iterating on the source spec, `unmute dev <source-dir>` recompiles this
 project and runs it for you behind a dev client.
@@ -80,7 +78,6 @@ the typed results.
 from __future__ import annotations
 
 import asyncio
-
 import os
 from dataclasses import asdict, dataclass
 
@@ -102,7 +99,6 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies

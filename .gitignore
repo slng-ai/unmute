@@ -7,7 +7,6 @@ my-test-agent/
 # Compiled target projects (reproducible via `unmute compile`; goldens are the tracked form)
 examples/*/build/
 __pycache__/
-SPEC.md
 .codex/worktrees/
 .firecrawl
 bin/

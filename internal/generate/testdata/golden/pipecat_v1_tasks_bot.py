@@ -15,9 +15,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import functools
-
-import os
 import json
+import os
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -45,7 +44,6 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies

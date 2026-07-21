@@ -102,6 +102,7 @@ func TestTelephonyDocsContract(t *testing.T) {
 		"CONTEXT.md": {"**Telephony route**", "**Coordination mode**"},
 		"TELEPHONY.md": {
 			"## Route matrix and package cardinality",
+			"reject every telephony target",
 			"## Credentials",
 			"TWILIO_ACCOUNT_SID",
 			"TELNYX_API_KEY",
@@ -116,13 +117,13 @@ func TestTelephonyDocsContract(t *testing.T) {
 		},
 		"docs/user/learn/07-phone-calls.md": {
 			"## Choose a supported carrier route", "## Configure multiple carriers",
-			"## Configure self-hosted LiveKit SIP", "LIVEKIT_SIP_INBOUND_TRUNK", "10000-20000",
+			"## Configure self-hosted LiveKit SIP", "LIVEKIT_SIP_INBOUND_TRUNK", "10000-10100",
 		},
 		"docs/user/reference/targets-yaml.md": {"## Multiple telephony routes", "pipecat_twilio", "livekit_telnyx"},
 		"docs/user/reference/providers.md":    {"## Use several providers in one target", "Telephony uses **carrier**"},
 		"docs/user/targets/pipecat.md":        {"### Telephony carrier integrations", "TELNYX_CONNECTION_ID", "PLIVO_AUTH_ID"},
 		"docs/user/targets/livekit.md": {
-			"TELNYX_SIP_ADDRESS", "PLIVO_SIP_ADDRESS", "LIVEKIT_SIP_URI", "not an audio buffer", "No emitted adapter",
+			"TELNYX_SIP_ADDRESS", "PLIVO_SIP_ADDRESS", "LIVEKIT_SIP_URI", "not an audio buffer", "No emitted adapter", "10000-10100",
 		},
 	}
 	for path, terms := range checks {

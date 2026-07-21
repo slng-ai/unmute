@@ -83,8 +83,11 @@ orchestrator already performs.
 
 ## Current repository state
 
-The compiler and offline generated routes are implemented. Credentialed L4
-verification and production hardening remain incomplete.
+Telephony is fail-closed in the public CLI. The compiler internals and offline
+emitters exist, but no selectable Pipecat or LiveKit telephony route has passed
+its exact credentialed L4 smoke. Consequently, `unmute validate`, `unmute
+compile`, and `unmute dev --telephony` reject every telephony target before an
+artifact is written or Docker is invoked.
 
 - Strict Connection loading and exact route resolution produce one
   `TelephonyPlan` per selected target.
@@ -93,18 +96,28 @@ verification and production hardening remain incomplete.
 - LiveKit emits selected Twilio, Telnyx, or Plivo SIP trunk and dispatch inputs,
   native outbound/voicemail/transfers, and normalized SIP participant context.
   Exotel and the separate Twilio Connector remain gated.
-- `unmute dev --telephony` consumes the provider-neutral runtime plan. It
-  requires `--public-url` only for routes with HTTP or WSS carrier endpoints.
+- Direct generator tests render the Pipecat and LiveKit artifacts described in
+  this document. Those test artifacts are implementation evidence, not an
+  obtainable or supported deployment escape hatch.
+- `unmute dev --telephony` validates and attempts generation before checking a
+  public URL, credentials, local topology conflicts, or Docker. The current
+  error therefore explains the provisional or gated route instead of asking a
+  user to provision credentials for an unusable path.
 - Generated and compile-report files contain environment-variable names, not
   credential values.
 - Every implemented carrier route remains provisional until its credentialed
   inbound, outbound, authentication, hangup, and advertised-control smokes
   pass.
-- Generated LiveKit SIP and Pipecat telephony projects now include
+- The offline LiveKit SIP and Pipecat projects include
   `compose.telephony.yaml`, and their plans report exact services plus closed
-  coordination reasons and consumers. `unmute dev --telephony` always executes
-  that file, waits for Compose health, follows logs, and performs project-scoped
-  cleanup without deleting volumes.
+  coordination reasons and consumers. Once an exact route is promoted, the
+  dev command will execute that file, wait for Compose health, follow logs, and
+  perform project-scoped cleanup without deleting volumes.
+- Promotion requires the exact framework/transport/carrier route to pass
+  credentialed inbound, outbound, signature/authentication, hangup, and every
+  advertised control smoke, with its capability evidence changed from
+  provisional to enabled. Credential-free generation and syntax tests alone
+  cannot promote a route.
 
 ## Route matrix and package cardinality
 
@@ -112,9 +125,10 @@ A package can declare any number of named telephony targets and Connections.
 Each target still selects exactly one Connection and one route, so every build
 contains one carrier adapter and one credential vocabulary. To use several
 carriers, add several target instances, such as `pipecat_twilio`,
-`pipecat_telnyx`, and `livekit_plivo`. `unmute compile` writes each one to its
-own `build/<target-name>/` directory; `unmute dev --telephony` runs one selected
-target at a time.
+`pipecat_telnyx`, and `livekit_plivo`. After those routes are promoted,
+`unmute compile` will write each one to its own `build/<target-name>/`
+directory and `unmute dev --telephony` will run one selected target at a time.
+Today, each telephony target fails closed before either action.
 
 The compiler has no package-level carrier count limit. The closed route matrix,
 not the number of targets, is the limit:
@@ -624,13 +638,7 @@ exactly the declared number of concurrent sessions, including a limit of one.
 
 ## Local development
 
-Local telephony uses the same generated application as deployment. Docker
-Compose is the required local executor for both orchestrators. Pipecat carrier
-WebSocket routes still need an HTTPS/WSS tunnel. LiveKit SIP instead requires a
-carrier-reachable SIP service and RTP range; `--public-url` is neither required
-nor sufficient for that route.
-
-The first CLI implementation adds this form:
+The intended promoted-route interface is:
 
 ```text
 unmute dev ./agent --target pipecat --telephony \
@@ -639,9 +647,18 @@ unmute dev ./agent --target pipecat --telephony \
 unmute dev ./agent --target livekit --telephony
 ```
 
-The first command builds and starts the generated Pipecat application in
-Compose with Redis. The second builds and starts the generated LiveKit Agent,
-Redis, LiveKit Server, and LiveKit SIP in one Compose project.
+Both commands currently stop at route validation because every emitted route
+is provisional and the remaining recognized routes are gated. They do not
+write `compose.telephony.yaml`, check credentials, or invoke Docker. There is
+no emitted Compose file to run directly through a supported CLI flow.
+
+Once an exact route is promoted, Docker Compose is the required local executor
+for both orchestrators. The first command will build and start the generated
+Pipecat application with Redis. The second will build and start the generated
+LiveKit Agent, Redis, LiveKit Server, and LiveKit SIP in one Compose project.
+Pipecat carrier WebSocket routes still need an HTTPS/WSS tunnel. LiveKit SIP
+instead needs carrier-reachable SIP and RTP; `--public-url` is neither required
+nor sufficient for that route.
 
 `UNMUTE_TELEPHONY_PORT` selects the generated application health/API host port
 for either route. LiveKit local topology also accepts `UNMUTE_LIVEKIT_PORT`,
@@ -652,24 +669,39 @@ ports when running two stacks. Compose project names use
 `unmute-<source-dir>-<target>-<path-hash>`, so networks and preserved volumes
 remain isolated after ports are separated.
 
-The command performs these steps:
+For a promoted route, the command performs these steps in this order:
 
-1. Compile the selected target.
-2. Validate required carrier and model environment variables.
-3. Verify Docker Compose is available.
-4. Build or update the exact generated Compose graph.
-5. Wait for every declared service health check and application readiness.
-6. Print the exact inbound webhook, WSS, outbound trigger, and status URLs.
-7. Print the manual carrier configuration required for the selected adapter.
-8. Stream Compose logs using the existing `--verbose` behavior.
-9. Stop only the project-scoped Compose stack on interruption and preserve its
+1. Validate and generate the selected target.
+2. Resolve and print the provider-neutral runtime plan.
+3. Validate required carrier and model environment variables.
+4. Verify Docker Compose is available.
+5. Build or update the exact generated Compose graph.
+6. Wait for every declared service health check and application readiness.
+7. Print the exact inbound webhook, WSS, outbound trigger, and status URLs.
+8. Print the manual carrier configuration required for the selected adapter.
+9. Stream Compose logs using the existing `--verbose` behavior.
+10. Stop only the project-scoped Compose stack on interruption and preserve its
    named data volumes.
 
-`unmute dev --telephony` fails before application readiness if Docker Compose
-is unavailable, a service is unhealthy, or explicit external LiveKit values
-conflict with the generated local topology. There is no flag or native-process
-fallback for local telephony in v1. You can also run the emitted Compose file
-directly for a credential-free infrastructure smoke.
+After promotion, `unmute dev --telephony` will fail before application
+readiness if Docker Compose is unavailable, a service is unhealthy, or
+explicit external LiveKit values conflict with the generated local topology.
+There is no flag or native-process fallback for local telephony in v1.
+
+LiveKit SIP trunk IDs create a local bootstrap dependency. After a LiveKit SIP
+route is promoted and its artifact is obtainable, start the infrastructure
+services first:
+
+```sh
+docker compose -f compose.telephony.yaml up -d redis livekit_server livekit_sip
+```
+
+Then point `lk` at the local server with the generated development key pair,
+create the required inbound/outbound trunks and dispatch rule, export the
+returned `LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` values,
+and start the full telephony command. This component-only bootstrap is a future
+promoted-route procedure; the current validation gate prevents obtaining that
+Compose file through `unmute compile`.
 
 The CLI doesn't install or run ngrok in the first release. For carrier
 WebSocket routes, you run any tunnel you prefer and pass its stable HTTPS URL.

@@ -13,8 +13,8 @@ uv run bot.py                             # web: open the URL it prints
 uv run --extra console bot.py console     # terminal: talk over local mic/speaker
 {{end}}
 ```
-
-{{if .Telephony}}This project uses the
+{{if .Telephony}}
+This project uses the
 `pipecat/carrier-websocket/{{.Telephony.Carrier}}` route and contains only that
 carrier adapter.
 
@@ -55,7 +55,6 @@ This route remains provisional until its credentialed smoke passes.
 serves a WebRTC test client you can open in the browser. Console mode needs the
 `console` extra (pyaudio; `brew install portaudio` first on macOS).
 {{end}}
-
 While iterating on the source spec, `unmute dev <source-dir>` recompiles this
 project and runs it for you behind a dev client.
 

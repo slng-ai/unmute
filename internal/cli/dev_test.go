@@ -95,7 +95,7 @@ func TestDev_help(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--no-open", "--bot-port", "--target", "--telephony", "--public-url", "talk to it"} {
+	for _, want := range []string{"--no-open", "--bot-port", "--target", "--telephony", "--public-url", "UNMUTE_TELEPHONY_PORT", "talk to it"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("dev --help missing %q; got:\n%s", want, out.String())
 		}
@@ -318,9 +318,13 @@ func TestComposeLocalEnvironmentAndLiveKitConflicts(t *testing.T) { // telephony
 	}
 }
 
-func TestDevTelephonyPreflightStopsBeforeCredentialsOrProvisionalRoute(t *testing.T) { // telephony V11, V17
+func TestDevTelephonyReportsProvisionalRouteBeforeConfiguration(t *testing.T) { // telephony V11, V17, B12
 	restore := composePreflight
-	composePreflight = func(context.Context, []string) error { return nil }
+	preflightCalled := false
+	composePreflight = func(context.Context, []string) error {
+		preflightCalled = true
+		return errors.New("Docker must not be checked for a validation-red route")
+	}
 	t.Cleanup(func() { composePreflight = restore })
 	dir := copySafeCore(t)
 	targetsPath := filepath.Join(dir, "targets.yaml")
@@ -357,12 +361,20 @@ func TestDevTelephonyPreflightStopsBeforeCredentialsOrProvisionalRoute(t *testin
 	for _, name := range []string{"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"} {
 		t.Setenv(name, "")
 	}
-	out, err := run(t, "dev", dir, "--target", "pipecat", "--telephony", "--public-url", "https://voice.example.com")
-	if err == nil || !strings.Contains(err.Error(), "TWILIO_ACCOUNT_SID") || !strings.Contains(err.Error(), "TELEPHONY.md#credentials") {
-		t.Fatalf("preflight error = %v", err)
+	out, err := run(t, "dev", dir, "--target", "pipecat", "--telephony")
+	if err == nil || !strings.Contains(err.Error(), "has not passed its credentialed smoke") {
+		t.Fatalf("route error = %v", err)
 	}
-	if !strings.Contains(out, "wss://voice.example.com/telephony/ws/{token}") || !strings.Contains(out, "Twilio Console account dashboard") {
-		t.Fatalf("setup output =\n%s", out)
+	for _, laterGate := range []string{"--public-url", "TWILIO_ACCOUNT_SID", "Docker"} {
+		if strings.Contains(err.Error(), laterGate) {
+			t.Errorf("route error reached later gate %q: %v", laterGate, err)
+		}
+	}
+	if preflightCalled {
+		t.Fatal("Docker preflight ran before telephony route validation")
+	}
+	if out != "" {
+		t.Fatalf("validation-red route printed an executable plan:\n%s", out)
 	}
 	if _, err := run(t, "dev", dir, "--target", "pipecat", "--public-url", "https://voice.example.com"); err == nil || !strings.Contains(err.Error(), "requires --telephony") {
 		t.Fatalf("standalone --public-url error = %v", err)

@@ -43,6 +43,10 @@ So a two-agent, one-task spec becomes a main worker plus two agent workers, wire
 | `.env.example` | The exact environment variables this spec needs, ready to copy to `.env`. |
 | `compile-report.json` | A machine-readable record of what was compiled: target, version, agents, required env, and any warnings. |
 
+That command works for non-telephony Pipecat targets. Telephony targets are
+currently provisional or gated, so public validation stops before any of their
+offline-tested files, including `compose.telephony.yaml`, are written.
+
 The output folder is rewritten from scratch on every compile, so never edit it by hand. `bot.py` carries only the imports and code your spec actually exercises: no tools means no HTTP client import, no tasks means no task machinery. The emitted pipeline stays clean.
 
 The `compile-report.json` is worth reading after a compile. It lists every
@@ -132,7 +136,8 @@ validate yet because every outbound channel must declare a voicemail policy.
 
 To configure several carriers, declare several Pipecat target instances, such
 as `pipecat_twilio` and `pipecat_telnyx`, and bind each to its own Connection.
-Each compiles to a separate project. See
+After promotion, each will compile to a separate project; today each fails
+closed independently. See
 [phone calls](../learn/07-phone-calls.md#configure-multiple-carriers) for a full
 Pipecat and LiveKit example.
 
@@ -230,21 +235,27 @@ On macOS, install PortAudio first with `brew install portaudio`. Both modes read
 keys from `.env`. Browser logs go to `build/<target>/bot.log`; add `--verbose`
 to stream them. Console mode streams directly to the terminal.
 
-Telephony mode is different: it always builds and runs the emitted Docker
-Compose graph, waits for the Pipecat application and Redis health checks, and
-uses `--bot-port` as the host port. Redis stores only bounded telephony control
-records; audio, transcripts, prompts, task state, and worker handoffs stay in
-the active process. Docker does not create public ingress, so keep the HTTPS/WSS
-tunnel named by `--public-url` running. Telephony logs go to
-`build/<target>/telephony.log`; `--verbose` follows them in the terminal.
+The telephony command is the intended promoted-route interface. Today it fails
+with the route's credentialed-smoke diagnostic before checking
+`--public-url`, carrier credentials, or Docker, and it emits no Compose file.
+Once that exact carrier route is promoted, the command will build and run the
+emitted Docker Compose graph, wait for the Pipecat application and Redis health
+checks, and pass `--bot-port` to Compose as `UNMUTE_TELEPHONY_PORT`. Redis will
+store only bounded telephony control records; audio, transcripts, prompts,
+task state, and worker handoffs stay in the active process. Docker will not
+create public ingress, so the HTTPS/WSS tunnel named by `--public-url` must
+remain running. Telephony logs will go to `build/<target>/telephony.log`;
+`--verbose` will follow them in the terminal.
 
-**Compile only, to inspect or deploy the project:**
+**Compile only, to inspect or deploy a non-telephony project:**
 
 ```sh
 unmute compile acme --target pipecat
 ```
 
-Then, in `acme/build/pipecat/`, the generated `README.md` shows the quickstart the project supports directly:
+For a non-telephony target, `acme/build/pipecat/README.md` shows the quickstart
+the project supports directly. A telephony target does not create that
+directory until its route is promoted.
 
 ```sh
 cp .env.example .env    # fill in your keys

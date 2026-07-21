@@ -443,15 +443,18 @@ transfer behavior.
 
 To configure several carriers, declare several LiveKit targets, such as
 `livekit_twilio` and `livekit_plivo`, and bind each to its own Connection. Each
-compiles to a separate project and SIP setup. See
+will compile to a separate project and SIP setup after its exact route is
+promoted; today each fails closed independently. See
 [phone calls](../learn/07-phone-calls.md#configure-multiple-carriers) for a full
 Pipecat and LiveKit example.
 
-The generated `.env.example` names every deployment value. Get the LiveKit API
-key pair from the self-hosted server's `keys` configuration, set `LIVEKIT_URL`
-to that server, and set `REDIS_URL` to the Redis deployment shared by LiveKit
-Server and LiveKit SIP. Set `LIVEKIT_SIP_URI` to the SIP service's public DNS
-name or SIP URI. Local `unmute dev --telephony` supplies its own clearly
+The offline emitter's `.env.example` names every deployment value. It is
+visible in generator tests but is not obtainable through public compilation
+while the route is provisional. After promotion, get the LiveKit API key pair
+from the self-hosted server's `keys` configuration, set `LIVEKIT_URL` to that
+server, and set `REDIS_URL` to the Redis deployment shared by LiveKit Server
+and LiveKit SIP. Set `LIVEKIT_SIP_URI` to the SIP service's public DNS name or
+SIP URI. Local `unmute dev --telephony` will supply its own clearly
 non-production LiveKit key pair and Redis connection instead.
 
 For Twilio, get the SIP address, Credential List username and password, and
@@ -460,12 +463,12 @@ Telnyx, use the SIP connection address, credentials, and assigned number from
 Telnyx Mission Control. For Plivo, use the Zentrunk termination domain,
 outbound credential, and linked number from the Plivo Console.
 
-Compilation emits the selected `sip-inbound-trunk.json`,
-`sip-outbound-trunk.json`, and `sip-dispatch-rule.json` inputs. Materialize
-their environment placeholders with `envsubst`, then run the `lk sip ...
-create` commands in the generated README. Copy the returned IDs to
-`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` as requested by
-`.env.example`.
+After promotion, compilation will emit the selected
+`sip-inbound-trunk.json`, `sip-outbound-trunk.json`, and
+`sip-dispatch-rule.json` inputs. Materialize their environment placeholders
+with `envsubst`, then run the `lk sip ... create` commands in the generated
+README. Copy the returned IDs to `LIVEKIT_SIP_INBOUND_TRUNK` and
+`LIVEKIT_SIP_OUTBOUND_TRUNK` as requested by `.env.example`.
 
 Self-hosted SIP runs LiveKit Server and LiveKit SIP against the same Redis.
 Redis is their shared datastore and message bus, so calls, SIP participants,
@@ -477,22 +480,39 @@ idempotency, transfer locks, and admission. LiveKit's generated Agent does not
 use Redis; LiveKit Server and LiveKit SIP are the consumers.
 
 An HTTPS development tunnel isn't enough for LiveKit SIP. The carrier must
-reach SIP signaling and RTP directly; the defaults are SIP port `5060` and UDP
-RTP ports `10000-20000`. The generated worker itself exposes LiveKit's `/`
-health endpoint, which returns success only while the worker is connected and
-operating normally.
+reach SIP signaling and RTP directly; the local defaults are SIP port `5060`
+and UDP RTP ports `10000-10100`. Production must configure a range sized for
+its traffic. The generated worker itself exposes LiveKit's `/` health endpoint,
+which returns success only while the worker is connected and operating
+normally.
 
-Local SIP telephony always uses the emitted Compose graph:
+This is the intended local SIP command after promotion:
 
 ```sh
 unmute dev acme --target livekit --telephony
 ```
 
-Docker Compose builds the Agent and starts Redis, LiveKit Server, and LiveKit
-SIP, then waits for every health check. Non-empty external `LIVEKIT_URL`, API
-key/secret, or `REDIS_URL` values conflict with this local graph and are
-rejected. `--verbose` follows Compose logs; normal output is retained in
-`build/livekit/telephony.log`. Stopping preserves the named Redis volume.
+Today it reports the provisional route before checking credentials or Docker
+and does not emit the Compose graph. Once the route is promoted, Docker Compose
+will build the Agent and start Redis, LiveKit Server, and LiveKit SIP, then wait
+for every health check. Non-empty external `LIVEKIT_URL`, API key/secret, or
+`REDIS_URL` values will conflict with this local graph and be rejected.
+`--verbose` will follow Compose logs; normal output will be retained in
+`build/livekit/telephony.log`. Stopping will preserve the named Redis volume.
+
+The local trunk IDs come from the local server, so bootstrap the promoted
+artifact in two phases. From its generated directory, first run:
+
+```sh
+docker compose -f compose.telephony.yaml up -d redis livekit_server livekit_sip
+```
+
+Point `lk` at that server using the generated development key pair, create the
+needed trunks and dispatch rule, export the returned
+`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK`, and then run the
+full command. The current validation gate prevents obtaining this Compose file
+through `unmute compile`; these steps describe the post-promotion bootstrap,
+not a workaround around the gate.
 
 ## Run it and talk to the agent
 
