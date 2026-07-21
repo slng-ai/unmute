@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import asyncio
 {{if .Tracing}}import base64
+{{end}}{{if and .Tracing .NeedsFunctionCalls}}import functools
 {{end}}
 {{if .NeedsInspect}}import inspect
 {{end}}import os
-{{if .HasFlows}}import json
+{{if or .HasFlows (and .Tracing .NeedsFunctionCalls)}}import json
 {{end}}{{if .Variables}}from dataclasses import asdict, dataclass
 {{end}}{{if .NeedsHTTPX}}
 import httpx
@@ -115,6 +116,75 @@ def _enable_agent_tracing(main: PipelineWorker, agents: list[LLMWorker]) -> None
         agent._enable_tracing = True
         agent._tracing_context = main._tracing_context
 
+
+{{if .NeedsFunctionCalls}}# ponytail: Pipecat 1.5 has no standard-tool tracing hook. Remove this
+# subclass when ordinary LLMWorker tools gain native spans.
+class _TracedLLMWorker(LLMWorker):
+    """Add the tool spans missing from Pipecat's standard LLM tracing."""
+
+    async def _trace_tool(self, name, arguments, call, tool_call_id=None):
+        if not self._enable_tracing:
+            return await call(None)
+        parent = (
+            self._tracing_context.get_turn_context()
+            or self._tracing_context.get_conversation_context()
+        )
+        with trace.get_tracer("unmute.pipecat.tools").start_as_current_span(
+            f"tool:{name}", context=parent
+        ) as span:
+            span.set_attribute("tool.function_name", name)
+            span.set_attribute("langfuse.observation.input", json.dumps(arguments, default=str))
+            if tool_call_id:
+                span.set_attribute("tool.call_id", tool_call_id)
+            try:
+                result = await call(span)
+            except Exception:
+                span.set_attribute("tool.result_status", "error")
+                raise
+            if result is not None:
+                span.set_attribute("langfuse.observation.output", json.dumps(result, default=str))
+            span.set_attribute("tool.result_status", "completed")
+            return result
+
+    def _track_tool_call(self, method):
+        tracked = super()._track_tool_call(method)
+
+        @functools.wraps(tracked)
+        async def wrapper(params, *args, **kwargs):
+            async def call(span):
+                if span:
+                    result_callback = params.result_callback
+
+                    async def traced_result_callback(result, **callback_kwargs):
+                        span.set_attribute(
+                            "langfuse.observation.output", json.dumps(result, default=str)
+                        )
+                        return await result_callback(result, **callback_kwargs)
+
+                    params.result_callback = traced_result_callback
+                return await tracked(params, *args, **kwargs)
+
+            return await self._trace_tool(
+                params.function_name,
+                dict(params.arguments),
+                call,
+                tool_call_id=params.tool_call_id,
+            )
+
+        return wrapper
+
+    def _trace_flow_tool(self, name, method):
+        @functools.wraps(method)
+        async def wrapper(args, flow_manager):
+            async def call(_span):
+                return await method(args, flow_manager)
+
+            return await self._trace_tool(name, dict(args), call)
+
+        return wrapper
+
+
+{{end}}
 {{end}}
 {{if .Variables}}
 @dataclass
@@ -140,7 +210,7 @@ def build_{{.Name}}_tts():
     return {{template "svc" .TTS.Call}}
 
 
-class {{.Class}}(LLMWorker):
+class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}_TracedLLMWorker{{else}}LLMWorker{{end}}):
     """Agent: {{.Name}}."""
 
     def __init__(self) -> None:
@@ -215,14 +285,14 @@ class {{.Class}}(LLMWorker):
                     description={{pyq .Description}},
                     properties={{.InputProps}},
                     required={{.InputRequired}},
-                    handler=_flow_tool_{{.Name}},
+                    handler={{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .Name}}, _flow_tool_{{.Name}}){{else}}_flow_tool_{{.Name}}{{end}},
                 ),
 {{end}}                FlowsFunctionSchema(
                     name={{pyq $t.FinishName}},
                     description="Record the result of this step and finish.",
                     properties={{$t.ResultProps}},
                     required={{$t.ResultRequired}},
-                    handler=self._{{$d.MethodName}}_finish_{{$t.Name}},
+                    handler={{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq $t.FinishName}}, self._{{$d.MethodName}}_finish_{{$t.Name}}){{else}}self._{{$d.MethodName}}_finish_{{$t.Name}}{{end}},
                 ),
             ],
 {{if $d.Isolated}}            context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),

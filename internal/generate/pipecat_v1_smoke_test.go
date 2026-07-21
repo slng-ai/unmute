@@ -168,6 +168,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from pipecat.bus import BusBridgeProcessor  # noqa: E402
 from pipecat.frames.frames import (  # noqa: E402
     Frame,
+    FunctionCallFromLLM,
     InputAudioRawFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -208,10 +209,24 @@ class FakeLLM(LLMService):
                 user_turn_completion_config=None,
             )
         )
+        self.tool_called = False
 
     @traced_llm
     async def _process_context(self, context: LLMContext) -> None:
-        await self.push_frame(LLMTextFrame("traced."))
+        if not self.tool_called:
+            self.tool_called = True
+            await self.run_function_calls(
+                [
+                    FunctionCallFromLLM(
+                        function_name="lookup_customer",
+                        tool_call_id="call-smoke",
+                        arguments={"phone": "+1555010101"},
+                        context=context,
+                    )
+                ]
+            )
+        else:
+            await self.push_frame(LLMTextFrame("traced."))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
@@ -332,6 +347,8 @@ async def main() -> None:
 
     spans = memory.get_finished_spans()
     conversation = next(span for span in spans if span.name == "conversation")
+    turn = next(span for span in spans if span.name == "turn")
+    tool_call = next(span for span in spans if span.name == "tool:lookup_customer")
     requests = {span.name: span for span in spans if span.name in {"stt", "llm", "tts"}}
     assert requests.keys() == {"stt", "llm", "tts"}
     assert requests["stt"].attributes["gen_ai.request.model"] == "probe-stt"
@@ -343,6 +360,12 @@ async def main() -> None:
     assert conversation.attributes["langfuse.trace.name"] == bot.TRACE_NAME
     assert conversation.resource.attributes["service.name"] == bot.TRACE_NAME
     assert all(span.context.trace_id == conversation.context.trace_id for span in requests.values())
+    assert tool_call.context.trace_id == conversation.context.trace_id
+    assert tool_call.parent.span_id == turn.context.span_id
+    assert json.loads(tool_call.attributes["langfuse.observation.input"]) == {"phone": "+1555010101"}
+    assert json.loads(tool_call.attributes["langfuse.observation.output"])["customer_id"] == "cus_1001"
+    assert tool_call.attributes["tool.function_name"] == "lookup_customer"
+    assert tool_call.attributes["tool.call_id"] == "call-smoke"
     assert all(span.end_time > span.start_time for span in requests.values())
     assert receiver.requests
     path, headers = receiver.requests[0]
