@@ -83,8 +83,8 @@ every provider binding emits.
 ## Public examples and internal fixtures
 
 - [examples/README.md](examples/README.md) — runnable LiveKit/Pipecat matrix
-  using one salon workflow across a large prompt, one task, a task group, and
-  two-agent handoffs.
+  using one salon workflow across a large prompt, independent tasks, a task
+  group, and two-agent handoffs.
 - [internal/testdata/safe_core/](internal/testdata/safe_core/) — internal
   five-target portability fixture; every primary validates.
 - [internal/testdata/remy/](internal/testdata/remy/) — internal legacy handoff
