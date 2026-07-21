@@ -1,4 +1,7 @@
-description: Create a Sage and Stone customer after the caller gives permission.
+description: >-
+  Create a Sage and Stone customer only after lookup found no record and the
+  caller explicitly gave permission. Use only the customer_id this action
+  returns.
 
 input:
   type: object
