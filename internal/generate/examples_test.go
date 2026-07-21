@@ -42,18 +42,44 @@ func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 				t.Fatalf("got %d tools, want 5", len(agent.Tools))
 			}
 			for name, def := range agent.Agents {
-				if !strings.Contains(def.Instructions, "## Voice contract") || !strings.Contains(def.Instructions, "Never speak or emit") {
-					t.Errorf("agent %q is missing the example voice contract", name)
+				for _, required := range []string{"## Voice contract", "Never speak or emit", "immediately and silently", "Never ask the caller to wait"} {
+					if !strings.Contains(def.Instructions, required) {
+						t.Errorf("agent %q is missing prompt contract %q", name, required)
+					}
 				}
 			}
 			for name, task := range agent.Tasks {
-				if !strings.Contains(task.Instructions, "## Voice contract") || !strings.Contains(task.Instructions, "Never speak or emit") || !strings.Contains(task.Instructions, "runtime-only") {
-					t.Errorf("task %q is missing the example voice and result contract", name)
+				for _, required := range []string{"## Voice contract", "Never speak or emit", "immediately and silently", "runtime-only"} {
+					if !strings.Contains(task.Instructions, required) {
+						t.Errorf("task %q is missing prompt contract %q", name, required)
+					}
 				}
+			}
+			toolContracts := map[string]string{
+				"lookup_customer":    "before any availability",
+				"create_customer":    "explicitly gave permission",
+				"check_availability": "real, nonempty customer_id",
+				"book_appointment":   "Never invent either ID",
+				"cancel_appointment": "explicit confirmation",
 			}
 			for name, tool := range agent.Tools {
 				if tool.Execution != ir.ToolLocal || tool.URLEnv != "" {
 					t.Errorf("tool %q execution/url = %q/%q, want local/empty", name, tool.Execution, tool.URLEnv)
+				}
+				if !strings.Contains(tool.Description, toolContracts[name]) {
+					t.Errorf("tool %q is missing workflow contract %q", name, toolContracts[name])
+				}
+			}
+			if tc.name == "single-task" {
+				parent := agent.Agents["appointment_desk"].Instructions
+				if !strings.Contains(parent, "Don't ask for the service, date, phone number") {
+					t.Error("single-task parent can collect task-owned fields before delegation")
+				}
+				task := agent.Tasks["appointment_request"].Instructions
+				customerGate := strings.Index(task, "## Customer gate")
+				booking := strings.Index(task, "## Booking workflow")
+				if customerGate < 0 || booking < 0 || customerGate > booking || !strings.Contains(task, "Never guess an ID") {
+					t.Error("single-task workflow does not gate booking on customer identification")
 				}
 			}
 			for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
@@ -125,7 +151,7 @@ func TestExampleToolExposure(t *testing.T) {
 			name: "subagents",
 			agentTools: map[string][]string{
 				"booking_desk":        {"lookup_customer", "create_customer", "check_availability", "book_appointment", "to_appointment_manager"},
-				"appointment_manager": {"lookup_customer", "check_availability", "book_appointment", "cancel_appointment", "to_booking_desk"},
+				"appointment_manager": {"lookup_customer", "create_customer", "check_availability", "book_appointment", "cancel_appointment", "to_booking_desk"},
 			},
 		},
 	}

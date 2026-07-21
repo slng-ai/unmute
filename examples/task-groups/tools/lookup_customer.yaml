@@ -1,4 +1,7 @@
-description: Look up a Sage and Stone customer by phone number.
+description: >-
+  Identify a Sage and Stone customer by phone number before any availability
+  check or appointment change. Use only the returned customer_id; never invent
+  one or use a placeholder.
 
 input:
   type: object

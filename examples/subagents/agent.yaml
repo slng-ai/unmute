@@ -41,6 +41,7 @@ agents:
     voice: voice
     tools:
       - lookup_customer
+      - create_customer
       - check_availability
       - book_appointment
       - cancel_appointment

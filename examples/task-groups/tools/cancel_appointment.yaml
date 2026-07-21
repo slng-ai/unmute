@@ -1,4 +1,7 @@
-description: Cancel one confirmed Sage and Stone appointment.
+description: >-
+  Cancel one Sage and Stone appointment only after customer identification and
+  the caller's explicit confirmation. Use the existing appointment_id supplied
+  by the caller; never invent one or use a placeholder.
 
 input:
   type: object
