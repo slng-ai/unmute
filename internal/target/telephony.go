@@ -33,10 +33,34 @@ type TelephonyEvidence struct {
 }
 
 type TelephonyRoute struct {
-	Key                 TelephonyKey
-	Features            map[TelephonyFeature]TelephonyEvidence
-	RequiredEnvironment []string
-	OptionalEnvironment []string
+	Key                        TelephonyKey
+	Features                   map[TelephonyFeature]TelephonyEvidence
+	RequiredEnvironment        []string
+	OptionalEnvironment        []string
+	Processes                  []TelephonyProcess
+	PublicEndpoints            []TelephonyEndpointRule
+	RuntimeEnvironment         []TelephonyEnvironmentRule
+	LocallySuppliedEnvironment []string
+	ManualSteps                []string
+}
+
+type TelephonyProcess struct {
+	Name      string
+	Command   []string
+	Health    string
+	Readiness string
+}
+
+type TelephonyEndpointRule struct {
+	Name        string
+	Method      string
+	Path        string
+	AnyFeatures []TelephonyFeature
+}
+
+type TelephonyEnvironmentRule struct {
+	Name        string
+	AnyFeatures []TelephonyFeature
 }
 
 func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
@@ -67,18 +91,60 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		features = append(features, TelephonyFeature(ColdTransfer))
 		add(Pipecat, "carrier-websocket", carrier, pipecat, features...)
 	}
+	pipecatProcess := []TelephonyProcess{{
+		Name: "agent", Command: []string{"uv", "run", "uvicorn", "telephony:app", "--host", "0.0.0.0", "--port", "7860"},
+		Health: "/healthz", Readiness: "/readyz",
+	}}
+	pipecatEndpoints := []TelephonyEndpointRule{
+		{Name: "inbound", Method: "POST", Path: "/telephony/inbound", AnyFeatures: []TelephonyFeature{TelephonyInbound}},
+		{Name: "media", Method: "WS", Path: "/telephony/ws/{token}"},
+		{Name: "outbound", Method: "POST", Path: "/telephony/outbound", AnyFeatures: []TelephonyFeature{TelephonyOutbound}},
+		{Name: "status", Method: "POST", Path: "/telephony/status"},
+	}
+	pipecatEnvironment := []TelephonyEnvironmentRule{
+		{Name: "REDIS_URL"},
+		{Name: "UNMUTE_OUTBOUND_TOKEN", AnyFeatures: []TelephonyFeature{TelephonyOutbound}},
+		{Name: "UNMUTE_PUBLIC_URL"},
+	}
+	setPipecatRuntime := func(key TelephonyKey, steps []string, extra ...TelephonyEndpointRule) {
+		route := routes[key]
+		route.Processes = slices.Clone(pipecatProcess)
+		route.PublicEndpoints = append(slices.Clone(pipecatEndpoints), extra...)
+		route.RuntimeEnvironment = slices.Clone(pipecatEnvironment)
+		route.LocallySuppliedEnvironment = []string{"REDIS_URL"}
+		route.ManualSteps = steps
+		routes[key] = route
+	}
 	twilio := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}
 	route := routes[twilio]
 	route.RequiredEnvironment = []string{"account_sid", "auth_token", "from_number"}
 	routes[twilio] = route
+	setPipecatRuntime(twilio, []string{
+		"get the Account SID and Auth Token from the Twilio Console account dashboard and select a Voice-capable number",
+		"configure the Twilio number voice webhook as POST to the reported inbound endpoint",
+		"configure Twilio call status callbacks as POST to the reported status endpoint",
+	})
 	telnyx := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"}
 	route = routes[telnyx]
 	route.RequiredEnvironment = []string{"api_key", "public_key", "connection_id", "from_number"}
 	routes[telnyx] = route
+	setPipecatRuntime(telnyx, []string{
+		"get an API key and public key from Telnyx Mission Control, then select a Voice API Application and phone number",
+		"set the Voice API Application webhook URL to the reported inbound endpoint and use API version 2",
+		"assign the selected phone number to that Voice API Application; generated outbound calls report status to the reported status endpoint",
+	})
 	plivo := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "plivo"}
 	route = routes[plivo]
 	route.RequiredEnvironment = []string{"auth_id", "auth_token", "from_number"}
 	routes[plivo] = route
+	setPipecatRuntime(plivo, []string{
+		"get the Auth ID and Auth Token from the Plivo Console dashboard and select a Voice-capable number",
+		"create a Voice XML Application whose Answer URL is POST to the reported inbound endpoint",
+		"assign the selected phone number to that XML Application and configure its Hangup URL as POST to the reported status endpoint",
+	},
+		TelephonyEndpointRule{Name: "outbound-answer", Method: "POST", Path: "/telephony/answer/{token}", AnyFeatures: []TelephonyFeature{TelephonyOutbound}},
+		TelephonyEndpointRule{Name: "transfer", Method: "POST", Path: "/telephony/transfer/{token}", AnyFeatures: []TelephonyFeature{TelephonyFeature(ColdTransfer)}},
+	)
 	exotel := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "exotel"}
 	routes[exotel] = TelephonyRoute{Key: exotel, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{
 		"api_key", "api_token", "account_sid", "subdomain", "from_number", "app_id",
@@ -98,6 +164,25 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		key := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: selected.carrier}
 		route := routes[key]
 		route.RequiredEnvironment = []string{"sip_address", "sip_username", "sip_password", "from_number"}
+		route.Processes = []TelephonyProcess{{
+			Name: "agent", Command: []string{"uv", "run", "agent.py", "dev"}, Health: "/", Readiness: "/",
+		}}
+		route.RuntimeEnvironment = []TelephonyEnvironmentRule{
+			{Name: "LIVEKIT_API_KEY"},
+			{Name: "LIVEKIT_API_SECRET"},
+			{Name: "LIVEKIT_SIP_INBOUND_TRUNK", AnyFeatures: []TelephonyFeature{TelephonyInbound}},
+			{Name: "LIVEKIT_SIP_OUTBOUND_TRUNK", AnyFeatures: []TelephonyFeature{TelephonyOutbound, TelephonyFeature(WarmTransfer)}},
+			{Name: "LIVEKIT_SIP_URI"},
+			{Name: "LIVEKIT_URL"},
+			{Name: "REDIS_URL"},
+		}
+		route.LocallySuppliedEnvironment = []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL", "REDIS_URL"}
+		route.ManualSteps = []string{
+			"get LIVEKIT_URL and the API key pair from the self-hosted LiveKit Server configuration; configure LiveKit Server and LiveKit SIP with the same Redis deployment",
+			"deploy LiveKit SIP with public SIP signaling and RTP ports, then set LIVEKIT_SIP_URI to that public SIP endpoint",
+			"get the selected carrier SIP address, username, password, and phone number from its SIP trunking console",
+			"materialize the generated SIP JSON inputs, create the LiveKit trunks and dispatch rule with lk, and copy the returned trunk IDs into the reported environment variables",
+		}
 		routes[key] = route
 	}
 	exotel = TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}

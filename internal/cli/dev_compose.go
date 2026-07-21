@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -42,11 +41,9 @@ func preflightCompose(ctx context.Context, env []string) error {
 }
 
 func externalTelephonyEnv(plan *generate.TelephonyRuntimePlan) []string {
-	local := map[string]bool{"REDIS_URL": true}
-	if slices.Contains(plan.Services, "livekit_server") {
-		local["LIVEKIT_URL"] = true
-		local["LIVEKIT_API_KEY"] = true
-		local["LIVEKIT_API_SECRET"] = true
+	local := make(map[string]bool, len(plan.LocalEnvironment))
+	for _, name := range plan.LocalEnvironment {
+		local[name] = true
 	}
 	result := make([]string, 0, len(plan.RequiredEnv))
 	for _, name := range plan.RequiredEnv {
@@ -58,9 +55,6 @@ func externalTelephonyEnv(plan *generate.TelephonyRuntimePlan) []string {
 }
 
 func rejectLocalTopologyConflicts(plan *generate.TelephonyRuntimePlan, env []string) error {
-	if !slices.Contains(plan.Services, "livekit_server") {
-		return nil
-	}
 	values := make(map[string]string, len(env))
 	for _, entry := range env {
 		name, value, ok := strings.Cut(entry, "=")
@@ -68,7 +62,7 @@ func rejectLocalTopologyConflicts(plan *generate.TelephonyRuntimePlan, env []str
 			values[name] = value
 		}
 	}
-	for _, name := range []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "REDIS_URL"} {
+	for _, name := range plan.LocalEnvironment {
 		if values[name] != "" {
 			return fmt.Errorf("%s conflicts with the generated local LiveKit SIP topology; unset it for `unmute dev --telephony`", name)
 		}

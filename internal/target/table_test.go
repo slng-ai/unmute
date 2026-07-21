@@ -120,9 +120,19 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if !ok || len(optional) != 0 || strings.Join(required, ",") != "account_sid,auth_token,from_number" {
 		t.Fatalf("connector environment vocabulary = required %v optional %v ok %v", required, optional, ok)
 	}
+	if route := TelephonyRoutes()[connector]; len(route.Processes) != 0 || len(route.PublicEndpoints) != 0 {
+		t.Fatalf("route-recognition-only connector advertises runtime facts: %#v", route)
+	}
 	required, optional, ok = TelephonyEnvironment(exact)
 	if !ok || len(optional) != 0 || strings.Join(required, ",") != "account_sid,auth_token,from_number" {
 		t.Fatalf("exact environment vocabulary = required %v optional %v ok %v", required, optional, ok)
+	}
+	runtime := TelephonyRoutes()[exact]
+	if len(runtime.Processes) != 1 || len(runtime.PublicEndpoints) != 4 || len(runtime.ManualSteps) == 0 {
+		t.Fatalf("Pipecat route runtime facts = %#v", runtime)
+	}
+	if strings.Join(runtime.LocallySuppliedEnvironment, ",") != "REDIS_URL" {
+		t.Fatalf("Pipecat locally supplied environment = %v", runtime.LocallySuppliedEnvironment)
 	}
 	telnyx := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"}
 	required, optional, ok = TelephonyEnvironment(telnyx)

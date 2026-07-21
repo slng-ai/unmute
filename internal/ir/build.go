@@ -796,6 +796,7 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 	key := targetcap.TelephonyKey{
 		Provider: targetcap.Provider(resolved.Provider), Transport: resolved.Transport, Carrier: resolved.Carrier,
 	}
+	route := targetcap.TelephonyRoutes()[key]
 	evidence := make([]TelephonyFeatureEvidence, 0, len(features))
 	for _, feature := range slices.Sorted(maps.Keys(features)) {
 		row := targetcap.ResolveTelephonyFeature(key, feature)
@@ -805,6 +806,42 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		})
 	}
 	connection := agent.Connections[resolved.Connection]
+	hasAnyFeature := func(required []targetcap.TelephonyFeature) bool {
+		if len(required) == 0 {
+			return true
+		}
+		for _, feature := range required {
+			if features[feature] {
+				return true
+			}
+		}
+		return false
+	}
+	processes := make([]TelephonyProcess, 0, len(route.Processes))
+	for _, process := range route.Processes {
+		processes = append(processes, TelephonyProcess{
+			Name: process.Name, Command: slices.Clone(process.Command), Health: process.Health, Readiness: process.Readiness,
+		})
+	}
+	endpoints := make([]TelephonyEndpoint, 0, len(route.PublicEndpoints))
+	for _, endpoint := range route.PublicEndpoints {
+		if hasAnyFeature(endpoint.AnyFeatures) {
+			endpoints = append(endpoints, TelephonyEndpoint{Name: endpoint.Name, Method: endpoint.Method, Path: endpoint.Path})
+		}
+	}
+	requiredEnvironment := make([]string, 0, len(connection.Environment)+len(route.RuntimeEnvironment))
+	for _, name := range connection.Environment {
+		if name != "" {
+			requiredEnvironment = append(requiredEnvironment, name)
+		}
+	}
+	for _, requirement := range route.RuntimeEnvironment {
+		if hasAnyFeature(requirement.AnyFeatures) {
+			requiredEnvironment = append(requiredEnvironment, requirement.Name)
+		}
+	}
+	slices.Sort(requiredEnvironment)
+	requiredEnvironment = slices.Compact(requiredEnvironment)
 	coordination, admissionOwner := "shared", "generated_runtime"
 	services := []string{"application", "redis"}
 	reasons := []TelephonyCoordinationReason{
@@ -832,7 +869,10 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		Channels: channels, Connection: resolved.Connection,
 		Key:         TelephonyKey{Provider: resolved.Provider, Transport: resolved.Transport, Carrier: resolved.Carrier},
 		Environment: maps.Clone(connection.Environment), Destinations: maps.Clone(resolved.Destinations),
-		SystemSources: sources, Evidence: evidence, Services: services, Coordination: coordination,
+		SystemSources: sources, Evidence: evidence,
+		Processes: processes, PublicEndpoints: endpoints, RequiredEnvironment: requiredEnvironment,
+		LocalEnvironment: slices.Clone(route.LocallySuppliedEnvironment), ManualSteps: slices.Clone(route.ManualSteps),
+		Services: services, Coordination: coordination,
 		CoordinationReasons: reasons, AdmissionOwner: admissionOwner,
 	}
 }

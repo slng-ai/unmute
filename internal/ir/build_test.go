@@ -59,6 +59,15 @@ func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 	if got := strings.Join(plan.Services, ","); got != "application,redis" {
 		t.Fatalf("services = %s", got)
 	}
+	if len(plan.Processes) != 1 || len(plan.PublicEndpoints) != 3 || len(plan.ManualSteps) == 0 {
+		t.Fatalf("runtime facts = %#v", plan)
+	}
+	if got := strings.Join(plan.LocalEnvironment, ","); got != "REDIS_URL" {
+		t.Fatalf("locally supplied environment = %s", got)
+	}
+	if got := strings.Join(plan.RequiredEnvironment, ","); got != "REDIS_URL,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,UNMUTE_PUBLIC_URL" {
+		t.Fatalf("required environment = %s", got)
+	}
 	if got := coordinationReasonNames(plan.CoordinationReasons); got != "admission,call_correlation,callback_idempotency,human_transfer" {
 		t.Fatalf("coordination reasons = %s", got)
 	}
@@ -87,6 +96,12 @@ func TestBuildLiveKitSIPUsesSharedDispatchPlan(t *testing.T) { // telephony T10,
 	}
 	if got := strings.Join(plan.Services, ","); got != "application,livekit_server,livekit_sip,redis" {
 		t.Fatalf("LiveKit SIP services = %s", got)
+	}
+	if len(plan.Processes) != 1 || len(plan.PublicEndpoints) != 0 || len(plan.ManualSteps) == 0 {
+		t.Fatalf("LiveKit SIP runtime facts = %#v", plan)
+	}
+	if got := strings.Join(plan.LocalEnvironment, ","); got != "LIVEKIT_API_KEY,LIVEKIT_API_SECRET,LIVEKIT_URL,REDIS_URL" {
+		t.Fatalf("LiveKit SIP locally supplied environment = %s", got)
 	}
 	if got := coordinationReasonNames(plan.CoordinationReasons); got != "livekit_control_plane" {
 		t.Fatalf("LiveKit SIP coordination reasons = %s", got)

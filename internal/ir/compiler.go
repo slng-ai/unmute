@@ -357,10 +357,28 @@ type TelephonyPlan struct {
 	Destinations        map[string]string             `json:"destinations,omitempty" yaml:"destinations,omitempty"`
 	SystemSources       map[string]VariableSource     `json:"system_sources,omitempty" yaml:"system_sources,omitempty"`
 	Evidence            []TelephonyFeatureEvidence    `json:"evidence" yaml:"evidence"`
+	Processes           []TelephonyProcess            `json:"processes" yaml:"processes"`
+	PublicEndpoints     []TelephonyEndpoint           `json:"public_endpoints,omitempty" yaml:"public_endpoints,omitempty"`
+	RequiredEnvironment []string                      `json:"required_environment" yaml:"required_environment"`
+	LocalEnvironment    []string                      `json:"locally_supplied_environment" yaml:"locally_supplied_environment"`
+	ManualSteps         []string                      `json:"manual_steps,omitempty" yaml:"manual_steps,omitempty"`
 	Services            []string                      `json:"services" yaml:"services"`
 	Coordination        string                        `json:"coordination" yaml:"coordination"`
 	CoordinationReasons []TelephonyCoordinationReason `json:"coordination_reasons" yaml:"coordination_reasons"`
 	AdmissionOwner      string                        `json:"admission_owner" yaml:"admission_owner"`
+}
+
+type TelephonyProcess struct {
+	Name      string   `json:"name" yaml:"name"`
+	Command   []string `json:"command" yaml:"command"`
+	Health    string   `json:"health,omitempty" yaml:"health,omitempty"`
+	Readiness string   `json:"readiness,omitempty" yaml:"readiness,omitempty"`
+}
+
+type TelephonyEndpoint struct {
+	Name   string `json:"name" yaml:"name"`
+	Method string `json:"method" yaml:"method"`
+	Path   string `json:"path" yaml:"path"`
 }
 
 type TelephonyCoordinationReason struct {

@@ -978,6 +978,7 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	}
 	compose := artifactFile(t, artifact, "compose.telephony.yaml")
 	assertValidYAML(t, compose)
+	assertComposeLocalEnvironment(t, compose, TelephonyRuntimePlanFor(resolved))
 	assertGoldenFile(t, filepath.Join("testdata", "golden", "livekit_v1_telephony_compose.yaml"), compose, *updateLiveKitV1)
 	for _, want := range []string{
 		"image: redis:7.4.9-alpine", "image: livekit/livekit-server:v1.13.4", "image: livekit/sip:v1.7.0",

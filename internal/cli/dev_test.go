@@ -294,8 +294,9 @@ func TestComposeExecutorTreatsLogInterruptAsCleanStop(t *testing.T) { // telepho
 
 func TestComposeLocalEnvironmentAndLiveKitConflicts(t *testing.T) { // telephony V24-V25
 	plan := &generate.TelephonyRuntimePlan{
-		Services:    []string{"application", "redis", "livekit_server", "livekit_sip"},
-		RequiredEnv: []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "REDIS_URL", "TWILIO_SIP_PASSWORD"},
+		Services:         []string{"application", "redis", "livekit_server", "livekit_sip"},
+		RequiredEnv:      []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "REDIS_URL", "TWILIO_SIP_PASSWORD"},
+		LocalEnvironment: []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "REDIS_URL"},
 	}
 	if got := externalTelephonyEnv(plan); strings.Join(got, ",") != "TWILIO_SIP_PASSWORD" {
 		t.Fatalf("external env = %v", got)
@@ -305,6 +306,15 @@ func TestComposeLocalEnvironmentAndLiveKitConflicts(t *testing.T) { // telephony
 	}
 	if err := rejectLocalTopologyConflicts(plan, []string{"LIVEKIT_URL="}); err != nil {
 		t.Fatalf("empty local override should not conflict: %v", err)
+	}
+	pipecat := &generate.TelephonyRuntimePlan{
+		RequiredEnv: []string{"REDIS_URL", "TWILIO_AUTH_TOKEN"}, LocalEnvironment: []string{"REDIS_URL"},
+	}
+	if got := externalTelephonyEnv(pipecat); strings.Join(got, ",") != "TWILIO_AUTH_TOKEN" {
+		t.Fatalf("Pipecat external environment = %v", got)
+	}
+	if err := rejectLocalTopologyConflicts(pipecat, []string{"REDIS_URL=redis://external"}); err == nil || !strings.Contains(err.Error(), "REDIS_URL conflicts") {
+		t.Fatalf("Pipecat local Redis conflict = %v", err)
 	}
 }
 

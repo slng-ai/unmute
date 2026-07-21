@@ -341,6 +341,8 @@ The plan contains the following resolved facts:
 - Required controls and their proven capability results.
 - Symbolic transfer destinations resolved for the target.
 - Required environment variable names.
+- Environment names supplied by the generated local topology rather than by
+  the operator.
 - Public HTTP and WSS endpoint descriptions.
 - Normalized call-context sources.
 - Generated process and file requirements.
@@ -363,6 +365,9 @@ Each definition records these facts:
 - Required and optional Connection environment keys.
 - Supported Pipecat serializer and package extra.
 - Supported media routes.
+- Runtime process, endpoint, required-environment, local-environment, and
+  manual-setup facts, with feature conditions where a route emits them only
+  for inbound, outbound, or transfer use.
 - Inbound and outbound support.
 - Control support by route.
 - Call-context field mapping.
@@ -1039,6 +1044,8 @@ sandboxes or test accounts.
 - Import and instantiate every selected Pipecat serializer.
 - Validate signed webhook fixtures.
 - Exercise inbound stream start parsing.
+- Execute the generated Redis Lua admission boundary against a real Redis
+  server.
 - Create and cancel an outbound test call.
 - End and cold-transfer an active call.
 - Exercise warm-transfer success and failure when enabled.

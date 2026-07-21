@@ -890,6 +890,40 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 	if plan.Coordination != "shared" {
 		row.Errors = add(row.Errors, "telephony coordination must be shared")
 	}
+	if len(plan.Processes) == 0 {
+		row.Errors = add(row.Errors, "telephony plan has no runtime process")
+	}
+	seenProcesses := make(map[string]bool, len(plan.Processes))
+	for _, process := range plan.Processes {
+		if process.Name == "" || len(process.Command) == 0 || seenProcesses[process.Name] {
+			row.Errors = add(row.Errors, "telephony runtime processes must have unique names and non-empty commands")
+		}
+		seenProcesses[process.Name] = true
+	}
+	seenEndpoints := make(map[string]bool, len(plan.PublicEndpoints))
+	for _, endpoint := range plan.PublicEndpoints {
+		if endpoint.Name == "" || endpoint.Method == "" || endpoint.Path == "" || seenEndpoints[endpoint.Name] {
+			row.Errors = add(row.Errors, "telephony public endpoints must have unique names, methods, and paths")
+		}
+		seenEndpoints[endpoint.Name] = true
+	}
+	requiredEnvironment := make(map[string]bool, len(plan.RequiredEnvironment))
+	for _, name := range plan.RequiredEnvironment {
+		if name == "" || requiredEnvironment[name] {
+			row.Errors = add(row.Errors, "telephony required environment must be non-empty and unique")
+		}
+		requiredEnvironment[name] = true
+	}
+	localEnvironment := make(map[string]bool, len(plan.LocalEnvironment))
+	for _, name := range plan.LocalEnvironment {
+		if name == "" || localEnvironment[name] || !requiredEnvironment[name] {
+			row.Errors = add(row.Errors, "telephony locally supplied environment must be unique and required by the runtime")
+		}
+		localEnvironment[name] = true
+	}
+	if len(plan.ManualSteps) == 0 {
+		row.Errors = add(row.Errors, "telephony plan has no route setup instructions")
+	}
 	services := make(map[string]bool, len(plan.Services))
 	allowedServices := map[string]bool{"application": true, "redis": true}
 	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {
