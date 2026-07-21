@@ -3,6 +3,7 @@ package spec
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -127,7 +128,12 @@ func readWithin(root, name string) ([]byte, error) {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	defer func() { _ = packageRoot.Close() }()
-	content, err := packageRoot.ReadFile(name)
+	file, err := packageRoot.Open(name)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	defer func() { _ = file.Close() }()
+	content, err := io.ReadAll(file)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
