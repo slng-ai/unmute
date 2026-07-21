@@ -161,6 +161,9 @@ func collectImportsExtras(data pipecatData) (imports, extras, deps []string) {
 	// RunnerArguments, pipecat.runner.run.main → needs fastapi/uvicorn via
 	// [runner]), a local VAD (silero), and the WebRTC dev transport (webrtc).
 	extraSet := map[string]bool{"runner": true, "silero": true, "webrtc": true}
+	if data.Tracing {
+		extraSet["tracing"] = true
+	}
 	depSet := map[string]bool{}
 	if data.Transport == "daily-sip" {
 		extraSet["daily"] = true
