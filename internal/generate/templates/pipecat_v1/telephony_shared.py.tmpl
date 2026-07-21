@@ -18,6 +18,7 @@ from telephony_state import TelephonyState
 
 app = FastAPI()
 CONNECTION = {{pyq .Telephony.Connection}}
+CONTROL_TIMEOUT_SECS = 10
 PENDING_TTL_SECS = 300
 SESSION_TTL_SECS = {{.Telephony.SessionTTL}}
 REQUIRED_ENV = [{{range $i, $name := .RequiredEnv}}{{if $i}}, {{end}}{{pyq $name}}{{end}}]

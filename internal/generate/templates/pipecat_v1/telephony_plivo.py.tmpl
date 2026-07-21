@@ -15,6 +15,7 @@ from plivo import RestClient, utils
 
 from telephony_shared import (
     CONNECTION,
+    CONTROL_TIMEOUT_SECS,
     PENDING_TTL_SECS,
     SESSION_TTL_SECS,
     STATE,
@@ -46,7 +47,7 @@ async def _signed_form(request: Request) -> dict[str, str]:
     )
     if not valid:
         raise HTTPException(status_code=403, detail="invalid carrier signature")
-    if not await STATE.mark_once("nonce", nonce, PENDING_TTL_SECS):
+    if not await STATE.mark_once("nonce", nonce, SESSION_TTL_SECS):
         raise HTTPException(status_code=403, detail="invalid carrier signature")
     return form
 
@@ -74,7 +75,9 @@ def _stream_xml(token: str) -> str:
 
 {{end}}
 def _client() -> RestClient:
-    return RestClient(_env(AUTH_ID_ENV), _env(AUTH_TOKEN_ENV))
+    return RestClient(
+        _env(AUTH_ID_ENV), _env(AUTH_TOKEN_ENV), timeout=CONTROL_TIMEOUT_SECS
+    )
 
 
 def configure_pipecat_env() -> None:

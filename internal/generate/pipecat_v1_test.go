@@ -405,8 +405,10 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	adapter := artifactFile(t, artifact, "telephony.py")
 	for _, want := range []string{
 		`RequestValidator(_env(AUTH_TOKEN_ENV))`,
+		`TwilioHttpClient(timeout=CONTROL_TIMEOUT_SECS)`,
 		`_validator().validate(_http_url(request.url.path), form, signature)`,
 		`_validator().validate(`,
+		`STATE.mark_once("inbound", call_id, SESSION_TTL_SECS)`,
 		`STATE.mark_once("status", event_id, SESSION_TTL_SECS)`,
 		`status_callback_event=["initiated", "ringing", "answered", "completed"]`,
 		`await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))`,
@@ -419,6 +421,7 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	}
 	shared := artifactFile(t, artifact, "telephony_shared.py")
 	for _, want := range []string{
+		`CONTROL_TIMEOUT_SECS = 10`,
 		`def _env(name: str) -> str:`,
 		`def _public_url() -> str:`,
 		`async def _remember(`,
@@ -483,7 +486,11 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		t.Error("Dockerfile does not start the selected telephony server")
 	}
 	readme := artifactFile(t, artifact, "README.md")
-	for _, want := range []string{"pipecat/carrier-websocket/twilio", "Twilio phone-number voice"} {
+	for _, want := range []string{
+		"pipecat/carrier-websocket/twilio",
+		"Twilio phone-number voice",
+		"Cold transfer is destructive on this generated\nTwilio\nroute",
+	} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("README.md missing Twilio setup %q", want)
 		}
@@ -589,12 +596,16 @@ func TestPipecatTelnyxTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	adapter := artifactFile(t, artifact, "telephony.py")
 	for _, want := range []string{
 		`Ed25519PublicKey.from_public_bytes`,
+		`aiohttp.ClientTimeout(total=CONTROL_TIMEOUT_SECS)`,
+		`aiohttp.ClientSession(headers=headers, timeout=timeout)`,
 		`abs(int(time.time()) - signed_at) > WEBHOOK_TOLERANCE_SECS`,
 		`timestamp.encode() + b"|" + raw`,
 		`STATE.mark_once("event", data["id"], SESSION_TTL_SECS)`,
 		`"stream_bidirectional_mode": "rtp"`,
 		`"stream_bidirectional_codec": "PCMU"`,
 		`"command_id": secrets.token_urlsafe(24)`,
+		`task = asyncio.create_task(`,
+		`await STATE.forget("event", event_id)`,
 		`destination, call_start = await _outbound_request(request)`,
 		`await handle_media(websocket, token)`,
 		`"carrier": "telnyx"`,
@@ -602,6 +613,11 @@ func TestPipecatTelnyxTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		if !strings.Contains(adapter, want) {
 			t.Errorf("telephony.py missing %q", want)
 		}
+	}
+	statusCheck := strings.Index(adapter, `if response.status < 200 or response.status >= 300:`)
+	jsonDecode := strings.Index(adapter, `return await response.json()`)
+	if statusCheck < 0 || jsonDecode < 0 || statusCheck > jsonDecode {
+		t.Error("Telnyx adapter must check response status before decoding JSON")
 	}
 	artifactFile(t, artifact, "telephony_shared.py")
 	for _, forbidden := range []string{"RequestValidator", "Twilio", "Plivo", "Exotel", "media.payload", "audio/x-mulaw"} {
@@ -627,7 +643,12 @@ func TestPipecatTelnyxTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		}
 	}
 	readme := artifactFile(t, artifact, "README.md")
-	for _, want := range []string{"pipecat/carrier-websocket/telnyx", "Telnyx Voice API", "API version 2"} {
+	for _, want := range []string{
+		"pipecat/carrier-websocket/telnyx",
+		"Telnyx Voice API",
+		"API version 2",
+		"Cold transfer is destructive on this generated\nTelnyx\nroute",
+	} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("README.md missing Telnyx setup %q", want)
 		}
@@ -667,7 +688,8 @@ func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T
 	adapter := artifactFile(t, artifact, "telephony.py")
 	for _, want := range []string{
 		`utils.validate_v3_signature(`,
-		`STATE.mark_once("nonce", nonce, PENDING_TTL_SECS)`,
+		`STATE.mark_once("nonce", nonce, SESSION_TTL_SECS)`,
+		`timeout=CONTROL_TIMEOUT_SECS`,
 		`bidirectional="true"`,
 		`keepCallAlive="true"`,
 		`contentType="audio/x-mulaw;rate=8000"`,
@@ -708,7 +730,12 @@ func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T
 		}
 	}
 	readme := artifactFile(t, artifact, "README.md")
-	for _, want := range []string{"pipecat/carrier-websocket/plivo", "Plivo Voice XML", "Hangup URL"} {
+	for _, want := range []string{
+		"pipecat/carrier-websocket/plivo",
+		"Plivo Voice XML",
+		"Hangup URL",
+		"Cold transfer is destructive on this generated\nPlivo\nroute",
+	} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("README.md missing Plivo setup %q", want)
 		}

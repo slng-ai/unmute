@@ -722,6 +722,9 @@ of the minimum implementation and cannot be deferred.
 - Redact credentials, phone numbers, and raw webhook bodies from normal logs.
 - Treat duplicate carrier callbacks as normal and process them idempotently.
 - Apply short request timeouts to carrier control calls.
+- Document when a carrier route cannot restore the original media stream after
+  a failed cold transfer; the generated Pipecat READMEs currently identify
+  that limitation for Twilio, Telnyx, and Plivo.
 - Retry only operations documented as safe to retry.
 - Return provider-appropriate success responses quickly, then process status
   events asynchronously when the carrier requires it.

@@ -10,11 +10,13 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 from fastapi import HTTPException, Request, WebSocket
 from fastapi.responses import Response
 from pipecat.runner.types import WebSocketRunnerArguments
+from twilio.http.http_client import TwilioHttpClient
 from twilio.request_validator import RequestValidator
 from twilio.rest import Client
 
 from telephony_shared import (
     CONNECTION,
+    CONTROL_TIMEOUT_SECS,
     SESSION_TTL_SECS,
     STATE,
     _env,
@@ -32,6 +34,14 @@ from telephony_shared import (
 ACCOUNT_SID_ENV = {{pyq .Telephony.AccountSIDEnv}}
 AUTH_TOKEN_ENV = {{pyq .Telephony.AuthTokenEnv}}
 FROM_NUMBER_ENV = {{pyq .Telephony.FromNumberEnv}}
+
+
+def _client() -> Client:
+    return Client(
+        _env(ACCOUNT_SID_ENV),
+        _env(AUTH_TOKEN_ENV),
+        http_client=TwilioHttpClient(timeout=CONTROL_TIMEOUT_SECS),
+    )
 
 
 def _validator() -> RequestValidator:
@@ -97,7 +107,7 @@ async def cold_transfer(call_id: str, destination: str) -> None:
     if not await STATE.mark_once("transfer", call_id, SESSION_TTL_SECS):
         return
     try:
-        client = Client(_env(ACCOUNT_SID_ENV), _env(AUTH_TOKEN_ENV))
+        client = _client()
         await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))
     except Exception:
         await STATE.forget("transfer", call_id)
@@ -112,7 +122,14 @@ async def inbound(request: Request) -> Response:
     to_number = form.get("To", "")
     if not _valid_destination(from_number) or not _valid_destination(to_number):
         raise HTTPException(status_code=400, detail="invalid carrier call context")
-    token, _ = await _remember("inbound", from_number, to_number, {})
+    call_id = form.get("CallSid", "")
+    if not call_id or not await STATE.mark_once("inbound", call_id, SESSION_TTL_SECS):
+        raise HTTPException(status_code=409, detail="duplicate inbound call")
+    try:
+        token, _ = await _remember("inbound", from_number, to_number, {})
+    except Exception:
+        await STATE.forget("inbound", call_id)
+        raise
     return Response(_stream_twiml(token), media_type="application/xml")
 
 
@@ -120,7 +137,7 @@ async def inbound(request: Request) -> Response:
 async def outbound(request: Request) -> dict[str, str]:
     destination, call_start = await _outbound_request(request)
     token, session_id = await _remember("outbound", _env(FROM_NUMBER_ENV), destination, call_start)
-    client = Client(_env(ACCOUNT_SID_ENV), _env(AUTH_TOKEN_ENV))
+    client = _client()
     call = await asyncio.to_thread(
         client.calls.create,
         to=destination,

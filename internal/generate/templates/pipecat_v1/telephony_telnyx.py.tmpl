@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import json
@@ -17,6 +18,7 @@ from pipecat.runner.types import WebSocketRunnerArguments
 
 from telephony_shared import (
     CONNECTION,
+    CONTROL_TIMEOUT_SECS,
     SESSION_TTL_SECS,
     STATE,
     _env,
@@ -36,6 +38,7 @@ PUBLIC_KEY_ENV = {{pyq .Telephony.PublicKeyEnv}}
 CONNECTION_ID_ENV = {{pyq .Telephony.ConnectionEnv}}
 FROM_NUMBER_ENV = {{pyq .Telephony.FromNumberEnv}}
 WEBHOOK_TOLERANCE_SECS = 300
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 
 async def _signed_event(request: Request) -> dict:
@@ -59,12 +62,12 @@ async def _signed_event(request: Request) -> dict:
 
 async def _call_api(method: str, path: str, body: dict) -> dict:
     headers = {"Authorization": "Bearer " + _env(API_KEY_ENV), "Content-Type": "application/json"}
-    async with aiohttp.ClientSession(headers=headers) as session:
+    timeout = aiohttp.ClientTimeout(total=CONTROL_TIMEOUT_SECS)
+    async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
         async with session.request(method, "https://api.telnyx.com/v2" + path, json=body) as response:
-            payload = await response.json()
             if response.status < 200 or response.status >= 300:
                 raise RuntimeError(f"Telnyx call control failed with status {response.status}")
-            return payload
+            return await response.json()
 
 
 def configure_pipecat_env() -> None:
@@ -110,24 +113,40 @@ async def inbound(request: Request) -> dict[str, bool]:
     await _require_accepting()
     if not await STATE.mark_once("event", data["id"], SESSION_TTL_SECS):
         return {"accepted": True, "duplicate": True}
-    try:
-        payload = data.get("payload", {})
-        if data.get("event_type") == "call.initiated" and payload.get("direction") == "incoming":
-            from_number, to_number = payload.get("from", ""), payload.get("to", "")
-            if not _valid_destination(from_number) or not _valid_destination(to_number):
-                raise HTTPException(status_code=400, detail="invalid carrier call context")
-            token, _ = await _remember("inbound", from_number, to_number, {})
-            await _call_api("POST", f"/calls/{payload['call_control_id']}/actions/answer", {
-                "command_id": secrets.token_urlsafe(24),
-                "stream_url": _websocket_url(f"/telephony/ws/{token}"),
-                "stream_track": "both_tracks",
-                "stream_bidirectional_mode": "rtp",
-                "stream_bidirectional_codec": "PCMU",
-            })
-    except Exception:
+    payload = data.get("payload", {})
+    if data.get("event_type") != "call.initiated" or payload.get("direction") != "incoming":
+        return {"accepted": True, "duplicate": False}
+    from_number, to_number = payload.get("from", ""), payload.get("to", "")
+    call_id = payload.get("call_control_id")
+    if (
+        not isinstance(call_id, str)
+        or not _valid_destination(from_number)
+        or not _valid_destination(to_number)
+    ):
         await STATE.forget("event", data["id"])
-        raise
+        raise HTTPException(status_code=400, detail="invalid carrier call context")
+    task = asyncio.create_task(
+        _answer_inbound(data["id"], call_id, from_number, to_number)
+    )
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
     return {"accepted": True, "duplicate": False}
+
+
+async def _answer_inbound(
+    event_id: str, call_id: str, from_number: str, to_number: str
+) -> None:
+    try:
+        token, _ = await _remember("inbound", from_number, to_number, {})
+        await _call_api("POST", f"/calls/{call_id}/actions/answer", {
+            "command_id": secrets.token_urlsafe(24),
+            "stream_url": _websocket_url(f"/telephony/ws/{token}"),
+            "stream_track": "both_tracks",
+            "stream_bidirectional_mode": "rtp",
+            "stream_bidirectional_codec": "PCMU",
+        })
+    except Exception:
+        await STATE.forget("event", event_id)
 
 
 {{end}}{{if .Telephony.HasOutbound}}@app.post("/telephony/outbound")
