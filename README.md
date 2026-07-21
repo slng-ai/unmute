@@ -142,6 +142,14 @@ Route support remains provisional until a real credentialed smoke passes.
 where to obtain each credential, local public-URL flow, deployment topology,
 and current verification policy.
 
+Every generated telephony project includes `compose.telephony.yaml`, and
+`unmute dev <agent> --target <name> --telephony` always executes it. Pipecat
+runs the generated application plus Redis. LiveKit SIP runs the generated
+Agent, Redis, LiveKit Server, and LiveKit SIP. Compose supplies local Redis and
+the conspicuous non-production LiveKit key pair; put carrier and model keys in
+the package's ignored `.env`. A normal `ctrl-c` stops only that package's
+Compose project and preserves its Redis volume.
+
 Generated Pipecat adapters currently cover Twilio, Telnyx, and Plivo offline;
 all stay provisional until credentialed smokes pass. For Twilio, get the
 Account SID and Auth Token from the Console account dashboard and the caller ID
@@ -169,9 +177,10 @@ Set the target's `provider: livekit`, `transport: sip`, `carrier`, and
 `connection`. The generated project includes inbound-trunk, outbound-trunk,
 and dispatch-rule JSON inputs for the directions you request. Self-hosted SIP
 also requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`,
-`REDIS_URL`, and a public `LIVEKIT_SIP_URI`; the `lk` commands return the trunk
-IDs used at runtime. An HTTPS tunnel is enough for Pipecat callbacks, but not
-for LiveKit SIP signaling and RTP.
+`REDIS_URL`, and a public `LIVEKIT_SIP_URI` in deployment; local Compose
+supplies the Server, key pair, and Redis connection. The `lk` commands return
+the trunk IDs used at runtime. An HTTPS tunnel is enough for Pipecat callbacks,
+but not for LiveKit SIP signaling and RTP.
 
 Exotel remains gated: its documented static Voicebot WebSocket flow does not
 yet provide a proven authenticated upgrade that satisfies Unmute's ingress

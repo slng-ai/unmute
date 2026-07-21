@@ -103,20 +103,36 @@ The fastest loop for a **Pipecat or LiveKit** instance: compiles the selected ta
   through LiveKit Inference, such as a think model with `provider: livekit` or
   the cloud `turn-detector`. The preflight tells you which.
 
-**Telephony (`--telephony`).** Runs the process command from the resolved
-telephony artifact rather than the browser UI. `--public-url` is required and
-must be the exact public HTTPS origin used by the carrier; Unmute passes it as
-`UNMUTE_PUBLIC_URL`, waits for the reported readiness endpoint, and prints the
-fully qualified HTTP/WSS callback URLs plus carrier setup steps. Before
-compiling or starting a process, it lists missing credential environment names
-and points to the credential guide. It never prints credential values. The
-current routes remain provisional, so they still fail closed after preflight
-until their credentialed smokes pass.
+**Telephony (`--telephony`).** Always runs the generated
+`compose.telephony.yaml`; there is no host-process fallback or infrastructure
+flag. Every route builds the generated application and version-pinned Redis.
+LiveKit SIP additionally starts version-pinned LiveKit Server and LiveKit SIP.
+Unmute preflights Docker Compose, waits for declared health checks, prints the
+resolved service graph and carrier setup, follows Compose logs under
+`--verbose`, and stops only its deterministic project on `ctrl-c` without
+removing data volumes.
 
-- Requires `uv` on your `PATH` (see [install](../start/install.md)). Reads keys from a `.env` at the package root.
+`--public-url` is required only when the resolved route reports public HTTP/WSS
+endpoints, such as Pipecat carrier WebSockets. It must be the exact public HTTPS
+origin used for carrier signatures. LiveKit SIP has no HTTP callback URL; it
+instead needs carrier-reachable SIP and RTP networking. Before compilation,
+Unmute names missing carrier/model configuration and points to the credential
+guide without printing values. Local Compose supplies Redis for both targets
+and the local LiveKit Server key pair. Explicit external LiveKit or Redis
+values are rejected in LiveKit SIP dev mode rather than silently ignored. The
+current routes remain provisional until their credentialed smokes pass.
+
+- Browser and console modes require `uv` on your `PATH` (see
+  [install](../start/install.md)); telephony mode requires Docker with the
+  Compose plugin. All modes read keys from a `.env` at the package root.
 - `--port` sets the dev UI port (default 8765). `--bot-port` sets the Pipecat
-  runner or generated telephony server port (default 7860). `--console` ignores
-  both web ports.
+  runner or telephony Compose host port (default 7860). `--console` ignores both
+  web ports.
 - `--no-open` skips opening the browser; `--verbose` streams agent logs to your terminal.
-- Web-mode agent logs are written to `build/<name>/bot.log` (Pipecat) or `agent.log` (LiveKit); console mode streams straight to your terminal. Press `ctrl-c` to stop.
-- Fails clearly if no target is declared, the selected provider has no local runner, LiveKit creds are missing where required, or `uv` is not installed.
+- Web-mode agent logs are written to `build/<name>/bot.log` (Pipecat) or
+  `agent.log` (LiveKit); telephony logs use `telephony.log`; console mode streams
+  straight to your terminal. Press `ctrl-c` to stop.
+- Fails clearly if no target is declared, the selected provider has no local
+  runner, required credentials are missing, Docker Compose or its daemon is
+  unavailable for telephony, a declared service is unhealthy, local LiveKit
+  settings conflict, or `uv` is unavailable for browser/console mode.

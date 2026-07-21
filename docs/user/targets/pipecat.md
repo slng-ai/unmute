@@ -37,7 +37,8 @@ So a two-agent, one-task spec becomes a main worker plus two agent workers, wire
 | `bot.py` | The whole agent: the pipeline, every agent worker, every task flow, tools, handoffs. |
 | `pyproject.toml` | Pinned dependencies. Only the services your spec uses are included. |
 | `Dockerfile` | A container image for deployment. |
-| `pcc-deploy.toml` | Pipecat Cloud deploy config. |
+| `pcc-deploy.toml` | Pipecat Cloud deploy config for non-telephony targets. |
+| `compose.telephony.yaml` | The generated application plus version-pinned Redis for telephony targets. |
 | `README.md` | A quickstart for the generated project. |
 | `.env.example` | The exact environment variables this spec needs, ready to copy to `.env`. |
 | `compile-report.json` | A machine-readable record of what was compiled: target, version, agents, required env, and any warnings. |
@@ -188,6 +189,8 @@ Read both, then test the exact behavior they point at.
 ```sh
 unmute dev acme             # talk in the browser
 unmute dev acme --console   # talk in the terminal, over your mic and speaker
+unmute dev acme --target pipecat --telephony \
+  --public-url https://agent-test.example-tunnel.dev
 ```
 
 The command selects the only target automatically; with multiple targets, it
@@ -197,6 +200,14 @@ Browser mode runs `bot.py` with uv and opens the web client. `--console` runs
 On macOS, install PortAudio first with `brew install portaudio`. Both modes read
 keys from `.env`. Browser logs go to `build/<target>/bot.log`; add `--verbose`
 to stream them. Console mode streams directly to the terminal.
+
+Telephony mode is different: it always builds and runs the emitted Docker
+Compose graph, waits for the Pipecat application and Redis health checks, and
+uses `--bot-port` as the host port. Redis stores only bounded telephony control
+records; audio, transcripts, prompts, task state, and worker handoffs stay in
+the active process. Docker does not create public ingress, so keep the HTTPS/WSS
+tunnel named by `--public-url` running. Telephony logs go to
+`build/<target>/telephony.log`; `--verbose` follows them in the terminal.
 
 **Compile only, to inspect or deploy the project:**
 

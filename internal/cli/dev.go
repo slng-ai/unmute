@@ -184,11 +184,17 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort 
 	printDevTelephonyPlan(cmd.OutOrStdout(), resolved.Name, plan, public)
 
 	childEnv := devChildEnv(root, cmd.ErrOrStderr())
+	if err := rejectLocalTopologyConflicts(plan, childEnv); err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
+	}
 	if public != nil {
 		childEnv = setChildEnv(childEnv, "UNMUTE_PUBLIC_URL", public.String())
 	}
-	childEnv = setChildEnv(childEnv, "UNMUTE_AGENT_HEALTH_PORT", botPort)
-	if missing := missingEnvironment(plan.RequiredEnv, childEnv); len(missing) > 0 {
+	childEnv = setChildEnv(childEnv, "UNMUTE_TELEPHONY_PORT", botPort)
+	if err := composePreflight(cmd.Context(), childEnv); err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
+	}
+	if missing := missingEnvironment(externalTelephonyEnv(plan), childEnv); len(missing) > 0 {
 		return fmt.Errorf("dev %s: missing telephony credentials/configuration: %s; see TELEPHONY.md#credentials for where to obtain them", root, strings.Join(missing, ", "))
 	}
 
@@ -196,10 +202,10 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort 
 	if err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
 	}
-	if artifact.Telephony == nil || len(artifact.Telephony.Processes) != 1 {
-		return fmt.Errorf("dev %s: target %q has no executable telephony process", root, resolved.Name)
+	if artifact.Telephony == nil || len(artifact.Telephony.Services) == 0 {
+		return fmt.Errorf("dev %s: target %q has no executable telephony topology", root, resolved.Name)
 	}
-	if missing := missingEnvironment(artifact.Telephony.RequiredEnv, childEnv); len(missing) > 0 {
+	if missing := missingEnvironment(externalTelephonyEnv(artifact.Telephony), childEnv); len(missing) > 0 {
 		return fmt.Errorf("dev %s: missing generated runtime environment: %s", root, strings.Join(missing, ", "))
 	}
 	outDir := filepath.Join(root, "build", resolved.Name)
@@ -207,14 +213,9 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort 
 		return fmt.Errorf("dev %s: %w", root, err)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "compiled %s\n", outDir)
-
-	process := artifact.Telephony.Processes[0]
-	command := devTelephonyCommand(process.Command, botPort)
-	if len(command) == 0 {
-		return fmt.Errorf("dev %s: telephony process command is empty", root)
-	}
-	if _, err := exec.LookPath(command[0]); err != nil {
-		return fmt.Errorf("dev %s: %s not found on PATH", root, command[0])
+	composePath := filepath.Join(outDir, "compose.telephony.yaml")
+	if _, err := os.Stat(composePath); err != nil {
+		return fmt.Errorf("dev %s: generated telephony Compose file: %w", root, err)
 	}
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -228,35 +229,10 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort 
 	if verbose {
 		processOut = io.MultiWriter(logFile, cmd.ErrOrStderr())
 	}
-	child := exec.Command(command[0], command[1:]...)
-	child.Dir, child.Env, child.Stdout, child.Stderr = outDir, childEnv, processOut, processOut
-	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := child.Start(); err != nil {
-		return fmt.Errorf("dev %s: start telephony process: %w", root, err)
+	project := composeProjectName(root, resolved.Name)
+	if err := runTelephonyCompose(ctx, outDir, composePath, project, childEnv, processOut, cmd.OutOrStdout(), cmd.ErrOrStderr(), logPath); err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
 	}
-	defer killGroup(child)
-	done := make(chan error, 1)
-	go func() { done <- child.Wait() }()
-
-	spin := startSpinner(cmd.ErrOrStderr(), "starting telephony route")
-	readyURL := "http://" + net.JoinHostPort("127.0.0.1", botPort) + process.Readiness
-	waitErr := waitHTTPReady(ctx, readyURL, done, 3*time.Minute)
-	spin.Stop()
-	if waitErr != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "telephony route failed to start. logs: %s\n", logPath)
-		return fmt.Errorf("dev %s: %w", root, waitErr)
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "\n  \033[1;32m▸\033[0m telephony route ready\n    ctrl-c to stop  ·  logs: %s\n\n", logPath)
-	select {
-	case <-ctx.Done():
-		fmt.Fprintln(cmd.ErrOrStderr(), "\nstopping...")
-	case err := <-done:
-		if err != nil {
-			return fmt.Errorf("dev %s: telephony process exited: %w", root, err)
-		}
-		return nil
-	}
-	stopBot(child, done)
 	return nil
 }
 
@@ -287,6 +263,10 @@ func printDevTelephonyPlan(out io.Writer, name string, plan *generate.TelephonyR
 	for _, step := range plan.ManualSteps {
 		fmt.Fprintf(out, "%s: setup: %s\n", name, step)
 	}
+	fmt.Fprintf(out, "%s: local services: %s\n", name, strings.Join(plan.Services, ", "))
+	for _, reason := range plan.Reasons {
+		fmt.Fprintf(out, "%s: coordination reason %s -> %s\n", name, reason.Name, strings.Join(reason.Consumers, ", "))
+	}
 }
 
 func setChildEnv(env []string, name, value string) []string {
@@ -315,45 +295,6 @@ func missingEnvironment(names, env []string) []string {
 		}
 	}
 	return missing
-}
-
-func devTelephonyCommand(command []string, port string) []string {
-	result := append([]string(nil), command...)
-	for i := 0; i+1 < len(result); i++ {
-		if result[i] == "--port" {
-			result[i+1] = port
-			break
-		}
-	}
-	return result
-}
-
-func waitHTTPReady(ctx context.Context, endpoint string, processDone <-chan error, timeout time.Duration) error {
-	deadline := time.After(timeout)
-	ticker := time.NewTicker(300 * time.Millisecond)
-	defer ticker.Stop()
-	client := &http.Client{Timeout: time.Second}
-	for {
-		response, err := client.Get(endpoint)
-		if err == nil {
-			_ = response.Body.Close()
-			if response.StatusCode >= 200 && response.StatusCode < 300 {
-				return nil
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case err := <-processDone:
-			if err != nil {
-				return fmt.Errorf("telephony process exited before ready: %w", err)
-			}
-			return errors.New("telephony process exited before ready")
-		case <-deadline:
-			return fmt.Errorf("telephony route not ready after %s", timeout)
-		case <-ticker.C:
-		}
-	}
 }
 
 // runDevConsole compiles the selected target and hands the terminal to its
@@ -608,7 +549,7 @@ func devChildEnv(root string, warn io.Writer) []string {
 	}
 	for name, value := range vals {
 		if value != "" {
-			env = append(env, name+"="+value)
+			env = setChildEnv(env, name, value)
 		}
 	}
 	return env

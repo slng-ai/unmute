@@ -80,8 +80,10 @@ environment:
 
 Use equivalent environment names for the selected carrier. Self-hosted
 LiveKit SIP also needs Redis because the LiveKit server and SIP service use it
-as a shared datastore and message bus. Pipecat's single-process adapter can
-keep one call's pending context local.
+as a shared datastore and message bus. Pipecat also uses Redis, but only for
+opaque pending-call correlation, callback idempotency, human-transfer locks,
+and admission counters. Audio, transcripts, prompts, task state, and agent
+handoff remain inside the active call worker.
 
 ## Configure credentials
 
@@ -100,6 +102,12 @@ deployment secret store. Obtain them here:
 | LiveKit SIP with Telnyx | `TELNYX_SIP_ADDRESS`, `TELNYX_SIP_USERNAME`, `TELNYX_SIP_PASSWORD`, `TELNYX_PHONE_NUMBER` | Telnyx Mission Control → SIP Trunking. Use the SIP connection address and credentials, and its assigned number. |
 | LiveKit SIP with Plivo | `PLIVO_SIP_ADDRESS`, `PLIVO_SIP_USERNAME`, `PLIVO_SIP_PASSWORD`, `PLIVO_PHONE_NUMBER` | Plivo Console → Zentrunk. Use the termination domain, outbound credential, and linked number. |
 | LiveKit SIP resource IDs | `LIVEKIT_SIP_INBOUND_TRUNK`, `LIVEKIT_SIP_OUTBOUND_TRUNK` | Copy the `SIPTrunkID` values printed by the generated `lk sip ... create` setup commands. Only the directions and controls you request are required. |
+
+For local development, generated Compose supplies `REDIS_URL` on Pipecat and
+the local `LIVEKIT_URL`, API key pair, and Redis connection on LiveKit SIP. Do
+not copy the generated `devkey`/`devsecret-local-only` pair into deployment.
+Production still needs the self-hosted values in the table. Carrier credentials,
+model-provider keys, trunk IDs, and public ingress remain yours in both places.
 
 Carrier WebSocket deployments also set `UNMUTE_PUBLIC_URL` to the exact public
 HTTPS origin used in signature validation. It is configuration, not a secret.
@@ -134,7 +142,19 @@ carrier. It emits `sip-inbound-trunk.json`, `sip-outbound-trunk.json`, and
 `sip-dispatch-rule.json` as needed. These files contain environment
 placeholders, not credentials.
 
-Complete setup in this order:
+For local development, run:
+
+```sh
+unmute dev ./agent --target livekit --telephony
+```
+
+This always builds and starts the generated Agent, Redis, LiveKit Server, and
+LiveKit SIP with Docker Compose. It rejects non-empty `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, or `REDIS_URL` from the host because
+those values would conflict with the generated local topology. `ctrl-c` stops
+only this package's Compose project and preserves its Redis data volume.
+
+Complete real carrier setup in this order:
 
 1. Deploy LiveKit Server and LiveKit SIP against the same Redis deployment.
 2. Expose SIP signaling and RTP to the carrier. The defaults are SIP port
@@ -144,12 +164,34 @@ Complete setup in this order:
    `lk sip inbound create`, `lk sip outbound create`, and
    `lk sip dispatch create` commands.
 5. Copy the returned trunk IDs into the generated `.env.example` names.
-6. Start the worker with `uv run agent.py dev`.
+6. Start the local stack with `unmute dev --telephony`, or deploy the generated
+   Agent against the production topology.
 
 `unmute dev --telephony` doesn't require `--public-url` for this route because
 there are no carrier HTTP callbacks. It still requires the public SIP/RTP
 deployment and the listed configuration. An HTTPS tunnel can't expose that
 media topology.
+
+## Run Pipecat telephony locally
+
+Pipecat carrier WebSocket routes need Docker Compose and an externally visible
+HTTPS origin:
+
+```sh
+unmute dev ./agent --target pipecat --telephony \
+  --public-url https://agent-test.example-tunnel.dev
+```
+
+The command builds the same generated application used in deployment, starts
+it with Redis, waits for both health checks, and prints the exact HTTP/WSS
+carrier endpoints. `--bot-port` selects the host port; it does not change the
+container's internal port. Add `--verbose` to follow Compose logs in the
+terminal; otherwise they remain in `build/<target>/telephony.log`.
+
+Docker does not provide public ingress. Keep your tunnel running for Pipecat.
+For LiveKit SIP, expose SIP `5060` and UDP RTP `10000-20000` through networking
+that the carrier can actually reach. A healthy local stack proves service
+wiring, not a real call.
 
 ## Transfer to a person
 

@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -114,22 +113,22 @@ func TestTelephonyDevPlanUsesExactPublicURLAndResolvedArtifact(t *testing.T) { /
 			{Name: "inbound", Method: "POST", Path: "/telephony/inbound"},
 			{Name: "media", Method: "WS", Path: "/telephony/ws/{token}"},
 		},
-		ManualSteps: []string{"configure signed callbacks"}, Coordination: "local",
+		ManualSteps: []string{"configure signed callbacks"}, Services: []string{"application", "redis"}, Coordination: "shared",
+		Reasons: []ir.TelephonyCoordinationReason{{Name: "call_correlation", Consumers: []string{"application"}}},
 	}
 	var out bytes.Buffer
 	printDevTelephonyPlan(&out, "phone", plan, public)
 	for _, want := range []string{
-		"provider=pipecat transport=carrier-websocket carrier=twilio coordination=local",
+		"provider=pipecat transport=carrier-websocket carrier=twilio coordination=shared",
 		"POST https://voice.example.com/unmute/telephony/inbound",
 		"WS wss://voice.example.com/unmute/telephony/ws/{token}",
 		"setup: configure signed callbacks",
+		"local services: application, redis",
+		"coordination reason call_correlation -> application",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("plan missing %q:\n%s", want, out.String())
 		}
-	}
-	if got := strings.Join(devTelephonyCommand([]string{"uv", "run", "uvicorn", "telephony:app", "--port", "7860"}, "9000"), " "); got != "uv run uvicorn telephony:app --port 9000" {
-		t.Fatalf("dev command = %q", got)
 	}
 }
 
@@ -158,23 +157,111 @@ func TestTelephonyDevRejectsUnsafePublicURLAndNamesMissingCredentials(t *testing
 	}
 }
 
-func TestWaitHTTPReadyRequiresSuccessfulReadiness(t *testing.T) { // telephony V16
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-	done := make(chan error)
-	if err := waitHTTPReady(context.Background(), server.URL, done, time.Second); err != nil {
+func TestComposePreflightFailsClearlyWhenDockerIsMissing(t *testing.T) { // telephony V24
+	restore := composeLookPath
+	composeLookPath = func(string) (string, error) { return "", errors.New("not found") }
+	t.Cleanup(func() { composeLookPath = restore })
+	err := preflightCompose(context.Background(), os.Environ())
+	if err == nil || !strings.Contains(err.Error(), "docker compose is required") || !strings.Contains(err.Error(), "Docker Desktop") {
+		t.Fatalf("preflight error = %v", err)
+	}
+}
+
+func TestComposePreflightFailsClearlyWhenDaemonIsUnavailable(t *testing.T) { // telephony V24
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "docker")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nif [ \"$1\" = fail ]; then echo daemon-down; exit 1; fi\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	exited := make(chan error, 1)
-	exited <- errors.New("boom")
-	if err := waitHTTPReady(context.Background(), "http://127.0.0.1:1/readyz", exited, time.Second); err == nil || !strings.Contains(err.Error(), "exited before ready") {
-		t.Fatalf("got %v", err)
+	restoreLook, restoreCommand := composeLookPath, composeCommand
+	composeLookPath = func(string) (string, error) { return fake, nil }
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		mode := "ok"
+		if len(args) > 0 && args[0] == "info" {
+			mode = "fail"
+		}
+		return exec.CommandContext(ctx, fake, mode)
+	}
+	t.Cleanup(func() { composeLookPath, composeCommand = restoreLook, restoreCommand })
+	err := preflightCompose(context.Background(), os.Environ())
+	if err == nil || !strings.Contains(err.Error(), "docker daemon is unavailable") || !strings.Contains(err.Error(), "daemon-down") {
+		t.Fatalf("preflight error = %v", err)
+	}
+}
+
+func TestComposePlanIsProjectScopedAndPreservesVolumes(t *testing.T) { // telephony V24-V25
+	project := composeProjectName("/tmp/My Agent!", "LiveKit Main")
+	if !strings.HasPrefix(project, "unmute-my-agent--livekit-main-") {
+		t.Fatalf("project = %q", project)
+	}
+	up := strings.Join(composeArgs("compose.telephony.yaml", project, "up", "--build", "--detach", "--wait"), " ")
+	if !strings.Contains(up, "--project-name "+project) || !strings.Contains(up, "up --build --detach --wait") {
+		t.Fatalf("up args = %q", up)
+	}
+	down := strings.Join(composeArgs("compose.telephony.yaml", project, "down", "--remove-orphans"), " ")
+	if strings.Contains(down, "--volumes") || !strings.Contains(down, "--project-name "+project) {
+		t.Fatalf("down args = %q", down)
+	}
+}
+
+func TestComposeExecutorRunsUpLogsAndProjectScopedDown(t *testing.T) { // telephony V24
+	dir := t.TempDir()
+	trace := filepath.Join(dir, "trace.log")
+	fake := filepath.Join(dir, "docker")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TRACE_FILE\"\ncase \"$*\" in *' logs '*) while :; do sleep 1; done;; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restore := composeCommand
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, fake, args...)
+	}
+	t.Cleanup(func() { composeCommand = restore })
+	var output bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(time.Second, cancel)
+	err := runTelephonyCompose(ctx, dir, filepath.Join(dir, "compose.telephony.yaml"), "unmute-test", []string{"TRACE_FILE=" + trace}, &output, &output, &output, filepath.Join(dir, "telephony.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := string(raw)
+	for _, want := range []string{
+		"--project-name unmute-test up --build --detach --remove-orphans --wait",
+		"--project-name unmute-test logs --follow --no-color",
+		"--project-name unmute-test down --remove-orphans --timeout 30",
+	} {
+		if !strings.Contains(commands, want) {
+			t.Errorf("commands missing %q:\n%s", want, commands)
+		}
+	}
+	if strings.Contains(commands, "--volumes") {
+		t.Fatalf("cleanup removed volumes:\n%s", commands)
+	}
+}
+
+func TestComposeLocalEnvironmentAndLiveKitConflicts(t *testing.T) { // telephony V24-V25
+	plan := &generate.TelephonyRuntimePlan{
+		Services:    []string{"application", "redis", "livekit_server", "livekit_sip"},
+		RequiredEnv: []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "REDIS_URL", "TWILIO_SIP_PASSWORD"},
+	}
+	if got := externalTelephonyEnv(plan); strings.Join(got, ",") != "TWILIO_SIP_PASSWORD" {
+		t.Fatalf("external env = %v", got)
+	}
+	if err := rejectLocalTopologyConflicts(plan, []string{"LIVEKIT_URL=wss://cloud.example"}); err == nil || !strings.Contains(err.Error(), "LIVEKIT_URL conflicts") {
+		t.Fatalf("conflict = %v", err)
+	}
+	if err := rejectLocalTopologyConflicts(plan, []string{"LIVEKIT_URL="}); err != nil {
+		t.Fatalf("empty local override should not conflict: %v", err)
 	}
 }
 
 func TestDevTelephonyPreflightStopsBeforeCredentialsOrProvisionalRoute(t *testing.T) { // telephony V11, V17
+	restore := composePreflight
+	composePreflight = func(context.Context, []string) error { return nil }
+	t.Cleanup(func() { composePreflight = restore })
 	dir := copySafeCore(t)
 	targetsPath := filepath.Join(dir, "targets.yaml")
 	raw, err := os.ReadFile(targetsPath)

@@ -164,7 +164,7 @@ import os
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
-import bot  # noqa: E402  (module import already constructs the agent workers)
+import bot  # noqa: E402
 
 if hasattr(bot, "setup_langfuse_tracing"):
     for name in ("LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_BASE_URL"):
@@ -374,7 +374,13 @@ async def main() -> None:
     provider = trace.get_tracer_provider()
     provider.add_span_processor(SimpleSpanProcessor(memory))
 
-    agent_name = bot.AGENTS[0].name
+    agent_names = sorted(
+        name.removeprefix("build_").removesuffix("_llm")
+        for name in vars(bot)
+        if name.startswith("build_") and name.endswith("_llm")
+    )
+    assert len(agent_names) == 1, agent_names
+    agent_name = agent_names[0]
     setattr(bot, f"build_{agent_name}_llm", FakeLLM)
     setattr(bot, f"build_{agent_name}_tts", FakeTTS)
 
@@ -396,7 +402,16 @@ async def main() -> None:
         additional_span_attributes={"langfuse.trace.name": bot.TRACE_NAME},
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
-    request_agent = type(bot.AGENTS[0])()
+    agent_types = [
+        value
+        for value in vars(bot).values()
+        if isinstance(value, type)
+        and issubclass(value, bot.LLMWorker)
+        and value is not bot.LLMWorker
+        and value.__module__ == "bot"
+    ]
+    assert len(agent_types) == 1, agent_types
+    request_agent = agent_types[0]()
     bot._enable_agent_tracing(main_worker, [request_agent])
 
     @main_worker.event_handler("on_pipeline_started")
@@ -533,9 +548,9 @@ func TestSmokePipecatV1RestoredVendorsInstantiates(t *testing.T) {
 }
 
 // TestSmokePipecatV1LocalToolInstantiates proves the local-tool lowering (T14,
-// V13) against real pipecat-ai: importing bot constructs the agent workers, so
-// the @tool wrapper class-collects and `import tools.fetch_notes` resolves the
-// copied handler file inside the venv.
+// V13) against real pipecat-ai: importing bot defines the call-local worker
+// classes, so the @tool wrapper class-collects and `import tools.fetch_notes`
+// resolves the copied handler file inside the venv.
 func TestSmokePipecatV1LocalToolInstantiates(t *testing.T) {
 	runPipecatSmoke(t, "safe_core", nil, func(agent *ir.Agent) {
 		agent.Tools["fetch_notes"] = ir.Tool{

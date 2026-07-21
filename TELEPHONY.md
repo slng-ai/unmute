@@ -102,9 +102,9 @@ verification and production hardening remain incomplete.
   pass.
 - Generated LiveKit SIP and Pipecat telephony projects now include
   `compose.telephony.yaml`, and their plans report exact services plus closed
-  coordination reasons and consumers. `unmute dev --telephony` does not yet
-  execute that file; the CLI executor and credential-free topology smoke remain
-  the next implementation slice.
+  coordination reasons and consumers. `unmute dev --telephony` always executes
+  that file, waits for Compose health, follows logs, and performs project-scoped
+  cleanup without deleting volumes.
 
 ## What scales across carriers
 
@@ -250,15 +250,14 @@ The Agent declares what a phone channel must do. A Connection declares which
 carrier account supplies it. The target selects the media route used by the
 orchestrator.
 
-The proposed package addition is one file per external connection:
+The package uses one file per external connection:
 
 ```text
 connections/
   primary_phone.yaml
 ```
 
-The proposed connection shape stores environment variable names, never secret
-values:
+The connection shape stores environment variable names, never secret values:
 
 ```yaml
 # connections/primary_phone.yaml
@@ -1036,11 +1035,9 @@ The plan keeps uncertain behavior gated rather than designing around guesses.
 
 ## Next steps
 
-The plans, reports, provisional route emitters, and local Compose artifacts
-exist. The next slice makes Compose the default local telephony runtime without
-changing Agent behavior.
+The plans, reports, provisional route emitters, Compose artifacts, and local
+executor exist.
 
-1. Make `unmute dev --telephony` build, start, watch, and stop Compose.
-2. Run the credential-free topology smoke, including Redis failure and restart.
-3. Keep every carrier feature provisional until its separate real-call smoke
+1. Run the credential-free topology smoke, including Redis failure and restart.
+2. Keep every carrier feature provisional until its separate real-call smoke
    passes.

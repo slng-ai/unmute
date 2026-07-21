@@ -427,11 +427,12 @@ Twilio `connector` route, plus one telephony Connection. These new routes are
 provisional until credentialed smokes pass. The Connector cannot inherit SIP
 transfer behavior.
 
-The generated `.env.example` names every required value. Get the LiveKit API
-key pair from the self-hosted server's `keys` configuration, and set
-`LIVEKIT_URL` to that server. Set `REDIS_URL` to the Redis deployment shared by
-LiveKit Server and LiveKit SIP. Set `LIVEKIT_SIP_URI` to the SIP service's
-public DNS name or SIP URI.
+The generated `.env.example` names every deployment value. Get the LiveKit API
+key pair from the self-hosted server's `keys` configuration, set `LIVEKIT_URL`
+to that server, and set `REDIS_URL` to the Redis deployment shared by LiveKit
+Server and LiveKit SIP. Set `LIVEKIT_SIP_URI` to the SIP service's public DNS
+name or SIP URI. Local `unmute dev --telephony` supplies its own clearly
+non-production LiveKit key pair and Redis connection instead.
 
 For Twilio, get the SIP address, Credential List username and password, and
 associated number from **Elastic SIP Trunking** in the Twilio Console. For
@@ -450,16 +451,28 @@ Self-hosted SIP runs LiveKit Server and LiveKit SIP against the same Redis.
 Redis is their shared datastore and message bus, so calls, SIP participants,
 and Agent dispatch remain coherent when either service has multiple replicas.
 It is not an audio buffer. Audio flows through SIP/RTP and LiveKit's media
-services. This differs from a single-process Pipecat carrier WebSocket, where
-one long-lived connection and its call context can remain in one process;
-Pipecat also needs shared coordination once mutable call state can reach
-different replicas.
+services. Pipecat's media and conversation remain in one long-lived worker too,
+but its generated telephony application uses Redis for correlation, callback
+idempotency, transfer locks, and admission. LiveKit's generated Agent does not
+use Redis; LiveKit Server and LiveKit SIP are the consumers.
 
 An HTTPS development tunnel isn't enough for LiveKit SIP. The carrier must
 reach SIP signaling and RTP directly; the defaults are SIP port `5060` and UDP
 RTP ports `10000-20000`. The generated worker itself exposes LiveKit's `/`
 health endpoint, which returns success only while the worker is connected and
 operating normally.
+
+Local SIP telephony always uses the emitted Compose graph:
+
+```sh
+unmute dev acme --target livekit --telephony
+```
+
+Docker Compose builds the Agent and starts Redis, LiveKit Server, and LiveKit
+SIP, then waits for every health check. Non-empty external `LIVEKIT_URL`, API
+key/secret, or `REDIS_URL` values conflict with this local graph and are
+rejected. `--verbose` follows Compose logs; normal output is retained in
+`build/livekit/telephony.log`. Stopping preserves the named Redis volume.
 
 ## Run it and talk to the agent
 
