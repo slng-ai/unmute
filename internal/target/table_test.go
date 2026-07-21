@@ -127,9 +127,22 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if !ok || len(optional) != 0 || strings.Join(required, ",") != "auth_id,auth_token,from_number" {
 		t.Fatalf("Plivo environment vocabulary = required %v optional %v ok %v", required, optional, ok)
 	}
+	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
+		livekitSIP := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: carrier}
+		required, optional, ok = TelephonyEnvironment(livekitSIP)
+		if !ok || len(optional) != 0 || strings.Join(required, ",") != "sip_address,sip_username,sip_password,from_number" {
+			t.Fatalf("LiveKit SIP %s environment vocabulary = required %v optional %v ok %v", carrier, required, optional, ok)
+		}
+		if got := ResolveTelephonyFeature(livekitSIP, TelephonyFeature(WarmTransfer)); got.Tag != Provisional || got.Smoke || !strings.Contains(got.Docs, carrier) {
+			t.Fatalf("LiveKit SIP %s warm transfer evidence = %#v", carrier, got)
+		}
+	}
 	exotel := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "exotel"}
 	if got := ResolveTelephonyFeature(exotel, TelephonyRouteSelected); got.Tag != Gated || !strings.Contains(got.Note, "does not support route") {
 		t.Fatalf("Exotel unauthenticated WebSocket route = %#v", got)
+	}
+	if got := ResolveTelephonyFeature(TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}, TelephonyRouteSelected); got.Tag != Gated {
+		t.Fatalf("unproven Exotel SIP route = %#v", got)
 	}
 	if got := ResolveTelephonyFeature(exact, TelephonyFeature(WarmTransfer)); got.Tag != Provisional || !strings.Contains(got.Note, "cannot also join the Conference") {
 		t.Fatalf("Twilio warm-transfer evidence = %#v", got)

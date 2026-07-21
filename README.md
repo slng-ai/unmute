@@ -152,6 +152,27 @@ public HTTPS origin and generate a separate `UNMUTE_OUTBOUND_TOKEN` if the
 channel permits outbound calls. See the linked telephony guide for the exact
 Connection vocabulary and setup steps.
 
+Generated LiveKit SIP projects cover Twilio, Telnyx, and Plivo through the
+same `livekit/sip/<carrier>` plan. Their Connection vocabulary is:
+
+```yaml
+# connections/primary_phone.yaml
+kind: telephony
+environment:
+  sip_address: TWILIO_SIP_ADDRESS
+  sip_username: TWILIO_SIP_USERNAME
+  sip_password: TWILIO_SIP_PASSWORD
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+Set the target's `provider: livekit`, `transport: sip`, `carrier`, and
+`connection`. The generated project includes inbound-trunk, outbound-trunk,
+and dispatch-rule JSON inputs for the directions you request. Self-hosted SIP
+also requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`,
+`REDIS_URL`, and a public `LIVEKIT_SIP_URI`; the `lk` commands return the trunk
+IDs used at runtime. An HTTPS tunnel is enough for Pipecat callbacks, but not
+for LiveKit SIP signaling and RTP.
+
 Exotel remains gated: its documented static Voicebot WebSocket flow does not
 yet provide a proven authenticated upgrade that satisfies Unmute's ingress
-policy.
+policy, and its LiveKit SIP route has no provider-specific proof.

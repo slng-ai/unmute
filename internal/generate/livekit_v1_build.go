@@ -203,6 +203,20 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			data.HasWarmTransfer = data.HasWarmTransfer || ht.Warm
 		}
 	}
+	data.Telephony, err = buildLiveKitTelephony(agent, tgt, env)
+	if err != nil {
+		return livekitData{}, err
+	}
+	if data.Telephony != nil {
+		for i := range data.Agents {
+			if !data.Agents[i].IsEntry {
+				continue
+			}
+			data.Telephony.Greeting = data.Agents[i].Greeting
+			data.Agents[i].Greeting = &livekitGreeting{Silent: true}
+			break
+		}
+	}
 
 	data.Notes = append(data.Notes, livekitServiceNotes(data)...)
 	if data.HasWarmTransfer {
@@ -218,6 +232,104 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
 	return data, nil
+}
+
+func buildLiveKitTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*livekitTelephony, error) {
+	plan := tgt.Telephony
+	if plan == nil {
+		return nil, nil
+	}
+	if plan.Key.Provider != ir.ProviderLiveKit || plan.Key.Transport != "sip" {
+		return nil, fmt.Errorf("livekit telephony route (%s, %s, %s) has no emitted adapter", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+	}
+	switch plan.Key.Carrier {
+	case "twilio", "telnyx", "plivo":
+	default:
+		return nil, fmt.Errorf("livekit SIP carrier %q has no emitted setup", plan.Key.Carrier)
+	}
+	docs := ""
+	for _, evidence := range plan.Evidence {
+		if evidence.Docs != "" {
+			docs = evidence.Docs
+			break
+		}
+	}
+	if docs == "" {
+		return nil, fmt.Errorf("livekit SIP carrier %q has no setup documentation", plan.Key.Carrier)
+	}
+	required := []string{"sip_address", "sip_username", "sip_password", "from_number"}
+	allowed := make(map[string]bool, len(required))
+	for _, key := range required {
+		allowed[key] = true
+		if plan.Environment[key] == "" {
+			return nil, fmt.Errorf("livekit SIP connection requires environment key %q", key)
+		}
+		env.add(plan.Environment[key])
+	}
+	for key := range plan.Environment {
+		if !allowed[key] {
+			return nil, fmt.Errorf("livekit SIP route does not accept connection environment key %q", key)
+		}
+	}
+	telephony := &livekitTelephony{
+		Carrier: plan.Key.Carrier, Connection: plan.Connection,
+		ProviderDocs: docs,
+		CredentialHint: "the selected carrier's SIP trunking console; use its termination address, " +
+			"authentication username and password, and linked phone number",
+		SIPAddressEnv: plan.Environment["sip_address"], SIPUsernameEnv: plan.Environment["sip_username"],
+		SIPPasswordEnv: plan.Environment["sip_password"], FromNumberEnv: plan.Environment["from_number"],
+	}
+	for _, evidence := range plan.Evidence {
+		switch evidence.Feature {
+		case "inbound":
+			telephony.HasInbound = true
+		case "outbound":
+			telephony.HasOutbound = true
+		case "warm_transfer":
+			telephony.HasWarm = true
+		}
+	}
+	for _, variable := range sortedVarNames(agent) {
+		def := agent.Variables[variable]
+		if def.Source == ir.VariableSourceCallStart {
+			telephony.CallStart = append(telephony.CallStart, livekitCallStart{
+				Name: variable, Type: string(def.Type), TypeCheck: livekitTypeCheck(def.Type), Required: def.Default == nil,
+			})
+		}
+	}
+	sourceVariables := make([]string, 0, len(plan.SystemSources))
+	for variable := range plan.SystemSources {
+		sourceVariables = append(sourceVariables, variable)
+	}
+	sort.Strings(sourceVariables)
+	for _, variable := range sourceVariables {
+		telephony.SystemSources = append(telephony.SystemSources, livekitSystemSource{
+			Variable: variable, Source: string(plan.SystemSources[variable]),
+		})
+	}
+	for _, name := range []string{"REDIS_URL", "LIVEKIT_SIP_URI"} {
+		env.add(name)
+	}
+	if telephony.HasInbound {
+		env.add("LIVEKIT_SIP_INBOUND_TRUNK")
+	}
+	if telephony.HasOutbound || telephony.HasWarm {
+		env.add("LIVEKIT_SIP_OUTBOUND_TRUNK")
+	}
+	return telephony, nil
+}
+
+func livekitTypeCheck(t ir.PrimitiveType) string {
+	switch t {
+	case ir.PrimitiveBoolean:
+		return "isinstance(value, bool)"
+	case ir.PrimitiveInteger:
+		return "isinstance(value, int) and not isinstance(value, bool)"
+	case ir.PrimitiveNumber:
+		return "isinstance(value, (int, float)) and not isinstance(value, bool)"
+	default:
+		return "isinstance(value, str)"
+	}
 }
 
 // livekitInferenceUses lists the bindings that route through LiveKit Inference,

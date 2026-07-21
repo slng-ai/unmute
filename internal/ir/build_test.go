@@ -57,6 +57,28 @@ func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 	}
 }
 
+func TestBuildLiveKitSIPUsesSharedDispatchPlan(t *testing.T) { // telephony T10, V13, V18
+	pkg := loadSafeCore(t)
+	target := pkg.Targets["livekit"]
+	target.Transport, target.Carrier, target.Connection = "sip", "twilio", "primary_phone"
+	pkg.Targets["livekit"] = target
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment = map[string]string{
+		"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
+		"sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
+	}
+	pkg.Connections["primary_phone"] = connection
+
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := agent.Targets["livekit"].Telephony
+	if plan == nil || plan.Coordination != "shared" || plan.AdmissionOwner != "livekit_dispatch" {
+		t.Fatalf("LiveKit SIP plan = %#v", plan)
+	}
+}
+
 func TestBuildRejectsUnknownOrInvalidConnection(t *testing.T) { // telephony V1-V3
 	tests := []struct {
 		name   string

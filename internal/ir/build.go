@@ -799,11 +799,15 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		})
 	}
 	connection := agent.Connections[resolved.Connection]
+	coordination, admissionOwner := "local", "generated_runtime"
+	if resolved.Provider == ProviderLiveKit && resolved.Transport == "sip" {
+		coordination, admissionOwner = "shared", "livekit_dispatch"
+	}
 	return &TelephonyPlan{
 		Channels: channels, Connection: resolved.Connection,
 		Key:         TelephonyKey{Provider: resolved.Provider, Transport: resolved.Transport, Carrier: resolved.Carrier},
 		Environment: maps.Clone(connection.Environment), Destinations: maps.Clone(resolved.Destinations),
-		SystemSources: sources, Evidence: evidence, Coordination: "local", AdmissionOwner: "generated_runtime",
+		SystemSources: sources, Evidence: evidence, Coordination: coordination, AdmissionOwner: admissionOwner,
 	}
 }
 

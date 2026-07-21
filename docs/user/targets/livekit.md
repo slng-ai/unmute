@@ -393,12 +393,31 @@ channels:
     on_voicemail: leave_message
 ```
 
-Resolve the symbolic destination for each LiveKit target.
+Declare one SIP Connection. The keys stay the same across supported SIP
+carriers; only their environment-variable names and values change.
+
+```yaml
+# connections/primary_phone.yaml
+kind: telephony
+environment:
+  sip_address: TWILIO_SIP_ADDRESS
+  sip_username: TWILIO_SIP_USERNAME
+  sip_password: TWILIO_SIP_PASSWORD
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+Bind the Connection and symbolic destinations to the exact route.
 
 ```yaml
 # targets.yaml
 targets:
   livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    transport: sip
+    carrier: twilio
+    connection: primary_phone
     destinations:
       support_line: "+14155550123"
 ```
@@ -408,13 +427,39 @@ Twilio `connector` route, plus one telephony Connection. These new routes are
 provisional until credentialed smokes pass. The Connector cannot inherit SIP
 transfer behavior.
 
+The generated `.env.example` names every required value. Get the LiveKit API
+key pair from the self-hosted server's `keys` configuration, and set
+`LIVEKIT_URL` to that server. Set `REDIS_URL` to the Redis deployment shared by
+LiveKit Server and LiveKit SIP. Set `LIVEKIT_SIP_URI` to the SIP service's
+public DNS name or SIP URI.
+
+For Twilio, get the SIP address, Credential List username and password, and
+associated number from **Elastic SIP Trunking** in the Twilio Console. For
+Telnyx, use the SIP connection address, credentials, and assigned number from
+Telnyx Mission Control. For Plivo, use the Zentrunk termination domain,
+outbound credential, and linked number from the Plivo Console.
+
+Compilation emits the selected `sip-inbound-trunk.json`,
+`sip-outbound-trunk.json`, and `sip-dispatch-rule.json` inputs. Materialize
+their environment placeholders with `envsubst`, then run the `lk sip ...
+create` commands in the generated README. Copy the returned IDs to
+`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` as requested by
+`.env.example`.
+
 Self-hosted SIP runs LiveKit Server and LiveKit SIP against the same Redis.
 Redis is their shared datastore and message bus, so calls, SIP participants,
 and Agent dispatch remain coherent when either service has multiple replicas.
-It is not an audio buffer. This differs from a single-process Pipecat carrier
-WebSocket, where one long-lived connection and its call context can remain in
-one process; Pipecat also needs shared coordination once mutable call state can
-reach different replicas.
+It is not an audio buffer. Audio flows through SIP/RTP and LiveKit's media
+services. This differs from a single-process Pipecat carrier WebSocket, where
+one long-lived connection and its call context can remain in one process;
+Pipecat also needs shared coordination once mutable call state can reach
+different replicas.
+
+An HTTPS development tunnel isn't enough for LiveKit SIP. The carrier must
+reach SIP signaling and RTP directly; the defaults are SIP port `5060` and UDP
+RTP ports `10000-20000`. The generated worker itself exposes LiveKit's `/`
+health endpoint, which returns success only while the worker is connected and
+operating normally.
 
 ## Run it and talk to the agent
 

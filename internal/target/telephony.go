@@ -87,15 +87,27 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	routes[exotel] = TelephonyRoute{Key: exotel, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{
 		"api_key", "api_token", "account_sid", "subdomain", "from_number", "app_id",
 	}}
-	sip := "https://docs.livekit.io/transport/self-hosting/sip-server/"
-	for _, carrier := range []string{"twilio", "telnyx", "plivo", "exotel"} {
+	sipRoutes := []struct{ carrier, docs string }{
+		{"twilio", "https://docs.livekit.io/telephony/start/providers/twilio/"},
+		{"telnyx", "https://docs.livekit.io/telephony/start/providers/telnyx/"},
+		{"plivo", "https://docs.livekit.io/telephony/start/providers/plivo/"},
+	}
+	for _, selected := range sipRoutes {
 		features := append([]TelephonyFeature{
 			TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(ColdTransfer),
 			TelephonyFeature(WarmTransfer), TelephonyFeature(Hangup),
 			TelephonyFeature(VoicemailDetection), TelephonyBriefingSummary,
 		}, sourcesWithoutStream...)
-		add(LiveKit, "sip", carrier, sip, features...)
+		add(LiveKit, "sip", selected.carrier, selected.docs, features...)
+		key := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: selected.carrier}
+		route := routes[key]
+		route.RequiredEnvironment = []string{"sip_address", "sip_username", "sip_password", "from_number"}
+		routes[key] = route
 	}
+	exotel = TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}
+	routes[exotel] = TelephonyRoute{Key: exotel, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{
+		"sip_address", "sip_username", "sip_password", "from_number",
+	}}
 	connector := "https://docs.livekit.io/telephony/connectors/twilio/"
 	add(LiveKit, "connector", "twilio", connector,
 		append([]TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)}, sourcesWithoutStream...)...,

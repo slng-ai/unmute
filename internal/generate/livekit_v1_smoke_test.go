@@ -448,6 +448,26 @@ func runLiveKitSmoke(t *testing.T, example string, mutate func(*ir.Target)) {
 	runLiveKitSmokeScript(t, example, mutate, livekitSmokeScript)
 }
 
+func TestLiveKitSIPGeneratedPythonCompiles(t *testing.T) { // telephony T10, V20
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+	agent, resolved := configuredLiveKitSIP(t)
+	artifact, err := GenerateLiveKit(agent, resolved, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agent.py")
+	if err := os.WriteFile(path, []byte(artifactFile(t, artifact, "agent.py")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(python, "-m", "py_compile", path).CombinedOutput(); err != nil {
+		t.Fatalf("generated LiveKit SIP Python does not compile: %v\n%s", err, output)
+	}
+}
+
 func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target), script string) {
 	t.Helper()
 	if _, err := exec.LookPath("uv"); err != nil {

@@ -133,6 +133,18 @@ func TestTelephonyDevPlanUsesExactPublicURLAndResolvedArtifact(t *testing.T) { /
 	}
 }
 
+func TestLiveKitSIPDevPlanNeedsNoHTTPSCallbackURL(t *testing.T) { // telephony T10, V17
+	plan := &generate.TelephonyRuntimePlan{
+		Route:       ir.TelephonyKey{Provider: ir.ProviderLiveKit, Transport: "sip", Carrier: "twilio"},
+		ManualSteps: []string{"expose SIP signaling and RTP"}, Coordination: "shared",
+	}
+	var out bytes.Buffer
+	printDevTelephonyPlan(&out, "phone", plan, nil)
+	if !strings.Contains(out.String(), "transport=sip") || !strings.Contains(out.String(), "expose SIP signaling and RTP") {
+		t.Fatalf("LiveKit SIP plan =\n%s", out.String())
+	}
+}
+
 func TestTelephonyDevRejectsUnsafePublicURLAndNamesMissingCredentials(t *testing.T) { // telephony V11
 	for _, value := range []string{"", "http://voice.example.com", "https://user@example.com", "https://voice.example.com?host=wrong"} {
 		if _, err := parseTelephonyPublicURL(value); err == nil {

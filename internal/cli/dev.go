@@ -154,13 +154,13 @@ func newDevCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&uiPort, "port", "8765", "port for the local dev UI")
-	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "port the Pipecat runner listens on")
+	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "port the generated agent health server listens on")
 	cmd.Flags().StringVar(&targetName, "target", "", "target instance name (required without a TTY when multiple exist)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open the browser automatically")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "stream agent logs to stderr (default: write to bot.log only)")
 	cmd.Flags().BoolVar(&console, "console", false, "talk to the agent in the terminal over the local mic/speaker (no browser or dev server; --port/--bot-port/--no-open are ignored)")
 	cmd.Flags().BoolVar(&telephony, "telephony", false, "run the selected target's resolved telephony route (no browser UI)")
-	cmd.Flags().StringVar(&publicURL, "public-url", "", "exact public HTTPS origin used for carrier callbacks and signature validation (requires --telephony)")
+	cmd.Flags().StringVar(&publicURL, "public-url", "", "exact public HTTPS origin for routes with carrier callbacks (requires --telephony)")
 	return cmd
 }
 
@@ -174,13 +174,20 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort 
 	if plan == nil {
 		return fmt.Errorf("dev %s: target %q has no resolved telephony route", root, resolved.Name)
 	}
-	public, err := parseTelephonyPublicURL(publicValue)
-	if err != nil {
-		return fmt.Errorf("dev %s: %w", root, err)
+	var public *url.URL
+	if len(plan.PublicEndpoints) > 0 || publicValue != "" {
+		public, err = parseTelephonyPublicURL(publicValue)
+		if err != nil {
+			return fmt.Errorf("dev %s: %w", root, err)
+		}
 	}
 	printDevTelephonyPlan(cmd.OutOrStdout(), resolved.Name, plan, public)
 
-	childEnv := setChildEnv(devChildEnv(root, cmd.ErrOrStderr()), "UNMUTE_PUBLIC_URL", public.String())
+	childEnv := devChildEnv(root, cmd.ErrOrStderr())
+	if public != nil {
+		childEnv = setChildEnv(childEnv, "UNMUTE_PUBLIC_URL", public.String())
+	}
+	childEnv = setChildEnv(childEnv, "UNMUTE_AGENT_HEALTH_PORT", botPort)
 	if missing := missingEnvironment(plan.RequiredEnv, childEnv); len(missing) > 0 {
 		return fmt.Errorf("dev %s: missing telephony credentials/configuration: %s; see TELEPHONY.md#credentials for where to obtain them", root, strings.Join(missing, ", "))
 	}
@@ -268,6 +275,9 @@ func parseTelephonyPublicURL(value string) (*url.URL, error) {
 func printDevTelephonyPlan(out io.Writer, name string, plan *generate.TelephonyRuntimePlan, public *url.URL) {
 	fmt.Fprintf(out, "%s: telephony route provider=%s transport=%s carrier=%s coordination=%s\n", name, plan.Route.Provider, plan.Route.Transport, plan.Route.Carrier, plan.Coordination)
 	for _, endpoint := range plan.PublicEndpoints {
+		if public == nil {
+			continue
+		}
 		base := strings.TrimSuffix(public.String(), "/")
 		if endpoint.Method == "WS" {
 			base = "wss" + strings.TrimPrefix(base, "https")

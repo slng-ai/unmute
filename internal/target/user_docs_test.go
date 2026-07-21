@@ -106,7 +106,13 @@ func TestTelephonyDocsContract(t *testing.T) {
 			"PLIVO_AUTH_ID",
 			"EXOTEL_API_KEY",
 			"LIVEKIT_API_KEY",
+			"LIVEKIT_SIP_URI",
+			"TWILIO_SIP_ADDRESS",
+			"TELNYX_SIP_ADDRESS",
+			"PLIVO_SIP_ADDRESS",
 		},
+		"docs/user/learn/07-phone-calls.md": {"## Configure self-hosted LiveKit SIP", "LIVEKIT_SIP_INBOUND_TRUNK", "10000-20000"},
+		"docs/user/targets/livekit.md":      {"sip_address", "LIVEKIT_SIP_URI", "not an audio buffer"},
 	}
 	for path, terms := range checks {
 		raw, err := os.ReadFile(filepath.Join(root, path))

@@ -42,6 +42,23 @@ func TelephonyRuntimePlanFor(target ir.Target) *TelephonyRuntimePlan {
 		AdmissionOwner: plan.AdmissionOwner,
 		ManualSteps:    []string{"configure the selected carrier or SIP trunk to the reported public endpoints"},
 	}
+	if plan.Key.Provider == ir.ProviderLiveKit && plan.Key.Transport == "sip" {
+		runtime.ManualSteps = []string{
+			"get LIVEKIT_URL and the API key pair from the self-hosted LiveKit Server configuration; configure LiveKit Server and LiveKit SIP with the same Redis deployment",
+			"deploy LiveKit SIP with public SIP signaling and RTP ports, then set LIVEKIT_SIP_URI to that public SIP endpoint",
+			"get the selected carrier SIP address, username, password, and phone number from its SIP trunking console",
+			"materialize the generated SIP JSON inputs, create the LiveKit trunks and dispatch rule with lk, and copy the returned trunk IDs into the reported environment variables",
+		}
+		runtime.RequiredEnv = append(runtime.RequiredEnv,
+			"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_SIP_URI",
+		)
+		if telephonyHasFeature(plan, "inbound") {
+			runtime.RequiredEnv = append(runtime.RequiredEnv, "LIVEKIT_SIP_INBOUND_TRUNK")
+		}
+		if telephonyHasFeature(plan, "outbound") || telephonyHasFeature(plan, "warm_transfer") {
+			runtime.RequiredEnv = append(runtime.RequiredEnv, "LIVEKIT_SIP_OUTBOUND_TRUNK")
+		}
+	}
 	if plan.Key.Provider == ir.ProviderPipecat && plan.Key.Transport == "carrier-websocket" && plan.Key.Carrier == "twilio" {
 		runtime.ManualSteps = []string{
 			"get the Account SID and Auth Token from the Twilio Console account dashboard and select a Voice-capable number",
@@ -91,7 +108,7 @@ func TelephonyRuntimePlanFor(target ir.Target) *TelephonyRuntimePlan {
 	case ir.ProviderLiveKit:
 		runtime.Processes = []TelephonyProcess{{
 			Name: "agent", Command: []string{"uv", "run", "agent.py", "dev"},
-			Health: "/healthz", Readiness: "/readyz",
+			Health: "/", Readiness: "/",
 		}}
 	}
 	switch target.Transport {
@@ -117,6 +134,8 @@ func TelephonyRuntimePlanFor(target ir.Target) *TelephonyRuntimePlan {
 			{Name: "status", Method: "POST", Path: "/telephony/status"},
 		}
 	}
+	slices.Sort(runtime.RequiredEnv)
+	runtime.RequiredEnv = slices.Compact(runtime.RequiredEnv)
 	return runtime
 }
 

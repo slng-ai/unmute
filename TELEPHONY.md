@@ -1,6 +1,6 @@
 # Telephony architecture and implementation plan
 
-Status: Adopted design; implementation in progress. Updated July 20, 2026.
+Status: Adopted design; implementation in progress. Updated July 21, 2026.
 
 Unmute must share telephony intent, planning, and call context across
 orchestrators while keeping carrier media and call-control behavior in small,
@@ -52,8 +52,10 @@ The implementation must provide the following behavior:
 - Perform cold human transfers where the selected route supports them.
 - Perform warm human transfers where the selected route supports them.
 - Detect voicemail for outbound calls where the selected route supports it.
-- Run locally through a public tunnel.
-- Run on customer infrastructure through public TLS ingress.
+- Run carrier WebSocket routes locally through a public HTTPS/WSS tunnel.
+- Run LiveKit SIP only where the carrier can reach public SIP signaling and
+  RTP; an HTTPS tunnel is insufficient.
+- Run on customer infrastructure through route-appropriate public ingress.
 - Scale horizontally for ordinary calls and document the extra coordination
   required for warm transfers.
 - Emit all Python code through Go `text/template` files.
@@ -73,30 +75,23 @@ orchestrator already performs.
 
 ## Current repository state
 
-The repository already contains the compiler seams needed for this work, but
-the generated artifacts don't yet form a complete telephony runtime.
+The compiler and offline generated routes are implemented. Credentialed L4
+verification and production hardening remain incomplete.
 
-- `internal/spec/package.go` declares telephony channel direction and target
-  strings for `transport`, `carrier`, and `destinations`.
-- `internal/ir/build.go` resolves destinations but mostly copies carrier and
-  transport strings into the IR.
-- `internal/target/table.go` gates controls by orchestrator, carrier, and
-  transport.
-- `internal/generate/artifact.go` already emits multiple deterministic files
-  and a compile report.
-- The Pipecat template currently registers WebRTC and Daily transport
-  parameters, but it doesn't emit carrier WebSocket ingress, inbound markup,
-  outbound call creation, or call-context hydration.
-- The LiveKit template currently emits SIP outbound calls and native SIP
-  transfers, but it doesn't emit inbound trunk or dispatch configuration.
-- `unmute dev` starts a browser or console runtime. It doesn't expose a public
-  telephony endpoint or run a telephony deployment plan.
-- Variables with `source: call_start` aren't hydrated from carrier call data.
-- `CONTEXT.md` defines a Connection, but `SCHEMA.md` and the implementation have
-  no Connection surface.
-
-The first schema task must reconcile Connection ownership. The implementation
-must not add more provider-specific strings directly to `Artifact` or the CLI.
+- Strict Connection loading and exact route resolution produce one
+  `TelephonyPlan` per selected target.
+- Pipecat emits selected Twilio, Telnyx, or Plivo carrier WebSocket ingress,
+  outbound control, authentication, and normalized context. Exotel is gated.
+- LiveKit emits selected Twilio, Telnyx, or Plivo SIP trunk and dispatch inputs,
+  native outbound/voicemail/transfers, and normalized SIP participant context.
+  Exotel and the separate Twilio Connector remain gated.
+- `unmute dev --telephony` consumes the provider-neutral runtime plan. It
+  requires `--public-url` only for routes with HTTP or WSS carrier endpoints.
+- Generated and compile-report files contain environment-variable names, not
+  credential values.
+- Every implemented carrier route remains provisional until its credentialed
+  inbound, outbound, authentication, hangup, and advertised-control smokes
+  pass.
 
 ## What scales across carriers
 
@@ -172,7 +167,11 @@ The initial route adapters use these names:
 | Pipecat with Plivo | `PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN`, `PLIVO_PHONE_NUMBER` | Plivo Console dashboard → API Keys and Phone Numbers. The Auth Token validates V3 webhook signatures. |
 | Pipecat with Exotel | `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`, `EXOTEL_ACCOUNT_SID`, `EXOTEL_SUBDOMAIN`, `EXOTEL_PHONE_NUMBER`, `EXOTEL_APP_ID` | Exotel Dashboard → API Settings for the key, token, Account SID, and regional subdomain; use the ExoPhone and call-flow application ID from the Voice dashboard. |
 | LiveKit Cloud or Twilio Connector | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | LiveKit Cloud project settings, or run `lk app env -w`. The Connector also needs the Twilio variables above. |
-| Self-hosted LiveKit SIP | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `REDIS_URL` | Create the API key and secret in the LiveKit Server configuration and use the same pair in LiveKit SIP. Set `LIVEKIT_URL` to that server. Create `REDIS_URL` from your Redis deployment. Carrier SIP trunk usernames and passwords remain deployment secrets referenced by the generated trunk setup. |
+| Self-hosted LiveKit SIP topology | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `REDIS_URL`, `LIVEKIT_SIP_URI` | Create the API key and secret in the LiveKit Server `keys` configuration and use the same pair in LiveKit SIP. Set `LIVEKIT_URL` to that server, `REDIS_URL` to their shared Redis deployment, and `LIVEKIT_SIP_URI` to the SIP service's public DNS name or SIP URI. |
+| LiveKit SIP with Twilio | `TWILIO_SIP_ADDRESS`, `TWILIO_SIP_USERNAME`, `TWILIO_SIP_PASSWORD`, `TWILIO_PHONE_NUMBER` | Twilio Console → Elastic SIP Trunking. Use the termination URI, Credential List username and password, and associated number. |
+| LiveKit SIP with Telnyx | `TELNYX_SIP_ADDRESS`, `TELNYX_SIP_USERNAME`, `TELNYX_SIP_PASSWORD`, `TELNYX_PHONE_NUMBER` | Telnyx Mission Control → SIP Trunking. Use the SIP connection address and credentials, and its assigned number. |
+| LiveKit SIP with Plivo | `PLIVO_SIP_ADDRESS`, `PLIVO_SIP_USERNAME`, `PLIVO_SIP_PASSWORD`, `PLIVO_PHONE_NUMBER` | Plivo Console → Zentrunk. Use the termination domain, outbound credential, and linked number. |
+| LiveKit SIP resource IDs | `LIVEKIT_SIP_INBOUND_TRUNK`, `LIVEKIT_SIP_OUTBOUND_TRUNK` | Copy each `SIPTrunkID` printed by the generated `lk sip ... create` setup commands. Only requested directions and controls require their corresponding ID. |
 
 The generated outbound HTTP endpoint also requires
 `UNMUTE_OUTBOUND_TOKEN`. Generate this secret yourself with a cryptographically
@@ -196,11 +195,13 @@ and
 [LiveKit self-hosted SIP guide](https://docs.livekit.io/transport/self-hosting/sip-server/).
 
 No carrier or LiveKit credentials were available during the initial build.
-The generated Pipecat Twilio, Telnyx, and Plivo adapters therefore have offline
-tests only. Exotel remains gated because its documented static App Bazaar
-Voicebot URL does not provide a proven authenticated WebSocket upgrade and
-custom URL data may be stripped. Every live route stays provisional until its corresponding inbound,
-outbound, hangup, authentication, and advertised-control smoke completes.
+The generated Pipecat Twilio, Telnyx, and Plivo adapters and LiveKit SIP
+topology therefore have offline tests only. Exotel remains gated because its
+documented static App Bazaar Voicebot URL doesn't provide a proven
+authenticated WebSocket upgrade, custom URL data may be stripped, and no
+provider-specific LiveKit SIP route has been proven. Every live route stays
+provisional until its corresponding inbound, outbound, hangup,
+authentication, and advertised-control smoke completes.
 
 ## Architecture
 
@@ -338,7 +339,8 @@ Carrier payloads use different names and identifiers. The adapter normalizes
 only the fields the Agent can use portably.
 
 ```text
-provider
+session_id
+carrier
 connection
 call_id
 stream_id
@@ -351,9 +353,10 @@ Transfer coordination may also retain provider-private call-leg and conference
 IDs. Those values stay inside the telephony runtime and never become portable
 Agent variables.
 
-The normalized values hydrate matching `source: call_start` system variables
-before the greeting or first model turn runs. Missing required values cause the
-call to fail before conversation starts.
+The normalized values hydrate matching explicit system sources before the
+greeting or first model turn runs. Authored `source: call_start` variables come
+from outbound job input instead. Missing requested values cause the call to
+fail before conversation starts.
 
 ### Pipecat route
 
@@ -404,6 +407,19 @@ trunk and dispatch configuration files or commands, but it doesn't execute
 them automatically. See the
 [LiveKit SIP server guide](https://docs.livekit.io/transport/self-hosting/sip-server/)
 for the underlying deployment topology and public SIP and RTP requirements.
+
+The implemented route uses one Connection vocabulary for Twilio, Telnyx, and
+Plivo: `sip_address`, `sip_username`, `sip_password`, and `from_number`. It
+emits inbound-trunk, outbound-trunk, and individual-room dispatch JSON only
+when the authored directions and controls need them. Credentials remain
+environment placeholders; outbound authentication is passed to `lk` rather
+than written into the generated JSON.
+
+The Agent waits for the SIP participant and normalizes LiveKit's
+`sip.callID`, `sip.phoneNumber`, and `sip.trunkPhoneNumber` attributes before
+the entry greeting. Outbound jobs use authenticated LiveKit Agent dispatch
+metadata with `direction`, `phone_number`, and authored `call_start` values.
+The route remains provisional until credentialed smokes prove these paths.
 
 #### Twilio Connector
 
@@ -475,9 +491,9 @@ establish the required operations.
 
 ### Transfer coordination state
 
-Ordinary inbound, outbound, hangup, and cold-transfer calls can remain
-stateless across replicas because the active WebSocket stays on one process and
-the carrier owns call state.
+Ordinary Pipecat inbound, outbound, hangup, and cold-transfer calls can keep
+call-local state on one replica because the active WebSocket stays on that
+process and the carrier owns call state.
 
 Warm transfer needs idempotent coordination across asynchronous callbacks. The
 first local implementation may use an in-memory call registry. A deployment
@@ -485,14 +501,22 @@ with warm transfer and more than one replica must use Redis for callback
 deduplication, state transitions, and short-lived locks. This is a known
 ceiling, not a reason to require Redis for simple calls.
 
+LiveKit SIP is different: Redis is required by the self-hosted LiveKit Server
+and SIP service topology even for simple calls. They use it for distributed
+room state, routing, and service coordination. Redis isn't in the RTP or
+LiveKit audio path, and the generated Agent worker doesn't use it as an audio
+buffer.
+
 The state key uses the carrier and call ID. Records expire after the maximum
 call duration plus a short cleanup window. Provider callbacks may be retried,
 so every transition must be idempotent.
 
 ## Local development
 
-Local telephony uses the same generated application as deployment. A tunnel is
-the only extra network hop.
+Local telephony uses the same generated application as deployment. Pipecat
+carrier WebSocket routes add an HTTPS/WSS tunnel. LiveKit SIP instead requires
+a carrier-reachable SIP service and RTP range; `--public-url` is neither
+required nor sufficient for that route.
 
 The first CLI implementation adds this form:
 
@@ -512,9 +536,10 @@ The command performs these steps:
 7. Stream or retain logs using the existing `--verbose` behavior.
 8. Stop the complete process group on interruption.
 
-The CLI doesn't install or run ngrok in the first release. You run any tunnel
-you prefer and pass its stable HTTPS URL. Add managed tunnel support only when
-repeated user friction justifies another dependency and credential path.
+The CLI doesn't install or run ngrok in the first release. For carrier
+WebSocket routes, you run any tunnel you prefer and pass its stable HTTPS URL.
+Add managed tunnel support only when repeated user friction justifies another
+dependency and credential path.
 
 A container alone is insufficient. The carrier must still have credentials, a
 voice-enabled number, and a configured route to the public URL.
