@@ -970,6 +970,7 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	for _, want := range []string{
 		"Configure self-hosted LiveKit SIP", "SIP trunking console", "twilio provider guide", "REDIS_URL", "not an audio hop",
 		`--auth-user "$TWILIO_SIP_USERNAME"`, `--auth-pass "$TWILIO_SIP_PASSWORD"`,
+		"UNMUTE_LIVEKIT_SIP_PORT", "UNMUTE_LIVEKIT_RTP_PORT_RANGE", "UNMUTE_LIVEKIT_PORT",
 	} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("README.md missing %q", want)
@@ -980,8 +981,12 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	assertGoldenFile(t, filepath.Join("testdata", "golden", "livekit_v1_telephony_compose.yaml"), compose, *updateLiveKitV1)
 	for _, want := range []string{
 		"image: redis:7.4.9-alpine", "image: livekit/livekit-server:v1.13.4", "image: livekit/sip:v1.7.0",
-		"LIVEKIT_API_SECRET=devsecret-local-only", "address: redis:6379", `"5060:5060/udp"`,
-		`"10000-20000:10000-20000/udp"`, "condition: service_healthy", "redis_data:/data",
+		"LIVEKIT_API_SECRET=devsecret-local-only", "address: redis:6379",
+		`stop_grace_period: "1200s"`, `"${UNMUTE_LIVEKIT_PORT:-7880}:7880"`,
+		`"${UNMUTE_LIVEKIT_SIP_PORT:-5060}:5060/udp"`,
+		`rtp_port: ${UNMUTE_LIVEKIT_RTP_PORT_RANGE:-10000-10100}`,
+		`"${UNMUTE_LIVEKIT_RTP_PORT_RANGE:-10000-10100}:${UNMUTE_LIVEKIT_RTP_PORT_RANGE:-10000-10100}/udp"`,
+		"condition: service_healthy", "redis_data:/data",
 	} {
 		if !strings.Contains(compose, want) {
 			t.Errorf("compose.telephony.yaml missing %q:\n%s", want, compose)

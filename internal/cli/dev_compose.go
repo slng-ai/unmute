@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/slng/unmute/internal/generate"
@@ -94,6 +95,18 @@ func composeArgs(file, project string, command ...string) []string {
 	return append(args, command...)
 }
 
+func composeWasInterrupted(ctx context.Context, err error) bool {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		return true
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	status, ok := exitErr.Sys().(syscall.WaitStatus)
+	return ok && status.Signaled() && (status.Signal() == syscall.SIGINT || status.Signal() == syscall.SIGTERM)
+}
+
 func runTelephonyCompose(
 	ctx context.Context,
 	dir, file, project string,
@@ -116,6 +129,10 @@ func runTelephonyCompose(
 	spin.Stop()
 	if err != nil {
 		_ = cleanup()
+		if composeWasInterrupted(ctx, err) {
+			fmt.Fprintln(stderr, "\nstopping...")
+			return nil
+		}
 		fmt.Fprintf(stderr, "telephony Compose failed to start. logs: %s\n", logPath)
 		return fmt.Errorf("start Docker Compose topology: %w", err)
 	}
@@ -143,10 +160,14 @@ func runTelephonyCompose(
 		<-logsDone
 		return nil
 	case err := <-logsDone:
-		if ctx.Err() == nil && err == nil {
+		if composeWasInterrupted(ctx, err) {
+			fmt.Fprintln(stderr, "\nstopping...")
+			return nil
+		}
+		if err == nil {
 			return errors.New("docker compose log stream exited before shutdown")
 		}
-		if err != nil && ctx.Err() == nil {
+		if err != nil {
 			return fmt.Errorf("docker compose log stream exited: %w", err)
 		}
 		return nil

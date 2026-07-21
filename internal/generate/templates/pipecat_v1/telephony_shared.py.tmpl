@@ -3,25 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager, suppress
 import hmac
 import os
 import re
 import secrets
+import signal
 from collections.abc import Callable
 from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket
+from loguru import logger
 from pipecat.runner.types import WebSocketRunnerArguments
 
 import bot
 from telephony_state import TelephonyState
 
 
-app = FastAPI()
 CONNECTION = {{pyq .Telephony.Connection}}
 CONTROL_TIMEOUT_SECS = 10
 PENDING_TTL_SECS = 300
 SESSION_TTL_SECS = {{.Telephony.SessionTTL}}
+DRAIN_TIMEOUT_SECS = max(1, SESSION_TTL_SECS - 30)
 REQUIRED_ENV = [{{range $i, $name := .RequiredEnv}}{{if $i}}, {{end}}{{pyq $name}}{{end}}]
 CALL_START_TYPES = {
 {{range .Telephony.CallStart}}    {{pyq .Name}}: {{pyq .Type}},
@@ -30,6 +33,51 @@ CALL_START_REQUIRED = {
 {{range .Telephony.CallStart}}{{if .Required}}    {{pyq .Name}},
 {{end}}{{end}}}
 STATE = TelephonyState(os.getenv("REDIS_URL"), {{pyq .Project}}, {{.Telephony.MaxSessions}}, SESSION_TTL_SECS)
+_ACTIVE_MEDIA: set[WebSocket] = set()
+_DRAIN_TASK: asyncio.Task | None = None
+
+
+async def _force_drain() -> None:
+    await asyncio.sleep(DRAIN_TIMEOUT_SECS)
+    if not _ACTIVE_MEDIA:
+        return
+    logger.error(
+        "telephony forced termination after drain timeout; active_sessions={}",
+        len(_ACTIVE_MEDIA),
+    )
+    await asyncio.gather(
+        *(websocket.close(code=1012) for websocket in tuple(_ACTIVE_MEDIA)),
+        return_exceptions=True,
+    )
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    global _DRAIN_TASK
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def begin_drain(signum, frame) -> None:
+        global _DRAIN_TASK
+        STATE.begin_drain()
+        if _DRAIN_TASK is None:
+            _DRAIN_TASK = asyncio.create_task(_force_drain())
+        if callable(previous_sigterm):
+            previous_sigterm(signum, frame)
+
+    signal.signal(signal.SIGTERM, begin_drain)
+    try:
+        yield
+    finally:
+        STATE.begin_drain()
+        signal.signal(signal.SIGTERM, previous_sigterm)
+        if _DRAIN_TASK is not None:
+            _DRAIN_TASK.cancel()
+            with suppress(asyncio.CancelledError):
+                await _DRAIN_TASK
+        await STATE.close()
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 def _env(name: str) -> str:
@@ -133,12 +181,6 @@ async def readiness() -> dict[str, object]:
     return {"ready": True}
 
 
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    STATE.begin_drain()
-    await STATE.close()
-
-
 async def handle_media(
     websocket: WebSocket,
     token: str,
@@ -158,6 +200,7 @@ async def handle_media(
         await websocket.close(code=1013)
         return
     await websocket.accept()
+    _ACTIVE_MEDIA.add(websocket)
     try:
         runner_args = WebSocketRunnerArguments(
             websocket=websocket,
@@ -173,6 +216,7 @@ async def handle_media(
             await agent_task
             refresh_task.cancel()
     finally:
+        _ACTIVE_MEDIA.discard(websocket)
         await STATE.release(pending["session_id"])
 
 

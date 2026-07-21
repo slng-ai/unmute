@@ -39,6 +39,10 @@ set to the status URL, then assign the phone number to that application.
 {{end}}The public origin must exactly match `UNMUTE_PUBLIC_URL` or signature
 validation will reject the request.
 
+Normal logs default to `INFO`. Setting `UNMUTE_LOG_LEVEL=DEBUG` also enables
+upstream Pipecat parser diagnostics, which may include caller phone numbers;
+use debug logging only in a controlled environment.
+
 {{if .Telephony.HasCold}}Cold transfer is destructive on this generated
 {{if eq .Telephony.Carrier "twilio"}}Twilio{{else if eq .Telephony.Carrier "telnyx"}}Telnyx{{else if eq .Telephony.Carrier "plivo"}}Plivo{{end}}
 route: the adapter does not restore the original AI media stream when the

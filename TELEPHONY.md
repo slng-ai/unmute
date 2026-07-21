@@ -638,6 +638,15 @@ The first command builds and starts the generated Pipecat application in
 Compose with Redis. The second builds and starts the generated LiveKit Agent,
 Redis, LiveKit Server, and LiveKit SIP in one Compose project.
 
+`UNMUTE_TELEPHONY_PORT` selects the generated application health/API host port
+for either route. LiveKit local topology also accepts `UNMUTE_LIVEKIT_PORT`,
+`UNMUTE_LIVEKIT_SIP_PORT`, and `UNMUTE_LIVEKIT_RTP_PORT_RANGE`. Its local RTP
+default is the smaller `10000-10100` range; production must configure and expose
+the range sized for its traffic. Set distinct values for all occupied host
+ports when running two stacks. Compose project names use
+`unmute-<source-dir>-<target>-<path-hash>`, so networks and preserved volumes
+remain isolated after ports are separated.
+
 The command performs these steps:
 
 1. Compile the selected target.
@@ -681,10 +690,15 @@ The deployment must provide the following runtime behavior:
 - Public HTTPS and WSS on TCP 443.
 - WebSocket upgrade support and timeouts longer than the maximum call duration.
 - Graceful shutdown that stops accepting calls and drains active streams.
+- A stop grace period at least as long as the compiled call duration. The
+  generated adapter rejects new calls as soon as SIGTERM arrives and reports
+  any active sessions it must force-close at its drain deadline.
 - Horizontal scaling based on active sessions, not HTTP request rate alone.
 - Carrier credentials and model credentials through environment secrets.
 - Redis for pending-call correlation, callback idempotency, human-transfer
   state, and admission.
+- `INFO` logging by default. `UNMUTE_LOG_LEVEL=DEBUG` can expose phone numbers
+  through upstream Pipecat parser diagnostics and is only for controlled use.
 
 ### LiveKit deployment
 

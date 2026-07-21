@@ -3,6 +3,7 @@ services:
   application:
     build:
       context: .
+    stop_grace_period: "1200s"
     environment:
       - LIVEKIT_URL=ws://livekit_server:7880
       - LIVEKIT_API_KEY=devkey
@@ -48,7 +49,7 @@ services:
     image: livekit/livekit-server:v1.13.4
     command: ["--dev", "--bind", "0.0.0.0", "--redis-host", "redis:6379"]
     ports:
-      - "7880:7880"
+      - "${UNMUTE_LIVEKIT_PORT:-7880}:7880"
     depends_on:
       redis:
         condition: service_healthy
@@ -69,14 +70,14 @@ services:
           address: redis:6379
         health_port: 8080
         sip_port: 5060
-        rtp_port: 10000-20000
+        rtp_port: ${UNMUTE_LIVEKIT_RTP_PORT_RANGE:-10000-10100}
         use_external_ip: true
         logging:
           level: debug
     ports:
-      - "5060:5060/tcp"
-      - "5060:5060/udp"
-      - "10000-20000:10000-20000/udp"
+      - "${UNMUTE_LIVEKIT_SIP_PORT:-5060}:5060/tcp"
+      - "${UNMUTE_LIVEKIT_SIP_PORT:-5060}:5060/udp"
+      - "${UNMUTE_LIVEKIT_RTP_PORT_RANGE:-10000-10100}:${UNMUTE_LIVEKIT_RTP_PORT_RANGE:-10000-10100}/udp"
     depends_on:
       redis:
         condition: service_healthy

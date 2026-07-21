@@ -27,7 +27,8 @@ import asyncio
 {{end}}
 {{if .NeedsInspect}}import inspect
 {{end}}import os
-{{if or .HasFlows .Tracing}}import json
+{{if .Telephony}}import sys
+{{end}}{{if or .HasFlows .Tracing}}import json
 {{end}}{{if .Tracing}}from collections.abc import Sequence
 {{end}}{{if .Variables}}from dataclasses import asdict, dataclass
 {{end}}{{if .Tracing}}from datetime import datetime, timezone
@@ -36,7 +37,8 @@ import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}{{if .Telephony}}import telephony
 {{end}}from dotenv import load_dotenv
-{{if .Tracing}}
+{{if .Telephony}}from loguru import logger
+{{end}}{{if .Tracing}}
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace import TracerProvider
@@ -73,7 +75,10 @@ from pipecat.utils.tracing.setup import setup_tracing
 {{end}}
 load_dotenv()
 
-MAIN_NAME = {{pyq .MainName}}
+{{if .Telephony}}logger.remove()
+logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())
+
+{{end}}MAIN_NAME = {{pyq .MainName}}
 {{if .Tracing}}
 TRACE_NAME = {{pyq .EntryAgent}} + "-" + {{pyq .Project}}
 {{end}}

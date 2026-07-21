@@ -242,6 +242,56 @@ func TestComposeExecutorRunsUpLogsAndProjectScopedDown(t *testing.T) { // teleph
 	}
 }
 
+func TestComposeExecutorTreatsStartupInterruptAsCleanStop(t *testing.T) { // telephony V24
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "docker")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\ncase \"$*\" in *' up '*) while :; do sleep 1; done;; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restore := composeCommand
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, fake, args...)
+	}
+	t.Cleanup(func() { composeCommand = restore })
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	var output bytes.Buffer
+	err := runTelephonyCompose(
+		ctx, dir, filepath.Join(dir, "compose.telephony.yaml"), "unmute-test",
+		nil, &output, &output, &output, filepath.Join(dir, "telephony.log"),
+	)
+	if err != nil {
+		t.Fatalf("startup interrupt returned an error: %v", err)
+	}
+	if !strings.Contains(output.String(), "stopping...") {
+		t.Fatalf("startup interrupt did not report a clean stop: %s", output.String())
+	}
+}
+
+func TestComposeExecutorTreatsLogInterruptAsCleanStop(t *testing.T) { // telephony V24
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "docker")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restore := composeCommand
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, fake, args...)
+	}
+	t.Cleanup(func() { composeCommand = restore })
+	var output bytes.Buffer
+	err := runTelephonyCompose(
+		context.Background(), dir, filepath.Join(dir, "compose.telephony.yaml"), "unmute-test",
+		nil, &output, &output, &output, filepath.Join(dir, "telephony.log"),
+	)
+	if err != nil {
+		t.Fatalf("log interrupt returned an error: %v", err)
+	}
+	if !strings.Contains(output.String(), "stopping...") {
+		t.Fatalf("log interrupt did not report a clean stop: %s", output.String())
+	}
+}
+
 func TestComposeLocalEnvironmentAndLiveKitConflicts(t *testing.T) { // telephony V24-V25
 	plan := &generate.TelephonyRuntimePlan{
 		Services:    []string{"application", "redis", "livekit_server", "livekit_sip"},

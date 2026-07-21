@@ -424,6 +424,12 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	for _, want := range []string{
 		`CONTROL_TIMEOUT_SECS = 10`,
 		`SESSION_TTL_SECS = 1260`,
+		`DRAIN_TIMEOUT_SECS = max(1, SESSION_TTL_SECS - 30)`,
+		`app = FastAPI(lifespan=lifespan)`,
+		`signal.signal(signal.SIGTERM, begin_drain)`,
+		`STATE.begin_drain()`,
+		`telephony forced termination after drain timeout; active_sessions={}`,
+		`websocket.close(code=1012)`,
 		`def _env(name: str) -> str:`,
 		`def _public_url() -> str:`,
 		`async def _remember(`,
@@ -470,6 +476,7 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		`call_context = telephony.normalized_context(runner_args)`,
 		`agents = [BillingAgent(state=state, context=context, call_context=call_context), IntakeAgent(state=state, context=context, call_context=call_context)]`,
 		`await telephony.cold_transfer(self.call_context["call_id"], "+14155550123")`,
+		`logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing %q", want)
@@ -477,6 +484,14 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	}
 	if strings.Contains(bot, "STATE = State()") || strings.Contains(bot, "AGENTS = [") {
 		t.Error("per-call state or workers escaped into module globals")
+	}
+	if strings.Contains(shared, `@app.on_event("shutdown")`) {
+		t.Error("telephony_shared.py retains deprecated post-stop shutdown draining")
+	}
+	beginDrainAt := strings.Index(shared, "STATE.begin_drain()")
+	stopServerAt := strings.Index(shared, "previous_sigterm(signum, frame)")
+	if beginDrainAt < 0 || stopServerAt < 0 || beginDrainAt > stopServerAt {
+		t.Error("SIGTERM must flip readiness before asking Uvicorn to stop")
 	}
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
 	if !strings.Contains(pyproject, `"twilio>=9,<10"`) {
@@ -499,6 +514,7 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		"pipecat/carrier-websocket/twilio",
 		"Twilio phone-number voice",
 		"Cold transfer is destructive on this generated\nTwilio\nroute",
+		"UNMUTE_LOG_LEVEL=DEBUG",
 	} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("README.md missing Twilio setup %q", want)
@@ -510,6 +526,7 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	for _, want := range []string{
 		"build:\n      context: .", "image: redis:7.4.9-alpine", "condition: service_healthy",
 		"REDIS_URL=redis://redis:6379/0", "redis_data:/data", "UNMUTE_TELEPHONY_PORT:-7860",
+		`stop_grace_period: "1260s"`,
 	} {
 		if !strings.Contains(compose, want) {
 			t.Errorf("compose.telephony.yaml missing %q:\n%s", want, compose)

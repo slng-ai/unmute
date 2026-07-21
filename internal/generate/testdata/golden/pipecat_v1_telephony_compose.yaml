@@ -3,6 +3,7 @@ services:
   application:
     build:
       context: .
+    stop_grace_period: "1260s"
     environment:
       - REDIS_URL=redis://redis:6379/0
       - DEEPGRAM_API_KEY
