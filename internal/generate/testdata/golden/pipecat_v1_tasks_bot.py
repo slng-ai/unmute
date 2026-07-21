@@ -19,6 +19,7 @@ import functools
 import os
 import json
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 
 import httpx
 from dotenv import load_dotenv
@@ -86,6 +87,79 @@ def require_env() -> None:
 
 
 
+def _patch_pipecat_speech_tracing() -> None:
+    """Expose Pipecat's speech payloads and metrics to Langfuse."""
+    from pipecat.frames.frames import TTSAudioRawFrame
+    from pipecat.services.tts_service import TTSService
+    from pipecat.utils.tracing import service_decorators
+
+    if getattr(service_decorators.add_stt_span_attributes, "__langfuse_patch__", False):
+        return
+
+    def patch(original, kind):
+        def patched(span, *args, **kwargs):
+            set_attribute = span.set_attribute
+
+            # ponytail: Pipecat 1.5 emits speech data under generic keys that
+            # Langfuse does not map. Remove when Pipecat emits Langfuse I/O.
+            def mapped_set_attribute(key, value):
+                set_attribute(key, value)
+                encoded = json.dumps(value, default=str)
+                if kind == "stt" and key == "transcript":
+                    set_attribute("langfuse.observation.output", encoded)
+                    set_attribute("langfuse.trace.input", encoded)
+                elif kind == "tts" and key == "text":
+                    set_attribute("langfuse.observation.input", encoded)
+                    set_attribute("langfuse.trace.output", encoded)
+                elif key == "metrics.ttfb":
+                    set_attribute("langfuse.observation.metadata.ttfb_seconds", value)
+                    set_attribute(
+                        "langfuse.observation.completion_start_time",
+                        datetime.now(timezone.utc).isoformat(),
+                    )
+                elif kind == "tts" and key == "metrics.character_count":
+                    set_attribute("langfuse.observation.metadata.character_count", value)
+                    set_attribute(
+                        "langfuse.observation.usage_details",
+                        json.dumps({"characters": value}),
+                    )
+
+            span.set_attribute = mapped_set_attribute
+            original(span, *args, **kwargs)
+            mapped_set_attribute(
+                "langfuse.observation.input" if kind == "stt" else "langfuse.observation.output",
+                json.dumps("audio"),
+            )
+
+        patched.__langfuse_patch__ = True
+        return patched
+
+    service_decorators.add_stt_span_attributes = patch(
+        service_decorators.add_stt_span_attributes, "stt"
+    )
+    service_decorators.add_tts_span_attributes = patch(
+        service_decorators.add_tts_span_attributes, "tts"
+    )
+
+    original_append_to_audio_context = TTSService.append_to_audio_context
+
+    async def append_to_audio_context(self, context_id, frame):
+        entry = getattr(self, "_tts_spans", {}).get(context_id)
+        if isinstance(frame, TTSAudioRawFrame) and entry and not entry.get("ttfb_recorded"):
+            started_at = getattr(getattr(self, "_metrics", None), "_start_ttfb_time", 0)
+            # ponytail: Pipecat 1.5 clears some TTS contexts while pushing the
+            # metric frame. Record TTFB at the actual first audio frame instead.
+            if started_at:
+                entry["span"].set_attribute(
+                    "metrics.ttfb", datetime.now(timezone.utc).timestamp() - started_at
+                )
+                entry["ttfb_recorded"] = True
+        return await original_append_to_audio_context(self, context_id, frame)
+
+    append_to_audio_context.__langfuse_patch__ = True
+    TTSService.append_to_audio_context = append_to_audio_context
+
+
 def setup_langfuse_tracing() -> bool:
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
@@ -101,6 +175,7 @@ def setup_langfuse_tracing() -> bool:
     os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = (
         f"Authorization=Basic%20{auth},x-langfuse-ingestion-version=4"
     )
+    _patch_pipecat_speech_tracing()
     if not setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter()):
         raise RuntimeError("Pipecat OpenTelemetry tracing is unavailable")
     return True

@@ -123,11 +123,47 @@ func TestV21PipecatUsesNativeTracing(t *testing.T) {
 	for _, forbidden := range []string{
 		"SpanProcessor",
 		"LangfuseAttributeProcessor",
-		"span.set_attribute =",
-		"service_decorators",
 	} {
 		if strings.Contains(bot, forbidden) {
 			t.Errorf("bot.py contains custom tracing hook %q", forbidden)
+		}
+	}
+}
+
+func TestV23PipecatSpeechObservationsAreRich(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enableLangfuse(agent)
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"def _patch_pipecat_speech_tracing() -> None:",
+		"service_decorators.add_stt_span_attributes",
+		"service_decorators.add_tts_span_attributes",
+		"TTSService.append_to_audio_context",
+		`"langfuse.observation.input"`,
+		`"langfuse.observation.output"`,
+		`"langfuse.trace.input"`,
+		`"langfuse.trace.output"`,
+		`"langfuse.observation.completion_start_time"`,
+		`"langfuse.observation.usage_details"`,
+		`"langfuse.observation.metadata.ttfb_seconds"`,
+		`"langfuse.observation.metadata.character_count"`,
+		"_patch_pipecat_speech_tracing()",
+		"PipelineParams(enable_metrics=True, enable_usage_metrics=True)",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing %q", want)
 		}
 	}
 }

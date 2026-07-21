@@ -246,12 +246,17 @@ class FakeSTT(STTService):
             settings=STTSettings(model="probe-stt", language="en"),
         )
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     @traced_stt
     async def run_stt(self, audio: bytes):
+        await self.start_ttfb_metrics()
         yield TranscriptionFrame(
             "trace this request",
             user_id="probe-user",
             timestamp="2026-07-20T00:00:00Z",
+            language="en",
             finalized=True,
         )
 
@@ -265,6 +270,9 @@ class FakeTTS(TTSService):
             sample_rate=16000,
             settings=TTSSettings(model="probe-tts", voice="probe-voice", language="en"),
         )
+
+    def can_generate_metrics(self) -> bool:
+        return True
 
     @traced_tts
     async def run_tts(self, text: str, context_id: str):
@@ -319,7 +327,7 @@ async def main() -> None:
         name="trace-main",
         enable_tracing=True,
         additional_span_attributes={"langfuse.trace.name": bot.TRACE_NAME},
-        params=PipelineParams(enable_metrics=True),
+        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
     request_agent = type(bot.AGENTS[0])()
     bot._enable_agent_tracing(main_worker, [request_agent])
@@ -354,9 +362,31 @@ async def main() -> None:
     assert requests["stt"].attributes["gen_ai.request.model"] == "probe-stt"
     assert requests["llm"].attributes["gen_ai.request.model"] == "probe-model"
     assert requests["tts"].attributes["gen_ai.request.model"] == "probe-tts"
+    assert requests["stt"].attributes["gen_ai.provider.name"] == "fakestt"
+    assert requests["tts"].attributes["gen_ai.provider.name"] == "faketts"
     assert requests["stt"].attributes["transcript"] == "trace this request"
+    assert requests["stt"].attributes["language"] == "en"
+    assert requests["stt"].attributes["is_final"] is True
     assert requests["llm"].attributes["output"] == "traced."
     assert requests["tts"].attributes["text"] == "traced."
+    assert requests["tts"].attributes["voice_id"] == "probe-voice"
+    assert requests["tts"].attributes["metrics.character_count"] == len("traced.")
+    assert requests["stt"].attributes["metrics.ttfb"] >= 0
+    assert requests["tts"].attributes["metrics.ttfb"] >= 0
+    assert json.loads(requests["stt"].attributes["langfuse.observation.input"]) == "audio"
+    assert json.loads(requests["stt"].attributes["langfuse.observation.output"]) == "trace this request"
+    assert json.loads(requests["tts"].attributes["langfuse.observation.input"]) == "traced."
+    assert json.loads(requests["tts"].attributes["langfuse.observation.output"]) == "audio"
+    assert json.loads(requests["stt"].attributes["langfuse.trace.input"]) == "trace this request"
+    assert json.loads(requests["tts"].attributes["langfuse.trace.output"]) == "traced."
+    assert requests["stt"].attributes["langfuse.observation.metadata.ttfb_seconds"] >= 0
+    assert requests["tts"].attributes["langfuse.observation.metadata.ttfb_seconds"] >= 0
+    assert requests["stt"].attributes["langfuse.observation.completion_start_time"]
+    assert requests["tts"].attributes["langfuse.observation.completion_start_time"]
+    assert requests["tts"].attributes["langfuse.observation.metadata.character_count"] == len("traced.")
+    assert json.loads(requests["tts"].attributes["langfuse.observation.usage_details"]) == {
+        "characters": len("traced.")
+    }
     assert conversation.attributes["langfuse.trace.name"] == bot.TRACE_NAME
     assert conversation.resource.attributes["service.name"] == bot.TRACE_NAME
     assert all(span.context.trace_id == conversation.context.trace_id for span in requests.values())
