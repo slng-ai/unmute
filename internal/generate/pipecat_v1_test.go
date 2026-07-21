@@ -407,17 +407,32 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		`RequestValidator(_env(AUTH_TOKEN_ENV))`,
 		`_validator().validate(_http_url(request.url.path), form, signature)`,
 		`_validator().validate(`,
-		`pending = await STATE.pending(token, consume=True)`,
-		`await STATE.admit(pending["session_id"])`,
 		`STATE.mark_once("status", event_id, SESSION_TTL_SECS)`,
-		`hmac.compare_digest(request.headers.get("Authorization", ""), expected)`,
 		`status_callback_event=["initiated", "ringing", "answered", "completed"]`,
 		`await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))`,
-		`"campaign_id": "string"`,
-		`CALL_START_REQUIRED = {`,
+		`destination, call_start = await _outbound_request(request)`,
+		`await handle_media(websocket, token, _validate_websocket)`,
 	} {
 		if !strings.Contains(adapter, want) {
 			t.Errorf("telephony.py missing %q", want)
+		}
+	}
+	shared := artifactFile(t, artifact, "telephony_shared.py")
+	for _, want := range []string{
+		`def _env(name: str) -> str:`,
+		`def _public_url() -> str:`,
+		`async def _remember(`,
+		`async def _outbound_request(request: Request)`,
+		`hmac.compare_digest(request.headers.get("Authorization", ""), expected)`,
+		`pending = await STATE.pending(token, consume=True)`,
+		`await STATE.admit(pending["session_id"])`,
+		`if STATE.draining:`,
+		`await websocket.close(code=1013)`,
+		`"campaign_id": "string"`,
+		`CALL_START_REQUIRED = {`,
+	} {
+		if !strings.Contains(shared, want) {
+			t.Errorf("telephony_shared.py missing %q", want)
 		}
 	}
 	state := artifactFile(t, artifact, "telephony_state.py")
@@ -456,8 +471,10 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		t.Error("pyproject.toml missing selected Twilio SDK")
 	}
 	report := artifactFile(t, artifact, "compile-report.json")
-	if !strings.Contains(report, `"telephony.py"`) {
-		t.Error("compile report missing selected adapter")
+	for _, path := range []string{`"telephony.py"`, `"telephony_shared.py"`} {
+		if !strings.Contains(report, path) {
+			t.Errorf("compile report missing generated file %s", path)
+		}
 	}
 	if strings.Contains(report, `"pcc-deploy.toml"`) {
 		t.Error("direct carrier server must not advertise the incompatible Pipecat Cloud runner manifest")
@@ -578,15 +595,15 @@ func TestPipecatTelnyxTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		`"stream_bidirectional_mode": "rtp"`,
 		`"stream_bidirectional_codec": "PCMU"`,
 		`"command_id": secrets.token_urlsafe(24)`,
-		`pending = await STATE.pending(token, consume=True)`,
-		`await STATE.admit(pending["session_id"])`,
-		`hmac.compare_digest(request.headers.get("Authorization", ""), expected)`,
+		`destination, call_start = await _outbound_request(request)`,
+		`await handle_media(websocket, token)`,
 		`"carrier": "telnyx"`,
 	} {
 		if !strings.Contains(adapter, want) {
 			t.Errorf("telephony.py missing %q", want)
 		}
 	}
+	artifactFile(t, artifact, "telephony_shared.py")
 	for _, forbidden := range []string{"RequestValidator", "Twilio", "Plivo", "Exotel", "media.payload", "audio/x-mulaw"} {
 		if strings.Contains(adapter, forbidden) {
 			t.Errorf("telephony.py contains unselected or media implementation %q", forbidden)
@@ -651,21 +668,21 @@ func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T
 	for _, want := range []string{
 		`utils.validate_v3_signature(`,
 		`STATE.mark_once("nonce", nonce, PENDING_TTL_SECS)`,
-		`pending = await STATE.pending(token, consume=True)`,
-		`await STATE.admit(pending["session_id"])`,
 		`bidirectional="true"`,
 		`keepCallAlive="true"`,
 		`contentType="audio/x-mulaw;rate=8000"`,
 		`answer_url=_http_url(f"/telephony/answer/{token}")`,
 		`_client().calls.transfer`,
 		`aleg_url=_http_url(f"/telephony/transfer/{token}")`,
-		`hmac.compare_digest(request.headers.get("Authorization", ""), expected)`,
+		`destination, call_start = await _outbound_request(request)`,
+		`await handle_media(websocket, token)`,
 		`"carrier": "plivo"`,
 	} {
 		if !strings.Contains(adapter, want) {
 			t.Errorf("telephony.py missing %q", want)
 		}
 	}
+	artifactFile(t, artifact, "telephony_shared.py")
 	for _, forbidden := range []string{"RequestValidator", "Twilio", "Telnyx", "Exotel", "media.payload"} {
 		if strings.Contains(adapter, forbidden) {
 			t.Errorf("telephony.py contains unselected or media implementation %q", forbidden)

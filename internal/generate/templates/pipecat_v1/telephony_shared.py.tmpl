@@ -1,0 +1,168 @@
+"""Generated carrier-neutral telephony helpers for {{.Project}}."""
+
+from __future__ import annotations
+
+import hmac
+import os
+import re
+import secrets
+from collections.abc import Callable
+from urllib.parse import urlsplit, urlunsplit
+
+from fastapi import FastAPI, HTTPException, Request, WebSocket
+from pipecat.runner.types import WebSocketRunnerArguments
+
+import bot
+from telephony_state import TelephonyState
+
+
+app = FastAPI()
+CONNECTION = {{pyq .Telephony.Connection}}
+PENDING_TTL_SECS = 300
+SESSION_TTL_SECS = {{.Telephony.SessionTTL}}
+REQUIRED_ENV = [{{range $i, $name := .RequiredEnv}}{{if $i}}, {{end}}{{pyq $name}}{{end}}]
+CALL_START_TYPES = {
+{{range .Telephony.CallStart}}    {{pyq .Name}}: {{pyq .Type}},
+{{end}}}
+CALL_START_REQUIRED = {
+{{range .Telephony.CallStart}}{{if .Required}}    {{pyq .Name}},
+{{end}}{{end}}}
+STATE = TelephonyState(os.getenv("REDIS_URL"), {{pyq .Project}}, {{.Telephony.MaxSessions}}, SESSION_TTL_SECS)
+
+
+def _env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+def _public_url() -> str:
+    value = _env("UNMUTE_PUBLIC_URL").rstrip("/")
+    parsed = urlsplit(value)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
+        raise RuntimeError("UNMUTE_PUBLIC_URL must be an HTTPS origin with an optional path")
+    return value
+
+
+def _http_url(path: str) -> str:
+    return _public_url() + path
+
+
+def _websocket_url(path: str) -> str:
+    parsed = urlsplit(_http_url(path))
+    return urlunsplit(("wss", parsed.netloc, parsed.path, "", ""))
+
+
+async def _remember(
+    direction: str, from_number: str, to_number: str, call_start: dict
+) -> tuple[str, str]:
+    session_id = secrets.token_urlsafe(24)
+    token = secrets.token_urlsafe(32)
+    await STATE.remember_pending(token, {
+        "session_id": session_id,
+        "direction": direction,
+        "from_number": from_number,
+        "to_number": to_number,
+        "call_start": dict(call_start),
+    }, PENDING_TTL_SECS)
+    return token, session_id
+
+
+async def _require_accepting() -> None:
+    if STATE.draining or not await STATE.ping():
+        raise HTTPException(status_code=503, detail="telephony control unavailable")
+
+
+def _valid_destination(value: object) -> bool:
+    return isinstance(value, str) and bool(
+        re.fullmatch(r"\+[1-9][0-9]{7,14}", value) or value.startswith("sip:")
+    )
+
+
+def _valid_call_start(name: str, value: object) -> bool:
+    kind = CALL_START_TYPES[name]
+    if kind == "string":
+        return isinstance(value, str)
+    if kind == "boolean":
+        return isinstance(value, bool)
+    if kind == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if kind == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return False
+
+
+async def _outbound_request(request: Request) -> tuple[str, dict]:
+    expected = "Bearer " + _env("UNMUTE_OUTBOUND_TOKEN")
+    if not hmac.compare_digest(request.headers.get("Authorization", ""), expected):
+        raise HTTPException(status_code=401, detail="invalid application authorization")
+    await _require_accepting()
+    body = await request.json()
+    if not isinstance(body, dict) or set(body) - {"to", "call_start"}:
+        raise HTTPException(status_code=422, detail="unknown outbound field")
+    destination = body.get("to")
+    call_start = body.get("call_start", {})
+    if not _valid_destination(destination) or not isinstance(call_start, dict):
+        raise HTTPException(status_code=422, detail="invalid outbound request")
+    if set(call_start) - set(CALL_START_TYPES):
+        raise HTTPException(status_code=422, detail="unknown call_start field")
+    missing = sorted(CALL_START_REQUIRED - set(call_start))
+    invalid = sorted(
+        name for name, value in call_start.items() if not _valid_call_start(name, value)
+    )
+    if missing or invalid:
+        raise HTTPException(status_code=422, detail={"missing": missing, "invalid": invalid})
+    return destination, call_start
+
+
+@app.get("/healthz")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+async def readiness() -> dict[str, object]:
+    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise HTTPException(status_code=503, detail={"missing_environment": missing})
+    _public_url()
+    await _require_accepting()
+    return {"ready": True}
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    STATE.begin_drain()
+    await STATE.close()
+
+
+async def handle_media(
+    websocket: WebSocket,
+    token: str,
+    validator: Callable[[WebSocket], bool] | None = None,
+) -> None:
+    if STATE.draining:
+        await websocket.close(code=1013)
+        return
+    if validator is not None and not validator(websocket):
+        await websocket.close(code=4003)
+        return
+    pending = await STATE.pending(token, consume=True)
+    if pending is None:
+        await websocket.close(code=4003)
+        return
+    if not await STATE.admit(pending["session_id"]):
+        await websocket.close(code=1013)
+        return
+    await websocket.accept()
+    try:
+        runner_args = WebSocketRunnerArguments(
+            websocket=websocket,
+            transport_type=None,
+            body={"telephony": pending},
+            session_id=pending["session_id"],
+        )
+        await bot.bot(runner_args)
+    finally:
+        await STATE.release(pending["session_id"])

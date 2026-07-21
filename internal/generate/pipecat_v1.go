@@ -344,7 +344,7 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		{"env.example", ".env.example"},
 	}
 	if data.Telephony != nil {
-		templateName := "telephony.py"
+		templateName := "telephony_twilio.py"
 		switch data.Telephony.Carrier {
 		case "telnyx":
 			templateName = "telephony_telnyx.py"
@@ -352,6 +352,7 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 			templateName = "telephony_plivo.py"
 		}
 		outputs = append(outputs, struct{ tmpl, path string }{templateName, "telephony.py"})
+		outputs = append(outputs, struct{ tmpl, path string }{"telephony_shared.py", "telephony_shared.py"})
 		outputs = append(outputs, struct{ tmpl, path string }{"telephony_state.py", "telephony_state.py"})
 		outputs = append(outputs, struct{ tmpl, path string }{"compose.telephony.yaml", "compose.telephony.yaml"})
 	} else {

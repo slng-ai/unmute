@@ -1,0 +1,147 @@
+"""Generated Twilio ingress and call control for {{.Project}}."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from urllib.parse import parse_qsl
+from xml.etree.ElementTree import Element, SubElement, tostring
+
+from fastapi import HTTPException, Request, WebSocket
+from fastapi.responses import Response
+from pipecat.runner.types import WebSocketRunnerArguments
+from twilio.request_validator import RequestValidator
+from twilio.rest import Client
+
+from telephony_shared import (
+    CONNECTION,
+    SESSION_TTL_SECS,
+    STATE,
+    _env,
+    _http_url,
+    _outbound_request,
+    _remember,
+    _require_accepting,
+    _valid_destination,
+    _websocket_url,
+    app,
+    handle_media,
+)
+
+
+ACCOUNT_SID_ENV = {{pyq .Telephony.AccountSIDEnv}}
+AUTH_TOKEN_ENV = {{pyq .Telephony.AuthTokenEnv}}
+FROM_NUMBER_ENV = {{pyq .Telephony.FromNumberEnv}}
+
+
+def _validator() -> RequestValidator:
+    return RequestValidator(_env(AUTH_TOKEN_ENV))
+
+
+async def _signed_form(request: Request) -> dict[str, str]:
+    form = dict(parse_qsl((await request.body()).decode("utf-8"), keep_blank_values=True))
+    signature = request.headers.get("X-Twilio-Signature", "")
+    if not signature or not _validator().validate(_http_url(request.url.path), form, signature):
+        raise HTTPException(status_code=403, detail="invalid carrier signature")
+    return form
+
+
+def _validate_websocket(websocket: WebSocket) -> bool:
+    signature = websocket.headers.get("X-Twilio-Signature", "")
+    return bool(signature) and _validator().validate(
+        _websocket_url(websocket.url.path), {}, signature
+    )
+
+
+def _stream_twiml(token: str) -> str:
+    response = Element("Response")
+    connect = SubElement(response, "Connect")
+    SubElement(connect, "Stream", url=_websocket_url(f"/telephony/ws/{token}"))
+    return tostring(response, encoding="unicode")
+
+
+def _dial_twiml(destination: str) -> str:
+    response = Element("Response")
+    dial = SubElement(response, "Dial")
+    dial.text = destination
+    return tostring(response, encoding="unicode")
+
+
+def configure_pipecat_env() -> None:
+    """Pipecat's Twilio serializer reads canonical names; Connections may rename them."""
+    os.environ["TWILIO_ACCOUNT_SID"] = _env(ACCOUNT_SID_ENV)
+    os.environ["TWILIO_AUTH_TOKEN"] = _env(AUTH_TOKEN_ENV)
+
+
+def normalized_context(runner_args: WebSocketRunnerArguments) -> dict:
+    pending = (runner_args.body or {}).get("telephony")
+    call_data = runner_args.call_data
+    if not pending or call_data is None:
+        raise RuntimeError("authenticated telephony context is unavailable")
+    return {
+        "session_id": pending["session_id"],
+        "carrier": "twilio",
+        "connection": CONNECTION,
+        "call_id": call_data.call_id,
+        "stream_id": call_data.stream_id,
+        "direction": pending["direction"],
+        "from_number": pending["from_number"],
+        "to_number": pending["to_number"],
+        "call_start": pending["call_start"],
+    }
+
+
+async def cold_transfer(call_id: str, destination: str) -> None:
+    if not _valid_destination(destination):
+        raise RuntimeError("invalid compiled transfer destination")
+    if not await STATE.mark_once("transfer", call_id, SESSION_TTL_SECS):
+        return
+    try:
+        client = Client(_env(ACCOUNT_SID_ENV), _env(AUTH_TOKEN_ENV))
+        await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))
+    except Exception:
+        await STATE.forget("transfer", call_id)
+        raise
+
+
+{{if .Telephony.HasInbound}}@app.post("/telephony/inbound")
+async def inbound(request: Request) -> Response:
+    form = await _signed_form(request)
+    await _require_accepting()
+    from_number = form.get("From", "")
+    to_number = form.get("To", "")
+    if not _valid_destination(from_number) or not _valid_destination(to_number):
+        raise HTTPException(status_code=400, detail="invalid carrier call context")
+    token, _ = await _remember("inbound", from_number, to_number, {})
+    return Response(_stream_twiml(token), media_type="application/xml")
+
+
+{{end}}{{if .Telephony.HasOutbound}}@app.post("/telephony/outbound")
+async def outbound(request: Request) -> dict[str, str]:
+    destination, call_start = await _outbound_request(request)
+    token, session_id = await _remember("outbound", _env(FROM_NUMBER_ENV), destination, call_start)
+    client = Client(_env(ACCOUNT_SID_ENV), _env(AUTH_TOKEN_ENV))
+    call = await asyncio.to_thread(
+        client.calls.create,
+        to=destination,
+        from_=_env(FROM_NUMBER_ENV),
+        twiml=_stream_twiml(token),
+        status_callback=_http_url("/telephony/status"),
+        status_callback_event=["initiated", "ringing", "answered", "completed"],
+    )
+    return {"session_id": session_id, "call_id": call.sid, "status": "accepted"}
+
+
+{{end}}@app.post("/telephony/status")
+async def status(request: Request) -> dict[str, bool]:
+    form = await _signed_form(request)
+    event_id = ":".join(
+        (form.get("CallSid", ""), form.get("CallStatus", ""), form.get("SequenceNumber", ""))
+    )
+    duplicate = not await STATE.mark_once("status", event_id, SESSION_TTL_SECS)
+    return {"accepted": True, "duplicate": duplicate}
+
+
+@app.websocket("/telephony/ws/{token}")
+async def media(websocket: WebSocket, token: str) -> None:
+    await handle_media(websocket, token, _validate_websocket)
