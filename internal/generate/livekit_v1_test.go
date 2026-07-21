@@ -3,6 +3,7 @@ package generate
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -935,7 +936,7 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		`MAX_SESSIONS = 60`,
 		`len(agent_server.active_jobs) / MAX_SESSIONS`,
 		`drain_timeout=1200`,
-		`load_threshold=(MAX_SESSIONS - 1) / MAX_SESSIONS`,
+		`load_threshold=1.0`,
 		`"call_id": attributes.get("sip.callID")`,
 		`"from_number": trunk_number if direction == "outbound" else remote_number`,
 		`raise RuntimeError("phone_number must be an E.164 number")`,
@@ -1010,6 +1011,42 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	}
 	if len(runtime.PublicEndpoints) != 0 {
 		t.Fatalf("LiveKit SIP must not report HTTP callback endpoints: %#v", runtime.PublicEndpoints)
+	}
+}
+
+func TestLiveKitSIPCapacityIsExactAtOneAndN(t *testing.T) { // telephony V22, V30
+	for _, maxSessions := range []int{1, 60} {
+		t.Run(fmt.Sprintf("max_%d", maxSessions), func(t *testing.T) {
+			agent, resolved := configuredLiveKitSIP(t)
+			agent.Capacity.MaxSessions = maxSessions
+			artifact, err := GenerateLiveKit(agent, resolved, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			agentPy := artifactFile(t, artifact, "agent.py")
+			for _, want := range []string{
+				fmt.Sprintf("MAX_SESSIONS = %d", maxSessions),
+				`return min(len(agent_server.active_jobs) / MAX_SESSIONS, 1.0)`,
+				`load_threshold=1.0`,
+			} {
+				if !strings.Contains(agentPy, want) {
+					t.Errorf("agent.py missing exact-capacity expression %q", want)
+				}
+			}
+			if strings.Contains(agentPy, `load_threshold=(MAX_SESSIONS - 1) / MAX_SESSIONS`) {
+				t.Error("agent.py retains the capacity-shrinking threshold")
+			}
+
+			load := func(active int) float64 {
+				return min(float64(active)/float64(maxSessions), 1)
+			}
+			if load(maxSessions-1) >= 1 {
+				t.Fatalf("worker becomes full before session %d", maxSessions)
+			}
+			if load(maxSessions) != 1 {
+				t.Fatalf("worker is not full at session %d", maxSessions)
+			}
+		})
 	}
 }
 

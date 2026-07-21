@@ -546,7 +546,7 @@ def telephony_load(agent_server: AgentServer) -> float:
 server = AgentServer(
     port=int(os.getenv("UNMUTE_AGENT_HEALTH_PORT", "8081")),
     drain_timeout={{.DrainTimeoutSecs}},
-    load_threshold=(MAX_SESSIONS - 1) / MAX_SESSIONS,
+    load_threshold=1.0,
 )
 server.load_fnc = telephony_load
 {{- else}}

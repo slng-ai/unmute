@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import os
 import re
@@ -164,6 +165,19 @@ async def handle_media(
             body={"telephony": pending},
             session_id=pending["session_id"],
         )
-        await bot.bot(runner_args)
+        async with asyncio.TaskGroup() as tasks:
+            agent_task = tasks.create_task(bot.bot(runner_args))
+            refresh_task = tasks.create_task(
+                _refresh_admission(pending["session_id"])
+            )
+            await agent_task
+            refresh_task.cancel()
     finally:
         await STATE.release(pending["session_id"])
+
+
+async def _refresh_admission(session_id: str) -> None:
+    while True:
+        await asyncio.sleep(max(1, SESSION_TTL_SECS // 3))
+        if not await STATE.admit(session_id):
+            raise RuntimeError("active telephony admission lease was lost")

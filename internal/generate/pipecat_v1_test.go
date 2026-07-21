@@ -409,6 +409,7 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		`_validator().validate(_http_url(request.url.path), form, signature)`,
 		`_validator().validate(`,
 		`STATE.mark_once("inbound", call_id, SESSION_TTL_SECS)`,
+		`STATE.mark_once("transfer", call_id, SESSION_TTL_SECS)`,
 		`STATE.mark_once("status", event_id, SESSION_TTL_SECS)`,
 		`status_callback_event=["initiated", "ringing", "answered", "completed"]`,
 		`await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))`,
@@ -422,6 +423,7 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	shared := artifactFile(t, artifact, "telephony_shared.py")
 	for _, want := range []string{
 		`CONTROL_TIMEOUT_SECS = 10`,
+		`SESSION_TTL_SECS = 1260`,
 		`def _env(name: str) -> str:`,
 		`def _public_url() -> str:`,
 		`async def _remember(`,
@@ -429,6 +431,10 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		`hmac.compare_digest(request.headers.get("Authorization", ""), expected)`,
 		`pending = await STATE.pending(token, consume=True)`,
 		`await STATE.admit(pending["session_id"])`,
+		`async with asyncio.TaskGroup() as tasks:`,
+		`_refresh_admission(pending["session_id"])`,
+		`await asyncio.sleep(max(1, SESSION_TTL_SECS // 3))`,
+		`raise RuntimeError("active telephony admission lease was lost")`,
 		`if STATE.draining:`,
 		`await websocket.close(code=1013)`,
 		`"campaign_id": "string"`,
@@ -439,10 +445,13 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		}
 	}
 	state := artifactFile(t, artifact, "telephony_state.py")
-	for _, want := range []string{"hashlib.sha256", "setex", "getdel", "ZREMRANGEBYSCORE", "zrem"} {
+	for _, want := range []string{"hashlib.sha256", "setex", "getdel", "ZREMRANGEBYSCORE", "ZADD", "EXPIRE", "zrem"} {
 		if !strings.Contains(state, want) {
 			t.Errorf("telephony_state.py missing %q", want)
 		}
+	}
+	if strings.Index(state, "redis.call('ZADD'") > strings.Index(state, "redis.call('EXPIRE'") {
+		t.Error("admission refresh must extend the Redis key lifetime after re-scoring the active session")
 	}
 	for _, forbidden := range []string{"from_number", "to_number", "call_start", "credential", "transcript", "audio"} {
 		if strings.Contains(state, forbidden) {

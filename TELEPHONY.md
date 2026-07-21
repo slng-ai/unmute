@@ -612,6 +612,11 @@ Redis key identities are opaque hashes of route-native IDs. Records expire
 after the maximum call duration plus a short cleanup window. Provider callbacks
 may be retried, so every transition must be idempotent.
 
+An admitted Pipecat session refreshes its Redis lease while the media WebSocket
+is alive and releases it when the session ends. LiveKit reports a worker full
+only when active jobs reach `capacity.max_sessions`, so both runtimes accept
+exactly the declared number of concurrent sessions, including a limit of one.
+
 ## Local development
 
 Local telephony uses the same generated application as deployment. Docker

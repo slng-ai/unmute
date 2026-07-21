@@ -11,13 +11,11 @@ from redis.asyncio import Redis
 
 _ADMIT = """
 local existing = redis.call('ZSCORE', KEYS[1], ARGV[4])
-if existing then
-  redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4])
-  return 1
-end
-redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
-if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[2]) then
-  return 0
+if not existing then
+  redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+  if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[2]) then
+    return 0
+  end
 end
 redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4])
 redis.call('EXPIRE', KEYS[1], ARGV[5])
