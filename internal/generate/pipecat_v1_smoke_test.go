@@ -133,14 +133,37 @@ print("smoke ok:", ", ".join(builders))
 // request spans to share the conversation trace.
 const pipecatRequestTracingSmokeScript = `"""Smoke check: a real worker turn emits nested speech and LLM spans."""
 import asyncio
+import base64
 import json
 import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+class OTLPReceiver(BaseHTTPRequestHandler):
+    def do_POST(self) -> None:
+        self.rfile.read(int(self.headers["Content-Length"]))
+        self.server.requests.append((self.path, dict(self.headers)))
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, format, *args) -> None:
+        pass
+
+
+receiver = HTTPServer(("127.0.0.1", 0), OTLPReceiver)
+receiver.requests = []
+threading.Thread(target=receiver.serve_forever, daemon=True).start()
 
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
+os.environ["LANGFUSE_PUBLIC_KEY"] = "pk-smoke"
+os.environ["LANGFUSE_SECRET_KEY"] = "sk-smoke"
+os.environ["LANGFUSE_BASE_URL"] = f"http://127.0.0.1:{receiver.server_port}"
 
 import bot  # noqa: E402
 from opentelemetry import trace  # noqa: E402
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor  # noqa: E402
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter  # noqa: E402
 from pipecat.bus import BusBridgeProcessor  # noqa: E402
 from pipecat.frames.frames import (  # noqa: E402
@@ -164,7 +187,6 @@ from pipecat.services.settings import LLMSettings, STTSettings, TTSSettings  # n
 from pipecat.services.stt_service import STTService  # noqa: E402
 from pipecat.services.tts_service import TTSService  # noqa: E402
 from pipecat.utils.tracing.service_decorators import traced_llm, traced_stt, traced_tts  # noqa: E402
-from pipecat.utils.tracing.setup import setup_tracing  # noqa: E402
 from pipecat.workers.llm import LLMWorkerActivationArgs  # noqa: E402
 from pipecat.workers.runner import WorkerRunner  # noqa: E402
 
@@ -258,9 +280,9 @@ class StopAfterSpeech(Passthrough):
 
 async def main() -> None:
     memory = InMemorySpanExporter()
-    assert setup_tracing(exporter=memory)
+    assert bot.setup_langfuse_tracing()
     provider = trace.get_tracer_provider()
-    provider.add_span_processor(bot.LangfuseAttributeProcessor())
+    provider.add_span_processor(SimpleSpanProcessor(memory))
 
     agent_name = bot.AGENTS[0].name
     setattr(bot, f"build_{agent_name}_llm", FakeLLM)
@@ -281,6 +303,7 @@ async def main() -> None:
         ),
         name="trace-main",
         enable_tracing=True,
+        additional_span_attributes={"langfuse.trace.name": bot.TRACE_NAME},
         params=PipelineParams(enable_metrics=True),
     )
     request_agent = type(bot.AGENTS[0])()
@@ -314,14 +337,21 @@ async def main() -> None:
     assert requests["stt"].attributes["gen_ai.request.model"] == "probe-stt"
     assert requests["llm"].attributes["gen_ai.request.model"] == "probe-model"
     assert requests["tts"].attributes["gen_ai.request.model"] == "probe-tts"
-    assert requests["stt"].attributes["langfuse.observation.input"] == "audio"
-    assert requests["stt"].attributes["langfuse.observation.output"] == "trace this request"
-    assert requests["tts"].attributes["langfuse.observation.input"] == "traced."
-    assert requests["tts"].attributes["langfuse.observation.output"] == "audio"
-    assert conversation.attributes["langfuse.observation.input"] == "trace this request", dict(conversation.attributes)
-    assert conversation.attributes["langfuse.observation.output"] == "traced.", dict(conversation.attributes)
+    assert requests["stt"].attributes["transcript"] == "trace this request"
+    assert requests["llm"].attributes["output"] == "traced."
+    assert requests["tts"].attributes["text"] == "traced."
+    assert conversation.attributes["langfuse.trace.name"] == bot.TRACE_NAME
+    assert conversation.resource.attributes["service.name"] == bot.TRACE_NAME
     assert all(span.context.trace_id == conversation.context.trace_id for span in requests.values())
     assert all(span.end_time > span.start_time for span in requests.values())
+    assert receiver.requests
+    path, headers = receiver.requests[0]
+    headers = {name.lower(): value for name, value in headers.items()}
+    auth = base64.b64encode(b"pk-smoke:sk-smoke").decode()
+    assert path == "/api/public/otel/v1/traces"
+    assert headers["authorization"] == f"Basic {auth}"
+    assert headers["x-langfuse-ingestion-version"] == "4"
+    receiver.shutdown()
     print("pipecat speech tracing smoke ok")
 
 
@@ -397,8 +427,8 @@ func TestSmokePipecatV1LocalToolInstantiates(t *testing.T) {
 	})
 }
 
-// TestSmokeV17PipecatSpeechTracing proves the 1.5 worker compatibility shim
-// sends STT, LLM, and TTS requests into the main conversation trace.
+// TestSmokeV17PipecatSpeechTracing proves the generated OTLP setup exports the
+// native STT, LLM, and TTS tree under the named conversation trace (V21).
 func TestSmokeV17PipecatSpeechTracing(t *testing.T) {
 	runPipecatSmokeScript(t, "simple-prompt", nil, nil, pipecatRequestTracingSmokeScript)
 }

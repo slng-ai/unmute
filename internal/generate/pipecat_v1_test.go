@@ -90,6 +90,9 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 	}
 
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !strings.Contains(pyproject, ",tracing,") {
+		t.Error("pyproject.toml missing the official pipecat-ai tracing extra")
+	}
 	if !strings.Contains(pyproject, `"opentelemetry-exporter-otlp-proto-http>=1.33,<2"`) {
 		t.Error("pyproject.toml missing the OpenTelemetry HTTP exporter")
 	}
@@ -101,7 +104,7 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 	}
 }
 
-func TestV18PipecatLangfuseObservationMapping(t *testing.T) {
+func TestV21PipecatUsesNativeTracing(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
@@ -117,16 +120,14 @@ func TestV18PipecatLangfuseObservationMapping(t *testing.T) {
 	}
 
 	bot := artifactFile(t, artifact, "bot.py")
-	for _, want := range []string{
-		"class LangfuseAttributeProcessor(SpanProcessor):",
-		`"langfuse.observation.input"`,
-		`"langfuse.observation.output"`,
-		`"langfuse.trace.input"`,
-		`"langfuse.trace.output"`,
-		"trace.get_tracer_provider().add_span_processor(LangfuseAttributeProcessor())",
+	for _, forbidden := range []string{
+		"SpanProcessor",
+		"LangfuseAttributeProcessor",
+		"span.set_attribute =",
+		"service_decorators",
 	} {
-		if !strings.Contains(bot, want) {
-			t.Errorf("bot.py missing %q", want)
+		if strings.Contains(bot, forbidden) {
+			t.Errorf("bot.py contains custom tracing hook %q", forbidden)
 		}
 	}
 }
