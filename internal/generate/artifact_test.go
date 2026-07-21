@@ -97,12 +97,15 @@ func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { //
 	if got := strings.Join(plan.Processes[0].Command, " "); got != "uv run uvicorn telephony:app --host 0.0.0.0 --port 7860" {
 		t.Fatalf("process command = %q", got)
 	}
+	if got := strings.Join(plan.Services, ","); got != "application,redis" || len(plan.Reasons) == 0 {
+		t.Fatalf("coordination graph = %#v", plan)
+	}
 	files, err := withTelephonyReport([]File{{Path: "compile-report.json", Content: []byte(`{"target":"pipecat","required_env":["OPENAI_API_KEY"]}`)}}, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
 	report := string(files[0].Content)
-	for _, want := range []string{`"telephony"`, `"carrier": "twilio"`, `"coordination": "shared"`, `"smoke": false`} {
+	for _, want := range []string{`"telephony"`, `"carrier": "twilio"`, `"services"`, `"coordination_reasons"`, `"coordination": "shared"`, `"smoke": false`} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report missing %s:\n%s", want, report)
 		}

@@ -980,6 +980,23 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 			t.Errorf("README.md missing %q", want)
 		}
 	}
+	compose := artifactFile(t, artifact, "compose.telephony.yaml")
+	assertValidYAML(t, compose)
+	assertGoldenFile(t, filepath.Join("testdata", "golden", "livekit_v1_telephony_compose.yaml"), compose, *updateLiveKitV1)
+	for _, want := range []string{
+		"image: redis:7.4.9-alpine", "image: livekit/livekit-server:v1.13.4", "image: livekit/sip:v1.7.0",
+		"LIVEKIT_API_SECRET=devsecret-local-only", "address: redis:6379", `"5060:5060/udp"`,
+		`"10000-20000:10000-20000/udp"`, "condition: service_healthy", "redis_data:/data",
+	} {
+		if !strings.Contains(compose, want) {
+			t.Errorf("compose.telephony.yaml missing %q:\n%s", want, compose)
+		}
+	}
+	for _, forbidden := range []string{"image: livekit/livekit-server:latest", "image: livekit/sip:latest", "secret-value", "TWILIO_SIP_PASSWORD=", "REDIS_URL=redis"} {
+		if strings.Contains(compose, forbidden) {
+			t.Errorf("compose.telephony.yaml contains %q", forbidden)
+		}
+	}
 
 	runtime := TelephonyRuntimePlanFor(resolved)
 	if runtime.Coordination != "shared" || runtime.AdmissionOwner != "livekit_dispatch" {

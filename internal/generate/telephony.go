@@ -9,14 +9,16 @@ import (
 )
 
 type TelephonyRuntimePlan struct {
-	Route           ir.TelephonyKey               `json:"route"`
-	Processes       []TelephonyProcess            `json:"processes"`
-	PublicEndpoints []TelephonyEndpoint           `json:"public_endpoints,omitempty"`
-	RequiredEnv     []string                      `json:"required_env"`
-	ManualSteps     []string                      `json:"manual_steps,omitempty"`
-	Evidence        []ir.TelephonyFeatureEvidence `json:"evidence"`
-	Coordination    string                        `json:"coordination"`
-	AdmissionOwner  string                        `json:"admission_owner"`
+	Route           ir.TelephonyKey                  `json:"route"`
+	Processes       []TelephonyProcess               `json:"processes"`
+	PublicEndpoints []TelephonyEndpoint              `json:"public_endpoints,omitempty"`
+	RequiredEnv     []string                         `json:"required_env"`
+	ManualSteps     []string                         `json:"manual_steps,omitempty"`
+	Evidence        []ir.TelephonyFeatureEvidence    `json:"evidence"`
+	Services        []string                         `json:"services"`
+	Coordination    string                           `json:"coordination"`
+	Reasons         []ir.TelephonyCoordinationReason `json:"coordination_reasons"`
+	AdmissionOwner  string                           `json:"admission_owner"`
 }
 
 type TelephonyProcess struct {
@@ -39,6 +41,7 @@ func TelephonyRuntimePlanFor(target ir.Target) *TelephonyRuntimePlan {
 	}
 	runtime := &TelephonyRuntimePlan{
 		Route: plan.Key, Evidence: slices.Clone(plan.Evidence), Coordination: plan.Coordination,
+		Services: slices.Clone(plan.Services), Reasons: slices.Clone(plan.CoordinationReasons),
 		AdmissionOwner: plan.AdmissionOwner,
 		ManualSteps:    []string{"configure the selected carrier or SIP trunk to the reported public endpoints"},
 	}

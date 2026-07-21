@@ -471,9 +471,19 @@ reads the named environment values.
 
 The compiler resolves directions, controls, briefing behavior, system variable
 sources, evidence, public endpoints, coordination, and admission ownership for
-the exact route. A feature is enabled only when its row has current official
-documentation and a successful route smoke. Without a live smoke, the row
-remains provisional and validation fails when the Agent requests it.
+the exact route. Every LiveKit or Pipecat v1 telephony plan resolves shared
+coordination and emits Redis. LiveKit Server and LiveKit SIP use it as platform
+infrastructure. Generated Pipecat code uses it only for pending-call
+correlation, callback replay protection, human-transfer state, and admission;
+agent handoff, tasks, transcripts, prompts, model context, and audio stay in the
+active worker. The plan and compile report name the applicable reasons from the
+closed set `livekit_control_plane`, `call_correlation`,
+`callback_idempotency`, `human_transfer`, and `admission`. A feature is enabled
+only when its row has current official documentation and a successful route
+smoke. The reason set is non-empty and every reason maps to a declared service
+that consumes the Redis connection; an idle Redis sidecar is invalid. Without a
+live smoke, the row remains provisional and validation fails when the Agent
+requests it.
 
 ---
 

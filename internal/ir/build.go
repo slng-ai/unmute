@@ -800,14 +800,34 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 	}
 	connection := agent.Connections[resolved.Connection]
 	coordination, admissionOwner := "shared", "generated_runtime"
+	services := []string{"application", "redis"}
+	reasons := []TelephonyCoordinationReason{
+		{Name: "admission", Consumers: []string{"application"}},
+	}
+	if resolved.Provider == ProviderPipecat {
+		reasons = append(reasons,
+			TelephonyCoordinationReason{Name: "call_correlation", Consumers: []string{"application"}},
+			TelephonyCoordinationReason{Name: "callback_idempotency", Consumers: []string{"application"}},
+		)
+		if features[targetcap.TelephonyFeature(targetcap.ColdTransfer)] || features[targetcap.TelephonyFeature(targetcap.WarmTransfer)] {
+			reasons = append(reasons, TelephonyCoordinationReason{Name: "human_transfer", Consumers: []string{"application"}})
+		}
+	}
 	if resolved.Provider == ProviderLiveKit && resolved.Transport == "sip" {
 		admissionOwner = "livekit_dispatch"
+		services = append(services, "livekit_server", "livekit_sip")
+		reasons = []TelephonyCoordinationReason{
+			{Name: "livekit_control_plane", Consumers: []string{"livekit_server", "livekit_sip"}},
+		}
 	}
+	slices.Sort(services)
+	slices.SortFunc(reasons, func(a, b TelephonyCoordinationReason) int { return strings.Compare(a.Name, b.Name) })
 	return &TelephonyPlan{
 		Channels: channels, Connection: resolved.Connection,
 		Key:         TelephonyKey{Provider: resolved.Provider, Transport: resolved.Transport, Carrier: resolved.Carrier},
 		Environment: maps.Clone(connection.Environment), Destinations: maps.Clone(resolved.Destinations),
-		SystemSources: sources, Evidence: evidence, Coordination: coordination, AdmissionOwner: admissionOwner,
+		SystemSources: sources, Evidence: evidence, Services: services, Coordination: coordination,
+		CoordinationReasons: reasons, AdmissionOwner: admissionOwner,
 	}
 }
 

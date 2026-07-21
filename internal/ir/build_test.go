@@ -55,6 +55,12 @@ func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 	if plan.Coordination != "shared" || plan.AdmissionOwner != "generated_runtime" || len(plan.Evidence) == 0 {
 		t.Fatalf("incomplete plan = %#v", plan)
 	}
+	if got := strings.Join(plan.Services, ","); got != "application,redis" {
+		t.Fatalf("services = %s", got)
+	}
+	if got := coordinationReasonNames(plan.CoordinationReasons); got != "admission,call_correlation,callback_idempotency,human_transfer" {
+		t.Fatalf("coordination reasons = %s", got)
+	}
 }
 
 func TestBuildLiveKitSIPUsesSharedDispatchPlan(t *testing.T) { // telephony T10, V13, V18
@@ -77,6 +83,23 @@ func TestBuildLiveKitSIPUsesSharedDispatchPlan(t *testing.T) { // telephony T10,
 	if plan == nil || plan.Coordination != "shared" || plan.AdmissionOwner != "livekit_dispatch" {
 		t.Fatalf("LiveKit SIP plan = %#v", plan)
 	}
+	if got := strings.Join(plan.Services, ","); got != "application,livekit_server,livekit_sip,redis" {
+		t.Fatalf("LiveKit SIP services = %s", got)
+	}
+	if got := coordinationReasonNames(plan.CoordinationReasons); got != "livekit_control_plane" {
+		t.Fatalf("LiveKit SIP coordination reasons = %s", got)
+	}
+	if got := strings.Join(plan.CoordinationReasons[0].Consumers, ","); got != "livekit_server,livekit_sip" {
+		t.Fatalf("LiveKit SIP coordination consumers = %s", got)
+	}
+}
+
+func coordinationReasonNames(reasons []TelephonyCoordinationReason) string {
+	names := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		names = append(names, reason.Name)
+	}
+	return strings.Join(names, ",")
 }
 
 func TestBuildRejectsUnknownOrInvalidConnection(t *testing.T) { // telephony V1-V3

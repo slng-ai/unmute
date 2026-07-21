@@ -312,6 +312,32 @@ func TestValidateTelephonyPlanFailsClosedWithoutRouteSmoke(t *testing.T) { // te
 	}
 }
 
+func TestValidateTelephonyPlanRejectsOrphanRedisAndUnknownConsumers(t *testing.T) { // telephony V13, V23
+	pkg := loadSafeCore(t)
+	target := pkg.Targets["pipecat"]
+	target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
+	pkg.Targets["pipecat"] = target
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["pipecat"]
+	reasons := append([]TelephonyCoordinationReason(nil), resolved.Telephony.CoordinationReasons...)
+
+	resolved.Telephony.CoordinationReasons = nil
+	report, err := Validate(agent, []Target{resolved}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "Redis service has no coordination consumer") {
+		t.Fatalf("orphan Redis: err=%v report=%#v", err, report.PerTarget)
+	}
+
+	resolved.Telephony.CoordinationReasons = reasons
+	resolved.Telephony.CoordinationReasons[0].Consumers = []string{"undeclared"}
+	report, err = Validate(agent, []Target{resolved}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `undeclared consumer "undeclared"`) {
+		t.Fatalf("unknown consumer: err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
 func TestValidateExotelTelephonyFailsClosedWithoutAuthenticatedWebSocket(t *testing.T) { // telephony T9, V4-V6
 	pkg := loadSafeCore(t)
 	target := pkg.Targets["pipecat"]

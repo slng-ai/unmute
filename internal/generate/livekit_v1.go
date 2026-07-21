@@ -440,6 +440,9 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		{"Dockerfile", "Dockerfile"},
 		{"livekit.toml", "livekit.toml"},
 	}
+	if data.Telephony != nil {
+		outputs = append(outputs, struct{ tmpl, path string }{"compose.telephony.yaml", "compose.telephony.yaml"})
+	}
 	var files []File
 	for _, o := range outputs {
 		content, err := renderLiveKitV1(o.tmpl, data)

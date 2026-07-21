@@ -28,10 +28,14 @@ Compile the SCHEMA.md v1 package (`agent.yaml` + `instructions.md` + `agents/` +
 - C12: `capacity` is declared; worker/GPU/quota numbers are derived and printed in the report, never stored in the package (D11, N2). Sizing coefficients are dated and marked `unbenchmarked` until measured.
 - C13: telephony compilation is implemented only for LiveKit and Pipecat.
   Build resolves one Connection and one exact
-  `(orchestrator, transport, carrier)` route per telephony target. Mutable
-  callback, outbound-correlation, or warm-transfer state uses shared
-  coordination when requests can reach different replicas; sticky routing is
-  not a correctness mechanism.
+  `(orchestrator, transport, carrier)` route per telephony target. Every v1
+  route resolves shared coordination, a non-empty closed reason set, and Redis.
+  Every reason maps to a declared consuming service; Redis is never an idle
+  sidecar. LiveKit uses Redis for its Server/SIP control plane; generated
+  Pipecat code uses it only for call correlation, callback idempotency,
+  human-transfer state, and admission. Agent handoff, task state, transcripts,
+  prompts, model context, and audio remain in the active worker. Sticky routing
+  is not a correctness mechanism.
 
 ## §I surfaces
 - I.package: on-disk v1 layout (SCHEMA.md §3): `agent.yaml`, `instructions.md`, `agents/*.md`, `tasks/*.md`, `tools/<name>.yaml` (+ `<name>.py` handlers, code targets only), `connections/<name>.yaml`, `targets.yaml`. Tool and Connection names come from their file names; neither has a `name:` field inside the file.
@@ -42,9 +46,15 @@ Compile the SCHEMA.md v1 package (`agent.yaml` + `instructions.md` + `agents/` +
   never reads the environment.
 - I.telephony.route: Build resolves a LiveKit or Pipecat telephony target to
   one `TelephonyPlan`. The plan carries its exact route, directions, controls,
-  variable sources, endpoints, evidence, coordination mode, admission owner,
-  required environment names, and manual steps. Validate and Generate consume
-  this same plan.
+  variable sources, endpoints, evidence, admission owner, required environment
+  names, manual steps, Compose application/dependency services,
+  `coordination: shared`, and closed coordination reasons with deterministic
+  consuming services. Validate and Generate consume this same plan.
+- I.telephony.local: every telephony code route emits a deterministic
+  `compose.telephony.yaml` plus provider-neutral service, health, and local
+  environment facts in its runtime artifact. Every graph contains the generated
+  application service and Redis. `livekit/sip/*` also selects LiveKit Server and
+  LiveKit SIP.
 - I.ir.types: `internal/ir` — v1 constructs as Go structs mirroring SCHEMA.md §4–6: `Agent` (top level; NO `Pipeline` struct, N15), `ModelDef` (one unified authoring type for every `models:` section entry + target overrides: `provider`, `model`, `voice`, `speed`, `language`, `temperature`, `top_p`, `top_k`, `params`, `fallback`, `placement` override, `semantic_endpointing`; kind — think/speak/listen/turn — is the section the entry sits in, fixed by Build and field-checked), `Variable` (`type`/`default`/`source`), `AgentDef`, `Task`, `TaskGroup`, `Control` (`Delegate|AgentTransfer|HumanTransfer`), `Tool` (`description`, `input`/`output`, `execution`, `handler` iff `local`, `url_env` iff `webhook`, `interruption`, `effect`), `Conversation` (`greeting`/`interruption`/`inactivity`/`max_duration`/`thinking_audio`), `Tracing` (`provider` only), `Channel`, `Capacity`, `Target`. `Target.Models` stays the **derived** `Bindings{Listen,Turn,Speak,Reason}` view (a `Binding` per effective model), which Build populates by resolving each target's overrides over the agent's `ModelDef`s — the generators and most of Validate consume this resolved view unchanged, so the unified `ModelDef` is an authoring-and-schema type, not a per-target one. (`Bindings`/`Binding` and the internal `reason` role identifier are retained deliberately: renaming a role that is no longer user-facing would be churn, N15.) All cross-references are stored as **names, not pointers** (C2, keeps the graph acyclic). jsonschema-go derives the authoring schema from `ModelDef` and the debug schema from the resolved IR, with manual `TypeSchemas` overrides for the `Control` union and enum result types (C2).
 - I.ir.Build: `internal/ir` — `Build(*spec.Package) (*ir.Agent, error)`. Resolves every reference (entry_agent; agent `model`/`voice` → models, fixing each entry's kind from its reference site (V22); tool + control names; `task`/`group` names; `then_target`; `fallback` chains; `summarizer`; `requires` variables; `destination`). Flattens + cycle-checks fallback. Enforces snake_case + reserved-underscore + shared-namespace uniqueness. Returns the resolved IR.
 - I.capability: `internal/target` (leaf package, C4) — the machine form of the SCHEMA.md §4–7 matrix. Not one scalar map but a small set of **typed per-provider matrices**, because Validate needs more than a tag: (a) the tag matrix `(field, provider) → core|warn|gated|provisional` + condition note; (b) the role matrix `(role, provider) → open|integrated` (§6.2, for V9); (c) the history matrix `(history-value, provider) → ok|fail|generated` (§4.7, for V8); (d) the fallback slot-kind per provider (for V10). One place; the gating engine reads only this. Condition notes carry provider vocabulary (e.g. "Vapi: return-to-prior-assistant unverified") — a deliberate trade: `internal/target` is provider-aware even though `ir` is not.
@@ -65,6 +75,20 @@ Compile the SCHEMA.md v1 package (`agent.yaml` + `instructions.md` + `agents/` +
   briefing mode, or system variable source. A route without a current official
   documentation URL, verification date, and successful smoke remains
   provisional.
+- V29: every v1 telephony Compose file contains the generated application and
+  version-pinned Redis. Exact route facts add only further dependencies:
+  `livekit/sip/*` adds LiveKit Server and LiveKit SIP. No carrier choice removes
+  Redis. At least one declared service consumes the Redis connection and gates
+  readiness on it; an orphan Redis service is invalid. No carrier or model
+  credential value is baked into the file or image.
+- V30: `unmute dev --telephony` always executes the generated Compose graph and
+  fails clearly when Docker Compose is unavailable. No flag enables or disables
+  local telephony infrastructure; non-telephony dev behavior is unchanged.
+- V31: Pipecat Redis records are TTL-bound and limited to pending-call
+  correlation with the minimum call-start context, callback replay markers,
+  human-transfer state/locks, and admission counters. Credentials, raw webhook
+  bodies, audio, transcripts, prompts, model context, tasks, and agent handoff
+  never enter Redis.
 - V4: a `gated` field on a target that cannot honor it → hard error before any artifact, message in that provider's own vocabulary (e.g. `history: messages` on ElevenLabs → "ElevenLabs always keeps the full transcript"). Multi-target: fails if ANY resolved target rejects.
 - V5: a `warn` field on a warning target → message to stderr, exit 0, IR still valid; never a silent downgrade (SCHEMA.md §1, D3).
 - V6: (forward-looking) a `provisional` field, when used, fails validation on every target until a driver clears its tag. No field in SCHEMA §4–6 currently carries `provisional`; this guards the tag for future use.
@@ -109,8 +133,9 @@ T15|x|kind-sectioned palette per N15 second amendment — `spec.AgentFile.Models
 T14|x|scaffold + TUI per N15 — instance name = provider name in `targets.yaml.tmpl` (no `-dev`); `agent.yaml.tmpl` emits the unified `models:` map with the wizard's concrete picks + `listen`/`turn` blocks when the target needs them; `targets.yaml.tmpl` shrinks to infrastructure (provider, version, pins, transport, carrier, destinations), no `models:`; `env.example.tmpl`, build paths, tests follow|V23,C7
 T17|x|Add the singular optional tracing decode/IR structs, reject providers other than `langfuse` in Build, propagate the selection, and add its capability row; accept LiveKit/Pipecat and fail Vapi/ElevenLabs/Deepgram; extend schema, validation, and emitter-agreement tests|V25,V2,V3,V4,V19
 T18|x|Keep `unmute init`, its `.env.example`, and `safe_core` free of tracing; add `tracing: { provider: langfuse }` to all four public example packages; document the version-1 migration after both driver tracing tasks land|V26,V14,driver-livekit.md T21,driver-pipecat.md T18
+T19|x|extend `TelephonyPlan` and the runtime artifact with shared coordination reasons and consumers; emit application + Redis for every telephony route and exact extra dependencies in `compose.telephony.yaml`; reject orphan Redis; add agreement, TTL, data-boundary, and secret-exclusion tests; execution remains owned by the telephony implementation spec|I.telephony.route,I.telephony.local,V29-V31
 
-Dependency order: T1, T2, T3 → T4 → T5 → T6; T7 with T5; T8 last; T10 after T3+T5 (socket for the driver specs); T9 only after ≥1 driver `case` is real (phased); T11 with T9; T12 after the first driver lands; T13 before T14 (templates emit the flattened shape). T17 precedes both driver tracing tasks; T18 follows them.
+Dependency order: T1, T2, T3 → T4 → T5 → T6; T7 with T5; T8 last; T10 after T3+T5 (socket for the driver specs); T9 only after ≥1 driver `case` is real (phased); T11 with T9; T12 after the first driver lands; T13 before T14 (templates emit the flattened shape). T17 precedes both driver tracing tasks; T18 follows them. T19 follows the telephony plan and runtime-artifact work.
 
 ## §B bugs
 id|date|cause|fix

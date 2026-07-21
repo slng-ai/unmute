@@ -337,6 +337,7 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		}
 		outputs = append(outputs, struct{ tmpl, path string }{templateName, "telephony.py"})
 		outputs = append(outputs, struct{ tmpl, path string }{"telephony_state.py", "telephony_state.py"})
+		outputs = append(outputs, struct{ tmpl, path string }{"compose.telephony.yaml", "compose.telephony.yaml"})
 	} else {
 		outputs = append(outputs, struct{ tmpl, path string }{"pcc-deploy.toml", "pcc-deploy.toml"})
 	}

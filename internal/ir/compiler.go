@@ -350,15 +350,22 @@ type Connection struct {
 }
 
 type TelephonyPlan struct {
-	Channels       []string                   `json:"channels" yaml:"channels"`
-	Connection     string                     `json:"connection" yaml:"connection"`
-	Key            TelephonyKey               `json:"key" yaml:"key"`
-	Environment    map[string]string          `json:"environment" yaml:"environment"`
-	Destinations   map[string]string          `json:"destinations,omitempty" yaml:"destinations,omitempty"`
-	SystemSources  map[string]VariableSource  `json:"system_sources,omitempty" yaml:"system_sources,omitempty"`
-	Evidence       []TelephonyFeatureEvidence `json:"evidence" yaml:"evidence"`
-	Coordination   string                     `json:"coordination" yaml:"coordination"`
-	AdmissionOwner string                     `json:"admission_owner" yaml:"admission_owner"`
+	Channels            []string                      `json:"channels" yaml:"channels"`
+	Connection          string                        `json:"connection" yaml:"connection"`
+	Key                 TelephonyKey                  `json:"key" yaml:"key"`
+	Environment         map[string]string             `json:"environment" yaml:"environment"`
+	Destinations        map[string]string             `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	SystemSources       map[string]VariableSource     `json:"system_sources,omitempty" yaml:"system_sources,omitempty"`
+	Evidence            []TelephonyFeatureEvidence    `json:"evidence" yaml:"evidence"`
+	Services            []string                      `json:"services" yaml:"services"`
+	Coordination        string                        `json:"coordination" yaml:"coordination"`
+	CoordinationReasons []TelephonyCoordinationReason `json:"coordination_reasons" yaml:"coordination_reasons"`
+	AdmissionOwner      string                        `json:"admission_owner" yaml:"admission_owner"`
+}
+
+type TelephonyCoordinationReason struct {
+	Name      string   `json:"name" yaml:"name"`
+	Consumers []string `json:"consumers" yaml:"consumers"`
 }
 
 type TelephonyKey struct {

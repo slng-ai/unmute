@@ -1,0 +1,92 @@
+# Generated local-development topology. The devkey/devsecret pair below is intentionally non-production.
+services:
+  application:
+    build:
+      context: .
+    environment:
+      - LIVEKIT_URL=ws://livekit_server:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=devsecret-local-only
+      - DEEPGRAM_API_KEY
+      - ELEVEN_API_KEY
+      - GET_INVOICE_URL
+      - LIVEKIT_SIP_INBOUND_TRUNK
+      - LIVEKIT_SIP_OUTBOUND_TRUNK
+      - LIVEKIT_SIP_URI
+      - LOOKUP_CUSTOMER_URL
+      - OPENAI_API_KEY
+      - TWILIO_PHONE_NUMBER
+      - TWILIO_SIP_ADDRESS
+      - TWILIO_SIP_PASSWORD
+      - TWILIO_SIP_USERNAME
+    ports:
+      - "${UNMUTE_TELEPHONY_PORT:-8081}:8081"
+    depends_on:
+      livekit_server:
+        condition: service_healthy
+      livekit_sip:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+
+  redis:
+    image: redis:7.4.9-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  livekit_server:
+    image: livekit/livekit-server:v1.13.4
+    command: ["--dev", "--bind", "0.0.0.0", "--redis-host", "redis:6379"]
+    ports:
+      - "7880:7880"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  livekit_sip:
+    image: livekit/sip:v1.7.0
+    environment:
+      SIP_CONFIG_BODY: |
+        api_key: devkey
+        api_secret: devsecret-local-only
+        ws_url: ws://livekit_server:7880
+        redis:
+          address: redis:6379
+        health_port: 8080
+        sip_port: 5060
+        rtp_port: 10000-20000
+        use_external_ip: true
+        logging:
+          level: debug
+    ports:
+      - "5060:5060/tcp"
+      - "5060:5060/udp"
+      - "10000-20000:10000-20000/udp"
+    depends_on:
+      redis:
+        condition: service_healthy
+      livekit_server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q ':1F90 ' /proc/net/tcp"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  redis_data:

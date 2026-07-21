@@ -883,6 +883,93 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 	if plan == nil {
 		return
 	}
+	if plan.Coordination != "shared" {
+		row.Errors = add(row.Errors, "telephony coordination must be shared")
+	}
+	services := make(map[string]bool, len(plan.Services))
+	allowedServices := map[string]bool{"application": true, "redis": true}
+	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {
+		allowedServices["livekit_server"] = true
+		allowedServices["livekit_sip"] = true
+	}
+	for _, service := range plan.Services {
+		if service == "" || services[service] {
+			row.Errors = add(row.Errors, "telephony services must be non-empty and unique")
+			continue
+		}
+		if !allowedServices[service] {
+			row.Errors = add(row.Errors, fmt.Sprintf("telephony route declares unexpected service %q", service))
+		}
+		services[service] = true
+	}
+	for _, required := range []string{"application", "redis"} {
+		if !services[required] {
+			row.Errors = add(row.Errors, fmt.Sprintf("telephony service %s is required", required))
+		}
+	}
+	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {
+		for _, required := range []string{"livekit_server", "livekit_sip"} {
+			if !services[required] {
+				row.Errors = add(row.Errors, fmt.Sprintf("livekit SIP service %s is required", required))
+			}
+		}
+	} else if services["livekit_server"] || services["livekit_sip"] {
+		row.Errors = add(row.Errors, "LiveKit Server and SIP services require the livekit/sip route")
+	}
+	closedReasons := map[string]bool{
+		"livekit_control_plane": true, "call_correlation": true, "callback_idempotency": true,
+		"human_transfer": true, "admission": true,
+	}
+	if len(plan.CoordinationReasons) == 0 {
+		row.Errors = add(row.Errors, "telephony Redis service has no coordination consumer")
+	}
+	seenReasons := make(map[string]bool, len(plan.CoordinationReasons))
+	for _, reason := range plan.CoordinationReasons {
+		if !closedReasons[reason.Name] {
+			row.Errors = add(row.Errors, fmt.Sprintf("unknown telephony coordination reason %q", reason.Name))
+		}
+		if seenReasons[reason.Name] {
+			row.Errors = add(row.Errors, fmt.Sprintf("duplicate telephony coordination reason %q", reason.Name))
+		}
+		seenReasons[reason.Name] = true
+		if len(reason.Consumers) == 0 {
+			row.Errors = add(row.Errors, fmt.Sprintf("telephony coordination reason %q has no consumers", reason.Name))
+		}
+		for _, consumer := range reason.Consumers {
+			if consumer == "redis" || !services[consumer] {
+				row.Errors = add(row.Errors, fmt.Sprintf("telephony coordination reason %q has undeclared consumer %q", reason.Name, consumer))
+			}
+		}
+		if plan.Key.Provider == ProviderPipecat && (len(reason.Consumers) != 1 || reason.Consumers[0] != "application") {
+			row.Errors = add(row.Errors, fmt.Sprintf("Pipecat coordination reason %q must be consumed by application", reason.Name))
+		}
+	}
+	if plan.Key.Provider == ProviderPipecat {
+		for _, required := range []string{"admission", "call_correlation", "callback_idempotency"} {
+			if !seenReasons[required] {
+				row.Errors = add(row.Errors, fmt.Sprintf("Pipecat coordination reason %q is required", required))
+			}
+		}
+		needsHumanTransfer := false
+		for _, evidence := range plan.Evidence {
+			needsHumanTransfer = needsHumanTransfer || evidence.Feature == string(targetcap.ColdTransfer) || evidence.Feature == string(targetcap.WarmTransfer)
+		}
+		if needsHumanTransfer != seenReasons["human_transfer"] {
+			row.Errors = add(row.Errors, "Pipecat human_transfer coordination reason must match the selected transfer features")
+		}
+	}
+	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {
+		if len(seenReasons) != 1 || !seenReasons["livekit_control_plane"] {
+			row.Errors = add(row.Errors, "LiveKit SIP coordination reason must be livekit_control_plane")
+		}
+		for _, reason := range plan.CoordinationReasons {
+			consumers := slices.Clone(reason.Consumers)
+			slices.Sort(consumers)
+			if reason.Name == "livekit_control_plane" && !slices.Equal(consumers, []string{"livekit_server", "livekit_sip"}) {
+				row.Errors = add(row.Errors, "LiveKit control-plane coordination consumers must be livekit_server and livekit_sip")
+			}
+		}
+	}
 	for _, evidence := range plan.Evidence {
 		switch targetcap.Tag(evidence.Tag) {
 		case targetcap.Core:

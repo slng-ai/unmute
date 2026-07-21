@@ -59,10 +59,12 @@ unable to initialize a burst of new Agent sessions.
 _Avoid_: concurrency, requests per second
 
 **Coordination mode**:
-The state boundary required by a telephony route: `none` for stateless routes,
-`local` when state remains on one process, or `shared` when callbacks,
-outbound correlation, or warm transfers can reach different replicas. Shared
-coordination must be ready before a multi-replica route accepts calls.
+The state boundary required by a telephony route. Every v1 LiveKit or Pipecat
+route resolves `shared`; the resolved plan also says why and which declared
+service consumes Redis. Pipecat uses Redis only for bounded telephony
+correlation, idempotency, human-transfer, and admission records. LiveKit Server
+and LiveKit SIP use Redis for their distributed control plane. Media, prompts,
+transcripts, tasks, and agent handoff remain in the active worker.
 _Avoid_: cache, sticky sessions
 
 **Variable**:

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/spec"
 	"github.com/slng/unmute/internal/target"
@@ -462,6 +463,46 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	}
 	if docker := artifactFile(t, artifact, "Dockerfile"); !strings.Contains(docker, `CMD ["uvicorn", "telephony:app"`) {
 		t.Error("Dockerfile does not start the selected telephony server")
+	}
+	compose := artifactFile(t, artifact, "compose.telephony.yaml")
+	assertValidYAML(t, compose)
+	assertGoldenFile(t, filepath.Join("testdata", "golden", "pipecat_v1_telephony_compose.yaml"), compose, *updatePipecatV1)
+	for _, want := range []string{
+		"build:\n      context: .", "image: redis:7.4.9-alpine", "condition: service_healthy",
+		"REDIS_URL=redis://redis:6379/0", "redis_data:/data", "UNMUTE_TELEPHONY_PORT:-7860",
+	} {
+		if !strings.Contains(compose, want) {
+			t.Errorf("compose.telephony.yaml missing %q:\n%s", want, compose)
+		}
+	}
+	for _, forbidden := range []string{"image: redis:latest", "secret-value", "+14155550123"} {
+		if strings.Contains(compose, forbidden) {
+			t.Errorf("compose.telephony.yaml contains %q", forbidden)
+		}
+	}
+}
+
+func assertValidYAML(t *testing.T, content string) {
+	t.Helper()
+	var decoded map[string]any
+	if err := yaml.Unmarshal([]byte(content), &decoded); err != nil {
+		t.Fatalf("invalid generated YAML: %v\n%s", err, content)
+	}
+}
+
+func assertGoldenFile(t *testing.T, path, got string, update bool) {
+	t.Helper()
+	if update {
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != string(want) {
+		t.Fatalf("golden differs; rerun the test with its update flag")
 	}
 }
 
