@@ -208,6 +208,14 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		return livekitData{}, err
 	}
 	if data.Telephony != nil {
+		if agent.Capacity == nil || agent.Capacity.MaxSessions <= 0 {
+			return livekitData{}, fmt.Errorf("livekit telephony requires positive capacity.max_sessions")
+		}
+		data.MaxSessions = agent.Capacity.MaxSessions
+		data.DrainTimeoutSecs = data.MaxDurationSecs
+		if data.DrainTimeoutSecs <= 0 {
+			data.DrainTimeoutSecs = 1800
+		}
 		for i := range data.Agents {
 			if !data.Agents[i].IsEntry {
 				continue

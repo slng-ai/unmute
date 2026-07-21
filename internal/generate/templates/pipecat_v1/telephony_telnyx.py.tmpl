@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import asyncio
 import hmac
 import json
 import os
@@ -20,6 +19,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket
 from pipecat.runner.types import WebSocketRunnerArguments
 
 import bot
+from telephony_state import TelephonyState
 
 
 app = FastAPI()
@@ -29,6 +29,7 @@ CONNECTION_ID_ENV = {{pyq .Telephony.ConnectionEnv}}
 FROM_NUMBER_ENV = {{pyq .Telephony.FromNumberEnv}}
 CONNECTION = {{pyq .Telephony.Connection}}
 PENDING_TTL_SECS = 300
+SESSION_TTL_SECS = {{.Telephony.SessionTTL}}
 WEBHOOK_TOLERANCE_SECS = 300
 REQUIRED_ENV = [{{range $i, $name := .RequiredEnv}}{{if $i}}, {{end}}{{pyq $name}}{{end}}]
 CALL_START_TYPES = {
@@ -37,9 +38,7 @@ CALL_START_TYPES = {
 CALL_START_REQUIRED = {
 {{range .Telephony.CallStart}}{{if .Required}}    {{pyq .Name}},
 {{end}}{{end}}}
-_pending: dict[str, dict] = {}
-_seen_events: set[str] = set()
-_control_tasks: dict[str, object] = {}
+STATE = TelephonyState(os.getenv("REDIS_URL"), {{pyq .Project}}, {{.Telephony.MaxSessions}}, SESSION_TTL_SECS)
 
 
 def _env(name: str) -> str:
@@ -85,22 +84,22 @@ async def _signed_event(request: Request) -> dict:
     return data
 
 
-def _remember(direction: str, from_number: str, to_number: str, call_start: dict) -> tuple[str, str]:
+async def _remember(direction: str, from_number: str, to_number: str, call_start: dict) -> tuple[str, str]:
     session_id = secrets.token_urlsafe(24)
     token = secrets.token_urlsafe(32)
-    now = time.monotonic()
-    for old_token, value in list(_pending.items()):
-        if value["expires_at"] <= now:
-            _pending.pop(old_token, None)
-    _pending[token] = {
+    await STATE.remember_pending(token, {
         "session_id": session_id,
         "direction": direction,
         "from_number": from_number,
         "to_number": to_number,
         "call_start": dict(call_start),
-        "expires_at": now + PENDING_TTL_SECS,
-    }
+    }, PENDING_TTL_SECS)
     return token, session_id
+
+
+async def _require_accepting() -> None:
+    if STATE.draining or not await STATE.ping():
+        raise HTTPException(status_code=503, detail="telephony control unavailable")
 
 
 def _valid_destination(value: object) -> bool:
@@ -157,17 +156,15 @@ def normalized_context(runner_args: WebSocketRunnerArguments) -> dict:
 async def cold_transfer(call_id: str, destination: str) -> None:
     if not _valid_destination(destination):
         raise RuntimeError("invalid compiled transfer destination")
-    task = _control_tasks.get(call_id)
-    if task is None:
-        task = asyncio.create_task(_call_api("POST", f"/calls/{call_id}/actions/transfer", {
+    if not await STATE.mark_once("transfer", call_id, SESSION_TTL_SECS):
+        return
+    try:
+        await _call_api("POST", f"/calls/{call_id}/actions/transfer", {
             "to": destination,
             "command_id": secrets.token_urlsafe(24),
-        }))
-        _control_tasks[call_id] = task
-    try:
-        await task
+        })
     except Exception:
-        _control_tasks.pop(call_id, None)
+        await STATE.forget("transfer", call_id)
         raise
 
 
@@ -182,28 +179,39 @@ async def readiness() -> dict[str, object]:
     if missing:
         raise HTTPException(status_code=503, detail={"missing_environment": missing})
     _public_url()
+    await _require_accepting()
     return {"ready": True}
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    STATE.begin_drain()
+    await STATE.close()
 
 
 {{if .Telephony.HasInbound}}@app.post("/telephony/inbound")
 async def inbound(request: Request) -> dict[str, bool]:
     data = await _signed_event(request)
-    if data["id"] in _seen_events:
+    await _require_accepting()
+    if not await STATE.mark_once("event", data["id"], SESSION_TTL_SECS):
         return {"accepted": True, "duplicate": True}
-    payload = data.get("payload", {})
-    if data.get("event_type") == "call.initiated" and payload.get("direction") == "incoming":
-        from_number, to_number = payload.get("from", ""), payload.get("to", "")
-        if not _valid_destination(from_number) or not _valid_destination(to_number):
-            raise HTTPException(status_code=400, detail="invalid carrier call context")
-        token, _ = _remember("inbound", from_number, to_number, {})
-        await _call_api("POST", f"/calls/{payload['call_control_id']}/actions/answer", {
-            "command_id": secrets.token_urlsafe(24),
-            "stream_url": _websocket_url(f"/telephony/ws/{token}"),
-            "stream_track": "both_tracks",
-            "stream_bidirectional_mode": "rtp",
-            "stream_bidirectional_codec": "PCMU",
-        })
-    _seen_events.add(data["id"])
+    try:
+        payload = data.get("payload", {})
+        if data.get("event_type") == "call.initiated" and payload.get("direction") == "incoming":
+            from_number, to_number = payload.get("from", ""), payload.get("to", "")
+            if not _valid_destination(from_number) or not _valid_destination(to_number):
+                raise HTTPException(status_code=400, detail="invalid carrier call context")
+            token, _ = await _remember("inbound", from_number, to_number, {})
+            await _call_api("POST", f"/calls/{payload['call_control_id']}/actions/answer", {
+                "command_id": secrets.token_urlsafe(24),
+                "stream_url": _websocket_url(f"/telephony/ws/{token}"),
+                "stream_track": "both_tracks",
+                "stream_bidirectional_mode": "rtp",
+                "stream_bidirectional_codec": "PCMU",
+            })
+    except Exception:
+        await STATE.forget("event", data["id"])
+        raise
     return {"accepted": True, "duplicate": False}
 
 
@@ -212,6 +220,7 @@ async def outbound(request: Request) -> dict[str, str]:
     expected = "Bearer " + _env("UNMUTE_OUTBOUND_TOKEN")
     if not hmac.compare_digest(request.headers.get("Authorization", ""), expected):
         raise HTTPException(status_code=401, detail="invalid application authorization")
+    await _require_accepting()
     body = await request.json()
     if not isinstance(body, dict) or set(body) - {"to", "call_start"}:
         raise HTTPException(status_code=422, detail="unknown outbound field")
@@ -225,7 +234,7 @@ async def outbound(request: Request) -> dict[str, str]:
     invalid = sorted(name for name, value in call_start.items() if not _valid_call_start(name, value))
     if missing or invalid:
         raise HTTPException(status_code=422, detail={"missing": missing, "invalid": invalid})
-    token, session_id = _remember("outbound", _env(FROM_NUMBER_ENV), destination, call_start)
+    token, session_id = await _remember("outbound", _env(FROM_NUMBER_ENV), destination, call_start)
     result = await _call_api("POST", "/calls", {
         "connection_id": _env(CONNECTION_ID_ENV),
         "from": _env(FROM_NUMBER_ENV),
@@ -243,22 +252,30 @@ async def outbound(request: Request) -> dict[str, str]:
 {{end}}@app.post("/telephony/status")
 async def status(request: Request) -> dict[str, bool]:
     data = await _signed_event(request)
-    duplicate = data["id"] in _seen_events
-    _seen_events.add(data["id"])
+    duplicate = not await STATE.mark_once("event", data["id"], SESSION_TTL_SECS)
     return {"accepted": True, "duplicate": duplicate}
 
 
 @app.websocket("/telephony/ws/{token}")
 async def media(websocket: WebSocket, token: str) -> None:
-    pending = _pending.pop(token, None)
-    if pending is None or pending["expires_at"] <= time.monotonic():
+    if STATE.draining:
+        await websocket.close(code=1013)
+        return
+    pending = await STATE.pending(token, consume=True)
+    if pending is None:
         await websocket.close(code=4003)
         return
+    if not await STATE.admit(pending["session_id"]):
+        await websocket.close(code=1013)
+        return
     await websocket.accept()
-    runner_args = WebSocketRunnerArguments(
-        websocket=websocket,
-        transport_type=None,
-        body={"telephony": pending},
-        session_id=pending["session_id"],
-    )
-    await bot.bot(runner_args)
+    try:
+        runner_args = WebSocketRunnerArguments(
+            websocket=websocket,
+            transport_type=None,
+            body={"telephony": pending},
+            session_id=pending["session_id"],
+        )
+        await bot.bot(runner_args)
+    finally:
+        await STATE.release(pending["session_id"])

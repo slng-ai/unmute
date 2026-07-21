@@ -553,6 +553,13 @@ if __name__ == "__main__":
       "value": "4h0m0s",
       "status": "unbenchmarked",
       "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+    },
+    {
+      "target": "pipecat",
+      "metric": "provider_call_start_rate.telephony",
+      "value": "4",
+      "status": "unbenchmarked",
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
     }
   ],
   "notes": [

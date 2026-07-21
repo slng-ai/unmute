@@ -457,7 +457,7 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 	if !foundTemperature {
 		t.Fatal("forwarded temperature param is missing")
 	}
-	if len(report.Sizing) != 30 {
+	if len(report.Sizing) != 35 {
 		t.Fatalf("sizing lines = %d", len(report.Sizing))
 	}
 	for _, line := range report.Sizing {
@@ -477,13 +477,16 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 	}
 	delete(agent.Channels, "web")
 	report, err = Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
-	if err != nil || len(report.Sizing) != 4 {
+	if err != nil || len(report.Sizing) != 5 {
 		t.Fatalf("telephony-only sizing: err=%v lines=%#v", err, report.Sizing)
 	}
 	for _, line := range report.Sizing {
 		if strings.Contains(line.Metric, "realtime_audio") {
 			t.Fatalf("telephony-only sizing includes realtime audio: %#v", line)
 		}
+	}
+	if got := report.Sizing[len(report.Sizing)-1]; got.Metric != "provider_call_start_rate.telephony" || got.Value != "4" {
+		t.Fatalf("telephony call-start sizing = %#v", got)
 	}
 }
 

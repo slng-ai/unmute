@@ -938,7 +938,10 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 
 	agentPy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		`server = AgentServer(port=int(os.getenv("UNMUTE_AGENT_HEALTH_PORT", "8081")))`,
+		`MAX_SESSIONS = 60`,
+		`len(agent_server.active_jobs) / MAX_SESSIONS`,
+		`drain_timeout=1200`,
+		`load_threshold=(MAX_SESSIONS - 1) / MAX_SESSIONS`,
 		`"call_id": attributes.get("sip.callID")`,
 		`"from_number": trunk_number if direction == "outbound" else remote_number`,
 		`raise RuntimeError("phone_number must be an E.164 number")`,

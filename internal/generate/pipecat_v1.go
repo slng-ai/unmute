@@ -160,6 +160,8 @@ type pipecatVariable struct {
 type pipecatTelephony struct {
 	Carrier       string
 	Connection    string
+	MaxSessions   int
+	SessionTTL    int
 	AccountSIDEnv string
 	AuthIDEnv     string
 	AuthTokenEnv  string
@@ -334,6 +336,7 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 			templateName = "telephony_plivo.py"
 		}
 		outputs = append(outputs, struct{ tmpl, path string }{templateName, "telephony.py"})
+		outputs = append(outputs, struct{ tmpl, path string }{"telephony_state.py", "telephony_state.py"})
 	} else {
 		outputs = append(outputs, struct{ tmpl, path string }{"pcc-deploy.toml", "pcc-deploy.toml"})
 	}

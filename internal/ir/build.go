@@ -799,9 +799,9 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		})
 	}
 	connection := agent.Connections[resolved.Connection]
-	coordination, admissionOwner := "local", "generated_runtime"
+	coordination, admissionOwner := "shared", "generated_runtime"
 	if resolved.Provider == ProviderLiveKit && resolved.Transport == "sip" {
-		coordination, admissionOwner = "shared", "livekit_dispatch"
+		admissionOwner = "livekit_dispatch"
 	}
 	return &TelephonyPlan{
 		Channels: channels, Connection: resolved.Connection,

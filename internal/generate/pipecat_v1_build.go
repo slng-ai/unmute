@@ -107,6 +107,9 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 	if plan.Key.Provider != ir.ProviderPipecat || plan.Key.Transport != "carrier-websocket" {
 		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no emitted adapter", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
 	}
+	if agent.Capacity == nil || agent.Capacity.MaxSessions <= 0 {
+		return nil, fmt.Errorf("pipecat telephony requires positive capacity.max_sessions")
+	}
 	var required []string
 	switch plan.Key.Carrier {
 	case "twilio":
@@ -133,9 +136,17 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 		}
 	}
 	env.add("UNMUTE_PUBLIC_URL")
+	env.add("REDIS_URL")
+	sessionTTL := 360
+	if agent.Conversation != nil {
+		if configured := durationSecs(agent.Conversation.MaxDuration) + 60; configured > sessionTTL {
+			sessionTTL = configured
+		}
+	}
 
 	telephony := &pipecatTelephony{
 		Carrier: plan.Key.Carrier, Connection: plan.Connection,
+		MaxSessions: agent.Capacity.MaxSessions, SessionTTL: sessionTTL,
 		AccountSIDEnv: plan.Environment["account_sid"], AuthIDEnv: plan.Environment["auth_id"],
 		AuthTokenEnv: plan.Environment["auth_token"],
 		APIKeyEnv:    plan.Environment["api_key"], PublicKeyEnv: plan.Environment["public_key"],

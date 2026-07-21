@@ -91,7 +91,7 @@ func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { //
 	if plan == nil || len(plan.Processes) != 1 || len(plan.PublicEndpoints) != 3 {
 		t.Fatalf("runtime plan = %#v", plan)
 	}
-	if strings.Join(plan.RequiredEnv, ",") != "TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,UNMUTE_PUBLIC_URL" {
+	if strings.Join(plan.RequiredEnv, ",") != "REDIS_URL,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,UNMUTE_PUBLIC_URL" {
 		t.Fatalf("required env = %v", plan.RequiredEnv)
 	}
 	if got := strings.Join(plan.Processes[0].Command, " "); got != "uv run uvicorn telephony:app --host 0.0.0.0 --port 7860" {
@@ -102,7 +102,7 @@ func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { //
 		t.Fatal(err)
 	}
 	report := string(files[0].Content)
-	for _, want := range []string{`"telephony"`, `"carrier": "twilio"`, `"coordination": "local"`, `"smoke": false`} {
+	for _, want := range []string{`"telephony"`, `"carrier": "twilio"`, `"coordination": "shared"`, `"smoke": false`} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report missing %s:\n%s", want, report)
 		}

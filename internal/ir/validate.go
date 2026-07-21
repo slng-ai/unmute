@@ -143,6 +143,12 @@ func sizing(agent *Agent, resolved Target) []Sizing {
 			})
 		}
 	}
+	if channelKinds[string(ChannelTelephony)] {
+		result = append(result, Sizing{
+			Target: resolved.Name, Metric: "provider_call_start_rate.telephony",
+			Value: fmt.Sprint(agent.Capacity.PeakStartsPerSecond), Status: "unbenchmarked", Basis: basis,
+		})
+	}
 	return result
 }
 

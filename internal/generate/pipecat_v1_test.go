@@ -405,7 +405,9 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		`RequestValidator(_env(AUTH_TOKEN_ENV))`,
 		`_validator().validate(_http_url(request.url.path), form, signature)`,
 		`_validator().validate(`,
-		`pending = _pending.pop(token, None)`,
+		`pending = await STATE.pending(token, consume=True)`,
+		`await STATE.admit(pending["session_id"])`,
+		`STATE.mark_once("status", event_id, SESSION_TTL_SECS)`,
 		`hmac.compare_digest(request.headers.get("Authorization", ""), expected)`,
 		`status_callback_event=["initiated", "ringing", "answered", "completed"]`,
 		`await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))`,
@@ -414,6 +416,17 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	} {
 		if !strings.Contains(adapter, want) {
 			t.Errorf("telephony.py missing %q", want)
+		}
+	}
+	state := artifactFile(t, artifact, "telephony_state.py")
+	for _, want := range []string{"hashlib.sha256", "setex", "getdel", "ZREMRANGEBYSCORE", "zrem"} {
+		if !strings.Contains(state, want) {
+			t.Errorf("telephony_state.py missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"from_number", "to_number", "call_start", "credential", "transcript", "audio"} {
+		if strings.Contains(state, forbidden) {
+			t.Errorf("telephony_state.py leaks disallowed state field %q", forbidden)
 		}
 	}
 	for _, forbidden := range []string{"Telnyx", "Plivo", "Exotel", "audio/x-mulaw", "media.payload"} {
@@ -512,11 +525,12 @@ func TestPipecatTelnyxTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		`Ed25519PublicKey.from_public_bytes`,
 		`abs(int(time.time()) - signed_at) > WEBHOOK_TOLERANCE_SECS`,
 		`timestamp.encode() + b"|" + raw`,
-		`data["id"] in _seen_events`,
+		`STATE.mark_once("event", data["id"], SESSION_TTL_SECS)`,
 		`"stream_bidirectional_mode": "rtp"`,
 		`"stream_bidirectional_codec": "PCMU"`,
 		`"command_id": secrets.token_urlsafe(24)`,
-		`pending = _pending.pop(token, None)`,
+		`pending = await STATE.pending(token, consume=True)`,
+		`await STATE.admit(pending["session_id"])`,
 		`hmac.compare_digest(request.headers.get("Authorization", ""), expected)`,
 		`"carrier": "telnyx"`,
 	} {
@@ -580,8 +594,9 @@ func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T
 	adapter := artifactFile(t, artifact, "telephony.py")
 	for _, want := range []string{
 		`utils.validate_v3_signature(`,
-		`nonce in _seen_nonces`,
-		`pending = _pending.pop(token, None)`,
+		`STATE.mark_once("nonce", nonce, PENDING_TTL_SECS)`,
+		`pending = await STATE.pending(token, consume=True)`,
+		`await STATE.admit(pending["session_id"])`,
 		`bidirectional="true"`,
 		`keepCallAlive="true"`,
 		`contentType="audio/x-mulaw;rate=8000"`,

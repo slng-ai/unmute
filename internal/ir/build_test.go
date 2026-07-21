@@ -52,7 +52,7 @@ func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 	if plan.Key.Transport != "carrier-websocket" || plan.Key.Carrier != "twilio" || plan.Connection != "primary_phone" {
 		t.Fatalf("route = %#v", plan)
 	}
-	if plan.AdmissionOwner != "generated_runtime" || len(plan.Evidence) == 0 {
+	if plan.Coordination != "shared" || plan.AdmissionOwner != "generated_runtime" || len(plan.Evidence) == 0 {
 		t.Fatalf("incomplete plan = %#v", plan)
 	}
 }

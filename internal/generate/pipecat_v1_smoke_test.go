@@ -137,7 +137,7 @@ func testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t *testing.T, c
 	}
 	dir := t.TempDir()
 	var paths []string
-	for _, name := range []string{"bot.py", "telephony.py"} {
+	for _, name := range []string{"bot.py", "telephony.py", "telephony_state.py"} {
 		content := []byte(artifactFile(t, artifact, name))
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, content, 0o600); err != nil {

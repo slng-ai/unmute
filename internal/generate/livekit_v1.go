@@ -286,6 +286,8 @@ type livekitData struct {
 	InactivityEndSecs      int
 	InactivityEndDeltaSecs int // end_after minus nudge_after, floored at 1s
 	MaxDurationSecs        int
+	MaxSessions            int // telephony worker admission cap
+	DrainTimeoutSecs       int // bound graceful shutdown by the longest session
 }
 
 // livekitEmittedFields declares every capability field the LiveKit emitter has

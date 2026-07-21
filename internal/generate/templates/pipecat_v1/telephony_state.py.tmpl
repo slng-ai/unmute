@@ -1,0 +1,92 @@
+"""Shared Redis control state for generated telephony adapters."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import time
+
+from redis.asyncio import Redis
+
+
+_ADMIT = """
+local existing = redis.call('ZSCORE', KEYS[1], ARGV[4])
+if existing then
+  redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4])
+  return 1
+end
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[2]) then
+  return 0
+end
+redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4])
+redis.call('EXPIRE', KEYS[1], ARGV[5])
+return 1
+"""
+
+
+class TelephonyState:
+    def __init__(self, redis_url: str | None, project: str, max_sessions: int, session_ttl: int):
+        self._redis = Redis.from_url(redis_url, decode_responses=True) if redis_url else None
+        self._prefix = f"unmute:{project}"
+        self._max_sessions = max_sessions
+        self._session_ttl = session_ttl
+        self.draining = False
+
+    def _client(self) -> Redis:
+        if self._redis is None:
+            raise RuntimeError("Missing required environment variable: REDIS_URL")
+        return self._redis
+
+    def _key(self, kind: str, identity: str | None = None) -> str:
+        key = f"{self._prefix}:{kind}"
+        if identity is not None:
+            digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+            key += f":{digest}"
+        return key
+
+    async def ping(self) -> bool:
+        try:
+            return bool(await self._client().ping())
+        except Exception:
+            return False
+
+    async def remember_pending(self, token: str, value: dict, ttl: int) -> None:
+        payload = json.dumps(value, separators=(",", ":"))
+        await self._client().setex(self._key("pending", token), ttl, payload)
+
+    async def pending(self, token: str, *, consume: bool) -> dict | None:
+        key = self._key("pending", token)
+        raw = await (self._client().getdel(key) if consume else self._client().get(key))
+        return json.loads(raw) if raw else None
+
+    async def mark_once(self, kind: str, identity: str, ttl: int) -> bool:
+        return bool(await self._client().set(self._key(kind, identity), "1", ex=ttl, nx=True))
+
+    async def forget(self, kind: str, identity: str) -> None:
+        await self._client().delete(self._key(kind, identity))
+
+    async def admit(self, session_id: str) -> bool:
+        now = int(time.time())
+        expires = now + self._session_ttl
+        result = await self._client().eval(
+            _ADMIT,
+            1,
+            self._key("active"),
+            now,
+            self._max_sessions,
+            expires,
+            session_id,
+            self._session_ttl + 60,
+        )
+        return bool(result)
+
+    async def release(self, session_id: str) -> None:
+        await self._client().zrem(self._key("active"), session_id)
+
+    def begin_drain(self) -> None:
+        self.draining = True
+
+    async def close(self) -> None:
+        if self._redis is not None:
+            await self._redis.aclose()

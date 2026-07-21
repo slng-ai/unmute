@@ -535,7 +535,23 @@ def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
 
 
-server = AgentServer({{if .Telephony}}port=int(os.getenv("UNMUTE_AGENT_HEALTH_PORT", "8081")){{end}})
+{{- if .Telephony}}
+MAX_SESSIONS = {{.MaxSessions}}
+
+
+def telephony_load(agent_server: AgentServer) -> float:
+    return min(len(agent_server.active_jobs) / MAX_SESSIONS, 1.0)
+
+
+server = AgentServer(
+    port=int(os.getenv("UNMUTE_AGENT_HEALTH_PORT", "8081")),
+    drain_timeout={{.DrainTimeoutSecs}},
+    load_threshold=(MAX_SESSIONS - 1) / MAX_SESSIONS,
+)
+server.load_fnc = telephony_load
+{{- else}}
+server = AgentServer()
+{{- end}}
 server.setup_fnc = prewarm
 
 

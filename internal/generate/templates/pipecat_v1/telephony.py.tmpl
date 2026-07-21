@@ -7,7 +7,6 @@ import hmac
 import os
 import re
 import secrets
-import time
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 from xml.etree.ElementTree import Element, SubElement, tostring
 
@@ -18,6 +17,7 @@ from twilio.request_validator import RequestValidator
 from twilio.rest import Client
 
 import bot
+from telephony_state import TelephonyState
 
 
 app = FastAPI()
@@ -26,6 +26,7 @@ AUTH_TOKEN_ENV = {{pyq .Telephony.AuthTokenEnv}}
 FROM_NUMBER_ENV = {{pyq .Telephony.FromNumberEnv}}
 CONNECTION = {{pyq .Telephony.Connection}}
 PENDING_TTL_SECS = 300
+SESSION_TTL_SECS = {{.Telephony.SessionTTL}}
 REQUIRED_ENV = [{{range $i, $name := .RequiredEnv}}{{if $i}}, {{end}}{{pyq $name}}{{end}}]
 CALL_START_TYPES = {
 {{range .Telephony.CallStart}}    {{pyq .Name}}: {{pyq .Type}},
@@ -33,9 +34,7 @@ CALL_START_TYPES = {
 CALL_START_REQUIRED = {
 {{range .Telephony.CallStart}}{{if .Required}}    {{pyq .Name}},
 {{end}}{{end}}}
-_pending: dict[str, dict] = {}
-_seen_status: set[str] = set()
-_transferred_calls: set[str] = set()
+STATE = TelephonyState(os.getenv("REDIS_URL"), {{pyq .Project}}, {{.Telephony.MaxSessions}}, SESSION_TTL_SECS)
 
 
 def _env(name: str) -> str:
@@ -81,22 +80,22 @@ def _validate_websocket(websocket: WebSocket) -> bool:
     )
 
 
-def _remember(direction: str, from_number: str, to_number: str, call_start: dict) -> tuple[str, str]:
+async def _remember(direction: str, from_number: str, to_number: str, call_start: dict) -> tuple[str, str]:
     session_id = secrets.token_urlsafe(24)
     token = secrets.token_urlsafe(32)
-    now = time.monotonic()
-    for old_token, value in list(_pending.items()):
-        if value["expires_at"] <= now:
-            _pending.pop(old_token, None)
-    _pending[token] = {
+    await STATE.remember_pending(token, {
         "session_id": session_id,
         "direction": direction,
         "from_number": from_number,
         "to_number": to_number,
         "call_start": dict(call_start),
-        "expires_at": now + PENDING_TTL_SECS,
-    }
+    }, PENDING_TTL_SECS)
     return token, session_id
+
+
+async def _require_accepting() -> None:
+    if STATE.draining or not await STATE.ping():
+        raise HTTPException(status_code=503, detail="telephony control unavailable")
 
 
 def _stream_twiml(token: str) -> str:
@@ -157,13 +156,16 @@ def normalized_context(runner_args: WebSocketRunnerArguments) -> dict:
 
 
 async def cold_transfer(call_id: str, destination: str) -> None:
-    if call_id in _transferred_calls:
-        return
     if not _valid_destination(destination):
         raise RuntimeError("invalid compiled transfer destination")
-    client = Client(_env(ACCOUNT_SID_ENV), _env(AUTH_TOKEN_ENV))
-    await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))
-    _transferred_calls.add(call_id)
+    if not await STATE.mark_once("transfer", call_id, SESSION_TTL_SECS):
+        return
+    try:
+        client = Client(_env(ACCOUNT_SID_ENV), _env(AUTH_TOKEN_ENV))
+        await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))
+    except Exception:
+        await STATE.forget("transfer", call_id)
+        raise
 
 
 @app.get("/healthz")
@@ -177,17 +179,25 @@ async def readiness() -> dict[str, object]:
     if missing:
         raise HTTPException(status_code=503, detail={"missing_environment": missing})
     _public_url()
+    await _require_accepting()
     return {"ready": True}
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    STATE.begin_drain()
+    await STATE.close()
 
 
 {{if .Telephony.HasInbound}}@app.post("/telephony/inbound")
 async def inbound(request: Request) -> Response:
     form = await _signed_form(request)
+    await _require_accepting()
     from_number = form.get("From", "")
     to_number = form.get("To", "")
     if not _valid_destination(from_number) or not _valid_destination(to_number):
         raise HTTPException(status_code=400, detail="invalid carrier call context")
-    token, _ = _remember("inbound", from_number, to_number, {})
+    token, _ = await _remember("inbound", from_number, to_number, {})
     return Response(_stream_twiml(token), media_type="application/xml")
 
 
@@ -196,6 +206,7 @@ async def outbound(request: Request) -> dict[str, str]:
     expected = "Bearer " + _env("UNMUTE_OUTBOUND_TOKEN")
     if not hmac.compare_digest(request.headers.get("Authorization", ""), expected):
         raise HTTPException(status_code=401, detail="invalid application authorization")
+    await _require_accepting()
     body = await request.json()
     if not isinstance(body, dict) or set(body) - {"to", "call_start"}:
         raise HTTPException(status_code=422, detail="unknown outbound field")
@@ -209,7 +220,7 @@ async def outbound(request: Request) -> dict[str, str]:
     invalid = sorted(name for name, value in call_start.items() if not _valid_call_start(name, value))
     if missing or invalid:
         raise HTTPException(status_code=422, detail={"missing": missing, "invalid": invalid})
-    token, session_id = _remember("outbound", _env(FROM_NUMBER_ENV), destination, call_start)
+    token, session_id = await _remember("outbound", _env(FROM_NUMBER_ENV), destination, call_start)
     client = Client(_env(ACCOUNT_SID_ENV), _env(AUTH_TOKEN_ENV))
     call = await asyncio.to_thread(
         client.calls.create,
@@ -228,25 +239,30 @@ async def status(request: Request) -> dict[str, bool]:
     event_id = ":".join(
         (form.get("CallSid", ""), form.get("CallStatus", ""), form.get("SequenceNumber", ""))
     )
-    duplicate = event_id in _seen_status
-    _seen_status.add(event_id)
+    duplicate = not await STATE.mark_once("status", event_id, SESSION_TTL_SECS)
     return {"accepted": True, "duplicate": duplicate}
 
 
 @app.websocket("/telephony/ws/{token}")
 async def media(websocket: WebSocket, token: str) -> None:
-    if not _validate_websocket(websocket):
+    if STATE.draining or not _validate_websocket(websocket):
         await websocket.close(code=4003)
         return
-    pending = _pending.pop(token, None)
-    if pending is None or pending["expires_at"] <= time.monotonic():
+    pending = await STATE.pending(token, consume=True)
+    if pending is None:
         await websocket.close(code=4003)
+        return
+    if not await STATE.admit(pending["session_id"]):
+        await websocket.close(code=1013)
         return
     await websocket.accept()
-    runner_args = WebSocketRunnerArguments(
-        websocket=websocket,
-        transport_type=None,
-        body={"telephony": pending},
-        session_id=pending["session_id"],
-    )
-    await bot.bot(runner_args)
+    try:
+        runner_args = WebSocketRunnerArguments(
+            websocket=websocket,
+            transport_type=None,
+            body={"telephony": pending},
+            session_id=pending["session_id"],
+        )
+        await bot.bot(runner_args)
+    finally:
+        await STATE.release(pending["session_id"])
