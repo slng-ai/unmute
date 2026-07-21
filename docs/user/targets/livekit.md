@@ -255,6 +255,12 @@ above like any other think model — there is nothing extra to add in
 `targets.yaml`. LiveKit gives a task with `model` its own think model; if you
 omit the field, the task uses the entry agent's model.
 
+LiveKit always gives the task its own instructions. When task history carries
+over, the generated context excludes the owning agent's instructions. The
+[context strategy map](../concepts/how-targets-run-your-agent.md#compare-context-strategies)
+shows what `full`, `messages`, `last_n`, `summary`, and `reset` send to the
+task.
+
 LiveKit also accepts nested task results when every configured target is a code
 target. Wrap the JSON Schema value in `schema`.
 

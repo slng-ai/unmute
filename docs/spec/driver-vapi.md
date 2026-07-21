@@ -1,6 +1,6 @@
 # SPEC — Vapi driver (generate.Artifact case)
 
-Consumes the core: [compiler.md](compiler.md). Schema truth: [SCHEMA.md](../../SCHEMA.md). Vapi facts: SCHEMA.md conditions ² + ORCHESTRATOR footnote ². SCHEMA.md wins on disagreement.
+Consumes the core: [compiler.md](compiler.md). Schema truth: [SCHEMA.md](../SCHEMA.md). Vapi facts: SCHEMA.md conditions ² + ORCHESTRATOR footnote ². SCHEMA.md wins on disagreement.
 
 Type: **managed target**. Emits an assistant/Squad API payload (`Artifact.Payload`) plus an `ApplyPlan` that pushes it to the Vapi API. No generator today; the existing SLNG generator (`internal/generate/slng.go` payload + `internal/cli/apply.go` POST) is the closest managed-target pattern to follow.
 

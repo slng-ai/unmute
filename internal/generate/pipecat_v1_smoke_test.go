@@ -484,6 +484,98 @@ asyncio.run(_run())
 print("smoke ok:", ", ".join(builders))
 `
 
+const pipecatTaskRoleSmokeScript = `"""Smoke check: task role replaces, then restores, the owner role."""
+import asyncio
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot  # noqa: E402
+from pipecat.flows import FlowManager  # noqa: E402
+from pipecat.frames.frames import Frame  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair  # noqa: E402
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor  # noqa: E402
+from pipecat.services.llm_service import LLMService  # noqa: E402
+from pipecat.services.settings import LLMSettings  # noqa: E402
+from pipecat.workers.runner import WorkerRunner  # noqa: E402
+
+OWNER_PROMPT = None
+original_owner_builder = bot.build_appointment_desk_llm
+
+
+class FakeLLM(LLMService):
+    def __init__(self) -> None:
+        super().__init__(settings=LLMSettings(model="smoke", system_instruction=OWNER_PROMPT))
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+
+
+class Passthrough(FrameProcessor):
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+
+
+for name in list(vars(bot)):
+    if name.startswith("build_") and name.endswith("_llm"):
+        setattr(bot, name, FakeLLM)
+    elif name.startswith("build_") and name.endswith("_tts"):
+        setattr(bot, name, Passthrough)
+
+
+async def main() -> None:
+    global OWNER_PROMPT
+    OWNER_PROMPT = original_owner_builder()._settings.system_instruction
+    context = LLMContext()
+    owner = bot.AppointmentDeskAgent(state=None, context=context, call_context=None)
+    target = bot.AftercareAgent(state=None, context=context, call_context=None)
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(owner, target)
+    run_task = asyncio.create_task(runner.run(auto_end=False))
+    await asyncio.wait_for(owner._pipeline_start_event.wait(), timeout=5)
+    await asyncio.wait_for(target._pipeline_start_event.wait(), timeout=5)
+
+    owner._active = True
+    owner._manage_appointment_results = {}
+    owner._manage_appointment_snapshot = (
+        [dict(message) for message in context.get_messages()],
+        context.tools,
+    )
+    flow = FlowManager(
+        llm=owner.llm,
+        context_aggregator=LLMContextAggregatorPair(context),
+        worker=owner,
+    )
+    node = owner._manage_appointment_node_identify_customer()
+    await flow.initialize(node)
+    await owner.flush_pipeline()
+    assert owner.llm._settings.system_instruction == node["role_message"]
+    assert owner.llm._settings.system_instruction != OWNER_PROMPT
+
+    await owner._manage_appointment_finish_finalize_appointment(
+        {"action": "book", "status": "ok", "appointment_id": "apt-smoke"},
+        flow,
+    )
+    assert owner.llm._settings.system_instruction == OWNER_PROMPT
+    for _ in range(100):
+        if target.active:
+            break
+        await asyncio.sleep(0.01)
+    assert target.active, "then: transfer did not activate the target worker"
+
+    await runner.cancel("task role smoke complete")
+    await asyncio.wait_for(run_task, timeout=5)
+    print("task role smoke ok")
+
+
+asyncio.run(main())
+`
+
 const pipecatStaticCheckScript = `"""Smoke check: the generated project passes ty."""
 import subprocess
 
@@ -803,10 +895,20 @@ func TestSmokePipecatV1ServicesInstantiate(t *testing.T) {
 	runPipecatSmoke(t, "safe_core", nil, nil)
 }
 
-// TestSmokePipecatV1TaskGroupsInstantiate imports the generated FlowManager
-// lowering used by both standalone tasks and task groups.
+// TestSmokePipecatV1TaskGroupsInstantiate runs the generated FlowManager on
+// Pipecat 1.5.0 and observes task-role replacement, owner-role restoration,
+// and transfer activation (V28).
 func TestSmokePipecatV1TaskGroupsInstantiate(t *testing.T) {
-	runPipecatSmoke(t, "task-groups", nil, nil)
+	runPipecatSmokeScript(t, "task-groups", nil, func(agent *ir.Agent) {
+		aftercare := agent.Agents["appointment_desk"]
+		aftercare.Instructions = "You are the aftercare agent."
+		aftercare.Tools = nil
+		agent.Agents["aftercare"] = aftercare
+		group := agent.TaskGroups["appointment_flow"]
+		group.Then = ir.GroupTransfer
+		group.ThenTarget = "aftercare"
+		agent.TaskGroups["appointment_flow"] = group
+	}, pipecatTaskRoleSmokeScript)
 }
 
 // TestSmokePipecatV1MultiVendorInstantiates covers the remaining official

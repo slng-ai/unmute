@@ -15,9 +15,9 @@ Commands: `init`, `validate`, `compile`, `apply`, `dev`
 and Deepgram fail with `driver is not implemented` until theirs land.
 
 Where things live: user docs in [docs/user/](docs/user/README.md), the locked
-schema in [SCHEMA.md](SCHEMA.md), driver specs in [docs/spec/](docs/spec/),
+schema in [SCHEMA.md](docs/SCHEMA.md), driver specs in [docs/spec/](docs/spec/),
 the provider catalogue design and findings in
-[PROVIDER_CATALOG.md](PROVIDER_CATALOG.md), vocabulary in
+[PROVIDER_CATALOG.md](docs/PROVIDER_CATALOG.md), vocabulary in
 [CONTEXT.md](CONTEXT.md), engineering rules in [CLAUDE.md](CLAUDE.md).
 
 ## Build
@@ -144,7 +144,7 @@ environment:
 ```
 
 Route support remains provisional until a real credentialed smoke passes.
-[TELEPHONY.md](TELEPHONY.md) documents the architecture, exact credential list,
+[TELEPHONY.md](docs/TELEPHONY.md) documents the architecture, exact credential list,
 where to obtain each credential, local public-URL flow, deployment topology,
 and current verification policy.
 

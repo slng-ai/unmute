@@ -2,7 +2,7 @@
 
 A get-around guide to `unmute_cli`. Not exhaustive — the load-bearing files,
 grouped by what you're trying to do. For the *why* behind the design, see
-[CONTEXT.md](CONTEXT.md) (vocabulary), [SCHEMA.md](SCHEMA.md) (the locked spec),
+[CONTEXT.md](../CONTEXT.md) (vocabulary), [SCHEMA.md](SCHEMA.md) (the locked spec),
 and [CLAUDE.md](CLAUDE.md) (engineering rules).
 
 ## The one you asked about: provider integrations

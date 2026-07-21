@@ -41,6 +41,7 @@ from pipecat.bus import BusBridgeProcessor
 {{else if .NeedsEndFrame}}from pipecat.frames.frames import EndFrame
 {{else if .NeedsAppendFrame}}from pipecat.frames.frames import LLMMessagesAppendFrame
 {{end}}{{if .GreetingText}}from pipecat.frames.frames import TTSSpeakFrame
+{{end}}{{if .NeedsRoleRestore}}from pipecat.frames.frames import LLMUpdateSettingsFrame
 {{end}}from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -51,6 +52,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 {{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
+{{end}}{{if .NeedsRoleRestore}}from pipecat.services.settings import LLMSettings
 {{end}}from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 {{if .Telephony}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -186,7 +188,7 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
             response.raise_for_status()
             await params.result_callback(response.json())
 {{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.llm.push_frame(EndFrame())
-{{end}}{{end}}{{range $d := .Delegates}}
+{{end}}{{end}}{{$agentPrompt := .Prompt}}{{range $d := .Delegates}}
     @tool()
     async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
@@ -205,7 +207,8 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
     def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
         return NodeConfig(
             name={{pyq $t.Name}},
-            task_messages=[{"role": "system", "content": {{pyq $t.Prompt}}}],
+            role_message={{pyq $t.Prompt}},
+            task_messages=[{"role": "developer", "content": "Begin this step."}],
             functions=[
 {{range $t.Tools}}                FlowsFunctionSchema(
                     name={{pyq .Name}},
@@ -235,6 +238,10 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
 {{else}}        # then: {{$d.Then}} — restore the owner's pre-flow context (messages and
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._{{$d.MethodName}}_snapshot
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(system_instruction={{pyq $agentPrompt}}),
+        ))
+        await self.flush_pipeline()
 {{if eq $d.Then "transfer"}}        self.context.set_messages(messages)
         self.context.set_tools(tools)
         await self.activate_worker(

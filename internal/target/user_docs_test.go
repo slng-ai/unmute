@@ -93,14 +93,14 @@ func TestTelephonyDocsContract(t *testing.T) {
 	root := filepath.Join("..", "..")
 	checks := map[string][]string{
 		"README.md": {"## Telephony", "connections/<name>.yaml", "pipecat_twilio", "TELEPHONY.md"},
-		"SCHEMA.md": {
+		"docs/SCHEMA.md": {
 			"peak_starts_per_second",
 			"(orchestrator, transport, carrier)",
 			"connections/primary_phone.yaml",
 			"any number of named targets and Connections",
 		},
 		"CONTEXT.md": {"**Telephony route**", "**Coordination mode**"},
-		"TELEPHONY.md": {
+		"docs/TELEPHONY.md": {
 			"## Route matrix and package cardinality",
 			"reject every telephony target",
 			"## Credentials",

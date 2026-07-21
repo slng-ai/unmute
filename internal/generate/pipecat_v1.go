@@ -224,6 +224,7 @@ type pipecatData struct {
 	NeedsAppendFrame    bool
 	HasFlows            bool // any delegate (tasks run as Flows on the owner, C8)
 	HasIsolated         bool // any isolated group (ContextStrategy RESET import)
+	NeedsRoleRestore    bool // any non-ending delegate (V28)
 }
 
 // Provider → service facts (class, import, extra/dep, key env, constructor

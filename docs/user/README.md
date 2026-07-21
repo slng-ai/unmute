@@ -97,7 +97,7 @@ reference pages when you need one exact YAML field:
 ## Documentation contract
 
 Examples show YAML before explanation and keep target-specific facts in the
-target and reference pages. [SCHEMA.md](../../SCHEMA.md) and the driver specs
+target and reference pages. [SCHEMA.md](../SCHEMA.md) and the driver specs
 remain the source of truth when a user page and the implementation disagree.
 
 The docs never hide a target limitation. If a YAML field cannot map faithfully
