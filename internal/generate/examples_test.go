@@ -18,7 +18,7 @@ func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 		agents, tasks, groups int
 	}{
 		{"simple-prompt", 1, 0, 0},
-		{"single-task", 1, 1, 0},
+		{"multi-task", 1, 2, 0},
 		{"task-groups", 1, 3, 1},
 		{"subagents", 2, 0, 0},
 	}
@@ -70,16 +70,19 @@ func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 					t.Errorf("tool %q is missing workflow contract %q", name, toolContracts[name])
 				}
 			}
-			if tc.name == "single-task" {
+			if tc.name == "multi-task" {
 				parent := agent.Agents["appointment_desk"].Instructions
-				if !strings.Contains(parent, "Don't ask for the service, date, phone number") {
-					t.Error("single-task parent can collect task-owned fields before delegation")
+				if !strings.Contains(parent, "Don't ask for the caller's name or phone number first") ||
+					!strings.Contains(parent, "service, date, or appointment ID first") {
+					t.Error("multi-task parent can collect task-owned fields before delegation")
 				}
-				task := agent.Tasks["appointment_request"].Instructions
-				customerGate := strings.Index(task, "## Customer gate")
-				booking := strings.Index(task, "## Booking workflow")
-				if customerGate < 0 || booking < 0 || customerGate > booking || !strings.Contains(task, "Never guess an ID") {
-					t.Error("single-task workflow does not gate booking on customer identification")
+				customer := agent.Tasks["customer_record"].Instructions
+				appointment := agent.Tasks["appointment_request"].Instructions
+				if !strings.Contains(customer, "Never guess an ID") ||
+					!strings.Contains(customer, "explicit permission") ||
+					!strings.Contains(appointment, "nonempty customer ID") ||
+					!strings.Contains(appointment, "Only after booking succeeds") {
+					t.Error("multi-task workflow does not enforce customer and appointment gates")
 				}
 			}
 			for _, provider := range []ir.Provider{ir.ProviderLiveKit, ir.ProviderPipecat} {
@@ -105,7 +108,7 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	want := []string{"simple-prompt", "single-task", "subagents", "task-groups"}
+	want := []string{"multi-task", "simple-prompt", "subagents", "task-groups"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -134,9 +137,12 @@ func TestExampleToolExposure(t *testing.T) {
 			agentTools: map[string][]string{"appointment_desk": domainTools},
 		},
 		{
-			name:       "single-task",
-			agentTools: map[string][]string{"appointment_desk": {"manage_appointment"}},
-			taskTools:  map[string][]string{"appointment_request": domainTools},
+			name:       "multi-task",
+			agentTools: map[string][]string{"appointment_desk": {"check_customer", "manage_appointment"}},
+			taskTools: map[string][]string{
+				"customer_record":     {"lookup_customer", "create_customer"},
+				"appointment_request": {"check_availability", "book_appointment", "cancel_appointment"},
+			},
 		},
 		{
 			name:       "task-groups",

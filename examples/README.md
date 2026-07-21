@@ -2,7 +2,8 @@
 
 These four packages apply the same Sage and Stone Salon appointment workflow
 to progressively stronger orchestration. Compare them to see when one large
-prompt stops being enough and tasks, task groups, or agent handoffs help.
+prompt stops being enough and independent tasks, task groups, or agent handoffs
+help.
 
 Each package contains the same five deterministic local Python tools for
 customer lookup and creation, availability, booking, and cancellation. The
@@ -12,7 +13,7 @@ and Pipecat runs.
 | Package | Structure | Responsibility split |
 |---|---|---|
 | [`simple-prompt`](simple-prompt/) | One agent and one large prompt | One agent owns every workflow and tool. |
-| [`single-task`](single-task/) | One agent and one task | The agent delegates the complete appointment request, then resumes. |
+| [`multi-task`](multi-task/) | One agent and two independent tasks | One task owns customer records; another owns appointments. |
 | [`task-groups`](task-groups/) | One agent and three ordered tasks | Shared context moves through customer identification, slot selection, and finalization. |
 | [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |
 

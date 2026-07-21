@@ -88,7 +88,7 @@ because recompiling replaces `build/<target>/`.
 ```sh
 make build
 
-# Choose: simple-prompt, single-task, task-groups, or subagents
+# Choose: simple-prompt, multi-task, task-groups, or subagents
 EXAMPLE=simple-prompt
 
 bin/unmute validate "examples/$EXAMPLE"

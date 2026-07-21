@@ -1,4 +1,4 @@
-# One agent delegates the whole appointment workflow to one bounded task.
+# One agent delegates customer records and appointment work to separate tasks.
 version: 1
 language: en
 entry_agent: appointment_desk
@@ -28,31 +28,51 @@ agents:
     instructions: instructions.md
     model: reasoning
     voice: voice
-    tools: [manage_appointment]
+    tools: [check_customer, manage_appointment]
+
+variables:
+  customer_id: { type: string }
+  customer_name: { type: string }
 
 tasks:
+  customer_record:
+    instructions: tasks/customer-record.md
+    tools: [lookup_customer, create_customer]
+    result:
+      customer_id: string
+      customer_name: string
+      record_status: { enum: [existing, created, failed] }
+      summary: string
+    context:
+      history: full
+
   appointment_request:
-    instructions: tasks/manage-appointment.md
+    instructions: tasks/appointment-request.md
     tools:
-      - lookup_customer
-      - create_customer
       - check_availability
       - book_appointment
       - cancel_appointment
     result:
       action: string
       status: string
-      customer_id: string
       appointment_id: string
       summary: string
     context:
       history: full
 
 controls:
+  check_customer:
+    kind: delegate
+    task: customer_record
+    when: Identify the caller before handling an appointment request.
+    assign:
+      customer_id: result.customer_id
+      customer_name: result.customer_name
+
   manage_appointment:
     kind: delegate
     task: appointment_request
-    when: The caller wants to book, reschedule, or cancel an appointment.
+    when: The identified caller wants to book, reschedule, or cancel an appointment.
 
 tools:
   - lookup_customer
