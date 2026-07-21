@@ -220,12 +220,13 @@ The initial route adapters use these names:
 | LiveKit SIP with Plivo | `PLIVO_SIP_ADDRESS`, `PLIVO_SIP_USERNAME`, `PLIVO_SIP_PASSWORD`, `PLIVO_PHONE_NUMBER` | Plivo Console → Zentrunk. Use the termination domain, outbound credential, and linked number. |
 | LiveKit SIP resource IDs | `LIVEKIT_SIP_INBOUND_TRUNK`, `LIVEKIT_SIP_OUTBOUND_TRUNK` | Copy each `SIPTrunkID` printed by the generated `lk sip ... create` setup commands. Only requested directions and controls require their corresponding ID. |
 
-The generated outbound HTTP endpoint also requires
+The generated Pipecat carrier-WebSocket outbound HTTP endpoint also requires
 `UNMUTE_OUTBOUND_TOKEN`. Generate this secret yourself with a cryptographically
-secure password generator; it does not come from a carrier. Every generated
-telephony Compose graph also supplies `REDIS_URL`. Redis is always present so
-the same application remains correct across independently routed requests and
-multiple replicas; it is never part of the media path.
+secure password generator; it does not come from a carrier. LiveKit SIP doesn't
+use this token. Every generated telephony Compose graph also supplies
+`REDIS_URL`. Redis is always present so the same application remains correct
+across independently routed requests and multiple replicas; it is never part
+of the media path.
 
 The local LiveKit SIP Compose stack needs no LiveKit Cloud or carrier
 credentials to boot. It supplies an obvious non-production LiveKit API key pair
@@ -322,8 +323,10 @@ The first implementation supports one telephony Connection per target. A
 package can add any number of targets and Connections for supported routes, but
 one generated target never combines carriers. It must fail clearly when a
 single target requests multiple telephony channels that need different
-connections. Add per-channel target bindings only when a real agent needs that
-topology.
+connections. A LiveKit or Pipecat target with a telephony channel must bind a
+Connection, and a target cannot bind a telephony Connection when the package
+has no telephony channel. Add per-channel target bindings only when a real
+agent needs that topology.
 
 ### Resolved telephony plan
 

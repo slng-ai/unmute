@@ -85,9 +85,10 @@ func smokePipecatTelephonyArtifact(t *testing.T) generate.Artifact {
 	if err != nil {
 		t.Fatal(err)
 	}
+	enableSmokeTelephony(pkg)
 	target := pkg.Targets["pipecat"]
 	target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
-	pkg.Targets["pipecat"] = target
+	pkg.Targets = map[string]spec.Target{"pipecat": target}
 	agent, err := ir.Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -105,9 +106,10 @@ func smokeLiveKitSIPArtifact(t *testing.T) generate.Artifact {
 	if err != nil {
 		t.Fatal(err)
 	}
+	enableSmokeTelephony(pkg)
 	target := pkg.Targets["livekit"]
 	target.Transport, target.Carrier, target.Connection = "sip", "twilio", "primary_phone"
-	pkg.Targets["livekit"] = target
+	pkg.Targets = map[string]spec.Target{"livekit": target}
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = map[string]string{
 		"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
@@ -123,6 +125,14 @@ func smokeLiveKitSIPArtifact(t *testing.T) generate.Artifact {
 		t.Fatal(err)
 	}
 	return artifact
+}
+
+func enableSmokeTelephony(pkg *spec.Package) {
+	inbound, outbound := true, false
+	pkg.Agent.Channels["phone"] = spec.Channel{
+		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
+		RequiredControls: []string{"cold_transfer", "hangup"},
+	}
 }
 
 func artifactFileContent(t *testing.T, artifact generate.Artifact, path string) string {

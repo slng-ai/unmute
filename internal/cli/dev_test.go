@@ -271,10 +271,27 @@ func TestDevTelephonyPreflightStopsBeforeCredentialsOrProvisionalRoute(t *testin
 	configured := strings.Replace(string(raw),
 		"    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat",
 		"    transport: carrier-websocket\n    carrier: twilio\n    connection: primary_phone", 1)
+	configured = strings.Replace(configured,
+		"    sdk_language: python\n    models:",
+		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:", 1)
 	if configured == string(raw) {
 		t.Fatal("pipecat target fixture did not change")
 	}
 	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agentPath := filepath.Join(dir, "agent.yaml")
+	agentRaw, err := os.ReadFile(agentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentConfigured := strings.Replace(string(agentRaw),
+		"channels:\n  web: { kind: realtime_audio }",
+		"channels:\n  web: { kind: realtime_audio }\n  phone:\n    kind: telephony\n    inbound: true\n    outbound: false\n    required_controls: [cold_transfer, hangup]", 1)
+	if agentConfigured == string(agentRaw) {
+		t.Fatal("agent channel fixture did not change")
+	}
+	if err := os.WriteFile(agentPath, []byte(agentConfigured), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"} {

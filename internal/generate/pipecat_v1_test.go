@@ -379,11 +379,12 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	enablePackageTelephony(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Transport = "carrier-websocket"
 	configured.Carrier = "twilio"
 	configured.Connection = "primary_phone"
-	pkg.Targets["pipecat"] = configured
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	outbound := true
 	phone := pkg.Agent.Channels["phone"]
 	phone.Outbound = &outbound
@@ -540,11 +541,12 @@ func TestPipecatTelnyxTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	enablePackageTelephony(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Transport = "carrier-websocket"
 	configured.Carrier = "telnyx"
 	configured.Connection = "primary_phone"
-	pkg.Targets["pipecat"] = configured
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = map[string]string{
 		"api_key":       "TELNYX_API_KEY",
@@ -620,11 +622,12 @@ func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	enablePackageTelephony(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Transport = "carrier-websocket"
 	configured.Carrier = "plivo"
 	configured.Connection = "primary_phone"
-	pkg.Targets["pipecat"] = configured
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = map[string]string{
 		"auth_id": "PLIVO_AUTH_ID", "auth_token": "PLIVO_AUTH_TOKEN", "from_number": "PLIVO_PHONE_NUMBER",
@@ -883,6 +886,14 @@ func targetByProvider(t *testing.T, agent *ir.Agent, provider ir.Provider) ir.Ta
 	}
 	t.Fatalf("no target for provider %q", provider)
 	return ir.Target{}
+}
+
+func enablePackageTelephony(pkg *spec.Package) {
+	inbound, outbound := true, false
+	pkg.Agent.Channels["phone"] = spec.Channel{
+		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
+		RequiredControls: []string{"cold_transfer", "hangup"},
+	}
 }
 
 // TestV14_ActivationGatedOnPipelineStart (driver-pipecat V14, B8): the entry

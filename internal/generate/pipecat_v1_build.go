@@ -2,6 +2,7 @@ package generate
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -110,27 +111,29 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 	if agent.Capacity == nil || agent.Capacity.MaxSessions <= 0 {
 		return nil, fmt.Errorf("pipecat telephony requires positive capacity.max_sessions")
 	}
-	var required []string
 	switch plan.Key.Carrier {
-	case "twilio":
-		required = []string{"account_sid", "auth_token", "from_number"}
-	case "telnyx":
-		required = []string{"api_key", "public_key", "connection_id", "from_number"}
-	case "plivo":
-		required = []string{"auth_id", "auth_token", "from_number"}
+	case "twilio", "telnyx", "plivo":
 	default:
 		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no emitted adapter", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
 	}
-	allowed := map[string]bool{}
-	for _, key := range required {
+	required, optional, ok := targetcap.TelephonyEnvironment(targetcap.TelephonyKey{
+		Provider: targetcap.Pipecat, Transport: plan.Key.Transport, Carrier: plan.Key.Carrier,
+	})
+	if !ok {
+		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no environment vocabulary", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+	}
+	allowed := make(map[string]bool, len(required)+len(optional))
+	for _, key := range append(required, optional...) {
 		allowed[key] = true
+	}
+	for _, key := range required {
 		name := plan.Environment[key]
 		if name == "" {
 			return nil, fmt.Errorf("pipecat telephony route %s requires connection environment key %q", plan.Key.Carrier, key)
 		}
 		env.add(name)
 	}
-	for key := range plan.Environment {
+	for _, key := range slices.Sorted(maps.Keys(plan.Environment)) {
 		if !allowed[key] {
 			return nil, fmt.Errorf("pipecat telephony route %s does not accept connection environment key %q", plan.Key.Carrier, key)
 		}

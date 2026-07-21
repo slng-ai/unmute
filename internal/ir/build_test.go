@@ -35,11 +35,12 @@ func TestBuildSafeCore(t *testing.T) {
 
 func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
 	target := pkg.Targets["pipecat"]
 	target.Transport = "carrier-websocket"
 	target.Carrier = "twilio"
 	target.Connection = "primary_phone"
-	pkg.Targets["pipecat"] = target
+	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
 
 	agent, err := Build(pkg)
 	if err != nil {
@@ -65,9 +66,10 @@ func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 
 func TestBuildLiveKitSIPUsesSharedDispatchPlan(t *testing.T) { // telephony T10, V13, V18
 	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
 	target := pkg.Targets["livekit"]
 	target.Transport, target.Carrier, target.Connection = "sip", "twilio", "primary_phone"
-	pkg.Targets["livekit"] = target
+	pkg.Targets = map[string]packagespec.Target{"livekit": target}
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = map[string]string{
 		"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
@@ -96,6 +98,7 @@ func TestBuildLiveKitSIPUsesSharedDispatchPlan(t *testing.T) { // telephony T10,
 
 func TestBuildSupportsMultipleCarrierTargets(t *testing.T) {
 	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
 	pipecat, livekit := pkg.Targets["pipecat"], pkg.Targets["livekit"]
 	pipecat.Transport, livekit.Transport = "carrier-websocket", "sip"
 	pkg.Targets = map[string]packagespec.Target{
@@ -140,6 +143,26 @@ func TestBuildSupportsMultipleCarrierTargets(t *testing.T) {
 	}
 }
 
+func TestBuildRequiresTelephonyConnectionAndRejectsInverse(t *testing.T) {
+	t.Run("missing connection", func(t *testing.T) {
+		pkg := loadSafeCore(t)
+		enableTelephony(pkg)
+		pkg.Targets = map[string]packagespec.Target{"pipecat": pkg.Targets["pipecat"]}
+		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), `target "pipecat" requires connection for telephony`) {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("connection without channel", func(t *testing.T) {
+		pkg := loadSafeCore(t)
+		target := pkg.Targets["livekit"]
+		target.Connection = "primary_phone"
+		pkg.Targets = map[string]packagespec.Target{"livekit": target}
+		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), `sets connection but has no telephony channel`) {
+			t.Fatalf("got %v", err)
+		}
+	})
+}
+
 func withTelephonyRoute(target packagespec.Target, carrier, connection string) packagespec.Target {
 	target.Carrier, target.Connection = carrier, connection
 	return target
@@ -162,9 +185,10 @@ func TestBuildRejectsUnknownOrInvalidConnection(t *testing.T) { // telephony V1-
 		{
 			name: "missing reference",
 			mutate: func(pkg *packagespec.Package) {
+				enableTelephony(pkg)
 				target := pkg.Targets["pipecat"]
 				target.Connection = "missing_phone"
-				pkg.Targets["pipecat"] = target
+				pkg.Targets = map[string]packagespec.Target{"pipecat": target}
 			},
 			want: "missing_phone",
 		},
@@ -180,24 +204,26 @@ func TestBuildRejectsUnknownOrInvalidConnection(t *testing.T) { // telephony V1-
 		{
 			name: "missing route environment key",
 			mutate: func(pkg *packagespec.Package) {
+				enableTelephony(pkg)
 				connection := pkg.Connections["primary_phone"]
 				delete(connection.Environment, "auth_token")
 				pkg.Connections["primary_phone"] = connection
 				target := pkg.Targets["pipecat"]
 				target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
-				pkg.Targets["pipecat"] = target
+				pkg.Targets = map[string]packagespec.Target{"pipecat": target}
 			},
 			want: `requires environment key "auth_token"`,
 		},
 		{
 			name: "unknown route environment key",
 			mutate: func(pkg *packagespec.Package) {
+				enableTelephony(pkg)
 				connection := pkg.Connections["primary_phone"]
 				connection.Environment["api_key"] = "TWILIO_API_KEY"
 				pkg.Connections["primary_phone"] = connection
 				target := pkg.Targets["pipecat"]
 				target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
-				pkg.Targets["pipecat"] = target
+				pkg.Targets = map[string]packagespec.Target{"pipecat": target}
 			},
 			want: `environment key "api_key" is not accepted`,
 		},
@@ -487,4 +513,12 @@ func loadSafeCore(t *testing.T) *packagespec.Package {
 		t.Fatal(err)
 	}
 	return pkg
+}
+
+func enableTelephony(pkg *packagespec.Package) {
+	inbound, outbound := true, false
+	pkg.Agent.Channels["phone"] = packagespec.Channel{
+		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
+		RequiredControls: []string{"cold_transfer", "hangup"},
+	}
 }

@@ -265,8 +265,16 @@ func buildLiveKitTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*liveki
 	if docs == "" {
 		return nil, fmt.Errorf("livekit SIP carrier %q has no setup documentation", plan.Key.Carrier)
 	}
-	required := []string{"sip_address", "sip_username", "sip_password", "from_number"}
-	allowed := make(map[string]bool, len(required))
+	required, optional, ok := targetcap.TelephonyEnvironment(targetcap.TelephonyKey{
+		Provider: targetcap.LiveKit, Transport: plan.Key.Transport, Carrier: plan.Key.Carrier,
+	})
+	if !ok {
+		return nil, fmt.Errorf("livekit SIP route (%s, %s, %s) has no environment vocabulary", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+	}
+	allowed := make(map[string]bool, len(required)+len(optional))
+	for _, key := range append(required, optional...) {
+		allowed[key] = true
+	}
 	for _, key := range required {
 		allowed[key] = true
 		if plan.Environment[key] == "" {
@@ -274,7 +282,12 @@ func buildLiveKitTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*liveki
 		}
 		env.add(plan.Environment[key])
 	}
+	environmentKeys := make([]string, 0, len(plan.Environment))
 	for key := range plan.Environment {
+		environmentKeys = append(environmentKeys, key)
+	}
+	sort.Strings(environmentKeys)
+	for _, key := range environmentKeys {
 		if !allowed[key] {
 			return nil, fmt.Errorf("livekit SIP route does not accept connection environment key %q", key)
 		}

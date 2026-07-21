@@ -869,18 +869,12 @@ func TestLiveKitV1OutboundVoicemail(t *testing.T) {
 		{ir.VoicemailLeaveMessage, `ctx.shutdown("voicemail: left a message")  # on_voicemail: leave_message`},
 		{ir.VoicemailHangup, `ctx.shutdown("voicemail detected")  # on_voicemail: hangup`},
 	} {
-		pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		agent, err := ir.Build(pkg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		inbound, outbound := false, true
-		agent.Channels["phone"] = ir.Channel{Kind: ir.ChannelTelephony, Inbound: &inbound, Outbound: &outbound, OnVoicemail: tc.action}
+		agent, resolved := configuredLiveKitSIP(t)
+		phone := agent.Channels["phone"]
+		phone.OnVoicemail = tc.action
+		agent.Channels["phone"] = phone
 
-		artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+		artifact, err := GenerateLiveKit(agent, resolved, nil, nil)
 		if err != nil {
 			t.Fatalf("generate %s: %v", tc.action, err)
 		}
@@ -1011,6 +1005,9 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 			t.Errorf("runtime required env missing %s: %s", want, required)
 		}
 	}
+	if strings.Contains(required, "UNMUTE_OUTBOUND_TOKEN") {
+		t.Errorf("LiveKit SIP runtime requires unused outbound token: %s", required)
+	}
 	if len(runtime.PublicEndpoints) != 0 {
 		t.Fatalf("LiveKit SIP must not report HTTP callback endpoints: %#v", runtime.PublicEndpoints)
 	}
@@ -1022,9 +1019,10 @@ func configuredLiveKitSIP(t *testing.T) (*ir.Agent, ir.Target) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	enablePackageTelephony(pkg)
 	configured := pkg.Targets["livekit"]
 	configured.Transport, configured.Carrier, configured.Connection = "sip", "twilio", "primary_phone"
-	pkg.Targets["livekit"] = configured
+	pkg.Targets = map[string]spec.Target{"livekit": configured}
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = map[string]string{
 		"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
@@ -1174,8 +1172,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbound, outbound, enabled, noCalls := false, true, true, false
-	agent.Channels["phone"] = ir.Channel{Kind: ir.ChannelTelephony, Inbound: &inbound, Outbound: &outbound, OnVoicemail: ir.VoicemailLeaveMessage}
+	enabled, noCalls := true, false
 	agent.Conversation.Interruption = &ir.Interruption{Enabled: &enabled, MinimumWords: 2, IgnorePhrases: []string{"uh-huh"}}
 	agent.Conversation.ThinkingAudio = ir.ThinkingSubtle
 	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}

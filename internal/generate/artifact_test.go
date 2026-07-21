@@ -78,11 +78,12 @@ func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { //
 	if err != nil {
 		t.Fatal(err)
 	}
+	enablePackageTelephony(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Transport = "carrier-websocket"
 	configured.Carrier = "twilio"
 	configured.Connection = "primary_phone"
-	pkg.Targets["pipecat"] = configured
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	agent, err := ir.Build(pkg)
 	if err != nil {
 		t.Fatal(err)

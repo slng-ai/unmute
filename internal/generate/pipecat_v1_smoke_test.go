@@ -119,11 +119,12 @@ func testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t *testing.T, c
 	if err != nil {
 		t.Fatal(err)
 	}
+	enablePackageTelephony(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Transport = "carrier-websocket"
 	configured.Carrier = carrier
 	configured.Connection = "primary_phone"
-	pkg.Targets["pipecat"] = configured
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = environment
 	pkg.Connections["primary_phone"] = connection

@@ -87,7 +87,7 @@ func TelephonyRuntimePlanFor(target ir.Target) *TelephonyRuntimePlan {
 		runtime.RequiredEnv = append(runtime.RequiredEnv, name)
 	}
 	for _, evidence := range plan.Evidence {
-		if evidence.Feature == "outbound" {
+		if plan.Key.Provider == ir.ProviderPipecat && plan.Key.Transport == "carrier-websocket" && evidence.Feature == "outbound" {
 			runtime.RequiredEnv = append(runtime.RequiredEnv, "UNMUTE_OUTBOUND_TOKEN")
 		}
 	}

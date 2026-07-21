@@ -234,9 +234,19 @@ func TestValidateCapacity(t *testing.T) { // V12
 	}
 }
 
+func TestValidateTelephonyRequiresPeakStartRateWithoutConnection(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Channels["phone"] = testTelephonyChannel()
+	agent.Capacity.PeakStartsPerSecond = 0
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderElevenLabs)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "capacity.peak_starts_per_second must be positive for telephony") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
 func TestValidateOutboundRequiresSatisfiableVariablesAndWarnsOnDeepgram(t *testing.T) { // V13
 	agent := safeAgent(t)
-	phone := agent.Channels["phone"]
+	phone := testTelephonyChannel()
 	outbound := true
 	phone.Outbound = &outbound
 	phone.OnVoicemail = VoicemailLeaveMessage
@@ -263,7 +273,7 @@ func TestValidateOutboundRequiresSatisfiableVariablesAndWarnsOnDeepgram(t *testi
 
 func TestValidateRejectsVoicemailPolicyWithoutOutbound(t *testing.T) {
 	agent := safeAgent(t)
-	phone := agent.Channels["phone"]
+	phone := testTelephonyChannel()
 	phone.OnVoicemail = VoicemailHangup
 	agent.Channels["phone"] = phone
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
@@ -281,26 +291,24 @@ func TestValidateRequiresInterruptionEnabled(t *testing.T) {
 	}
 }
 
-func TestValidateResolvesRequiredControlsAgainstTargetRoute(t *testing.T) {
+func TestValidateCodeTelephonyRequiresResolvedPlan(t *testing.T) {
 	agent := safeAgent(t)
-	phone := agent.Channels["phone"]
-	phone.RequiredControls = append(phone.RequiredControls, "dtmf_send")
-	agent.Channels["phone"] = phone
+	agent.Channels["phone"] = testTelephonyChannel()
 	target := targetFor(agent, ProviderLiveKit)
-	target.Carrier = ""
 	report, err := Validate(agent, []Target{target}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "exact carrier Twilio") {
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "telephony channel requires a resolved Connection plan") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}
 }
 
 func TestValidateTelephonyPlanFailsClosedWithoutRouteSmoke(t *testing.T) { // telephony V4-V6
 	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
 	target := pkg.Targets["pipecat"]
 	target.Transport = "carrier-websocket"
 	target.Carrier = "twilio"
 	target.Connection = "primary_phone"
-	pkg.Targets["pipecat"] = target
+	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -314,9 +322,10 @@ func TestValidateTelephonyPlanFailsClosedWithoutRouteSmoke(t *testing.T) { // te
 
 func TestValidateTelephonyPlanRejectsOrphanRedisAndUnknownConsumers(t *testing.T) { // telephony V13, V23
 	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
 	target := pkg.Targets["pipecat"]
 	target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
-	pkg.Targets["pipecat"] = target
+	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -340,11 +349,12 @@ func TestValidateTelephonyPlanRejectsOrphanRedisAndUnknownConsumers(t *testing.T
 
 func TestValidateExotelTelephonyFailsClosedWithoutAuthenticatedWebSocket(t *testing.T) { // telephony T9, V4-V6
 	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
 	target := pkg.Targets["pipecat"]
 	target.Transport = "carrier-websocket"
 	target.Carrier = "exotel"
 	target.Connection = "primary_phone"
-	pkg.Targets["pipecat"] = target
+	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = map[string]string{
 		"api_key": "EXOTEL_API_KEY", "api_token": "EXOTEL_API_TOKEN",
@@ -483,26 +493,16 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 	if !foundTemperature {
 		t.Fatal("forwarded temperature param is missing")
 	}
-	if len(report.Sizing) != 35 {
+	if len(report.Sizing) != 20 {
 		t.Fatalf("sizing lines = %d", len(report.Sizing))
 	}
 	for _, line := range report.Sizing {
-		if line.Status != "unbenchmarked" || !strings.Contains(line.Basis, "channels=realtime_audio,telephony") {
+		if line.Status != "unbenchmarked" || !strings.Contains(line.Basis, "channels=realtime_audio") {
 			t.Fatalf("sizing line = %#v", line)
 		}
 	}
-	usageValue := ""
-	for _, line := range report.Sizing {
-		if line.Metric == "provider_session_time_quota.telephony" {
-			usageValue = line.Value
-			break
-		}
-	}
-	if usageValue != "4h0m0s" {
-		t.Fatalf("telephony session-time quota = %q", usageValue)
-	}
-	delete(agent.Channels, "web")
-	report, err = Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	agent.Channels = map[string]Channel{"phone": testTelephonyChannel()}
+	report, err = Validate(agent, []Target{targetFor(agent, ProviderElevenLabs)}, targetcap.Default())
 	if err != nil || len(report.Sizing) != 5 {
 		t.Fatalf("telephony-only sizing: err=%v lines=%#v", err, report.Sizing)
 	}
@@ -534,12 +534,6 @@ func TestValidatePipecatMaturityGates(t *testing.T) { // driver-pipecat T1, C9
 			tool.Execution, tool.URLEnv = ToolMCP, ""
 			a.Tools["lookup_customer"] = tool
 		}, "does not emit MCP tools yet"},
-		{"outbound", func(a *Agent) {
-			phone := a.Channels["phone"]
-			outbound := true
-			phone.Outbound, phone.OnVoicemail = &outbound, VoicemailLeaveMessage
-			a.Channels["phone"] = phone
-		}, "does not emit outbound calling yet"},
 		{"transfer_history", func(a *Agent) {
 			a.Controls["to_billing"].(*AgentTransfer).Context.History = HistoryMessages
 		}, "history: full only"},
@@ -588,6 +582,14 @@ func targetFor(agent *Agent, provider Provider) Target {
 		}
 	}
 	panic("target not found: " + provider)
+}
+
+func testTelephonyChannel() Channel {
+	inbound, outbound := true, false
+	return Channel{
+		Kind: ChannelTelephony, Inbound: &inbound, Outbound: &outbound,
+		RequiredControls: []string{"cold_transfer", "hangup"},
+	}
 }
 
 func reportFor(report ValidateReport, provider Provider) TargetValidation {

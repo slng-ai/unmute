@@ -826,7 +826,7 @@ func validateCapacity(agent *Agent, resolved Target, provider targetcap.Provider
 	if agent.Capacity.PeakSessions <= 0 || agent.Capacity.MaxSessions <= 0 {
 		row.Errors = add(row.Errors, "capacity peak_sessions and max_sessions must be positive")
 	}
-	if hasTelephonyChannel(agent) && resolved.Connection != "" && agent.Capacity.PeakStartsPerSecond <= 0 {
+	if hasTelephonyChannel(agent) && agent.Capacity.PeakStartsPerSecond <= 0 {
 		row.Errors = add(row.Errors, "capacity.peak_starts_per_second must be positive for telephony")
 	}
 	if agent.Capacity.PeakSessions > agent.Capacity.MaxSessions {
@@ -839,6 +839,10 @@ func validateCapacity(agent *Agent, resolved Target, provider targetcap.Provider
 
 func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
 	for _, channel := range agent.Channels {
+		if channel.Kind == ChannelTelephony && (provider == targetcap.LiveKit || provider == targetcap.Pipecat) && resolved.Telephony == nil {
+			row.Errors = add(row.Errors, "telephony channel requires a resolved Connection plan")
+			continue
+		}
 		for _, control := range channel.RequiredControls {
 			if !validRequiredControl(control) {
 				continue

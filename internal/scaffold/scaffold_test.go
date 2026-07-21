@@ -340,21 +340,27 @@ func TestPreflightTelephonyAndHumanTransfer(t *testing.T) {
 				Destination: "support_line", Value: "+14155550123", Mode: "cold",
 			}}
 			report, err := Preflight(data)
+			if provider == "pipecat" {
+				if err == nil || !strings.Contains(err.Error(), "requires connection for telephony") {
+					t.Fatalf("Preflight() = %v", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("Preflight() = %v", err)
 			}
-			if provider == "pipecat" && !slices.Contains(report.RequiredEnv, "DAILY_API_KEY") {
-				t.Fatalf("required env = %v", report.RequiredEnv)
+			if report.TargetName != "elevenlabs" {
+				t.Fatalf("target = %q", report.TargetName)
 			}
 		})
 	}
 }
 
-func TestPreflightRejectsUnsupportedOutbound(t *testing.T) {
+func TestPreflightRejectsCodeTelephonyWithoutConnection(t *testing.T) {
 	data := Data{Name: "agent", Language: "en"}
 	data.SetTarget("pipecat")
 	data.Channels = []Channel{{Name: "phone", Kind: "telephony", Outbound: true, OnVoicemail: "hangup"}}
-	if _, err := Preflight(data); err == nil || !strings.Contains(err.Error(), "does not emit outbound calling") {
+	if _, err := Preflight(data); err == nil || !strings.Contains(err.Error(), "requires connection for telephony") {
 		t.Fatalf("Preflight() error = %v", err)
 	}
 }

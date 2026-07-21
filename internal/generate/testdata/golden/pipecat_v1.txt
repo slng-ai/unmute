@@ -517,49 +517,28 @@ if __name__ == "__main__":
       "metric": "workers",
       "value": "60",
       "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
     },
     {
       "target": "pipecat",
       "metric": "gpus",
       "value": "0",
       "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
     },
     {
       "target": "pipecat",
       "metric": "provider_concurrency_quota.realtime_audio",
       "value": "40",
       "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
     },
     {
       "target": "pipecat",
       "metric": "provider_session_time_quota.realtime_audio",
       "value": "4h0m0s",
       "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
-    },
-    {
-      "target": "pipecat",
-      "metric": "provider_concurrency_quota.telephony",
-      "value": "40",
-      "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
-    },
-    {
-      "target": "pipecat",
-      "metric": "provider_session_time_quota.telephony",
-      "value": "4h0m0s",
-      "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
-    },
-    {
-      "target": "pipecat",
-      "metric": "provider_call_start_rate.telephony",
-      "value": "4",
-      "status": "unbenchmarked",
-      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio,telephony"
+      "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
     }
   ],
   "notes": [

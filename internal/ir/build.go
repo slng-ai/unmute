@@ -96,7 +96,8 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		if len(raw.Environment) == 0 {
 			return nil, fmt.Errorf("%s: connection %q environment must not be empty", pkg.Location(path, "environment:"), name)
 		}
-		for key, value := range raw.Environment {
+		for _, key := range sortedKeys(raw.Environment) {
+			value := raw.Environment[key]
 			if !namePattern.MatchString(key) {
 				return nil, fmt.Errorf("%s: connection %q environment key %q must be lowercase snake_case", pkg.Location(path, key), name, key)
 			}
@@ -675,12 +676,13 @@ func stringSlice(value any) ([]string, error) {
 // Only used models and the listen/turn selections resolve; palette alternates
 // stay inert.
 func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, agent *Agent, used map[string]bool) (Target, error) {
-	for key := range raw.Models {
+	for _, key := range sortedKeys(raw.Models) {
 		if _, ok := agent.Models[key]; !ok {
 			return Target{}, fmt.Errorf("%s: target %q overrides %q, which is not a defined model", pkg.Location("targets.yaml", key), name, key)
 		}
 	}
-	for destination, value := range raw.Destinations {
+	for _, destination := range sortedKeys(raw.Destinations) {
+		value := raw.Destinations[destination]
 		if !validDestination(value) {
 			return Target{}, fmt.Errorf("%s: destination %q must be an E.164 phone number or SIP URI", pkg.Location("targets.yaml", destination), destination)
 		}
@@ -690,6 +692,13 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 			return Target{}, missing(pkg, "targets.yaml", "connection", raw.Connection)
 		}
 	}
+	telephony := hasTelephonyChannel(agent)
+	if telephony && (raw.Provider == string(ProviderLiveKit) || raw.Provider == string(ProviderPipecat)) && raw.Connection == "" {
+		return Target{}, fmt.Errorf("%s: target %q requires connection for telephony", pkg.Location("targets.yaml", name+":"), name)
+	}
+	if !telephony && raw.Connection != "" {
+		return Target{}, fmt.Errorf("%s: target %q sets connection but has no telephony channel", pkg.Location("targets.yaml", "connection:"), name)
+	}
 	built := Target{
 		Name: name, Provider: Provider(raw.Provider), Version: raw.Version, Pins: raw.Pins,
 		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier, Connection: raw.Connection,
@@ -697,7 +706,7 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 		Models:       resolveBindings(agent, used, raw.Models),
 		Destinations: raw.Destinations,
 	}
-	if raw.Connection != "" && hasTelephonyChannel(agent) {
+	if raw.Connection != "" && telephony {
 		built.Telephony = buildTelephonyPlan(pkg, agent, built)
 		if err := validateTelephonyEnvironment(pkg, built.Telephony); err != nil {
 			return Target{}, err
@@ -722,7 +731,7 @@ func validateTelephonyEnvironment(pkg *packagespec.Package, plan *TelephonyPlan)
 			return fmt.Errorf("%s: connection %q requires environment key %q for route (%s, %s, %s)", pkg.Location(path, "environment:"), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
 		}
 	}
-	for name := range plan.Environment {
+	for _, name := range sortedKeys(plan.Environment) {
 		if !allowed[name] {
 			return fmt.Errorf("%s: connection %q environment key %q is not accepted by route (%s, %s, %s)", pkg.Location(path, name), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
 		}
@@ -766,9 +775,6 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 			continue
 		}
 		mode := stringValue(control.Mode)
-		if mode == "" {
-			mode = string(TransferCold)
-		}
 		features[targetcap.TelephonyFeature(mode+"_transfer")] = true
 		switch stringValue(control.Briefing) {
 		case string(BriefingSummary):
