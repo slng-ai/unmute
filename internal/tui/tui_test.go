@@ -3,6 +3,8 @@ package tui
 import (
 	"bytes"
 	"errors"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"path/filepath"
@@ -113,6 +115,21 @@ func TestV27RedrawsInPlaceNoScrollback(t *testing.T) { // docs/spec/tui.md V27
 	for _, sequence := range []string{"\x1b[?1049h", "\x1b[?1049l"} {
 		if got := strings.Count(output.String(), sequence); got != 1 {
 			t.Fatalf("alt-screen sequence %q count = %d, want 1", sequence, got)
+		}
+	}
+}
+
+func TestInteractivePathImportsNoHuh(t *testing.T) { // docs/spec/tui.md C4, T28
+	for _, file := range []string{"shell.go", "view.go"} {
+		fset := token.NewFileSet()
+		parsed, err := parser.ParseFile(fset, file, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("parse %s: %v", file, err)
+		}
+		for _, imp := range parsed.Imports {
+			if strings.Contains(imp.Path.Value, "charmbracelet/huh") {
+				t.Errorf("%s imports huh; the interactive path must stay huh-free", file)
+			}
 		}
 	}
 }

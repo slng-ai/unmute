@@ -101,7 +101,7 @@ T24|x|responsive breakpoints, value tail-truncation, single-pane drill-down, and
 T25|.|keep accessible/non-TTY as a linear renderer over the same model; retrofit the V18-V42 tests to the new render; add `teatest` golden snapshots pinned to 80x24 + a fixed color profile; unit-test `Update`|C5,V49
 T26|x|port the modals: preflight repair, scrollable Validate/Compile notice, confirmations, and Maintain loss report + Save-rewrite confirm|V21,V32,V33
 T27|.|CLI output theme through I.cliui: styled status lines, error/warning blocks, and a run header for validate/compile/apply; restyle `dev`'s picker and spinner; NO_COLOR + non-TTY plain; keep exit codes|C18,I.cliui,V48
-T28|.|keep `huh` scoped to the accessible/headless renderer; add a small test asserting the interactive path imports no `huh`|C4,C5
+T28|x|keep `huh` scoped to the accessible/headless renderer; add a small test asserting the interactive path imports no `huh`|C4,C5
 
 Dependency order: T1 → T2 → T3; T4 after T1; T5 after its compiler/driver cross-spec dependency; T6 after T2; T7 closed the first build. T8 → T9 → T10 → T11 → T13 → T14 → T15 → T16 → T17. T12 stays blocked on catalogue work and does not permit TUI-local provider lists. Redesign: T18 → T19 → T20 → T21 → T22; T23, T24, T25, and T26 after T22; T27 after T18 and can run beside the TUI panels; T28 last, after T22 confirms the interactive path is huh-free.
 
