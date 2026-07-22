@@ -62,8 +62,10 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
+from typing import Annotated
 import httpx
 from dotenv import load_dotenv
+from pydantic import Field
 from livekit.agents import (
     NOT_GIVEN,
     Agent,
@@ -299,7 +301,7 @@ class ConfirmBooking(AgentTask[dict]):
         self.session.generate_reply(instructions="Begin this step.")
 
     @function_tool
-    async def send_confirmation(self, ctx: RunContext, name: str, phone: str, summary: str) -> dict:
+    async def send_confirmation(self, ctx: RunContext, name: Annotated[str, Field(description="The name the booking is under")], phone: Annotated[str, Field(description="Caller phone number in E.164 form")], summary: Annotated[str, Field(description="One-line summary of the booking to include")]) -> dict:
         """Send the caller a confirmation text for their booking. Call only after the caller has agreed to receive it."""
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -323,7 +325,7 @@ class FindSlot(AgentTask[dict]):
         self.session.generate_reply(instructions="Begin this step.")
 
     @function_tool
-    async def check_availability(self, ctx: RunContext, date: str, party_size: int) -> dict:
+    async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:
         """Find open table times for a date and party size. Returns the available time slots."""
         async with httpx.AsyncClient() as client:
             resp = await client.post(

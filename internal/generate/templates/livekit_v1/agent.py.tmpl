@@ -12,7 +12,7 @@ stt.FallbackAdapter around its fallback chain (T16). */ -}}
 agents and tasks share the shape (T15). */ -}}
 {{define "webhook_tool"}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.PyType}}{{end}}) -> dict:
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict:
         {{triple .Description}}
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -29,7 +29,7 @@ agents and tasks share the shape (T15). */ -}}
 the file defines a callable named like the tool; sync or async). */ -}}
 {{define "local_tool"}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.PyType}}{{end}}) -> dict:
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict:
         {{triple .Description}}
         result = tools.{{.Method}}.{{.Method}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Name}}={{$a.Name}}{{end}})
         if inspect.isawaitable(result):
@@ -50,10 +50,12 @@ url_env, allowed_tools keeping D8 visibility. */ -}}
 {{end}}import logging
 import os
 {{if .HasVars}}from dataclasses import dataclass
+{{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
 {{end}}{{if .NeedsHTTPX}}import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
-{{if .Outbound}}from livekit import api
+{{if .NeedsField}}from pydantic import Field
+{{end}}{{if .Outbound}}from livekit import api
 {{end}}from livekit.agents import (
 {{- if .Outbound}}
     AMD,
@@ -424,7 +426,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict
         self.session.generate_reply(instructions="Begin this step.")
 {{range .Tools}}{{template "method_tool" .}}{{end}}
     @function_tool
-    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.PyType}}{{end}}) -> None:
+    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}) -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
         self.complete({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} })

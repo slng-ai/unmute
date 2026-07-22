@@ -591,6 +591,57 @@ func TestV1LiveKitCompletedFlowEndsOnce(t *testing.T) {
 	}
 }
 
+// TestV2LiveKitToolCarriesSchema guards F1/V2: both @function_tool paths present
+// the LLM the schema the tool YAML declares. An enum lowers to Literal[...] and a
+// per-property description to Annotated[..., Field(description=...)], on the
+// task-level tool (find_slot's check_availability) and, with the same tool added
+// to an agent, on the agent-level path too.
+func TestV2LiveKitToolCarriesSchema(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Inject an enum property into check_availability (Input is a shared map).
+	props := agent.Tools["check_availability"].Input["properties"].(map[string]any)
+	props["service"] = map[string]any{
+		"type":        "string",
+		"enum":        []any{"haircut", "hair-color", "blowout"},
+		"description": "The service requested",
+	}
+	// Also expose the tool agent-level on the greeter so both paths emit it.
+	g := agent.Agents["greeter"]
+	g.Tools = append(g.Tools, "check_availability")
+	agent.Agents["greeter"] = g
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+
+	for _, want := range []string{
+		"from typing import Annotated, Literal",
+		"from pydantic import Field",
+		// enum → Literal, description → Annotated[..., Field(...)]
+		`service: Annotated[Literal["haircut", "hair-color", "blowout"], Field(description="The service requested")]`,
+		// non-enum described args still carry the description
+		`party_size: Annotated[int, Field(description="Number of people")]`,
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	// The same schema must reach the LLM on BOTH the agent-level and task-level
+	// emissions of the tool (two def sites, both carrying the Literal).
+	if got := strings.Count(botpy, `Literal["haircut", "hair-color", "blowout"]`); got != 2 {
+		t.Errorf("expected the enum Literal on both tool paths (2 sites), got %d", got)
+	}
+}
+
 // TestLiveKitV1IsolatedGroup covers the T13 lowering (V2/C3): an isolated
 // task_group compiles to a sequence of standalone AgentTasks, each starting
 // with a fresh context — never a TaskGroup, which always shares context.
@@ -852,9 +903,10 @@ func TestLiveKitV1ConversationShapingAndAgentTools(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		// Agent-level webhook tool on the greeter class.
+		// Agent-level webhook tool on the greeter class, carrying the declared
+		// per-property schema (V2): descriptions via Annotated[..., Field(...)].
 		"class Greeter(IgnorePhrasesMixin, Agent):",
-		"async def check_availability(self, ctx: RunContext, date: str, party_size: int) -> dict:",
+		`async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:`,
 		// Interruption options ride turn_handling.
 		`interruption={"enabled": True, "min_words": 2},`,
 		// Generated ignore-phrase filter (lowercased phrases).

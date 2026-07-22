@@ -118,6 +118,37 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		}
 	}
 
+	// V2: tool and finish args that carry an enum need typing.Literal; args that
+	// carry a description need typing.Annotated + pydantic.Field. Import only what
+	// is used (no unused-import F-violation, dl§V26).
+	needLiteral, needAnnotated := false, false
+	scanArgs := func(args []livekitArg) {
+		for _, a := range args {
+			needLiteral = needLiteral || len(a.Enum) > 0
+			needAnnotated = needAnnotated || a.Desc != ""
+		}
+	}
+	for _, a := range data.Agents {
+		for _, tool := range a.Tools {
+			scanArgs(tool.Args)
+		}
+	}
+	for _, t := range data.Tasks {
+		for _, tool := range t.Tools {
+			scanArgs(tool.Args)
+		}
+		scanArgs(t.Result)
+	}
+	data.NeedsField = needAnnotated
+	var typingNames []string
+	if needAnnotated {
+		typingNames = append(typingNames, "Annotated")
+	}
+	if needLiteral {
+		typingNames = append(typingNames, "Literal")
+	}
+	data.TypingImports = strings.Join(typingNames, ", ")
+
 	// Local handler files ride the artifact (tools/<name>.py); mcp mounts and
 	// local wrappers pull their imports.
 	seenLocal := map[string]bool{}
@@ -654,7 +685,15 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 		built.LLM = &taskLLM
 	}
 	for _, fname := range sortedResultNames(task.Result) {
-		built.Result = append(built.Result, livekitArg{Name: fname, PyType: resultPyType(task.Result[fname]), Required: true})
+		rf := task.Result[fname]
+		base := resultPyType(rf)
+		// V2: a result field's enum reaches the finish() arg as Literal[...] too
+		// (resultPyType collapses it to str otherwise); result fields carry no
+		// description in the schema.
+		built.Result = append(built.Result, livekitArg{
+			Name: fname, PyType: base, Required: true, Enum: rf.Enum,
+			Anno: pyAnno(base, rf.Enum, ""),
+		})
 	}
 	mcpByEnv := map[string][]string{}
 	for _, ref := range task.Tools {
@@ -870,14 +909,52 @@ func livekitToolArgs(input map[string]any) []livekitArg {
 	args := make([]livekitArg, 0, len(names))
 	for _, n := range names {
 		pt := "str"
+		var enum []string
+		var desc string
 		if prop, ok := props[n].(map[string]any); ok {
 			if t, ok := prop["type"].(string); ok {
 				pt = jsonPyType(t)
 			}
+			// V2: carry the declared enum and per-property description across so
+			// the LLM sees the schema the tool YAML wrote (C4). Non-string enum
+			// values are left off Literal (falls back to the base type).
+			if e, ok := prop["enum"].([]any); ok {
+				for _, v := range e {
+					if s, ok := v.(string); ok {
+						enum = append(enum, s)
+					}
+				}
+			}
+			if d, ok := prop["description"].(string); ok {
+				desc = d
+			}
 		}
-		args = append(args, livekitArg{Name: n, PyType: pt, Required: required[n]})
+		args = append(args, livekitArg{
+			Name: n, PyType: pt, Required: required[n], Enum: enum, Desc: desc,
+			Anno: pyAnno(pt, enum, desc),
+		})
 	}
 	return args
+}
+
+// pyAnno renders a tool arg's Python annotation from its base type, enum, and
+// description (V2). An enum becomes Literal[...]; a description wraps the type in
+// Annotated[..., Field(description=...)]. LiveKit derives the JSON-schema the LLM
+// sees from these via pydantic (build_legacy_openai_schema): Literal → enum,
+// Field(description=...) → the property description.
+func pyAnno(base string, enum []string, desc string) string {
+	typeExpr := base
+	if len(enum) > 0 {
+		quoted := make([]string, len(enum))
+		for i, e := range enum {
+			quoted[i] = pyQuote(e)
+		}
+		typeExpr = "Literal[" + strings.Join(quoted, ", ") + "]"
+	}
+	if desc != "" {
+		return "Annotated[" + typeExpr + ", Field(description=" + pyQuote(desc) + ")]"
+	}
+	return typeExpr
 }
 
 func livekitTaskPrompt(task ir.Task, result []livekitArg) string {
