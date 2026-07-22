@@ -32,6 +32,12 @@ Everything Unmute generates for Pipecat is built on Pipecat's **workers** model.
 
 So a two-agent, one-task spec becomes a main worker plus two agent workers, wired together, with the task living inside its delegating agent. You never edit this; you change the spec and recompile. (For how the same yaml lowers on LiveKit, see [how targets run your agent](../concepts/how-targets-run-your-agent.md).)
 
+The one exception is the simplest case. A **single agent with no handoffs and no
+tasks** skips the workers machinery entirely: its model runs inline in one
+pipeline and its tools are plain functions on the LLM context, so the generated
+`bot.py` has no bus or worker scaffolding to read. Turning on tracing, adding
+`variables`, or using telephony keeps the workers shape even for one agent.
+
 ## What gets generated
 
 `unmute compile acme --target pipecat` writes a complete project to `acme/build/pipecat/`:
@@ -52,6 +58,11 @@ currently provisional or gated, so public validation stops before any of their
 offline-tested files, including `compose.telephony.yaml`, are written.
 
 The output folder is rewritten from scratch on every compile, so never edit it by hand. `bot.py` carries only the imports and code your spec actually exercises: no tools means no HTTP client import, no tasks means no task machinery. The emitted pipeline stays clean.
+
+As it writes the project, Unmute runs `ruff format` over the emitted Python so
+the code is consistently formatted out of the box. `ruff` is optional: if it is
+not on your `PATH`, Unmute writes the (still valid) code unformatted and prints
+a one-line warning to stderr.
 
 The `compile-report.json` is worth reading after a compile. It lists every
 required environment variable and every forwarded model, so you can see what

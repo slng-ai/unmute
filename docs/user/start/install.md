@@ -53,6 +53,11 @@ uv --version
 If `uv` isn't installed, `unmute dev` stops with an installation link.
 Everything else works without uv.
 
+Compiling a code target (Pipecat, LiveKit) also runs `ruff format` over the
+generated Python so it lands cleanly formatted. `ruff` is optional: without it,
+`unmute` writes the (still valid) code unformatted and prints a one-line
+warning. Install it from [docs.astral.sh/ruff](https://docs.astral.sh/ruff/).
+
 Browser and console modes have these additional requirements:
 
 - LiveKit browser mode needs a LiveKit server. Set `LIVEKIT_URL`,
