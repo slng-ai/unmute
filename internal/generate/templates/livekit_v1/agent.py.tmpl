@@ -12,7 +12,7 @@ stt.FallbackAdapter around its fallback chain (T16). */ -}}
 agents and tasks share the shape (T15). */ -}}
 {{define "webhook_tool"}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.PyType}}{{end}}) -> dict:
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict:
         {{triple .Description}}
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -29,7 +29,7 @@ agents and tasks share the shape (T15). */ -}}
 the file defines a callable named like the tool; sync or async). */ -}}
 {{define "local_tool"}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.PyType}}{{end}}) -> dict:
+    async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict:
         {{triple .Description}}
         result = tools.{{.Method}}.{{.Method}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Name}}={{$a.Name}}{{end}})
         if inspect.isawaitable(result):
@@ -50,15 +50,19 @@ url_env, allowed_tools keeping D8 visibility. */ -}}
 {{end}}import logging
 import os
 {{if .HasVars}}from dataclasses import dataclass
+{{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
 {{end}}{{if .NeedsHTTPX}}import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
-{{if .Outbound}}from livekit import api
+{{if .NeedsField}}from pydantic import Field
+{{end}}{{if .Outbound}}from livekit import api
 {{end}}from livekit.agents import (
 {{- if .Outbound}}
     AMD,
 {{- end}}
+{{- if not .SingleAgentMinimal}}
     NOT_GIVEN,
+{{- end}}
     Agent,
 {{- if .NeedsTasks}}
     AgentTask,
@@ -71,7 +75,9 @@ import os
 {{- end}}
     JobContext,
     JobProcess,
+{{- if not .SingleAgentMinimal}}
     NotGivenOr,
+{{- end}}
 {{- if .NeedsFunctionTools}}
     RunContext,
 {{- end}}
@@ -84,7 +90,9 @@ import os
     get_job_context,
 {{- end}}
     inference,
+{{- if .NeedsLLM}}
     llm,
+{{- end}}
 {{- if .NeedsMCP}}
     mcp,
 {{- end}}
@@ -116,7 +124,7 @@ load_dotenv(".env.local")
 {{- if .NeedsLastN}}
 def _last_n(source: llm.ChatContext, n: int, *, exclude_function_call: bool = False) -> llm.ChatContext:
     """history: last_n — the newest n items; truncate() keeps call/output pairs."""
-    ctx = source.copy(exclude_instructions=True, exclude_function_call=exclude_function_call)
+    ctx = source.copy(exclude_instructions=True, exclude_function_call=exclude_function_call, exclude_handoff=True)
     ctx.truncate(max_items=n)
     return ctx
 {{end}}
@@ -266,10 +274,12 @@ class IgnorePhrasesMixin:
 # --- agents ----------------------------------------------------------------
 {{range .Agents}}
 class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
-    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+    def __init__(self{{if not $.SingleAgentMinimal}}, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN{{end}}) -> None:
         super().__init__(
             instructions={{.PromptConst}},
+{{- if not $.SingleAgentMinimal}}
             chat_ctx=chat_ctx,
+{{- end}}
 {{- if .LLM}}
             llm={{template "llmexpr" .LLM}},
 {{- end}}
@@ -291,9 +301,9 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         pass  # the caller speaks first
 {{- end}}
 {{- else}}
-        self.session.generate_reply(
-            instructions="You are now handling this. Continue in one short line; do not greet again."
-        )
+        # This agent took over via handoff; let its own instructions drive the
+        # opening (the prompt already says not to re-greet).
+        self.session.generate_reply()
 {{- end}}
 {{- range .Tools}}{{template "method_tool" .}}{{end}}
 {{range .Transfers}}
@@ -371,7 +381,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         return task_results
 {{- else if eq .Then "transfer"}}
         # then: transfer — control moves on and does not return here.
-        return {{.ThenClass}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
+        return {{.ThenClass}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
 {{- else}}
         # then: end — the flow is the last thing on the call; this does not return.
         self.session.shutdown()
@@ -381,12 +391,12 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
     async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{end}}:
         {{triple .When}}
         group = TaskGroup(
-            chat_ctx=self.chat_ctx.copy(exclude_instructions=True),
+            chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
         )
 {{- range .Steps}}
         group.add(
-            lambda: {{.Class}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True)),
+            lambda: {{.Class}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
             id={{pyq .ID}},
             description={{pyq .Desc}},
         )
@@ -400,7 +410,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         await self.update_chat_ctx(owner_ctx)
         return result.task_results
 {{- else if eq .Then "transfer"}}
-        owner_ctx = self.chat_ctx.copy(exclude_instructions=True)
+        owner_ctx = self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)
         await group
         # then: transfer — control moves on and does not return here. N13: drop
         # the flow's turns by handing the target the pre-flow context.
@@ -421,13 +431,14 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict
         super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if .MCPServers}}, {{template "mcp_mounts" .MCPServers}}{{end}})
 
     async def on_enter(self) -> None:
-        self.session.generate_reply(instructions="Begin this step.")
+        # The task's own instructions describe this step; let them drive the opening.
+        self.session.generate_reply()
 {{range .Tools}}{{template "method_tool" .}}{{end}}
     @function_tool
-    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.PyType}}{{end}}) -> str:
-        """Record the result of this step and finish."""
+    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}) -> None:
+        """Record the result of this step and finish. complete() is the sole
+        resolution; do not relay anything after it."""
         self.complete({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} })
-        return "Done."
 {{end}}
 {{- end}}
 

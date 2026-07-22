@@ -233,6 +233,9 @@ type livekitArg struct {
 	Name     string
 	PyType   string
 	Required bool
+	Enum     []string // input `enum` → Literal[...] (V2)
+	Desc     string   // per-property `description` → Annotated[..., Field(description=...)] (V2)
+	Anno     string   // rendered Python annotation (PyType, Literal[...], or Annotated[...])
 }
 
 type livekitPrompt struct {
@@ -263,18 +266,22 @@ type livekitData struct {
 	InferenceUses []string // bindings routed through LiveKit Inference (console needs cloud creds, C2/C7)
 	Tracing       bool
 
-	NeedsTasks         bool // AgentTask import
-	NeedsTaskGroups    bool // beta.workflows TaskGroup import
-	NeedsFunctionTools bool // RunContext + function_tool imports
-	NeedsHTTPX         bool // any webhook tool
-	HasVars            bool // Userdata dataclass + session userdata
-	NeedsLastN         bool // the _last_n history helper
-	NeedsSummarize     bool // the _summarize history helper
-	NeedsAsyncio       bool // inactivity end / max_duration timers
-	NeedsInspect       bool // local tool wrappers (isawaitable)
-	NeedsMCP           bool // mcp import (MCPServerHTTP)
-	HasColdTransfer    bool // get_job_context import
-	HasWarmTransfer    bool // WarmTransferTask import + trunk env
+	NeedsTasks         bool   // AgentTask import
+	NeedsTaskGroups    bool   // beta.workflows TaskGroup import
+	NeedsFunctionTools bool   // RunContext + function_tool imports
+	TypingImports      string // `from typing import ...` names (Annotated/Literal), "" if none (V2)
+	NeedsField         bool   // `from pydantic import Field` — any tool arg carries a description (V2)
+	SingleAgentMinimal bool   // one agent, never a handoff target: drop the chat_ctx ctor plumbing (F3)
+	NeedsLLM           bool   // the `llm` module import (chat_ctx param, fallback chains, or history helpers)
+	NeedsHTTPX         bool   // any webhook tool
+	HasVars            bool   // Userdata dataclass + session userdata
+	NeedsLastN         bool   // the _last_n history helper
+	NeedsSummarize     bool   // the _summarize history helper
+	NeedsAsyncio       bool   // inactivity end / max_duration timers
+	NeedsInspect       bool   // local tool wrappers (isawaitable)
+	NeedsMCP           bool   // mcp import (MCPServerHTTP)
+	HasColdTransfer    bool   // get_job_context import
+	HasWarmTransfer    bool   // WarmTransferTask import + trunk env
 	Outbound           *livekitOutbound
 	Telephony          *livekitTelephony
 
