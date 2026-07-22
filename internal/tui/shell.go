@@ -59,6 +59,7 @@ type viewCtx struct {
 	breadcrumb string
 	target     string
 	sidebar    []sideItem
+	hero       bool // Home draws the wordmark hero instead of header + sidebar
 }
 
 // fieldReq asks the model to render one field and reply with the answer. It

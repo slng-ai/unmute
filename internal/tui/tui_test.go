@@ -74,38 +74,35 @@ func TestRunQuit(t *testing.T) {
 	}
 }
 
-func TestV23WordmarkHasNoBackgroundColor(t *testing.T) { // docs/spec/tui.md V23
-	if strings.Contains(slngWordmark, "48;") {
-		t.Fatalf("wordmark still paints a background: %q", slngWordmark)
-	}
-	if !strings.Contains(slngWordmark, "38;2;245;201;110m") {
-		t.Fatalf("wordmark lost the SLNG foreground color: %q", slngWordmark)
-	}
-}
-
-func TestV26WordmarkRendersInsideHome(t *testing.T) {
-	t.Setenv("NO_COLOR", "")
-	var output bytes.Buffer
-	if _, err := Run(strings.NewReader("3\n"), &output, true); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(output.String(), "____") {
-		t.Fatalf("home omitted wordmark:\n%s", output.String())
-	}
-}
-
-func TestV26NoColorOmitsWordmark(t *testing.T) {
+func TestV23HomeHeroShowsWordmark(t *testing.T) { // docs/spec/tui.md V23
 	t.Setenv("NO_COLOR", "1")
-	var output bytes.Buffer
-	if _, err := Run(strings.NewReader("3\n"), &output, true); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(output.String(), "____") {
-		t.Fatalf("NO_COLOR output contains wordmark:\n%s", output.String())
+	view := renderField(t, 90, 24, fieldReq{kind: kindSelect, ctx: viewCtx{hero: true}, choices: []choice{{"Create a new agent", actionCreate}, {"Quit", actionQuit}}})
+	if !strings.Contains(view, "SLNG//") {
+		t.Fatalf("home hero omits SLNG wordmark:\n%s", view)
 	}
 }
 
-func TestV27StepsRedrawInPersistentAltScreen(t *testing.T) {
+func TestV23HeaderBadgeShownOnEditorScreens(t *testing.T) { // docs/spec/tui.md V23
+	view := renderField(t, 90, 24, fieldReq{kind: kindSelect, title: "Models", backable: true, ctx: viewCtx{breadcrumb: "Create › Models"}, choices: []choice{{"Listen", "listen"}, {"← Back", actionBack}}})
+	if !strings.Contains(view, "SLNG//") {
+		t.Fatalf("editor header omits SLNG badge:\n%s", view)
+	}
+}
+
+func TestV26LogoRendersInsideProgram(t *testing.T) { // docs/spec/tui.md V26
+	t.Setenv("NO_COLOR", "1")
+	screens := map[string]string{
+		"home":   renderField(t, 90, 24, fieldReq{kind: kindSelect, ctx: viewCtx{hero: true}, choices: []choice{{"Quit", actionQuit}}}),
+		"editor": renderField(t, 90, 24, fieldReq{kind: kindSelect, title: "Models", backable: true, choices: []choice{{"Listen", "l"}, {"← Back", actionBack}}}),
+	}
+	for name, view := range screens {
+		if !strings.Contains(view, "SLNG//") {
+			t.Fatalf("%s screen omits logo:\n%s", name, view)
+		}
+	}
+}
+
+func TestV27RedrawsInPlaceNoScrollback(t *testing.T) { // docs/spec/tui.md V27
 	var output bytes.Buffer
 	runner := newRunner(strings.NewReader(""), &output, false)
 	if _, err := runner.runProgram(func() (Result, error) { return Result{}, nil }); err != nil {

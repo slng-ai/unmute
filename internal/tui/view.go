@@ -16,13 +16,61 @@ func (m console) View() string {
 	if m.width == 0 || m.height == 0 {
 		return ""
 	}
-	header := m.renderHeader()
 	footer := m.renderFooter()
+	// Home is the logo hero: no header badge, the wordmark is the whole screen.
+	if m.req != nil && m.req.ctx.hero {
+		bodyH := m.height - lipgloss.Height(footer)
+		if bodyH < 3 {
+			bodyH = 3
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, m.renderHome(bodyH), footer)
+	}
+	header := m.renderHeader()
 	bodyH := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
 	if bodyH < 3 {
 		bodyH = 3
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, m.renderBody(bodyH), footer)
+}
+
+// heroArt is the SLNG wordmark drawn large for the Home screen. Rendered in the
+// accent color; NO_COLOR falls back to plain "SLNG//" text (C15, V23).
+const heroArt = `███████╗██╗     ███╗   ██╗ ██████╗    ██╗██╗
+██╔════╝██║     ████╗  ██║██╔════╝   ██╔╝██║
+███████╗██║     ██╔██╗ ██║██║  ███╗ ██╔╝██╔╝
+╚════██║██║     ██║╚██╗██║██║   ██║██╔╝██╔╝
+███████║███████╗██║ ╚████║╚██████╔╝██╔╝██╔╝
+╚══════╝╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝ ╚═╝`
+
+func heroLogo() string {
+	if style.NoColor() {
+		return "SLNG//"
+	}
+	return style.Accented(heroArt)
+}
+
+func (m console) renderHome(h int) string {
+	block := lipgloss.JoinVertical(lipgloss.Center,
+		heroLogo(),
+		"",
+		style.Dim("Author-once, portable voice agents"),
+		"",
+		m.renderChoices(),
+	)
+	return lipgloss.Place(m.width, h, lipgloss.Center, lipgloss.Center, block)
+}
+
+func (m console) renderChoices() string {
+	var b strings.Builder
+	for i, c := range m.req.choices {
+		if i == m.cursor {
+			b.WriteString(style.Accented("› " + c.label))
+		} else {
+			b.WriteString("  " + c.label)
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func (m console) renderHeader() string {

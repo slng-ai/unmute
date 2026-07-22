@@ -26,12 +26,6 @@ const (
 	actionQuit    = "quit"
 	actionBack    = ":back"
 	agentNameHelp = "Choose a unique name for your agent. This name is also used for its local directory."
-	slngWordmark  = "\x1b[1;38;2;245;201;110m" +
-		"  ____  _     _   _  ____       //  // \n" +
-		" / ___|| |   | \\ | |/ ___|     //  //  \n" +
-		" \\___ \\| |   |  \\| | |  _     //  //   \n" +
-		"  ___) | |___| |\\  | |_| |   //  //    \n" +
-		" |____/|_____|_| \\_|\\____|  //  //     \x1b[0m"
 )
 
 // Agent is the basic configuration for a scaffold.
@@ -84,6 +78,7 @@ func runWithStart(in io.Reader, out io.Writer, accessible, createOnly bool, acti
 
 func runHome(runner *fieldRunner) (Result, error) {
 	for {
+		runner.ctx = viewCtx{hero: true}
 		choice, _, err := runner.selectOne(homeTitle(), "What would you like to do?", []huh.Option[string]{
 			huh.NewOption("Create a new agent", actionCreate),
 			huh.NewOption("Open an existing agent", actionOpen),
@@ -95,6 +90,7 @@ func runHome(runner *fieldRunner) (Result, error) {
 		if choice == actionQuit {
 			return Result{}, nil
 		}
+		runner.ctx = viewCtx{}
 		if choice == actionOpen {
 			if err := openExisting(runner); err != nil {
 				return Result{}, err
@@ -129,12 +125,9 @@ func runCreate(runner *fieldRunner) (Result, bool, error) {
 	return editAgent(runner, Agent{Path: path, Data: data})
 }
 
-func homeTitle() string {
-	if os.Getenv("NO_COLOR") != "" {
-		return "Unmute"
-	}
-	return slngWordmark
-}
+// homeTitle is the Home select title used by the accessible renderer; the
+// interactive renderer draws the wordmark hero instead (view.go).
+func homeTitle() string { return "SLNG//" }
 
 func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 	result := Result{Agent: agent, Create: true}
