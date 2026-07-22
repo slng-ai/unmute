@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, FlowsFunctionSchema, NodeConfig
-from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame
+from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -256,10 +256,14 @@ class IntakeAgent(TracedLLMWorker):
             context_aggregator=LLMContextAggregatorPair(self.context),
             worker=self,
         )
-        # Resolve this tool call before the flow's first inference: Pipecat
-        # ignores a @tool's return value, so an unresolved call hangs the turn
-        # (V3/B1).
-        await params.result_callback({"status": "running the collect task"})
+        # Resolve this tool call so it never dangles (V3/B1), but with
+        # run_llm=False: the flow's first node (respond_immediately) is the sole
+        # responder, so the owner never runs a second completion and the caller
+        # hears the task's opening line once, not twice (V7/B4).
+        await params.result_callback(
+            {"status": "running the collect task"},
+            properties=FunctionCallResultProperties(run_llm=False),
+        )
         await flow.initialize(self._run_collect_node_collect())
 
     def _run_collect_node_collect(self) -> NodeConfig:
@@ -314,10 +318,14 @@ class IntakeAgent(TracedLLMWorker):
             context_aggregator=LLMContextAggregatorPair(self.context),
             worker=self,
         )
-        # Resolve this tool call before the flow's first inference: Pipecat
-        # ignores a @tool's return value, so an unresolved call hangs the turn
-        # (V3/B1).
-        await params.result_callback({"status": "running the triage flow"})
+        # Resolve this tool call so it never dangles (V3/B1), but with
+        # run_llm=False: the flow's first node (respond_immediately) is the sole
+        # responder, so the owner never runs a second completion and the caller
+        # hears the task's opening line once, not twice (V7/B4).
+        await params.result_callback(
+            {"status": "running the triage flow"},
+            properties=FunctionCallResultProperties(run_llm=False),
+        )
         await flow.initialize(self._run_triage_node_collect())
 
     def _run_triage_node_collect(self) -> NodeConfig:

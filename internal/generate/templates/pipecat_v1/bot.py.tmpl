@@ -229,10 +229,14 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
             context_aggregator=LLMContextAggregatorPair(self.context),
             worker=self,
         )
-        # Resolve this tool call before the flow's first inference: Pipecat
-        # ignores a @tool's return value, so an unresolved call hangs the turn
-        # (V3/B1).
-        await params.result_callback({"status": "running the {{if $d.Task}}{{$d.Task}} task{{else}}{{$d.Group}} flow{{end}}"})
+        # Resolve this tool call so it never dangles (V3/B1), but with
+        # run_llm=False: the flow's first node (respond_immediately) is the sole
+        # responder, so the owner never runs a second completion and the caller
+        # hears the task's opening line once, not twice (V7/B4).
+        await params.result_callback(
+            {"status": "running the {{if $d.Task}}{{$d.Task}} task{{else}}{{$d.Group}} flow{{end}}"},
+            properties=FunctionCallResultProperties(run_llm=False),
+        )
         await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
 {{range $t := $d.StepTasks}}
     def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:

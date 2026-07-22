@@ -157,6 +157,14 @@ dp§V26's small-context task-role boundary is preserved.
   Guard: `TestF3PipecatSingleAgentInline` (shape + `py_compile`) +
   `TestSmokePipecatV1InlineInstantiates` (constructs against real pipecat-ai
   1.5.0 + pipecat-slng; tools register on `LLMContext`).
+- V7 (F5, from B4 — refines V3): the delegate `@tool` resolves its call with
+  `FunctionCallResultProperties(run_llm=False)`. It hands control to the flow,
+  whose first node (`respond_immediately=True`) is the sole responder — so the
+  owner must NOT run a second completion. A default `result_callback` (run_llm
+  true) makes the owner answer too, emitting the task's opening line twice
+  (observed in a live trace: two `llm` generations back-to-back after each
+  `tool:<delegate>` span). Guard: `TestPipecatV1TasksGolden` asserts the delegate
+  resolves with `run_llm=False`; the double-inference regression fails it.
 
 *(No F2 invariant — F2's semantic change is rejected, see C8. dp§V26 stays
 authoritative. F2's only real residue, the duplicated prompt literal, is a
@@ -179,3 +187,4 @@ id|date|cause|fix
 B1|2026-07-22|delegate `@tool` (`run_collect`/`run_triage`) returns `{"status": …}` and never calls `params.result_callback`; Pipecat ignores a `@tool`'s return value, so the FlowManager delegate call is left unresolved and the LLM turn hangs (docs: tool methods *must* call `result_callback` "to avoid unresolved LLM calls"). Latent: the tasks golden only import-checks and the B7/T12 scripted-SSE spike didn't enforce tool_call/result pairing.|V3
 B2|2026-07-22|`then: end` queues `EndFrame()` directly in the finish handler (`bot.py.tmpl` ~L236), contradicting dp§V2 ("end_conversation action") and upstream `food_ordering` (`post_actions=[{"type":"end_conversation"}]`). Undetected because no example/golden exercises `then: end` — the path is emitted but untested.|V4
 B3|2026-07-22|`inputFields` sorted agent-level `@tool` args alphabetically, so a tool with an optional param sorting before a required one would emit `def f(opt=..., req)` — invalid Python (non-default arg after default). Latent: every example tool's input is all-required or all-optional, never mixed, so it never surfaced; F1's real type hints (`= 0`/`= ""`) make the ordering matter more than the old uniform `= ""`.|V5
+B4|2026-07-22|T4's F5 fix resolved the delegate `@tool` with a default `params.result_callback`, so the owner LLM answered the resolved call AND the flow's first node (`respond_immediately=True`) answered — the caller heard the task's opening line twice per delegate ("What date would you prefer for your haircut?" then "…for your haircut appointment?"). Root cause: the delegate hands control to the flow, so the owner must resolve WITHOUT a follow-up completion. Undetected because the L1–L3 goldens check text and the smokes only construct — a live trace surfaced it.|V7

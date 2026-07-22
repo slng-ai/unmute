@@ -458,10 +458,13 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		t.Fatal("bot.py not emitted")
 	}
 	for _, want := range []string{
-		"from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame",
+		"from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame",
 		"from pipecat.services.settings import LLMSettings",
 		`role_message="Ask for the caller's email, look them up, and confirm their account tier."`,
 		`task_messages=[{"role": "developer", "content": "Begin this step."}]`,
+		// The delegate resolves its call with run_llm=False so only the flow node
+		// responds — no double assistant turn (V7/B4).
+		`properties=FunctionCallResultProperties(run_llm=False),`,
 		// The agent prompt is one module constant, referenced by builder + restore (V2).
 		`INTAKE_PROMPT = """# Intake agent`,
 		`delta=LLMSettings(system_instruction=INTAKE_PROMPT)`,

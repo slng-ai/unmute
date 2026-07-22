@@ -274,6 +274,10 @@ func setImportNeeds(data *pipecatData) {
 	if data.NeedsEndFrame {
 		data.FrameImports = append(data.FrameImports, "EndFrame")
 	}
+	if data.HasFlows {
+		// delegate @tool resolves its call with run_llm=False (V7)
+		data.FrameImports = append(data.FrameImports, "FunctionCallResultProperties")
+	}
 	if data.NeedsAppendFrame {
 		data.FrameImports = append(data.FrameImports, "LLMMessagesAppendFrame")
 	}
