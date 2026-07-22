@@ -273,15 +273,15 @@ type livekitData struct {
 	NeedsField         bool   // `from pydantic import Field` — any tool arg carries a description (V2)
 	SingleAgentMinimal bool   // one agent, never a handoff target: drop the chat_ctx ctor plumbing (F3)
 	NeedsLLM           bool   // the `llm` module import (chat_ctx param, fallback chains, or history helpers)
-	NeedsHTTPX         bool // any webhook tool
-	HasVars            bool // Userdata dataclass + session userdata
-	NeedsLastN         bool // the _last_n history helper
-	NeedsSummarize     bool // the _summarize history helper
-	NeedsAsyncio       bool // inactivity end / max_duration timers
-	NeedsInspect       bool // local tool wrappers (isawaitable)
-	NeedsMCP           bool // mcp import (MCPServerHTTP)
-	HasColdTransfer    bool // get_job_context import
-	HasWarmTransfer    bool // WarmTransferTask import + trunk env
+	NeedsHTTPX         bool   // any webhook tool
+	HasVars            bool   // Userdata dataclass + session userdata
+	NeedsLastN         bool   // the _last_n history helper
+	NeedsSummarize     bool   // the _summarize history helper
+	NeedsAsyncio       bool   // inactivity end / max_duration timers
+	NeedsInspect       bool   // local tool wrappers (isawaitable)
+	NeedsMCP           bool   // mcp import (MCPServerHTTP)
+	HasColdTransfer    bool   // get_job_context import
+	HasWarmTransfer    bool   // WarmTransferTask import + trunk env
 	Outbound           *livekitOutbound
 	Telephony          *livekitTelephony
 
