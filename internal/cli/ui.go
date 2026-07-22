@@ -20,9 +20,9 @@ func (u ui) fg(s, hex string) string {
 	return u.r.NewStyle().Foreground(lipgloss.Color(hex)).Render(s)
 }
 
-func (u ui) ok(s string) string     { return u.fg(s, style.Success) }
-func (u ui) fail(s string) string   { return u.fg(s, style.Error) }
-func (u ui) muted(s string) string  { return u.r.NewStyle().Foreground(style.Muted).Render(s) }
+func (u ui) ok(s string) string    { return u.fg(s, style.Success) }
+func (u ui) fail(s string) string  { return u.fg(s, style.Error) }
+func (u ui) muted(s string) string { return u.r.NewStyle().Foreground(style.Muted).Render(s) }
 func (u ui) accent(s string) string {
 	return u.r.NewStyle().Foreground(lipgloss.Color(style.Accent)).Bold(true).Render(s)
 }

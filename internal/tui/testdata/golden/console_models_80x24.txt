@@ -1,0 +1,24 @@
+ SLNG//   remy > Models                                                ● pipecat
+╭────────────────────╮ ╭───────────────────────────────────────────────────────╮
+│ SECTIONS           │ │ Models                                                │
+│                    │ │                                                       │
+│   Identity         │ │ › Listen (STT)  ·  deepgram                           │
+│ › Models           │ │   Reason (LLM)  ·  openai                             │
+│     Listen         │ │   Speak (TTS)  ·  cartesia                            │
+│     Reason         │ │   ← Back                                              │
+│     Speak          │ │                                                       │
+│   Behavior         │ │                                                       │
+│   Integrations     │ │                                                       │
+│   Lifecycle        │ │                                                       │
+│                    │ │                                                       │
+│                    │ │                                                       │
+│                    │ │                                                       │
+│                    │ │                                                       │
+│                    │ │                                                       │
+│                    │ │                                                       │
+│                    │ │                                                       │
+│                    │ │                                                       │
+│                    │ │                                                       │
+│                    │ │                                                       │
+╰────────────────────╯ ╰───────────────────────────────────────────────────────╯
+↑/↓ move · ↵ select · ctrl+p palette · esc back · q quit                        

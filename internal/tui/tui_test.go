@@ -168,6 +168,19 @@ func TestV35InteractiveMenuDefaultsToFirstRow(t *testing.T) { // docs/spec/tui.m
 	}
 }
 
+func TestV49AccessibleModeDrivesEveryScreen(t *testing.T) { // docs/spec/tui.md V49, C5
+	t.Chdir(t.TempDir())
+	// Home -> create -> name -> Create agent -> confirm, all by numbered input,
+	// zero TTY and zero Python.
+	got, err := Run(strings.NewReader("1\nagent\n7\n\n"), &bytes.Buffer{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Confirmed || !got.Create || got.Agent.Data.Name != "agent" {
+		t.Fatalf("accessible create did not complete: %#v", got)
+	}
+}
+
 func TestV45PaletteOpensAndFuzzyFilters(t *testing.T) { // docs/spec/tui.md V45
 	m := newConsole(nil)
 	sized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -278,7 +291,7 @@ func TestV44OnlyFocusedPanelHasAccentBorder(t *testing.T) { // docs/spec/tui.md 
 func TestV44SidebarShowsActiveSection(t *testing.T) { // docs/spec/tui.md V44
 	req := fieldReq{
 		kind: kindSelect, title: "Models", backable: true,
-		ctx:  viewCtx{sidebar: []sideItem{{label: "Identity"}, {label: "Models", active: true}, {label: "Listen", child: true}}},
+		ctx:     viewCtx{sidebar: []sideItem{{label: "Identity"}, {label: "Models", active: true}, {label: "Listen", child: true}}},
 		choices: []choice{{"Listen", "listen"}, {"← Back", actionBack}},
 	}
 	view := renderField(t, 100, 24, req)
