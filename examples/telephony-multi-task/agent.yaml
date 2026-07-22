@@ -33,6 +33,8 @@ agents:
 variables:
   customer_id: { type: string }
   customer_name: { type: string }
+  # Hydrated by the telephony runtime before the greeting.
+  caller_number: { type: string, source: from_number }
 
 tasks:
   customer_record:
@@ -74,6 +76,12 @@ controls:
     task: appointment_request
     when: The identified caller wants to book, reschedule, or cancel an appointment.
 
+  escalate_to_front_desk:
+    kind: human_transfer
+    destination: front_desk
+    mode: cold
+    when: The caller asks for a person, or the request cannot be completed with the available tools.
+
 tools:
   - lookup_customer
   - create_customer
@@ -92,8 +100,15 @@ tracing:
 
 channels:
   web: { kind: realtime_audio }
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: true
+    on_voicemail: hangup
+    required_controls: [cold_transfer, hangup]
 
 capacity:
   peak_sessions: 5
   max_sessions: 10
+  peak_starts_per_second: 1
   avg_session_duration: 5m

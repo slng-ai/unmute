@@ -166,6 +166,9 @@ func newDevCmd() *cobra.Command {
 	return cmd
 }
 
+// runDevTelephony is the fail-closed gate: loading and generation reject
+// every provisional or gated route before any tunnel, Docker, or carrier
+// call (SPEC V5). The post-gate orchestration lives in execDevTelephony.
 func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort string, verbose bool) error {
 	agent, targets, err := loadPackage(root, []string{targetName})
 	if err != nil {
@@ -183,53 +186,8 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort 
 	if artifact.Telephony == nil || len(artifact.Telephony.Services) == 0 {
 		return fmt.Errorf("dev %s: target %q has no executable telephony topology", root, resolved.Name)
 	}
-	plan = artifact.Telephony
-	var public *url.URL
-	if len(plan.PublicEndpoints) > 0 || publicValue != "" {
-		public, err = parseTelephonyPublicURL(publicValue)
-		if err != nil {
-			return fmt.Errorf("dev %s: %w", root, err)
-		}
-	}
-	printDevTelephonyPlan(cmd.OutOrStdout(), resolved.Name, plan, public)
-
-	childEnv := devChildEnv(root, cmd.ErrOrStderr())
-	if err := rejectLocalTopologyConflicts(plan, childEnv); err != nil {
-		return fmt.Errorf("dev %s: %w", root, err)
-	}
-	if public != nil {
-		childEnv = setChildEnv(childEnv, "UNMUTE_PUBLIC_URL", public.String())
-	}
-	childEnv = setChildEnv(childEnv, "UNMUTE_TELEPHONY_PORT", botPort)
-	if missing := missingEnvironment(externalTelephonyEnv(plan), childEnv); len(missing) > 0 {
-		return fmt.Errorf("dev %s: missing telephony credentials/configuration: %s; see TELEPHONY.md#credentials for where to obtain them", root, strings.Join(missing, ", "))
-	}
-	if err := composePreflight(cmd.Context(), childEnv); err != nil {
-		return fmt.Errorf("dev %s: %w", root, err)
-	}
-	outDir := filepath.Join(root, "build", resolved.Name)
-	if err := writeArtifactFiles(cmd.ErrOrStderr(), outDir, artifact.Files); err != nil {
-		return fmt.Errorf("dev %s: %w", root, err)
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "compiled %s\n", outDir)
-	composePath := filepath.Join(outDir, "compose.telephony.yaml")
-	if _, err := os.Stat(composePath); err != nil {
-		return fmt.Errorf("dev %s: generated telephony Compose file: %w", root, err)
-	}
-	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	logPath := filepath.Join(outDir, "telephony.log")
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		return fmt.Errorf("dev %s: open log: %w", root, err)
-	}
-	defer func() { _ = logFile.Close() }()
-	var processOut io.Writer = logFile
-	if verbose {
-		processOut = io.MultiWriter(logFile, cmd.ErrOrStderr())
-	}
-	project := composeProjectName(root, resolved.Name)
-	if err := runTelephonyCompose(ctx, outDir, composePath, project, childEnv, processOut, cmd.OutOrStdout(), cmd.ErrOrStderr(), logPath); err != nil {
+	opts := devTelephonyOptions{publicValue: publicValue, botPort: botPort, verbose: verbose}
+	if err := execDevTelephony(cmd, root, resolved.Name, artifact.Telephony, artifact.Files, opts); err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
 	}
 	return nil
@@ -237,7 +195,7 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort 
 
 func parseTelephonyPublicURL(value string) (*url.URL, error) {
 	if value == "" {
-		return nil, errors.New("--telephony requires --public-url <https-url>")
+		return nil, errors.New("--public-url must be an HTTPS origin with an optional path, got an empty value")
 	}
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
@@ -249,22 +207,28 @@ func parseTelephonyPublicURL(value string) (*url.URL, error) {
 
 func printDevTelephonyPlan(out io.Writer, name string, plan *generate.TelephonyRuntimePlan, public *url.URL) {
 	fmt.Fprintf(out, "%s: telephony route provider=%s transport=%s carrier=%s coordination=%s\n", name, plan.Route.Provider, plan.Route.Transport, plan.Route.Carrier, plan.Coordination)
-	for _, endpoint := range plan.PublicEndpoints {
-		if public == nil {
-			continue
-		}
-		base := strings.TrimSuffix(public.String(), "/")
-		if endpoint.Method == "WS" {
-			base = "wss" + strings.TrimPrefix(base, "https")
-		}
-		fmt.Fprintf(out, "%s: %s %s %s%s\n", name, endpoint.Name, endpoint.Method, base, endpoint.Path)
-	}
+	printDevTelephonyEndpoints(out, name, plan, public)
 	for _, step := range plan.ManualSteps {
 		fmt.Fprintf(out, "%s: setup: %s\n", name, step)
 	}
 	fmt.Fprintf(out, "%s: local services: %s\n", name, strings.Join(plan.Services, ", "))
 	for _, reason := range plan.Reasons {
 		fmt.Fprintf(out, "%s: coordination reason %s -> %s\n", name, reason.Name, strings.Join(reason.Consumers, ", "))
+	}
+}
+
+// printDevTelephonyEndpoints prints the exact public callback URLs once the
+// origin is known (TELEPHONY.md step 6); a nil public prints nothing.
+func printDevTelephonyEndpoints(out io.Writer, name string, plan *generate.TelephonyRuntimePlan, public *url.URL) {
+	if public == nil {
+		return
+	}
+	for _, endpoint := range plan.PublicEndpoints {
+		base := strings.TrimSuffix(public.String(), "/")
+		if endpoint.Method == "WS" {
+			base = "wss" + strings.TrimPrefix(base, "https")
+		}
+		fmt.Fprintf(out, "%s: %s %s %s%s\n", name, endpoint.Name, endpoint.Method, base, endpoint.Path)
 	}
 }
 

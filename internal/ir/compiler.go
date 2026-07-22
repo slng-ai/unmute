@@ -363,6 +363,8 @@ type TelephonyPlan struct {
 	PublicEndpoints     []TelephonyEndpoint           `json:"public_endpoints,omitempty" yaml:"public_endpoints,omitempty"`
 	RequiredEnvironment []string                      `json:"required_environment" yaml:"required_environment"`
 	LocalEnvironment    []string                      `json:"locally_supplied_environment" yaml:"locally_supplied_environment"`
+	DevEnvironment      []string                      `json:"dev_supplied_environment,omitempty" yaml:"dev_supplied_environment,omitempty"`
+	AutoWebhookEndpoint string                        `json:"auto_webhook_endpoint,omitempty" yaml:"auto_webhook_endpoint,omitempty"`
 	ManualSteps         []string                      `json:"manual_steps,omitempty" yaml:"manual_steps,omitempty"`
 	Services            []string                      `json:"services" yaml:"services"`
 	Coordination        string                        `json:"coordination" yaml:"coordination"`

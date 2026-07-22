@@ -125,6 +125,30 @@ func TestPublicExamplePackages(t *testing.T) {
 	}
 }
 
+// The telephony example is a complete, schema-faithful package (channel,
+// connections, routes, destinations) that builds cleanly and then fails
+// closed at generation, because every telephony route is provisional (B1,
+// SPEC V5). It must stay honest: promotion, not this test, unlocks it.
+func TestTelephonyExampleBuildsAndFailsClosed(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "telephony-multi-task"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"livekit", "pipecat"} {
+		resolved, ok := agent.Targets[name]
+		if !ok || resolved.Telephony == nil {
+			t.Fatalf("target %q has no resolved telephony plan", name)
+		}
+		if _, err := Generate(agent, resolved, target.Default()); err == nil {
+			t.Fatalf("target %q generated despite provisional telephony routes", name)
+		}
+	}
+}
+
 func TestExampleToolExposure(t *testing.T) {
 	domainTools := []string{"lookup_customer", "create_customer", "check_availability", "book_appointment", "cancel_appointment"}
 	cases := []struct {

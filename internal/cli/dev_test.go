@@ -219,7 +219,11 @@ func TestComposeExecutorRunsUpLogsAndProjectScopedDown(t *testing.T) { // teleph
 	var output bytes.Buffer
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(time.Second, cancel)
-	err := runTelephonyCompose(ctx, dir, filepath.Join(dir, "compose.telephony.yaml"), "unmute-test", []string{"TRACE_FILE=" + trace}, &output, &output, &output, filepath.Join(dir, "telephony.log"))
+	err := runTelephonyCompose(ctx, telephonyComposeRun{
+		dir: dir, file: filepath.Join(dir, "compose.telephony.yaml"), project: "unmute-test",
+		env: []string{"TRACE_FILE=" + trace}, output: &output, stdout: &output, stderr: &output,
+		logPath: filepath.Join(dir, "telephony.log"),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,10 +260,11 @@ func TestComposeExecutorTreatsStartupInterruptAsCleanStop(t *testing.T) { // tel
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(100*time.Millisecond, cancel)
 	var output bytes.Buffer
-	err := runTelephonyCompose(
-		ctx, dir, filepath.Join(dir, "compose.telephony.yaml"), "unmute-test",
-		nil, &output, &output, &output, filepath.Join(dir, "telephony.log"),
-	)
+	err := runTelephonyCompose(ctx, telephonyComposeRun{
+		dir: dir, file: filepath.Join(dir, "compose.telephony.yaml"), project: "unmute-test",
+		output: &output, stdout: &output, stderr: &output,
+		logPath: filepath.Join(dir, "telephony.log"),
+	})
 	if err != nil {
 		t.Fatalf("startup interrupt returned an error: %v", err)
 	}
@@ -280,10 +285,11 @@ func TestComposeExecutorTreatsLogInterruptAsCleanStop(t *testing.T) { // telepho
 	}
 	t.Cleanup(func() { composeCommand = restore })
 	var output bytes.Buffer
-	err := runTelephonyCompose(
-		context.Background(), dir, filepath.Join(dir, "compose.telephony.yaml"), "unmute-test",
-		nil, &output, &output, &output, filepath.Join(dir, "telephony.log"),
-	)
+	err := runTelephonyCompose(context.Background(), telephonyComposeRun{
+		dir: dir, file: filepath.Join(dir, "compose.telephony.yaml"), project: "unmute-test",
+		output: &output, stdout: &output, stderr: &output,
+		logPath: filepath.Join(dir, "telephony.log"),
+	})
 	if err != nil {
 		t.Fatalf("log interrupt returned an error: %v", err)
 	}
@@ -315,6 +321,26 @@ func TestComposeLocalEnvironmentAndLiveKitConflicts(t *testing.T) { // telephony
 	}
 	if err := rejectLocalTopologyConflicts(pipecat, []string{"REDIS_URL=redis://external"}); err == nil || !strings.Contains(err.Error(), "REDIS_URL conflicts") {
 		t.Fatalf("Pipecat local Redis conflict = %v", err)
+	}
+}
+
+// Trunk IDs are supplied by the dev command itself (SPEC V4): they are never
+// demanded from the user and a user-set value is rejected, not overridden.
+func TestComposeDevSuppliedEnvironmentIsNeverDemandedAndRejectsOverrides(t *testing.T) {
+	plan := &generate.TelephonyRuntimePlan{
+		RequiredEnv:      []string{"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK", "LIVEKIT_URL", "TWILIO_SIP_PASSWORD"},
+		LocalEnvironment: []string{"LIVEKIT_URL"},
+		DevSuppliedEnv:   []string{"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK"},
+	}
+	if got := externalTelephonyEnv(plan); strings.Join(got, ",") != "TWILIO_SIP_PASSWORD" {
+		t.Fatalf("external env = %v", got)
+	}
+	err := rejectLocalTopologyConflicts(plan, []string{"LIVEKIT_SIP_INBOUND_TRUNK=ST_stale"})
+	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_SIP_INBOUND_TRUNK is supplied by `unmute dev --telephony` itself") {
+		t.Fatalf("dev-supplied override = %v", err)
+	}
+	if err := rejectLocalTopologyConflicts(plan, []string{"LIVEKIT_SIP_OUTBOUND_TRUNK="}); err != nil {
+		t.Fatalf("empty dev-supplied override should not conflict: %v", err)
 	}
 }
 

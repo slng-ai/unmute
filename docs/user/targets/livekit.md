@@ -474,10 +474,13 @@ outbound credential, and linked number from the Plivo Console.
 
 After promotion, compilation will emit the selected
 `sip-inbound-trunk.json`, `sip-outbound-trunk.json`, and
-`sip-dispatch-rule.json` inputs. Materialize their environment placeholders
-with `envsubst`, then run the `lk sip ... create` commands in the generated
-README. Copy the returned IDs to `LIVEKIT_SIP_INBOUND_TRUNK` and
-`LIVEKIT_SIP_OUTBOUND_TRUNK` as requested by `.env.example`.
+`sip-dispatch-rule.json` inputs for production deployments. Materialize their
+environment placeholders with `envsubst`, then run the `lk sip ... create`
+commands in the generated README. Copy the returned IDs to
+`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` as requested by
+`.env.example`. For local development none of this is needed:
+`unmute dev --telephony` creates the same records on the local server itself
+and supplies both IDs.
 
 Self-hosted SIP runs LiveKit Server and LiveKit SIP against the same Redis.
 Redis is their shared datastore and message bus, so calls, SIP participants,
@@ -502,26 +505,21 @@ unmute dev acme --target livekit --telephony
 ```
 
 Today it reports the provisional route before checking credentials or Docker
-and does not emit the Compose graph. Once the route is promoted, Docker Compose
-will build the Agent and start Redis, LiveKit Server, and LiveKit SIP, then wait
-for every health check. Non-empty external `LIVEKIT_URL`, API key/secret, or
-`REDIS_URL` values will conflict with this local graph and be rejected.
-`--verbose` will follow Compose logs; normal output will be retained in
-`build/livekit/telephony.log`. Stopping will preserve the named Redis volume.
+and does not emit the Compose graph. Once the route is promoted, the command
+runs the whole bootstrap itself: Docker Compose builds the Agent and starts
+Redis, LiveKit Server, and LiveKit SIP first; the command then creates or
+reuses the inbound trunk, outbound trunk, and `call-` dispatch rule on that
+local server with the generated development key pair, injects the returned
+`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK`, and starts the
+application. Record creation is idempotent: the named Redis volume persists,
+so restarts reuse existing records instead of duplicating them.
 
-The local trunk IDs come from the local server, so bootstrap the promoted
-artifact in two phases. From its generated directory, first run:
-
-```sh
-docker compose -f compose.telephony.yaml up -d redis livekit_server livekit_sip
-```
-
-Point `lk` at that server using the generated development key pair, create the
-needed trunks and dispatch rule, export the returned
-`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK`, and then run the
-full command. The current validation gate prevents obtaining this Compose file
-through `unmute compile`; these steps describe the post-promotion bootstrap,
-not a workaround around the gate.
+Non-empty external `LIVEKIT_URL`, API key/secret, `REDIS_URL`, or trunk ID
+values conflict with this local graph and are rejected. `--verbose` follows
+Compose logs; normal output is retained in `build/livekit/telephony.log`.
+Stopping preserves the named Redis volume. The current validation gate still
+prevents obtaining this Compose file through `unmute compile`; this describes
+the post-promotion behavior, not a workaround around the gate.
 
 ## Run it and talk to the agent
 

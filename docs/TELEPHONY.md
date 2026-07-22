@@ -1,6 +1,8 @@
 # Telephony architecture and implementation plan
 
-Status: Adopted design; implementation in progress. Updated July 21, 2026.
+Status: Adopted design; implementation in progress. Updated July 22, 2026
+(zero-step local development amendment: managed cloudflared tunnel, automatic
+Twilio webhook configuration, automatic local LiveKit trunk records).
 
 Unmute must share telephony intent, planning, and call context across
 orchestrators while keeping carrier media and call-control behavior in small,
@@ -32,6 +34,28 @@ orchestrator's supported transport. The implementation follows these rules:
   Beta.
 - Run the same generated application files locally and in production. Public
   ingress, environment values, and infrastructure remain deployment concerns.
+- Make local development zero-step for a promoted route. When a carrier
+  WebSocket route runs without `--public-url`, the dev command starts a
+  managed cloudflared quick tunnel as a child process and supplies
+  `UNMUTE_PUBLIC_URL` itself. cloudflared is the only supported tunnel
+  client (Apache 2.0, no account or token needed, one output parser, one
+  failure mode); `--public-url` stays as the bring-your-own-tunnel path for
+  any other client, ngrok included.
+- Configure the carrier voice webhook automatically where the carrier
+  definition records that fact. In v1 only the Pipecat carrier WebSocket
+  route with Twilio carries it: the dev command looks up the configured
+  number, sets its voice webhook to the plan's inbound endpoint, and prints
+  the previous value so the user can restore it. Other carriers keep printed
+  manual steps until their fact and implementation are added.
+- Create the local LiveKit SIP trunk and dispatch records automatically. For
+  the LiveKit SIP route, after the local infrastructure services are
+  healthy, the dev command creates or reuses (idempotently, by content) the
+  inbound trunk, outbound trunk, and individual-room dispatch rule against
+  the local server with the generated development key pair, and injects the
+  returned IDs as `LIVEKIT_SIP_INBOUND_TRUNK` and
+  `LIVEKIT_SIP_OUTBOUND_TRUNK`. Users never supply these two values for
+  local development. Carrier-side (Twilio console) trunk setup stays manual
+  and one-time.
 - Fail during validation when a carrier and route cannot provide a requested
   direction or control.
 - Don't create a universal audio gateway or reimplement carrier serializers.
@@ -72,9 +96,16 @@ The implementation must provide the following behavior:
 The first implementation deliberately excludes work that a carrier or
 orchestrator already performs.
 
-- Unmute does not provision phone numbers, carrier applications, or SIP trunks.
+- Unmute does not provision carrier-side resources: it never buys phone
+  numbers and never creates carrier applications or carrier SIP trunks. The
+  one-time carrier console setup stays manual. Automatic setup applies only
+  to Unmute-owned local development state: the number's voice webhook value
+  (restorable, previous value printed) and trunk records inside the user's
+  own self-hosted LiveKit SIP bridge.
 - Unmute does not proxy or transcode audio between Pipecat and LiveKit.
-- Unmute does not provide a built-in tunnel client in the first release.
+- Unmute does not bundle a tunnel binary. The dev command manages an
+  external `cloudflared` found on PATH; installing it is the user's one-time
+  step, and `--public-url` works with any other tunnel.
 - The local Compose file is not a production deployment recipe.
 - Unmute does not promise the same transfer implementation on every route.
 - Unmute does not expose raw carrier webhook payloads to agent prompts or tools.
@@ -232,7 +263,7 @@ The initial route adapters use these names:
 | LiveKit SIP with Twilio | `TWILIO_SIP_ADDRESS`, `TWILIO_SIP_USERNAME`, `TWILIO_SIP_PASSWORD`, `TWILIO_PHONE_NUMBER` | Twilio Console → Elastic SIP Trunking. Use the termination URI, Credential List username and password, and associated number. |
 | LiveKit SIP with Telnyx | `TELNYX_SIP_ADDRESS`, `TELNYX_SIP_USERNAME`, `TELNYX_SIP_PASSWORD`, `TELNYX_PHONE_NUMBER` | Telnyx Mission Control → SIP Trunking. Use the SIP connection address and credentials, and its assigned number. |
 | LiveKit SIP with Plivo | `PLIVO_SIP_ADDRESS`, `PLIVO_SIP_USERNAME`, `PLIVO_SIP_PASSWORD`, `PLIVO_PHONE_NUMBER` | Plivo Console → Zentrunk. Use the termination domain, outbound credential, and linked number. |
-| LiveKit SIP resource IDs | `LIVEKIT_SIP_INBOUND_TRUNK`, `LIVEKIT_SIP_OUTBOUND_TRUNK` | Copy each `SIPTrunkID` printed by the generated `lk sip ... create` setup commands. Only requested directions and controls require their corresponding ID. |
+| LiveKit SIP resource IDs | `LIVEKIT_SIP_INBOUND_TRUNK`, `LIVEKIT_SIP_OUTBOUND_TRUNK` | For local development, `unmute dev --telephony` creates the records itself and supplies both IDs; do not set them. For production, copy each `SIPTrunkID` printed by the generated `lk sip ... create` setup commands. Only requested directions and controls require their corresponding ID. |
 
 The generated Pipecat carrier-WebSocket outbound HTTP endpoint also requires
 `UNMUTE_OUTBOUND_TOKEN`. Generate this secret yourself with a cryptographically
@@ -249,11 +280,13 @@ outside the generated local stack. Starting a conversational Agent may still
 require the selected model providers' credentials. Placing a real phone call
 still requires the selected carrier credentials and public SIP/RTP reachability.
 
-Direct carrier WebSocket routes also require `UNMUTE_PUBLIC_URL`. Set it to the
-exact externally visible HTTPS origin (including any fixed path prefix, but no
-query or fragment). It is not a credential. Generated signature validation
-derives its HTTP and WSS callback URLs only from this value and never trusts a
-forwarded host header.
+Direct carrier WebSocket routes also require `UNMUTE_PUBLIC_URL`. For local
+development the dev command supplies it from the managed cloudflared tunnel,
+or from `--public-url` when you bring your own tunnel. In production, set it
+to the exact externally visible HTTPS origin (including any fixed path
+prefix, but no query or fragment). It is not a credential. Generated
+signature validation derives its HTTP and WSS callback URLs only from this
+value and never trusts a forwarded host header.
 
 The source pages are the
 [Twilio credential guide](https://www.twilio.com/docs/iam/api-keys),
@@ -495,9 +528,11 @@ one named Redis data volume so a normal stop and restart doesn't discard local
 trunk and dispatch state. The generated non-production API key pair is local
 configuration, not a user credential.
 
-Carrier trunk and number changes remain manual. Unmute may emit deterministic
-trunk and dispatch configuration files or commands, but it doesn't execute
-them automatically. See the
+Carrier-side trunk and number changes remain manual. Unmute emits
+deterministic trunk and dispatch configuration files for production use. For
+local development, `unmute dev --telephony` creates the same records
+automatically against the local server (see Local development below); it
+never touches the carrier console. See the
 [LiveKit SIP server guide](https://docs.livekit.io/transport/self-hosting/sip-server/)
 for the underlying deployment topology and public SIP and RTP requirements.
 
@@ -607,10 +642,14 @@ room state, routing, and service coordination. Redis isn't in the RTP or
 LiveKit audio path, and the generated Agent worker doesn't use it as an audio
 buffer.
 
-Both orchestrators select the same version-pinned Redis service definition, but
-different components consume it. Generated Pipecat code uses it for Unmute's
-telephony control records. LiveKit Server and LiveKit SIP use it for LiveKit's
-distributed control plane.
+Both orchestrators select the same version-pinned coordination service
+definition, but different components consume it. Generated Pipecat code uses
+it for Unmute's telephony control records. LiveKit Server and LiveKit SIP use
+it for LiveKit's distributed control plane. The pinned image is Valkey
+(BSD-3-Clause), because Redis images are source-available (RSALv2/SSPLv1)
+since 7.4 and the whole local stack must stay open source. Valkey speaks the
+Redis protocol, so the service name, `REDIS_URL`, and the coordination reason
+names keep the Redis name.
 
 The reason-to-consumer mapping is closed and inspectable:
 
@@ -641,9 +680,7 @@ exactly the declared number of concurrent sessions, including a limit of one.
 The intended promoted-route interface is:
 
 ```text
-unmute dev ./agent --target pipecat --telephony \
-  --public-url https://agent-test.example-tunnel.dev
-
+unmute dev ./agent --target pipecat --telephony
 unmute dev ./agent --target livekit --telephony
 ```
 
@@ -654,11 +691,29 @@ no emitted Compose file to run directly through a supported CLI flow.
 
 Once an exact route is promoted, Docker Compose is the required local executor
 for both orchestrators. The first command will build and start the generated
-Pipecat application with Redis. The second will build and start the generated
-LiveKit Agent, Redis, LiveKit Server, and LiveKit SIP in one Compose project.
-Pipecat carrier WebSocket routes still need an HTTPS/WSS tunnel. LiveKit SIP
-instead needs carrier-reachable SIP and RTP; `--public-url` is neither required
-nor sufficient for that route.
+Pipecat application with Redis, plus a managed cloudflared quick tunnel. The
+second will build and start the generated LiveKit Agent, Redis, LiveKit
+Server, and LiveKit SIP in one Compose project, then create the local trunk
+and dispatch records itself. Pipecat carrier WebSocket routes still need an
+HTTPS/WSS tunnel; the dev command supplies one. LiveKit SIP instead needs
+carrier-reachable SIP and RTP; a tunnel and `--public-url` are neither
+required nor sufficient for that route.
+
+For carrier WebSocket routes the dev command manages the tunnel:
+
+- With no `--public-url`, it requires `cloudflared` on PATH. If missing, it
+  fails with install instructions (macOS: `brew install cloudflared`; Linux:
+  distribution package or a binary from the cloudflare/cloudflared releases
+  page) and points at `--public-url` as the alternative.
+- It spawns `cloudflared tunnel --url http://127.0.0.1:<port>` as a child
+  process, parses the `https://<random>.trycloudflare.com` origin from the
+  child's output, and injects it as `UNMUTE_PUBLIC_URL`. Quick tunnel URLs
+  rotate on every run, so anything derived from them is reconfigured on
+  every start.
+- The tunnel child is killed on every exit path, exactly like the Compose
+  stack.
+- `--public-url` skips all tunnel management. Use it for ngrok or any other
+  tunnel you already run.
 
 `UNMUTE_TELEPHONY_PORT` selects the generated application health/API host port
 for either route. LiveKit local topology also accepts `UNMUTE_LIVEKIT_PORT`,
@@ -673,40 +728,53 @@ For a promoted route, the command performs these steps in this order:
 
 1. Validate and generate the selected target.
 2. Resolve and print the provider-neutral runtime plan.
-3. Validate required carrier and model environment variables.
+3. Validate required carrier and model environment variables. Values the
+   command supplies itself (`UNMUTE_PUBLIC_URL` under the managed tunnel,
+   `LIVEKIT_SIP_INBOUND_TRUNK`, `LIVEKIT_SIP_OUTBOUND_TRUNK`) are not
+   demanded from the user.
 4. Verify Docker Compose is available.
-5. Build or update the exact generated Compose graph.
-6. Wait for every declared service health check and application readiness.
-7. Print the exact inbound webhook, WSS, outbound trigger, and status URLs.
-8. Print the manual carrier configuration required for the selected adapter.
-9. Stream Compose logs using the existing `--verbose` behavior.
-10. Stop only the project-scoped Compose stack on interruption and preserve its
-   named data volumes.
+5. Start the managed cloudflared tunnel when the plan has public endpoints
+   and `--public-url` is absent, or take the `--public-url` origin as given.
+6. Print the exact inbound webhook, WSS, outbound trigger, and status URLs.
+7. Build or update the exact generated Compose graph. For LiveKit SIP, bring
+   up the infrastructure services first (Redis, LiveKit Server, LiveKit
+   SIP) and wait for their health checks.
+8. For LiveKit SIP, create or reuse the inbound trunk, outbound trunk, and
+   individual-room dispatch rule against the local server with the
+   generated development key pair, and inject the returned IDs into the
+   application environment. Creation is idempotent: an existing
+   content-identical record is reused, never duplicated.
+9. Wait for every declared service health check and application readiness.
+10. Configure the carrier voice webhook automatically where the carrier
+    definition supports it (Twilio today), printing the previous webhook URL
+    so it can be restored. Print the remaining manual carrier configuration
+    for adapters without that fact.
+11. Print the call line ("call +1XXXXXXXXXX, ctrl-c to stop") and stream
+    Compose logs using the existing `--verbose` behavior.
+12. Stop only the project-scoped Compose stack on interruption, preserve its
+    named data volumes, and kill the managed tunnel.
 
 After promotion, `unmute dev --telephony` will fail before application
 readiness if Docker Compose is unavailable, a service is unhealthy, or
 explicit external LiveKit values conflict with the generated local topology.
 There is no flag or native-process fallback for local telephony in v1.
 
-LiveKit SIP trunk IDs create a local bootstrap dependency. After a LiveKit SIP
-route is promoted and its artifact is obtainable, start the infrastructure
-services first:
+LiveKit SIP trunk IDs create a local bootstrap dependency. The dev command
+resolves it itself: it brings up the infrastructure services first, creates
+or reuses the trunk and dispatch records over the local server's SIP API
+with the generated development key pair, injects the returned IDs, and only
+then starts the application service. The Redis data volume persists across
+restarts, so records survive a normal stop; the list-before-create check is
+what keeps every restart from duplicating them. The emitted `sip-*.json`
+files and the printed `lk` commands remain the manual path for production
+deployments. The current validation gate still prevents obtaining that
+Compose file through `unmute compile` until a route is promoted.
 
-```sh
-docker compose -f compose.telephony.yaml up -d redis livekit_server livekit_sip
-```
-
-Then point `lk` at the local server with the generated development key pair,
-create the required inbound/outbound trunks and dispatch rule, export the
-returned `LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` values,
-and start the full telephony command. This component-only bootstrap is a future
-promoted-route procedure; the current validation gate prevents obtaining that
-Compose file through `unmute compile`.
-
-The CLI doesn't install or run ngrok in the first release. For carrier
-WebSocket routes, you run any tunnel you prefer and pass its stable HTTPS URL.
-Add managed tunnel support only when repeated user friction justifies another
-dependency and credential path.
+The CLI does not install or run ngrok. cloudflared is the only managed
+tunnel client: it is Apache 2.0 licensed and needs no account or token for
+quick tunnels, so one client means one output parser and one failure mode.
+For any other tunnel, run it yourself and pass its HTTPS origin with
+`--public-url`.
 
 A healthy local stack proves process wiring, not telephony reachability. A real
 call still needs carrier credentials, a voice-enabled number, and the route's
@@ -1017,7 +1085,8 @@ route.
 4. Add deployment health, readiness, and drain behavior.
 5. Update user documentation that currently says Pipecat inbound works without
    explaining the missing generated route.
-6. Consider built-in tunnel support only after measuring demand.
+6. Managed tunnel support is adopted (cloudflared quick tunnels, this
+   amendment); keep `--public-url` as the bring-your-own-tunnel path.
 
 Acceptance requires a new user to complete local inbound and outbound tests by
 following generated instructions without reading target template code.
@@ -1127,8 +1196,10 @@ The plan keeps uncertain behavior gated rather than designing around guesses.
 - **Shared coordination:** Every v1 telephony Compose graph includes Redis.
   Pipecat uses it for bounded Unmute control records; LiveKit Server and SIP use
   it as platform infrastructure. Agent handoff and media remain call-local.
-- **Automatic provisioning:** It remains excluded. Reopen the schema decision
-  only if generated manual steps become the dominant source of setup failures.
+- **Automatic provisioning:** Carrier-side provisioning (numbers, carrier
+  applications, carrier trunks) remains excluded. Unmute-owned local
+  development state is automated: the number's voice webhook (restorable)
+  and trunk records inside the user's own self-hosted LiveKit SIP bridge.
 - **Universal gateway:** It remains excluded unless native Pipecat serializers,
   LiveKit SIP, and the LiveKit Connector all fail a concrete requirement.
 

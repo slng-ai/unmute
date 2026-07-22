@@ -41,7 +41,16 @@ type TelephonyRoute struct {
 	PublicEndpoints            []TelephonyEndpointRule
 	RuntimeEnvironment         []TelephonyEnvironmentRule
 	LocallySuppliedEnvironment []string
-	ManualSteps                []string
+	// DevSuppliedEnvironment names required env values that `unmute dev
+	// --telephony` supplies itself for local runs (users never set them
+	// locally; production still supplies real values).
+	DevSuppliedEnvironment []string
+	ManualSteps            []string
+	// AutoWebhookEndpoint names the public endpoint the dev command sets as
+	// the carrier's voice webhook automatically on every start. Empty means
+	// the carrier keeps printed manual steps. This is a carrier fact, not a
+	// framework: only carriers with a CLI implementation may carry it.
+	AutoWebhookEndpoint string
 }
 
 type TelephonyProcess struct {
@@ -121,9 +130,12 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	routes[twilio] = route
 	setPipecatRuntime(twilio, []string{
 		"get the Account SID and Auth Token from the Twilio Console account dashboard and select a Voice-capable number",
-		"configure the Twilio number voice webhook as POST to the reported inbound endpoint",
+		"for production, configure the Twilio number voice webhook as POST to the reported inbound endpoint (unmute dev --telephony sets it automatically and prints the previous value)",
 		"configure Twilio call status callbacks as POST to the reported status endpoint",
 	})
+	route = routes[twilio]
+	route.AutoWebhookEndpoint = "inbound"
+	routes[twilio] = route
 	telnyx := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"}
 	route = routes[telnyx]
 	route.RequiredEnvironment = []string{"api_key", "public_key", "connection_id", "from_number"}
@@ -177,11 +189,12 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 			{Name: "REDIS_URL"},
 		}
 		route.LocallySuppliedEnvironment = []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL", "REDIS_URL"}
+		route.DevSuppliedEnvironment = []string{"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK"}
 		route.ManualSteps = []string{
 			"get LIVEKIT_URL and the API key pair from the self-hosted LiveKit Server configuration; configure LiveKit Server and LiveKit SIP with the same Redis deployment",
 			"deploy LiveKit SIP with public SIP signaling and RTP ports, then set LIVEKIT_SIP_URI to that public SIP endpoint",
 			"get the selected carrier SIP address, username, password, and phone number from its SIP trunking console",
-			"materialize the generated SIP JSON inputs, create the LiveKit trunks and dispatch rule with lk, and copy the returned trunk IDs into the reported environment variables",
+			"for production, materialize the generated SIP JSON inputs, create the LiveKit trunks and dispatch rule with lk, and copy the returned trunk IDs into the reported environment variables (unmute dev --telephony creates the local records and supplies both IDs itself)",
 		}
 		routes[key] = route
 	}

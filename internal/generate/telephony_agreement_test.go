@@ -3,6 +3,7 @@ package generate
 import (
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -56,4 +57,27 @@ func emittedTelephonyFeatures(key target.TelephonyKey) map[target.TelephonyFeatu
 		}
 	}
 	return map[target.TelephonyFeature]bool{}
+}
+
+// The local telephony stack is purely open source (SPEC V8, B3): the
+// coordination store ships as Valkey (BSD-3-Clause), never a Redis image,
+// because Redis images are source-available (RSALv2/SSPLv1) since 7.4. The
+// service name and REDIS_URL keep the protocol's name on purpose.
+func TestV8TelephonyComposeShipsOSILicensedCoordinationStore(t *testing.T) {
+	for _, golden := range []string{
+		"testdata/golden/livekit_v1_telephony_compose.yaml",
+		"testdata/golden/pipecat_v1_telephony_compose.yaml",
+	} {
+		raw, err := os.ReadFile(golden)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(raw)
+		if strings.Contains(content, "image: redis:") {
+			t.Errorf("%s pins a source-available Redis image", golden)
+		}
+		if !strings.Contains(content, "image: valkey/valkey:") {
+			t.Errorf("%s does not pin the Valkey coordination store", golden)
+		}
+	}
 }

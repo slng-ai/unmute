@@ -143,6 +143,8 @@ func TestTelephonyRuntimePlanForIsAThinCopy(t *testing.T) { // telephony I.plan,
 		Processes:           []ir.TelephonyProcess{{Name: "custom", Command: []string{"custom-command"}}},
 		PublicEndpoints:     []ir.TelephonyEndpoint{{Name: "custom", Method: "PATCH", Path: "/custom"}},
 		RequiredEnvironment: []string{"CUSTOM_REQUIRED"}, LocalEnvironment: []string{"CUSTOM_REQUIRED"},
+		DevEnvironment: []string{"CUSTOM_DEV"}, AutoWebhookEndpoint: "custom",
+		Environment: map[string]string{"custom_key": "CUSTOM_REQUIRED"},
 		ManualSteps: []string{"custom setup"}, Services: []string{"custom-service"},
 	}}
 	runtime := TelephonyRuntimePlanFor(resolved)
@@ -151,6 +153,9 @@ func TestTelephonyRuntimePlanForIsAThinCopy(t *testing.T) { // telephony I.plan,
 	}
 	if strings.Join(runtime.RequiredEnv, ",") != "CUSTOM_REQUIRED" || strings.Join(runtime.LocalEnvironment, ",") != "CUSTOM_REQUIRED" || strings.Join(runtime.ManualSteps, ",") != "custom setup" {
 		t.Fatalf("runtime plan did not copy resolved facts: %#v", runtime)
+	}
+	if strings.Join(runtime.DevSuppliedEnv, ",") != "CUSTOM_DEV" || runtime.AutoWebhookEndpoint != "custom" || runtime.Environment["custom_key"] != "CUSTOM_REQUIRED" {
+		t.Fatalf("runtime plan did not copy dev facts: %#v", runtime)
 	}
 	runtime.Processes[0].Command[0] = "mutated"
 	if resolved.Telephony.Processes[0].Command[0] != "custom-command" {
