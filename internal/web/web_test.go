@@ -26,3 +26,17 @@ func TestV16PipecatUsesRTVI2SegmentUpdates(t *testing.T) {
 		t.Error("web client still renders deprecated bot-transcription frames")
 	}
 }
+
+func TestV17LiveKitUpdatesTranscriptionSegment(t *testing.T) {
+	raw, err := FS.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	if !strings.Contains(source, `setBotSegment(seg.id, text)`) {
+		t.Error("LiveKit remote transcription does not update by segment id")
+	}
+	if strings.Contains(source, `else pushTurn("bot", text)`) {
+		t.Error("LiveKit remote transcription still appends every update")
+	}
+}

@@ -559,8 +559,8 @@ async function connectLivekit(session){
         const text = (seg.text || "").trim();
         if (!text) continue;
         if (who === "you" && !seg.final) setPartial(text);
-        else if (who === "you") promotePartial(text);
-        else pushTurn("bot", text);
+        else if (who === "you"){ promotePartial(text); resetBotTurn(); }
+        else setBotSegment(seg.id, text);
       }
     });
   }
