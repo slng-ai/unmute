@@ -135,6 +135,15 @@ always runs the deployable container.
 - V14: `unmute dev` loads local credentials in precedence order: ambient env,
   current-working-directory `.env`, package-root `.env`. Package values win;
   both Pipecat and LiveKit receive the merged environment.
+- V15: compile and every dev mode preserve an existing user-owned
+  `build/<target>/.env` byte-for-byte, including its permission bits, while
+  replacing the generated artifact set. Both code targets emit a
+  `.dockerignore` that excludes `.env`, so a preserved secret never enters the
+  image through `COPY . .`.
+- V16: the Pipecat browser sends an RTVI `client-ready` message for protocol
+  2.0.0 when its data channel opens. It renders `bot-output` by `segment_id`,
+  replacing progress updates within one bot turn, and never appends deprecated
+  `bot-transcription` frames as separate turns.
 
 ## §T tasks
 
@@ -149,6 +158,8 @@ T7|x|docs: `docs/user/reference/cli.md`, the learn-flow dev-mode pages, `docs/us
 T8|x|install Pipecat image OpenCV runtime libs; add credential-free image build + SmallWebRTC import smoke; regenerate golden|V12
 T9|x|standardize Pipecat + LiveKit local dotenv on `.env`; align emitted/top-level READMEs; assert naming at L1 and container passthrough at L4|V13
 T10|x|load shared repo-root `.env` before package-root `.env`; package overrides; cover merge order at L1|V14
+T11|x|preserve a target-local `.env` across artifact rewrites and emit `.dockerignore` for both code targets so Docker excludes it|V15
+T12|x|complete the raw Pipecat RTVI 2 handshake and reduce `bot-output` progress by segment instead of appending deprecated transcription frames|V16
 
 ## §B bugs
 
@@ -156,3 +167,5 @@ id|date|cause|fix
 B1|2026-07-22|Pipecat Dockerfile used `python:3.12-slim` without native OpenCV libs; `pipecat-ai[webrtc]` installed `opencv-python`; host-only runtime smoke + build-free Compose smoke never imported SmallWebRTC inside image|V12
 B2|2026-07-22|LiveKit generated projects read `.env.local` while CLI, Compose, Pipecat, and user docs used package-root `.env`; top-level example docs added a repo-root `.env.local` staging name, so misplaced credentials reached the container unset|V13
 B3|2026-07-22|B2 standardized the filename but left `devChildEnv` package-only; repo-root `.env` remained an unloaded file, so both containers still missed shared credentials|V14
+B4|2026-07-22|`writeArtifactFiles` removed the whole target directory before every compile/dev rewrite, deleting a user-created `.env`; no regression distinguished generated files from this user-owned secret, and preserving it without a Docker exclusion would have baked it into `COPY . .`|V15
+B5|2026-07-22|the hand-written Pipecat browser opened an RTVI data channel without the required `client-ready` handshake and rendered deprecated `bot-transcription` payloads by appending one DOM turn per frame; readiness was unreliable and cumulative/progress frames appeared as repeated answers|V16

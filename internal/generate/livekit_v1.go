@@ -487,6 +487,7 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		}
 		files = append(files, File{Path: o.path, Content: content})
 	}
+	files = append(files, File{Path: ".dockerignore", Content: []byte(".env\n")})
 	sipFiles, err := livekitSIPFiles(data)
 	if err != nil {
 		return nil, err

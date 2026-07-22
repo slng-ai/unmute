@@ -51,6 +51,17 @@ func TestV13CodeTargetsUseDotenv(t *testing.T) {
 	}
 }
 
+func TestV15CodeTargetsExcludeDotenvFromDockerBuild(t *testing.T) {
+	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
+		t.Run(string(provider), func(t *testing.T) {
+			dockerignore := artifactFile(t, devArtifact(t, provider), ".dockerignore")
+			if !strings.Contains("\n"+dockerignore, "\n.env\n") {
+				t.Fatalf(".dockerignore does not exclude .env:\n%s", dockerignore)
+			}
+		})
+	}
+}
+
 // TestPipecatDevComposeGolden locks the pipecat web dev topology: one built
 // application service, no coordination store (the web path uses none), env by
 // name only. SPEC T1, V2, V3, V11. Zero Python, zero Docker.

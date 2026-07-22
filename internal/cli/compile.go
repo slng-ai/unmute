@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -142,7 +143,35 @@ func loadPackage(dir string, names []string) (*ir.Agent, []ir.Target, error) {
 // generator stays template-only, the write path polishes layout. ruff is
 // optional — absent, the (already valid, F-clean) source is written unformatted
 // and a single warning goes to warn.
-func writeArtifactFiles(warn io.Writer, outDir string, files []generate.File) error {
+func writeArtifactFiles(warn io.Writer, outDir string, files []generate.File) (err error) {
+	dotenvPath := filepath.Join(outDir, ".env")
+	var dotenv []byte
+	var dotenvMode os.FileMode
+	if info, statErr := os.Lstat(dotenvPath); statErr == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("preserve %s: not a regular file", dotenvPath)
+		}
+		dotenv, err = os.ReadFile(dotenvPath)
+		if err != nil {
+			return fmt.Errorf("preserve %s: %w", dotenvPath, err)
+		}
+		dotenvMode = info.Mode().Perm()
+		defer func() {
+			if mkdirErr := os.MkdirAll(outDir, 0o755); mkdirErr != nil {
+				err = errors.Join(err, fmt.Errorf("restore %s: %w", dotenvPath, mkdirErr))
+				return
+			}
+			if writeErr := os.WriteFile(dotenvPath, dotenv, dotenvMode); writeErr != nil {
+				err = errors.Join(err, fmt.Errorf("restore %s: %w", dotenvPath, writeErr))
+				return
+			}
+			if chmodErr := os.Chmod(dotenvPath, dotenvMode); chmodErr != nil {
+				err = errors.Join(err, fmt.Errorf("restore mode for %s: %w", dotenvPath, chmodErr))
+			}
+		}()
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf("inspect %s: %w", dotenvPath, statErr)
+	}
 	if err := os.RemoveAll(outDir); err != nil {
 		return err
 	}

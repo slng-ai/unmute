@@ -81,9 +81,10 @@ user's first run.
 
 Every [example](examples/README.md) declares both `pipecat` and `livekit`, so
 `validate` and `compile` cover both targets. Runs need `uv` on your PATH. Keep
-credentials in the ignored repo-root `.env` (the generated
-`.env.example` files list the exact variables), and copy them after compiling,
-because recompiling replaces `build/<target>/`.
+credentials in the ignored repo-root `.env`; the generated `.env.example`
+files list the exact variables. For a direct generated-project run, copy that
+file into `build/<target>/.env`. Later compiles preserve it, and the generated
+`.dockerignore` keeps it out of container images.
 
 ```sh
 make build
