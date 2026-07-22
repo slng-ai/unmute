@@ -533,7 +533,7 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		"async def do_find(self, ctx: RunContext) -> dict:",
-		"result = await FindSlot(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))",
+		"result = await FindSlot(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))",
 		`ctx.userdata.caller_phone = result["date"]`,
 		"@dataclass\nclass Userdata:",
 		"caller_phone: str | None = None",
@@ -914,7 +914,7 @@ func TestLiveKitV1HistoryResetAndToolCallShaping(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		`return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True))`,
+		`return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True, exclude_handoff=True))`,
 		"# history: reset — the target starts fresh (a handoff marker still lands).",
 		"return Greeter()",
 	} {

@@ -844,10 +844,13 @@ func livekitCtxExpr(c ir.TaskContext) (expr string, needsLastN bool) {
 		}
 		return fmt.Sprintf("_last_n(self.chat_ctx, %d)", c.MaxMessages), true
 	default: // full
+		// exclude_handoff drops stale AgentHandoff markers from the carried
+		// history (upstream recipe idiom); exclude_config_update is intentionally
+		// omitted to stay within the >=1.5 floor (dl§C6).
 		if excludeCalls {
-			return "self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True)", false
+			return "self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True, exclude_handoff=True)", false
 		}
-		return "self.chat_ctx.copy(exclude_instructions=True)", false
+		return "self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)", false
 	}
 }
 

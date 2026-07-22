@@ -130,29 +130,29 @@ class Events(Agent):
         )
 
     async def on_enter(self) -> None:
-        self.session.generate_reply(
-            instructions="You are now handling this. Continue in one short line; do not greet again."
-        )
+        # This agent took over via handoff; let its own instructions drive the
+        # opening (the prompt already says not to re-greet).
+        self.session.generate_reply()
 
     @function_tool
     async def back_to_greeter(self, ctx: RunContext):
         """Caller wants something else, or to start over."""
-        return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
+        return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
 
     @function_tool
     async def do_event(self, ctx: RunContext) -> dict:
         """The caller is ready to plan their event; run the events flow. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request."""
         group = TaskGroup(
-            chat_ctx=self.chat_ctx.copy(exclude_instructions=True),
+            chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
         )
         group.add(
-            lambda: QualifyEvent(chat_ctx=self.chat_ctx.copy(exclude_instructions=True)),
+            lambda: QualifyEvent(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
             id="qualify_event",
             description="qualify event",
         )
         group.add(
-            lambda: ConfirmBooking(chat_ctx=self.chat_ctx.copy(exclude_instructions=True)),
+            lambda: ConfirmBooking(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
             id="confirm_booking",
             description="confirm booking",
         )
@@ -178,12 +178,12 @@ class Greeter(Agent):
     @function_tool
     async def to_reservations(self, ctx: RunContext):
         """Caller wants to book a table for a normal dine-in visit."""
-        return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
+        return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
 
     @function_tool
     async def to_events(self, ctx: RunContext):
         """Caller wants to plan a private event, party, or large group booking."""
-        return Events(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
+        return Events(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
 
 
 class Reservations(Agent):
@@ -195,29 +195,29 @@ class Reservations(Agent):
         )
 
     async def on_enter(self) -> None:
-        self.session.generate_reply(
-            instructions="You are now handling this. Continue in one short line; do not greet again."
-        )
+        # This agent took over via handoff; let its own instructions drive the
+        # opening (the prompt already says not to re-greet).
+        self.session.generate_reply()
 
     @function_tool
     async def back_to_greeter(self, ctx: RunContext):
         """Caller wants something else, or to start over."""
-        return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
+        return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
 
     @function_tool
     async def do_reserve(self, ctx: RunContext) -> dict:
         """The caller is ready to book a table; run the reservation flow. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request."""
         group = TaskGroup(
-            chat_ctx=self.chat_ctx.copy(exclude_instructions=True),
+            chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
         )
         group.add(
-            lambda: FindSlot(chat_ctx=self.chat_ctx.copy(exclude_instructions=True)),
+            lambda: FindSlot(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
             id="find_slot",
             description="find slot",
         )
         group.add(
-            lambda: ConfirmBooking(chat_ctx=self.chat_ctx.copy(exclude_instructions=True)),
+            lambda: ConfirmBooking(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
             id="confirm_booking",
             description="confirm booking",
         )
@@ -237,7 +237,8 @@ class ConfirmBooking(AgentTask[dict]):
         super().__init__(instructions=CONFIRM_BOOKING_PROMPT, chat_ctx=chat_ctx)
 
     async def on_enter(self) -> None:
-        self.session.generate_reply(instructions="Begin this step.")
+        # The task's own instructions describe this step; let them drive the opening.
+        self.session.generate_reply()
 
     @function_tool
     async def send_confirmation(self, ctx: RunContext, name: Annotated[str, Field(description="The name the booking is under")], phone: Annotated[str, Field(description="Caller phone number in E.164 form")], summary: Annotated[str, Field(description="One-line summary of the booking to include")]) -> dict:
@@ -261,7 +262,8 @@ class FindSlot(AgentTask[dict]):
         super().__init__(instructions=FIND_SLOT_PROMPT, chat_ctx=chat_ctx)
 
     async def on_enter(self) -> None:
-        self.session.generate_reply(instructions="Begin this step.")
+        # The task's own instructions describe this step; let them drive the opening.
+        self.session.generate_reply()
 
     @function_tool
     async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:
@@ -285,7 +287,8 @@ class QualifyEvent(AgentTask[dict]):
         super().__init__(instructions=QUALIFY_EVENT_PROMPT, chat_ctx=chat_ctx)
 
     async def on_enter(self) -> None:
-        self.session.generate_reply(instructions="Begin this step.")
+        # The task's own instructions describe this step; let them drive the opening.
+        self.session.generate_reply()
 
     @function_tool
     async def finish(self, ctx: RunContext, date: str, headcount: int, occasion: str) -> None:

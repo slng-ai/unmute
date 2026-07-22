@@ -124,7 +124,7 @@ load_dotenv(".env.local")
 {{- if .NeedsLastN}}
 def _last_n(source: llm.ChatContext, n: int, *, exclude_function_call: bool = False) -> llm.ChatContext:
     """history: last_n — the newest n items; truncate() keeps call/output pairs."""
-    ctx = source.copy(exclude_instructions=True, exclude_function_call=exclude_function_call)
+    ctx = source.copy(exclude_instructions=True, exclude_function_call=exclude_function_call, exclude_handoff=True)
     ctx.truncate(max_items=n)
     return ctx
 {{end}}
@@ -301,9 +301,9 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         pass  # the caller speaks first
 {{- end}}
 {{- else}}
-        self.session.generate_reply(
-            instructions="You are now handling this. Continue in one short line; do not greet again."
-        )
+        # This agent took over via handoff; let its own instructions drive the
+        # opening (the prompt already says not to re-greet).
+        self.session.generate_reply()
 {{- end}}
 {{- range .Tools}}{{template "method_tool" .}}{{end}}
 {{range .Transfers}}
@@ -381,7 +381,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         return task_results
 {{- else if eq .Then "transfer"}}
         # then: transfer — control moves on and does not return here.
-        return {{.ThenClass}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))
+        return {{.ThenClass}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
 {{- else}}
         # then: end — the flow is the last thing on the call; this does not return.
         self.session.shutdown()
@@ -391,12 +391,12 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
     async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{end}}:
         {{triple .When}}
         group = TaskGroup(
-            chat_ctx=self.chat_ctx.copy(exclude_instructions=True),
+            chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
         )
 {{- range .Steps}}
         group.add(
-            lambda: {{.Class}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True)),
+            lambda: {{.Class}}(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
             id={{pyq .ID}},
             description={{pyq .Desc}},
         )
@@ -410,7 +410,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         await self.update_chat_ctx(owner_ctx)
         return result.task_results
 {{- else if eq .Then "transfer"}}
-        owner_ctx = self.chat_ctx.copy(exclude_instructions=True)
+        owner_ctx = self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)
         await group
         # then: transfer — control moves on and does not return here. N13: drop
         # the flow's turns by handing the target the pre-flow context.
@@ -431,7 +431,8 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict
         super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if .MCPServers}}, {{template "mcp_mounts" .MCPServers}}{{end}})
 
     async def on_enter(self) -> None:
-        self.session.generate_reply(instructions="Begin this step.")
+        # The task's own instructions describe this step; let them drive the opening.
+        self.session.generate_reply()
 {{range .Tools}}{{template "method_tool" .}}{{end}}
     @function_tool
     async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}) -> None:
