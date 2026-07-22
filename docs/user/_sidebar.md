@@ -13,6 +13,7 @@
   - [05. Tasks](learn/05-tasks.md)
   - [06. Task groups](learn/06-task-groups.md)
   - [07. Phone calls](learn/07-phone-calls.md)
+  - [Twilio walkthrough](learn/twilio-walkthrough.md)
   - [08. Going live](learn/08-going-live.md)
 
 - Concepts

@@ -16,7 +16,7 @@ and Pipecat runs.
 | [`multi-task`](multi-task/) | One agent and two independent tasks | One task owns customer records; another owns appointments. |
 | [`task-groups`](task-groups/) | One agent and three ordered tasks | Shared context moves through customer identification, slot selection, and finalization. |
 | [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |
-| [`telephony-multi-task`](telephony-multi-task/) | The multi-task agent with a phone channel | Inbound calls over Twilio on both routes (Pipecat carrier-websocket and LiveKit SIP), with a cold transfer to a person. Fails closed until its routes are promoted. |
+| [`telephony-multi-task`](telephony-multi-task/) | The multi-task agent with a phone channel | Inbound and outbound calls over Twilio on both routes (Pipecat carrier-websocket and LiveKit SIP), with a cold transfer to a person. Fails closed until its routes are promoted. |
 
 ## Test the tools
 

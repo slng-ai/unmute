@@ -249,8 +249,10 @@ unmute dev ./agent --target pipecat --telephony
 ```
 
 You set credentials in `.env` once (see the `.env` examples below and the
-one-time carrier setup for each model). The command then does the rest, in
-this order:
+one-time carrier setup for each model). For a hands-on version of this
+section with the exact Twilio Console clicks, follow the
+[Twilio walkthrough](twilio-walkthrough.md). The command then does the rest,
+in this order:
 
 1. Validates and generates the selected target (gated routes still fail
    closed here).

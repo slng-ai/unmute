@@ -103,7 +103,8 @@ channels:
   phone:
     kind: telephony
     inbound: true
-    outbound: false
+    outbound: true
+    on_voicemail: hangup
     required_controls: [cold_transfer, hangup]
 
 capacity:
