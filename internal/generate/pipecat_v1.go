@@ -137,9 +137,18 @@ type pipecatLocalTool struct {
 	Source string
 }
 
+// pipecatArg is one agent-level @tool parameter. Pipecat derives the tool schema
+// from the method signature + Google-style docstring, so the declared type,
+// per-property description, and enum all ride across (V1): PyType/PyDefault shape
+// the signature; Description + Enum become the `Args:` docstring lines (Pipecat's
+// direct-function generator does not map Literal→JSON enum, so enums are prose).
 type pipecatArg struct {
-	Name     string
-	Required bool
+	Name        string
+	PyType      string // signature annotation: str/int/float/bool/list/dict (+ " | None" for optional complex)
+	PyDefault   string // default literal for an optional arg (rendered as ` = <PyDefault>`); unused when Required
+	Required    bool
+	Description string
+	Enum        []string
 }
 
 // pipecatTransfer is an agent_transfer control lowered to activate_worker.

@@ -566,7 +566,9 @@ func humanTransferTool(name string, c *ir.HumanTransfer, target ir.Target, env *
 	}, nil
 }
 
-// inputFields flattens a tool input JSON Schema object into ordered arg names.
+// inputFields flattens a tool input JSON Schema object into ordered args,
+// carrying each property's type, description, and enum so the agent-level @tool
+// signature + docstring present the LLM the schema the tool YAML declares (V1).
 func inputFields(input map[string]any) []pipecatArg {
 	props, _ := input["properties"].(map[string]any)
 	requiredList, _ := input["required"].([]any)
@@ -580,12 +582,55 @@ func inputFields(input map[string]any) []pipecatArg {
 	for k := range props {
 		names = append(names, k)
 	}
-	sort.Strings(names)
+	// Required params first (Python forbids a non-default arg after a defaulted
+	// one), alphabetical within each group so the signature is stable (B3/V5).
+	sort.Slice(names, func(i, j int) bool {
+		if required[names[i]] != required[names[j]] {
+			return required[names[i]]
+		}
+		return names[i] < names[j]
+	})
 	args := make([]pipecatArg, 0, len(names))
 	for _, n := range names {
-		args = append(args, pipecatArg{Name: n, Required: required[n]})
+		prop, _ := props[n].(map[string]any)
+		jsonType, _ := prop["type"].(string)
+		pyType, pyDefault := pyArgTypeDefault(jsonType, required[n])
+		arg := pipecatArg{Name: n, PyType: pyType, PyDefault: pyDefault, Required: required[n]}
+		if desc, ok := prop["description"].(string); ok {
+			arg.Description = desc
+		}
+		if enum, ok := prop["enum"].([]any); ok {
+			for _, v := range enum {
+				arg.Enum = append(arg.Enum, fmt.Sprintf("%v", v))
+			}
+		}
+		args = append(args, arg)
 	}
 	return args
+}
+
+// pyArgTypeDefault maps a JSON-Schema primitive type to a Python signature
+// annotation and, for an optional arg, a type-appropriate default literal. A
+// None default on a complex type widens the annotation to keep it type-clean.
+func pyArgTypeDefault(jsonType string, required bool) (pyType, pyDefault string) {
+	switch jsonType {
+	case "integer":
+		pyType, pyDefault = "int", "0"
+	case "number":
+		pyType, pyDefault = "float", "0.0"
+	case "boolean":
+		pyType, pyDefault = "bool", "False"
+	case "array":
+		pyType, pyDefault = "list", "None"
+	case "object":
+		pyType, pyDefault = "dict", "None"
+	default:
+		pyType, pyDefault = "str", `""`
+	}
+	if !required && pyDefault == "None" {
+		pyType += " | None"
+	}
+	return pyType, pyDefault
 }
 
 // applyConversation lowers the conversation block into the template model:

@@ -154,7 +154,11 @@ class BillingAgent(TracedLLMWorker):
 
     @tool
     async def get_invoice(self, params: FunctionCallParams, customer_id: str):
-        """Fetch the most recent invoice for a customer id. Returns the invoice total and status."""
+        """Fetch the most recent invoice for a customer id. Returns the invoice total and status.
+
+        Args:
+            customer_id (str): The customer id from lookup_customer
+        """
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 os.environ["GET_INVOICE_URL"],
@@ -225,7 +229,12 @@ class IntakeAgent(TracedLLMWorker):
 
     @tool
     async def lookup_customer(self, params: FunctionCallParams, email: str = "", phone: str = ""):
-        """Look up a customer record by phone number or email. Returns the customer id and name."""
+        """Look up a customer record by phone number or email. Returns the customer id and name.
+
+        Args:
+            email (str): Caller email address
+            phone (str): Caller phone number in E.164 form
+        """
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 os.environ["LOOKUP_CUSTOMER_URL"],

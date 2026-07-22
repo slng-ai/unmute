@@ -611,6 +611,82 @@ func TestV3PipecatToolsResolveCallback(t *testing.T) {
 	}
 }
 
+// TestV1PipecatAgentToolCarriesSchema: the same tool YAML reaches the LLM with
+// its declared schema on BOTH emission paths (V1) — the agent-level @tool as a
+// typed signature + Google `Args:` docstring (per-property description + enum
+// prose, since Pipecat's direct-function generator does not map Literal→enum),
+// and the Flow-node FlowsFunctionSchema as verbatim `properties`. Also proves
+// required params precede optional so the signature is valid Python (V5/B3).
+func TestV1PipecatAgentToolCarriesSchema(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tools["book_service"] = ir.Tool{
+		Description: "Book a service slot.",
+		Execution:   ir.ToolWebhook,
+		URLEnv:      "BOOK_SERVICE_URL",
+		Input: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				// `notes`/`party_size` are optional and sort alphabetically before
+				// the required `service`; the emitter must still list `service` first.
+				"service":    map[string]any{"type": "string", "enum": []any{"haircut", "hair-color", "blowout"}, "description": "Which service"},
+				"party_size": map[string]any{"type": "integer", "description": "Guests"},
+				"notes":      map[string]any{"type": "string", "description": "Extra notes"},
+			},
+			"required": []any{"service"},
+		},
+	}
+	// Reference it as an agent-level tool AND inside a task (the Flow path).
+	agent.Tasks["book"] = ir.Task{
+		Instructions: "Book the caller's chosen service.",
+		Tools:        []string{"book_service"},
+		Result:       map[string]ir.ResultField{"ok": {Type: ir.PrimitiveBoolean}},
+		Context:      ir.TaskContext{History: ir.HistoryFull},
+	}
+	agent.Controls["run_book"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "book", When: "Book a service."}
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "book_service", "run_book")
+	agent.Agents["intake"] = intake
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+
+	for _, want := range []string{
+		// Agent-level @tool: required first, typed, then optional with defaults.
+		"async def book_service(self, params: FunctionCallParams, service: str, notes: str = \"\", party_size: int = 0):",
+		// Google Args docstring carries descriptions + enum prose + real types.
+		"            service (str): Which service One of: haircut, hair-color, blowout.",
+		"            notes (str): Extra notes",
+		"            party_size (int): Guests",
+		// Flow-node path: the same schema verbatim as FlowsFunctionSchema properties.
+		`properties={"notes": {"description": "Extra notes", "type": "string"}, "party_size": {"description": "Guests", "type": "integer"}, "service": {"description": "Which service", "enum": ["haircut", "hair-color", "blowout"], "type": "string"}}`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing schema fidelity %q", want)
+		}
+	}
+
+	// The emitted signature must be valid Python (required-before-optional, B3).
+	if _, err := exec.LookPath("python3"); err == nil {
+		f := filepath.Join(t.TempDir(), "bot.py")
+		if err := os.WriteFile(f, []byte(bot), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("python3", "-m", "py_compile", f).CombinedOutput(); err != nil {
+			t.Fatalf("emitted bot.py is not valid Python:\n%s", out)
+		}
+	}
+}
+
 // TestPipecatRuffCheckClean: the raw generator output (template-only, before the
 // write-path ruff format pass) passes `ruff check --select F` — only used
 // imports, no undefined names (V2). Uses a feature-rich fixture (tools + a Flow

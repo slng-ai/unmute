@@ -99,9 +99,11 @@ dp§V26's small-context task-role boundary is preserved.
   docstring prose — upstream does this because the direct-function generator
   does not map `Literal` → JSON-schema `enum` yet. Strict enums on agent-level
   tools are the author's opt-in via an explicit `FunctionSchema` bundled with the
-  handler (documented escape hatch, not the default). Guard: extend the tasks +
-  subagents goldens; a build-level check that every agent-level arg carries the
-  YAML's type/enum/description.
+  handler (documented escape hatch, not the default). Guard:
+  `TestV1PipecatAgentToolCarriesSchema` — the same tool reaches the LLM with its
+  declared type/description/enum on both the agent-level signature+docstring and
+  the Flow-node `FlowsFunctionSchema`; the tasks golden shows the `Args:`
+  descriptions previously lost (`lookup_customer`).
 - V2 (F4, amended — the write path runs `ruff format`, C1): the emission is
   clean in two layers. (1) **Generator** (template-only): its raw output passes
   `ruff check --select F` — only used imports (`LLMWorker` gated to plain-worker
@@ -139,6 +141,11 @@ dp§V26's small-context task-role boundary is preserved.
   (return/transfer/end) carries golden coverage, so an emitted-but-untested path
   can't drift again (the end path had none). Guard: a `then: end` golden fixture
   + assertion.
+- V5 (F1, from B3): an agent-level `@tool` signature is valid Python — required
+  params precede optional ones (Python forbids a defaulted arg before a
+  non-defaulted one). `inputFields` orders required-first, then alphabetical
+  within each group. Guard: `TestV1PipecatAgentToolCarriesSchema` uses a tool
+  whose optional params sort before its required one and `py_compile`s the bot.
 
 *(No F2 invariant — F2's semantic change is rejected, see C8. dp§V26 stays
 authoritative. F2's only real residue, the duplicated prompt literal, is a
@@ -146,7 +153,7 @@ code-DRY fix inside T3/V2.)*
 
 ## §T tasks
 id|status|desc|cites
-T1|.|F1: thread the tool `input` schema into the agent-level `@tool` path. Extend `pipecatArg` with type/description/enum; populate in `inputFields`/`buildTool`; template renders typed signature + Google `Args:` docstring (enums as prose). Regen tasks+subagents goldens; assert both paths schema-equal. Document the `FunctionSchema` escape hatch for strict enums|V1,C4,I.build,I.tmpl
+T1|x|F1: thread the tool `input` schema into the agent-level `@tool` path. Extended `pipecatArg` with type/description/enum; `inputFields` populates them (required-first ordering, B3/V5); template renders typed signature + Google `Args:` docstring (descriptions carried, enums as prose). Both paths schema-equal; escape hatch (explicit `FunctionSchema`) documented in V1. Goldens regen|V1,V5,C4,I.build,I.tmpl,B3
 T2|.|F3: collapse `len(agents)==1 && no agent_transfers` to the inline `food_ordering` shape — LLM inline in the pipeline, no bus / `BusBridgeProcessor` / `activate_entry` dance — scoped to the pipeline+`run_bot` section of the template only; agent class, tools, and flows blocks stay shared. Record the trade-off (one uniform shape vs. a second code path) in the PR. Reconcile with dp§V14 (activation gate applies only to the bus path). Regen `simple-prompt` golden|C5,C3,I.tmpl
 T3|x|F4: two-layer clean output. Template/build: gate `LLMWorker` + drop `asdict` (F-clean), merge `frames.frames` imports, `@tool()`→`@tool`, drop `respond_immediately=True`, `json={...}` spacing, each agent prompt as one triple-quoted module constant referenced by builder + restore (dedup; C8-preserving). Write path (`writeArtifactFiles`, I.write): best-effort `ruff format` pass on emitted `.py`, warn to stderr if ruff absent (ADR-0002/C1 amended). Guards: `TestPipecatRuffCheckClean` + `TestWriteArtifactFilesFormatsPython` (both skip w/o ruff); regen goldens (raw)|V2,C8,I.tmpl,I.build,I.write
 T4|x|F5 CONFIRMED defect (context7: Pipecat "tool methods must call `params.result_callback()` … to avoid unresolved LLM calls"). Fix: the delegate `@tool` resolves its call via `params.result_callback` instead of returning `{"status": …}` (`bot.py.tmpl` ~L205; golden `:230`,`:286`). Add `TestV3PipecatToolsResolveCallback`; regen tasks golden|V3,B1,I.tmpl
@@ -160,3 +167,4 @@ golden churn: T3 → T1 → T2. F2 is decided (rejected, C8); no task.
 id|date|cause|fix
 B1|2026-07-22|delegate `@tool` (`run_collect`/`run_triage`) returns `{"status": …}` and never calls `params.result_callback`; Pipecat ignores a `@tool`'s return value, so the FlowManager delegate call is left unresolved and the LLM turn hangs (docs: tool methods *must* call `result_callback` "to avoid unresolved LLM calls"). Latent: the tasks golden only import-checks and the B7/T12 scripted-SSE spike didn't enforce tool_call/result pairing.|V3
 B2|2026-07-22|`then: end` queues `EndFrame()` directly in the finish handler (`bot.py.tmpl` ~L236), contradicting dp§V2 ("end_conversation action") and upstream `food_ordering` (`post_actions=[{"type":"end_conversation"}]`). Undetected because no example/golden exercises `then: end` — the path is emitted but untested.|V4
+B3|2026-07-22|`inputFields` sorted agent-level `@tool` args alphabetically, so a tool with an optional param sorting before a required one would emit `def f(opt=..., req)` — invalid Python (non-default arg after default). Latent: every example tool's input is all-required or all-optional, never mixed, so it never surfaced; F1's real type hints (`= 0`/`= ""`) make the ordering matter more than the old uniform `= ""`.|V5
