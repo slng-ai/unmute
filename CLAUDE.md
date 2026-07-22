@@ -33,3 +33,4 @@ Go structs are the schema source for their own surface: `internal/spec` derives 
 - Ponytail for writing great code
 - Spec to write specs before building
 - Build for building out the specs
+- find-docs skill to use context7 cli for searching docs
