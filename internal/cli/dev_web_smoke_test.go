@@ -72,6 +72,29 @@ func TestSmokeDevComposeValidates(t *testing.T) {
 	}
 }
 
+// TestSmokeDevPipecatImageImportsWebRTC builds the emitted application image
+// and imports its web transport inside that image (SPEC V12). This catches
+// native wheel dependencies absent from python:slim; host uv smokes cannot.
+func TestSmokeDevPipecatImageImportsWebRTC(t *testing.T) {
+	docker := requireDocker(t)
+	composeFile, outDir, env := smokeDevArtifact(t, "pipecat")
+	project := composeProjectName(outDir, "pipecat")
+	run := func(args ...string) ([]byte, error) {
+		cmd := exec.Command(docker, composeArgs(composeFile, project, args...)...)
+		cmd.Dir, cmd.Env = outDir, env
+		return cmd.CombinedOutput()
+	}
+	t.Cleanup(func() { _, _ = run("down", "--remove-orphans") })
+
+	if output, err := run("build", "application"); err != nil {
+		t.Fatalf("build pipecat application: %v\n%s", err, output)
+	}
+	if output, err := run("run", "--rm", "--no-deps", "application", "python", "-c",
+		"from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport"); err != nil {
+		t.Fatalf("import SmallWebRTCTransport in pipecat image: %v\n%s", err, output)
+	}
+}
+
 // TestSmokeDevLiveKitServerStarts brings up the single-node dev livekit-server
 // alone (no worker, no creds) to prove the pinned image, --dev command, ports,
 // and healthcheck are real (SPEC V4, T6 L4). The worker needs provider creds
