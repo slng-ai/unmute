@@ -109,4 +109,6 @@ Groups are where the last portability edges show up:
 
 Step back and look at what the package does now. Two agents with their own models and voices, a handoff between them with a guard, webhook tools, typed shared state, a delegated task with a typed result, and an ordered task group. That is a genuinely complex voice agent, described in a handful of readable files, and every piece of it runs on Pipecat.
 
+For when to choose a task group over a single task, a handoff, or just one agent, see [why tasks and task groups](../concepts/why-tasks-and-task-groups.md).
+
 To see exactly what all of it compiles into, and how to deploy it, read the [Pipecat target page](../targets/pipecat.md).
