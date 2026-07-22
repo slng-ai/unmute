@@ -203,6 +203,18 @@ show every route end to end with real-schema YAML.
   the carrier fact itself. Guard: L2 output assertions (no token/password
   substrings); golden diffs show `${VAR}` placeholders only.
 - V7: `go.mod` is unchanged by this feature (C1). Guard: review + CI.
+- V8 (from B3): **every image pinned in the generated telephony Compose
+  graphs carries an OSI-approved open source license.** The coordination
+  store ships as Valkey (BSD-3-Clause, `valkey/valkey:9.1.1-alpine`), never
+  a Redis image: Redis images are source-available (RSALv2/SSPLv1) since
+  7.4 and only 8.0+ regained an OSI option (AGPLv3). The service name,
+  `REDIS_URL`, and the coordination reason names keep the Redis protocol
+  name on purpose (LiveKit's config vocabulary and the closed reason set
+  are unchanged). Compatibility verified live 2026-07-22: LiveKit Server
+  v1.13.4 boots against Valkey 9.1.1 (redis connect log + HTTP 200) and the
+  valkey image ships `redis-*` compatibility symlinks. Guard:
+  `TestV8TelephonyComposeShipsOSILicensedCoordinationStore` asserts both
+  compose goldens pin `valkey/valkey:` and no `image: redis:`.
 
 ## §T tasks
 id|status|desc|cites
@@ -214,6 +226,7 @@ T5|x|Twilio webhook auto-config: `internal/cli/dev_twilio.go` (lookup by exact n
 T6|x|LiveKit trunk automation: `internal/cli/dev_livekit_sip.go` (HS256 sip-admin JWT, Twirp POST helper, list/ensure inbound trunk, outbound trunk, dispatch rule with content-identity matching per V4, camelCase+snake_case tolerant parsing); admin URL from `UNMUTE_LIVEKIT_PORT` default 7880 against 127.0.0.1 with the generated dev key pair; IDs injected via the T4 between-phase hook. L1 match tests; L2 httptest Twirp server incl. second-run reuse|I.lksip,V4,C1,C2,C6
 T7|x|User docs + example: rewrite [learn/07-phone-calls.md](docs/user/learn/07-phone-calls.md) zero-step walkthrough (what dev does, cloudflared install line, one-time Twilio console setup per model, printed output meaning, honest limits); per-route full YAML in reference/targets pages (agent.yaml telephony channel inbound/outbound/both, call_start variables, transfer destinations; connections per carrier vocabulary for both models; targets.yaml per route; .env example per route with CLI-supplied values noted); [reference/providers.md](docs/user/reference/providers.md) pointer stays carrier-free; make [examples/telephony-multi-task](examples/telephony-multi-task) a real telephony package (channel+connection+target+.env.example+README) that fails closed with today's gate note; sidebar entry check. Derive every field from SCHEMA.md; simple language, no em dashes|I.doc,C7,C8
 T9|x|Check remediation (B2 + I.doc): dispatch-rule ensure gains agent-name verification with in-place replace via UpdateSIPDispatchRule (`{"sipDispatchRuleId", "replace": {...}}`, verified against livekit/protocol 2026-07-22); plan facts print at step 2 (route, setup, services, reasons) and endpoint URLs print at step 6 after the origin is known, matching the TELEPHONY.md 12-step order. L2: replace-on-mismatch test, print-order assertion|V4,I.doc,B2
+T11|x|OSS purity fix (B3): swap the pinned coordination-store image from `redis:7.4.9-alpine` (RSALv2/SSPLv1) to `valkey/valkey:9.1.1-alpine` (BSD-3) in both compose templates (command `valkey-server`, healthcheck `valkey-cli ping`; service name and REDIS_URL unchanged), regenerate the two compose goldens, update the two image assertions, add the V8 guard test, and note the Valkey choice in TELEPHONY.md + learn/07|V8,B3,C7
 T10|x|User request 2026-07-22: make [examples/telephony-multi-task](examples/telephony-multi-task) inbound AND outbound for Twilio on both targets (channel `outbound: true` + `on_voicemail: hangup`; `.env.example` gains `UNMUTE_OUTBOUND_TOKEN`), extend its README with exact test steps (call the number; Pipecat `POST /telephony/outbound` bearer + `{"to","call_start"}` per telephony_shared.py.tmpl:146; LiveKit `lk dispatch create` with `{"direction":"outbound","phone_number","call_start"}` metadata per README.md.tmpl:97), and add a hands-on step-by-step Twilio walkthrough page (docs/user/learn/twilio-walkthrough.md + sidebar) covering where each value lives in the Twilio console for both models, honest gate and SIP/NAT limits|I.doc,C7,V5
 T8|x|Gates + hygiene: verify fail-closed byte-identical (run gate tests), `go test ./...` zero Python/network, `make lint fmt test`, goldens regenerated where files changed, no go.mod diff (V7). L4 smoke additions only where real cloudflared/Twilio/Docker are needed (build tag smoke)|V5,V7,C3,C7
 
@@ -224,4 +237,5 @@ T7 after T1 (and after T2 for exact env names). T8 last.
 ## §B bugs
 id|date|cause|fix
 B1|2026-07-22|Pre-existing at branch start: commit 5e21577 added `examples/telephony-multi-task` (a copy of multi-task with no telephony channel, connection, or route) without registering it in `TestPublicExamplePackages` (internal/generate/examples_test.go:113), so the default suite was red before this work began. No new invariant: that registry test is the guard and it fired. Fix folded into T7, which makes the example a real telephony package and registers it|T7
+B3|2026-07-22|Found by user review: the ask was purely open source, but both generated Compose graphs pinned `redis:7.4.9-alpine`. Redis switched to RSALv2/SSPLv1 (source-available, not OSI) at 7.4; an OSI license (AGPLv3 option) only returned with 8.0. Every other component checked clean the same day via the GitHub license API: Pipecat BSD-2, LiveKit server/sip/agents Apache-2.0, cloudflared Apache-2.0. Fix: V8 (new invariant) + T11 swap to Valkey 9.1.1 (BSD-3), proven live against LiveKit Server v1.13.4 before the swap|V8
 B2|2026-07-22|Found by adversarial /check: V4 promised reuse of a "content-identical" record, but the dispatch-rule match ([dev_livekit_sip.go:97](internal/cli/dev_livekit_sip.go:97)) compared only trunk IDs + `call-` prefix and ignored the dispatched agent name, so a rule pointing at a different agent would be silently reused and inbound calls would dispatch the wrong agent. Latent through normal CLI use (the Compose project name includes the target name, so each project gets its own Redis volume and the agent name cannot drift), reachable via hand-created `lk` records against the same local stack. Fix: V4 amended to define record identity explicitly and require in-place replace on agent mismatch; T9 implements it|V4

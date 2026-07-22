@@ -145,7 +145,9 @@ Use equivalent environment names for the selected carrier
 LiveKit SIP also needs Redis because the LiveKit server and SIP service use it
 as a shared datastore and message bus. Pipecat also uses Redis, but only for
 opaque pending-call correlation, callback idempotency, human-transfer locks,
-and admission counters. Audio, transcripts, prompts, task state, and agent
+and admission counters. The generated Compose graphs ship Valkey
+(BSD-3-Clause) as that store, so the whole local stack stays open source;
+it speaks the Redis protocol and the service keeps the Redis name. Audio, transcripts, prompts, task state, and agent
 handoff remain inside the active call worker.
 
 ## Choose a supported carrier route

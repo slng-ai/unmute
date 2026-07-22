@@ -1178,7 +1178,7 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	assertComposeLocalEnvironment(t, compose, TelephonyRuntimePlanFor(resolved))
 	assertGoldenFile(t, filepath.Join("testdata", "golden", "livekit_v1_telephony_compose.yaml"), compose, *updateLiveKitV1)
 	for _, want := range []string{
-		"image: redis:7.4.9-alpine", "image: livekit/livekit-server:v1.13.4", "image: livekit/sip:v1.7.0",
+		"image: valkey/valkey:9.1.1-alpine", "image: livekit/livekit-server:v1.13.4", "image: livekit/sip:v1.7.0",
 		"LIVEKIT_API_SECRET=devsecret-local-only", "address: redis:6379",
 		`stop_grace_period: "1200s"`, `"${UNMUTE_LIVEKIT_PORT:-7880}:7880"`,
 		`"${UNMUTE_LIVEKIT_SIP_PORT:-5060}:5060/udp"`,

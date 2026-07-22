@@ -996,7 +996,7 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	assertComposeLocalEnvironment(t, compose, TelephonyRuntimePlanFor(resolved))
 	assertGoldenFile(t, filepath.Join("testdata", "golden", "pipecat_v1_telephony_compose.yaml"), compose, *updatePipecatV1)
 	for _, want := range []string{
-		"build:\n      context: .", "image: redis:7.4.9-alpine", "condition: service_healthy",
+		"build:\n      context: .", "image: valkey/valkey:9.1.1-alpine", "condition: service_healthy",
 		"REDIS_URL=redis://redis:6379/0", "redis_data:/data", "UNMUTE_TELEPHONY_PORT:-7860",
 		`stop_grace_period: "1260s"`,
 	} {

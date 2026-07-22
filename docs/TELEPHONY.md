@@ -642,10 +642,14 @@ room state, routing, and service coordination. Redis isn't in the RTP or
 LiveKit audio path, and the generated Agent worker doesn't use it as an audio
 buffer.
 
-Both orchestrators select the same version-pinned Redis service definition, but
-different components consume it. Generated Pipecat code uses it for Unmute's
-telephony control records. LiveKit Server and LiveKit SIP use it for LiveKit's
-distributed control plane.
+Both orchestrators select the same version-pinned coordination service
+definition, but different components consume it. Generated Pipecat code uses
+it for Unmute's telephony control records. LiveKit Server and LiveKit SIP use
+it for LiveKit's distributed control plane. The pinned image is Valkey
+(BSD-3-Clause), because Redis images are source-available (RSALv2/SSPLv1)
+since 7.4 and the whole local stack must stay open source. Valkey speaks the
+Redis protocol, so the service name, `REDIS_URL`, and the coordination reason
+names keep the Redis name.
 
 The reason-to-consumer mapping is closed and inspectable:
 

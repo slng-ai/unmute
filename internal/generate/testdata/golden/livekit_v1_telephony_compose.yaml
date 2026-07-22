@@ -35,12 +35,15 @@ services:
       start_period: 15s
 
   redis:
-    image: redis:7.4.9-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    # Valkey (BSD-3-Clause) is the coordination store: Redis images are
+    # source-available (RSALv2/SSPLv1) since 7.4, not open source. The
+    # service name and REDIS_URL keep the protocol's name.
+    image: valkey/valkey:9.1.1-alpine
+    command: ["valkey-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 2s
       timeout: 3s
       retries: 30
