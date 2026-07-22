@@ -433,12 +433,28 @@ func TestSmokeV26LiveKitExamplesStaticCheck(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			// dl§V26: the raw generator output is ruff-check + ty-clean.
 			for _, args := range [][]string{{"run", "ruff", "check", "."}, {"run", "ty", "check", "."}} {
 				cmd := exec.Command("uv", args...)
 				cmd.Dir = dir
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("uv %v failed:\n%s", args, out)
 				}
+			}
+			// V3 (F4): the CLI write path applies `ruff format`; assert it lays the
+			// project out cleanly (write-path parity) and that the result is
+			// format-stable (a second pass leaves no diff). Byte-format-stability
+			// of the raw generator output stays out of scope (C1: the generator
+			// never formats).
+			format := exec.Command("uv", "run", "ruff", "format", ".")
+			format.Dir = dir
+			if out, err := format.CombinedOutput(); err != nil {
+				t.Fatalf("uv run ruff format failed:\n%s", out)
+			}
+			diff := exec.Command("uv", "run", "ruff", "format", "--diff", ".")
+			diff.Dir = dir
+			if out, err := diff.CombinedOutput(); err != nil {
+				t.Fatalf("emitted project is not ruff-format-stable:\n%s", out)
 			}
 		})
 	}
