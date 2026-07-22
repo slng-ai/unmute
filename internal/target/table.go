@@ -362,8 +362,8 @@ func Default() Table {
 				deny(Deepgram, "Deepgram provider-hosted tools are not proven by its driver"),
 			),
 			FieldToolBuiltin: field(
-				// LiveKit + Pipecat host prebuilt tools (the end_call registry,
-				// docs/spec/prebuilt-tools.md); the rest still lack a lowering.
+				deny(LiveKit, "LiveKit builtin tools are not proven by its driver"),
+				deny(Pipecat, "Pipecat builtin tools are not proven by its driver"),
 				deny(Vapi, "Vapi builtin tools are not proven by its driver"),
 				deny(ElevenLabs, "ElevenLabs builtin tools are not proven by its driver"),
 				deny(Deepgram, "Deepgram builtin tools are not proven by its driver"),

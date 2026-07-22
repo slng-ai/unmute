@@ -108,7 +108,7 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	want := []string{"multi-task", "simple-prompt", "subagents", "task-groups", "telephony-multi-task"}
+	want := []string{"multi-task", "simple-prompt", "subagents", "task-groups"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}

@@ -238,12 +238,10 @@ const (
 )
 
 type Tool struct {
-	Description   string           `json:"description,omitempty" yaml:"description,omitempty"`
-	Input         map[string]any   `json:"input,omitempty" yaml:"input,omitempty"`
+	Description   string           `json:"description" yaml:"description"`
+	Input         map[string]any   `json:"input" yaml:"input"`
 	Output        map[string]any   `json:"output,omitempty" yaml:"output,omitempty"`
 	Execution     ToolExecution    `json:"execution" yaml:"execution"`
-	Builtin       string           `json:"builtin,omitempty" yaml:"builtin,omitempty"` // prebuilt registry id (builtin only)
-	Instructions  string           `json:"instructions,omitempty" yaml:"instructions,omitempty"`
 	Handler       string           `json:"handler,omitempty" yaml:"handler,omitempty"`
 	HandlerSource string           `json:"-" yaml:"-"` // local handler file content, loaded by spec.Load
 	URLEnv        string           `json:"url_env,omitempty" yaml:"url_env,omitempty"`

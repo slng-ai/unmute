@@ -24,7 +24,7 @@ func newInitCmd() *cobra.Command {
 				return runConsole(cmd, true)
 			}
 			dir := args[0]
-			return writeScaffold(cmd, dir, scaffold.Data{Name: filepath.Base(dir), Tools: scaffold.DefaultTools()})
+			return writeScaffold(cmd, dir, scaffold.Data{Name: filepath.Base(dir)})
 		},
 	}
 }

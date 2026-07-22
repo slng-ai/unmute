@@ -146,19 +146,14 @@ type Control struct {
 }
 
 type Tool struct {
-	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
-	Input       map[string]any `json:"input,omitempty" yaml:"input,omitempty"`
-	Output      map[string]any `json:"output,omitempty" yaml:"output,omitempty"`
-	Execution   string         `json:"execution" yaml:"execution"`
-	// Builtin names a prebuilt-tool registry id; legal only with
-	// execution: builtin (docs/spec/prebuilt-tools.md).
-	Builtin string `json:"builtin,omitempty" yaml:"builtin,omitempty"`
-	// Instructions is the prebuilt's optional closing/goodbye text; builtin only.
-	Instructions string `json:"instructions,omitempty" yaml:"instructions,omitempty"`
-	Handler      string `json:"handler,omitempty" yaml:"handler,omitempty"`
-	URLEnv       string `json:"url_env,omitempty" yaml:"url_env,omitempty"`
-	Interruption string `json:"interruption,omitempty" yaml:"interruption,omitempty"`
-	Effect       string `json:"effect,omitempty" yaml:"effect,omitempty"`
+	Description  string         `json:"description" yaml:"description"`
+	Input        map[string]any `json:"input" yaml:"input"`
+	Output       map[string]any `json:"output,omitempty" yaml:"output,omitempty"`
+	Execution    string         `json:"execution" yaml:"execution"`
+	Handler      string         `json:"handler,omitempty" yaml:"handler,omitempty"`
+	URLEnv       string         `json:"url_env,omitempty" yaml:"url_env,omitempty"`
+	Interruption string         `json:"interruption,omitempty" yaml:"interruption,omitempty"`
+	Effect       string         `json:"effect,omitempty" yaml:"effect,omitempty"`
 }
 
 type Conversation struct {

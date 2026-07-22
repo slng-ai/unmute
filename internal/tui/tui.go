@@ -120,7 +120,6 @@ func runCreate(runner *fieldRunner) (Result, bool, error) {
 		Channel:      scaffold.DefaultChannel,
 		Greeting:     scaffold.DefaultGreeting,
 		Instructions: scaffold.DefaultInstructions,
-		Tools:        scaffold.DefaultTools(), // seeded, editable/removable in the Tools section
 	}
 	data.SetTarget(scaffold.DefaultTarget)
 	return editAgent(runner, Agent{Path: path, Data: data})
@@ -244,7 +243,6 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			}
 			if !back && selected != actionBack {
 				result.Agent.Data.SetTarget(selected)
-				dropUnsupportedBuiltins(&result.Agent.Data)
 				for i := range result.Agent.Data.Agents {
 					result.Agent.Data.Agents[i].Reason = result.Agent.Data.Reason
 					result.Agent.Data.Agents[i].Speak = result.Agent.Data.Speak
@@ -904,25 +902,6 @@ func editTools(runner *fieldRunner, data *scaffold.Data) error {
 	}
 }
 
-// dropUnsupportedBuiltins removes prebuilt tools the current target cannot
-// host. Switching to a managed target would otherwise leave the seeded
-// end_call default as a guaranteed validation failure. Dropped tools are not
-// re-added on switching back; the user re-adds them if wanted.
-func dropUnsupportedBuiltins(data *scaffold.Data) {
-	provider := targetcap.Provider(data.Target)
-	if targetcap.Default().Capability(targetcap.FieldToolBuiltin, provider).Tag != targetcap.Gated {
-		return
-	}
-	kept := data.Tools[:0]
-	for _, tool := range data.Tools {
-		if tool.ExecutionKind() == "builtin" {
-			continue
-		}
-		kept = append(kept, tool)
-	}
-	data.Tools = kept
-}
-
 func toolLabel(data *scaffold.Data, tool scaffold.Tool) string {
 	return fmt.Sprintf("%s  ·  %s  ·  %s", tool.Name, tool.ExecutionKind(), toolAttachmentLabel(data, tool))
 }
@@ -941,7 +920,6 @@ var toolExecutionKinds = []toolExecutionKind{
 	{Value: "webhook", Name: "Webhook"},
 	{Value: "local", Name: "Local Python", Field: targetcap.FieldToolLocal},
 	{Value: "mcp", Name: "MCP server", Field: targetcap.FieldToolMCP},
-	{Value: "builtin", Name: "Prebuilt", Field: targetcap.FieldToolBuiltin},
 }
 
 // toolExecutionGate returns the capability row gating kind on target; ok is
@@ -961,7 +939,6 @@ func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool
 			"webhook": "HTTP endpoint from an environment variable",
 			"local":   "creates " + handler + " when saved",
 			"mcp":     "server address from an environment variable",
-			"builtin": "provider prebuilt tool (end_call)",
 		}
 		options := make([]huh.Option[string], 0, len(toolExecutionKinds)+1)
 		for _, kind := range toolExecutionKinds {
@@ -998,69 +975,35 @@ func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool
 			tool.Handler = handler
 			tool.URLEnv = ""
 		}
-		if selected == "builtin" {
-			// The registry has one id today; default it and drop the
-			// webhook/local fields a prebuilt tool never carries.
-			tool.URLEnv, tool.Input, tool.Output = "", "", ""
-			if tool.Builtin == "" {
-				tool.Builtin = "end_call"
-			}
-		} else {
-			tool.Builtin, tool.Instructions = "", ""
-		}
 		return false, nil
 	}
 }
 
 func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) error {
 	for {
-		var options []huh.Option[string]
-		if tool.ExecutionKind() == "builtin" {
-			// A prebuilt tool carries no input/output/url; the registry owns its
-			// schema. Description and the goodbye message are the only knobs.
-			options = []huh.Option[string]{
-				huh.NewOption("Description  ·  "+oneLine(tool.Description), "description"),
-				huh.NewOption("Prebuilt  ·  "+firstNonempty(tool.Builtin, "end_call"), "execution"),
-				huh.NewOption("Goodbye message  ·  "+firstNonempty(oneLine(tool.Instructions), "provider default"), "instructions"),
-				huh.NewOption("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
-				huh.NewOption("Delete tool", "delete"),
-				huh.NewOption("← Back", actionBack),
-			}
-		} else {
-			executionField := huh.NewOption("Webhook URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url")
-			switch tool.ExecutionKind() {
-			case "local":
-				executionField = huh.NewOption("Python handler  ·  "+firstNonempty(tool.Handler, "none"), "handler")
-			case "mcp":
-				executionField = huh.NewOption("MCP server URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url")
-			}
-			options = []huh.Option[string]{
-				huh.NewOption("Description  ·  "+oneLine(tool.Description), "description"),
-				huh.NewOption("Execution  ·  "+tool.ExecutionKind(), "execution"),
-				executionField,
-				huh.NewOption("Input schema  ·  "+oneLine(tool.Input), "input"),
-				huh.NewOption("Output schema  ·  "+firstNonempty(oneLine(tool.Output), "unconstrained"), "output"),
-				huh.NewOption("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
-				huh.NewOption("Delete tool", "delete"),
-				huh.NewOption("← Back", actionBack),
-			}
+		executionField := huh.NewOption("Webhook URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url")
+		switch tool.ExecutionKind() {
+		case "local":
+			executionField = huh.NewOption("Python handler  ·  "+firstNonempty(tool.Handler, "none"), "handler")
+		case "mcp":
+			executionField = huh.NewOption("MCP server URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url")
 		}
-		choice, _, err := runner.selectOne(tool.Name, "", options, true)
+		choice, _, err := runner.selectOne(tool.Name, "", []huh.Option[string]{
+			huh.NewOption("Description  ·  "+oneLine(tool.Description), "description"),
+			huh.NewOption("Execution  ·  "+tool.ExecutionKind(), "execution"),
+			executionField,
+			huh.NewOption("Input schema  ·  "+oneLine(tool.Input), "input"),
+			huh.NewOption("Output schema  ·  "+firstNonempty(oneLine(tool.Output), "unconstrained"), "output"),
+			huh.NewOption("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
+			huh.NewOption("Delete tool", "delete"),
+			huh.NewOption("← Back", actionBack),
+		}, true)
 		if err != nil || choice == actionBack {
 			return err
 		}
 		switch choice {
 		case "description":
-			// Optional for a builtin (the registry supplies a default).
-			validate := validateRequiredText
-			if tool.ExecutionKind() == "builtin" {
-				validate = validateBasic
-			}
-			if _, err := runner.input("Description", "What the model sees.", &tool.Description, validate); err != nil {
-				return err
-			}
-		case "instructions":
-			if _, err := runner.input("Goodbye message", "Optional. What the agent says as it ends the call.", &tool.Instructions, validateBasic); err != nil {
+			if _, err := runner.input("Description", "What the model sees.", &tool.Description, validateRequiredText); err != nil {
 				return err
 			}
 		case "execution":

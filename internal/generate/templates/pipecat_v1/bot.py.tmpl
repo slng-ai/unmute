@@ -142,14 +142,7 @@ async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: 
     Args:
 {{range .Args}}        {{.Name}} ({{.PyType}}):{{if .Description}} {{.Description}}{{end}}{{if .Enum}} One of: {{join .Enum ", "}}.{{end}}
 {{end}}    """{{else}}"""{{end}}
-{{if .Builtin}}{{if .Instructions}}    await params.llm.push_frame(
-        LLMMessagesAppendFrame(
-            [{"role": "developer", "content": {{pyq .Instructions}}}],
-            run_llm=True,
-        )
-    )
-{{end}}    await params.result_callback({"ended": True})
-{{else if .Local}}    result = tools.{{.Name}}.{{.Name}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Name}}={{$a.Name}}{{end}})
+{{if .Local}}    result = tools.{{.Name}}.{{.Name}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Name}}={{$a.Name}}{{end}})
     if inspect.isawaitable(result):
         result = await result
     await params.result_callback(result)
@@ -210,13 +203,6 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
             await _TRANSPORT.sip_call_transfer({"toEndPoint": {{pyq .ColdDestination}}})
 {{end}}
         await params.result_callback({"transferred": True})
-{{else if .Builtin}}{{if .Instructions}}        await params.llm.push_frame(
-            LLMMessagesAppendFrame(
-                [{"role": "developer", "content": {{pyq .Instructions}}}],
-                run_llm=True,
-            )
-        )
-{{end}}        await params.result_callback({"ended": True})
 {{else if .Local}}        result = tools.{{.Name}}.{{.Name}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Name}}={{$a.Name}}{{end}})
         if inspect.isawaitable(result):
             result = await result

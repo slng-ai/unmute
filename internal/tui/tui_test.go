@@ -43,7 +43,7 @@ func TestRunCreateDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := scaffold.Data{Name: "agent", Language: scaffold.DefaultLanguage, Channel: scaffold.DefaultChannel, Greeting: scaffold.DefaultGreeting, Instructions: scaffold.DefaultInstructions, Tools: scaffold.DefaultTools()}
+	data := scaffold.Data{Name: "agent", Language: scaffold.DefaultLanguage, Channel: scaffold.DefaultChannel, Greeting: scaffold.DefaultGreeting, Instructions: scaffold.DefaultInstructions}
 	data.SetTarget(scaffold.DefaultTarget)
 	agent := Agent{Path: "agent", Data: data}
 	want := Result{Agent: agent, Create: true, Confirmed: true}
@@ -569,9 +569,7 @@ func TestRunAddVariableAndTool(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
 		"3\n3\n1\ncustomer_id\n3\n2\n5\n3\n" +
-		// Tools list now starts with the seeded end_call: "Add tool" is 2, and
-		// after the new tool the list has 2 tools so its "Back" is 4.
-		"4\n1\n2\nlookup_customer\n1\nLook up the caller\n3\nLOOKUP_URL\n8\n4\n" +
+		"4\n1\n1\nlookup_customer\n1\nLook up the caller\n3\nLOOKUP_URL\n8\n3\n" +
 		"7\n\n"
 	var output bytes.Buffer
 	got, err := Run(strings.NewReader(input), &output, true)
@@ -581,14 +579,7 @@ func TestRunAddVariableAndTool(t *testing.T) {
 	if len(got.Agent.Data.Variables) != 1 || got.Agent.Data.Variables[0].Source != "call_start" {
 		t.Fatalf("variables = %#v", got.Agent.Data.Variables)
 	}
-	// The default end_call is seeded, so the added webhook tool is the second.
-	var lookup *scaffold.Tool
-	for i := range got.Agent.Data.Tools {
-		if got.Agent.Data.Tools[i].Name == "lookup_customer" {
-			lookup = &got.Agent.Data.Tools[i]
-		}
-	}
-	if lookup == nil || lookup.URLEnv != "LOOKUP_URL" {
+	if len(got.Agent.Data.Tools) != 1 || got.Agent.Data.Tools[0].URLEnv != "LOOKUP_URL" {
 		t.Fatalf("tools = %#v", got.Agent.Data.Tools)
 	}
 }
@@ -1066,7 +1057,7 @@ func TestV29UnavailableChoiceNamesGateAndOffersBack(t *testing.T) {
 	// Vapi still gates local tools; pipecat's gate lifted 2026-07-17 (T14).
 	var output bytes.Buffer
 	tool := scaffold.Tool{}
-	back, err := chooseToolExecution(newRunner(strings.NewReader("2\n1\n5\n"), &output, true), string(targetcap.Vapi), &tool)
+	back, err := chooseToolExecution(newRunner(strings.NewReader("2\n1\n4\n"), &output, true), string(targetcap.Vapi), &tool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1113,7 +1104,7 @@ func TestV42ExecutionPickerDerivesFromTable(t *testing.T) { // docs/spec/tui.md 
 	// Gated: mcp on Pipecat surfaces the table row's own note, then Back.
 	var output bytes.Buffer
 	tool := scaffold.Tool{Name: "book_table"}
-	back, err := chooseToolExecution(newRunner(strings.NewReader("3\n1\n5\n"), &output, true), string(targetcap.Pipecat), &tool)
+	back, err := chooseToolExecution(newRunner(strings.NewReader("3\n1\n4\n"), &output, true), string(targetcap.Pipecat), &tool)
 	if err != nil {
 		t.Fatal(err)
 	}

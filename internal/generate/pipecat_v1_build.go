@@ -221,14 +221,6 @@ func setImportNeeds(data *pipecatData) {
 				data.NeedsEndFrame = data.NeedsEndFrame || !t.CarrierTransfer
 				continue
 			}
-			if t.Builtin != "" {
-				// prebuilt end_call: bodyless, speaks the goodbye then EndFrame.
-				data.NeedsEndFrame = true
-				if t.Instructions != "" {
-					data.NeedsAppendFrame = true
-				}
-				continue
-			}
 			if t.Local {
 				data.NeedsInspect = true // isawaitable on the user handler (V13)
 			} else {
@@ -560,7 +552,6 @@ func buildTool(name string, tool ir.Tool, env *envSet) pipecatTool {
 	built := pipecatTool{
 		Name: name, MethodName: name, Description: tool.Description, URLEnv: tool.URLEnv,
 		Local: tool.Execution == ir.ToolLocal, HandlerSource: tool.HandlerSource,
-		Builtin: tool.Builtin, Instructions: tool.Instructions,
 		EndsCall: tool.Effect == ir.ToolEndsConversation, Interruption: interruptionValue(tool.Interruption),
 	}
 	built.Args = append(built.Args, inputFields(tool.Input)...)

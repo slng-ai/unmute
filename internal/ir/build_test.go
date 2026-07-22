@@ -8,31 +8,6 @@ import (
 	packagespec "github.com/slng/unmute/internal/spec"
 )
 
-func TestBuildBuiltinToolResolvesRegistryDefaults(t *testing.T) {
-	pkg := loadSafeCore(t)
-	tool := pkg.Tools["lookup_customer"]
-	tool.Execution = "builtin"
-	tool.Builtin = "end_call"
-	tool.Instructions = "Thank the caller and say goodbye."
-	tool.Input, tool.Output, tool.URLEnv, tool.Handler, tool.Effect, tool.Description = nil, nil, "", "", "", ""
-	pkg.Tools["lookup_customer"] = tool
-
-	agent, err := Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := agent.Tools["lookup_customer"]
-	if got.Builtin != "end_call" || got.Instructions != "Thank the caller and say goodbye." {
-		t.Fatalf("builtin fields not carried through: %#v", got)
-	}
-	if got.Effect != ToolEndsConversation {
-		t.Errorf("effect = %q, want ends_conversation (from registry)", got.Effect)
-	}
-	if got.Description == "" {
-		t.Error("empty description must be filled from the registry default")
-	}
-}
-
 func TestBuildSafeCore(t *testing.T) {
 	agent, err := Build(loadSafeCore(t))
 	if err != nil {

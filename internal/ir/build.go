@@ -465,25 +465,11 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 		interruption = ToolProviderDefault
 	}
 	effect := ToolEffect(raw.Effect)
-	description := raw.Description
-	// A builtin tool takes its default effect and description from the prebuilt
-	// registry; Validate rejects an unknown id or a conflicting effect (V1, V5).
-	if raw.Execution == string(ToolBuiltin) {
-		if prebuilt, ok := targetcap.LookupPrebuilt(raw.Builtin); ok {
-			if effect == "" {
-				effect = ToolEffect(prebuilt.Effect)
-			}
-			if description == "" {
-				description = prebuilt.DefaultDescription
-			}
-		}
-	}
 	if effect == "" {
 		effect = ToolReturnsData
 	}
 	return Tool{
-		Description: description, Input: raw.Input, Output: raw.Output, Execution: ToolExecution(raw.Execution),
-		Builtin: raw.Builtin, Instructions: raw.Instructions,
+		Description: raw.Description, Input: raw.Input, Output: raw.Output, Execution: ToolExecution(raw.Execution),
 		Handler: handler, URLEnv: raw.URLEnv, Interruption: interruption, Effect: effect,
 	}
 }

@@ -29,13 +29,13 @@ effect: returns_data
 
 What the model reads to decide when to call the tool.
 
-Required: yes, except for a `builtin` tool where it is optional (the prebuilt supplies a default). Values: text. Default: none. Targets: all five, core.
+Required: yes. Values: text. Default: none. Targets: all five, core.
 
 ### input
 
 The arguments the model fills in, as a JSON Schema object. All five targets accept JSON Schema tool inputs, so nesting is allowed here.
 
-Required: yes, except for a `builtin` tool, which has none (the prebuilt owns its schema). Values: a JSON Schema object. Default: none. Targets: all five, core.
+Required: yes. Values: a JSON Schema object. Default: none. Targets: all five, core.
 
 ### output
 
@@ -53,53 +53,11 @@ Required: yes. Values: `local | client | webhook | provider_hosted | builtin | m
 |---|---|
 | `webhook` | all five targets. **The safe choice.** |
 | `local` | code targets only (a handler file in your package) |
-| `builtin` | a provider prebuilt tool you pick by name; LiveKit and Pipecat only (see below) |
 | `mcp` | fails on Deepgram (no runtime MCP client); on LiveKit needs SDK language `python` |
-| `client`, `provider_hosted` | gated per driver; each driver documents what it can host |
+| `client`, `provider_hosted`, `builtin` | gated per driver; each driver documents what it can host |
 
-On Pipecat, the driver emits `webhook`, `local`, and `builtin` tools. `mcp` remains a driver
+On Pipecat, the driver emits `webhook` and `local` tools. `mcp` remains a driver
 maturity gate.
-
-## Prebuilt tools (`execution: builtin`)
-
-Some tools you would otherwise hand-write are already shipped by the platforms.
-Instead of authoring a handler, you **pick** one by name. Today there is one: `end_call`,
-a tool the model calls to hang up when the caller is done.
-
-```yaml
-# tools/end_call.yaml  (the file name is still your tool name)
-execution: builtin
-builtin: end_call
-description: End the call once the caller's issue is resolved.   # optional, extra guidance for the model
-instructions: Thank the caller and say goodbye.                  # optional, the closing line
-```
-
-A prebuilt tool has **no `input`, `output`, `url_env`, or `handler`** — the platform owns
-its schema and behavior. Both fields are optional:
-
-- `description` adds your own guidance on top of the built-in description (LiveKit `extra_description`; Pipecat tool docstring).
-- `instructions` is the closing message (LiveKit `end_instructions`; a Pipecat developer message).
-
-`end_call` works on **LiveKit and Pipecat**. It fails on Vapi, ElevenLabs, and Deepgram,
-which have no lowering for it. It ends the call, so its `effect` is fixed to
-`ends_conversation`.
-
-**`end_call` is included by default.** `unmute init` scaffolds a `tools/end_call.yaml` and
-attaches it to your entry agent, and the create wizard seeds it too. Keep it, edit its
-wording, or delete the file (and its reference in `agent.yaml`) if you don't want it. If you
-switch a new agent to a managed target that can't host it, the wizard drops it for you.
-
-### builtin
-
-The prebuilt-tool id to use. See [Prebuilt tools](#prebuilt-tools-execution-builtin) above.
-
-Required: conditional (iff `execution: builtin`). Values: a prebuilt id (today: `end_call`). Default: none. An unknown id is an error.
-
-### instructions
-
-The closing message for a prebuilt tool that ends the call.
-
-Required: no, and legal only on a `builtin` tool. Values: text. Default: none (the platform's default goodbye).
 
 ### handler
 
@@ -123,4 +81,4 @@ Required: no. Values: `continue | cancel | provider_default`. Default: `provider
 
 What the tool does to the conversation when it finishes.
 
-Required: no. Values: `returns_data | ends_conversation`. Default: `returns_data`. Targets: all five, core. For a `builtin` tool the value is fixed by the prebuilt (`end_call` is always `ends_conversation`); a conflicting value is an error.
+Required: no. Values: `returns_data | ends_conversation`. Default: `returns_data`. Targets: all five, core.

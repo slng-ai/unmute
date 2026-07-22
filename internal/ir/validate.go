@@ -300,19 +300,6 @@ func validateStructure(agent *Agent) []string {
 		}
 	}
 	for name, tool := range agent.Tools {
-		// builtin/instructions are legal only on a builtin tool (V2).
-		if tool.Execution != ToolBuiltin {
-			if tool.Builtin != "" {
-				errors = add(errors, fmt.Sprintf("tool %q builtin is legal for builtin execution only", name))
-			}
-			if tool.Instructions != "" {
-				errors = add(errors, fmt.Sprintf("tool %q instructions is legal for builtin execution only", name))
-			}
-		}
-		if tool.Execution == ToolBuiltin {
-			validateBuiltinTool(name, tool, &errors)
-			continue
-		}
 		if tool.Description == "" {
 			errors = add(errors, fmt.Sprintf("tool %q description is required", name))
 		}
@@ -349,7 +336,7 @@ func validateStructure(agent *Agent) []string {
 			if tool.Handler != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler is legal for local execution only", name))
 			}
-		case ToolClient, ToolProviderHosted:
+		case ToolClient, ToolProviderHosted, ToolBuiltin:
 			if tool.Handler != "" || tool.URLEnv != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler/url_env does not match execution %q", name, tool.Execution))
 			}
@@ -530,27 +517,6 @@ func validateContext(context TaskContext, provider targetcap.Provider, caps targ
 	}
 	if context.History == HistorySummary && context.Summarizer == "" {
 		row.Errors = add(row.Errors, "context history summary requires a summarizer profile")
-	}
-}
-
-// validateBuiltinTool checks a prebuilt tool: known id (V1), no webhook/local
-// fields (V3), and an effect that matches the registry (V5). The provider gate
-// (FieldToolBuiltin) is applied per target in validateTools (V4).
-func validateBuiltinTool(name string, tool Tool, errors *[]string) {
-	if tool.Input != nil || tool.Output != nil || tool.Handler != "" || tool.URLEnv != "" {
-		*errors = add(*errors, fmt.Sprintf("tool %q builtin execution takes no input, output, handler, or url_env", name))
-	}
-	if tool.Builtin == "" {
-		*errors = add(*errors, fmt.Sprintf("tool %q builtin execution requires a builtin id", name))
-		return
-	}
-	prebuilt, ok := targetcap.LookupPrebuilt(tool.Builtin)
-	if !ok {
-		*errors = add(*errors, fmt.Sprintf("tool %q has unknown builtin %q", name, tool.Builtin))
-		return
-	}
-	if tool.Effect != ToolEffect(prebuilt.Effect) {
-		*errors = add(*errors, fmt.Sprintf("tool %q builtin %q fixes effect to %s, cannot be %q", name, tool.Builtin, prebuilt.Effect, tool.Effect))
 	}
 }
 

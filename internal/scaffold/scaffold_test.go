@@ -189,43 +189,6 @@ func TestWrite_targetChoices(t *testing.T) {
 	}
 }
 
-func TestDefaultToolsScaffoldsEndCall(t *testing.T) {
-	defaults := DefaultTools()
-	if len(defaults) != 1 || defaults[0].Name != "end_call" || defaults[0].Execution != "builtin" || defaults[0].Builtin != "end_call" {
-		t.Fatalf("DefaultTools() = %#v", defaults)
-	}
-
-	data := Data{Name: "agent", Tools: DefaultTools()}
-	data.SetTarget("pipecat")
-	dir := filepath.Join(t.TempDir(), "agent")
-	if _, err := Write(dir, data); err != nil {
-		t.Fatal(err)
-	}
-
-	agent, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(agent), "- end_call") {
-		t.Errorf("entry agent must reference end_call:\n%s", agent)
-	}
-	tool, err := os.ReadFile(filepath.Join(dir, "tools", "end_call.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"execution: builtin", "builtin: end_call"} {
-		if !strings.Contains(string(tool), want) {
-			t.Errorf("end_call.yaml missing %q:\n%s", want, tool)
-		}
-	}
-	if strings.Contains(string(tool), "input:") || strings.Contains(string(tool), "url_env:") {
-		t.Errorf("builtin tool must not carry input/url_env:\n%s", tool)
-	}
-	if _, err := Preflight(data); err != nil {
-		t.Fatalf("Preflight() = %v", err)
-	}
-}
-
 func TestWriteVariablesAndTools(t *testing.T) {
 	data := Data{
 		Name:     "agent",

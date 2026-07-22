@@ -216,15 +216,6 @@ func TestSmokePipecatV1InlineInstantiates(t *testing.T) {
 	}, pipecatInlineSmokeScript)
 }
 
-// TestSmokePipecatV1BuiltinEndCall proves the emitted bodyless end_call @tool
-// imports and constructs in a real venv (prebuilt-tools T11).
-func TestSmokePipecatV1BuiltinEndCall(t *testing.T) {
-	runPipecatSmokeScript(t, "simple-prompt", nil, func(agent *ir.Agent) {
-		agent.Tracing = nil
-		addBuiltinEndCall(agent)
-	}, pipecatInlineSmokeScript)
-}
-
 func examplePackagePath(name string) string {
 	if name == "remy" || name == "safe_core" {
 		return filepath.Join("..", "testdata", name)
