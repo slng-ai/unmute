@@ -387,6 +387,83 @@ func TestValidateRejectsLiteralWebhookURL(t *testing.T) {
 	}
 }
 
+// makeBuiltin rewrites an existing safe_core tool into a clean end_call
+// builtin, keeping its references intact.
+func makeBuiltin(agent *Agent, name string) {
+	tool := agent.Tools[name]
+	tool.Execution = ToolBuiltin
+	tool.Builtin = "end_call"
+	tool.Input, tool.Output, tool.URLEnv, tool.Handler = nil, nil, "", ""
+	tool.Effect = ToolEndsConversation
+	tool.Description = "End the call."
+	agent.Tools[name] = tool
+}
+
+func TestValidateBuiltinEndCallPassesOnLiveKit(t *testing.T) {
+	agent := safeAgent(t)
+	makeBuiltin(agent, "lookup_customer")
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("end_call builtin must validate on LiveKit: %v\n%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateBuiltinDeniedOnVapiInProviderWords(t *testing.T) {
+	agent := safeAgent(t)
+	makeBuiltin(agent, "lookup_customer")
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderVapi)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "Vapi") {
+		t.Fatalf("builtin on Vapi must gate in Vapi vocabulary: err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateBuiltinUnknownIDRejected(t *testing.T) {
+	agent := safeAgent(t)
+	makeBuiltin(agent, "lookup_customer")
+	tool := agent.Tools["lookup_customer"]
+	tool.Builtin = "teleport"
+	agent.Tools["lookup_customer"] = tool
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "teleport") {
+		t.Fatalf("unknown builtin id must be rejected: err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateBuiltinRejectsWebhookFields(t *testing.T) {
+	agent := safeAgent(t)
+	makeBuiltin(agent, "lookup_customer")
+	tool := agent.Tools["lookup_customer"]
+	tool.URLEnv = "SOME_URL"
+	agent.Tools["lookup_customer"] = tool
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "lookup_customer") {
+		t.Fatalf("builtin tool with url_env must be rejected: err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateBuiltinFieldsRejectedOnNonBuiltin(t *testing.T) {
+	agent := safeAgent(t)
+	tool := agent.Tools["lookup_customer"] // stays webhook
+	tool.Instructions = "goodbye"
+	agent.Tools["lookup_customer"] = tool
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "instructions") {
+		t.Fatalf("instructions on a non-builtin tool must be rejected: err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+func TestValidateBuiltinRejectsConflictingEffect(t *testing.T) {
+	agent := safeAgent(t)
+	makeBuiltin(agent, "lookup_customer")
+	tool := agent.Tools["lookup_customer"]
+	tool.Effect = ToolReturnsData // conflicts with end_call's ends_conversation
+	agent.Tools["lookup_customer"] = tool
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "effect") {
+		t.Fatalf("conflicting effect on a builtin tool must be rejected: err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
 func TestValidateNestedResultChecksEveryConfiguredTarget(t *testing.T) {
 	agent := safeAgent(t)
 	agent.Tasks["nested"] = Task{

@@ -1,4 +1,8 @@
-description: [[quote .Description]]
+[[if eq .ExecutionKind "builtin"]]execution: builtin
+builtin: [[.Builtin]]
+[[if .Description]]description: [[quote .Description]]
+[[end]][[if .Instructions]]instructions: [[quote .Instructions]]
+[[end]][[else]]description: [[quote .Description]]
 input: [[.Input]]
 [[if .Output]]output: [[.Output]]
 [[end]]execution: [[.ExecutionKind]]
@@ -7,3 +11,4 @@ input: [[.Input]]
 [[end]]
 interruption: provider_default
 effect: returns_data
+[[end]]

@@ -48,6 +48,18 @@ func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	}
 }
 
+func TestBuiltinToolsPassOnCodeDriversOnly(t *testing.T) {
+	table := Default()
+	if table.Capability(FieldToolBuiltin, LiveKit).Tag != Core || table.Capability(FieldToolBuiltin, Pipecat).Tag != Core {
+		t.Fatal("builtin tools must pass on LiveKit and Pipecat")
+	}
+	for _, provider := range []Provider{Vapi, ElevenLabs, Deepgram} {
+		if table.Capability(FieldToolBuiltin, provider).Tag != Gated {
+			t.Errorf("builtin tools passed on %s", provider)
+		}
+	}
+}
+
 func TestTelephonyControlsResolveCarrierAndTransport(t *testing.T) {
 	table := Default()
 	tests := []struct {

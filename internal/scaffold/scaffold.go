@@ -96,7 +96,12 @@ type Tool struct {
 	Name        string
 	Description string
 	Execution   string
-	Handler     string
+	// Builtin names a prebuilt-tool registry id; set only with execution:
+	// builtin (docs/spec/prebuilt-tools.md).
+	Builtin string
+	// Instructions is the prebuilt's optional closing/goodbye message.
+	Instructions string
+	Handler      string
 	// HandlerSource is package content carried through maintenance. It is not
 	// rendered into the tool declaration.
 	HandlerSource string
@@ -105,6 +110,20 @@ type Tool struct {
 	Output        string // optional JSON Schema object
 	AttachTo      []string
 	AttachTasks   []string
+}
+
+// DefaultTools are the prebuilt tools every new agent starts with: the
+// end_call prebuilt, attached to the entry agent. init and the create wizard
+// seed these so the tool is present by default yet fully editable and
+// removable (docs/spec/prebuilt-tools.md C9). Only valid on code targets;
+// switching to a managed target surfaces the normal capability gate.
+func DefaultTools() []Tool {
+	return []Tool{{
+		Name:        "end_call",
+		Execution:   "builtin",
+		Builtin:     "end_call",
+		Description: "End the call when the caller is finished or says goodbye.",
+	}}
 }
 
 func (t Tool) ExecutionKind() string {

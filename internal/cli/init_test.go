@@ -63,6 +63,35 @@ func TestInit_scaffoldsValidV1Package(t *testing.T) {
 	}
 }
 
+func TestInit_seedsEndCallByDefault(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "support-bot")
+	out, err := run(t, "init", dir)
+	if err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	tool, err := os.ReadFile(filepath.Join(dir, "tools", "end_call.yaml"))
+	if err != nil {
+		t.Fatalf("init did not scaffold the default end_call tool: %v", err)
+	}
+	for _, want := range []string{"execution: builtin", "builtin: end_call"} {
+		if !strings.Contains(string(tool), want) {
+			t.Errorf("end_call.yaml missing %q:\n%s", want, tool)
+		}
+	}
+	agent, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(agent), "- end_call") {
+		t.Errorf("entry agent must reference end_call:\n%s", agent)
+	}
+	// Still compiles clean on the default pipecat target.
+	vout, err := run(t, "validate", dir)
+	if err != nil {
+		t.Fatalf("validate scaffold with default end_call: %v\n%s", err, vout)
+	}
+}
+
 func TestInit_refusesExistingDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "support-bot")
 	if _, err := run(t, "init", dir); err != nil {

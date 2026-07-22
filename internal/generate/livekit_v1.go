@@ -67,6 +67,7 @@ type livekitAgent struct {
 	TTS            *livekitService // set only when it differs from the session default
 	Greeting       *livekitGreeting
 	Tools          []livekitTool
+	Prebuilt       []livekitTool // execution: builtin tools, rendered into super().__init__(tools=...)
 	MCPServers     []livekitMCPServer
 	Transfers      []livekitTransfer
 	HumanTransfers []livekitHumanTransfer
@@ -196,6 +197,7 @@ type livekitTask struct {
 	LLM         *livekitChain // per-task model override (B1); nil = session LLM
 	Result      []livekitArg  // finish() args + the completed result dict
 	Tools       []livekitTool
+	Prebuilt    []livekitTool // execution: builtin tools, rendered into super().__init__(tools=...)
 	MCPServers  []livekitMCPServer
 }
 
@@ -204,8 +206,10 @@ type livekitTool struct {
 	Description      string
 	URLEnv           string
 	Args             []livekitArg
-	Local            bool // execution: local — call the copied handler module
-	EndsConversation bool // effect: ends_conversation — shutdown after the call
+	Local            bool   // execution: local — call the copied handler module
+	Builtin          string // execution: builtin — prebuilt registry id (renders into tools=, not a method)
+	Instructions     string // builtin end_call closing message → end_instructions
+	EndsConversation bool   // effect: ends_conversation — shutdown after the call
 }
 
 // livekitMCPServer is one MCP server an agent or task mounts (B3): the tools
@@ -273,6 +277,7 @@ type livekitData struct {
 	NeedsAsyncio       bool // inactivity end / max_duration timers
 	NeedsInspect       bool // local tool wrappers (isawaitable)
 	NeedsMCP           bool // mcp import (MCPServerHTTP)
+	NeedsEndCallTool   bool // beta.tools EndCallTool import (prebuilt end_call)
 	HasColdTransfer    bool // get_job_context import
 	HasWarmTransfer    bool // WarmTransferTask import + trunk env
 	Outbound           *livekitOutbound
@@ -322,6 +327,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldThinkingAudio:         true, // BackgroundAudioPlayer thinking sound
 	targetcap.FieldToolOutput:            true, // tool returns response.json()
 	targetcap.FieldToolLocal:             true, // handler copied + wrapped
+	targetcap.FieldToolBuiltin:           true, // prebuilt end_call → beta EndCallTool
 	targetcap.FieldToolMCP:               true, // mcp.MCPServerHTTP mounts (B3)
 	targetcap.FieldToolInterruption:      true, // warn: runs to completion
 	targetcap.FieldOutbound:              true, // SIP dial-out off job metadata
