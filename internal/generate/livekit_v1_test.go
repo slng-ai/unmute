@@ -533,16 +533,164 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		"async def do_find(self, ctx: RunContext) -> dict:",
-		"result = await FindSlot(chat_ctx=self.chat_ctx.copy(exclude_instructions=True))",
+		"result = await FindSlot(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))",
 		`ctx.userdata.caller_phone = result["date"]`,
 		"@dataclass\nclass Userdata:",
 		"caller_phone: str | None = None",
 		"session = AgentSession[Userdata](",
 		"userdata=Userdata(),",
+		// V1/B1: the single-task delegate docstring carries the finality guidance
+		// so the owner LLM does not re-run the finished flow.
+		"Do not run this flow again for the same request.",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
 		}
+	}
+}
+
+// TestV1LiveKitCompletedFlowEndsOnce guards F0/B1: a completed task/delegate
+// returns control once and the owner never re-runs a finished flow. Deterministic
+// proxies: finish() resolves via self.complete() only (`-> None`, no trailing
+// return that would emit a stray output after the task closes), and every
+// then:return delegate docstring tells the LLM the result is final and the flow
+// must not re-run.
+func TestV1LiveKitCompletedFlowEndsOnce(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+
+	// finish() is the sole resolution: -> None, no value returned after complete().
+	if !strings.Contains(botpy, "async def finish(self, ctx: RunContext, sent: bool) -> None:") {
+		t.Error("finish must be typed -> None (complete() is the sole resolution)")
+	}
+	if strings.Contains(botpy, `return "Done."`) {
+		t.Error(`finish must not return a value after self.complete() (stray post-completion output)`)
+	}
+	// Every then:return delegate (do_reserve, do_event here) states the result is
+	// final and the flow must not re-run.
+	for _, delegate := range []string{"async def do_reserve", "async def do_event"} {
+		idx := strings.Index(botpy, delegate)
+		if idx < 0 {
+			t.Fatalf("delegate %q not emitted", delegate)
+		}
+		doc := botpy[idx : idx+400]
+		if !strings.Contains(doc, "Do not run this flow again for the same request.") {
+			t.Errorf("then:return delegate %q missing finality guidance in its docstring", delegate)
+		}
+	}
+}
+
+// TestV2LiveKitToolCarriesSchema guards F1/V2: both @function_tool paths present
+// the LLM the schema the tool YAML declares. An enum lowers to Literal[...] and a
+// per-property description to Annotated[..., Field(description=...)], on the
+// task-level tool (find_slot's check_availability) and, with the same tool added
+// to an agent, on the agent-level path too.
+func TestV2LiveKitToolCarriesSchema(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Inject an enum property into check_availability (Input is a shared map).
+	props := agent.Tools["check_availability"].Input["properties"].(map[string]any)
+	props["service"] = map[string]any{
+		"type":        "string",
+		"enum":        []any{"haircut", "hair-color", "blowout"},
+		"description": "The service requested",
+	}
+	// Also expose the tool agent-level on the greeter so both paths emit it.
+	g := agent.Agents["greeter"]
+	g.Tools = append(g.Tools, "check_availability")
+	agent.Agents["greeter"] = g
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+
+	for _, want := range []string{
+		"from typing import Annotated, Literal",
+		"from pydantic import Field",
+		// enum → Literal, description → Annotated[..., Field(...)]
+		`service: Annotated[Literal["haircut", "hair-color", "blowout"], Field(description="The service requested")]`,
+		// non-enum described args still carry the description
+		`party_size: Annotated[int, Field(description="Number of people")]`,
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	// The same schema must reach the LLM on BOTH the agent-level and task-level
+	// emissions of the tool (two def sites, both carrying the Literal).
+	if got := strings.Count(botpy, `Literal["haircut", "hair-color", "blowout"]`); got != 2 {
+		t.Errorf("expected the enum Literal on both tool paths (2 sites), got %d", got)
+	}
+}
+
+// TestF3LiveKitSingleAgentMinimalShape guards F3: a lone agent that is never a
+// handoff target emits the canonical Agent(instructions=...) shape with no
+// chat_ctx ctor plumbing and no NOT_GIVEN/NotGivenOr/llm imports that only feed
+// it. Multi-agent output is unchanged.
+func TestF3LiveKitSingleAgentMinimalShape(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	if !strings.Contains(botpy, "    def __init__(self) -> None:") {
+		t.Error("minimal single agent must have a plain __init__(self) with no chat_ctx param")
+	}
+	for _, forbidden := range []string{
+		"chat_ctx: NotGivenOr[llm.ChatContext]",
+		"chat_ctx=chat_ctx",
+		"    NOT_GIVEN,",
+		"    NotGivenOr,",
+		"    llm,",
+	} {
+		if strings.Contains(botpy, forbidden) {
+			t.Errorf("minimal single agent must not emit %q", forbidden)
+		}
+	}
+
+	// Guard against over-application: multi-agent Remy keeps the plumbing.
+	rpkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ragent, err := ir.Build(rpkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rart, err := Generate(ragent, targetByProvider(t, ragent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate remy: %v", err)
+	}
+	remypy := artifactFile(t, rart, "agent.py")
+	if !strings.Contains(remypy, "def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:") {
+		t.Error("multi-agent Remy must keep the chat_ctx handoff plumbing")
 	}
 }
 
@@ -766,7 +914,7 @@ func TestLiveKitV1HistoryResetAndToolCallShaping(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		`return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True))`,
+		`return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True, exclude_handoff=True))`,
 		"# history: reset — the target starts fresh (a handoff marker still lands).",
 		"return Greeter()",
 	} {
@@ -850,9 +998,10 @@ func TestLiveKitV1ConversationShapingAndAgentTools(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		// Agent-level webhook tool on the greeter class.
+		// Agent-level webhook tool on the greeter class, carrying the declared
+		// per-property schema (V2): descriptions via Annotated[..., Field(...)].
 		"class Greeter(IgnorePhrasesMixin, Agent):",
-		"async def check_availability(self, ctx: RunContext, date: str, party_size: int) -> dict:",
+		`async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:`,
 		// Interruption options ride turn_handling.
 		`interruption={"enabled": True, "min_words": 2},`,
 		// Generated ignore-phrase filter (lowercased phrases).

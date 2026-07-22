@@ -128,6 +128,37 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		}
 	}
 
+	// V2: tool and finish args that carry an enum need typing.Literal; args that
+	// carry a description need typing.Annotated + pydantic.Field. Import only what
+	// is used (no unused-import F-violation, dl§V26).
+	needLiteral, needAnnotated := false, false
+	scanArgs := func(args []livekitArg) {
+		for _, a := range args {
+			needLiteral = needLiteral || len(a.Enum) > 0
+			needAnnotated = needAnnotated || a.Desc != ""
+		}
+	}
+	for _, a := range data.Agents {
+		for _, tool := range a.Tools {
+			scanArgs(tool.Args)
+		}
+	}
+	for _, t := range data.Tasks {
+		for _, tool := range t.Tools {
+			scanArgs(tool.Args)
+		}
+		scanArgs(t.Result)
+	}
+	data.NeedsField = needAnnotated
+	var typingNames []string
+	if needAnnotated {
+		typingNames = append(typingNames, "Annotated")
+	}
+	if needLiteral {
+		typingNames = append(typingNames, "Literal")
+	}
+	data.TypingImports = strings.Join(typingNames, ", ")
+
 	// Local handler files ride the artifact (tools/<name>.py); mcp mounts and
 	// local wrappers pull their imports.
 	seenLocal := map[string]bool{}
@@ -165,6 +196,24 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			}
 		}
 	}
+
+	// F3: a lone agent that is never a handoff target needs no chat_ctx plumbing
+	// (the canonical single-agent shape is Agent(instructions=...)). Drop the
+	// ctor param plus the NOT_GIVEN/NotGivenOr imports that only feed it. The llm
+	// module import survives only if something still references it (a fallback
+	// chain or a history helper); otherwise it too would be an unused import
+	// (dl§V26). Multi-agent output is unchanged.
+	data.SingleAgentMinimal = len(data.Agents) == 1 && !data.NeedsTasks &&
+		len(data.Agents[0].Transfers) == 0 && len(data.Agents[0].HumanTransfers) == 0 &&
+		len(data.Agents[0].Delegates) == 0
+	anyChain := len(data.SessionLLM.Chain) > 0
+	for _, a := range data.Agents {
+		anyChain = anyChain || (a.LLM != nil && len(a.LLM.Chain) > 0)
+	}
+	for _, t := range data.Tasks {
+		anyChain = anyChain || (t.LLM != nil && len(t.LLM.Chain) > 0)
+	}
+	data.NeedsLLM = !data.SingleAgentMinimal || anyChain || data.NeedsLastN || data.NeedsSummarize
 
 	// Typed shared state (SCHEMA 4.4): variables lower to a Userdata dataclass
 	// on the session; `assign` and `requires` read and write its fields.
@@ -619,8 +668,9 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 		}
 		sort.Slice(single.Assign, func(i, j int) bool { return single.Assign[i].Var < single.Assign[j].Var })
 		// A single task always returns to the owner (SCHEMA 4.7); the AgentTask
-		// hands back the typed result only (C4/N13).
-		return livekitDelegate{Method: ref, When: delegateWhen(c), Task: single, Then: "return"}, nil
+		// hands back the typed result only (C4/N13). The finality guidance stops
+		// the owner LLM re-running the finished flow (B1/V1).
+		return livekitDelegate{Method: ref, When: delegateWhen(c) + delegateReturnFinality, Task: single, Then: "return"}, nil
 	}
 	group, ok := agent.TaskGroups[c.Group]
 	if !ok {
@@ -637,6 +687,9 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 	// result that never comes). The lowerings themselves live in the template.
 	switch group.Then {
 	case ir.GroupReturn:
+		// The flow returns its typed results; tell the owner they are final so it
+		// relays them and does not re-run the finished flow (B1/V1).
+		delegate.When += delegateReturnFinality
 	case ir.GroupTransfer:
 		delegate.ThenClass = pyName(group.ThenTarget)
 		delegate.When += " This flow does not return to you: when it finishes the caller is handed to the " + group.ThenTarget + "."
@@ -664,7 +717,15 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 		built.LLM = &taskLLM
 	}
 	for _, fname := range sortedResultNames(task.Result) {
-		built.Result = append(built.Result, livekitArg{Name: fname, PyType: resultPyType(task.Result[fname]), Required: true})
+		rf := task.Result[fname]
+		base := resultPyType(rf)
+		// V2: a result field's enum reaches the finish() arg as Literal[...] too
+		// (resultPyType collapses it to str otherwise); result fields carry no
+		// description in the schema.
+		built.Result = append(built.Result, livekitArg{
+			Name: fname, PyType: base, Required: true, Enum: rf.Enum,
+			Anno: pyAnno(base, rf.Enum, ""),
+		})
 	}
 	mcpByEnv := map[string][]string{}
 	for _, ref := range task.Tools {
@@ -809,10 +870,13 @@ func livekitCtxExpr(c ir.TaskContext) (expr string, needsLastN bool) {
 		}
 		return fmt.Sprintf("_last_n(self.chat_ctx, %d)", c.MaxMessages), true
 	default: // full
+		// exclude_handoff drops stale AgentHandoff markers from the carried
+		// history (upstream recipe idiom); exclude_config_update is intentionally
+		// omitted to stay within the >=1.5 floor (dl§C6).
 		if excludeCalls {
-			return "self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True)", false
+			return "self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True, exclude_handoff=True)", false
 		}
-		return "self.chat_ctx.copy(exclude_instructions=True)", false
+		return "self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)", false
 	}
 }
 
@@ -842,6 +906,11 @@ func delegateWhen(c *ir.Delegate) string {
 	}
 	return "Run this flow."
 }
+
+// delegateReturnFinality is appended to a then:return delegate docstring so the
+// owner LLM treats the returned result as the final outcome and does not re-run
+// the finished flow (B1/V1; mirrors the upstream flow-entry docstring idiom).
+const delegateReturnFinality = " When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request."
 
 func humanize(name string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(name, "_", " "), "-", " ")
@@ -887,14 +956,52 @@ func livekitToolArgs(input map[string]any) []livekitArg {
 	args := make([]livekitArg, 0, len(names))
 	for _, n := range names {
 		pt := "str"
+		var enum []string
+		var desc string
 		if prop, ok := props[n].(map[string]any); ok {
 			if t, ok := prop["type"].(string); ok {
 				pt = jsonPyType(t)
 			}
+			// V2: carry the declared enum and per-property description across so
+			// the LLM sees the schema the tool YAML wrote (C4). Non-string enum
+			// values are left off Literal (falls back to the base type).
+			if e, ok := prop["enum"].([]any); ok {
+				for _, v := range e {
+					if s, ok := v.(string); ok {
+						enum = append(enum, s)
+					}
+				}
+			}
+			if d, ok := prop["description"].(string); ok {
+				desc = d
+			}
 		}
-		args = append(args, livekitArg{Name: n, PyType: pt, Required: required[n]})
+		args = append(args, livekitArg{
+			Name: n, PyType: pt, Required: required[n], Enum: enum, Desc: desc,
+			Anno: pyAnno(pt, enum, desc),
+		})
 	}
 	return args
+}
+
+// pyAnno renders a tool arg's Python annotation from its base type, enum, and
+// description (V2). An enum becomes Literal[...]; a description wraps the type in
+// Annotated[..., Field(description=...)]. LiveKit derives the JSON-schema the LLM
+// sees from these via pydantic (build_legacy_openai_schema): Literal → enum,
+// Field(description=...) → the property description.
+func pyAnno(base string, enum []string, desc string) string {
+	typeExpr := base
+	if len(enum) > 0 {
+		quoted := make([]string, len(enum))
+		for i, e := range enum {
+			quoted[i] = pyQuote(e)
+		}
+		typeExpr = "Literal[" + strings.Join(quoted, ", ") + "]"
+	}
+	if desc != "" {
+		return "Annotated[" + typeExpr + ", Field(description=" + pyQuote(desc) + ")]"
+	}
+	return typeExpr
 }
 
 func livekitTaskPrompt(task ir.Task, result []livekitArg) string {

@@ -1,0 +1,23 @@
+description: >-
+  Identify a Sage and Stone customer by phone number before any availability
+  check or appointment change. Use only the returned customer_id; never invent
+  one or use a placeholder.
+
+input:
+  type: object
+  properties:
+    phone: { type: string, description: Customer phone number }
+  required: [phone]
+
+output:
+  type: object
+  properties:
+    found: { type: boolean }
+    customer_id: { type: string }
+    name: { type: string }
+  required: [found, customer_id, name]
+
+execution: local
+handler: tools/lookup_customer.py
+interruption: provider_default
+effect: returns_data

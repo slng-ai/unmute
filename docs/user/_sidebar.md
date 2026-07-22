@@ -17,6 +17,7 @@
 
 - Concepts
   - [How Unmute works](concepts/how-unmute-works.md)
+  - [Why tasks and task groups](concepts/why-tasks-and-task-groups.md)
   - [How targets interpret your YAML](concepts/how-targets-run-your-agent.md)
   - [Our take on orchestrators](concepts/our-take-on-orchestrators.md)
   - [Models and overrides](concepts/profiles-and-bindings.md)

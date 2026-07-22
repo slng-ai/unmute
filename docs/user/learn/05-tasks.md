@@ -142,4 +142,6 @@ Tasks are the first tier where a whole platform drops out:
 
 So a task is portable across the code targets and one managed target, but not Vapi.
 
+Not sure a task is the right tool? [Why tasks and task groups](../concepts/why-tasks-and-task-groups.md) covers when to reach for one, versus a single agent or a full handoff.
+
 Next: [06. Task groups](06-task-groups.md), which run several tasks in order and decide what happens when they finish.
