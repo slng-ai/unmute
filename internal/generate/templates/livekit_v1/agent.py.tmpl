@@ -60,7 +60,9 @@ import os
 {{- if .Outbound}}
     AMD,
 {{- end}}
+{{- if not .SingleAgentMinimal}}
     NOT_GIVEN,
+{{- end}}
     Agent,
 {{- if .NeedsTasks}}
     AgentTask,
@@ -73,7 +75,9 @@ import os
 {{- end}}
     JobContext,
     JobProcess,
+{{- if not .SingleAgentMinimal}}
     NotGivenOr,
+{{- end}}
 {{- if .NeedsFunctionTools}}
     RunContext,
 {{- end}}
@@ -86,7 +90,9 @@ import os
     get_job_context,
 {{- end}}
     inference,
+{{- if .NeedsLLM}}
     llm,
+{{- end}}
 {{- if .NeedsMCP}}
     mcp,
 {{- end}}
@@ -268,10 +274,12 @@ class IgnorePhrasesMixin:
 # --- agents ----------------------------------------------------------------
 {{range .Agents}}
 class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
-    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+    def __init__(self{{if not $.SingleAgentMinimal}}, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN{{end}}) -> None:
         super().__init__(
             instructions={{.PromptConst}},
+{{- if not $.SingleAgentMinimal}}
             chat_ctx=chat_ctx,
+{{- end}}
 {{- if .LLM}}
             llm={{template "llmexpr" .LLM}},
 {{- end}}

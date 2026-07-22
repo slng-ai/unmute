@@ -642,6 +642,58 @@ func TestV2LiveKitToolCarriesSchema(t *testing.T) {
 	}
 }
 
+// TestF3LiveKitSingleAgentMinimalShape guards F3: a lone agent that is never a
+// handoff target emits the canonical Agent(instructions=...) shape with no
+// chat_ctx ctor plumbing and no NOT_GIVEN/NotGivenOr/llm imports that only feed
+// it. Multi-agent output is unchanged.
+func TestF3LiveKitSingleAgentMinimalShape(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	if !strings.Contains(botpy, "    def __init__(self) -> None:") {
+		t.Error("minimal single agent must have a plain __init__(self) with no chat_ctx param")
+	}
+	for _, forbidden := range []string{
+		"chat_ctx: NotGivenOr[llm.ChatContext]",
+		"chat_ctx=chat_ctx",
+		"    NOT_GIVEN,",
+		"    NotGivenOr,",
+		"    llm,",
+	} {
+		if strings.Contains(botpy, forbidden) {
+			t.Errorf("minimal single agent must not emit %q", forbidden)
+		}
+	}
+
+	// Guard against over-application: multi-agent Remy keeps the plumbing.
+	rpkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ragent, err := ir.Build(rpkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rart, err := Generate(ragent, targetByProvider(t, ragent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate remy: %v", err)
+	}
+	remypy := artifactFile(t, rart, "agent.py")
+	if !strings.Contains(remypy, "def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:") {
+		t.Error("multi-agent Remy must keep the chat_ctx handoff plumbing")
+	}
+}
+
 // TestLiveKitV1IsolatedGroup covers the T13 lowering (V2/C3): an isolated
 // task_group compiles to a sequence of standalone AgentTasks, each starting
 // with a fresh context — never a TaskGroup, which always shares context.

@@ -271,6 +271,8 @@ type livekitData struct {
 	NeedsFunctionTools bool   // RunContext + function_tool imports
 	TypingImports      string // `from typing import ...` names (Annotated/Literal), "" if none (V2)
 	NeedsField         bool   // `from pydantic import Field` — any tool arg carries a description (V2)
+	SingleAgentMinimal bool   // one agent, never a handoff target: drop the chat_ctx ctor plumbing (F3)
+	NeedsLLM           bool   // the `llm` module import (chat_ctx param, fallback chains, or history helpers)
 	NeedsHTTPX         bool // any webhook tool
 	HasVars            bool // Userdata dataclass + session userdata
 	NeedsLastN         bool // the _last_n history helper

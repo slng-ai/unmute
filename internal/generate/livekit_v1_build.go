@@ -187,6 +187,24 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		}
 	}
 
+	// F3: a lone agent that is never a handoff target needs no chat_ctx plumbing
+	// (the canonical single-agent shape is Agent(instructions=...)). Drop the
+	// ctor param plus the NOT_GIVEN/NotGivenOr imports that only feed it. The llm
+	// module import survives only if something still references it (a fallback
+	// chain or a history helper); otherwise it too would be an unused import
+	// (dl§V26). Multi-agent output is unchanged.
+	data.SingleAgentMinimal = len(data.Agents) == 1 && !data.NeedsTasks &&
+		len(data.Agents[0].Transfers) == 0 && len(data.Agents[0].HumanTransfers) == 0 &&
+		len(data.Agents[0].Delegates) == 0
+	anyChain := len(data.SessionLLM.Chain) > 0
+	for _, a := range data.Agents {
+		anyChain = anyChain || (a.LLM != nil && len(a.LLM.Chain) > 0)
+	}
+	for _, t := range data.Tasks {
+		anyChain = anyChain || (t.LLM != nil && len(t.LLM.Chain) > 0)
+	}
+	data.NeedsLLM = !data.SingleAgentMinimal || anyChain || data.NeedsLastN || data.NeedsSummarize
+
 	// Typed shared state (SCHEMA 4.4): variables lower to a Userdata dataclass
 	// on the session; `assign` and `requires` read and write its fields.
 	for _, name := range sortedVarNames(agent) {
