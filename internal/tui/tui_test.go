@@ -117,6 +117,23 @@ func TestV27RedrawsInPlaceNoScrollback(t *testing.T) { // docs/spec/tui.md V27
 	}
 }
 
+func TestV33NoticeRendersScrollableOutput(t *testing.T) { // docs/spec/tui.md V33, V21
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	shown, _ := sized.(console).Update(requestMsg{ok: true, request: noticeRequest{
+		title: "validate",
+		run:   func(w io.Writer) error { return nil },
+		done:  make(chan error, 1),
+	}})
+	loaded, _ := shown.(console).Update(noticeDoneMsg{text: "line one\nline two"})
+	view := loaded.(console).View()
+	for _, want := range []string{"validate", "line one", "line two", "scroll"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("notice missing %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestV35InteractiveMenuDefaultsToFirstRow(t *testing.T) { // docs/spec/tui.md V35, V38
 	req := fieldReq{
 		kind: kindSelect, title: "Variables", backable: true, initial: "type",
