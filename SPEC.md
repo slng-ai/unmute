@@ -134,8 +134,8 @@ id|status|desc|cites
 T1|x|emit `compose.dev.yaml` for both code targets: pipecat `application` template, livekit `livekit_server`+`application` template, wire into `generate.Generate`; L1/L3 goldens with `-update`|I.compose,V2,V3,V4,V11
 T2|x|make local Docker mode the default runner: preflight, generate, `up --build --detach --wait`, project-scoped `down` on every exit, logs to `build/<target>/dev.log`, `--verbose` follows; delete the host-uv web path and the `runLiveKitWeb` server-spawn branch, migrate token mint + readiness into the runner; missing-Docker install message|I.dev,I.console,V1,V5,V8,V9,V10
 T3|x|standardize the web UI: `GET /api/session` bootstrap handler (httptest-able) + one SLNG-branded page whose only per-target code is the transport adapter; keep the pipecat offer reverse-proxy and livekit token mint|I.session,I.web,V6
-T4|.|console routing: `--console` keeps native uv + host audio; `--console --telephony` stays rejected|I.console,V7
-T5|.|gate preservation: telephony fail-closed path and its L2 gate test untouched; local mode isolated from telephony code|V10
+T4|x|console routing: `--console` keeps native uv + host audio; `--console --telephony` stays rejected|I.console,V7
+T5|x|gate preservation: telephony fail-closed path and its L2 gate test untouched; local mode isolated from telephony code|V10
 T6|.|tests: L2 default-mode routing, docker-missing text, command sequences (`up --build --detach --wait`, logs, project-scoped `down`, no `--volumes`), env passthrough, session-endpoint contract, teardown on interrupt; L4 smoke (build tag) for real Docker/browser; full suite green with zero Python/network/Docker|V1-V11
 T7|.|docs: `docs/user/reference/cli.md`, the learn-flow dev-mode pages, `docs/user/targets/{pipecat,livekit}.md`, and a going-live "local Compose to production" checklist per route; local mode is the deployable-image test step, Kubernetes is the same image with different manifests|I.dev,I.compose
 

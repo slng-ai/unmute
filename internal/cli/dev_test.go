@@ -437,6 +437,17 @@ func TestSelectDevTargetRequiresNameForMultipleWithoutTTY(t *testing.T) {
 	}
 }
 
+// TestDevConsoleAndTelephonyRejected: console (native, host audio) and
+// telephony (containerized) are mutually exclusive and refused up front,
+// before any generation or Docker (SPEC V7).
+func TestDevConsoleAndTelephonyRejected(t *testing.T) {
+	dir := copySafeCore(t)
+	_, err := run(t, "dev", dir, "--target", "pipecat", "--console", "--telephony")
+	if err == nil || !strings.Contains(err.Error(), "--console and --telephony cannot be used together") {
+		t.Fatalf("console+telephony error = %v", err)
+	}
+}
+
 // TestDevWebRejectsManagedProvider: a managed provider has no local dev runner
 // and is refused before generation or any Docker preflight (SPEC I.dev).
 func TestDevWebRejectsManagedProvider(t *testing.T) {
