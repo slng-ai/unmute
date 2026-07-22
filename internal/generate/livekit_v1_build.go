@@ -605,8 +605,9 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 		}
 		sort.Slice(single.Assign, func(i, j int) bool { return single.Assign[i].Var < single.Assign[j].Var })
 		// A single task always returns to the owner (SCHEMA 4.7); the AgentTask
-		// hands back the typed result only (C4/N13).
-		return livekitDelegate{Method: ref, When: delegateWhen(c), Task: single, Then: "return"}, nil
+		// hands back the typed result only (C4/N13). The finality guidance stops
+		// the owner LLM re-running the finished flow (B1/V1).
+		return livekitDelegate{Method: ref, When: delegateWhen(c) + delegateReturnFinality, Task: single, Then: "return"}, nil
 	}
 	group, ok := agent.TaskGroups[c.Group]
 	if !ok {
@@ -623,6 +624,9 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 	// result that never comes). The lowerings themselves live in the template.
 	switch group.Then {
 	case ir.GroupReturn:
+		// The flow returns its typed results; tell the owner they are final so it
+		// relays them and does not re-run the finished flow (B1/V1).
+		delegate.When += delegateReturnFinality
 	case ir.GroupTransfer:
 		delegate.ThenClass = pyName(group.ThenTarget)
 		delegate.When += " This flow does not return to you: when it finishes the caller is handed to the " + group.ThenTarget + "."
@@ -816,6 +820,11 @@ func delegateWhen(c *ir.Delegate) string {
 	}
 	return "Run this flow."
 }
+
+// delegateReturnFinality is appended to a then:return delegate docstring so the
+// owner LLM treats the returned result as the final outcome and does not re-run
+// the finished flow (B1/V1; mirrors the upstream flow-entry docstring idiom).
+const delegateReturnFinality = " When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request."
 
 func humanize(name string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(name, "_", " "), "-", " ")

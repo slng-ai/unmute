@@ -539,9 +539,54 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 		"caller_phone: str | None = None",
 		"session = AgentSession[Userdata](",
 		"userdata=Userdata(),",
+		// V1/B1: the single-task delegate docstring carries the finality guidance
+		// so the owner LLM does not re-run the finished flow.
+		"Do not run this flow again for the same request.",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
+		}
+	}
+}
+
+// TestV1LiveKitCompletedFlowEndsOnce guards F0/B1: a completed task/delegate
+// returns control once and the owner never re-runs a finished flow. Deterministic
+// proxies: finish() resolves via self.complete() only (`-> None`, no trailing
+// return that would emit a stray output after the task closes), and every
+// then:return delegate docstring tells the LLM the result is final and the flow
+// must not re-run.
+func TestV1LiveKitCompletedFlowEndsOnce(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+
+	// finish() is the sole resolution: -> None, no value returned after complete().
+	if !strings.Contains(botpy, "async def finish(self, ctx: RunContext, sent: bool) -> None:") {
+		t.Error("finish must be typed -> None (complete() is the sole resolution)")
+	}
+	if strings.Contains(botpy, `return "Done."`) {
+		t.Error(`finish must not return a value after self.complete() (stray post-completion output)`)
+	}
+	// Every then:return delegate (do_reserve, do_event here) states the result is
+	// final and the flow must not re-run.
+	for _, delegate := range []string{"async def do_reserve", "async def do_event"} {
+		idx := strings.Index(botpy, delegate)
+		if idx < 0 {
+			t.Fatalf("delegate %q not emitted", delegate)
+		}
+		doc := botpy[idx : idx+400]
+		if !strings.Contains(doc, "Do not run this flow again for the same request.") {
+			t.Errorf("then:return delegate %q missing finality guidance in its docstring", delegate)
 		}
 	}
 }

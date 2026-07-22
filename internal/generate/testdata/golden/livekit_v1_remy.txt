@@ -200,7 +200,7 @@ class Events(Agent):
 
     @function_tool
     async def do_event(self, ctx: RunContext) -> dict:
-        """The caller is ready to plan their event; run the events flow."""
+        """The caller is ready to plan their event; run the events flow. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request."""
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True),
             summarize_chat_ctx=False,
@@ -265,7 +265,7 @@ class Reservations(Agent):
 
     @function_tool
     async def do_reserve(self, ctx: RunContext) -> dict:
-        """The caller is ready to book a table; run the reservation flow."""
+        """The caller is ready to book a table; run the reservation flow. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request."""
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True),
             summarize_chat_ctx=False,
@@ -310,10 +310,10 @@ class ConfirmBooking(AgentTask[dict]):
             return resp.json()
 
     @function_tool
-    async def finish(self, ctx: RunContext, sent: bool) -> str:
-        """Record the result of this step and finish."""
+    async def finish(self, ctx: RunContext, sent: bool) -> None:
+        """Record the result of this step and finish. complete() is the sole
+        resolution; do not relay anything after it."""
         self.complete({"sent": sent})
-        return "Done."
 
 class FindSlot(AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
@@ -334,10 +334,10 @@ class FindSlot(AgentTask[dict]):
             return resp.json()
 
     @function_tool
-    async def finish(self, ctx: RunContext, date: str, party_size: int, time: str) -> str:
-        """Record the result of this step and finish."""
+    async def finish(self, ctx: RunContext, date: str, party_size: int, time: str) -> None:
+        """Record the result of this step and finish. complete() is the sole
+        resolution; do not relay anything after it."""
         self.complete({"date": date, "party_size": party_size, "time": time})
-        return "Done."
 
 class QualifyEvent(AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
@@ -347,10 +347,10 @@ class QualifyEvent(AgentTask[dict]):
         self.session.generate_reply(instructions="Begin this step.")
 
     @function_tool
-    async def finish(self, ctx: RunContext, date: str, headcount: int, occasion: str) -> str:
-        """Record the result of this step and finish."""
+    async def finish(self, ctx: RunContext, date: str, headcount: int, occasion: str) -> None:
+        """Record the result of this step and finish. complete() is the sole
+        resolution; do not relay anything after it."""
         self.complete({"date": date, "headcount": headcount, "occasion": occasion})
-        return "Done."
 
 
 # --- session ---------------------------------------------------------------

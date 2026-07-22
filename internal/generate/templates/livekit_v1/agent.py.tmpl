@@ -424,10 +424,10 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict
         self.session.generate_reply(instructions="Begin this step.")
 {{range .Tools}}{{template "method_tool" .}}{{end}}
     @function_tool
-    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.PyType}}{{end}}) -> str:
-        """Record the result of this step and finish."""
+    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.PyType}}{{end}}) -> None:
+        """Record the result of this step and finish. complete() is the sole
+        resolution; do not relay anything after it."""
         self.complete({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} })
-        return "Done."
 {{end}}
 {{- end}}
 
