@@ -444,6 +444,7 @@ if __name__ == "__main__":
     "README.md",
     "agent.py",
     "compile-report.json",
+    "compose.dev.yaml",
     "livekit.toml",
     "pyproject.toml",
     "tracing.py"
@@ -552,6 +553,55 @@ if __name__ == "__main__":
     "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory"
   ]
 }
+=== compose.dev.yaml ===
+# Generated local-development topology. Not a production deployment model.
+# `unmute dev` builds and runs this: the same worker image production deploys,
+# talking to a single-node dev livekit-server over WebRTC in the browser. The
+# devkey/secret pair is the LiveKit --dev placeholder, never for production.
+services:
+  livekit_server:
+    image: livekit/livekit-server:v1.13.4
+    # Single-node dev server needs no external store (Redis only turns on
+    # distributed mode). Browser WebRTC through Docker Desktop needs three
+    # published ports: 7880 (signal/WS), 7881 (ICE/TCP fallback) and one UDP
+    # mux port 7882; the default 50000-60000 range is impractical to publish.
+    # --node-ip advertises a host-reachable ICE candidate instead of the
+    # container's internal IP. Verified against LiveKit self-hosting docs,
+    # config-sample.yaml and the server CLI on 2026-07-22.
+    command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1", "--udp-port", "7882"]
+    ports:
+      - "${UNMUTE_LIVEKIT_PORT:-7880}:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  application:
+    build:
+      context: .
+    command: ["python", "agent.py", "dev"]
+    environment:
+      - LIVEKIT_URL=ws://livekit_server:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=secret
+      - CHECK_AVAILABILITY_URL
+      - LANGFUSE_BASE_URL
+      - LANGFUSE_PUBLIC_KEY
+      - LANGFUSE_SECRET_KEY
+      - OPENAI_API_KEY
+      - SEND_CONFIRMATION_URL
+      - SLNG_API_KEY
+    depends_on:
+      livekit_server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('livekit_server', 7880), timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
 === livekit.toml ===
 # LiveKit Cloud agent config (`lk agent create` fills project/subdomain on
 # first deploy; the id below matches the worker's agent_name).

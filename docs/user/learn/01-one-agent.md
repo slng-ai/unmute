@@ -87,6 +87,13 @@ unmute validate acme
 unmute dev acme
 ```
 
+`unmute dev` builds the same Docker image you would deploy, runs it locally,
+and opens a browser page where you talk to the agent over WebRTC. It needs
+Docker (Docker Desktop or Docker Engine with the Compose plugin). No mic in the
+terminal? Prefer to skip the browser? Run `unmute dev acme --console` to talk
+over your terminal's mic and speaker instead; that path needs `uv`, not Docker.
+Press `ctrl-c` to stop; the container comes down on its own.
+
 ## Reading agent.yaml block by block
 
 **`version`** is always `1`. It pins the spec format.

@@ -537,24 +537,20 @@ LiveKit credentials** — it never connects to LiveKit Cloud. It asks for
 Inference (a think model with `provider: livekit`, or the cloud
 `turn-detector`); the preflight names what it needs.
 
-**Web** needs a LiveKit server, and the default is fully local: LiveKit's
-server is open source, so with no `LIVEKIT_URL` set, `unmute dev` starts
-`livekit-server --dev` for you (or reuses one already on `:7880`) and stops it
-when you quit — no cloud account, no cost. Install it once:
+**Web (the default)** runs everything in containers and needs Docker (Docker
+Desktop or Docker Engine with the Compose plugin). `unmute dev` builds the same
+worker image you deploy and, from the emitted `compose.dev.yaml`, starts a
+single-node `livekit-server --dev` container next to it, then serves the WebRTC
+web client. There is no LiveKit install, no cloud account, and no credentials:
+the dev server uses LiveKit's `--dev` key pair, the worker joins it over the
+Compose network, and the browser reaches it on the published ports (`7880` for
+signalling, `7881` for the TCP fallback, `7882/udp` for the UDP mux). The page
+mints a token and joins a fresh room; your agent is dispatched to that room
+automatically. To point at LiveKit Cloud or your own deployment instead, deploy
+the built image yourself; local dev always runs the containerized dev server.
 
-```sh
-brew install livekit                        # macOS
-curl -sSL https://get.livekit.io | bash     # Linux
-```
-
-To use LiveKit Cloud or your own deployment instead, set `LIVEKIT_URL`,
-`LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in a `.env` at the package root —
-explicit credentials always win. Either way, `unmute dev` runs
-`uv run agent.py dev`, waits for the worker to register, then opens a browser
-client that joins a fresh room; your agent is dispatched to that room
-automatically.
-
-Both read keys from `.env`; press `ctrl-c` to stop. See the
+Both modes read keys from `.env`; press `ctrl-c` to stop and the stack comes
+down (the data volume is kept). See the
 [dev command reference](../reference/cli.md#dev) for all flags.
 
 ## Know the LiveKit boundaries

@@ -437,42 +437,22 @@ func TestSelectDevTargetRequiresNameForMultipleWithoutTTY(t *testing.T) {
 	}
 }
 
-func TestCompileTargetForDevUsesExactInstance(t *testing.T) {
+// TestDevConsoleAndTelephonyRejected: console (native, host audio) and
+// telephony (containerized) are mutually exclusive and refused up front,
+// before any generation or Docker (SPEC V7).
+func TestDevConsoleAndTelephonyRejected(t *testing.T) {
 	dir := copySafeCore(t)
-	cmd := newRootCmd()
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	outDir, err := compileTargetForDev(cmd, dir, "pipecat")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if outDir != filepath.Join(dir, "build", "pipecat") {
-		t.Fatalf("outDir = %q", outDir)
-	}
-	if _, err := os.Stat(filepath.Join(outDir, "bot.py")); err != nil {
-		t.Fatal(err)
+	_, err := run(t, "dev", dir, "--target", "pipecat", "--console", "--telephony")
+	if err == nil || !strings.Contains(err.Error(), "--console and --telephony cannot be used together") {
+		t.Fatalf("console+telephony error = %v", err)
 	}
 }
 
-func TestDevSelectedTargetReportsProviderSpecificRunner(t *testing.T) {
+// TestDevWebRejectsManagedProvider: a managed provider has no local dev runner
+// and is refused before generation or any Docker preflight (SPEC I.dev).
+func TestDevWebRejectsManagedProvider(t *testing.T) {
 	dir := copySafeCore(t)
-	// livekit web with no URL now tries the local dev-server fallback; force
-	// both probes negative (no server on :7880, no binary) so the machine's
-	// real state can't change the branch (V10), and force the ambient creds
-	// empty. Expect the C7 install prompt pointing at --console.
-	t.Setenv("LIVEKIT_URL", "")
-	t.Setenv("LIVEKIT_API_KEY", "")
-	t.Setenv("LIVEKIT_API_SECRET", "")
-	restorePort, restoreLook := liveKitPortProbe, liveKitLookPath
-	liveKitPortProbe = func(string) bool { return false }
-	liveKitLookPath = func(string) (string, error) { return "", errors.New("not found") }
-	t.Cleanup(func() { liveKitPortProbe, liveKitLookPath = restorePort, restoreLook })
-
-	_, err := run(t, "dev", dir, "--target", "livekit")
-	if err == nil || !strings.Contains(err.Error(), "brew install livekit") || !strings.Contains(err.Error(), "--console") {
-		t.Fatalf("livekit web install-prompt error = %v", err)
-	}
-	_, err = run(t, "dev", dir, "--target", "elevenlabs")
+	_, err := run(t, "dev", dir, "--target", "elevenlabs")
 	if err == nil || !strings.Contains(err.Error(), `target "elevenlabs" uses managed ElevenLabs`) || !strings.Contains(err.Error(), "unmute apply") {
 		t.Fatalf("elevenlabs dev error = %v", err)
 	}

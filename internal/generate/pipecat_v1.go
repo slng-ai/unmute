@@ -223,6 +223,7 @@ type pipecatData struct {
 	Extras              []string
 	Deps                []string // standalone pip deps for plugin services (e.g. pipecat-slng)
 	RequiredEnv         []string
+	DevEnv              []string // provider creds the web dev image needs, without telephony/coordination env (compose.dev.yaml)
 	Notes               []string
 	Tracing             bool
 	Telephony           *pipecatTelephony
@@ -357,6 +358,7 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		{"bot.py", "bot.py"},
 		{"pyproject.toml", "pyproject.toml"},
 		{"Dockerfile", "Dockerfile"},
+		{"compose.dev.yaml", "compose.dev.yaml"},
 		{"README.md", "README.md"},
 		{"env.example", ".env.example"},
 	}

@@ -47,6 +47,7 @@ pipeline and its tools are plain functions on the LLM context, so the generated
 | `bot.py` | The whole agent: the pipeline, every agent worker, every task flow, tools, handoffs. |
 | `pyproject.toml` | Pinned dependencies. Only the services your spec uses are included. |
 | `Dockerfile` | A container image for deployment. |
+| `compose.dev.yaml` | The local dev stack `unmute dev` runs: one `application` service built from the `Dockerfile`, no coordination store. |
 | `pcc-deploy.toml` | Pipecat Cloud deploy config for non-telephony targets. |
 | `compose.telephony.yaml` | The generated application plus version-pinned Redis for telephony targets. |
 | `README.md` | A quickstart for the generated project. |
@@ -250,11 +251,15 @@ unmute dev acme --target pipecat --telephony   # answer real phone calls
 
 The command selects the only target automatically; with multiple targets, it
 prompts in a terminal or requires `--target <name>` in a noninteractive shell.
-Browser mode runs `bot.py` with uv and opens the web client. `--console` runs
-`uv run --extra console bot.py console` over your local microphone and speaker.
-On macOS, install PortAudio first with `brew install portaudio`. Both modes read
-keys from `.env`. Browser logs go to `build/<target>/bot.log`; add `--verbose`
-to stream them. Console mode streams directly to the terminal.
+Browser mode (the default) builds the deployable image and runs it via the
+emitted `compose.dev.yaml`, then serves a WebRTC web client against the
+container. It needs Docker (Docker Desktop or Docker Engine with the Compose
+plugin); this is the same image you deploy, so what you test is what ships.
+`--console` runs `uv run --extra console bot.py console` over your local
+microphone and speaker, no Docker; on macOS install PortAudio first with
+`brew install portaudio`. All modes read keys from `.env`. Browser logs go to
+`build/<target>/dev.log`; add `--verbose` to follow the container logs. Console
+mode streams directly to the terminal.
 
 The telephony command is the intended promoted-route interface. Today it fails
 with the route's credentialed-smoke diagnostic before checking a public URL,

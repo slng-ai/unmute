@@ -98,6 +98,35 @@ For deployment, both generated projects include a `Dockerfile`. Pipecat adds
 ordinary Python projects, so you can supply the listed environment variables
 through any host and run them without Unmute present.
 
+## From local Compose to production
+
+`unmute dev` is the "test the deployable image" step. It builds the same
+container image you ship and runs it under the emitted `compose.dev.yaml`, so
+what you talk to locally is the image you deploy. Production is that same image
+with real inputs and stable infrastructure. Kubernetes is the same image again
+with different manifests; LiveKit publishes open-source Helm charts for its
+server and workers.
+
+The generated `compose.dev.yaml` and `compose.telephony.yaml` are local
+development executors, not production manifests. Here is what each route uses
+in dev and what production replaces it with.
+
+**Pipecat, web.**
+- Dev-only: one `application` container, keys from a `.env`, the host port from `--bot-port`.
+- Production: your own provider keys from a secret store, a stable HTTPS/WSS ingress in front of the bot with WebSocket timeouts longer than your longest call, and scaling by concurrent sessions.
+
+**LiveKit, web.**
+- Dev-only: the `livekit-server --dev` container with its `devkey`/`secret` pair, the single UDP-mux port, and `--node-ip 127.0.0.1` so browser WebRTC reaches the container through Docker Desktop.
+- Production: your own LiveKit deployment or LiveKit Cloud with real API keys, TLS on the signalling port, the full RTC port range or a routable node IP, and worker autoscaling driven by dispatch and session load. The worker is the same image; only `LIVEKIT_URL`, the keys, and the manifest change.
+
+**Pipecat, telephony.**
+- Dev-only: the managed cloudflared quick tunnel, a single Valkey container, and the Twilio voice webhook set for you on every start.
+- Production: your own stable public HTTPS origin with WSS timeouts past your longest call, a managed Redis-protocol store, the carrier webhook set once by you, and secrets from a secret store. Scale by concurrent sessions and peak call-start rate.
+
+**LiveKit, telephony (SIP).**
+- Dev-only: the `livekit-server --dev` and `livekit-sip` containers, the dev key pair, a single Valkey container, a small RTP range, and the inbound trunk, outbound trunk, and dispatch rule created for you.
+- Production: your own keys, a managed Redis-protocol store, public SIP and RTP reachability, the trunk and dispatch records created once by you with `lk sip create` from the JSON the plan prints, and scaling by dispatch and session load.
+
 ## You have gone the whole way
 
 From [one agent](01-one-agent.md) to a complex, multi-agent, tool-using,

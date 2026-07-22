@@ -73,6 +73,10 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		}
 		data.Variables = append(data.Variables, pipecatVariable{Name: name, PyType: pt, Default: def, Source: string(v.Source)})
 	}
+	// Snapshot the provider creds before telephony env is added: the web dev
+	// image (compose.dev.yaml) runs bot.py over WebRTC and needs no telephony
+	// or coordination env.
+	data.DevEnv = env.sorted()
 	data.Telephony, err = buildPipecatTelephony(agent, target, env)
 	if err != nil {
 		return pipecatData{}, err
