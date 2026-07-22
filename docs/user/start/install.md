@@ -41,28 +41,30 @@ CGO_ENABLED=0 go build -o bin/unmute .
 
 ## Install tools for local runs
 
-Building and compiling need only `unmute`. The `unmute dev` command runs the
-generated Python project with **uv**, a Python package manager.
+Building and compiling need only `unmute`.
 
-Install uv by following the instructions at [docs.astral.sh/uv](https://docs.astral.sh/uv/). Then check it:
+The default `unmute dev` (browser) and `unmute dev --telephony` run the
+generated project in containers, so they need **Docker**: Docker Desktop or
+Docker Engine with the Compose plugin. `unmute dev` builds the same image you
+would deploy and runs it locally. If Docker or the Compose plugin is missing,
+`unmute dev` stops with an install message before doing any work.
+
+`unmute dev --console` is the no-Docker path. It runs the generated Python
+project with **uv**, a Python package manager, over your terminal's mic and
+speaker. Install uv from [docs.astral.sh/uv](https://docs.astral.sh/uv/), then
+check it:
 
 ```sh
 uv --version
 ```
-
-If `uv` isn't installed, `unmute dev` stops with an installation link.
-Everything else works without uv.
 
 Compiling a code target (Pipecat, LiveKit) also runs `ruff format` over the
 generated Python so it lands cleanly formatted. `ruff` is optional: without it,
 `unmute` writes the (still valid) code unformatted and prints a one-line
 warning. Install it from [docs.astral.sh/ruff](https://docs.astral.sh/ruff/).
 
-Browser and console modes have these additional requirements:
+Console mode has one extra requirement:
 
-- LiveKit browser mode needs a LiveKit server. Set `LIVEKIT_URL`,
-  `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` for an existing server, or install
-  `livekit-server` so `unmute dev` can start it locally.
 - Pipecat console mode needs PortAudio. On macOS, install it with
   `brew install portaudio`; uv installs the Python `pyaudio` package through
   the generated project's `console` extra.
@@ -70,8 +72,9 @@ Browser and console modes have these additional requirements:
 ## What you do not need
 
 You don't install Pipecat, Python packages, or platform SDKs by hand. When you
-run your agent, `unmute` generates the Python project, and uv installs its
-pinned dependencies on the first run.
+run your agent, `unmute` generates the Python project; the container build
+installs its pinned dependencies for browser mode, and uv does the same for
+`--console`.
 
 ## Next
 

@@ -91,11 +91,24 @@ The fastest loop for a **Pipecat or LiveKit** instance: compiles the selected ta
 - With multiple targets on an interactive terminal, `dev` always asks which instance to test and shows both instance name and provider. In a noninteractive shell, pass `--target <name>`; it never picks by YAML/map order or by preferring Pipecat.
 - `--target` dispatches that exact instance. Pipecat and LiveKit both run; a selected ElevenLabs target points to `unmute apply`, and unshipped providers report their own missing dev runner.
 
-**Web (default).** Opens a browser client:
-- Pipecat: runs `uv run bot.py`, proxies WebRTC to the local runner, serves the client.
-- LiveKit: runs `uv run agent.py dev`, waits for the worker to register, then serves a client that mints a token and joins the room (the agent joins the same room automatically). Zero-config by default: with no `LIVEKIT_URL` set, `unmute dev` uses the open-source dev server locally — reusing one already listening on `:7880`, or starting `livekit-server --dev` itself and stopping it when you quit. Install it once (`brew install livekit` on macOS; `curl -sSL https://get.livekit.io | bash` on Linux). Explicit `LIVEKIT_URL`/`LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET` in the environment or `.env` (LiveKit Cloud or self-hosted) always win. With no creds and no binary, the error names the install command and points at `--console`.
+**Web (default), runs the deployable container.** This is the default mode
+and it **requires Docker**. `unmute dev` builds the same image production
+deploys and talks to it through one standardized SLNG-branded web UI over
+WebRTC, the same page for both Pipecat and LiveKit. It generates the project,
+emits a `compose.dev.yaml` next to the `Dockerfile`, runs
+`docker compose up --build --wait` under a project-scoped name, serves the UI,
+and tears the stack down on exit (data volumes are kept). The only per-target
+difference is the transport adapter behind `GET /api/session`:
+- Pipecat: one `application` container runs `python bot.py --host 0.0.0.0 --port 7860`; the page POSTs its WebRTC offer, which the dev server proxies to the container.
+- LiveKit: a single-node `livekit-server --dev` container plus the `application` worker running `python agent.py dev`; the page mints a token and joins the room, and the worker joins it automatically. No LiveKit install, no host server, no credentials: the containerized dev server uses the `--dev` key pair, and the browser reaches it on the published ports.
 
-**Console (`--console`).** Talk in the terminal over your local mic and speaker — no browser, no dev server:
+The old host-`uv` web path is gone: local testing always runs the deployable
+image, so `uv` is **not** needed for web mode. If Docker or the Compose plugin
+is missing, `dev` fails before doing any work with an install message naming
+Docker Desktop or Docker Engine plus the Compose plugin, and points you at
+`--console` to talk without Docker.
+
+**Console (`--console`).** Talk in the terminal over your local mic and speaker. No browser, no Docker, no dev server:
 - Pipecat: `uv run --extra console bot.py console`. The `console` extra pulls in pyaudio; on macOS run `brew install portaudio` first.
 - LiveKit: `uv run agent.py console`. Needs **no** LiveKit credentials for a
   scaffold-default agent with native providers and local turn detection. It
@@ -145,22 +158,26 @@ fails closed; after promotion, `compile` can select several targets or all of
 them, while `dev --telephony` runs one exact route at a time. Pass its instance
 name, such as `--target pipecat_twilio` or `--target livekit_plivo`.
 
-- Browser and console modes require `uv` on your `PATH` (see
-  [install](../start/install.md)); telephony mode requires Docker with the
-  Compose plugin. All modes read keys from a `.env` at the package root.
-- `--port` sets the dev UI port (default 8765). `--bot-port` sets the generated
-  agent host port (default 7860); in telephony mode the CLI passes it to
-  Compose as `UNMUTE_TELEPHONY_PORT`. `--console` ignores both web ports.
-- Telephony Compose projects use
-  `unmute-<source-dir>-<target>-<path-hash>`. Separate projects still need
-  distinct host ports; LiveKit accepts `UNMUTE_LIVEKIT_PORT`,
-  `UNMUTE_LIVEKIT_SIP_PORT`, and `UNMUTE_LIVEKIT_RTP_PORT_RANGE` in addition to
-  `UNMUTE_TELEPHONY_PORT`.
-- `--no-open` skips opening the browser; `--verbose` streams agent logs to your terminal.
-- Web-mode agent logs are written to `build/<name>/bot.log` (Pipecat) or
-  `agent.log` (LiveKit); telephony logs use `telephony.log`; console mode streams
-  straight to your terminal. Press `ctrl-c` to stop.
+- Web (default) and telephony modes require **Docker** with the Compose plugin.
+  Console mode requires `uv` on your `PATH` (see
+  [install](../start/install.md)). All modes read keys from a `.env` at the
+  package root; the compose files list env var names only, values come from
+  your environment at run time and are never written into the file.
+- `--port` sets the dev UI port (default 8765). `--bot-port` sets the host port
+  the agent container is published on (default 7860); the CLI passes it to
+  Compose as `UNMUTE_DEV_PORT` in web mode and `UNMUTE_TELEPHONY_PORT` in
+  telephony mode. `--console` ignores both web ports.
+- Compose projects use `unmute-<source-dir>-<target>-<path-hash>`, so several
+  local stacks coexist. Separate stacks still need distinct host ports;
+  LiveKit web publishes `7880` (signal), `7881` (ICE/TCP), and `7882/udp`
+  (ICE/UDP mux). Telephony LiveKit additionally accepts `UNMUTE_LIVEKIT_PORT`,
+  `UNMUTE_LIVEKIT_SIP_PORT`, and `UNMUTE_LIVEKIT_RTP_PORT_RANGE`.
+- `--no-open` skips opening the browser; `--verbose` follows the container logs
+  in your terminal.
+- Web-mode logs (both targets) are written to `build/<name>/dev.log`; telephony
+  logs use `telephony.log`; console mode streams straight to your terminal.
+  Press `ctrl-c` to stop; the stack comes down and data volumes are kept.
 - Fails clearly if no target is declared, the selected provider has no local
-  runner, required credentials are missing, Docker Compose or its daemon is
-  unavailable for telephony, a declared service is unhealthy, local LiveKit
-  settings conflict, or `uv` is unavailable for browser/console mode.
+  runner, Docker or its daemon is unavailable for web/telephony mode, a declared
+  service is unhealthy, required telephony credentials are missing, local
+  LiveKit settings conflict, or `uv` is unavailable for console mode.
