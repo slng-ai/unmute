@@ -28,6 +28,7 @@ Go structs are the schema source for their own surface: `internal/spec` derives 
 
 ## Layout
 `internal/` not `pkg/`. One file per command in `internal/cli/`. Hand-write cobra commands — **no `cobra-cli` generator**.
+The `docs/spec` holds all the specs of what we are building.
 
 ## Skills
 - Ponytail for writing great code
