@@ -318,6 +318,26 @@ func TestComposeLocalEnvironmentAndLiveKitConflicts(t *testing.T) { // telephony
 	}
 }
 
+// Trunk IDs are supplied by the dev command itself (SPEC V4): they are never
+// demanded from the user and a user-set value is rejected, not overridden.
+func TestComposeDevSuppliedEnvironmentIsNeverDemandedAndRejectsOverrides(t *testing.T) {
+	plan := &generate.TelephonyRuntimePlan{
+		RequiredEnv:      []string{"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK", "LIVEKIT_URL", "TWILIO_SIP_PASSWORD"},
+		LocalEnvironment: []string{"LIVEKIT_URL"},
+		DevSuppliedEnv:   []string{"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK"},
+	}
+	if got := externalTelephonyEnv(plan); strings.Join(got, ",") != "TWILIO_SIP_PASSWORD" {
+		t.Fatalf("external env = %v", got)
+	}
+	err := rejectLocalTopologyConflicts(plan, []string{"LIVEKIT_SIP_INBOUND_TRUNK=ST_stale"})
+	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_SIP_INBOUND_TRUNK is supplied by `unmute dev --telephony` itself") {
+		t.Fatalf("dev-supplied override = %v", err)
+	}
+	if err := rejectLocalTopologyConflicts(plan, []string{"LIVEKIT_SIP_OUTBOUND_TRUNK="}); err != nil {
+		t.Fatalf("empty dev-supplied override should not conflict: %v", err)
+	}
+}
+
 func TestDevTelephonyReportsProvisionalRouteBeforeConfiguration(t *testing.T) { // telephony V11, V17, B12
 	restore := composePreflight
 	preflightCalled := false

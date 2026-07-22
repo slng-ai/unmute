@@ -71,6 +71,31 @@ func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 	if got := coordinationReasonNames(plan.CoordinationReasons); got != "admission,call_correlation,callback_idempotency,human_transfer" {
 		t.Fatalf("coordination reasons = %s", got)
 	}
+	if plan.AutoWebhookEndpoint != "inbound" || len(plan.DevEnvironment) != 0 {
+		t.Fatalf("auto webhook = %q, dev environment = %v", plan.AutoWebhookEndpoint, plan.DevEnvironment)
+	}
+}
+
+// An outbound-only channel emits no inbound endpoint, so the auto-webhook
+// fact must not survive projection (nothing to point the carrier at).
+func TestBuildClearsAutoWebhookWithoutInboundEndpoint(t *testing.T) {
+	pkg := loadSafeCore(t)
+	inbound, outbound := false, true
+	pkg.Agent.Channels["phone"] = packagespec.Channel{
+		Kind: "telephony", Inbound: &inbound, Outbound: &outbound, OnVoicemail: "hangup",
+	}
+	target := pkg.Targets["pipecat"]
+	target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
+	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := agent.Targets["pipecat"].Telephony
+	if plan == nil || plan.AutoWebhookEndpoint != "" {
+		t.Fatalf("outbound-only plan auto webhook = %#v", plan)
+	}
 }
 
 func TestBuildLiveKitSIPUsesSharedDispatchPlan(t *testing.T) { // telephony T10, V13, V18
@@ -102,6 +127,13 @@ func TestBuildLiveKitSIPUsesSharedDispatchPlan(t *testing.T) { // telephony T10,
 	}
 	if got := strings.Join(plan.LocalEnvironment, ","); got != "LIVEKIT_API_KEY,LIVEKIT_API_SECRET,LIVEKIT_URL,REDIS_URL" {
 		t.Fatalf("LiveKit SIP locally supplied environment = %s", got)
+	}
+	// Fixture is inbound-only, so only the inbound trunk ID is dev-supplied.
+	if got := strings.Join(plan.DevEnvironment, ","); got != "LIVEKIT_SIP_INBOUND_TRUNK" {
+		t.Fatalf("LiveKit SIP dev-supplied environment = %s", got)
+	}
+	if plan.AutoWebhookEndpoint != "" {
+		t.Fatalf("LiveKit SIP auto webhook = %q", plan.AutoWebhookEndpoint)
 	}
 	if got := coordinationReasonNames(plan.CoordinationReasons); got != "livekit_control_plane" {
 		t.Fatalf("LiveKit SIP coordination reasons = %s", got)

@@ -3,23 +3,33 @@ package generate
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/slng/unmute/internal/ir"
 )
 
 type TelephonyRuntimePlan struct {
-	Route            ir.TelephonyKey                  `json:"route"`
-	Processes        []TelephonyProcess               `json:"processes"`
-	PublicEndpoints  []TelephonyEndpoint              `json:"public_endpoints,omitempty"`
-	RequiredEnv      []string                         `json:"required_env"`
-	LocalEnvironment []string                         `json:"locally_supplied_environment"`
-	ManualSteps      []string                         `json:"manual_steps,omitempty"`
-	Evidence         []ir.TelephonyFeatureEvidence    `json:"evidence"`
-	Services         []string                         `json:"services"`
-	Coordination     string                           `json:"coordination"`
-	Reasons          []ir.TelephonyCoordinationReason `json:"coordination_reasons"`
-	AdmissionOwner   string                           `json:"admission_owner"`
+	Route            ir.TelephonyKey     `json:"route"`
+	Processes        []TelephonyProcess  `json:"processes"`
+	PublicEndpoints  []TelephonyEndpoint `json:"public_endpoints,omitempty"`
+	RequiredEnv      []string            `json:"required_env"`
+	LocalEnvironment []string            `json:"locally_supplied_environment"`
+	// DevSuppliedEnv names required env values the dev command supplies
+	// itself for local runs; they are never demanded from the user.
+	DevSuppliedEnv []string `json:"dev_supplied_environment,omitempty"`
+	// Environment maps the Connection's carrier vocabulary keys to the env
+	// var names the user chose (names only, never values).
+	Environment map[string]string `json:"environment,omitempty"`
+	// AutoWebhookEndpoint names the public endpoint the dev command sets as
+	// the carrier voice webhook automatically; empty keeps manual steps.
+	AutoWebhookEndpoint string                           `json:"auto_webhook_endpoint,omitempty"`
+	ManualSteps         []string                         `json:"manual_steps,omitempty"`
+	Evidence            []ir.TelephonyFeatureEvidence    `json:"evidence"`
+	Services            []string                         `json:"services"`
+	Coordination        string                           `json:"coordination"`
+	Reasons             []ir.TelephonyCoordinationReason `json:"coordination_reasons"`
+	AdmissionOwner      string                           `json:"admission_owner"`
 }
 
 type TelephonyProcess = ir.TelephonyProcess
@@ -45,7 +55,9 @@ func TelephonyRuntimePlanFor(target ir.Target) *TelephonyRuntimePlan {
 		Route: plan.Key, Evidence: slices.Clone(plan.Evidence), Coordination: plan.Coordination,
 		Processes: processes, PublicEndpoints: slices.Clone(plan.PublicEndpoints),
 		RequiredEnv: slices.Clone(plan.RequiredEnvironment), LocalEnvironment: slices.Clone(plan.LocalEnvironment),
-		ManualSteps: slices.Clone(plan.ManualSteps), Services: slices.Clone(plan.Services),
+		DevSuppliedEnv: slices.Clone(plan.DevEnvironment), Environment: maps.Clone(plan.Environment),
+		AutoWebhookEndpoint: plan.AutoWebhookEndpoint,
+		ManualSteps:         slices.Clone(plan.ManualSteps), Services: slices.Clone(plan.Services),
 		Reasons: reasons, AdmissionOwner: plan.AdmissionOwner,
 	}
 	return runtime
