@@ -144,6 +144,9 @@ always runs the deployable container.
   2.0.0 when its data channel opens. It renders `bot-output` by `segment_id`,
   replacing progress updates within one bot turn, and never appends deprecated
   `bot-transcription` frames as separate turns.
+- V17: the LiveKit browser renders remote transcription updates by `segment.id`,
+  replacing interim and final text within one bot turn instead of appending a
+  transcript row per event.
 
 ## §T tasks
 
@@ -169,3 +172,4 @@ B2|2026-07-22|LiveKit generated projects read `.env.local` while CLI, Compose, P
 B3|2026-07-22|B2 standardized the filename but left `devChildEnv` package-only; repo-root `.env` remained an unloaded file, so both containers still missed shared credentials|V14
 B4|2026-07-22|`writeArtifactFiles` removed the whole target directory before every compile/dev rewrite, deleting a user-created `.env`; no regression distinguished generated files from this user-owned secret, and preserving it without a Docker exclusion would have baked it into `COPY . .`|V15
 B5|2026-07-22|the hand-written Pipecat browser opened an RTVI data channel without the required `client-ready` handshake and rendered deprecated `bot-transcription` payloads by appending one DOM turn per frame; readiness was unreliable and cumulative/progress frames appeared as repeated answers|V16
+B6|2026-07-22|the LiveKit `TranscriptionReceived` handler called `pushTurn` for every remote segment event, so cumulative interim updates and the final update rendered as separate bot answers|V17
