@@ -97,7 +97,7 @@ T20|x|render the header (logo badge, breadcrumb, target status) and the Home wor
 T21|x|render the section sidebar tree (five sections, inline children, current values, focus border) and the footer hint bar|C10,C11,C16,V44
 T22|x|port every field and overview editor (select/input/text/overview) from huh to `bubbles` components inside the editor panel; keep the overview-menu pattern and the Back rules|C13,V35,V37,V38,V44
 T23|.|command palette overlay (`Ctrl+P` / `:`), fuzzy filter, every bound action plus a jump to every section|C16,V45
-T24|.|responsive breakpoints, value tail-truncation, single-pane drill-down, and the too-small message|C17,V46
+T24|x|responsive breakpoints, value tail-truncation, single-pane drill-down, and the too-small message|C17,V46
 T25|.|keep accessible/non-TTY as a linear renderer over the same model; retrofit the V18-V42 tests to the new render; add `teatest` golden snapshots pinned to 80x24 + a fixed color profile; unit-test `Update`|C5,V49
 T26|.|port the modals: preflight repair, scrollable Validate/Compile notice, confirmations, and Maintain loss report + Save-rewrite confirm|V21,V32,V33
 T27|.|CLI output theme through I.cliui: styled status lines, error/warning blocks, and a run header for validate/compile/apply; restyle `dev`'s picker and spinner; NO_COLOR + non-TTY plain; keep exit codes|C18,I.cliui,V48

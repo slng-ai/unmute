@@ -297,12 +297,21 @@ func (m console) editorInner() int {
 	return max(10, w-4) // minus border + padding
 }
 
+// sidebarWidth reserves the sidebar column only when the terminal is wide
+// enough; below 80 cols the console drops to a single editor pane (C17, V46).
 func (m console) sidebarWidth() int {
-	if m.width < 72 || m.req == nil || len(m.req.ctx.sidebar) == 0 {
+	if m.width < 80 || m.req == nil || len(m.req.ctx.sidebar) == 0 {
 		return 0
 	}
 	return 22
 }
+
+// minWidth/minHeight are the floor below which the console shows a
+// "terminal too small" message instead of a layout (C17, V46).
+const (
+	minWidth  = 60
+	minHeight = 20
+)
 
 func (r *fieldRunner) runProgram(flow func() (Result, error)) (Result, error) {
 	r.requests = make(chan shellRequest)

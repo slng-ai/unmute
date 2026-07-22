@@ -134,6 +134,45 @@ func TestV35InteractiveMenuDefaultsToFirstRow(t *testing.T) { // docs/spec/tui.m
 	}
 }
 
+func TestV46BreakpointsPickLayout(t *testing.T) { // docs/spec/tui.md V46
+	req := fieldReq{
+		kind: kindSelect, title: "Models", backable: true,
+		ctx:     viewCtx{sidebar: []sideItem{{label: "Identity", active: true}}},
+		choices: []choice{{"Listen", "l"}, {"← Back", actionBack}},
+	}
+	if wide := renderField(t, 100, 24, req); !strings.Contains(wide, "SECTIONS") {
+		t.Errorf("wide layout should show the sidebar:\n%s", wide)
+	}
+	if narrow := renderField(t, 72, 24, req); strings.Contains(narrow, "SECTIONS") {
+		t.Errorf("narrow layout should collapse to a single pane:\n%s", narrow)
+	}
+}
+
+func TestV46TooSmallShowsMessage(t *testing.T) { // docs/spec/tui.md V46
+	view := renderField(t, 40, 12, fieldReq{kind: kindSelect, title: "X", choices: []choice{{"a", "a"}}})
+	if !strings.Contains(strings.ToLower(view), "too small") {
+		t.Fatalf("a tiny terminal should show the too-small message:\n%s", view)
+	}
+}
+
+func TestV46ResizeRelayouts(t *testing.T) { // docs/spec/tui.md V46
+	m := newConsole(nil)
+	req := requestMsg{ok: true, request: fieldReq{
+		kind: kindSelect, title: "Models", backable: true,
+		ctx:     viewCtx{sidebar: []sideItem{{label: "Identity", active: true}}},
+		choices: []choice{{"a", "a"}, {"← Back", actionBack}},
+	}}
+	big, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	shown, _ := big.(console).Update(req)
+	if !strings.Contains(shown.(console).View(), "SECTIONS") {
+		t.Fatal("expected the sidebar at a wide size")
+	}
+	small, _ := shown.(console).Update(tea.WindowSizeMsg{Width: 70, Height: 24})
+	if strings.Contains(small.(console).View(), "SECTIONS") {
+		t.Fatal("resizing narrow should drop the sidebar")
+	}
+}
+
 func TestV44LayoutHasHeaderSidebarEditorFooter(t *testing.T) { // docs/spec/tui.md V44
 	req := fieldReq{
 		kind: kindSelect, title: "Models", backable: true,
@@ -320,9 +359,9 @@ func TestV37ConstrainedMenuPinsBackInFooter(t *testing.T) { // docs/spec/tui.md 
 		},
 		backable: true,
 	}
-	// A short viewport must still keep a Back affordance: the footer is a fixed
-	// region, separate from the scrolling option list (V37, was B9).
-	if view := renderField(t, 80, 9, req); !strings.Contains(strings.ToLower(view), "back") {
+	// At the minimum viewport the footer must still keep a Back affordance: it
+	// is a fixed region, separate from the scrolling option list (V37, was B9).
+	if view := renderField(t, 80, 20, req); !strings.Contains(strings.ToLower(view), "back") {
 		t.Fatalf("constrained menu omitted Back affordance:\n%s", view)
 	}
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -15,6 +16,10 @@ import (
 func (m console) View() string {
 	if m.width == 0 || m.height == 0 {
 		return ""
+	}
+	if m.width < minWidth || m.height < minHeight {
+		msg := fmt.Sprintf("terminal too small — need at least %dx%d", minWidth, minHeight)
+		return lipgloss.Place(max(m.width, 1), max(m.height, 1), lipgloss.Center, lipgloss.Center, style.Dim(msg))
 	}
 	footer := m.renderFooter()
 	// Home is the logo hero: no header badge, the wordmark is the whole screen.
