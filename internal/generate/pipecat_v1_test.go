@@ -531,6 +531,28 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 			t.Errorf("end-only task group has unused restoration import %q", forbidden)
 		}
 	}
+	// then: end lowers to the Flows end_conversation post-action on a terminal
+	// node, not a raw EndFrame in the finish handler (V4/B2, dp§V2 doc-wins).
+	if !strings.Contains(endBot, `post_actions=[{"type": "end_conversation"}]`) {
+		t.Error("then: end must end via the Flows end_conversation post-action")
+	}
+	if !strings.Contains(endBot, "def _run_triage_end_node(self) -> NodeConfig:") {
+		t.Error("then: end must transition to a terminal end node")
+	}
+	endFinish := strings.Index(endBot, "async def _run_triage_finish_collect")
+	if endFinish < 0 {
+		t.Fatal("end task group missing final handler")
+	}
+	endFinishBody := endBot[endFinish:]
+	if next := strings.Index(endFinishBody[1:], "\n    def "); next >= 0 {
+		endFinishBody = endFinishBody[:next]
+	}
+	if strings.Contains(endFinishBody, "queue_frame(EndFrame())") {
+		t.Error("then: end finish handler still queues a raw EndFrame (B2)")
+	}
+	if !strings.Contains(endFinishBody, "self._run_triage_end_node()") {
+		t.Error("then: end finish handler must return the terminal end node")
+	}
 }
 
 // TestV3PipecatToolsResolveCallback: every emitted agent-level @tool method

@@ -211,9 +211,9 @@ func setImportNeeds(data *pipecatData) {
 		}
 		for _, d := range a.Delegates {
 			data.HasFlows = true // tasks run as Flows on the owning worker (C8)
-			if d.Then == "end" {
-				data.NeedsEndFrame = true
-			} else {
+			// then: end ends via the Flows end_conversation post-action, not a
+			// raw EndFrame (V4/B2); only a non-ending delegate restores the role.
+			if d.Then != "end" {
 				data.NeedsRoleRestore = true
 			}
 			if d.Isolated {

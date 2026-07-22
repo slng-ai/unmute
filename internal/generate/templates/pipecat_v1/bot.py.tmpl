@@ -236,8 +236,9 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
         self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
 {{if $t.NextName}}        return {"status": "ok"}, self._{{$d.MethodName}}_node_{{$t.NextName}}()
 {{else}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
-{{end}}{{if eq $d.Then "end"}}        await self.queue_frame(EndFrame())
-        return {"status": "ok"}, None
+{{end}}{{if eq $d.Then "end"}}        # then: end — hand to a terminal node whose end_conversation
+        # post-action ends the call after the goodbye drains (V4/B2).
+        return {"status": "ok"}, self._{{$d.MethodName}}_end_node()
 {{else}}        # then: {{$d.Then}} — restore the owner's pre-flow context (messages and
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._{{$d.MethodName}}_snapshot
@@ -261,7 +262,18 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
         }])
         self.context.set_tools(tools)
 {{end}}        return {"status": "ok"}, None
-{{end}}{{end}}{{end}}{{end}}
+{{end}}{{end}}{{end}}{{if eq $d.Then "end"}}
+    def _{{$d.MethodName}}_end_node(self) -> NodeConfig:
+        # Terminal node: speak a brief closing line, then end_conversation ends
+        # the call once its TTS drains (Flows built-in action; V4/B2).
+        return NodeConfig(
+            name="end",
+            task_messages=[{"role": "developer", "content": "Thank the caller and say goodbye."}],
+            functions=[],
+            post_actions=[{"type": "end_conversation"}],
+            respond_immediately=True,
+        )
+{{end}}{{end}}
 {{end}}{{if .FlowTools}}
 # --- task tools (flows handlers) ----------------------------------------------
 # Tools available inside task steps; stable module-level handlers so a
