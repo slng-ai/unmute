@@ -245,8 +245,7 @@ Read both, then test the exact behavior they point at.
 ```sh
 unmute dev acme             # talk in the browser
 unmute dev acme --console   # talk in the terminal, over your mic and speaker
-unmute dev acme --target pipecat --telephony \
-  --public-url https://agent-test.example-tunnel.dev
+unmute dev acme --target pipecat --telephony   # answer real phone calls
 ```
 
 The command selects the only target automatically; with multiple targets, it
@@ -258,16 +257,22 @@ keys from `.env`. Browser logs go to `build/<target>/bot.log`; add `--verbose`
 to stream them. Console mode streams directly to the terminal.
 
 The telephony command is the intended promoted-route interface. Today it fails
-with the route's credentialed-smoke diagnostic before checking
-`--public-url`, carrier credentials, or Docker, and it emits no Compose file.
-Once that exact carrier route is promoted, the command will build and run the
-emitted Docker Compose graph, wait for the Pipecat application and Redis health
-checks, and pass `--bot-port` to Compose as `UNMUTE_TELEPHONY_PORT`. Redis will
-store only bounded telephony control records; audio, transcripts, prompts,
-task state, and worker handoffs stay in the active process. Docker will not
-create public ingress, so the HTTPS/WSS tunnel named by `--public-url` must
-remain running. Telephony logs will go to `build/<target>/telephony.log`;
-`--verbose` will follow them in the terminal.
+with the route's credentialed-smoke diagnostic before checking a public URL,
+carrier credentials, or Docker, and it emits no Compose file. Once that exact
+carrier route is promoted, the command will build and run the emitted Docker
+Compose graph, wait for the Pipecat application and Redis health checks, and
+pass `--bot-port` to Compose as `UNMUTE_TELEPHONY_PORT`. Redis will store only
+bounded telephony control records; audio, transcripts, prompts, task state,
+and worker handoffs stay in the active process.
+
+Public ingress is managed for you: without `--public-url`, the command runs a
+cloudflared quick tunnel as a child process (install it once; macOS:
+`brew install cloudflared`) and supplies `UNMUTE_PUBLIC_URL` itself. On the
+Twilio route it then sets the number's voice webhook to the printed inbound
+endpoint on every start and prints the previous value. Pass
+`--public-url https://your-tunnel.example` to bring your own tunnel instead;
+that tunnel must remain running. Telephony logs will go to
+`build/<target>/telephony.log`; `--verbose` will follow them in the terminal.
 
 **Compile only, to inspect or deploy a non-telephony project:**
 

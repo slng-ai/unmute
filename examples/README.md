@@ -1,6 +1,6 @@
 # Examples
 
-These four packages apply the same Sage and Stone Salon appointment workflow
+These packages apply the same Sage and Stone Salon appointment workflow
 to progressively stronger orchestration. Compare them to see when one large
 prompt stops being enough and independent tasks, task groups, or agent handoffs
 help.
@@ -16,6 +16,7 @@ and Pipecat runs.
 | [`multi-task`](multi-task/) | One agent and two independent tasks | One task owns customer records; another owns appointments. |
 | [`task-groups`](task-groups/) | One agent and three ordered tasks | Shared context moves through customer identification, slot selection, and finalization. |
 | [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |
+| [`telephony-multi-task`](telephony-multi-task/) | The multi-task agent with a phone channel | Inbound calls over Twilio on both routes (Pipecat carrier-websocket and LiveKit SIP), with a cold transfer to a person. Fails closed until its routes are promoted. |
 
 ## Test the tools
 

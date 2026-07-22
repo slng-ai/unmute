@@ -113,19 +113,29 @@ After an exact route is promoted, telephony mode will always run the generated
 `compose.telephony.yaml`; there is no host-process fallback or infrastructure
 flag. Every route will build the generated application and version-pinned
 Redis. LiveKit SIP will additionally start version-pinned LiveKit Server and
-LiveKit SIP. Unmute will preflight Docker Compose, wait for declared health
-checks, print the resolved service graph and carrier setup, follow Compose logs
-under `--verbose`, and stop only its deterministic project on `ctrl-c` without
-removing data volumes.
+LiveKit SIP, then create or reuse the local inbound trunk, outbound trunk,
+and dispatch rule itself and inject `LIVEKIT_SIP_INBOUND_TRUNK` and
+`LIVEKIT_SIP_OUTBOUND_TRUNK` before the application starts. Unmute will
+preflight Docker Compose, wait for declared health checks, print the resolved
+service graph and carrier setup, configure the Twilio voice webhook
+automatically on that route (printing the previous value), print the call
+line, follow Compose logs under `--verbose`, and stop only its deterministic
+project on `ctrl-c` without removing data volumes or leaving the tunnel
+running.
 
-`--public-url` is required only when the resolved route reports public HTTP/WSS
-endpoints, such as Pipecat carrier WebSockets. It must be the exact public HTTPS
-origin used for carrier signatures. LiveKit SIP has no HTTP callback URL; it
-instead needs carrier-reachable SIP and RTP networking. For a promoted route,
-Unmute will name missing carrier/model configuration after successful
-generation and point to the credential guide without printing values. Local
-Compose will supply Redis for both targets and the local LiveKit Server key
-pair. Explicit external LiveKit or Redis values will be rejected in LiveKit
+Routes with public HTTP/WSS endpoints (Pipecat carrier WebSockets) need a
+public HTTPS origin. Without `--public-url`, the dev command starts a managed
+cloudflared quick tunnel and supplies `UNMUTE_PUBLIC_URL` itself; cloudflared
+must be on PATH (macOS: `brew install cloudflared`; Linux: distribution
+package or the cloudflare/cloudflared releases page). `--public-url` skips
+all tunnel management and must be the exact public HTTPS origin used for
+carrier signatures (use it for ngrok or any other tunnel). LiveKit SIP has no
+HTTP callback URL; it instead needs carrier-reachable SIP and RTP networking,
+which no HTTPS tunnel provides. For a promoted route, Unmute will name
+missing carrier/model configuration after successful generation and point to
+the credential guide without printing values. Local Compose will supply Redis
+for both targets and the local LiveKit Server key pair. Explicit external
+LiveKit or Redis values, and user-set trunk IDs, will be rejected in LiveKit
 SIP dev mode rather than silently ignored.
 
 When a package declares several carrier routes, each one is a separate target
