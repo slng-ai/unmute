@@ -219,7 +219,11 @@ func TestComposeExecutorRunsUpLogsAndProjectScopedDown(t *testing.T) { // teleph
 	var output bytes.Buffer
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(time.Second, cancel)
-	err := runTelephonyCompose(ctx, dir, filepath.Join(dir, "compose.telephony.yaml"), "unmute-test", []string{"TRACE_FILE=" + trace}, &output, &output, &output, filepath.Join(dir, "telephony.log"))
+	err := runTelephonyCompose(ctx, telephonyComposeRun{
+		dir: dir, file: filepath.Join(dir, "compose.telephony.yaml"), project: "unmute-test",
+		env: []string{"TRACE_FILE=" + trace}, output: &output, stdout: &output, stderr: &output,
+		logPath: filepath.Join(dir, "telephony.log"),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,10 +260,11 @@ func TestComposeExecutorTreatsStartupInterruptAsCleanStop(t *testing.T) { // tel
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(100*time.Millisecond, cancel)
 	var output bytes.Buffer
-	err := runTelephonyCompose(
-		ctx, dir, filepath.Join(dir, "compose.telephony.yaml"), "unmute-test",
-		nil, &output, &output, &output, filepath.Join(dir, "telephony.log"),
-	)
+	err := runTelephonyCompose(ctx, telephonyComposeRun{
+		dir: dir, file: filepath.Join(dir, "compose.telephony.yaml"), project: "unmute-test",
+		output: &output, stdout: &output, stderr: &output,
+		logPath: filepath.Join(dir, "telephony.log"),
+	})
 	if err != nil {
 		t.Fatalf("startup interrupt returned an error: %v", err)
 	}
@@ -280,10 +285,11 @@ func TestComposeExecutorTreatsLogInterruptAsCleanStop(t *testing.T) { // telepho
 	}
 	t.Cleanup(func() { composeCommand = restore })
 	var output bytes.Buffer
-	err := runTelephonyCompose(
-		context.Background(), dir, filepath.Join(dir, "compose.telephony.yaml"), "unmute-test",
-		nil, &output, &output, &output, filepath.Join(dir, "telephony.log"),
-	)
+	err := runTelephonyCompose(context.Background(), telephonyComposeRun{
+		dir: dir, file: filepath.Join(dir, "compose.telephony.yaml"), project: "unmute-test",
+		output: &output, stdout: &output, stderr: &output,
+		logPath: filepath.Join(dir, "telephony.log"),
+	})
 	if err != nil {
 		t.Fatalf("log interrupt returned an error: %v", err)
 	}
