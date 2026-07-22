@@ -136,7 +136,7 @@ T2|x|make local Docker mode the default runner: preflight, generate, `up --build
 T3|x|standardize the web UI: `GET /api/session` bootstrap handler (httptest-able) + one SLNG-branded page whose only per-target code is the transport adapter; keep the pipecat offer reverse-proxy and livekit token mint|I.session,I.web,V6
 T4|x|console routing: `--console` keeps native uv + host audio; `--console --telephony` stays rejected|I.console,V7
 T5|x|gate preservation: telephony fail-closed path and its L2 gate test untouched; local mode isolated from telephony code|V10
-T6|.|tests: L2 default-mode routing, docker-missing text, command sequences (`up --build --detach --wait`, logs, project-scoped `down`, no `--volumes`), env passthrough, session-endpoint contract, teardown on interrupt; L4 smoke (build tag) for real Docker/browser; full suite green with zero Python/network/Docker|V1-V11
+T6|x|tests: L2 default-mode routing, docker-missing text, command sequences (`up --build --detach --wait`, logs, project-scoped `down`, no `--volumes`), env passthrough, session-endpoint contract, teardown on interrupt; L4 smoke (build tag) for real Docker/browser; full suite green with zero Python/network/Docker|V1-V11
 T7|.|docs: `docs/user/reference/cli.md`, the learn-flow dev-mode pages, `docs/user/targets/{pipecat,livekit}.md`, and a going-live "local Compose to production" checklist per route; local mode is the deployable-image test step, Kubernetes is the same image with different manifests|I.dev,I.compose
 
 ## §B bugs
