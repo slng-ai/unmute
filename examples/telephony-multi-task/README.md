@@ -22,16 +22,24 @@ follow the step-by-step
 
 ## Set up once
 
-1. Copy `.env.example` to `.env` and fill in the values. The walkthrough
+From the repo root:
+
+1. Build the CLI and put it on your PATH: `make install` (or use
+   `bin/unmute` after `make build` and adjust the commands below to
+   `bin/unmute ... examples/telephony-multi-task`).
+2. `cd examples/telephony-multi-task`
+3. Copy `.env.example` to `.env` and fill in the values. The walkthrough
    explains where each one comes from.
-2. For the Pipecat route, install cloudflared (macOS:
+4. For the Pipecat route, install cloudflared (macOS:
    `brew install cloudflared`), or plan to pass `--public-url` with your own
    tunnel.
-3. For the LiveKit route, create the Twilio Elastic SIP Trunk (termination
+5. For the LiveKit route, create the Twilio Elastic SIP Trunk (termination
    URI, Credential List, origination URI, attached number).
 
 The dev command supplies `UNMUTE_PUBLIC_URL`, `REDIS_URL`, the local LiveKit
-key pair, and both LiveKit trunk IDs itself. Never set those in `.env`.
+key pair, and both LiveKit trunk IDs itself. Never set those in `.env`. The
+`REDIS_URL` name is kept for compatibility; the container behind it is
+Valkey (BSD-3-Clause), not Redis, so the whole local stack stays open source.
 
 ## Test the Pipecat route
 
@@ -41,18 +49,23 @@ Start it:
 unmute dev . --target pipecat --telephony
 ```
 
-Wait for the ready banner. The command prints the tunnel origin, sets the
-Twilio voice webhook automatically (and prints the previous webhook so you
-can restore it), and ends with `call +1XXXXXXXXXX, ctrl-c to stop`.
+Leave this terminal running and watch its output top to bottom: the
+resolved route, the tunnel origin (`managed tunnel https://<random>.trycloudflare.com`),
+the exact public endpoints, the ready banner, the Twilio webhook update
+(with the previous value so you can restore it), and finally
+`call +1XXXXXXXXXX, ctrl-c to stop`.
 
 **Inbound:** call the printed number from your phone. You should hear:
 "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
 
-**Outbound:** trigger a call to your own phone through the generated
-endpoint. Use the tunnel origin the command printed and your
-`UNMUTE_OUTBOUND_TOKEN` value:
+**Outbound:** open a second terminal in this directory. Copy the tunnel
+origin from the first terminal's output and export it there, then trigger a
+call to your own phone:
 
 ```bash
+export UNMUTE_PUBLIC_URL=https://<the-origin-you-just-saw>
+source .env   # loads UNMUTE_OUTBOUND_TOKEN into this shell
+
 curl -X POST "$UNMUTE_PUBLIC_URL/telephony/outbound" \
   -H "Authorization: Bearer $UNMUTE_OUTBOUND_TOKEN" \
   -H "Content-Type: application/json" \
@@ -60,7 +73,10 @@ curl -X POST "$UNMUTE_PUBLIC_URL/telephony/outbound" \
 ```
 
 A `{"session_id": ..., "call_id": ..., "status": "accepted"}` reply means
-Twilio is dialing. Your phone rings, and the same agent answers.
+Twilio is dialing. Your phone rings, and the same agent answers. `UNMUTE_PUBLIC_URL`
+is only set inside the running container, never in your shell, so it must be
+exported by hand in this second terminal; the tunnel origin also changes on
+every run, so copy it fresh each time.
 
 ## Test the LiveKit route
 
@@ -70,19 +86,19 @@ Start it:
 unmute dev . --target livekit --telephony
 ```
 
-The command starts Redis, LiveKit Server, and LiveKit SIP, creates or reuses
-the inbound trunk, outbound trunk, and `call-` dispatch rule on the local
-server, injects both trunk IDs, and then starts the agent. Your machine must
-be reachable from Twilio on SIP port 5060 and UDP ports 10000-10100; Docker
-Desktop NAT often blocks this even when every health check is green (see the
-walkthrough for the limits).
+In order, the command starts Redis-protocol Valkey, LiveKit Server, and
+LiveKit SIP; creates or reuses the inbound trunk, then the `call-` dispatch
+rule, then the outbound trunk on the local server; injects both trunk IDs;
+and starts the agent. Your machine must be reachable from Twilio on SIP port
+5060 and UDP ports 10000-10100; Docker Desktop NAT often blocks this even
+when every health check is green (see the walkthrough for the limits).
 
 **Inbound:** call the number attached to the Twilio trunk. Twilio sends the
 call to your origination URI, LiveKit SIP answers, and the dispatch rule
 puts the caller in a fresh `call-*` room with the agent.
 
 **Outbound:** dispatch the agent to a new room with outbound job metadata.
-Point `lk` at the local server first:
+Point `lk` at the local server first, in a second terminal:
 
 ```bash
 export LIVEKIT_URL=http://127.0.0.1:7880
@@ -100,7 +116,7 @@ outside this local stack.
 ## Stop and clean up
 
 `ctrl-c` stops this package's Compose project, kills the managed tunnel, and
-keeps the Redis data volume, so the LiveKit records are reused on the next
+keeps the Valkey data volume, so the LiveKit records are reused on the next
 run. To wipe the local records too, remove the project's volumes using the
 project name from the ready banner (`compose project: unmute-...`):
 
