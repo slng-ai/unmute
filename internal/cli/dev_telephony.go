@@ -101,6 +101,13 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 		stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr(), logPath: logPath,
 	}
 	run.onReady = func(ctx context.Context) error {
+		// The webhook is reconfigured on every start: quick tunnel URLs
+		// rotate per run, and the previous value is printed for restore (V3).
+		if plan.AutoWebhookEndpoint != "" && public != nil {
+			if err := autoConfigureCarrierWebhook(ctx, cmd.OutOrStdout(), targetName, plan, public, childEnv); err != nil {
+				return err
+			}
+		}
 		printDevCallLine(cmd.OutOrStdout(), plan, childEnv)
 		return nil
 	}
