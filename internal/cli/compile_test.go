@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,42 @@ import (
 	"github.com/slng/unmute/internal/generate"
 	"github.com/slng/unmute/internal/ir"
 )
+
+// TestWriteArtifactFilesFormatsPython: the write path runs a best-effort
+// `ruff format` over emitted .py so the on-disk project is format-stable, and
+// leaves non-Python files untouched (SPEC V2). Skips when ruff is absent.
+func TestWriteArtifactFilesFormatsPython(t *testing.T) {
+	if _, err := exec.LookPath("ruff"); err != nil {
+		t.Skip("ruff not installed")
+	}
+	dir := t.TempDir()
+	ugly := "x  =  {  'a':1 }\n\n\n\ndef f( ):\n    return   x\n"
+	readme := "# keep  this  as-is\n"
+	files := []generate.File{
+		{Path: "bot.py", Content: []byte(ugly)},
+		{Path: "README.md", Content: []byte(readme)},
+	}
+	if err := writeArtifactFiles(nil, dir, files); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "bot.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) == ugly {
+		t.Error("bot.py was written unformatted (ruff format pass did not run)")
+	}
+	// Format-stable: a second `ruff format` produces no diff.
+	cmd := exec.Command("ruff", "format", "--diff", "-")
+	cmd.Stdin = bytes.NewReader(got)
+	if out, _ := cmd.CombinedOutput(); len(bytes.TrimSpace(out)) != 0 {
+		t.Errorf("written bot.py is not ruff-format-stable:\n%s", out)
+	}
+	// Non-Python files are copied verbatim.
+	if md, _ := os.ReadFile(filepath.Join(dir, "README.md")); string(md) != readme {
+		t.Errorf("README.md was modified: %q", md)
+	}
+}
 
 // copySafeCore copies the example package into a temp dir so compile can write
 // its build/ output without polluting the repo.

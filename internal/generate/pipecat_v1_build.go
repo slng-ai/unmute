@@ -84,6 +84,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		data.Notes = append(data.Notes, "turn role lowers to on-device VAD (Silero); its binding is advisory")
 	}
 	setImportNeeds(&data)
+	data.Inline = inlineEligible(&data)
 	data.Imports, data.Extras, data.Deps = collectImportsExtras(data)
 	if data.Telephony != nil {
 		switch data.Telephony.Carrier {
@@ -181,6 +182,26 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 	return telephony, nil
 }
 
+// inlineEligible reports whether the bot collapses to the inline single-agent
+// shape (F3): the LLM sits directly in the main pipeline with its tools as
+// module-level direct functions in LLMContext, no bus / BusBridge / LLMWorker /
+// activate_worker. Scoped to the simplest case — one agent, no handoffs, no Flow
+// delegates, no tracing (the tracing helper is worker-bound, V22), no telephony
+// or cold transfer. Everything else keeps the workers/bus path (dp§C8).
+func inlineEligible(data *pipecatData) bool {
+	// State (Variables) and model-written greeting both need machinery the inline
+	// shape lacks (module-level tools can't reach self.state; the greeting has no
+	// activate_worker to carry a developer message), so they keep the bus path.
+	if len(data.Agents) != 1 || data.Tracing || data.Telephony != nil || data.HasColdTransfer {
+		return false
+	}
+	if len(data.Variables) > 0 || data.GreetingInstruction != "" {
+		return false
+	}
+	a := data.Agents[0]
+	return len(a.Transfers) == 0 && len(a.Delegates) == 0
+}
+
 // setImportNeeds inspects the built model so bot.py imports only what this spec
 // exercises (no dead imports in the emitted pipeline).
 func setImportNeeds(data *pipecatData) {
@@ -211,9 +232,9 @@ func setImportNeeds(data *pipecatData) {
 		}
 		for _, d := range a.Delegates {
 			data.HasFlows = true // tasks run as Flows on the owning worker (C8)
-			if d.Then == "end" {
-				data.NeedsEndFrame = true
-			} else {
+			// then: end ends via the Flows end_conversation post-action, not a
+			// raw EndFrame (V4/B2); only a non-ending delegate restores the role.
+			if d.Then != "end" {
 				data.NeedsRoleRestore = true
 			}
 			if d.Isolated {
@@ -247,6 +268,25 @@ func setImportNeeds(data *pipecatData) {
 	}
 	collectLocal(data.FlowTools)
 	sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
+
+	// pipecat.frames.frames names ride one merged import (V2); appended in
+	// alphabetical order so it already matches isort without a sort pass.
+	if data.NeedsEndFrame {
+		data.FrameImports = append(data.FrameImports, "EndFrame")
+	}
+	if data.HasFlows {
+		// delegate @tool resolves its call with run_llm=False (V7)
+		data.FrameImports = append(data.FrameImports, "FunctionCallResultProperties")
+	}
+	if data.NeedsAppendFrame {
+		data.FrameImports = append(data.FrameImports, "LLMMessagesAppendFrame")
+	}
+	if data.NeedsRoleRestore {
+		data.FrameImports = append(data.FrameImports, "LLMUpdateSettingsFrame")
+	}
+	if data.GreetingText != "" {
+		data.FrameImports = append(data.FrameImports, "TTSSpeakFrame")
+	}
 }
 
 // collectImportsExtras returns the deduped, sorted service imports for bot.py,
@@ -330,7 +370,8 @@ func sortedKeys(set map[string]bool) []string {
 }
 
 func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.AgentDef, env *envSet) (pipecatAgent, error) {
-	llm, err := agentLLMService(target.Models.Reason[def.Model], def.Instructions, env)
+	promptConst := promptConstName(name)
+	llm, err := agentLLMService(target.Models.Reason[def.Model], promptConst, env)
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
@@ -338,7 +379,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
-	built := pipecatAgent{Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions, LLM: llm, TTS: tts}
+	built := pipecatAgent{Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions, PromptConst: promptConst, LLM: llm, TTS: tts}
 
 	for _, ref := range def.Tools {
 		if tool, ok := agent.Tools[ref]; ok {
@@ -550,7 +591,9 @@ func humanTransferTool(name string, c *ir.HumanTransfer, target ir.Target, env *
 	}, nil
 }
 
-// inputFields flattens a tool input JSON Schema object into ordered arg names.
+// inputFields flattens a tool input JSON Schema object into ordered args,
+// carrying each property's type, description, and enum so the agent-level @tool
+// signature + docstring present the LLM the schema the tool YAML declares (V1).
 func inputFields(input map[string]any) []pipecatArg {
 	props, _ := input["properties"].(map[string]any)
 	requiredList, _ := input["required"].([]any)
@@ -564,12 +607,55 @@ func inputFields(input map[string]any) []pipecatArg {
 	for k := range props {
 		names = append(names, k)
 	}
-	sort.Strings(names)
+	// Required params first (Python forbids a non-default arg after a defaulted
+	// one), alphabetical within each group so the signature is stable (B3/V5).
+	sort.Slice(names, func(i, j int) bool {
+		if required[names[i]] != required[names[j]] {
+			return required[names[i]]
+		}
+		return names[i] < names[j]
+	})
 	args := make([]pipecatArg, 0, len(names))
 	for _, n := range names {
-		args = append(args, pipecatArg{Name: n, Required: required[n]})
+		prop, _ := props[n].(map[string]any)
+		jsonType, _ := prop["type"].(string)
+		pyType, pyDefault := pyArgTypeDefault(jsonType, required[n])
+		arg := pipecatArg{Name: n, PyType: pyType, PyDefault: pyDefault, Required: required[n]}
+		if desc, ok := prop["description"].(string); ok {
+			arg.Description = desc
+		}
+		if enum, ok := prop["enum"].([]any); ok {
+			for _, v := range enum {
+				arg.Enum = append(arg.Enum, fmt.Sprintf("%v", v))
+			}
+		}
+		args = append(args, arg)
 	}
 	return args
+}
+
+// pyArgTypeDefault maps a JSON-Schema primitive type to a Python signature
+// annotation and, for an optional arg, a type-appropriate default literal. A
+// None default on a complex type widens the annotation to keep it type-clean.
+func pyArgTypeDefault(jsonType string, required bool) (pyType, pyDefault string) {
+	switch jsonType {
+	case "integer":
+		pyType, pyDefault = "int", "0"
+	case "number":
+		pyType, pyDefault = "float", "0.0"
+	case "boolean":
+		pyType, pyDefault = "bool", "False"
+	case "array":
+		pyType, pyDefault = "list", "None"
+	case "object":
+		pyType, pyDefault = "dict", "None"
+	default:
+		pyType, pyDefault = "str", `""`
+	}
+	if !required && pyDefault == "None" {
+		pyType += " | None"
+	}
+	return pyType, pyDefault
 }
 
 // applyConversation lowers the conversation block into the template model:
@@ -663,10 +749,11 @@ func sttService(binding *ir.Binding, language string, env *envSet) (pipecatServi
 }
 
 // agentLLMService builds an agent's LLM; the prompt nests into Settings as
-// system_instruction (the workers-model shape, driver-pipecat C2).
-func agentLLMService(binding ir.Binding, prompt string, env *envSet) (pipecatService, error) {
+// system_instruction (the workers-model shape, driver-pipecat C2), referenced
+// through its module constant so builder and restore share one copy (V2).
+func agentLLMService(binding ir.Binding, promptRef string, env *envSet) (pipecatService, error) {
 	return resolvePipecatService(targetcap.Reason, binding, "", env,
-		pyKV{Key: "system_instruction", Value: pyQuote(prompt)})
+		pyKV{Key: "system_instruction", Value: promptRef})
 }
 
 func ttsService(binding ir.Binding, language string, env *envSet) (pipecatService, error) {

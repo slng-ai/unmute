@@ -3,7 +3,9 @@ package generate
 import (
 	"flag"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -83,7 +85,7 @@ func TestV32PipecatGreetingModes(t *testing.T) {
 				Text:        "Hi, this is Sage and Stone Salon.",
 			},
 			want: []string{
-				"from pipecat.frames.frames import TTSSpeakFrame",
+				"from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame",
 				`TTSSpeakFrame("Hi, this is Sage and Stone Salon.")`,
 				"next(agent for agent in agents",
 				"args=LLMWorkerActivationArgs(run_llm=False)",
@@ -456,11 +458,16 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		t.Fatal("bot.py not emitted")
 	}
 	for _, want := range []string{
-		"from pipecat.frames.frames import LLMUpdateSettingsFrame",
+		"from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame",
 		"from pipecat.services.settings import LLMSettings",
 		`role_message="Ask for the caller's email, look them up, and confirm their account tier."`,
 		`task_messages=[{"role": "developer", "content": "Begin this step."}]`,
-		`delta=LLMSettings(system_instruction="# Intake agent`,
+		// The delegate resolves its call with run_llm=False so only the flow node
+		// responds — no double assistant turn (V7/B4).
+		`properties=FunctionCallResultProperties(run_llm=False),`,
+		// The agent prompt is one module constant, referenced by builder + restore (V2).
+		`INTAKE_PROMPT = """# Intake agent`,
+		`delta=LLMSettings(system_instruction=INTAKE_PROMPT)`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing task role boundary %q", want)
@@ -529,6 +536,256 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		if strings.Contains(endBot, forbidden) {
 			t.Errorf("end-only task group has unused restoration import %q", forbidden)
 		}
+	}
+	// then: end lowers to the Flows end_conversation post-action on a terminal
+	// node, not a raw EndFrame in the finish handler (V4/B2, dp§V2 doc-wins).
+	if !strings.Contains(endBot, `post_actions=[{"type": "end_conversation"}]`) {
+		t.Error("then: end must end via the Flows end_conversation post-action")
+	}
+	if !strings.Contains(endBot, "def _run_triage_end_node(self) -> NodeConfig:") {
+		t.Error("then: end must transition to a terminal end node")
+	}
+	endFinish := strings.Index(endBot, "async def _run_triage_finish_collect")
+	if endFinish < 0 {
+		t.Fatal("end task group missing final handler")
+	}
+	endFinishBody := endBot[endFinish:]
+	if next := strings.Index(endFinishBody[1:], "\n    def "); next >= 0 {
+		endFinishBody = endFinishBody[:next]
+	}
+	if strings.Contains(endFinishBody, "queue_frame(EndFrame())") {
+		t.Error("then: end finish handler still queues a raw EndFrame (B2)")
+	}
+	if !strings.Contains(endFinishBody, "self._run_triage_end_node()") {
+		t.Error("then: end finish handler must return the terminal end node")
+	}
+}
+
+// TestV3PipecatToolsResolveCallback: every emitted agent-level @tool method
+// resolves its function call via params.result_callback. Pipecat drops a @tool's
+// return value, so a bare `return {...}` leaves the call unresolved (V3, B1). The
+// delegate @tool that starts a FlowManager is the one B1 caught.
+func TestV3PipecatToolsResolveCallback(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tasks["collect"] = ir.Task{
+		Instructions: "Ask for the caller's email and confirm their tier.",
+		Tools:        []string{"lookup_customer"},
+		Result:       map[string]ir.ResultField{"tier": {Type: ir.PrimitiveString}},
+		Context:      ir.TaskContext{History: ir.HistoryFull},
+	}
+	agent.Controls["run_collect"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "collect", When: "Collect account details."}
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "run_collect")
+	agent.Agents["intake"] = intake
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+
+	// A @tool method has the signature `(self, params: FunctionCallParams …)`.
+	// Flow-internal handlers take `(args, flow_manager)` / `(self, args, …)` and
+	// return per the Flows contract instead, so this regex skips them.
+	sig := regexp.MustCompile(`(?m)^    async def (\w+)\(self, params: FunctionCallParams`)
+	methods := sig.FindAllStringSubmatchIndex(bot, -1)
+	if len(methods) == 0 {
+		t.Fatal("no @tool methods emitted")
+	}
+	for i, loc := range methods {
+		name := bot[loc[2]:loc[3]]
+		end := len(bot)
+		if i+1 < len(methods) {
+			end = methods[i+1][0]
+		}
+		if !strings.Contains(bot[loc[0]:end], "params.result_callback") {
+			t.Errorf("@tool %q never calls params.result_callback; its function call is left unresolved", name)
+		}
+	}
+	if strings.Contains(bot, `return {"status": "running`) {
+		t.Error("delegate @tool still returns a status dict instead of resolving the call (B1)")
+	}
+}
+
+// TestF3PipecatSingleAgentInline: a single agent with no handoffs, tasks,
+// variables, tracing, or telephony collapses to the inline shape (F3) — the LLM
+// sits directly in the pipeline, tools are module-level direct functions in
+// LLMContext, and there is no bus / BusBridge / LLMWorker / activate_worker.
+func TestF3PipecatSingleAgentInline(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tracing = nil // simple-prompt ships tracing; the inline path is scoped to no-tracing
+
+	bot := artifactFile(t, mustGeneratePipecatInline(t, agent), "bot.py")
+
+	for _, absent := range []string{
+		"BusBridgeProcessor",
+		"activate_worker",
+		"LLMWorkerActivationArgs",
+		"class AppointmentDeskAgent",
+		"@tool",
+	} {
+		if strings.Contains(bot, absent) {
+			t.Errorf("inline bot.py should not contain %q (bus scaffolding)", absent)
+		}
+	}
+	for _, want := range []string{
+		"async def lookup_customer(params: FunctionCallParams", // tool as a module-level direct function
+		"context = LLMContext(tools=[",                         // tools registered on the context
+		"build_appointment_desk_llm(),",                        // LLM inline in the pipeline
+		"worker = PipelineWorker(",                             // a plain PipelineWorker, no bus
+		`await worker.queue_frame(TTSSpeakFrame(`,              // text greeting queued directly
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("inline bot.py missing %q", want)
+		}
+	}
+
+	if _, err := exec.LookPath("python3"); err == nil {
+		f := filepath.Join(t.TempDir(), "bot.py")
+		if err := os.WriteFile(f, []byte(bot), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("python3", "-m", "py_compile", f).CombinedOutput(); err != nil {
+			t.Fatalf("inline bot.py is not valid Python:\n%s", out)
+		}
+	}
+}
+
+func mustGeneratePipecatInline(t *testing.T, agent *ir.Agent) Artifact {
+	t.Helper()
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	return artifact
+}
+
+// TestV1PipecatAgentToolCarriesSchema: the same tool YAML reaches the LLM with
+// its declared schema on BOTH emission paths (V1) — the agent-level @tool as a
+// typed signature + Google `Args:` docstring (per-property description + enum
+// prose, since Pipecat's direct-function generator does not map Literal→enum),
+// and the Flow-node FlowsFunctionSchema as verbatim `properties`. Also proves
+// required params precede optional so the signature is valid Python (V5/B3).
+func TestV1PipecatAgentToolCarriesSchema(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tools["book_service"] = ir.Tool{
+		Description: "Book a service slot.",
+		Execution:   ir.ToolWebhook,
+		URLEnv:      "BOOK_SERVICE_URL",
+		Input: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				// `notes`/`party_size` are optional and sort alphabetically before
+				// the required `service`; the emitter must still list `service` first.
+				"service":    map[string]any{"type": "string", "enum": []any{"haircut", "hair-color", "blowout"}, "description": "Which service"},
+				"party_size": map[string]any{"type": "integer", "description": "Guests"},
+				"notes":      map[string]any{"type": "string", "description": "Extra notes"},
+			},
+			"required": []any{"service"},
+		},
+	}
+	// Reference it as an agent-level tool AND inside a task (the Flow path).
+	agent.Tasks["book"] = ir.Task{
+		Instructions: "Book the caller's chosen service.",
+		Tools:        []string{"book_service"},
+		Result:       map[string]ir.ResultField{"ok": {Type: ir.PrimitiveBoolean}},
+		Context:      ir.TaskContext{History: ir.HistoryFull},
+	}
+	agent.Controls["run_book"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "book", When: "Book a service."}
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "book_service", "run_book")
+	agent.Agents["intake"] = intake
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+
+	for _, want := range []string{
+		// Agent-level @tool: required first, typed, then optional with defaults.
+		"async def book_service(self, params: FunctionCallParams, service: str, notes: str = \"\", party_size: int = 0):",
+		// Google Args docstring carries descriptions + enum prose + real types.
+		"            service (str): Which service One of: haircut, hair-color, blowout.",
+		"            notes (str): Extra notes",
+		"            party_size (int): Guests",
+		// Flow-node path: the same schema verbatim as FlowsFunctionSchema properties.
+		`properties={"notes": {"description": "Extra notes", "type": "string"}, "party_size": {"description": "Guests", "type": "integer"}, "service": {"description": "Which service", "enum": ["haircut", "hair-color", "blowout"], "type": "string"}}`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing schema fidelity %q", want)
+		}
+	}
+
+	// The emitted signature must be valid Python (required-before-optional, B3).
+	if _, err := exec.LookPath("python3"); err == nil {
+		f := filepath.Join(t.TempDir(), "bot.py")
+		if err := os.WriteFile(f, []byte(bot), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("python3", "-m", "py_compile", f).CombinedOutput(); err != nil {
+			t.Fatalf("emitted bot.py is not valid Python:\n%s", out)
+		}
+	}
+}
+
+// TestPipecatRuffCheckClean: the raw generator output (template-only, before the
+// write-path ruff format pass) passes `ruff check --select F` — only used
+// imports, no undefined names (V2). Uses a feature-rich fixture (tools + a Flow
+// delegate + tracing + variables). Skips when ruff is absent.
+func TestPipecatRuffCheckClean(t *testing.T) {
+	if _, err := exec.LookPath("ruff"); err != nil {
+		t.Skip("ruff not installed")
+	}
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enableLangfuse(agent)
+	agent.Tasks["collect"] = ir.Task{
+		Instructions: "Ask for the caller's email and confirm their tier.",
+		Tools:        []string{"lookup_customer"},
+		Result:       map[string]ir.ResultField{"tier": {Type: ir.PrimitiveString, Enum: []string{"free", "pro"}}},
+		Context:      ir.TaskContext{History: ir.HistoryFull},
+	}
+	agent.Controls["run_collect"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "collect", When: "Collect account details."}
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "run_collect")
+	agent.Agents["intake"] = intake
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	cmd := exec.Command("ruff", "check", "--select", "F", "-")
+	cmd.Stdin = strings.NewReader(artifactFile(t, artifact, "bot.py"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("raw generated bot.py is not `ruff check --select F` clean:\n%s", out)
 	}
 }
 

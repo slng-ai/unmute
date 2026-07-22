@@ -68,14 +68,15 @@ type pyKV struct {
 // pipecatAgent is one LLMWorker: its class, worker name, LLM, TTS, prompt, and
 // the tools/transfers/delegates it exposes as @tool methods.
 type pipecatAgent struct {
-	Name      string // worker name (the agent's snake_case id)
-	Class     string // Python class name
-	Prompt    string
-	LLM       pipecatService
-	TTS       pipecatService
-	Tools     []pipecatTool
-	Transfers []pipecatTransfer
-	Delegates []pipecatDelegate
+	Name        string // worker name (the agent's snake_case id)
+	Class       string // Python class name
+	Prompt      string
+	PromptConst string // module constant holding Prompt (dedup: builder + restore, V2)
+	LLM         pipecatService
+	TTS         pipecatService
+	Tools       []pipecatTool
+	Transfers   []pipecatTransfer
+	Delegates   []pipecatDelegate
 }
 
 // pipecatTask is one guided conversational step lowered to a Flow node (C8, B7):
@@ -136,9 +137,18 @@ type pipecatLocalTool struct {
 	Source string
 }
 
+// pipecatArg is one agent-level @tool parameter. Pipecat derives the tool schema
+// from the method signature + Google-style docstring, so the declared type,
+// per-property description, and enum all ride across (V1): PyType/PyDefault shape
+// the signature; Description + Enum become the `Args:` docstring lines (Pipecat's
+// direct-function generator does not map Literal→JSON enum, so enums are prose).
 type pipecatArg struct {
-	Name     string
-	Required bool
+	Name        string
+	PyType      string // signature annotation: str/int/float/bool/list/dict (+ " | None" for optional complex)
+	PyDefault   string // default literal for an optional arg (rendered as ` = <PyDefault>`); unused when Required
+	Required    bool
+	Description string
+	Enum        []string
 }
 
 // pipecatTransfer is an agent_transfer control lowered to activate_worker.
@@ -206,6 +216,7 @@ type pipecatData struct {
 	MaxDurationSecs     int
 	HasColdTransfer     bool
 	Transport           string
+	FrameImports        []string // pipecat.frames.frames names, merged into one import (V2)
 	Imports             []string
 	Extras              []string
 	Deps                []string // standalone pip deps for plugin services (e.g. pipecat-slng)
@@ -225,6 +236,7 @@ type pipecatData struct {
 	HasFlows            bool // any delegate (tasks run as Flows on the owner, C8)
 	HasIsolated         bool // any isolated group (ContextStrategy RESET import)
 	NeedsRoleRestore    bool // any non-ending delegate (V28)
+	Inline              bool // single agent, no bus: LLM inline in the pipeline (F3)
 }
 
 // Provider → service facts (class, import, extra/dep, key env, constructor
@@ -387,7 +399,7 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
 	}
-	tmpl, err := template.New(name).Funcs(template.FuncMap{"pyq": pyQuote, "join": strings.Join}).Parse(string(raw))
+	tmpl, err := template.New(name).Funcs(template.FuncMap{"pyq": pyQuote, "pytriple": pyTriple, "join": strings.Join}).Parse(string(raw))
 	if err != nil {
 		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
 	}
@@ -400,6 +412,12 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 
 // pyQuote renders a Go string as a Python string literal.
 func pyQuote(s string) string { return strconv.Quote(s) }
+
+// promptConstName is the module constant that holds an agent's system prompt
+// (referenced by its LLM builder and its Flow restore handler, dedup per V2).
+func promptConstName(agent string) string {
+	return strings.ToUpper(strings.ReplaceAll(agent, "-", "_")) + "_PROMPT"
+}
 
 type pipecatReportJSON struct {
 	Target      string                `json:"target"`

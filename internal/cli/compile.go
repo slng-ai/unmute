@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -48,7 +50,7 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 		switch artifact.Kind {
 		case generate.CodeTarget:
 			outDir := filepath.Join(dir, "build", resolved.Name)
-			if err := writeArtifactFiles(outDir, artifact.Files); err != nil {
+			if err := writeArtifactFiles(cmd.ErrOrStderr(), outDir, artifact.Files); err != nil {
 				return fmt.Errorf("compile %s: %w", dir, err)
 			}
 			for _, file := range artifact.Files {
@@ -134,19 +136,49 @@ func loadPackage(dir string, names []string) (*ir.Agent, []ir.Target, error) {
 	return agent, targets, nil
 }
 
-// writeArtifactFiles writes a code-target project into a clean build dir.
-func writeArtifactFiles(outDir string, files []generate.File) error {
+// writeArtifactFiles writes a code-target project into a clean build dir,
+// applying a best-effort `ruff format` pass to emitted Python (SPEC C1/V2): the
+// generator stays template-only, the write path polishes layout. ruff is
+// optional — absent, the (already valid, F-clean) source is written unformatted
+// and a single warning goes to warn.
+func writeArtifactFiles(warn io.Writer, outDir string, files []generate.File) error {
 	if err := os.RemoveAll(outDir); err != nil {
 		return err
 	}
+	ruffMissing := false
 	for _, file := range files {
 		path := filepath.Join(outDir, file.Path)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(path, file.Content, 0o644); err != nil {
+		content := file.Content
+		if strings.HasSuffix(file.Path, ".py") {
+			formatted, found := formatPython(content)
+			content, ruffMissing = formatted, ruffMissing || !found
+		}
+		if err := os.WriteFile(path, content, 0o644); err != nil {
 			return err
 		}
 	}
+	if ruffMissing && warn != nil {
+		fmt.Fprintln(warn, "warning: ruff not found on PATH; emitted Python left unformatted (install ruff for formatted output)")
+	}
 	return nil
+}
+
+// formatPython runs `ruff format` on Python source, best-effort. Returns the
+// input unchanged with found=false when ruff is not installed, and unchanged
+// (found=true) if ruff errors — formatting never fails generation.
+func formatPython(src []byte) (out []byte, found bool) {
+	ruff, err := exec.LookPath("ruff")
+	if err != nil {
+		return src, false
+	}
+	cmd := exec.Command(ruff, "format", "-")
+	cmd.Stdin = bytes.NewReader(src)
+	formatted, err := cmd.Output()
+	if err != nil {
+		return src, true
+	}
+	return formatted, true
 }

@@ -170,6 +170,52 @@ async def main():
 asyncio.run(main())
 `
 
+// pipecatInlineSmokeScript proves the inline single-agent emission (F3) against
+// real pipecat-ai 1.5.0 + pipecat-slng: bot.py imports, has no bus scaffolding,
+// its service builders construct, and its module-level tool functions register
+// on LLMContext (the inline tool path). Construction-level, like the other
+// instantiate smokes.
+const pipecatInlineSmokeScript = `"""Smoke check: the inline single-agent bot imports and constructs, no bus."""
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+
+src = open("bot.py").read()
+assert "BusBridgeProcessor" not in src, "inline bot must not build the bus"
+assert "activate_worker(" not in src, "inline bot must not activate workers"
+
+assert type(bot.build_stt()).__name__ == "SlngSTTService"
+assert type(bot.build_appointment_desk_llm()).__name__ == "OpenAILLMService"
+assert type(bot.build_appointment_desk_tts()).__name__ == "SlngTTSService"
+
+# The generated module-level tool functions are valid direct functions.
+LLMContext(
+    tools=[
+        bot.lookup_customer,
+        bot.create_customer,
+        bot.check_availability,
+        bot.book_appointment,
+        bot.cancel_appointment,
+    ]
+)
+print("inline instantiation ok")
+`
+
+// TestSmokePipecatV1InlineInstantiates proves the inline single-agent shape (F3)
+// end to end on real pipecat-ai: no bus, LLM inline, tools as direct functions
+// on LLMContext. simple-prompt ships tracing, which the inline path excludes, so
+// the smoke clears it.
+func TestSmokePipecatV1InlineInstantiates(t *testing.T) {
+	runPipecatSmokeScript(t, "simple-prompt", nil, func(agent *ir.Agent) {
+		agent.Tracing = nil
+	}, pipecatInlineSmokeScript)
+}
+
 func examplePackagePath(name string) string {
 	if name == "remy" || name == "safe_core" {
 		return filepath.Join("..", "testdata", name)
