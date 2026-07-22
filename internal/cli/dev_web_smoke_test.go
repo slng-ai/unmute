@@ -72,12 +72,13 @@ func TestSmokeDevComposeValidates(t *testing.T) {
 	}
 }
 
-// TestSmokeDevPipecatImageImportsWebRTC builds the emitted application image
-// and imports its web transport inside that image (SPEC V12). This catches
-// native wheel dependencies absent from python:slim; host uv smokes cannot.
-func TestSmokeDevPipecatImageImportsWebRTC(t *testing.T) {
+// TestSmokeDevPipecatImageReceivesEnvAndImportsWebRTC builds the emitted image,
+// proves Compose passes a host env value, and imports its web transport inside
+// that image (SPEC V12, V13).
+func TestSmokeDevPipecatImageReceivesEnvAndImportsWebRTC(t *testing.T) {
 	docker := requireDocker(t)
 	composeFile, outDir, env := smokeDevArtifact(t, "pipecat")
+	env = setChildEnv(env, "OPENAI_API_KEY", "unmute-env-smoke")
 	project := composeProjectName(outDir, "pipecat")
 	run := func(args ...string) ([]byte, error) {
 		cmd := exec.Command(docker, composeArgs(composeFile, project, args...)...)
@@ -90,8 +91,8 @@ func TestSmokeDevPipecatImageImportsWebRTC(t *testing.T) {
 		t.Fatalf("build pipecat application: %v\n%s", err, output)
 	}
 	if output, err := run("run", "--rm", "--no-deps", "application", "python", "-c",
-		"from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport"); err != nil {
-		t.Fatalf("import SmallWebRTCTransport in pipecat image: %v\n%s", err, output)
+		"import os; assert os.environ['OPENAI_API_KEY'] == 'unmute-env-smoke'; from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport"); err != nil {
+		t.Fatalf("verify environment and import SmallWebRTCTransport in pipecat image: %v\n%s", err, output)
 	}
 }
 

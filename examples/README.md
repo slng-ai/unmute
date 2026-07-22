@@ -44,11 +44,11 @@ The generated projects are in `examples/simple-prompt/build/livekit/` and
 
 ## Review Langfuse traces
 
-Keep credentials in the ignored repository-root `.env.local`. Copy the file
+Keep credentials in the ignored repository-root `.env`. Copy the file
 without printing it, then run one target through `unmute dev`.
 
 ```sh
-cp .env.local examples/simple-prompt/.env
+cp .env examples/simple-prompt/.env
 bin/unmute dev examples/simple-prompt --target pipecat
 ```
 

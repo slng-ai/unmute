@@ -18,7 +18,7 @@ import (
 
 func TestParseDotenv(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, ".env.local")
+	path := filepath.Join(dir, ".env")
 	content := strings.Join([]string{
 		"# a comment",
 		"",

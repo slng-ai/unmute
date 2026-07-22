@@ -10,10 +10,9 @@ import (
 	"github.com/slng/unmute/internal/target"
 )
 
-// devComposeArtifact compiles safe_core to the named provider and returns the
-// emitted compose.dev.yaml. safe_core carries both a pipecat and a livekit
-// target, so one fixture covers both dev-compose goldens.
-func devComposeArtifact(t *testing.T, provider ir.Provider) string {
+// devArtifact compiles safe_core to the named provider. safe_core carries both
+// code targets, so one fixture covers their shared dev invariants.
+func devArtifact(t *testing.T, provider ir.Provider) Artifact {
 	t.Helper()
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
@@ -27,7 +26,29 @@ func devComposeArtifact(t *testing.T, provider ir.Provider) string {
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	return artifactFile(t, artifact, "compose.dev.yaml")
+	return artifact
+}
+
+func devComposeArtifact(t *testing.T, provider ir.Provider) string {
+	t.Helper()
+	return artifactFile(t, devArtifact(t, provider), "compose.dev.yaml")
+}
+
+func TestV13CodeTargetsUseDotenv(t *testing.T) {
+	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
+		t.Run(string(provider), func(t *testing.T) {
+			artifact := devArtifact(t, provider)
+			for _, file := range artifact.Files {
+				if strings.Contains(string(file.Content), ".env.local") {
+					t.Errorf("%s contains .env.local; local dotenv filename is .env", file.Path)
+				}
+			}
+			entrypoint := map[ir.Provider]string{ir.ProviderPipecat: "bot.py", ir.ProviderLiveKit: "agent.py"}[provider]
+			if source := artifactFile(t, artifact, entrypoint); !strings.Contains(source, "load_dotenv()") {
+				t.Errorf("%s does not load .env with load_dotenv()", entrypoint)
+			}
+		})
+	}
 }
 
 // TestPipecatDevComposeGolden locks the pipecat web dev topology: one built

@@ -118,7 +118,7 @@ from livekit.plugins import {{join .PluginModules ", "}}
 logger = logging.getLogger({{pyq .Project}})
 logger.setLevel(logging.INFO)
 
-load_dotenv(".env.local")
+load_dotenv()
 
 
 # --- prompts ---------------------------------------------------------------

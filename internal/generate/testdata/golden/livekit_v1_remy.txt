@@ -36,7 +36,7 @@ the LiveKit development worker.
 
 ```sh
 uv sync                       # or: pip install -e .
-cp .env.example .env.local    # then fill in the selected provider values
+cp .env.example .env          # then fill in the selected provider values
 uv run agent.py console       # local terminal session
 uv run agent.py dev           # LiveKit development worker
 ```
@@ -45,7 +45,7 @@ uv run agent.py dev           # LiveKit development worker
 ## Trace with Langfuse
 
 Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
-`LANGFUSE_BASE_URL` in `.env.local`; all three are required. The trace name is
+`LANGFUSE_BASE_URL` in `.env`; all three are required. The trace name is
 `Greeter-livekit`; the LiveKit room name becomes the Langfuse
 session ID.
 
@@ -92,7 +92,7 @@ from tracing import setup_langfuse
 logger = logging.getLogger("livekit")
 logger.setLevel(logging.INFO)
 
-load_dotenv(".env.local")
+load_dotenv()
 
 
 # --- prompts ---------------------------------------------------------------

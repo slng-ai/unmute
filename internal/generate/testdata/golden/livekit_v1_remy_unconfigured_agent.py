@@ -31,7 +31,7 @@ from livekit.plugins import openai, silero, slng
 logger = logging.getLogger("livekit")
 logger.setLevel(logging.INFO)
 
-load_dotenv(".env.local")
+load_dotenv()
 
 
 # --- prompts ---------------------------------------------------------------
