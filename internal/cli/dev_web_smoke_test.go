@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,12 +73,25 @@ func TestSmokeDevComposeValidates(t *testing.T) {
 	}
 }
 
-// TestSmokeDevPipecatImageImportsWebRTC builds the emitted application image
-// and imports its web transport inside that image (SPEC V12). This catches
-// native wheel dependencies absent from python:slim; host uv smokes cannot.
-func TestSmokeDevPipecatImageImportsWebRTC(t *testing.T) {
+// TestSmokeDevPipecatImageReceivesEnvAndImportsWebRTC builds the emitted image,
+// proves Compose passes a host env value, and imports its web transport inside
+// that image (SPEC V12, V13).
+func TestSmokeDevPipecatImageReceivesEnvAndImportsWebRTC(t *testing.T) {
 	docker := requireDocker(t)
-	composeFile, outDir, env := smokeDevArtifact(t, "pipecat")
+	composeFile, outDir, _ := smokeDevArtifact(t, "pipecat")
+	values, err := parseDotenv(filepath.Join(outDir, ".env.example"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name := range values {
+		t.Setenv(name, "")
+	}
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".env"), []byte("OPENAI_API_KEY=unmute-env-smoke\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repo)
+	env := devChildEnv(outDir, io.Discard)
 	project := composeProjectName(outDir, "pipecat")
 	run := func(args ...string) ([]byte, error) {
 		cmd := exec.Command(docker, composeArgs(composeFile, project, args...)...)
@@ -90,8 +104,8 @@ func TestSmokeDevPipecatImageImportsWebRTC(t *testing.T) {
 		t.Fatalf("build pipecat application: %v\n%s", err, output)
 	}
 	if output, err := run("run", "--rm", "--no-deps", "application", "python", "-c",
-		"from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport"); err != nil {
-		t.Fatalf("import SmallWebRTCTransport in pipecat image: %v\n%s", err, output)
+		"import os; assert os.environ['OPENAI_API_KEY'] == 'unmute-env-smoke'; from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport"); err != nil {
+		t.Fatalf("verify environment and import SmallWebRTCTransport in pipecat image: %v\n%s", err, output)
 	}
 }
 

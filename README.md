@@ -81,7 +81,7 @@ user's first run.
 
 Every [example](examples/README.md) declares both `pipecat` and `livekit`, so
 `validate` and `compile` cover both targets. Runs need `uv` on your PATH. Keep
-credentials in the ignored repo-root `.env.local` (the generated
+credentials in the ignored repo-root `.env` (the generated
 `.env.example` files list the exact variables), and copy them after compiling,
 because recompiling replaces `build/<target>/`.
 
@@ -98,7 +98,7 @@ bin/unmute compile "examples/$EXAMPLE"
 Test the generated LiveKit project in console mode (terminal mic and speaker):
 
 ```sh
-cp .env.local "examples/$EXAMPLE/build/livekit/.env.local"
+cp .env "examples/$EXAMPLE/build/livekit/.env"
 cd "examples/$EXAMPLE/build/livekit"
 uv run agent.py console
 ```
@@ -107,16 +107,16 @@ Test the generated Pipecat project (starts a WebRTC test client and prints the
 URL to open). Run from the repo root:
 
 ```sh
-cp .env.local "examples/$EXAMPLE/build/pipecat/.env"
+cp .env "examples/$EXAMPLE/build/pipecat/.env"
 cd "examples/$EXAMPLE/build/pipecat"
 uv run bot.py
 ```
 
-`unmute dev` does the recompile-and-run loop in one command, reading `.env`
-from the package root:
+`unmute dev` does the recompile-and-run loop in one command. It reads `.env`
+from the current directory, then the package root; package values override
+shared repository values. From the repository root, no copy is needed:
 
 ```sh
-cp .env.local "examples/$EXAMPLE/.env"
 bin/unmute dev "examples/$EXAMPLE" --target pipecat
 bin/unmute dev "examples/$EXAMPLE" --target livekit --console
 ```

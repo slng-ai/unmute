@@ -130,6 +130,11 @@ always runs the deployable container.
 - V12: the generated Pipecat image builds from its emitted `Dockerfile` and
   imports `pipecat.transports.smallwebrtc.transport`; L4 smoke proves this
   inside the image.
+- V13: `.env` is the sole local dotenv filename for both code targets and all
+  dev modes. Emitted Python and READMEs never name `.env.local`.
+- V14: `unmute dev` loads local credentials in precedence order: ambient env,
+  current-working-directory `.env`, package-root `.env`. Package values win;
+  both Pipecat and LiveKit receive the merged environment.
 
 ## §T tasks
 
@@ -142,8 +147,12 @@ T5|x|gate preservation: telephony fail-closed path and its L2 gate test untouche
 T6|x|tests: L2 default-mode routing, docker-missing text, command sequences (`up --build --detach --wait`, logs, project-scoped `down`, no `--volumes`), env passthrough, session-endpoint contract, teardown on interrupt; L4 smoke (build tag) for real Docker/browser; full suite green with zero Python/network/Docker|V1-V11
 T7|x|docs: `docs/user/reference/cli.md`, the learn-flow dev-mode pages, `docs/user/targets/{pipecat,livekit}.md`, and a going-live "local Compose to production" checklist per route; local mode is the deployable-image test step, Kubernetes is the same image with different manifests|I.dev,I.compose
 T8|x|install Pipecat image OpenCV runtime libs; add credential-free image build + SmallWebRTC import smoke; regenerate golden|V12
+T9|x|standardize Pipecat + LiveKit local dotenv on `.env`; align emitted/top-level READMEs; assert naming at L1 and container passthrough at L4|V13
+T10|x|load shared repo-root `.env` before package-root `.env`; package overrides; cover merge order at L1|V14
 
 ## §B bugs
 
 id|date|cause|fix
 B1|2026-07-22|Pipecat Dockerfile used `python:3.12-slim` without native OpenCV libs; `pipecat-ai[webrtc]` installed `opencv-python`; host-only runtime smoke + build-free Compose smoke never imported SmallWebRTC inside image|V12
+B2|2026-07-22|LiveKit generated projects read `.env.local` while CLI, Compose, Pipecat, and user docs used package-root `.env`; top-level example docs added a repo-root `.env.local` staging name, so misplaced credentials reached the container unset|V13
+B3|2026-07-22|B2 standardized the filename but left `devChildEnv` package-only; repo-root `.env` remained an unloaded file, so both containers still missed shared credentials|V14

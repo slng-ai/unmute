@@ -549,8 +549,9 @@ mints a token and joins a fresh room; your agent is dispatched to that room
 automatically. To point at LiveKit Cloud or your own deployment instead, deploy
 the built image yourself; local dev always runs the containerized dev server.
 
-Both modes read keys from `.env`; press `ctrl-c` to stop and the stack comes
-down (the data volume is kept). See the
+Both modes read shared keys from the current directory's `.env`, then apply
+package-root `.env` overrides. Press `ctrl-c` to stop and the stack comes down
+(the data volume is kept). See the
 [dev command reference](../reference/cli.md#dev) for all flags.
 
 ## Know the LiveKit boundaries

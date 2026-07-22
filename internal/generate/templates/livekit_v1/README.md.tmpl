@@ -10,7 +10,7 @@ the LiveKit development worker.
 
 ```sh
 uv sync                       # or: pip install -e .
-cp .env.example .env.local    # then fill in the selected provider values
+cp .env.example .env          # then fill in the selected provider values
 uv run agent.py console       # local terminal session
 uv run agent.py dev           # LiveKit development worker
 ```
@@ -19,7 +19,7 @@ uv run agent.py dev           # LiveKit development worker
 ## Trace with Langfuse
 
 Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
-`LANGFUSE_BASE_URL` in `.env.local`; all three are required. The trace name is
+`LANGFUSE_BASE_URL` in `.env`; all three are required. The trace name is
 `{{.EntryClass}}-{{.Project}}`; the LiveKit room name becomes the Langfuse
 session ID.
 
@@ -41,7 +41,7 @@ through the LiveKit docs MCP server.
 
 ### Required configuration and credentials
 
-Set these values in `.env.local` or your deployment secret store:
+Set these values in `.env` or your deployment secret store:
 
 - `LIVEKIT_URL`: the WebSocket URL of your self-hosted LiveKit Server.
 - `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`: a key pair from the `keys`
@@ -70,7 +70,7 @@ or RTP. Generated local Compose defaults to SIP port `5060` and UDP RTP ports
 Materialize the generated JSON before passing it to `lk`. The committed inputs
 contain variable names only; the `/tmp` copies contain resolved configuration
 and must not be committed. Export the values in your shell first;
-`envsubst` doesn't read `.env.local` itself.
+`envsubst` doesn't read `.env` itself.
 
 {{if .Telephony.HasInbound}}
 ```sh
