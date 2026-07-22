@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/slng/unmute/internal/generate"
 	"github.com/slng/unmute/internal/ir"
@@ -18,6 +19,17 @@ import (
 	"github.com/slng/unmute/internal/spec"
 	targetcap "github.com/slng/unmute/internal/target"
 )
+
+// renderField drives the interactive console model through one field at a fixed
+// terminal size and returns the rendered frame, for asserting on the visible UI
+// without a TTY.
+func renderField(t *testing.T, w, h int, req fieldReq) string {
+	t.Helper()
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	shown, _ := sized.(console).Update(requestMsg{ok: true, request: req})
+	return shown.(console).View()
+}
 
 func TestRunCreateDefaults(t *testing.T) {
 	t.Chdir(t.TempDir())
@@ -167,15 +179,16 @@ func TestV36SectionsHaveNoPassThroughMenus(t *testing.T) { // docs/spec/tui.md V
 }
 
 func TestV37EveryScreenShowsBackAffordance(t *testing.T) { // docs/spec/tui.md V37
-	keymap := backKeyMap()
-	for name, help := range map[string]string{
-		"input":   keymap.Input.Submit.Help().Key + " " + keymap.Input.Submit.Help().Desc,
-		"text":    keymap.Text.Submit.Help().Key + " " + keymap.Text.Submit.Help().Desc,
-		"select":  keymap.Select.Submit.Help().Key + " " + keymap.Select.Submit.Help().Desc,
-		"confirm": keymap.Confirm.Submit.Help().Key + " " + keymap.Confirm.Submit.Help().Desc,
+	for _, tc := range []struct {
+		name string
+		req  fieldReq
+	}{
+		{"select", fieldReq{kind: kindSelect, title: "Select", choices: []choice{{"Act", "act"}, {"← Back", actionBack}}, backable: true}},
+		{"input", fieldReq{kind: kindInput, title: "Input", backable: true}},
+		{"text", fieldReq{kind: kindText, title: "Text", backable: true}},
 	} {
-		if !strings.Contains(help, "Back") {
-			t.Errorf("%s interactive footer omits Back: %q", name, help)
+		if view := renderField(t, 90, 24, tc.req); !strings.Contains(strings.ToLower(view), "back") {
+			t.Errorf("%s interactive screen omits Back affordance:\n%s", tc.name, view)
 		}
 	}
 
@@ -225,31 +238,34 @@ func TestV37EveryScreenShowsBackAffordance(t *testing.T) { // docs/spec/tui.md V
 		}
 	}
 
-	notice := programShell{notice: &noticeState{title: "Report", lines: []string{"done"}, height: 10}}
-	if view := notice.View(); !strings.Contains(view, "Back") {
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	shown, _ := sized.(console).Update(requestMsg{ok: true, request: noticeRequest{
+		title: "Report",
+		run:   func(w io.Writer) error { _, _ = io.WriteString(w, "done"); return nil },
+		done:  make(chan error, 1),
+	}})
+	if view := shown.(console).View(); !strings.Contains(strings.ToLower(view), "back") {
 		t.Errorf("interactive notice footer omits Back: %q", view)
 	}
 }
 
 func TestV37ConstrainedMenuPinsBackInFooter(t *testing.T) { // docs/spec/tui.md V37
-	var choice string
-	options := []huh.Option[string]{
-		huh.NewOption("Description", "description"),
-		huh.NewOption("Execution", "execution"),
-		huh.NewOption("Webhook URL env", "url"),
-		huh.NewOption("Input schema", "input"),
-		huh.NewOption("Output schema", "output"),
-		huh.NewOption("Attached to", "attach"),
-		huh.NewOption("Delete tool", "delete"),
-		huh.NewOption("← Back", actionBack),
+	req := fieldReq{
+		kind:  kindSelect,
+		title: "user_verified",
+		choices: []choice{
+			{"Description", "description"}, {"Execution", "execution"},
+			{"Webhook URL env", "url"}, {"Input schema", "input"},
+			{"Output schema", "output"}, {"Attached to", "attach"},
+			{"Delete tool", "delete"}, {"← Back", actionBack},
+		},
+		backable: true,
 	}
-	form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("user_verified").Options(options...).Value(&choice))).
-		WithKeyMap(backKeyMap()).
-		WithHeight(9)
-
-	model, _ := (programShell{}).Update(requestMsg{request: formRequest{form: form, done: make(chan error, 1)}, ok: true})
-	if view := model.(programShell).View(); !strings.Contains(view, "← Back") {
-		t.Fatalf("constrained menu omitted pinned Back affordance:\n%s", view)
+	// A short viewport must still keep a Back affordance: the footer is a fixed
+	// region, separate from the scrolling option list (V37, was B9).
+	if view := renderField(t, 80, 9, req); !strings.Contains(strings.ToLower(view), "back") {
+		t.Fatalf("constrained menu omitted Back affordance:\n%s", view)
 	}
 }
 
@@ -1221,10 +1237,9 @@ func TestRunEOFAborts(t *testing.T) {
 	}
 }
 
-func TestBackKeyMapShowsFooterHint(t *testing.T) {
-	help := backKeyMap().Input.Submit.Help()
-	if help.Key != "← Back" || !strings.Contains(help.Desc, "Esc") {
-		t.Fatalf("input footer help = %#v", help)
+func TestConsoleFooterShowsBackHint(t *testing.T) {
+	if view := renderField(t, 80, 24, fieldReq{kind: kindInput, title: "Name", backable: true}); !strings.Contains(strings.ToLower(view), "back") {
+		t.Fatalf("interactive input footer omits Back hint:\n%s", view)
 	}
 }
 

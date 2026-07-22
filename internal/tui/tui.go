@@ -357,6 +357,18 @@ func repairPreflight(runner *fieldRunner, data *scaffold.Data, preflightErr erro
 }
 
 func showNotice(runner *fieldRunner, title, message string) error {
+	if !runner.accessible {
+		runner.sendField(fieldReq{
+			kind:     kindSelect,
+			title:    title,
+			desc:     message,
+			choices:  []choice{{label: "← Back", value: actionBack}},
+			initial:  actionBack,
+			backable: true,
+			ctx:      runner.ctx,
+		})
+		return nil
+	}
 	choice := actionBack
 	_, err := runner.run(huh.NewSelect[string]().
 		Title(title).
@@ -3041,6 +3053,7 @@ type fieldRunner struct {
 	tracked    *eofReader
 	requests   chan shellRequest
 	actions    ActionHandler
+	ctx        viewCtx // interactive chrome context (breadcrumb, target, sidebar)
 }
 
 func newRunner(in io.Reader, out io.Writer, accessible bool) *fieldRunner {
@@ -3052,20 +3065,11 @@ func newRunner(in io.Reader, out io.Writer, accessible bool) *fieldRunner {
 	return runner
 }
 
+// run drives one huh field for the accessible/headless path only (C5). The
+// interactive path never calls it; it uses sendField (shell.go) instead.
 func (r *fieldRunner) run(field huh.Field, backable bool) (bool, error) {
-	form := huh.NewForm(huh.NewGroup(field)).
-		WithAccessible(r.accessible)
-	if backable && !r.accessible {
-		form.WithKeyMap(backKeyMap())
-	}
-	var err error
-	if r.accessible {
-		err = r.runAccessible(form)
-	} else {
-		done := make(chan error, 1)
-		r.requests <- formRequest{form: form, done: done}
-		err = <-done
-	}
+	form := huh.NewForm(huh.NewGroup(field)).WithAccessible(true)
+	err := r.runAccessible(form)
 	if r.tracked != nil && r.tracked.eof {
 		return false, fmt.Errorf("menu: %w", huh.ErrUserAborted)
 	}
@@ -3108,6 +3112,21 @@ func (r *fieldRunner) selectOne(title, description string, options []huh.Option[
 			}
 		}
 	}
+	if !r.accessible {
+		reply := r.sendField(fieldReq{
+			kind:     kindSelect,
+			title:    title,
+			desc:     description,
+			choices:  toChoices(options),
+			initial:  options[0].Value,
+			backable: backable,
+			ctx:      r.ctx,
+		})
+		if reply.back {
+			return actionBack, true, nil
+		}
+		return reply.value, false, nil
+	}
 	choice := options[0].Value
 	field := huh.NewSelect[string]().Title(title).Description(description).Options(options...).Value(&choice)
 	back, err := r.run(field, backable)
@@ -3117,19 +3136,25 @@ func (r *fieldRunner) selectOne(title, description string, options []huh.Option[
 	return choice, false, nil
 }
 
-func backKeyMap() *huh.KeyMap {
-	keymap := huh.NewDefaultKeyMap()
-	keymap.Quit.SetKeys("esc", "ctrl+c")
-	// ponytail: Huh omits form-level Quit from field help, so include Esc in
-	// submit help until Huh exposes custom footer bindings.
-	keymap.Input.Submit.SetHelp("← Back", "(Esc) • enter Submit")
-	keymap.Text.Submit.SetHelp("← Back", "(Esc) • enter Submit")
-	keymap.Select.Submit.SetHelp("← Back", "(Esc) • enter Select")
-	keymap.Confirm.Submit.SetHelp("← Back", "(Esc) • enter Confirm")
-	return keymap
+// toChoices converts huh options (built by the flow) into the neutral choice
+// pairs the interactive model renders.
+func toChoices(options []huh.Option[string]) []choice {
+	out := make([]choice, len(options))
+	for i, o := range options {
+		out[i] = choice{label: o.Key, value: o.Value}
+	}
+	return out
 }
 
 func (r *fieldRunner) input(title, description string, value *string, validate func(string) error) (bool, error) {
+	if !r.accessible {
+		reply := r.sendField(fieldReq{kind: kindInput, title: title, desc: description, initial: *value, backable: true, validate: validate, ctx: r.ctx})
+		if reply.back {
+			return true, nil
+		}
+		*value = reply.value
+		return false, nil
+	}
 	temporary := *value
 	back, err := r.run(huh.NewInput().
 		Title(title).
@@ -3144,6 +3169,14 @@ func (r *fieldRunner) input(title, description string, value *string, validate f
 }
 
 func (r *fieldRunner) text(title, description string, value *string) (bool, error) {
+	if !r.accessible {
+		reply := r.sendField(fieldReq{kind: kindText, title: title, desc: description, initial: *value, backable: true, ctx: r.ctx})
+		if reply.back {
+			return true, nil
+		}
+		*value = reply.value
+		return false, nil
+	}
 	temporary := *value
 	back, err := r.run(huh.NewText().
 		Title(title).

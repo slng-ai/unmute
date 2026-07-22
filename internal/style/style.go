@@ -64,3 +64,19 @@ func Dim(s string) string {
 	}
 	return lipgloss.NewStyle().Foreground(Muted).Render(s)
 }
+
+// Errored renders text in the error color.
+func Errored(s string) string { return fg(s, Error) }
+
+// Warned renders text in the warning (amber) color.
+func Warned(s string) string { return fg(s, Warn) }
+
+// Ok renders text in the success color.
+func Ok(s string) string { return fg(s, Success) }
+
+func fg(s, hex string) string {
+	if NoColor() {
+		return s
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Render(s)
+}

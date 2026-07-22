@@ -7,20 +7,18 @@ import (
 	"io"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
 )
 
-type formRequest struct {
-	form *huh.Form
-	done chan error
-}
+// The interactive console is a custom Bubble Tea MVU program (docs/spec/tui.md
+// C4). The screen flow runs as ordinary blocking Go code in a goroutine
+// (fieldRunner); it hands the model one field at a time over a channel and waits
+// for the answer. The model owns the alt-screen, the SLNG chrome, and the field
+// components. huh renders only the accessible/headless path (run, in tui.go).
 
-type noticeRequest struct {
-	title string
-	run   func(io.Writer) error
-	done  chan error
-}
+// ---- flow <-> model protocol ----
 
 type shellRequest interface{}
 
@@ -29,8 +27,64 @@ type requestMsg struct {
 	ok      bool
 }
 
-type noticeDoneMsg struct {
-	text string
+func waitRequest(requests <-chan shellRequest) tea.Cmd {
+	return func() tea.Msg {
+		request, ok := <-requests
+		return requestMsg{request: request, ok: ok}
+	}
+}
+
+// fieldKind is the interactive field the model renders. confirms and notices are
+// selects; the flow never sends anything else (C4).
+type fieldKind int
+
+const (
+	kindSelect fieldKind = iota
+	kindInput
+	kindText
+)
+
+type choice struct{ label, value string }
+
+// sideItem is one row of the section sidebar.
+type sideItem struct {
+	label  string
+	active bool
+	child  bool
+}
+
+// viewCtx is the persistent chrome the flow supplies with each field: the
+// breadcrumb, the current target, and the sidebar rows (populated in T21).
+type viewCtx struct {
+	breadcrumb string
+	target     string
+	sidebar    []sideItem
+}
+
+// fieldReq asks the model to render one field and reply with the answer. It
+// carries plain data, never a huh type, so the interactive path imports no huh.
+type fieldReq struct {
+	kind     fieldKind
+	title    string
+	desc     string
+	choices  []choice
+	initial  string
+	backable bool
+	validate func(string) error
+	ctx      viewCtx
+	reply    chan fieldReply
+}
+
+type fieldReply struct {
+	value string
+	back  bool
+}
+
+// noticeRequest streams a command's combined output into a scrollable panel.
+type noticeRequest struct {
+	title string
+	run   func(io.Writer) error
+	done  chan error
 }
 
 type noticeState struct {
@@ -41,38 +95,59 @@ type noticeState struct {
 	done   chan error
 }
 
-type programShell struct {
+type noticeDoneMsg struct{ text string }
+
+// ---- the model ----
+
+type console struct {
 	requests <-chan shellRequest
-	current  *huh.Form
-	done     chan error
-	notice   *noticeState
+	width    int
+	height   int
+
+	req    *fieldReq
+	cursor int
+	input  textinput.Model
+	area   textarea.Model
+	errMsg string
+
+	notice *noticeState
 }
 
-func waitRequest(requests <-chan shellRequest) tea.Cmd {
-	return func() tea.Msg {
-		request, ok := <-requests
-		return requestMsg{request: request, ok: ok}
-	}
+func newConsole(requests <-chan shellRequest) console {
+	in := textinput.New()
+	in.Prompt = "› "
+	ta := textarea.New()
+	ta.ShowLineNumbers = false
+	ta.Prompt = ""
+	return console{requests: requests, input: in, area: ta}
 }
 
-func (m programShell) Init() tea.Cmd { return waitRequest(m.requests) }
+func (m console) Init() tea.Cmd { return waitRequest(m.requests) }
 
-func (m programShell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m console) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.area.SetWidth(max(4, m.editorInner()-2))
+		m.area.SetHeight(8)
+		m.input.Width = max(4, m.editorInner()-4)
+		if m.notice != nil {
+			m.notice.height = max(3, msg.Height-6)
+		}
+		return m, nil
 	case requestMsg:
 		if !msg.ok {
 			return m, tea.Quit
 		}
-		switch request := msg.request.(type) {
-		case formRequest:
-			m.current = request.form
-			m.done = request.done
-			return m, m.current.Init()
+		switch r := msg.request.(type) {
+		case fieldReq:
+			return m.startField(r)
 		case noticeRequest:
-			m.notice = &noticeState{title: request.title, height: 20, done: request.done}
+			m.notice = &noticeState{title: r.title, height: max(3, m.height-6), done: r.done}
+			run := r.run
 			return m, func() tea.Msg {
 				var report bytes.Buffer
-				if err := request.run(&report); err != nil {
+				if err := run(&report); err != nil {
 					fmt.Fprintf(&report, "error: %v\n", err)
 				}
 				return noticeDoneMsg{text: report.String()}
@@ -83,76 +158,181 @@ func (m programShell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice.lines = strings.Split(strings.TrimRight(msg.text, "\n"), "\n")
 		}
 		return m, nil
-	case tea.WindowSizeMsg:
-		if m.notice != nil {
-			m.notice.height = max(3, msg.Height-4)
-			return m, nil
-		}
 	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
 		if m.notice != nil {
-			switch msg.String() {
-			case "up", "k":
-				m.notice.offset = max(0, m.notice.offset-1)
-			case "down", "j":
-				m.notice.offset = min(max(0, len(m.notice.lines)-m.notice.height), m.notice.offset+1)
-			case "pgup":
-				m.notice.offset = max(0, m.notice.offset-m.notice.height)
-			case "pgdown":
-				m.notice.offset = min(max(0, len(m.notice.lines)-m.notice.height), m.notice.offset+m.notice.height)
-			case "enter", "esc":
-				m.notice.done <- nil
-				m.notice = nil
-				return m, waitRequest(m.requests)
+			return m.updateNotice(msg)
+		}
+		if m.req != nil {
+			return m.updateField(msg)
+		}
+	}
+	return m, nil
+}
+
+func (m console) startField(r fieldReq) (tea.Model, tea.Cmd) {
+	req := r
+	m.req = &req
+	m.errMsg = ""
+	switch r.kind {
+	case kindSelect:
+		m.cursor = 0
+		for i, c := range r.choices {
+			if c.value == r.initial {
+				m.cursor = i
+				break
+			}
+		}
+		return m, nil
+	case kindInput:
+		m.input.SetValue(r.initial)
+		m.input.CursorEnd()
+		return m, m.input.Focus()
+	case kindText:
+		m.area.SetValue(r.initial)
+		return m, m.area.Focus()
+	}
+	return m, nil
+}
+
+func (m console) updateField(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.req.kind {
+	case kindSelect:
+		switch msg.String() {
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < len(m.req.choices)-1 {
+				m.cursor++
+			}
+		case "home", "g":
+			m.cursor = 0
+		case "end", "G":
+			m.cursor = len(m.req.choices) - 1
+		case "enter":
+			return m.answer(fieldReply{value: m.req.choices[m.cursor].value})
+		case "esc":
+			if m.req.backable {
+				return m.answer(fieldReply{value: actionBack, back: true})
+			}
+		}
+		return m, nil
+	case kindInput:
+		switch msg.String() {
+		case "enter":
+			if m.req.validate != nil {
+				if err := m.req.validate(m.input.Value()); err != nil {
+					m.errMsg = err.Error()
+					return m, nil
+				}
+			}
+			return m.answer(fieldReply{value: m.input.Value()})
+		case "esc":
+			if m.req.backable {
+				return m.answer(fieldReply{value: actionBack, back: true})
 			}
 			return m, nil
 		}
-	}
-	if m.notice != nil {
-		return m, nil
-	}
-	if m.current == nil {
-		return m, nil
-	}
-	model, cmd := m.current.Update(msg)
-	m.current = model.(*huh.Form)
-	if m.current.State == huh.StateNormal {
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	case kindText:
+		switch msg.String() {
+		case "ctrl+d":
+			return m.answer(fieldReply{value: m.area.Value()})
+		case "esc":
+			if m.req.backable {
+				return m.answer(fieldReply{value: actionBack, back: true})
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.area, cmd = m.area.Update(msg)
 		return m, cmd
 	}
-	err := error(nil)
-	if m.current.State == huh.StateAborted {
-		err = huh.ErrUserAborted
+	return m, nil
+}
+
+func (m console) updateNotice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	maxOff := max(0, len(m.notice.lines)-m.notice.height)
+	switch msg.String() {
+	case "up", "k":
+		m.notice.offset = max(0, m.notice.offset-1)
+	case "down", "j":
+		m.notice.offset = min(maxOff, m.notice.offset+1)
+	case "pgup":
+		m.notice.offset = max(0, m.notice.offset-m.notice.height)
+	case "pgdown":
+		m.notice.offset = min(maxOff, m.notice.offset+m.notice.height)
+	case "enter", "esc":
+		m.notice.done <- nil
+		m.notice = nil
+		return m, waitRequest(m.requests)
 	}
-	m.done <- err
-	m.current, m.done = nil, nil
+	return m, nil
+}
+
+// answer replies to the blocked flow goroutine and waits for the next request.
+func (m console) answer(r fieldReply) (tea.Model, tea.Cmd) {
+	if m.req != nil && m.req.reply != nil {
+		m.req.reply <- r
+	}
+	m.req = nil
+	m.input.Blur()
+	m.area.Blur()
 	return m, waitRequest(m.requests)
 }
 
-func (m programShell) View() string {
-	if m.notice != nil {
-		end := min(len(m.notice.lines), m.notice.offset+m.notice.height)
-		lines := m.notice.lines[m.notice.offset:end]
-		return m.notice.title + "\n\n" + strings.Join(lines, "\n") + "\n\n↑/↓ scroll • Enter/Esc Back"
+// editorInner is the usable inner width of the editor panel at the current size.
+func (m console) editorInner() int {
+	w := m.width - m.sidebarWidth() - 1
+	if w < 10 {
+		w = m.width
 	}
-	if m.current == nil {
-		return ""
+	return max(10, w-4) // minus border + padding
+}
+
+func (m console) sidebarWidth() int {
+	if m.width < 72 || m.req == nil || len(m.req.ctx.sidebar) == 0 {
+		return 0
 	}
-	return m.current.View()
+	return 22
 }
 
 func (r *fieldRunner) runProgram(flow func() (Result, error)) (Result, error) {
 	r.requests = make(chan shellRequest)
-	var result Result
-	var flowErr error
+	type flowResult struct {
+		result Result
+		err    error
+	}
+	resultCh := make(chan flowResult, 1)
 	go func() {
-		result, flowErr = flow()
+		res, err := flow()
+		resultCh <- flowResult{res, err}
 		close(r.requests)
 	}()
-	_, programErr := tea.NewProgram(programShell{requests: r.requests},
+	_, programErr := tea.NewProgram(newConsole(r.requests),
 		tea.WithInput(r.in), tea.WithOutput(r.out), tea.WithAltScreen()).Run()
 	if programErr != nil && !errors.Is(programErr, tea.ErrInterrupted) {
 		return Result{}, programErr
 	}
-	return result, flowErr
+	select {
+	case fr := <-resultCh:
+		return fr.result, fr.err
+	default:
+		return Result{}, nil // quit before the flow finished
+	}
+}
+
+// sendField hands one field to the model and blocks until the user answers.
+func (r *fieldRunner) sendField(spec fieldReq) fieldReply {
+	spec.reply = make(chan fieldReply, 1)
+	r.requests <- spec
+	return <-spec.reply
 }
 
 func (r *fieldRunner) runNotice(title string, run func(io.Writer) error) error {
