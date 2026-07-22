@@ -206,7 +206,7 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort 
 		return fmt.Errorf("dev %s: %w", root, err)
 	}
 	outDir := filepath.Join(root, "build", resolved.Name)
-	if err := writeArtifactFiles(outDir, artifact.Files); err != nil {
+	if err := writeArtifactFiles(cmd.ErrOrStderr(), outDir, artifact.Files); err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "compiled %s\n", outDir)
@@ -319,7 +319,7 @@ func runDevConsole(cmd *cobra.Command, root, targetName string) error {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
 	}
 	outDir := filepath.Join(root, "build", resolved.Name)
-	if err := writeArtifactFiles(outDir, artifact.Files); err != nil {
+	if err := writeArtifactFiles(cmd.ErrOrStderr(), outDir, artifact.Files); err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "compiled %s\n", outDir)
@@ -526,7 +526,7 @@ func compileTargetForDev(cmd *cobra.Command, root, targetName string) (string, e
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
 	}
 	outDir := filepath.Join(root, "build", resolved.Name)
-	if err := writeArtifactFiles(outDir, artifact.Files); err != nil {
+	if err := writeArtifactFiles(cmd.ErrOrStderr(), outDir, artifact.Files); err != nil {
 		return "", fmt.Errorf("dev %s: %w", root, err)
 	}
 	return outDir, nil

@@ -39,7 +39,7 @@ func TestSmokeTelephonyComposeTopologies(t *testing.T) { // telephony V26
 		t.Run(tc.name, func(t *testing.T) {
 			outDir := filepath.Join(t.TempDir(), tc.name)
 			artifact := tc.artifact(t)
-			if err := writeArtifactFiles(outDir, artifact.Files); err != nil {
+			if err := writeArtifactFiles(nil, outDir, artifact.Files); err != nil {
 				t.Fatal(err)
 			}
 			composeFile := filepath.Join(outDir, "compose.telephony.yaml")

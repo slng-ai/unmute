@@ -17,11 +17,16 @@ gaps F1/F3/F4; confirm-then-decide F5/F6; F2's semantic change is rejected (C8) 
 dp§V26's small-context task-role boundary is preserved.
 
 ## §C constraints
-- C1: Python emitted **only** through embedded `text/template` (ADR-0002,
-  dp§C1). No hand-written Python in the artifact path. Every fix is a template
-  (`bot.py.tmpl`) + build-model (`pipecat_v1_build.go`) change, tested via
-  golden files (`-update-pipecat`) and the L4 smoke gate (`make smoke`, needs
-  Python).
+- C1 (amended per T3 decision): the **generator** emits Python **only** through
+  embedded `text/template` (ADR-0002, dp§C1) — no hand-written Python in the
+  generate package; every generator fix is a template (`bot.py.tmpl`) +
+  build-model (`pipecat_v1_build.go`) change, golden-tested. dp§C1 stays intact:
+  the generator is still template-only. **New:** the CLI **write path**
+  (`writeArtifactFiles`, I.write) applies a best-effort `ruff format` pass to
+  emitted `.py` before writing to disk (layout only, not the generator);
+  `ruff` is an **optional** runtime tool — absent → warn to stderr, write the
+  unformatted (still valid, F-clean) source, exit 0. Goldens capture the **raw**
+  generator output (zero-Python L1–L3 preserved).
 - C2: **doc wins** (CLAUDE.md). When code and a doc disagree, fix the code. F6
   is partly a doc-vs-code check, not only an upstream-idiom one.
 - C3: **reconcile with [driver-pipecat.md](docs/spec/driver-pipecat.md)** — it
@@ -67,8 +72,11 @@ dp§V26's small-context task-role boundary is preserved.
   `pyQuote`).
 - I.gold: `internal/generate/testdata/golden/pipecat_v1_*.py` + `pipecat_v1.txt`
   (regen with `-update-pipecat`).
+- I.write: [writeArtifactFiles](internal/cli/compile.go) — the shared CLI seam
+  that writes a code-target project to disk (compile/dev). T3 adds the
+  best-effort `ruff format` pass here (C1).
 - I.smoke: L4 `make smoke` (build tag `smoke`, needs Python) — proves emitted
-  Python is valid; the natural home for the ruff gate (V2).
+  Python is valid.
 
 ## §V invariants
 - V1 (F1): **both tool-emission paths present the LLM the same schema the tool
@@ -94,19 +102,23 @@ dp§V26's small-context task-role boundary is preserved.
   handler (documented escape hatch, not the default). Guard: extend the tasks +
   subagents goldens; a build-level check that every agent-level arg carries the
   YAML's type/enum/description.
-- V2 (F4): **generated Python passes `ruff check --select F` and is stable under
-  `ruff format`.** Specifically: no `F401` — `LLMWorker` is unused when tracing
-  is on (agents subclass `TracedLLMWorker`, golden `:45`,`:124`), `asdict` is
-  unused whenever `Variables` (golden `:18`); prompt strings are triple-quoted
-  module constants, not single-line escaped literals (`pyQuote` =
-  `strconv.Quote`, golden `:110`,`:263`,`:319`); the split `from
-  pipecat.frames.frames` imports are merged (golden `:26`–`:28`); `json={ "x": x
-  }` brace spacing, stray blank lines inside call args (golden `:402`,`:405`),
-  and missing blank lines between top-level defs are gone; `@tool` not
-  `@tool()`; no `respond_immediately=True` (restates the default); project
-  imports sit in their own isort group, not the stdlib block. Guard: wire `ruff
-  check --select F` + `ruff format --diff` into the L4 smoke (I.smoke); goldens
-  regenerated clean.
+- V2 (F4, amended — the write path runs `ruff format`, C1): the emission is
+  clean in two layers. (1) **Generator** (template-only): its raw output passes
+  `ruff check --select F` — only used imports (`LLMWorker` gated to plain-worker
+  bots — unused when agents subclass `TracedLLMWorker`; no `asdict`), same-module
+  `from pipecat.frames.frames` imports merged, no other F-violations — plus the
+  idiom fixes ruff cannot make: `@tool` not `@tool()`, no `respond_immediately=True`
+  (the Flows default), and each agent prompt a single triple-quoted module
+  constant referenced by builder + restore (dedup; C8-preserving). So the raw
+  output is valid and F-clean even when ruff is absent. (2) **Write path**
+  (`writeArtifactFiles`, I.write): a best-effort `ruff format` pass makes the
+  on-disk `.py` byte-stable under `ruff format` (brace spacing, blank lines,
+  line-wrapping — the data-dependent layout the template cannot make static).
+  Byte-`ruff format`-stability of the *raw* generator output is **out of scope**
+  (line-wrapping depends on runtime string length; C1 forbids formatting in the
+  generator). Guard: `TestPipecatRuffCheckClean` (raw output is F-clean; skips if
+  ruff absent) + `TestWriteArtifactFilesFormatsPython` (write path formats +
+  stable; skips if ruff absent).
 - V3 (F5, from B1): every generated agent-level `@tool` method resolves its
   function call via `await params.result_callback(...)`. Pipecat ignores a
   `@tool`'s **return value** ("Tool methods must call `params.result_callback()`
@@ -136,7 +148,7 @@ code-DRY fix inside T3/V2.)*
 id|status|desc|cites
 T1|.|F1: thread the tool `input` schema into the agent-level `@tool` path. Extend `pipecatArg` with type/description/enum; populate in `inputFields`/`buildTool`; template renders typed signature + Google `Args:` docstring (enums as prose). Regen tasks+subagents goldens; assert both paths schema-equal. Document the `FunctionSchema` escape hatch for strict enums|V1,C4,I.build,I.tmpl
 T2|.|F3: collapse `len(agents)==1 && no agent_transfers` to the inline `food_ordering` shape — LLM inline in the pipeline, no bus / `BusBridgeProcessor` / `activate_entry` dance — scoped to the pipeline+`run_bot` section of the template only; agent class, tools, and flows blocks stay shared. Record the trade-off (one uniform shape vs. a second code path) in the PR. Reconcile with dp§V14 (activation gate applies only to the bus path). Regen `simple-prompt` golden|C5,C3,I.tmpl
-T3|.|F4: make emitted Python ruff-clean + format-stable — gate `LLMWorker`/`asdict` imports (no F401), emit each agent prompt as one triple-quoted module constant referenced by both `build_<name>_llm` and its restore handler (kills the golden `:110`/`:263`/`:319` literal duplication — code-DRY only, **preserves the dp§V26 replace-and-restore semantics per C8**), merge the `frames.frames` imports, fix brace/blank-line formatting, drop `@tool()`→`@tool` and `respond_immediately=True`, group project imports. Wire `ruff check --select F` + `ruff format --diff` into `make smoke`. Regen all four goldens|V2,C8,I.tmpl,I.build,I.smoke
+T3|x|F4: two-layer clean output. Template/build: gate `LLMWorker` + drop `asdict` (F-clean), merge `frames.frames` imports, `@tool()`→`@tool`, drop `respond_immediately=True`, `json={...}` spacing, each agent prompt as one triple-quoted module constant referenced by builder + restore (dedup; C8-preserving). Write path (`writeArtifactFiles`, I.write): best-effort `ruff format` pass on emitted `.py`, warn to stderr if ruff absent (ADR-0002/C1 amended). Guards: `TestPipecatRuffCheckClean` + `TestWriteArtifactFilesFormatsPython` (both skip w/o ruff); regen goldens (raw)|V2,C8,I.tmpl,I.build,I.write
 T4|x|F5 CONFIRMED defect (context7: Pipecat "tool methods must call `params.result_callback()` … to avoid unresolved LLM calls"). Fix: the delegate `@tool` resolves its call via `params.result_callback` instead of returning `{"status": …}` (`bot.py.tmpl` ~L205; golden `:230`,`:286`). Add `TestV3PipecatToolsResolveCallback`; regen tasks golden|V3,B1,I.tmpl
 T5|x|F6 CONFIRMED (context7 + no test coverage): `then: end` queues `EndFrame()` (`bot.py.tmpl` ~L236), drifting from dp§V2 + upstream `food_ordering`; no example/golden exercises the path. Fix: emit `post_actions=[{"type": "end_conversation"}]` on the terminal node; add a `then: end` golden fixture + assertion. Verify end-node wiring against the pipecat-flows end pattern before finalizing|V4,B2,C2,C3,I.tmpl
 

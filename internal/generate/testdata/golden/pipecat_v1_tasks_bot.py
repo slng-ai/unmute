@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
 import httpx
 from dotenv import load_dotenv
@@ -23,9 +23,7 @@ from dotenv import load_dotenv
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
 from pipecat.flows import ContextStrategy, ContextStrategyConfig, FlowManager, FlowsFunctionSchema, NodeConfig
-from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
-from pipecat.frames.frames import TTSSpeakFrame
-from pipecat.frames.frames import LLMUpdateSettingsFrame
+from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -42,7 +40,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
-from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
+from pipecat.workers.llm import LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
 
 from tracing import (
@@ -99,6 +97,29 @@ async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
     await asyncio.sleep(timeout_secs)
     await worker.queue_frame(EndFrame())
 
+# --- prompts ----------------------------------------------------------------
+# Agent system instructions as module constants: one copy each, referenced by
+# the LLM builder and any Flow restore (V2).
+BILLING_PROMPT = """# Billing agent (placeholder prompt)
+
+You are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+
+- The caller was handed to you because they have a billing question. The conversation so far is in your context.
+- Use `get_invoice` to look up invoices for customer `{{customer_id}}`.
+- Explain charges calmly and clearly, one item at a time.
+- If the caller is not satisfied or asks for a person, transfer them with `to_human`.
+"""
+INTAKE_PROMPT = """# Intake agent (placeholder prompt)
+
+You are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+
+- Greet the caller and find out what they need.
+- When they give a phone number or email, use `lookup_customer` to find their record.
+- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.
+- Never guess account details. If you cannot find the customer, say so and ask again.
+"""
+
+
 # --- agents -----------------------------------------------------------------
 
 
@@ -107,7 +128,7 @@ def build_billing_llm():
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
             model="gpt-4o",
-            system_instruction="# Billing agent (placeholder prompt)\n\nYou are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.\n\n- The caller was handed to you because they have a billing question. The conversation so far is in your context.\n- Use `get_invoice` to look up invoices for customer `{{customer_id}}`.\n- Explain charges calmly and clearly, one item at a time.\n- If the caller is not satisfied or asks for a person, transfer them with `to_human`.\n",
+            system_instruction=BILLING_PROMPT,
         ),
     )
 
@@ -131,7 +152,7 @@ class BillingAgent(TracedLLMWorker):
         llm = build_billing_llm()
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
 
-    @tool()
+    @tool
     async def get_invoice(self, params: FunctionCallParams, customer_id: str):
         """Fetch the most recent invoice for a customer id. Returns the invoice total and status."""
         async with httpx.AsyncClient() as client:
@@ -143,7 +164,7 @@ class BillingAgent(TracedLLMWorker):
             response.raise_for_status()
             await params.result_callback(response.json())
 
-    @tool()
+    @tool
     async def to_human(self, params: FunctionCallParams):
         """Transfer the caller to a human."""
         await params.llm.push_frame(
@@ -164,7 +185,7 @@ def build_intake_llm():
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
             model="gpt-4o-mini",
-            system_instruction="# Intake agent (placeholder prompt)\n\nYou are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.\n\n- Greet the caller and find out what they need.\n- When they give a phone number or email, use `lookup_customer` to find their record.\n- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.\n- Never guess account details. If you cannot find the customer, say so and ask again.\n",
+            system_instruction=INTAKE_PROMPT,
             temperature=0.4,
         ),
     )
@@ -202,7 +223,7 @@ class IntakeAgent(TracedLLMWorker):
             result_callback=params.result_callback,
         )
 
-    @tool()
+    @tool
     async def lookup_customer(self, params: FunctionCallParams, email: str = "", phone: str = ""):
         """Look up a customer record by phone number or email. Returns the customer id and name."""
         async with httpx.AsyncClient() as client:
@@ -214,7 +235,7 @@ class IntakeAgent(TracedLLMWorker):
             response.raise_for_status()
             await params.result_callback(response.json())
 
-    @tool()
+    @tool
     async def run_collect(self, params: FunctionCallParams):
         """Collect the caller's account details."""
         self._run_collect_results = {}
@@ -253,7 +274,6 @@ class IntakeAgent(TracedLLMWorker):
                     handler=self._trace_flow_tool("finish_run_collect_collect", self._run_collect_finish_collect),
                 ),
             ],
-            respond_immediately=True,
         )
 
     async def _run_collect_finish_collect(self, args, flow_manager):
@@ -263,7 +283,7 @@ class IntakeAgent(TracedLLMWorker):
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._run_collect_snapshot
         await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction="# Intake agent (placeholder prompt)\n\nYou are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.\n\n- Greet the caller and find out what they need.\n- When they give a phone number or email, use `lookup_customer` to find their record.\n- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.\n- Never guess account details. If you cannot find the customer, say so and ask again.\n"),
+            delta=LLMSettings(system_instruction=INTAKE_PROMPT),
         ))
         await self.flush_pipeline()
         self.context.set_messages(messages + [{
@@ -273,7 +293,7 @@ class IntakeAgent(TracedLLMWorker):
         self.context.set_tools(tools)
         return {"status": "ok"}, None
 
-    @tool()
+    @tool
     async def run_triage(self, params: FunctionCallParams):
         """Run the triage group."""
         self._run_triage_results = {}
@@ -313,7 +333,6 @@ class IntakeAgent(TracedLLMWorker):
                 ),
             ],
             context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
-            respond_immediately=True,
         )
 
     async def _run_triage_finish_collect(self, args, flow_manager):
@@ -322,7 +341,7 @@ class IntakeAgent(TracedLLMWorker):
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._run_triage_snapshot
         await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction="# Intake agent (placeholder prompt)\n\nYou are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.\n\n- Greet the caller and find out what they need.\n- When they give a phone number or email, use `lookup_customer` to find their record.\n- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.\n- Never guess account details. If you cannot find the customer, say so and ask again.\n"),
+            delta=LLMSettings(system_instruction=INTAKE_PROMPT),
         ))
         await self.flush_pipeline()
         self.context.set_messages(messages + [{

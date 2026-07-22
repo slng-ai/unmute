@@ -247,6 +247,21 @@ func setImportNeeds(data *pipecatData) {
 	}
 	collectLocal(data.FlowTools)
 	sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
+
+	// pipecat.frames.frames names ride one merged import (V2); appended in
+	// alphabetical order so it already matches isort without a sort pass.
+	if data.NeedsEndFrame {
+		data.FrameImports = append(data.FrameImports, "EndFrame")
+	}
+	if data.NeedsAppendFrame {
+		data.FrameImports = append(data.FrameImports, "LLMMessagesAppendFrame")
+	}
+	if data.NeedsRoleRestore {
+		data.FrameImports = append(data.FrameImports, "LLMUpdateSettingsFrame")
+	}
+	if data.GreetingText != "" {
+		data.FrameImports = append(data.FrameImports, "TTSSpeakFrame")
+	}
 }
 
 // collectImportsExtras returns the deduped, sorted service imports for bot.py,
@@ -330,7 +345,8 @@ func sortedKeys(set map[string]bool) []string {
 }
 
 func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.AgentDef, env *envSet) (pipecatAgent, error) {
-	llm, err := agentLLMService(target.Models.Reason[def.Model], def.Instructions, env)
+	promptConst := promptConstName(name)
+	llm, err := agentLLMService(target.Models.Reason[def.Model], promptConst, env)
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
@@ -338,7 +354,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
-	built := pipecatAgent{Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions, LLM: llm, TTS: tts}
+	built := pipecatAgent{Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions, PromptConst: promptConst, LLM: llm, TTS: tts}
 
 	for _, ref := range def.Tools {
 		if tool, ok := agent.Tools[ref]; ok {
@@ -663,10 +679,11 @@ func sttService(binding *ir.Binding, language string, env *envSet) (pipecatServi
 }
 
 // agentLLMService builds an agent's LLM; the prompt nests into Settings as
-// system_instruction (the workers-model shape, driver-pipecat C2).
-func agentLLMService(binding ir.Binding, prompt string, env *envSet) (pipecatService, error) {
+// system_instruction (the workers-model shape, driver-pipecat C2), referenced
+// through its module constant so builder and restore share one copy (V2).
+func agentLLMService(binding ir.Binding, promptRef string, env *envSet) (pipecatService, error) {
 	return resolvePipecatService(targetcap.Reason, binding, "", env,
-		pyKV{Key: "system_instruction", Value: pyQuote(prompt)})
+		pyKV{Key: "system_instruction", Value: promptRef})
 }
 
 func ttsService(binding ir.Binding, language string, env *envSet) (pipecatService, error) {

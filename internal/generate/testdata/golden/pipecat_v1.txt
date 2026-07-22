@@ -79,15 +79,14 @@ from __future__ import annotations
 
 import asyncio
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
 import httpx
 from dotenv import load_dotenv
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
-from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
-from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -149,6 +148,29 @@ async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
     await asyncio.sleep(timeout_secs)
     await worker.queue_frame(EndFrame())
 
+# --- prompts ----------------------------------------------------------------
+# Agent system instructions as module constants: one copy each, referenced by
+# the LLM builder and any Flow restore (V2).
+BILLING_PROMPT = """# Billing agent (placeholder prompt)
+
+You are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+
+- The caller was handed to you because they have a billing question. The conversation so far is in your context.
+- Use `get_invoice` to look up invoices for customer `{{customer_id}}`.
+- Explain charges calmly and clearly, one item at a time.
+- If the caller is not satisfied or asks for a person, transfer them with `to_human`.
+"""
+INTAKE_PROMPT = """# Intake agent (placeholder prompt)
+
+You are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
+
+- Greet the caller and find out what they need.
+- When they give a phone number or email, use `lookup_customer` to find their record.
+- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.
+- Never guess account details. If you cannot find the customer, say so and ask again.
+"""
+
+
 # --- agents -----------------------------------------------------------------
 
 
@@ -157,7 +179,7 @@ def build_billing_llm():
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
             model="gpt-4o",
-            system_instruction="# Billing agent (placeholder prompt)\n\nYou are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.\n\n- The caller was handed to you because they have a billing question. The conversation so far is in your context.\n- Use `get_invoice` to look up invoices for customer `{{customer_id}}`.\n- Explain charges calmly and clearly, one item at a time.\n- If the caller is not satisfied or asks for a person, transfer them with `to_human`.\n",
+            system_instruction=BILLING_PROMPT,
         ),
     )
 
@@ -180,7 +202,7 @@ class BillingAgent(LLMWorker):
         llm = build_billing_llm()
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
 
-    @tool()
+    @tool
     async def get_invoice(self, params: FunctionCallParams, customer_id: str):
         """Fetch the most recent invoice for a customer id. Returns the invoice total and status."""
         async with httpx.AsyncClient() as client:
@@ -192,7 +214,7 @@ class BillingAgent(LLMWorker):
             response.raise_for_status()
             await params.result_callback(response.json())
 
-    @tool()
+    @tool
     async def to_human(self, params: FunctionCallParams):
         """Transfer the caller to a human."""
         await params.llm.push_frame(
@@ -213,7 +235,7 @@ def build_intake_llm():
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
             model="gpt-4o-mini",
-            system_instruction="# Intake agent (placeholder prompt)\n\nYou are the front desk voice agent for Acme Support. This is a phone call, so keep every answer to one or two short sentences.\n\n- Greet the caller and find out what they need.\n- When they give a phone number or email, use `lookup_customer` to find their record.\n- If the caller asks about billing, an invoice, or a refund, hand off to the billing agent with `to_billing`.\n- Never guess account details. If you cannot find the customer, say so and ask again.\n",
+            system_instruction=INTAKE_PROMPT,
             temperature=0.4,
         ),
     )
@@ -250,7 +272,7 @@ class IntakeAgent(LLMWorker):
             result_callback=params.result_callback,
         )
 
-    @tool()
+    @tool
     async def lookup_customer(self, params: FunctionCallParams, email: str = "", phone: str = ""):
         """Look up a customer record by phone number or email. Returns the customer id and name."""
         async with httpx.AsyncClient() as client:

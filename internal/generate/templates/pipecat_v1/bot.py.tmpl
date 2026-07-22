@@ -26,7 +26,7 @@ import asyncio
 {{end}}{{if .HasFlows}}import json
 {{end}}import os
 {{if .Telephony}}import sys
-{{end}}{{if .Variables}}from dataclasses import asdict, dataclass
+{{end}}{{if .Variables}}from dataclasses import dataclass
 {{end}}{{if .NeedsHTTPX}}
 import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
@@ -37,11 +37,7 @@ import httpx
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
 {{if .HasFlows}}from pipecat.flows import {{if .HasIsolated}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig
-{{end}}{{if and .NeedsEndFrame .NeedsAppendFrame}}from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame
-{{else if .NeedsEndFrame}}from pipecat.frames.frames import EndFrame
-{{else if .NeedsAppendFrame}}from pipecat.frames.frames import LLMMessagesAppendFrame
-{{end}}{{if .GreetingText}}from pipecat.frames.frames import TTSSpeakFrame
-{{end}}{{if .NeedsRoleRestore}}from pipecat.frames.frames import LLMUpdateSettingsFrame
+{{end}}{{if .FrameImports}}from pipecat.frames.frames import {{join .FrameImports ", "}}
 {{end}}from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -59,7 +55,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 {{end}}{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
-{{end}}from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
+{{end}}from pipecat.workers.llm import {{if not (and .Tracing .NeedsFunctionCalls)}}LLMWorker, {{end}}LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
 from pipecat.workers.runner import WorkerRunner
 {{if .Tracing}}
 from tracing import (
@@ -122,6 +118,12 @@ async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
     await asyncio.sleep(timeout_secs)
     await worker.queue_frame(EndFrame())
 {{end}}
+# --- prompts ----------------------------------------------------------------
+# Agent system instructions as module constants: one copy each, referenced by
+# the LLM builder and any Flow restore (V2).
+{{range .Agents}}{{.PromptConst}} = {{pytriple .Prompt}}
+{{end}}
+
 # --- agents -----------------------------------------------------------------
 {{range .Agents}}
 
@@ -161,7 +163,7 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
             result_callback=params.result_callback,
         )
 {{end}}{{range .Tools}}
-    @tool({{if eq .Interruption "cancel"}}cancel_on_interruption=True{{else if eq .Interruption "continue"}}cancel_on_interruption=False{{end}})
+    @tool{{if eq .Interruption "cancel"}}(cancel_on_interruption=True){{else if eq .Interruption "continue"}}(cancel_on_interruption=False){{end}}
     async def {{.MethodName}}(self, params: FunctionCallParams{{range .Args}}, {{.Name}}: str{{if not .Required}} = ""{{end}}{{end}}):
         """{{.Description}}"""
 {{if .ColdDestination}}        await params.llm.push_frame(
@@ -188,8 +190,8 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
             response.raise_for_status()
             await params.result_callback(response.json())
 {{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.llm.push_frame(EndFrame())
-{{end}}{{end}}{{$agentPrompt := .Prompt}}{{range $d := .Delegates}}
-    @tool()
+{{end}}{{end}}{{$agentPromptConst := .PromptConst}}{{range $d := .Delegates}}
+    @tool
     async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
         self._{{$d.MethodName}}_results = {}
@@ -229,8 +231,7 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
                 ),
             ],
 {{if $d.Isolated}}            context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
-{{end}}            respond_immediately=True,
-        )
+{{end}}        )
 
     async def _{{$d.MethodName}}_finish_{{$t.Name}}(self, args, flow_manager):
         self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
@@ -243,7 +244,7 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._{{$d.MethodName}}_snapshot
         await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction={{pyq $agentPrompt}}),
+            delta=LLMSettings(system_instruction={{$agentPromptConst}}),
         ))
         await self.flush_pipeline()
 {{if eq $d.Then "transfer"}}        self.context.set_messages(messages)
@@ -271,7 +272,6 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
             task_messages=[{"role": "developer", "content": "Thank the caller and say goodbye."}],
             functions=[],
             post_actions=[{"type": "end_conversation"}],
-            respond_immediately=True,
         )
 {{end}}{{end}}
 {{end}}{{if .FlowTools}}

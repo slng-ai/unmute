@@ -3,6 +3,7 @@ package generate
 import (
 	"flag"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -84,7 +85,7 @@ func TestV32PipecatGreetingModes(t *testing.T) {
 				Text:        "Hi, this is Sage and Stone Salon.",
 			},
 			want: []string{
-				"from pipecat.frames.frames import TTSSpeakFrame",
+				"from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame",
 				`TTSSpeakFrame("Hi, this is Sage and Stone Salon.")`,
 				"next(agent for agent in agents",
 				"args=LLMWorkerActivationArgs(run_llm=False)",
@@ -457,11 +458,13 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		t.Fatal("bot.py not emitted")
 	}
 	for _, want := range []string{
-		"from pipecat.frames.frames import LLMUpdateSettingsFrame",
+		"from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame",
 		"from pipecat.services.settings import LLMSettings",
 		`role_message="Ask for the caller's email, look them up, and confirm their account tier."`,
 		`task_messages=[{"role": "developer", "content": "Begin this step."}]`,
-		`delta=LLMSettings(system_instruction="# Intake agent`,
+		// The agent prompt is one module constant, referenced by builder + restore (V2).
+		`INTAKE_PROMPT = """# Intake agent`,
+		`delta=LLMSettings(system_instruction=INTAKE_PROMPT)`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing task role boundary %q", want)
@@ -605,6 +608,45 @@ func TestV3PipecatToolsResolveCallback(t *testing.T) {
 	}
 	if strings.Contains(bot, `return {"status": "running`) {
 		t.Error("delegate @tool still returns a status dict instead of resolving the call (B1)")
+	}
+}
+
+// TestPipecatRuffCheckClean: the raw generator output (template-only, before the
+// write-path ruff format pass) passes `ruff check --select F` — only used
+// imports, no undefined names (V2). Uses a feature-rich fixture (tools + a Flow
+// delegate + tracing + variables). Skips when ruff is absent.
+func TestPipecatRuffCheckClean(t *testing.T) {
+	if _, err := exec.LookPath("ruff"); err != nil {
+		t.Skip("ruff not installed")
+	}
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enableLangfuse(agent)
+	agent.Tasks["collect"] = ir.Task{
+		Instructions: "Ask for the caller's email and confirm their tier.",
+		Tools:        []string{"lookup_customer"},
+		Result:       map[string]ir.ResultField{"tier": {Type: ir.PrimitiveString, Enum: []string{"free", "pro"}}},
+		Context:      ir.TaskContext{History: ir.HistoryFull},
+	}
+	agent.Controls["run_collect"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "collect", When: "Collect account details."}
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "run_collect")
+	agent.Agents["intake"] = intake
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	cmd := exec.Command("ruff", "check", "--select", "F", "-")
+	cmd.Stdin = strings.NewReader(artifactFile(t, artifact, "bot.py"))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("raw generated bot.py is not `ruff check --select F` clean:\n%s", out)
 	}
 }
 
