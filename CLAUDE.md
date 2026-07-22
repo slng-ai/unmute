@@ -3,7 +3,7 @@
 Go CLI that compiles a declarative voice-agent spec into orchestrator-native artifacts. Full design in `docs/ARCHITECTURE.md`; engineering detail in `docs/DEVELOPMENT.md`; glossary in `CONTEXT.md`; locked decisions in `docs/adr/`. **When code and a doc disagree, the doc wins — fix the code or open an issue.**
 
 ## The one rule
-We own **Go only**. Python is *emitted* by our `text/template` files and *shelled out to* by `unmute dev` — never a package we maintain in this repo (ADR-0002, compile-don't-interpret). If you're maintaining Python here, you've drifted from the locked design.
+Unmute is written in Go, so you mantian **Go code** but you also write some python code snippets and examples, in python. When you  run python code, always check for ty or ruff issues. 
 
 ## Tooling
 - Go 1.24 (pin in `go.mod`); `CGO_ENABLED=0` static binary; version stamped at link time, never hardcoded.
@@ -19,12 +19,7 @@ We own **Go only**. Python is *emitted* by our `text/template` files and *shelle
 - `SilenceUsage` + `SilenceErrors` on the root. Exit codes: `0` ok, `1` error — add more only when a consumer actually reads them. Warnings → stderr + exit 0 (never a silent downgrade).
 
 ## IR
-Go structs are the schema source for their own surface: `internal/spec` derives the unresolved authoring schema, while `internal/ir` derives the resolved/debug schema. **Do not hand-author `.json` schema files.** Flow: `spec.Load` → `ir.Build` → `ir.Validate` → `generate.Generate`.
-
-## Testing
-`go test ./...` runs L1–L3 and needs **zero Python**:
-- L1 unit (pure logic, table-driven) · L2 in-process command tests (real tree, capture output) · L3 golden files (`-update` to regenerate).
-- L4 smoke (`make smoke`, build tag `smoke`) proves emitted Python is valid — opt-in, needs Python, never in the default suite or PR gate.
+Go structs are the schema source for their own surface: `internal/spec` derives the unresolved authoring schema, while `internal/ir` derives the resolved/debug schema.
 
 ## Layout
 `internal/` not `pkg/`. One file per command in `internal/cli/`. Hand-write cobra commands — **no `cobra-cli` generator**.

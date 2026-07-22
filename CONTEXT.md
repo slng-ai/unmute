@@ -1,6 +1,6 @@
 # Unmute
 
-Unmute is SLNG's portable voice-agent framework: define the agent once as a directory of declarative YAML, **compile** it to any **Orchestrator**, deploy it to any **Region** on any **Runtime**, and move it wherever you want. The portability is the product: one plain-YAML spec that makes every orchestration layer easy to write, read, and swap. SLNG's **Execution Layer** is the default model route — `unmute init` scaffolds SLNG credentials and routes unless asked otherwise — and a binding can name any provider the framework itself integrates; the provider catalogue maps those (PROVIDER_CATALOG.md, 2026-07-15). Inspired by Vercel Eve's directory conventions, with voice-native primitives on top.
+Unmute is SLNG's portable voice-agent framework: define the agent once as a directory of declarative YAML, **compile** it to any **Orchestrator**, deploy it to any **Region** on any **Runtime**, and move it wherever you want. The portability is the product: one plain-YAML spec that makes every orchestration layer easy to write, read, and swap. SLNG's **Execution Layer** is the default model route — `unmute init` scaffolds SLNG credentials and routes unless asked otherwise — and a binding can name any provider the framework itself integrates; the provider catalogue maps those. Inspired by Vercel Eve's directory conventions, with voice-native primitives on top.
 
 ## Language
 
