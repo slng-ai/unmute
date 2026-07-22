@@ -3,6 +3,8 @@ package tui
 import (
 	"bytes"
 	"errors"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,13 +13,27 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/slng/unmute/internal/generate"
 	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/scaffold"
 	"github.com/slng/unmute/internal/spec"
+	"github.com/slng/unmute/internal/style"
 	targetcap "github.com/slng/unmute/internal/target"
 )
+
+// renderField drives the interactive console model through one field at a fixed
+// terminal size and returns the rendered frame, for asserting on the visible UI
+// without a TTY.
+func renderField(t *testing.T, w, h int, req fieldReq) string {
+	t.Helper()
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	shown, _ := sized.(console).Update(requestMsg{ok: true, request: req})
+	return shown.(console).View()
+}
 
 func TestRunCreateDefaults(t *testing.T) {
 	t.Chdir(t.TempDir())
@@ -62,38 +78,35 @@ func TestRunQuit(t *testing.T) {
 	}
 }
 
-func TestV23WordmarkHasNoBackgroundColor(t *testing.T) { // docs/spec/tui.md V23
-	if strings.Contains(slngWordmark, "48;") {
-		t.Fatalf("wordmark still paints a background: %q", slngWordmark)
-	}
-	if !strings.Contains(slngWordmark, "38;2;245;201;110m") {
-		t.Fatalf("wordmark lost the SLNG foreground color: %q", slngWordmark)
-	}
-}
-
-func TestV26WordmarkRendersInsideHome(t *testing.T) {
-	t.Setenv("NO_COLOR", "")
-	var output bytes.Buffer
-	if _, err := Run(strings.NewReader("3\n"), &output, true); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(output.String(), "____") {
-		t.Fatalf("home omitted wordmark:\n%s", output.String())
-	}
-}
-
-func TestV26NoColorOmitsWordmark(t *testing.T) {
+func TestV23HomeHeroShowsWordmark(t *testing.T) { // docs/spec/tui.md V23
 	t.Setenv("NO_COLOR", "1")
-	var output bytes.Buffer
-	if _, err := Run(strings.NewReader("3\n"), &output, true); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(output.String(), "____") {
-		t.Fatalf("NO_COLOR output contains wordmark:\n%s", output.String())
+	view := renderField(t, 90, 24, fieldReq{kind: kindSelect, ctx: viewCtx{hero: true}, choices: []choice{{"Create a new agent", actionCreate}, {"Quit", actionQuit}}})
+	if !strings.Contains(view, "SLNG//") {
+		t.Fatalf("home hero omits SLNG wordmark:\n%s", view)
 	}
 }
 
-func TestV27StepsRedrawInPersistentAltScreen(t *testing.T) {
+func TestV23HeaderBadgeShownOnEditorScreens(t *testing.T) { // docs/spec/tui.md V23
+	view := renderField(t, 90, 24, fieldReq{kind: kindSelect, title: "Models", backable: true, ctx: viewCtx{breadcrumb: "Create › Models"}, choices: []choice{{"Listen", "listen"}, {"← Back", actionBack}}})
+	if !strings.Contains(view, "SLNG//") {
+		t.Fatalf("editor header omits SLNG badge:\n%s", view)
+	}
+}
+
+func TestV26LogoRendersInsideProgram(t *testing.T) { // docs/spec/tui.md V26
+	t.Setenv("NO_COLOR", "1")
+	screens := map[string]string{
+		"home":   renderField(t, 90, 24, fieldReq{kind: kindSelect, ctx: viewCtx{hero: true}, choices: []choice{{"Quit", actionQuit}}}),
+		"editor": renderField(t, 90, 24, fieldReq{kind: kindSelect, title: "Models", backable: true, choices: []choice{{"Listen", "l"}, {"← Back", actionBack}}}),
+	}
+	for name, view := range screens {
+		if !strings.Contains(view, "SLNG//") {
+			t.Fatalf("%s screen omits logo:\n%s", name, view)
+		}
+	}
+}
+
+func TestV27RedrawsInPlaceNoScrollback(t *testing.T) { // docs/spec/tui.md V27
 	var output bytes.Buffer
 	runner := newRunner(strings.NewReader(""), &output, false)
 	if _, err := runner.runProgram(func() (Result, error) { return Result{}, nil }); err != nil {
@@ -103,6 +116,190 @@ func TestV27StepsRedrawInPersistentAltScreen(t *testing.T) {
 		if got := strings.Count(output.String(), sequence); got != 1 {
 			t.Fatalf("alt-screen sequence %q count = %d, want 1", sequence, got)
 		}
+	}
+}
+
+func TestInteractivePathImportsNoHuh(t *testing.T) { // docs/spec/tui.md C4, T28
+	for _, file := range []string{"shell.go", "view.go"} {
+		fset := token.NewFileSet()
+		parsed, err := parser.ParseFile(fset, file, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("parse %s: %v", file, err)
+		}
+		for _, imp := range parsed.Imports {
+			if strings.Contains(imp.Path.Value, "charmbracelet/huh") {
+				t.Errorf("%s imports huh; the interactive path must stay huh-free", file)
+			}
+		}
+	}
+}
+
+func TestV33NoticeRendersScrollableOutput(t *testing.T) { // docs/spec/tui.md V33, V21
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	shown, _ := sized.(console).Update(requestMsg{ok: true, request: noticeRequest{
+		title: "validate",
+		run:   func(w io.Writer) error { return nil },
+		done:  make(chan error, 1),
+	}})
+	loaded, _ := shown.(console).Update(noticeDoneMsg{text: "line one\nline two"})
+	view := loaded.(console).View()
+	for _, want := range []string{"validate", "line one", "line two", "scroll"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("notice missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestV35InteractiveMenuDefaultsToFirstRow(t *testing.T) { // docs/spec/tui.md V35, V38
+	req := fieldReq{
+		kind: kindSelect, title: "Variables", backable: true, initial: "type",
+		choices: []choice{{"Type  ·  string", "type"}, {"Default  ·  —", "default"}, {"← Back", actionBack}},
+	}
+	view := renderField(t, 90, 24, req)
+	if !strings.Contains(view, "› Type") {
+		t.Errorf("overview did not default to the first actionable row:\n%s", view)
+	}
+	if !strings.Contains(view, "← Back") {
+		t.Errorf("overview omits the Back row:\n%s", view)
+	}
+	if !strings.Contains(view, "·") {
+		t.Errorf("overview rows should carry current values:\n%s", view)
+	}
+}
+
+func TestV49AccessibleModeDrivesEveryScreen(t *testing.T) { // docs/spec/tui.md V49, C5
+	t.Chdir(t.TempDir())
+	// Home -> create -> name -> Create agent -> confirm, all by numbered input,
+	// zero TTY and zero Python.
+	got, err := Run(strings.NewReader("1\nagent\n7\n\n"), &bytes.Buffer{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Confirmed || !got.Create || got.Agent.Data.Name != "agent" {
+		t.Fatalf("accessible create did not complete: %#v", got)
+	}
+}
+
+func TestV45PaletteOpensAndFuzzyFilters(t *testing.T) { // docs/spec/tui.md V45
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	withReq, _ := sized.(console).Update(requestMsg{ok: true, request: fieldReq{
+		kind: kindSelect, title: "Menu", backable: true,
+		choices: []choice{{"Identity", "i"}, {"Models", "m"}, {"Behavior", "b"}, {"← Back", actionBack}},
+	}})
+	opened, _ := withReq.(console).Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	typed := opened.(console)
+	for _, r := range "beh" {
+		next, _ := typed.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		typed = next.(console)
+	}
+	view := typed.View()
+	if !strings.Contains(view, "Command palette") {
+		t.Fatalf("palette did not open:\n%s", view)
+	}
+	if !strings.Contains(view, "Behavior") {
+		t.Fatalf("fuzzy query 'beh' should match Behavior:\n%s", view)
+	}
+	if strings.Contains(view, "Identity") {
+		t.Errorf("fuzzy query 'beh' should filter out Identity:\n%s", view)
+	}
+}
+
+func TestV45EveryActionIsInPalette(t *testing.T) { // docs/spec/tui.md V45
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	withReq, _ := sized.(console).Update(requestMsg{ok: true, request: fieldReq{
+		kind: kindSelect, title: "Menu", backable: true,
+		choices: []choice{{"Identity", "i"}, {"Models", "m"}, {"Lifecycle", "l"}, {"← Back", actionBack}},
+	}})
+	opened, _ := withReq.(console).Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	view := opened.(console).View()
+	for _, want := range []string{"Identity", "Models", "Lifecycle"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("empty palette query should list every row, missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestV46BreakpointsPickLayout(t *testing.T) { // docs/spec/tui.md V46
+	req := fieldReq{
+		kind: kindSelect, title: "Models", backable: true,
+		ctx:     viewCtx{sidebar: []sideItem{{label: "Identity", active: true}}},
+		choices: []choice{{"Listen", "l"}, {"← Back", actionBack}},
+	}
+	if wide := renderField(t, 100, 24, req); !strings.Contains(wide, "SECTIONS") {
+		t.Errorf("wide layout should show the sidebar:\n%s", wide)
+	}
+	if narrow := renderField(t, 72, 24, req); strings.Contains(narrow, "SECTIONS") {
+		t.Errorf("narrow layout should collapse to a single pane:\n%s", narrow)
+	}
+}
+
+func TestV46TooSmallShowsMessage(t *testing.T) { // docs/spec/tui.md V46
+	view := renderField(t, 40, 12, fieldReq{kind: kindSelect, title: "X", choices: []choice{{"a", "a"}}})
+	if !strings.Contains(strings.ToLower(view), "too small") {
+		t.Fatalf("a tiny terminal should show the too-small message:\n%s", view)
+	}
+}
+
+func TestV46ResizeRelayouts(t *testing.T) { // docs/spec/tui.md V46
+	m := newConsole(nil)
+	req := requestMsg{ok: true, request: fieldReq{
+		kind: kindSelect, title: "Models", backable: true,
+		ctx:     viewCtx{sidebar: []sideItem{{label: "Identity", active: true}}},
+		choices: []choice{{"a", "a"}, {"← Back", actionBack}},
+	}}
+	big, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	shown, _ := big.(console).Update(req)
+	if !strings.Contains(shown.(console).View(), "SECTIONS") {
+		t.Fatal("expected the sidebar at a wide size")
+	}
+	small, _ := shown.(console).Update(tea.WindowSizeMsg{Width: 70, Height: 24})
+	if strings.Contains(small.(console).View(), "SECTIONS") {
+		t.Fatal("resizing narrow should drop the sidebar")
+	}
+}
+
+func TestV44LayoutHasHeaderSidebarEditorFooter(t *testing.T) { // docs/spec/tui.md V44
+	req := fieldReq{
+		kind: kindSelect, title: "Models", backable: true,
+		ctx: viewCtx{
+			breadcrumb: "agent › Models", target: "pipecat",
+			sidebar: []sideItem{{label: "Identity"}, {label: "Models", active: true}, {label: "Listen", child: true}, {label: "Behavior"}, {label: "Integrations"}, {label: "Lifecycle"}},
+		},
+		choices: []choice{{"Listen", "listen"}, {"← Back", actionBack}},
+	}
+	view := renderField(t, 100, 24, req)
+	for _, want := range []string{"SLNG//", "SECTIONS", "Identity", "Lifecycle", "Models", "Listen", "back"} {
+		if !strings.Contains(strings.ToLower(view), strings.ToLower(want)) {
+			t.Errorf("layout missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestV44OnlyFocusedPanelHasAccentBorder(t *testing.T) { // docs/spec/tui.md V44
+	t.Setenv("NO_COLOR", "")
+	if got := panel(20, 10, true).GetBorderTopForeground(); got != lipgloss.Color(style.Accent) {
+		t.Errorf("focused panel border = %v, want accent %s", got, style.Accent)
+	}
+	if got := panel(20, 10, false).GetBorderTopForeground(); got == lipgloss.Color(style.Accent) {
+		t.Errorf("unfocused panel border must not be accent")
+	}
+}
+
+func TestV44SidebarShowsActiveSection(t *testing.T) { // docs/spec/tui.md V44
+	req := fieldReq{
+		kind: kindSelect, title: "Models", backable: true,
+		ctx:     viewCtx{sidebar: []sideItem{{label: "Identity"}, {label: "Models", active: true}, {label: "Listen", child: true}}},
+		choices: []choice{{"Listen", "listen"}, {"← Back", actionBack}},
+	}
+	view := renderField(t, 100, 24, req)
+	if !strings.Contains(view, "› Models") {
+		t.Errorf("active section not marked:\n%s", view)
+	}
+	if !strings.Contains(view, "Listen") {
+		t.Errorf("active section child not shown:\n%s", view)
 	}
 }
 
@@ -167,15 +364,16 @@ func TestV36SectionsHaveNoPassThroughMenus(t *testing.T) { // docs/spec/tui.md V
 }
 
 func TestV37EveryScreenShowsBackAffordance(t *testing.T) { // docs/spec/tui.md V37
-	keymap := backKeyMap()
-	for name, help := range map[string]string{
-		"input":   keymap.Input.Submit.Help().Key + " " + keymap.Input.Submit.Help().Desc,
-		"text":    keymap.Text.Submit.Help().Key + " " + keymap.Text.Submit.Help().Desc,
-		"select":  keymap.Select.Submit.Help().Key + " " + keymap.Select.Submit.Help().Desc,
-		"confirm": keymap.Confirm.Submit.Help().Key + " " + keymap.Confirm.Submit.Help().Desc,
+	for _, tc := range []struct {
+		name string
+		req  fieldReq
+	}{
+		{"select", fieldReq{kind: kindSelect, title: "Select", choices: []choice{{"Act", "act"}, {"← Back", actionBack}}, backable: true}},
+		{"input", fieldReq{kind: kindInput, title: "Input", backable: true}},
+		{"text", fieldReq{kind: kindText, title: "Text", backable: true}},
 	} {
-		if !strings.Contains(help, "Back") {
-			t.Errorf("%s interactive footer omits Back: %q", name, help)
+		if view := renderField(t, 90, 24, tc.req); !strings.Contains(strings.ToLower(view), "back") {
+			t.Errorf("%s interactive screen omits Back affordance:\n%s", tc.name, view)
 		}
 	}
 
@@ -225,31 +423,34 @@ func TestV37EveryScreenShowsBackAffordance(t *testing.T) { // docs/spec/tui.md V
 		}
 	}
 
-	notice := programShell{notice: &noticeState{title: "Report", lines: []string{"done"}, height: 10}}
-	if view := notice.View(); !strings.Contains(view, "Back") {
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	shown, _ := sized.(console).Update(requestMsg{ok: true, request: noticeRequest{
+		title: "Report",
+		run:   func(w io.Writer) error { _, _ = io.WriteString(w, "done"); return nil },
+		done:  make(chan error, 1),
+	}})
+	if view := shown.(console).View(); !strings.Contains(strings.ToLower(view), "back") {
 		t.Errorf("interactive notice footer omits Back: %q", view)
 	}
 }
 
 func TestV37ConstrainedMenuPinsBackInFooter(t *testing.T) { // docs/spec/tui.md V37
-	var choice string
-	options := []huh.Option[string]{
-		huh.NewOption("Description", "description"),
-		huh.NewOption("Execution", "execution"),
-		huh.NewOption("Webhook URL env", "url"),
-		huh.NewOption("Input schema", "input"),
-		huh.NewOption("Output schema", "output"),
-		huh.NewOption("Attached to", "attach"),
-		huh.NewOption("Delete tool", "delete"),
-		huh.NewOption("← Back", actionBack),
+	req := fieldReq{
+		kind:  kindSelect,
+		title: "user_verified",
+		choices: []choice{
+			{"Description", "description"}, {"Execution", "execution"},
+			{"Webhook URL env", "url"}, {"Input schema", "input"},
+			{"Output schema", "output"}, {"Attached to", "attach"},
+			{"Delete tool", "delete"}, {"← Back", actionBack},
+		},
+		backable: true,
 	}
-	form := huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("user_verified").Options(options...).Value(&choice))).
-		WithKeyMap(backKeyMap()).
-		WithHeight(9)
-
-	model, _ := (programShell{}).Update(requestMsg{request: formRequest{form: form, done: make(chan error, 1)}, ok: true})
-	if view := model.(programShell).View(); !strings.Contains(view, "← Back") {
-		t.Fatalf("constrained menu omitted pinned Back affordance:\n%s", view)
+	// At the minimum viewport the footer must still keep a Back affordance: it
+	// is a fixed region, separate from the scrolling option list (V37, was B9).
+	if view := renderField(t, 80, 20, req); !strings.Contains(strings.ToLower(view), "back") {
+		t.Fatalf("constrained menu omitted Back affordance:\n%s", view)
 	}
 }
 
@@ -1221,10 +1422,9 @@ func TestRunEOFAborts(t *testing.T) {
 	}
 }
 
-func TestBackKeyMapShowsFooterHint(t *testing.T) {
-	help := backKeyMap().Input.Submit.Help()
-	if help.Key != "← Back" || !strings.Contains(help.Desc, "Esc") {
-		t.Fatalf("input footer help = %#v", help)
+func TestConsoleFooterShowsBackHint(t *testing.T) {
+	if view := renderField(t, 80, 24, fieldReq{kind: kindInput, title: "Name", backable: true}); !strings.Contains(strings.ToLower(view), "back") {
+		t.Fatalf("interactive input footer omits Back hint:\n%s", view)
 	}
 }
 

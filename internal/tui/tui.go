@@ -26,12 +26,6 @@ const (
 	actionQuit    = "quit"
 	actionBack    = ":back"
 	agentNameHelp = "Choose a unique name for your agent. This name is also used for its local directory."
-	slngWordmark  = "\x1b[1;38;2;245;201;110m" +
-		"  ____  _     _   _  ____       //  // \n" +
-		" / ___|| |   | \\ | |/ ___|     //  //  \n" +
-		" \\___ \\| |   |  \\| | |  _     //  //   \n" +
-		"  ___) | |___| |\\  | |_| |   //  //    \n" +
-		" |____/|_____|_| \\_|\\____|  //  //     \x1b[0m"
 )
 
 // Agent is the basic configuration for a scaffold.
@@ -84,6 +78,7 @@ func runWithStart(in io.Reader, out io.Writer, accessible, createOnly bool, acti
 
 func runHome(runner *fieldRunner) (Result, error) {
 	for {
+		runner.ctx = viewCtx{hero: true}
 		choice, _, err := runner.selectOne(homeTitle(), "What would you like to do?", []huh.Option[string]{
 			huh.NewOption("Create a new agent", actionCreate),
 			huh.NewOption("Open an existing agent", actionOpen),
@@ -95,6 +90,7 @@ func runHome(runner *fieldRunner) (Result, error) {
 		if choice == actionQuit {
 			return Result{}, nil
 		}
+		runner.ctx = viewCtx{}
 		if choice == actionOpen {
 			if err := openExisting(runner); err != nil {
 				return Result{}, err
@@ -129,11 +125,71 @@ func runCreate(runner *fieldRunner) (Result, bool, error) {
 	return editAgent(runner, Agent{Path: path, Data: data})
 }
 
-func homeTitle() string {
-	if os.Getenv("NO_COLOR") != "" {
-		return "Unmute"
+// homeTitle is the Home select title used by the accessible renderer; the
+// interactive renderer draws the wordmark hero instead (view.go).
+func homeTitle() string { return "SLNG//" }
+
+// sidebarSections is the fixed five-section tree shown in the console sidebar
+// (docs/spec/tui.md C10, C16, V44). Order matches editorSectionOptions.
+var sidebarSections = []struct{ id, label string }{
+	{"identity", "Identity"},
+	{"models", "Models"},
+	{"behavior", "Behavior"},
+	{"integrations", "Integrations"},
+	{"lifecycle", "Lifecycle"},
+}
+
+func sectionChildren(id string) []string {
+	switch id {
+	case "identity":
+		return []string{"Target", "Language"}
+	case "models":
+		return []string{"Listen", "Reason", "Speak"}
+	case "behavior":
+		return []string{"Instructions", "Greeting", "Variables", "Advanced"}
+	case "integrations":
+		return []string{"Tools", "Channels", "Human transfers"}
+	case "lifecycle":
+		return []string{"Agents", "Handoffs", "Tasks", "Task groups"}
 	}
-	return slngWordmark
+	return nil
+}
+
+// sectionOf maps an editor choice to its owning sidebar section.
+func sectionOf(choice string) string {
+	if section, ok := strings.CutPrefix(choice, "section:"); ok {
+		return section
+	}
+	switch choice {
+	case "target", "language":
+		return "identity"
+	case "models":
+		return "models"
+	case "prompt", "greeting", "variables", "customize":
+		return "behavior"
+	case "tools", "channels", "humans":
+		return "integrations"
+	case "agents", "handoffs", "tasks", "groups":
+		return "lifecycle"
+	}
+	return ""
+}
+
+// agentCtx builds the console chrome for the create/maintain editor: breadcrumb,
+// target status, and the sidebar tree with the active section expanded.
+func agentCtx(data scaffold.Data, active string) viewCtx {
+	var items []sideItem
+	breadcrumb := data.Name
+	for _, s := range sidebarSections {
+		items = append(items, sideItem{label: s.label, active: s.id == active})
+		if s.id == active {
+			breadcrumb = data.Name + " › " + s.label
+			for _, child := range sectionChildren(s.id) {
+				items = append(items, sideItem{label: child, child: true})
+			}
+		}
+	}
+	return viewCtx{breadcrumb: breadcrumb, target: targetLabel(data.Target), sidebar: items}
 }
 
 func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
@@ -149,6 +205,7 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			huh.NewOption("Create agent", "save"),
 			huh.NewOption("← Back", actionBack),
 		)
+		runner.ctx = agentCtx(result.Agent.Data, "")
 		choice, back, err := runner.selectOne(result.Agent.Data.Name, "Choose a section; changes stay in memory until Create agent.", options, true)
 		if err != nil {
 			return Result{}, false, err
@@ -156,6 +213,7 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 		if back || choice == actionBack {
 			return Result{}, true, nil
 		}
+		runner.ctx = agentCtx(result.Agent.Data, sectionOf(choice))
 		if strings.HasPrefix(choice, "section:") {
 			section := strings.TrimPrefix(choice, "section:")
 			if section == "models" {
@@ -357,6 +415,18 @@ func repairPreflight(runner *fieldRunner, data *scaffold.Data, preflightErr erro
 }
 
 func showNotice(runner *fieldRunner, title, message string) error {
+	if !runner.accessible {
+		runner.sendField(fieldReq{
+			kind:     kindSelect,
+			title:    title,
+			desc:     message,
+			choices:  []choice{{label: "← Back", value: actionBack}},
+			initial:  actionBack,
+			backable: true,
+			ctx:      runner.ctx,
+		})
+		return nil
+	}
 	choice := actionBack
 	_, err := runner.run(huh.NewSelect[string]().
 		Title(title).
@@ -3041,6 +3111,7 @@ type fieldRunner struct {
 	tracked    *eofReader
 	requests   chan shellRequest
 	actions    ActionHandler
+	ctx        viewCtx // interactive chrome context (breadcrumb, target, sidebar)
 }
 
 func newRunner(in io.Reader, out io.Writer, accessible bool) *fieldRunner {
@@ -3052,20 +3123,11 @@ func newRunner(in io.Reader, out io.Writer, accessible bool) *fieldRunner {
 	return runner
 }
 
+// run drives one huh field for the accessible/headless path only (C5). The
+// interactive path never calls it; it uses sendField (shell.go) instead.
 func (r *fieldRunner) run(field huh.Field, backable bool) (bool, error) {
-	form := huh.NewForm(huh.NewGroup(field)).
-		WithAccessible(r.accessible)
-	if backable && !r.accessible {
-		form.WithKeyMap(backKeyMap())
-	}
-	var err error
-	if r.accessible {
-		err = r.runAccessible(form)
-	} else {
-		done := make(chan error, 1)
-		r.requests <- formRequest{form: form, done: done}
-		err = <-done
-	}
+	form := huh.NewForm(huh.NewGroup(field)).WithAccessible(true)
+	err := r.runAccessible(form)
 	if r.tracked != nil && r.tracked.eof {
 		return false, fmt.Errorf("menu: %w", huh.ErrUserAborted)
 	}
@@ -3108,6 +3170,21 @@ func (r *fieldRunner) selectOne(title, description string, options []huh.Option[
 			}
 		}
 	}
+	if !r.accessible {
+		reply := r.sendField(fieldReq{
+			kind:     kindSelect,
+			title:    title,
+			desc:     description,
+			choices:  toChoices(options),
+			initial:  options[0].Value,
+			backable: backable,
+			ctx:      r.ctx,
+		})
+		if reply.back {
+			return actionBack, true, nil
+		}
+		return reply.value, false, nil
+	}
 	choice := options[0].Value
 	field := huh.NewSelect[string]().Title(title).Description(description).Options(options...).Value(&choice)
 	back, err := r.run(field, backable)
@@ -3117,19 +3194,25 @@ func (r *fieldRunner) selectOne(title, description string, options []huh.Option[
 	return choice, false, nil
 }
 
-func backKeyMap() *huh.KeyMap {
-	keymap := huh.NewDefaultKeyMap()
-	keymap.Quit.SetKeys("esc", "ctrl+c")
-	// ponytail: Huh omits form-level Quit from field help, so include Esc in
-	// submit help until Huh exposes custom footer bindings.
-	keymap.Input.Submit.SetHelp("← Back", "(Esc) • enter Submit")
-	keymap.Text.Submit.SetHelp("← Back", "(Esc) • enter Submit")
-	keymap.Select.Submit.SetHelp("← Back", "(Esc) • enter Select")
-	keymap.Confirm.Submit.SetHelp("← Back", "(Esc) • enter Confirm")
-	return keymap
+// toChoices converts huh options (built by the flow) into the neutral choice
+// pairs the interactive model renders.
+func toChoices(options []huh.Option[string]) []choice {
+	out := make([]choice, len(options))
+	for i, o := range options {
+		out[i] = choice{label: o.Key, value: o.Value}
+	}
+	return out
 }
 
 func (r *fieldRunner) input(title, description string, value *string, validate func(string) error) (bool, error) {
+	if !r.accessible {
+		reply := r.sendField(fieldReq{kind: kindInput, title: title, desc: description, initial: *value, backable: true, validate: validate, ctx: r.ctx})
+		if reply.back {
+			return true, nil
+		}
+		*value = reply.value
+		return false, nil
+	}
 	temporary := *value
 	back, err := r.run(huh.NewInput().
 		Title(title).
@@ -3144,6 +3227,14 @@ func (r *fieldRunner) input(title, description string, value *string, validate f
 }
 
 func (r *fieldRunner) text(title, description string, value *string) (bool, error) {
+	if !r.accessible {
+		reply := r.sendField(fieldReq{kind: kindText, title: title, desc: description, initial: *value, backable: true, ctx: r.ctx})
+		if reply.back {
+			return true, nil
+		}
+		*value = reply.value
+		return false, nil
+	}
 	temporary := *value
 	back, err := r.run(huh.NewText().
 		Title(title).

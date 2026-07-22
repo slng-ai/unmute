@@ -22,8 +22,10 @@ import (
 	"time"
 
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/slng/unmute/internal/generate"
 	"github.com/slng/unmute/internal/ir"
+	"github.com/slng/unmute/internal/style"
 	"github.com/slng/unmute/internal/target"
 	"github.com/slng/unmute/internal/web"
 	"github.com/spf13/cobra"
@@ -417,6 +419,7 @@ func startSpinner(w io.Writer, msg string) *spinner {
 		close(s.done)
 		return s
 	}
+	accent := lipgloss.NewRenderer(w).NewStyle().Foreground(lipgloss.Color(style.Accent))
 	go func() {
 		defer close(s.done)
 		frames := []rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'}
@@ -429,7 +432,7 @@ func startSpinner(w io.Writer, msg string) *spinner {
 				fmt.Fprint(w, "\r\033[2K")
 				return
 			case <-t.C:
-				fmt.Fprintf(w, "\r\033[2K \033[33m%c\033[0m %s", frames[i%len(frames)], msg)
+				fmt.Fprintf(w, "\r\033[2K %s %s", accent.Render(string(frames[i%len(frames)])), msg)
 				i++
 			}
 		}

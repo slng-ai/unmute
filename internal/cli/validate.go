@@ -39,12 +39,15 @@ func runValidate(cmd *cobra.Command, dir string, names []string) error {
 		return fmt.Errorf("validate %s: %w", dir, err)
 	}
 	report, validateErr := ir.Validate(agent, targets, target.Default())
+	out := cmd.OutOrStdout()
+	printHeader(out, "validate "+dir)
+	u := newUI(out)
 	for _, row := range report.PerTarget {
-		status := "✓"
+		status := u.ok("✓")
 		if len(row.Errors) > 0 {
-			status = "✗"
+			status = u.fail("✗")
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "%s %s (%s)\n", status, row.Name, row.Provider)
+		fmt.Fprintf(out, "%s %s (%s)\n", status, u.accent(row.Name), row.Provider)
 	}
 	wroteWarnings := false
 	for _, row := range report.PerTarget {
