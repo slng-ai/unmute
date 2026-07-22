@@ -1,3 +1,5 @@
+=== .dockerignore ===
+.env
 === .env.example ===
 CHECK_AVAILABILITY_URL=
 LANGFUSE_BASE_URL=
@@ -439,6 +441,7 @@ if __name__ == "__main__":
     "qualify_event"
   ],
   "generated_files": [
+    ".dockerignore",
     ".env.example",
     "Dockerfile",
     "README.md",

@@ -1,0 +1,28 @@
+package web
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestV16PipecatUsesRTVI2SegmentUpdates(t *testing.T) {
+	raw, err := FS.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	for _, want := range []string{
+		`type:"client-ready"`,
+		`version:"2.0.0"`,
+		`new Map()`,
+		`t === "bot-output"`,
+		`d.segment_id`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("web client missing %q", want)
+		}
+	}
+	if strings.Contains(source, `t === "bot-transcription"`) {
+		t.Error("web client still renders deprecated bot-transcription frames")
+	}
+}

@@ -249,6 +249,8 @@ let room = null;                                     // livekit transport
 let audioCtx = null, analyser = null, micNode = null, remoteNode = null, raf = 0;
 let muted = false, selectedDeviceId = null;
 let partialEl = null; // live user partial; replaced/promoted on final
+let botTurnEl = null;
+const botSegments = new Map(); // RTVI segment id → latest text
 
 function setState(s, label, hint){
   el.body.dataset.state = s;
@@ -262,6 +264,8 @@ function audioConstraint(){ return selectedDeviceId ? { deviceId: { exact: selec
 function clearTranscript(){
   el.tlist.innerHTML = "";
   partialEl = null;
+  botTurnEl = null;
+  botSegments.clear();
   el.body.dataset.hasHistory = "false";
 }
 function nearBottom(){
@@ -295,6 +299,22 @@ function promotePartial(text){
   } else {
     pushTurn("you", text);
   }
+}
+function resetBotTurn(){
+  botTurnEl = null;
+  botSegments.clear();
+}
+function setBotSegment(id, text){
+  text = (text || "").trim();
+  if (!text) return;
+  botSegments.set(String(id), text);
+  let merged = "";
+  for (const part of botSegments.values()){
+    if (!merged || part.startsWith(merged)) merged = part;
+    else if (part !== merged && !merged.endsWith(part)) merged += " " + part;
+  }
+  if (!botTurnEl) botTurnEl = pushTurn("bot", merged);
+  else botTurnEl.querySelector(".said").textContent = merged;
 }
 
 // ── meter: mic + agent mixed into one analyser ──────────
@@ -420,18 +440,19 @@ async function waitForIce(pc){
   });
 }
 
-// RTVI message types we render. Bot uses bot-transcription (sentence-aggregated,
-// final text); user-transcription delivers partials + finals.
+// RTVI 2 message types we render. bot-output carries a stable segment id, so
+// progress updates replace their segment instead of adding transcript rows.
 function handleRtvi(msg){
   const t = msg.type, d = msg.data || {};
   if (t === "user-transcription"){
     const text = (d.text || "").trim();
     if (!text) return;
-    if (d.final) promotePartial(text);
+    if (d.final){ promotePartial(text); resetBotTurn(); }
     else setPartial(text);
-  } else if (t === "bot-transcription"){
-    const text = (d.text || "").trim();
-    if (text) pushTurn("bot", text);
+  } else if (t === "bot-llm-started"){
+    resetBotTurn();
+  } else if (t === "bot-output"){
+    setBotSegment(d.segment_id, d.text);
   }
 }
 
@@ -467,6 +488,10 @@ async function connectPipecat(session){
     // RTVI carries transcripts over the "chat" data channel; pipecat's server
     // expects the client to create it. JSON frames: {label:"rtvi-ai", type, data}.
     dc = pc.createDataChannel("chat", { ordered: true });
+    dc.addEventListener("open", () => dc.send(JSON.stringify({
+      label:"rtvi-ai", type:"client-ready", id:"unmute-dev-ready",
+      data:{version:"2.0.0", about:{library:"unmute-dev", platform:"web"}},
+    })));
     dc.addEventListener("message", e => {
       try {
         const msg = JSON.parse(e.data);

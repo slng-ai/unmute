@@ -48,6 +48,55 @@ func TestWriteArtifactFilesFormatsPython(t *testing.T) {
 	}
 }
 
+func TestV15WriteArtifactFilesPreservesDotenv(t *testing.T) {
+	dir := t.TempDir()
+	dotenv := filepath.Join(dir, ".env")
+	const secret = "OPENAI_API_KEY=keep-me\n"
+	if err := os.WriteFile(dotenv, []byte(secret), 0o660); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dotenv, 0o660); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeArtifactFiles(nil, dir, []generate.File{{Path: "README.md", Content: []byte("generated\n")}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dotenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != secret {
+		t.Fatalf(".env changed during artifact rewrite: %q", got)
+	}
+	if info, err := os.Stat(dotenv); err != nil {
+		t.Fatal(err)
+	} else if info.Mode().Perm() != 0o660 {
+		t.Fatalf(".env mode = %o, want 660", info.Mode().Perm())
+	}
+}
+
+func TestV15WriteArtifactFilesRestoresDotenvAfterFailure(t *testing.T) {
+	dir := t.TempDir()
+	dotenv := filepath.Join(dir, ".env")
+	const secret = "OPENAI_API_KEY=keep-me\n"
+	if err := os.WriteFile(dotenv, []byte(secret), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := writeArtifactFiles(nil, dir, []generate.File{{Path: "bad\x00path", Content: []byte("generated\n")}})
+	if err == nil {
+		t.Fatal("artifact rewrite unexpectedly succeeded")
+	}
+	got, readErr := os.ReadFile(dotenv)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != secret {
+		t.Fatalf(".env changed after failed artifact rewrite: %q", got)
+	}
+}
+
 // copySafeCore copies the example package into a temp dir so compile can write
 // its build/ output without polluting the repo.
 func copySafeCore(t *testing.T) string {
