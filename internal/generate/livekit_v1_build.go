@@ -262,6 +262,11 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			data.HasWarmTransfer = data.HasWarmTransfer || ht.Warm
 		}
 	}
+	// Snapshot the provider creds before telephony env is added: the web dev
+	// image (compose.dev.yaml) runs `agent.py dev` against a single-node dev
+	// livekit-server and needs no telephony env. LIVEKIT_URL/KEY/SECRET are in
+	// this set but the template hardcodes their dev values.
+	data.DevEnv = env.sorted()
 	data.Telephony, err = buildLiveKitTelephony(agent, tgt, env)
 	if err != nil {
 		return livekitData{}, err

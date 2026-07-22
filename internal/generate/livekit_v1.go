@@ -266,6 +266,7 @@ type livekitData struct {
 	PluginModules []string // merged `from livekit.plugins import ...` names
 	Deps          []string
 	RequiredEnv   []string
+	DevEnv        []string // provider creds the web dev image needs (LIVEKIT_* are hardcoded in compose.dev.yaml)
 	Notes         []string
 	InferenceUses []string // bindings routed through LiveKit Inference (console needs cloud creds, C2/C7)
 	Tracing       bool
@@ -469,6 +470,7 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		{"README.md", "README.md"},
 		{"env.example", ".env.example"},
 		{"Dockerfile", "Dockerfile"},
+		{"compose.dev.yaml", "compose.dev.yaml"},
 		{"livekit.toml", "livekit.toml"},
 	}
 	if data.Tracing {

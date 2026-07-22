@@ -1,0 +1,24 @@
+# Generated local-development topology. Not a production deployment model.
+# `unmute dev` builds and runs this: the same image production deploys, driven
+# over WebRTC in the browser. No coordination store here; the web path does not
+# use one (the no-idle-sidecar rule).
+services:
+  application:
+    build:
+      context: .
+    command: ["python", "bot.py", "--host", "0.0.0.0", "--port", "7860"]
+    environment:
+      - DAILY_API_KEY
+      - DEEPGRAM_API_KEY
+      - GET_INVOICE_URL
+      - LOOKUP_CUSTOMER_URL
+      - OPENAI_API_KEY
+      - SLNG_API_KEY
+    ports:
+      - "${UNMUTE_DEV_PORT:-7860}:7860"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 7860), timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
