@@ -1,0 +1,99 @@
+# One agent delegates customer records and appointment work to separate tasks.
+version: 1
+language: en
+entry_agent: appointment_desk
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  appointment_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools: [check_customer, manage_appointment]
+
+variables:
+  customer_id: { type: string }
+  customer_name: { type: string }
+
+tasks:
+  customer_record:
+    instructions: tasks/customer-record.md
+    tools: [lookup_customer, create_customer]
+    result:
+      customer_id: string
+      customer_name: string
+      record_status: { enum: [existing, created, failed] }
+      summary: string
+    context:
+      history: full
+
+  appointment_request:
+    instructions: tasks/appointment-request.md
+    tools:
+      - check_availability
+      - book_appointment
+      - cancel_appointment
+    result:
+      action: string
+      status: string
+      appointment_id: string
+      summary: string
+    context:
+      history: full
+
+controls:
+  check_customer:
+    kind: delegate
+    task: customer_record
+    when: Identify the caller before handling an appointment request.
+    assign:
+      customer_id: result.customer_id
+      customer_name: result.customer_name
+
+  manage_appointment:
+    kind: delegate
+    task: appointment_request
+    when: The identified caller wants to book, reschedule, or cancel an appointment.
+
+tools:
+  - lookup_customer
+  - create_customer
+  - check_availability
+  - book_appointment
+  - cancel_appointment
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
+  interruption: { enabled: true }
+
+tracing:
+  provider: langfuse
+
+channels:
+  web: { kind: realtime_audio }
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m
