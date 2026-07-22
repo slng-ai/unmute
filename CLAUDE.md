@@ -2,6 +2,9 @@
 
 Go CLI that compiles a declarative voice-agent spec into orchestrator-native artifacts. Full design in `docs/ARCHITECTURE.md`; engineering detail in `docs/DEVELOPMENT.md`; glossary in `CONTEXT.md`; locked decisions in `docs/adr/`. **When code and a doc disagree, the doc wins — fix the code or open an issue.**
 
+## Voice contracts
+While writing documents or speaking with the user, always use a simple language and simple wording. 
+
 ## The one rule
 Unmute is written in Go, so you mantian **Go code** but you also write some python code snippets and examples, in python. When you  run python code, always check for ty or ruff issues. 
 
