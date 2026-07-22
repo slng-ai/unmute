@@ -226,8 +226,11 @@ class IntakeAgent(TracedLLMWorker):
             context_aggregator=LLMContextAggregatorPair(self.context),
             worker=self,
         )
+        # Resolve this tool call before the flow's first inference: Pipecat
+        # ignores a @tool's return value, so an unresolved call hangs the turn
+        # (V3/B1).
+        await params.result_callback({"status": "running the collect task"})
         await flow.initialize(self._run_collect_node_collect())
-        return {"status": "running the collect task"}
 
     def _run_collect_node_collect(self) -> NodeConfig:
         return NodeConfig(
@@ -282,8 +285,11 @@ class IntakeAgent(TracedLLMWorker):
             context_aggregator=LLMContextAggregatorPair(self.context),
             worker=self,
         )
+        # Resolve this tool call before the flow's first inference: Pipecat
+        # ignores a @tool's return value, so an unresolved call hangs the turn
+        # (V3/B1).
+        await params.result_callback({"status": "running the triage flow"})
         await flow.initialize(self._run_triage_node_collect())
-        return {"status": "running the triage flow"}
 
     def _run_triage_node_collect(self) -> NodeConfig:
         return NodeConfig(

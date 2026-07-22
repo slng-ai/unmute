@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -529,6 +530,59 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		if strings.Contains(endBot, forbidden) {
 			t.Errorf("end-only task group has unused restoration import %q", forbidden)
 		}
+	}
+}
+
+// TestV3PipecatToolsResolveCallback: every emitted agent-level @tool method
+// resolves its function call via params.result_callback. Pipecat drops a @tool's
+// return value, so a bare `return {...}` leaves the call unresolved (V3, B1). The
+// delegate @tool that starts a FlowManager is the one B1 caught.
+func TestV3PipecatToolsResolveCallback(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tasks["collect"] = ir.Task{
+		Instructions: "Ask for the caller's email and confirm their tier.",
+		Tools:        []string{"lookup_customer"},
+		Result:       map[string]ir.ResultField{"tier": {Type: ir.PrimitiveString}},
+		Context:      ir.TaskContext{History: ir.HistoryFull},
+	}
+	agent.Controls["run_collect"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "collect", When: "Collect account details."}
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "run_collect")
+	agent.Agents["intake"] = intake
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+
+	// A @tool method has the signature `(self, params: FunctionCallParams …)`.
+	// Flow-internal handlers take `(args, flow_manager)` / `(self, args, …)` and
+	// return per the Flows contract instead, so this regex skips them.
+	sig := regexp.MustCompile(`(?m)^    async def (\w+)\(self, params: FunctionCallParams`)
+	methods := sig.FindAllStringSubmatchIndex(bot, -1)
+	if len(methods) == 0 {
+		t.Fatal("no @tool methods emitted")
+	}
+	for i, loc := range methods {
+		name := bot[loc[2]:loc[3]]
+		end := len(bot)
+		if i+1 < len(methods) {
+			end = methods[i+1][0]
+		}
+		if !strings.Contains(bot[loc[0]:end], "params.result_callback") {
+			t.Errorf("@tool %q never calls params.result_callback; its function call is left unresolved", name)
+		}
+	}
+	if strings.Contains(bot, `return {"status": "running`) {
+		t.Error("delegate @tool still returns a status dict instead of resolving the call (B1)")
 	}
 }
 
