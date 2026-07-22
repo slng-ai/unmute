@@ -100,6 +100,23 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 		env: childEnv, output: processOut,
 		stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr(), logPath: logPath,
 	}
+	if len(plan.DevSuppliedEnv) > 0 {
+		// LiveKit SIP: infrastructure first, then trunk and dispatch records
+		// against the local server, then the application with the IDs (V4).
+		run.infraServices = telephonyInfraServices(plan)
+		run.beforeApp = func(ctx context.Context, env []string) ([]string, error) {
+			injected, err := ensureLiveKitSIPRecords(ctx, cmd.OutOrStdout(), targetName, plan, env)
+			if err != nil {
+				return nil, err
+			}
+			for _, name := range plan.DevSuppliedEnv {
+				if injected[name] != "" {
+					env = setChildEnv(env, name, injected[name])
+				}
+			}
+			return env, nil
+		}
+	}
 	run.onReady = func(ctx context.Context) error {
 		// The webhook is reconfigured on every start: quick tunnel URLs
 		// rotate per run, and the previous value is printed for restore (V3).
