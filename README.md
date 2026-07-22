@@ -112,11 +112,11 @@ cd "examples/$EXAMPLE/build/pipecat"
 uv run bot.py
 ```
 
-`unmute dev` does the recompile-and-run loop in one command, reading `.env`
-from the package root:
+`unmute dev` does the recompile-and-run loop in one command. It reads `.env`
+from the current directory, then the package root; package values override
+shared repository values. From the repository root, no copy is needed:
 
 ```sh
-cp .env "examples/$EXAMPLE/.env"
 bin/unmute dev "examples/$EXAMPLE" --target pipecat
 bin/unmute dev "examples/$EXAMPLE" --target livekit --console
 ```

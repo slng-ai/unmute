@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,8 +78,20 @@ func TestSmokeDevComposeValidates(t *testing.T) {
 // that image (SPEC V12, V13).
 func TestSmokeDevPipecatImageReceivesEnvAndImportsWebRTC(t *testing.T) {
 	docker := requireDocker(t)
-	composeFile, outDir, env := smokeDevArtifact(t, "pipecat")
-	env = setChildEnv(env, "OPENAI_API_KEY", "unmute-env-smoke")
+	composeFile, outDir, _ := smokeDevArtifact(t, "pipecat")
+	values, err := parseDotenv(filepath.Join(outDir, ".env.example"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name := range values {
+		t.Setenv(name, "")
+	}
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".env"), []byte("OPENAI_API_KEY=unmute-env-smoke\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repo)
+	env := devChildEnv(outDir, io.Discard)
 	project := composeProjectName(outDir, "pipecat")
 	run := func(args ...string) ([]byte, error) {
 		cmd := exec.Command(docker, composeArgs(composeFile, project, args...)...)

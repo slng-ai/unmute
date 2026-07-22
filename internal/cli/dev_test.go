@@ -61,6 +61,34 @@ func TestDevChildEnv_readsDotenv(t *testing.T) {
 	}
 }
 
+func TestV14DevChildEnvReadsWorkingDirectoryThenPackageDotenv(t *testing.T) {
+	repo := t.TempDir()
+	root := filepath.Join(repo, "examples", "agent")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".env"), []byte(
+		"UNMUTE_TEST_REPO_ENV=repo\nUNMUTE_TEST_SHARED_ENV=repo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte(
+		"UNMUTE_TEST_PACKAGE_ENV=package\nUNMUTE_TEST_SHARED_ENV=package\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repo)
+
+	env := devChildEnv(root, &bytes.Buffer{})
+	for _, want := range []string{
+		"UNMUTE_TEST_REPO_ENV=repo",
+		"UNMUTE_TEST_PACKAGE_ENV=package",
+		"UNMUTE_TEST_SHARED_ENV=package",
+	} {
+		if !contains(env, want) {
+			t.Errorf("dev child env missing %q", want)
+		}
+	}
+}
+
 func TestDevChildEnv_missingFileIsFine(t *testing.T) {
 	var warn bytes.Buffer
 	env := devChildEnv(t.TempDir(), &warn) // no .env present

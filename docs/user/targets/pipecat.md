@@ -257,9 +257,10 @@ container. It needs Docker (Docker Desktop or Docker Engine with the Compose
 plugin); this is the same image you deploy, so what you test is what ships.
 `--console` runs `uv run --extra console bot.py console` over your local
 microphone and speaker, no Docker; on macOS install PortAudio first with
-`brew install portaudio`. All modes read keys from `.env`. Browser logs go to
-`build/<target>/dev.log`; add `--verbose` to follow the container logs. Console
-mode streams directly to the terminal.
+`brew install portaudio`. All modes read shared keys from the current
+directory's `.env`, then apply package-root `.env` overrides. Browser logs go
+to `build/<target>/dev.log`; add `--verbose` to follow the container logs.
+Console mode streams directly to the terminal.
 
 The telephony command is the intended promoted-route interface. Today it fails
 with the route's credentialed-smoke diagnostic before checking a public URL,

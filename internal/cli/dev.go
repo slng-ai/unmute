@@ -361,21 +361,34 @@ func selectDevTarget(cmd *cobra.Command, root, requested string) (string, error)
 	return selected, nil
 }
 
-// devChildEnv builds the bot subprocess environment: the ambient env plus any
-// KEY=VALUE pairs from a .env at the package root. The bot also calls
-// load_dotenv(), and its require_env() fails loudly if a value is missing.
+// devChildEnv builds the bot subprocess environment from the ambient env, the
+// current directory's .env, then the package-root .env. Later files win, so a
+// package can override shared repository credentials.
 func devChildEnv(root string, warn io.Writer) []string {
 	env := os.Environ()
-	vals, err := parseDotenv(filepath.Join(root, ".env"))
-	if err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
-			fmt.Fprintf(warn, "warning: reading .env: %v\n", err)
+	packageEnv := filepath.Join(root, ".env")
+	files := []string{}
+	if cwd, err := os.Getwd(); err == nil {
+		files = append(files, filepath.Join(cwd, ".env"))
+		if absolute, err := filepath.Abs(packageEnv); err == nil {
+			packageEnv = absolute
 		}
-		return env
 	}
-	for name, value := range vals {
-		if value != "" {
-			env = setChildEnv(env, name, value)
+	if len(files) == 0 || files[0] != packageEnv {
+		files = append(files, packageEnv)
+	}
+	for _, file := range files {
+		vals, err := parseDotenv(file)
+		if err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				fmt.Fprintf(warn, "warning: reading %s: %v\n", file, err)
+			}
+			continue
+		}
+		for name, value := range vals {
+			if value != "" {
+				env = setChildEnv(env, name, value)
+			}
 		}
 	}
 	return env

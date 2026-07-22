@@ -91,7 +91,11 @@ None of your spec files ever hold a secret. This is a rule, not a convention:
 - Provider keys are referenced by name (`OPENAI_API_KEY`, `SLNG_API_KEY`) and set in the environment, never written in `targets.yaml`.
 - Phone numbers in `destinations:` are configuration, not secrets, and may live in the target.
 
-For local runs, put values in a `.env` at the package root; `unmute dev` reads it. When you `compile`, Unmute writes a `build/<target>/.env.example` listing the exact variables that target needs, so you always know what to provide. The `compile-report.json` lists the required environment too.
+For local runs, put shared values in a `.env` in the directory where you run
+`unmute dev`. You can put package-specific values in `<package>/.env`; those
+override shared values. When you `compile`, Unmute writes a
+`build/<target>/.env.example` listing the exact variables that target needs.
+The `compile-report.json` lists the required environment too.
 
 For deployment, both generated projects include a `Dockerfile`. Pipecat adds
 `pcc-deploy.toml` for Pipecat Cloud; LiveKit adds `livekit.toml`. Both are

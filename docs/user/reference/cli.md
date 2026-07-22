@@ -160,8 +160,9 @@ name, such as `--target pipecat_twilio` or `--target livekit_plivo`.
 
 - Web (default) and telephony modes require **Docker** with the Compose plugin.
   Console mode requires `uv` on your `PATH` (see
-  [install](../start/install.md)). All modes read keys from a `.env` at the
-  package root; the compose files list env var names only, values come from
+  [install](../start/install.md)). All modes merge keys from the current
+  directory's `.env`, then the package-root `.env`; package values override
+  shared values. The compose files list env var names only. Values come from
   your environment at run time and are never written into the file.
 - `--port` sets the dev UI port (default 8765). `--bot-port` sets the host port
   the agent container is published on (default 7860); the CLI passes it to
