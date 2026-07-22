@@ -168,6 +168,47 @@ func TestV35InteractiveMenuDefaultsToFirstRow(t *testing.T) { // docs/spec/tui.m
 	}
 }
 
+func TestV45PaletteOpensAndFuzzyFilters(t *testing.T) { // docs/spec/tui.md V45
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	withReq, _ := sized.(console).Update(requestMsg{ok: true, request: fieldReq{
+		kind: kindSelect, title: "Menu", backable: true,
+		choices: []choice{{"Identity", "i"}, {"Models", "m"}, {"Behavior", "b"}, {"← Back", actionBack}},
+	}})
+	opened, _ := withReq.(console).Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	typed := opened.(console)
+	for _, r := range "beh" {
+		next, _ := typed.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		typed = next.(console)
+	}
+	view := typed.View()
+	if !strings.Contains(view, "Command palette") {
+		t.Fatalf("palette did not open:\n%s", view)
+	}
+	if !strings.Contains(view, "Behavior") {
+		t.Fatalf("fuzzy query 'beh' should match Behavior:\n%s", view)
+	}
+	if strings.Contains(view, "Identity") {
+		t.Errorf("fuzzy query 'beh' should filter out Identity:\n%s", view)
+	}
+}
+
+func TestV45EveryActionIsInPalette(t *testing.T) { // docs/spec/tui.md V45
+	m := newConsole(nil)
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	withReq, _ := sized.(console).Update(requestMsg{ok: true, request: fieldReq{
+		kind: kindSelect, title: "Menu", backable: true,
+		choices: []choice{{"Identity", "i"}, {"Models", "m"}, {"Lifecycle", "l"}, {"← Back", actionBack}},
+	}})
+	opened, _ := withReq.(console).Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	view := opened.(console).View()
+	for _, want := range []string{"Identity", "Models", "Lifecycle"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("empty palette query should list every row, missing %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestV46BreakpointsPickLayout(t *testing.T) { // docs/spec/tui.md V46
 	req := fieldReq{
 		kind: kindSelect, title: "Models", backable: true,

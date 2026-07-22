@@ -95,8 +95,10 @@ func (m console) renderHeader() string {
 }
 
 func (m console) renderFooter() string {
-	hint := "↑/↓ move · ↵ select · esc back · q quit"
+	hint := "↑/↓ move · ↵ select · ctrl+p palette · esc back · q quit"
 	switch {
+	case m.palette != nil:
+		hint = "type to filter · ↑/↓ move · ↵ jump · esc close"
 	case m.notice != nil:
 		hint = "↑/↓ scroll · enter/esc back"
 	case m.req != nil && m.req.kind == kindInput:
@@ -107,7 +109,35 @@ func (m console) renderFooter() string {
 	return style.Dim(hint)
 }
 
+func (m console) renderPalette(w, h int) string {
+	var b strings.Builder
+	b.WriteString(style.Accented("Command palette") + "\n")
+	b.WriteString("> " + m.palette.query + "\n\n")
+	matches := m.paletteMatches()
+	if len(matches) == 0 {
+		b.WriteString(style.Dim("no matches"))
+	}
+	for n, idx := range matches {
+		label := m.req.choices[idx].label
+		if n == m.palette.cursor {
+			b.WriteString(style.Accented("› " + label))
+		} else {
+			b.WriteString("  " + label)
+		}
+		b.WriteString("\n")
+	}
+	boxW := min(w-4, 60)
+	if boxW < 12 {
+		boxW = max(w, 12)
+	}
+	box := panel(boxW, min(h, len(matches)+6), true).Render(strings.TrimRight(b.String(), "\n"))
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box)
+}
+
 func (m console) renderBody(h int) string {
+	if m.palette != nil {
+		return m.renderPalette(m.width, h)
+	}
 	if sw := m.sidebarWidth(); sw > 0 {
 		side := m.renderSidebar(sw, h)
 		ed := m.renderEditor(m.width-sw-1, h)

@@ -105,13 +105,21 @@ type console struct {
 	width    int
 	height   int
 
-	req    *fieldReq
-	cursor int
-	input  textinput.Model
-	area   textarea.Model
-	errMsg string
+	req     *fieldReq
+	cursor  int
+	input   textinput.Model
+	area    textarea.Model
+	errMsg  string
+	palette *paletteState
 
 	notice *noticeState
+}
+
+// paletteState is the fuzzy command palette overlaid on a menu (V45). It filters
+// the current menu's rows; from the editor hub that includes every section jump.
+type paletteState struct {
+	query  string
+	cursor int
 }
 
 func newConsole(requests <-chan shellRequest) console {
@@ -199,9 +207,17 @@ func (m console) startField(r fieldReq) (tea.Model, tea.Cmd) {
 }
 
 func (m console) updateField(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.palette != nil {
+		return m.updatePalette(msg)
+	}
 	switch m.req.kind {
 	case kindSelect:
 		switch msg.String() {
+		case "ctrl+p", ":":
+			if !m.req.ctx.hero {
+				m.palette = &paletteState{}
+			}
+			return m, nil
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
@@ -275,6 +291,63 @@ func (m console) updateNotice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, waitRequest(m.requests)
 	}
 	return m, nil
+}
+
+func (m console) updatePalette(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	matches := m.paletteMatches()
+	switch msg.String() {
+	case "esc":
+		m.palette = nil
+	case "up", "ctrl+k":
+		if m.palette.cursor > 0 {
+			m.palette.cursor--
+		}
+	case "down", "ctrl+j":
+		if m.palette.cursor < len(matches)-1 {
+			m.palette.cursor++
+		}
+	case "enter":
+		if len(matches) > 0 {
+			idx := matches[m.palette.cursor]
+			m.palette = nil
+			return m.answer(fieldReply{value: m.req.choices[idx].value})
+		}
+	case "backspace":
+		if m.palette.query != "" {
+			m.palette.query = m.palette.query[:len(m.palette.query)-1]
+			m.palette.cursor = 0
+		}
+	default:
+		if len(msg.Runes) == 1 {
+			m.palette.query += string(msg.Runes)
+			m.palette.cursor = 0
+		}
+	}
+	return m, nil
+}
+
+// paletteMatches returns the indices of the current menu's rows that fuzzy-match
+// the palette query.
+func (m console) paletteMatches() []int {
+	var out []int
+	for i, c := range m.req.choices {
+		if fuzzyMatch(m.palette.query, c.label) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// fuzzyMatch reports whether query is a case-insensitive subsequence of s.
+func fuzzyMatch(query, s string) bool {
+	query, s = strings.ToLower(query), strings.ToLower(s)
+	j := 0
+	for i := 0; i < len(s) && j < len(query); i++ {
+		if s[i] == query[j] {
+			j++
+		}
+	}
+	return j == len(query)
 }
 
 // answer replies to the blocked flow goroutine and waits for the next request.
