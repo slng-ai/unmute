@@ -130,7 +130,7 @@
   #connect:hover:not([disabled]){background:oklch(0.92 0.165 96)}
   #mute{flex:none}
 
-  /* mic selector — shown only when ≥2 inputs exist */
+  /* mic selector — shown only when ≥2 inputs exist (pipecat transport only) */
   .microw{
     display:flex;align-items:center;gap:10px;
     border:1px solid var(--border);background:var(--surface);
@@ -209,13 +209,16 @@
 
 <script>
 "use strict";
+// One page, two transports. `GET /api/session` returns {kind}: the CLI picks
+// pipecat (WebRTC offer proxied to the containerized bot) or livekit (join a
+// room with the JS SDK). Everything below the transport adapter is shared UI.
+//
 // Visual-preview switch: build flips this to true for the standalone mockup so
-// the connected UI is viewable without a running bot. Shipped client = false.
+// the connected UI is viewable without a running agent. Shipped client = false.
 // ponytail: one constant + one simulate() branch — the alternative is a second file.
 const DEMO = false;
 
 const q = new URLSearchParams(location.search);
-const OFFER_URL = q.get("offer") || "/api/offer";          // Go proxies → pipecat SmallWebRTC
 const AGENT = q.get("agent") || "agent";
 const BARS = 24;
 
@@ -240,8 +243,10 @@ const bars = Array.from({length: BARS}, () => {
   return i;
 });
 
-let pc = null, mic = null, pcId = null, raf = 0, dc = null;
-let audioCtx = null, analyser = null, micNode = null, remoteNode = null;
+let transport = null;                 // "webrtc-offer" | "livekit" while connected
+let pc = null, mic = null, pcId = null, dc = null;   // pipecat transport
+let room = null;                                     // livekit transport
+let audioCtx = null, analyser = null, micNode = null, remoteNode = null, raf = 0;
 let muted = false, selectedDeviceId = null;
 let partialEl = null; // live user partial; replaced/promoted on final
 
@@ -292,60 +297,6 @@ function promotePartial(text){
   }
 }
 
-// RTVI message types we render. Bot uses bot-transcription (sentence-aggregated,
-// final text); user-transcription delivers partials + finals.
-function handleRtvi(msg){
-  const t = msg.type, d = msg.data || {};
-  if (t === "user-transcription"){
-    const text = (d.text || "").trim();
-    if (!text) return;
-    if (d.final) promotePartial(text);
-    else setPartial(text);
-  } else if (t === "bot-transcription"){
-    const text = (d.text || "").trim();
-    if (text) pushTurn("bot", text);
-  }
-}
-
-// ── mic enumeration / selection ─────────────────────────
-async function refreshMics(){
-  let devices;
-  if (DEMO){
-    devices = [{deviceId:"builtin",label:"MacBook Pro Microphone"},
-               {deviceId:"usb",label:"Shure MV7 (USB)"}];
-  } else {
-    try { devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput"); }
-    catch { devices = []; }
-  }
-  el.micsel.innerHTML = "";
-  devices.forEach((d, i) => {
-    const o = document.createElement("option");
-    o.value = d.deviceId;
-    o.textContent = d.label || `Microphone ${i + 1}`;
-    if (d.deviceId === selectedDeviceId) o.selected = true;
-    el.micsel.appendChild(o);
-  });
-  el.microw.hidden = devices.length < 2;          // only offer a choice when there is one
-}
-
-el.micsel.addEventListener("change", async () => {
-  selectedDeviceId = el.micsel.value || null;
-  if (!DEMO && el.body.dataset.state === "connected") await swapMic();
-});
-
-async function swapMic(){
-  try {
-    const next = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint() });
-    const track = next.getAudioTracks()[0];
-    track.enabled = !muted;
-    const sender = pc.getSenders().find(s => s.track && s.track.kind === "audio");
-    if (sender) await sender.replaceTrack(track);     // hot-swap, no renegotiation
-    mic.getTracks().forEach(t => t.stop());
-    mic = next;
-    reconnectMic(next);                               // re-tap into the meter
-  } catch { /* keep the existing mic on failure */ }
-}
-
 // ── meter: mic + agent mixed into one analyser ──────────
 function startMeter(remoteStream){
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -353,7 +304,7 @@ function startMeter(remoteStream){
   analyser.fftSize = 64;
   remoteNode = audioCtx.createMediaStreamSource(remoteStream);
   remoteNode.connect(analyser);                       // agent voice
-  if (mic) reconnectMic(mic);                         // your voice
+  if (mic) reconnectMic(mic);                         // your voice (pipecat only)
   const freq = new Uint8Array(analyser.frequencyBinCount);
   const tick = () => {
     analyser.getByteFrequencyData(freq);
@@ -378,6 +329,89 @@ function stopMeter(){
   setBars(0.08);
 }
 
+// ── shared teardown (either transport) ──────────────────
+function teardown(state, hint){
+  stopMeter();
+  if (dc){ try { dc.close(); } catch {} dc = null; }
+  if (pc){ pc.close(); pc = null; }
+  if (mic){ mic.getTracks().forEach(t => t.stop()); mic = null; }
+  if (room){ try { room.disconnect(); } catch {} room = null; }
+  el.remote.srcObject = null;
+  el.mute.disabled = true; el.mute.textContent = "mic on";
+  el.body.classList.remove("muted"); muted = false;
+  el.connect.textContent = "connect";
+  transport = null;
+  setPartial("");
+  setState(state, state === "error" ? "error" : "ready",
+           state === "error" ? hint : "press connect and talk to your agent");
+}
+
+function toggleMute(){
+  muted = !muted;
+  el.body.classList.toggle("muted", muted);
+  el.mute.textContent = muted ? "muted" : "mic on";
+  if (mic) mic.getAudioTracks().forEach(t => t.enabled = !muted);        // pipecat
+  if (room) { try { room.localParticipant.setMicrophoneEnabled(!muted); } catch {} } // livekit
+}
+
+// ── bootstrap: ask the CLI which transport this target uses ──
+async function connect(){
+  if (DEMO) return simulate();
+  if (transport) return;                              // re-entry guard
+  clearTranscript();
+  setState("connecting", "connecting", "reaching the agent");
+  let session;
+  try {
+    const res = await fetch("/api/session");
+    if (!res.ok) throw new Error("session " + res.status);
+    session = await res.json();
+  } catch (err) {
+    return setState("error", "error", "could not reach the dev server");
+  }
+  transport = session.kind;
+  if (session.kind === "livekit") return connectLivekit(session);
+  return connectPipecat(session);                     // "webrtc-offer"
+}
+
+// ── pipecat transport: WebRTC offer → containerized bot ──
+async function refreshMics(){
+  let devices;
+  if (DEMO){
+    devices = [{deviceId:"builtin",label:"MacBook Pro Microphone"},
+               {deviceId:"usb",label:"Shure MV7 (USB)"}];
+  } else {
+    try { devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audioinput"); }
+    catch { devices = []; }
+  }
+  el.micsel.innerHTML = "";
+  devices.forEach((d, i) => {
+    const o = document.createElement("option");
+    o.value = d.deviceId;
+    o.textContent = d.label || `Microphone ${i + 1}`;
+    if (d.deviceId === selectedDeviceId) o.selected = true;
+    el.micsel.appendChild(o);
+  });
+  el.microw.hidden = devices.length < 2;              // only offer a choice when there is one
+}
+
+el.micsel.addEventListener("change", async () => {
+  selectedDeviceId = el.micsel.value || null;
+  if (!DEMO && el.body.dataset.state === "connected" && transport === "webrtc-offer") await swapMic();
+});
+
+async function swapMic(){
+  try {
+    const next = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint() });
+    const track = next.getAudioTracks()[0];
+    track.enabled = !muted;
+    const sender = pc.getSenders().find(s => s.track && s.track.kind === "audio");
+    if (sender) await sender.replaceTrack(track);     // hot-swap, no renegotiation
+    mic.getTracks().forEach(t => t.stop());
+    mic = next;
+    reconnectMic(next);                               // re-tap into the meter
+  } catch { /* keep the existing mic on failure */ }
+}
+
 async function waitForIce(pc){
   if (pc.iceGatheringState === "complete") return;
   await new Promise(res => {
@@ -386,10 +420,23 @@ async function waitForIce(pc){
   });
 }
 
-async function connect(){
-  if (DEMO) return simulate();
-  if (pc) return;                                     // ponytail: re-entry guard — double-click spawns two pipelines server-side and races the module-level pc
-  clearTranscript();
+// RTVI message types we render. Bot uses bot-transcription (sentence-aggregated,
+// final text); user-transcription delivers partials + finals.
+function handleRtvi(msg){
+  const t = msg.type, d = msg.data || {};
+  if (t === "user-transcription"){
+    const text = (d.text || "").trim();
+    if (!text) return;
+    if (d.final) promotePartial(text);
+    else setPartial(text);
+  } else if (t === "bot-transcription"){
+    const text = (d.text || "").trim();
+    if (text) pushTurn("bot", text);
+  }
+}
+
+async function connectPipecat(session){
+  const offerUrl = session.offerUrl || "/api/offer";
   setState("connecting", "connecting", "requesting microphone");
   try {
     mic = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint() });
@@ -406,7 +453,7 @@ async function connect(){
     }
     await refreshMics();                              // labels resolve once permission is granted
   } catch {
-    return setState("error", "error", "microphone permission denied");
+    return teardown("error", "microphone permission denied");
   }
   try {
     pc = new RTCPeerConnection();
@@ -432,7 +479,7 @@ async function connect(){
     await waitForIce(pc);
     setState("connecting", "connecting", "negotiating with agent");
 
-    const res = await fetch(OFFER_URL, {
+    const res = await fetch(offerUrl, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, pc_id: pcId }),
     });
@@ -450,32 +497,72 @@ async function connect(){
   }
 }
 
-function teardown(state, hint){
-  stopMeter();
-  if (dc){ try { dc.close(); } catch {} dc = null; }
-  if (pc){ pc.close(); pc = null; }
-  if (mic){ mic.getTracks().forEach(t => t.stop()); mic = null; }
-  el.remote.srcObject = null;
-  el.mute.disabled = true; el.mute.textContent = "mic on";
-  el.body.classList.remove("muted"); muted = false;
-  el.connect.textContent = "connect";
-  setPartial("");
-  setState(state, state === "error" ? "error" : "ready",
-           state === "error" ? hint : "press connect and talk to your agent");
+// ── livekit transport: join a room with the vendored JS SDK ──
+function loadLiveKit(){
+  if (window.LivekitClient) return Promise.resolve(window.LivekitClient);
+  return new Promise((resolve) => {
+    const s = document.createElement("script");
+    s.src = "/livekit-client.umd.js";
+    s.onload = () => resolve(window.LivekitClient || null);
+    s.onerror = () => resolve(null);
+    document.head.appendChild(s);
+  });
 }
 
-function toggleMute(){
-  muted = !muted;
-  el.body.classList.toggle("muted", muted);
-  el.mute.textContent = muted ? "muted" : "mic on";
-  if (mic) mic.getAudioTracks().forEach(t => t.enabled = !muted);
+async function connectLivekit(session){
+  el.microw.hidden = true;                            // the SDK owns mic selection
+  setState("connecting", "connecting", "loading the livekit client");
+  const LK = await loadLiveKit();
+  if (!LK) return teardown("error", "could not load the livekit client");
+
+  room = new LK.Room({ adaptiveStream:true, dynacast:true });
+  room.on(LK.RoomEvent.TrackSubscribed, (track) => {
+    if (track.kind === LK.Track.Kind.Audio){
+      const stream = new MediaStream([track.mediaStreamTrack]);
+      el.remote.srcObject = stream;                   // playback
+      startMeter(stream);                             // agent voice drives the meter
+    }
+  });
+  room.on(LK.RoomEvent.TrackUnsubscribed, () => { el.remote.srcObject = null; });
+  room.on(LK.RoomEvent.Disconnected, () => teardown("idle"));
+  room.on(LK.RoomEvent.ParticipantConnected, (p) => setState("connected", "live", "talking to " + p.identity));
+  // Transcriptions are optional across SDK builds; wire them when present.
+  if (LK.RoomEvent.TranscriptionReceived){
+    room.on(LK.RoomEvent.TranscriptionReceived, (segments, participant) => {
+      const who = participant && participant.isLocal ? "you" : "bot";
+      for (const seg of segments){
+        const text = (seg.text || "").trim();
+        if (!text) continue;
+        if (who === "you" && !seg.final) setPartial(text);
+        else if (who === "you") promotePartial(text);
+        else pushTurn("bot", text);
+      }
+    });
+  }
+
+  try {
+    setState("connecting", "connecting", "connecting to room");
+    await room.connect(session.url, session.token);
+    setState("connected", "live", "talk to your agent");
+    el.connect.textContent = "disconnect";
+  } catch (err) {
+    return teardown("error", String(err.message || err));
+  }
+  // Mic failure must not mask a successful join: you can still hear the agent.
+  try {
+    await room.localParticipant.setMicrophoneEnabled(true);
+    muted = false; el.body.classList.remove("muted");
+    el.mute.disabled = false; el.mute.textContent = "mic on";
+  } catch (err) {
+    el.state.textContent = "live — microphone blocked; allow access and reconnect";
+  }
 }
 
 el.connect.addEventListener("click", () =>
   el.body.dataset.state === "connected" ? teardown("idle") : connect());
 el.mute.addEventListener("click", toggleMute);
 if (!DEMO && navigator.mediaDevices && navigator.mediaDevices.addEventListener)
-  navigator.mediaDevices.addEventListener("devicechange", refreshMics);
+  navigator.mediaDevices.addEventListener("devicechange", () => { if (transport === "webrtc-offer") refreshMics(); });
 
 // ── demo-only visual preview (DEMO=true builds) ──────────
 function simulate(){
@@ -503,7 +590,6 @@ function simulate(){
 
 setBars(0.08);
 setState("idle", "ready");
-refreshMics();
 </script>
 </body>
 </html>

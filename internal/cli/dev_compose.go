@@ -23,9 +23,22 @@ var (
 	composeSlug      = regexp.MustCompile(`[^a-z0-9_-]+`)
 )
 
+// composeInstallHint names what to install; both entry points word their own
+// missing-docker sentence around it.
+const composeInstallHint = "install Docker Desktop or Docker Engine with the Compose plugin"
+
+// preflightCompose is the --telephony gate. Its message is unchanged on purpose
+// (telephony behaviour is byte-for-byte stable, SPEC V10).
 func preflightCompose(ctx context.Context, env []string) error {
+	return preflightComposeCore(ctx, env, "docker compose is required for --telephony; "+composeInstallHint)
+}
+
+// preflightComposeCore runs the docker/compose/daemon checks. missingHint is the
+// full error returned when the docker binary is absent, so each entry point can
+// name its own mode and escape hatch.
+func preflightComposeCore(ctx context.Context, env []string, missingHint string) error {
 	if _, err := composeLookPath("docker"); err != nil {
-		return errors.New("docker compose is required for --telephony; install Docker Desktop or Docker Engine with the Compose plugin")
+		return errors.New(missingHint)
 	}
 	check := composeCommand(ctx, "docker", "compose", "version")
 	check.Env = env
