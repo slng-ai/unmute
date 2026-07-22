@@ -207,22 +207,28 @@ func parseTelephonyPublicURL(value string) (*url.URL, error) {
 
 func printDevTelephonyPlan(out io.Writer, name string, plan *generate.TelephonyRuntimePlan, public *url.URL) {
 	fmt.Fprintf(out, "%s: telephony route provider=%s transport=%s carrier=%s coordination=%s\n", name, plan.Route.Provider, plan.Route.Transport, plan.Route.Carrier, plan.Coordination)
-	for _, endpoint := range plan.PublicEndpoints {
-		if public == nil {
-			continue
-		}
-		base := strings.TrimSuffix(public.String(), "/")
-		if endpoint.Method == "WS" {
-			base = "wss" + strings.TrimPrefix(base, "https")
-		}
-		fmt.Fprintf(out, "%s: %s %s %s%s\n", name, endpoint.Name, endpoint.Method, base, endpoint.Path)
-	}
+	printDevTelephonyEndpoints(out, name, plan, public)
 	for _, step := range plan.ManualSteps {
 		fmt.Fprintf(out, "%s: setup: %s\n", name, step)
 	}
 	fmt.Fprintf(out, "%s: local services: %s\n", name, strings.Join(plan.Services, ", "))
 	for _, reason := range plan.Reasons {
 		fmt.Fprintf(out, "%s: coordination reason %s -> %s\n", name, reason.Name, strings.Join(reason.Consumers, ", "))
+	}
+}
+
+// printDevTelephonyEndpoints prints the exact public callback URLs once the
+// origin is known (TELEPHONY.md step 6); a nil public prints nothing.
+func printDevTelephonyEndpoints(out io.Writer, name string, plan *generate.TelephonyRuntimePlan, public *url.URL) {
+	if public == nil {
+		return
+	}
+	for _, endpoint := range plan.PublicEndpoints {
+		base := strings.TrimSuffix(public.String(), "/")
+		if endpoint.Method == "WS" {
+			base = "wss" + strings.TrimPrefix(base, "https")
+		}
+		fmt.Fprintf(out, "%s: %s %s %s%s\n", name, endpoint.Name, endpoint.Method, base, endpoint.Path)
 	}
 }
 

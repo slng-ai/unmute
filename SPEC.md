@@ -177,14 +177,20 @@ show every route end to end with real-schema YAML.
   outbound: address=`sip_address` env value, numbers=`from_number` value,
   auth in request body only; dispatch: individual rule `roomPrefix: call-`
   dispatching the generated agent name, bound to the inbound trunk).
-  Returned IDs are injected as `LIVEKIT_SIP_INBOUND_TRUNK` and
+  Record identity is explicit (amended after B2): inbound trunk = numbers;
+  outbound trunk = address + numbers (auth not comparable: list responses
+  redact it); dispatch rule = bound trunk + individual `call-` prefix. A
+  located dispatch rule whose dispatched agent name differs from the target
+  is replaced in place via UpdateSIPDispatchRule (never duplicated, never
+  left stale, and never silently reused with the wrong agent). Returned IDs
+  are injected as `LIVEKIT_SIP_INBOUND_TRUNK` and
   `LIVEKIT_SIP_OUTBOUND_TRUNK` into the application environment before the
   application service starts; the user never supplies these two values for
   local dev (missing-env excludes them; a user-set non-empty value is
   rejected like other locally supplied names). Guard: L1 content-match
   tests (same record reused, changed record recreated); L2 httptest Twirp
   server asserting list-before-create, auth only in body, env injection,
-  and second-run reuse.
+  second-run reuse, and replace-on-agent-mismatch.
 - V5: fail-closed validation output for gated and provisional routes is
   byte-for-byte unchanged, and no tunnel, carrier, or Twirp call happens
   before the gate passes. Guard: the existing gate L2 test passes without
@@ -207,6 +213,7 @@ T4|x|Post-gate core restructure: extract the orchestration after the gate in `ru
 T5|x|Twilio webhook auto-config: `internal/cli/dev_twilio.go` (lookup by exact number, update VoiceUrl+VoiceMethod=POST, capture+print previous URL, Basic auth from mapped env names, `twilioAPIBase` seam, short timeouts); called only when the plan carries the fact and endpoints are public; failure is a clear error (not silent). L1 URL derivation; L2 httptest; agreement test fact⇒implementation|I.twilio,V3,C2,C5
 T6|x|LiveKit trunk automation: `internal/cli/dev_livekit_sip.go` (HS256 sip-admin JWT, Twirp POST helper, list/ensure inbound trunk, outbound trunk, dispatch rule with content-identity matching per V4, camelCase+snake_case tolerant parsing); admin URL from `UNMUTE_LIVEKIT_PORT` default 7880 against 127.0.0.1 with the generated dev key pair; IDs injected via the T4 between-phase hook. L1 match tests; L2 httptest Twirp server incl. second-run reuse|I.lksip,V4,C1,C2,C6
 T7|x|User docs + example: rewrite [learn/07-phone-calls.md](docs/user/learn/07-phone-calls.md) zero-step walkthrough (what dev does, cloudflared install line, one-time Twilio console setup per model, printed output meaning, honest limits); per-route full YAML in reference/targets pages (agent.yaml telephony channel inbound/outbound/both, call_start variables, transfer destinations; connections per carrier vocabulary for both models; targets.yaml per route; .env example per route with CLI-supplied values noted); [reference/providers.md](docs/user/reference/providers.md) pointer stays carrier-free; make [examples/telephony-multi-task](examples/telephony-multi-task) a real telephony package (channel+connection+target+.env.example+README) that fails closed with today's gate note; sidebar entry check. Derive every field from SCHEMA.md; simple language, no em dashes|I.doc,C7,C8
+T9|x|Check remediation (B2 + I.doc): dispatch-rule ensure gains agent-name verification with in-place replace via UpdateSIPDispatchRule (`{"sipDispatchRuleId", "replace": {...}}`, verified against livekit/protocol 2026-07-22); plan facts print at step 2 (route, setup, services, reasons) and endpoint URLs print at step 6 after the origin is known, matching the TELEPHONY.md 12-step order. L2: replace-on-mismatch test, print-order assertion|V4,I.doc,B2
 T8|x|Gates + hygiene: verify fail-closed byte-identical (run gate tests), `go test ./...` zero Python/network, `make lint fmt test`, goldens regenerated where files changed, no go.mod diff (V7). L4 smoke additions only where real cloudflared/Twilio/Docker are needed (build tag smoke)|V5,V7,C3,C7
 
 Dependency order: T1 first (doc wins; the 12-step order drives T4). T2 before
@@ -216,3 +223,4 @@ T7 after T1 (and after T2 for exact env names). T8 last.
 ## §B bugs
 id|date|cause|fix
 B1|2026-07-22|Pre-existing at branch start: commit 5e21577 added `examples/telephony-multi-task` (a copy of multi-task with no telephony channel, connection, or route) without registering it in `TestPublicExamplePackages` (internal/generate/examples_test.go:113), so the default suite was red before this work began. No new invariant: that registry test is the guard and it fired. Fix folded into T7, which makes the example a real telephony package and registers it|T7
+B2|2026-07-22|Found by adversarial /check: V4 promised reuse of a "content-identical" record, but the dispatch-rule match ([dev_livekit_sip.go:97](internal/cli/dev_livekit_sip.go:97)) compared only trunk IDs + `call-` prefix and ignored the dispatched agent name, so a rule pointing at a different agent would be silently reused and inbound calls would dispatch the wrong agent. Latent through normal CLI use (the Compose project name includes the target name, so each project gets its own Redis volume and the agent name cannot drift), reachable via hand-created `lk` records against the same local stack. Fix: V4 amended to define record identity explicitly and require in-place replace on agent mismatch; T9 implements it|V4

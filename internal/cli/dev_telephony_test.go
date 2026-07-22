@@ -102,6 +102,11 @@ func TestExecDevTelephonyManagedTunnelInjectsPublicURLAndTearsDown(t *testing.T)
 			t.Errorf("output missing %q:\n%s", want, printed)
 		}
 	}
+	// TELEPHONY.md step order: plan facts print before the tunnel starts,
+	// endpoint URLs print after the origin is known.
+	if plan, tunnel := strings.Index(printed, "telephony route provider="), strings.Index(printed, "managed tunnel"); plan == -1 || plan > tunnel {
+		t.Fatalf("plan facts did not print before the tunnel:\n%s", printed)
+	}
 	raw, err := os.ReadFile(trace)
 	if err != nil {
 		t.Fatal(err)

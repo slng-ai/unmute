@@ -82,6 +82,20 @@ func (f *fakeSIPAdmin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		record["sipDispatchRuleId"] = "SDR_1"
 		f.rules = append(f.rules, record)
 		write(record)
+	case "UpdateSIPDispatchRule":
+		id, _ := payload["sipDispatchRuleId"].(string)
+		replacement, _ := payload["replace"].(map[string]any)
+		for i, rule := range f.rules {
+			ruleID, _ := rule["sipDispatchRuleId"].(string)
+			if snake, _ := rule["sip_dispatch_rule_id"].(string); ruleID == "" {
+				ruleID = snake
+			}
+			if ruleID == id {
+				replacement["sipDispatchRuleId"] = id
+				f.rules[i] = replacement
+			}
+		}
+		write(replacement)
 	default:
 		http.Error(w, "unknown method "+method, http.StatusNotFound)
 	}
@@ -172,6 +186,7 @@ func TestEnsureLiveKitSIPRecordsReadsSnakeCaseResponses(t *testing.T) {
 		"sip_dispatch_rule_id": "SDR_9",
 		"trunk_ids":            []any{"ST_in_9"},
 		"rule":                 map[string]any{"dispatch_rule_individual": map[string]any{"room_prefix": "call-"}},
+		"room_config":          map[string]any{"agents": []any{map[string]any{"agent_name": "phone"}}},
 	}}
 	var out strings.Builder
 	injected, err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", livekitSIPPlan(), sipTestEnv())
@@ -183,6 +198,35 @@ func TestEnsureLiveKitSIPRecordsReadsSnakeCaseResponses(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(fake.requests, ","), "Create") {
 		t.Fatalf("snake_case records were not reused: %v", fake.requests)
+	}
+}
+
+// V4/B2: a dispatch rule with the right trunk and prefix but the wrong
+// dispatched agent is replaced in place, never reused and never duplicated.
+func TestEnsureLiveKitSIPRecordsReplacesDispatchRuleOnAgentMismatch(t *testing.T) {
+	fake, _ := newFakeSIPAdmin(t)
+	fake.inbound = []map[string]any{{"sipTrunkId": "ST_in_1", "numbers": []any{"+15550001111"}}}
+	fake.outbound = []map[string]any{{"sipTrunkId": "ST_out_1", "address": "example.pstn.twilio.com", "numbers": []any{"+15550001111"}}}
+	fake.rules = []map[string]any{{
+		"sipDispatchRuleId": "SDR_stale",
+		"trunkIds":          []any{"ST_in_1"},
+		"rule":              map[string]any{"dispatchRuleIndividual": map[string]any{"roomPrefix": "call-"}},
+		"roomConfig":        map[string]any{"agents": []any{map[string]any{"agentName": "old-target"}}},
+	}}
+	var out strings.Builder
+	if _, err := ensureLiveKitSIPRecords(context.Background(), &out, "phone", livekitSIPPlan(), sipTestEnv()); err != nil {
+		t.Fatal(err)
+	}
+	requests := strings.Join(fake.requests, ",")
+	if strings.Contains(requests, "CreateSIPDispatchRule") || !strings.Contains(requests, "UpdateSIPDispatchRule") {
+		t.Fatalf("mismatched rule was not replaced in place: %s", requests)
+	}
+	if !strings.Contains(fake.bodies["UpdateSIPDispatchRule"], `"sipDispatchRuleId":"SDR_stale"`) ||
+		!strings.Contains(fake.bodies["UpdateSIPDispatchRule"], `"agentName":"phone"`) {
+		t.Fatalf("replace body = %s", fake.bodies["UpdateSIPDispatchRule"])
+	}
+	if !strings.Contains(out.String(), `dispatch rule "unmute phone inbound" (updated)`) {
+		t.Fatalf("output = %s", out.String())
 	}
 }
 

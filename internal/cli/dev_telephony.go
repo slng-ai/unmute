@@ -29,6 +29,9 @@ type devTelephonyOptions struct {
 // configuration, the call line, log streaming, and teardown. It never
 // validates routes; runDevTelephony's gate already did (SPEC V5).
 func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generate.TelephonyRuntimePlan, files []generate.File, opts devTelephonyOptions) error {
+	// TELEPHONY.md step 2: the provider-neutral plan prints before env
+	// validation; the endpoint URLs print at step 6, once the origin exists.
+	printDevTelephonyPlan(cmd.OutOrStdout(), targetName, plan, nil)
 	childEnv := devChildEnv(root, cmd.ErrOrStderr())
 	if err := rejectLocalTopologyConflicts(plan, childEnv); err != nil {
 		return err
@@ -93,7 +96,7 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 	if public != nil {
 		childEnv = setChildEnv(childEnv, "UNMUTE_PUBLIC_URL", public.String())
 	}
-	printDevTelephonyPlan(cmd.OutOrStdout(), targetName, plan, public)
+	printDevTelephonyEndpoints(cmd.OutOrStdout(), targetName, plan, public)
 
 	run := telephonyComposeRun{
 		dir: outDir, file: composePath, project: composeProjectName(root, targetName),

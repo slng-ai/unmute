@@ -82,30 +82,11 @@ func ensureLiveKitSIPRecords(ctx context.Context, out io.Writer, targetName stri
 		fmt.Fprintf(out, "%s: LiveKit inbound trunk %s (%s)\n", targetName, trunkID, createdOrReused(reused))
 
 		dispatchName := "unmute " + targetName + " inbound"
-		_, dispatchReused, err := client.ensureRecord(ctx, "ListSIPDispatchRule", "CreateSIPDispatchRule",
-			map[string]any{"dispatch_rule": map[string]any{
-				"name":     dispatchName,
-				"trunkIds": []string{trunkID},
-				"rule":     map[string]any{"dispatchRuleIndividual": map[string]any{"roomPrefix": "call-"}},
-				"roomConfig": map[string]any{"agents": []map[string]any{{
-					"agentName": targetName, "metadata": `{"direction":"inbound"}`,
-				}}},
-			}},
-			"dispatch_rule",
-			func(item sipRecord) bool {
-				rule := item.record("rule")
-				individual := rule.record("dispatchRuleIndividual", "dispatch_rule_individual")
-				if individual == nil || individual.string("roomPrefix", "room_prefix") != "call-" {
-					return false
-				}
-				return slices.Equal(item.strings("trunkIds", "trunk_ids"), []string{trunkID})
-			},
-			func(item sipRecord) string { return item.string("sipDispatchRuleId", "sip_dispatch_rule_id") },
-		)
+		action, err := client.ensureDispatchRule(ctx, dispatchName, targetName, trunkID)
 		if err != nil {
 			return nil, fmt.Errorf("ensure LiveKit dispatch rule: %w", err)
 		}
-		fmt.Fprintf(out, "%s: LiveKit dispatch rule %q (%s)\n", targetName, dispatchName, createdOrReused(dispatchReused))
+		fmt.Fprintf(out, "%s: LiveKit dispatch rule %q (%s)\n", targetName, dispatchName, action)
 	}
 
 	if needs("LIVEKIT_SIP_OUTBOUND_TRUNK") {
@@ -169,6 +150,58 @@ func mintLiveKitSIPAdminToken(apiKey, apiSecret string, now time.Time) (string, 
 type sipAdminClient struct {
 	base  string
 	token string
+}
+
+// ensureDispatchRule locates the dispatch rule by identity (bound trunk +
+// individual `call-` prefix, V4) and reconciles its content: reuse when it
+// already dispatches agentName, replace in place when it dispatches
+// something else (creating a second `call-` rule on the same trunk would
+// conflict, and reusing it would dispatch the wrong agent, B2), create when
+// absent. Returns the action taken.
+func (c *sipAdminClient) ensureDispatchRule(ctx context.Context, name, agentName, trunkID string) (string, error) {
+	desired := map[string]any{
+		"name":     name,
+		"trunkIds": []string{trunkID},
+		"rule":     map[string]any{"dispatchRuleIndividual": map[string]any{"roomPrefix": "call-"}},
+		"roomConfig": map[string]any{"agents": []map[string]any{{
+			"agentName": agentName, "metadata": `{"direction":"inbound"}`,
+		}}},
+	}
+	var listing struct {
+		Items []sipRecord `json:"items"`
+	}
+	if err := c.call(ctx, "ListSIPDispatchRule", map[string]any{}, &listing); err != nil {
+		return "", err
+	}
+	for _, item := range listing.Items {
+		individual := item.record("rule").record("dispatchRuleIndividual", "dispatch_rule_individual")
+		if individual == nil || individual.string("roomPrefix", "room_prefix") != "call-" {
+			continue
+		}
+		if !slices.Equal(item.strings("trunkIds", "trunk_ids"), []string{trunkID}) {
+			continue
+		}
+		id := item.string("sipDispatchRuleId", "sip_dispatch_rule_id")
+		if id == "" {
+			continue
+		}
+		agents := item.record("roomConfig", "room_config").list("agents")
+		if len(agents) == 1 && agents[0].string("agentName", "agent_name") == agentName {
+			return "reused", nil
+		}
+		if err := c.call(ctx, "UpdateSIPDispatchRule", map[string]any{"sipDispatchRuleId": id, "replace": desired}, &sipRecord{}); err != nil {
+			return "", err
+		}
+		return "updated", nil
+	}
+	var created sipRecord
+	if err := c.call(ctx, "CreateSIPDispatchRule", map[string]any{"dispatch_rule": desired}, &created); err != nil {
+		return "", err
+	}
+	if created.string("sipDispatchRuleId", "sip_dispatch_rule_id") == "" {
+		return "", fmt.Errorf("CreateSIPDispatchRule returned no record ID")
+	}
+	return "created", nil
 }
 
 // ensureRecord lists existing records, reuses the first match, and creates
@@ -249,6 +282,23 @@ func (r sipRecord) record(keys ...string) sipRecord {
 		if value, ok := r[key].(map[string]any); ok {
 			return sipRecord(value)
 		}
+	}
+	return nil
+}
+
+func (r sipRecord) list(keys ...string) []sipRecord {
+	for _, key := range keys {
+		values, ok := r[key].([]any)
+		if !ok {
+			continue
+		}
+		out := make([]sipRecord, 0, len(values))
+		for _, value := range values {
+			if record, ok := value.(map[string]any); ok {
+				out = append(out, sipRecord(record))
+			}
+		}
+		return out
 	}
 	return nil
 }
