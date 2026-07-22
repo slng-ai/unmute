@@ -7,7 +7,7 @@ Unmute is written in Go, so you mantian **Go code** but you also write some pyth
 
 ## Tooling
 - Go 1.24 (pin in `go.mod`); `CGO_ENABLED=0` static binary; version stamped at link time, never hardcoded.
-- Direct deps — `cobra`, `goccy/go-yaml` (gives line/col on parse errors), `google/jsonschema-go` (**v0.x — pin the exact version, bump deliberately**), and `charmbracelet/huh` v1.0.0 for the console. Huh intentionally brings its terminal UI graph; the only sanctioned direct Bubble Tea import is `internal/tui/shell.go`, whose single persistent `tea.Program` owns the console alt-screen and hosts the huh forms. Do not import Bubble Tea anywhere else or Lip Gloss directly. Everything else is stdlib. **No new dep for what a few lines of stdlib do — justify any addition in the PR.** No `viper` until a real global config file exists.
+- Direct deps — `cobra`, `goccy/go-yaml` (gives line/col on parse errors), `google/jsonschema-go` (**v0.x — pin the exact version, bump deliberately**), and `charmbracelet/huh` v1.0.0 for interactive init. Huh intentionally brings its terminal UI graph; do not import Bubble Tea or Lip Gloss directly. Everything else is stdlib. **No new dep for what a few lines of stdlib do — justify any addition in the PR.** No `viper` until a real global config file exists.
 - `golangci-lint` from day one (`.golangci.yml`).
 - Make targets: `build test smoke lint fmt install`.
 
@@ -19,7 +19,17 @@ Unmute is written in Go, so you mantian **Go code** but you also write some pyth
 - `SilenceUsage` + `SilenceErrors` on the root. Exit codes: `0` ok, `1` error — add more only when a consumer actually reads them. Warnings → stderr + exit 0 (never a silent downgrade).
 
 ## IR
-Go structs are the schema source for their own surface: `internal/spec` derives the unresolved authoring schema, while `internal/ir` derives the resolved/debug schema.
+Go structs are the schema source for their own surface: `internal/spec` derives the unresolved authoring schema, while `internal/ir` derives the resolved/debug schema. **Do not hand-author `.json` schema files.** Flow: `spec.Load` → `ir.Build` → `ir.Validate` → `generate.Generate`.
+
+## Testing
+`go test ./...` runs L1–L3 and needs **zero Python**:
+- L1 unit (pure logic, table-driven) · L2 in-process command tests (real tree, capture output) · L3 golden files (`-update` to regenerate).
+- L4 smoke (`make smoke`, build tag `smoke`) proves emitted Python is valid — opt-in, needs Python, never in the default suite or PR gate.
 
 ## Layout
 `internal/` not `pkg/`. One file per command in `internal/cli/`. Hand-write cobra commands — **no `cobra-cli` generator**.
+
+## Skills
+- Ponytail for writing great code
+- Spec to write specs before building
+- Build for building out the specs
