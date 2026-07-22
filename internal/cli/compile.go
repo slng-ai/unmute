@@ -38,6 +38,7 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 	if len(targets) == 0 {
 		return fmt.Errorf("compile %s: no targets selected", dir)
 	}
+	printHeader(cmd.OutOrStdout(), "compile "+dir)
 	caps := target.Default()
 	for _, resolved := range targets {
 		artifact, err := generate.Generate(agent, resolved, caps)

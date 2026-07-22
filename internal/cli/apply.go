@@ -69,6 +69,7 @@ func runApply(cmd *cobra.Command, dir string, names []string) error {
 	if err != nil {
 		return fmt.Errorf("apply %s: %w", dir, err)
 	}
+	printHeader(cmd.OutOrStdout(), "apply "+dir)
 	caps := target.Default()
 	for _, resolved := range targets {
 		artifact, err := generate.Generate(agent, resolved, caps)
