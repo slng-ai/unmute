@@ -236,6 +236,7 @@ type pipecatData struct {
 	HasFlows            bool // any delegate (tasks run as Flows on the owner, C8)
 	HasIsolated         bool // any isolated group (ContextStrategy RESET import)
 	NeedsRoleRestore    bool // any non-ending delegate (V28)
+	Inline              bool // single agent, no bus: LLM inline in the pipeline (F3)
 }
 
 // Provider → service facts (class, import, extra/dep, key env, constructor

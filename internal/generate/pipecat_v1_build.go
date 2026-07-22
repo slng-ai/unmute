@@ -84,6 +84,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		data.Notes = append(data.Notes, "turn role lowers to on-device VAD (Silero); its binding is advisory")
 	}
 	setImportNeeds(&data)
+	data.Inline = inlineEligible(&data)
 	data.Imports, data.Extras, data.Deps = collectImportsExtras(data)
 	if data.Telephony != nil {
 		switch data.Telephony.Carrier {
@@ -179,6 +180,26 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 		}
 	}
 	return telephony, nil
+}
+
+// inlineEligible reports whether the bot collapses to the inline single-agent
+// shape (F3): the LLM sits directly in the main pipeline with its tools as
+// module-level direct functions in LLMContext, no bus / BusBridge / LLMWorker /
+// activate_worker. Scoped to the simplest case — one agent, no handoffs, no Flow
+// delegates, no tracing (the tracing helper is worker-bound, V22), no telephony
+// or cold transfer. Everything else keeps the workers/bus path (dp§C8).
+func inlineEligible(data *pipecatData) bool {
+	// State (Variables) and model-written greeting both need machinery the inline
+	// shape lacks (module-level tools can't reach self.state; the greeting has no
+	// activate_worker to carry a developer message), so they keep the bus path.
+	if len(data.Agents) != 1 || data.Tracing || data.Telephony != nil || data.HasColdTransfer {
+		return false
+	}
+	if len(data.Variables) > 0 || data.GreetingInstruction != "" {
+		return false
+	}
+	a := data.Agents[0]
+	return len(a.Transfers) == 0 && len(a.Delegates) == 0
 }
 
 // setImportNeeds inspects the built model so bot.py imports only what this spec

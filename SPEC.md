@@ -146,6 +146,17 @@ dp§V26's small-context task-role boundary is preserved.
   non-defaulted one). `inputFields` orders required-first, then alphabetical
   within each group. Guard: `TestV1PipecatAgentToolCarriesSchema` uses a tool
   whose optional params sort before its required one and `py_compile`s the bot.
+- V6 (F3): a single agent with no `agent_transfer`, no tasks/delegates, no
+  tracing, no `variables`, and no telephony lowers to the **inline** shape — the
+  LLM sits directly in the main pipeline (`transport.input → STT → user
+  aggregator → LLM → TTS → transport.output → assistant aggregator`), its tools
+  are module-level direct functions registered on the `LLMContext`, and there is
+  no bus, `BusBridgeProcessor`, `LLMWorker`, or `activate_worker`
+  (`inlineEligible`, I.build; `bot.py.tmpl` `Inline` branches). Anything else
+  keeps the workers/bus topology (dp§C8, amended 2026-07-22 to acknowledge this).
+  Guard: `TestF3PipecatSingleAgentInline` (shape + `py_compile`) +
+  `TestSmokePipecatV1InlineInstantiates` (constructs against real pipecat-ai
+  1.5.0 + pipecat-slng; tools register on `LLMContext`).
 
 *(No F2 invariant — F2's semantic change is rejected, see C8. dp§V26 stays
 authoritative. F2's only real residue, the duplicated prompt literal, is a
@@ -154,7 +165,7 @@ code-DRY fix inside T3/V2.)*
 ## §T tasks
 id|status|desc|cites
 T1|x|F1: thread the tool `input` schema into the agent-level `@tool` path. Extended `pipecatArg` with type/description/enum; `inputFields` populates them (required-first ordering, B3/V5); template renders typed signature + Google `Args:` docstring (descriptions carried, enums as prose). Both paths schema-equal; escape hatch (explicit `FunctionSchema`) documented in V1. Goldens regen|V1,V5,C4,I.build,I.tmpl,B3
-T2|.|F3: collapse `len(agents)==1 && no agent_transfers` to the inline `food_ordering` shape — LLM inline in the pipeline, no bus / `BusBridgeProcessor` / `activate_entry` dance — scoped to the pipeline+`run_bot` section of the template only; agent class, tools, and flows blocks stay shared. Record the trade-off (one uniform shape vs. a second code path) in the PR. Reconcile with dp§V14 (activation gate applies only to the bus path). Regen `simple-prompt` golden|C5,C3,I.tmpl
+T2|x|F3: inline single-agent shape (second codegen path, per context7 the inline tools are module-level direct functions in `LLMContext`, not the `@tool` `LLMWorker` class). Scoped to the validatable, zero-risk slice: 1 agent, no transfers/tasks/tracing/variables/telephony → LLM inline, no bus/BusBridge/LLMWorker/activate_worker (`inlineEligible` + `bot.py.tmpl` `Inline` branches). Everything else keeps the workers/bus path unchanged (goldens byte-identical). dp§C8 amended (C3). Validated against real pipecat-ai 1.5.0 + pipecat-slng in a uv/py3.12 venv (import + services + `LLMContext(tools=[direct fns])` all construct). **Follow-ups**: inline+tracing (V16–V25 tracing helper is worker-bound — needs a direct-function span hook for V22), inline+tasks (Flows-on-pipeline), inline model-written greeting/variables|V6,C5,C3,I.tmpl,dp§C8
 T3|x|F4: two-layer clean output. Template/build: gate `LLMWorker` + drop `asdict` (F-clean), merge `frames.frames` imports, `@tool()`→`@tool`, drop `respond_immediately=True`, `json={...}` spacing, each agent prompt as one triple-quoted module constant referenced by builder + restore (dedup; C8-preserving). Write path (`writeArtifactFiles`, I.write): best-effort `ruff format` pass on emitted `.py`, warn to stderr if ruff absent (ADR-0002/C1 amended). Guards: `TestPipecatRuffCheckClean` + `TestWriteArtifactFilesFormatsPython` (both skip w/o ruff); regen goldens (raw)|V2,C8,I.tmpl,I.build,I.write
 T4|x|F5 CONFIRMED defect (context7: Pipecat "tool methods must call `params.result_callback()` … to avoid unresolved LLM calls"). Fix: the delegate `@tool` resolves its call via `params.result_callback` instead of returning `{"status": …}` (`bot.py.tmpl` ~L205; golden `:230`,`:286`). Add `TestV3PipecatToolsResolveCallback`; regen tasks golden|V3,B1,I.tmpl
 T5|x|F6 CONFIRMED (context7 + no test coverage): `then: end` queues `EndFrame()` (`bot.py.tmpl` ~L236), drifting from dp§V2 + upstream `food_ordering`; no example/golden exercises the path. Fix: emit `post_actions=[{"type": "end_conversation"}]` on the terminal node; add a `then: end` golden fixture + assertion. Verify end-node wiring against the pipecat-flows end pattern before finalizing|V4,B2,C2,C3,I.tmpl

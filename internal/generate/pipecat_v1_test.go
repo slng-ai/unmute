@@ -611,6 +611,66 @@ func TestV3PipecatToolsResolveCallback(t *testing.T) {
 	}
 }
 
+// TestF3PipecatSingleAgentInline: a single agent with no handoffs, tasks,
+// variables, tracing, or telephony collapses to the inline shape (F3) — the LLM
+// sits directly in the pipeline, tools are module-level direct functions in
+// LLMContext, and there is no bus / BusBridge / LLMWorker / activate_worker.
+func TestF3PipecatSingleAgentInline(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tracing = nil // simple-prompt ships tracing; the inline path is scoped to no-tracing
+
+	bot := artifactFile(t, mustGeneratePipecatInline(t, agent), "bot.py")
+
+	for _, absent := range []string{
+		"BusBridgeProcessor",
+		"activate_worker",
+		"LLMWorkerActivationArgs",
+		"class AppointmentDeskAgent",
+		"@tool",
+	} {
+		if strings.Contains(bot, absent) {
+			t.Errorf("inline bot.py should not contain %q (bus scaffolding)", absent)
+		}
+	}
+	for _, want := range []string{
+		"async def lookup_customer(params: FunctionCallParams", // tool as a module-level direct function
+		"context = LLMContext(tools=[",                         // tools registered on the context
+		"build_appointment_desk_llm(),",                        // LLM inline in the pipeline
+		"worker = PipelineWorker(",                             // a plain PipelineWorker, no bus
+		`await worker.queue_frame(TTSSpeakFrame(`,              // text greeting queued directly
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("inline bot.py missing %q", want)
+		}
+	}
+
+	if _, err := exec.LookPath("python3"); err == nil {
+		f := filepath.Join(t.TempDir(), "bot.py")
+		if err := os.WriteFile(f, []byte(bot), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("python3", "-m", "py_compile", f).CombinedOutput(); err != nil {
+			t.Fatalf("inline bot.py is not valid Python:\n%s", out)
+		}
+	}
+}
+
+func mustGeneratePipecatInline(t *testing.T, agent *ir.Agent) Artifact {
+	t.Helper()
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	return artifact
+}
+
 // TestV1PipecatAgentToolCarriesSchema: the same tool YAML reaches the LLM with
 // its declared schema on BOTH emission paths (V1) — the agent-level @tool as a
 // typed signature + Google `Args:` docstring (per-property description + enum
