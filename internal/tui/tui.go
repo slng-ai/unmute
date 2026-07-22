@@ -129,6 +129,69 @@ func runCreate(runner *fieldRunner) (Result, bool, error) {
 // interactive renderer draws the wordmark hero instead (view.go).
 func homeTitle() string { return "SLNG//" }
 
+// sidebarSections is the fixed five-section tree shown in the console sidebar
+// (docs/spec/tui.md C10, C16, V44). Order matches editorSectionOptions.
+var sidebarSections = []struct{ id, label string }{
+	{"identity", "Identity"},
+	{"models", "Models"},
+	{"behavior", "Behavior"},
+	{"integrations", "Integrations"},
+	{"lifecycle", "Lifecycle"},
+}
+
+func sectionChildren(id string) []string {
+	switch id {
+	case "identity":
+		return []string{"Target", "Language"}
+	case "models":
+		return []string{"Listen", "Reason", "Speak"}
+	case "behavior":
+		return []string{"Instructions", "Greeting", "Variables", "Advanced"}
+	case "integrations":
+		return []string{"Tools", "Channels", "Human transfers"}
+	case "lifecycle":
+		return []string{"Agents", "Handoffs", "Tasks", "Task groups"}
+	}
+	return nil
+}
+
+// sectionOf maps an editor choice to its owning sidebar section.
+func sectionOf(choice string) string {
+	if section, ok := strings.CutPrefix(choice, "section:"); ok {
+		return section
+	}
+	switch choice {
+	case "target", "language":
+		return "identity"
+	case "models":
+		return "models"
+	case "prompt", "greeting", "variables", "customize":
+		return "behavior"
+	case "tools", "channels", "humans":
+		return "integrations"
+	case "agents", "handoffs", "tasks", "groups":
+		return "lifecycle"
+	}
+	return ""
+}
+
+// agentCtx builds the console chrome for the create/maintain editor: breadcrumb,
+// target status, and the sidebar tree with the active section expanded.
+func agentCtx(data scaffold.Data, active string) viewCtx {
+	var items []sideItem
+	breadcrumb := data.Name
+	for _, s := range sidebarSections {
+		items = append(items, sideItem{label: s.label, active: s.id == active})
+		if s.id == active {
+			breadcrumb = data.Name + " › " + s.label
+			for _, child := range sectionChildren(s.id) {
+				items = append(items, sideItem{label: child, child: true})
+			}
+		}
+	}
+	return viewCtx{breadcrumb: breadcrumb, target: targetLabel(data.Target), sidebar: items}
+}
+
 func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 	result := Result{Agent: agent, Create: true}
 	for {
@@ -142,6 +205,7 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			huh.NewOption("Create agent", "save"),
 			huh.NewOption("← Back", actionBack),
 		)
+		runner.ctx = agentCtx(result.Agent.Data, "")
 		choice, back, err := runner.selectOne(result.Agent.Data.Name, "Choose a section; changes stay in memory until Create agent.", options, true)
 		if err != nil {
 			return Result{}, false, err
@@ -149,6 +213,7 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 		if back || choice == actionBack {
 			return Result{}, true, nil
 		}
+		runner.ctx = agentCtx(result.Agent.Data, sectionOf(choice))
 		if strings.HasPrefix(choice, "section:") {
 			section := strings.TrimPrefix(choice, "section:")
 			if section == "models" {

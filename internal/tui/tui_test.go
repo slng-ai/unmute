@@ -13,10 +13,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/slng/unmute/internal/generate"
 	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/scaffold"
 	"github.com/slng/unmute/internal/spec"
+	"github.com/slng/unmute/internal/style"
 	targetcap "github.com/slng/unmute/internal/target"
 )
 
@@ -112,6 +114,48 @@ func TestV27RedrawsInPlaceNoScrollback(t *testing.T) { // docs/spec/tui.md V27
 		if got := strings.Count(output.String(), sequence); got != 1 {
 			t.Fatalf("alt-screen sequence %q count = %d, want 1", sequence, got)
 		}
+	}
+}
+
+func TestV44LayoutHasHeaderSidebarEditorFooter(t *testing.T) { // docs/spec/tui.md V44
+	req := fieldReq{
+		kind: kindSelect, title: "Models", backable: true,
+		ctx: viewCtx{
+			breadcrumb: "agent › Models", target: "pipecat",
+			sidebar: []sideItem{{label: "Identity"}, {label: "Models", active: true}, {label: "Listen", child: true}, {label: "Behavior"}, {label: "Integrations"}, {label: "Lifecycle"}},
+		},
+		choices: []choice{{"Listen", "listen"}, {"← Back", actionBack}},
+	}
+	view := renderField(t, 100, 24, req)
+	for _, want := range []string{"SLNG//", "SECTIONS", "Identity", "Lifecycle", "Models", "Listen", "back"} {
+		if !strings.Contains(strings.ToLower(view), strings.ToLower(want)) {
+			t.Errorf("layout missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestV44OnlyFocusedPanelHasAccentBorder(t *testing.T) { // docs/spec/tui.md V44
+	t.Setenv("NO_COLOR", "")
+	if got := panel(20, 10, true).GetBorderTopForeground(); got != lipgloss.Color(style.Accent) {
+		t.Errorf("focused panel border = %v, want accent %s", got, style.Accent)
+	}
+	if got := panel(20, 10, false).GetBorderTopForeground(); got == lipgloss.Color(style.Accent) {
+		t.Errorf("unfocused panel border must not be accent")
+	}
+}
+
+func TestV44SidebarShowsActiveSection(t *testing.T) { // docs/spec/tui.md V44
+	req := fieldReq{
+		kind: kindSelect, title: "Models", backable: true,
+		ctx:  viewCtx{sidebar: []sideItem{{label: "Identity"}, {label: "Models", active: true}, {label: "Listen", child: true}}},
+		choices: []choice{{"Listen", "listen"}, {"← Back", actionBack}},
+	}
+	view := renderField(t, 100, 24, req)
+	if !strings.Contains(view, "› Models") {
+		t.Errorf("active section not marked:\n%s", view)
+	}
+	if !strings.Contains(view, "Listen") {
+		t.Errorf("active section child not shown:\n%s", view)
 	}
 }
 
