@@ -41,6 +41,9 @@ the file defines a callable named like the tool; sync or async). */ -}}
 {{end -}}
 {{- /* method_tool dispatches on execution. */ -}}
 {{define "method_tool"}}{{if .Local}}{{template "local_tool" .}}{{else}}{{template "webhook_tool" .}}{{end}}{{end -}}
+{{- /* prebuilt_list renders execution: builtin tools as SDK helper instances
+spread into the tools= kwarg (docs/spec/prebuilt-tools.md). */ -}}
+{{define "prebuilt_list"}}{{range $i, $p := .}}{{if $i}}, {{end}}{{if eq $p.Builtin "end_call"}}*EndCallTool(extra_description={{pyq $p.Description}}{{if $p.Instructions}}, end_instructions={{pyq $p.Instructions}}{{end}}).tools{{end}}{{end}}{{end -}}
 {{- /* mcp_mounts renders an agent's/task's MCP servers (B3): one server per
 url_env, allowed_tools keeping D8 visibility. */ -}}
 {{define "mcp_mounts"}}mcp_servers=[{{range $i, $s := .}}{{if $i}}, {{end}}mcp.MCPServerHTTP(url=os.environ[{{pyq $s.URLEnv}}], allowed_tools=[{{range $j, $t := $s.Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]){{end}}]{{end -}}
@@ -103,6 +106,9 @@ import os
 )
 {{- if or .NeedsTaskGroups .HasWarmTransfer}}
 from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskGroup{{if .HasWarmTransfer}}, WarmTransferTask{{end}}{{else}}WarmTransferTask{{end}}
+{{- end}}
+{{- if .NeedsEndCallTool}}
+from livekit.agents.beta.tools import EndCallTool  # prebuilt end_call (beta)
 {{- end}}
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import {{join .PluginModules ", "}}
@@ -289,6 +295,9 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- if .MCPServers}}
             {{template "mcp_mounts" .MCPServers}},
 {{- end}}
+{{- if .Prebuilt}}
+            tools=[{{template "prebuilt_list" .Prebuilt}}],
+{{- end}}
         )
 
     async def on_enter(self) -> None:
@@ -428,7 +437,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{range .Tasks}}
 class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
-        super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if .MCPServers}}, {{template "mcp_mounts" .MCPServers}}{{end}})
+        super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if .MCPServers}}, {{template "mcp_mounts" .MCPServers}}{{end}}{{if .Prebuilt}}, tools=[{{template "prebuilt_list" .Prebuilt}}]{{end}})
 
     async def on_enter(self) -> None:
         # The task's own instructions describe this step; let them drive the opening.

@@ -378,23 +378,26 @@ The file name is the tool name (N4). Four parts plus a description. Which agents
 
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
-| `description` | yes | text | core | What the LLM reads. |
-| `input` | yes | JSON Schema object | core | Lowers natively everywhere (N10). |
-| `output` | no | JSON Schema object | warn | Enforced by generated code on code targets. Managed targets have no slot for it: warns there. |
+| `description` | yes, except `builtin` | text | core | What the LLM reads. Optional for `execution: builtin`, where the prebuilt registry supplies a default and this text is added on top (docs/spec/prebuilt-tools.md). |
+| `input` | yes, except `builtin` | JSON Schema object | core | Lowers natively everywhere (N10). A `builtin` tool has no `input`: the prebuilt owns its schema. |
+| `output` | no | JSON Schema object | warn | Enforced by generated code on code targets. Managed targets have no slot for it: warns there. Not legal on a `builtin` tool. |
 | `execution` | yes | `local \| client \| webhook \| provider_hosted \| builtin \| mcp` | see below | |
-| `handler` | iff `execution: local` | path, default `<name>.py` | | Code targets only. |
-| `url_env` | iff `execution: webhook` or `mcp` | env var name | core | Reference only, never a URL value. For `mcp` it names the MCP server address (driver-livekit B3, 2026-07-16: code targets have no other slot for it; managed targets may configure the server provider-side and ignore it). |
+| `builtin` | iff `execution: builtin` | prebuilt registry id (v1: `end_call`) | see below | Names a provider-shipped prebuilt tool the user selects instead of authoring a handler. Unknown id fails with file:line. |
+| `instructions` | no, `builtin` only | text | core | The prebuilt's closing/goodbye message (LiveKit `end_instructions`; Pipecat developer message). Illegal on a non-builtin tool. |
+| `handler` | iff `execution: local` | path, default `<name>.py` | | Code targets only. Not legal on a `builtin` tool. |
+| `url_env` | iff `execution: webhook` or `mcp` | env var name | core | Reference only, never a URL value. For `mcp` it names the MCP server address (driver-livekit B3, 2026-07-16: code targets have no other slot for it; managed targets may configure the server provider-side and ignore it). Not legal on a `builtin` tool. |
 | `interruption` | no, default `provider_default` | `continue \| cancel \| provider_default` | warn | Honored on Pipecat (`cancel_on_interruption`); LiveKit runs tools to completion, so non-default values warn there (2026-07-16). On managed targets only `provider_default` means anything; other values warn. |
-| `effect` | no, default `returns_data` | `returns_data \| ends_conversation` | core | |
+| `effect` | no, default `returns_data` | `returns_data \| ends_conversation` | core | Fixed by the registry for a `builtin` tool (`end_call` implies `ends_conversation`); a conflicting value fails. |
 
 Execution gating across the five:
 
 - `webhook`: works everywhere. **This is the safe choice.**
 - `local`: code targets only.
 - `mcp`: **fails on Deepgram** (no runtime MCP client). On LiveKit it requires SDK language Python; code targets read the server address from `url_env` (B3, 2026-07-16).
-- `client`, `provider_hosted`, `builtin`: gated per driver; each driver documents what it can host. Not part of the safe core yet.
+- `builtin`: LiveKit and Pipecat host the prebuilt-tool registry (v1: `end_call`); **fails on Vapi, ElevenLabs, and Deepgram** (no lowering). LiveKit lowers `end_call` to the beta `EndCallTool`; Pipecat to a bodyless end tool. See docs/spec/prebuilt-tools.md.
+- `client`, `provider_hosted`: gated per driver; each driver documents what it can host. Not part of the safe core yet.
 
-The Pipecat driver v1 emits `webhook` and `local` tools (amended 2026-07-17, driver-pipecat T14: `local` lowers to the same `@tool` method, body awaiting the user handler from `tools/<name>.py`); `mcp` stays maturity-gated there until the driver emits it.
+The Pipecat driver v1 emits `webhook`, `local`, and `builtin` tools (amended 2026-07-17, driver-pipecat T14: `local` lowers to the same `@tool` method, body awaiting the user handler from `tools/<name>.py`; `builtin` added 2026-07-22, prebuilt-tools T6); `mcp` stays maturity-gated there until the driver emits it.
 
 ---
 

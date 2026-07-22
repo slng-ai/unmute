@@ -924,6 +924,49 @@ func TestLiveKitV1HistoryResetAndToolCallShaping(t *testing.T) {
 	}
 }
 
+// TestLiveKitV1BuiltinEndCallTool covers the prebuilt end_call lowering:
+// the beta EndCallTool import, its construction with the mapped params in the
+// agent's super().__init__(tools=...), and that it is NOT a @function_tool
+// method (docs/spec/prebuilt-tools.md V7).
+func TestLiveKitV1BuiltinEndCallTool(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tools["end_call"] = ir.Tool{
+		Execution:    ir.ToolBuiltin,
+		Builtin:      "end_call",
+		Description:  "End the call when the caller is finished.",
+		Instructions: "Thank the caller and say goodbye.",
+		Effect:       ir.ToolEndsConversation,
+		Interruption: ir.ToolProviderDefault,
+	}
+	def := agent.Agents["greeter"]
+	def.Tools = append(def.Tools, "end_call")
+	agent.Agents["greeter"] = def
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		"from livekit.agents.beta.tools import EndCallTool",
+		`tools=[*EndCallTool(extra_description="End the call when the caller is finished.", end_instructions="Thank the caller and say goodbye.").tools],`,
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	if strings.Contains(botpy, "async def end_call(") {
+		t.Error("a builtin tool must not render as a @function_tool method")
+	}
+}
+
 // TestLiveKitV1ConversationShapingAndAgentTools covers the T15 lowerings
 // (V16): agent-level webhook tools, interruption enabled/min_words via
 // TurnHandlingOptions, the generated ignore-phrase stt_node filter, thinking

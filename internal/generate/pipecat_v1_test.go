@@ -18,6 +18,49 @@ import (
 
 var updatePipecatV1 = flag.Bool("update-pipecat", false, "rewrite the pipecat v1 golden")
 
+// TestPipecatV1BuiltinEndCallTool covers the prebuilt end_call lowering: a
+// bodyless @tool that speaks the goodbye then ends via EndFrame, with no
+// url_env, handler, or httpx POST (docs/spec/prebuilt-tools.md V7).
+func TestPipecatV1BuiltinEndCallTool(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tools["end_call"] = ir.Tool{
+		Execution:    ir.ToolBuiltin,
+		Builtin:      "end_call",
+		Description:  "End the call when the caller is finished.",
+		Instructions: "Thank the caller and say goodbye.",
+		Effect:       ir.ToolEndsConversation,
+		Interruption: ir.ToolProviderDefault,
+	}
+	def := agent.Agents[agent.EntryAgent]
+	def.Tools = append(def.Tools, "end_call")
+	agent.Agents[agent.EntryAgent] = def
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"async def end_call(self, params: FunctionCallParams):",
+		`"content": "Thank the caller and say goodbye."`,
+		"await params.llm.push_frame(EndFrame())",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing %q", want)
+		}
+	}
+	if strings.Contains(bot, `os.environ[""]`) {
+		t.Error("builtin tool must not emit a webhook POST")
+	}
+}
+
 // TestPipecatV1Golden emits the safe_core project to pipecat and compares the
 // full file set byte-for-byte (driver-pipecat T8, V10). Zero Python.
 func TestPipecatV1Golden(t *testing.T) {

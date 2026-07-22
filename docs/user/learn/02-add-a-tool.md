@@ -115,4 +115,22 @@ Keep tools webhook-based and they stay in the safe core. Pipecat also emits
 `local` Python handlers. It doesn't emit `mcp` tools yet; see the
 [Pipecat target page](../targets/pipecat.md).
 
+## You already have one: end_call
+
+You don't have to write the tool that hangs up the call. LiveKit and Pipecat ship
+it, and you pick it by name instead of authoring a handler:
+
+```yaml
+# tools/end_call.yaml
+execution: builtin
+builtin: end_call
+description: End the call once the caller's issue is resolved.   # optional
+instructions: Thank the caller and say goodbye.                  # optional
+```
+
+If you ran `unmute init`, this file is **already there** and attached to your entry
+agent, so a fresh agent can end its own calls out of the box. Keep it, change the
+wording, or delete the file to drop it. It runs on LiveKit and Pipecat only. Full
+details on the [tools reference page](../reference/tools.md#prebuilt-tools-execution-builtin).
+
 Next: [03. Variables](03-variables.md), so the agent can remember what it looked up.

@@ -376,7 +376,7 @@ func TestSmokeLiveKitV1RestoredVendorsInstantiates(t *testing.T) {
 // TestSmokeV22LiveKitSpeechTracing proves request instrumentation, not only
 // exporter connectivity: one AgentSession must trace its STT, LLM, and TTS paths.
 func TestSmokeV22LiveKitSpeechTracing(t *testing.T) {
-	runLiveKitSmokeScript(t, "simple-prompt", nil, livekitRequestTracingSmokeScript)
+	runLiveKitSmokeScript(t, "simple-prompt", nil, nil, livekitRequestTracingSmokeScript)
 }
 
 func TestSmokeV26LiveKitExamplesStaticCheck(t *testing.T) {
@@ -462,7 +462,27 @@ func TestSmokeV26LiveKitExamplesStaticCheck(t *testing.T) {
 
 func runLiveKitSmoke(t *testing.T, example string, mutate func(*ir.Target)) {
 	t.Helper()
-	runLiveKitSmokeScript(t, example, mutate, livekitSmokeScript)
+	runLiveKitSmokeScript(t, example, mutate, nil, livekitSmokeScript)
+}
+
+// addBuiltinEndCall attaches a prebuilt end_call tool to the entry agent (the
+// scaffold/init default, prebuilt-tools T9/T11).
+func addBuiltinEndCall(agent *ir.Agent) {
+	agent.Tools["end_call"] = ir.Tool{
+		Execution: ir.ToolBuiltin, Builtin: "end_call",
+		Description:  "End the call when the caller is finished.",
+		Instructions: "Thank the caller and say goodbye.",
+		Effect:       ir.ToolEndsConversation, Interruption: ir.ToolProviderDefault,
+	}
+	def := agent.Agents[agent.EntryAgent]
+	def.Tools = append(def.Tools, "end_call")
+	agent.Agents[agent.EntryAgent] = def
+}
+
+// TestSmokeLiveKitV1BuiltinEndCall proves the emitted beta EndCallTool import
+// and construction resolve and instantiate in a real venv (prebuilt-tools T11).
+func TestSmokeLiveKitV1BuiltinEndCall(t *testing.T) {
+	runLiveKitSmokeScript(t, "simple-prompt", nil, addBuiltinEndCall, livekitSmokeScript)
 }
 
 func TestLiveKitSIPGeneratedPythonCompiles(t *testing.T) { // telephony T10, V20
@@ -485,7 +505,7 @@ func TestLiveKitSIPGeneratedPythonCompiles(t *testing.T) { // telephony T10, V20
 	}
 }
 
-func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target), script string) {
+func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target), mutateAgent func(*ir.Agent), script string) {
 	t.Helper()
 	if _, err := exec.LookPath("uv"); err != nil {
 		t.Skip("uv not available")
@@ -497,6 +517,9 @@ func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 	agent, err := ir.Build(pkg)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if mutateAgent != nil {
+		mutateAgent(agent)
 	}
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
 	if mutate != nil {

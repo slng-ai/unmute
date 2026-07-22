@@ -125,6 +125,8 @@ type pipecatTool struct {
 	Args            []pipecatArg
 	InputProps      string // Python literal: the input schema's properties object
 	InputRequired   string // Python literal: the input schema's required list
+	Builtin         string // execution: builtin — prebuilt registry id (bodyless end tool)
+	Instructions    string // builtin end_call goodbye → developer message before EndFrame
 	EndsCall        bool
 	Interruption    string // "cancel" | "continue" | "" (provider default)
 	ColdDestination string // set for a cold human_transfer: the resolved number/SIP URI
@@ -281,6 +283,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldMaxDuration:          true, // asyncio EndFrame timer
 	targetcap.FieldToolOutput:           true, // tool returns response.json()
 	targetcap.FieldToolLocal:            true, // @tool awaiting tools/<name>.py (T14, V13)
+	targetcap.FieldToolBuiltin:          true, // prebuilt end_call → bodyless end tool
 	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
 	targetcap.FieldTracingLangfuse:      true,
 }

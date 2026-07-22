@@ -117,6 +117,16 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			break
 		}
 	}
+	for _, a := range data.Agents {
+		if len(a.Prebuilt) > 0 {
+			data.NeedsEndCallTool = true
+		}
+	}
+	for _, tk := range data.Tasks {
+		if len(tk.Prebuilt) > 0 {
+			data.NeedsEndCallTool = true
+		}
+	}
 
 	// V2: tool and finish args that carry an enum need typing.Literal; args that
 	// carry a description need typing.Annotated + pydantic.Field. Import only what
@@ -547,7 +557,11 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 			if err != nil {
 				return livekitAgent{}, fmt.Errorf("agent %q: %w", name, err)
 			}
-			built.Tools = append(built.Tools, lowered)
+			if lowered.Builtin != "" {
+				built.Prebuilt = append(built.Prebuilt, lowered)
+			} else {
+				built.Tools = append(built.Tools, lowered)
+			}
 			continue
 		}
 		control, ok := agent.Controls[ref]
@@ -728,15 +742,20 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 		if err != nil {
 			return livekitTask{}, fmt.Errorf("task %q: %w", name, err)
 		}
-		built.Tools = append(built.Tools, lowered)
+		if lowered.Builtin != "" {
+			built.Prebuilt = append(built.Prebuilt, lowered)
+		} else {
+			built.Tools = append(built.Tools, lowered)
+		}
 	}
 	built.MCPServers = livekitMCPServers(mcpByEnv)
 	return built, nil
 }
 
 // buildLiveKitTool lowers a webhook or local tool to a @function_tool method
-// (agents and tasks share the shape); mcp tools mount as servers upstream.
-// client/provider_hosted/builtin are table-denied and cannot validate green.
+// (agents and tasks share the shape); mcp tools mount as servers upstream. A
+// builtin tool becomes a prebuilt (EndCallTool) rendered into tools=, not a
+// method. client/provider_hosted stay table-denied.
 func buildLiveKitTool(name string, tool ir.Tool, env *envSet) (livekitTool, error) {
 	switch tool.Execution {
 	case ir.ToolWebhook:
@@ -750,6 +769,13 @@ func buildLiveKitTool(name string, tool ir.Tool, env *envSet) (livekitTool, erro
 		return livekitTool{
 			Method: name, Description: tool.Description, Local: true,
 			Args:             livekitToolArgs(tool.Input),
+			EndsConversation: tool.Effect == ir.ToolEndsConversation,
+		}, nil
+	case ir.ToolBuiltin:
+		// Prebuilt: no method, no args; the registry id picks the SDK helper.
+		return livekitTool{
+			Method: name, Description: tool.Description,
+			Builtin: tool.Builtin, Instructions: tool.Instructions,
 			EndsConversation: tool.Effect == ir.ToolEndsConversation,
 		}, nil
 	default:
