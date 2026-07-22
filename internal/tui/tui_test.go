@@ -117,6 +117,23 @@ func TestV27RedrawsInPlaceNoScrollback(t *testing.T) { // docs/spec/tui.md V27
 	}
 }
 
+func TestV35InteractiveMenuDefaultsToFirstRow(t *testing.T) { // docs/spec/tui.md V35, V38
+	req := fieldReq{
+		kind: kindSelect, title: "Variables", backable: true, initial: "type",
+		choices: []choice{{"Type  ·  string", "type"}, {"Default  ·  —", "default"}, {"← Back", actionBack}},
+	}
+	view := renderField(t, 90, 24, req)
+	if !strings.Contains(view, "› Type") {
+		t.Errorf("overview did not default to the first actionable row:\n%s", view)
+	}
+	if !strings.Contains(view, "← Back") {
+		t.Errorf("overview omits the Back row:\n%s", view)
+	}
+	if !strings.Contains(view, "·") {
+		t.Errorf("overview rows should carry current values:\n%s", view)
+	}
+}
+
 func TestV44LayoutHasHeaderSidebarEditorFooter(t *testing.T) { // docs/spec/tui.md V44
 	req := fieldReq{
 		kind: kindSelect, title: "Models", backable: true,

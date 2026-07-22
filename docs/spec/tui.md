@@ -95,7 +95,7 @@ T18|x|add `lipgloss` + `bubbles` as direct deps; build the I.theme token package
 T19|x|build the MVU shell: one root model, alt-screen, focus states (sidebar/editor/palette/modal), a nav stack, and resize/suspend/panic terminal restore; delete the goroutine+channel+huh shell|C4,C17,I.console,V27,V47
 T20|x|render the header (logo badge, breadcrumb, target status) and the Home wordmark hero; NO_COLOR plain-text fallback|C15,I.console,V23,V26
 T21|x|render the section sidebar tree (five sections, inline children, current values, focus border) and the footer hint bar|C10,C11,C16,V44
-T22|.|port every field and overview editor (select/input/text/overview) from huh to `bubbles` components inside the editor panel; keep the overview-menu pattern and the Back rules|C13,V35,V37,V38,V44
+T22|x|port every field and overview editor (select/input/text/overview) from huh to `bubbles` components inside the editor panel; keep the overview-menu pattern and the Back rules|C13,V35,V37,V38,V44
 T23|.|command palette overlay (`Ctrl+P` / `:`), fuzzy filter, every bound action plus a jump to every section|C16,V45
 T24|.|responsive breakpoints, value tail-truncation, single-pane drill-down, and the too-small message|C17,V46
 T25|.|keep accessible/non-TTY as a linear renderer over the same model; retrofit the V18-V42 tests to the new render; add `teatest` golden snapshots pinned to 80x24 + a fixed color profile; unit-test `Update`|C5,V49
