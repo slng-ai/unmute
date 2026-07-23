@@ -131,21 +131,26 @@ Pipecat combines them into one process.**
 
 ### Telephony
 
-Telephony adds a phone bridge in front of whatever already exists, and adds
-Redis for coordination.
+Telephony adds a phone bridge in front of whatever already exists. Most routes
+also add Redis for coordination. The one exception is the LiveKit Twilio
+connector, which needs no Redis.
 
-- **LiveKit.** A LiveKit SIP service turns the carrier call into a normal
-  LiveKit participant. After that the flow is the same as a browser call: the
-  server dispatches, the worker joins. LiveKit Server and LiveKit SIP share
-  Redis to coordinate. The worker itself does not touch Redis.
+- **LiveKit.** LiveKit has two phone routes. The **Twilio connector** is the
+  simplest to run on a laptop: a generated bridge answers Twilio and joins a
+  local LiveKit room as a participant, so the worker handles the call like any
+  other browser call. It needs a LiveKit Server but no Redis and no SIP. The
+  **SIP** route is the multi-carrier path: a LiveKit SIP service turns the
+  carrier call into a normal LiveKit participant, and LiveKit Server and LiveKit
+  SIP share Redis to coordinate. The worker itself never touches Redis on either
+  route.
 - **Pipecat.** The same `bot.py` process gains a FastAPI front door for carrier
   webhooks and the media WebSocket. Redis sits beside it and holds only small
   control records (call correlation, idempotency, transfer state, admission
   counters). The live audio and conversation stay in the process.
 
-Phone calls are not currently runnable in the public CLI (see [Telephony release
-boundary](#telephony-release-boundary)); the design below is what runs once a
-route is promoted.
+Phone calls run in the public CLI today for every route with a real adapter
+(see [Telephony runtime state](#telephony-runtime-state)). Only routes with no
+adapter, currently Exotel, fail closed.
 
 ## LiveKit architecture
 
@@ -187,7 +192,8 @@ mode needs.
 |---|---|
 | Console | `agent.py console` only. No LiveKit Server, no Redis. |
 | Browser | A local or configured LiveKit Server, a separate `agent.py dev` worker, and a local UI/token helper. |
-| Telephony | Agent, Redis, LiveKit Server, and LiveKit SIP together in Docker Compose. |
+| Telephony (Twilio connector) | The generated bridge and Agent in one application container, plus a local `livekit-server --dev`. No Redis, no SIP. |
+| Telephony (SIP) | Agent, Redis, LiveKit Server, and LiveKit SIP together in Docker Compose. |
 
 In browser mode, `unmute dev` starts or reuses `livekit-server --dev` when no
 `LIVEKIT_URL` is configured. The browser joins that server directly, and the
@@ -200,13 +206,50 @@ now we do not deploy on LiveKit Cloud: the worker connects to a self-hosted
 LiveKit Server. Worker replicas and LiveKit Server replicas are separate
 scaling units, so you size them independently.
 
-A self-hosted phone route also needs LiveKit SIP, shared Redis, public SIP
-signaling, and public RTP ports. [DEPLOYMENT.md](DEPLOYMENT.md) records the
-full self-hosted production requirements.
+A self-hosted **SIP** phone route also needs LiveKit SIP, shared Redis, public
+SIP signaling, and public RTP ports. The **Twilio connector** route instead
+needs public HTTPS and WSS ingress for the bridge and a LiveKit Server it can
+reach; it needs no SIP, no RTP ports, and no Redis.
+[DEPLOYMENT.md](DEPLOYMENT.md) records the full self-hosted production
+requirements.
 
 ### Telephony
 
-LiveKit telephony adds a SIP bridge while preserving the server-worker split.
+LiveKit has two telephony routes with different topologies. The Twilio
+connector is the primary route for local development, and SIP is the
+multi-carrier path with the full feature set.
+
+#### Twilio connector
+
+The connector route is a generated bridge that speaks Twilio Media Streams and
+joins a self-hosted LiveKit room. It uses no SIP and no Redis.
+
+```text
+Phone carrier (Twilio)
+    | Media Streams (HTTPS webhook + WSS audio)
+    v
+telephony_bridge.py ----> LiveKit Server <----> Agent worker
+  (joins the room as a participant)
+```
+
+Twilio reaches the generated `telephony_bridge.py` over a public HTTPS webhook
+and a media WebSocket. The bridge answers with TwiML, terminates the Media
+Streams audio itself, and joins a local LiveKit room as an ordinary participant
+carrying the caller's audio. LiveKit Server then dispatches the Agent worker
+into that room, and the worker reads the call facts from the job metadata. Audio
+is G.711 mu-law at 8 kHz; the LiveKit SDK resamples to the agent's rate.
+
+This is Unmute's own implementation of the Media Streams mechanism. It does not
+call LiveKit's `ConnectTwilioCall` API, so it runs against a stock
+`livekit-server --dev` with no connector service. Locally, Docker Compose runs
+just two services: the application container (bridge plus worker) and
+`livekit-server --dev`. There is no Redis and no LiveKit SIP.
+
+#### Self-hosted SIP
+
+The SIP route adds a SIP bridge while preserving the server-worker split. It is
+the multi-carrier path for Twilio, Telnyx, and Plivo, and it carries the full
+telephony feature set including transfers and voicemail detection.
 
 ```text
 Phone carrier
@@ -225,7 +268,8 @@ worker does not consume Redis.
 
 Locally, Docker Compose runs all four services together (Agent, Redis, LiveKit
 Server, LiveKit SIP). `unmute dev --telephony` also creates the local trunk and
-dispatch records for you.
+dispatch records for you. SIP needs carrier-reachable public SIP signaling and
+an RTP port range, which an HTTPS tunnel cannot provide.
 
 ## Pipecat architecture
 
@@ -311,11 +355,15 @@ telephony stacks.
   locally and in production; only the startup command and the environment
   change.
 - **Local telephony Compose.** `unmute dev --telephony` runs a route-derived
-  Docker Compose graph. Pipecat gets its application plus Redis. LiveKit SIP also
-  gets LiveKit Server and LiveKit SIP. These files use pinned image versions,
-  health checks, local credentials where needed, and a named Redis volume so a
-  normal stop and restart keeps local state. They are development topologies,
-  not production recipes.
+  Docker Compose graph, written as `compose.telephony.yaml` in the generated
+  project. Pipecat gets its application plus Redis. The LiveKit Twilio connector
+  gets its application plus a local `livekit-server --dev` and no Redis (this
+  variant comes from the `compose.telephony.connector.yaml` template). LiveKit
+  SIP gets its application plus Redis, LiveKit Server, and LiveKit SIP. These
+  files use pinned image versions, health checks, local credentials where
+  needed, and a named Redis volume where Redis is present so a normal stop and
+  restart keeps local state. They are development topologies, not production
+  recipes.
 
 The compiler emits Dockerfiles and target-native deployment metadata. It does
 not provision production networking, Redis, carrier resources, secrets, or
@@ -323,11 +371,12 @@ replica management. Those stay with the operator.
 
 ## Redis boundary
 
-Redis is required by the generated telephony designs, but its consumer differs
-by target.
+Redis is required by most generated telephony designs, but its consumer differs
+by target, and one route uses no Redis at all.
 
 | Target | Redis consumer | Purpose |
 |---|---|---|
+| LiveKit Twilio connector | None | The connector uses no Redis; the bridge keeps its own in-process call state. |
 | LiveKit SIP | LiveKit Server and LiveKit SIP | Distributed room state, routing, and SIP coordination. |
 | Pipecat telephony | Generated telephony application | Call correlation, idempotency, transfer locks, and admission. |
 
@@ -338,17 +387,30 @@ Redis never stores credentials, raw webhook bodies, audio, transcripts,
 prompts, model context, task state, or agent-handoff state. Normal console and
 browser development does not require Redis.
 
-## Telephony release boundary
+## Telephony runtime state
 
-The telephony architecture and offline emitters exist, but public telephony
-execution is fail-closed as of July 21, 2026. No selectable LiveKit or Pipecat
-telephony route has passed its exact credentialed smoke test. Therefore,
-`validate`, `compile`, and `dev --telephony` reject those routes before writing
-an artifact or invoking Docker.
+Public telephony execution is no longer fail-closed. Every route with a real
+adapter runs in the public CLI: `validate`, `compile`, and `dev --telephony`
+emit it and run it with no warning and no error. This covers the Pipecat
+carrier-WebSocket routes (Twilio, Telnyx, Plivo), the LiveKit SIP routes
+(Twilio, Telnyx, Plivo), and the LiveKit Twilio connector.
 
-Treat the Compose topologies in this document as the intended post-promotion
-runtime, not an available workaround. [TELEPHONY.md](TELEPHONY.md) records
-the exact route matrix and promotion requirements.
+Two things still fail closed, and both are correct:
+
+- **Exotel**, on either framework, has no generated adapter, so it is gated and
+  rejected before an artifact is written.
+- **Unproven controls** on a route that cannot perform them. Voicemail
+  detection and transfers are not emitted on the connector route, so a channel
+  that requests them fails and points at the SIP route. Warm transfer is not
+  yet proven on any route.
+
+A running route can still be *provisional*, which is internal maturity tracking,
+not a runtime block. Provisional means the route has a real adapter but no
+automated end-to-end smoke in CI yet. The status lives in the generated
+`compile-report.json` and is never printed at runtime. The Twilio connector and
+the Pipecat Twilio route were both confirmed on real inbound and outbound calls
+by the author. [TELEPHONY.md](TELEPHONY.md) records the exact route matrix and
+what each route has proven.
 
 ## Architectural invariants
 
