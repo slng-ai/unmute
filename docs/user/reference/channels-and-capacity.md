@@ -31,7 +31,7 @@ Required: yes, on a telephony channel. Values: bool. Default: none.
 | Route | What happens | Tag |
 |---|---|---|
 | LiveKit SIP with Twilio, Telnyx, or Plivo | Inbound and outbound paths are emitted offline; the exact route remains provisional | provisional |
-| LiveKit Twilio Connector | No adapter is emitted | gated |
+| LiveKit Twilio Connector | Inbound and outbound paths are emitted offline; the exact route remains provisional | provisional |
 | Pipecat carrier WebSocket with Twilio, Telnyx, or Plivo | Inbound and outbound paths are emitted offline; the exact route remains provisional | provisional |
 | Pipecat or LiveKit with Exotel | No route is emitted | gated |
 
@@ -59,7 +59,7 @@ Default: none (outbound proceeds without voicemail detection).
 | Route | What happens | Tag |
 |---|---|---|
 | LiveKit SIP with Twilio, Telnyx, or Plivo | Both values are emitted through LiveKit answering-machine detection; each route remains provisional | provisional |
-| LiveKit Twilio Connector | No adapter is emitted | gated |
+| LiveKit Twilio Connector | Voicemail handling is not emitted; use the LiveKit SIP route | gated |
 | Pipecat carrier WebSocket with Twilio, Telnyx, or Plivo | Voicemail handling is not emitted | gated |
 | Pipecat or LiveKit with Exotel | No route is emitted | gated |
 

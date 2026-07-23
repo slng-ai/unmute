@@ -17,8 +17,7 @@ a new media gateway.
 > `dev --telephony` execute it with no warning and no verification error. Its
 > provisional-versus-verified state is internal maturity tracking, recorded in
 > the generated `compile-report.json`, and is never printed at runtime. Only a
-> gated route with no adapter (Exotel, the LiveKit Twilio Connector) fails
-> closed.
+> gated route with no adapter (Exotel) fails closed.
 
 ## Decision
 
@@ -31,10 +30,12 @@ orchestrator's supported transport. The implementation follows these rules:
 - Reuse Pipecat's existing carrier serializers inside the Pipecat target only.
 - Use self-hosted LiveKit SIP as the default multi-carrier LiveKit route.
 - Run every local telephony target through a route-derived Docker Compose graph.
-  Every graph gets its generated application and Redis. LiveKit SIP also gets
-  LiveKit Server and LiveKit SIP.
-- Treat LiveKit's Twilio Connector as an optional Twilio-only route while it is
-  Beta.
+  Every graph gets its generated application. Pipecat and LiveKit SIP graphs also
+  get Redis. LiveKit SIP additionally gets LiveKit Server and LiveKit SIP; the
+  Twilio connector instead adds a local `livekit-server --dev` and no Redis.
+- Treat LiveKit's Twilio connector as an optional Twilio-only route. Its
+  generated bridge speaks Twilio Media Streams and joins a self-hosted LiveKit
+  room, so it needs no LiveKit Cloud.
 - Run the same generated application files locally and in production. Public
   ingress, environment values, and infrastructure remain deployment concerns.
 - Make local development zero-step for a promoted route. When a carrier
@@ -121,9 +122,8 @@ Telephony routes with a real adapter are usable in the public CLI:
 `unmute validate`, `unmute compile`, and `unmute dev --telephony` run them with
 no warning and no verification error. Their provisional-versus-verified status
 is internal maturity tracking, recorded in the generated `compile-report.json`,
-not printed at runtime. Only gated routes with no adapter (Exotel, the LiveKit
-Twilio Connector) are rejected before an artifact is written or Docker is
-invoked.
+not printed at runtime. Only gated routes with no adapter (Exotel) are rejected
+before an artifact is written or Docker is invoked.
 
 - Strict Connection loading and exact route resolution produce one
   `TelephonyPlan` per selected target.
@@ -131,7 +131,8 @@ invoked.
   outbound control, authentication, and normalized context. Exotel is gated.
 - LiveKit emits selected Twilio, Telnyx, or Plivo SIP trunk and dispatch inputs,
   native outbound/voicemail/transfers, and normalized SIP participant context.
-  Exotel and the separate Twilio Connector remain gated.
+  It also emits the Twilio connector bridge (inbound, outbound, hangup). Exotel
+  remains gated.
 - Direct generator tests render the Pipecat and LiveKit artifacts described in
   this document. Those test artifacts are implementation evidence, not an
   obtainable or supported deployment escape hatch.
@@ -174,20 +175,21 @@ not the number of targets, is the limit:
 | Pipecat | `carrier-websocket` | Twilio | Direct carrier adapter and Pipecat Twilio serializer | Generated in offline tests; provisional |
 | Pipecat | `carrier-websocket` | Telnyx | Direct carrier adapter and Pipecat Telnyx serializer | Generated in offline tests; provisional |
 | Pipecat | `carrier-websocket` | Plivo | Direct carrier adapter and Pipecat Plivo serializer | Generated in offline tests; provisional |
-| Pipecat | `carrier-websocket` | Exotel | None | Gated |
+| Pipecat | `carrier-websocket` | Exotel | No generated adapter | Gated |
 | LiveKit | `sip` | Twilio | Self-hosted LiveKit SIP and Twilio trunk inputs | Generated in offline tests; provisional |
 | LiveKit | `sip` | Telnyx | Self-hosted LiveKit SIP and Telnyx trunk inputs | Generated in offline tests; provisional |
 | LiveKit | `sip` | Plivo | Self-hosted LiveKit SIP and Plivo trunk inputs | Generated in offline tests; provisional |
-| LiveKit | `sip` | Exotel | None | Gated |
-| LiveKit | `connector` | Twilio | No generated adapter | Recognized Beta route; gated |
+| LiveKit | `sip` | Exotel | No generated adapter | Gated |
+| LiveKit | `connector` | Twilio | Generated Twilio Media Streams bridge into a self-hosted LiveKit room | Generated in offline tests; provisional |
 
 "Generated in offline tests" is not the same as verified. A generated row runs
 in the public CLI now; its exact credentialed smoke, once it exists, only
 promotes it from provisional to verified in `compile-report.json`, with no
 change to whether it runs. The Pipecat adapters contain inbound, outbound,
 hangup, and cold-transfer paths; voicemail and warm transfer remain gated. The LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
-cold-transfer, and warm-transfer paths. The Twilio Connector has only route and
-credential vocabulary today, so validation stops before generation.
+cold-transfer, and warm-transfer paths. The LiveKit Twilio connector emitter
+contains inbound, outbound, and hangup paths; transfers and voicemail stay on
+the LiveKit SIP route.
 
 ## What scales across carriers
 
@@ -258,12 +260,12 @@ The initial route adapters use these names:
 
 | Route | Environment variables | Where to get them |
 |---|---|---|
-| Pipecat or LiveKit Connector with Twilio | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | Twilio Console → Account dashboard and Phone Numbers. The Auth Token is also required to validate Twilio webhook signatures. Twilio recommends scoped API keys for production REST calls, but the Auth Token remains necessary for request validation. |
+| Pipecat or LiveKit connector with Twilio | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | Twilio Console → Account dashboard and Phone Numbers. The Auth Token is also required to validate Twilio webhook signatures. Twilio recommends scoped API keys for production REST calls, but the Auth Token remains necessary for request validation. |
 | Pipecat with Telnyx | `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_PHONE_NUMBER` | Telnyx Mission Control Portal → API Keys, Public Key, and the Voice API Application details page. The application ID is the Connection ID. |
 | Pipecat with Plivo | `PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN`, `PLIVO_PHONE_NUMBER` | Plivo Console dashboard → API Keys and Phone Numbers. The Auth Token validates V3 webhook signatures. |
 | Pipecat with Exotel | `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`, `EXOTEL_ACCOUNT_SID`, `EXOTEL_SUBDOMAIN`, `EXOTEL_PHONE_NUMBER`, `EXOTEL_APP_ID` | Exotel Dashboard → API Settings for the key, token, Account SID, and regional subdomain; use the ExoPhone and call-flow application ID from the Voice dashboard. |
 | All Pipecat telephony routes | `REDIS_URL` | Generated Compose supplies the local value. In production, use the connection URL from the Redis service managed by your infrastructure operator. Store any password in the deployment secret store. |
-| LiveKit Cloud or Twilio Connector | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | LiveKit Cloud project settings, or run `lk app env -w`. The Connector also needs the Twilio variables above. |
+| LiveKit Twilio connector | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Local Compose supplies the non-production `devkey`/`secret` pair and a local `livekit-server --dev`; in production point these at your self-hosted LiveKit server. The connector needs no LiveKit Cloud and no Redis, and also needs the Twilio variables above. |
 | Self-hosted LiveKit SIP topology | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `REDIS_URL` | Create the API key and secret in the LiveKit Server `keys` configuration and use the same pair in LiveKit SIP. Set `LIVEKIT_URL` to that server and `REDIS_URL` to their shared Redis deployment. For inbound calls, point the carrier's origination URI at your public LiveKit SIP endpoint. |
 | LiveKit SIP with Twilio | `TWILIO_SIP_ADDRESS`, `TWILIO_SIP_USERNAME`, `TWILIO_SIP_PASSWORD`, `TWILIO_PHONE_NUMBER` | Twilio Console → Elastic SIP Trunking. Use the termination URI, Credential List username and password, and associated number. |
 | LiveKit SIP with Telnyx | `TELNYX_SIP_ADDRESS`, `TELNYX_SIP_USERNAME`, `TELNYX_SIP_PASSWORD`, `TELNYX_PHONE_NUMBER` | Telnyx Mission Control → SIP Trunking. Use the SIP connection address and credentials, and its assigned number. |
@@ -554,20 +556,23 @@ the entry greeting. Outbound jobs use authenticated LiveKit Agent dispatch
 metadata with `direction`, `phone_number`, and authored `call_start` values.
 The route remains provisional until credentialed smokes prove these paths.
 
-#### Twilio Connector
+#### Twilio connector
 
-The LiveKit Twilio Connector mirrors the Pipecat Media Streams topology and can
-target a self-hosted LiveKit server. It is currently Beta and Twilio-specific.
+The LiveKit Twilio connector is a self-hosted, from-scratch implementation of
+the Twilio Media Streams mechanism. It is Twilio-specific.
 
-The generated webhook creates a connector session, receives a WSS URL, and
-returns TwiML that points Twilio at that URL. The connector creates a LiveKit
-participant and dispatches the Agent. The
+The generated `telephony_bridge.py` implements the Twilio Media Streams protocol
+itself: it serves the inbound voice webhook and the media WebSocket, and it
+returns TwiML that points Twilio at its own WSS endpoint. The bridge then joins
+a local, self-hosted LiveKit room, where the generated Agent worker handles the
+call. There is no LiveKit Cloud and no hosted `ConnectTwilioCall` API. LiveKit's
+own hosted connector is Cloud-only; this is a separate open-source
+implementation of the same Media Streams mechanism. The
 [LiveKit Twilio Connector guide](https://docs.livekit.io/telephony/connectors/twilio/)
-documents inbound and outbound calls and states that self-hosted LiveKit is
-supported.
+documents Twilio's Media Streams calls for reference.
 
-This route requires a spike before it can claim warm-transfer parity. If the
-spike fails, LiveKit SIP remains the supported transfer route.
+The route supports inbound, outbound, and hangup. Call transfers and voicemail
+detection stay on the LiveKit SIP route.
 
 ## Human transfers
 
@@ -818,9 +823,9 @@ HTTP tunnel alone doesn't make a local SIP deployment reachable from a carrier.
 The generated Compose file is for local development and L4 topology smokes;
 production uses the deployment model selected by the operator.
 
-The Twilio Connector route requires public webhook ingress, but Twilio sends
-media to the connector URL returned by LiveKit. It doesn't send media to the
-Agent worker container.
+The Twilio connector route requires public webhook and WSS ingress. Twilio
+sends media over the WebSocket to the generated bridge, which joins the
+self-hosted LiveKit room. There is no LiveKit Cloud connector URL.
 
 ### Scaling model
 
@@ -1193,7 +1198,7 @@ The plan keeps uncertain behavior gated rather than designing around guesses.
   before code changes begin.
 - **Warm transfer:** Conference semantics and private briefing differ by
   carrier. Capability rows remain carrier- and route-specific.
-- **LiveKit Connector:** It is Beta and Twilio-only. SIP remains the stable
+- **LiveKit connector:** It is Twilio-only. SIP remains the stable
   multi-carrier path.
 - **Multiple phone channels:** The first implementation supports one telephony
   Connection per target. Add channel-to-connection target bindings when a real

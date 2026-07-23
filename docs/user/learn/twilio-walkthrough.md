@@ -145,6 +145,16 @@ declares; this example declares none, so it stays empty.
 
 ## Part 2: the LiveKit route (Elastic SIP Trunking)
 
+> **Want the easy laptop-testable LiveKit route instead?** Use the LiveKit
+> Twilio connector (`transport: connector`). It uses the same three Twilio
+> credentials as the Pipecat route in Part 1, the same managed cloudflared
+> tunnel, and `--to` for outbound. No SIP trunk and no public SIP/RTP
+> reachability: Twilio reaches its generated bridge over HTTPS and WSS, so both
+> inbound and outbound work on a laptop. The
+> [telephony-hello example](../../../telephony-hello/README.md) uses it; run
+> `unmute dev telephony-hello --telephony --target livekit`. Part 2 below covers
+> the SIP route, which is the production-trunk path.
+
 LiveKit runs a self-hosted SIP bridge on your machine. Twilio talks SIP and
 RTP to it directly, so this route needs real network reachability, not an
 HTTPS tunnel.

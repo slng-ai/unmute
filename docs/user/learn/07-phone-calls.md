@@ -9,13 +9,13 @@ credentials into generated code. For local development,
 points the Twilio number's voice webhook at it, and creates the local LiveKit
 trunk records itself (see "Local development with zero steps" below).
 
-The Pipecat Twilio, Telnyx, and Plivo routes and the LiveKit SIP routes have
-real adapters and are usable now. They are tagged **provisional**, but that is
-internal maturity tracking recorded in `compile-report.json`, not a runtime
-warning: `unmute validate`, `unmute compile`, and `unmute dev --telephony` run
-them cleanly, with no warning. The remaining recognized routes (Exotel on any
-framework, and the LiveKit Twilio Connector) are gated with no adapter, so they
-still fail closed.
+The Pipecat Twilio, Telnyx, and Plivo routes, the LiveKit Twilio connector, and
+the LiveKit SIP routes have real adapters and are usable now. They are tagged
+**provisional**, but that is internal maturity tracking recorded in
+`compile-report.json`, not a runtime warning: `unmute validate`,
+`unmute compile`, and `unmute dev --telephony` run them cleanly, with no warning.
+The remaining recognized routes (Exotel on any framework) are gated with no
+adapter, so they still fail closed.
 
 ## Declare the phone channel
 
@@ -125,10 +125,9 @@ and Plivo use separate generated adapters because their signatures and call
 control APIs differ; selecting one never emits another carrier's SDK or
 credentials.
 
-LiveKit uses either `transport: sip` or the distinct Beta
-`transport: connector` route. The Connector is Twilio-only and cannot inherit
-SIP transfer behavior. The SIP route uses this Connection vocabulary for
-Twilio, Telnyx, and Plivo:
+LiveKit uses either `transport: sip` or the distinct `transport: connector`
+route. The connector is Twilio-only and cannot inherit SIP transfer behavior.
+The SIP route uses this Connection vocabulary for Twilio, Telnyx, and Plivo:
 
 ```yaml
 # connections/primary_phone.yaml
@@ -168,14 +167,16 @@ for an unselected carrier.
 | LiveKit | `sip` | Telnyx | `sip_address`, `sip_username`, `sip_password`, `from_number` | Generated offline; provisional |
 | LiveKit | `sip` | Plivo | `sip_address`, `sip_username`, `sip_password`, `from_number` | Generated offline; provisional |
 | LiveKit | `sip` | Exotel | `sip_address`, `sip_username`, `sip_password`, `from_number` | Gated; no emitted setup |
-| LiveKit | `connector` | Twilio | `account_sid`, `auth_token`, `from_number` | Recognized Beta route; no emitted adapter |
+| LiveKit | `connector` | Twilio | `account_sid`, `auth_token`, `from_number` | Generated offline; provisional |
 
 "Generated offline" means the emitter and credential-free checks exist. The
 route is usable now: public validation, compilation, and telephony development
 run it cleanly, with no warning. The Pipecat emitters contain inbound, outbound,
 hangup, and cold-transfer paths; voicemail and warm transfer remain gated. The
 LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
-cold-transfer, and warm-transfer paths.
+cold-transfer, and warm-transfer paths. The LiveKit Twilio connector emitter
+contains inbound, outbound, and hangup paths; transfers and voicemail stay on
+the LiveKit SIP route.
 
 ## Configure multiple carriers
 
@@ -239,9 +240,8 @@ Create `connections/twilio_api.yaml`, `connections/telnyx_api.yaml`,
 from the matrix. The package can contain all of them. `unmute compile` processes every declared
 target when you omit `--target`, while `unmute dev --telephony` runs one
 selected target at a time. Provisional routes run cleanly, with no warning;
-only the gated no-adapter routes (Exotel, the LiveKit Twilio Connector) fail.
-Adding another supported carrier is another target and Connection, not a schema
-change.
+only the gated no-adapter routes (Exotel) fail. Adding another supported carrier
+is another target and Connection, not a schema change.
 
 ## Local development with zero steps
 
@@ -372,8 +372,8 @@ route matrix instead of the `*_SIP_*` names).
   every local health check passes. The managed tunnel applies only to
   carrier webhook routes.
 - Provisional routes run now, cleanly and with no warning. Only the gated
-  no-adapter routes (Exotel, the LiveKit Twilio Connector) fail closed,
-  because there is nothing to run for them.
+  no-adapter routes (Exotel) fail closed, because there is nothing to run for
+  them.
 
 ## Configure telephony by orchestrator
 
@@ -386,7 +386,7 @@ credentials and a different `transport` on each orchestrator.
 |---|---|---|---|---|
 | LiveKit | Twilio, Telnyx, or Plivo | `sip` | Yes | Offline-tested; provisional |
 | LiveKit | Exotel | `sip` | Not yet | Gated; no emitted setup |
-| LiveKit | Twilio | `connector` | No | Gated; no emitted adapter |
+| LiveKit | Twilio | `connector` | No | Offline-tested; provisional |
 | Pipecat | Twilio, Telnyx, or Plivo | `carrier-websocket` | No | Offline-tested; provisional |
 | Pipecat | Exotel | `carrier-websocket` | No | Gated; no emitted adapter |
 
@@ -394,8 +394,7 @@ credentials and a different `transport` on each orchestrator.
 > [!IMPORTANT]
 > The provisional routes in this table run now. Validation, compilation, and
 > `unmute dev --telephony` generate and run them cleanly, with no warning. Only
-> the gated Exotel and Twilio Connector rows fail, because there is no adapter to
-> run.
+> the gated Exotel rows fail, because there is no adapter to run.
 
 ### Configure a Pipecat carrier WebSocket
 
@@ -578,13 +577,34 @@ PLIVO_SIP_PASSWORD=replace-with-zentrunk-password
 PLIVO_PHONE_NUMBER=+14155550123
 ```
 
-#### Handle Exotel and the LiveKit Twilio Connector
+#### Handle Exotel
 
-Neither route has a runnable setup. LiveKit SIP with Exotel is gated until an
-official provider setup and credentialed smoke prove the route. The Beta
-LiveKit Twilio Connector is a separate `transport: connector` route; Unmute
-recognizes its credential vocabulary but emits no adapter and never inherits
-SIP capabilities.
+LiveKit SIP with Exotel is gated until an official provider setup and
+credentialed smoke prove the route. Unmute recognizes its credential vocabulary
+but emits no setup for it, so it fails closed.
+
+#### Use the LiveKit Twilio connector
+
+The `transport: connector` route is the easy, laptop-testable LiveKit option. It
+is Twilio-only and uses the same three Twilio credentials as the Pipecat carrier
+route: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER`. No
+SIP trunk and no Redis. The generated `telephony_bridge.py` speaks the Twilio
+Media Streams protocol and bridges the call into a local, self-hosted LiveKit
+room, so it needs no LiveKit Cloud. Local Compose runs the application container
+and a local `livekit-server --dev`.
+
+Run it like the Pipecat route. `unmute dev --telephony` starts a managed
+cloudflared tunnel, sets the Twilio voice webhook automatically, and places an
+outbound call with `--to`:
+
+```sh
+unmute dev ./agent --target livekit --telephony --to +15551234567
+```
+
+Twilio reaches the bridge over HTTPS and WSS, so both inbound and outbound work
+fully on a laptop. The connector supports inbound, outbound, and hangup. Call
+transfers and voicemail detection stay on the LiveKit SIP route, which the
+connector cannot inherit.
 
 #### Create the LiveKit resources
 

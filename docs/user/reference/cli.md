@@ -110,15 +110,28 @@ Docker Desktop or Docker Engine plus the Compose plugin, and points you at
 
 **Telephony (`--telephony`).** Real phone calls, through the generated
 `compose.telephony.yaml`. A route with a real adapter (every Pipecat carrier
-WebSocket and LiveKit SIP route) just runs: validation, compilation, and
-`dev --telephony` start it with no warning and no verification error. Only a
-**gated** route with no adapter at all (Exotel, the LiveKit Twilio Connector)
-still fails closed, because there is nothing to run. Test the behavior you
-depend on yourself before production.
+WebSocket route, the LiveKit Twilio connector, and every LiveKit SIP route) just
+runs: validation, compilation, and `dev --telephony` start it with no warning
+and no verification error. Only a **gated** route with no adapter at all
+(Exotel) still fails closed, because there is nothing to run. Test the behavior
+you depend on yourself before production.
+
+The LiveKit Twilio connector runs like the Pipecat carrier route. It uses the
+same three Twilio credentials (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+`TWILIO_PHONE_NUMBER`), no SIP trunk and no Redis. Its generated
+`telephony_bridge.py` speaks the Twilio Media Streams protocol and bridges the
+call into a local, self-hosted LiveKit room, so it needs no LiveKit Cloud.
+`dev --telephony` starts a managed cloudflared tunnel, sets the Twilio voice
+webhook automatically, and places an outbound call with `--to`. Twilio only
+reaches the bridge over HTTPS and WSS, so both inbound and outbound work fully
+on a laptop. It supports inbound, outbound, and hangup; call transfers and
+voicemail detection stay on the LiveKit SIP route.
 
 Telephony mode runs the generated `compose.telephony.yaml`; there is no
-host-process fallback or infrastructure flag. Every route builds the generated
-application and version-pinned Redis. LiveKit SIP additionally starts
+host-process fallback or infrastructure flag. Pipecat carrier and LiveKit SIP
+routes build the generated application and version-pinned Redis; the LiveKit
+Twilio connector builds the application plus a local `livekit-server --dev` and
+needs no Redis. LiveKit SIP additionally starts
 version-pinned LiveKit Server and LiveKit SIP, then creates or reuses the local
 inbound trunk, outbound trunk, and dispatch rule itself and injects
 `LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` before the
@@ -140,8 +153,9 @@ inbound-only target. Without `--to`, an outbound-capable target prints how to
 place a call and dials nothing. The generated `POST /telephony/outbound`
 endpoint stays available for your own application to drive.
 
-Routes with public HTTP/WSS endpoints (Pipecat carrier WebSockets) need a
-public HTTPS origin. Without `--public-url`, the dev command starts a managed
+Routes with public HTTP/WSS endpoints (Pipecat carrier WebSockets and the
+LiveKit Twilio connector) need a public HTTPS origin. Without `--public-url`,
+the dev command starts a managed
 cloudflared quick tunnel and supplies `UNMUTE_PUBLIC_URL` itself; cloudflared
 must be on PATH (macOS: `brew install cloudflared`; Linux: distribution
 package or the cloudflare/cloudflared releases page). `--public-url` skips
