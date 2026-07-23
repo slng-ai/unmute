@@ -1,6 +1,5 @@
 # One agent owns every appointment workflow and tool.
 version: 1
-language: en
 entry_agent: appointment_desk
 
 models:

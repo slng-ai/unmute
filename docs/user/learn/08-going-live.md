@@ -40,7 +40,7 @@ target never combines them. See
 ## Check portability before you commit
 
 Here is the useful move before choosing a platform: **`validate` runs against
-all five targets, including providers without a generator.** Validation uses
+all four targets, including providers without a generator.** Validation uses
 the schema's capability rules, so it can tell you what passes, warns, or fails
 before generation:
 
@@ -49,16 +49,15 @@ unmute validate acme
 ```
 
 ```text
-✓ elevenlabs (elevenlabs)
 ✓ livekit (livekit)
 ✓ pipecat (pipecat)
 ✗ vapi (vapi)
 ```
 
 Warnings and errors print per target. LiveKit and Pipecat have shipped code
-drivers, so `compile` writes both native projects. ElevenLabs has a shipped
-managed driver and uses `unmute apply`. Vapi and Deepgram still validate, but
-generation fails with `driver is not implemented` until their drivers ship.
+drivers, so `compile` writes both native projects. Vapi and Deepgram still
+validate, but generation fails with `driver is not implemented` until their
+drivers ship.
 
 ## Capacity
 
@@ -135,7 +134,7 @@ in dev and what production replaces it with.
 
 From [one agent](01-one-agent.md) to a complex, multi-agent, tool-using,
 task-delegating voice agent, the package is described once, checked against all
-five platforms, and compiled to native LiveKit and Pipecat projects.
+four platforms, and compiled to native LiveKit and Pipecat projects.
 
 To go deeper, use the [YAML reference](../reference/agent-yaml.md),
 [LiveKit guide](../targets/livekit.md), or

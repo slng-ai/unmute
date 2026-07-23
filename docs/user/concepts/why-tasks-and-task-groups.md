@@ -90,7 +90,7 @@ version:
 - **Pipecat** has no task primitive, so Unmute lowers a task to a Flow step on
   the delegating worker, and a task group to a Flow chain. A per-task model is
   refused today.
-- **Vapi and ElevenLabs** are managed platforms with no place to host generated
+- **Vapi** is a managed platform with no place to host generated
   logic, so some task and group options fail validation instead of running. See
   [tiers](tiers.md).
 

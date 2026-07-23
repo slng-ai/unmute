@@ -88,9 +88,6 @@ func TestCheckVendor(t *testing.T) {
 		endpoint bool
 		wantErr  string // "" = must pass; otherwise a substring of the error
 	}{
-		{ElevenLabs, Speak, "elevenlabs", false, ""},
-		{ElevenLabs, Speak, "eleven_labs", false, ""}, // provider-spelling alias
-		{ElevenLabs, Speak, "cartesia", false, "has no slot"},
 		{Deepgram, Listen, "deepgram", false, ""},
 		{Deepgram, Listen, "openai", false, "has no slot"},
 		{Deepgram, Speak, "aws_polly", false, ""},
@@ -130,8 +127,8 @@ func TestCatalogLookup(t *testing.T) {
 	if got := cat.RolesFor(Pipecat, "slng"); strings.Join(got, ",") != "listen,speak" {
 		t.Errorf("slng roles on pipecat = %v", got)
 	}
-	if e, ok := cat.Lookup(ElevenLabs, Speak, "elevenlabs"); !ok || !e.VoiceRequired() {
-		t.Errorf("ElevenLabs speak arity = %#v", e)
+	if e, ok := cat.Lookup(LiveKit, Speak, "elevenlabs"); !ok || !e.VoiceRequired() {
+		t.Errorf("livekit elevenlabs speak arity = %#v", e)
 	}
 }
 

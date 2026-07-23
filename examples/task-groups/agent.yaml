@@ -1,6 +1,5 @@
 # One agent delegates three ordered appointment tasks with shared context.
 version: 1
-language: en
 entry_agent: appointment_desk
 
 models:

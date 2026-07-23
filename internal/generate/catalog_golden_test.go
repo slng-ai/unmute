@@ -47,11 +47,13 @@ func TestCatalogResolutionGolden(t *testing.T) {
 			envRef = livekitEnvRef
 		}
 		env := newEnvSet()
-		language := ""
-		if entry.Role == targetcap.Listen || entry.Role == targetcap.Speak {
-			language = "es-MX"
+		// Language is per-model (N16) and gated where the entry has no slot;
+		// exercise it only on entries that expose one.
+		if (entry.Role == targetcap.Listen || entry.Role == targetcap.Speak) &&
+			entry.Call != nil && entry.Call.Language.Arg != "" && !entry.Call.NoLanguage {
+			binding.Language = "es-MX"
 		}
-		call, resolved, err := resolveService(defaultCatalog, entry.Framework, entry.Role, binding, language, envRef, env)
+		call, resolved, err := resolveService(defaultCatalog, entry.Framework, entry.Role, binding, envRef, env)
 		if err != nil {
 			t.Errorf("%s %s %s: resolve: %v", entry.Framework, entry.Role, entry.Vendor, err)
 			continue
@@ -108,7 +110,9 @@ func TestLanguageLoweringUsesCataloguedSlot(t *testing.T) {
 			if tc.framework == targetcap.LiveKit {
 				envRef = livekitEnvRef
 			}
-			call, _, err := resolveService(defaultCatalog, tc.framework, tc.role, tc.binding, tc.agentLang, envRef, newEnvSet())
+			binding := tc.binding
+			binding.Language = tc.agentLang // per-model language (N16)
+			call, _, err := resolveService(defaultCatalog, tc.framework, tc.role, binding, envRef, newEnvSet())
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -1,4 +1,4 @@
-# One instance per primary target. The same portable source compiles to all five.
+# One instance per primary target. The same portable source compiles to all four.
 # Each instance carries infrastructure only (provider, version, transport,
 # destinations) plus a `models:` override map, keyed by model name, for the
 # entries this target cannot run as defined in agent.yaml (N15). An override
@@ -36,19 +36,6 @@ targets:
       # intent comes from the conversation block, not from a bound model.
       front_desk: { provider: elevenlabs, voice: cgSgspJ2msm6clMCkdW9 }
       specialist: { provider: elevenlabs, voice: EXAVITQu4vr4xnSDxMaL }
-    destinations:
-      billing_line: "+14155550123"
-
-  elevenlabs:
-    provider: elevenlabs
-    models:
-      # listen and turn are integrated on ElevenLabs: the transcriber override
-      # is settings-only and can never name an outside STT model.
-      transcriber: { params: { user_input_audio_format: ulaw_8000 } }
-      front_desk: { voice: cgSgspJ2msm6clMCkdW9 }   # ElevenLabs voices only
-      specialist: { voice: EXAVITQu4vr4xnSDxMaL }
-      fast_reasoning:    { model: gemini-2.5-flash }    # ElevenLabs supported list
-      careful_reasoning: { model: claude-sonnet-4-5 }
     destinations:
       billing_line: "+14155550123"
 

@@ -12,7 +12,7 @@ variables:
 
 Each variable has:
 
-- **`type`**: one of `string`, `number`, `boolean`, `integer`. These four primitives are the common ground across all five platforms.
+- **`type`**: one of `string`, `number`, `boolean`, `integer`. These four primitives are the common ground across all four platforms.
 - **`default`** (optional): the starting value. `verified` starts `false`. `customer_id` has no default, so it starts empty until something sets it.
 - **`source`** (optional): set it to `call_start` for a value that must be supplied when the call begins, for example a customer id passed in by an outbound dialer or a web session. Unmute checks that every `call_start` variable can actually be supplied on the channels you use.
 
@@ -58,9 +58,9 @@ A variable with no default becomes an optional field (for example `customer_id: 
 
 ## What just got harder
 
-Variables themselves are `core`: typed shared state works on all five platforms. Two honest notes for later:
+Variables themselves are `core`: typed shared state works on all four platforms. Two honest notes for later:
 
-- The four primitive types are the portable set on purpose. There are no lists, objects, or nested shapes in a variable, because the five platforms do not agree on those.
+- The four primitive types are the portable set on purpose. There are no lists, objects, or nested shapes in a variable, because the four platforms do not agree on those.
 - Where the state physically lives differs per platform (Pipecat keeps the dataclass above; others use their own store), but you never see that difference. You just read and write named values.
 
 Next: [04. Two agents](04-two-agents.md), where a second agent takes over the call and inherits everything in this state.

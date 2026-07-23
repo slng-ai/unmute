@@ -4,7 +4,6 @@ package ir
 // acyclic and schema derivation does not recurse through agent handoffs.
 type Agent struct {
 	Version    int    `json:"version" yaml:"version"`
-	Language   string `json:"language" yaml:"language"`
 	EntryAgent string `json:"entry_agent" yaml:"entry_agent"`
 	// Models flattens the four authoring sections into one name-keyed map; each
 	// entry's Kind records its section (names are one namespace, N15).
@@ -406,29 +405,27 @@ type TelephonyFeatureEvidence struct {
 }
 
 type Target struct {
-	Name         string            `json:"name" yaml:"name"`
-	Provider     Provider          `json:"provider" yaml:"provider"`
-	Version      string            `json:"version,omitempty" yaml:"version,omitempty"`
-	Pins         map[string]string `json:"pins,omitempty" yaml:"pins,omitempty"`
-	SDKLanguage  string            `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
-	Transport    string            `json:"transport,omitempty" yaml:"transport,omitempty"`
-	Carrier      string            `json:"carrier,omitempty" yaml:"carrier,omitempty"`
-	Connection   string            `json:"connection,omitempty" yaml:"connection,omitempty"`
-	Region       string            `json:"region,omitempty" yaml:"region,omitempty"`
-	Edition      string            `json:"edition,omitempty" yaml:"edition,omitempty"`
-	Models       Bindings          `json:"models" yaml:"models"`
-	Destinations map[string]string `json:"destinations,omitempty" yaml:"destinations,omitempty"`
-	Telephony    *TelephonyPlan    `json:"telephony,omitempty" yaml:"telephony,omitempty"`
+	Name             string            `json:"name" yaml:"name"`
+	Provider         Provider          `json:"provider" yaml:"provider"`
+	Version          string            `json:"version,omitempty" yaml:"version,omitempty"`
+	Pins             map[string]string `json:"pins,omitempty" yaml:"pins,omitempty"`
+	SDKLanguage      string            `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
+	Transport        string            `json:"transport,omitempty" yaml:"transport,omitempty"`
+	Carrier          string            `json:"carrier,omitempty" yaml:"carrier,omitempty"`
+	Connection       string            `json:"connection,omitempty" yaml:"connection,omitempty"`
+	DeploymentRegion string            `json:"deployment_region,omitempty" yaml:"deployment_region,omitempty"`
+	Models           Bindings          `json:"models" yaml:"models"`
+	Destinations     map[string]string `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	Telephony        *TelephonyPlan    `json:"telephony,omitempty" yaml:"telephony,omitempty"`
 }
 
 type Provider string
 
 const (
-	ProviderLiveKit    Provider = "livekit"
-	ProviderPipecat    Provider = "pipecat"
-	ProviderVapi       Provider = "vapi"
-	ProviderElevenLabs Provider = "elevenlabs"
-	ProviderDeepgram   Provider = "deepgram"
+	ProviderLiveKit  Provider = "livekit"
+	ProviderPipecat  Provider = "pipecat"
+	ProviderVapi     Provider = "vapi"
+	ProviderDeepgram Provider = "deepgram"
 )
 
 type Bindings struct {
@@ -454,6 +451,7 @@ type Binding struct {
 	Model               string              `json:"model,omitempty" yaml:"model,omitempty"`
 	Voice               string              `json:"voice,omitempty" yaml:"voice,omitempty"`
 	VoiceID             string              `json:"voice_id,omitempty" yaml:"voice_id,omitempty"`
+	Language            string              `json:"language,omitempty" yaml:"language,omitempty"`
 	EndpointEnv         string              `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 	Placement           Placement           `json:"placement,omitempty" yaml:"placement,omitempty"`
 	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`

@@ -1,6 +1,5 @@
 # Two agents share appointment tools and hand the conversation back and forth.
 version: 1
-language: en
 entry_agent: booking_desk
 
 models:

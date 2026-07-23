@@ -14,18 +14,21 @@ func TestValidateSafeCorePerTarget(t *testing.T) { // V5, V18
 	if err != nil {
 		t.Fatalf("%v: %#v", err, report.PerTarget)
 	}
-	if len(report.PerTarget) != 5 {
+	if len(report.PerTarget) != 4 {
 		t.Fatalf("target rows = %d", len(report.PerTarget))
 	}
-	elevenlabs := reportFor(report, ProviderElevenLabs)
-	if len(elevenlabs.Warnings) == 0 || len(elevenlabs.Errors) != 0 {
-		t.Fatalf("ElevenLabs row = %#v", elevenlabs)
+	for _, provider := range []Provider{ProviderLiveKit, ProviderPipecat, ProviderVapi, ProviderDeepgram} {
+		if row := reportFor(report, provider); len(row.Errors) != 0 {
+			t.Fatalf("%s row has errors: %#v", provider, row)
+		}
 	}
 }
 
-func TestValidateLanguage(t *testing.T) {
+func TestValidateLanguage(t *testing.T) { // N16: language is validated per model
 	agent := safeAgent(t)
-	agent.Language = "not_a_language"
+	def := agent.Models["front_desk"]
+	def.Language = "not_a_language"
+	agent.Models["front_desk"] = def
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
 	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "BCP-47") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
@@ -37,12 +40,52 @@ func TestValidateLangfuseTracingByTarget(t *testing.T) { // V25
 	agent.Tracing = &Tracing{Provider: "langfuse"}
 	for provider, wantError := range map[Provider]bool{
 		ProviderLiveKit: false, ProviderPipecat: false,
-		ProviderVapi: true, ProviderElevenLabs: true, ProviderDeepgram: true,
+		ProviderVapi: true, ProviderDeepgram: true,
 	} {
 		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
 		if (err != nil) != wantError {
 			t.Errorf("%s: err=%v report=%#v", provider, err, report.PerTarget)
 		}
+	}
+}
+
+// N16: language belongs on speak/listen models only; on a think/turn model it
+// would be silently dropped at generate, so validate rejects it.
+func TestValidateLanguageOnThinkModelRejected(t *testing.T) {
+	agent := safeAgent(t)
+	def := agent.Models["fast_reasoning"] // a think model
+	def.Language = "es"
+	agent.Models["fast_reasoning"] = def
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "language applies only to speak and listen") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+// N16: a language set on a vendor whose integration has no language slot must
+// fail at VALIDATE, not just generate (C6: gate before any artifact). gemini
+// TTS is NoLanguage on livekit.
+func TestValidateLanguageSlotGate(t *testing.T) {
+	agent := safeAgent(t)
+	target := targetFor(agent, ProviderLiveKit)
+	target.Models.Speak["front_desk"] = Binding{Provider: "gemini", Voice: "Kore", Language: "es"}
+	report, err := Validate(agent, []Target{target}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "has no language slot") {
+		t.Fatalf("expected a validate-time language-slot gate; err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+// LiveKit has no OpenAI-compatible speak wildcard (N14): a speak binding with
+// an endpoint_env is gated. Restores coverage dropped with the ElevenLabs sweep.
+func TestValidateLiveKitSpeakEndpointGate(t *testing.T) {
+	agent := safeAgent(t)
+	target := targetFor(agent, ProviderLiveKit)
+	b := target.Models.Speak["front_desk"]
+	b.EndpointEnv = "CUSTOM_TTS_URL"
+	target.Models.Speak["front_desk"] = b
+	report, err := Validate(agent, []Target{target}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "no OpenAI-compatible speak wildcard") {
+		t.Fatalf("expected the livekit speak-endpoint gate; err=%v report=%#v", err, report.PerTarget)
 	}
 }
 
@@ -71,36 +114,6 @@ func TestValidateUsesProviderVocabularyForGates(t *testing.T) { // V4, V11
 	}
 }
 
-func TestValidateWarnsWhenElevenLabsTaskReturns(t *testing.T) {
-	agent := safeAgent(t)
-	agent.Tasks["collect"] = Task{
-		Instructions: "collect", Result: map[string]ResultField{"done": {Type: PrimitiveBoolean}},
-		Context: TaskContext{History: HistoryFull},
-	}
-	agent.Controls["collect"] = &Delegate{Kind: ControlDelegate, Task: "collect"}
-	report, err := Validate(agent, []Target{targetFor(agent, ProviderElevenLabs)}, targetcap.Default())
-	if err != nil || !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), "running transcript") {
-		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
-	}
-}
-
-func TestValidateElevenLabsBriefingMessageIsTwilioOnly(t *testing.T) { // driver-elevenlabs V8
-	warm := &HumanTransfer{Kind: ControlHumanTransfer, Destination: "billing_line", Mode: TransferWarm, Briefing: BriefingMessage}
-	sip := targetFor(safeAgent(t), ProviderElevenLabs) // no carrier -> SIP-style transfer
-	twilio := targetFor(safeAgent(t), ProviderElevenLabs)
-	twilio.Carrier = "twilio"
-
-	agent := safeAgent(t)
-	agent.Controls["to_human"] = warm
-	report, err := Validate(agent, []Target{sip}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "native Twilio integration") {
-		t.Fatalf("expected SIP briefing:message gate; err=%v report=%#v", err, report.PerTarget)
-	}
-	if report, err := Validate(agent, []Target{twilio}, targetcap.Default()); err != nil {
-		t.Fatalf("carrier twilio must pass briefing:message; err=%v report=%#v", err, report.PerTarget)
-	}
-}
-
 func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
 	agent := safeAgent(t)
 	agent.Models["group_only_summarizer"] = ModelDef{Kind: KindThink, Placement: PlacementAPI}
@@ -111,23 +124,8 @@ func TestValidateTaskGroupOverridesMemberContext(t *testing.T) {
 	agent.TaskGroups["collect_then_end"] = TaskGroup{
 		Steps: []string{"collect"}, ContextScope: ContextShared, Then: GroupEnd, Merge: GroupMergeResults,
 	}
-	report, err := Validate(agent, []Target{targetFor(agent, ProviderElevenLabs)}, targetcap.Default())
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
 	if err != nil || strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "missing reason binding") {
-		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
-	}
-}
-
-func TestValidateWarnsWhenElevenLabsTaskGroupReturns(t *testing.T) {
-	agent := safeAgent(t)
-	agent.Tasks["collect"] = Task{
-		Instructions: "collect", Result: map[string]ResultField{"done": {Type: PrimitiveBoolean}},
-		Context: TaskContext{History: HistoryFull},
-	}
-	agent.TaskGroups["collect_then_return"] = TaskGroup{
-		Steps: []string{"collect"}, ContextScope: ContextShared, Then: GroupReturn, Merge: GroupMergeResults,
-	}
-	report, err := Validate(agent, []Target{targetFor(agent, ProviderElevenLabs)}, targetcap.Default())
-	if err != nil || !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), "task-group turns") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}
 }
@@ -147,8 +145,8 @@ func TestValidateContextPolicy(t *testing.T) { // V8
 	agent := safeAgent(t)
 	transfer := agent.Controls["to_billing"].(*AgentTransfer)
 	transfer.Context.History = HistoryMessages
-	report, err := Validate(agent, []Target{targetFor(agent, ProviderElevenLabs)}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "ElevenLabs always keeps the full transcript") {
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "history: full only") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}
 }
@@ -170,25 +168,6 @@ func TestValidateOpenTurnBindingRequiredWhenAbsent(t *testing.T) {
 	report, err := Validate(agent, []Target{target}, targetcap.Default())
 	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "missing open turn binding") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
-	}
-}
-
-func TestValidateSpeakProviderAndEndpointSlots(t *testing.T) {
-	agent := safeAgent(t)
-	target := targetFor(agent, ProviderElevenLabs)
-	binding := target.Models.Speak["front_desk"]
-	binding.Provider = "cartesia"
-	binding.EndpointEnv = "CUSTOM_TTS_URL"
-	target.Models.Speak["front_desk"] = binding
-	report, err := Validate(agent, []Target{target}, targetcap.Default())
-	if err == nil {
-		t.Fatal("expected speak slot errors")
-	}
-	errors := strings.Join(report.PerTarget[0].Errors, "\n")
-	for _, want := range []string{"custom speak endpoints have no slot", `speak binding provider "cartesia" has no slot`} {
-		if !strings.Contains(errors, want) {
-			t.Errorf("missing %q in %q", want, errors)
-		}
 	}
 }
 
@@ -215,16 +194,6 @@ func TestValidateSpeakRequiredFieldsFromCatalog(t *testing.T) {
 	}
 }
 
-func TestValidateManagedSpeakRequiredFieldsFromCatalog(t *testing.T) {
-	agent := safeAgent(t)
-	target := targetFor(agent, ProviderElevenLabs)
-	target.Models.Speak["front_desk"] = Binding{Provider: "elevenlabs", Model: "eleven_turbo_v2_5"}
-	report, err := Validate(agent, []Target{target}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "missing a voice") {
-		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
-	}
-}
-
 func TestValidateCapacity(t *testing.T) { // V12
 	agent := safeAgent(t)
 	agent.Capacity.PeakSessions = agent.Capacity.MaxSessions + 1
@@ -238,7 +207,7 @@ func TestValidateTelephonyRequiresPeakStartRateWithoutConnection(t *testing.T) {
 	agent := safeAgent(t)
 	agent.Channels["phone"] = testTelephonyChannel()
 	agent.Capacity.PeakStartsPerSecond = 0
-	report, err := Validate(agent, []Target{targetFor(agent, ProviderElevenLabs)}, targetcap.Default())
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderVapi)}, targetcap.Default())
 	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "capacity.peak_starts_per_second must be positive for telephony") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}
@@ -514,10 +483,9 @@ func TestT16_ListenFallbackGatesPerTarget(t *testing.T) {
 		t.Fatalf("livekit must accept listen fallback; err=%v report=%#v", err, report.PerTarget)
 	}
 	for provider, want := range map[Provider]string{
-		ProviderPipecat:    "does not emit listen fallback yet",
-		ProviderVapi:       "no documented transcriber fallback slot",
-		ProviderElevenLabs: "no STT fallback slot",
-		ProviderDeepgram:   "single provider; there is no fallback slot",
+		ProviderPipecat:  "does not emit listen fallback yet",
+		ProviderVapi:     "no documented transcriber fallback slot",
+		ProviderDeepgram: "single provider; there is no fallback slot",
 	} {
 		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
 		if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), want) {
@@ -554,9 +522,9 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 5 targets x (listen + turn + 2 speak + 2 reason): the package-wide turn
+	// 4 targets x (listen + turn + 2 speak + 2 reason): the package-wide turn
 	// preference now reaches integrated-turn targets too (warned, not dropped).
-	if len(report.ForwardedBindings) != 30 {
+	if len(report.ForwardedBindings) != 24 {
 		t.Fatalf("forwarded bindings = %d", len(report.ForwardedBindings))
 	}
 	foundTemperature := false
@@ -570,7 +538,8 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 	if !foundTemperature {
 		t.Fatal("forwarded temperature param is missing")
 	}
-	if len(report.Sizing) != 20 {
+	// 4 targets x (workers + gpus + realtime_audio concurrency + session-time) = 16.
+	if len(report.Sizing) != 16 {
 		t.Fatalf("sizing lines = %d", len(report.Sizing))
 	}
 	for _, line := range report.Sizing {
@@ -579,7 +548,7 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 		}
 	}
 	agent.Channels = map[string]Channel{"phone": testTelephonyChannel()}
-	report, err = Validate(agent, []Target{targetFor(agent, ProviderElevenLabs)}, targetcap.Default())
+	report, err = Validate(agent, []Target{targetFor(agent, ProviderVapi)}, targetcap.Default())
 	if err != nil || len(report.Sizing) != 5 {
 		t.Fatalf("telephony-only sizing: err=%v lines=%#v", err, report.Sizing)
 	}

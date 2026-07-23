@@ -41,7 +41,7 @@ load  ->  build  ->  validate  ->  generate
 
 The rule that makes all of this trustworthy: **when a target cannot do something you asked for, Unmute stops and says so.** It never silently drops the feature, and it never quietly swaps in a weaker version to make things fit.
 
-Consider a feature that works on four platforms and not the fifth. A tool that "averages" would remove the feature everywhere, so your agent is the same but worse on all five. A tool that "silently downgrades" would keep the feature on four and pretend on the fifth, so your agent looks fine but behaves differently where you least expect. Unmute does neither. It keeps the feature where it works and **fails validation** where it does not, telling you exactly which platform and why.
+Consider a feature that works on four platforms and not the fifth. A tool that "averages" would remove the feature everywhere, so your agent is the same but worse on all four. A tool that "silently downgrades" would keep the feature on four and pretend on the fifth, so your agent looks fine but behaves differently where you least expect. Unmute does neither. It keeps the feature where it works and **fails validation** where it does not, telling you exactly which platform and why.
 
 The payoff: what passes validation is real. If `unmute validate` says a target passes, every feature in your spec genuinely works on that target. Nothing was dropped behind your back.
 

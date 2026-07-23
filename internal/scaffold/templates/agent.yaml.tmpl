@@ -2,7 +2,6 @@
 # and `unmute compile .`. Nothing here is provider-specific — that lives in
 # targets.yaml.
 version: 1
-language: [[ yaml .Language ]]
 entry_agent: [[.EntryAgent]]
 
 # Every model is defined here once, in the central map grouped by kind (N15):
@@ -29,12 +28,14 @@ models:
 [[if .Speak.Provider]]      provider: [[.Speak.Provider]]
 [[end]][[if .Speak.Model]]      model: [[quote .Speak.Model]]
 [[end]]      voice: [[quote .Speak.Voice]]
-[[if .Speak.Params]]      params: [[.Speak.Params]]
+[[if .Speak.Language]]      language: [[yaml .Speak.Language]]
+[[end]][[if .Speak.Params]]      params: [[.Speak.Params]]
 [[end]][[end]][[if .Listen.Provider]]  listen:
     transcriber:
       provider: [[.Listen.Provider]]
       model: [[quote .Listen.Model]]
-[[if .Listen.Params]]      params: [[.Listen.Params]]
+[[if .Listen.Language]]      language: [[yaml .Listen.Language]]
+[[end]][[if .Listen.Params]]      params: [[.Listen.Params]]
 [[end]][[end]][[if eq .Target "pipecat"]]  turn:
     vad: { provider: local, model: silero }
 [[else if eq .Target "livekit"]]  turn:

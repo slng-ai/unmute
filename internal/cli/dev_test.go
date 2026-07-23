@@ -480,9 +480,9 @@ func TestDevConsoleAndTelephonyRejected(t *testing.T) {
 // and is refused before generation or any Docker preflight (SPEC I.dev).
 func TestDevWebRejectsManagedProvider(t *testing.T) {
 	dir := copySafeCore(t)
-	_, err := run(t, "dev", dir, "--target", "elevenlabs")
-	if err == nil || !strings.Contains(err.Error(), `target "elevenlabs" uses managed ElevenLabs`) || !strings.Contains(err.Error(), "unmute apply") {
-		t.Fatalf("elevenlabs dev error = %v", err)
+	_, err := run(t, "dev", dir, "--target", "vapi")
+	if err == nil || !strings.Contains(err.Error(), "its dev runner is not implemented") {
+		t.Fatalf("vapi dev error = %v", err)
 	}
 }
 
@@ -505,7 +505,6 @@ func TestConsolePlan(t *testing.T) {
 	}{
 		{ir.ProviderPipecat, "run --extra console bot.py console", ""},
 		{ir.ProviderLiveKit, "run agent.py console", ""},
-		{ir.ProviderElevenLabs, "", "unmute apply"},
 		{ir.ProviderVapi, "", "not implemented"},
 	} {
 		got, err := consolePlan(tc.provider)
@@ -544,14 +543,6 @@ func TestRequireInferenceCreds(t *testing.T) {
 	}
 	if err := requireInferenceCreds(dir, uses); err != nil {
 		t.Errorf("creds present in .env, want nil; got %v", err)
-	}
-}
-
-func TestDevConsoleRefusesManaged(t *testing.T) {
-	dir := copySafeCore(t)
-	_, err := run(t, "dev", dir, "--target", "elevenlabs", "--console")
-	if err == nil || !strings.Contains(err.Error(), "managed ElevenLabs") || !strings.Contains(err.Error(), "unmute apply") {
-		t.Fatalf("elevenlabs console error = %v", err)
 	}
 }
 

@@ -15,7 +15,7 @@ live in Go, not YAML.** One entry per `(framework, role, provider)`:
 | [internal/target/catalog.go](internal/target/catalog.go) | The `Entry` / `CallSpec` types, `Lookup`, `Vendors`, and `CheckVendor` (the one vendor/endpoint rulebook shared by validation and codegen) |
 | [internal/target/catalog_pipecat.go](internal/target/catalog_pipecat.go) | Pipecat entries: deepgram, assemblyai, openai, slng (listen); elevenlabs, cartesia, openai, slng (speak); openai + wildcard (reason) |
 | [internal/target/catalog_livekit.go](internal/target/catalog_livekit.go) | LiveKit entries: deepgram, slng (listen); elevenlabs, cartesia, slng (speak); Inference wildcard (reason) |
-| [internal/target/catalog_deepgram.go](internal/target/catalog_deepgram.go), [catalog_elevenlabs.go](internal/target/catalog_elevenlabs.go) | Managed-target matrix rows (allowlists only, no code injection) |
+| [internal/target/catalog_deepgram.go](internal/target/catalog_deepgram.go) | Deepgram matrix rows (allowlists only, no code injection) |
 
 **Why Go and not YAML:** CLAUDE.md locks "Go structs are the schema source";
 an entry is only valid against a driver's templates and pinned version range,
@@ -36,7 +36,7 @@ The flow is `spec.Load → ir.Build → ir.Validate → generate.Generate`:
 | Stage | File | Role |
 |---|---|---|
 | entry | [main.go](main.go) | `os.Exit(cli.Execute(version))`, nothing else |
-| commands | [internal/cli/root.go](internal/cli/root.go) | builds the cobra tree; `init`, `validate`, `compile`, `apply`, `dev` |
+| commands | [internal/cli/root.go](internal/cli/root.go) | builds the cobra tree; `init`, `validate`, `compile`, `dev` |
 | load | [internal/spec/load.go](internal/spec/load.go), [schema.go](internal/spec/schema.go) | read the package dir → unresolved authoring structs |
 | build | [internal/ir/build.go](internal/ir/build.go), [compiler.go](internal/ir/compiler.go) | resolve into the IR (`ir.Agent`, `ir.Target`, `ir.Binding`) |
 | validate | [internal/ir/validate.go](internal/ir/validate.go) | check spec against the capability table + provider catalogue |
@@ -51,7 +51,6 @@ entry point + version check), and `templates/`:
 |---|---|---|---|
 | Pipecat | [pipecat_v1_build.go](internal/generate/pipecat_v1_build.go) | [templates/pipecat_v1/](internal/generate/templates/pipecat_v1/) (`bot.py.tmpl`) | code target |
 | LiveKit | [livekit_v1_build.go](internal/generate/livekit_v1_build.go) | [templates/livekit_v1/](internal/generate/templates/livekit_v1/) (`agent.py.tmpl`) | code target |
-| ElevenLabs | [elevenlabs.go](internal/generate/elevenlabs.go) | none (builds an `ApplyPlan`, JSON to the API) | managed target |
 
 **Shared codegen glue:** [internal/generate/service_call.go](internal/generate/service_call.go)
 turns `catalogue entry + binding` into a rendered constructor (`ServiceCall`),

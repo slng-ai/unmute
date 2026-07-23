@@ -2,7 +2,7 @@
 
 We will build one customer service agent for a company called Acme Support, and grow it across these pages until it can look up customers, remember what it learned, hand off to a specialist, and delegate work. This page builds the smallest version: one agent that talks.
 
-Everything here is **tier T0** and every field is `core`, so this agent runs on all five platforms. We compile it to Pipecat.
+Everything here is **tier T0** and every field is `core`, so this agent runs on all four platforms. We compile it to Pipecat.
 
 ## The package
 
@@ -127,7 +127,7 @@ Model names and voice ids are sent to the platform as written and never checked 
 
 Nothing yet. This is the safe core:
 
-- Every field is `core`, so this agent passes on all five platforms.
-- The one thing to know: your **fixed** greeting line (`speaks_first: agent` with `text`) works everywhere. A **model-written** opening (no `text`) is generated on Pipecat and LiveKit, native on Vapi, but only conditional on ElevenLabs and warns on Deepgram. If you want zero warnings across all five, give a fixed `text`. On Pipecat specifically, both work.
+- Every field is `core`, so this agent passes on all four platforms.
+- The one thing to know: your **fixed** greeting line (`speaks_first: agent` with `text`) works everywhere. A **model-written** opening (no `text`) is generated on Pipecat and LiveKit, native on Vapi, and warns on Deepgram. If you want zero warnings across all four, give a fixed `text`. On Pipecat specifically, both work.
 
 Next: [02. Add a tool](02-add-a-tool.md), so the agent can look things up.

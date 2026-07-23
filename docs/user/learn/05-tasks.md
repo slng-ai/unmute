@@ -136,7 +136,6 @@ for the complete boundary map.
 Tasks are the first tier where a whole platform drops out:
 
 - **A task fails on Vapi.** It is not proven that a Vapi handoff can return to the calling assistant, so single-task delegates are blocked there.
-- **A task is conditional on ElevenLabs.** It works only as a workflow node, only with `history: full`, and the `assign` must route through a tool.
 - **A task works on LiveKit, Deepgram, and Pipecat.** On Pipecat everything on this page is emitted: the flow step, the typed result, and the assign.
 - **The per-task `model:` override fails on Pipecat.** The compile error names it; drop the override and the same spec passes. It works on LiveKit.
 

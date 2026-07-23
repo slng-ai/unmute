@@ -1,6 +1,5 @@
 # One agent delegates customer records and appointment work to separate tasks.
 version: 1
-language: en
 entry_agent: appointment_desk
 
 models:

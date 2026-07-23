@@ -1,5 +1,6 @@
 agent_name = {{pyq .Project}}
 image = "{{.Project}}:latest"
-
+{{if .DeploymentRegion}}region = {{pyq .DeploymentRegion}}
+{{end}}
 [scaling]
 min_agents = 1

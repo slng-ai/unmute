@@ -2,7 +2,7 @@
 
 Unmute builds voice agents. A voice agent is a program you talk to on the phone or in a browser. It listens, thinks, and talks back.
 
-There are many platforms that run voice agents. LiveKit, Pipecat, Vapi, ElevenLabs, and Deepgram are five of them. They all do the same basic job, but each one wants your agent written a different way. If you build on one and later want another, you usually rewrite everything.
+There are many platforms that run voice agents. LiveKit, Pipecat, Vapi, and Deepgram are four of them. They all do the same basic job, but each one wants your agent written a different way. If you build on one and later want another, you usually rewrite everything.
 
 Unmute fixes that. You describe your agent once, in plain files. Then you pick a platform and Unmute writes that platform's version for you.
 
@@ -88,8 +88,7 @@ Start with [Install](install.md), then build
 ## Know which drivers ship
 
 LiveKit and Pipecat are shipped code targets: `compile` writes a runnable
-Python project that you host. ElevenLabs is a shipped managed target: `apply`
-reconciles its hosted configuration. Vapi and Deepgram still validate against
+Python project that you host. Vapi and Deepgram still validate against
 the shared schema, but their generators aren't implemented.
 
 Every feature page names the target-specific warning or failure when the

@@ -14,7 +14,7 @@ listen: transcriber   # required only because two listen entries exist; swap in 
 # turn: needs no selector, vad is the sole entry
 ```
 
-A section's sole chain head selects itself (an entry named only in a `fallback` list is part of that chain, not a candidate), so most packages never write the selector. Two or more entries with no selector fail loud naming the candidates. A target may cover a role natively (Deepgram and ElevenLabs build in listen and turn), in which case its override of the selected entry carries settings only (see [targets.yaml](targets-yaml.md)).
+A section's sole chain head selects itself (an entry named only in a `fallback` list is part of that chain, not a candidate), so most packages never write the selector. Two or more entries with no selector fail loud naming the candidates. A target may cover a role natively (Deepgram builds turn into listen), in which case its override of the selected entry carries settings only (see [targets.yaml](targets-yaml.md)).
 
 ## placement, in one sentence
 
@@ -31,7 +31,6 @@ Required: no in the file, but every resolved target whose listen role is open ne
 | LiveKit | any catalogued STT vendor; `provider: local` also runs your own | core / gated |
 | Pipecat | any catalogued STT vendor; `provider: local` also runs your own | core / gated |
 | Vapi | `provider: local` fails (managed, cannot run your model) | gated |
-| ElevenLabs | integrated ASR; a listen block is settings-only and can never name an outside model | gated |
 | Deepgram | Deepgram models only; a third-party listen model or `provider: local` fails | gated |
 
 So a hosted listen model is `core` everywhere it is open; `provider: local` is `gated` and works only on LiveKit and Pipecat.
@@ -47,7 +46,6 @@ Required: no. Values: a `provider`/`model` pair plus an optional `semantic_endpo
 | LiveKit | the full turn model is a Cloud feature, so the selection is a preference | warn |
 | Pipecat | end-of-turn runs on-device (Silero VAD); the selection is advisory | warn |
 | Vapi | turn is built in; a turn model is ignored with a warning | warn |
-| ElevenLabs | turn is built in; a turn model is ignored with a warning | warn |
 | Deepgram | turn is built into listen; a turn model is ignored with a warning | warn |
 
 ### turn.semantic_endpointing

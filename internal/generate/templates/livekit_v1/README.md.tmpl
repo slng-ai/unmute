@@ -15,6 +15,16 @@ uv run agent.py console       # local terminal session
 uv run agent.py dev           # LiveKit development worker
 ```
 
+## Deploy
+
+Deploy to LiveKit Cloud with the `lk` CLI. The region is set once, at create
+time, and cannot be changed afterward (`us-east | eu-central | ap-south`).
+
+```sh
+lk agent create{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}
+```
+
+{{if .DeploymentRegion}}This project's `deployment_region` is `{{.DeploymentRegion}}`.{{else}}No `deployment_region` is set, so LiveKit assigns the default; pass `--region` above to pin one.{{end}}
 {{if .Tracing}}
 ## Trace with Langfuse
 
@@ -27,8 +37,7 @@ Starting the worker or exporting a synthetic span proves connectivity only.
 Complete at least one user turn before reviewing the trace. A traced request
 contains `llm_node` and `llm_request` generation observations in addition to
 the session and agent spans.
-
-{{end}}
+{{end -}}
 {{if .Telephony}}
 ## Configure self-hosted LiveKit SIP
 
@@ -118,7 +127,7 @@ it for distributed room state and routing; LiveKit SIP uses the same Redis
 deployment to coordinate SIP participants with the server. Audio still flows
 through the SIP/RTP and LiveKit media services. Scale worker replicas on active
 jobs, keep the shared Redis available, and drain active calls before shutdown.
-
 {{end -}}
+
 Do not edit this project by hand — it is regenerated from the agent spec.
 Change the spec and recompile.

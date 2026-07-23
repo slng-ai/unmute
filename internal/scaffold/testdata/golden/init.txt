@@ -11,7 +11,6 @@ SLNG_API_KEY=
 # and `unmute compile .`. Nothing here is provider-specific — that lives in
 # targets.yaml.
 version: 1
-language: en
 entry_agent: assistant
 
 # Every model is defined here once, in the central map grouped by kind (N15):

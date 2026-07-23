@@ -85,7 +85,7 @@ Two housekeeping notes: additional agents keep their prompts in an `agents/` fol
 - **`history`** is how much of the conversation carries over. `full` carries the whole transcript, so billing can see what the caller already said. Other values (`messages`, `last_n`, `summary`, `reset`) trim it in different ways.
 - **`variables`** is which shared variables carry over. `all` carries everything in your `variables` block, so `customer_id` and `verified` come along.
 
-`history: full` with `variables: all` is the portable choice: it works on all five platforms and it is what the Pipecat driver emits today.
+`history: full` with `variables: all` is the portable choice: it works on all four platforms and it is what the Pipecat driver emits today.
 
 ## Guarding a handoff (optional)
 
@@ -130,9 +130,9 @@ With `requires`, a guard is generated in front of that, checking the state and r
 
 Handoff is where the platforms start to diverge, so read this:
 
-- **The basic handoff is `core`.** `agent_transfer` with `history: full` and `variables: all` works on all five platforms. Any number of agents can transfer between each other this way.
-- **`requires` is `gated`.** It works on Pipecat, LiveKit, and Deepgram (code targets can generate the check). It **fails on Vapi and ElevenLabs**, which have no mechanism for it.
-- **History other than `full` is limited.** On ElevenLabs, only `full` works at all. On Pipecat, the driver emits `full` only today; the other history values are a driver maturity gate, not a platform limit (see the [Pipecat target page](../targets/pipecat.md)). For now, keep `history: full`.
+- **The basic handoff is `core`.** `agent_transfer` with `history: full` and `variables: all` works on all four platforms. Any number of agents can transfer between each other this way.
+- **`requires` is `gated`.** It works on Pipecat, LiveKit, and Deepgram (code targets can generate the check). It **fails on Vapi**, which has no mechanism for it.
+- **History other than `full` is limited.** On Pipecat, the driver emits `full` only today; the other history values are a driver maturity gate, not a platform limit (see the [Pipecat target page](../targets/pipecat.md)). For now, keep `history: full`.
 
 On Pipecat specifically, everything on this page works, including the `requires` guard.
 

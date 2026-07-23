@@ -1,5 +1,5 @@
-# Safe-core example: runs on all five primary targets
-# (LiveKit, Pipecat, Vapi, ElevenLabs, Deepgram) with warnings only,
+# Safe-core example: runs on all four primary targets
+# (LiveKit, Pipecat, Vapi, Deepgram) with warnings only,
 # no failures. It follows SCHEMA.md section 7 exactly.
 #
 # What it deliberately avoids, and why:
@@ -10,7 +10,6 @@
 #   - outbound calls: omitted; Deepgram's carrier-conditional lowering warns
 
 version: 1
-language: en
 entry_agent: intake
 
 # Every model is defined once, here, in the central map grouped by kind (N15):
@@ -87,13 +86,13 @@ tools: [lookup_customer, get_invoice]
 conversation:
   greeting:
     speaks_first: agent
-    # Fixed opening: same words every call, works on all five targets.
+    # Fixed opening: same words every call, works on all four targets.
     # Leave `text` out to let the model write the opening from the prompt;
-    # that is conditional on ElevenLabs and warns on Deepgram (SCHEMA.md 4.8).
+    # that warns on Deepgram (SCHEMA.md 4.8).
     text: "Hi, you have reached Acme Support. How can I help you today?"
   interruption:
     enabled: true
-    minimum_words: 2                        # warns on ElevenLabs (no such knob)
+    minimum_words: 2
     ignore_phrases: [okay, right, uh-huh]   # warns on Deepgram (dropped)
   inactivity: { nudge_after: 15s, end_after: 45s }
   max_duration: 20m

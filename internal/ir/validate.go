@@ -209,8 +209,20 @@ func validateStructure(agent *Agent) []string {
 	if agent.Version != 1 {
 		errors = add(errors, "version must be 1")
 	}
-	if agent.Language != "" && !languagePattern.MatchString(agent.Language) {
-		errors = add(errors, "language must be a BCP-47 language tag such as en or en-US")
+	for _, name := range sortedKeys(agent.Models) {
+		m := agent.Models[name]
+		if m.Language == "" {
+			continue
+		}
+		// language is a speak/listen field only (N16); on a think/turn model it
+		// would be silently dropped at generate, so reject it here (fail loud).
+		if m.Kind == KindThink || m.Kind == KindTurn {
+			errors = add(errors, fmt.Sprintf("model %q is a %s model; language applies only to speak and listen models", name, m.Kind))
+			continue
+		}
+		if !languagePattern.MatchString(m.Language) {
+			errors = add(errors, fmt.Sprintf("model %q language must be a BCP-47 language tag such as en or en-US", name))
+		}
 	}
 	if agent.Tracing != nil && agent.Tracing.Provider != "langfuse" {
 		errors = add(errors, "tracing provider must be langfuse")
@@ -591,12 +603,30 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 			row.Errors = add(row.Errors, err.Error())
 		}
 	}
+	// A per-model language must have a slot on the resolved target's integration
+	// (N16). The generator errors on a slotless entry; mirror it here so a
+	// slotless language fails validate, not just generate (C6: gate before any
+	// artifact).
+	checkLanguageSlot := func(role targetcap.Role, label string, binding *Binding) {
+		if binding == nil || binding.Language == "" || binding.Provider == "" {
+			return
+		}
+		entry, ok := catalog.Lookup(provider, role, binding.Provider)
+		if !ok {
+			return // an unknown vendor is already reported by checkVendor
+		}
+		if entry.Call == nil || entry.Call.NoLanguage || entry.Call.Language.Arg == "" {
+			row.Errors = add(row.Errors, fmt.Sprintf("%s %s binding provider %q has no language slot; remove the language field", provider, label, binding.Provider))
+		}
+	}
 	validateRoleBinding("listen", caps.Role(targetcap.Listen, provider), resolved.Models.Listen, row)
 	checkVendor(targetcap.Listen, resolved.Models.Listen)
+	checkLanguageSlot(targetcap.Listen, "listen", resolved.Models.Listen)
 	for _, fallback := range resolved.Models.ListenFallbacks {
 		binding := fallback.Binding
 		validatePlacement("listen."+fallback.Name, &binding, row)
 		checkVendor(targetcap.Listen, &binding)
+		checkLanguageSlot(targetcap.Listen, "listen."+fallback.Name, &binding)
 	}
 	validateRoleBinding("turn", caps.Role(targetcap.Turn, provider), resolved.Models.Turn, row)
 	checkVendor(targetcap.Turn, resolved.Models.Turn)
@@ -613,6 +643,7 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 			applyCapability(caps, targetcap.FieldSpeakEndpoint, provider, row)
 		}
 		checkVendor(targetcap.Speak, &binding)
+		checkLanguageSlot(targetcap.Speak, "speak."+name, &binding)
 		checkSpeakRequiredFields(catalog, provider, name, binding, row)
 	}
 	for _, name := range slices.Sorted(maps.Keys(models)) {
@@ -757,9 +788,6 @@ func validateFallbacks(agent *Agent, resolved Target, caps targetcap.Table, row 
 			if slot == targetcap.FallbackSameProvider && primary.Provider != "" && binding.Provider != "" && primary.Provider != binding.Provider {
 				row.Errors = add(row.Errors, "Vapi fallbackModels must stay within one provider")
 			}
-			if slot == targetcap.FallbackModelID && len(binding.Params) > 0 {
-				row.Warnings = add(row.Warnings, "ElevenLabs fallback entries accept model IDs only; per-entry params are not forwarded")
-			}
 		}
 	}
 }
@@ -783,9 +811,7 @@ func validateHumanTransfer(control *HumanTransfer, resolved Target, provider tar
 	case BriefingSummary:
 		applyCapability(caps, targetcap.FieldBriefingSummary, provider, row)
 	case BriefingMessage:
-		// V8: the message-briefing gate is carrier-conditional on ElevenLabs
-		// (native Twilio only); CapabilityForValue is a no-op where no condition exists.
-		applyCapabilityValue(caps.CapabilityForValue(targetcap.FieldBriefingMessage, provider, resolved.Carrier), string(targetcap.FieldBriefingMessage), provider, row)
+		applyCapability(caps, targetcap.FieldBriefingMessage, provider, row)
 	case BriefingWait:
 		applyCapability(caps, targetcap.FieldBriefingWait, provider, row)
 	default:

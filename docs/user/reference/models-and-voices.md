@@ -47,13 +47,13 @@ Required: yes (a hosted managed model may leave it implicit where the provider's
 
 The model identity, forwarded to that provider's SDK verbatim — `gpt-4o-mini` for OpenAI, `slng/deepgram/aura:2-en` for SLNG. Never parsed or rewritten.
 
-Required: yes (may be omitted when the target's engine is integrated and a voice id alone selects the model, e.g. ElevenLabs). Values: text. Default: none.
+Required: yes. Values: text. Default: none.
 
 ### description
 
 For humans only. Not used to pick a model.
 
-Required: no. Values: text. Default: none. Targets: all five, core.
+Required: no. Values: text. Default: none. Targets: all four, core.
 
 ## Speak model fields
 
@@ -71,11 +71,11 @@ Required: no. Values: number. Default: `1.0`. Tag: warn — lowered through the 
 
 ### language
 
-A per-model override of the package `language` (BCP-47).
+The spoken language for this STT or TTS model, as a BCP-47 tag (N16). It lives only on the model, never at the package level. When unset, no language is sent and the provider default — or the language already encoded in the model route, such as `slng/deepgram/nova:3-en` — applies.
 
-Required: no. Values: a BCP-47 tag. Default: the top-level `language`. Tag: gated per target.
+Required: no. Values: a BCP-47 tag such as `en` or `es-MX`. Default: none (nothing is emitted). Tag: gated per target — setting it on a target whose integration has no language slot is a compile error.
 
-Per-agent voices are native on LiveKit, Pipecat, and ElevenLabs, and work on all five.
+Per-agent voices are native on LiveKit and Pipecat, and work on all four.
 
 ## Think model fields
 
@@ -83,7 +83,7 @@ Per-agent voices are native on LiveKit, Pipecat, and ElevenLabs, and work on all
 
 Sampling temperature.
 
-Required: no. Values: number. Default: provider default. Targets: all five, core — Vapi `model.temperature`, ElevenLabs `prompt.temperature`, Deepgram `think.provider.temperature`, constructor kwargs on Pipecat and LiveKit.
+Required: no. Values: number. Default: provider default. Targets: all four, core — Vapi `model.temperature`, Deepgram `think.provider.temperature`, constructor kwargs on Pipecat and LiveKit.
 
 ### top_p, top_k
 
@@ -108,7 +108,6 @@ Required: no. Values: ordered list of model names. Default: none. The chain is c
 | LiveKit | native (`FallbackAdapter`) | gated |
 | Pipecat | supported, but the driver does not emit it yet (maturity gate) | gated |
 | Vapi | native, but same-provider chains only; a cross-provider chain fails | gated |
-| ElevenLabs | native; entries are model ids only, so models carrying extra settings warn | gated |
 | Deepgram | native (ordered provider array, mixed providers allowed) | gated |
 
 On Pipecat, using `fallback` fails validation today; it is a driver maturity gate, not a platform limit.
@@ -122,7 +121,6 @@ On Pipecat, using `fallback` fails validation today; it is a driver maturity gat
 | LiveKit | native (`stt.FallbackAdapter`) | gated |
 | Pipecat | the driver does not emit listen fallback yet (maturity gate) | gated |
 | Vapi | no documented transcriber fallback slot | gated |
-| ElevenLabs | listen is integrated; no STT fallback slot | gated |
 | Deepgram | `agent.listen` takes a single provider; no fallback slot | gated |
 
 ```yaml
@@ -148,7 +146,6 @@ Required: no. Values: `api | local`. Default: derived.
 | LiveKit | hosted and `local` both work | gated |
 | Pipecat | hosted and `local` both work | gated |
 | Vapi | `local` think fails (custom LLM endpoint unverified) | gated |
-| ElevenLabs | `local` think works only through its documented custom LLM endpoint | gated |
 | Deepgram | `local` think works through a custom LLM endpoint | gated |
 
-A hosted provider is the portable choice. A `local` think model needs somewhere to run: fine on code targets, and on ElevenLabs only via its custom LLM endpoint.
+A hosted provider is the portable choice. A `local` think model needs somewhere to run: fine on code targets.

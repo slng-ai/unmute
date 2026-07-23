@@ -116,7 +116,6 @@ func runCreate(runner *fieldRunner) (Result, bool, error) {
 	}
 	data := scaffold.Data{
 		Name:         filepath.Base(filepath.Clean(path)),
-		Language:     scaffold.DefaultLanguage,
 		Channel:      scaffold.DefaultChannel,
 		Greeting:     scaffold.DefaultGreeting,
 		Instructions: scaffold.DefaultInstructions,
@@ -236,7 +235,6 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 			selected, back, err := runner.selectOne("Target / orchestrator", runner.describe("Vapi and Deepgram are unavailable: their generators are not implemented yet."), []huh.Option[string]{
 				huh.NewOption("Pipecat  ·  generated code project", string(targetcap.Pipecat)),
 				huh.NewOption("LiveKit  ·  generated code project", string(targetcap.LiveKit)),
-				huh.NewOption("ElevenLabs  ·  managed API plan", string(targetcap.ElevenLabs)),
 				huh.NewOption("← Back", actionBack),
 			}, true)
 			if err != nil {
@@ -252,10 +250,6 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 				for i := range result.Agent.Data.Fallbacks {
 					result.Agent.Data.Fallbacks[i].Binding = result.Agent.Data.Reason
 				}
-			}
-		case "language":
-			if _, err := runner.input("Language", "Primary spoken BCP-47 language tag, for example en or es-MX.", &result.Agent.Data.Language, validateLanguage); err != nil {
-				return Result{}, false, err
 			}
 		case "models":
 			if err := editModels(runner, &result.Agent.Data); err != nil {
@@ -329,7 +323,7 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 
 func editorSectionOptions(data scaffold.Data) []huh.Option[string] {
 	return []huh.Option[string]{
-		huh.NewOption("Identity  ·  target, language", "section:identity"),
+		huh.NewOption("Identity  ·  target", "section:identity"),
 		huh.NewOption("Models  ·  "+modelsLabel(data), "section:models"),
 		huh.NewOption("Behavior  ·  instructions, greeting, variables, advanced", "section:behavior"),
 		huh.NewOption("Integrations  ·  tools, channels, human transfers", "section:integrations"),
@@ -343,7 +337,6 @@ func chooseEditorSection(runner *fieldRunner, data *scaffold.Data, section strin
 	case "identity":
 		options = []huh.Option[string]{
 			huh.NewOption("Target  ·  "+targetLabel(data.Target), "target"),
-			huh.NewOption("Language  ·  "+data.Language, "language"),
 		}
 	case "behavior":
 		options = []huh.Option[string]{
@@ -444,9 +437,9 @@ func summary(result Result, review scaffold.PreflightReport) string {
 		compile = "yes (selected target)"
 	}
 	var text strings.Builder
-	fmt.Fprintf(&text, "Create %s?\nTarget: %s (%s)\nLanguage: %s\nCaller channels: %s\nGreeting: %s\nRequired env: %s\nForwarded bindings:",
+	fmt.Fprintf(&text, "Create %s?\nTarget: %s (%s)\nCaller channels: %s\nGreeting: %s\nRequired env: %s\nForwarded bindings:",
 		result.Agent.Data.Name, targetLabel(result.Agent.Data.Target), review.TargetName,
-		result.Agent.Data.Language, channelsLabel(result.Agent.Data), result.Agent.Data.Greeting, strings.Join(review.RequiredEnv, ", "))
+		channelsLabel(result.Agent.Data), result.Agent.Data.Greeting, strings.Join(review.RequiredEnv, ", "))
 	for _, binding := range review.Bindings {
 		profile := ""
 		if binding.Profile != "" {
@@ -491,8 +484,6 @@ func targetLabel(provider string) string {
 	switch targetcap.Provider(provider) {
 	case targetcap.LiveKit:
 		return "LiveKit"
-	case targetcap.ElevenLabs:
-		return "ElevenLabs"
 	default:
 		return "Pipecat"
 	}
@@ -585,26 +576,27 @@ func modelsLabelPart(target string, role targetcap.Role, binding scaffold.Bindin
 
 func editBinding(runner *fieldRunner, data *scaffold.Data, role targetcap.Role) error {
 	binding := bindingForRole(data, role)
-	return editBindingFor(runner, data.Target, role, &data.Language, binding)
+	return editBindingFor(runner, data.Target, role, binding)
 }
 
-func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, language *string, binding *scaffold.Binding) error {
+func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, binding *scaffold.Binding) error {
 	framework := targetcap.Provider(target)
 	catalog := targetcap.DefaultCatalog()
-	integratedListen := framework == targetcap.ElevenLabs && role == targetcap.Listen
 	for {
 		brand := catalog.Brand(framework, role, binding.Provider, binding.Model)
-		if brand == "" && integratedListen {
-			brand = "integrated"
-		}
 		if brand == "" {
 			brand = "not set"
 		}
 		distributors := catalog.Distributors(framework, role, brand)
 		entry, _ := catalog.Lookup(framework, role, binding.Provider)
 		entryHint := catalogueEntryHint(entry)
-		modelApplicable := !integratedListen && (entry.Call == nil || entry.Call.Model.Arg != "")
+		modelApplicable := entry.Call == nil || entry.Call.Model.Arg != ""
 		voiceApplicable := role == targetcap.Speak && (entry.Call == nil || entry.Call.Voice.Arg != "")
+		// Language is per-model and only STT/TTS integrations with a real slot
+		// carry it (N16). Offering it on a slotless entry would author a spec
+		// that validates green but fails compile, so gate it like model/voice.
+		languageApplicable := (role == targetcap.Listen || role == targetcap.Speak) &&
+			entry.Call != nil && entry.Call.Language.Arg != "" && !entry.Call.NoLanguage
 
 		options := []huh.Option[string]{huh.NewOption("Provider  ·  "+brand, "provider")}
 		if len(distributors) > 1 {
@@ -616,8 +608,10 @@ func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, lan
 		if voiceApplicable {
 			options = append(options, huh.NewOption("Voice  ·  "+firstNonempty(binding.Voice, "not set"), "voice"))
 		}
+		if languageApplicable {
+			options = append(options, huh.NewOption("Language  ·  "+firstNonempty(binding.Language, "provider default"), "language"))
+		}
 		options = append(options,
-			huh.NewOption("Language  ·  "+firstNonempty(*language, scaffold.DefaultLanguage), "language"),
 			huh.NewOption("Additional config  ·  "+firstNonempty(binding.Params, "none"), "params"),
 			huh.NewOption("← Back", actionBack),
 		)
@@ -628,12 +622,6 @@ func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, lan
 		switch choice {
 		case "provider":
 			providerChoices := providerOptions(framework, role)
-			if integratedListen {
-				if err := showNotice(runner, "Integrated provider", "ElevenLabs owns the listen provider for this target."); err != nil {
-					return err
-				}
-				continue
-			}
 			if len(providerChoices) == 0 {
 				if _, err := runner.input("Provider (optional)", "This role has no fixed provider catalogue; the identity is forwarded.", &binding.Provider, validateBasic); err != nil {
 					return err
@@ -685,7 +673,7 @@ func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, lan
 				return err
 			}
 		case "language":
-			if _, err := runner.input("Language", "Primary spoken BCP-47 language tag, for example en or es-MX. "+entryHint, language, validateLanguage); err != nil {
+			if _, err := runner.input("Language", "Per-model BCP-47 tag, for example en or es-MX. Blank uses the provider default. "+entryHint, &binding.Language, validateLanguage); err != nil {
 				return err
 			}
 		case "params":
@@ -1254,13 +1242,13 @@ func editAgentDetails(runner *fieldRunner, data *scaffold.Data, name string) err
 			}
 		case "reason":
 			binding := agent.Reason
-			if err := editBindingFor(runner, data.Target, targetcap.Reason, &data.Language, &binding); err != nil {
+			if err := editBindingFor(runner, data.Target, targetcap.Reason, &binding); err != nil {
 				return err
 			}
 			setAgentBinding(data, name, targetcap.Reason, binding)
 		case "speak":
 			binding := agent.Speak
-			if err := editBindingFor(runner, data.Target, targetcap.Speak, &data.Language, &binding); err != nil {
+			if err := editBindingFor(runner, data.Target, targetcap.Speak, &binding); err != nil {
 				return err
 			}
 			setAgentBinding(data, name, targetcap.Speak, binding)
@@ -1554,11 +1542,14 @@ func editHandoffContextDetails(runner *fieldRunner, data *scaffold.Data, handoff
 		}
 		switch choice {
 		case "history":
-			choices := []huh.Option[string]{huh.NewOption("Full history (portable)", "full")}
-			if data.Target != string(targetcap.ElevenLabs) {
-				choices = append(choices, huh.NewOption("Messages", "messages"), huh.NewOption("Last N messages", "last_n"), huh.NewOption("Summary", "summary"), huh.NewOption("Reset", "reset"))
+			choices := []huh.Option[string]{
+				huh.NewOption("Full history (portable)", "full"),
+				huh.NewOption("Messages", "messages"),
+				huh.NewOption("Last N messages", "last_n"),
+				huh.NewOption("Summary", "summary"),
+				huh.NewOption("Reset", "reset"),
+				huh.NewOption("← Back", actionBack),
 			}
-			choices = append(choices, huh.NewOption("← Back", actionBack))
 			selected, back, err := runner.selectOne("Conversation history", "", choices, true)
 			if err != nil {
 				return err
@@ -1800,11 +1791,14 @@ func editTaskContext(runner *fieldRunner, data *scaffold.Data, task *scaffold.Ta
 		}
 		switch choice {
 		case "history":
-			choices := []huh.Option[string]{huh.NewOption("Full history (portable)", "full")}
-			if data.Target != string(targetcap.ElevenLabs) {
-				choices = append(choices, huh.NewOption("Messages", "messages"), huh.NewOption("Last N messages", "last_n"), huh.NewOption("Summary", "summary"), huh.NewOption("Reset", "reset"))
+			choices := []huh.Option[string]{
+				huh.NewOption("Full history (portable)", "full"),
+				huh.NewOption("Messages", "messages"),
+				huh.NewOption("Last N messages", "last_n"),
+				huh.NewOption("Summary", "summary"),
+				huh.NewOption("Reset", "reset"),
+				huh.NewOption("← Back", actionBack),
 			}
-			choices = append(choices, huh.NewOption("← Back", actionBack))
 			selected, back, err := runner.selectOne("Task history", "", choices, true)
 			if err != nil {
 				return false, err
@@ -2037,11 +2031,11 @@ func editTaskGroupDetails(runner *fieldRunner, data *scaffold.Data, name string)
 				group.Steps = selected
 			}
 		case "context":
-			options := []huh.Option[string]{huh.NewOption("Shared context", "shared")}
-			if data.Target != string(targetcap.ElevenLabs) {
-				options = append(options, huh.NewOption("Isolated context", "isolated"))
+			options := []huh.Option[string]{
+				huh.NewOption("Shared context", "shared"),
+				huh.NewOption("Isolated context", "isolated"),
+				huh.NewOption("← Back", actionBack),
 			}
-			options = append(options, huh.NewOption("← Back", actionBack))
 			selected, back, err := runner.selectOne("Context between steps", "", options, true)
 			if err != nil {
 				return err
@@ -2326,11 +2320,7 @@ func editHumanTransferDetails(runner *fieldRunner, data *scaffold.Data, name str
 				}
 				continue
 			}
-			options := []huh.Option[string]{huh.NewOption("Summary", "summary")}
-			if data.Target == string(targetcap.ElevenLabs) {
-				options = []huh.Option[string]{huh.NewOption("Message", "message")}
-			}
-			options = append(options, huh.NewOption("← Back", actionBack))
+			options := []huh.Option[string]{huh.NewOption("Summary", "summary"), huh.NewOption("← Back", actionBack)}
 			selected, back, err := runner.selectOne("Operator briefing", "", options, true)
 			if err != nil {
 				return err
@@ -2575,7 +2565,7 @@ func editFallbackDetails(runner *fieldRunner, data *scaffold.Data, name string) 
 				fallback.Profile = selected
 			}
 		case "binding":
-			if err := editBindingFor(runner, data.Target, targetcap.Reason, &data.Language, &fallback.Binding); err != nil {
+			if err := editBindingFor(runner, data.Target, targetcap.Reason, &fallback.Binding); err != nil {
 				return err
 			}
 		case "delete":
@@ -2664,8 +2654,7 @@ func editAdvancedTarget(runner *fieldRunner, data *scaffold.Data) error {
 		}{
 			{"Target version", "Driver/framework version pin.", &data.TargetVersion, validateBasic},
 			{"SDK language (optional)", "For example python on LiveKit.", &data.SDKLanguage, validateBasic},
-			{"Region (optional)", "Provider vocabulary; forwarded as declared.", &data.Region, validateBasic},
-			{"Edition (optional)", "Provider vocabulary; forwarded as declared.", &data.Edition, validateBasic},
+			{"Deployment region (optional)", "Where the platform deploys the agent; forwarded as declared (Pipecat pcc-deploy region, LiveKit lk agent create --region).", &data.DeploymentRegion, validateBasic},
 			{"Pins (optional JSON object)", "Independently versioned target packages.", &data.Pins, validateParams},
 		}
 		options := make([]huh.Option[string], 0, len(fields)+1)

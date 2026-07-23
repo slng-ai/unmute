@@ -29,19 +29,19 @@ effect: returns_data
 
 What the model reads to decide when to call the tool.
 
-Required: yes, except for a `builtin` tool where it is optional (the prebuilt supplies a default). Values: text. Default: none. Targets: all five, core.
+Required: yes, except for a `builtin` tool where it is optional (the prebuilt supplies a default). Values: text. Default: none. Targets: all four, core.
 
 ### input
 
-The arguments the model fills in, as a JSON Schema object. All five targets accept JSON Schema tool inputs, so nesting is allowed here.
+The arguments the model fills in, as a JSON Schema object. All four targets accept JSON Schema tool inputs, so nesting is allowed here.
 
-Required: yes, except for a `builtin` tool, which has none (the prebuilt owns its schema). Values: a JSON Schema object. Default: none. Targets: all five, core.
+Required: yes, except for a `builtin` tool, which has none (the prebuilt owns its schema). Values: a JSON Schema object. Default: none. Targets: all four, core.
 
 ### output
 
 The shape the tool promises to return.
 
-Required: no. Values: a JSON Schema object. Default: none. Tag: warn. Enforced by generated code on code targets (LiveKit, Pipecat, Deepgram). Managed targets (Vapi, ElevenLabs) have no slot for it and warn.
+Required: no. Values: a JSON Schema object. Default: none. Tag: warn. Enforced by generated code on code targets (LiveKit, Pipecat, Deepgram). The managed target (Vapi) has no slot for it and warns.
 
 ### execution
 
@@ -51,7 +51,7 @@ Required: yes. Values: `local | client | webhook | provider_hosted | builtin | m
 
 | Value | Where it works |
 |---|---|
-| `webhook` | all five targets. **The safe choice.** |
+| `webhook` | all four targets. **The safe choice.** |
 | `local` | code targets only (a handler file in your package) |
 | `builtin` | a provider prebuilt tool you pick by name; LiveKit and Pipecat only (see below) |
 | `mcp` | fails on Deepgram (no runtime MCP client); on LiveKit needs SDK language `python` |
@@ -80,7 +80,7 @@ its schema and behavior. Both fields are optional:
 - `description` adds your own guidance on top of the built-in description (LiveKit `extra_description`; Pipecat tool docstring).
 - `instructions` is the closing message (LiveKit `end_instructions`; a Pipecat developer message).
 
-`end_call` works on **LiveKit and Pipecat**. It fails on Vapi, ElevenLabs, and Deepgram,
+`end_call` works on **LiveKit and Pipecat**. It fails on Vapi and Deepgram,
 which have no lowering for it. It ends the call, so its `effect` is fixed to
 `ends_conversation`.
 
@@ -111,7 +111,7 @@ Required: conditional (iff `execution: local`). Values: a path, default `<name>.
 
 The environment variable holding the tool's endpoint. A variable name, never a URL value. For a `webhook` tool it is the webhook URL; for an `mcp` tool it is the MCP server address.
 
-Required: conditional (iff `execution: webhook` or `mcp`). Values: an environment variable name. Default: none. Targets: all five, core.
+Required: conditional (iff `execution: webhook` or `mcp`). Values: an environment variable name. Default: none. Targets: all four, core.
 
 ### interruption
 
@@ -123,4 +123,4 @@ Required: no. Values: `continue | cancel | provider_default`. Default: `provider
 
 What the tool does to the conversation when it finishes.
 
-Required: no. Values: `returns_data | ends_conversation`. Default: `returns_data`. Targets: all five, core. For a `builtin` tool the value is fixed by the prebuilt (`end_call` is always `ends_conversation`); a conflicting value is an error.
+Required: no. Values: `returns_data | ends_conversation`. Default: `returns_data`. Targets: all four, core. For a `builtin` tool the value is fixed by the prebuilt (`end_call` is always `ends_conversation`); a conflicting value is an error.

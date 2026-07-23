@@ -43,7 +43,7 @@ func TestRunCreateDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := scaffold.Data{Name: "agent", Language: scaffold.DefaultLanguage, Channel: scaffold.DefaultChannel, Greeting: scaffold.DefaultGreeting, Instructions: scaffold.DefaultInstructions, Tools: scaffold.DefaultTools()}
+	data := scaffold.Data{Name: "agent", Channel: scaffold.DefaultChannel, Greeting: scaffold.DefaultGreeting, Instructions: scaffold.DefaultInstructions, Tools: scaffold.DefaultTools()}
 	data.SetTarget(scaffold.DefaultTarget)
 	agent := Agent{Path: "agent", Data: data}
 	want := Result{Agent: agent, Create: true, Confirmed: true}
@@ -330,7 +330,7 @@ func TestV34EditorSectionsStayGrouped(t *testing.T) { // docs/spec/tui.md V34
 	want := []struct {
 		value, label string
 	}{
-		{"section:identity", "Identity  ·  target, language"},
+		{"section:identity", "Identity  ·  target"},
 		{"section:models", "Models  ·  "},
 		{"section:behavior", "Behavior  ·  instructions, greeting, variables, advanced"},
 		{"section:integrations", "Integrations  ·  tools, channels, human transfers"},
@@ -502,9 +502,8 @@ func TestV24DistributorRowAppearsOnlyForMultipleRoutes(t *testing.T) { // docs/s
 		}
 		routes := catalog.Distributors(framework, role, brand)
 		binding := scaffold.Binding{Provider: routes[0], Model: brand + "/model"}
-		language := scaffold.DefaultLanguage
 		var output bytes.Buffer
-		err := editBindingFor(newRunner(strings.NewReader(""), &output, true), string(framework), role, &language, &binding)
+		err := editBindingFor(newRunner(strings.NewReader(""), &output, true), string(framework), role, &binding)
 		if !errors.Is(err, huh.ErrUserAborted) {
 			t.Fatalf("binding overview error = %v, want ErrUserAborted", err)
 		}
@@ -554,14 +553,34 @@ func TestRunEditModels(t *testing.T) {
 	}
 }
 
-func TestRunEditLanguage(t *testing.T) {
-	t.Chdir(t.TempDir())
-	got, err := Run(strings.NewReader("1\nagent\n1\n2\nes-MX\n7\n\n"), &bytes.Buffer{}, true)
+func TestEditLanguageIsPerModel(t *testing.T) { // per-model language (N16)
+	root := filepath.Join(t.TempDir(), "agent")
+	data := scaffold.Data{Name: "agent"}
+	data.SetTarget(scaffold.DefaultTarget)
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := loadMaintained(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Agent.Data.Language != "es-MX" {
-		t.Fatalf("language = %q", got.Agent.Data.Language)
+	agent.data.Speak.Language = "es-MX"
+	if err := saveMaintained(newRunner(strings.NewReader("1\n1\n"), &bytes.Buffer{}, true), &agent); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(root, "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(manifest), "language: es-MX") {
+		t.Fatalf("per-model language not emitted:\n%s", manifest)
+	}
+	reloaded, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.data.Speak.Language != "es-MX" {
+		t.Fatalf("speak language round-trip = %q", reloaded.data.Speak.Language)
 	}
 }
 
@@ -881,7 +900,7 @@ func TestV39TaskResultAssignmentCanBeRemoved(t *testing.T) { // docs/spec/tui.md
 func TestV21PreflightFailureUsesDedicatedScreen(t *testing.T) { // docs/spec/tui.md V21
 	// Pipecat still gates fallback (driver-pipecat C9/B7); livekit emits it
 	// natively since driver-livekit T5, so the failure fixture lives here.
-	data := scaffold.Data{Name: "agent", Language: "en", Channel: "web"}
+	data := scaffold.Data{Name: "agent", Channel: "web"}
 	data.SetTarget("pipecat")
 	data.Fallbacks = []scaffold.ModelFallback{{Name: "backup", Profile: "assistant_model", Binding: data.Reason}}
 	var output bytes.Buffer
@@ -970,23 +989,28 @@ func TestRunHumanTransfersRequireTelephony(t *testing.T) {
 	}
 }
 
-func TestRunAddTelephonyAndHumanTransfer(t *testing.T) {
+func TestRunTelephonyCreateGatedOnConnection(t *testing.T) {
 	t.Chdir(t.TempDir())
+	// The create wizard offers only code targets (Pipecat/LiveKit). Telephony on
+	// a code target requires a connection (build.go / scaffold.Preflight), which
+	// the wizard cannot set — telephony connections are targets.yaml config, not
+	// a scaffold field. So adding a telephony channel plus a human transfer builds
+	// the in-memory config, but Create is correctly gated until a connection
+	// exists. (Managed targets like ElevenLabs, which slipped past this gate, no
+	// longer exist — and never had a real telephony route anyway, SCHEMA N17.)
+	// Drive: create → add telephony channel → add human transfer → Create (blocked)
+	// → Back out of the repair menu → Back out of the editor → Quit.
 	input := "1\nagent\n" +
-		"1\n1\n3\n" +
 		"4\n2\n1\n2\n5\n" +
 		"4\n3\n1\nto_human\n2\nCaller requests a person.\n3\nsupport_line\n4\n+14155550123\n8\n3\n" +
-		"7\n\n"
+		"7\n10\n8\n3\n"
 	var output bytes.Buffer
-	got, err := Run(strings.NewReader(input), &output, true)
-	if err != nil {
-		t.Fatalf("%v\n%s", err, output.String())
+	got, _ := Run(strings.NewReader(input), &output, true)
+	if got.Confirmed {
+		t.Fatalf("telephony agent must not be created without a connection: %#v", got.Agent.Data)
 	}
-	if got.Agent.Data.Target != "elevenlabs" || !hasTelephony(&got.Agent.Data) || len(got.Agent.Data.HumanTransfers) != 1 {
-		t.Fatalf("telephony result = %#v", got.Agent.Data)
-	}
-	if got.Agent.Data.HumanTransfers[0].Destination != "support_line" {
-		t.Fatalf("human transfers = %#v", got.Agent.Data.HumanTransfers)
+	if !strings.Contains(output.String(), "requires connection for telephony") {
+		t.Fatalf("wizard did not surface the telephony connection gate:\n%s", output.String())
 	}
 }
 
@@ -1004,12 +1028,14 @@ func TestRunCustomizeCapacity(t *testing.T) {
 
 func TestV20BackPreservesPriorEdits(t *testing.T) { // docs/spec/tui.md V20
 	t.Chdir(t.TempDir())
-	input := "1\nagent\n1\n2\nes-MX\n3\n1\n:back\n7\n\n"
+	// Edit greeting (Behavior), then open Instructions and Back out unchanged;
+	// the greeting edit must survive.
+	input := "1\nagent\n3\n2\nEdited greeting\n3\n1\n:back\n7\n\n"
 	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Agent.Data.Language != "es-MX" || got.Agent.Data.Instructions != scaffold.DefaultInstructions {
+	if got.Agent.Data.Greeting != "Edited greeting" || got.Agent.Data.Instructions != scaffold.DefaultInstructions {
 		t.Fatalf("back lost edits: %#v", got.Agent.Data)
 	}
 }
@@ -1081,7 +1107,7 @@ func TestV29UnavailableChoiceNamesGateAndOffersBack(t *testing.T) {
 
 func TestTUIMatchesCapabilityTable(t *testing.T) { // docs/spec/tui.md V42
 	table := targetcap.Default()
-	providers := []targetcap.Provider{targetcap.LiveKit, targetcap.Pipecat, targetcap.Deepgram, targetcap.Vapi, targetcap.ElevenLabs}
+	providers := []targetcap.Provider{targetcap.LiveKit, targetcap.Pipecat, targetcap.Deepgram, targetcap.Vapi}
 	kindFields := map[targetcap.Field]bool{}
 	for _, kind := range toolExecutionKinds {
 		if kind.Field != "" {
@@ -1191,7 +1217,7 @@ func TestV40MaintainPreservesLocalHandler(t *testing.T) { // docs/spec/tui.md V4
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent.data.Language = "es"
+	agent.data.Speak.Language = "es"
 	if err := saveMaintained(newRunner(strings.NewReader("1\n1\n"), &bytes.Buffer{}, true), &agent); err != nil {
 		t.Fatal(err)
 	}
@@ -1215,8 +1241,7 @@ func TestV24ModelsLabelDeduplicatesProviderBrands(t *testing.T) { // docs/spec/t
 func TestV24ProviderThenDistributorFlow(t *testing.T) { // docs/spec/tui.md V24
 	binding := scaffold.Binding{}
 	input := "1\n1\n2\n2\n3\nslng/cartesia/sonic-3\n4\nvoice-id\n7\n"
-	language := scaffold.DefaultLanguage
-	if err := editBindingFor(newRunner(strings.NewReader(input), &bytes.Buffer{}, true), "pipecat", targetcap.Speak, &language, &binding); err != nil {
+	if err := editBindingFor(newRunner(strings.NewReader(input), &bytes.Buffer{}, true), "pipecat", targetcap.Speak, &binding); err != nil {
 		t.Fatal(err)
 	}
 	want := scaffold.Binding{Provider: "slng", Model: "slng/cartesia/sonic-3", Voice: "voice-id"}
@@ -1515,7 +1540,7 @@ func TestV32DestructiveSaveNamesFilesAndConfirms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent.data.Language = "es-MX"
+	agent.data.Speak.Language = "es-MX"
 	var output bytes.Buffer
 	// Confirm rewrite, then Back from the saved notice.
 	if err := saveMaintained(newRunner(strings.NewReader("1\n1\n"), &output, true), &agent); err != nil {
@@ -1544,11 +1569,11 @@ func TestV20MaintainBackPreservesPriorEdits(t *testing.T) { // docs/spec/tui.md 
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Language, new value, Back from the maintain menu.
-	if err := editMaintained(newRunner(strings.NewReader("1\n2\nes-MX\n9\n"), &bytes.Buffer{}, true), &agent); err != nil {
+	// Behavior → Greeting, new value, Back from the maintain menu.
+	if err := editMaintained(newRunner(strings.NewReader("3\n2\nEdited greeting\n9\n"), &bytes.Buffer{}, true), &agent); err != nil {
 		t.Fatal(err)
 	}
-	if agent.data.Language != "es-MX" {
+	if agent.data.Greeting != "Edited greeting" {
 		t.Fatalf("Back lost maintain edit: %#v", agent.data)
 	}
 }

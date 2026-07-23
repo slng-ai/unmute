@@ -59,14 +59,13 @@ targets:
       # Replace the local VAD entry with LiveKit's turn detector.
       vad: { provider: livekit, model: turn-detector-mini }
 
-  elevenlabs:
-    provider: elevenlabs
+  deepgram:
+    provider: deepgram
     models:
-      # ElevenLabs can't run the SLNG voice or the Deepgram STT, so override
-      # just those entries (by name; an override replaces the whole entry):
-      front_desk: { voice: cgSgspJ2msm6clMCkdW9 }
-      fast_reasoning: { model: gemini-2.5-flash }
-      transcriber: { params: { user_input_audio_format: ulaw_8000 } }  # settings-only: listen is integrated
+      # Deepgram runs its own voices and STT, so override just those entries
+      # (by name; an override replaces the whole entry):
+      front_desk: { model: aura-2-thalia-en }
+      transcriber: { model: flux, params: { eot_threshold: 0.7 } }  # turn rides the listen params: turn is integrated
 ```
 
 Each instance is named after its provider (`pipecat`, not `pipecat-dev`): what
@@ -103,11 +102,10 @@ Not every role is bindable on every target. A role is **open** (you name an outs
 
 On LiveKit and Pipecat, all four roles are open: you choose listen, speak,
 think, and turn models. The example keeps Pipecat's turn detection local and
-uses a LiveKit override for that framework's detector. On managed targets,
-more roles are integrated. On ElevenLabs, for example, listening is integrated:
-a `listen` override can carry settings but cannot name an outside speech model.
-When a role is integrated, an outside model fails because the value has nowhere
-to go.
+uses a LiveKit override for that framework's detector. On Vapi and Deepgram,
+turn detection is integrated: a `turn` override can carry settings but cannot
+name an outside model. When a role is integrated, an outside model fails because
+the value has nowhere to go.
 
 For the full role-by-role table, see
 [targets.yaml](../reference/targets-yaml.md). The

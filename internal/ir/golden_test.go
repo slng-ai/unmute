@@ -94,7 +94,7 @@ func thenReturnGolden(t *testing.T) compilerGoldenCase {
 func historyGolden(t *testing.T) compilerGoldenCase {
 	agent := safeAgent(t)
 	agent.Controls["to_billing"].(*AgentTransfer).Context.History = HistoryMessages
-	return compilerGoldenCase{"history_messages", agent, []Target{targetFor(agent, ProviderElevenLabs)}, true}
+	return compilerGoldenCase{"history_messages", agent, []Target{targetFor(agent, ProviderPipecat)}, true}
 }
 
 func localPlacementGolden(t *testing.T) compilerGoldenCase {
@@ -104,9 +104,9 @@ func localPlacementGolden(t *testing.T) compilerGoldenCase {
 	local := &Binding{Provider: "local", Model: "whisper-large-v3", Placement: PlacementLocal}
 	vapi := targetFor(agent, ProviderVapi)
 	vapi.Models.Listen = local
-	eleven := targetFor(agent, ProviderElevenLabs)
-	eleven.Models.Listen = local
-	return compilerGoldenCase{"local_listen", agent, []Target{vapi, eleven}, true}
+	deepgram := targetFor(agent, ProviderDeepgram)
+	deepgram.Models.Listen = local
+	return compilerGoldenCase{"local_listen", agent, []Target{vapi, deepgram}, true}
 }
 
 func mcpGolden(t *testing.T) compilerGoldenCase {
