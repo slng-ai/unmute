@@ -108,7 +108,7 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	want := []string{"multi-task", "simple-prompt", "subagents", "task-groups", "telephony-multi-task"}
+	want := []string{"multi-task", "simple-prompt", "subagents", "task-groups", "telephony-hello"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -125,12 +125,12 @@ func TestPublicExamplePackages(t *testing.T) {
 	}
 }
 
-// The telephony example is a complete, schema-faithful package (channel,
-// connections, routes, destinations) with real adapters. A provisional route
-// (adapter present, no credentialed smoke yet) is usable, so it generates with
-// an unverified warning; promotion is a maturity signal, not a generation gate.
+// The shipped telephony example (telephony-hello) is a complete,
+// schema-faithful package with real adapters on both targets: Pipecat
+// carrier-websocket and the LiveKit Twilio connector. Both are provisional
+// (adapter present, no credentialed smoke yet) and usable, so both generate.
 func TestTelephonyExampleGeneratesProvisionalRoute(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "telephony-multi-task"))
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "telephony-hello"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,14 +138,15 @@ func TestTelephonyExampleGeneratesProvisionalRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// LiveKit SIP supports every feature this example requests (voicemail,
-	// cold transfer), all provisional, so generation succeeds.
-	resolved, ok := agent.Targets["livekit"]
-	if !ok || resolved.Telephony == nil {
-		t.Fatalf("livekit target has no resolved telephony plan")
+	livekit, ok := agent.Targets["livekit"]
+	if !ok || livekit.Telephony == nil || livekit.Transport != "connector" {
+		t.Fatalf("livekit target is not the resolved connector route: %#v", livekit.Telephony)
 	}
-	if _, err := Generate(agent, resolved, target.Default()); err != nil {
-		t.Fatalf("provisional livekit telephony route must generate, got %v", err)
+	for _, name := range []string{"livekit", "pipecat"} {
+		resolved := agent.Targets[name]
+		if _, err := Generate(agent, resolved, target.Default()); err != nil {
+			t.Fatalf("provisional telephony route %q must generate, got %v", name, err)
+		}
 	}
 }
 
