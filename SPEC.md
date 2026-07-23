@@ -168,7 +168,7 @@ T3|x|dev wiring: confirm tunnel, auto webhook, call line, --to all fire data-dri
 T4|x|SIP route: remove LIVEKIT_SIP_URI everywhere (route rule, generate env list, templates, goldens, docs, tests); --to on a SIP plan places the call via CreateDispatch (mintLiveKitRoomAdminToken helper + placeLiveKitDispatch on the sipAdminClient Twirp pattern, branch in onReady by route transport, print room + dispatch id). L2 httptest: method, path, auth grant, agent_name, metadata, one call only|C4,I.sipdial,V6,V7
 T5|x|telephony-hello: switch the livekit target to a twilio connector connection so one .env drives both targets; README update|I.connection,I.env
 T6|x|docs: twilio-walkthrough (connector route section, SIP kept as the production trunk path), cli.md, TELEPHONY.md, tags-and-gating (connector un-gated), targets/livekit.md. Simple words, no em dashes|I.prod,V6
-T7|.|full suite green; manual E2E with real creds: connector inbound call, connector outbound --to call (both through the tunnel), SIP outbound --to call (needs the Twilio SIP trunk values)|V1-V9
+T7|x|full suite green (build, vet, golangci-lint, go test all clean; connector bridge py_compile + ruff clean; mu-law self-check passes 256/256). Manual E2E with real creds is the user's live test: connector inbound call, connector outbound --to call (both through the tunnel), SIP outbound --to call (needs the Twilio SIP trunk values)|V1-V9
 
 ## §B bugs
 
