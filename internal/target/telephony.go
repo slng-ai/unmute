@@ -201,10 +201,51 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	routes[exotel] = TelephonyRoute{Key: exotel, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{
 		"sip_address", "sip_username", "sip_password", "from_number",
 	}}
-	key := TelephonyKey{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}
-	routes[key] = TelephonyRoute{Key: key, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{
-		"account_sid", "auth_token", "from_number",
+	// LiveKit Twilio connector: Twilio Media Streams over WebSocket, bridged
+	// into a local LiveKit room by the generated telephony_bridge.py. Same
+	// Twilio surface as the Pipecat carrier-websocket route (HTTPS webhook +
+	// media WebSocket + dial-out), so it tunnels and auto-configures the same
+	// way, but the agent runs as a LiveKit worker. No SIP trunk and no Redis:
+	// only the application container and a local `livekit-server --dev`. This
+	// bridge is our own open-source implementation of the Media Streams
+	// protocol; LiveKit's hosted connector is Cloud-only.
+	connector := TelephonyKey{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}
+	connectorFeatures := append([]TelephonyFeature{
+		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup),
+	}, sourcesWithStream...)
+	add(LiveKit, "connector", "twilio", "https://docs.livekit.io/telephony/connectors/twilio/", connectorFeatures...)
+	route = routes[connector]
+	route.RequiredEnvironment = []string{"account_sid", "auth_token", "from_number"}
+	route.Processes = []TelephonyProcess{{
+		// One container runs both roles: the agent worker (LiveKit) and the
+		// Twilio bridge web server. The bridge is what the carrier reaches.
+		Name: "application", Command: []string{"sh", "-c", "python agent.py start & exec python telephony_bridge.py"},
+		Health: "/", Readiness: "/",
 	}}
+	route.PublicEndpoints = []TelephonyEndpointRule{
+		{Name: "inbound", Method: "POST", Path: "/telephony/inbound", AnyFeatures: []TelephonyFeature{TelephonyInbound}},
+		{Name: "media", Method: "WS", Path: "/telephony/ws/{token}"},
+		{Name: "outbound", Method: "POST", Path: "/telephony/outbound", AnyFeatures: []TelephonyFeature{TelephonyOutbound}},
+		{Name: "status", Method: "POST", Path: "/telephony/status"},
+	}
+	route.RuntimeEnvironment = []TelephonyEnvironmentRule{
+		{Name: "LIVEKIT_API_KEY"},
+		{Name: "LIVEKIT_API_SECRET"},
+		{Name: "LIVEKIT_URL"},
+		{Name: "UNMUTE_OUTBOUND_TOKEN", AnyFeatures: []TelephonyFeature{TelephonyOutbound}},
+		{Name: "UNMUTE_PUBLIC_URL"},
+	}
+	// The local Compose supplies the LiveKit key pair and URL (the documented
+	// --dev pair); UNMUTE_PUBLIC_URL and UNMUTE_OUTBOUND_TOKEN are dev-supplied
+	// by `unmute dev` itself, exactly like the Pipecat route.
+	route.LocallySuppliedEnvironment = []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL"}
+	route.AutoWebhookEndpoint = "inbound"
+	route.ManualSteps = []string{
+		"get the Account SID and Auth Token from the Twilio Console account dashboard and select a Voice-capable number",
+		"for production, configure the Twilio number voice webhook as POST to the reported inbound endpoint (unmute dev --telephony sets it automatically and prints the previous value)",
+		"deploy a self-hosted LiveKit Server and set LIVEKIT_URL and the API key pair to it; the bridge and worker connect out to it, so it needs no public SIP or RTP",
+	}
+	routes[connector] = route
 	return routes
 }
 

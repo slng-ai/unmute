@@ -121,19 +121,26 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 			t.Fatalf("partial or unsupported route passed: %#v", got)
 		}
 	}
+	// The LiveKit Twilio connector is a usable route (its own open-source
+	// bridge): inbound, outbound, and hangup are provisional like the other
+	// live routes; transfers and voicemail stay gated (unsupported for now).
 	connector := TelephonyKey{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}
-	for _, feature := range []TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup), TelephonyFeature(WarmTransfer)} {
-		got := ResolveTelephonyFeature(connector, feature)
-		if got.Tag != Gated {
-			t.Fatalf("connector route-recognition-only feature %s = %#v", feature, got)
+	for _, feature := range []TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)} {
+		if got := ResolveTelephonyFeature(connector, feature); got.Tag != Provisional {
+			t.Fatalf("connector feature %s = %#v, want provisional", feature, got)
+		}
+	}
+	for _, feature := range []TelephonyFeature{TelephonyFeature(WarmTransfer), TelephonyFeature(ColdTransfer), TelephonyFeature(VoicemailDetection)} {
+		if got := ResolveTelephonyFeature(connector, feature); got.Tag != Gated {
+			t.Fatalf("connector unsupported feature %s = %#v, want gated", feature, got)
 		}
 	}
 	required, optional, ok := TelephonyEnvironment(connector)
 	if !ok || len(optional) != 0 || strings.Join(required, ",") != "account_sid,auth_token,from_number" {
 		t.Fatalf("connector environment vocabulary = required %v optional %v ok %v", required, optional, ok)
 	}
-	if route := TelephonyRoutes()[connector]; len(route.Processes) != 0 || len(route.PublicEndpoints) != 0 {
-		t.Fatalf("route-recognition-only connector advertises runtime facts: %#v", route)
+	if route := TelephonyRoutes()[connector]; len(route.Processes) != 1 || len(route.PublicEndpoints) != 4 || route.AutoWebhookEndpoint != "inbound" {
+		t.Fatalf("connector must advertise runtime facts: %#v", route)
 	}
 	required, optional, ok = TelephonyEnvironment(exact)
 	if !ok || len(optional) != 0 || strings.Join(required, ",") != "account_sid,auth_token,from_number" {

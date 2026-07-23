@@ -998,10 +998,25 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		row.Errors = add(row.Errors, "telephony plan has no route setup instructions")
 	}
 	services := make(map[string]bool, len(plan.Services))
-	allowedServices := map[string]bool{"application": true, "redis": true}
-	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {
+	// Each route has an exact service set: Pipecat and LiveKit SIP coordinate
+	// through Redis; the LiveKit connector runs the app plus a local LiveKit
+	// Server only (no Redis, no SIP bridge).
+	isLiveKitSIP := plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip"
+	isLiveKitConnector := plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "connector"
+	allowedServices := map[string]bool{"application": true}
+	requiredServices := []string{"application"}
+	switch {
+	case isLiveKitSIP:
+		allowedServices["redis"] = true
 		allowedServices["livekit_server"] = true
 		allowedServices["livekit_sip"] = true
+		requiredServices = append(requiredServices, "redis", "livekit_server", "livekit_sip")
+	case isLiveKitConnector:
+		allowedServices["livekit_server"] = true
+		requiredServices = append(requiredServices, "livekit_server")
+	default:
+		allowedServices["redis"] = true
+		requiredServices = append(requiredServices, "redis")
 	}
 	for _, service := range plan.Services {
 		if service == "" || services[service] {
@@ -1013,19 +1028,10 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		}
 		services[service] = true
 	}
-	for _, required := range []string{"application", "redis"} {
+	for _, required := range requiredServices {
 		if !services[required] {
 			row.Errors = add(row.Errors, fmt.Sprintf("telephony service %s is required", required))
 		}
-	}
-	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {
-		for _, required := range []string{"livekit_server", "livekit_sip"} {
-			if !services[required] {
-				row.Errors = add(row.Errors, fmt.Sprintf("livekit SIP service %s is required", required))
-			}
-		}
-	} else if services["livekit_server"] || services["livekit_sip"] {
-		row.Errors = add(row.Errors, "LiveKit Server and SIP services require the livekit/sip route")
 	}
 	closedReasons := map[string]bool{
 		"livekit_control_plane": true, "call_correlation": true, "callback_idempotency": true,

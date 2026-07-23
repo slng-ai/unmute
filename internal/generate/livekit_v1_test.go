@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1341,6 +1342,122 @@ func configuredLiveKitSIP(t *testing.T) (*ir.Agent, ir.Target) {
 		t.Fatal(err)
 	}
 	return agent, agent.Targets["livekit"]
+}
+
+func configuredLiveKitConnector(t *testing.T) (*ir.Agent, ir.Target) {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The connector supports no transfers yet, so drop the human transfer
+	// control and every reference to it. primary_phone already carries the
+	// Twilio account trio (account_sid, auth_token, from_number).
+	delete(pkg.Agent.Controls, "to_human")
+	for name, a := range pkg.Agent.Agents {
+		a.Tools = slices.DeleteFunc(a.Tools, func(s string) bool { return s == "to_human" })
+		pkg.Agent.Agents[name] = a
+	}
+	inbound, outbound := true, true
+	pkg.Agent.Channels["phone"] = spec.Channel{
+		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
+		RequiredControls: []string{"hangup"},
+	}
+	configured := pkg.Targets["livekit"]
+	configured.Transport, configured.Carrier, configured.Connection = "connector", "twilio", "primary_phone"
+	pkg.Targets = map[string]spec.Target{"livekit": configured}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return agent, agent.Targets["livekit"]
+}
+
+// The LiveKit Twilio connector generates its own open-source Media Streams
+// bridge (SPEC T2, V1-V4): the bridge and connector agent branch are emitted,
+// there is no SIP trunk or Redis, no LiveKit Cloud reference, and the env is
+// the Twilio account trio the same as Pipecat.
+func TestLiveKitConnectorGeneratesBridgeWithoutCloudOrSIP(t *testing.T) {
+	agent, resolved := configuredLiveKitConnector(t)
+	artifact, err := GenerateLiveKit(agent, resolved, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bridge := artifactFile(t, artifact, "telephony_bridge.py")
+	for _, want := range []string{
+		"_mulaw_selfcheck()",
+		"api.RoomAgentDispatch(agent_name=AGENT_NAME",
+		"rtc.AudioSource(SAMPLE_RATE, NUM_CHANNELS)",
+		"RequestValidator",
+		`app.router.add_post("/telephony/inbound", inbound)`,
+		`app.router.add_post("/telephony/outbound", outbound)`,
+		`app.router.add_get("/telephony/ws/{token}", media_ws)`,
+	} {
+		if !strings.Contains(bridge, want) {
+			t.Errorf("telephony_bridge.py missing %q", want)
+		}
+	}
+
+	agentPy := artifactFile(t, artifact, "agent.py")
+	if !strings.Contains(agentPy, "_livekit_call_context(ctx.room.name, metadata)") {
+		t.Error("agent.py connector branch must build context from metadata")
+	}
+	if strings.Contains(agentPy, "create_sip_participant") {
+		t.Error("connector agent.py must not create SIP participants")
+	}
+
+	// V1: no LiveKit Cloud dependency anywhere in the generated project.
+	for _, file := range artifact.Files {
+		content := string(file.Content)
+		for _, forbidden := range []string{"livekit.cloud", "ConnectTwilioCall", "connect_twilio_call", "LIVEKIT_SIP_URI"} {
+			if strings.Contains(content, forbidden) {
+				t.Errorf("%s references %q (connector must be self-hosted only)", file.Path, forbidden)
+			}
+		}
+	}
+	// No SIP trunk inputs on the connector route.
+	for _, file := range artifact.Files {
+		if strings.HasPrefix(file.Path, "sip-") {
+			t.Errorf("connector emitted a SIP input file %q", file.Path)
+		}
+	}
+
+	compose := artifactFile(t, artifact, "compose.telephony.yaml")
+	for _, want := range []string{"livekit_server:", "LIVEKIT_API_SECRET=secret", "python telephony_bridge.py"} {
+		if !strings.Contains(compose, want) {
+			t.Errorf("connector compose missing %q:\n%s", want, compose)
+		}
+	}
+	for _, forbidden := range []string{"redis", "livekit_sip", "livekit/sip:", "devsecret-local-only"} {
+		if strings.Contains(compose, forbidden) {
+			t.Errorf("connector compose contains %q", forbidden)
+		}
+	}
+
+	env := artifactFile(t, artifact, ".env.example")
+	for _, want := range []string{"TWILIO_ACCOUNT_SID=", "TWILIO_AUTH_TOKEN=", "TWILIO_PHONE_NUMBER=", "UNMUTE_PUBLIC_URL=", "UNMUTE_OUTBOUND_TOKEN="} {
+		if !strings.Contains(env, want) {
+			t.Errorf(".env.example missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"TWILIO_SIP_", "LIVEKIT_SIP_INBOUND_TRUNK", "REDIS_URL"} {
+		if strings.Contains(env, forbidden) {
+			t.Errorf(".env.example contains SIP-only %q", forbidden)
+		}
+	}
+	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, `"aiohttp"`) || !strings.Contains(pyproject, `"twilio"`) {
+		t.Errorf("pyproject missing bridge deps:\n%s", pyproject)
+	}
+
+	plan := TelephonyRuntimePlanFor(resolved)
+	services := strings.Join(plan.Services, ",")
+	if services != "application,livekit_server" {
+		t.Errorf("connector services = %q, want application,livekit_server", services)
+	}
+	if len(plan.PublicEndpoints) != 4 || plan.AutoWebhookEndpoint != "inbound" {
+		t.Errorf("connector runtime facts = %#v", plan)
+	}
 }
 
 // TestLiveKitV1PinsAndSDKLanguage covers the T7 remainders (C6/C1): plugin

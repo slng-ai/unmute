@@ -1,0 +1,295 @@
+"""Generated Twilio <-> LiveKit media bridge for {{.Project}}.
+
+This is our own open-source implementation of the Twilio Media Streams
+protocol (LiveKit's hosted Twilio Connector is Cloud only). It answers the
+Twilio webhook, opens the media WebSocket, and joins a LiveKit room as a
+participant carrying the caller's audio. The room's agent worker
+(agent.py) is dispatched by the join token and handles the conversation.
+
+Audio is G.711 mu-law at 8 kHz both ways; the LiveKit SDK resamples between
+8 kHz and the agent's rate, so the only codec work here is mu-law.
+
+# ponytail: single process, in-memory pending-call map, no Redis. Fine for one
+# bridge replica; add a shared store if you run several behind one number.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import hmac
+import json
+import logging
+import os
+import re
+import secrets
+from array import array
+
+from aiohttp import web
+from livekit import api, rtc
+from twilio.request_validator import RequestValidator
+from twilio.rest import Client
+
+logger = logging.getLogger({{pyq .Project}})
+logging.basicConfig(level=logging.INFO)
+
+CONNECTION = {{pyq .Telephony.Connection}}
+CARRIER = {{pyq .Telephony.Carrier}}
+AGENT_NAME = {{pyq .AgentName}}
+BRIDGE_PORT = int(os.getenv("UNMUTE_TELEPHONY_BRIDGE_PORT", "7860"))
+
+SAMPLE_RATE = 8000
+NUM_CHANNELS = 1
+E164 = re.compile(r"\+[1-9][0-9]{7,14}")
+
+# Pending calls keyed by the single-use, unguessable token embedded in the
+# media WebSocket URL. The signed webhook is the trust boundary; the token is
+# the capability that authorizes the matching WebSocket (popped on use).
+PENDING: dict[str, dict] = {}
+
+
+def _env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+def _public_origin() -> str:
+    value = _env("UNMUTE_PUBLIC_URL").rstrip("/")
+    if not value.startswith("https://"):
+        raise RuntimeError("UNMUTE_PUBLIC_URL must be an HTTPS origin")
+    return value
+
+
+def _https_url(path: str) -> str:
+    return _public_origin() + path
+
+
+def _wss_url(path: str) -> str:
+    return "wss://" + _public_origin()[len("https://"):] + path
+
+
+# --- mu-law (G.711) codec ---------------------------------------------------
+# Pure-Python tables: stdlib audioop was removed in Python 3.13.
+_EXP_LUT = (0, 132, 396, 924, 1980, 4092, 8316, 16764)
+_BIAS = 0x84
+_CLIP = 32635
+
+
+def _ulaw_to_linear(u: int) -> int:
+    u = ~u & 0xFF
+    sign = u & 0x80
+    exponent = (u >> 4) & 0x07
+    mantissa = u & 0x0F
+    sample = _EXP_LUT[exponent] + (mantissa << (exponent + 3))
+    return -sample if sign else sample
+
+
+def _linear_to_ulaw(sample: int) -> int:
+    sign = 0x80 if sample < 0 else 0
+    if sign:
+        sample = -sample
+    if sample > _CLIP:
+        sample = _CLIP
+    sample += _BIAS
+    segment = (sample >> 7) & 0xFF
+    exponent = max(segment.bit_length() - 1, 0)
+    mantissa = (sample >> (exponent + 3)) & 0x0F
+    return ~(sign | (exponent << 4) | mantissa) & 0xFF
+
+
+_ULAW_TO_PCM = [_ulaw_to_linear(b) for b in range(256)]
+
+
+def ulaw_to_pcm16(payload: bytes) -> bytes:
+    return array("h", (_ULAW_TO_PCM[b] for b in payload)).tobytes()
+
+
+def pcm16_to_ulaw(pcm: bytes) -> bytes:
+    samples = array("h")
+    samples.frombytes(pcm)
+    return bytes(_linear_to_ulaw(s) for s in samples)
+
+
+def _mulaw_selfcheck() -> None:
+    # A decode -> encode -> decode round-trip must preserve the linear value on
+    # every code point (SPEC V8): a broken table would silently corrupt audio,
+    # so fail loud at boot. This holds for all 256 codes including the two zero
+    # codes (0xFF is +0, 0x7F is -0; both decode to 0 and re-encode to 0xFF).
+    for b in range(256):
+        linear = _ULAW_TO_PCM[b]
+        assert _ULAW_TO_PCM[_linear_to_ulaw(linear)] == linear, f"mu-law round-trip broke at {b}"
+
+
+# --- Twilio surface ----------------------------------------------------------
+def _validator() -> RequestValidator:
+    return RequestValidator(_env({{pyq .Telephony.AuthTokenEnv}}))
+
+
+def _client() -> Client:
+    return Client(_env({{pyq .Telephony.AccountSIDEnv}}), _env({{pyq .Telephony.AuthTokenEnv}}))
+
+
+def _stream_twiml(token: str) -> str:
+    url = _wss_url(f"/telephony/ws/{token}")
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Response><Connect><Stream url="{url}"/></Connect></Response>'
+    )
+
+
+async def health(_: web.Request) -> web.Response:
+    return web.Response(text="ok")
+
+{{if .Telephony.HasInbound}}
+async def inbound(request: web.Request) -> web.Response:
+    form = dict(await request.post())
+    signature = request.headers.get("X-Twilio-Signature", "")
+    if not signature or not _validator().validate(_https_url("/telephony/inbound"), form, signature):
+        raise web.HTTPForbidden(text="invalid carrier signature")
+    token = secrets.token_urlsafe(32)
+    PENDING[token] = {
+        "direction": "inbound",
+        "from_number": form.get("From", ""),
+        "to_number": form.get("To", ""),
+        "call_start": {},
+    }
+    return web.Response(text=_stream_twiml(token), content_type="application/xml")
+{{end}}{{if .Telephony.HasOutbound}}
+async def outbound(request: web.Request) -> web.Response:
+    expected = "Bearer " + _env("UNMUTE_OUTBOUND_TOKEN")
+    if not hmac.compare_digest(request.headers.get("Authorization", ""), expected):
+        raise web.HTTPUnauthorized(text="invalid application authorization")
+    body = await request.json()
+    if not isinstance(body, dict) or set(body) - {"to", "call_start"}:
+        raise web.HTTPBadRequest(text="unknown outbound field")
+    destination = body.get("to")
+    call_start = body.get("call_start", {})
+    if not isinstance(destination, str) or not E164.fullmatch(destination) or not isinstance(call_start, dict):
+        raise web.HTTPBadRequest(text="invalid outbound request")
+    from_number = _env({{pyq .Telephony.FromNumberEnv}})
+    token = secrets.token_urlsafe(32)
+    PENDING[token] = {
+        "direction": "outbound",
+        "from_number": from_number,
+        "to_number": destination,
+        "call_start": call_start,
+    }
+    try:
+        call = await asyncio.to_thread(
+            _client().calls.create,
+            to=destination,
+            from_=from_number,
+            twiml=_stream_twiml(token),
+            status_callback=_https_url("/telephony/status"),
+            status_callback_event=["initiated", "ringing", "answered", "completed"],
+        )
+    except Exception as exc:  # surface the carrier reason, not an opaque 500
+        PENDING.pop(token, None)
+        raise web.HTTPBadGateway(text=f"Twilio rejected the outbound call: {exc}") from exc
+    return web.json_response({"call_id": call.sid, "status": "accepted"})
+{{end}}
+async def status(request: web.Request) -> web.Response:
+    form = dict(await request.post())
+    logger.info("call status %s -> %s", form.get("CallSid", ""), form.get("CallStatus", ""))
+    return web.Response(text="ok")
+
+
+# --- media bridge ------------------------------------------------------------
+def _dispatch_token(room_name: str, pending: dict, call_sid: str, stream_sid: str) -> str:
+    metadata = json.dumps({
+        "direction": pending["direction"],
+        "from_number": pending["from_number"],
+        "to_number": pending["to_number"],
+        "call_id": call_sid,
+        "stream_id": stream_sid,
+        "call_start": pending["call_start"],
+    })
+    return (
+        api.AccessToken()
+        .with_identity("twilio-bridge")
+        .with_grants(api.VideoGrants(room_join=True, room=room_name, can_publish=True, can_subscribe=True))
+        .with_room_config(
+            api.RoomConfiguration(agents=[api.RoomAgentDispatch(agent_name=AGENT_NAME, metadata=metadata)])
+        )
+        .to_jwt()
+    )
+
+
+async def media_ws(request: web.Request) -> web.WebSocketResponse:
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    pending = PENDING.pop(request.match_info["token"], None)
+    if pending is None:
+        await ws.close(code=4403, message=b"unknown or used token")
+        return ws
+
+    source = rtc.AudioSource(SAMPLE_RATE, NUM_CHANNELS)
+    track = rtc.LocalAudioTrack.create_audio_track("caller", source)
+    room = rtc.Room()
+    state: dict = {"stream_sid": None, "tasks": []}
+
+    async def forward_agent_audio(audio_track: rtc.Track) -> None:
+        stream = rtc.AudioStream(audio_track, sample_rate=SAMPLE_RATE, num_channels=NUM_CHANNELS)
+        async for event in stream:
+            if ws.closed or state["stream_sid"] is None:
+                continue
+            payload = base64.b64encode(pcm16_to_ulaw(bytes(event.frame.data))).decode("ascii")
+            await ws.send_json({"event": "media", "streamSid": state["stream_sid"], "media": {"payload": payload}})
+
+    @room.on("track_subscribed")
+    def _on_track(track_: rtc.Track, *_args) -> None:
+        if track_.kind == rtc.TrackKind.KIND_AUDIO:
+            state["tasks"].append(asyncio.create_task(forward_agent_audio(track_)))
+
+    connected = False
+    try:
+        async for message in ws:
+            if message.type != web.WSMsgType.TEXT:
+                continue
+            data = json.loads(message.data)
+            event = data.get("event")
+            if event == "start":
+                start = data.get("start", {})
+                state["stream_sid"] = start.get("streamSid") or data.get("streamSid")
+                call_sid = start.get("callSid", state["stream_sid"])
+                room_name = f"call-{call_sid}"
+                token = _dispatch_token(room_name, pending, call_sid, state["stream_sid"])
+                await room.connect(_env("LIVEKIT_URL"), token)
+                await room.local_participant.publish_track(
+                    track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
+                )
+                connected = True
+            elif event == "media" and connected:
+                pcm = ulaw_to_pcm16(base64.b64decode(data["media"]["payload"]))
+                await source.capture_frame(
+                    rtc.AudioFrame(data=pcm, sample_rate=SAMPLE_RATE, num_channels=NUM_CHANNELS, samples_per_channel=len(pcm) // 2)
+                )
+            elif event == "stop":
+                break
+    finally:
+        for task in state["tasks"]:
+            task.cancel()
+        if connected:
+            await room.disconnect()
+    return ws
+
+
+def build_app() -> web.Application:
+    app = web.Application()
+    app.router.add_get("/", health)
+{{- if .Telephony.HasInbound}}
+    app.router.add_post("/telephony/inbound", inbound)
+{{- end}}
+{{- if .Telephony.HasOutbound}}
+    app.router.add_post("/telephony/outbound", outbound)
+{{- end}}
+    app.router.add_post("/telephony/status", status)
+    app.router.add_get("/telephony/ws/{token}", media_ws)
+    return app
+
+
+if __name__ == "__main__":
+    _mulaw_selfcheck()
+    web.run_app(build_app(), host="0.0.0.0", port=BRIDGE_PORT)
