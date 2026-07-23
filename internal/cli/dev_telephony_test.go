@@ -3,6 +3,10 @@ package cli
 import (
 	"bytes"
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,6 +70,40 @@ func pipecatTwilioPlan() *generate.TelephonyRuntimePlan {
 		Evidence:     []ir.TelephonyFeatureEvidence{{Feature: "inbound", Tag: "core"}},
 		Services:     []string{"application", "redis"},
 		Coordination: "shared",
+	}
+}
+
+// pipecatTwilioOutboundPlan is the inbound plan plus the outbound feature,
+// endpoint, and the UNMUTE_OUTBOUND_TOKEN the CLI must supply itself.
+func pipecatTwilioOutboundPlan() *generate.TelephonyRuntimePlan {
+	plan := pipecatTwilioPlan()
+	plan.PublicEndpoints = append(plan.PublicEndpoints, generate.TelephonyEndpoint{Name: "outbound", Method: "POST", Path: "/telephony/outbound"})
+	plan.RequiredEnv = append(plan.RequiredEnv, "UNMUTE_OUTBOUND_TOKEN")
+	plan.Evidence = append(plan.Evidence, ir.TelephonyFeatureEvidence{Feature: "outbound", Tag: "core"})
+	return plan
+}
+
+// livekitConnectorPlan is the LiveKit Twilio connector shape: the Twilio
+// account trio like Pipecat, the LiveKit dev pair supplied locally, and the
+// HTTP dial-out token the CLI mints. No Redis, no SIP trunks.
+func livekitConnectorPlan() *generate.TelephonyRuntimePlan {
+	return &generate.TelephonyRuntimePlan{
+		Route: ir.TelephonyKey{Provider: ir.ProviderLiveKit, Transport: "connector", Carrier: "twilio"},
+		PublicEndpoints: []generate.TelephonyEndpoint{
+			{Name: "inbound", Method: "POST", Path: "/telephony/inbound"},
+			{Name: "media", Method: "WS", Path: "/telephony/ws/{token}"},
+			{Name: "outbound", Method: "POST", Path: "/telephony/outbound"},
+		},
+		RequiredEnv: []string{
+			"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER",
+			"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
+			"UNMUTE_PUBLIC_URL", "UNMUTE_OUTBOUND_TOKEN",
+		},
+		LocalEnvironment: []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"},
+		Environment:      map[string]string{"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN", "from_number": "TWILIO_PHONE_NUMBER"},
+		Evidence:         []ir.TelephonyFeatureEvidence{{Feature: "inbound", Tag: "provisional"}, {Feature: "outbound", Tag: "provisional"}},
+		Services:         []string{"application", "livekit_server"},
+		Coordination:     "shared",
 	}
 }
 
@@ -226,5 +264,261 @@ func TestComposeExecutorRunsInfraServicesThenHookThenFullGraph(t *testing.T) {
 	full := lines[1]
 	if !strings.HasSuffix(strings.Split(full, " | ")[0], "--wait") || !strings.Contains(full, "TRUNKS=ST_in/ST_out") {
 		t.Fatalf("full up did not carry hook-extended env: %q", full)
+	}
+}
+
+// Regression: a relative package dir must still let Compose find its file.
+// Compose runs with its working directory set to the build dir, so a --file
+// path relative to the process cwd doubles the prefix and vanishes. The fake
+// docker resolves --file from its own cwd and fails if it is not there.
+func TestExecDevTelephonyRelativeRootLocatesComposeFile(t *testing.T) {
+	parent := t.TempDir()
+	t.Chdir(parent)
+	if err := os.MkdirAll("pkg", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	trace := filepath.Join(parent, "trace.log")
+	if err := os.WriteFile(filepath.Join("pkg", ".env"),
+		[]byte("TRACE_FILE="+trace+"\nTWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// composeArgs puts the compose file at arg 3 (compose --file <file> ...).
+	// From the command's working dir, that file must exist.
+	script := filepath.Join(parent, "docker")
+	body := "#!/bin/sh\nif [ \"$2\" = \"--file\" ] && [ ! -f \"$3\" ]; then printf 'FILE_MISSING:%s\\n' \"$3\" >> \"$TRACE_FILE\"; exit 1; fi\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restoreCmd, restorePreflight := composeCommand, composePreflight
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, script, args...)
+	}
+	composePreflight = func(context.Context, []string) error { return nil }
+	t.Cleanup(func() { composeCommand, composePreflight = restoreCmd, restorePreflight })
+
+	cloudflared := filepath.Join(parent, "cloudflared")
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreLook := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
+	t.Cleanup(func() { tunnelLookPath = restoreLook })
+
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, "pkg", "phone", pipecatTwilioPlan(), composeFiles, devTelephonyOptions{botPort: "7862"}); err != nil {
+		t.Fatalf("execDevTelephony with relative root: %v\n%s", err, out.String())
+	}
+	if raw, err := os.ReadFile(trace); err == nil && strings.Contains(string(raw), "FILE_MISSING") {
+		t.Fatalf("compose could not locate its file from the build dir:\n%s", raw)
+	}
+}
+
+// T2/V4: an outbound-capable target gets UNMUTE_OUTBOUND_TOKEN from the CLI,
+// not from .env (which lacks it), and the token is injected into the container
+// env yet never printed to the user.
+func TestExecDevTelephonyOutboundSuppliesTokenWithoutEnvOrPrint(t *testing.T) {
+	root, trace := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	script := filepath.Join(root, "docker")
+	body := "#!/bin/sh\nprintf '%s | OUTBOUND=[%s]\\n' \"$*\" \"$UNMUTE_OUTBOUND_TOKEN\" >> \"$TRACE_FILE\"\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restoreCmd, restorePreflight := composeCommand, composePreflight
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, script, args...)
+	}
+	composePreflight = func(context.Context, []string) error { return nil }
+	t.Cleanup(func() { composeCommand, composePreflight = restoreCmd, restorePreflight })
+
+	cloudflared := filepath.Join(root, "cloudflared")
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreLook := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
+	t.Cleanup(func() { tunnelLookPath = restoreLook })
+
+	cmd, out := telephonyTestCommand(t)
+	// The .env has no UNMUTE_OUTBOUND_TOKEN; a clean run proves the CLI supplied it.
+	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioOutboundPlan(), composeFiles, devTelephonyOptions{botPort: "7861"}); err != nil {
+		t.Fatalf("execDevTelephony (outbound): %v\n%s", err, out.String())
+	}
+	raw, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "OUTBOUND=[]") {
+		t.Fatalf("UNMUTE_OUTBOUND_TOKEN was not injected into the container env:\n%s", raw)
+	}
+	if strings.Contains(out.String(), "OUTBOUND_TOKEN") {
+		t.Fatalf("the outbound token must never be printed:\n%s", out.String())
+	}
+}
+
+// V5: the LiveKit connector run mints and injects UNMUTE_OUTBOUND_TOKEN (its
+// runtime lists it) and demands only the Twilio account trio from .env, exactly
+// like the Pipecat route. LIVEKIT_URL and the key pair are supplied locally.
+func TestExecDevTelephonyConnectorSuppliesTokenAndTwilioEnvOnly(t *testing.T) {
+	root, trace := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	script := filepath.Join(root, "docker")
+	body := "#!/bin/sh\nprintf '%s | OUTBOUND=[%s]\\n' \"$*\" \"$UNMUTE_OUTBOUND_TOKEN\" >> \"$TRACE_FILE\"\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restoreCmd, restorePreflight := composeCommand, composePreflight
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, script, args...)
+	}
+	composePreflight = func(context.Context, []string) error { return nil }
+	t.Cleanup(func() { composeCommand, composePreflight = restoreCmd, restorePreflight })
+
+	cloudflared := filepath.Join(root, "cloudflared")
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreLook := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
+	t.Cleanup(func() { tunnelLookPath = restoreLook })
+
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, root, "phone", livekitConnectorPlan(), composeFiles, devTelephonyOptions{botPort: "7862"}); err != nil {
+		t.Fatalf("execDevTelephony (connector): %v\n%s", err, out.String())
+	}
+	raw, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "OUTBOUND=[]") {
+		t.Fatalf("connector run did not inject UNMUTE_OUTBOUND_TOKEN:\n%s", raw)
+	}
+	if strings.Contains(out.String(), "OUTBOUND_TOKEN") {
+		t.Fatalf("the outbound token must never be printed:\n%s", out.String())
+	}
+}
+
+// V5: a LiveKit SIP run injects no UNMUTE_OUTBOUND_TOKEN — SIP dials out by
+// agent dispatch, so the token would be a dead injection.
+func TestExecDevTelephonySIPInjectsNoOutboundToken(t *testing.T) {
+	newFakeSIPAdmin(t)
+	root, trace := fakeTelephonyRoot(t, strings.Join(sipTestEnv(), "\n"))
+	script := filepath.Join(root, "docker")
+	body := "#!/bin/sh\nprintf '%s | OUTBOUND=[%s]\\n' \"$*\" \"$UNMUTE_OUTBOUND_TOKEN\" >> \"$TRACE_FILE\"\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restoreCmd, restorePreflight := composeCommand, composePreflight
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, script, args...)
+	}
+	composePreflight = func(context.Context, []string) error { return nil }
+	t.Cleanup(func() { composeCommand, composePreflight = restoreCmd, restorePreflight })
+
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, root, "phone", livekitSIPPlan(), composeFiles, devTelephonyOptions{botPort: "8081"}); err != nil {
+		t.Fatalf("execDevTelephony (sip): %v\n%s", err, out.String())
+	}
+	raw, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "OUTBOUND=[]") {
+		t.Fatalf("SIP run injected an outbound token it never uses:\n%s", raw)
+	}
+}
+
+// T4/V5: with --to, the CLI POSTs the Bearer-authed dial-out trigger to the
+// container's published bot port over loopback once the graph is healthy, and
+// prints the returned call id.
+func TestExecDevTelephonyPlacesOutboundCallAfterReady(t *testing.T) {
+	var gotAuth, gotBody, gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		_, _ = w.Write([]byte(`{"session_id":"s","call_id":"CA-test","status":"accepted"}`))
+	}))
+	t.Cleanup(server.Close)
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	fakeDocker(t, root)
+	cloudflared := filepath.Join(root, "cloudflared")
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreLook := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
+	t.Cleanup(func() { tunnelLookPath = restoreLook })
+
+	cmd, out := telephonyTestCommand(t)
+	opts := devTelephonyOptions{botPort: parsed.Port(), to: "+15559998888"}
+	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioOutboundPlan(), composeFiles, opts); err != nil {
+		t.Fatalf("execDevTelephony (outbound --to): %v\n%s", err, out.String())
+	}
+	if gotPath != "/telephony/outbound" {
+		t.Fatalf("dial-out POST path = %q", gotPath)
+	}
+	if !strings.HasPrefix(gotAuth, "Bearer ") || len(gotAuth) <= len("Bearer ") {
+		t.Fatalf("dial-out trigger missing Bearer token: %q", gotAuth)
+	}
+	if !strings.Contains(gotBody, `"to":"+15559998888"`) {
+		t.Fatalf("dial-out body = %q", gotBody)
+	}
+	if !strings.Contains(out.String(), "CA-test") {
+		t.Fatalf("call id not printed:\n%s", out.String())
+	}
+}
+
+// T5/V6: an outbound-capable target run without --to prints a dial-out hint and
+// places no call.
+func TestExecDevTelephonyOutboundWithoutToHintsAndPlacesNothing(t *testing.T) {
+	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	fakeDocker(t, root)
+	cloudflared := filepath.Join(root, "cloudflared")
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreLook := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
+	t.Cleanup(func() { tunnelLookPath = restoreLook })
+
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioOutboundPlan(), composeFiles, devTelephonyOptions{botPort: "7861"}); err != nil {
+		t.Fatalf("outbound without --to: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "dial-out ready") {
+		t.Fatalf("outbound-capable target without --to should hint at dial-out:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "calling ") {
+		t.Fatalf("no call must be placed without --to:\n%s", out.String())
+	}
+}
+
+// T5/V7: an inbound-only target prints its dial-in number and no dial-out text.
+func TestExecDevTelephonyInboundOnlyHasNoDialOutText(t *testing.T) {
+	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	fakeDocker(t, root)
+	cloudflared := filepath.Join(root, "cloudflared")
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreLook := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
+	t.Cleanup(func() { tunnelLookPath = restoreLook })
+
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioPlan(), composeFiles, devTelephonyOptions{botPort: "7861"}); err != nil {
+		t.Fatalf("inbound-only: %v\n%s", err, out.String())
+	}
+	if strings.Contains(out.String(), "dial-out") {
+		t.Fatalf("inbound-only target must not mention dial-out:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "call +15550001111") {
+		t.Fatalf("inbound-only target should print its dial-in number:\n%s", out.String())
 	}
 }

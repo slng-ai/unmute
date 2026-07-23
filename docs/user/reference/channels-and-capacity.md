@@ -31,12 +31,14 @@ Required: yes, on a telephony channel. Values: bool. Default: none.
 | Route | What happens | Tag |
 |---|---|---|
 | LiveKit SIP with Twilio, Telnyx, or Plivo | Inbound and outbound paths are emitted offline; the exact route remains provisional | provisional |
-| LiveKit Twilio Connector | No adapter is emitted | gated |
-| Pipecat carrier WebSocket with Twilio, Telnyx, or Plivo | Inbound and outbound paths are emitted offline; outbound remains blocked until voicemail handling is emitted | provisional/gated |
+| LiveKit Twilio Connector | Inbound and outbound paths are emitted offline; the exact route remains provisional | provisional |
+| Pipecat carrier WebSocket with Twilio, Telnyx, or Plivo | Inbound and outbound paths are emitted offline; the exact route remains provisional | provisional |
 | Pipecat or LiveKit with Exotel | No route is emitted | gated |
 
-`outbound: true` requires `on_voicemail` and that all `source: call_start`
-variables are satisfiable. Support is resolved against the exact route; see the
+`outbound: true` needs all `source: call_start` variables to be satisfiable.
+Voicemail handling is optional (see `on_voicemail` below), so an outbound
+Pipecat carrier-WebSocket agent no longer has to set it. Support is resolved
+against the exact route; see the
 [phone-call route matrix](../learn/07-phone-calls.md#choose-a-supported-carrier-route).
 
 ### required_controls
@@ -49,12 +51,15 @@ Required: no. Values: a list from `cold_transfer, warm_transfer, dtmf_send, dtmf
 
 What to do when a machine answers an outbound call.
 
-Required: conditional (iff `outbound: true`). Values: `hangup | leave_message`. Default: none.
+Required: no. Optional on any outbound channel, and only valid on a route that
+can detect voicemail. Setting it on Pipecat is an error, because the Pipecat
+driver does not emit voicemail handling. Values: `hangup | leave_message`.
+Default: none (outbound proceeds without voicemail detection).
 
 | Route | What happens | Tag |
 |---|---|---|
 | LiveKit SIP with Twilio, Telnyx, or Plivo | Both values are emitted through LiveKit answering-machine detection; each route remains provisional | provisional |
-| LiveKit Twilio Connector | No adapter is emitted | gated |
+| LiveKit Twilio Connector | Voicemail handling is not emitted; use the LiveKit SIP route | gated |
 | Pipecat carrier WebSocket with Twilio, Telnyx, or Plivo | Voicemail handling is not emitted | gated |
 | Pipecat or LiveKit with Exotel | No route is emitted | gated |
 

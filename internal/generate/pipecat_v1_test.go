@@ -935,6 +935,8 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		`status_callback_event=["initiated", "ringing", "answered", "completed"]`,
 		`await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))`,
 		`destination, call_start = await _outbound_request(request)`,
+		`except TwilioRestException as exc:`,
+		`Twilio rejected the outbound call:`,
 		`await handle_media(websocket, token, _validate_websocket)`,
 	} {
 		if !strings.Contains(adapter, want) {
@@ -965,7 +967,7 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		`if STATE.draining:`,
 		`await websocket.close(code=1013)`,
 		`"campaign_id": "string"`,
-		`CALL_START_REQUIRED = {`,
+		`CALL_START_REQUIRED = frozenset((`,
 	} {
 		if !strings.Contains(shared, want) {
 			t.Errorf("telephony_shared.py missing %q", want)
@@ -1536,6 +1538,75 @@ func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
 	call := strings.Index(block, "await activate_entry()")
 	if gate == -1 || call == -1 || gate > call {
 		t.Errorf("on_client_connected must await pipeline_started before activate_entry (gate=%d, call=%d)", gate, call)
+	}
+}
+
+// A carrier-websocket telephony build (Twilio/Telnyx/Plivo) has no RTVI client:
+// the carrier opens a raw media WebSocket, so the bot must activate and greet
+// from the transport's on_client_connected event. Gating on RTVI on_client_ready
+// (as the web client does) leaves a phone caller in silence — the greeting never
+// fires. Verified against the Pipecat Twilio dial-in docs.
+func TestPipecatCarrierWebsocketGreetsOnClientConnected(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enablePackageTelephony(pkg)
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = "twilio"
+	configured.Connection = "primary_phone"
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
+
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	if !strings.Contains(bot, `@transport.event_handler("on_client_connected")`) {
+		t.Error("carrier-websocket bot must greet from on_client_connected (a phone call has no RTVI client)")
+	}
+	if strings.Contains(bot, `@main.rtvi.event_handler("on_client_ready")`) {
+		t.Error("carrier-websocket bot must not wait for RTVI on_client_ready; a Twilio media stream never sends it")
+	}
+}
+
+// TestV8_OutboundEmptyCallStartRendersSet (SPEC V8, B1): with no required
+// call_start variables, CALL_START_REQUIRED must still be a set. An empty `{}`
+// is a dict, so `CALL_START_REQUIRED - set(call_start)` in the dial-out handler
+// would raise TypeError and 500 the outbound call.
+func TestV8_OutboundEmptyCallStartRendersSet(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enablePackageTelephony(pkg)
+	configured := pkg.Targets["pipecat"]
+	configured.Transport, configured.Carrier, configured.Connection = "carrier-websocket", "twilio", "primary_phone"
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
+	outbound := true
+	phone := pkg.Agent.Channels["phone"]
+	phone.Outbound = &outbound
+	pkg.Agent.Channels["phone"] = phone
+
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := artifactFile(t, artifact, "telephony_shared.py")
+	if !strings.Contains(shared, "CALL_START_REQUIRED = frozenset((") {
+		t.Errorf("CALL_START_REQUIRED must be a set even when empty:\n%s", shared)
+	}
+	if strings.Contains(shared, "CALL_START_REQUIRED = {") {
+		t.Error("CALL_START_REQUIRED must not render as a dict literal ({} is a dict, breaks set difference)")
 	}
 }
 

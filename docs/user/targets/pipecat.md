@@ -54,9 +54,10 @@ pipeline and its tools are plain functions on the LLM context, so the generated
 | `.env.example` | The exact environment variables this spec needs, ready to copy to `.env`. |
 | `compile-report.json` | A machine-readable record of what was compiled: target, version, agents, required env, and any warnings. |
 
-That command works for non-telephony Pipecat targets. Telephony targets are
-currently provisional or gated, so public validation stops before any of their
-offline-tested files, including `compose.telephony.yaml`, are written.
+That command works for telephony and non-telephony Pipecat targets alike.
+Provisional telephony routes compile and write their files, including
+`compose.telephony.yaml`, cleanly and with no warning. Only the gated no-adapter
+route (Exotel) stops validation, because there is nothing to generate for it.
 
 The output folder is rewritten from scratch on every compile, so never edit it by hand. `bot.py` carries only the imports and code your spec actually exercises: no tools means no HTTP client import, no tasks means no task machinery. The emitted pipeline stays clean.
 
@@ -147,15 +148,16 @@ the Twilio Connection; `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`,
 `PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN`, and `PLIVO_PHONE_NUMBER` for Plivo. The
 Connection stores these names, while `.env` stores their values.
 
-Every generated row still fails public validation until its credentialed route
-smoke passes. The adapters contain inbound, outbound, hangup, and cold-transfer
-paths. Voicemail handling and warm transfer remain gated, so outbound cannot
-validate yet because every outbound channel must declare a voicemail policy.
+Every generated row runs now and is tagged provisional: validation and
+compilation emit it cleanly, with no warning. The adapters contain inbound,
+outbound, hangup, and cold-transfer paths. Voicemail handling and warm transfer
+remain gated, so an outbound channel still fails validation, because every
+outbound channel must declare a voicemail policy.
 
 To configure several carriers, declare several Pipecat target instances, such
 as `pipecat_twilio` and `pipecat_telnyx`, and bind each to its own Connection.
-After promotion, each will compile to a separate project; today each fails
-closed independently. See
+Each compiles to a separate project, and each provisional route runs cleanly,
+with no warning. See
 [phone calls](../learn/07-phone-calls.md#configure-multiple-carriers) for a full
 Pipecat and LiveKit example.
 
@@ -262,14 +264,12 @@ directory's `.env`, then apply package-root `.env` overrides. Browser logs go
 to `build/<target>/dev.log`; add `--verbose` to follow the container logs.
 Console mode streams directly to the terminal.
 
-The telephony command is the intended promoted-route interface. Today it fails
-with the route's credentialed-smoke diagnostic before checking a public URL,
-carrier credentials, or Docker, and it emits no Compose file. Once that exact
-carrier route is promoted, the command will build and run the emitted Docker
-Compose graph, wait for the Pipecat application and Redis health checks, and
-pass `--bot-port` to Compose as `UNMUTE_TELEPHONY_PORT`. Redis will store only
-bounded telephony control records; audio, transcripts, prompts, task state,
-and worker handoffs stay in the active process.
+The telephony command runs the provisional route now, cleanly and with no
+warning. It builds and runs the emitted Docker Compose graph, waits for the
+Pipecat application and Redis health checks, and passes `--bot-port` to Compose
+as `UNMUTE_TELEPHONY_PORT`. Redis stores only bounded telephony control records;
+audio, transcripts, prompts, task state, and worker handoffs stay in the active
+process.
 
 Public ingress is managed for you: without `--public-url`, the command runs a
 cloudflared quick tunnel as a child process (install it once; macOS:
@@ -287,8 +287,9 @@ unmute compile acme --target pipecat
 ```
 
 For a non-telephony target, `acme/build/pipecat/README.md` shows the quickstart
-the project supports directly. A telephony target does not create that
-directory until its route is promoted.
+the project supports directly. A telephony target compiles to the same
+directory, but you run it through `unmute dev --telephony` rather than the
+`uv run bot.py` quickstart below.
 
 ```sh
 cp .env.example .env    # fill in your keys

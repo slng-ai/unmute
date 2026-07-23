@@ -1,13 +1,19 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -16,11 +22,34 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// randomOutboundToken mints the dev-only shared secret the CLI and the
+// container's dial-out endpoint use to authenticate a local outbound trigger.
+func randomOutboundToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
 // devTelephonyOptions carries the dev command flags into the post-gate core.
 type devTelephonyOptions struct {
 	publicValue string
 	botPort     string
+	to          string // --to: E.164 to dial once the outbound-capable graph is healthy
 	verbose     bool
+}
+
+// e164Pattern matches an E.164 number, the same shape the generated
+// _valid_destination accepts (leading +, no leading zero, 8-15 digits).
+var e164Pattern = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
+
+// validateDialTarget rejects a --to value that is not a bare E.164 number.
+func validateDialTarget(number string) error {
+	if !e164Pattern.MatchString(number) {
+		return fmt.Errorf("dev: --to must be an E.164 number like +15551234567, got %q", number)
+	}
+	return nil
 }
 
 // execDevTelephony runs everything after the fail-closed gate: env checks,
@@ -43,6 +72,23 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 	if opts.publicValue != "" || len(plan.PublicEndpoints) > 0 {
 		required = slices.DeleteFunc(required, func(name string) bool { return name == "UNMUTE_PUBLIC_URL" })
 	}
+	// UNMUTE_OUTBOUND_TOKEN is a dev-supplied secret for the HTTP dial-out routes
+	// (Pipecat carrier-websocket and the LiveKit connector): the CLI mints it,
+	// injects it so the container's dial-out endpoint can authenticate the
+	// trigger and pass readiness, and reuses it to place the call. It is never
+	// demanded from .env and never printed. Mint it exactly when the route's
+	// runtime lists it (SPEC V5): LiveKit SIP dials out by agent dispatch and
+	// needs no token, so it must not receive a dead injection.
+	outboundToken := ""
+	if slices.Contains(plan.RequiredEnv, "UNMUTE_OUTBOUND_TOKEN") {
+		token, err := randomOutboundToken()
+		if err != nil {
+			return fmt.Errorf("mint outbound token: %w", err)
+		}
+		outboundToken = token
+		childEnv = setChildEnv(childEnv, "UNMUTE_OUTBOUND_TOKEN", outboundToken)
+		required = slices.DeleteFunc(required, func(name string) bool { return name == "UNMUTE_OUTBOUND_TOKEN" })
+	}
 	if missing := missingEnvironment(required, childEnv); len(missing) > 0 {
 		return fmt.Errorf("missing telephony credentials/configuration: %s; see TELEPHONY.md#credentials for where to obtain them", strings.Join(missing, ", "))
 	}
@@ -57,6 +103,13 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 	composePath := filepath.Join(outDir, "compose.telephony.yaml")
 	if _, err := os.Stat(composePath); err != nil {
 		return fmt.Errorf("generated telephony Compose file: %w", err)
+	}
+	// Compose runs with its working directory set to the build dir, so the
+	// --file path must be absolute: a path relative to the process cwd doubles
+	// the build-dir prefix and vanishes when root is a relative package dir.
+	composePath, err := filepath.Abs(composePath)
+	if err != nil {
+		return fmt.Errorf("resolve telephony Compose path: %w", err)
 	}
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -99,7 +152,7 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 	printDevTelephonyEndpoints(cmd.OutOrStdout(), targetName, plan, public)
 
 	run := telephonyComposeRun{
-		dir: outDir, file: composePath, project: composeProjectName(root, targetName),
+		dir: filepath.Dir(composePath), file: composePath, project: composeProjectName(root, targetName),
 		env: childEnv, output: processOut,
 		stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr(), logPath: logPath,
 	}
@@ -129,9 +182,55 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 			}
 		}
 		printDevCallLine(cmd.OutOrStdout(), plan, childEnv)
+		// Outbound-capable route: --to places one call now that the graph is
+		// healthy; without --to, print how to place one and do nothing (T5).
+		// The direction guard in runDevTelephony ensures opts.to is only set for
+		// an outbound-capable plan. Placement differs by route: LiveKit SIP has
+		// no HTTP dial-out endpoint, so it dispatches the agent on the local
+		// server; carrier-websocket and the connector POST to the bot's own
+		// /telephony/outbound (I.trigger, I.sipdial).
+		if planHasTelephonyFeature(plan, "outbound") {
+			if opts.to != "" {
+				if plan.Route.Transport == "sip" {
+					if err := placeLiveKitDispatch(ctx, cmd.OutOrStdout(), targetName, opts.to, childEnv); err != nil {
+						return err
+					}
+				} else if err := placeOutboundCall(ctx, cmd.OutOrStdout(), targetName, opts.botPort, outboundToken, opts.to); err != nil {
+					return err
+				}
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s: dial-out ready; re-run with --to <E.164> to place a call\n", targetName)
+			}
+		}
 		return nil
 	}
 	return runTelephonyCompose(ctx, run)
+}
+
+// placeOutboundCall triggers the container's dial-out endpoint over loopback
+// (SPEC I.trigger): the CLI, not the tunnel, reaches the published bot port,
+// and the returned call id is printed. The Bearer token is the dev secret from
+// randomOutboundToken; it is sent, never printed.
+func placeOutboundCall(ctx context.Context, out io.Writer, targetName, botPort, token, to string) error {
+	body, err := json.Marshal(map[string]string{"to": to})
+	if err != nil {
+		return err
+	}
+	endpoint := fmt.Sprintf("http://127.0.0.1:%s/telephony/outbound", botPort)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Content-Type", "application/json")
+	var result struct {
+		CallID string `json:"call_id"`
+	}
+	if err := doTelephonyJSON(request, &result); err != nil {
+		return fmt.Errorf("place outbound call to %s: %w", to, err)
+	}
+	fmt.Fprintf(out, "\n  \033[1;32m▸\033[0m calling %s  (call %s)  ·  ctrl-c to stop\n\n", to, result.CallID)
+	return nil
 }
 
 // printDevCallLine prints the number to dial once an inbound route is live.

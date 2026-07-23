@@ -925,9 +925,10 @@ func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider
 		if channel.Outbound == nil || !*channel.Outbound {
 			continue
 		}
-		if channel.OnVoicemail == "" {
-			row.Errors = add(row.Errors, "outbound telephony requires on_voicemail")
-		}
+		// Voicemail handling is optional for outbound (T1): the carrier-websocket
+		// dial-out flow never requires it. on_voicemail stays route-gated below
+		// and in the resolved plan's evidence, so a route that cannot detect
+		// voicemail (Pipecat) still errors when on_voicemail is explicitly set.
 		if resolved.Telephony == nil {
 			for name, variable := range agent.Variables {
 				if variable.Source == VariableSourceCallStart && variable.Default == nil {
@@ -997,10 +998,25 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		row.Errors = add(row.Errors, "telephony plan has no route setup instructions")
 	}
 	services := make(map[string]bool, len(plan.Services))
-	allowedServices := map[string]bool{"application": true, "redis": true}
-	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {
+	// Each route has an exact service set: Pipecat and LiveKit SIP coordinate
+	// through Redis; the LiveKit connector runs the app plus a local LiveKit
+	// Server only (no Redis, no SIP bridge).
+	isLiveKitSIP := plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip"
+	isLiveKitConnector := plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "connector"
+	allowedServices := map[string]bool{"application": true}
+	requiredServices := []string{"application"}
+	switch {
+	case isLiveKitSIP:
+		allowedServices["redis"] = true
 		allowedServices["livekit_server"] = true
 		allowedServices["livekit_sip"] = true
+		requiredServices = append(requiredServices, "redis", "livekit_server", "livekit_sip")
+	case isLiveKitConnector:
+		allowedServices["livekit_server"] = true
+		requiredServices = append(requiredServices, "livekit_server")
+	default:
+		allowedServices["redis"] = true
+		requiredServices = append(requiredServices, "redis")
 	}
 	for _, service := range plan.Services {
 		if service == "" || services[service] {
@@ -1012,19 +1028,10 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		}
 		services[service] = true
 	}
-	for _, required := range []string{"application", "redis"} {
+	for _, required := range requiredServices {
 		if !services[required] {
 			row.Errors = add(row.Errors, fmt.Sprintf("telephony service %s is required", required))
 		}
-	}
-	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {
-		for _, required := range []string{"livekit_server", "livekit_sip"} {
-			if !services[required] {
-				row.Errors = add(row.Errors, fmt.Sprintf("livekit SIP service %s is required", required))
-			}
-		}
-	} else if services["livekit_server"] || services["livekit_sip"] {
-		row.Errors = add(row.Errors, "LiveKit Server and SIP services require the livekit/sip route")
 	}
 	closedReasons := map[string]bool{
 		"livekit_control_plane": true, "call_correlation": true, "callback_idempotency": true,
@@ -1088,7 +1095,12 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 			}
 		case targetcap.Warn:
 			row.Warnings = add(row.Warnings, evidence.Note)
-		case targetcap.Gated, targetcap.Provisional:
+		case targetcap.Provisional:
+			// A provisional route has a real adapter but no automated end-to-end
+			// test yet. It is usable and validates silently; the provisional
+			// status stays in compile-report.json for the team to track and
+			// promote. Only Gated (no adapter exists) is a hard error.
+		case targetcap.Gated:
 			row.Errors = add(row.Errors, fmt.Sprintf("telephony %s: %s", evidence.Feature, evidence.Note))
 		default:
 			row.Errors = add(row.Errors, fmt.Sprintf("telephony feature %s has no capability tag", evidence.Feature))

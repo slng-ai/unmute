@@ -886,6 +886,15 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 			{Name: "livekit_control_plane", Consumers: []string{"livekit_server", "livekit_sip"}},
 		}
 	}
+	if resolved.Provider == ProviderLiveKit && resolved.Transport == "connector" {
+		// The bridge and worker share a room on a local LiveKit Server. No SIP
+		// bridge and no Redis: the bridge keeps its own in-process call state.
+		admissionOwner = "livekit_dispatch"
+		services = []string{"application", "livekit_server"}
+		reasons = []TelephonyCoordinationReason{
+			{Name: "livekit_control_plane", Consumers: []string{"livekit_server"}},
+		}
+	}
 	slices.Sort(services)
 	slices.SortFunc(reasons, func(a, b TelephonyCoordinationReason) int { return strings.Compare(a.Name, b.Name) })
 	return &TelephonyPlan{

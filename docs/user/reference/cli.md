@@ -74,7 +74,7 @@ Compiling a Vapi or Deepgram instance fails with `<provider> driver is not imple
 ## dev
 
 ```sh
-unmute dev <agent-dir> [--target <name>] [--console | --telephony [--public-url <https-url>]] [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
+unmute dev <agent-dir> [--target <name>] [--console | --telephony [--public-url <https-url>] [--to <e164>]] [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
 ```
 
 The fastest loop for a **Pipecat or LiveKit** instance: compiles the selected target to `build/<name>/`, runs it locally, and lets you talk to the agent — in the browser (default) or in your terminal (`--console`). Whatever you build, you can speak to.
@@ -108,43 +108,68 @@ Docker Desktop or Docker Engine plus the Compose plugin, and points you at
   through LiveKit Inference, such as a think model with `provider: livekit` or
   the cloud `turn-detector`. The preflight tells you which.
 
-**Telephony (`--telephony`).** All current routes are provisional or gated, so
-validation and generation fail before a Compose file is written, a public URL
-or credentials are checked, or Docker is invoked. The diagnostic names the
-exact route and its missing credentialed smoke. There is no direct-Compose
-escape hatch through the public CLI today.
+**Telephony (`--telephony`).** Real phone calls, through the generated
+`compose.telephony.yaml`. A route with a real adapter (every Pipecat carrier
+WebSocket route, the LiveKit Twilio connector, and every LiveKit SIP route) just
+runs: validation, compilation, and `dev --telephony` start it with no warning
+and no verification error. Only a **gated** route with no adapter at all
+(Exotel) still fails closed, because there is nothing to run. Test the behavior
+you depend on yourself before production.
 
-After an exact route is promoted, telephony mode will always run the generated
-`compose.telephony.yaml`; there is no host-process fallback or infrastructure
-flag. Every route will build the generated application and version-pinned
-Redis. LiveKit SIP will additionally start version-pinned LiveKit Server and
-LiveKit SIP, then create or reuse the local inbound trunk, outbound trunk,
-and dispatch rule itself and inject `LIVEKIT_SIP_INBOUND_TRUNK` and
-`LIVEKIT_SIP_OUTBOUND_TRUNK` before the application starts. Unmute will
-preflight Docker Compose, wait for declared health checks, print the resolved
-service graph and carrier setup, configure the Twilio voice webhook
-automatically on that route (printing the previous value), print the call
-line, follow Compose logs under `--verbose`, and stop only its deterministic
+The LiveKit Twilio connector runs like the Pipecat carrier route. It uses the
+same three Twilio credentials (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+`TWILIO_PHONE_NUMBER`), no SIP trunk and no Redis. Its generated
+`telephony_bridge.py` speaks the Twilio Media Streams protocol and bridges the
+call into a local, self-hosted LiveKit room, so it needs no LiveKit Cloud.
+`dev --telephony` starts a managed cloudflared tunnel, sets the Twilio voice
+webhook automatically, and places an outbound call with `--to`. Twilio only
+reaches the bridge over HTTPS and WSS, so both inbound and outbound work fully
+on a laptop. It supports inbound, outbound, and hangup; call transfers and
+voicemail detection stay on the LiveKit SIP route.
+
+Telephony mode runs the generated `compose.telephony.yaml`; there is no
+host-process fallback or infrastructure flag. Pipecat carrier and LiveKit SIP
+routes build the generated application and version-pinned Redis; the LiveKit
+Twilio connector builds the application plus a local `livekit-server --dev` and
+needs no Redis. LiveKit SIP additionally starts
+version-pinned LiveKit Server and LiveKit SIP, then creates or reuses the local
+inbound trunk, outbound trunk, and dispatch rule itself and injects
+`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` before the
+application starts. Unmute preflights Docker Compose, waits for declared health
+checks, prints the resolved service graph and carrier setup, configures the
+Twilio voice webhook automatically where the route carries that fact (printing
+the previous value), prints the call line, places an outbound call when `--to`
+is set, follows Compose logs under `--verbose`, and stops only its deterministic
 project on `ctrl-c` without removing data volumes or leaving the tunnel
 running.
 
-Routes with public HTTP/WSS endpoints (Pipecat carrier WebSockets) need a
-public HTTPS origin. Without `--public-url`, the dev command starts a managed
+**Outbound dial-out (`--to <e164>`).** On an outbound-capable target, pass
+`--to +15551234567` and, once the container is healthy, the dev command places
+one call to that number and prints the returned call id. The CLI mints the
+dial-out secret `UNMUTE_OUTBOUND_TOKEN` itself, injects it into the container,
+and never demands it from `.env` or prints it. `--to` requires `--telephony`
+and a resolved direction that includes outbound; it is rejected on an
+inbound-only target. Without `--to`, an outbound-capable target prints how to
+place a call and dials nothing. The generated `POST /telephony/outbound`
+endpoint stays available for your own application to drive.
+
+Routes with public HTTP/WSS endpoints (Pipecat carrier WebSockets and the
+LiveKit Twilio connector) need a public HTTPS origin. Without `--public-url`,
+the dev command starts a managed
 cloudflared quick tunnel and supplies `UNMUTE_PUBLIC_URL` itself; cloudflared
 must be on PATH (macOS: `brew install cloudflared`; Linux: distribution
 package or the cloudflare/cloudflared releases page). `--public-url` skips
 all tunnel management and must be the exact public HTTPS origin used for
 carrier signatures (use it for ngrok or any other tunnel). LiveKit SIP has no
 HTTP callback URL; it instead needs carrier-reachable SIP and RTP networking,
-which no HTTPS tunnel provides. For a promoted route, Unmute will name
-missing carrier/model configuration after successful generation and point to
-the credential guide without printing values. Local Compose will supply Redis
-for both targets and the local LiveKit Server key pair. Explicit external
-LiveKit or Redis values, and user-set trunk IDs, will be rejected in LiveKit
-SIP dev mode rather than silently ignored.
+which no HTTPS tunnel provides. Unmute names missing carrier/model
+configuration after generation and points to the credential guide without
+printing values. Local Compose supplies Redis for both targets and the local
+LiveKit Server key pair. Explicit external LiveKit or Redis values, and user-set
+trunk IDs, are rejected in LiveKit SIP dev mode rather than silently ignored.
 
 When a package declares several carrier routes, each one is a separate target
-and, after promotion, a separate generated Compose project. The package and
+and a separate generated Compose project. The package and
 schema can hold any number of supported routes. Today each telephony target
 fails closed; after promotion, `compile` can select several targets or all of
 them, while `dev --telephony` runs one exact route at a time. Pass its instance

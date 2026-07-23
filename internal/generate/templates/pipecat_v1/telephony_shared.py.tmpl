@@ -29,9 +29,9 @@ REQUIRED_ENV = [{{range $i, $name := .RequiredEnv}}{{if $i}}, {{end}}{{pyq $name
 CALL_START_TYPES = {
 {{range .Telephony.CallStart}}    {{pyq .Name}}: {{pyq .Type}},
 {{end}}}
-CALL_START_REQUIRED = {
+CALL_START_REQUIRED = frozenset((
 {{range .Telephony.CallStart}}{{if .Required}}    {{pyq .Name}},
-{{end}}{{end}}}
+{{end}}{{end}}))
 STATE = TelephonyState(os.getenv("REDIS_URL"), {{pyq .Project}}, {{.Telephony.MaxSessions}}, SESSION_TTL_SECS)
 _ACTIVE_MEDIA: set[WebSocket] = set()
 _DRAIN_TASK: asyncio.Task | None = None

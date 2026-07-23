@@ -6,29 +6,37 @@ import (
 	"testing"
 )
 
-// The auto-webhook fact is carrier data: exactly one route carries it in v1
-// (Pipecat carrier-websocket with Twilio) and it must name a declared public
-// endpoint. A fact on any other route means someone added data without a CLI
-// implementation (SPEC V3, C5).
-func TestTelephonyAutoWebhookIsATwilioPipecatFactOnly(t *testing.T) {
+// The auto-webhook fact is carrier data backed by a CLI implementation. The
+// only implementation is Twilio (internal/cli/dev_twilio.go), so exactly the
+// Twilio routes carry it (Pipecat carrier-websocket and the LiveKit connector),
+// each naming a declared public endpoint. A fact on any non-Twilio route means
+// someone added data without a CLI implementation (SPEC V3, C5).
+func TestTelephonyAutoWebhookIsATwilioFactOnly(t *testing.T) {
 	routes := TelephonyRoutes()
-	twilio := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}
+	twilioRoutes := map[TelephonyKey]bool{
+		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}: true,
+		{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}:         true,
+	}
 	for key, route := range routes {
-		if key == twilio {
+		if route.AutoWebhookEndpoint == "" {
 			continue
 		}
-		if route.AutoWebhookEndpoint != "" {
+		if !twilioRoutes[key] {
 			t.Fatalf("route %v carries auto-webhook fact %q without a CLI implementation", key, route.AutoWebhookEndpoint)
 		}
+		if route.AutoWebhookEndpoint != "inbound" {
+			t.Fatalf("route %v auto-webhook endpoint = %q, want inbound", key, route.AutoWebhookEndpoint)
+		}
+		if !slices.ContainsFunc(route.PublicEndpoints, func(rule TelephonyEndpointRule) bool {
+			return rule.Name == route.AutoWebhookEndpoint
+		}) {
+			t.Fatalf("route %v auto-webhook fact names no declared endpoint: %#v", key, route.PublicEndpoints)
+		}
 	}
-	route := routes[twilio]
-	if route.AutoWebhookEndpoint != "inbound" {
-		t.Fatalf("Twilio auto-webhook endpoint = %q, want inbound", route.AutoWebhookEndpoint)
-	}
-	if !slices.ContainsFunc(route.PublicEndpoints, func(rule TelephonyEndpointRule) bool {
-		return rule.Name == route.AutoWebhookEndpoint
-	}) {
-		t.Fatalf("auto-webhook fact names no declared endpoint: %#v", route.PublicEndpoints)
+	for key := range twilioRoutes {
+		if routes[key].AutoWebhookEndpoint != "inbound" {
+			t.Fatalf("Twilio route %v must carry the auto-webhook fact", key)
+		}
 	}
 }
 

@@ -10,7 +10,7 @@ Every feature in Unmute carries a **tag** that says how it behaves on a target. 
 
 **`gated`** **fails validation** on at least one target. The failure is a clear error that names the target and the reason. Gated does not mean broken; it means "works on some targets, not others". A guard on a handoff is gated: it works on Pipecat, it fails on Vapi.
 
-**`provisional`** is not proven on any target yet. Using it fails everywhere until a target's driver proves it works. It stays in the schema so the shape is already decided, but you cannot use it today.
+**`provisional`** works on a target and runs cleanly, with no warning. It has not passed its automated credentialed test yet, but that does not block you or change how it runs. The provisional-versus-verified status is internal maturity tracking, recorded in `compile-report.json`, not something the CLI shows as a runtime warning.
 
 ## Failure is loud and early
 

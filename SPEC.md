@@ -1,175 +1,177 @@
-# SPEC — containerized `unmute dev` entry points + one web UI
+# SPEC: LiveKit Twilio connector route (local telephony parity with Pipecat)
 
-Source brief: the feature request "Two containerized entry points plus console".
-Schema truth: [SCHEMA.md](docs/SCHEMA.md). Telephony spec (untouched here):
-[docs/SPEC.md](docs/SPEC.md). LiveKit containerized facts verified 2026-07-22
-against LiveKit self-hosting docs and `config-sample.yaml` (see §I.livekit).
+Source brief: "I want to test locally both pipecat and livekit in the same
+way. No LiveKit Cloud dependency: only Docker and open source, and it must
+also scale to production." Telephony design: [docs/TELEPHONY.md](docs/TELEPHONY.md).
+
+Ground truth found while scoping (do not re-litigate):
+
+- Cloudflared quick tunnels carry HTTPS/WSS to one local port, nothing else.
+  LiveKit SIP needs SIP 5060 (UDP/TCP) and RTP UDP into the laptop, so no
+  tunnel can ever make SIP inbound work locally. That route stays as the
+  production trunk option; it is not the local-testing answer.
+- LiveKit ships an official "Twilio Connector" (Twilio Media Streams over
+  WebSocket instead of SIP), but the serving side is LiveKit Cloud only
+  (BETA). Verified: `ConnectTwilioCall` exists in livekit/protocol, and no
+  OSS service implements it (livekit/livekit pkg/service has no connector;
+  there is no livekit/connector repo). We therefore build our own bridge,
+  same mechanism, fully open source.
+- The route key is already reserved in `internal/target/telephony.go`:
+  `{LiveKit, "connector", "twilio"}`, today gated with no adapter, required
+  env already `account_sid, auth_token, from_number` (pipecat-shaped).
+- The Pipecat template already implements the Twilio side end to end
+  (webhook signature validation, TwiML `<Connect><Stream>`, Media Streams
+  WS protocol, outbound `calls.create`, status callback). The bridge reuses
+  those exact protocol shapes.
+- Verified in livekit/python-sdks: `rtc.AudioSource(sample_rate=8000,
+  num_channels=1)` publishes 8 kHz audio and `rtc.AudioStream(track,
+  sample_rate=8000, num_channels=1)` resamples received audio to 8 kHz. The
+  SDK does the resampling; we only need mu-law encode/decode (pure Python
+  lookup tables, ~30 lines; stdlib audioop is removed in Python 3.13, so no
+  audioop).
+- The CLI web-mode token minting (`mintLiveKitToken` + `lkRoomConfig`
+  agents) already shows how a joining participant's token dispatches the
+  agent. The bridge uses the same trick: no SIP trunks, no dispatch rules,
+  no Redis.
+- SIP dial-out API verified 2026-07-23 against docs.livekit.io
+  /reference/agents/agent-dispatch-service-api: `POST
+  <server>/twirp/livekit.AgentDispatchService/CreateDispatch` with JSON
+  `{"agent_name","room","metadata"}`, Bearer JWT with video grant
+  `{"roomAdmin":true,"room":<room>}`; the room is auto-created. Same Twirp
+  shape as the existing `sipAdminClient`. Outbound SIP works from a laptop
+  because the local stack initiates every connection; only inbound needs
+  public SIP/RTP reachability.
+- `UNMUTE_OUTBOUND_TOKEN` mint currently triggers on the outbound feature;
+  the connector route lists the token like Pipecat, so making the mint
+  condition data-driven (plan RequiredEnv contains it) serves both.
 
 ## §G goal
 
-`unmute dev <dir>` runs the same Docker image production deploys, locally,
-through one SLNG-branded web UI over WebRTC, identically for Pipecat and
-LiveKit targets. Local (Docker) mode is the new default. `--telephony` is
-byte-for-byte unchanged. `--console` stays native on the host mic and speaker.
-The old host-uv web path is deleted, not hidden behind a flag: local testing
-always runs the deployable container.
+`unmute dev <pkg> --telephony --target <livekit-connector-instance>` works
+exactly like the Pipecat run: same three Twilio env vars, same managed
+cloudflared tunnel, same auto webhook, same `--to` dial-out. All local, all
+open source, and the same generated container deploys to production behind
+any public HTTPS origin with a self-hosted LiveKit server.
 
 ## §C constraints
 
-- C1: exactly three modes behind one command. Default = local Docker mode.
-  `--telephony` = phone calls, already containerized, unchanged. `--console` =
-  terminal over host audio, stays native uv. `--console --telephony` is
-  rejected before any work.
-- C2: WebRTC stays the browser transport for both targets. No new WebSocket
-  browser audio path is invented; both clients already use WebRTC.
-- C3: one embedded web client in `internal/web`. One host bootstrap endpoint
-  returns the transport kind and its parameters. The page's only per-target
-  code is the transport adapter behind that contract.
-- C4: no new Go dependency (child processes + stdlib) and no new JS dependency
-  in `internal/web`. Reuse the compose exec seams, do not add new ones without
-  need.
-- C5: `compose.dev.yaml` uses pinned images with explicit versions, env passed
-  by name from the host (same `.env` handling and `devChildEnv`), a healthcheck
-  per service, and no secret values in the file.
-- C6: Pipecat dev compose has one `application` service built from the
-  generated `Dockerfile`, command overridden to the web entry
-  `python bot.py --host 0.0.0.0 --port 7860`, host port from `--bot-port`. No
-  Valkey sidecar: the web path does not use the coordination store and the
-  no-idle-sidecar rule applies.
-- C7: LiveKit dev compose has `livekit_server` (pinned `livekit/livekit-server`
-  in `--dev` single-node mode, no external store) plus the `application` worker
-  built from the `Dockerfile` with command `python agent.py dev` and
-  `LIVEKIT_URL=ws://livekit_server:7880` inside the network. No Valkey.
-- C8: the breaking change is loud. `unmute dev` now requires Docker. A missing
-  Docker or Compose plugin fails with an install message as helpful as the
-  cloudflared one, naming Docker Desktop or Docker Engine plus the Compose
-  plugin.
-- C9: the telephony fail-closed validation, `execDevTelephony`,
-  `runTelephonyCompose`, and the route gate are untouched. Local mode never
-  touches telephony plans, carrier code, or the tunnel.
-- C10: L1 to L3 need zero Python, zero network, zero Docker. Real Docker and a
-  real browser are L4 only (`make smoke`, build tag `smoke`), outside the PR
-  gate.
+- C1: no LiveKit Cloud API, SDK call, or URL anywhere in generated
+  artifacts. The bridge speaks only Twilio Media Streams and livekit-rtc
+  against the configured LIVEKIT_URL.
+- C2: no new Python dependency beyond what the routes already use:
+  aiohttp and livekit-rtc ship with livekit-agents; `twilio` is added for
+  this route only (the Pipecat route already depends on it for the same
+  jobs: outbound calls and webhook signatures).
+- C3: no new Go dependency.
+- C4: the Pipecat route is behaviorally unchanged. The LiveKit SIP route
+  changes in exactly two ways: `LIVEKIT_SIP_URI` (consumed by nothing) is
+  removed, and `--to` places a real call via agent dispatch instead of
+  404ing against an endpoint that route never emits.
+- C5: L1-L3 need zero Python, zero network, zero Docker. Bridge behavior is
+  covered by golden files; real calls are manual/L4.
+- C6: Twilio webhook signature validation is mandatory in the bridge, same
+  as Pipecat (trust boundary, never simplified away). The outbound endpoint
+  Bearer-auths on UNMUTE_OUTBOUND_TOKEN.
+- C7: secrets (auth token, outbound token) never reach stdout, stderr, or
+  emitted files.
 
 ## §I surfaces
 
-- I.compose: `generate.Generate` emits `compose.dev.yaml` for both code targets
-  beside the existing project files. Deterministic, golden-locked. Pipecat: one
-  `application` service. LiveKit: `livekit_server` + `application`. Built from
-  the generated `Dockerfile` via `build:`, images pinned, env by name only,
-  healthcheck per service.
-- I.dev: `unmute dev <dir>` with no mode flag runs the default local runner:
-  compose preflight (reuse `composePreflight` / `composeLookPath`), generate,
-  `docker compose up --build --detach --wait` under a project-scoped name
-  (reuse `composeProjectName`), then start the host dev server against the
-  containerized services. Logs to `build/<target>/dev.log`, `--verbose`
-  follows. Project-scoped `down` (no `--volumes`) on every exit path.
-- I.session: `GET /api/session` on the host dev server returns the transport
-  contract. Pipecat: `{"kind":"webrtc-offer","offerUrl":"/api/offer"}` (the
-  offer is reverse-proxied to the containerized bot at `--bot-port`). LiveKit:
-  `{"kind":"livekit","url":"ws://localhost:7880","token":"<jwt>"}` (token minted
-  by the existing `livekit_token.go`). The handler is a plain `http.Handler` so
-  L2 tests hit it with `httptest`.
-- I.web: one SLNG-branded page in `internal/web` (embedded FS, `//go:embed`).
-  Same layout, controls, and connection-status UX for both targets. One
-  transport-adapter module switches on the `kind` from `/api/session`: Pipecat
-  posts a WebRTC offer, LiveKit joins with the LiveKit JS SDK. No new JS
-  framework, same asset approach.
-- I.console: `--console` keeps the native uv path and host audio, unchanged
-  except that it is now selected by an explicit flag rather than being a branch
-  of the web path.
-- I.livekit: containerized LiveKit dev facts (verified 2026-07-22). Single node
-  needs no external store; Redis only enables distributed mode. `--dev` injects
-  the `devkey`/`secret` placeholder keys. The browser needs three published
-  ports: `7880/tcp` (API + WebSocket signaling), `7881/tcp` (ICE/TCP fallback),
-  `7882/udp` (ICE/UDP mux, a single port; the default 50000-60000 range is
-  impractical through Docker). Inside a container the server must bind
-  `0.0.0.0`, and `--node-ip 127.0.0.1` is required so the SFU advertises a
-  host-reachable ICE candidate instead of the container's internal IP. Command:
-  `livekit-server --dev --bind 0.0.0.0 --node-ip 127.0.0.1 --udp-port 7882`.
-  All four flags exist in the server CLI. Exact loopback-candidate behavior is
-  proven at L4; L1 to L3 only lock the emitted compose shape.
+- I.connection: a connection YAML with `transport: connector`,
+  `carrier: twilio` and env keys `account_sid`, `auth_token`, `from_number`
+  resolves to the connector route. Features: route_selected, inbound,
+  outbound, hangup, and the non-stream variable sources. Voicemail and
+  transfers stay unsupported (gated) on this route for now.
+- I.env: user-supplied env is exactly the Pipecat set: TWILIO_ACCOUNT_SID,
+  TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, plus model keys. LIVEKIT_URL,
+  LIVEKIT_API_KEY, LIVEKIT_API_SECRET are locally supplied by the generated
+  Compose (devkey pair) and real env in production. UNMUTE_PUBLIC_URL and
+  UNMUTE_OUTBOUND_TOKEN are dev-supplied like Pipecat.
+- I.bridge: generated `telephony_bridge.py` (aiohttp, in the application
+  container next to agent.py):
+  - `POST /telephony/inbound`: validates the Twilio signature, returns TwiML
+    `<Connect><Stream url="wss://<public>/telephony/ws/<token>">`.
+  - `WS /telephony/ws/<token>`: speaks Twilio Media Streams (start, media,
+    stop, mark, clear). Joins room `call-<CallSid>` via livekit-rtc with a
+    token whose room config dispatches the agent (agent_name = target name,
+    metadata carries direction, from/to numbers, call_start). Publishes
+    caller audio (base64 mu-law 8k -> AudioSource(8000,1)) and returns agent
+    audio (AudioStream(track, 8000, 1) -> mu-law -> base64 media frames).
+  - `POST /telephony/outbound`: Bearer token, body `{"to", "call_start"}`,
+    `client.calls.create` with TwiML pointing back at the same WS path,
+    returns `call_id`. Same contract as Pipecat.
+  - `POST /telephony/status/<token>`: status callback, logs call end.
+  - `GET /`: health, port 8081 (unchanged health contract).
+- I.agent: on the connector route agent.py reads call facts (direction,
+  numbers, call_start) from the dispatch metadata the bridge wrote. It never
+  calls create_sip_participant; the bridge places outbound calls.
+- I.compose: `compose.telephony.yaml` for the connector route runs exactly
+  two services: application (bridge + worker) and livekit_server (`--dev`,
+  single node, no Redis, no SIP container).
+- I.dev: `dev --telephony` on this route reuses the Pipecat machinery
+  unchanged and data-driven: managed tunnel (PublicEndpoints non-empty),
+  auto Twilio webhook (AutoWebhookEndpoint), call line, `--to` places the
+  call via loopback POST with the minted token.
+- I.sipdial: on a LiveKit SIP plan with `--to`, after the graph is healthy
+  the CLI mints a roomAdmin JWT for the local devkey pair and POSTs
+  `CreateDispatch` to `http://127.0.0.1:<UNMUTE_LIVEKIT_PORT|7880>` with
+  agent_name = target name, room `call-<random>`, and metadata
+  `{"direction":"outbound","phone_number":"<E.164>","call_start":{}}`. The
+  worker then dials through the stored outbound trunk. Prints
+  `calling <E.164> (room <room>, dispatch <id>)`. Failure returns through
+  the normal teardown path.
+- I.prod: same container behind any public HTTPS origin; set
+  UNMUTE_PUBLIC_URL, UNMUTE_OUTBOUND_TOKEN, LIVEKIT_URL and key pair to the
+  self-hosted server; point the Twilio number webhook at
+  `/telephony/inbound`. README documents this.
 
 ## §V invariants
 
-- V1: `unmute dev <dir>` with no flags runs Compose (build, up, wait) and then
-  the host dev server. It never runs the host-uv bot path and never spawns
-  `livekit-server` on the host. The removed host-uv web path and the
-  server-spawn branch of `runLiveKitWeb` no longer exist in the tree.
-- V2: `compose.dev.yaml` is emitted for both code targets, is byte-deterministic
-  (golden), pins every image to an explicit version, passes env by name with no
-  secret values in the file, gives every service a healthcheck, and the runner
-  starts it with `--wait`.
-- V3: the Pipecat `compose.dev.yaml` has exactly one `application` service built
-  from the generated `Dockerfile`, command
-  `python bot.py --host 0.0.0.0 --port 7860`, host port equal to `--bot-port`,
-  and no Valkey or other coordination service.
-- V4: the LiveKit `compose.dev.yaml` has `livekit_server` (pinned
-  `livekit/livekit-server`, `--dev`, no external store) and an `application`
-  worker (`python agent.py dev`, `LIVEKIT_URL=ws://livekit_server:7880`),
-  publishes `7880/tcp`, `7881/tcp`, and `7882/udp`, sets a host-reachable
-  `--node-ip`, and has no Valkey service.
-- V5: default-mode teardown runs a project-scoped `docker compose down` on every
-  exit path including interrupt, and never passes `--volumes`, so data volumes
-  survive.
-- V6: `GET /api/session` returns the webrtc-offer contract for Pipecat and the
-  livekit contract for LiveKit, and the one page selects its transport adapter
-  from `kind` with no other per-target branch.
-- V7: `--console` runs the native uv path with host audio; `--console` combined
-  with `--telephony` is rejected before generate or any child process.
-- V8: a missing Docker binary or Compose plugin fails in preflight, before
-  generate and before any container starts, with an error naming Docker Desktop
-  or Docker Engine and the Compose plugin.
-- V9: env passthrough reuses the existing `.env` load and `devChildEnv`.
-  `compose.dev.yaml` lists env var names only; values come from the host
-  environment at run time and are never written into the file.
-- V10: `execDevTelephony`, `runTelephonyCompose`, the route gate, and the L2
-  telephony gate test are unchanged. `--telephony` stdout, stderr, and emitted
-  artifacts are byte-for-byte identical to before this work.
-- V11: `go.mod` is unchanged and `internal/web` gains no JS dependency.
-- V12: the generated Pipecat image builds from its emitted `Dockerfile` and
-  imports `pipecat.transports.smallwebrtc.transport`; L4 smoke proves this
-  inside the image.
-- V13: `.env` is the sole local dotenv filename for both code targets and all
-  dev modes. Emitted Python and READMEs never name `.env.local`.
-- V14: `unmute dev` loads local credentials in precedence order: ambient env,
-  current-working-directory `.env`, package-root `.env`. Package values win;
-  both Pipecat and LiveKit receive the merged environment.
-- V15: compile and every dev mode preserve an existing user-owned
-  `build/<target>/.env` byte-for-byte, including its permission bits, while
-  replacing the generated artifact set. Both code targets emit a
-  `.dockerignore` that excludes `.env`, so a preserved secret never enters the
-  image through `COPY . .`.
-- V16: the Pipecat browser sends an RTVI `client-ready` message for protocol
-  2.0.0 when its data channel opens. It renders `bot-output` by `segment_id`,
-  replacing progress updates within one bot turn, and never appends deprecated
-  `bot-transcription` frames as separate turns.
-- V17: the LiveKit browser renders remote transcription updates by `segment.id`,
-  replacing interim and final text within one bot turn instead of appending a
-  transcript row per event.
+- V1: generated connector artifacts contain no `livekit.cloud`, no
+  `ConnectTwilioCall`, and no SIP trunk or dispatch-rule setup. Grep-clean.
+- V2: the bridge rejects webhook requests with a missing or wrong Twilio
+  signature (403) before doing any work, byte-identical logic to the
+  Pipecat template's validation.
+- V3: `POST /telephony/outbound` without the exact Bearer token is 401; with
+  it, exactly one `calls.create` fires and its TwiML `<Stream>` URL is the
+  public WS endpoint. Empty `call_start` never errors (B1 class from the
+  Pipecat spec: required-set arithmetic must hold when empty).
+- V4: the dev run on a connector plan demands exactly TWILIO_ACCOUNT_SID,
+  TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER plus model keys; never LIVEKIT_URL,
+  the key pair, a trunk ID, or LIVEKIT_SIP_URI.
+- V5: UNMUTE_OUTBOUND_TOKEN is minted exactly when the plan's RequiredEnv
+  lists it (Pipecat outbound and connector outbound); a SIP plan run injects
+  no token.
+- V6: no artifact, route rule, doc, or test references LIVEKIT_SIP_URI.
+- V7: `--to` on a LiveKit SIP plan sends exactly one CreateDispatch to the
+  local server: path `/twirp/livekit.AgentDispatchService/CreateDispatch`,
+  Bearer JWT signed by the devkey pair with a roomAdmin grant, agent_name =
+  target name, metadata JSON with direction "outbound" and phone_number =
+  the `--to` value. No POST to `/telephony/outbound` happens on a SIP plan,
+  and SIP auth values appear in no printed line.
+- V8: the mu-law tables round-trip: encode(decode(b)) == b for all 256 byte
+  values (asserted in the emitted code's self-check and the L4 smoke).
+- V9: Pipecat telephony stdout/stderr and artifacts are byte-for-byte
+  unchanged (regression guard).
+- V10: the generated local LiveKit stack uses the documented `livekit-server
+  --dev` key pair `devkey`/`secret` consistently across the server, the app
+  worker, LiveKit SIP, and every hand-minted admin/dispatch token. No
+  artifact, compose file, or Go constant uses a secret the `--dev` server
+  will not accept. (grep: no `devsecret-local-only`).
 
 ## §T tasks
 
 id|status|desc|cites
-T1|x|emit `compose.dev.yaml` for both code targets: pipecat `application` template, livekit `livekit_server`+`application` template, wire into `generate.Generate`; L1/L3 goldens with `-update`|I.compose,V2,V3,V4,V11
-T2|x|make local Docker mode the default runner: preflight, generate, `up --build --detach --wait`, project-scoped `down` on every exit, logs to `build/<target>/dev.log`, `--verbose` follows; delete the host-uv web path and the `runLiveKitWeb` server-spawn branch, migrate token mint + readiness into the runner; missing-Docker install message|I.dev,I.console,V1,V5,V8,V9,V10
-T3|x|standardize the web UI: `GET /api/session` bootstrap handler (httptest-able) + one SLNG-branded page whose only per-target code is the transport adapter; keep the pipecat offer reverse-proxy and livekit token mint|I.session,I.web,V6
-T4|x|console routing: `--console` keeps native uv + host audio; `--console --telephony` stays rejected|I.console,V7
-T5|x|gate preservation: telephony fail-closed path and its L2 gate test untouched; local mode isolated from telephony code|V10
-T6|x|tests: L2 default-mode routing, docker-missing text, command sequences (`up --build --detach --wait`, logs, project-scoped `down`, no `--volumes`), env passthrough, session-endpoint contract, teardown on interrupt; L4 smoke (build tag) for real Docker/browser; full suite green with zero Python/network/Docker|V1-V11
-T7|x|docs: `docs/user/reference/cli.md`, the learn-flow dev-mode pages, `docs/user/targets/{pipecat,livekit}.md`, and a going-live "local Compose to production" checklist per route; local mode is the deployable-image test step, Kubernetes is the same image with different manifests|I.dev,I.compose
-T8|x|install Pipecat image OpenCV runtime libs; add credential-free image build + SmallWebRTC import smoke; regenerate golden|V12
-T9|x|standardize Pipecat + LiveKit local dotenv on `.env`; align emitted/top-level READMEs; assert naming at L1 and container passthrough at L4|V13
-T10|x|load shared repo-root `.env` before package-root `.env`; package overrides; cover merge order at L1|V14
-T11|x|preserve a target-local `.env` across artifact rewrites and emit `.dockerignore` for both code targets so Docker excludes it|V15
-T12|x|complete the raw Pipecat RTVI 2 handshake and reduce `bot-output` progress by segment instead of appending deprecated transcription frames|V16
+T1|x|route table: un-gate {livekit,connector,twilio} with features (route_selected, inbound, outbound, hangup, non-stream sources), endpoints (inbound, ws, outbound, status), processes, runtime env (UNMUTE_PUBLIC_URL, UNMUTE_OUTBOUND_TOKEN, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET with local-supplied set), AutoWebhookEndpoint. L1 route resolution + validate tests (voicemail/transfer on connector still errors)|I.connection,I.env,V4
+T2|x|generate: connector flavor in livekit_v1: telephony_bridge.py.tmpl (signature validation, TwiML, Media Streams WS, mu-law tables, livekit-rtc room join with dispatching token, outbound calls.create, status, health), agent.py connector branch (metadata call facts, no create_sip_participant), pyproject adds twilio for this route, Dockerfile/entry runs bridge + worker, compose.telephony.yaml with application + livekit_server --dev only. Goldens for all|I.bridge,I.agent,I.compose,V1,V2,V3,V8
+T3|x|dev wiring: confirm tunnel, auto webhook, call line, --to all fire data-driven on the connector plan; make the token mint condition RequiredEnv-driven. L2: connector plan run demands only the pipecat-shaped env; --to POSTs loopback with the token; pipecat run unchanged|I.dev,V4,V5,V9
+T4|x|SIP route: remove LIVEKIT_SIP_URI everywhere (route rule, generate env list, templates, goldens, docs, tests); --to on a SIP plan places the call via CreateDispatch (mintLiveKitRoomAdminToken helper + placeLiveKitDispatch on the sipAdminClient Twirp pattern, branch in onReady by route transport, print room + dispatch id). L2 httptest: method, path, auth grant, agent_name, metadata, one call only|C4,I.sipdial,V6,V7
+T5|x|telephony-hello: switch the livekit target to a twilio connector connection so one .env drives both targets; README update|I.connection,I.env
+T6|x|docs: twilio-walkthrough (connector route section, SIP kept as the production trunk path), cli.md, TELEPHONY.md, tags-and-gating (connector un-gated), targets/livekit.md. Simple words, no em dashes|I.prod,V6
+T7|x|full suite green (build, vet, golangci-lint, go test all clean; connector bridge py_compile + ruff clean; mu-law self-check passes 256/256). Manual E2E with real creds is the user's live test: connector inbound call, connector outbound --to call (both through the tunnel), SIP outbound --to call (needs the Twilio SIP trunk values)|V1-V9
 
 ## §B bugs
 
 id|date|cause|fix
-B1|2026-07-22|Pipecat Dockerfile used `python:3.12-slim` without native OpenCV libs; `pipecat-ai[webrtc]` installed `opencv-python`; host-only runtime smoke + build-free Compose smoke never imported SmallWebRTC inside image|V12
-B2|2026-07-22|LiveKit generated projects read `.env.local` while CLI, Compose, Pipecat, and user docs used package-root `.env`; top-level example docs added a repo-root `.env.local` staging name, so misplaced credentials reached the container unset|V13
-B3|2026-07-22|B2 standardized the filename but left `devChildEnv` package-only; repo-root `.env` remained an unloaded file, so both containers still missed shared credentials|V14
-B4|2026-07-22|`writeArtifactFiles` removed the whole target directory before every compile/dev rewrite, deleting a user-created `.env`; no regression distinguished generated files from this user-owned secret, and preserving it without a Docker exclusion would have baked it into `COPY . .`|V15
-B5|2026-07-22|the hand-written Pipecat browser opened an RTVI data channel without the required `client-ready` handshake and rendered deprecated `bot-transcription` payloads by appending one DOM turn per frame; readiness was unreliable and cumulative/progress frames appeared as repeated answers|V16
-B6|2026-07-22|the LiveKit `TranscriptionReceived` handler called `pushTurn` for every remote segment event, so cumulative interim updates and the final update rendered as separate bot answers|V17
+B1|2026-07-23|`--to` on a LiveKit SIP target POSTed /telephony/outbound on the bot port, an endpoint that route never emits, so dial-out 404ed; dev also demanded LIVEKIT_SIP_URI which nothing consumes|V5,V6,V7
+B2|2026-07-23|the generated LiveKit SIP telephony Compose set the app/SIP/admin-token secret to `devsecret-local-only`, but `livekit-server --dev` only accepts `devkey`/`secret` (docs.livekit.io/transport/self-hosting/local), so worker registration and every livekit.SIP Twirp admin call would 401. Never observed earlier because the phantom LIVEKIT_SIP_URI env error (B1) blocked startup before containers ran|V10

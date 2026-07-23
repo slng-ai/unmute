@@ -102,14 +102,13 @@ func TestTelephonyDocsContract(t *testing.T) {
 		"CONTEXT.md": {"**Telephony route**", "**Coordination mode**"},
 		"docs/TELEPHONY.md": {
 			"## Route matrix and package cardinality",
-			"reject every telephony target",
+			"gated routes with no adapter",
 			"## Credentials",
 			"TWILIO_ACCOUNT_SID",
 			"TELNYX_API_KEY",
 			"PLIVO_AUTH_ID",
 			"EXOTEL_API_KEY",
 			"LIVEKIT_API_KEY",
-			"LIVEKIT_SIP_URI",
 			"TWILIO_SIP_ADDRESS",
 			"TELNYX_SIP_ADDRESS",
 			"PLIVO_SIP_ADDRESS",
@@ -124,7 +123,7 @@ func TestTelephonyDocsContract(t *testing.T) {
 		"docs/user/reference/providers.md":    {"## Use several providers in one target", "Telephony uses **carrier**"},
 		"docs/user/targets/pipecat.md":        {"### Telephony carrier integrations", "TELNYX_CONNECTION_ID", "PLIVO_AUTH_ID"},
 		"docs/user/targets/livekit.md": {
-			"TELNYX_SIP_ADDRESS", "PLIVO_SIP_ADDRESS", "LIVEKIT_SIP_URI", "not an audio buffer", "No emitted adapter", "10000-10100",
+			"TELNYX_SIP_ADDRESS", "PLIVO_SIP_ADDRESS", "not an audio buffer", "No emitted adapter", "10000-10100",
 		},
 	}
 	for path, terms := range checks {

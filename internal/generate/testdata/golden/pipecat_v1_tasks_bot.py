@@ -493,8 +493,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
-            # Daily SIP has no RTVI client-ready handshake. Start once its
-            # participant is connected and main's StartFrame has traversed.
+            # Telephony transports (carrier WebSocket, Daily SIP) have no RTVI
+            # client-ready handshake: the carrier opens a raw media WebSocket and
+            # the bot initiates once that connection is open and main's StartFrame
+            # has traversed (Pipecat Twilio dial-in flow; SPEC V2).
             await pipeline_started.wait()
             await activate_entry()
 

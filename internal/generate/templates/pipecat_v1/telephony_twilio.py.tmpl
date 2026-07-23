@@ -10,6 +10,7 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 from fastapi import HTTPException, Request, WebSocket
 from fastapi.responses import Response
 from pipecat.runner.types import WebSocketRunnerArguments
+from twilio.base.exceptions import TwilioRestException
 from twilio.http.http_client import TwilioHttpClient
 from twilio.request_validator import RequestValidator
 from twilio.rest import Client
@@ -138,14 +139,19 @@ async def outbound(request: Request) -> dict[str, str]:
     destination, call_start = await _outbound_request(request)
     token, session_id = await _remember("outbound", _env(FROM_NUMBER_ENV), destination, call_start)
     client = _client()
-    call = await asyncio.to_thread(
-        client.calls.create,
-        to=destination,
-        from_=_env(FROM_NUMBER_ENV),
-        twiml=_stream_twiml(token),
-        status_callback=_http_url("/telephony/status"),
-        status_callback_event=["initiated", "ringing", "answered", "completed"],
-    )
+    try:
+        call = await asyncio.to_thread(
+            client.calls.create,
+            to=destination,
+            from_=_env(FROM_NUMBER_ENV),
+            twiml=_stream_twiml(token),
+            status_callback=_http_url("/telephony/status"),
+            status_callback_event=["initiated", "ringing", "answered", "completed"],
+        )
+    except TwilioRestException as exc:
+        # Surface the carrier's reason (geo permissions, unverified trial number,
+        # invalid destination) instead of an opaque 500 the caller cannot read.
+        raise HTTPException(status_code=502, detail=f"Twilio rejected the outbound call: {exc.msg}") from exc
     return {"session_id": session_id, "call_id": call.sid, "status": "accepted"}
 
 

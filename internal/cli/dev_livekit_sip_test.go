@@ -19,12 +19,13 @@ import (
 // fakeSIPAdmin is an in-memory Twirp livekit.SIP server: List* returns the
 // stored records, Create* stores and returns the record with a fresh ID.
 type fakeSIPAdmin struct {
-	t        *testing.T
-	inbound  []map[string]any
-	outbound []map[string]any
-	rules    []map[string]any
-	requests []string
-	bodies   map[string]string
+	t          *testing.T
+	inbound    []map[string]any
+	outbound   []map[string]any
+	rules      []map[string]any
+	requests   []string
+	bodies     map[string]string
+	dispatches []map[string]any
 }
 
 func newFakeSIPAdmin(t *testing.T) (*fakeSIPAdmin, *httptest.Server) {
@@ -39,10 +40,7 @@ func newFakeSIPAdmin(t *testing.T) (*fakeSIPAdmin, *httptest.Server) {
 }
 
 func (f *fakeSIPAdmin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	method := strings.TrimPrefix(r.URL.Path, "/twirp/livekit.SIP/")
 	body, _ := io.ReadAll(r.Body)
-	f.requests = append(f.requests, method)
-	f.bodies[method] = string(body)
 	if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") {
 		http.Error(w, "missing bearer token", http.StatusUnauthorized)
 		return
@@ -58,6 +56,21 @@ func (f *fakeSIPAdmin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(v)
 	}
+	// AgentDispatchService is a separate Twirp service (outbound dial-out).
+	if dispatchMethod, ok := strings.CutPrefix(r.URL.Path, "/twirp/livekit.AgentDispatchService/"); ok {
+		f.requests = append(f.requests, dispatchMethod)
+		f.bodies[dispatchMethod] = string(body)
+		if dispatchMethod == "CreateDispatch" {
+			f.dispatches = append(f.dispatches, payload)
+			write(map[string]any{"id": "AD_1", "agent_name": payload["agent_name"], "room": payload["room"]})
+			return
+		}
+		http.Error(w, "unknown method "+dispatchMethod, http.StatusNotFound)
+		return
+	}
+	method := strings.TrimPrefix(r.URL.Path, "/twirp/livekit.SIP/")
+	f.requests = append(f.requests, method)
+	f.bodies[method] = string(body)
 	switch method {
 	case "ListSIPInboundTrunk":
 		write(map[string]any{"items": f.inbound})
@@ -233,7 +246,7 @@ func TestEnsureLiveKitSIPRecordsReplacesDispatchRuleOnAgentMismatch(t *testing.T
 // C1/C2: the SIP admin token is an HS256 JWT whose claims carry the sip
 // admin grant and the api key as issuer.
 func TestMintLiveKitSIPAdminTokenCarriesSIPAdminGrant(t *testing.T) {
-	token, err := mintLiveKitSIPAdminToken("devkey", "devsecret-local-only", time.Unix(1_800_000_000, 0))
+	token, err := mintLiveKitSIPAdminToken("devkey", "secret", time.Unix(1_800_000_000, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,6 +269,71 @@ func TestMintLiveKitSIPAdminTokenCarriesSIPAdminGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	if claims.Iss != "devkey" || !claims.SIP.Admin || claims.Exp <= 1_800_000_000 {
+		t.Fatalf("claims = %+v", claims)
+	}
+}
+
+// V7: --to on a SIP plan places the call by dispatching the agent on the local
+// server (no /telephony/outbound POST exists for this route). Exactly one
+// CreateDispatch fires, with agent_name = target, a fresh call- room, and
+// outbound metadata carrying the number; the SIP auth never appears in output.
+func TestPlaceLiveKitDispatchOutbound(t *testing.T) {
+	fake, _ := newFakeSIPAdmin(t)
+	var out strings.Builder
+	if err := placeLiveKitDispatch(context.Background(), &out, "phone", "+15557778888", sipTestEnv()); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.dispatches) != 1 {
+		t.Fatalf("expected one CreateDispatch, got %d: %v", len(fake.dispatches), fake.requests)
+	}
+	got := fake.dispatches[0]
+	if got["agent_name"] != "phone" {
+		t.Errorf("agent_name = %v", got["agent_name"])
+	}
+	room, _ := got["room"].(string)
+	if !strings.HasPrefix(room, "call-") {
+		t.Errorf("room = %q, want a fresh call- room", room)
+	}
+	metadata, _ := got["metadata"].(string)
+	for _, want := range []string{`"direction":"outbound"`, `"phone_number":"+15557778888"`, `"call_start":{}`} {
+		if !strings.Contains(metadata, want) {
+			t.Errorf("metadata missing %q: %s", want, metadata)
+		}
+	}
+	printed := out.String()
+	if !strings.Contains(printed, "calling +15557778888") || !strings.Contains(printed, "dispatch AD_1") {
+		t.Errorf("call line = %q", printed)
+	}
+	if strings.Contains(printed, "sip-sekrit") {
+		t.Errorf("output leaks SIP auth: %s", printed)
+	}
+}
+
+// The dispatch token is an HS256 JWT with the server-wide roomAdmin grant the
+// AgentDispatchService requires; no room is scoped so it can create any room.
+func TestMintLiveKitDispatchTokenCarriesRoomAdmin(t *testing.T) {
+	token, err := mintLiveKitDispatchToken("devkey", "secret", time.Unix(1_800_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("token has %d parts", len(parts))
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims struct {
+		Iss   string `json:"iss"`
+		Video struct {
+			RoomAdmin bool `json:"roomAdmin"`
+		} `json:"video"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		t.Fatal(err)
+	}
+	if claims.Iss != "devkey" || !claims.Video.RoomAdmin {
 		t.Fatalf("claims = %+v", claims)
 	}
 }

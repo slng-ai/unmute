@@ -199,15 +199,23 @@ environment:
 Set the target's `provider: livekit`, `transport: sip`, `carrier`, and
 `connection`. The generated project includes inbound-trunk, outbound-trunk,
 and dispatch-rule JSON inputs for the directions you request. Self-hosted SIP
-also requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`,
-`REDIS_URL`, and a public `LIVEKIT_SIP_URI` in deployment; local Compose
-supplies the Server, key pair, and Redis connection. The `lk` commands return
+also requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and
+`REDIS_URL` in deployment, with the carrier's origination URI pointed at your
+public LiveKit SIP endpoint; local Compose supplies the Server, key pair, and
+Redis connection. The `lk` commands return
 the trunk IDs used at runtime. An HTTPS tunnel is enough for Pipecat callbacks,
 but not for LiveKit SIP signaling and RTP.
 
 Exotel remains gated: its documented static Voicebot WebSocket flow does not
 yet provide a proven authenticated upgrade that satisfies Unmute's ingress
-policy, and its LiveKit SIP route has no provider-specific proof. LiveKit's
-Beta Twilio Connector route is also gated: its route and credential vocabulary
-are recognized, but Unmute does not emit a Connector adapter or inherit SIP
-transfer capabilities.
+policy, and its LiveKit SIP route has no provider-specific proof.
+
+The LiveKit Twilio connector is a usable self-hosted route. Its generated
+`telephony_bridge.py` speaks the Twilio Media Streams protocol and bridges the
+call into a local, self-hosted LiveKit room, with no LiveKit Cloud. It uses the
+same three Twilio credentials as the Pipecat route (`TWILIO_ACCOUNT_SID`,
+`TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`), no SIP trunk and no Redis. It runs
+like the Pipecat route (`unmute dev --telephony` with the managed tunnel, the
+automatic Twilio webhook, and `--to`) and works fully on a laptop for inbound
+and outbound. It supports inbound, outbound, and hangup; transfers and voicemail
+stay on the LiveKit SIP route.

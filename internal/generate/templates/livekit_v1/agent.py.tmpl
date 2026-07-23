@@ -203,6 +203,21 @@ def _livekit_call_start(metadata: dict) -> dict:
     return call_start
 
 
+{{- if eq .Telephony.Transport "connector"}}
+def _livekit_call_context(room_name: str, metadata: dict) -> dict:
+    # The Twilio bridge writes every call fact into the job metadata, so the
+    # agent reads them directly (there is no SIP participant to inspect).
+    return {
+        "session_id": room_name,
+        "carrier": {{pyq .Telephony.Carrier}},
+        "connection": {{pyq .Telephony.Connection}},
+        "call_id": metadata.get("call_id"),
+        "stream_id": metadata.get("stream_id"),
+        "direction": metadata.get("direction", "inbound"),
+        "from_number": metadata.get("from_number"),
+        "to_number": metadata.get("to_number"),
+    }
+{{- else}}
 def _livekit_call_context(room_name: str, participant, metadata: dict) -> dict:
     expected_direction = (
         "outbound" if "phone_number" in metadata else "inbound"
@@ -222,6 +237,7 @@ def _livekit_call_context(room_name: str, participant, metadata: dict) -> dict:
         "from_number": trunk_number if direction == "outbound" else remote_number,
         "to_number": remote_number if direction == "outbound" else trunk_number,
     }
+{{- end}}
 
 
 {{- if .HasVars}}
@@ -543,6 +559,22 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- end}}
 {{- end}}
 {{if .Telephony}}
+{{- if eq .Telephony.Transport "connector"}}
+    await ctx.connect()
+    # The Twilio bridge placed or answered the call, joined this room with the
+    # caller's audio, and dispatched this job. Direction (inbound or outbound)
+    # is already resolved by the bridge, so the agent just runs the session.
+    # Wait for the bridge participant so the caller audio track exists first.
+    await ctx.wait_for_participant()
+{{- if .HasVars}}
+    metadata = _livekit_job_metadata(ctx.job.metadata)
+    call_start = _livekit_call_start(metadata)
+    call_context = _livekit_call_context(ctx.room.name, metadata)
+    _hydrate_livekit_context(session.userdata, call_context, call_start)
+{{- end}}
+    await session.start(agent={{.EntryClass}}(), room=ctx.room)
+    await _livekit_entry_greeting(session)
+{{- else}}
     metadata = _livekit_job_metadata(ctx.job.metadata)
     call_start = _livekit_call_start(metadata)
     outbound_job = "phone_number" in metadata
@@ -608,6 +640,7 @@ async def entrypoint(ctx: JobContext) -> None:
             return
 {{- end}}
     await _livekit_entry_greeting(session)
+{{- end}}
 {{- else}}
     await session.start(agent={{.EntryClass}}(), room=ctx.room)
     await ctx.connect()

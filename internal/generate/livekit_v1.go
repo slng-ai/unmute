@@ -116,6 +116,9 @@ type livekitOutbound struct {
 // contains environment-variable names and normalized variable mappings only;
 // secret values never enter generation.
 type livekitTelephony struct {
+	// Transport is "sip" (carrier SIP trunk) or "connector" (our Twilio Media
+	// Streams bridge). It selects the agent.py call path and the emitted files.
+	Transport      string
 	Carrier        string
 	Connection     string
 	ProviderDocs   string
@@ -124,12 +127,15 @@ type livekitTelephony struct {
 	SIPUsernameEnv string
 	SIPPasswordEnv string
 	FromNumberEnv  string
-	HasInbound     bool
-	HasOutbound    bool
-	HasWarm        bool
-	Greeting       *livekitGreeting
-	SystemSources  []livekitSystemSource
-	CallStart      []livekitCallStart
+	// Connector-only: the bridge's Twilio client and webhook signature check.
+	AccountSIDEnv string
+	AuthTokenEnv  string
+	HasInbound    bool
+	HasOutbound   bool
+	HasWarm       bool
+	Greeting      *livekitGreeting
+	SystemSources []livekitSystemSource
+	CallStart     []livekitCallStart
 }
 
 type livekitSystemSource struct {
@@ -362,6 +368,24 @@ var livekitEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 	"source.to_number":                                       true,
 }
 
+// The LiveKit Twilio connector emits inbound, outbound, and hangup only;
+// transfers and voicemail are not supported on this route yet. It carries a
+// Twilio stream id (source.stream_id) since it rides Twilio Media Streams.
+var livekitConnectorEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
+	targetcap.TelephonyRouteSelected:             true,
+	targetcap.TelephonyInbound:                   true,
+	targetcap.TelephonyOutbound:                  true,
+	targetcap.TelephonyFeature(targetcap.Hangup): true,
+	"source.session_id":                          true,
+	"source.carrier":                             true,
+	"source.connection":                          true,
+	"source.call_id":                             true,
+	"source.stream_id":                           true,
+	"source.direction":                           true,
+	"source.from_number":                         true,
+	"source.to_number":                           true,
+}
+
 // GenerateLiveKit lowers a validated agent + livekit target into a project. The
 // socket runs Validate(caps) first (V17), so this reads only agent+target.
 func GenerateLiveKit(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedBinding, sizing []ir.Sizing) (Artifact, error) {
@@ -477,8 +501,18 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 	if data.Tracing {
 		outputs = append(outputs, struct{ tmpl, path string }{"tracing.py", "tracing.py"})
 	}
+	connector := data.Telephony != nil && data.Telephony.Transport == "connector"
 	if data.Telephony != nil {
-		outputs = append(outputs, struct{ tmpl, path string }{"compose.telephony.yaml", "compose.telephony.yaml"})
+		// The connector runs the app plus a local LiveKit Server only (no Redis,
+		// no SIP bridge); its Compose and the bridge process differ from SIP.
+		if connector {
+			outputs = append(outputs,
+				struct{ tmpl, path string }{"compose.telephony.connector.yaml", "compose.telephony.yaml"},
+				struct{ tmpl, path string }{"telephony_bridge.py", "telephony_bridge.py"},
+			)
+		} else {
+			outputs = append(outputs, struct{ tmpl, path string }{"compose.telephony.yaml", "compose.telephony.yaml"})
+		}
 	}
 	var files []File
 	for _, o := range outputs {
@@ -489,11 +523,15 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		files = append(files, File{Path: o.path, Content: content})
 	}
 	files = append(files, File{Path: ".dockerignore", Content: []byte(".env\n")})
-	sipFiles, err := livekitSIPFiles(data)
-	if err != nil {
-		return nil, err
+	// SIP trunk JSON inputs are for the SIP route only; the connector uses no
+	// SIP trunks.
+	if !connector {
+		sipFiles, err := livekitSIPFiles(data)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, sipFiles...)
 	}
-	files = append(files, sipFiles...)
 	// Local tool handlers are copied verbatim from the source package (SCHEMA
 	// §5: code targets host the handler).
 	if len(data.LocalTools) > 0 {

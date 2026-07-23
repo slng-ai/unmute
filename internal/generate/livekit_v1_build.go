@@ -251,7 +251,10 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	sort.Strings(channelNames)
 	for _, name := range channelNames {
 		ch := agent.Channels[name]
-		if ch.Kind == ir.ChannelTelephony && ch.Outbound != nil && *ch.Outbound {
+		// The connector route places outbound calls in the bridge (Twilio call +
+		// room join), so the agent never runs the SIP dial-out/AMD flow. Only SIP
+		// (and non-telephony targets) drive data.Outbound.
+		if ch.Kind == ir.ChannelTelephony && ch.Outbound != nil && *ch.Outbound && tgt.Transport != "connector" {
 			data.Outbound = &livekitOutbound{LeaveMessage: ch.OnVoicemail == ir.VoicemailLeaveMessage}
 			env.add("LIVEKIT_SIP_OUTBOUND_TRUNK")
 			break
@@ -312,9 +315,107 @@ func buildLiveKitTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*liveki
 	if plan == nil {
 		return nil, nil
 	}
-	if plan.Key.Provider != ir.ProviderLiveKit || plan.Key.Transport != "sip" {
+	if plan.Key.Provider != ir.ProviderLiveKit {
 		return nil, fmt.Errorf("livekit telephony route (%s, %s, %s) has no emitted adapter", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
 	}
+	switch plan.Key.Transport {
+	case "sip":
+		return buildLiveKitSIPTelephony(agent, tgt, env)
+	case "connector":
+		return buildLiveKitConnectorTelephony(agent, tgt, env)
+	default:
+		return nil, fmt.Errorf("livekit telephony route (%s, %s, %s) has no emitted adapter", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+	}
+}
+
+// fillLiveKitTelephonyCommon populates the direction, call_start, and system
+// source facts shared by every LiveKit telephony transport.
+func fillLiveKitTelephonyCommon(telephony *livekitTelephony, agent *ir.Agent, plan *ir.TelephonyPlan) {
+	for _, evidence := range plan.Evidence {
+		switch evidence.Feature {
+		case "inbound":
+			telephony.HasInbound = true
+		case "outbound":
+			telephony.HasOutbound = true
+		case "warm_transfer":
+			telephony.HasWarm = true
+		}
+	}
+	for _, variable := range sortedVarNames(agent) {
+		def := agent.Variables[variable]
+		if def.Source == ir.VariableSourceCallStart {
+			telephony.CallStart = append(telephony.CallStart, livekitCallStart{
+				Name: variable, Type: string(def.Type), TypeCheck: livekitTypeCheck(def.Type), Required: def.Default == nil,
+			})
+		}
+	}
+	sourceVariables := make([]string, 0, len(plan.SystemSources))
+	for variable := range plan.SystemSources {
+		sourceVariables = append(sourceVariables, variable)
+	}
+	sort.Strings(sourceVariables)
+	for _, variable := range sourceVariables {
+		telephony.SystemSources = append(telephony.SystemSources, livekitSystemSource{
+			Variable: variable, Source: string(plan.SystemSources[variable]),
+		})
+	}
+}
+
+// buildLiveKitConnectorTelephony lowers the LiveKit Twilio connector route: the
+// generated bridge speaks Twilio Media Streams and joins a local LiveKit room,
+// so the env vocabulary is the Twilio account trio (like Pipecat), not SIP
+// trunk fields. No SIP trunk env and no Redis.
+func buildLiveKitConnectorTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*livekitTelephony, error) {
+	plan := tgt.Telephony
+	if plan.Key.Carrier != "twilio" {
+		return nil, fmt.Errorf("livekit connector carrier %q has no emitted setup", plan.Key.Carrier)
+	}
+	docs := ""
+	for _, evidence := range plan.Evidence {
+		if evidence.Docs != "" {
+			docs = evidence.Docs
+			break
+		}
+	}
+	required, optional, ok := targetcap.TelephonyEnvironment(targetcap.TelephonyKey{
+		Provider: targetcap.LiveKit, Transport: plan.Key.Transport, Carrier: plan.Key.Carrier,
+	})
+	if !ok {
+		return nil, fmt.Errorf("livekit connector route (%s, %s, %s) has no environment vocabulary", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+	}
+	allowed := make(map[string]bool, len(required)+len(optional))
+	for _, key := range append(required, optional...) {
+		allowed[key] = true
+	}
+	for _, key := range required {
+		if plan.Environment[key] == "" {
+			return nil, fmt.Errorf("livekit connector connection requires environment key %q", key)
+		}
+		env.add(plan.Environment[key])
+	}
+	for key := range plan.Environment {
+		if !allowed[key] {
+			return nil, fmt.Errorf("livekit connector route does not accept connection environment key %q", key)
+		}
+	}
+	telephony := &livekitTelephony{
+		Transport: "connector", Carrier: plan.Key.Carrier, Connection: plan.Connection,
+		ProviderDocs:  docs,
+		AccountSIDEnv: plan.Environment["account_sid"], AuthTokenEnv: plan.Environment["auth_token"],
+		FromNumberEnv: plan.Environment["from_number"],
+	}
+	fillLiveKitTelephonyCommon(telephony, agent, plan)
+	// The bridge and worker connect out to the local LiveKit Server; the carrier
+	// reaches the bridge over the public HTTPS origin, and dial-out mints a token.
+	env.add("UNMUTE_PUBLIC_URL")
+	if telephony.HasOutbound {
+		env.add("UNMUTE_OUTBOUND_TOKEN")
+	}
+	return telephony, nil
+}
+
+func buildLiveKitSIPTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*livekitTelephony, error) {
+	plan := tgt.Telephony
 	switch plan.Key.Carrier {
 	case "twilio", "telnyx", "plivo":
 	default:
@@ -358,44 +459,15 @@ func buildLiveKitTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*liveki
 		}
 	}
 	telephony := &livekitTelephony{
-		Carrier: plan.Key.Carrier, Connection: plan.Connection,
+		Transport: "sip", Carrier: plan.Key.Carrier, Connection: plan.Connection,
 		ProviderDocs: docs,
 		CredentialHint: "the selected carrier's SIP trunking console; use its termination address, " +
 			"authentication username and password, and linked phone number",
 		SIPAddressEnv: plan.Environment["sip_address"], SIPUsernameEnv: plan.Environment["sip_username"],
 		SIPPasswordEnv: plan.Environment["sip_password"], FromNumberEnv: plan.Environment["from_number"],
 	}
-	for _, evidence := range plan.Evidence {
-		switch evidence.Feature {
-		case "inbound":
-			telephony.HasInbound = true
-		case "outbound":
-			telephony.HasOutbound = true
-		case "warm_transfer":
-			telephony.HasWarm = true
-		}
-	}
-	for _, variable := range sortedVarNames(agent) {
-		def := agent.Variables[variable]
-		if def.Source == ir.VariableSourceCallStart {
-			telephony.CallStart = append(telephony.CallStart, livekitCallStart{
-				Name: variable, Type: string(def.Type), TypeCheck: livekitTypeCheck(def.Type), Required: def.Default == nil,
-			})
-		}
-	}
-	sourceVariables := make([]string, 0, len(plan.SystemSources))
-	for variable := range plan.SystemSources {
-		sourceVariables = append(sourceVariables, variable)
-	}
-	sort.Strings(sourceVariables)
-	for _, variable := range sourceVariables {
-		telephony.SystemSources = append(telephony.SystemSources, livekitSystemSource{
-			Variable: variable, Source: string(plan.SystemSources[variable]),
-		})
-	}
-	for _, name := range []string{"REDIS_URL", "LIVEKIT_SIP_URI"} {
-		env.add(name)
-	}
+	fillLiveKitTelephonyCommon(telephony, agent, plan)
+	env.add("REDIS_URL")
 	if telephony.HasInbound {
 		env.add("LIVEKIT_SIP_INBOUND_TRUNK")
 	}
@@ -1073,6 +1145,13 @@ func livekitDeps(data livekitData) []string {
 	}
 	if data.NeedsHTTPX {
 		deps = append(deps, "httpx")
+	}
+	// The connector bridge is a standalone aiohttp server that places outbound
+	// Twilio calls and validates inbound webhook signatures. livekit-agents
+	// already pulls in livekit rtc and aiohttp, but pin them so the bridge does
+	// not depend on that staying true.
+	if data.Telephony != nil && data.Telephony.Transport == "connector" {
+		deps = append(deps, "aiohttp", "twilio")
 	}
 	sort.Strings(deps)
 	return deps

@@ -46,6 +46,48 @@ contains `llm_node` and `llm_request` generation observations in addition to
 the session and agent spans.
 {{end -}}
 {{if .Telephony}}
+{{- if eq .Telephony.Transport "connector"}}
+## Configure the LiveKit Twilio connector
+
+This project uses the `livekit/connector/{{.Telephony.Carrier}}` route: the
+generated `telephony_bridge.py` speaks Twilio Media Streams over a WebSocket
+and joins a local LiveKit room, where the agent worker handles the call. There
+is no SIP trunk and no Redis. A normal HTTPS tunnel is enough, because Twilio
+only needs to reach the bridge over HTTPS and WSS. This is our own open-source
+bridge; LiveKit's hosted connector is Cloud only.
+
+### Required configuration and credentials
+
+Set these in `.env` or your deployment secret store:
+
+- `{{.Telephony.AccountSIDEnv}}` and `{{.Telephony.AuthTokenEnv}}`: your Twilio
+  Account SID and Auth Token (Twilio Console account dashboard). The Auth Token
+  also validates inbound webhook signatures.
+- `{{.Telephony.FromNumberEnv}}`: your Voice-capable Twilio number, E.164.
+- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`: your self-hosted
+  LiveKit Server. The bridge and worker connect out to it, so it needs no
+  public SIP or RTP. Local `unmute dev --telephony` supplies its own dev pair.
+- `UNMUTE_PUBLIC_URL`: the public HTTPS origin the carrier reaches; local
+  `unmute dev --telephony` supplies a managed tunnel.
+{{- if .Telephony.HasOutbound}}
+- `UNMUTE_OUTBOUND_TOKEN`: the bearer token that authorizes
+  `POST /telephony/outbound`; local `unmute dev --telephony` mints it.
+{{- end}}
+
+### Run it
+
+Point the Twilio number's voice webhook at `POST /telephony/inbound` (the dev
+command sets it automatically and prints the previous value).
+{{- if .Telephony.HasOutbound}} Place an outbound call with
+`unmute dev --telephony --to <E.164>`, or POST `{"to": "<E.164>"}` with the
+bearer token to `/telephony/outbound` from your own application.
+{{- end}}
+
+### Scale the route
+
+The bridge and worker are stateless: run more replicas behind one number. Each
+call is one LiveKit room, and the join token dispatches the worker into it.
+{{- else}}
 ## Configure self-hosted LiveKit SIP
 
 This project uses the `livekit/sip/{{.Telephony.Carrier}}` route. Unmute emits
@@ -63,8 +105,6 @@ Set these values in `.env` or your deployment secret store:
 - `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`: a key pair from the `keys`
   section of that server's configuration. LiveKit SIP uses the same pair.
 - `REDIS_URL`: the Redis deployment shared by LiveKit Server and LiveKit SIP.
-- `LIVEKIT_SIP_URI`: the public DNS name or SIP URI of LiveKit SIP. Your
-  carrier sends SIP traffic here.
 - `{{.Telephony.SIPAddressEnv}}`, `{{.Telephony.SIPUsernameEnv}}`, and
   `{{.Telephony.SIPPasswordEnv}}`: {{.Telephony.CredentialHint}}.
 - `{{.Telephony.FromNumberEnv}}`: the phone number linked to that SIP trunk.
@@ -98,9 +138,10 @@ envsubst < sip-dispatch-rule.json > /tmp/unmute-sip-dispatch-rule.json
 lk sip dispatch create /tmp/unmute-sip-dispatch-rule.json
 ```
 
-Configure the carrier's origination URI to `LIVEKIT_SIP_URI`. The dispatch rule
-creates one `call-*` room per inbound call and dispatches the `{{.AgentName}}`
-worker with `direction: inbound` metadata.
+Point the carrier's origination URI at your public LiveKit SIP endpoint (the
+address you deployed LiveKit SIP on). The dispatch rule creates one `call-*`
+room per inbound call and dispatches the `{{.AgentName}}` worker with
+`direction: inbound` metadata.
 {{end}}
 {{if or .Telephony.HasOutbound .Telephony.HasWarm}}
 ```sh
@@ -134,6 +175,7 @@ it for distributed room state and routing; LiveKit SIP uses the same Redis
 deployment to coordinate SIP participants with the server. Audio still flows
 through the SIP/RTP and LiveKit media services. Scale worker replicas on active
 jobs, keep the shared Redis available, and drain active calls before shutdown.
+{{- end}}
 {{end -}}
 
 Do not edit this project by hand — it is regenerated from the agent spec.
