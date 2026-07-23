@@ -1090,10 +1090,10 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		case targetcap.Warn:
 			row.Warnings = add(row.Warnings, evidence.Note)
 		case targetcap.Provisional:
-			// A provisional route has a real adapter but no credentialed smoke
-			// yet. It is usable, so warn rather than block; the operator tests it
-			// themselves. Only Gated (no adapter exists) stays a hard error.
-			row.Warnings = add(row.Warnings, fmt.Sprintf("telephony %s is unverified: %s", evidence.Feature, evidence.Note))
+			// A provisional route has a real adapter but no automated end-to-end
+			// test yet. It is usable and validates silently; the provisional
+			// status stays in compile-report.json for the team to track and
+			// promote. Only Gated (no adapter exists) is a hard error.
 		case targetcap.Gated:
 			row.Errors = add(row.Errors, fmt.Sprintf("telephony %s: %s", evidence.Feature, evidence.Note))
 		default:

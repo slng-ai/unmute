@@ -271,9 +271,10 @@ func TestValidateCodeTelephonyRequiresResolvedPlan(t *testing.T) {
 }
 
 // A provisional telephony route (real adapter, no credentialed smoke) is
-// usable: validation warns that it is unverified but does not block. Only
+// usable and validates silently: no error and no telephony warning. The
+// provisional status lives in the compile report, not the user's console. Only
 // Gated routes (no adapter) stay hard errors.
-func TestValidateTelephonyProvisionalRouteWarnsNotBlocks(t *testing.T) {
+func TestValidateTelephonyProvisionalRouteIsUsableAndQuiet(t *testing.T) {
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
 	target := pkg.Targets["pipecat"]
@@ -290,8 +291,10 @@ func TestValidateTelephonyProvisionalRouteWarnsNotBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provisional route must not block, got errors=%#v", report.PerTarget[0].Errors)
 	}
-	if !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), "unverified") {
-		t.Fatalf("provisional route must warn it is unverified, got warnings=%#v", report.PerTarget[0].Warnings)
+	for _, w := range report.PerTarget[0].Warnings {
+		if strings.Contains(w, "telephony") {
+			t.Fatalf("provisional route must not print a telephony warning, got %q", w)
+		}
 	}
 }
 
