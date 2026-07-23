@@ -422,10 +422,12 @@ The carrier matrix makes those values explicit:
 | `sip` | Exotel | Exotel SIP values | No emitted setup | Gated pending provider-specific proof |
 | `connector` | Twilio | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | No emitted adapter | Recognized Beta route; gated |
 
-Every SIP row still fails public validation until its credentialed route smoke
-passes. The SIP emitter contains inbound, outbound, voicemail, hangup,
-cold-transfer, and warm-transfer paths. The Twilio Connector currently has only
-route and credential vocabulary; Unmute does not emit a Connector adapter.
+Every SIP row runs now and is tagged provisional: validation and compilation
+emit it with a warning that the route is unverified until its credentialed
+route smoke passes. The SIP emitter contains inbound, outbound, voicemail,
+hangup, cold-transfer, and warm-transfer paths. The Twilio Connector has only
+route and credential vocabulary; Unmute emits no Connector adapter, so that
+route stays gated and fails closed.
 Follow the
 [SIP trunking guide](../learn/07-phone-calls.md#configure-telephony-by-orchestrator)
 for the complete Twilio, Telnyx, and Plivo setup.
@@ -452,19 +454,18 @@ transfer behavior.
 
 To configure several carriers, declare several LiveKit targets, such as
 `livekit_twilio` and `livekit_plivo`, and bind each to its own Connection. Each
-will compile to a separate project and SIP setup after its exact route is
-promoted; today each fails closed independently. See
+compiles to a separate project and SIP setup, and each provisional route runs
+with its own unverified warning. See
 [phone calls](../learn/07-phone-calls.md#configure-multiple-carriers) for a full
 Pipecat and LiveKit example.
 
-The offline emitter's `.env.example` names every deployment value. It is
-visible in generator tests but is not obtainable through public compilation
-while the route is provisional. After promotion, get the LiveKit API key pair
-from the self-hosted server's `keys` configuration, set `LIVEKIT_URL` to that
-server, and set `REDIS_URL` to the Redis deployment shared by LiveKit Server
-and LiveKit SIP. Set `LIVEKIT_SIP_URI` to the SIP service's public DNS name or
-SIP URI. Local `unmute dev --telephony` will supply its own clearly
-non-production LiveKit key pair and Redis connection instead.
+The emitter's `.env.example` names every deployment value and is written by
+public compilation now. Get the LiveKit API key pair from the self-hosted
+server's `keys` configuration, set `LIVEKIT_URL` to that server, and set
+`REDIS_URL` to the Redis deployment shared by LiveKit Server and LiveKit SIP.
+Set `LIVEKIT_SIP_URI` to the SIP service's public DNS name or SIP URI. Local
+`unmute dev --telephony` supplies its own clearly non-production LiveKit key
+pair and Redis connection instead.
 
 For Twilio, get the SIP address, Credential List username and password, and
 associated number from **Elastic SIP Trunking** in the Twilio Console. For
@@ -472,9 +473,9 @@ Telnyx, use the SIP connection address, credentials, and assigned number from
 Telnyx Mission Control. For Plivo, use the Zentrunk termination domain,
 outbound credential, and linked number from the Plivo Console.
 
-After promotion, compilation will emit the selected
-`sip-inbound-trunk.json`, `sip-outbound-trunk.json`, and
-`sip-dispatch-rule.json` inputs for production deployments. Materialize their
+Compilation emits the selected `sip-inbound-trunk.json`,
+`sip-outbound-trunk.json`, and `sip-dispatch-rule.json` inputs for production
+deployments. Materialize their
 environment placeholders with `envsubst`, then run the `lk sip ... create`
 commands in the generated README. Copy the returned IDs to
 `LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` as requested by
@@ -498,16 +499,15 @@ its traffic. The generated worker itself exposes LiveKit's `/` health endpoint,
 which returns success only while the worker is connected and operating
 normally.
 
-This is the intended local SIP command after promotion:
+This is the local SIP command:
 
 ```sh
 unmute dev acme --target livekit --telephony
 ```
 
-Today it reports the provisional route before checking credentials or Docker
-and does not emit the Compose graph. Once the route is promoted, the command
-runs the whole bootstrap itself: Docker Compose builds the Agent and starts
-Redis, LiveKit Server, and LiveKit SIP first; the command then creates or
+The command prints a warning that the route is unverified, then runs the whole
+bootstrap itself: Docker Compose builds the Agent and starts Redis, LiveKit
+Server, and LiveKit SIP first; the command then creates or
 reuses the inbound trunk, outbound trunk, and `call-` dispatch rule on that
 local server with the generated development key pair, injects the returned
 `LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK`, and starts the
@@ -517,9 +517,9 @@ so restarts reuse existing records instead of duplicating them.
 Non-empty external `LIVEKIT_URL`, API key/secret, `REDIS_URL`, or trunk ID
 values conflict with this local graph and are rejected. `--verbose` follows
 Compose logs; normal output is retained in `build/livekit/telephony.log`.
-Stopping preserves the named Redis volume. The current validation gate still
-prevents obtaining this Compose file through `unmute compile`; this describes
-the post-promotion behavior, not a workaround around the gate.
+Stopping preserves the named Redis volume. Remember that a real call still
+needs carrier-reachable SIP signaling and RTP; the local stack runs, but an
+HTTPS tunnel cannot carry the media path.
 
 ## Run it and talk to the agent
 

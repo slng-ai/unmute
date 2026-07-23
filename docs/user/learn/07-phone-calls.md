@@ -9,11 +9,13 @@ credentials into generated code. For local development,
 points the Twilio number's voice webhook at it, and creates the local LiveKit
 trunk records itself (see "Local development with zero steps" below).
 
-All emitted carrier routes are currently **provisional**, and the remaining
-recognized routes are gated. The generated Pipecat Twilio, Telnyx, and Plivo
-adapters and the LiveKit SIP routes have credential-free tests, but validation
-continues to fail closed until each exact route passes real inbound, outbound,
-authentication, hangup, and transfer smokes.
+The Pipecat Twilio, Telnyx, and Plivo routes and the LiveKit SIP routes have
+real adapters and are usable now. They are tagged **provisional**: the adapter
+exists but has not passed its automated credentialed smoke yet, so
+`unmute validate`, `unmute compile`, and `unmute dev --telephony` run them and
+print a per-feature warning that the route is unverified. The remaining
+recognized routes (Exotel on any framework, and the LiveKit Twilio Connector)
+are gated with no adapter, so they still fail closed.
 
 ## Declare the phone channel
 
@@ -168,12 +170,13 @@ for an unselected carrier.
 | LiveKit | `sip` | Exotel | `sip_address`, `sip_username`, `sip_password`, `from_number` | Gated; no emitted setup |
 | LiveKit | `connector` | Twilio | `account_sid`, `auth_token`, `from_number` | Recognized Beta route; no emitted adapter |
 
-"Generated offline" means the emitter and credential-free checks exist. It
-does not promote the route: public validation, compilation, and telephony
-development still fail closed until the exact credentialed smoke passes. The
-Pipecat emitters contain inbound, outbound, hangup, and cold-transfer paths;
-voicemail and warm transfer remain gated. The LiveKit SIP emitter contains
-inbound, outbound, voicemail, hangup, cold-transfer, and warm-transfer paths.
+"Generated offline" means the emitter and credential-free checks exist. The
+route is usable now: public validation, compilation, and telephony development
+run it and print a warning that the route is unverified until its exact
+credentialed smoke passes. The Pipecat emitters contain inbound, outbound,
+hangup, and cold-transfer paths; voicemail and warm transfer remain gated. The
+LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
+cold-transfer, and warm-transfer paths.
 
 ## Configure multiple carriers
 
@@ -234,17 +237,16 @@ targets:
 Create `connections/twilio_api.yaml`, `connections/telnyx_api.yaml`,
 `connections/plivo_api.yaml`, `connections/twilio_sip.yaml`,
 `connections/telnyx_sip.yaml`, and `connections/plivo_sip.yaml` with the keys
-from the matrix. The package can contain all of them, but every telephony
-target currently fails closed because its exact route is provisional or gated.
-After promotion, `unmute compile` will process every declared target when you
-omit `--target`, while `unmute dev --telephony` will run one selected target at
-a time. Adding another supported carrier is another target and Connection, not
-a schema change.
+from the matrix. The package can contain all of them. `unmute compile` processes every declared
+target when you omit `--target`, while `unmute dev --telephony` runs one
+selected target at a time. Provisional routes run with an unverified warning;
+only the gated no-adapter routes (Exotel, the LiveKit Twilio Connector) fail.
+Adding another supported carrier is another target and Connection, not a schema
+change.
 
 ## Local development with zero steps
 
-Once a route is promoted, local development needs one command and no manual
-setup per run:
+Local development needs one command and no manual setup per run:
 
 ```sh
 unmute dev ./agent --target pipecat --telephony
@@ -370,9 +372,9 @@ route matrix instead of the `*_SIP_*` names).
   tunnel cannot carry it, and Docker Desktop NAT may block it even when
   every local health check passes. The managed tunnel applies only to
   carrier webhook routes.
-- Every telephony route still fails closed today. The flow above describes
-  the promoted-route behavior; until a route passes its credentialed
-  smokes, `unmute dev --telephony` stops at validation.
+- Provisional routes run now with an unverified warning. Only the gated
+  no-adapter routes (Exotel, the LiveKit Twilio Connector) fail closed,
+  because there is nothing to run for them.
 
 ## Configure telephony by orchestrator
 
@@ -391,10 +393,10 @@ credentials and a different `transport` on each orchestrator.
 
 <!-- prettier-ignore -->
 > [!IMPORTANT]
-> Every route in this table currently fails validation before generation.
-> Offline tests prove the emitted shape, but each exact route remains
-> provisional until it passes a credentialed call smoke. You can author the
-> configuration now; you cannot run it through the public CLI yet.
+> The provisional routes in this table run now. Validation, compilation, and
+> `unmute dev --telephony` generate and run them, and print a warning that the
+> route is unverified until it passes a credentialed call smoke. Only the gated
+> Exotel and Twilio Connector rows fail, because there is no adapter to run.
 
 ### Configure a Pipecat carrier WebSocket
 
@@ -409,8 +411,7 @@ HTTP and WebSocket endpoints over HTTPS.
 | Plivo | `auth_id`, `auth_token`, `from_number` | `PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN`, `PLIVO_PHONE_NUMBER` |
 | Exotel | `api_key`, `api_token`, `account_sid`, `subdomain`, `from_number`, `app_id` | Gated; these values do not enable the route |
 
-After the selected route is promoted, run it locally with one command; the
-managed tunnel supplies the public origin:
+Run it locally with one command; the managed tunnel supplies the public origin:
 
 ```sh
 unmute dev ./agent --target pipecat_twilio --telephony
@@ -586,9 +587,9 @@ SIP capabilities.
 
 #### Create the LiveKit resources
 
-After the selected route is promoted, compile it and materialize the generated
-JSON. The committed inputs contain environment variable placeholders;
-`envsubst` resolves them from your exported environment.
+Compile the target and materialize the generated JSON. The committed inputs
+contain environment variable placeholders; `envsubst` resolves them from your
+exported environment.
 
 ```sh
 envsubst < sip-inbound-trunk.json > /tmp/unmute-sip-inbound-trunk.json
