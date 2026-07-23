@@ -184,7 +184,6 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 			{Name: "LIVEKIT_API_SECRET"},
 			{Name: "LIVEKIT_SIP_INBOUND_TRUNK", AnyFeatures: []TelephonyFeature{TelephonyInbound}},
 			{Name: "LIVEKIT_SIP_OUTBOUND_TRUNK", AnyFeatures: []TelephonyFeature{TelephonyOutbound, TelephonyFeature(WarmTransfer)}},
-			{Name: "LIVEKIT_SIP_URI"},
 			{Name: "LIVEKIT_URL"},
 			{Name: "REDIS_URL"},
 		}
@@ -192,7 +191,7 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		route.DevSuppliedEnvironment = []string{"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK"}
 		route.ManualSteps = []string{
 			"get LIVEKIT_URL and the API key pair from the self-hosted LiveKit Server configuration; configure LiveKit Server and LiveKit SIP with the same Redis deployment",
-			"deploy LiveKit SIP with public SIP signaling and RTP ports, then set LIVEKIT_SIP_URI to that public SIP endpoint",
+			"deploy LiveKit SIP with public SIP signaling and RTP ports, then point the carrier's origination URI at that public SIP endpoint",
 			"get the selected carrier SIP address, username, password, and phone number from its SIP trunking console",
 			"for production, materialize the generated SIP JSON inputs, create the LiveKit trunks and dispatch rule with lk, and copy the returned trunk IDs into the reported environment variables (unmute dev --telephony creates the local records and supplies both IDs itself)",
 		}

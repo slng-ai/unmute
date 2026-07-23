@@ -1199,7 +1199,7 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	env := artifactFile(t, artifact, ".env.example")
 	for _, name := range []string{
 		"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "REDIS_URL",
-		"LIVEKIT_SIP_URI", "LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK",
+		"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK",
 		"TWILIO_SIP_ADDRESS", "TWILIO_SIP_USERNAME", "TWILIO_SIP_PASSWORD", "TWILIO_PHONE_NUMBER",
 	} {
 		if !strings.Contains(env, name+"=") {
@@ -1247,10 +1247,13 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		t.Fatalf("runtime process = %#v", runtime.Processes)
 	}
 	required := strings.Join(runtime.RequiredEnv, ",")
-	for _, want := range []string{"REDIS_URL", "LIVEKIT_SIP_URI", "LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK", "TWILIO_SIP_PASSWORD"} {
+	for _, want := range []string{"REDIS_URL", "LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK", "TWILIO_SIP_PASSWORD"} {
 		if !strings.Contains(required, want) {
 			t.Errorf("runtime required env missing %s: %s", want, required)
 		}
+	}
+	if strings.Contains(required, "LIVEKIT_SIP_URI") {
+		t.Errorf("runtime still requires the unused LIVEKIT_SIP_URI: %s", required)
 	}
 	if strings.Contains(required, "UNMUTE_OUTBOUND_TOKEN") {
 		t.Errorf("LiveKit SIP runtime requires unused outbound token: %s", required)

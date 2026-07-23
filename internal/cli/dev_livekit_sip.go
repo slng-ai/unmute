@@ -303,6 +303,82 @@ func (r sipRecord) list(keys ...string) []sipRecord {
 	return nil
 }
 
+// placeLiveKitDispatch places an outbound LiveKit SIP call by dispatching the
+// agent into a fresh room with outbound metadata (SPEC I.sipdial). The worker
+// then dials `to` through the stored outbound trunk. API shape verified
+// 2026-07-23 against docs.livekit.io /reference/agents/agent-dispatch-service-api:
+//
+//	POST <server>/twirp/livekit.AgentDispatchService/CreateDispatch
+//	{"agent_name","room","metadata"} ; Bearer JWT with roomAdmin ; room auto-created.
+func placeLiveKitDispatch(ctx context.Context, out io.Writer, targetName, to string, env []string) error {
+	room, err := randomRoomName("call")
+	if err != nil {
+		return err
+	}
+	token, err := mintLiveKitDispatchToken(liveKitSIPComposeKey, liveKitSIPComposeSecret, time.Now())
+	if err != nil {
+		return err
+	}
+	client := &sipAdminClient{base: liveKitSIPAdminBase(env), token: token}
+	// The worker reads phone_number, direction, and call_start from job metadata
+	// (agent.py connector/SIP branch). call_start stays empty here; drive it from
+	// your own application when the agent declares required call_start variables.
+	metadata, err := json.Marshal(map[string]any{
+		"direction": "outbound", "phone_number": to, "call_start": map[string]any{},
+	})
+	if err != nil {
+		return err
+	}
+	var created sipRecord
+	if err := client.callDispatch(ctx, "CreateDispatch", map[string]any{
+		"agent_name": targetName, "room": room, "metadata": string(metadata),
+	}, &created); err != nil {
+		return fmt.Errorf("place outbound call to %s: %w", to, err)
+	}
+	id := created.string("id")
+	fmt.Fprintf(out, "\n  \033[1;32m▸\033[0m calling %s  (room %s, dispatch %s)  ·  ctrl-c to stop\n\n", to, room, id)
+	return nil
+}
+
+// mintLiveKitDispatchToken returns a short-lived HS256 JWT with server-wide
+// roomAdmin (the AgentDispatchService grant), reusing the hand-rolled JWT
+// approach from mintLiveKitToken. No room is scoped so it can create any room.
+func mintLiveKitDispatchToken(apiKey, apiSecret string, now time.Time) (string, error) {
+	claims := struct {
+		Iss   string `json:"iss"`
+		Nbf   int64  `json:"nbf"`
+		Exp   int64  `json:"exp"`
+		Video struct {
+			RoomAdmin bool `json:"roomAdmin"`
+		} `json:"video"`
+	}{Iss: apiKey, Nbf: now.Unix(), Exp: now.Add(10 * time.Minute).Unix()}
+	claims.Video.RoomAdmin = true
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		return "", err
+	}
+	signingInput := b64url([]byte(`{"alg":"HS256","typ":"JWT"}`)) + "." + b64url(payload)
+	mac := hmac.New(sha256.New, []byte(apiSecret))
+	mac.Write([]byte(signingInput))
+	return signingInput + "." + b64url(mac.Sum(nil)), nil
+}
+
+// callDispatch posts to the AgentDispatchService Twirp endpoint. Separate from
+// call() because that one is hardwired to the livekit.SIP service path.
+func (c *sipAdminClient) callDispatch(ctx context.Context, method string, payload, result any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/twirp/livekit.AgentDispatchService/"+method, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	request.Header.Set("Content-Type", "application/json")
+	return doTelephonyJSON(request, result)
+}
+
 // telephonyInfraServices is the Compose graph minus the application: the
 // services that must be healthy before trunk records can be created.
 func telephonyInfraServices(plan *generate.TelephonyRuntimePlan) []string {

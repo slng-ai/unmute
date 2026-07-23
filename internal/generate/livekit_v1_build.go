@@ -393,9 +393,7 @@ func buildLiveKitTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*liveki
 			Variable: variable, Source: string(plan.SystemSources[variable]),
 		})
 	}
-	for _, name := range []string{"REDIS_URL", "LIVEKIT_SIP_URI"} {
-		env.add(name)
-	}
+	env.add("REDIS_URL")
 	if telephony.HasInbound {
 		env.add("LIVEKIT_SIP_INBOUND_TRUNK")
 	}

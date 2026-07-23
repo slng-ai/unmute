@@ -180,12 +180,19 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 		}
 		printDevCallLine(cmd.OutOrStdout(), plan, childEnv)
 		// Outbound-capable route: --to places one call now that the graph is
-		// healthy (T4); without --to, print how to place one and do nothing (T5).
+		// healthy; without --to, print how to place one and do nothing (T5).
 		// The direction guard in runDevTelephony ensures opts.to is only set for
-		// an outbound-capable plan, so the token minted in T2 is present.
+		// an outbound-capable plan. Placement differs by route: LiveKit SIP has
+		// no HTTP dial-out endpoint, so it dispatches the agent on the local
+		// server; carrier-websocket and the connector POST to the bot's own
+		// /telephony/outbound (I.trigger, I.sipdial).
 		if planHasTelephonyFeature(plan, "outbound") {
 			if opts.to != "" {
-				if err := placeOutboundCall(ctx, cmd.OutOrStdout(), targetName, opts.botPort, outboundToken, opts.to); err != nil {
+				if plan.Route.Transport == "sip" {
+					if err := placeLiveKitDispatch(ctx, cmd.OutOrStdout(), targetName, opts.to, childEnv); err != nil {
+						return err
+					}
+				} else if err := placeOutboundCall(ctx, cmd.OutOrStdout(), targetName, opts.botPort, outboundToken, opts.to); err != nil {
 					return err
 				}
 			} else {

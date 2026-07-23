@@ -448,7 +448,6 @@ when you fill in `.env`.
 
 | Value | Owned by | Meaning |
 |---|---|---|
-| `LIVEKIT_SIP_URI` | Your LiveKit SIP deployment | Public SIP endpoint where the carrier sends inbound calls |
 | `*_SIP_ADDRESS` | Carrier | Carrier termination address that LiveKit calls for outbound calls |
 | `*_SIP_USERNAME`, `*_SIP_PASSWORD` | Carrier | Credentials that LiveKit uses for outbound SIP authentication |
 | `*_PHONE_NUMBER` | Carrier | E.164 number associated with the carrier trunk |
@@ -497,10 +496,12 @@ LIVEKIT_URL=wss://livekit.example.com
 LIVEKIT_API_KEY=replace-with-server-key
 LIVEKIT_API_SECRET=replace-with-server-secret
 REDIS_URL=redis://redis.example.com:6379
-LIVEKIT_SIP_URI=sip.example.com
 ```
 
-Expose SIP signaling and RTP directly to the carrier. Generated local Compose
+Note the public SIP endpoint you deploy LiveKit SIP on (for example
+`sip.example.com`); the carrier's origination URI points at it. Nothing reads
+it as an environment variable. Expose SIP signaling and RTP directly to the
+carrier. Generated local Compose
 defaults to SIP port `5060` and UDP RTP ports `10000-10100`; production needs a
 range sized for its call traffic. An HTTPS tunnel cannot expose this media
 path.
@@ -514,7 +515,7 @@ for the carrier-side fields.
 
 1. Create an Elastic SIP Trunk in the Twilio Console.
 2. For inbound calls, set its origination URI to
-   `sip:<LIVEKIT_SIP_URI>;transport=tcp`.
+   `sip:<your-livekit-sip-endpoint>;transport=tcp`.
 3. For outbound calls, create a Credential List and attach it to the trunk.
 4. Associate the Twilio phone number with the trunk.
 5. Put the termination SIP URI, Credential List username and password, and
@@ -535,7 +536,8 @@ profile. Use the
 for the carrier-side fields.
 
 1. Create an FQDN SIP Connection in the Telnyx Portal.
-2. Add `LIVEKIT_SIP_URI` as the connection's FQDN for inbound calls.
+2. Add your public LiveKit SIP endpoint as the connection's FQDN for inbound
+   calls.
 3. Set the origination and destination number formats to `+E.164`.
 4. For outbound calls, set a username and password and select an outbound
    voice profile.
@@ -562,7 +564,7 @@ trunks. Use the
 for the carrier-side fields.
 
 1. Create an inbound Zentrunk whose primary URI is
-   `<LIVEKIT_SIP_URI>;transport=tcp`, and link the Plivo phone number.
+   `<your-livekit-sip-endpoint>;transport=tcp`, and link the Plivo phone number.
 2. Create an outbound credential with a username and strong password.
 3. Create an outbound Zentrunk with that credential.
 4. Copy its termination SIP domain from the `trunk_domain` field.

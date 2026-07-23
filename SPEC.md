@@ -1,121 +1,171 @@
-# SPEC — Pipecat Twilio dial-out (outbound) at the core
+# SPEC: LiveKit Twilio connector route (local telephony parity with Pipecat)
 
-Source brief: "implement the dial-out that got excluded" for the Pipecat Twilio
-carrier-websocket route, following the Pipecat Twilio WebSocket dial-out docs
-(https://docs.pipecat.ai/pipecat/telephony/twilio-websockets#dial-out).
-Schema truth: [SCHEMA.md](docs/SCHEMA.md). Telephony design: [docs/TELEPHONY.md](docs/TELEPHONY.md).
+Source brief: "I want to test locally both pipecat and livekit in the same
+way. No LiveKit Cloud dependency: only Docker and open source, and it must
+also scale to production." Telephony design: [docs/TELEPHONY.md](docs/TELEPHONY.md).
 
-Ground truth found while scoping (do not re-litigate): the generated outbound
-path already exists. `internal/target/telephony.go` gives the Pipecat
-carrier-websocket route the `outbound` feature, the `/telephony/outbound`
-endpoint rule, and the `UNMUTE_OUTBOUND_TOKEN` runtime env. The template
-`telephony_twilio.py.tmpl` emits `POST /telephony/outbound` (gated on
-`.Telephony.HasOutbound`) that Bearer-auths on `UNMUTE_OUTBOUND_TOKEN`, calls
-`_remember("outbound", ...)`, and runs `client.calls.create(to, from_,
-twiml=<Connect><Stream wss://…/telephony/ws/{token}>>, status_callback=…)` —
-the exact docs pattern. The media WebSocket reuses dial-in `handle_media`. This
-spec adds no second WS path and no serializer.
+Ground truth found while scoping (do not re-litigate):
+
+- Cloudflared quick tunnels carry HTTPS/WSS to one local port, nothing else.
+  LiveKit SIP needs SIP 5060 (UDP/TCP) and RTP UDP into the laptop, so no
+  tunnel can ever make SIP inbound work locally. That route stays as the
+  production trunk option; it is not the local-testing answer.
+- LiveKit ships an official "Twilio Connector" (Twilio Media Streams over
+  WebSocket instead of SIP), but the serving side is LiveKit Cloud only
+  (BETA). Verified: `ConnectTwilioCall` exists in livekit/protocol, and no
+  OSS service implements it (livekit/livekit pkg/service has no connector;
+  there is no livekit/connector repo). We therefore build our own bridge,
+  same mechanism, fully open source.
+- The route key is already reserved in `internal/target/telephony.go`:
+  `{LiveKit, "connector", "twilio"}`, today gated with no adapter, required
+  env already `account_sid, auth_token, from_number` (pipecat-shaped).
+- The Pipecat template already implements the Twilio side end to end
+  (webhook signature validation, TwiML `<Connect><Stream>`, Media Streams
+  WS protocol, outbound `calls.create`, status callback). The bridge reuses
+  those exact protocol shapes.
+- Verified in livekit/python-sdks: `rtc.AudioSource(sample_rate=8000,
+  num_channels=1)` publishes 8 kHz audio and `rtc.AudioStream(track,
+  sample_rate=8000, num_channels=1)` resamples received audio to 8 kHz. The
+  SDK does the resampling; we only need mu-law encode/decode (pure Python
+  lookup tables, ~30 lines; stdlib audioop is removed in Python 3.13, so no
+  audioop).
+- The CLI web-mode token minting (`mintLiveKitToken` + `lkRoomConfig`
+  agents) already shows how a joining participant's token dispatches the
+  agent. The bridge uses the same trick: no SIP trunks, no dispatch rules,
+  no Redis.
+- SIP dial-out API verified 2026-07-23 against docs.livekit.io
+  /reference/agents/agent-dispatch-service-api: `POST
+  <server>/twirp/livekit.AgentDispatchService/CreateDispatch` with JSON
+  `{"agent_name","room","metadata"}`, Bearer JWT with video grant
+  `{"roomAdmin":true,"room":<room>}`; the room is auto-created. Same Twirp
+  shape as the existing `sipAdminClient`. Outbound SIP works from a laptop
+  because the local stack initiates every connection; only inbound needs
+  public SIP/RTP reachability.
+- `UNMUTE_OUTBOUND_TOKEN` mint currently triggers on the outbound feature;
+  the connector route lists the token like Pipecat, so making the mint
+  condition data-driven (plan RequiredEnv contains it) serves both.
 
 ## §G goal
 
-A Pipecat carrier-websocket agent whose `channels.phone` direction includes
-outbound compiles a working dial-out path, and `unmute dev --telephony --to
-<E.164>` places a real outbound call once the container is healthy. Direction
-drives it: inbound-only is unchanged, outbound places a call, both do both.
+`unmute dev <pkg> --telephony --target <livekit-connector-instance>` works
+exactly like the Pipecat run: same three Twilio env vars, same managed
+cloudflared tunnel, same auto webhook, same `--to` dial-out. All local, all
+open source, and the same generated container deploys to production behind
+any public HTTPS origin with a self-hosted LiveKit server.
 
 ## §C constraints
 
-- C1: outbound is a direction, not a new transport. Reuse the emitted
-  `POST /telephony/outbound`, `_outbound_request`, `_remember`, and shared
-  `handle_media`. No new endpoint, WS path, or serializer in generated Python.
-- C2: voicemail detection is optional, never a precondition of outbound. A
-  carrier-websocket agent may set `outbound: true` with no `on_voicemail`.
-  `on_voicemail` stays route-gated: Pipecat still errors when it is set,
-  because the Pipecat driver denies voicemail (unchanged deny).
-- C3: `UNMUTE_OUTBOUND_TOKEN` is a dev-supplied secret for local runs, like
-  `UNMUTE_PUBLIC_URL`: `execDevTelephony` mints a random token, injects it into
-  the container env before `up`, and reuses it to authorize the trigger. It is
-  never demanded from `.env` and never printed. Production supplies its own.
-- C4: the CLI places the call over loopback to the container's published bot
-  port, not through the tunnel. The tunnel only carries the media WebSocket
-  Twilio opens back to the bot.
-- C5: provisional telephony routes are usable (validation warns `unverified`
-  rather than blocking); outbound is provisional like inbound. Only gated routes
-  with no adapter stay hard errors. No route is promoted to verified by this
-  work.
-- C6: no new Go dependency (stdlib `net/http` for the trigger POST) and no new
-  Python dependency (the endpoint already exists).
-- C7: L1–L3 need zero Python, zero network, zero Docker. A real placed call is
-  L4 only, behind the dev flag and real credentials.
+- C1: no LiveKit Cloud API, SDK call, or URL anywhere in generated
+  artifacts. The bridge speaks only Twilio Media Streams and livekit-rtc
+  against the configured LIVEKIT_URL.
+- C2: no new Python dependency beyond what the routes already use:
+  aiohttp and livekit-rtc ship with livekit-agents; `twilio` is added for
+  this route only (the Pipecat route already depends on it for the same
+  jobs: outbound calls and webhook signatures).
+- C3: no new Go dependency.
+- C4: the Pipecat route is behaviorally unchanged. The LiveKit SIP route
+  changes in exactly two ways: `LIVEKIT_SIP_URI` (consumed by nothing) is
+  removed, and `--to` places a real call via agent dispatch instead of
+  404ing against an endpoint that route never emits.
+- C5: L1-L3 need zero Python, zero network, zero Docker. Bridge behavior is
+  covered by golden files; real calls are manual/L4.
+- C6: Twilio webhook signature validation is mandatory in the bridge, same
+  as Pipecat (trust boundary, never simplified away). The outbound endpoint
+  Bearer-auths on UNMUTE_OUTBOUND_TOKEN.
+- C7: secrets (auth token, outbound token) never reach stdout, stderr, or
+  emitted files.
 
 ## §I surfaces
 
-- I.schema: `channels.phone` with `outbound: true` and `on_voicemail` omitted is
-  valid on a Pipecat carrier-websocket target. Setting `on_voicemail` on a
-  Pipecat target stays a validation error (route denies voicemail). Routes that
-  support voicemail (LiveKit SIP) keep accepting `on_voicemail` as before.
-- I.flag: `unmute dev --telephony --to <E.164>` places one outbound call to
-  `<E.164>` after `up --wait` reports healthy. `--to` requires `--telephony`
-  and a resolved direction that includes outbound; the value is validated as
-  E.164 before generate. On an inbound-only target `--to` is a clear error.
-  Without `--to`, an outbound-capable target prints one line saying dial-out is
-  available and how to place a call, and places nothing.
-- I.trigger: the outbound call is placed from the existing `onReady` hook in
-  `execDevTelephony`, after health and after the webhook/inbound line. The CLI
-  POSTs `{"to":"<E.164>"}` with `Authorization: Bearer <UNMUTE_OUTBOUND_TOKEN>`
-  to `http://127.0.0.1:<bot-port>/telephony/outbound`, prints the returned
-  `call_id`, then follows logs as usual. A non-2xx or transport error tears the
-  project down on the normal failure path.
-- I.env: `execDevTelephony` mints `UNMUTE_OUTBOUND_TOKEN` (crypto-random) when
-  the resolved direction includes outbound, injects it with the same
-  `setChildEnv` used for `UNMUTE_PUBLIC_URL`, and removes it from the
-  missing-credentials check (special-cased exactly like `UNMUTE_PUBLIC_URL`).
-  It is NOT added to `DevSuppliedEnvironment`: that field drives the LiveKit SIP
-  infra-first path and must stay LiveKit-only.
-- I.endpoint: the generated `POST /telephony/outbound` (telephony_twilio.py) is
-  unchanged by this spec. It is the dial-out server the docs describe.
+- I.connection: a connection YAML with `transport: connector`,
+  `carrier: twilio` and env keys `account_sid`, `auth_token`, `from_number`
+  resolves to the connector route. Features: route_selected, inbound,
+  outbound, hangup, and the non-stream variable sources. Voicemail and
+  transfers stay unsupported (gated) on this route for now.
+- I.env: user-supplied env is exactly the Pipecat set: TWILIO_ACCOUNT_SID,
+  TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, plus model keys. LIVEKIT_URL,
+  LIVEKIT_API_KEY, LIVEKIT_API_SECRET are locally supplied by the generated
+  Compose (devkey pair) and real env in production. UNMUTE_PUBLIC_URL and
+  UNMUTE_OUTBOUND_TOKEN are dev-supplied like Pipecat.
+- I.bridge: generated `telephony_bridge.py` (aiohttp, in the application
+  container next to agent.py):
+  - `POST /telephony/inbound`: validates the Twilio signature, returns TwiML
+    `<Connect><Stream url="wss://<public>/telephony/ws/<token>">`.
+  - `WS /telephony/ws/<token>`: speaks Twilio Media Streams (start, media,
+    stop, mark, clear). Joins room `call-<CallSid>` via livekit-rtc with a
+    token whose room config dispatches the agent (agent_name = target name,
+    metadata carries direction, from/to numbers, call_start). Publishes
+    caller audio (base64 mu-law 8k -> AudioSource(8000,1)) and returns agent
+    audio (AudioStream(track, 8000, 1) -> mu-law -> base64 media frames).
+  - `POST /telephony/outbound`: Bearer token, body `{"to", "call_start"}`,
+    `client.calls.create` with TwiML pointing back at the same WS path,
+    returns `call_id`. Same contract as Pipecat.
+  - `POST /telephony/status/<token>`: status callback, logs call end.
+  - `GET /`: health, port 8081 (unchanged health contract).
+- I.agent: on the connector route agent.py reads call facts (direction,
+  numbers, call_start) from the dispatch metadata the bridge wrote. It never
+  calls create_sip_participant; the bridge places outbound calls.
+- I.compose: `compose.telephony.yaml` for the connector route runs exactly
+  two services: application (bridge + worker) and livekit_server (`--dev`,
+  single node, no Redis, no SIP container).
+- I.dev: `dev --telephony` on this route reuses the Pipecat machinery
+  unchanged and data-driven: managed tunnel (PublicEndpoints non-empty),
+  auto Twilio webhook (AutoWebhookEndpoint), call line, `--to` places the
+  call via loopback POST with the minted token.
+- I.sipdial: on a LiveKit SIP plan with `--to`, after the graph is healthy
+  the CLI mints a roomAdmin JWT for the local devkey pair and POSTs
+  `CreateDispatch` to `http://127.0.0.1:<UNMUTE_LIVEKIT_PORT|7880>` with
+  agent_name = target name, room `call-<random>`, and metadata
+  `{"direction":"outbound","phone_number":"<E.164>","call_start":{}}`. The
+  worker then dials through the stored outbound trunk. Prints
+  `calling <E.164> (room <room>, dispatch <id>)`. Failure returns through
+  the normal teardown path.
+- I.prod: same container behind any public HTTPS origin; set
+  UNMUTE_PUBLIC_URL, UNMUTE_OUTBOUND_TOKEN, LIVEKIT_URL and key pair to the
+  self-hosted server; point the Twilio number webhook at
+  `/telephony/inbound`. README documents this.
 
 ## §V invariants
 
-- V1: a Pipecat carrier-websocket target with `phone.inbound: true,
-  outbound: true` and no `on_voicemail` passes validation and generation, and
-  the artifact contains `@app.post("/telephony/outbound")`.
-- V2: a Pipecat target with `on_voicemail` set still fails validation with the
-  route-denies-voicemail error. Decoupling outbound from voicemail never
-  enables voicemail on Pipecat.
-- V3: `--to` requires `--telephony`; `--to` on a resolved direction without
-  outbound errors before any child process; a `--to` value that is not E.164
-  errors before generate.
-- V4: when the resolved direction includes outbound and `--to` is set, the CLI
-  supplies `UNMUTE_OUTBOUND_TOKEN` itself, never lists it in the
-  missing-credentials error, and never writes it to stdout, stderr, or any
-  emitted file.
-- V5: the outbound trigger POST fires only after `up --wait` succeeds, targets
-  `127.0.0.1:<bot-port>/telephony/outbound`, carries the Bearer token and a body
-  of only `{"to": "<E.164>"}`, and on failure returns through the same teardown
-  as any startup failure (project-scoped `down`, no `--volumes`).
-- V6: inbound behavior is unchanged. An inbound-only target rejects `--to`,
-  prints its dial-in number, and places no call.
-- V7: `--telephony` stdout, stderr, and emitted artifacts for existing targets
-  are byte-for-byte identical when `--to` is absent (regression guard on the
-  compose command sequence and the printed lines).
-- V8: the generated dial-out endpoint accepts a body with no `call_start` and
-  never 500s on required-field checking. Emitted `CALL_START_REQUIRED` is always
-  a set (empty or not), never a dict, so `CALL_START_REQUIRED - set(call_start)`
-  holds when the agent declares no required call-start variables.
+- V1: generated connector artifacts contain no `livekit.cloud`, no
+  `ConnectTwilioCall`, and no SIP trunk or dispatch-rule setup. Grep-clean.
+- V2: the bridge rejects webhook requests with a missing or wrong Twilio
+  signature (403) before doing any work, byte-identical logic to the
+  Pipecat template's validation.
+- V3: `POST /telephony/outbound` without the exact Bearer token is 401; with
+  it, exactly one `calls.create` fires and its TwiML `<Stream>` URL is the
+  public WS endpoint. Empty `call_start` never errors (B1 class from the
+  Pipecat spec: required-set arithmetic must hold when empty).
+- V4: the dev run on a connector plan demands exactly TWILIO_ACCOUNT_SID,
+  TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER plus model keys; never LIVEKIT_URL,
+  the key pair, a trunk ID, or LIVEKIT_SIP_URI.
+- V5: UNMUTE_OUTBOUND_TOKEN is minted exactly when the plan's RequiredEnv
+  lists it (Pipecat outbound and connector outbound); a SIP plan run injects
+  no token.
+- V6: no artifact, route rule, doc, or test references LIVEKIT_SIP_URI.
+- V7: `--to` on a LiveKit SIP plan sends exactly one CreateDispatch to the
+  local server: path `/twirp/livekit.AgentDispatchService/CreateDispatch`,
+  Bearer JWT signed by the devkey pair with a roomAdmin grant, agent_name =
+  target name, metadata JSON with direction "outbound" and phone_number =
+  the `--to` value. No POST to `/telephony/outbound` happens on a SIP plan,
+  and SIP auth values appear in no printed line.
+- V8: the mu-law tables round-trip: encode(decode(b)) == b for all 256 byte
+  values (asserted in the emitted code's self-check and the L4 smoke).
+- V9: Pipecat telephony stdout/stderr and artifacts are byte-for-byte
+  unchanged (regression guard).
 
 ## §T tasks
 
 id|status|desc|cites
-T1|x|validate: outbound no longer requires on_voicemail; on_voicemail still validated + route-gated when present. L1: pipecat outbound-no-voicemail validates; pipecat + on_voicemail still errors; livekit-sip outbound+voicemail still valid|I.schema,V1,V2
-T2|x|dev env: mint UNMUTE_OUTBOUND_TOKEN in execDevTelephony when direction includes outbound, inject before up, special-case it out of the missing-credentials check like UNMUTE_PUBLIC_URL; do not touch DevSuppliedEnvironment. L2: token absent from .env still runs; token never printed|I.env,V4
-T3|x|`--to <E.164>` flag on newDevCmd: E.164 validation, requires --telephony, requires outbound-capable resolved direction, rejects inbound-only with a clear message. L2 flag-guard tests|I.flag,V3,V6
-T4|x|place the call from onReady: POST Bearer-authed {"to":…} to 127.0.0.1:<bot-port>/telephony/outbound, print call_id, teardown on failure. L2 with a fake bot HTTP server asserting method+path+Authorization+body; assert POST fires after readiness|I.trigger,V5
-T5|x|regression: inbound-only --telephony output unchanged without --to; outbound-capable target without --to prints the availability line and places nothing. L2 golden-ish assertions on printed lines|V6,V7
-T6|x|docs: outbound is a direction; `--to` local dial-out; voicemail optional; the CLI→loopback→Twilio→media-WS flow; update docs/user telephony + cli reference. No em dashes|I.flag,I.schema
-T7|x|verify no golden drift for pipecat outbound generation (endpoint already emitted); regenerate only if env-name ordering changes; add L4 real outbound-call smoke behind the dev flag|V1,V7
+T1|.|route table: un-gate {livekit,connector,twilio} with features (route_selected, inbound, outbound, hangup, non-stream sources), endpoints (inbound, ws, outbound, status), processes, runtime env (UNMUTE_PUBLIC_URL, UNMUTE_OUTBOUND_TOKEN, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET with local-supplied set), AutoWebhookEndpoint. L1 route resolution + validate tests (voicemail/transfer on connector still errors)|I.connection,I.env,V4
+T2|.|generate: connector flavor in livekit_v1: telephony_bridge.py.tmpl (signature validation, TwiML, Media Streams WS, mu-law tables, livekit-rtc room join with dispatching token, outbound calls.create, status, health), agent.py connector branch (metadata call facts, no create_sip_participant), pyproject adds twilio for this route, Dockerfile/entry runs bridge + worker, compose.telephony.yaml with application + livekit_server --dev only. Goldens for all|I.bridge,I.agent,I.compose,V1,V2,V3,V8
+T3|.|dev wiring: confirm tunnel, auto webhook, call line, --to all fire data-driven on the connector plan; make the token mint condition RequiredEnv-driven. L2: connector plan run demands only the pipecat-shaped env; --to POSTs loopback with the token; pipecat run unchanged|I.dev,V4,V5,V9
+T4|x|SIP route: remove LIVEKIT_SIP_URI everywhere (route rule, generate env list, templates, goldens, docs, tests); --to on a SIP plan places the call via CreateDispatch (mintLiveKitRoomAdminToken helper + placeLiveKitDispatch on the sipAdminClient Twirp pattern, branch in onReady by route transport, print room + dispatch id). L2 httptest: method, path, auth grant, agent_name, metadata, one call only|C4,I.sipdial,V6,V7
+T5|.|telephony-hello: switch the livekit target to a twilio connector connection so one .env drives both targets; README update|I.connection,I.env
+T6|.|docs: twilio-walkthrough (connector route section, SIP kept as the production trunk path), cli.md, TELEPHONY.md, tags-and-gating (connector un-gated), targets/livekit.md. Simple words, no em dashes|I.prod,V6
+T7|.|full suite green; manual E2E with real creds: connector inbound call, connector outbound --to call (both through the tunnel), SIP outbound --to call (needs the Twilio SIP trunk values)|V1-V9
 
 ## §B bugs
 
 id|date|cause|fix
-B1|2026-07-23|emitted CALL_START_REQUIRED was `{}` (a dict) when the agent had no required call_start vars; `CALL_START_REQUIRED - set(call_start)` in _outbound_request raised TypeError and POST /telephony/outbound 500'd; no test placed an outbound call with empty call_start|V8
+B1|2026-07-23|`--to` on a LiveKit SIP target POSTed /telephony/outbound on the bot port, an endpoint that route never emits, so dial-out 404ed; dev also demanded LIVEKIT_SIP_URI which nothing consumes|V5,V6,V7

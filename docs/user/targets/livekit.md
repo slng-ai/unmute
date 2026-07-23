@@ -462,9 +462,9 @@ The emitter's `.env.example` names every deployment value and is written by
 public compilation now. Get the LiveKit API key pair from the self-hosted
 server's `keys` configuration, set `LIVEKIT_URL` to that server, and set
 `REDIS_URL` to the Redis deployment shared by LiveKit Server and LiveKit SIP.
-Set `LIVEKIT_SIP_URI` to the SIP service's public DNS name or SIP URI. Local
-`unmute dev --telephony` supplies its own clearly non-production LiveKit key
-pair and Redis connection instead.
+For inbound calls, point the carrier's origination URI at your public LiveKit
+SIP endpoint. Local `unmute dev --telephony` supplies its own clearly
+non-production LiveKit key pair and Redis connection instead.
 
 For Twilio, get the SIP address, Credential List username and password, and
 associated number from **Elastic SIP Trunking** in the Twilio Console. For

@@ -56,8 +56,6 @@ Set these values in `.env` or your deployment secret store:
 - `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`: a key pair from the `keys`
   section of that server's configuration. LiveKit SIP uses the same pair.
 - `REDIS_URL`: the Redis deployment shared by LiveKit Server and LiveKit SIP.
-- `LIVEKIT_SIP_URI`: the public DNS name or SIP URI of LiveKit SIP. Your
-  carrier sends SIP traffic here.
 - `{{.Telephony.SIPAddressEnv}}`, `{{.Telephony.SIPUsernameEnv}}`, and
   `{{.Telephony.SIPPasswordEnv}}`: {{.Telephony.CredentialHint}}.
 - `{{.Telephony.FromNumberEnv}}`: the phone number linked to that SIP trunk.
@@ -91,9 +89,10 @@ envsubst < sip-dispatch-rule.json > /tmp/unmute-sip-dispatch-rule.json
 lk sip dispatch create /tmp/unmute-sip-dispatch-rule.json
 ```
 
-Configure the carrier's origination URI to `LIVEKIT_SIP_URI`. The dispatch rule
-creates one `call-*` room per inbound call and dispatches the `{{.AgentName}}`
-worker with `direction: inbound` metadata.
+Point the carrier's origination URI at your public LiveKit SIP endpoint (the
+address you deployed LiveKit SIP on). The dispatch rule creates one `call-*`
+room per inbound call and dispatches the `{{.AgentName}}` worker with
+`direction: inbound` metadata.
 {{end}}
 {{if or .Telephony.HasOutbound .Telephony.HasWarm}}
 ```sh

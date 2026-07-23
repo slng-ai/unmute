@@ -199,9 +199,10 @@ environment:
 Set the target's `provider: livekit`, `transport: sip`, `carrier`, and
 `connection`. The generated project includes inbound-trunk, outbound-trunk,
 and dispatch-rule JSON inputs for the directions you request. Self-hosted SIP
-also requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`,
-`REDIS_URL`, and a public `LIVEKIT_SIP_URI` in deployment; local Compose
-supplies the Server, key pair, and Redis connection. The `lk` commands return
+also requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and
+`REDIS_URL` in deployment, with the carrier's origination URI pointed at your
+public LiveKit SIP endpoint; local Compose supplies the Server, key pair, and
+Redis connection. The `lk` commands return
 the trunk IDs used at runtime. An HTTPS tunnel is enough for Pipecat callbacks,
 but not for LiveKit SIP signaling and RTP.
 
