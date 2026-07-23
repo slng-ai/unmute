@@ -217,31 +217,43 @@ def _dispatch_token(room_name: str, pending: dict, call_sid: str, stream_sid: st
     )
 
 
+async def forward_agent_audio(ws: web.WebSocketResponse, stream_sid_ref: dict, audio_track: rtc.Track) -> None:
+    # The agent's speech: resample to 8 kHz mono, mu-law encode, send to Twilio.
+    stream = rtc.AudioStream(audio_track, sample_rate=SAMPLE_RATE, num_channels=NUM_CHANNELS)
+    try:
+        async for event in stream:
+            if ws.closed or stream_sid_ref["value"] is None:
+                continue
+            payload = base64.b64encode(pcm16_to_ulaw(bytes(event.frame.data))).decode("ascii")
+            await ws.send_json({"event": "media", "streamSid": stream_sid_ref["value"], "media": {"payload": payload}})
+    except Exception:
+        logger.exception("agent audio forwarding stopped")
+    finally:
+        await stream.aclose()
+
+
 async def media_ws(request: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse()
     await ws.prepare(request)
-    pending = PENDING.pop(request.match_info["token"], None)
+    token_key = request.match_info["token"]
+    pending = PENDING.pop(token_key, None)
     if pending is None:
+        logger.warning("media WS with unknown or already-used token; closing")
         await ws.close(code=4403, message=b"unknown or used token")
         return ws
+    logger.info("media WS connected (%s call)", pending["direction"])
 
     source = rtc.AudioSource(SAMPLE_RATE, NUM_CHANNELS)
     track = rtc.LocalAudioTrack.create_audio_track("caller", source)
     room = rtc.Room()
-    state: dict = {"stream_sid": None, "tasks": []}
-
-    async def forward_agent_audio(audio_track: rtc.Track) -> None:
-        stream = rtc.AudioStream(audio_track, sample_rate=SAMPLE_RATE, num_channels=NUM_CHANNELS)
-        async for event in stream:
-            if ws.closed or state["stream_sid"] is None:
-                continue
-            payload = base64.b64encode(pcm16_to_ulaw(bytes(event.frame.data))).decode("ascii")
-            await ws.send_json({"event": "media", "streamSid": state["stream_sid"], "media": {"payload": payload}})
+    stream_sid_ref: dict = {"value": None}
+    tasks: list = []
 
     @room.on("track_subscribed")
     def _on_track(track_: rtc.Track, *_args) -> None:
         if track_.kind == rtc.TrackKind.KIND_AUDIO:
-            state["tasks"].append(asyncio.create_task(forward_agent_audio(track_)))
+            logger.info("agent audio track subscribed; forwarding to the caller")
+            tasks.append(asyncio.create_task(forward_agent_audio(ws, stream_sid_ref, track_)))
 
     connected = False
     try:
@@ -252,24 +264,32 @@ async def media_ws(request: web.Request) -> web.WebSocketResponse:
             event = data.get("event")
             if event == "start":
                 start = data.get("start", {})
-                state["stream_sid"] = start.get("streamSid") or data.get("streamSid")
-                call_sid = start.get("callSid", state["stream_sid"])
+                stream_sid_ref["value"] = start.get("streamSid") or data.get("streamSid")
+                call_sid = start.get("callSid", stream_sid_ref["value"])
                 room_name = f"call-{call_sid}"
-                token = _dispatch_token(room_name, pending, call_sid, state["stream_sid"])
-                await room.connect(_env("LIVEKIT_URL"), token)
+                token = _dispatch_token(room_name, pending, call_sid, stream_sid_ref["value"])
+                lk_url = _env("LIVEKIT_URL")
+                logger.info("connecting bridge to room %s at %s", room_name, lk_url)
+                await room.connect(lk_url, token)
                 await room.local_participant.publish_track(
                     track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
                 )
                 connected = True
+                logger.info("bridge joined room %s; caller audio published", room_name)
             elif event == "media" and connected:
                 pcm = ulaw_to_pcm16(base64.b64decode(data["media"]["payload"]))
                 await source.capture_frame(
                     rtc.AudioFrame(data=pcm, sample_rate=SAMPLE_RATE, num_channels=NUM_CHANNELS, samples_per_channel=len(pcm) // 2)
                 )
             elif event == "stop":
+                logger.info("media stream stopped by carrier")
                 break
+    except Exception:
+        # Without this the failure is invisible: Twilio just plays an
+        # "application error" and the call drops with no local trace.
+        logger.exception("media bridge failed")
     finally:
-        for task in state["tasks"]:
+        for task in tasks:
             task.cancel()
         if connected:
             await room.disconnect()
