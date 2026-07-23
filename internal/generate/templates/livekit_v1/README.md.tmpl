@@ -17,14 +17,21 @@ uv run agent.py dev           # LiveKit development worker
 
 ## Deploy
 
-Deploy to LiveKit Cloud with the `lk` CLI. The region is set once, at create
-time, and cannot be changed afterward (`us-east | eu-central | ap-south`).
+Deployment is self-hosted: the worker connects out to a LiveKit Server you
+run and needs no inbound ports. Build the generated `Dockerfile` into an
+image, set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` to your
+server's values plus the provider keys from `.env.example`, then start the
+worker:
 
 ```sh
-lk agent create{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}
+python agent.py start
 ```
 
-{{if .DeploymentRegion}}This project's `deployment_region` is `{{.DeploymentRegion}}`.{{else}}No `deployment_region` is set, so LiveKit assigns the default; pass `--region` above to pin one.{{end}}
+See `docs/DEPLOYMENT.md` in the Unmute repository for the full self-hosted
+setup: server, Redis, firewall ports, sizing, and scaling.
+
+Compatibility note: the project also runs on LiveKit Cloud with the `lk` CLI
+(`lk agent create{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}`), but that is not the supported path.
 {{if .Tracing}}
 ## Trace with Langfuse
 
