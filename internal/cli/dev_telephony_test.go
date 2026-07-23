@@ -83,6 +83,30 @@ func pipecatTwilioOutboundPlan() *generate.TelephonyRuntimePlan {
 	return plan
 }
 
+// livekitConnectorPlan is the LiveKit Twilio connector shape: the Twilio
+// account trio like Pipecat, the LiveKit dev pair supplied locally, and the
+// HTTP dial-out token the CLI mints. No Redis, no SIP trunks.
+func livekitConnectorPlan() *generate.TelephonyRuntimePlan {
+	return &generate.TelephonyRuntimePlan{
+		Route: ir.TelephonyKey{Provider: ir.ProviderLiveKit, Transport: "connector", Carrier: "twilio"},
+		PublicEndpoints: []generate.TelephonyEndpoint{
+			{Name: "inbound", Method: "POST", Path: "/telephony/inbound"},
+			{Name: "media", Method: "WS", Path: "/telephony/ws/{token}"},
+			{Name: "outbound", Method: "POST", Path: "/telephony/outbound"},
+		},
+		RequiredEnv: []string{
+			"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER",
+			"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
+			"UNMUTE_PUBLIC_URL", "UNMUTE_OUTBOUND_TOKEN",
+		},
+		LocalEnvironment: []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"},
+		Environment:      map[string]string{"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN", "from_number": "TWILIO_PHONE_NUMBER"},
+		Evidence:         []ir.TelephonyFeatureEvidence{{Feature: "inbound", Tag: "provisional"}, {Feature: "outbound", Tag: "provisional"}},
+		Services:         []string{"application", "livekit_server"},
+		Coordination:     "shared",
+	}
+}
+
 var composeFiles = []generate.File{{Path: "compose.telephony.yaml", Content: []byte("services: {}\n")}}
 
 // V1: without --public-url the managed tunnel supplies UNMUTE_PUBLIC_URL to
@@ -329,6 +353,77 @@ func TestExecDevTelephonyOutboundSuppliesTokenWithoutEnvOrPrint(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "OUTBOUND_TOKEN") {
 		t.Fatalf("the outbound token must never be printed:\n%s", out.String())
+	}
+}
+
+// V5: the LiveKit connector run mints and injects UNMUTE_OUTBOUND_TOKEN (its
+// runtime lists it) and demands only the Twilio account trio from .env, exactly
+// like the Pipecat route. LIVEKIT_URL and the key pair are supplied locally.
+func TestExecDevTelephonyConnectorSuppliesTokenAndTwilioEnvOnly(t *testing.T) {
+	root, trace := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	script := filepath.Join(root, "docker")
+	body := "#!/bin/sh\nprintf '%s | OUTBOUND=[%s]\\n' \"$*\" \"$UNMUTE_OUTBOUND_TOKEN\" >> \"$TRACE_FILE\"\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restoreCmd, restorePreflight := composeCommand, composePreflight
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, script, args...)
+	}
+	composePreflight = func(context.Context, []string) error { return nil }
+	t.Cleanup(func() { composeCommand, composePreflight = restoreCmd, restorePreflight })
+
+	cloudflared := filepath.Join(root, "cloudflared")
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreLook := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
+	t.Cleanup(func() { tunnelLookPath = restoreLook })
+
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, root, "phone", livekitConnectorPlan(), composeFiles, devTelephonyOptions{botPort: "7862"}); err != nil {
+		t.Fatalf("execDevTelephony (connector): %v\n%s", err, out.String())
+	}
+	raw, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "OUTBOUND=[]") {
+		t.Fatalf("connector run did not inject UNMUTE_OUTBOUND_TOKEN:\n%s", raw)
+	}
+	if strings.Contains(out.String(), "OUTBOUND_TOKEN") {
+		t.Fatalf("the outbound token must never be printed:\n%s", out.String())
+	}
+}
+
+// V5: a LiveKit SIP run injects no UNMUTE_OUTBOUND_TOKEN — SIP dials out by
+// agent dispatch, so the token would be a dead injection.
+func TestExecDevTelephonySIPInjectsNoOutboundToken(t *testing.T) {
+	newFakeSIPAdmin(t)
+	root, trace := fakeTelephonyRoot(t, strings.Join(sipTestEnv(), "\n"))
+	script := filepath.Join(root, "docker")
+	body := "#!/bin/sh\nprintf '%s | OUTBOUND=[%s]\\n' \"$*\" \"$UNMUTE_OUTBOUND_TOKEN\" >> \"$TRACE_FILE\"\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restoreCmd, restorePreflight := composeCommand, composePreflight
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, script, args...)
+	}
+	composePreflight = func(context.Context, []string) error { return nil }
+	t.Cleanup(func() { composeCommand, composePreflight = restoreCmd, restorePreflight })
+
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, root, "phone", livekitSIPPlan(), composeFiles, devTelephonyOptions{botPort: "8081"}); err != nil {
+		t.Fatalf("execDevTelephony (sip): %v\n%s", err, out.String())
+	}
+	raw, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "OUTBOUND=[]") {
+		t.Fatalf("SIP run injected an outbound token it never uses:\n%s", raw)
 	}
 }
 

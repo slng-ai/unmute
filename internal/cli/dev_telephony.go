@@ -72,12 +72,15 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 	if opts.publicValue != "" || len(plan.PublicEndpoints) > 0 {
 		required = slices.DeleteFunc(required, func(name string) bool { return name == "UNMUTE_PUBLIC_URL" })
 	}
-	// UNMUTE_OUTBOUND_TOKEN is a dev-supplied secret for outbound-capable routes
-	// (SPEC T2/V4): the CLI mints it, injects it so the container's dial-out
-	// endpoint can authenticate the trigger and pass readiness, and reuses it to
-	// place the call (T4). It is never demanded from .env and never printed.
+	// UNMUTE_OUTBOUND_TOKEN is a dev-supplied secret for the HTTP dial-out routes
+	// (Pipecat carrier-websocket and the LiveKit connector): the CLI mints it,
+	// injects it so the container's dial-out endpoint can authenticate the
+	// trigger and pass readiness, and reuses it to place the call. It is never
+	// demanded from .env and never printed. Mint it exactly when the route's
+	// runtime lists it (SPEC V5): LiveKit SIP dials out by agent dispatch and
+	// needs no token, so it must not receive a dead injection.
 	outboundToken := ""
-	if planHasTelephonyFeature(plan, "outbound") {
+	if slices.Contains(plan.RequiredEnv, "UNMUTE_OUTBOUND_TOKEN") {
 		token, err := randomOutboundToken()
 		if err != nil {
 			return fmt.Errorf("mint outbound token: %w", err)
