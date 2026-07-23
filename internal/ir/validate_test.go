@@ -289,6 +289,76 @@ func TestValidateTelephonyPlanFailsClosedWithoutRouteSmoke(t *testing.T) { // te
 	}
 }
 
+func TestValidateTelephonyDevUnsafeDowngradesProvisional(t *testing.T) { // telephony V5 dev escape hatch
+	t.Setenv("UNMUTE_DEV_UNSAFE_TELEPHONY", "1")
+	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
+	target := pkg.Targets["pipecat"]
+	target.Transport = "carrier-websocket"
+	target.Carrier = "twilio"
+	target.Connection = "primary_phone"
+	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["pipecat"]
+	report, err := Validate(agent, []Target{resolved}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("expected no error with dev escape hatch, got %v (errors=%#v)", err, report.PerTarget[0].Errors)
+	}
+	if !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), "allowed by UNMUTE_DEV_UNSAFE_TELEPHONY") {
+		t.Fatalf("expected provisional route downgraded to a warning, got warnings=%#v errors=%#v", report.PerTarget[0].Warnings, report.PerTarget[0].Errors)
+	}
+}
+
+// T1/V1: a Pipecat carrier-websocket target may be outbound-capable without
+// on_voicemail. No voicemail error of any kind is raised when it is omitted.
+func TestValidateOutboundWithoutVoicemailRaisesNoVoicemailError(t *testing.T) {
+	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
+	phone := pkg.Agent.Channels["phone"]
+	outbound := true
+	phone.Outbound = &outbound
+	pkg.Agent.Channels["phone"] = phone
+	target := pkg.Targets["pipecat"]
+	target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
+	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, _ := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
+	joined := strings.Join(report.PerTarget[0].Errors, "\n")
+	if strings.Contains(joined, "voicemail") {
+		t.Fatalf("outbound without on_voicemail must raise no voicemail error, got:\n%s", joined)
+	}
+}
+
+// T1/V2: setting on_voicemail on Pipecat still fails, because the Pipecat route
+// cannot detect voicemail. Decoupling outbound from voicemail never enables it.
+func TestValidatePipecatOnVoicemailStillErrors(t *testing.T) {
+	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
+	phone := pkg.Agent.Channels["phone"]
+	outbound := true
+	phone.Outbound = &outbound
+	phone.OnVoicemail = "hangup"
+	pkg.Agent.Channels["phone"] = phone
+	target := pkg.Targets["pipecat"]
+	target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
+	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
+	joined := strings.Join(report.PerTarget[0].Errors, "\n")
+	if err == nil || !strings.Contains(joined, "voicemail") {
+		t.Fatalf("pipecat + on_voicemail must still error on voicemail support, err=%v:\n%s", err, joined)
+	}
+}
+
 func TestValidateTelephonyPlanRejectsOrphanRedisAndUnknownConsumers(t *testing.T) { // telephony V13, V23
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
