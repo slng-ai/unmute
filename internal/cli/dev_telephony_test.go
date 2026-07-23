@@ -378,3 +378,52 @@ func TestExecDevTelephonyPlacesOutboundCallAfterReady(t *testing.T) {
 		t.Fatalf("call id not printed:\n%s", out.String())
 	}
 }
+
+// T5/V6: an outbound-capable target run without --to prints a dial-out hint and
+// places no call.
+func TestExecDevTelephonyOutboundWithoutToHintsAndPlacesNothing(t *testing.T) {
+	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	fakeDocker(t, root)
+	cloudflared := filepath.Join(root, "cloudflared")
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreLook := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
+	t.Cleanup(func() { tunnelLookPath = restoreLook })
+
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioOutboundPlan(), composeFiles, devTelephonyOptions{botPort: "7861"}); err != nil {
+		t.Fatalf("outbound without --to: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "dial-out ready") {
+		t.Fatalf("outbound-capable target without --to should hint at dial-out:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "calling ") {
+		t.Fatalf("no call must be placed without --to:\n%s", out.String())
+	}
+}
+
+// T5/V7: an inbound-only target prints its dial-in number and no dial-out text.
+func TestExecDevTelephonyInboundOnlyHasNoDialOutText(t *testing.T) {
+	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	fakeDocker(t, root)
+	cloudflared := filepath.Join(root, "cloudflared")
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreLook := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
+	t.Cleanup(func() { tunnelLookPath = restoreLook })
+
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioPlan(), composeFiles, devTelephonyOptions{botPort: "7861"}); err != nil {
+		t.Fatalf("inbound-only: %v\n%s", err, out.String())
+	}
+	if strings.Contains(out.String(), "dial-out") {
+		t.Fatalf("inbound-only target must not mention dial-out:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "call +15550001111") {
+		t.Fatalf("inbound-only target should print its dial-in number:\n%s", out.String())
+	}
+}

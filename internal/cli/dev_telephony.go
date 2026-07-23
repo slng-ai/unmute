@@ -179,12 +179,17 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 			}
 		}
 		printDevCallLine(cmd.OutOrStdout(), plan, childEnv)
-		// --to: place one outbound call now that the graph is healthy (T4). The
-		// direction guard in runDevTelephony ensures the plan is outbound-capable,
-		// so the token minted in T2 is set. A failure returns and tears down.
-		if opts.to != "" {
-			if err := placeOutboundCall(ctx, cmd.OutOrStdout(), targetName, opts.botPort, outboundToken, opts.to); err != nil {
-				return err
+		// Outbound-capable route: --to places one call now that the graph is
+		// healthy (T4); without --to, print how to place one and do nothing (T5).
+		// The direction guard in runDevTelephony ensures opts.to is only set for
+		// an outbound-capable plan, so the token minted in T2 is present.
+		if planHasTelephonyFeature(plan, "outbound") {
+			if opts.to != "" {
+				if err := placeOutboundCall(ctx, cmd.OutOrStdout(), targetName, opts.botPort, outboundToken, opts.to); err != nil {
+					return err
+				}
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s: dial-out ready; re-run with --to <E.164> to place a call\n", targetName)
 			}
 		}
 		return nil
