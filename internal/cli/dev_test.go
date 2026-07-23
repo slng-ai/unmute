@@ -476,6 +476,59 @@ func TestDevConsoleAndTelephonyRejected(t *testing.T) {
 	}
 }
 
+// T3/V3: --to requires --telephony and a valid E.164 value; both fail up front,
+// before target selection.
+func TestDevToFlagGuards(t *testing.T) {
+	dir := copySafeCore(t)
+	if _, err := run(t, "dev", dir, "--target", "pipecat", "--to", "+15551234567"); err == nil || !strings.Contains(err.Error(), "--to requires --telephony") {
+		t.Fatalf("--to without --telephony error = %v", err)
+	}
+	if _, err := run(t, "dev", dir, "--target", "pipecat", "--telephony", "--to", "not-a-number"); err == nil || !strings.Contains(err.Error(), "E.164") {
+		t.Fatalf("malformed --to error = %v", err)
+	}
+}
+
+// T3/V6: --to on an inbound-only target errors before generate and any child
+// process, naming the outbound requirement rather than the provisional gate.
+func TestDevToRejectsInboundOnlyTarget(t *testing.T) {
+	dir := copySafeCore(t)
+	targetsPath := filepath.Join(dir, "targets.yaml")
+	raw, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := strings.Replace(string(raw),
+		"    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat",
+		"    transport: carrier-websocket\n    carrier: twilio\n    connection: primary_phone", 1)
+	configured = strings.Replace(configured,
+		"    sdk_language: python\n    models:",
+		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:", 1)
+	if configured == string(raw) {
+		t.Fatal("target fixture did not change")
+	}
+	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agentPath := filepath.Join(dir, "agent.yaml")
+	agentRaw, err := os.ReadFile(agentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentConfigured := strings.Replace(string(agentRaw),
+		"channels:\n  web: { kind: realtime_audio }",
+		"channels:\n  web: { kind: realtime_audio }\n  phone:\n    kind: telephony\n    inbound: true\n    outbound: false\n    required_controls: [cold_transfer, hangup]", 1)
+	if agentConfigured == string(agentRaw) {
+		t.Fatal("agent channel fixture did not change")
+	}
+	if err := os.WriteFile(agentPath, []byte(agentConfigured), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = run(t, "dev", dir, "--target", "pipecat", "--telephony", "--to", "+15551234567")
+	if err == nil || !strings.Contains(err.Error(), "outbound-capable") {
+		t.Fatalf("--to on inbound-only error = %v", err)
+	}
+}
+
 // TestDevWebRejectsManagedProvider: a managed provider has no local dev runner
 // and is refused before generation or any Docker preflight (SPEC I.dev).
 func TestDevWebRejectsManagedProvider(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -32,7 +33,20 @@ func randomOutboundToken() (string, error) {
 type devTelephonyOptions struct {
 	publicValue string
 	botPort     string
+	to          string // --to: E.164 to dial once the outbound-capable graph is healthy
 	verbose     bool
+}
+
+// e164Pattern matches an E.164 number, the same shape the generated
+// _valid_destination accepts (leading +, no leading zero, 8-15 digits).
+var e164Pattern = regexp.MustCompile(`^\+[1-9][0-9]{7,14}$`)
+
+// validateDialTarget rejects a --to value that is not a bare E.164 number.
+func validateDialTarget(number string) error {
+	if !e164Pattern.MatchString(number) {
+		return fmt.Errorf("dev: --to must be an E.164 number like +15551234567, got %q", number)
+	}
+	return nil
 }
 
 // execDevTelephony runs everything after the fail-closed gate: env checks,
