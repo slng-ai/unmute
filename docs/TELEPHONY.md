@@ -13,8 +13,11 @@ a new media gateway.
 
 <!-- prettier-ignore -->
 > [!NOTE]
-> Route support remains provisional until its credentialed L4 smoke passes.
-> L1–L3 tests do not require credentials and cannot promote a route by
+> A route with a real adapter stays provisional until its credentialed L4 smoke
+> passes, but provisional no longer blocks use: `validate`, `compile`, and
+> `dev --telephony` run it and print an `unverified` warning. Only a gated route
+> with no adapter (Exotel, the LiveKit Twilio Connector) fails closed. L1–L3
+> tests do not require credentials and cannot promote a route to verified by
 > themselves.
 
 ## Decision
@@ -114,11 +117,12 @@ orchestrator already performs.
 
 ## Current repository state
 
-Telephony is fail-closed in the public CLI. The compiler internals and offline
-emitters exist, but no selectable Pipecat or LiveKit telephony route has passed
-its exact credentialed L4 smoke. Consequently, `unmute validate`, `unmute
-compile`, and `unmute dev --telephony` reject every telephony target before an
-artifact is written or Docker is invoked.
+Telephony routes with a real adapter are usable in the public CLI. No selectable
+Pipecat or LiveKit route has passed its exact credentialed L4 smoke yet, so
+`unmute validate`, `unmute compile`, and `unmute dev --telephony` run them and
+print an `unverified` warning per feature. Only gated routes with no adapter
+(Exotel, the LiveKit Twilio Connector) are rejected before an artifact is
+written or Docker is invoked.
 
 - Strict Connection loading and exact route resolution produce one
   `TelephonyPlan` per selected target.

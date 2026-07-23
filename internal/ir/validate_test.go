@@ -270,27 +270,10 @@ func TestValidateCodeTelephonyRequiresResolvedPlan(t *testing.T) {
 	}
 }
 
-func TestValidateTelephonyPlanFailsClosedWithoutRouteSmoke(t *testing.T) { // telephony V4-V6
-	pkg := loadSafeCore(t)
-	enableTelephony(pkg)
-	target := pkg.Targets["pipecat"]
-	target.Transport = "carrier-websocket"
-	target.Carrier = "twilio"
-	target.Connection = "primary_phone"
-	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
-	agent, err := Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolved := agent.Targets["pipecat"]
-	report, err := Validate(agent, []Target{resolved}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "has not passed its credentialed smoke") {
-		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
-	}
-}
-
-func TestValidateTelephonyDevUnsafeDowngradesProvisional(t *testing.T) { // telephony V5 dev escape hatch
-	t.Setenv("UNMUTE_DEV_UNSAFE_TELEPHONY", "1")
+// A provisional telephony route (real adapter, no credentialed smoke) is
+// usable: validation warns that it is unverified but does not block. Only
+// Gated routes (no adapter) stay hard errors.
+func TestValidateTelephonyProvisionalRouteWarnsNotBlocks(t *testing.T) {
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
 	target := pkg.Targets["pipecat"]
@@ -305,10 +288,10 @@ func TestValidateTelephonyDevUnsafeDowngradesProvisional(t *testing.T) { // tele
 	resolved := agent.Targets["pipecat"]
 	report, err := Validate(agent, []Target{resolved}, targetcap.Default())
 	if err != nil {
-		t.Fatalf("expected no error with dev escape hatch, got %v (errors=%#v)", err, report.PerTarget[0].Errors)
+		t.Fatalf("provisional route must not block, got errors=%#v", report.PerTarget[0].Errors)
 	}
-	if !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), "allowed by UNMUTE_DEV_UNSAFE_TELEPHONY") {
-		t.Fatalf("expected provisional route downgraded to a warning, got warnings=%#v errors=%#v", report.PerTarget[0].Warnings, report.PerTarget[0].Errors)
+	if !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), "unverified") {
+		t.Fatalf("provisional route must warn it is unverified, got warnings=%#v", report.PerTarget[0].Warnings)
 	}
 }
 

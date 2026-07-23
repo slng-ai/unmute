@@ -39,9 +39,10 @@ drives it: inbound-only is unchanged, outbound places a call, both do both.
 - C4: the CLI places the call over loopback to the container's published bot
   port, not through the tunnel. The tunnel only carries the media WebSocket
   Twilio opens back to the bot.
-- C5: the fail-closed gate is unchanged. Outbound is provisional like inbound;
-  `UNMUTE_DEV_UNSAFE_TELEPHONY` lifts it for local dev. No new bypass, no
-  promotion of the route.
+- C5: provisional telephony routes are usable (validation warns `unverified`
+  rather than blocking); outbound is provisional like inbound. Only gated routes
+  with no adapter stay hard errors. No route is promoted to verified by this
+  work.
 - C6: no new Go dependency (stdlib `net/http` for the trigger POST) and no new
   Python dependency (the endpoint already exists).
 - C7: L1–L3 need zero Python, zero network, zero Docker. A real placed call is

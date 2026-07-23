@@ -372,14 +372,11 @@ func TestComposeDevSuppliedEnvironmentIsNeverDemandedAndRejectsOverrides(t *test
 	}
 }
 
-func TestDevTelephonyReportsProvisionalRouteBeforeConfiguration(t *testing.T) { // telephony V11, V17, B12
-	restore := composePreflight
-	preflightCalled := false
-	composePreflight = func(context.Context, []string) error {
-		preflightCalled = true
-		return errors.New("Docker must not be checked for a validation-red route")
-	}
-	t.Cleanup(func() { composePreflight = restore })
+// A provisional route is usable now: dev proceeds past validation instead of
+// failing closed on the credentialed-smoke gate. It stops later (here on
+// missing model credentials), never on the gate. Standalone --public-url still
+// requires --telephony.
+func TestDevTelephonyProvisionalRouteDoesNotFailClosed(t *testing.T) {
 	dir := copySafeCore(t)
 	targetsPath := filepath.Join(dir, "targets.yaml")
 	raw, err := os.ReadFile(targetsPath)
@@ -413,22 +410,11 @@ func TestDevTelephonyReportsProvisionalRouteBeforeConfiguration(t *testing.T) { 
 		t.Fatal(err)
 	}
 	for _, name := range []string{"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"} {
-		t.Setenv(name, "")
+		t.Setenv(name, "value")
 	}
-	out, err := run(t, "dev", dir, "--target", "pipecat", "--telephony")
-	if err == nil || !strings.Contains(err.Error(), "has not passed its credentialed smoke") {
-		t.Fatalf("route error = %v", err)
-	}
-	for _, laterGate := range []string{"--public-url", "TWILIO_ACCOUNT_SID", "Docker"} {
-		if strings.Contains(err.Error(), laterGate) {
-			t.Errorf("route error reached later gate %q: %v", laterGate, err)
-		}
-	}
-	if preflightCalled {
-		t.Fatal("Docker preflight ran before telephony route validation")
-	}
-	if out != "" {
-		t.Fatalf("validation-red route printed an executable plan:\n%s", out)
+	_, err = run(t, "dev", dir, "--target", "pipecat", "--telephony", "--public-url", "https://voice.example.com")
+	if err == nil || strings.Contains(err.Error(), "credentialed smoke") {
+		t.Fatalf("provisional route must no longer fail closed at validation, got %v", err)
 	}
 	if _, err := run(t, "dev", dir, "--target", "pipecat", "--public-url", "https://voice.example.com"); err == nil || !strings.Contains(err.Error(), "requires --telephony") {
 		t.Fatalf("standalone --public-url error = %v", err)

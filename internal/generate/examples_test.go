@@ -126,10 +126,10 @@ func TestPublicExamplePackages(t *testing.T) {
 }
 
 // The telephony example is a complete, schema-faithful package (channel,
-// connections, routes, destinations) that builds cleanly and then fails
-// closed at generation, because every telephony route is provisional (B1,
-// SPEC V5). It must stay honest: promotion, not this test, unlocks it.
-func TestTelephonyExampleBuildsAndFailsClosed(t *testing.T) {
+// connections, routes, destinations) with real adapters. A provisional route
+// (adapter present, no credentialed smoke yet) is usable, so it generates with
+// an unverified warning; promotion is a maturity signal, not a generation gate.
+func TestTelephonyExampleGeneratesProvisionalRoute(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "telephony-multi-task"))
 	if err != nil {
 		t.Fatal(err)
@@ -138,14 +138,14 @@ func TestTelephonyExampleBuildsAndFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"livekit", "pipecat"} {
-		resolved, ok := agent.Targets[name]
-		if !ok || resolved.Telephony == nil {
-			t.Fatalf("target %q has no resolved telephony plan", name)
-		}
-		if _, err := Generate(agent, resolved, target.Default()); err == nil {
-			t.Fatalf("target %q generated despite provisional telephony routes", name)
-		}
+	// LiveKit SIP supports every feature this example requests (voicemail,
+	// cold transfer), all provisional, so generation succeeds.
+	resolved, ok := agent.Targets["livekit"]
+	if !ok || resolved.Telephony == nil {
+		t.Fatalf("livekit target has no resolved telephony plan")
+	}
+	if _, err := Generate(agent, resolved, target.Default()); err != nil {
+		t.Fatalf("provisional livekit telephony route must generate, got %v", err)
 	}
 }
 

@@ -108,23 +108,25 @@ Docker Desktop or Docker Engine plus the Compose plugin, and points you at
   through LiveKit Inference, such as a think model with `provider: livekit` or
   the cloud `turn-detector`. The preflight tells you which.
 
-**Telephony (`--telephony`).** All current routes are provisional or gated, so
-validation and generation fail before a Compose file is written, a public URL
-or credentials are checked, or Docker is invoked. The diagnostic names the
-exact route and its missing credentialed smoke. There is no direct-Compose
-escape hatch through the public CLI today.
+**Telephony (`--telephony`).** Real phone calls, through the generated
+`compose.telephony.yaml`. A route with a real adapter (every Pipecat carrier
+WebSocket and LiveKit SIP route) is **provisional**: it runs, and validation
+prints an `unverified` warning that it has not passed an automated credentialed
+smoke. Only a **gated** route with no adapter at all (Exotel, the LiveKit Twilio
+Connector) still fails closed, because there is nothing to run. Test the
+behavior you depend on yourself before production.
 
-After an exact route is promoted, telephony mode will always run the generated
-`compose.telephony.yaml`; there is no host-process fallback or infrastructure
-flag. Every route will build the generated application and version-pinned
-Redis. LiveKit SIP will additionally start version-pinned LiveKit Server and
-LiveKit SIP, then create or reuse the local inbound trunk, outbound trunk,
-and dispatch rule itself and inject `LIVEKIT_SIP_INBOUND_TRUNK` and
-`LIVEKIT_SIP_OUTBOUND_TRUNK` before the application starts. Unmute will
-preflight Docker Compose, wait for declared health checks, print the resolved
-service graph and carrier setup, configure the Twilio voice webhook
-automatically on that route (printing the previous value), print the call
-line, follow Compose logs under `--verbose`, and stop only its deterministic
+Telephony mode runs the generated `compose.telephony.yaml`; there is no
+host-process fallback or infrastructure flag. Every route builds the generated
+application and version-pinned Redis. LiveKit SIP additionally starts
+version-pinned LiveKit Server and LiveKit SIP, then creates or reuses the local
+inbound trunk, outbound trunk, and dispatch rule itself and injects
+`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` before the
+application starts. Unmute preflights Docker Compose, waits for declared health
+checks, prints the resolved service graph and carrier setup, configures the
+Twilio voice webhook automatically where the route carries that fact (printing
+the previous value), prints the call line, places an outbound call when `--to`
+is set, follows Compose logs under `--verbose`, and stops only its deterministic
 project on `ctrl-c` without removing data volumes or leaving the tunnel
 running.
 
@@ -146,15 +148,14 @@ package or the cloudflare/cloudflared releases page). `--public-url` skips
 all tunnel management and must be the exact public HTTPS origin used for
 carrier signatures (use it for ngrok or any other tunnel). LiveKit SIP has no
 HTTP callback URL; it instead needs carrier-reachable SIP and RTP networking,
-which no HTTPS tunnel provides. For a promoted route, Unmute will name
-missing carrier/model configuration after successful generation and point to
-the credential guide without printing values. Local Compose will supply Redis
-for both targets and the local LiveKit Server key pair. Explicit external
-LiveKit or Redis values, and user-set trunk IDs, will be rejected in LiveKit
-SIP dev mode rather than silently ignored.
+which no HTTPS tunnel provides. Unmute names missing carrier/model
+configuration after generation and points to the credential guide without
+printing values. Local Compose supplies Redis for both targets and the local
+LiveKit Server key pair. Explicit external LiveKit or Redis values, and user-set
+trunk IDs, are rejected in LiveKit SIP dev mode rather than silently ignored.
 
 When a package declares several carrier routes, each one is a separate target
-and, after promotion, a separate generated Compose project. The package and
+and a separate generated Compose project. The package and
 schema can hold any number of supported routes. Today each telephony target
 fails closed; after promotion, `compile` can select several targets or all of
 them, while `dev --telephony` runs one exact route at a time. Pass its instance

@@ -3,7 +3,6 @@ package ir
 import (
 	"fmt"
 	"maps"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -11,15 +10,6 @@ import (
 
 	targetcap "github.com/slng/unmute/internal/target"
 )
-
-// devUnsafeTelephony reports the local dev escape hatch that relaxes the
-// telephony fail-closed gate (V5) for unproven Provisional routes. It is a
-// deliberate impurity: an env read inside validation, kept to one call site so
-// the default stays fail-closed and no caller signature changes.
-func devUnsafeTelephony() bool {
-	v := os.Getenv("UNMUTE_DEV_UNSAFE_TELEPHONY")
-	return v == "1" || strings.EqualFold(v, "true")
-}
 
 var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var languagePattern = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`)
@@ -1100,16 +1090,10 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		case targetcap.Warn:
 			row.Warnings = add(row.Warnings, evidence.Note)
 		case targetcap.Provisional:
-			// ponytail: a route can't pass its credentialed smoke until it runs
-			// once, and the gate blocks that first run. UNMUTE_DEV_UNSAFE_TELEPHONY
-			// downgrades an unproven (Provisional) route to a warning so local dev
-			// can make that first real call. Gated (no implementation) stays a hard
-			// error. Never set this in production; the default is fail-closed (V5).
-			if devUnsafeTelephony() {
-				row.Warnings = add(row.Warnings, fmt.Sprintf("telephony %s: %s (allowed by UNMUTE_DEV_UNSAFE_TELEPHONY)", evidence.Feature, evidence.Note))
-			} else {
-				row.Errors = add(row.Errors, fmt.Sprintf("telephony %s: %s", evidence.Feature, evidence.Note))
-			}
+			// A provisional route has a real adapter but no credentialed smoke
+			// yet. It is usable, so warn rather than block; the operator tests it
+			// themselves. Only Gated (no adapter exists) stays a hard error.
+			row.Warnings = add(row.Warnings, fmt.Sprintf("telephony %s is unverified: %s", evidence.Feature, evidence.Note))
 		case targetcap.Gated:
 			row.Errors = add(row.Errors, fmt.Sprintf("telephony %s: %s", evidence.Feature, evidence.Note))
 		default:
