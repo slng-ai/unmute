@@ -1539,6 +1539,40 @@ func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
 	}
 }
 
+// A carrier-websocket telephony build (Twilio/Telnyx/Plivo) has no RTVI client:
+// the carrier opens a raw media WebSocket, so the bot must activate and greet
+// from the transport's on_client_connected event. Gating on RTVI on_client_ready
+// (as the web client does) leaves a phone caller in silence — the greeting never
+// fires. Verified against the Pipecat Twilio dial-in docs.
+func TestPipecatCarrierWebsocketGreetsOnClientConnected(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enablePackageTelephony(pkg)
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = "twilio"
+	configured.Connection = "primary_phone"
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
+
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	if !strings.Contains(bot, `@transport.event_handler("on_client_connected")`) {
+		t.Error("carrier-websocket bot must greet from on_client_connected (a phone call has no RTVI client)")
+	}
+	if strings.Contains(bot, `@main.rtvi.event_handler("on_client_ready")`) {
+		t.Error("carrier-websocket bot must not wait for RTVI on_client_ready; a Twilio media stream never sends it")
+	}
+}
+
 // TestPipecatWebWaitsForRTVIClientReady (SPEC V2): web agents activate and
 // greet from the PipelineWorker's RTVI readiness event, never the earlier
 // transport connection event.

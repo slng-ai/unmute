@@ -1,0 +1,8 @@
+# Twilio for the LiveKit SIP route: Elastic SIP Trunking into the self-hosted
+# livekit/sip bridge. Values are environment variable names, never secrets.
+kind: telephony
+environment:
+  sip_address: TWILIO_SIP_ADDRESS
+  sip_username: TWILIO_SIP_USERNAME
+  sip_password: TWILIO_SIP_PASSWORD
+  from_number: TWILIO_PHONE_NUMBER

@@ -58,6 +58,13 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 	if _, err := os.Stat(composePath); err != nil {
 		return fmt.Errorf("generated telephony Compose file: %w", err)
 	}
+	// Compose runs with its working directory set to the build dir, so the
+	// --file path must be absolute: a path relative to the process cwd doubles
+	// the build-dir prefix and vanishes when root is a relative package dir.
+	composePath, err := filepath.Abs(composePath)
+	if err != nil {
+		return fmt.Errorf("resolve telephony Compose path: %w", err)
+	}
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -99,7 +106,7 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 	printDevTelephonyEndpoints(cmd.OutOrStdout(), targetName, plan, public)
 
 	run := telephonyComposeRun{
-		dir: outDir, file: composePath, project: composeProjectName(root, targetName),
+		dir: filepath.Dir(composePath), file: composePath, project: composeProjectName(root, targetName),
 		env: childEnv, output: processOut,
 		stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr(), logPath: logPath,
 	}

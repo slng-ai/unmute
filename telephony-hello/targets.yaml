@@ -1,0 +1,20 @@
+# Two Twilio telephony targets against the same inbound-only agent.
+#   pipecat: carrier-websocket, testable on a laptop through the tunnel.
+#   livekit: SIP, needs a Twilio Elastic SIP Trunk and public SIP/RTP ingress.
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: carrier-websocket
+    carrier: twilio
+    connection: twilio_voice
+
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    transport: sip
+    carrier: twilio
+    connection: twilio_sip
+    models:
+      detector: { provider: livekit, model: turn-detector-mini }

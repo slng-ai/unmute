@@ -228,3 +228,50 @@ func TestComposeExecutorRunsInfraServicesThenHookThenFullGraph(t *testing.T) {
 		t.Fatalf("full up did not carry hook-extended env: %q", full)
 	}
 }
+
+// Regression: a relative package dir must still let Compose find its file.
+// Compose runs with its working directory set to the build dir, so a --file
+// path relative to the process cwd doubles the prefix and vanishes. The fake
+// docker resolves --file from its own cwd and fails if it is not there.
+func TestExecDevTelephonyRelativeRootLocatesComposeFile(t *testing.T) {
+	parent := t.TempDir()
+	t.Chdir(parent)
+	if err := os.MkdirAll("pkg", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	trace := filepath.Join(parent, "trace.log")
+	if err := os.WriteFile(filepath.Join("pkg", ".env"),
+		[]byte("TRACE_FILE="+trace+"\nTWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// composeArgs puts the compose file at arg 3 (compose --file <file> ...).
+	// From the command's working dir, that file must exist.
+	script := filepath.Join(parent, "docker")
+	body := "#!/bin/sh\nif [ \"$2\" = \"--file\" ] && [ ! -f \"$3\" ]; then printf 'FILE_MISSING:%s\\n' \"$3\" >> \"$TRACE_FILE\"; exit 1; fi\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restoreCmd, restorePreflight := composeCommand, composePreflight
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, script, args...)
+	}
+	composePreflight = func(context.Context, []string) error { return nil }
+	t.Cleanup(func() { composeCommand, composePreflight = restoreCmd, restorePreflight })
+
+	cloudflared := filepath.Join(parent, "cloudflared")
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreLook := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
+	t.Cleanup(func() { tunnelLookPath = restoreLook })
+
+	cmd, out := telephonyTestCommand(t)
+	if err := execDevTelephony(cmd, "pkg", "phone", pipecatTwilioPlan(), composeFiles, devTelephonyOptions{botPort: "7862"}); err != nil {
+		t.Fatalf("execDevTelephony with relative root: %v\n%s", err, out.String())
+	}
+	if raw, err := os.ReadFile(trace); err == nil && strings.Contains(string(raw), "FILE_MISSING") {
+		t.Fatalf("compose could not locate its file from the build dir:\n%s", raw)
+	}
+}

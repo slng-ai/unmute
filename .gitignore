@@ -10,3 +10,4 @@ __pycache__/
 .codex/worktrees/
 .firecrawl
 bin/
+telephony-hello/build/
