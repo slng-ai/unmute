@@ -41,7 +41,7 @@ channels:
   phone:
     kind: telephony
     inbound: true
-    outbound: false
+    outbound: true
 
 capacity:
   peak_sessions: 2
