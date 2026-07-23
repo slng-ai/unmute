@@ -1,8 +1,11 @@
 # Telephony architecture and implementation plan
 
-Status: Adopted design; implementation in progress. Updated July 22, 2026
-(zero-step local development amendment: managed cloudflared tunnel, automatic
-Twilio webhook configuration, automatic local LiveKit trunk records).
+Status: Adopted design, shipped for Twilio on both orchestrators. Updated
+July 23, 2026. Twilio runs end to end from `unmute dev --telephony`, inbound and
+outbound, on the Pipecat carrier-WebSocket route, the LiveKit Twilio connector,
+and LiveKit SIP, with a managed cloudflared tunnel, automatic Twilio webhook
+configuration, and automatic local LiveKit SIP trunk records. Telnyx, Plivo, and
+warm transfer are still in progress.
 
 Unmute must share telephony intent, planning, and call context across
 orchestrators while keeping carrier media and call-control behavior in small,
@@ -133,23 +136,24 @@ before an artifact is written or Docker is invoked.
   native outbound/voicemail/transfers, and normalized SIP participant context.
   It also emits the Twilio connector bridge (inbound, outbound, hangup). Exotel
   remains gated.
-- Direct generator tests render the Pipecat and LiveKit artifacts described in
-  this document. Those test artifacts are implementation evidence, not an
-  obtainable or supported deployment escape hatch.
-- `unmute dev --telephony` validates and attempts generation before checking a
-  public URL, credentials, local topology conflicts, or Docker. The current
-  error therefore explains the provisional or gated route instead of asking a
-  user to provision credentials for an unusable path.
+- Golden and generator tests render the Pipecat and LiveKit artifacts described
+  in this document, so the emitted files stay under test on every change.
+- `unmute dev --telephony` validates, generates, starts the managed tunnel
+  where the route needs one, sets the Twilio webhook automatically for Twilio,
+  brings up the route's Docker Compose graph, and prints the call line. With
+  `--to <E.164>` it places one outbound call once the graph is healthy. A gated
+  route (Exotel) still fails during validation before any of this runs.
 - Generated and compile-report files contain environment-variable names, not
   credential values.
 - Every implemented carrier route remains provisional until its credentialed
   inbound, outbound, authentication, hangup, and advertised-control smokes
-  pass.
-- The offline LiveKit SIP and Pipecat projects include
-  `compose.telephony.yaml`, and their plans report exact services plus closed
-  coordination reasons and consumers. Once an exact route is promoted, the
-  dev command will execute that file, wait for Compose health, follow logs, and
-  perform project-scoped cleanup without deleting volumes.
+  pass. Provisional does not block running; it is maturity tracking in
+  `compile-report.json`.
+- The generated LiveKit and Pipecat projects include `compose.telephony.yaml`,
+  and their plans report exact services plus closed coordination reasons and
+  consumers. `unmute dev --telephony` executes that file, waits for Compose
+  health, follows logs, and performs project-scoped cleanup without deleting
+  volumes.
 - Promotion requires the exact framework/transport/carrier route to pass
   credentialed inbound, outbound, signature/authentication, hangup, and every
   advertised control smoke, with its capability evidence changed from
@@ -162,34 +166,37 @@ A package can declare any number of named telephony targets and Connections.
 Each target still selects exactly one Connection and one route, so every build
 contains one carrier adapter and one credential vocabulary. To use several
 carriers, add several target instances, such as `pipecat_twilio`,
-`pipecat_telnyx`, and `livekit_plivo`. After those routes are promoted,
-`unmute compile` will write each one to its own `build/<target-name>/`
-directory and `unmute dev --telephony` will run one selected target at a time.
-Today, each telephony target fails closed before either action.
+`pipecat_telnyx`, and `livekit_plivo`. `unmute compile` writes each one to its
+own `build/<target-name>/` directory, and `unmute dev --telephony` runs one
+selected target at a time. A target with a real adapter runs; only a target on
+a gated route (Exotel) fails closed.
 
 The compiler has no package-level carrier count limit. The closed route matrix,
 not the number of targets, is the limit:
 
 | Framework | Transport | Carrier | Emitted integration | Current status |
 |---|---|---|---|---|
-| Pipecat | `carrier-websocket` | Twilio | Direct carrier adapter and Pipecat Twilio serializer | Generated in offline tests; provisional |
-| Pipecat | `carrier-websocket` | Telnyx | Direct carrier adapter and Pipecat Telnyx serializer | Generated in offline tests; provisional |
-| Pipecat | `carrier-websocket` | Plivo | Direct carrier adapter and Pipecat Plivo serializer | Generated in offline tests; provisional |
-| Pipecat | `carrier-websocket` | Exotel | No generated adapter | Gated |
-| LiveKit | `sip` | Twilio | Self-hosted LiveKit SIP and Twilio trunk inputs | Generated in offline tests; provisional |
-| LiveKit | `sip` | Telnyx | Self-hosted LiveKit SIP and Telnyx trunk inputs | Generated in offline tests; provisional |
-| LiveKit | `sip` | Plivo | Self-hosted LiveKit SIP and Plivo trunk inputs | Generated in offline tests; provisional |
-| LiveKit | `sip` | Exotel | No generated adapter | Gated |
-| LiveKit | `connector` | Twilio | Generated Twilio Media Streams bridge into a self-hosted LiveKit room | Generated in offline tests; provisional |
+| Pipecat | `carrier-websocket` | Twilio | Direct carrier adapter and Pipecat Twilio serializer | Runs; provisional. Real calls confirmed |
+| Pipecat | `carrier-websocket` | Telnyx | Direct carrier adapter and Pipecat Telnyx serializer | Runs; provisional |
+| Pipecat | `carrier-websocket` | Plivo | Direct carrier adapter and Pipecat Plivo serializer | Runs; provisional |
+| Pipecat | `carrier-websocket` | Exotel | No generated adapter | Gated; no adapter |
+| LiveKit | `sip` | Twilio | Self-hosted LiveKit SIP and Twilio trunk inputs | Runs; provisional |
+| LiveKit | `sip` | Telnyx | Self-hosted LiveKit SIP and Telnyx trunk inputs | Runs; provisional |
+| LiveKit | `sip` | Plivo | Self-hosted LiveKit SIP and Plivo trunk inputs | Runs; provisional |
+| LiveKit | `sip` | Exotel | No generated adapter | Gated; no adapter |
+| LiveKit | `connector` | Twilio | Generated Twilio Media Streams bridge into a self-hosted LiveKit room | Runs; provisional. Real calls confirmed |
 
-"Generated in offline tests" is not the same as verified. A generated row runs
-in the public CLI now; its exact credentialed smoke, once it exists, only
-promotes it from provisional to verified in `compile-report.json`, with no
-change to whether it runs. The Pipecat adapters contain inbound, outbound,
-hangup, and cold-transfer paths; voicemail and warm transfer remain gated. The LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
+"Runs; provisional" means the route runs in the public CLI now, and its
+provisional status is internal maturity tracking in `compile-report.json`, not
+a runtime block. A credentialed smoke in CI, once it exists, only flips the
+route from provisional to verified there, with no change to whether it runs. The
+Twilio connector and the Pipecat Twilio route were confirmed on real inbound and
+outbound calls by the author. The Pipecat adapters contain inbound, outbound,
+hangup, and cold-transfer paths; voicemail detection and warm transfer stay
+gated. The LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
 cold-transfer, and warm-transfer paths. The LiveKit Twilio connector emitter
-contains inbound, outbound, and hangup paths; transfers and voicemail stay on
-the LiveKit SIP route.
+contains inbound, outbound, and hangup paths; transfers and voicemail detection
+stay on the LiveKit SIP route.
 
 ## What scales across carriers
 
@@ -304,14 +311,15 @@ The source pages are the
 and
 [LiveKit self-hosted SIP guide](https://docs.livekit.io/transport/self-hosting/sip-server/).
 
-No carrier or LiveKit credentials were available during the initial build.
-The generated Pipecat Twilio, Telnyx, and Plivo adapters and LiveKit SIP
-topology therefore have offline tests only. Exotel remains gated because its
-documented static App Bazaar Voicebot URL doesn't provide a proven
-authenticated WebSocket upgrade, custom URL data may be stripped, and no
-provider-specific LiveKit SIP route has been proven. Every live route stays
-provisional until its corresponding inbound, outbound, hangup,
-authentication, and advertised-control smoke completes.
+The automated suite uses no carrier or LiveKit credentials, so the generated
+Pipecat Twilio, Telnyx, and Plivo adapters and the LiveKit SIP topology have
+offline tests in CI only. The author separately confirmed the Twilio routes,
+both Pipecat and the connector, on real inbound and outbound calls. Exotel
+remains gated because its documented static App Bazaar Voicebot URL doesn't
+provide a proven authenticated WebSocket upgrade, custom URL data may be
+stripped, and no provider-specific LiveKit SIP route has been proven. Every live
+route stays provisional until its corresponding inbound, outbound, hangup,
+authentication, and advertised-control smoke completes in CI.
 
 ## Architecture
 
@@ -562,14 +570,20 @@ The LiveKit Twilio connector is a self-hosted, from-scratch implementation of
 the Twilio Media Streams mechanism. It is Twilio-specific.
 
 The generated `telephony_bridge.py` implements the Twilio Media Streams protocol
-itself: it serves the inbound voice webhook and the media WebSocket, and it
-returns TwiML that points Twilio at its own WSS endpoint. The bridge then joins
-a local, self-hosted LiveKit room, where the generated Agent worker handles the
-call. There is no LiveKit Cloud and no hosted `ConnectTwilioCall` API. LiveKit's
-own hosted connector is Cloud-only; this is a separate open-source
-implementation of the same Media Streams mechanism. The
+itself: it validates the Twilio request signature, serves the inbound voice
+webhook and the media WebSocket, and returns TwiML that points Twilio at its own
+WSS endpoint. The bridge terminates the mu-law audio and joins a local,
+self-hosted LiveKit room as an ordinary participant, where the generated Agent
+worker handles the call. Audio is G.711 mu-law at 8 kHz both ways, and the
+LiveKit SDK resamples to the agent's rate.
+
+This is deliberately not LiveKit's own Twilio Connector. LiveKit ships a
+connector built on the `ConnectTwilioCall` server API, where a connector service
+terminates the Media Streams WebSocket and returns a `connect_url` for your
+TwiML. Unmute's route does not call that API and does not need that service, so
+it runs against a stock `livekit-server --dev` with no LiveKit Cloud. The
 [LiveKit Twilio Connector guide](https://docs.livekit.io/telephony/connectors/twilio/)
-documents Twilio's Media Streams calls for reference.
+documents the Media Streams calls for reference.
 
 The route supports inbound, outbound, and hangup. Call transfers and voicemail
 detection stay on the LiveKit SIP route.
@@ -687,27 +701,39 @@ exactly the declared number of concurrent sessions, including a limit of one.
 
 ## Local development
 
-The intended promoted-route interface is:
+The interface is:
 
 ```text
 unmute dev ./agent --target pipecat --telephony
 unmute dev ./agent --target livekit --telephony
+unmute dev ./agent --target <name> --telephony --to +15551234567
 ```
 
-Both commands currently stop at route validation because every emitted route
-is provisional and the remaining recognized routes are gated. They do not
-write `compose.telephony.yaml`, check credentials, or invoke Docker. There is
-no emitted Compose file to run directly through a supported CLI flow.
+Both commands run the selected route end to end. A route with a real adapter
+validates, generates, and starts; only a gated route (Exotel) stops at
+validation.
 
-Once an exact route is promoted, Docker Compose is the required local executor
-for both orchestrators. The first command will build and start the generated
-Pipecat application with Redis, plus a managed cloudflared quick tunnel. The
-second will build and start the generated LiveKit Agent, Redis, LiveKit
-Server, and LiveKit SIP in one Compose project, then create the local trunk
-and dispatch records itself. Pipecat carrier WebSocket routes still need an
-HTTPS/WSS tunnel; the dev command supplies one. LiveKit SIP instead needs
-carrier-reachable SIP and RTP; a tunnel and `--public-url` are neither
-required nor sufficient for that route.
+Docker Compose is the local executor for both orchestrators. The Pipecat
+command builds and starts the generated Pipecat application with Redis, plus a
+managed cloudflared quick tunnel. The LiveKit command depends on the route. The
+Twilio connector builds and starts the application, which runs the bridge and
+the worker together, with a local `livekit-server --dev` and no Redis, behind
+the same managed tunnel. The SIP route builds and starts the generated LiveKit
+Agent, Redis, LiveKit Server, and LiveKit SIP in one Compose project, then
+creates the local trunk and dispatch records itself. The Pipecat
+carrier-WebSocket route and the Twilio connector need an HTTPS/WSS tunnel, which
+the dev command supplies. LiveKit SIP instead needs carrier-reachable SIP and
+RTP; a tunnel and `--public-url` are neither required nor sufficient for that
+route.
+
+`--to <E.164>` places one outbound call on an outbound-capable target once the
+Compose graph is healthy. It works on the Pipecat carrier-WebSocket route and
+the Twilio connector, which both dial over the generated outbound endpoint, and
+on LiveKit SIP, which dials through a LiveKit agent dispatch. The CLI mints
+`UNMUTE_OUTBOUND_TOKEN` for the HTTP dial-out routes itself, so you never set it.
+An outbound channel no longer has to declare a voicemail policy; set
+`on_voicemail` only when the route supports voicemail detection, which today is
+LiveKit SIP.
 
 For carrier WebSocket routes the dev command manages the tunnel:
 
@@ -734,7 +760,7 @@ ports when running two stacks. Compose project names use
 `unmute-<source-dir>-<target>-<path-hash>`, so networks and preserved volumes
 remain isolated after ports are separated.
 
-For a promoted route, the command performs these steps in this order:
+The command performs these steps in this order:
 
 1. Validate and generate the selected target.
 2. Resolve and print the provider-neutral runtime plan.
@@ -764,21 +790,21 @@ For a promoted route, the command performs these steps in this order:
 12. Stop only the project-scoped Compose stack on interruption, preserve its
     named data volumes, and kill the managed tunnel.
 
-After promotion, `unmute dev --telephony` will fail before application
-readiness if Docker Compose is unavailable, a service is unhealthy, or
-explicit external LiveKit values conflict with the generated local topology.
-There is no flag or native-process fallback for local telephony in v1.
+`unmute dev --telephony` fails before application readiness if Docker Compose is
+unavailable, a service is unhealthy, or explicit external LiveKit values
+conflict with the generated local topology. There is no flag or native-process
+fallback for local telephony in v1.
 
 LiveKit SIP trunk IDs create a local bootstrap dependency. The dev command
 resolves it itself: it brings up the infrastructure services first, creates
 or reuses the trunk and dispatch records over the local server's SIP API
-with the generated development key pair, injects the returned IDs, and only
-then starts the application service. The Redis data volume persists across
-restarts, so records survive a normal stop; the list-before-create check is
-what keeps every restart from duplicating them. The emitted `sip-*.json`
-files and the printed `lk` commands remain the manual path for production
-deployments. The current validation gate still prevents obtaining that
-Compose file through `unmute compile` until a route is promoted.
+with the generated development key pair (`devkey`/`secret`), injects the
+returned IDs, and only then starts the application service. The Redis data
+volume persists across restarts, so records survive a normal stop; the
+list-before-create check is what keeps every restart from duplicating them. The
+emitted `sip-*.json` files and the printed `lk` commands remain the manual path
+for production deployments. `unmute compile` writes that Compose file for any
+route with a real adapter.
 
 The CLI does not install or run ngrok. cloudflared is the only managed
 tunnel client: it is Apache 2.0 licensed and needs no account or token for
@@ -954,6 +980,15 @@ Don't add a maintained Python package to this repository.
 The implementation order proves the risky seams early and extracts reuse only
 after duplication exists.
 
+Status as of July 23, 2026: Phases 0, 1, 2, 6, and 7 are shipped. Twilio runs
+end to end on both orchestrators, inbound and outbound, on the Pipecat
+carrier-WebSocket route, the LiveKit Twilio connector, and LiveKit SIP. The
+Phase 8 ergonomics (Compose executor, managed tunnel, automatic Twilio webhook,
+`--to` dial-out) are in place. The open work is Phase 3 (warm transfer), the
+credentialed smokes that promote each route from provisional to verified, and
+the remaining carriers: the Telnyx and Plivo adapters are emitted but not
+credential-verified, and Exotel stays gated (Phases 4 and 5).
+
 ### Phase 0: Align the decisions
 
 This phase changes documentation and schema decisions without emitting new
@@ -1067,21 +1102,26 @@ Acceptance requires the generated Agent to run against the emitted self-hosted
 LiveKit and LiveKit SIP stack without LiveKit Cloud. This does not promote a
 carrier route until its credentialed call smoke also passes.
 
-### Phase 7: Spike the LiveKit Twilio Connector
+### Phase 7: LiveKit Twilio connector (shipped)
 
-This phase decides whether the Twilio WebSocket route is useful enough to
-support beside SIP.
+This phase shipped the Twilio WebSocket route beside SIP. Unmute generates its
+own `telephony_bridge.py`, which speaks Twilio Media Streams and joins a
+self-hosted LiveKit room, so the route runs against a stock `livekit-server
+--dev` with no LiveKit Cloud and no connector service.
 
-1. Run the Connector against a self-hosted LiveKit server.
-2. Prove inbound and outbound calls from the generated webhook.
-3. Verify connector participant metadata and Agent dispatch.
-4. Prove cold transfer cleanup.
-5. Attempt the conference-first warm-transfer topology.
-6. Keep unsupported controls gated and document the SIP alternative.
+1. Runs against a self-hosted LiveKit server. Done.
+2. Inbound and outbound calls from the generated webhook. Done, confirmed on
+   real calls.
+3. Connector participant metadata and Agent dispatch through job metadata.
+   Done.
+4. Cold transfer cleanup. Not shipped; transfers stay on the SIP route.
+5. Conference-first warm transfer. Not shipped; stays on the SIP route.
+6. Unsupported controls stay gated and point at the SIP alternative. Done.
 
-Acceptance requires a pinned LiveKit version, a dated documentation link, and
-an opt-in smoke test. If warm transfer or self-hosted operation is unstable,
-ship SIP only and keep the Connector experimental.
+The route ships with a pinned LiveKit version and a dated documentation link.
+Its live audio path is covered by the mu-law self-check, `py_compile`, `ruff`,
+a local Docker integration run, and the author's real call rather than a CI
+smoke, so the route stays provisional until a credentialed smoke lands.
 
 ### Phase 8: Finish local and deployment ergonomics
 
@@ -1215,9 +1255,13 @@ The plan keeps uncertain behavior gated rather than designing around guesses.
 
 ## Next steps
 
-The plans, reports, provisional route emitters, Compose artifacts, and local
-executor exist.
+The plans, reports, route emitters, Compose artifacts, and local executor are
+shipped, and Twilio runs end to end on all three routes.
 
-1. Run the credential-free topology smoke, including Redis failure and restart.
-2. Keep every carrier feature provisional until its separate real-call smoke
-   passes.
+1. Add the credentialed smokes that promote each route from provisional to
+   verified, starting with the Twilio routes already confirmed by hand.
+2. Prove warm transfer (Phase 3) on the Pipecat carrier-WebSocket route.
+3. Credential-verify the Telnyx and Plivo adapters; keep Exotel gated until an
+   authenticated ingress pattern is proven.
+4. Run the credential-free topology smoke, including Redis failure and restart,
+   for the routes that use Redis.

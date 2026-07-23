@@ -150,9 +150,9 @@ Connection stores these names, while `.env` stores their values.
 
 Every generated row runs now and is tagged provisional: validation and
 compilation emit it cleanly, with no warning. The adapters contain inbound,
-outbound, hangup, and cold-transfer paths. Voicemail handling and warm transfer
-remain gated, so an outbound channel still fails validation, because every
-outbound channel must declare a voicemail policy.
+outbound, hangup, and cold-transfer paths. An outbound channel runs without a
+voicemail policy; voicemail detection and warm transfer stay gated on Pipecat,
+so setting `on_voicemail` still fails validation on this route.
 
 To configure several carriers, declare several Pipecat target instances, such
 as `pipecat_twilio` and `pipecat_telnyx`, and bind each to its own Connection.
