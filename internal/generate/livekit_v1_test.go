@@ -337,6 +337,33 @@ func TestV26LiveKitStaticCheckSurface(t *testing.T) {
 	}
 }
 
+// TestV26_LiveKitAgentWebhookImportsHTTPX guards B12: an agent that owns a
+// webhook tool must emit `import httpx` even when no task owns one. safe_core is
+// exactly this shape (agents own lookup_customer/get_invoice, no tasks), so its
+// agent.py called httpx.AsyncClient with no import (ruff F821, a V26 violation)
+// until the import need was computed over agent tools too, not just task tools.
+func TestV26_LiveKitAgentWebhookImportsHTTPX(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	agentPy := artifactFile(t, artifact, "agent.py")
+	if !strings.Contains(agentPy, "httpx.AsyncClient(") {
+		t.Fatal("fixture no longer lowers an agent webhook tool to httpx; pick one that does")
+	}
+	if !strings.Contains(agentPy, "import httpx") {
+		t.Error("agent.py calls httpx.AsyncClient but omits `import httpx` (ruff F821)")
+	}
+}
+
 // TestLiveKitV1MultiVendor proves the catalogue path end to end: the safe_core
 // livekit target binds Deepgram listen and ElevenLabs speak (per-vendor
 // plugins), one voice is rebound to Cartesia in-code, and the emitted project
