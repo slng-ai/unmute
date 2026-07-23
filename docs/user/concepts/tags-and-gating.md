@@ -4,9 +4,9 @@ Every feature in Unmute carries a **tag** that says how it behaves on a target. 
 
 ## The four tags
 
-**`core`** works on all five targets, with no failures and no warnings. This is the safe stuff. If your whole agent is core, it runs everywhere, quietly.
+**`core`** works on all four targets, with no failures and no warnings. This is the safe stuff. If your whole agent is core, it runs everywhere, quietly.
 
-**`warn`** works on all five, but at least one target prints a **warning** and keeps going. A warning goes to standard error and the command still succeeds (exit code 0). It means "this works, but not exactly the way you might expect on this platform". You should read it, but it does not block you.
+**`warn`** works on all four, but at least one target prints a **warning** and keeps going. A warning goes to standard error and the command still succeeds (exit code 0). It means "this works, but not exactly the way you might expect on this platform". You should read it, but it does not block you.
 
 **`gated`** **fails validation** on at least one target. The failure is a clear error that names the target and the reason. Gated does not mean broken; it means "works on some targets, not others". A guard on a handoff is gated: it works on Pipecat, it fails on Vapi.
 
@@ -22,7 +22,7 @@ This is the same fail-loud rule from [how Unmute works](how-unmute-works.md), vi
 
 Because warnings still pass, it is tempting to ignore them. Do not. A `warn` tag means a real behavior difference on a real platform. Some examples you will meet:
 
-- A minimum-words setting on interruptions works on Pipecat but has no equivalent on ElevenLabs, so ElevenLabs warns that it is ignored.
+- A minimum-words setting on interruptions works on Pipecat but is lossy on Deepgram (the model halts first), so Deepgram warns.
 - Ignore-phrases for interruptions are dropped on Deepgram, with a warning.
 
 On your chosen platform, a warning tells you the exact edge to test.

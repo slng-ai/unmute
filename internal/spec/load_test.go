@@ -13,7 +13,7 @@ func TestLoadSafeCore(t *testing.T) { // V3, V14
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pkg.Agent.EntryAgent != "intake" || len(pkg.Targets) != 5 {
+	if pkg.Agent.EntryAgent != "intake" || len(pkg.Targets) != 4 {
 		t.Fatalf("unexpected package: entry=%q targets=%d", pkg.Agent.EntryAgent, len(pkg.Targets))
 	}
 	if _, ok := pkg.Tools["lookup_customer"]; !ok {

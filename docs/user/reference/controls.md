@@ -36,7 +36,7 @@ Whether control comes back is decided by the target: a single task always return
 
 ## kind: agent_transfer
 
-Hands the conversation to another agent (tier T2). Works on all five targets in its basic form.
+Hands the conversation to another agent (tier T2). Works on all four targets in its basic form.
 
 ```yaml
 controls:
@@ -54,7 +54,7 @@ controls:
 
 The agent that takes over.
 
-Required: yes. Values: an agent name. Default: none. Targets: all five, core.
+Required: yes. Values: an agent name. Default: none. Targets: all four, core.
 
 ### requires
 
@@ -67,7 +67,6 @@ Required: no. Values: a list of variable names. Default: none.
 | LiveKit | generated | gated |
 | Pipecat | generated | gated |
 | Vapi | fails (no mechanism) | gated |
-| ElevenLabs | fails (no mechanism) | gated |
 | Deepgram | generated | gated |
 
 ### context.history
@@ -79,15 +78,15 @@ for the exact prompt and history boundaries.
 
 Required: yes. Values: `full | messages | last_n | summary | reset`. Default: none.
 
-| Value | LiveKit | Pipecat | Vapi | ElevenLabs | Deepgram |
-|---|---|---|---|---|---|
-| `full` | ok | ok | ok | ok | ok |
-| `messages` | ok | driver gate | ok | fails | ok |
-| `last_n` | ok | driver gate | ok | fails | ok |
-| `summary` | ok (generated) | driver gate | fails | fails | ok (generated) |
-| `reset` | ok | driver gate | ok | fails | ok |
+| Value | LiveKit | Pipecat | Vapi | Deepgram |
+|---|---|---|---|---|
+| `full` | ok | ok | ok | ok |
+| `messages` | ok | driver gate | ok | ok |
+| `last_n` | ok | driver gate | ok | ok |
+| `summary` | ok (generated) | driver gate | fails | ok (generated) |
+| `reset` | ok | driver gate | ok | ok |
 
-ElevenLabs always keeps the full transcript, so only `full` works there. `reset` never promises a literally empty context (on LiveKit a handoff marker still lands in the new context). **On Pipecat the driver emits `history: full` only today**; the other values are a driver maturity gate.
+`reset` never promises a literally empty context (on LiveKit a handoff marker still lands in the new context). **On Pipecat the driver emits `history: full` only today**; the other values are a driver maturity gate.
 
 ### context.max_messages
 
@@ -118,7 +117,6 @@ Required: yes. Values: `all` or a list of names. Default: none.
 | LiveKit | `all` or a subset list | gated |
 | Pipecat | `all` (a subset list is a driver maturity gate today) | gated |
 | Vapi | `all` only | gated |
-| ElevenLabs | `all` only | gated |
 | Deepgram | `all` or a subset list | gated |
 
 `all` is the only value managed targets accept. Subset lists compile on code targets.
@@ -139,7 +137,7 @@ controls:
 
 A symbolic name, resolved through the target instance's `destinations:` map to a phone number or SIP address.
 
-Required: yes. Values: a symbolic name. Default: none. Targets: all five, core (resolution). The transport that carries it gates per target; see `mode`.
+Required: yes. Values: a symbolic name. Default: none. Targets: all four, core (resolution). The transport that carries it gates per target; see `mode`.
 
 ### mode
 
@@ -152,7 +150,6 @@ Required: yes. Values: `cold | warm`. Default: none.
 | Pipecat carrier WebSocket with Twilio, Telnyx, or Plivo | Carrier REST path emitted offline; provisional | Not emitted |
 | Pipecat Daily SIP | Platform capability only; not an emitted v1 telephony route | Not emitted |
 | Vapi | native | needs the Twilio carrier (stable path) |
-| ElevenLabs | native | supported |
 | Deepgram | carrier-conditional | carrier-conditional |
 
 Cold transfers the caller and the agent drops off. Warm keeps the agent on to
@@ -172,5 +169,4 @@ Required: conditional (warm only). Values: `summary | message | wait`. Default: 
 | LiveKit SIP with Twilio, Telnyx, or Plivo | `summary`, emitted offline on a provisional route | provisional |
 | Pipecat | fails (warm not emitted yet) | gated |
 | Vapi | all three | gated |
-| ElevenLabs | `message` | gated |
 | Deepgram | fails | gated |

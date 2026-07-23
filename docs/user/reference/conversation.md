@@ -29,7 +29,6 @@ Required: yes, if the greeting block is present. Values: `agent | user`. Default
 | LiveKit | core (generated) | generated |
 | Pipecat | core (generated) | generated |
 | Vapi | native | native |
-| ElevenLabs | native | native |
 | Deepgram | core | warns (omission behavior undocumented) |
 
 `user` means the agent stays silent until the caller talks. It is `warn` overall because of Deepgram.
@@ -38,19 +37,19 @@ Required: yes, if the greeting block is present. Values: `agent | user`. Default
 
 The exact opening line, spoken word for word every call. May reference `{{variables}}` known at call start.
 
-Required: no. Values: text. Default: none. Targets: all five, core. (Native on Vapi, ElevenLabs, Deepgram; generated on LiveKit and Pipecat.)
+Required: no. Values: text. Default: none. Targets: all four, core. (Native on Vapi and Deepgram; generated on LiveKit and Pipecat.)
 
 ### The three greeting combinations
 
-- **`speaks_first: agent` with `text`**: a fixed opening, same words every call. Works on all five. The zero-warning safe choice.
-- **`speaks_first: agent` without `text`**: the model writes the opening from the prompt, so it varies. Generated on LiveKit and Pipecat, native on Vapi, **conditional on ElevenLabs** (needs a workflow node), **generated with a warning on Deepgram**.
-- **`speaks_first: user`**: the agent waits for the caller. Native on Vapi and ElevenLabs, generated on LiveKit and Pipecat, warns on Deepgram.
+- **`speaks_first: agent` with `text`**: a fixed opening, same words every call. Works on all four. The zero-warning safe choice.
+- **`speaks_first: agent` without `text`**: the model writes the opening from the prompt, so it varies. Generated on LiveKit and Pipecat, native on Vapi, **generated with a warning on Deepgram**.
+- **`speaks_first: user`**: the agent waits for the caller. Native on Vapi, generated on LiveKit and Pipecat, warns on Deepgram.
 
 ## interruption.enabled
 
 Whether the caller can interrupt the agent.
 
-Required: yes, if the interruption block is present. Values: bool. Default: none. Targets: all five, core.
+Required: yes, if the interruption block is present. Values: bool. Default: none. Targets: all four, core.
 
 ## interruption.minimum_words
 
@@ -63,7 +62,6 @@ Required: no. Values: int. Default: none. Tag: warn.
 | LiveKit | honored | core |
 | Pipecat | honored (minimum-words turn-start strategy) | core |
 | Vapi | honored | core |
-| ElevenLabs | no such knob; warns | warn |
 | Deepgram | lossy (the model halts first); warns | warn |
 
 ## interruption.ignore_phrases
@@ -77,7 +75,6 @@ Required: no. Values: a list of text. Default: none. Tag: warn.
 | LiveKit | generated | core |
 | Pipecat | generated (emitted as an ignore list) | core |
 | Vapi | native | core |
-| ElevenLabs | native | core |
 | Deepgram | dropped with a warning | warn |
 
 ## inactivity.nudge_after, inactivity.end_after
@@ -103,7 +100,6 @@ Required: no. Values: `none | subtle`. Default: none.
 | LiveKit | native | gated |
 | Pipecat | native, but the driver does not emit it yet (maturity gate) | gated |
 | Vapi | fails (no faithful lowering) | gated |
-| ElevenLabs | native | gated |
 | Deepgram | fails (no faithful lowering) | gated |
 
 On Pipecat, `thinking_audio` fails validation today; it is a driver maturity gate.

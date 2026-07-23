@@ -202,6 +202,7 @@ type pipecatCallStart struct {
 type pipecatData struct {
 	Project             string
 	Version             string
+	DeploymentRegion    string
 	MainName            string
 	EntryAgent          string
 	EntryClass          string
@@ -239,6 +240,7 @@ type pipecatData struct {
 	HasFlows            bool // any delegate (tasks run as Flows on the owner, C8)
 	HasIsolated         bool // any isolated group (ContextStrategy RESET import)
 	NeedsRoleRestore    bool // any non-ending delegate (V28)
+	NeedsLanguage       bool // any emitted service sets a language kwarg (Language enum import, N16)
 	Inline              bool // single agent, no bus: LLM inline in the pipeline (F3)
 }
 

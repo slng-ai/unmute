@@ -20,7 +20,7 @@ channels:
 
 The channel type.
 
-Required: yes. Values: `realtime_audio | telephony`. Default: none. Targets: all five, core. `realtime_audio` is a browser or app audio session; `telephony` is a phone line.
+Required: yes. Values: `realtime_audio | telephony`. Default: none. Targets: all four, core. `realtime_audio` is a browser or app audio session; `telephony` is a phone line.
 
 ### inbound, outbound
 
@@ -79,4 +79,4 @@ capacity:
 | `peak_starts_per_second` | telephony only | number | peak new-call rate; must be greater than zero |
 | `avg_session_duration` | yes | duration | sizing and quota input |
 
-Targets: all five, core (as a declaration). Sizing depends on concurrency, placement, and channels, not on how many agents are in the file and never on the provider brand alone. The derived numbers (workers, GPUs, quotas) are not yet printed by the CLI; see [going live](../learn/08-going-live.md).
+Targets: all four, core (as a declaration). Sizing depends on concurrency, placement, and channels, not on how many agents are in the file and never on the provider brand alone. The derived numbers (workers, GPUs, quotas) are not yet printed by the CLI; see [going live](../learn/08-going-live.md).

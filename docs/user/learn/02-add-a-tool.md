@@ -75,7 +75,7 @@ And mention it in the prompt so the model knows when to reach for it:
 
 **`output`** is the shape you promise to return. It is optional. On code targets like Pipecat it is enforced by generated code; on managed targets there is nowhere to check it, so it warns there.
 
-**`execution`** says where the tool runs. `webhook` means Unmute calls an HTTP endpoint you host. **This is the one execution kind that works on all five platforms; it is the safe choice.** Other kinds (`local` Python handlers, `mcp`, and more) exist but are gated per platform.
+**`execution`** says where the tool runs. `webhook` means Unmute calls an HTTP endpoint you host. **This is the one execution kind that works on all four platforms; it is the safe choice.** Other kinds (`local` Python handlers, `mcp`, and more) exist but are gated per platform.
 
 **`url_env`** names the environment variable that holds the endpoint URL. It is a variable name, never a URL. You set `LOOKUP_CUSTOMER_URL` in your `.env`. Keeping the URL out of the spec means the same spec points at your staging endpoint in dev and your real one in production.
 
@@ -107,8 +107,8 @@ You never write or edit this. You change the spec and recompile.
 
 Not much, on purpose:
 
-- `execution: webhook` is `core`. Webhook tools work on all five platforms. If you only ever use webhook tools, tools never block you anywhere.
-- `output:` is `warn` on managed targets (Vapi, ElevenLabs), because they cannot enforce it. On Pipecat it is enforced.
+- `execution: webhook` is `core`. Webhook tools work on all four platforms. If you only ever use webhook tools, tools never block you anywhere.
+- `output:` is `warn` on the managed target (Vapi), because it cannot enforce it. On Pipecat it is enforced.
 - `interruption: provider_default` and `effect` are `core`.
 
 Keep tools webhook-based and they stay in the safe core. Pipecat also emits

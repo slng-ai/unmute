@@ -100,15 +100,6 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		return artifact, nil
 	case ir.ProviderVapi:
 		return artifact, fmt.Errorf("vapi driver is not implemented")
-	case ir.ProviderElevenLabs:
-		emitted, err := GenerateElevenLabs(agent, resolved)
-		if err != nil {
-			return Artifact{}, fmt.Errorf("generate %s elevenlabs: %w", resolved.Name, err)
-		}
-		artifact.Apply = emitted.Apply
-		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
-		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
-		return artifact, nil
 	case ir.ProviderDeepgram:
 		return artifact, fmt.Errorf("deepgram driver is not implemented")
 	default:
@@ -132,7 +123,7 @@ func artifactKind(provider ir.Provider) ArtifactKind {
 	switch provider {
 	case ir.ProviderLiveKit, ir.ProviderPipecat, ir.ProviderDeepgram:
 		return CodeTarget
-	case ir.ProviderVapi, ir.ProviderElevenLabs:
+	case ir.ProviderVapi:
 		return ManagedTarget
 	default:
 		return ""

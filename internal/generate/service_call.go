@@ -28,7 +28,7 @@ type ServiceCall struct {
 // are driver-supplied nested args (the workers-model system_instruction),
 // inserted after model/voice. Every env var the call reads registers on env.
 func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap.Role,
-	binding ir.Binding, language string, envRef func(string) string, env *envSet, extraSettings ...pyKV) (ServiceCall, targetcap.Entry, error) {
+	binding ir.Binding, envRef func(string) string, env *envSet, extraSettings ...pyKV) (ServiceCall, targetcap.Entry, error) {
 
 	vendor := binding.Provider
 	if vendor == "" {
@@ -83,17 +83,18 @@ func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap
 	} else if spec.Model.Required {
 		return ServiceCall{}, entry, fmt.Errorf("%s %s binding is missing a model", fw, role)
 	}
-	if (role == targetcap.Listen || role == targetcap.Speak) && !spec.NoLanguage {
-		if language == "" {
-			language = "en"
-		}
-		if spec.Language.Arg == "" {
+	// Language is per-model (N16): emitted only when the model sets one. Unset
+	// means no language kwarg — the provider default or the model route's own
+	// encoding (slng/deepgram/nova:3-en) wins. A language on an entry with no
+	// slot is a gated error, never a silent drop.
+	if binding.Language != "" && (role == targetcap.Listen || role == targetcap.Speak) {
+		if spec.NoLanguage || spec.Language.Arg == "" {
 			return ServiceCall{}, entry, fmt.Errorf("%s %s binding provider %q has no language slot", fw, role, vendor)
 		}
-		// A target-specific param is an explicit integration override. Avoid
-		// emitting the same Python kwarg twice while keeping old packages valid.
+		// A target-specific param is an explicit integration override; avoid
+		// emitting the same Python kwarg twice.
 		if _, overridden := binding.Params[spec.Language.Arg]; !overridden {
-			nested(pyKV{Key: spec.Language.Arg, Value: pyQuote(language)})
+			nested(pyKV{Key: spec.Language.Arg, Value: pyQuote(binding.Language)})
 		}
 	}
 	for _, kv := range extraSettings {

@@ -38,11 +38,8 @@ func TestBuildSafeCore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if agent.EntryAgent != "intake" || len(agent.Targets) != 5 {
+	if agent.EntryAgent != "intake" || len(agent.Targets) != 4 {
 		t.Fatalf("unexpected IR: entry=%q targets=%d", agent.EntryAgent, len(agent.Targets))
-	}
-	if agent.Language != "en" {
-		t.Fatalf("language = %q", agent.Language)
 	}
 	if !strings.Contains(agent.Agents["intake"].Instructions, "front desk") {
 		t.Fatal("prompt path was not composed")
@@ -308,18 +305,6 @@ func TestBuildRejectsUnknownOrInvalidConnection(t *testing.T) { // telephony V1-
 				t.Fatalf("got %v", err)
 			}
 		})
-	}
-}
-
-func TestBuildDefaultsLanguage(t *testing.T) {
-	pkg := loadSafeCore(t)
-	pkg.Agent.Language = ""
-	agent, err := Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if agent.Language != "en" {
-		t.Fatalf("language = %q", agent.Language)
 	}
 }
 

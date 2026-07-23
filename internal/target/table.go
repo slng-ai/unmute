@@ -3,14 +3,13 @@ package target
 type Provider string
 
 const (
-	LiveKit    Provider = "livekit"
-	Pipecat    Provider = "pipecat"
-	Vapi       Provider = "vapi"
-	ElevenLabs Provider = "elevenlabs"
-	Deepgram   Provider = "deepgram"
+	LiveKit  Provider = "livekit"
+	Pipecat  Provider = "pipecat"
+	Vapi     Provider = "vapi"
+	Deepgram Provider = "deepgram"
 )
 
-var Providers = []Provider{LiveKit, Pipecat, Vapi, ElevenLabs, Deepgram}
+var Providers = []Provider{LiveKit, Pipecat, Vapi, Deepgram}
 
 func IsCode(provider Provider) bool {
 	return provider == LiveKit || provider == Pipecat || provider == Deepgram
@@ -145,7 +144,6 @@ const (
 	FallbackComponent    FallbackSlot = "component"
 	FallbackGenerated    FallbackSlot = "generated"
 	FallbackSameProvider FallbackSlot = "same_provider_model"
-	FallbackModelID      FallbackSlot = "model_id"
 	FallbackProvider     FallbackSlot = "provider_entry"
 )
 
@@ -207,47 +205,40 @@ func Default() Table {
 		Fields: map[Field]map[Provider]Capability{
 			FieldListenLocal: field(
 				deny(Vapi, "Vapi cannot run a local listen model"),
-				deny(ElevenLabs, "ElevenLabs uses its integrated ASR"),
 				deny(Deepgram, "Deepgram has no slot for an outside STT model"),
 			),
 			FieldSpeakLocal: field(
 				deny(Vapi, "Vapi cannot run a local voice model"),
-				deny(ElevenLabs, "ElevenLabs cannot run a local voice model"),
 				deny(Deepgram, "Deepgram cannot run a local voice model"),
 			),
 			FieldSpeakEndpoint: field(
 				deny(LiveKit, "LiveKit has no OpenAI-compatible speak wildcard: its openai plugin TTS carries no language slot (N14), so a custom speak endpoint cannot be catalogued"),
-				deny(ElevenLabs, "ElevenLabs custom speak endpoints have no slot"),
 			),
 			FieldReasonLocal: field(deny(Vapi, "Vapi custom local LLM endpoints are unverified")),
 			FieldTurnPlacement: field(
 				warn(LiveKit, "LiveKit turn placement is a preference"),
 				warn(Vapi, "Vapi integrates turn detection; placement is ignored"),
-				warn(ElevenLabs, "ElevenLabs integrates turn detection; placement is ignored"),
 				warn(Deepgram, "Deepgram integrates turn detection into listen; placement is ignored"),
 			),
 			FieldSemanticEndpointing: field(
 				warn(LiveKit, "LiveKit semantic endpointing depends on the bound model"),
 				warn(Pipecat, "Pipecat semantic endpointing depends on the bound model"),
 				warn(Vapi, "Vapi semantic endpointing is forwarded as a preference"),
-				warn(ElevenLabs, "ElevenLabs semantic endpointing is forwarded as a preference"),
 				warn(Deepgram, "Deepgram semantic endpointing depends on the bound listen model"),
 			),
 			FieldFallback: field(deny(Pipecat, "the Pipecat driver does not emit generated fallback yet")),
 			// Listen (STT) fallback: native on LiveKit (stt.FallbackAdapter,
 			// verified in livekit-agents source 2026-07-19). Gated elsewhere
 			// until a slot is verified: no documented transcriber fallback on
-			// Vapi, listen is integrated on ElevenLabs, and Deepgram's
-			// agent.listen takes a single provider (unlike think's array).
+			// Vapi, and Deepgram's agent.listen takes a single provider (unlike
+			// think's array).
 			FieldListenFallback: field(
 				deny(Pipecat, "the Pipecat driver does not emit listen fallback yet"),
 				deny(Vapi, "Vapi has no documented transcriber fallback slot"),
-				deny(ElevenLabs, "ElevenLabs listen is integrated; there is no STT fallback slot"),
 				deny(Deepgram, "Deepgram agent.listen takes a single provider; there is no fallback slot"),
 			),
 			FieldTask: field(
 				deny(Vapi, "Vapi return-to-prior-assistant is unverified"),
-				warn(ElevenLabs, "ElevenLabs keeps task turns in the owner's running transcript"),
 			),
 			// Verified 2026-07-16: an LLMSwitcher inside an LLMWorker pipeline
 			// stalls all flow frames on pipecat-ai 1.5.0, so per-task model has
@@ -255,34 +246,27 @@ func Default() Table {
 			FieldTaskModel: field(deny(Pipecat, "the Pipecat driver does not emit per-task model yet (LLMSwitcher stalls inside an LLMWorker)")),
 			FieldTaskNestedResult: field(
 				deny(Vapi, "Vapi cannot enforce nested task results"),
-				deny(ElevenLabs, "ElevenLabs cannot enforce nested task results"),
 			),
 			FieldTaskGroup: field(warn(LiveKit, "LiveKit TaskGroup is experimental")),
 			FieldTaskGroupReturn: field(
 				deny(Vapi, "Vapi state-preserving Squad return is unverified"),
-				warn(ElevenLabs, "ElevenLabs keeps task-group turns in the owner's running transcript"),
 			),
 			FieldContextIsolated: field(
 				deny(Vapi, "Vapi cannot isolate task-group context"),
-				deny(ElevenLabs, "ElevenLabs keeps one running transcript"),
 			),
 			FieldTransferRequires: field(
 				deny(Vapi, "Vapi has no machine-checked transfer guard"),
-				deny(ElevenLabs, "ElevenLabs has no machine-checked transfer guard"),
 			),
 			FieldContextNoToolCalls: field(
 				deny(Pipecat, "the Pipecat driver does not shape transfer context (include_tool_calls) yet"),
 				deny(Vapi, "Vapi cannot exclude tool calls from transfer context"),
-				deny(ElevenLabs, "ElevenLabs always keeps the full transcript"),
 			),
 			FieldContextVariableSubset: field(
 				deny(Pipecat, "the Pipecat driver does not shape transfer context (variables subset) yet"),
 				deny(Vapi, "Vapi accepts transfer variables: all only"),
-				deny(ElevenLabs, "ElevenLabs accepts transfer variables: all only"),
 			),
 			FieldBriefingSummary: field(
 				deny(Pipecat, "Pipecat has no summary briefing lowering"),
-				deny(ElevenLabs, "ElevenLabs supports message briefing only"),
 				deny(Deepgram, "Deepgram has no summary briefing lowering"),
 			),
 			FieldBriefingMessage: field(
@@ -293,7 +277,6 @@ func Default() Table {
 			FieldBriefingWait: field(
 				deny(LiveKit, "LiveKit has no wait briefing lowering"),
 				deny(Pipecat, "Pipecat has no wait briefing lowering"),
-				deny(ElevenLabs, "ElevenLabs has no wait briefing lowering"),
 				deny(Deepgram, "Deepgram has no wait briefing lowering"),
 			),
 			FieldGreetingUserFirst: field(
@@ -306,11 +289,9 @@ func Default() Table {
 				warn(LiveKit, "LiveKit default greeting behavior applies"),
 				warn(Pipecat, "Pipecat default greeting behavior applies"),
 				warn(Vapi, "Vapi default greeting behavior applies"),
-				warn(ElevenLabs, "ElevenLabs default greeting behavior applies"),
 				warn(Deepgram, "Deepgram default greeting behavior applies"),
 			),
 			FieldInterruptionMinWords: field(
-				warn(ElevenLabs, "ElevenLabs has no minimum-word interruption knob"),
 				warn(Deepgram, "Deepgram interruption minimum words is lossy"),
 			),
 			FieldInterruptionIgnore: field(
@@ -320,14 +301,12 @@ func Default() Table {
 				warn(LiveKit, "LiveKit driver must range-check inactivity durations"),
 				warn(Pipecat, "Pipecat driver must range-check inactivity durations"),
 				warn(Vapi, "Vapi driver must range-check inactivity durations"),
-				warn(ElevenLabs, "ElevenLabs driver must range-check inactivity durations"),
 				warn(Deepgram, "Deepgram driver must range-check inactivity durations"),
 			),
 			FieldMaxDuration: field(
 				warn(LiveKit, "LiveKit driver must verify a max-duration cap"),
 				warn(Pipecat, "Pipecat driver must verify a max-duration cap"),
 				warn(Vapi, "Vapi driver must verify a max-duration cap"),
-				warn(ElevenLabs, "ElevenLabs driver must verify a max-duration cap"),
 				warn(Deepgram, "Deepgram driver must verify a max-duration cap"),
 			),
 			FieldThinkingAudio: field(
@@ -337,11 +316,9 @@ func Default() Table {
 			),
 			FieldToolOutput: field(
 				warn(Vapi, "Vapi cannot enforce tool output schemas"),
-				warn(ElevenLabs, "ElevenLabs cannot enforce tool output schemas"),
 			),
 			FieldToolLocal: field(
 				deny(Vapi, "Vapi cannot host local tool code"),
-				deny(ElevenLabs, "ElevenLabs cannot host local tool code"),
 			),
 			FieldToolMCP: field(
 				deny(Pipecat, "the Pipecat driver does not emit MCP tools yet"),
@@ -351,27 +328,23 @@ func Default() Table {
 				deny(LiveKit, "LiveKit client tools are not proven by its driver"),
 				deny(Pipecat, "Pipecat client tools are not proven by its driver"),
 				deny(Vapi, "Vapi client tools are not proven by its driver"),
-				deny(ElevenLabs, "ElevenLabs client tools are not proven by its driver"),
 				deny(Deepgram, "Deepgram client tools are not proven by its driver"),
 			),
 			FieldToolProviderHosted: field(
 				deny(LiveKit, "LiveKit provider-hosted tools are not proven by its driver"),
 				deny(Pipecat, "Pipecat provider-hosted tools are not proven by its driver"),
 				deny(Vapi, "Vapi provider-hosted tools are not proven by its driver"),
-				deny(ElevenLabs, "ElevenLabs provider-hosted tools are not proven by its driver"),
 				deny(Deepgram, "Deepgram provider-hosted tools are not proven by its driver"),
 			),
 			FieldToolBuiltin: field(
 				// LiveKit + Pipecat host prebuilt tools (the end_call registry,
 				// docs/spec/prebuilt-tools.md); the rest still lack a lowering.
 				deny(Vapi, "Vapi builtin tools are not proven by its driver"),
-				deny(ElevenLabs, "ElevenLabs builtin tools are not proven by its driver"),
 				deny(Deepgram, "Deepgram builtin tools are not proven by its driver"),
 			),
 			FieldToolInterruption: field(
 				warn(LiveKit, "LiveKit runs tool executions to completion; a per-tool interruption preference is not enforced"),
 				warn(Vapi, "Vapi uses provider-default tool interruption"),
-				warn(ElevenLabs, "ElevenLabs uses provider-default tool interruption"),
 			),
 			FieldOutbound: field(
 				deny(Pipecat, "the Pipecat driver does not emit outbound calling yet"),
@@ -383,7 +356,6 @@ func Default() Table {
 			),
 			FieldTracingLangfuse: field(
 				deny(Vapi, "Vapi has no Langfuse tracing lowering"),
-				deny(ElevenLabs, "ElevenLabs has no Langfuse tracing lowering"),
 				deny(Deepgram, "the Deepgram driver does not emit Langfuse tracing"),
 			),
 			FieldFutureProvisional: provisional(),
@@ -393,56 +365,45 @@ func Default() Table {
 				control(),
 				controlTransport("daily-sip", "Pipecat cold transfer requires Daily SIP transport"),
 				control(),
-				control(),
 				controlNamedCarrier("twilio", "Deepgram transfer requires carrier Twilio in the generated bridge"),
 			),
 			WarmTransfer: controls(
 				control(),
 				controlDeny("Pipecat warm transfer ships upstream but this driver does not emit it yet"),
 				controlNamedCarrier("twilio", "Vapi warm transfer requires carrier Twilio"),
-				control(),
 				controlNamedCarrier("twilio", "Deepgram transfer requires carrier Twilio in the generated bridge"),
 			),
 			DTMFSend:           routedControls("dtmf_send"),
 			DTMFReceive:        routedControls("dtmf_receive"),
 			Hold:               routedControls("hold"),
-			Hangup:             controls(control(), control(), control(), control(), control()),
-			VoicemailDetection: controls(control(), control(), control(), control(), controlNamedCarrier("twilio", "Deepgram voicemail detection requires carrier Twilio AMD in the generated bridge")),
+			Hangup:             controls(control(), control(), control(), control()),
+			VoicemailDetection: controls(control(), control(), control(), controlNamedCarrier("twilio", "Deepgram voicemail detection requires carrier Twilio AMD in the generated bridge")),
 			IVRNavigation:      routedControls("ivr_navigation"),
 		},
 		Conditions: map[Field]map[Provider]ValueCondition{
 			FieldToolMCP: {
 				LiveKit: {Value: "python", Note: "LiveKit MCP tools require sdk_language: python"},
 			},
-			FieldReasonLocal: {
-				ElevenLabs: {NonEmpty: true, Note: "ElevenLabs local reason models require a custom endpoint"},
-			},
-			// V8: a warm-transfer briefing message is read to the operator only for
-			// numbers imported via the native Twilio integration; SIP transfers do
-			// not support it (verified against ElevenLabs docs 2026-07-15).
-			FieldBriefingMessage: {
-				ElevenLabs: {Value: "twilio", Note: "ElevenLabs warm-transfer briefing messages require carrier twilio (native Twilio integration); SIP transfers do not support them"},
-			},
 		},
 		Roles: map[Role]map[Provider]RoleKind{
-			Listen: role(Open, Open, Open, Integrated, Open),
-			Turn:   role(Open, Open, Integrated, Integrated, Integrated),
-			Speak:  role(Open, Open, Open, Open, Open),
-			Reason: role(Open, Open, Open, Open, Open),
+			Listen: role(Open, Open, Open, Open),
+			Turn:   role(Open, Open, Integrated, Integrated),
+			Speak:  role(Open, Open, Open, Open),
+			Reason: role(Open, Open, Open, Open),
 		},
 		History: map[History]map[Provider]HistorySupport{
 			// Pipecat driver v1 emits history: full only; other values are a
 			// maturity gate (the workers handoff carries the running context and
 			// fine-grained shaping is not emitted yet, C9).
-			HistoryFull:     history(HistoryOK, HistoryOK, HistoryOK, HistoryOK, HistoryOK),
-			HistoryMessages: history(HistoryOK, HistoryFail, HistoryOK, HistoryFail, HistoryOK),
-			HistoryLastN:    history(HistoryOK, HistoryFail, HistoryOK, HistoryFail, HistoryOK),
-			HistorySummary:  history(HistoryGenerated, HistoryFail, HistoryFail, HistoryFail, HistoryGenerated),
-			HistoryReset:    history(HistoryOK, HistoryFail, HistoryOK, HistoryFail, HistoryOK),
+			HistoryFull:     history(HistoryOK, HistoryOK, HistoryOK, HistoryOK),
+			HistoryMessages: history(HistoryOK, HistoryFail, HistoryOK, HistoryOK),
+			HistoryLastN:    history(HistoryOK, HistoryFail, HistoryOK, HistoryOK),
+			HistorySummary:  history(HistoryGenerated, HistoryFail, HistoryFail, HistoryGenerated),
+			HistoryReset:    history(HistoryOK, HistoryFail, HistoryOK, HistoryOK),
 		},
 		FallbackSlots: map[Provider]FallbackSlot{
 			LiveKit: FallbackComponent, Pipecat: FallbackGenerated, Vapi: FallbackSameProvider,
-			ElevenLabs: FallbackModelID, Deepgram: FallbackProvider,
+			Deepgram: FallbackProvider,
 		},
 	}
 }
@@ -466,12 +427,12 @@ func controlNamedCarrier(carrier, note string) ControlCapability {
 func routedControls(name string) map[Provider]ControlCapability {
 	note := "required control " + name + " is proven only for the exact carrier Twilio and transport Daily SIP route"
 	value := ControlCapability{Capability: Capability{Tag: Core}, Carrier: "twilio", Transport: "daily-sip", ConditionNote: note}
-	return controls(value, value, value, value, value)
+	return controls(value, value, value, value)
 }
 
-func controls(livekit, pipecat, vapi, elevenlabs, deepgram ControlCapability) map[Provider]ControlCapability {
+func controls(livekit, pipecat, vapi, deepgram ControlCapability) map[Provider]ControlCapability {
 	return map[Provider]ControlCapability{
-		LiveKit: livekit, Pipecat: pipecat, Vapi: vapi, ElevenLabs: elevenlabs, Deepgram: deepgram,
+		LiveKit: livekit, Pipecat: pipecat, Vapi: vapi, Deepgram: deepgram,
 	}
 }
 
@@ -507,26 +468,21 @@ func provisional() map[Provider]Capability {
 	return values
 }
 
-func role(livekit, pipecat, vapi, elevenlabs, deepgram RoleKind) map[Provider]RoleKind {
+func role(livekit, pipecat, vapi, deepgram RoleKind) map[Provider]RoleKind {
 	return map[Provider]RoleKind{
-		LiveKit: livekit, Pipecat: pipecat, Vapi: vapi, ElevenLabs: elevenlabs, Deepgram: deepgram,
+		LiveKit: livekit, Pipecat: pipecat, Vapi: vapi, Deepgram: deepgram,
 	}
 }
 
-func history(livekit, pipecat, vapi, elevenlabs, deepgram HistoryKind) map[Provider]HistorySupport {
+func history(livekit, pipecat, vapi, deepgram HistoryKind) map[Provider]HistorySupport {
 	values := map[Provider]HistorySupport{
 		LiveKit: {Kind: livekit}, Pipecat: {Kind: pipecat}, Vapi: {Kind: vapi},
-		ElevenLabs: {Kind: elevenlabs}, Deepgram: {Kind: deepgram},
+		Deepgram: {Kind: deepgram},
 	}
 	if pipecat == HistoryFail {
 		value := values[Pipecat]
 		value.Note = "the Pipecat driver emits history: full only; other values are not shaped yet"
 		values[Pipecat] = value
-	}
-	if elevenlabs == HistoryFail {
-		value := values[ElevenLabs]
-		value.Note = "ElevenLabs always keeps the full transcript"
-		values[ElevenLabs] = value
 	}
 	if vapi == HistoryFail {
 		value := values[Vapi]

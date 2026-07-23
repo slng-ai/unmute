@@ -361,9 +361,9 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		"from livekit.plugins import cartesia, deepgram, elevenlabs, openai, silero",
-		`stt=deepgram.STT(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3", language="en")`,
-		`tts=elevenlabs.TTS(api_key=os.environ["ELEVEN_API_KEY"], voice_id="cgSgspJ2msm6clMCkdW9", language="en")`,
-		`tts=cartesia.TTS(api_key=os.environ["CARTESIA_API_KEY"], voice="f786b574-daa5-4673-aa0c-cbe3e8534c02", model="sonic-3", language="en")`,
+		`stt=deepgram.STT(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3")`,
+		`tts=elevenlabs.TTS(api_key=os.environ["ELEVEN_API_KEY"], voice_id="cgSgspJ2msm6clMCkdW9")`,
+		`tts=cartesia.TTS(api_key=os.environ["CARTESIA_API_KEY"], voice="f786b574-daa5-4673-aa0c-cbe3e8534c02", model="sonic-3")`,
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -404,7 +404,7 @@ func TestT16_LiveKitEmitsListenFallbackAdapter(t *testing.T) {
 	for _, want := range []string{
 		"    stt,",
 		`stt=stt.FallbackAdapter(stt=[slng.STT(`,
-		`deepgram.STT(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3", language="en")])`,
+		`deepgram.STT(api_key=os.environ["DEEPGRAM_API_KEY"], model="nova-3")])`,
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -420,7 +420,7 @@ func TestT16_LiveKitEmitsListenFallbackAdapter(t *testing.T) {
 // quotes the support matrix instead of guessing a substitute service.
 func TestLiveKitV1UnknownVendorFailsWithMatrix(t *testing.T) {
 	env := newEnvSet()
-	_, err := livekitSTTService(&ir.Binding{Provider: "acme", Model: "m"}, "en", env)
+	_, err := livekitSTTService(&ir.Binding{Provider: "acme", Model: "m"}, env)
 	if err == nil || !strings.Contains(err.Error(), "listen providers on livekit: assemblyai, cartesia, deepgram, elevenlabs, gradium, sarvam, slng, soniox, speechmatics") {
 		t.Fatalf("want a matrix-quoting error, got %v", err)
 	}
@@ -1553,10 +1553,10 @@ func TestV17_SlngRouteVerbatim(t *testing.T) {
 		var svc livekitService
 		var err error
 		if tc.role == "listen" {
-			svc, err = livekitSTTService(&binding, "en", newEnvSet())
+			svc, err = livekitSTTService(&binding, newEnvSet())
 		} else {
 			binding.Voice = "aura-2-thalia-en"
-			svc, err = livekitTTSService(binding, "en", newEnvSet())
+			svc, err = livekitTTSService(binding, newEnvSet())
 		}
 		if err != nil {
 			t.Fatalf("%s: %v", tc.role, err)

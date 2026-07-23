@@ -337,7 +337,14 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	tgt := targetByProvider(t, agent, ir.ProviderPipecat)
+	if tgt.Models.Listen != nil {
+		// Exercise the per-model language path (N16): the slng STT slot emits a
+		// language kwarg, which resolvePipecatService wraps in the Language(...)
+		// enum. Top-level language no longer defaults, so set it here explicitly.
+		tgt.Models.Listen.Language = "en"
+	}
+	artifact, err := Generate(agent, tgt, target.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1388,11 +1395,11 @@ func TestPipecatWarmHumanTransferFailsGeneration(t *testing.T) {
 // mode (a silent OpenAI-compatible substitution) explicitly covered.
 func TestPipecatUnknownProviderFailsClosed(t *testing.T) {
 	env := newEnvSet()
-	_, err := ttsService(ir.Binding{Provider: "acme", Model: "m", Voice: "v"}, "en", env)
+	_, err := ttsService(ir.Binding{Provider: "acme", Model: "m", Voice: "v"}, env)
 	if err == nil || !strings.Contains(err.Error(), "endpoint_env") {
 		t.Fatalf("unknown provider without endpoint_env must fail closed, got %v", err)
 	}
-	svc, err := ttsService(ir.Binding{Provider: "acme", Model: "m", Voice: "v", EndpointEnv: "ACME_URL"}, "en", env)
+	svc, err := ttsService(ir.Binding{Provider: "acme", Model: "m", Voice: "v", EndpointEnv: "ACME_URL"}, env)
 	if err != nil {
 		t.Fatalf("OpenAI-compatible endpoint path: %v", err)
 	}

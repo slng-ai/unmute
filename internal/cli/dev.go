@@ -216,8 +216,6 @@ func consolePlan(p ir.Provider) ([]string, error) {
 		return []string{"run", "--extra", "console", "bot.py", "console"}, nil
 	case ir.ProviderLiveKit:
 		return []string{"run", "agent.py", "console"}, nil
-	case ir.ProviderElevenLabs:
-		return nil, fmt.Errorf("uses managed ElevenLabs; no local runner exists—use `unmute apply`")
 	default:
 		return nil, fmt.Errorf("uses %s; console mode is not implemented", p)
 	}

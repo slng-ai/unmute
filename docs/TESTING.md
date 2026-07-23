@@ -105,7 +105,7 @@ go test ./internal/tui
 | `internal/ir` | L1 + L3 | `ir.Build` + `ir.Validate`: reference resolution, name rules, fallback cycles, capacity, maturity gates, and the resolved-IR golden (`TestCompilerGolden`). |
 | `internal/target` | L1 | The capability table is complete and typed; telephony/MCP resolution. |
 | `internal/generate` | L1 + L3 | Provider dispatch validates first (V17); the Pipecat golden + tasks golden; the table↔emitter and service-map agreement tests (below). |
-| `internal/cli` | L2 | `init`, `validate`, `compile`, `apply`, `dev` against the real command tree. |
+| `internal/cli` | L2 | `init`, `validate`, `compile`, `dev` against the real command tree. |
 | `internal/scaffold` | L3 | `unmute init` writes exactly the v1 package (golden `init.txt`). |
 | `internal/tui` | L2 | The interactive `init` wizard (scripted input, no TTY). |
 
@@ -114,7 +114,6 @@ go test ./internal/tui
 ```sh
 go test ./internal/cli -run TestInit         # scaffold a valid v1 package
 go test ./internal/cli -run TestValidate     # per-target validate + warnings + gates
-go test ./internal/cli -run TestApply        # managed targets say "not implemented yet"
 go test ./internal/cli -run TestDev          # dev command wiring, dotenv parsing
 ```
 
@@ -219,13 +218,10 @@ bin/unmute compile "$agent" --target pipecat-dev
 
 ## Current command surface
 
-Implemented: `init`, `validate`, `compile`, `apply`, `dev`.
+Implemented: `init`, `validate`, `compile`, `dev`.
 
 - `compile <package-dir> [--target ...]` — code targets (e.g. Pipecat); writes
   `build/<target>/`.
-- `apply <package-dir> [--target ...]` — managed (config-plane) targets. Code
-  targets are told to use `compile`; managed drivers other than the built-ins
-  report "not implemented yet".
 - `validate <package-dir> [--target ...]` — per-target pass/fail, warnings to
   stderr (exit 0), gated features fail (exit 1).
 

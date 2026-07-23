@@ -56,8 +56,6 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 	switch resolved.Provider {
 	case ir.ProviderPipecat, ir.ProviderLiveKit:
 		// code targets: run the deployable container below.
-	case ir.ProviderElevenLabs:
-		return fmt.Errorf("dev %s: target %q uses managed ElevenLabs; no local runner exists—use `unmute apply %s --target %s`", root, resolved.Name, root, resolved.Name)
 	default:
 		return fmt.Errorf("dev %s: target %q uses %s; its dev runner is not implemented", root, resolved.Name, resolved.Provider)
 	}

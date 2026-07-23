@@ -136,17 +136,12 @@ func TestWrite_targetChoices(t *testing.T) {
 			agentWant:   []string{`voice: "aura-2-thalia-en"`, `params: {"speed":1}`, "provider: slng", "listen:", "turn:"},
 			env:         []string{"LIVEKIT_API_KEY=", "LIVEKIT_API_SECRET=", "LIVEKIT_URL=", "SLNG_API_KEY="},
 		},
-		{
-			target:      "elevenlabs",
-			targetsWant: []string{"elevenlabs:", "provider: elevenlabs"},
-			agentWant:   []string{`voice: "cgSgspJ2msm6clMCkdW9"`, `model: "gemini-2.5-flash"`, `params: {"speed":1}`},
-			env:         []string{"ELEVENLABS_API_KEY="},
-		},
 	} {
 		t.Run(tc.target, func(t *testing.T) {
-			data := Data{Name: "agent", Language: "es-MX", Channel: "web"}
+			data := Data{Name: "agent", Channel: "web"}
 			data.SetTarget(tc.target)
 			data.Speak.Params = `{"speed":1}`
+			data.Speak.Language = "es-MX" // per-model language (N16)
 			dir := filepath.Join(t.TempDir(), "agent")
 			if _, err := Write(dir, data); err != nil {
 				t.Fatal(err)
@@ -228,9 +223,8 @@ func TestDefaultToolsScaffoldsEndCall(t *testing.T) {
 
 func TestWriteVariablesAndTools(t *testing.T) {
 	data := Data{
-		Name:     "agent",
-		Language: "en",
-		Channel:  "web",
+		Name:    "agent",
+		Channel: "web",
 		Variables: []Variable{{
 			Name: "customer_id", Type: "string", Default: `"guest"`, Source: "call_start",
 		}},
@@ -293,9 +287,9 @@ func TestWriteLocalToolManifest(t *testing.T) {
 }
 
 func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
-	for _, provider := range []string{"pipecat", "livekit", "elevenlabs"} {
+	for _, provider := range []string{"pipecat", "livekit"} {
 		t.Run(provider, func(t *testing.T) {
-			data := Data{Name: "agent", Language: "en", Channel: "web"}
+			data := Data{Name: "agent", Channel: "web"}
 			data.SetTarget(provider)
 			data.Agents = []Agent{{
 				Name: "billing", Instructions: "You are the billing specialist.", Reason: data.Reason, Speak: data.Speak,
@@ -327,9 +321,9 @@ func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
 }
 
 func TestPreflightTaskAndOrderedGroup(t *testing.T) {
-	for _, provider := range []string{"pipecat", "livekit", "elevenlabs"} {
+	for _, provider := range []string{"pipecat", "livekit"} {
 		t.Run(provider, func(t *testing.T) {
-			data := Data{Name: "agent", Language: "en", Channel: "web"}
+			data := Data{Name: "agent", Channel: "web"}
 			data.SetTarget(provider)
 			data.Tasks = []Task{{
 				Name: "collect", Instructions: "Return the caller tier.", Result: `{"tier":{"enum":["free","pro"]}}`,
@@ -364,9 +358,9 @@ func TestPreflightTaskAndOrderedGroup(t *testing.T) {
 }
 
 func TestPreflightTelephonyAndHumanTransfer(t *testing.T) {
-	for _, provider := range []string{"pipecat", "elevenlabs"} {
+	for _, provider := range []string{"pipecat"} {
 		t.Run(provider, func(t *testing.T) {
-			data := Data{Name: "agent", Language: "en"}
+			data := Data{Name: "agent"}
 			data.SetTarget(provider)
 			data.Channels = []Channel{
 				{Name: "web", Kind: "realtime_audio"},
@@ -394,7 +388,7 @@ func TestPreflightTelephonyAndHumanTransfer(t *testing.T) {
 }
 
 func TestPreflightRejectsCodeTelephonyWithoutConnection(t *testing.T) {
-	data := Data{Name: "agent", Language: "en"}
+	data := Data{Name: "agent"}
 	data.SetTarget("pipecat")
 	data.Channels = []Channel{{Name: "phone", Kind: "telephony", Outbound: true, OnVoicemail: "hangup"}}
 	if _, err := Preflight(data); err == nil || !strings.Contains(err.Error(), "requires connection for telephony") {
@@ -402,16 +396,14 @@ func TestPreflightRejectsCodeTelephonyWithoutConnection(t *testing.T) {
 	}
 }
 
-func TestPreflightCustomizedElevenLabs(t *testing.T) {
+func TestPreflightCustomizedTarget(t *testing.T) {
 	enabled := true
 	data := Data{
-		Name: "agent", Language: "en", SpeaksFirst: "user", ModelGreeting: true, Interruption: &enabled,
+		Name: "agent", SpeaksFirst: "user", ModelGreeting: true, Interruption: &enabled,
 		MinimumWords: 2, IgnorePhrases: []string{"okay"}, NudgeAfter: "20s", EndAfter: "1m", MaxDuration: "10m",
 		Capacity: Capacity{PeakSessions: 5, MaxSessions: 10, AvgSessionDuration: "4m"},
-		Region:   "eu",
 	}
-	data.SetTarget("elevenlabs")
-	data.Region = "eu"
+	data.SetTarget("livekit")
 	data.Fallbacks = []ModelFallback{{
 		Name: "backup_model", Profile: "assistant_model", Binding: data.Reason,
 	}}
@@ -419,7 +411,7 @@ func TestPreflightCustomizedElevenLabs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Preflight() = %v", err)
 	}
-	if report.TargetName != "elevenlabs" {
+	if report.TargetName != "livekit" {
 		t.Fatalf("report = %#v", report)
 	}
 	dir := filepath.Join(t.TempDir(), "agent")
@@ -438,9 +430,9 @@ func TestPreflightCustomizedElevenLabs(t *testing.T) {
 }
 
 func TestPreflightShippedTargets(t *testing.T) {
-	for _, provider := range []string{"pipecat", "livekit", "elevenlabs"} {
+	for _, provider := range []string{"pipecat", "livekit"} {
 		t.Run(provider, func(t *testing.T) {
-			data := Data{Name: "agent", Language: "en", Channel: "web"}
+			data := Data{Name: "agent", Channel: "web"}
 			data.SetTarget(provider)
 			report, err := Preflight(data)
 			if err != nil {
@@ -455,7 +447,7 @@ func TestPreflightShippedTargets(t *testing.T) {
 
 func TestPreflightRejectsInvalidCandidateBeforeWrite(t *testing.T) {
 	t.Chdir(t.TempDir())
-	data := Data{Name: "agent", Language: "en", Channel: "web"}
+	data := Data{Name: "agent", Channel: "web"}
 	data.SetTarget("livekit")
 	data.Speak = Binding{Provider: "elevenlabs", Model: "eleven_multilingual_v2"}
 	if _, err := Preflight(data); err == nil || !strings.Contains(err.Error(), "missing a voice") {

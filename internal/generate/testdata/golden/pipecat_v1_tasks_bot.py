@@ -35,7 +35,6 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.settings import LLMSettings
-from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
@@ -138,7 +137,6 @@ def build_billing_tts():
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-orion-en",
         model="slng/deepgram/aura:2-en",
-        language=Language("en"),
     )
 
 
@@ -200,7 +198,6 @@ def build_intake_tts():
         api_key=os.environ["SLNG_API_KEY"],
         voice="aura-2-thalia-en",
         model="slng/deepgram/aura:2-en",
-        language=Language("en"),
     )
 
 
@@ -396,7 +393,6 @@ def build_stt():
         api_key=os.environ["DEEPGRAM_API_KEY"],
         settings=DeepgramSTTService.Settings(
             model="nova-3",
-            language=Language("en"),
         ),
     )
 

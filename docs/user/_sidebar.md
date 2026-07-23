@@ -45,5 +45,4 @@
   - [LiveKit](targets/livekit.md)
   - [Pipecat](targets/pipecat.md)
   - [Vapi](targets/vapi.md)
-  - [ElevenLabs](targets/elevenlabs.md)
   - [Deepgram](targets/deepgram.md)

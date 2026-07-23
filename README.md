@@ -1,17 +1,16 @@
 # Unmute CLI
 
 Unmute is SLNG's portability layer for voice agents: author the agent once as
-a directory of declarative YAML, then compile or apply it to the orchestration
+a directory of declarative YAML, then compile it to the orchestration
 layer you choose. `unmute init` scaffolds an SLNG-bound project (one
 `SLNG_API_KEY` covers hosted STT and TTS) unless you change a model; any
 provider a framework integrates is a one-line model change
 ([provider reference](docs/user/reference/providers.md)).
 
-Commands: `init`, `validate`, `compile`, `apply`, `dev`
+Commands: `init`, `validate`, `compile`, `dev`
 ([CLI reference](docs/user/reference/cli.md)). Drivers shipped today:
 **Pipecat** and
-**LiveKit** (code targets, `compile` writes a runnable Python project) and
-**ElevenLabs** (managed target, `apply` reconciles the provider config). Vapi
+**LiveKit** (code targets, `compile` writes a runnable Python project). Vapi
 and Deepgram fail with `driver is not implemented` until theirs land.
 
 Where things live: user docs in [docs/user/](docs/user/README.md), the locked
@@ -121,6 +120,21 @@ shared repository values. From the repository root, no copy is needed:
 bin/unmute dev "examples/$EXAMPLE" --target pipecat
 bin/unmute dev "examples/$EXAMPLE" --target livekit --console
 ```
+
+The public packages use one salon workflow to show increasing orchestration
+structure. Four-target portability and the legacy combined handoff/task-group
+case remain internal fixtures under `internal/testdata/`.
+
+## Not implemented yet
+
+Validation covers all four targets. These drivers still lack an executable
+generation path:
+
+- Vapi and Deepgram drivers (specs exist in `docs/spec/`; generation fails
+  clearly today).
+- Per-driver maturity gates are listed on each target page in
+  [docs/user/targets/](docs/user/targets/) and fail loud rather than silently
+  dropping behavior.
 
 ## Telephony
 

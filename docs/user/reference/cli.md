@@ -1,11 +1,11 @@
 # Reference: the CLI
 
-`unmute` has five commands: `init`, `validate`, `compile`, `apply`, and `dev`.
-All except `init` read a v1 package; see [agent.yaml](agent-yaml.md). Three
-drivers are shipped: **Pipecat** and **LiveKit** are code targets, and
-**ElevenLabs** is a managed target. Validation works for all five providers.
-Generation, apply, or development commands report `driver is not implemented`
-for Vapi and Deepgram until their drivers land.
+`unmute` has four commands: `init`, `validate`, `compile`, and `dev`.
+All except `init` read a v1 package; see [agent.yaml](agent-yaml.md). Two
+drivers are shipped: **Pipecat** and **LiveKit**, both code targets.
+Validation works for all four providers. Generation and development commands
+report `driver is not implemented` for Vapi and Deepgram until their drivers
+land.
 
 **Exit codes:** `0` on success, `1` on error. Warnings go to standard error and still exit `0`; they never silently downgrade a result.
 
@@ -59,7 +59,7 @@ The check mark becomes `✗` for a failing target. Warnings and errors print in
 separate, labeled blocks on standard error, with each message naming its target.
 The command exits `1` if any target fails.
 
-`validate` uses the schema's capability rules and the provider catalogue, not a driver, so it works for **all five providers** whether or not their driver is shipped. Use it to check portability across targets before you commit to one. Repeat `--target` to check specific instances, or omit it to check every declared target.
+`validate` uses the schema's capability rules and the provider catalogue, not a driver, so it works for **all four providers** whether or not their driver is shipped. Use it to check portability across targets before you commit to one. Repeat `--target` to check specific instances, or omit it to check every declared target.
 
 ## compile
 
@@ -67,17 +67,9 @@ The command exits `1` if any target fails.
 unmute compile <package-dir> [--target <name>]...
 ```
 
-Runs validate, then generates. For a **code target** (Pipecat, LiveKit), writes the project to `<package-dir>/build/<target-name>/` and prints a `generated <path>` line per file. For a **managed target**, prints a line telling you to use `apply`. Omitting `--target` compiles every declared target.
+Runs validate, then generates. For a **code target** (Pipecat, LiveKit), writes the project to `<package-dir>/build/<target-name>/` and prints a `generated <path>` line per file. Omitting `--target` compiles every declared target.
 
 Compiling a Vapi or Deepgram instance fails with `<provider> driver is not implemented` until those drivers ship.
-
-## apply
-
-```sh
-unmute apply <package-dir> [--target <name>]...
-```
-
-For **managed** targets: reconcile the provider's live config to your spec. Run it against a code target and it tells you to use `unmute compile` instead. The **ElevenLabs** driver is shipped: it builds one Conversational-AI Agent resource per Unmute agent, creates them in dependency order (transfer targets first, captured ids wired into the callers), PATCHes agents pinned by `agent_id.<name>`, honors a `branch_id` pin, and authenticates with `ELEVENLABS_API_KEY`. Applying to a Vapi instance fails with `vapi driver is not implemented` until that driver ships.
 
 ## dev
 
@@ -89,7 +81,7 @@ The fastest loop for a **Pipecat or LiveKit** instance: compiles the selected ta
 
 - With exactly one declared target, `dev` selects it automatically.
 - With multiple targets on an interactive terminal, `dev` always asks which instance to test and shows both instance name and provider. In a noninteractive shell, pass `--target <name>`; it never picks by YAML/map order or by preferring Pipecat.
-- `--target` dispatches that exact instance. Pipecat and LiveKit both run; a selected ElevenLabs target points to `unmute apply`, and unshipped providers report their own missing dev runner.
+- `--target` dispatches that exact instance. Pipecat and LiveKit both run; unshipped providers (Vapi, Deepgram) report their own missing dev runner.
 
 **Web (default), runs the deployable container.** This is the default mode
 and it **requires Docker**. `unmute dev` builds the same image production

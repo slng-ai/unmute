@@ -20,14 +20,13 @@ tasks:
       history: full
 ```
 
-Tier support for a single task across the five:
+Tier support for a single task across the four:
 
 | Target | What happens | Tag |
 |---|---|---|
 | LiveKit | native (`AgentTask`) | gated (T1) |
 | Pipecat | works (a Flow step on the delegating agent) | gated (T1) |
 | Vapi | fails: returning to the previous assistant is unverified | gated (T1) |
-| ElevenLabs | conditional: a workflow node, `assign` via a tool, `history: full` only | gated (T1) |
 | Deepgram | generated, works | gated (T1) |
 
 ### instructions
@@ -98,7 +97,6 @@ Required: yes. Values: `shared | isolated`. Default: none.
 | LiveKit | `isolated` compiles (as standalone AgentTasks, not TaskGroup) | gated |
 | Pipecat | both `shared` and `isolated` are emitted | gated |
 | Vapi | `isolated` cannot be expressed | gated |
-| ElevenLabs | `isolated` cannot be expressed | gated |
 | Deepgram | both compile (code target) | gated |
 
 `shared` means each step sees the group context as `history: full`; `isolated` means each step enters reset. The group's scope overrides the member tasks' own `context` while inside the group.
@@ -114,7 +112,6 @@ Required: yes. Values: `return | transfer | end`. Default: none.
 | LiveKit | works; TaskGroup is flagged experimental (warning) | gated |
 | Pipecat | all three emitted | gated |
 | Vapi | `return` fails (state-preserving return unverified); `transfer`/`end` work | gated |
-| ElevenLabs | works | gated |
 | Deepgram | works | gated |
 
 ### then_target

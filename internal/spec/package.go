@@ -30,7 +30,6 @@ func (p *Package) Location(file, token string) string {
 
 type AgentFile struct {
 	Version    int           `json:"version" yaml:"version"`
-	Language   string        `json:"language,omitempty" yaml:"language,omitempty"`
 	EntryAgent string        `json:"entry_agent" yaml:"entry_agent"`
 	Models     ModelSections `json:"models" yaml:"models"`
 	// Listen/Turn select one entry of the matching models section by name.
@@ -210,15 +209,14 @@ type TargetsFile struct {
 }
 
 type Target struct {
-	Provider     string              `json:"provider" yaml:"provider"`
-	Version      string              `json:"version,omitempty" yaml:"version,omitempty"`
-	Pins         map[string]string   `json:"pins,omitempty" yaml:"pins,omitempty"`
-	SDKLanguage  string              `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
-	Transport    string              `json:"transport,omitempty" yaml:"transport,omitempty"`
-	Carrier      string              `json:"carrier,omitempty" yaml:"carrier,omitempty"`
-	Connection   string              `json:"connection,omitempty" yaml:"connection,omitempty"`
-	Region       string              `json:"region,omitempty" yaml:"region,omitempty"`
-	Edition      string              `json:"edition,omitempty" yaml:"edition,omitempty"`
-	Models       map[string]ModelDef `json:"models,omitempty" yaml:"models,omitempty"` // per-target overrides (N15), keyed by model name / listen / turn
-	Destinations map[string]string   `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	Provider         string              `json:"provider" yaml:"provider"`
+	Version          string              `json:"version,omitempty" yaml:"version,omitempty"`
+	Pins             map[string]string   `json:"pins,omitempty" yaml:"pins,omitempty"`
+	SDKLanguage      string              `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
+	Transport        string              `json:"transport,omitempty" yaml:"transport,omitempty"`
+	Carrier          string              `json:"carrier,omitempty" yaml:"carrier,omitempty"`
+	Connection       string              `json:"connection,omitempty" yaml:"connection,omitempty"`
+	DeploymentRegion string              `json:"deployment_region,omitempty" yaml:"deployment_region,omitempty"` // where the platform deploys the agent (N18)
+	Models           map[string]ModelDef `json:"models,omitempty" yaml:"models,omitempty"`                       // per-target overrides (N15), keyed by model name / listen / turn
+	Destinations     map[string]string   `json:"destinations,omitempty" yaml:"destinations,omitempty"`
 }

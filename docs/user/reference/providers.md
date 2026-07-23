@@ -182,10 +182,6 @@ Inference. LiveKit listen and speak models have no custom-endpoint wildcard.
 
 No code is injected; the provider name is forwarded into the platform's own config, and the matrix only guards what each platform can actually run:
 
-- **ElevenLabs**: Speak accepts ElevenLabs voices only, usually with just a
-  `voice` field. Listen and turn are integrated, so their target overrides can
-  contain settings only. Think accepts the platform's model list or a custom
-  LLM endpoint.
 - **Deepgram**: Listen accepts Deepgram only. Speak accepts `deepgram`,
   `elevenlabs`, `cartesia`, `openai`, and `aws_polly`; the aliases
   `eleven_labs` and `open_ai` also work. Think is open and accepts custom

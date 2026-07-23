@@ -23,7 +23,7 @@ agents:
 
 Path to the Markdown file holding this agent's full prompt. The path is relative to the package root.
 
-Required: yes. Values: a path to a `.md` file. Default: none. Targets: all five, core.
+Required: yes. Values: a path to a `.md` file. Default: none. Targets: all four, core.
 
 ### model
 
@@ -31,7 +31,7 @@ The reasoning model this agent uses. It must name an entry in the top-level
 `models.think` section.
 
 Required: yes. Values: a
-[think model name](models-and-voices.md). Default: none. Targets: all five,
+[think model name](models-and-voices.md). Default: none. Targets: all four,
 core.
 
 ### voice
@@ -40,12 +40,12 @@ The voice this agent speaks with. It must name an entry in the top-level
 `models.speak` section.
 
 Required: yes. Values: a
-[speak model name](models-and-voices.md). Default: none. Targets: all five,
-core. Per-agent voices are native on LiveKit, Pipecat, and ElevenLabs, and work
-on all five.
+[speak model name](models-and-voices.md). Default: none. Targets: all four,
+core. Per-agent voices are native on LiveKit and Pipecat, and work
+on all four.
 
 ### tools
 
 The tools and controls this agent may invoke. Names come from the shared tool-and-control name space: plain [tools](tools.md) and [controls](controls.md) are listed the same way. A tool an agent does not list is invisible to that agent, even if it is compiled into the package by the top-level `tools:` manifest.
 
-Required: no. Values: a list of tool and control names. Default: none (the agent can invoke nothing). Targets: all five, core.
+Required: no. Values: a list of tool and control names. Default: none (the agent can invoke nothing). Targets: all four, core.

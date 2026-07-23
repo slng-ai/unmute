@@ -26,7 +26,6 @@ channel in `agent.yaml`.
 
 ```yaml
 version: 1
-language: en
 entry_agent: assistant
 
 models:

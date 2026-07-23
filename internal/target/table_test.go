@@ -21,14 +21,14 @@ func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 			}
 		}
 	}
-	if table.Role(Listen, ElevenLabs) != Integrated {
-		t.Fatal("ElevenLabs listen role must be integrated")
+	if table.Role(Turn, Vapi) != Integrated {
+		t.Fatal("Vapi turn role must be integrated")
 	}
-	if err := DefaultCatalog().CheckVendor(ElevenLabs, Speak, "elevenlabs", false); err != nil {
-		t.Fatalf("ElevenLabs speak provider elevenlabs must validate: %v", err)
+	if err := DefaultCatalog().CheckVendor(LiveKit, Speak, "elevenlabs", false); err != nil {
+		t.Fatalf("livekit speak vendor elevenlabs must validate: %v", err)
 	}
-	if got := table.HistorySupport(HistoryMessages, ElevenLabs); got.Kind != HistoryFail || got.Note == "" {
-		t.Fatalf("ElevenLabs messages history = %#v", got)
+	if got := table.HistorySupport(HistorySummary, Vapi); got.Kind != HistoryFail || got.Note == "" {
+		t.Fatalf("Vapi summary history = %#v", got)
 	}
 	for _, provider := range Providers {
 		if table.Capability(FieldFutureProvisional, provider).Tag != Provisional {
@@ -41,7 +41,7 @@ func TestDefaultTableIsCompleteAndTyped(t *testing.T) {
 	if table.Capability(FieldTracingLangfuse, LiveKit).Tag != Core || table.Capability(FieldTracingLangfuse, Pipecat).Tag != Core {
 		t.Fatal("Langfuse tracing must pass on code drivers")
 	}
-	for _, provider := range []Provider{Vapi, ElevenLabs, Deepgram} {
+	for _, provider := range []Provider{Vapi, Deepgram} {
 		if table.Capability(FieldTracingLangfuse, provider).Tag != Gated {
 			t.Errorf("Langfuse tracing passed on %s", provider)
 		}
@@ -53,7 +53,7 @@ func TestBuiltinToolsPassOnCodeDriversOnly(t *testing.T) {
 	if table.Capability(FieldToolBuiltin, LiveKit).Tag != Core || table.Capability(FieldToolBuiltin, Pipecat).Tag != Core {
 		t.Fatal("builtin tools must pass on LiveKit and Pipecat")
 	}
-	for _, provider := range []Provider{Vapi, ElevenLabs, Deepgram} {
+	for _, provider := range []Provider{Vapi, Deepgram} {
 		if table.Capability(FieldToolBuiltin, provider).Tag != Gated {
 			t.Errorf("builtin tools passed on %s", provider)
 		}

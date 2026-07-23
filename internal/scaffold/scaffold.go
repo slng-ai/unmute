@@ -32,48 +32,45 @@ const (
 	DefaultGreeting     = "Hi, thanks for calling. How can I help you today?"
 	DefaultInstructions = "You are a helpful voice assistant. This is a phone call, so keep every answer to one or two short sentences."
 	DefaultTarget       = "pipecat"
-	DefaultLanguage     = "en"
 	DefaultChannel      = "web"
 )
 
 // Data is the v1 agent configuration rendered by the scaffold templates.
 type Data struct {
-	Name           string
-	Target         string
-	Language       string
-	Channel        string
-	Channels       []Channel
-	EntryAgent     string
-	Transport      string
-	Carrier        string
-	TargetVersion  string
-	SDKLanguage    string
-	Region         string
-	Edition        string
-	Pins           string
-	Greeting       string
-	ModelGreeting  bool
-	SpeaksFirst    string
-	Interruption   *bool
-	MinimumWords   int
-	IgnorePhrases  []string
-	NudgeAfter     string
-	EndAfter       string
-	MaxDuration    string
-	ThinkingAudio  string
-	Instructions   string
-	Listen         Binding
-	Reason         Binding
-	Speak          Binding
-	Variables      []Variable
-	Tools          []Tool
-	Agents         []Agent
-	Handoffs       []Handoff
-	Tasks          []Task
-	TaskGroups     []TaskGroup
-	HumanTransfers []HumanTransfer
-	Fallbacks      []ModelFallback
-	Capacity       Capacity
+	Name             string
+	Target           string
+	Channel          string
+	Channels         []Channel
+	EntryAgent       string
+	Transport        string
+	Carrier          string
+	TargetVersion    string
+	SDKLanguage      string
+	DeploymentRegion string
+	Pins             string
+	Greeting         string
+	ModelGreeting    bool
+	SpeaksFirst      string
+	Interruption     *bool
+	MinimumWords     int
+	IgnorePhrases    []string
+	NudgeAfter       string
+	EndAfter         string
+	MaxDuration      string
+	ThinkingAudio    string
+	Instructions     string
+	Listen           Binding
+	Reason           Binding
+	Speak            Binding
+	Variables        []Variable
+	Tools            []Tool
+	Agents           []Agent
+	Handoffs         []Handoff
+	Tasks            []Task
+	TaskGroups       []TaskGroup
+	HumanTransfers   []HumanTransfer
+	Fallbacks        []ModelFallback
+	Capacity         Capacity
 }
 
 // Binding is one concrete role choice collected by the wizard. Params is an
@@ -82,6 +79,7 @@ type Binding struct {
 	Provider string
 	Model    string
 	Voice    string
+	Language string // per-model BCP-47 tag (N16); listen/speak only, omitted when empty
 	Params   string
 }
 
@@ -244,8 +242,7 @@ func (d *Data) SetTarget(provider string) {
 	d.Carrier = ""
 	d.TargetVersion = ""
 	d.SDKLanguage = ""
-	d.Region = ""
-	d.Edition = ""
+	d.DeploymentRegion = ""
 	d.Pins = ""
 	switch provider {
 	case "pipecat":
@@ -255,16 +252,10 @@ func (d *Data) SetTarget(provider string) {
 		d.TargetVersion = "1.5.2"
 		d.SDKLanguage = "python"
 	}
-	switch provider {
-	case "elevenlabs":
-		d.Listen = Binding{}
-		d.Reason = Binding{Model: "gemini-2.5-flash"}
-		d.Speak = Binding{Provider: "elevenlabs", Voice: "cgSgspJ2msm6clMCkdW9"}
-	default: // Pipecat and LiveKit share the safe SLNG/OpenAI starter.
-		d.Listen = Binding{Provider: "slng", Model: "slng/deepgram/nova:3-en"}
-		d.Reason = Binding{Provider: "openai", Model: "gpt-4.1-mini"}
-		d.Speak = Binding{Provider: "slng", Model: "slng/deepgram/aura:2-en", Voice: "aura-2-thalia-en"}
-	}
+	// Pipecat and LiveKit share the safe SLNG/OpenAI starter.
+	d.Listen = Binding{Provider: "slng", Model: "slng/deepgram/nova:3-en"}
+	d.Reason = Binding{Provider: "openai", Model: "gpt-4.1-mini"}
+	d.Speak = Binding{Provider: "slng", Model: "slng/deepgram/aura:2-en", Voice: "aura-2-thalia-en"}
 }
 
 func (d Data) withDefaults() Data {
@@ -278,9 +269,6 @@ func (d Data) withDefaults() Data {
 	}
 	if d.Instructions == "" {
 		d.Instructions = DefaultInstructions
-	}
-	if d.Language == "" {
-		d.Language = DefaultLanguage
 	}
 	if d.Channel == "" {
 		d.Channel = DefaultChannel
@@ -428,8 +416,6 @@ func (d Data) RequiredEnv() []string {
 		for _, name := range []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"} {
 			set[name] = true
 		}
-	case targetcap.ElevenLabs:
-		set["ELEVENLABS_API_KEY"] = true
 	}
 	if d.Transport == "daily-sip" {
 		set["DAILY_API_KEY"] = true

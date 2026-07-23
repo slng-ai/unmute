@@ -48,13 +48,8 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	language := pkg.Agent.Language
-	if language == "" {
-		language = "en"
-	}
 	out := &Agent{
 		Version:      pkg.Agent.Version,
-		Language:     language,
 		EntryAgent:   pkg.Agent.EntryAgent,
 		Models:       models,
 		Listen:       listenName,
@@ -716,9 +711,9 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 	built := Target{
 		Name: name, Provider: Provider(raw.Provider), Version: raw.Version, Pins: raw.Pins,
 		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier, Connection: raw.Connection,
-		Region: raw.Region, Edition: raw.Edition,
-		Models:       resolveBindings(agent, used, raw.Models),
-		Destinations: raw.Destinations,
+		DeploymentRegion: raw.DeploymentRegion,
+		Models:           resolveBindings(agent, used, raw.Models),
+		Destinations:     raw.Destinations,
 	}
 	if raw.Connection != "" && telephony {
 		built.Telephony = buildTelephonyPlan(pkg, agent, built)
@@ -950,14 +945,14 @@ func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]pa
 // per-vendor param path the old params map used).
 func toBinding(def ModelDef) Binding {
 	return Binding{
-		Provider: def.Provider, Model: def.Model, Voice: def.Voice,
+		Provider: def.Provider, Model: def.Model, Voice: def.Voice, Language: def.Language,
 		EndpointEnv: def.EndpointEnv, Placement: def.Placement,
 		SemanticEndpointing: def.SemanticEndpointing, Params: foldParams(def),
 	}
 }
 
 func foldParams(def ModelDef) map[string]any {
-	if def.Temperature == nil && def.TopP == nil && def.TopK == nil && def.Speed == nil && def.Language == "" && len(def.Params) == 0 {
+	if def.Temperature == nil && def.TopP == nil && def.TopK == nil && def.Speed == nil && len(def.Params) == 0 {
 		return nil
 	}
 	out := make(map[string]any, len(def.Params)+5)
@@ -978,9 +973,6 @@ func foldParams(def ModelDef) map[string]any {
 	}
 	if def.Speed != nil {
 		setIfAbsent("speed", *def.Speed)
-	}
-	if def.Language != "" {
-		setIfAbsent("language", def.Language)
 	}
 	return out
 }

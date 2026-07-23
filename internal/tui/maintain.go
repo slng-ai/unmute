@@ -125,16 +125,14 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	}
 	tgt := pkg.Targets[targetNames[0]]
 	data := scaffold.Data{
-		Name:          filepath.Base(pkg.Root),
-		Target:        tgt.Provider,
-		Language:      pkg.Agent.Language,
-		EntryAgent:    pkg.Agent.EntryAgent,
-		TargetVersion: tgt.Version,
-		SDKLanguage:   tgt.SDKLanguage,
-		Transport:     tgt.Transport,
-		Carrier:       tgt.Carrier,
-		Region:        tgt.Region,
-		Edition:       tgt.Edition,
+		Name:             filepath.Base(pkg.Root),
+		Target:           tgt.Provider,
+		EntryAgent:       pkg.Agent.EntryAgent,
+		TargetVersion:    tgt.Version,
+		SDKLanguage:      tgt.SDKLanguage,
+		DeploymentRegion: tgt.DeploymentRegion,
+		Transport:        tgt.Transport,
+		Carrier:          tgt.Carrier,
 	}
 	data.Pins = jsonText(tgt.Pins)
 	if def, ok := effectiveModelDef(pkg, tgt, "listen"); ok {
@@ -363,7 +361,7 @@ func scaffoldBinding(def packagespec.ModelDef) scaffold.Binding {
 			setIfAbsent("speed", *def.Speed)
 		}
 	}
-	return scaffold.Binding{Provider: def.Provider, Model: def.Model, Voice: def.Voice, Params: jsonText(params)}
+	return scaffold.Binding{Provider: def.Provider, Model: def.Model, Voice: def.Voice, Language: def.Language, Params: jsonText(params)}
 }
 
 func jsonText(value any) string {
@@ -489,8 +487,6 @@ func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 		switch choice {
 		case "target":
 			err = editTarget(runner, &agent.data)
-		case "language":
-			_, err = runner.input("Language", "Primary spoken BCP-47 language tag, for example en or es-MX.", &agent.data.Language, validateLanguage)
 		case "models":
 			err = editModels(runner, &agent.data)
 		case "prompt":
@@ -536,7 +532,6 @@ func editTarget(runner *fieldRunner, data *scaffold.Data) error {
 	selected, back, err := runner.selectOne("Target / orchestrator", "", []huh.Option[string]{
 		huh.NewOption("Pipecat", string(targetcap.Pipecat)),
 		huh.NewOption("LiveKit", string(targetcap.LiveKit)),
-		huh.NewOption("ElevenLabs", string(targetcap.ElevenLabs)),
 		huh.NewOption("← Back", actionBack),
 	}, true)
 	if err == nil && !back && selected != actionBack && selected != data.Target {

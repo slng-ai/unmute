@@ -7,7 +7,7 @@ reference page.
 
 ## How to read these reference pages
 
-Every field lists its **Required** status, allowed **Values**, and **Default**. Where a field behaves differently across the five targets (LiveKit, Pipecat, Vapi, ElevenLabs, Deepgram), a table shows what happens on each and its [tag](../concepts/tags-and-gating.md). Where a field is plain `core` on all five, that is stated in one line instead of five identical rows. Either way, the per-target outcome is always given. Rows come from `SCHEMA.md`; the reference never invents one.
+Every field lists its **Required** status, allowed **Values**, and **Default**. Where a field behaves differently across the four targets (LiveKit, Pipecat, Vapi, Deepgram), a table shows what happens on each and its [tag](../concepts/tags-and-gating.md). Where a field is plain `core` on all four, that is stated in one line instead of four identical rows. Either way, the per-target outcome is always given. Rows come from `SCHEMA.md`; the reference never invents one.
 
 Where a note says "the Pipecat driver does not emit this yet", that is a driver maturity gate: it fails validation today and lifts when the driver ships it. See the [Pipecat target page](../targets/pipecat.md).
 
@@ -39,7 +39,6 @@ Rules that hold across the whole package:
 | Field | Required | Type | Tag |
 |---|---|---|---|
 | `version` | yes | int, must be `1` | core |
-| `language` | no, defaults to `en` | BCP-47 tag such as `en` or `es-MX` | gated |
 | `entry_agent` | yes | name of an agent | core |
 | `models` | yes | four kind sections (`think`/`speak`/`listen`/`turn`) | core |
 | `listen` | only when `models.listen` has 2+ entries | name of a listen model | gated |
@@ -59,22 +58,13 @@ Rules that hold across the whole package:
 
 The spec format version. Always `1`.
 
-Required: yes. Values: the integer `1`. Default: none. Targets: all five, core.
-
-### language
-
-The primary spoken language for STT and TTS. Pipecat and LiveKit lower it
-through the selected catalogue integrations; ElevenLabs uses its unified agent
-language. A model's `language` or `params.language` overrides it for that
-model.
-
-Required: no. Values: a BCP-47 tag. Default: `en`. Targets: shipped generators; Vapi and Deepgram stay unavailable until their generators ship.
+Required: yes. Values: the integer `1`. Default: none. Targets: all four, core.
 
 ### entry_agent
 
 The name of the agent that answers first. Must be a key in the `agents` map.
 
-Required: yes. Values: an agent name. Default: none. Targets: all five, core.
+Required: yes. Values: an agent name. Default: none. Targets: all four, core.
 
 ### tracing
 
@@ -86,7 +76,7 @@ tracing:
   provider: langfuse
 ```
 
-LiveKit and Pipecat emit the integration. Vapi, ElevenLabs, and Deepgram fail
+LiveKit and Pipecat emit the integration. Vapi and Deepgram fail
 validation. Generated agents require `LANGFUSE_PUBLIC_KEY`,
 `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL` when configured. Omitting the
 block emits no tracing code, dependencies, environment keys, or documentation.
@@ -111,4 +101,4 @@ Each block has its own reference page with every field:
 - **`channels`**: how callers reach the agent. See [channels and capacity](channels-and-capacity.md).
 - **`capacity`**: declared traffic, required on code targets and telephony. See [channels and capacity](channels-and-capacity.md).
 
-The `safe core`, the subset that passes on all five targets, is collected on its own page: [safe core](safe-core.md).
+The `safe core`, the subset that passes on all four targets, is collected on its own page: [safe core](safe-core.md).

@@ -16,9 +16,6 @@ matrix row (no code injection)
 === deepgram speak openai ===
 matrix row (no code injection)
 
-=== elevenlabs speak elevenlabs ===
-matrix row (no code injection)
-
 === livekit listen assemblyai ===
 binding:  provider=assemblyai model=model-1
 class:    assemblyai.STT

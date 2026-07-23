@@ -100,7 +100,7 @@ different machinery with the same behavior; see
 
 Groups are where the last portability edges show up:
 
-- **`then: transfer` and `then: end` pass on all five platforms** (LiveKit prints a warning that task groups are experimental).
+- **`then: transfer` and `then: end` pass on all four platforms** (LiveKit prints a warning that task groups are experimental).
 - **`then: return` fails on Vapi.** A state-preserving return into a Vapi squad is not proven. It works on the others, and warns on LiveKit.
 - **`context_scope: isolated` is code-targets only.** It compiles on LiveKit, Pipecat, and Deepgram. Managed targets cannot express it.
 - **On Pipecat, everything on this page is emitted:** ordered steps, both scopes, and all three `then` outcomes.
