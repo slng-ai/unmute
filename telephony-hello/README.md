@@ -5,10 +5,16 @@ chats, so it exercises the phone path without any tools, tasks, or transfers.
 Use it to confirm your Twilio setup works before pointing the same flow at a
 real agent.
 
-It has one Pipecat target (Twilio Programmable Voice over a media WebSocket) and
-one LiveKit target (Twilio SIP). The Pipecat target is the one you can fully
-test on a laptop; LiveKit SIP needs public SIP and RTP reachability that a home
-or office network usually cannot provide.
+It has two targets, both driven by the same `.env`:
+
+- **pipecat**: Twilio Programmable Voice over a media WebSocket.
+- **livekit**: the LiveKit Twilio connector, which also uses Twilio Media
+  Streams over a WebSocket and bridges the call into a local LiveKit room where
+  a LiveKit worker handles it.
+
+Both test fully on a laptop through the managed tunnel, inbound and outbound.
+Neither needs a Twilio SIP trunk or public SIP/RTP. Swap `--target pipecat` for
+`--target livekit` in any command below to test the other stack.
 
 ## What you need
 
@@ -54,6 +60,13 @@ Watch the output for the managed tunnel URL, the webhook update, and the line
 `call +1...`. Call that number from your phone. The agent answers and greets
 you. Speak, and it replies. `ctrl-c` stops everything and restores the tunnel.
 
+The LiveKit connector works the same way; it just runs a local LiveKit Server
+alongside the bridge:
+
+```bash
+unmute dev telephony-hello --telephony --target livekit
+```
+
 ## Test an outbound call
 
 Add `--to` with a number you can answer:
@@ -65,6 +78,7 @@ unmute dev telephony-hello --telephony --target pipecat --to +15551234567
 Once the container is healthy, the CLI places the call and prints
 `calling +1..., call <id>`. Your phone rings, and the agent talks when you
 answer. The CLI mints the dial-out token itself, so no extra setup is needed.
+`--to` works the same on `--target livekit`.
 
 If Twilio refuses the call, the CLI prints the reason (for example geo
 permissions for the destination country, or a trial account that can only call

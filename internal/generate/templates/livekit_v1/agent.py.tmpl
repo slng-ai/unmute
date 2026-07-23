@@ -560,16 +560,16 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- end}}
 {{if .Telephony}}
 {{- if eq .Telephony.Transport "connector"}}
-    metadata = _livekit_job_metadata(ctx.job.metadata)
-    call_start = _livekit_call_start(metadata)
     await ctx.connect()
     # The Twilio bridge placed or answered the call, joined this room with the
     # caller's audio, and dispatched this job. Direction (inbound or outbound)
     # is already resolved by the bridge, so the agent just runs the session.
     # Wait for the bridge participant so the caller audio track exists first.
     await ctx.wait_for_participant()
-    call_context = _livekit_call_context(ctx.room.name, metadata)
 {{- if .HasVars}}
+    metadata = _livekit_job_metadata(ctx.job.metadata)
+    call_start = _livekit_call_start(metadata)
+    call_context = _livekit_call_context(ctx.room.name, metadata)
     _hydrate_livekit_context(session.userdata, call_context, call_start)
 {{- end}}
     await session.start(agent={{.EntryClass}}(), room=ctx.room)

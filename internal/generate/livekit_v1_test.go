@@ -1363,6 +1363,11 @@ func configuredLiveKitConnector(t *testing.T) (*ir.Agent, ir.Target) {
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
 		RequiredControls: []string{"hangup"},
 	}
+	// Exercise the metadata/hydrate path: the bridge writes these into the
+	// dispatch metadata and the connector agent branch reads them back.
+	pkg.Agent.Variables["campaign_id"] = spec.Variable{Type: "string", Source: "call_start", Default: "manual"}
+	pkg.Agent.Variables["provider_call_id"] = spec.Variable{Type: "string", Source: "call_id"}
+	pkg.Agent.Variables["call_direction"] = spec.Variable{Type: "string", Source: "direction"}
 	configured := pkg.Targets["livekit"]
 	configured.Transport, configured.Carrier, configured.Connection = "connector", "twilio", "primary_phone"
 	pkg.Targets = map[string]spec.Target{"livekit": configured}
