@@ -69,6 +69,16 @@ func pipecatTwilioPlan() *generate.TelephonyRuntimePlan {
 	}
 }
 
+// pipecatTwilioOutboundPlan is the inbound plan plus the outbound feature,
+// endpoint, and the UNMUTE_OUTBOUND_TOKEN the CLI must supply itself.
+func pipecatTwilioOutboundPlan() *generate.TelephonyRuntimePlan {
+	plan := pipecatTwilioPlan()
+	plan.PublicEndpoints = append(plan.PublicEndpoints, generate.TelephonyEndpoint{Name: "outbound", Method: "POST", Path: "/telephony/outbound"})
+	plan.RequiredEnv = append(plan.RequiredEnv, "UNMUTE_OUTBOUND_TOKEN")
+	plan.Evidence = append(plan.Evidence, ir.TelephonyFeatureEvidence{Feature: "outbound", Tag: "core"})
+	return plan
+}
+
 var composeFiles = []generate.File{{Path: "compose.telephony.yaml", Content: []byte("services: {}\n")}}
 
 // V1: without --public-url the managed tunnel supplies UNMUTE_PUBLIC_URL to
@@ -273,5 +283,47 @@ func TestExecDevTelephonyRelativeRootLocatesComposeFile(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(trace); err == nil && strings.Contains(string(raw), "FILE_MISSING") {
 		t.Fatalf("compose could not locate its file from the build dir:\n%s", raw)
+	}
+}
+
+// T2/V4: an outbound-capable target gets UNMUTE_OUTBOUND_TOKEN from the CLI,
+// not from .env (which lacks it), and the token is injected into the container
+// env yet never printed to the user.
+func TestExecDevTelephonyOutboundSuppliesTokenWithoutEnvOrPrint(t *testing.T) {
+	root, trace := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	script := filepath.Join(root, "docker")
+	body := "#!/bin/sh\nprintf '%s | OUTBOUND=[%s]\\n' \"$*\" \"$UNMUTE_OUTBOUND_TOKEN\" >> \"$TRACE_FILE\"\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restoreCmd, restorePreflight := composeCommand, composePreflight
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, script, args...)
+	}
+	composePreflight = func(context.Context, []string) error { return nil }
+	t.Cleanup(func() { composeCommand, composePreflight = restoreCmd, restorePreflight })
+
+	cloudflared := filepath.Join(root, "cloudflared")
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreLook := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
+	t.Cleanup(func() { tunnelLookPath = restoreLook })
+
+	cmd, out := telephonyTestCommand(t)
+	// The .env has no UNMUTE_OUTBOUND_TOKEN; a clean run proves the CLI supplied it.
+	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioOutboundPlan(), composeFiles, devTelephonyOptions{botPort: "7861"}); err != nil {
+		t.Fatalf("execDevTelephony (outbound): %v\n%s", err, out.String())
+	}
+	raw, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "OUTBOUND=[]") {
+		t.Fatalf("UNMUTE_OUTBOUND_TOKEN was not injected into the container env:\n%s", raw)
+	}
+	if strings.Contains(out.String(), "OUTBOUND_TOKEN") {
+		t.Fatalf("the outbound token must never be printed:\n%s", out.String())
 	}
 }

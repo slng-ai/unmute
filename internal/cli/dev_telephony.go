@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/url"
@@ -15,6 +17,16 @@ import (
 	"github.com/slng/unmute/internal/generate"
 	"github.com/spf13/cobra"
 )
+
+// randomOutboundToken mints the dev-only shared secret the CLI and the
+// container's dial-out endpoint use to authenticate a local outbound trigger.
+func randomOutboundToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
 
 // devTelephonyOptions carries the dev command flags into the post-gate core.
 type devTelephonyOptions struct {
@@ -42,6 +54,20 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 	// tunnel injects it after this check, so it is not demanded from .env.
 	if opts.publicValue != "" || len(plan.PublicEndpoints) > 0 {
 		required = slices.DeleteFunc(required, func(name string) bool { return name == "UNMUTE_PUBLIC_URL" })
+	}
+	// UNMUTE_OUTBOUND_TOKEN is a dev-supplied secret for outbound-capable routes
+	// (SPEC T2/V4): the CLI mints it, injects it so the container's dial-out
+	// endpoint can authenticate the trigger and pass readiness, and reuses it to
+	// place the call (T4). It is never demanded from .env and never printed.
+	outboundToken := ""
+	if planHasTelephonyFeature(plan, "outbound") {
+		token, err := randomOutboundToken()
+		if err != nil {
+			return fmt.Errorf("mint outbound token: %w", err)
+		}
+		outboundToken = token
+		childEnv = setChildEnv(childEnv, "UNMUTE_OUTBOUND_TOKEN", outboundToken)
+		required = slices.DeleteFunc(required, func(name string) bool { return name == "UNMUTE_OUTBOUND_TOKEN" })
 	}
 	if missing := missingEnvironment(required, childEnv); len(missing) > 0 {
 		return fmt.Errorf("missing telephony credentials/configuration: %s; see TELEPHONY.md#credentials for where to obtain them", strings.Join(missing, ", "))

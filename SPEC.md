@@ -103,7 +103,7 @@ drives it: inbound-only is unchanged, outbound places a call, both do both.
 
 id|status|desc|cites
 T1|x|validate: outbound no longer requires on_voicemail; on_voicemail still validated + route-gated when present. L1: pipecat outbound-no-voicemail validates; pipecat + on_voicemail still errors; livekit-sip outbound+voicemail still valid|I.schema,V1,V2
-T2|.|dev env: mint UNMUTE_OUTBOUND_TOKEN in execDevTelephony when direction includes outbound, inject before up, special-case it out of the missing-credentials check like UNMUTE_PUBLIC_URL; do not touch DevSuppliedEnvironment. L2: token absent from .env still runs; token never printed|I.env,V4
+T2|x|dev env: mint UNMUTE_OUTBOUND_TOKEN in execDevTelephony when direction includes outbound, inject before up, special-case it out of the missing-credentials check like UNMUTE_PUBLIC_URL; do not touch DevSuppliedEnvironment. L2: token absent from .env still runs; token never printed|I.env,V4
 T3|.|`--to <E.164>` flag on newDevCmd: E.164 validation, requires --telephony, requires outbound-capable resolved direction, rejects inbound-only with a clear message. L2 flag-guard tests|I.flag,V3,V6
 T4|.|place the call from onReady: POST Bearer-authed {"to":…} to 127.0.0.1:<bot-port>/telephony/outbound, print call_id, teardown on failure. L2 with a fake bot HTTP server asserting method+path+Authorization+body; assert POST fires after readiness|I.trigger,V5
 T5|.|regression: inbound-only --telephony output unchanged without --to; outbound-capable target without --to prints the availability line and places nothing. L2 golden-ish assertions on printed lines|V6,V7
