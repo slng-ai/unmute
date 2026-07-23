@@ -33,11 +33,13 @@ import (
 
 // The generated local key pair, hardcoded by
 // internal/generate/templates/livekit_v1/compose.telephony.yaml.tmpl and
-// pinned by its golden. Never valid outside the generated local stack (and
-// distinct from the `livekit-server --dev` pair in livekit_web.go).
+// pinned by its golden. This is the documented `livekit-server --dev` pair
+// (docs.livekit.io/transport/self-hosting/local): the dev server accepts only
+// devkey/secret, so admin tokens and worker registration must sign with it
+// (B2/V10). Never valid outside the generated local stack.
 const (
 	liveKitSIPComposeKey    = "devkey"
-	liveKitSIPComposeSecret = "devsecret-local-only"
+	liveKitSIPComposeSecret = "secret"
 )
 
 // liveKitSIPAdminBase is a seam: tests point it at an httptest server.

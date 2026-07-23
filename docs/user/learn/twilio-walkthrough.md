@@ -210,7 +210,7 @@ local server with the generated local-only key pair first:
 ```bash
 export LIVEKIT_URL=http://127.0.0.1:7880
 export LIVEKIT_API_KEY=devkey
-export LIVEKIT_API_SECRET=devsecret-local-only
+export LIVEKIT_API_SECRET=secret
 lk dispatch create --new-room --agent-name livekit \
   --metadata '{"direction": "outbound", "phone_number": "+15551234567", "call_start": {}}'
 ```

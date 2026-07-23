@@ -1,4 +1,6 @@
-# Generated local-development topology. The devkey/devsecret pair below is intentionally non-production.
+# Generated local-development topology. The devkey/secret pair below is the
+# documented `livekit-server --dev` pair (never for production); the dev server
+# accepts no other key pair.
 services:
   application:
     build:
@@ -7,7 +9,7 @@ services:
     environment:
       - LIVEKIT_URL=ws://livekit_server:7880
       - LIVEKIT_API_KEY=devkey
-      - LIVEKIT_API_SECRET=devsecret-local-only
+      - LIVEKIT_API_SECRET=secret
       - DEEPGRAM_API_KEY
       - ELEVEN_API_KEY
       - GET_INVOICE_URL
@@ -66,7 +68,7 @@ services:
     environment:
       SIP_CONFIG_BODY: |
         api_key: devkey
-        api_secret: devsecret-local-only
+        api_secret: secret
         ws_url: ws://livekit_server:7880
         redis:
           address: redis:6379

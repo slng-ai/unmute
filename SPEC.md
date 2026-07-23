@@ -153,6 +153,11 @@ any public HTTPS origin with a self-hosted LiveKit server.
   values (asserted in the emitted code's self-check and the L4 smoke).
 - V9: Pipecat telephony stdout/stderr and artifacts are byte-for-byte
   unchanged (regression guard).
+- V10: the generated local LiveKit stack uses the documented `livekit-server
+  --dev` key pair `devkey`/`secret` consistently across the server, the app
+  worker, LiveKit SIP, and every hand-minted admin/dispatch token. No
+  artifact, compose file, or Go constant uses a secret the `--dev` server
+  will not accept. (grep: no `devsecret-local-only`).
 
 ## §T tasks
 
@@ -169,3 +174,4 @@ T7|.|full suite green; manual E2E with real creds: connector inbound call, conne
 
 id|date|cause|fix
 B1|2026-07-23|`--to` on a LiveKit SIP target POSTed /telephony/outbound on the bot port, an endpoint that route never emits, so dial-out 404ed; dev also demanded LIVEKIT_SIP_URI which nothing consumes|V5,V6,V7
+B2|2026-07-23|the generated LiveKit SIP telephony Compose set the app/SIP/admin-token secret to `devsecret-local-only`, but `livekit-server --dev` only accepts `devkey`/`secret` (docs.livekit.io/transport/self-hosting/local), so worker registration and every livekit.SIP Twirp admin call would 401. Never observed earlier because the phantom LIVEKIT_SIP_URI env error (B1) blocked startup before containers ran|V10

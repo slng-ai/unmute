@@ -246,7 +246,7 @@ func TestEnsureLiveKitSIPRecordsReplacesDispatchRuleOnAgentMismatch(t *testing.T
 // C1/C2: the SIP admin token is an HS256 JWT whose claims carry the sip
 // admin grant and the api key as issuer.
 func TestMintLiveKitSIPAdminTokenCarriesSIPAdminGrant(t *testing.T) {
-	token, err := mintLiveKitSIPAdminToken("devkey", "devsecret-local-only", time.Unix(1_800_000_000, 0))
+	token, err := mintLiveKitSIPAdminToken("devkey", "secret", time.Unix(1_800_000_000, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestPlaceLiveKitDispatchOutbound(t *testing.T) {
 // The dispatch token is an HS256 JWT with the server-wide roomAdmin grant the
 // AgentDispatchService requires; no room is scoped so it can create any room.
 func TestMintLiveKitDispatchTokenCarriesRoomAdmin(t *testing.T) {
-	token, err := mintLiveKitDispatchToken("devkey", "devsecret-local-only", time.Unix(1_800_000_000, 0))
+	token, err := mintLiveKitDispatchToken("devkey", "secret", time.Unix(1_800_000_000, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
