@@ -1,47 +1,48 @@
 # Twilio walkthrough, step by step
 
 This guide walks you through testing real phone calls with the
-[telephony-multi-task example](../../../examples/telephony-multi-task/README.md),
-inbound and outbound, on both routes:
+[telephony-hello example](../../../examples/telephony-hello/README.md), inbound
+and outbound, on both laptop-testable routes:
 
 - **Pipecat** with Twilio Programmable Voice (`carrier-websocket`)
-- **LiveKit** with Twilio Elastic SIP Trunking (`sip`)
+- **LiveKit** with the Twilio connector (`connector`)
 
-It tells you exactly where each value lives in the Twilio Console. If you
-want the concepts behind these steps, read
-[07. Phone calls](07-phone-calls.md) first.
+Both routes use the same three Twilio credentials, the same managed cloudflared
+tunnel, and the same `--to` dial-out. Neither needs a SIP trunk or public
+SIP/RTP: Twilio reaches the generated app over HTTPS and WSS. It tells you
+exactly where each value lives in the Twilio Console. If you want the concepts
+behind these steps, read [07. Phone calls](07-phone-calls.md) first.
 
 > These telephony routes have real adapters, so validation, compilation, and
 > `unmute dev --telephony` run them cleanly, with no warning. The commands below
 > work today. Test the behavior you depend on yourself before you rely on it in
 > production.
 
-> For the quickest Pipecat test with no extra agent setup, use the
-> [telephony-hello example](../../../telephony-hello/README.md): a minimal
-> inbound and outbound Twilio agent. This walkthrough uses the richer
-> multi-task example. Note that its Pipecat target sets `on_voicemail`, which
-> Pipecat cannot do, so use `telephony-hello` (or this example's LiveKit
-> target) when testing Pipecat.
-
 ## What you need
 
 - A Twilio account with some balance (calls and numbers cost money).
 - Docker with the Compose plugin.
 - The Unmute CLI built (`make build`).
-- For the Pipecat route: `cloudflared` on PATH, or your own tunnel.
+- `cloudflared` on PATH, or your own tunnel.
 - A real phone to call from and to.
+- Model provider keys (`OPENAI_API_KEY`, `SLNG_API_KEY`) so the agent can
+  think, hear, and speak.
 
-Start from the example:
+Create the environment file the example reads:
 
 ```bash
-cd examples/telephony-multi-task
-cp .env.example .env
+cat > examples/telephony-hello/.env <<'EOF'
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
+OPENAI_API_KEY=
+SLNG_API_KEY=
+EOF
 ```
 
 Everything below fills in that `.env`. The dev command supplies
-`UNMUTE_PUBLIC_URL`, `REDIS_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
-`LIVEKIT_API_SECRET`, `LIVEKIT_SIP_INBOUND_TRUNK`, and
-`LIVEKIT_SIP_OUTBOUND_TRUNK` by itself. Leave those out of `.env`.
+`UNMUTE_PUBLIC_URL`, `UNMUTE_OUTBOUND_TOKEN`, `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` by itself. Leave those out.
 
 ## Part 1: the Pipecat route (Programmable Voice)
 
@@ -96,7 +97,7 @@ you prefer ngrok or another tunnel, skip this step and pass
 ### Step 5: run it
 
 ```bash
-unmute dev . --target pipecat --telephony
+unmute dev examples/telephony-hello --target pipecat --telephony
 ```
 
 Read the output top to bottom:
@@ -114,15 +115,15 @@ Read the output top to bottom:
 
 Call the printed number from your phone. Twilio requests the webhook, the
 generated app validates Twilio's signature and answers with a Media Streams
-connection, and the agent greets you: "Hi, this is Sage and Stone Salon."
+connection, and the agent greets you.
 
 ### Step 7: test outbound
 
-Your agent's phone channel must allow it (`outbound: true`). Re-run with `--to`
+The agent's phone channel allows it (`outbound: true`). Re-run with `--to`
 set to a number you can answer:
 
 ```bash
-unmute dev . --target pipecat --telephony --to +15551234567
+unmute dev examples/telephony-hello --target pipecat --telephony --to +15551234567
 ```
 
 Once the container is healthy the CLI places the call for you and prints
@@ -143,113 +144,72 @@ curl -X POST "https://<your-host>/telephony/outbound" \
 `call_start` carries values for any `source: call_start` variables the agent
 declares; this example declares none, so it stays empty.
 
-## Part 2: the LiveKit route (Elastic SIP Trunking)
+## Part 2: the LiveKit Twilio connector
 
-> **Want the easy laptop-testable LiveKit route instead?** Use the LiveKit
-> Twilio connector (`transport: connector`). It uses the same three Twilio
-> credentials as the Pipecat route in Part 1, the same managed cloudflared
-> tunnel, and `--to` for outbound. No SIP trunk and no public SIP/RTP
-> reachability: Twilio reaches its generated bridge over HTTPS and WSS, so both
-> inbound and outbound work on a laptop. The
-> [telephony-hello example](../../../telephony-hello/README.md) uses it; run
-> `unmute dev telephony-hello --telephony --target livekit`. Part 2 below covers
-> the SIP route, which is the production-trunk path.
+The connector uses Twilio Media Streams too, but bridges the call into a local
+LiveKit room where a LiveKit worker handles it. It needs the same three Twilio
+credentials as Part 1 and no extra Twilio setup. This is our own open-source
+bridge; LiveKit's hosted connector is Cloud only.
 
-LiveKit runs a self-hosted SIP bridge on your machine. Twilio talks SIP and
-RTP to it directly, so this route needs real network reachability, not an
-HTTPS tunnel.
+### Step 1: reuse the same credentials
 
-### Step 1: create the Elastic SIP Trunk
+The connector reads the same `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and
+`TWILIO_PHONE_NUMBER` you already set. There is no SIP trunk and no Redis. The
+dev command supplies `LIVEKIT_URL` and the local key pair itself and runs a
+local `livekit-server --dev` container next to the app.
 
-1. In the Twilio Console, go to **Elastic SIP Trunking → Trunks** and
-   create a trunk.
-2. Open the trunk's **Termination** page. Set a unique termination SIP URI;
-   Twilio shows it as `<your-name>.pstn.twilio.com`. Copy it into
-   `TWILIO_SIP_ADDRESS`.
-3. Still under Termination, create a **Credential List** (a username and a
-   strong password) and attach it to the trunk. Copy the values into
-   `TWILIO_SIP_USERNAME` and `TWILIO_SIP_PASSWORD`.
-4. Open the trunk's **Origination** page and add an origination URI that
-   points at your machine's public SIP endpoint, in the form
-   `sip:<your-public-host-or-ip>;transport=tcp`.
-5. Open the trunk's **Numbers** page and attach your Twilio phone number.
-   Reuse `TWILIO_PHONE_NUMBER` from Part 1 or buy a separate number.
-
-Termination is the direction LiveKit dials out through Twilio; origination
-is Twilio sending inbound calls to you. You need both for inbound and
-outbound.
-
-### Step 2: check your network reality
-
-Twilio must reach SIP port `5060` (TCP and UDP) and the RTP range
-`10000-10100/udp` on your machine. That usually means a public IP or router
-port forwarding. Docker Desktop's NAT on macOS and Windows often breaks
-carrier-reachable SIP even when every local health check is green. If
-inbound calls never arrive, this is the first thing to suspect; a Linux
-host with plain Docker or a small cloud VM behaves better.
-
-### Step 3: run it
+### Step 2: run it
 
 ```bash
-unmute dev . --target livekit --telephony
+unmute dev examples/telephony-hello --target livekit --telephony
 ```
 
-What happens, in order:
+The output is the same shape as Part 1: the managed tunnel, the public
+endpoints, the auto webhook update, and the call line. The only difference is
+an extra `livekit_server` service in the Compose graph.
 
-1. Redis, LiveKit Server, and LiveKit SIP start first and become healthy.
-2. The command creates or reuses the local records and prints each one:
-   inbound trunk, dispatch rule, outbound trunk (`created`, `reused`, or
-   `updated`). They live in the local Redis volume and survive restarts.
-3. Both trunk IDs are injected and the agent starts.
-4. The ready banner and the call line print.
+### Step 3: test inbound and outbound
 
-No tunnel and no `--public-url` here: SIP does not ride HTTPS.
-
-### Step 4: test inbound
-
-Call the number attached to the trunk. Twilio sends the call to your
-origination URI, LiveKit SIP accepts it, and the dispatch rule creates a
-fresh `call-*` room and dispatches the agent into it. You hear the same
-salon greeting.
-
-### Step 5: test outbound
-
-Dispatch the agent to a new room with outbound metadata. Point `lk` at the
-local server with the generated local-only key pair first:
+Call the printed number: Twilio opens the media WebSocket to the bridge, the
+bridge joins a fresh `call-*` room and dispatches the worker, and the agent
+greets you. For outbound, add `--to`:
 
 ```bash
-export LIVEKIT_URL=http://127.0.0.1:7880
-export LIVEKIT_API_KEY=devkey
-export LIVEKIT_API_SECRET=secret
-lk dispatch create --new-room --agent-name livekit \
-  --metadata '{"direction": "outbound", "phone_number": "+15551234567", "call_start": {}}'
+unmute dev examples/telephony-hello --target livekit --telephony --to +15551234567
 ```
 
-The worker validates the destination, dials through the stored outbound
-trunk with your Credential List auth, and your phone rings. The `devkey`
-pair only exists inside the generated local stack; never reuse it anywhere
-else.
+The CLI places the call and the bridge connects it into the room, exactly like
+the Pipecat route.
+
+## Production: the LiveKit SIP route
+
+For production, LiveKit's stable multi-carrier path is a self-hosted SIP bridge
+(`transport: sip`) fed by a carrier Elastic SIP Trunk. It is not laptop-testable
+for inbound, because Twilio talks SIP and RTP straight to your machine and an
+HTTPS tunnel cannot carry that. Set it up when you deploy on a host with public
+SIP and RTP reachability. The SIP route also supports call transfers and
+voicemail detection, which the connector does not. See
+[07. Phone calls](07-phone-calls.md#configure-self-hosted-livekit-sip) and
+[Configure LiveKit in YAML](../targets/livekit.md) for the trunk fields and
+the environment it needs.
 
 ## Troubleshooting
 
-- **`cloudflared not found on PATH`**: install it (Step 4 above) or pass
+- **`cloudflared not found on PATH`**: install it (Part 1, Step 4) or pass
   `--public-url` with your own tunnel.
 - **`missing telephony credentials/configuration: ...`**: the named `.env`
   values are empty. The error lists exactly which ones.
-- **`LIVEKIT_URL conflicts with the generated local LiveKit SIP topology`**
-  (or `REDIS_URL`, the API key pair, a trunk ID): remove that value from
-  `.env`; the local stack supplies its own.
+- **"an application error occurred" on inbound**: run with `--verbose` and read
+  the `application` container lines; the bridge logs each step (webhook,
+  media WS, room join) and any error.
 - **`phone number ... was not found on this Twilio account`**: the number in
   `TWILIO_PHONE_NUMBER` does not exist on this account or is not E.164.
   Check **Phone Numbers → Manage → Active numbers**.
+- **Outbound call rings then drops, or never rings**: on a trial account Twilio
+  only calls verified numbers, and international destinations need
+  **Voice → Settings → Geo Permissions** enabled for that country.
 - **Outbound curl returns 401**: the `Authorization` header does not match
   `UNMUTE_OUTBOUND_TOKEN`.
-- **LiveKit inbound never rings**: almost always SIP/RTP reachability.
-  Recheck Step 2 and your origination URI.
-- **Stale records**: stopping preserves the Redis volume on purpose. To
-  start clean, run `docker compose -f build/livekit/compose.telephony.yaml
-  -p <project-name> down --volumes` with the project name from the ready
-  banner.
 
 ## Restore Twilio when you are done
 

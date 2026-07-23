@@ -31,7 +31,7 @@ Neither needs a Twilio SIP trunk or public SIP/RTP. Swap `--target pipecat` for
 
 ## Credentials
 
-Put these in `telephony-hello/.env` (gitignored). Values are examples; use your
+Put these in `examples/telephony-hello/.env` (gitignored). Values are examples; use your
 own.
 
 ```bash
@@ -53,7 +53,7 @@ it on every run and prints the previous value so you can restore it.
 From the repository root:
 
 ```bash
-unmute dev telephony-hello --telephony --target pipecat
+unmute dev examples/telephony-hello --telephony --target pipecat
 ```
 
 Watch the output for the managed tunnel URL, the webhook update, and the line
@@ -64,7 +64,7 @@ The LiveKit connector works the same way; it just runs a local LiveKit Server
 alongside the bridge:
 
 ```bash
-unmute dev telephony-hello --telephony --target livekit
+unmute dev examples/telephony-hello --telephony --target livekit
 ```
 
 ## Test an outbound call
@@ -72,7 +72,7 @@ unmute dev telephony-hello --telephony --target livekit
 Add `--to` with a number you can answer:
 
 ```bash
-unmute dev telephony-hello --telephony --target pipecat --to +15551234567
+unmute dev examples/telephony-hello --telephony --target pipecat --to +15551234567
 ```
 
 Once the container is healthy, the CLI places the call and prints
