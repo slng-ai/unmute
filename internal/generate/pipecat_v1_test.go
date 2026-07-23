@@ -935,6 +935,8 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		`status_callback_event=["initiated", "ringing", "answered", "completed"]`,
 		`await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))`,
 		`destination, call_start = await _outbound_request(request)`,
+		`except TwilioRestException as exc:`,
+		`Twilio rejected the outbound call:`,
 		`await handle_media(websocket, token, _validate_websocket)`,
 	} {
 		if !strings.Contains(adapter, want) {
