@@ -80,10 +80,8 @@ user's first run.
 
 Every [example](examples/README.md) declares both `pipecat` and `livekit`, so
 `validate` and `compile` cover both targets. Runs need `uv` on your PATH. Keep
-credentials in the ignored repo-root `.env`; the generated `.env.example`
-files list the exact variables. For a direct generated-project run, copy that
-file into `build/<target>/.env`. Later compiles preserve it, and the generated
-`.dockerignore` keeps it out of container images.
+credentials in the ignored repo-root `.env`; the generated `.env.example` files
+list the exact variables.
 
 ```sh
 make build
@@ -93,37 +91,29 @@ EXAMPLE=simple-prompt
 
 bin/unmute validate "examples/$EXAMPLE"
 bin/unmute compile "examples/$EXAMPLE"
-```
 
-Test the generated LiveKit project in console mode (terminal mic and speaker):
-
-```sh
-cp .env "examples/$EXAMPLE/build/livekit/.env"
-cd "examples/$EXAMPLE/build/livekit"
-uv run agent.py console
-```
-
-Test the generated Pipecat project (starts a WebRTC test client and prints the
-URL to open). Run from the repo root:
-
-```sh
 cp .env "examples/$EXAMPLE/build/pipecat/.env"
-cd "examples/$EXAMPLE/build/pipecat"
-uv run bot.py
+cp .env "examples/$EXAMPLE/build/livekit/.env"
+
+bin/unmute dev "examples/$EXAMPLE" --target pipecat
+bin/unmute dev "examples/$EXAMPLE" --target livekit
 ```
 
-`unmute dev` does the recompile-and-run loop in one command. It reads `.env`
-from the current directory, then the package root; package values override
-shared repository values. From the repository root, no copy is needed:
+`unmute dev` recompiles and runs in one command, then opens a browser dev UI to
+talk to the agent. It reads `.env` from the current directory, then the package
+root, so from the repository root the copies above are optional. Add `--console`
+to talk over the terminal mic and speaker instead of the browser.
+
+Telephony works the same way, for the example that supports it:
 
 ```sh
-bin/unmute dev "examples/$EXAMPLE" --target pipecat
-bin/unmute dev "examples/$EXAMPLE" --target livekit --console
-```
+bin/unmute dev "examples/telephony-hello" --telephony --target livekit
+bin/unmute dev "examples/telephony-hello" --telephony --target pipecat
 
-The public packages use one salon workflow to show increasing orchestration
-structure. Four-target portability and the legacy combined handoff/task-group
-case remain internal fixtures under `internal/testdata/`.
+# add --to to place an outbound call
+bin/unmute dev "examples/telephony-hello" --telephony --target livekit --to +YOURNUMBER
+bin/unmute dev "examples/telephony-hello" --telephony --target pipecat --to +YOURNUMBER
+```
 
 ## Not implemented yet
 
