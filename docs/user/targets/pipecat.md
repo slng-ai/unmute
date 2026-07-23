@@ -56,9 +56,8 @@ pipeline and its tools are plain functions on the LLM context, so the generated
 
 That command works for telephony and non-telephony Pipecat targets alike.
 Provisional telephony routes compile and write their files, including
-`compose.telephony.yaml`, with a warning that the route is unverified. Only the
-gated no-adapter route (Exotel) stops validation, because there is nothing to
-generate for it.
+`compose.telephony.yaml`, cleanly and with no warning. Only the gated no-adapter
+route (Exotel) stops validation, because there is nothing to generate for it.
 
 The output folder is rewritten from scratch on every compile, so never edit it by hand. `bot.py` carries only the imports and code your spec actually exercises: no tools means no HTTP client import, no tasks means no task machinery. The emitted pipeline stays clean.
 
@@ -150,16 +149,15 @@ the Twilio Connection; `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`,
 Connection stores these names, while `.env` stores their values.
 
 Every generated row runs now and is tagged provisional: validation and
-compilation emit it with a warning that the route is unverified until its
-credentialed route smoke passes. The adapters contain inbound, outbound,
-hangup, and cold-transfer paths. Voicemail handling and warm transfer remain
-gated, so an outbound channel still fails validation, because every outbound
-channel must declare a voicemail policy.
+compilation emit it cleanly, with no warning. The adapters contain inbound,
+outbound, hangup, and cold-transfer paths. Voicemail handling and warm transfer
+remain gated, so an outbound channel still fails validation, because every
+outbound channel must declare a voicemail policy.
 
 To configure several carriers, declare several Pipecat target instances, such
 as `pipecat_twilio` and `pipecat_telnyx`, and bind each to its own Connection.
-Each compiles to a separate project, and each provisional route runs with its
-own unverified warning. See
+Each compiles to a separate project, and each provisional route runs cleanly,
+with no warning. See
 [phone calls](../learn/07-phone-calls.md#configure-multiple-carriers) for a full
 Pipecat and LiveKit example.
 
@@ -266,12 +264,12 @@ directory's `.env`, then apply package-root `.env` overrides. Browser logs go
 to `build/<target>/dev.log`; add `--verbose` to follow the container logs.
 Console mode streams directly to the terminal.
 
-The telephony command runs the provisional route now, printing a warning that
-the route is unverified until its credentialed smoke passes. It builds and runs
-the emitted Docker Compose graph, waits for the Pipecat application and Redis
-health checks, and passes `--bot-port` to Compose as `UNMUTE_TELEPHONY_PORT`.
-Redis stores only bounded telephony control records; audio, transcripts,
-prompts, task state, and worker handoffs stay in the active process.
+The telephony command runs the provisional route now, cleanly and with no
+warning. It builds and runs the emitted Docker Compose graph, waits for the
+Pipecat application and Redis health checks, and passes `--bot-port` to Compose
+as `UNMUTE_TELEPHONY_PORT`. Redis stores only bounded telephony control records;
+audio, transcripts, prompts, task state, and worker handoffs stay in the active
+process.
 
 Public ingress is managed for you: without `--public-url`, the command runs a
 cloudflared quick tunnel as a child process (install it once; macOS:

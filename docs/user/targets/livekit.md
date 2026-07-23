@@ -423,11 +423,10 @@ The carrier matrix makes those values explicit:
 | `connector` | Twilio | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | No emitted adapter | Recognized Beta route; gated |
 
 Every SIP row runs now and is tagged provisional: validation and compilation
-emit it with a warning that the route is unverified until its credentialed
-route smoke passes. The SIP emitter contains inbound, outbound, voicemail,
-hangup, cold-transfer, and warm-transfer paths. The Twilio Connector has only
-route and credential vocabulary; Unmute emits no Connector adapter, so that
-route stays gated and fails closed.
+emit it cleanly, with no warning. The SIP emitter contains inbound, outbound,
+voicemail, hangup, cold-transfer, and warm-transfer paths. The Twilio Connector
+has only route and credential vocabulary; Unmute emits no Connector adapter, so
+that route stays gated and fails closed.
 Follow the
 [SIP trunking guide](../learn/07-phone-calls.md#configure-telephony-by-orchestrator)
 for the complete Twilio, Telnyx, and Plivo setup.
@@ -455,7 +454,7 @@ transfer behavior.
 To configure several carriers, declare several LiveKit targets, such as
 `livekit_twilio` and `livekit_plivo`, and bind each to its own Connection. Each
 compiles to a separate project and SIP setup, and each provisional route runs
-with its own unverified warning. See
+cleanly, with no warning. See
 [phone calls](../learn/07-phone-calls.md#configure-multiple-carriers) for a full
 Pipecat and LiveKit example.
 
@@ -505,9 +504,8 @@ This is the local SIP command:
 unmute dev acme --target livekit --telephony
 ```
 
-The command prints a warning that the route is unverified, then runs the whole
-bootstrap itself: Docker Compose builds the Agent and starts Redis, LiveKit
-Server, and LiveKit SIP first; the command then creates or
+The command runs the whole bootstrap itself: Docker Compose builds the Agent and
+starts Redis, LiveKit Server, and LiveKit SIP first; the command then creates or
 reuses the inbound trunk, outbound trunk, and `call-` dispatch rule on that
 local server with the generated development key pair, injects the returned
 `LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK`, and starts the

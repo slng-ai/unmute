@@ -10,12 +10,12 @@ points the Twilio number's voice webhook at it, and creates the local LiveKit
 trunk records itself (see "Local development with zero steps" below).
 
 The Pipecat Twilio, Telnyx, and Plivo routes and the LiveKit SIP routes have
-real adapters and are usable now. They are tagged **provisional**: the adapter
-exists but has not passed its automated credentialed smoke yet, so
-`unmute validate`, `unmute compile`, and `unmute dev --telephony` run them and
-print a per-feature warning that the route is unverified. The remaining
-recognized routes (Exotel on any framework, and the LiveKit Twilio Connector)
-are gated with no adapter, so they still fail closed.
+real adapters and are usable now. They are tagged **provisional**, but that is
+internal maturity tracking recorded in `compile-report.json`, not a runtime
+warning: `unmute validate`, `unmute compile`, and `unmute dev --telephony` run
+them cleanly, with no warning. The remaining recognized routes (Exotel on any
+framework, and the LiveKit Twilio Connector) are gated with no adapter, so they
+still fail closed.
 
 ## Declare the phone channel
 
@@ -172,8 +172,7 @@ for an unselected carrier.
 
 "Generated offline" means the emitter and credential-free checks exist. The
 route is usable now: public validation, compilation, and telephony development
-run it and print a warning that the route is unverified until its exact
-credentialed smoke passes. The Pipecat emitters contain inbound, outbound,
+run it cleanly, with no warning. The Pipecat emitters contain inbound, outbound,
 hangup, and cold-transfer paths; voicemail and warm transfer remain gated. The
 LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
 cold-transfer, and warm-transfer paths.
@@ -239,7 +238,7 @@ Create `connections/twilio_api.yaml`, `connections/telnyx_api.yaml`,
 `connections/telnyx_sip.yaml`, and `connections/plivo_sip.yaml` with the keys
 from the matrix. The package can contain all of them. `unmute compile` processes every declared
 target when you omit `--target`, while `unmute dev --telephony` runs one
-selected target at a time. Provisional routes run with an unverified warning;
+selected target at a time. Provisional routes run cleanly, with no warning;
 only the gated no-adapter routes (Exotel, the LiveKit Twilio Connector) fail.
 Adding another supported carrier is another target and Connection, not a schema
 change.
@@ -372,7 +371,7 @@ route matrix instead of the `*_SIP_*` names).
   tunnel cannot carry it, and Docker Desktop NAT may block it even when
   every local health check passes. The managed tunnel applies only to
   carrier webhook routes.
-- Provisional routes run now with an unverified warning. Only the gated
+- Provisional routes run now, cleanly and with no warning. Only the gated
   no-adapter routes (Exotel, the LiveKit Twilio Connector) fail closed,
   because there is nothing to run for them.
 
@@ -394,9 +393,9 @@ credentials and a different `transport` on each orchestrator.
 <!-- prettier-ignore -->
 > [!IMPORTANT]
 > The provisional routes in this table run now. Validation, compilation, and
-> `unmute dev --telephony` generate and run them, and print a warning that the
-> route is unverified until it passes a credentialed call smoke. Only the gated
-> Exotel and Twilio Connector rows fail, because there is no adapter to run.
+> `unmute dev --telephony` generate and run them cleanly, with no warning. Only
+> the gated Exotel and Twilio Connector rows fail, because there is no adapter to
+> run.
 
 ### Configure a Pipecat carrier WebSocket
 

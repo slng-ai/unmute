@@ -13,12 +13,12 @@ a new media gateway.
 
 <!-- prettier-ignore -->
 > [!NOTE]
-> A route with a real adapter stays provisional until its credentialed L4 smoke
-> passes, but provisional no longer blocks use: `validate`, `compile`, and
-> `dev --telephony` run it and print an `unverified` warning. Only a gated route
-> with no adapter (Exotel, the LiveKit Twilio Connector) fails closed. L1–L3
-> tests do not require credentials and cannot promote a route to verified by
-> themselves.
+> A route with a real adapter runs cleanly: `validate`, `compile`, and
+> `dev --telephony` execute it with no warning and no verification error. Its
+> provisional-versus-verified state is internal maturity tracking, recorded in
+> the generated `compile-report.json`, and is never printed at runtime. Only a
+> gated route with no adapter (Exotel, the LiveKit Twilio Connector) fails
+> closed.
 
 ## Decision
 
@@ -117,12 +117,13 @@ orchestrator already performs.
 
 ## Current repository state
 
-Telephony routes with a real adapter are usable in the public CLI. No selectable
-Pipecat or LiveKit route has passed its exact credentialed L4 smoke yet, so
-`unmute validate`, `unmute compile`, and `unmute dev --telephony` run them and
-print an `unverified` warning per feature. Only gated routes with no adapter
-(Exotel, the LiveKit Twilio Connector) are rejected before an artifact is
-written or Docker is invoked.
+Telephony routes with a real adapter are usable in the public CLI:
+`unmute validate`, `unmute compile`, and `unmute dev --telephony` run them with
+no warning and no verification error. Their provisional-versus-verified status
+is internal maturity tracking, recorded in the generated `compile-report.json`,
+not printed at runtime. Only gated routes with no adapter (Exotel, the LiveKit
+Twilio Connector) are rejected before an artifact is written or Docker is
+invoked.
 
 - Strict Connection loading and exact route resolution produce one
   `TelephonyPlan` per selected target.
@@ -180,11 +181,11 @@ not the number of targets, is the limit:
 | LiveKit | `sip` | Exotel | None | Gated |
 | LiveKit | `connector` | Twilio | No generated adapter | Recognized Beta route; gated |
 
-"Generated in offline tests" does not mean the route is enabled. Every
-generated row still fails public validation until its exact credentialed smoke
-promotes the requested features. The Pipecat adapters contain inbound,
-outbound, hangup, and cold-transfer paths; voicemail and warm transfer remain
-gated. The LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
+"Generated in offline tests" is not the same as verified. A generated row runs
+in the public CLI now; its exact credentialed smoke, once it exists, only
+promotes it from provisional to verified in `compile-report.json`, with no
+change to whether it runs. The Pipecat adapters contain inbound, outbound,
+hangup, and cold-transfer paths; voicemail and warm transfer remain gated. The LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
 cold-transfer, and warm-transfer paths. The Twilio Connector has only route and
 credential vocabulary today, so validation stops before generation.
 

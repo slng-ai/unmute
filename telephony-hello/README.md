@@ -70,9 +70,10 @@ If Twilio refuses the call, the CLI prints the reason (for example geo
 permissions for the destination country, or a trial account that can only call
 verified numbers). Fix it in the Twilio Console and run again.
 
-## A note on the warning
+## A note on route maturity
 
-Validation prints `telephony ... is unverified`. That is expected: these routes
-have real adapters but have not passed an automated credentialed smoke, so the
-CLI flags them and lets you run them. Test the behavior you rely on yourself
-before you depend on it in production.
+These routes have real adapters, so `unmute validate`, `unmute compile`, and
+`unmute dev --telephony` run them with no warning and no error. The
+provisional-versus-verified status is internal maturity tracking, recorded in
+the generated `compile-report.json`, not something the CLI prints at runtime.
+Test the behavior you rely on yourself before you depend on it in production.

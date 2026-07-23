@@ -11,10 +11,10 @@ It tells you exactly where each value lives in the Twilio Console. If you
 want the concepts behind these steps, read
 [07. Phone calls](07-phone-calls.md) first.
 
-> Every telephony route is provisional: it has a real adapter but has not
-> passed an automated credentialed smoke. Validation prints an `unverified`
-> warning and lets you run it, so the commands below work today. Test the
-> behavior you depend on yourself before you rely on it in production.
+> These telephony routes have real adapters, so validation, compilation, and
+> `unmute dev --telephony` run them cleanly, with no warning. The commands below
+> work today. Test the behavior you depend on yourself before you rely on it in
+> production.
 
 > For the quickest Pipecat test with no extra agent setup, use the
 > [telephony-hello example](../../../telephony-hello/README.md): a minimal

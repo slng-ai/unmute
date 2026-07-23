@@ -110,11 +110,11 @@ Docker Desktop or Docker Engine plus the Compose plugin, and points you at
 
 **Telephony (`--telephony`).** Real phone calls, through the generated
 `compose.telephony.yaml`. A route with a real adapter (every Pipecat carrier
-WebSocket and LiveKit SIP route) is **provisional**: it runs, and validation
-prints an `unverified` warning that it has not passed an automated credentialed
-smoke. Only a **gated** route with no adapter at all (Exotel, the LiveKit Twilio
-Connector) still fails closed, because there is nothing to run. Test the
-behavior you depend on yourself before production.
+WebSocket and LiveKit SIP route) just runs: validation, compilation, and
+`dev --telephony` start it with no warning and no verification error. Only a
+**gated** route with no adapter at all (Exotel, the LiveKit Twilio Connector)
+still fails closed, because there is nothing to run. Test the behavior you
+depend on yourself before production.
 
 Telephony mode runs the generated `compose.telephony.yaml`; there is no
 host-process fallback or infrastructure flag. Every route builds the generated
