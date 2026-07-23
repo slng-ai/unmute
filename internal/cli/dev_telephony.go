@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -176,9 +179,43 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 			}
 		}
 		printDevCallLine(cmd.OutOrStdout(), plan, childEnv)
+		// --to: place one outbound call now that the graph is healthy (T4). The
+		// direction guard in runDevTelephony ensures the plan is outbound-capable,
+		// so the token minted in T2 is set. A failure returns and tears down.
+		if opts.to != "" {
+			if err := placeOutboundCall(ctx, cmd.OutOrStdout(), targetName, opts.botPort, outboundToken, opts.to); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	return runTelephonyCompose(ctx, run)
+}
+
+// placeOutboundCall triggers the container's dial-out endpoint over loopback
+// (SPEC I.trigger): the CLI, not the tunnel, reaches the published bot port,
+// and the returned call id is printed. The Bearer token is the dev secret from
+// randomOutboundToken; it is sent, never printed.
+func placeOutboundCall(ctx context.Context, out io.Writer, targetName, botPort, token, to string) error {
+	body, err := json.Marshal(map[string]string{"to": to})
+	if err != nil {
+		return err
+	}
+	endpoint := fmt.Sprintf("http://127.0.0.1:%s/telephony/outbound", botPort)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Content-Type", "application/json")
+	var result struct {
+		CallID string `json:"call_id"`
+	}
+	if err := doTelephonyJSON(request, &result); err != nil {
+		return fmt.Errorf("place outbound call to %s: %w", to, err)
+	}
+	fmt.Fprintf(out, "\n  \033[1;32m▸\033[0m calling %s  (call %s)  ·  ctrl-c to stop\n\n", to, result.CallID)
+	return nil
 }
 
 // printDevCallLine prints the number to dial once an inbound route is live.

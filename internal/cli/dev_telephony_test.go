@@ -3,6 +3,10 @@ package cli
 import (
 	"bytes"
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -325,5 +329,52 @@ func TestExecDevTelephonyOutboundSuppliesTokenWithoutEnvOrPrint(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "OUTBOUND_TOKEN") {
 		t.Fatalf("the outbound token must never be printed:\n%s", out.String())
+	}
+}
+
+// T4/V5: with --to, the CLI POSTs the Bearer-authed dial-out trigger to the
+// container's published bot port over loopback once the graph is healthy, and
+// prints the returned call id.
+func TestExecDevTelephonyPlacesOutboundCallAfterReady(t *testing.T) {
+	var gotAuth, gotBody, gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		_, _ = w.Write([]byte(`{"session_id":"s","call_id":"CA-test","status":"accepted"}`))
+	}))
+	t.Cleanup(server.Close)
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	fakeDocker(t, root)
+	cloudflared := filepath.Join(root, "cloudflared")
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreLook := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
+	t.Cleanup(func() { tunnelLookPath = restoreLook })
+
+	cmd, out := telephonyTestCommand(t)
+	opts := devTelephonyOptions{botPort: parsed.Port(), to: "+15559998888"}
+	if err := execDevTelephony(cmd, root, "phone", pipecatTwilioOutboundPlan(), composeFiles, opts); err != nil {
+		t.Fatalf("execDevTelephony (outbound --to): %v\n%s", err, out.String())
+	}
+	if gotPath != "/telephony/outbound" {
+		t.Fatalf("dial-out POST path = %q", gotPath)
+	}
+	if !strings.HasPrefix(gotAuth, "Bearer ") || len(gotAuth) <= len("Bearer ") {
+		t.Fatalf("dial-out trigger missing Bearer token: %q", gotAuth)
+	}
+	if !strings.Contains(gotBody, `"to":"+15559998888"`) {
+		t.Fatalf("dial-out body = %q", gotBody)
+	}
+	if !strings.Contains(out.String(), "CA-test") {
+		t.Fatalf("call id not printed:\n%s", out.String())
 	}
 }
