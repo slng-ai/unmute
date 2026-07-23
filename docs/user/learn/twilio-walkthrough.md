@@ -63,16 +63,13 @@ even if you use API keys elsewhere.
 You do not need to configure the number's webhook by hand. The dev command
 sets it on every start and prints the previous value so you can restore it.
 
-### Step 3: generate the outbound token
+### Step 3: the outbound token is automatic
 
-The generated outbound endpoint is protected by a token you create yourself.
-It is application auth, not a Twilio value:
-
-```bash
-openssl rand -hex 32
-```
-
-Put the output in `UNMUTE_OUTBOUND_TOKEN`.
+The generated dial-out endpoint is protected by an application token. For local
+development you do not set it: `unmute dev --telephony` mints a random
+`UNMUTE_OUTBOUND_TOKEN`, injects it into the container, and reuses it to place
+the call. In production you supply your own value in the deployment
+environment.
 
 ### Step 4: install cloudflared
 
@@ -114,20 +111,30 @@ connection, and the agent greets you: "Hi, this is Sage and Stone Salon."
 
 ### Step 7: test outbound
 
-Trigger a call to your own phone. Use the printed tunnel origin and your
-token:
+Your agent's phone channel must allow it (`outbound: true`). Re-run with `--to`
+set to a number you can answer:
 
 ```bash
-curl -X POST "https://<random>.trycloudflare.com/telephony/outbound" \
+unmute dev . --target pipecat --telephony --to +15551234567
+```
+
+Once the container is healthy the CLI places the call for you and prints
+`calling +1..., call <id>`. Your phone rings, and the agent starts talking when
+you answer. No token or curl needed: the CLI mints the token and triggers the
+dial-out over loopback.
+
+To drive dial-out from your own application instead, POST to the generated
+endpoint with your production token:
+
+```bash
+curl -X POST "https://<your-host>/telephony/outbound" \
   -H "Authorization: Bearer $UNMUTE_OUTBOUND_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"to": "+15551234567", "call_start": {}}'
 ```
 
-The reply `{"session_id": ..., "call_id": ..., "status": "accepted"}` means
-Twilio is dialing. `call_start` carries values for any
-`source: call_start` variables the agent declares; this example declares
-none, so it stays empty.
+`call_start` carries values for any `source: call_start` variables the agent
+declares; this example declares none, so it stays empty.
 
 ## Part 2: the LiveKit route (Elastic SIP Trunking)
 

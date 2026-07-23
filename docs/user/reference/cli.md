@@ -74,7 +74,7 @@ Compiling a Vapi or Deepgram instance fails with `<provider> driver is not imple
 ## dev
 
 ```sh
-unmute dev <agent-dir> [--target <name>] [--console | --telephony [--public-url <https-url>]] [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
+unmute dev <agent-dir> [--target <name>] [--console | --telephony [--public-url <https-url>] [--to <e164>]] [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
 ```
 
 The fastest loop for a **Pipecat or LiveKit** instance: compiles the selected target to `build/<name>/`, runs it locally, and lets you talk to the agent — in the browser (default) or in your terminal (`--console`). Whatever you build, you can speak to.
@@ -127,6 +127,16 @@ automatically on that route (printing the previous value), print the call
 line, follow Compose logs under `--verbose`, and stop only its deterministic
 project on `ctrl-c` without removing data volumes or leaving the tunnel
 running.
+
+**Outbound dial-out (`--to <e164>`).** On an outbound-capable target, pass
+`--to +15551234567` and, once the container is healthy, the dev command places
+one call to that number and prints the returned call id. The CLI mints the
+dial-out secret `UNMUTE_OUTBOUND_TOKEN` itself, injects it into the container,
+and never demands it from `.env` or prints it. `--to` requires `--telephony`
+and a resolved direction that includes outbound; it is rejected on an
+inbound-only target. Without `--to`, an outbound-capable target prints how to
+place a call and dials nothing. The generated `POST /telephony/outbound`
+endpoint stays available for your own application to drive.
 
 Routes with public HTTP/WSS endpoints (Pipecat carrier WebSockets) need a
 public HTTPS origin. Without `--public-url`, the dev command starts a managed
