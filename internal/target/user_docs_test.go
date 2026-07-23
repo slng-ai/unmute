@@ -102,7 +102,7 @@ func TestTelephonyDocsContract(t *testing.T) {
 		"CONTEXT.md": {"**Telephony route**", "**Coordination mode**"},
 		"docs/TELEPHONY.md": {
 			"## Route matrix and package cardinality",
-			"reject every telephony target",
+			"gated routes with no adapter",
 			"## Credentials",
 			"TWILIO_ACCOUNT_SID",
 			"TELNYX_API_KEY",
