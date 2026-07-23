@@ -108,7 +108,7 @@ T3|x|`--to <E.164>` flag on newDevCmd: E.164 validation, requires --telephony, r
 T4|x|place the call from onReady: POST Bearer-authed {"to":…} to 127.0.0.1:<bot-port>/telephony/outbound, print call_id, teardown on failure. L2 with a fake bot HTTP server asserting method+path+Authorization+body; assert POST fires after readiness|I.trigger,V5
 T5|x|regression: inbound-only --telephony output unchanged without --to; outbound-capable target without --to prints the availability line and places nothing. L2 golden-ish assertions on printed lines|V6,V7
 T6|x|docs: outbound is a direction; `--to` local dial-out; voicemail optional; the CLI→loopback→Twilio→media-WS flow; update docs/user telephony + cli reference. No em dashes|I.flag,I.schema
-T7|.|verify no golden drift for pipecat outbound generation (endpoint already emitted); regenerate only if env-name ordering changes; add L4 real outbound-call smoke behind the dev flag|V1,V7
+T7|x|verify no golden drift for pipecat outbound generation (endpoint already emitted); regenerate only if env-name ordering changes; add L4 real outbound-call smoke behind the dev flag|V1,V7
 
 ## §B bugs
 
