@@ -195,13 +195,14 @@ separate Agent worker joins the same room after dispatch.
 
 ### Deployment
 
-Deployment runs the same `agent.py`, started with `python agent.py start`. The
-worker connects to LiveKit Cloud or a self-hosted LiveKit Server. Worker
-replicas and LiveKit Server replicas are separate scaling units, so you size
-them independently.
+Deployment runs the same `agent.py`, started with `python agent.py start`. For
+now we do not deploy on LiveKit Cloud: the worker connects to a self-hosted
+LiveKit Server. Worker replicas and LiveKit Server replicas are separate
+scaling units, so you size them independently.
 
 A self-hosted phone route also needs LiveKit SIP, shared Redis, public SIP
-signaling, and public RTP ports.
+signaling, and public RTP ports. [DEPLOYMENT.md](DEPLOYMENT.md) records the
+full self-hosted production requirements.
 
 ### Telephony
 
@@ -272,10 +273,12 @@ part of the production artifact.
 
 ### Deployment
 
-The non-telephony image starts `python bot.py` and can run on Pipecat Cloud or
-any infrastructure that can host the generated Python project. The telephony
-image starts the generated FastAPI application, which requires TLS ingress with
-long-lived WebSocket support and a shared Redis deployment.
+The non-telephony image starts `python bot.py`. For now we do not deploy on
+Pipecat Cloud: the image runs on any infrastructure that can host the
+generated Python project. The telephony image starts the generated FastAPI
+application, which requires TLS ingress with long-lived WebSocket support and
+a shared Redis deployment. [DEPLOYMENT.md](DEPLOYMENT.md) records the full
+self-hosted production requirements.
 
 ### Telephony
 
@@ -370,6 +373,8 @@ repeat:
 
 - [SCHEMA.md](SCHEMA.md) for package fields, validation rules, and target
   capability contracts.
+- [DEPLOYMENT.md](DEPLOYMENT.md) for self-hosted production deployment
+  without LiveKit Cloud or Pipecat Cloud.
 - [CONTEXT.md](../CONTEXT.md) for domain terms and the compile-versus-runtime
   vocabulary.
 - [TELEPHONY.md](TELEPHONY.md) for carrier routes, credentials, ports,
