@@ -98,6 +98,10 @@ drives it: inbound-only is unchanged, outbound places a call, both do both.
 - V7: `--telephony` stdout, stderr, and emitted artifacts for existing targets
   are byte-for-byte identical when `--to` is absent (regression guard on the
   compose command sequence and the printed lines).
+- V8: the generated dial-out endpoint accepts a body with no `call_start` and
+  never 500s on required-field checking. Emitted `CALL_START_REQUIRED` is always
+  a set (empty or not), never a dict, so `CALL_START_REQUIRED - set(call_start)`
+  holds when the agent declares no required call-start variables.
 
 ## §T tasks
 
@@ -113,3 +117,4 @@ T7|x|verify no golden drift for pipecat outbound generation (endpoint already em
 ## §B bugs
 
 id|date|cause|fix
+B1|2026-07-23|emitted CALL_START_REQUIRED was `{}` (a dict) when the agent had no required call_start vars; `CALL_START_REQUIRED - set(call_start)` in _outbound_request raised TypeError and POST /telephony/outbound 500'd; no test placed an outbound call with empty call_start|V8

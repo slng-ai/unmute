@@ -965,7 +965,7 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		`if STATE.draining:`,
 		`await websocket.close(code=1013)`,
 		`"campaign_id": "string"`,
-		`CALL_START_REQUIRED = {`,
+		`CALL_START_REQUIRED = frozenset((`,
 	} {
 		if !strings.Contains(shared, want) {
 			t.Errorf("telephony_shared.py missing %q", want)
@@ -1570,6 +1570,41 @@ func TestPipecatCarrierWebsocketGreetsOnClientConnected(t *testing.T) {
 	}
 	if strings.Contains(bot, `@main.rtvi.event_handler("on_client_ready")`) {
 		t.Error("carrier-websocket bot must not wait for RTVI on_client_ready; a Twilio media stream never sends it")
+	}
+}
+
+// TestV8_OutboundEmptyCallStartRendersSet (SPEC V8, B1): with no required
+// call_start variables, CALL_START_REQUIRED must still be a set. An empty `{}`
+// is a dict, so `CALL_START_REQUIRED - set(call_start)` in the dial-out handler
+// would raise TypeError and 500 the outbound call.
+func TestV8_OutboundEmptyCallStartRendersSet(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enablePackageTelephony(pkg)
+	configured := pkg.Targets["pipecat"]
+	configured.Transport, configured.Carrier, configured.Connection = "carrier-websocket", "twilio", "primary_phone"
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
+	outbound := true
+	phone := pkg.Agent.Channels["phone"]
+	phone.Outbound = &outbound
+	pkg.Agent.Channels["phone"] = phone
+
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := artifactFile(t, artifact, "telephony_shared.py")
+	if !strings.Contains(shared, "CALL_START_REQUIRED = frozenset((") {
+		t.Errorf("CALL_START_REQUIRED must be a set even when empty:\n%s", shared)
+	}
+	if strings.Contains(shared, "CALL_START_REQUIRED = {") {
+		t.Error("CALL_START_REQUIRED must not render as a dict literal ({} is a dict, breaks set difference)")
 	}
 }
 
