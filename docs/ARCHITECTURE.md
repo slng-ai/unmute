@@ -91,11 +91,68 @@ application combines the network endpoint and conversation runtime in one
 process; its `PipelineWorker` and `LLMWorker` values are in-process objects, not
 separate deployments.
 
-## LiveKit runtime
+## Worker, server, and telephony in plain terms
 
-LiveKit separates room infrastructure from agent execution. The generated
-`agent.py` process registers with a LiveKit Server and waits for dispatched
-jobs.
+Before the deep dive, here is the short version of the three moving parts and
+how they differ between the two code targets.
+
+### The worker
+
+The worker is the process that actually runs a conversation. It holds the
+speech-to-text, the language models, the voices, the tools, and the live audio
+for one call.
+
+- **LiveKit.** The worker is the generated `agent.py`, and it is its own
+  process. It starts up, registers with a LiveKit Server, and waits. When a call
+  arrives, the server hands it a job, the worker joins that room, and it runs the
+  conversation. Inside the code this process is a LiveKit `AgentServer` object.
+  The name is misleading: it is the worker side, not the media server.
+- **Pipecat.** There is no separate worker process. The generated `bot.py` is
+  one process that is both the entry point and the conversation runtime. Inside
+  it, a `PipelineWorker` owns the transport and speech-to-text, and each authored
+  agent is an `LLMWorker` with its own model and voice. Only one `LLMWorker` is
+  active at a time; a handoff just switches which one is active. These "workers"
+  are objects inside the single process, not separate deployments.
+
+### The server
+
+The server is the network front door. It accepts the caller, moves the audio,
+and decides which worker handles the call.
+
+- **LiveKit.** The server is a real, separate service: the LiveKit Server (plus
+  LiveKit SIP for phone calls). It owns rooms, participants, signaling, media
+  routing, and job dispatch. You scale it separately from the workers.
+- **Pipecat.** There is no separate server. The same `bot.py` process is its own
+  front door: it accepts the browser WebRTC connection, or the carrier
+  WebSocket, and then runs the pipeline for that call.
+
+The one-line difference: **LiveKit splits server and worker into two services;
+Pipecat combines them into one process.**
+
+### Telephony
+
+Telephony adds a phone bridge in front of whatever already exists, and adds
+Redis for coordination.
+
+- **LiveKit.** A LiveKit SIP service turns the carrier call into a normal
+  LiveKit participant. After that the flow is the same as a browser call: the
+  server dispatches, the worker joins. LiveKit Server and LiveKit SIP share
+  Redis to coordinate. The worker itself does not touch Redis.
+- **Pipecat.** The same `bot.py` process gains a FastAPI front door for carrier
+  webhooks and the media WebSocket. Redis sits beside it and holds only small
+  control records (call correlation, idempotency, transfer state, admission
+  counters). The live audio and conversation stay in the process.
+
+Phone calls are not currently runnable in the public CLI (see [Telephony release
+boundary](#telephony-release-boundary)); the design below is what runs once a
+route is promoted.
+
+## LiveKit architecture
+
+LiveKit separates room infrastructure from agent execution. That split is the
+key to everything below.
+
+### Server and worker
 
 ```text
 Browser
@@ -107,19 +164,46 @@ LiveKit Server <----> generated Agent worker
 LiveKit room
 ```
 
-The LiveKit Server owns rooms, participants, signaling, media routing, and job
-dispatch. The Agent worker accepts a job, joins the assigned room, and runs the
-`AgentSession` containing the authored agents, tasks, tools, and model calls.
+The **LiveKit Server** owns rooms, participants, signaling, media routing, and
+job dispatch. The generated **Agent worker** (`agent.py`) registers with the
+server and waits for a job. When it accepts one, it joins the assigned room and
+runs the `AgentSession` containing the authored agents, tasks, tools, and model
+calls.
 
-The generated code creates a LiveKit `AgentServer`. Despite its class name,
-this is the worker-side host for registration, jobs, draining, and health
-checks. It is not the separate `livekit-server` media service.
+The generated code creates a LiveKit `AgentServer`. Despite its class name, this
+is the worker-side host for registration, jobs, draining, and health checks. It
+is not the separate `livekit-server` media service.
 
-Authored agents also remain inside one dispatched session. An agent handoff
-changes the active LiveKit `Agent`; it does not dispatch the conversation to a
-different container.
+All authored agents live inside one dispatched session. An agent handoff changes
+the active LiveKit `Agent`; it does not dispatch the conversation to a different
+container.
 
-### LiveKit telephony
+### Local
+
+`unmute dev` recompiles the target and starts the smallest topology the chosen
+mode needs.
+
+| Mode | What runs |
+|---|---|
+| Console | `agent.py console` only. No LiveKit Server, no Redis. |
+| Browser | A local or configured LiveKit Server, a separate `agent.py dev` worker, and a local UI/token helper. |
+| Telephony | Agent, Redis, LiveKit Server, and LiveKit SIP together in Docker Compose. |
+
+In browser mode, `unmute dev` starts or reuses `livekit-server --dev` when no
+`LIVEKIT_URL` is configured. The browser joins that server directly, and the
+separate Agent worker joins the same room after dispatch.
+
+### Deployment
+
+Deployment runs the same `agent.py`, started with `python agent.py start`. The
+worker connects to LiveKit Cloud or a self-hosted LiveKit Server. Worker
+replicas and LiveKit Server replicas are separate scaling units, so you size
+them independently.
+
+A self-hosted phone route also needs LiveKit SIP, shared Redis, public SIP
+signaling, and public RTP ports.
+
+### Telephony
 
 LiveKit telephony adds a SIP bridge while preserving the server-worker split.
 
@@ -132,22 +216,29 @@ LiveKit SIP ----> LiveKit Server <----> Agent worker
       +------ Redis ----+
 ```
 
-LiveKit SIP turns the carrier call into a LiveKit participant. LiveKit Server
-places that participant in a room and dispatches the Agent worker. LiveKit
-Server and LiveKit SIP share Redis for distributed room state, routing, and
-service coordination. The generated Agent worker does not consume Redis.
+LiveKit SIP turns the carrier call into a LiveKit participant. From there the
+call behaves like any other: LiveKit Server places the participant in a room and
+dispatches the Agent worker. LiveKit Server and LiveKit SIP share Redis for
+distributed room state, routing, and service coordination. The generated Agent
+worker does not consume Redis.
 
-## Pipecat runtime
+Locally, Docker Compose runs all four services together (Agent, Redis, LiveKit
+Server, LiveKit SIP). `unmute dev --telephony` also creates the local trunk and
+dispatch records for you.
+
+## Pipecat architecture
 
 Pipecat's generated application owns both its transport endpoint and its
 conversation pipeline. There is no separate LiveKit-style room server in the
 generated topology.
 
+### One process
+
 ```text
 Browser or carrier
         |
         v
-Generated Pipecat application
+Generated Pipecat application (bot.py)
   |- network transport
   |- speech-to-text
   |- main PipelineWorker
@@ -158,16 +249,35 @@ Generated Pipecat application
 
 One main `PipelineWorker` owns the transport and speech-to-text path. Each
 authored agent becomes an `LLMWorker` with its own reasoning model and voice.
-Only one agent worker is active at a time, and a handoff activates another
-worker inside the same process. Tasks run as Pipecat Flows on the delegating
-agent; they do not create another deployment worker.
+Only one agent worker is active at a time, and a handoff activates another worker
+inside the same process. Tasks run as Pipecat Flows on the delegating agent;
+they do not create another deployment worker.
 
 For browser sessions, the Pipecat runner accepts the WebRTC connection and
 starts the conversation pipeline. For telephony, the generated FastAPI
 application accepts carrier webhooks and the media WebSocket, then starts the
 same pipeline for that call.
 
-### Pipecat telephony
+### Local
+
+| Mode | What runs |
+|---|---|
+| Console | `bot.py console` only. No network server, no Redis. |
+| Browser | The `bot.py` WebRTC runtime plus a local UI/reverse proxy. No Redis. |
+| Telephony | The Pipecat telephony application and Redis together in Docker Compose. |
+
+In browser mode, `bot.py` runs on the bot port and the local Unmute UI proxies
+its WebRTC API requests to that process. The proxy is development tooling, not
+part of the production artifact.
+
+### Deployment
+
+The non-telephony image starts `python bot.py` and can run on Pipecat Cloud or
+any infrastructure that can host the generated Python project. The telephony
+image starts the generated FastAPI application, which requires TLS ingress with
+long-lived WebSocket support and a shared Redis deployment.
+
+### Telephony
 
 Pipecat telephony adds Redis beside the generated application.
 
@@ -189,49 +299,24 @@ The active media stream, transcript, prompts, model context, task state, and
 agent handoffs remain in the application process. Redis cannot move or resume
 an active call on another replica.
 
-## Local runtime
+## Docker and Compose
 
-`unmute dev` recompiles the selected target and starts the smallest local
-topology needed by the chosen mode.
+Docker appears in two places: the image the compiler emits, and the local
+telephony stacks.
 
-| Mode | LiveKit | Pipecat |
-|---|---|---|
-| Console | `agent.py console`; no LiveKit Server or Redis. | `bot.py console`; no network server or Redis. |
-| Browser | Local or configured LiveKit Server, separate `agent.py dev` worker, and a local UI/token helper. | `bot.py` WebRTC runtime and a local UI/reverse proxy; no Redis. |
-| Telephony | Agent, Redis, LiveKit Server, and LiveKit SIP in Compose. | Pipecat telephony application and Redis in Compose. |
+- **Emitted image.** Every code target gets a `Dockerfile`. The same image runs
+  locally and in production; only the startup command and the environment
+  change.
+- **Local telephony Compose.** `unmute dev --telephony` runs a route-derived
+  Docker Compose graph. Pipecat gets its application plus Redis. LiveKit SIP also
+  gets LiveKit Server and LiveKit SIP. These files use pinned image versions,
+  health checks, local credentials where needed, and a named Redis volume so a
+  normal stop and restart keeps local state. They are development topologies,
+  not production recipes.
 
-LiveKit browser mode starts or reuses `livekit-server --dev` when no explicit
-`LIVEKIT_URL` is configured. The browser joins that server directly, and the
-separate Agent worker joins the same room after dispatch.
-
-Pipecat browser mode runs `bot.py` on the bot port. The local Unmute UI proxies
-its WebRTC API requests to that process. The proxy is development tooling, not
-part of the production artifact.
-
-The telephony Compose files are development topologies. They use pinned images,
-health checks, local credentials where needed, and a named Redis volume. They
-are not production deployment recipes.
-
-## Deployed runtime
-
-Deployment runs the same generated application code with production startup
-modes and infrastructure.
-
-For LiveKit, the generated image starts `python agent.py start`. The worker
-connects to LiveKit Cloud or a self-hosted LiveKit Server. Worker replicas and
-LiveKit Server replicas are separate scaling units. A self-hosted SIP route
-also requires LiveKit SIP, shared Redis, public SIP signaling, and public RTP
-ports.
-
-For Pipecat, the non-telephony image starts `python bot.py` and can run on
-Pipecat Cloud or infrastructure that can host the generated Python project.
-The telephony image starts the generated FastAPI application. Production must
-provide TLS ingress with long-lived WebSocket support and a shared Redis
-deployment.
-
-The compiler emits Dockerfiles and target-native deployment metadata, but it
-does not provision production networking, Redis, carrier resources, secrets,
-or replica management.
+The compiler emits Dockerfiles and target-native deployment metadata. It does
+not provision production networking, Redis, carrier resources, secrets, or
+replica management. Those stay with the operator.
 
 ## Redis boundary
 
@@ -242,6 +327,9 @@ by target.
 |---|---|---|
 | LiveKit SIP | LiveKit Server and LiveKit SIP | Distributed room state, routing, and SIP coordination. |
 | Pipecat telephony | Generated telephony application | Call correlation, idempotency, transfer locks, and admission. |
+
+The pinned image is Valkey, an open-source server that speaks the Redis
+protocol. The service name and `REDIS_URL` keep the Redis name for familiarity.
 
 Redis never stores credentials, raw webhook bodies, audio, transcripts,
 prompts, model context, task state, or agent-handoff state. Normal console and
