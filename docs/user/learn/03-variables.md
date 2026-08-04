@@ -18,7 +18,7 @@ Each variable has:
 
 ## Use them in prompts and greetings
 
-A variable is written `{{name}}`, with no spaces inside the braces. Anywhere a prompt or a greeting line can reference one, it is substituted at runtime:
+A variable is written `{{name}}`, with no spaces inside the braces. This is the authoring syntax for referencing one from a prompt or a greeting line:
 
 ```markdown
 Use `get_invoice` to look up invoices for customer `{{customer_id}}`.
@@ -32,6 +32,8 @@ conversation:
     speaks_first: agent
     text: "Hi {{customer_name}}, you have reached Acme Support."
 ```
+
+> **Substitution into text is not implemented yet.** Both examples above compile, but the braces are copied into the generated project as literal characters, so the model reads `{{customer_id}}` and the greeting says "Hi {{customer_name}}". Variables are real and useful today as call state, which is the rest of this page. Do not depend on them appearing inside prompt or greeting text yet.
 
 ## How a variable gets set
 

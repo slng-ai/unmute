@@ -42,4 +42,6 @@ route metadata before the greeting; variable names never imply a source.
 - **At call start**, for `source: call_start` variables.
 - **During the call**, through a task delegate's `assign`, which maps a task's typed result field into a variable. See [controls](controls.md) and [tasks](tasks.md).
 
-Reference a variable in prompts and greeting text with `{{name}}` (no spaces inside the braces).
+The authoring syntax for referencing a variable in text is `{{name}}`, with no spaces inside the braces.
+
+> **Substitution into text is not implemented yet.** A `{{name}}` written in a prompt, a greeting, or a task prompt is copied into the generated project as literal characters, braces included, so the model reads `{{name}}` rather than the value. Variables work today as typed call state: they are set at call start or by a task's `assign`, and your controls and tasks read them. Treat `{{name}}` in text as reserved authoring syntax until substitution ships.

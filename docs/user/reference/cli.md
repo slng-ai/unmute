@@ -170,10 +170,10 @@ trunk IDs, are rejected in LiveKit SIP dev mode rather than silently ignored.
 
 When a package declares several carrier routes, each one is a separate target
 and a separate generated Compose project. The package and
-schema can hold any number of supported routes. Today each telephony target
-fails closed; after promotion, `compile` can select several targets or all of
-them, while `dev --telephony` runs one exact route at a time. Pass its instance
-name, such as `--target pipecat_twilio` or `--target livekit_plivo`.
+schema can hold any number of supported routes. `compile` can select several
+targets or all of them, while `dev --telephony` runs one exact route at a time.
+Pass its instance name, such as `--target pipecat_twilio` or
+`--target livekit_plivo`.
 
 - Web (default) and telephony modes require **Docker** with the Compose plugin.
   Console mode requires `uv` on your `PATH` (see

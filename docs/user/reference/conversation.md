@@ -35,7 +35,7 @@ Required: yes, if the greeting block is present. Values: `agent | user`. Default
 
 ## greeting.text
 
-The exact opening line, spoken word for word every call. May reference `{{variables}}` known at call start.
+The exact opening line, spoken word for word every call. May contain `{{variables}}` known at call start, but substitution into text is not implemented yet: the braces are spoken as written. See [variables](variables.md).
 
 Required: no. Values: text. Default: none. Targets: all four, core. (Native on Vapi and Deepgram; generated on LiveKit and Pipecat.)
 

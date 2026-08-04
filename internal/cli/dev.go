@@ -79,9 +79,12 @@ func newDevCmd() *cobra.Command {
 	return cmd
 }
 
-// runDevTelephony is the fail-closed gate: loading and generation reject
-// every provisional or gated route before any tunnel, Docker, or carrier
-// call (SPEC V5). The post-gate orchestration lives in execDevTelephony.
+// runDevTelephony is the pre-flight gate: loading and generation reject a
+// gated route, one with no generated adapter, before any tunnel, Docker, or
+// carrier call (SPEC V5). A provisional route has a real adapter and runs
+// here; its status is maturity tracking only and validation ignores it
+// (internal/ir/validate.go, the Provisional case of the telephony evidence
+// switch). The post-gate orchestration lives in execDevTelephony.
 func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort, to string, verbose bool) error {
 	agent, targets, err := loadPackage(root, []string{targetName})
 	if err != nil {

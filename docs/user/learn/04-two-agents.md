@@ -70,6 +70,8 @@ short sentences.
 - Explain charges calmly, one item at a time.
 ```
 
+> `{{customer_id}}` is the authoring syntax, but **substitution into prompt text is not implemented yet**: the braces reach the generated project as literal characters, so the model reads `{{customer_id}}` rather than the value. See [03. Variables](03-variables.md).
+
 Two housekeeping notes: additional agents keep their prompts in an `agents/` folder, and the new `get_invoice` tool is added the same way as [lookup_customer](02-add-a-tool.md) (its own file, listed in the top-level `tools:` manifest and in billing's `tools:` list).
 
 ## Reading the transfer control

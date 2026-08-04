@@ -2,7 +2,7 @@
 
 Consumes the core: [compiler.md](compiler.md). Schema truth: [SCHEMA.md](../SCHEMA.md). LiveKit facts: SCHEMA.md conditions ⁰ + ORCHESTRATOR footnote ⁰. SCHEMA.md wins on disagreement.
 
-Type: **code target**. Emits a LiveKit Agents project on disk (`Artifact.Files`). No generator today. SDK language matters: `sdk_language: python` is required for warm transfer and MCP.
+Type: **code target**. Emits a LiveKit Agents project on disk (`Artifact.Files`). The generator lives in `internal/generate/livekit_v1.go` and renders embedded `templates/livekit_v1/*.tmpl` files from the v1 IR. SDK language matters: `sdk_language: python` is required for warm transfer and MCP.
 
 ## §G goal
 Lower a validated `ir.Agent` + a `livekit` target instance into a runnable LiveKit Agents project: entrypoint (worker/session), agents as `Agent`s with handoff, tasks as `AgentTask`, task groups as `TaskGroup` or a standalone-`AgentTask` sequence, controls, tools, conversation, dependency/deploy files, compile report. The session resolves `listen`/`speak`/`reason` through the provider catalogue (`internal/target/catalog_livekit.go`): SLNG (`livekit-plugins-slng`) is the scaffold default, and any catalogued per-vendor plugin binds when the user picks it; a reason vendor without a native entry falls to LiveKit Inference, turn detection lowers to Inference with the version from the `turn:` binding, VAD to Silero, optional input noise cancellation to ai-coustics (C8, V17–V19). The `unmute init` example for LiveKit is an invented handoff + task-group agent bound to SLNG, so a first generation is a real SLNG agent, not a random plugin pick (V11, V12).

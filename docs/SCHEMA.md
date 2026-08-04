@@ -305,7 +305,7 @@ Outcomes, not provider knobs. All lifecycle fields are gated per target.
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
 | `greeting.speaks_first` | yes, if block present | `agent \| user` | `agent` core, `user` warn | `user` means the agent stays silent until the caller talks. Native on Vapi (`firstMessageMode: assistant-waits-for-user`), verified 2026-07-15. Generated on LiveKit and Pipecat: no opening is emitted. **Warns on Deepgram**: behavior of an omitted `agent.greeting` is undocumented; the driver smoke test must prove silence. |
-| `greeting.text` | no | text | core | Exact opening line, spoken word for word, every call. Verified 2026-07-15: Vapi `firstMessage`, Deepgram `agent.greeting`. Generated on LiveKit and Pipecat. May reference `{{variables}}` available at call start. |
+| `greeting.text` | no | text | core | Exact opening line, spoken word for word, every call. Verified 2026-07-15: Vapi `firstMessage`, Deepgram `agent.greeting`. Generated on LiveKit and Pipecat. May contain `{{variables}}` available at call start, but no driver substitutes them yet: the text is emitted as an inert literal, braces included (authoring syntax reserved, feature not implemented). |
 | `interruption.enabled` | yes, if block present | bool | core | |
 | `interruption.minimum_words` | no | int | warn | Lossy on Deepgram (model halts first): warns. |
 | `interruption.ignore_phrases` | no | list of text | warn | Native on Vapi. Generated on LiveKit and Pipecat. Dropped with a warning on Deepgram. |

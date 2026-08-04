@@ -59,7 +59,10 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 				fmt.Fprintln(cmd.OutOrStdout(), "generated", filepath.Join(outDir, file.Path))
 			}
 		case generate.ManagedTarget:
-			fmt.Fprintf(cmd.OutOrStdout(), "%s: managed target — run `unmute apply %s --target %s`\n", resolved.Name, dir, resolved.Name)
+			// Generation succeeded: a managed artifact is an Apply plan for the
+			// provider's API, never files on disk. No command consumes that plan
+			// yet, so compile reports the outcome instead of naming one.
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: managed target, no files to write; unmute cannot publish a %s payload yet\n", resolved.Name, resolved.Provider)
 		}
 		printContract(cmd.OutOrStdout(), resolved.Name, artifact.Notes)
 		printTelephonyPlan(cmd.OutOrStdout(), resolved.Name, artifact.Telephony)

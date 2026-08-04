@@ -5,10 +5,11 @@ to progressively stronger orchestration. Compare them to see when one large
 prompt stops being enough and independent tasks, task groups, or agent handoffs
 help.
 
-Each package contains the same five deterministic local Python tools for
-customer lookup and creation, availability, booking, and cancellation. The
-tools use no network or durable storage; they are fixtures for local LiveKit
-and Pipecat runs.
+The four workflow packages contain the same five deterministic local Python
+tools for customer lookup and creation, availability, booking, and
+cancellation. The tools use no network or durable storage; they are fixtures
+for local LiveKit and Pipecat runs. `telephony-hello` ships no local tools; it
+exists only to prove a phone route end to end.
 
 | Package | Structure | Responsibility split |
 |---|---|---|
@@ -17,17 +18,6 @@ and Pipecat runs.
 | [`task-groups`](task-groups/) | One agent and three ordered tasks | Shared context moves through customer identification, slot selection, and finalization. |
 | [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |
 | [`telephony-hello`](telephony-hello/) | A minimal inbound and outbound phone agent | Real Twilio calls on a laptop over both routes (Pipecat carrier-websocket and the LiveKit Twilio connector), driven by one `.env`. The smallest way to confirm your Twilio setup before wiring a real agent. |
-
-## Test the tools
-
-Run the shared behavior and drift check directly with Python:
-
-```sh
-python3 examples/test_tools.py
-```
-
-The check executes every handler in every package, including invalid input and
-not-found cases. The default Go suite still needs zero Python.
 
 ## Compile an example
 

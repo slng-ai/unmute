@@ -119,8 +119,10 @@ local dev server for development, so agent work never touches real traffic.
 
 The SIP route adds LiveKit SIP next to the server. It shares the server's
 Redis and needs public SIP signaling and RTP ports; an HTTPS tunnel is not
-enough. [TELEPHONY.md](TELEPHONY.md) owns the details, and the route is
-fail-closed until promoted.
+enough. [TELEPHONY.md](TELEPHONY.md) owns the details. The route runs today:
+`validate`, `compile`, and `dev --telephony` all accept it. Its provisional
+status is internal maturity tracking, recorded in `compile-report.json` and
+never a block.
 
 ## Pipecat: what to run
 
@@ -166,8 +168,9 @@ port 7860. Production must provide:
 - A stop grace period at least as long as the maximum call: on SIGTERM the
   application refuses new calls and drains active ones.
 
-This route is fail-closed until promoted; [TELEPHONY.md](TELEPHONY.md) has the
-full requirements, credentials, and security rules.
+This route runs today; its provisional status is internal maturity tracking,
+not a block. [TELEPHONY.md](TELEPHONY.md) has the full requirements,
+credentials, and security rules.
 
 ### Scaling Pipecat
 
@@ -221,9 +224,16 @@ Pipecat, browser sessions:
 3. STUN/TURN plan for cross-network media (see the known gap above).
 4. Scale and drain by active sessions.
 
-Telephony, either target: blocked on route promotion. Prepare against
-[TELEPHONY.md](TELEPHONY.md) but expect `validate` and `compile` to reject the
-route today.
+Telephony, either target:
+
+1. Declare a route with a generated adapter: any Pipecat carrier WebSocket
+   route, the LiveKit Twilio connector, or any LiveKit SIP route. Only Exotel,
+   which has no adapter, is rejected by `validate` and `compile`.
+2. Follow [TELEPHONY.md](TELEPHONY.md) for credentials, networking, and the
+   security rules.
+3. Confirm the exact route on real calls yourself before production. Every
+   route is still provisional, which means it has an adapter but no
+   credentialed end-to-end smoke test in CI.
 
 ## Sources
 
