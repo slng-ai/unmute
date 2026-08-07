@@ -120,7 +120,10 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		if !ok {
 			return nil, missing(pkg, "agent.yaml", "instructions", raw.Instructions)
 		}
-		out.Agents[name] = AgentDef{Instructions: instructions, Model: raw.Model, Voice: raw.Voice, Tools: raw.Tools}
+		out.Agents[name] = AgentDef{
+			Instructions: instructions, Model: raw.Model, Voice: raw.Voice, Tools: raw.Tools,
+			InstructionsFile: raw.Instructions,
+		}
 	}
 
 	for _, name := range sortedKeys(pkg.Agent.Tasks) {
@@ -148,7 +151,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		}
 		out.Tasks[name] = Task{
 			Instructions: instructions, Tools: raw.Tools, Model: raw.Model, Result: result,
-			Context: buildTaskContext(raw.Context),
+			Context: buildTaskContext(raw.Context), InstructionsFile: raw.Instructions,
 		}
 	}
 

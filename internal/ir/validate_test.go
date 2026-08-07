@@ -659,6 +659,175 @@ func TestValidatePipecatMaturityGates(t *testing.T) { // driver-pipecat T1, C9
 	}
 }
 
+// Substitution is not implemented, so prompt text reaches Python as an inert
+// literal. An undeclared or malformed {{placeholder}} is a hard error and a
+// declared one is a warning; both are target-independent, so every row carries
+// them.
+func TestValidatePlaceholdersInPromptText(t *testing.T) {
+	tests := []struct {
+		name        string
+		place       func(*Agent, string)
+		text        string
+		wantError   string
+		wantWarning string
+	}{
+		{
+			name:      "undeclared name in agent instructions",
+			place:     placeBillingInstructions,
+			text:      "Look up invoices for {{custmer_id}}.",
+			wantError: `agent "billing" instructions (agents/billing.md): {{custmer_id}} is not a declared variable`,
+		},
+		{
+			name:      "undeclared name in a task prompt",
+			place:     placeTaskInstructions,
+			text:      "Confirm the booking for {{guest_name}}.",
+			wantError: `task "collect" instructions: {{guest_name}} is not a declared variable`,
+		},
+		{
+			name:      "undeclared name in the greeting",
+			place:     placeGreetingText,
+			text:      "Hi {{custmer_id}}, you have reached Acme Support.",
+			wantError: `conversation greeting (agent.yaml): {{custmer_id}} is not a declared variable`,
+		},
+		{
+			name:        "declared name warns and still passes",
+			place:       placeBillingInstructions,
+			text:        "Look up invoices for {{customer_id}}.",
+			wantWarning: `agent "billing" instructions (agents/billing.md): {{customer_id}} is not substituted yet, so the text is spoken literally`,
+		},
+		{
+			// docs/user/reference/variables.md and docs/user/learn/03-variables.md
+			// both fix the syntax as {{name}} with no spaces inside the braces, so
+			// a padded name is not a reference even when the name is declared.
+			name:      "spaces inside the braces are rejected",
+			place:     placeGreetingText,
+			text:      "Hi {{ customer_id }}, you have reached Acme Support.",
+			wantError: `conversation greeting (agent.yaml): "{{ customer_id }}" has whitespace inside the braces; write {{customer_id}}`,
+		},
+		{
+			name:      "a newline inside the braces is rejected",
+			place:     placeBillingInstructions,
+			text:      "Look up invoices for {{\ncustomer_id\n}}.",
+			wantError: `agent "billing" instructions (agents/billing.md): "{{\ncustomer_id\n}}" has whitespace inside the braces; write {{customer_id}}`,
+		},
+		{
+			name:      "a padded undeclared name is rejected for its spacing first",
+			place:     placeBillingInstructions,
+			text:      "Look up invoices for {{ custmer_id }}.",
+			wantError: `agent "billing" instructions (agents/billing.md): "{{ custmer_id }}" has whitespace inside the braces; write {{custmer_id}}`,
+		},
+		{
+			name:  "text with no placeholders is silent",
+			place: placeBillingInstructions,
+			text:  "Explain charges calmly, one item at a time.",
+		},
+		{
+			name:      "empty braces are malformed",
+			place:     placeGreetingText,
+			text:      "Hi {{ }}, you have reached Acme Support.",
+			wantError: `conversation greeting (agent.yaml): malformed placeholder "{{ }}"; the accepted shape is {{name}}`,
+		},
+		{
+			name:      "a dotted path is malformed",
+			place:     placeBillingInstructions,
+			text:      "Look up invoices for {{customer.id}}.",
+			wantError: `agent "billing" instructions (agents/billing.md): malformed placeholder "{{customer.id}}"; the accepted shape is {{name}}`,
+		},
+		{
+			name:  "an unclosed brace pair is not a placeholder",
+			place: placeBillingInstructions,
+			text:  "Quote the {{ opening braces verbatim to the caller.",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			agent := safeAgent(t)
+			clearPromptText(agent)
+			test.place(agent, test.text)
+
+			report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+			row := report.PerTarget[0]
+			errors := strings.Join(row.Errors, "\n")
+			warnings := strings.Join(row.Warnings, "\n")
+
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("want pass, got err=%v errors=%q", err, errors)
+				}
+			} else {
+				if err == nil {
+					t.Fatalf("want error %q, got pass", test.wantError)
+				}
+				if !strings.Contains(errors, test.wantError) {
+					t.Errorf("errors = %q, want %q", errors, test.wantError)
+				}
+			}
+			if test.wantWarning == "" {
+				if strings.Contains(warnings, "placeholder") || strings.Contains(warnings, "spoken literally") {
+					t.Errorf("unexpected placeholder warning: %q", warnings)
+				}
+			} else if !strings.Contains(warnings, test.wantWarning) {
+				t.Errorf("warnings = %q, want %q", warnings, test.wantWarning)
+			}
+		})
+	}
+}
+
+// A hand-built agent has no markdown path, so the message degrades to the owner
+// alone rather than naming a file that does not exist.
+func TestValidatePlaceholderLocationFallsBackWithoutAFile(t *testing.T) {
+	agent := safeAgent(t)
+	clearPromptText(agent)
+	def := agent.Agents["billing"]
+	def.Instructions, def.InstructionsFile = "Look up invoices for {{custmer_id}}.", ""
+	agent.Agents["billing"] = def
+
+	report, _ := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	errors := strings.Join(report.PerTarget[0].Errors, "\n")
+	if !strings.Contains(errors, `agent "billing" instructions: {{custmer_id}} is not a declared variable`) {
+		t.Fatalf("errors = %q", errors)
+	}
+	if strings.Contains(errors, "()") {
+		t.Errorf("empty file rendered as parentheses: %q", errors)
+	}
+}
+
+// clearPromptText blanks every authored prompt so one case controls exactly one
+// text. safe_core's own billing prompt already carries {{customer_id}}.
+func clearPromptText(agent *Agent) {
+	for name, def := range agent.Agents {
+		def.Instructions = "No placeholders here."
+		agent.Agents[name] = def
+	}
+	for name, task := range agent.Tasks {
+		task.Instructions = "No placeholders here."
+		agent.Tasks[name] = task
+	}
+	if agent.Conversation != nil && agent.Conversation.Greeting != nil {
+		agent.Conversation.Greeting.Text = "Hi, you have reached Acme Support."
+	}
+}
+
+func placeBillingInstructions(agent *Agent, text string) {
+	def := agent.Agents["billing"]
+	def.Instructions = text
+	agent.Agents["billing"] = def
+}
+
+func placeGreetingText(agent *Agent, text string) {
+	agent.Conversation.Greeting.Text = text
+}
+
+func placeTaskInstructions(agent *Agent, text string) {
+	agent.Tasks["collect"] = Task{
+		Instructions: text, Result: map[string]ResultField{"done": {Type: PrimitiveBoolean}},
+		Context: TaskContext{History: HistoryFull},
+	}
+	agent.TaskGroups["collect_then_return"] = TaskGroup{
+		Steps: []string{"collect"}, ContextScope: ContextShared, Then: GroupReturn, Merge: GroupMergeResults,
+	}
+}
+
 func safeAgent(t *testing.T) *Agent {
 	t.Helper()
 	agent, err := Build(loadSafeCore(t))

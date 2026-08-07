@@ -109,6 +109,11 @@ type AgentDef struct {
 	Model        string   `json:"model" yaml:"model"`
 	Voice        string   `json:"voice" yaml:"voice"`
 	Tools        []string `json:"tools,omitempty" yaml:"tools,omitempty"`
+	// InstructionsFile is the package-relative markdown path Instructions was
+	// read from. Provenance only, so a validation message can name the file the
+	// author has to open; it is not part of the resolved contract, so it stays
+	// out of the derived schema and out of compile-report.json.
+	InstructionsFile string `json:"-" yaml:"-"`
 }
 
 type Task struct {
@@ -117,6 +122,8 @@ type Task struct {
 	Model        string                 `json:"model,omitempty" yaml:"model,omitempty"`
 	Result       map[string]ResultField `json:"result" yaml:"result"`
 	Context      TaskContext            `json:"context" yaml:"context"`
+	// InstructionsFile carries the same provenance as AgentDef.InstructionsFile.
+	InstructionsFile string `json:"-" yaml:"-"`
 }
 
 type ResultField struct {

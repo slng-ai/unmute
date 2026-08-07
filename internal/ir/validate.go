@@ -14,6 +14,27 @@ import (
 var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var languagePattern = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`)
 
+// placeholderPattern finds anything shaped like a placeholder in authored text:
+// two open braces, a run of non-brace characters, two close braces. It is
+// deliberately loose so a broken placeholder is caught rather than skipped.
+// A lone `{{` with no closing pair is not a placeholder and stays silent.
+var placeholderPattern = regexp.MustCompile(`\{\{([^{}]*)\}\}`)
+
+// placeholderNamePattern is the ONLY shape accepted between the braces: a bare
+// variable name with no padding. A name is a letter or underscore followed by
+// letters, digits, or underscores, matching the variable keys in agent.yaml.
+// Nothing else is a placeholder: no spaces, no dots, no filters, no defaults,
+// no expressions. docs/user/reference/variables.md and
+// docs/user/learn/03-variables.md both fix the contract as `{{name}}` with no
+// spaces inside the braces, so `{{ name }}` is not a reference and would still
+// be spoken literally after substitution ships.
+var placeholderNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// placeholderPaddedNamePattern catches the near miss worth its own message: a
+// valid name padded with whitespace. Still an error, but the author gets told
+// exactly what to delete instead of a generic "malformed".
+var placeholderPaddedNamePattern = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s*$`)
+
 type ValidateReport struct {
 	PerTarget         []TargetValidation
 	ForwardedBindings []ForwardedBinding
@@ -56,12 +77,18 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	if len(targets) == 0 {
 		return ValidateReport{}, fmt.Errorf("validate: no targets selected")
 	}
-	global := validateStructure(agent)
+	global, globalWarnings := validateStructure(agent)
 	global = append(global, validateConfiguredTargets(agent, caps)...)
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
 	failed := 0
 	for _, resolved := range targets {
-		row := TargetValidation{Name: resolved.Name, Provider: resolved.Provider, Errors: append([]string(nil), global...)}
+		// Structural findings are target-independent, so every row carries them;
+		// warnings ride along the same way errors already do.
+		row := TargetValidation{
+			Name: resolved.Name, Provider: resolved.Provider,
+			Errors:   append([]string(nil), global...),
+			Warnings: append([]string(nil), globalWarnings...),
+		}
 		validateTarget(agent, resolved, caps, &row)
 		report.ForwardedBindings = append(report.ForwardedBindings, forwardedBindings(resolved)...)
 		report.Sizing = append(report.Sizing, sizing(agent, resolved)...)
@@ -204,8 +231,10 @@ func validateConfiguredTargets(agent *Agent, caps targetcap.Table) []string {
 	return errors
 }
 
-func validateStructure(agent *Agent) []string {
-	var errors []string
+// validateStructure checks the target-independent shape of the resolved agent.
+// It returns errors and warnings separately; the caller copies both onto every
+// target row, because neither depends on which target is selected.
+func validateStructure(agent *Agent) (errors, warnings []string) {
 	if agent.Version != 1 {
 		errors = add(errors, "version must be 1")
 	}
@@ -433,7 +462,88 @@ func validateStructure(agent *Agent) []string {
 			errors = add(errors, "conversation.interruption.enabled is required")
 		}
 	}
-	return errors
+	placeholderErrors, placeholderWarnings := validatePlaceholders(agent)
+	errors = append(errors, placeholderErrors...)
+	warnings = append(warnings, placeholderWarnings...)
+	return errors, warnings
+}
+
+// promptText is one piece of authored text plus where the author has to go to
+// fix it. File is empty when the agent was assembled in code rather than loaded
+// from a package.
+type promptText struct {
+	owner string
+	file  string
+	text  string
+}
+
+func (p promptText) location() string {
+	if p.file == "" {
+		return p.owner
+	}
+	return fmt.Sprintf("%s (%s)", p.owner, p.file)
+}
+
+// promptTexts lists every authored text that reaches a prompt, in a stable
+// order. Tool instructions, human-transfer briefings, and control `when` text
+// are not scanned yet.
+func promptTexts(agent *Agent) []promptText {
+	var sources []promptText
+	for _, name := range sortedKeys(agent.Agents) {
+		def := agent.Agents[name]
+		sources = append(sources, promptText{
+			owner: fmt.Sprintf("agent %q instructions", name),
+			file:  def.InstructionsFile, text: def.Instructions,
+		})
+	}
+	for _, name := range sortedKeys(agent.Tasks) {
+		task := agent.Tasks[name]
+		sources = append(sources, promptText{
+			owner: fmt.Sprintf("task %q instructions", name),
+			file:  task.InstructionsFile, text: task.Instructions,
+		})
+	}
+	if agent.Conversation != nil && agent.Conversation.Greeting != nil {
+		sources = append(sources, promptText{
+			owner: "conversation greeting", file: "agent.yaml",
+			text: agent.Conversation.Greeting.Text,
+		})
+	}
+	return sources
+}
+
+// validatePlaceholders checks every {{placeholder}} in authored prompt text.
+// Substitution is not implemented: prompt text reaches the generated Python as
+// an inert literal, so {{name}} is spoken to the caller as those exact
+// characters, braces and all. Anything brace-shaped that is not a reference to
+// a declared variable can never become one, so it is a hard error; a correct
+// reference is a warning until substitution ships.
+func validatePlaceholders(agent *Agent) (errors, warnings []string) {
+	for _, source := range promptTexts(agent) {
+		for _, match := range placeholderPattern.FindAllStringSubmatch(source.text, -1) {
+			whole, inner := match[0], match[1]
+			switch {
+			case placeholderNamePattern.MatchString(inner):
+				if _, declared := agent.Variables[inner]; !declared {
+					errors = add(errors, fmt.Sprintf("%s: %s is not a declared variable",
+						source.location(), whole))
+					continue
+				}
+				warnings = add(warnings, fmt.Sprintf("%s: %s is not substituted yet, so the text is spoken literally",
+					source.location(), whole))
+			case placeholderPaddedNamePattern.MatchString(inner):
+				// %q because the padding can be a newline, which would otherwise
+				// split the message across lines.
+				name := placeholderPaddedNamePattern.FindStringSubmatch(inner)[1]
+				errors = add(errors, fmt.Sprintf("%s: %q has whitespace inside the braces; write {{%s}}",
+					source.location(), whole, name))
+			default:
+				errors = add(errors, fmt.Sprintf("%s: malformed placeholder %q; the accepted shape is {{name}}",
+					source.location(), whole))
+			}
+		}
+	}
+	return errors, warnings
 }
 
 func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *TargetValidation) {
