@@ -62,8 +62,10 @@ type FieldSpec struct {
 	Form     ModelForm // meaningful on Model only
 }
 
-// CallSpec is the constructor shape. Nil on managed-target rows (they forward
-// provider names into API bodies instead of emitting code).
+// CallSpec is the constructor shape. Nil on call-less rows: a row whose driver
+// injects no code, so the provider name is forwarded into an API body instead.
+// That is the whole Deepgram catalogue today, not a managed target — Vapi is
+// the only managed one (N17) and it has no catalogue file at all.
 type CallSpec struct {
 	Class     string
 	APIKeyArg string   // "" = the constructor takes no key argument
@@ -110,8 +112,8 @@ type Entry struct {
 	Install     InstallSpec
 	Import      string // full import line; "" = covered by the driver's core imports
 	Call        *CallSpec
-	// Managed rows have no Call; these fields retain binding arity for UIs and
-	// validation. Code rows derive the same facts from Call.
+	// Call-less rows have no Call; these fields retain binding arity for UIs and
+	// validation. Rows with a Call derive the same facts from it.
 	RequireModel bool
 	RequireVoice bool
 	// RequiresEndpoint gates wildcard rows: an unknown vendor is legal only as
@@ -262,8 +264,8 @@ func (c Catalog) Entries() []Entry { return c.entries }
 // one rulebook for vendor/endpoint slotting, shared by ir.Validate and the
 // drivers' resolution, so validate-green cannot disagree with generate.
 // Lenient by design: an empty vendor defers to the target's default, and a
-// (framework, role) with no entries at all is unrestricted (managed targets
-// forward any provider name; SCHEMA.md D10).
+// (framework, role) with no entries at all is unrestricted (a role with no
+// call-bearing row forwards any provider name; SCHEMA.md D10).
 func (c Catalog) CheckVendor(fw Provider, role Role, vendor string, hasEndpoint bool) error {
 	if vendor == "" {
 		return nil
