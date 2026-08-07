@@ -77,32 +77,45 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 }
 
 func forwardedBindings(resolved Target) []ForwardedBinding {
+	catalog := targetcap.DefaultCatalog()
+	provider := targetcap.Provider(resolved.Provider)
 	var result []ForwardedBinding
-	appendBinding := func(role, profile string, binding *Binding) {
+	appendBinding := func(role targetcap.Role, profile string, binding *Binding) {
 		if binding == nil {
 			return
 		}
-		params := make([]ForwardedParam, 0, len(binding.Params))
-		for _, name := range slices.Sorted(maps.Keys(binding.Params)) {
-			params = append(params, ForwardedParam{Name: name, Value: binding.Params[name]})
+		// Report the names actually sent, not the authored ones: a typed speed
+		// reaches rime as speed_alpha, and 6.2 rule 6 promises the report is where
+		// what was sent stays inspectable. Lowering can only fail on a package
+		// validation already rejected, so fall back to the authored map rather
+		// than hide the binding from a report the user is reading to debug.
+		shown := binding.Params
+		if lowered, err := catalog.LowerParams(provider, role, "", binding.Provider, binding.Params, binding.Generation); err == nil {
+			shown = lowered
+		}
+		reported := *binding
+		reported.Params = shown
+		params := make([]ForwardedParam, 0, len(shown))
+		for _, name := range slices.Sorted(maps.Keys(shown)) {
+			params = append(params, ForwardedParam{Name: name, Value: shown[name]})
 		}
 		result = append(result, ForwardedBinding{
-			Target: resolved.Name, Role: role, Profile: profile, Binding: *binding, Params: params,
+			Target: resolved.Name, Role: string(role), Profile: profile, Binding: reported, Params: params,
 		})
 	}
-	appendBinding("listen", "", resolved.Models.Listen)
+	appendBinding(targetcap.Listen, "", resolved.Models.Listen)
 	for _, fallback := range resolved.Models.ListenFallbacks {
 		binding := fallback.Binding
-		appendBinding("listen", fallback.Name, &binding)
+		appendBinding(targetcap.Listen, fallback.Name, &binding)
 	}
-	appendBinding("turn", "", resolved.Models.Turn)
+	appendBinding(targetcap.Turn, "", resolved.Models.Turn)
 	for _, name := range slices.Sorted(maps.Keys(resolved.Models.Speak)) {
 		binding := resolved.Models.Speak[name]
-		appendBinding("speak", name, &binding)
+		appendBinding(targetcap.Speak, name, &binding)
 	}
 	for _, name := range slices.Sorted(maps.Keys(resolved.Models.Reason)) {
 		binding := resolved.Models.Reason[name]
-		appendBinding("reason", name, &binding)
+		appendBinding(targetcap.Reason, name, &binding)
 	}
 	return result
 }
@@ -595,11 +608,20 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 	// validates green cannot fail provider selection at generate time.
 	// (Becomes a parameter when the providers.yaml overlay loader lands.)
 	catalog := targetcap.DefaultCatalog()
-	checkVendor := func(role targetcap.Role, binding *Binding) {
+	// One closure for both halves of the catalogue rulebook: vendor slotting, and
+	// the generation-param slotting LowerParams owns. Both are the exact calls the
+	// drivers make, so a binding that validates green cannot fail resolution at
+	// generate time. label names the binding ("speak.host") because add() dedupes
+	// identical strings, and without it three broken profiles on one vendor would
+	// collapse into a single error line.
+	checkVendor := func(role targetcap.Role, label string, binding *Binding) {
 		if binding == nil {
 			return
 		}
 		if err := catalog.CheckVendor(provider, role, binding.Provider, binding.EndpointEnv != ""); err != nil {
+			row.Errors = add(row.Errors, err.Error())
+		}
+		if _, err := catalog.LowerParams(provider, role, label, binding.Provider, binding.Params, binding.Generation); err != nil {
 			row.Errors = add(row.Errors, err.Error())
 		}
 	}
@@ -620,16 +642,16 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 		}
 	}
 	validateRoleBinding("listen", caps.Role(targetcap.Listen, provider), resolved.Models.Listen, row)
-	checkVendor(targetcap.Listen, resolved.Models.Listen)
+	checkVendor(targetcap.Listen, "listen", resolved.Models.Listen)
 	checkLanguageSlot(targetcap.Listen, "listen", resolved.Models.Listen)
 	for _, fallback := range resolved.Models.ListenFallbacks {
 		binding := fallback.Binding
 		validatePlacement("listen."+fallback.Name, &binding, row)
-		checkVendor(targetcap.Listen, &binding)
+		checkVendor(targetcap.Listen, "listen."+fallback.Name, &binding)
 		checkLanguageSlot(targetcap.Listen, "listen."+fallback.Name, &binding)
 	}
 	validateRoleBinding("turn", caps.Role(targetcap.Turn, provider), resolved.Models.Turn, row)
-	checkVendor(targetcap.Turn, resolved.Models.Turn)
+	checkVendor(targetcap.Turn, "turn", resolved.Models.Turn)
 
 	models, voices := usedProfiles(agent)
 	for _, name := range slices.Sorted(maps.Keys(voices)) {
@@ -642,7 +664,7 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 		if binding.EndpointEnv != "" {
 			applyCapability(caps, targetcap.FieldSpeakEndpoint, provider, row)
 		}
-		checkVendor(targetcap.Speak, &binding)
+		checkVendor(targetcap.Speak, "speak."+name, &binding)
 		checkLanguageSlot(targetcap.Speak, "speak."+name, &binding)
 		checkSpeakRequiredFields(catalog, provider, name, binding, row)
 	}
@@ -653,7 +675,7 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 			continue
 		}
 		validatePlacement("reason."+name, &binding, row)
-		checkVendor(targetcap.Reason, &binding)
+		checkVendor(targetcap.Reason, "reason."+name, &binding)
 	}
 }
 

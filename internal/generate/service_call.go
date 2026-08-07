@@ -30,10 +30,7 @@ type ServiceCall struct {
 func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap.Role,
 	binding ir.Binding, envRef func(string) string, env *envSet, extraSettings ...pyKV) (ServiceCall, targetcap.Entry, error) {
 
-	vendor := binding.Provider
-	if vendor == "" {
-		vendor = "openai" // the schema's OpenAI-compatible default spelling
-	}
+	vendor := targetcap.DefaultVendor(binding.Provider) // the schema's OpenAI-compatible default spelling
 	// Same rulebook as ir.Validate (Catalog.CheckVendor): vendor known,
 	// wildcard-needs-endpoint, endpoint-has-a-slot.
 	if err := cat.CheckVendor(fw, role, vendor, binding.EndpointEnv != ""); err != nil {
@@ -44,6 +41,13 @@ func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap
 		return ServiceCall{}, entry, fmt.Errorf("%s %s binding provider %q has no slot; no providers are catalogued for this role", fw, role, vendor)
 	}
 	spec := entry.Call
+	// The other half of that rulebook (Catalog.LowerParams): a typed generation
+	// field takes the entry's own kwarg name and fails without a slot, while the
+	// author's own params keys forward untouched.
+	params, err := cat.LowerParams(fw, role, "", vendor, binding.Params, binding.Generation)
+	if err != nil {
+		return ServiceCall{}, entry, err
+	}
 
 	call := ServiceCall{Class: spec.Class}
 	flat := func(kv pyKV) { call.Args = append(call.Args, kv) }
@@ -93,7 +97,7 @@ func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap
 		}
 		// A target-specific param is an explicit integration override; avoid
 		// emitting the same Python kwarg twice.
-		if _, overridden := binding.Params[spec.Language.Arg]; !overridden {
+		if _, overridden := params[spec.Language.Arg]; !overridden {
 			nested(pyKV{Key: spec.Language.Arg, Value: pyQuote(binding.Language)})
 		}
 	}
@@ -102,11 +106,11 @@ func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap
 	}
 	switch spec.Params {
 	case targetcap.ParamsExtraKwargs:
-		if len(binding.Params) > 0 {
-			flat(pyKV{Key: "extra_kwargs", Value: pyLiteral(binding.Params)})
+		if len(params) > 0 {
+			flat(pyKV{Key: "extra_kwargs", Value: pyLiteral(params)})
 		}
 	default: // kwargs and settings: one kwarg per param, sorted
-		for _, kv := range forwardParams(binding.Params) {
+		for _, kv := range forwardParams(params) {
 			nested(kv)
 		}
 	}

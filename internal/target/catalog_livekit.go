@@ -9,6 +9,13 @@ package target
 //
 // SLNG stays the init-scaffold default (driver-livekit V12); since the C8
 // amendment it is the default, not the only route — any entry here binds.
+//
+// Generation-param slots (Temperature/TopP/TopK/Speed) verified 2026-08-07 by
+// reading each plugin's constructor signature in the livekit/agents source
+// (livekit-plugins-<name>/.../tts.py and llm.py), and the slng rows against the
+// published livekit-plugins-slng 1.6.8 package — note the pin below floors at
+// 1.6.1, so a 1.6.x between the two is unverified. A missing slot is a checked
+// fact, not an omission: see the note on each such entry.
 
 var livekitCatalog = []Entry{
 	// --- listen ---------------------------------------------------------
@@ -139,6 +146,7 @@ var livekitCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model", Required: true},
 			Voice:    FieldSpec{Arg: "voice"},
 			Language: FieldSpec{Arg: "language"},
+			Speed:    FieldSpec{Arg: "speed"},
 			Params:   ParamsKwargs,
 		},
 		Notes: []string{"the route passes to model= verbatim — the slng/ prefix names the SLNG-hosted route family and is part of the URL path (driver-livekit C8/V17, B4)"},
@@ -156,8 +164,11 @@ var livekitCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice_id", Required: true},
 			Language: FieldSpec{Arg: "language"},
-			Params:   ParamsKwargs,
+			// No Speed slot: the plugin's speed lives on the nested
+			// VoiceSettings dataclass, not on the TTS constructor.
+			Params: ParamsKwargs,
 		},
+		Notes: []string{"no speed kwarg on the constructor: speed is a field of the nested VoiceSettings"},
 	},
 	{
 		Framework: LiveKit, Role: Speak, Vendor: "cartesia",
@@ -169,6 +180,7 @@ var livekitCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice", Required: true},
 			Language: FieldSpec{Arg: "language"},
+			Speed:    FieldSpec{Arg: "speed"}, // flat kwarg here, unlike the Pipecat service
 			Params:   ParamsKwargs,
 		},
 	},
@@ -182,9 +194,13 @@ var livekitCatalog = []Entry{
 			Class: "deepgram.TTS", APIKeyArg: "api_key", APIKeyEnv: "DEEPGRAM_API_KEY",
 			Model:      FieldSpec{Arg: "model", Required: true},
 			NoLanguage: true, // voice and language both ride the aura model id (aura-2-andromeda-en)
-			Params:     ParamsKwargs,
+			// No Speed slot: Aura exposes no rate control.
+			Params: ParamsKwargs,
 		},
-		Notes: []string{"no voice or language kwarg: both ride the aura model id (a bound voice is a hard error)"},
+		Notes: []string{
+			"no voice or language kwarg: both ride the aura model id (a bound voice is a hard error)",
+			"no speed kwarg: Aura exposes no rate control",
+		},
 	},
 	{
 		Framework: LiveKit, Role: Speak, Vendor: "inworld",
@@ -196,8 +212,10 @@ var livekitCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice", Required: true},
 			Language: FieldSpec{Arg: "language"},
+			Speed:    FieldSpec{Arg: "speaking_rate"},
 			Params:   ParamsKwargs,
 		},
+		Notes: []string{"speed lowers to speaking_rate (per-entry fact, F3/F4)"},
 	},
 	{
 		Framework: LiveKit, Role: Speak, Vendor: "rime",
@@ -209,9 +227,10 @@ var livekitCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "speaker", Required: true},
 			Language: FieldSpec{Arg: "lang"},
+			Speed:    FieldSpec{Arg: "speed_alpha"}, // snake_case here; the Pipecat service spells it speedAlpha
 			Params:   ParamsKwargs,
 		},
-		Notes: []string{"voice kwarg is speaker, language kwarg is lang (per-entry facts, F3/F4)"},
+		Notes: []string{"voice kwarg is speaker, language kwarg is lang, speed kwarg is speed_alpha (per-entry facts, F3/F4)"},
 	},
 	{
 		Framework: LiveKit, Role: Speak, Vendor: "gemini",
@@ -223,9 +242,15 @@ var livekitCatalog = []Entry{
 			Model:      FieldSpec{Arg: "model"},
 			Voice:      FieldSpec{Arg: "voice_name", Required: true},
 			NoLanguage: true, // Gemini TTS voices are multilingual; no language kwarg exists
-			Params:     ParamsKwargs,
+			// No Speed slot: the constructor takes instructions, not a rate;
+			// pacing is steered in prose. (The separate google.TTS Cloud service
+			// does have speaking_rate, but this entry is the Gemini one.)
+			Params: ParamsKwargs,
 		},
-		Notes: []string{"beta namespace constructor (google.beta.GeminiTTS); rides the google plugin extra"},
+		Notes: []string{
+			"beta namespace constructor (google.beta.GeminiTTS); rides the google plugin extra",
+			"no speed kwarg: pacing is steered through instructions",
+		},
 	},
 	{
 		Framework: LiveKit, Role: Speak, Vendor: "gradium",
@@ -237,8 +262,10 @@ var livekitCatalog = []Entry{
 			Model:      FieldSpec{Arg: "model_name"},
 			Voice:      FieldSpec{Arg: "voice_id", Required: true},
 			NoLanguage: true, // no language kwarg on the TTS constructor
-			Params:     ParamsKwargs,
+			// No Speed slot either: the constructor exposes no rate control.
+			Params: ParamsKwargs,
 		},
+		Notes: []string{"no language or speed kwarg on the TTS constructor"},
 	},
 	{
 		Framework: LiveKit, Role: Speak, Vendor: "sarvam",
@@ -250,9 +277,10 @@ var livekitCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "speaker", Required: true},
 			Language: FieldSpec{Arg: "target_language_code"},
+			Speed:    FieldSpec{Arg: "pace"},
 			Params:   ParamsKwargs,
 		},
-		Notes: []string{"voice kwarg is speaker, language kwarg is target_language_code (per-entry facts, F3/F4)"},
+		Notes: []string{"voice kwarg is speaker, language kwarg is target_language_code, speed kwarg is pace (per-entry facts, F3/F4)"},
 	},
 	{
 		Framework: LiveKit, Role: Speak, Vendor: "soniox",
@@ -264,6 +292,7 @@ var livekitCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice", Required: true},
 			Language: FieldSpec{Arg: "language"},
+			Speed:    FieldSpec{Arg: "speed"},
 			Params:   ParamsKwargs,
 		},
 	},
@@ -281,9 +310,11 @@ var livekitCatalog = []Entry{
 		Import:  "from livekit.plugins import openai",
 		Call: &CallSpec{
 			Class: "openai.LLM", APIKeyArg: "api_key", APIKeyEnv: "OPENAI_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "base_url"},
-			Params:   ParamsKwargs,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Endpoint:    FieldSpec{Arg: "base_url"},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			Params:      ParamsKwargs,
 		},
 		Notes: []string{"native plugin, not LiveKit Inference — a console run needs OPENAI_API_KEY only (B6); route through Inference deliberately with provider: livekit"},
 	},
@@ -294,10 +325,15 @@ var livekitCatalog = []Entry{
 		Import:  "from livekit.plugins import anthropic",
 		Call: &CallSpec{
 			Class: "anthropic.LLM", APIKeyArg: "api_key", APIKeyEnv: "ANTHROPIC_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "base_url"},
-			Params:   ParamsKwargs,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Endpoint:    FieldSpec{Arg: "base_url"},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopK:        FieldSpec{Arg: "top_k"},
+			// No TopP slot: the constructor takes top_k, not top_p. The reverse
+			// of every other LiveKit LLM plugin here.
+			Params: ParamsKwargs,
 		},
+		Notes: []string{"the only LiveKit LLM plugin with top_k and no top_p kwarg"},
 	},
 	{
 		Framework: LiveKit, Role: Reason, Vendor: "aws",
@@ -305,10 +341,12 @@ var livekitCatalog = []Entry{
 		Install: InstallSpec{Extra: "aws"},
 		Import:  "from livekit.plugins import aws",
 		Call: &CallSpec{
-			Class:     "aws.LLM",
-			ExtraEnvs: []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}, // boto3 default chain; no key kwarg emitted
-			Model:     FieldSpec{Arg: "model", Required: true},
-			Params:    ParamsKwargs,
+			Class:       "aws.LLM",
+			ExtraEnvs:   []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}, // boto3 default chain; no key kwarg emitted
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			Params:      ParamsKwargs,
 		},
 		Notes: []string{"Bedrock via the AWS SDK credential chain; region defaults to us-east-1 (override with a region param or AWS_REGION)"},
 	},
@@ -319,9 +357,11 @@ var livekitCatalog = []Entry{
 		Import:  "from livekit.plugins import groq",
 		Call: &CallSpec{
 			Class: "groq.LLM", APIKeyArg: "api_key", APIKeyEnv: "GROQ_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "base_url"},
-			Params:   ParamsKwargs,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Endpoint:    FieldSpec{Arg: "base_url"},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			Params:      ParamsKwargs,
 		},
 	},
 	{
@@ -331,8 +371,10 @@ var livekitCatalog = []Entry{
 		Import:  "from livekit.plugins import mistralai",
 		Call: &CallSpec{
 			Class: "mistralai.LLM", APIKeyArg: "api_key", APIKeyEnv: "MISTRAL_API_KEY",
-			Model:  FieldSpec{Arg: "model", Required: true},
-			Params: ParamsKwargs,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			Params:      ParamsKwargs,
 		},
 		Notes: []string{"the plugin module is mistralai; mistral is accepted as an alias (matches the pipecat spelling)"},
 	},
@@ -343,9 +385,11 @@ var livekitCatalog = []Entry{
 		Import:  "from livekit.plugins import openai",
 		Call: &CallSpec{
 			Class: "openai.LLM.with_openrouter", APIKeyArg: "api_key", APIKeyEnv: "OPENROUTER_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "base_url"},
-			Params:   ParamsKwargs,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Endpoint:    FieldSpec{Arg: "base_url"},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			Params:      ParamsKwargs,
 		},
 		Notes: []string{"classmethod constructor on the openai plugin (openai.LLM.with_openrouter)"},
 	},
@@ -356,9 +400,11 @@ var livekitCatalog = []Entry{
 		Import:  "from livekit.plugins import sarvam",
 		Call: &CallSpec{
 			Class: "sarvam.LLM", APIKeyArg: "api_key", APIKeyEnv: "SARVAM_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "base_url"},
-			Params:   ParamsKwargs,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Endpoint:    FieldSpec{Arg: "base_url"},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			Params:      ParamsKwargs,
 		},
 	},
 	{
@@ -368,9 +414,11 @@ var livekitCatalog = []Entry{
 		Import:  "from livekit.plugins import openai",
 		Call: &CallSpec{
 			Class: "openai.LLM.with_azure", APIKeyArg: "api_key", APIKeyEnv: "AZURE_OPENAI_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "azure_endpoint"},
-			Params:   ParamsKwargs,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Endpoint:    FieldSpec{Arg: "azure_endpoint"},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			Params:      ParamsKwargs,
 		},
 		Notes: []string{"set the deployment endpoint via endpoint_env (azure_endpoint) or AZURE_OPENAI_ENDPOINT; api_version via params when required"},
 	},
@@ -380,9 +428,13 @@ var livekitCatalog = []Entry{
 		Install: InstallSpec{}, // LiveKit Inference ships with livekit-agents
 		Import:  "",            // inference is in the driver's core import block
 		Call: &CallSpec{
-			Class:  "inference.LLM",
-			Model:  FieldSpec{Arg: "model", Required: true, Form: FormProviderSlashModel},
-			Params: ParamsExtraKwargs,
+			Class: "inference.LLM",
+			Model: FieldSpec{Arg: "model", Required: true, Form: FormProviderSlashModel},
+			// Slots here are keys of the extra_kwargs dict, typed upstream as
+			// ChatCompletionOptions: it carries temperature and top_p, no top_k.
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			Params:      ParamsExtraKwargs,
 		},
 		Notes: []string{"LiveKit Inference: managed models, billed through LiveKit Cloud, no provider key — needs LIVEKIT_API_KEY/LIVEKIT_API_SECRET even in console mode; provider: livekit passes the model verbatim (V19)"},
 	},

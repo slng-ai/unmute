@@ -3,6 +3,7 @@ package target
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -77,7 +78,18 @@ type CallSpec struct {
 	// decision, never a silent fallthrough. Exactly one of Language/NoLanguage.
 	NoLanguage bool
 	Endpoint   FieldSpec // zero = endpoint_env is rejected for this entry
-	Params     ParamsStyle
+	// Generation params: the four knobs Unmute owns (SCHEMA.md 4.3), folded
+	// into a binding's params by ir.Build. An author-supplied params key still
+	// forwards verbatim and unvalidated (D10), but these four are Unmute
+	// vocabulary, so each entry states whether its class has a slot and what
+	// the vendor calls it (rime speed_alpha, sarvam pace). A zero FieldSpec
+	// means no slot and a set value is rejected (SCHEMA.md 6.2 rule 5, N19),
+	// never emitted as a kwarg the constructor does not accept.
+	Temperature FieldSpec
+	TopP        FieldSpec
+	TopK        FieldSpec
+	Speed       FieldSpec
+	Params      ParamsStyle
 	// SettingsArg/SettingsClass override the nested-args wrapper for
 	// ParamsSettings entries. Defaults: "settings" and Class+".Settings"
 	// (the Pipecat official-service shape). Soniox on LiveKit nests in
@@ -274,6 +286,119 @@ func (c Catalog) CheckVendor(fw Provider, role Role, vendor string, hasEndpoint 
 
 func (c Catalog) hasWildcard(fw Provider, role Role) bool {
 	_, ok := c.Lookup(fw, role, "*")
+	return ok
+}
+
+// GenerationParams are the param names Unmute owns: ir.Build folds the typed
+// generation fields of a model definition into the binding's params under
+// exactly these keys. Every other key is an author-supplied provider setting
+// and forwards verbatim (D10). Keep in sync with ir.foldParams.
+var GenerationParams = []string{"speed", "temperature", "top_k", "top_p"}
+
+// DefaultVendor resolves an unset binding provider to the schema's
+// OpenAI-compatible default spelling. Shared so validation and driver
+// resolution normalise a binding identically.
+func DefaultVendor(vendor string) string {
+	if vendor == "" {
+		return "openai"
+	}
+	return vendor
+}
+
+// paramSlot returns the constructor argument this entry uses for one of the
+// GenerationParams, and false when the name is not one Unmute owns. Nil-safe:
+// call-less rows are the majority of the Deepgram catalogue.
+func (s *CallSpec) paramSlot(name string) (FieldSpec, bool) {
+	if s == nil {
+		return FieldSpec{}, false
+	}
+	switch name {
+	case "speed":
+		return s.Speed, true
+	case "temperature":
+		return s.Temperature, true
+	case "top_k":
+		return s.TopK, true
+	case "top_p":
+		return s.TopP, true
+	default:
+		return FieldSpec{}, false
+	}
+}
+
+// ParamSlots returns the generation params this entry declares a slot for,
+// keyed by Unmute's name and valued by the vendor's kwarg. For listings and the
+// catalogue golden; resolution itself goes through LowerParams.
+func (s *CallSpec) ParamSlots() map[string]string {
+	out := map[string]string{}
+	for _, name := range GenerationParams {
+		if slot, _ := s.paramSlot(name); slot.Arg != "" {
+			out[name] = slot.Arg
+		}
+	}
+	return out
+}
+
+// LowerParams is the one rulebook for generation-param slotting, shared by
+// ir.Validate and the drivers' resolution, so a binding that validates green
+// cannot fail param lowering at generate time.
+//
+// It splits a binding's params by provenance (ir.Binding.Generation). A key the
+// compiler wrote from a typed generation field lowers through the entry's own
+// kwarg and fails when the entry has no slot: the value has nowhere to go
+// (SCHEMA.md 6.2 rule 5, N19), and emitting it anyway is Python that raises
+// TypeError on the first call. A key the author wrote in params is forwarded
+// verbatim and never checked, even when it happens to share one of our names —
+// that is the single exception D2 carves out, and narrowing it here would take
+// away the escape hatch the same error message points at.
+//
+// label names the binding in errors ("speak.host"); empty means use the role.
+//
+// Lenient the same way CheckVendor is: a (framework, role) with no entries, or a
+// call-less row, forwards everything. See SCHEMA.md N19's scope note for why that
+// permanently excludes Vapi and Deepgram, and what covering them would need.
+func (c Catalog) LowerParams(fw Provider, role Role, label, vendor string, params, generation map[string]any) (map[string]any, error) {
+	if len(params) == 0 {
+		return params, nil
+	}
+	if label == "" {
+		label = string(role)
+	}
+	vendor = DefaultVendor(vendor)
+	entry, ok := c.Lookup(fw, role, vendor)
+	if !ok || entry.Call == nil {
+		return params, nil
+	}
+	out := make(map[string]any, len(params))
+	var problems []string // every bad param, so fixing them is not a rerun loop
+	for _, name := range slices.Sorted(maps.Keys(params)) {
+		slot, owned := entry.Call.paramSlot(name)
+		if _, typed := generation[name]; !owned || !typed {
+			out[name] = params[name] // author's own key: forwarded as-is (D2)
+			continue
+		}
+		switch {
+		case slot.Arg == "":
+			problems = append(problems, fmt.Sprintf(
+				"%s has no slot here (drop it, or set the vendor's own key in params, which is forwarded as-is)", name))
+		case slot.Arg != name && hasKey(params, slot.Arg):
+			// Two spellings of one knob. Unlike params.language shadowing a typed
+			// language (N16), the author cannot see this collision — only we know
+			// these are the same setting — so it fails rather than picking a winner.
+			problems = append(problems, fmt.Sprintf(
+				"%s lowers to %s here, which params already sets (keep one)", name, slot.Arg))
+		default:
+			out[slot.Arg] = params[name]
+		}
+	}
+	if len(problems) > 0 {
+		return nil, fmt.Errorf("%s %s binding provider %q: %s", fw, label, vendor, strings.Join(problems, "; "))
+	}
+	return out, nil
+}
+
+func hasKey(params map[string]any, key string) bool {
+	_, ok := params[key]
 	return ok
 }
 

@@ -93,12 +93,14 @@ env:      SPEECHMATICS_API_KEY
 binding:  provider="*" as acme model=model-1
 class:    inference.LLM
 args:     model="acme/model-1", extra_kwargs={"sample_rate": 24000}
+gen:      temperature=temperature, top_p=top_p
 install:  ships with the framework
 
 === livekit reason anthropic ===
 binding:  provider=anthropic model=model-1
 class:    anthropic.LLM
 args:     api_key=os.environ["ANTHROPIC_API_KEY"], model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_k=top_k
 import:   from livekit.plugins import anthropic
 install:  livekit-agents[anthropic]
 env:      ANTHROPIC_API_KEY
@@ -107,6 +109,7 @@ env:      ANTHROPIC_API_KEY
 binding:  provider=aws model=model-1
 class:    aws.LLM
 args:     model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_p=top_p
 import:   from livekit.plugins import aws
 install:  livekit-agents[aws]
 env:      AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
@@ -115,6 +118,7 @@ env:      AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 binding:  provider=azure model=model-1
 class:    openai.LLM.with_azure
 args:     api_key=os.environ["AZURE_OPENAI_API_KEY"], model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_p=top_p
 import:   from livekit.plugins import openai
 install:  livekit-agents[openai]
 env:      AZURE_OPENAI_API_KEY
@@ -123,6 +127,7 @@ env:      AZURE_OPENAI_API_KEY
 binding:  provider=groq model=model-1
 class:    groq.LLM
 args:     api_key=os.environ["GROQ_API_KEY"], model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_p=top_p
 import:   from livekit.plugins import groq
 install:  livekit-agents[groq]
 env:      GROQ_API_KEY
@@ -131,6 +136,7 @@ env:      GROQ_API_KEY
 binding:  provider=mistralai model=model-1
 class:    mistralai.LLM
 args:     api_key=os.environ["MISTRAL_API_KEY"], model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_p=top_p
 import:   from livekit.plugins import mistralai
 install:  livekit-agents[mistralai]
 env:      MISTRAL_API_KEY
@@ -139,6 +145,7 @@ env:      MISTRAL_API_KEY
 binding:  provider=openai model=model-1
 class:    openai.LLM
 args:     api_key=os.environ["OPENAI_API_KEY"], model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_p=top_p
 import:   from livekit.plugins import openai
 install:  livekit-agents[openai]
 env:      OPENAI_API_KEY
@@ -147,6 +154,7 @@ env:      OPENAI_API_KEY
 binding:  provider=openrouter model=model-1
 class:    openai.LLM.with_openrouter
 args:     api_key=os.environ["OPENROUTER_API_KEY"], model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_p=top_p
 import:   from livekit.plugins import openai
 install:  livekit-agents[openai]
 env:      OPENROUTER_API_KEY
@@ -155,6 +163,7 @@ env:      OPENROUTER_API_KEY
 binding:  provider=sarvam model=model-1
 class:    sarvam.LLM
 args:     api_key=os.environ["SARVAM_API_KEY"], model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_p=top_p
 import:   from livekit.plugins import sarvam
 install:  livekit-agents[sarvam]
 env:      SARVAM_API_KEY
@@ -163,6 +172,7 @@ env:      SARVAM_API_KEY
 binding:  provider=cartesia model=model-1 voice=voice-1
 class:    cartesia.TTS
 args:     api_key=os.environ["CARTESIA_API_KEY"], voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+gen:      speed=speed
 import:   from livekit.plugins import cartesia
 install:  livekit-agents[cartesia]
 env:      CARTESIA_API_KEY
@@ -203,6 +213,7 @@ env:      GRADIUM_API_KEY
 binding:  provider=inworld model=model-1 voice=voice-1
 class:    inworld.TTS
 args:     api_key=os.environ["INWORLD_API_KEY"], voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+gen:      speed=speaking_rate
 import:   from livekit.plugins import inworld
 install:  livekit-agents[inworld]
 env:      INWORLD_API_KEY
@@ -211,6 +222,7 @@ env:      INWORLD_API_KEY
 binding:  provider=rime model=model-1 voice=voice-1
 class:    rime.TTS
 args:     api_key=os.environ["RIME_API_KEY"], speaker="voice-1", model="model-1", lang="es-MX", sample_rate=24000
+gen:      speed=speed_alpha
 import:   from livekit.plugins import rime
 install:  livekit-agents[rime]
 env:      RIME_API_KEY
@@ -219,6 +231,7 @@ env:      RIME_API_KEY
 binding:  provider=sarvam model=model-1 voice=voice-1
 class:    sarvam.TTS
 args:     api_key=os.environ["SARVAM_API_KEY"], speaker="voice-1", model="model-1", target_language_code="es-MX", sample_rate=24000
+gen:      speed=pace
 import:   from livekit.plugins import sarvam
 install:  livekit-agents[sarvam]
 env:      SARVAM_API_KEY
@@ -227,6 +240,7 @@ env:      SARVAM_API_KEY
 binding:  provider=slng model=slng/deepgram/aura:2-en voice=voice-1
 class:    slng.TTS
 args:     api_key=os.environ["SLNG_API_KEY"], voice="voice-1", model="slng/deepgram/aura:2-en", language="es-MX", sample_rate=24000
+gen:      speed=speed
 import:   from livekit.plugins import slng
 install:  livekit-plugins-slng>=1.6.1
 env:      SLNG_API_KEY
@@ -235,6 +249,7 @@ env:      SLNG_API_KEY
 binding:  provider=soniox model=model-1 voice=voice-1
 class:    soniox.TTS
 args:     api_key=os.environ["SONIOX_API_KEY"], voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+gen:      speed=speed
 import:   from livekit.plugins import soniox
 install:  livekit-agents[soniox]
 env:      SONIOX_API_KEY
@@ -333,6 +348,7 @@ binding:  provider="*" as acme model=model-1 endpoint_env=ACME_BASE_URL
 class:    OpenAILLMService
 args:     api_key=os.environ["ACME_API_KEY"], base_url=os.environ["ACME_BASE_URL"]
 settings: model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_k=top_k, top_p=top_p
 import:   from pipecat.services.openai.llm import OpenAILLMService
 install:  pipecat-ai[openai]
 env:      ACME_API_KEY, ACME_BASE_URL
@@ -342,6 +358,7 @@ binding:  provider=anthropic model=model-1
 class:    AnthropicLLMService
 args:     api_key=os.environ["ANTHROPIC_API_KEY"]
 settings: model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_k=top_k, top_p=top_p
 import:   from pipecat.services.anthropic.llm import AnthropicLLMService
 install:  pipecat-ai[anthropic]
 env:      ANTHROPIC_API_KEY
@@ -351,6 +368,7 @@ binding:  provider=deepseek model=model-1
 class:    DeepSeekLLMService
 args:     api_key=os.environ["DEEPSEEK_API_KEY"]
 settings: model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_k=top_k, top_p=top_p
 import:   from pipecat.services.deepseek.llm import DeepSeekLLMService
 install:  pipecat-ai[deepseek]
 env:      DEEPSEEK_API_KEY
@@ -360,6 +378,7 @@ binding:  provider=google model=model-1
 class:    GoogleLLMService
 args:     api_key=os.environ["GOOGLE_API_KEY"]
 settings: model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_k=top_k, top_p=top_p
 import:   from pipecat.services.google.llm import GoogleLLMService
 install:  pipecat-ai[google]
 env:      GOOGLE_API_KEY
@@ -369,6 +388,7 @@ binding:  provider=groq model=model-1
 class:    GroqLLMService
 args:     api_key=os.environ["GROQ_API_KEY"]
 settings: model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_k=top_k, top_p=top_p
 import:   from pipecat.services.groq.llm import GroqLLMService
 install:  pipecat-ai[groq]
 env:      GROQ_API_KEY
@@ -378,6 +398,7 @@ binding:  provider=mistral model=model-1
 class:    MistralLLMService
 args:     api_key=os.environ["MISTRAL_API_KEY"]
 settings: model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_k=top_k, top_p=top_p
 import:   from pipecat.services.mistral.llm import MistralLLMService
 install:  pipecat-ai[mistral]
 env:      MISTRAL_API_KEY
@@ -387,6 +408,7 @@ binding:  provider=openai model=model-1
 class:    OpenAILLMService
 args:     api_key=os.environ["OPENAI_API_KEY"]
 settings: model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_k=top_k, top_p=top_p
 import:   from pipecat.services.openai.llm import OpenAILLMService
 install:  pipecat-ai[openai]
 env:      OPENAI_API_KEY
@@ -396,6 +418,7 @@ binding:  provider=openrouter model=model-1
 class:    OpenRouterLLMService
 args:     api_key=os.environ["OPENROUTER_API_KEY"]
 settings: model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_k=top_k, top_p=top_p
 import:   from pipecat.services.openrouter.llm import OpenRouterLLMService
 install:  pipecat-ai[openrouter]
 env:      OPENROUTER_API_KEY
@@ -405,6 +428,7 @@ binding:  provider=qwen model=model-1
 class:    QwenLLMService
 args:     api_key=os.environ["QWEN_API_KEY"]
 settings: model="model-1", sample_rate=24000
+gen:      temperature=temperature, top_k=top_k, top_p=top_p
 import:   from pipecat.services.qwen.llm import QwenLLMService
 install:  pipecat-ai[qwen]
 env:      QWEN_API_KEY
@@ -414,6 +438,7 @@ binding:  provider="*" as acme model=model-1 voice=voice-1 endpoint_env=ACME_BAS
 class:    OpenAITTSService
 args:     api_key=os.environ["ACME_API_KEY"], base_url=os.environ["ACME_BASE_URL"]
 settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+gen:      speed=speed
 import:   from pipecat.services.openai.tts import OpenAITTSService
 install:  pipecat-ai[openai]
 env:      ACME_API_KEY, ACME_BASE_URL
@@ -441,6 +466,7 @@ binding:  provider=elevenlabs model=model-1 voice=voice-1
 class:    ElevenLabsTTSService
 args:     api_key=os.environ["ELEVENLABS_API_KEY"]
 settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+gen:      speed=speed
 import:   from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 install:  pipecat-ai[elevenlabs]
 env:      ELEVENLABS_API_KEY
@@ -459,6 +485,7 @@ binding:  provider=inworld model=model-1 voice=voice-1
 class:    InworldTTSService
 args:     api_key=os.environ["INWORLD_API_KEY"]
 settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+gen:      speed=speaking_rate
 import:   from pipecat.services.inworld.tts import InworldTTSService
 install:  pipecat-ai[inworld]
 env:      INWORLD_API_KEY
@@ -468,6 +495,7 @@ binding:  provider=openai model=model-1 voice=voice-1
 class:    OpenAITTSService
 args:     api_key=os.environ["OPENAI_API_KEY"]
 settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+gen:      speed=speed
 import:   from pipecat.services.openai.tts import OpenAITTSService
 install:  pipecat-ai[openai]
 env:      OPENAI_API_KEY
@@ -477,6 +505,7 @@ binding:  provider=rime model=model-1 voice=voice-1
 class:    RimeTTSService
 args:     api_key=os.environ["RIME_API_KEY"]
 settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+gen:      speed=speedAlpha
 import:   from pipecat.services.rime.tts import RimeTTSService
 install:  pipecat-ai[rime]
 env:      RIME_API_KEY
@@ -486,6 +515,7 @@ binding:  provider=sarvam model=model-1 voice=voice-1
 class:    SarvamTTSService
 args:     api_key=os.environ["SARVAM_API_KEY"]
 settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+gen:      speed=pace
 import:   from pipecat.services.sarvam.tts import SarvamTTSService
 install:  pipecat-ai[sarvam]
 env:      SARVAM_API_KEY
@@ -494,6 +524,7 @@ env:      SARVAM_API_KEY
 binding:  provider=slng model=slng/deepgram/aura:2-en voice=voice-1
 class:    SlngTTSService
 args:     api_key=os.environ["SLNG_API_KEY"], voice="voice-1", model="slng/deepgram/aura:2-en", language="es-MX", sample_rate=24000
+gen:      speed=speed
 import:   from pipecat_slng import SlngTTSService
 install:  pipecat-slng>=0.4.0
 env:      SLNG_API_KEY
@@ -503,6 +534,7 @@ binding:  provider=soniox model=model-1 voice=voice-1
 class:    SonioxTTSService
 args:     api_key=os.environ["SONIOX_API_KEY"]
 settings: voice="voice-1", model="model-1", language="es-MX", sample_rate=24000
+gen:      speed=speed
 import:   from pipecat.services.soniox.tts import SonioxTTSService
 install:  pipecat-ai[soniox]
 env:      SONIOX_API_KEY

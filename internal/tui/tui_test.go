@@ -544,11 +544,15 @@ func TestRunSelectTarget(t *testing.T) {
 func TestRunEditModels(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// Create, name, Models, Speak, edit model/voice/config rows, Back, Create, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n2\n3\n1\n1\n2\n1\n3\nsonic-3\n4\nvoice-id\n6\n{\"speed\":1}\n7\n5\n7\n\n"), &bytes.Buffer{}, true)
+	// The params blob stays off Unmute's own generation names: those lower through
+	// the entry's declared slot, and Cartesia's speed nests in GenerationConfig,
+	// so params: {"speed": ...} is a slot error here (N19). pronunciation_dict_id
+	// is a real top-level Cartesia Settings field and forwards verbatim.
+	got, err := Run(strings.NewReader("1\nagent\n2\n3\n1\n1\n2\n1\n3\nsonic-3\n4\nvoice-id\n6\n{\"pronunciation_dict_id\":\"dict-1\"}\n7\n5\n7\n\n"), &bytes.Buffer{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Agent.Data.Speak != (scaffold.Binding{Provider: "cartesia", Model: "sonic-3", Voice: "voice-id", Params: `{"speed":1}`}) {
+	if got.Agent.Data.Speak != (scaffold.Binding{Provider: "cartesia", Model: "sonic-3", Voice: "voice-id", Params: `{"pronunciation_dict_id":"dict-1"}`}) {
 		t.Fatalf("speak binding = %#v", got.Agent.Data.Speak)
 	}
 }

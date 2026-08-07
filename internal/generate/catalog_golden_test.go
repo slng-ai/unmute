@@ -67,6 +67,11 @@ func TestCatalogResolutionGolden(t *testing.T) {
 		if len(call.SettingsArgs) > 0 {
 			fmt.Fprintf(&out, "settings: %s\n", joinKVs(call.SettingsArgs))
 		}
+		// Declared generation-param slots (N19), so changing one shows up in a
+		// reviewable diff rather than only in a behaviour change.
+		if slots := generationSlots(entry); slots != "" {
+			fmt.Fprintf(&out, "gen:      %s\n", slots)
+		}
 		if entry.Import != "" {
 			fmt.Fprintf(&out, "import:   %s\n", entry.Import)
 		}
@@ -132,6 +137,84 @@ func TestLanguageLoweringUsesCataloguedSlot(t *testing.T) {
 	}
 }
 
+// TestGenerationParamLoweringUsesCataloguedSlot is the generate half of N19:
+// resolveService lowers a generation param through the entry's own kwarg and
+// refuses one with no slot, using the same Catalog.LowerParams that ir.Validate
+// calls. A green validate therefore cannot fail here.
+func TestGenerationParamLoweringUsesCataloguedSlot(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		framework targetcap.Provider
+		role      targetcap.Role
+		binding   ir.Binding
+		wantKV    pyKV   // expected emitted kwarg
+		wantErr   string // substring; set instead of wantKV
+	}{
+		{
+			name: "pipecat renames speed", framework: targetcap.Pipecat, role: targetcap.Speak,
+			binding: typedBinding(ir.Binding{Provider: "rime", Model: "mistv2", Voice: "cove"}, map[string]any{"speed": 1.2}),
+			wantKV:  pyKV{Key: "speedAlpha", Value: "1.2"},
+		},
+		{
+			name: "livekit renames speed", framework: targetcap.LiveKit, role: targetcap.Speak,
+			binding: typedBinding(ir.Binding{Provider: "rime", Model: "mistv2", Voice: "cove"}, map[string]any{"speed": 1.2}),
+			wantKV:  pyKV{Key: "speed_alpha", Value: "1.2"},
+		},
+		{
+			name: "temperature keeps its name", framework: targetcap.Pipecat, role: targetcap.Reason,
+			binding: typedBinding(ir.Binding{Provider: "openai", Model: "gpt-4o-mini"}, map[string]any{"temperature": 0.4}),
+			wantKV:  pyKV{Key: "temperature", Value: "0.4"},
+		},
+		{
+			// The author's own key keeps its spelling even where a typed field
+			// would have been renamed: params is forwarded verbatim (D2).
+			name: "author speed is emitted as written", framework: targetcap.Pipecat, role: targetcap.Speak,
+			binding: ir.Binding{Provider: "rime", Model: "mistv2", Voice: "cove", Params: map[string]any{"speed": 0.9}},
+			wantKV:  pyKV{Key: "speed", Value: "0.9"},
+		},
+		{
+			name: "typed field with no slot is an error", framework: targetcap.Pipecat, role: targetcap.Speak,
+			binding: typedBinding(ir.Binding{Provider: "cartesia", Model: "sonic-3", Voice: "voice-1"}, map[string]any{"speed": 1.1}),
+			wantErr: "speed has no slot here",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			envRef := pipecatEnvRef
+			if tc.framework == targetcap.LiveKit {
+				envRef = livekitEnvRef
+			}
+			call, _, err := resolveService(defaultCatalog, tc.framework, tc.role, tc.binding, envRef, newEnvSet())
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("want error containing %q, got %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, kv := range append(call.Args, call.SettingsArgs...) {
+				if kv.Key == tc.wantKV.Key {
+					if kv.Value != tc.wantKV.Value {
+						t.Fatalf("%s = %s, want %s", kv.Key, kv.Value, tc.wantKV.Value)
+					}
+					return
+				}
+			}
+			t.Fatalf("no %q kwarg emitted; args=%s settings=%s", tc.wantKV.Key, joinKVs(call.Args), joinKVs(call.SettingsArgs))
+		})
+	}
+}
+
+// typedBinding puts params on a binding as if Build had folded them from the
+// typed generation fields, which is what makes them slot-checked rather than
+// forwarded verbatim.
+func typedBinding(binding ir.Binding, params map[string]any) ir.Binding {
+	binding.Params = params
+	binding.Generation = params
+	return binding
+}
+
 // sampleBinding synthesizes the minimal binding that exercises an entry:
 // slng models keep the route form to show the prefix transform, wildcards get
 // an unlisted vendor (plus an endpoint where required).
@@ -167,6 +250,20 @@ func describeBinding(binding ir.Binding) string {
 		s += " endpoint_env=" + binding.EndpointEnv
 	}
 	return s
+}
+
+// generationSlots renders an entry's declared generation-param slots as
+// "unmute name -> vendor kwarg" pairs, empty when it declares none.
+// GenerationParams is already sorted, so iterating it needs no second sort.
+func generationSlots(entry targetcap.Entry) string {
+	slots := entry.Call.ParamSlots()
+	var parts []string
+	for _, name := range targetcap.GenerationParams {
+		if arg, ok := slots[name]; ok {
+			parts = append(parts, name+"="+arg)
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func joinKVs(kvs []pyKV) string {

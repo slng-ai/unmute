@@ -67,7 +67,13 @@ Required: yes. Values: text. Default: none.
 
 Playback speed multiplier.
 
-Required: no. Values: number. Default: `1.0`. Tag: warn — lowered through the provider's documented slot, warned where none exists.
+Required: no. Values: number. Default: `1.0`. Tag: gated per target — lowered through the provider's own kwarg name, and setting it on an integration with no speed slot is a compile error.
+
+Each provider spells it differently and Unmute translates: rime takes `speed_alpha` on LiveKit and `speedAlpha` on Pipecat, sarvam takes `pace`, inworld takes `speaking_rate`. You write `speed` either way.
+
+Some integrations have no speed control at all, and those fail validation with the provider named rather than emitting a setting that does not exist. `provider: deepgram` is one, because Aura exposes no rate control. Note this is about the provider you bind, not the voice: the `slng` route that `unmute init` scaffolds does have a speed slot, even when the model behind it is an Aura voice.
+
+If a provider has a knob Unmute does not model, put it in `params:` under the provider's own name. Keys there are forwarded exactly as written, never renamed and never checked, so `params: {speed: 1.1}` sends a literal `speed` even to a provider Unmute has no slot for. That is your escape hatch, and it is the only way to reach a setting like Cartesia's nested `generation_config`.
 
 ### language
 
@@ -89,7 +95,9 @@ Required: no. Values: number. Default: provider default. Targets: all four, core
 
 Sampling cutoffs.
 
-Required: no. Values: number. Tag: warn — lowered through the provider's documented slot, warned where none exists.
+Required: no. Values: number. Tag: gated per target — setting one on an integration that has no slot for it is a compile error.
+
+`top_k` is the one to watch. Every Pipecat LLM service accepts it. On LiveKit only `anthropic` does, and `anthropic` is the one LiveKit LLM that has no `top_p`. If a target rejects it, the error names the parameter, the provider and the role.
 
 ### params
 

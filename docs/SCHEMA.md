@@ -79,6 +79,70 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
   feature, never with carrier-wide booleans. See
   [TELEPHONY.md](./TELEPHONY.md).
 
+- **N19 (2026-08-07).** The four typed generation fields (`temperature`,
+  `top_p`, `top_k`, `speed`) lower through an explicit per-entry slot in the
+  provider catalogue, exactly as `voice`, `model` and `language` already do. An
+  entry with no slot for one is a **compile error**, and each slot carries the
+  vendor's own kwarg name, per framework: `speed` reaches rime as `speed_alpha` on
+  LiveKit but `speedAlpha` on Pipecat (Rime's own camelCase, inside `Settings`),
+  sarvam as `pace`, inworld as `speaking_rate`. This flips `speed`, `top_p` and `top_k`
+  from `warn` to `gated` in section 4.3. Reason: the `warn` tag was never
+  implemented, and neither reading of it holds up. Emitting the kwarg anyway
+  produces Python that passes `ruff` and raises `TypeError` on the first live
+  call (real cases found while implementing: Pipecat `CartesiaTTSService` keeps
+  speed inside `generation_config`, Pipecat `DeepgramTTSService` and LiveKit
+  `deepgram.TTS` have no rate control at all, LiveKit `elevenlabs.TTS` keeps
+  speed on a nested `VoiceSettings`). Dropping it instead would silently change
+  how the agent sounds. What is checked is whether the kwarg exists, which is
+  6.2 rule 5, a structural fact, never the value.
+
+  **The gate is on the typed fields only, and `params:` is untouched.** D2 and
+  D10 are unamended: an author key in `params:` is forwarded verbatim and never
+  checked, *including* a key spelled the same as one of these four. Write
+  `params: {speed: 1.1}` and you get a literal `speed=1.1` on any vendor, slot or
+  no slot; write `speed: 1.1` and it lowers through the slot or fails. Both halves
+  matter. Without the second there is no gate; without the first the escape hatch
+  the error message points at would not exist, and `params: {temperature: 0.2}` on
+  an OpenAI STT model, a real documented parameter of that API, would stop
+  compiling. Once folded the two are indistinguishable by name, so `ir.Binding`
+  carries the provenance (`Generation`).
+
+  Two spellings of one knob is an error, not a silent winner: typed `speed` plus
+  `params: {speed_alpha: ...}` on rime fails naming both. This is deliberately
+  *unlike* `params.language` shadowing a typed `language` (N16), where the author
+  writes the same word and can see the override; here only the compiler knows the
+  two names are one setting.
+
+  Slots verified 2026-08-07 against the pipecat-ai documented Settings tables and
+  the livekit-agents plugin constructor signatures.
+
+  **Scope.** A slot here is a constructor kwarg, so the gate covers the two targets
+  that emit constructors, Pipecat and LiveKit. It does not reach Vapi or Deepgram,
+  and that is a permanent property of the mechanism, not a gap waiting on a driver:
+  Vapi is the managed target (N17) and has nowhere to host generated code (D4),
+  while the Deepgram rows are call-less by design because its bridge driver
+  forwards provider names into the `Settings` JSON. Neither will ever have a
+  constructor to read a slot off.
+
+  So on both, these params stay forwarded unvalidated, exactly as vendor selection
+  already is (`CheckVendor` treats a role with no rows as unrestricted, D10).
+  Nothing broken is emitted either way, because neither generates a project today.
+
+  Covering them needs two things the catalogue does not have yet, and both are
+  prerequisites, not one task. First a second kind of slot: an API body path rather
+  than a kwarg, declared on the `Entry` the way `RequireModel`/`RequireVoice`
+  already retain `Call`-independent facts for call-less rows. Section 9 records the
+  paths that exist (Vapi `assistant.model.temperature`, Deepgram
+  `agent.think.provider.temperature`) and none for `speed`, `top_p` or `top_k`,
+  which is why those three should eventually fail on both.
+
+  Second, rows to declare it on. There are no Vapi rows at all, and the Deepgram
+  rows cover listen and speak only (its 6.2 role table facts). Since `temperature`,
+  `top_p` and `top_k` are think fields, that documented
+  `agent.think.provider.temperature` path has nowhere to live either; only `speed`,
+  a speak field, could attach to the Deepgram rows that exist today. Tracked as an
+  open row in section 9.
+
 ---
 
 ## 3. Package layout
@@ -170,7 +234,7 @@ Speak model fields:
 | `provider` | yes | catalogue vendor, for example `slng` | core | `local` marks an on-machine TTS (section 4.2). |
 | `model` | yes | model identity forwarded to the provider, for example `slng/deepgram/aura:2-en` | core | |
 | `voice` | yes | voice id, forwarded as-is | core | |
-| `speed` | no, default `1.0` | number | warn | Lowered through the catalogue entry's documented slot; warned where the provider has none (verify per provider, section 9). |
+| `speed` | no, default `1.0` | number | gated (N19) | Lowered through the catalogue entry's declared slot, under that vendor's own kwarg name and per framework (rime `speed_alpha` on LiveKit, `speedAlpha` on Pipecat; sarvam `pace`; inworld `speaking_rate`). An entry with no slot is a compile error. A `speed` key inside `params:` is a different thing: forwarded verbatim, never renamed, never checked (N19). |
 | `language` | no | BCP-47 tag | gated (N16) | Lowered through the catalogue entry's language slot only when set; when unset no language kwarg is emitted (N16). |
 | `params` | no | open map, forwarded verbatim | core | |
 | `description` | no | text | core | For humans only. |
@@ -181,8 +245,8 @@ Think model fields:
 |---|---|---|---|---|
 | `provider` | yes | catalogue vendor, for example `openai` | core | `local` marks a self-hosted LLM (section 4.2). |
 | `model` | yes | model identity forwarded to the provider, for example `gpt-4.1-mini` | core | |
-| `temperature` | no | number | core | Verified slots on all four (section 9): Vapi `assistant.model.temperature`, Deepgram `agent.think.provider.temperature`, constructor kwargs on Pipecat and LiveKit. |
-| `top_p`, `top_k` | no | number | warn | Lowered through the catalogue entry's documented slot; warned where the provider has none (verify per provider, section 9). |
+| `temperature` | no | number | core | Verified slots on all four (section 9): Vapi `assistant.model.temperature`, Deepgram `agent.think.provider.temperature`, constructor kwargs on Pipecat and LiveKit. Every catalogued think entry declares one (N19). |
+| `top_p`, `top_k` | no | number | gated (N19) | Lowered through the catalogue entry's declared slot. An entry with no slot is a compile error. `top_k` is the common gap: every Pipecat LLM service takes it, on LiveKit only `anthropic` does, and `anthropic` is in turn the only LiveKit LLM with no `top_p`. The same names inside `params:` stay forwarded verbatim and unchecked (N19). |
 | `params` | no | open map, forwarded verbatim | core | Anything else the bound component accepts (`max_tokens` where a slot exists; never forwarded to Deepgram, which has no max-tokens slot). |
 | `description` | no | text | core | For humans only. |
 | `fallback` | no | ordered list of think model names | gated | Cycle-checked. Every model in a chain must land in the same slot kind and placement on the resolved target. All verified 2026-07-15. Deepgram: native (`agent.think` as an ordered provider array; mixed providers, per-entry params). LiveKit: native (`llm.FallbackAdapter`; STT/TTS adapters exist too). Pipecat: generated (the Pipecat driver v1 does not emit fallback yet — a maturity gate, not a platform limit; lifts when driver §T lands). Vapi: native (`model.fallbackModels`); entries are same-provider model IDs, so a **cross-provider chain fails on Vapi**; verified on OpenAI model schemas, others unverified. |
@@ -571,7 +635,7 @@ Resolved by the 2026-07-15 research pass (context7 plus official docs; exact fie
 - `fallback` on all five primaries: LiveKit `FallbackAdapter` (LLM, STT, TTS; Python and Node); Vapi `model.fallbackModels` (same-provider chains, verified on OpenAI model schemas); ElevenLabs `backup_llm_config` (`preference: override` with ordered `order`, `cascade_timeout_seconds`; no per-entry params); Deepgram `agent.think` ordered provider array (mixed providers, per-entry params). Pipecat stays generated.
 - `speaks_first: user` on ElevenLabs: an empty `first_message` is documented as "the agent waits for the user to start the discussion". Native.
 - Voicemail on LiveKit (`AMD`), Pipecat (`VoicemailDetector`), Vapi (`voicemailDetection` + `voicemailMessage`), ElevenLabs (`voicemail_detection` system tool + `voicemail_message`): both `hangup` and `leave_message`. Outbound unblocked (N6).
-- Generation param slots: Vapi `assistant.model.temperature` and `maxTokens`; ElevenLabs `conversation_config.agent.prompt.temperature` (default 0) and `max_tokens`; Deepgram `agent.think.provider.temperature` (**no max-tokens slot exists**, do not forward one). Forwarded-verbatim stance unchanged.
+- Generation param slots: Vapi `assistant.model.temperature` and `maxTokens`; ElevenLabs `conversation_config.agent.prompt.temperature` (default 0) and `max_tokens`; Deepgram `agent.think.provider.temperature` (**no max-tokens slot exists**, do not forward one). Values stay forwarded verbatim (D10); **which** kwarg each slot is became per-entry catalogue data on 2026-08-07 (N19), and Pipecat and LiveKit now gate a missing one. Vapi and Deepgram are not gated, because neither has a catalogued constructor to read a slot from — see the open row below.
 - Pipecat custom STT/TTS: `OpenAISTTService` and `OpenAITTSService` take a documented `base_url` override for OpenAI-compatible endpoints; service subclassing only for other protocols. (Later same day: SLNG STT/TTS ships first-class as `pipecat-slng` / `livekit-plugins-slng`, mapped by the provider catalogue, so the `base_url` path serves generic custom endpoints, not SLNG.)
 - Pipecat Flows: ships inside core `pipecat-ai` (`pipecat.flows`) since 1.5.0; the standalone `pipecat-ai-flows` package (last 1.4.0) is deprecated and never used.
 - Deepgram reusable agent configurations: exist and are immutable (delete and recreate to change; referenced as a UUID string in place of the `agent` object). Decision stands: compile to inline `Settings`; immutability makes reusable configs create-per-change churn with no compile-time benefit.
@@ -586,8 +650,8 @@ Still open:
 | Deepgram voicemail: bridge plus carrier AMD lowering | `on_voicemail`, `outbound` on Deepgram | **review-resolved 2026-07-15**: Deepgram publishes an official AMD-bridge outbound reference impl (Twilio async AMD → hangup + leave-message); generated, carrier-conditional (warn) |
 | In-flight tool calls on barge-in, managed target: Vapi docs silent | `interruption` | `provider_default` only |
 | Vapi `fallbackModels` on non-OpenAI model schemas | `fallback` on Vapi | conditional, same-provider chains |
-| Speak `speed` and think `top_p`/`top_k`: which providers document a slot (added 2026-07-19, N15; verify per catalogue entry before hardening) | `speed`, `top_p`, `top_k` | warn: lowered where the catalogue entry documents a slot, warned where none exists |
 | Listen fallback slots beyond LiveKit: Vapi transcriber fallback, Deepgram multi-provider listen (added 2026-07-19, T16) | `fallback` on listen | gated on Pipecat/Vapi/Deepgram until a slot is doc-verified |
+| Generation slots as an API body path, not a constructor kwarg. N19's gate reads a kwarg, so it can never reach Vapi (managed, nowhere to host generated code, D4) or Deepgram (rows call-less by design; the bridge forwards names into `Settings` JSON). Their real slot is a body path, `temperature` only per the resolved row above, so `speed`/`top_p`/`top_k` genuinely have nowhere to go there and should fail once paths are declared. Blocked on two prerequisites: an `Entry`-level path declaration (like `RequireModel`/`RequireVoice`), and rows to put it on — Vapi has none, and Deepgram's cover listen and speak only, so the think params have no row on either target. | `speed`, `top_p`, `top_k` on Vapi and Deepgram | forwarded unvalidated (D10), as vendor selection already is |
 
 **Driver maturity gates (tags tightened until a driver emits the feature).** A code target may support a feature at the schema level while its first driver has not emitted the lowering yet. Like warm transfer (§4.7), these are gates on the driver, not the platform, and lift when the matching driver §T task lands:
 

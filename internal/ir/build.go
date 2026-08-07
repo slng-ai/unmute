@@ -953,22 +953,34 @@ func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]pa
 // generation fields into the forwarded params (they lower through the same
 // per-vendor param path the old params map used).
 func toBinding(def ModelDef) Binding {
+	params, generation := foldParams(def)
 	return Binding{
 		Provider: def.Provider, Model: def.Model, Voice: def.Voice, Language: def.Language,
 		EndpointEnv: def.EndpointEnv, Placement: def.Placement,
-		SemanticEndpointing: def.SemanticEndpointing, Params: foldParams(def),
+		SemanticEndpointing: def.SemanticEndpointing, Params: params, Generation: generation,
 	}
 }
 
-func foldParams(def ModelDef) map[string]any {
+// foldParams merges the typed generation fields into the forwarded params and
+// records which keys it wrote itself. Params stays the flat merged view the
+// schema and the report already expose; generation is the provenance the slot
+// gate needs, because the two halves are checked differently (see Binding.Generation).
+//
+// An author key of the same name wins, as it always has: setIfAbsent skips it,
+// which also correctly leaves it out of generation, so it keeps forwarding
+// verbatim. The keys this writes are target.GenerationParams, and
+// TestFoldParamsWritesGenerationParams pins the two lists together.
+func foldParams(def ModelDef) (params, generation map[string]any) {
 	if def.Temperature == nil && def.TopP == nil && def.TopK == nil && def.Speed == nil && len(def.Params) == 0 {
-		return nil
+		return nil, nil
 	}
-	out := make(map[string]any, len(def.Params)+5)
+	out := make(map[string]any, len(def.Params)+4)
 	maps.Copy(out, def.Params)
+	typed := map[string]any{}
 	setIfAbsent := func(key string, value any) {
 		if _, ok := out[key]; !ok {
 			out[key] = value
+			typed[key] = value
 		}
 	}
 	if def.Temperature != nil {
@@ -983,7 +995,10 @@ func foldParams(def ModelDef) map[string]any {
 	if def.Speed != nil {
 		setIfAbsent("speed", *def.Speed)
 	}
-	return out
+	if len(typed) == 0 {
+		return out, nil
+	}
+	return out, typed
 }
 
 func buildConversation(raw *packagespec.Conversation) *Conversation {

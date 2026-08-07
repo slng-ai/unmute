@@ -363,6 +363,12 @@ func Default() Table {
 		Controls: map[TelephonyControl]map[Provider]ControlCapability{
 			ColdTransfer: controls(
 				control(),
+				// Live, not stale: this cell is read only when no telephony plan
+				// resolved (validateHumanTransfer short-circuits on one), which is
+				// the Daily SIP path a target selects with a bare
+				// transport: daily-sip. safe_core's pipecat instance does exactly
+				// that. Carrier routes reach cold transfer through the resolved
+				// plan's evidence instead, so the two never contradict.
 				controlTransport("daily-sip", "Pipecat cold transfer requires Daily SIP transport"),
 				control(),
 				controlNamedCarrier("twilio", "Deepgram transfer requires carrier Twilio in the generated bridge"),

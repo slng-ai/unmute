@@ -6,6 +6,18 @@ package target
 // v0.0.105; verified against the per-service docs 2026-07-15). The SLNG
 // plugin is a standalone package with flat kwargs (verified against
 // github.com/slng-ai/pipecat-slng source 2026-07-15).
+//
+// Generation-param slots (Temperature/TopP/TopK/Speed) verified 2026-08-07
+// against each service's documented Settings table in the pipecat-ai/docs
+// source, and the slng rows against the pipecat-slng package source. A missing
+// slot is a checked fact, not an omission: see the note on each such entry.
+//
+// Every LLM service here takes all three sampling params, because temperature,
+// top_p and top_k are fields of the shared LLMSettings base class. Worth knowing
+// that on the OpenAI-compatible services top_k is accepted and then ignored (the
+// pipecat source says the OpenAI client library has no such argument). A slot
+// declares the kwarg exists, never that the provider acts on it — SCHEMA.md 6.2
+// rule 6: some providers keep fields that do nothing, so run the agent to be sure.
 
 const pipecatServicesDocs = "https://docs.pipecat.ai/api-reference/server/services/supported-services"
 
@@ -150,6 +162,7 @@ var pipecatCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice", Required: true}, // Settings(voice=...); the flat voice_id kwarg is the deprecated pre-0.0.105 form
 			Language: FieldSpec{Arg: "language"},
+			Speed:    FieldSpec{Arg: "speed"},
 			Params:   ParamsSettings,
 		},
 	},
@@ -163,8 +176,12 @@ var pipecatCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice", Required: true},
 			Language: FieldSpec{Arg: "language"},
-			Params:   ParamsSettings,
+			// No Speed slot: Cartesia puts speed one level down, in
+			// Settings(generation_config=GenerationConfig(speed=...)), and a
+			// nested constructor is not a kwarg this builder can fill.
+			Params: ParamsSettings,
 		},
+		Notes: []string{"speed has no flat slot: it nests in Settings(generation_config=GenerationConfig(speed=...))"},
 	},
 	{
 		Framework: Pipecat, Role: Speak, Vendor: "openai",
@@ -177,6 +194,7 @@ var pipecatCatalog = []Entry{
 			Voice:    FieldSpec{Arg: "voice"},
 			Language: FieldSpec{Arg: "language"},
 			Endpoint: FieldSpec{Arg: "base_url"},
+			Speed:    FieldSpec{Arg: "speed"},
 			Params:   ParamsSettings,
 		},
 	},
@@ -190,8 +208,11 @@ var pipecatCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice", Required: true}, // aura voice ids (e.g. aura-2-helena-en)
 			Language: FieldSpec{Arg: "language"},
-			Params:   ParamsSettings,
+			// No Speed slot: Settings is model/voice/language only, Aura has no
+			// rate control.
+			Params: ParamsSettings,
 		},
+		Notes: []string{"no speed slot: Aura exposes no rate control, so Settings is model/voice/language only"},
 	},
 	{
 		Framework: Pipecat, Role: Speak, Vendor: "gradium",
@@ -203,8 +224,11 @@ var pipecatCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice", Required: true},
 			Language: FieldSpec{Arg: "language"},
-			Params:   ParamsSettings,
+			// No Speed slot: Settings is model/voice/language plus connection
+			// event handlers.
+			Params: ParamsSettings,
 		},
+		Notes: []string{"no speed slot: Settings carries model, voice, language and connection handlers only"},
 	},
 	{
 		Framework: Pipecat, Role: Speak, Vendor: "inworld",
@@ -216,8 +240,10 @@ var pipecatCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice", Required: true},
 			Language: FieldSpec{Arg: "language"},
+			Speed:    FieldSpec{Arg: "speaking_rate"},
 			Params:   ParamsSettings,
 		},
+		Notes: []string{"speed lowers to speaking_rate (per-entry fact, F3/F4)"},
 	},
 	{
 		Framework: Pipecat, Role: Speak, Vendor: "rime",
@@ -229,8 +255,10 @@ var pipecatCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice", Required: true},
 			Language: FieldSpec{Arg: "language"},
+			Speed:    FieldSpec{Arg: "speedAlpha"}, // Rime's own camelCase spelling
 			Params:   ParamsSettings,
 		},
+		Notes: []string{"speed lowers to speedAlpha, Rime's own camelCase spelling (per-entry fact, F3/F4)"},
 	},
 	{
 		Framework: Pipecat, Role: Speak, Vendor: "sarvam",
@@ -242,9 +270,13 @@ var pipecatCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice", Required: true},
 			Language: FieldSpec{Arg: "language"},
+			Speed:    FieldSpec{Arg: "pace"},
 			Params:   ParamsSettings,
 		},
-		Notes: []string{"the WebSocket service; SarvamHttpTTSService is the HTTP variant (PR #9 shipped that one)"},
+		Notes: []string{
+			"the WebSocket service; SarvamHttpTTSService is the HTTP variant (PR #9 shipped that one)",
+			"speed lowers to pace (per-entry fact, F3/F4)",
+		},
 	},
 	{
 		Framework: Pipecat, Role: Speak, Vendor: "soniox",
@@ -256,6 +288,7 @@ var pipecatCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model"},
 			Voice:    FieldSpec{Arg: "voice", Required: true},
 			Language: FieldSpec{Arg: "language"},
+			Speed:    FieldSpec{Arg: "speed"},
 			Params:   ParamsSettings,
 		},
 	},
@@ -274,6 +307,7 @@ var pipecatCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model", Required: true},
 			Voice:    FieldSpec{Arg: "voice"},
 			Language: FieldSpec{Arg: "language"},
+			Speed:    FieldSpec{Arg: "speed"},
 			Params:   ParamsKwargs,
 		},
 		Notes: []string{"routes by api_key + region params; endpoint_env has no slot (driver-pipecat B1/C10)"},
@@ -289,6 +323,7 @@ var pipecatCatalog = []Entry{
 			Voice:    FieldSpec{Arg: "voice"},
 			Language: FieldSpec{Arg: "language"},
 			Endpoint: FieldSpec{Arg: "base_url"},
+			Speed:    FieldSpec{Arg: "speed"},
 			Params:   ParamsSettings,
 		},
 		RequiresEndpoint: true,
@@ -305,9 +340,12 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.openai.llm import OpenAILLMService",
 		Call: &CallSpec{
 			Class: "OpenAILLMService", APIKeyArg: "api_key", APIKeyEnv: "OPENAI_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "base_url"},
-			Params:   ParamsSettings,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Endpoint:    FieldSpec{Arg: "base_url"},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			TopK:        FieldSpec{Arg: "top_k"},
+			Params:      ParamsSettings,
 		},
 	},
 	{
@@ -317,8 +355,11 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.anthropic.llm import AnthropicLLMService",
 		Call: &CallSpec{
 			Class: "AnthropicLLMService", APIKeyArg: "api_key", APIKeyEnv: "ANTHROPIC_API_KEY",
-			Model:  FieldSpec{Arg: "model", Required: true},
-			Params: ParamsSettings, // Settings accepts system_instruction (workers driver injects it)
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			TopK:        FieldSpec{Arg: "top_k"},
+			Params:      ParamsSettings, // Settings accepts system_instruction (workers driver injects it)
 		},
 	},
 	{
@@ -328,9 +369,12 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.deepseek.llm import DeepSeekLLMService",
 		Call: &CallSpec{
 			Class: "DeepSeekLLMService", APIKeyArg: "api_key", APIKeyEnv: "DEEPSEEK_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "base_url"},
-			Params:   ParamsSettings,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Endpoint:    FieldSpec{Arg: "base_url"},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			TopK:        FieldSpec{Arg: "top_k"},
+			Params:      ParamsSettings,
 		},
 	},
 	{
@@ -340,8 +384,11 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.google.llm import GoogleLLMService",
 		Call: &CallSpec{
 			Class: "GoogleLLMService", APIKeyArg: "api_key", APIKeyEnv: "GOOGLE_API_KEY",
-			Model:  FieldSpec{Arg: "model", Required: true},
-			Params: ParamsSettings, // Gemini GenAI backend; Settings accepts system_instruction
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			TopK:        FieldSpec{Arg: "top_k"},
+			Params:      ParamsSettings, // Gemini GenAI backend; Settings accepts system_instruction
 		},
 	},
 	{
@@ -351,9 +398,12 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.groq.llm import GroqLLMService",
 		Call: &CallSpec{
 			Class: "GroqLLMService", APIKeyArg: "api_key", APIKeyEnv: "GROQ_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "base_url"},
-			Params:   ParamsSettings,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Endpoint:    FieldSpec{Arg: "base_url"},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			TopK:        FieldSpec{Arg: "top_k"},
+			Params:      ParamsSettings,
 		},
 	},
 	{
@@ -363,9 +413,12 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.mistral.llm import MistralLLMService",
 		Call: &CallSpec{
 			Class: "MistralLLMService", APIKeyArg: "api_key", APIKeyEnv: "MISTRAL_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "base_url"},
-			Params:   ParamsSettings,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Endpoint:    FieldSpec{Arg: "base_url"},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			TopK:        FieldSpec{Arg: "top_k"},
+			Params:      ParamsSettings,
 		},
 	},
 	{
@@ -375,9 +428,12 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.openrouter.llm import OpenRouterLLMService",
 		Call: &CallSpec{
 			Class: "OpenRouterLLMService", APIKeyArg: "api_key", APIKeyEnv: "OPENROUTER_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "base_url"},
-			Params:   ParamsSettings,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Endpoint:    FieldSpec{Arg: "base_url"},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			TopK:        FieldSpec{Arg: "top_k"},
+			Params:      ParamsSettings,
 		},
 	},
 	{
@@ -387,9 +443,12 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.qwen.llm import QwenLLMService",
 		Call: &CallSpec{
 			Class: "QwenLLMService", APIKeyArg: "api_key", APIKeyEnv: "QWEN_API_KEY",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "base_url"},
-			Params:   ParamsSettings,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Endpoint:    FieldSpec{Arg: "base_url"},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			TopK:        FieldSpec{Arg: "top_k"},
+			Params:      ParamsSettings,
 		},
 	},
 	{
@@ -399,9 +458,12 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.openai.llm import OpenAILLMService",
 		Call: &CallSpec{
 			Class: "OpenAILLMService", APIKeyArg: "api_key",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "base_url"},
-			Params:   ParamsSettings,
+			Model:       FieldSpec{Arg: "model", Required: true},
+			Endpoint:    FieldSpec{Arg: "base_url"},
+			Temperature: FieldSpec{Arg: "temperature"},
+			TopP:        FieldSpec{Arg: "top_p"},
+			TopK:        FieldSpec{Arg: "top_k"},
+			Params:      ParamsSettings,
 		},
 		RequiresEndpoint: true,
 		Notes:            []string{"OpenAI-compatible custom endpoint (the documented SLNG-as-reason path); api-key env follows the <PROVIDER>_API_KEY convention"},

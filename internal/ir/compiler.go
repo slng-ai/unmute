@@ -456,4 +456,13 @@ type Binding struct {
 	Placement           Placement           `json:"placement,omitempty" yaml:"placement,omitempty"`
 	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
 	Params              map[string]any      `json:"params,omitempty" yaml:"params,omitempty"`
+	// Generation records which Params keys Build wrote from the typed generation
+	// fields, rather than the author's own params map. The two are treated very
+	// differently: a typed field lowers through the entry's declared slot and
+	// fails without one (N19), while an author-supplied key is forwarded verbatim
+	// and never checked, which is the one exception D2 carves out. Once folded
+	// they are indistinguishable by name, so provenance has to be carried.
+	// Unexported from both schemas on purpose: it is derivation bookkeeping, not
+	// authoring surface, and Params already reports the same values.
+	Generation map[string]any `json:"-" yaml:"-"`
 }

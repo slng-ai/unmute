@@ -1,6 +1,8 @@
 package ir
 
 import (
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,6 +34,127 @@ func TestValidateLanguage(t *testing.T) { // N16: language is validated per mode
 	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
 	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "BCP-47") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
+// TestValidateGenerationParamSlots is N19: a generation param with no slot on
+// the resolved integration fails validate, not just generate. Before this the
+// kwarg was emitted regardless and the agent raised TypeError on its first
+// call. Both roles are covered because each carries different typed fields.
+// Build has already folded the typed generation fields into each binding's
+// params, so the resolved binding is the surface Validate and the drivers both
+// read; these cases set it there.
+func TestValidateGenerationParamSlots(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		provider Provider
+		mutate   func(*Target)
+		want     string
+	}{
+		{
+			// livekit openai.LLM takes temperature and top_p, never top_k.
+			name: "think top_k", provider: ProviderLiveKit,
+			mutate: func(target *Target) {
+				binding := target.Models.Reason["fast_reasoning"]
+				binding.Params = map[string]any{"top_k": 40}
+				binding.Generation = binding.Params // typed origin, so slot-checked
+				target.Models.Reason["fast_reasoning"] = binding
+			},
+			want: `livekit reason.fast_reasoning binding provider "openai": top_k has no slot here`,
+		},
+		{
+			// Deepgram Aura exposes no rate control on either framework.
+			name: "speak speed", provider: ProviderPipecat,
+			mutate: func(target *Target) {
+				binding := target.Models.Speak["front_desk"]
+				binding.Provider = "deepgram"
+				binding.Params = map[string]any{"speed": 1.1}
+				binding.Generation = binding.Params
+				target.Models.Speak["front_desk"] = binding
+			},
+			want: `pipecat speak.front_desk binding provider "deepgram": speed has no slot here`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := safeAgent(t)
+			target := targetFor(agent, tc.provider)
+			tc.mutate(&target)
+			report, err := Validate(agent, []Target{target}, targetcap.Default())
+			if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), tc.want) {
+				t.Fatalf("want error containing %q, got err=%v report=%#v", tc.want, err, report.PerTarget)
+			}
+		})
+	}
+}
+
+// TestValidateAcceptsSlottedGenerationParams is the other half: a param the
+// entry does slot still passes, so the gate rejects only what has nowhere to go.
+func TestValidateAcceptsSlottedGenerationParams(t *testing.T) {
+	agent := safeAgent(t)
+	target := targetFor(agent, ProviderPipecat)
+	binding := target.Models.Speak["front_desk"]
+	binding.Params = map[string]any{"speed": 1.1} // slng speak has a speed kwarg
+	binding.Generation = binding.Params
+	target.Models.Speak["front_desk"] = binding
+	report, err := Validate(agent, []Target{target}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("%v: %#v", err, report.PerTarget)
+	}
+}
+
+// TestValidateKeepsTheParamsEscapeHatch is the D2 half: the author's own params
+// map is forwarded verbatim and never slot-checked, even for a key that shares
+// one of the typed names. Without the provenance split this failed, and the error
+// told the author to do the thing they had just done.
+func TestValidateKeepsTheParamsEscapeHatch(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		provider Provider
+		mutate   func(*Target)
+	}{
+		{
+			// temperature is a real documented parameter of OpenAI's transcription
+			// API, and no listen entry on any framework declares a slot for it.
+			name: "listen temperature", provider: ProviderPipecat,
+			mutate: func(target *Target) {
+				target.Models.Listen.Provider = "openai"
+				target.Models.Listen.Params = map[string]any{"temperature": 0.2}
+			},
+		},
+		{
+			name: "speak speed on a slotless vendor", provider: ProviderPipecat,
+			mutate: func(target *Target) {
+				binding := target.Models.Speak["front_desk"]
+				binding.Provider = "cartesia"
+				binding.Params = map[string]any{"speed": 1.1}
+				target.Models.Speak["front_desk"] = binding
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := safeAgent(t)
+			target := targetFor(agent, tc.provider)
+			tc.mutate(&target)
+			report, err := Validate(agent, []Target{target}, targetcap.Default())
+			if err != nil {
+				t.Fatalf("author params must not be slot-checked: %v: %#v", err, report.PerTarget)
+			}
+		})
+	}
+}
+
+// TestFoldParamsWritesGenerationParams closes the direction that actually bites:
+// foldParams writes its keys as literals, so a fifth typed field added there
+// without a matching target.GenerationParams entry would forward unchecked to
+// every vendor, which is the exact bug N19 exists to prevent.
+func TestFoldParamsWritesGenerationParams(t *testing.T) {
+	temperature, topP, speed := 0.5, 0.9, 1.1
+	topK := 40
+	_, generation := foldParams(ModelDef{
+		Temperature: &temperature, TopP: &topP, TopK: &topK, Speed: &speed,
+	})
+	if got := slices.Sorted(maps.Keys(generation)); !slices.Equal(got, targetcap.GenerationParams) {
+		t.Errorf("foldParams writes %v, target.GenerationParams lists %v", got, targetcap.GenerationParams)
 	}
 }
 
