@@ -322,7 +322,7 @@ func Default() Table {
 			// any target yet" is `provisional`, which fails validation
 			// everywhere and would reject every package that declares an output.
 			// Choosing between implementing enforcement and taking that break is
-			// a maintainer call, so the gap is recorded in SCHEMA.md N20 rather
+			// a maintainer call, so the gap is recorded in SCHEMA.md N22 rather
 			// than encoded here as a redefined tag.
 			FieldToolOutput: field(
 				warn(Vapi, "Vapi cannot enforce tool output schemas"),

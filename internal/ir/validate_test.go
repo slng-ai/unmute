@@ -842,7 +842,7 @@ func TestValidateToolSchemaWarnsOnUnrecognisedKey(t *testing.T) {
 			// unread keys everywhere; Pipecat keeps them only on the Flow-node
 			// path, where the properties map is serialised into bot.py verbatim;
 			// and a top-level input key is dropped by both. Any one-line summary
-			// is wrong often enough to mislead, so the matrix lives in N19.
+			// is wrong often enough to mislead, so the matrix lives in N21.
 			for _, promise := range []string{"forwarded to the provider", "depends on the driver", "surviv", "reaches the provider"} {
 				if strings.Contains(joined, promise) {
 					t.Fatalf("warning makes an unsupportable survival claim %q: %q", promise, joined)

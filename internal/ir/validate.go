@@ -662,7 +662,7 @@ var schemaValueKeywords = []string{
 // except on the Flow-node path, where buildTool hands the whole `properties` map
 // to pyLiteral and it lands in bot.py verbatim; and a key at the top level of
 // `input` is dropped by both. "Depends on the driver" would be wrong often
-// enough to mislead, so the matrix lives in SCHEMA.md N19 where it fits.
+// enough to mislead, so the matrix lives in SCHEMA.md N21 where it fits.
 type schemaReport struct {
 	notes []string
 }
