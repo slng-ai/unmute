@@ -274,6 +274,12 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			if field.Enum != nil && len(field.Enum) == 0 {
 				errors = add(errors, fmt.Sprintf("task %q result %q enum must not be empty", name, fieldName))
 			}
+			// A nested result field carries a raw schema (build.go stashes any
+			// unrecognised map as ResultField.Schema), which the Pipecat driver
+			// serialises through resultProperties/pyLiteral exactly the way it
+			// serialises tool properties. Same unvalidated surface, so the same
+			// walk applies.
+			validateSchemaKeys(fmt.Sprintf("task %q result %q", name, fieldName), "schema", field.Schema, &schemas)
 		}
 		errors = append(errors, validateContextShape(name, task.Context)...)
 	}
@@ -339,11 +345,11 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		if tool.Input["type"] != "object" {
 			errors = add(errors, fmt.Sprintf("tool %q input must be a JSON Schema object", name))
 		}
-		validateToolSchema(name, "input", tool.Input, &schemas)
+		validateSchemaKeys(fmt.Sprintf("tool %q", name), "input", tool.Input, &schemas)
 		if tool.Output != nil && tool.Output["type"] != "object" {
 			errors = add(errors, fmt.Sprintf("tool %q output must be a JSON Schema object", name))
 		}
-		validateToolSchema(name, "output", tool.Output, &schemas)
+		validateSchemaKeys(fmt.Sprintf("tool %q", name), "output", tool.Output, &schemas)
 		switch tool.Execution {
 		case ToolLocal:
 			if tool.Handler == "" {
@@ -625,7 +631,7 @@ func schemaKeyIsExtension(key string) bool {
 // values are schemas; the keys are the author's own property names and must
 // never be checked against the vocabulary.
 // draft-07's `dependencies` belongs here too: its values are either a subschema
-// or a plain string list, and validateToolSchemaValue handles both.
+// or a plain string list, and validateSchemaKeysValue handles both.
 var schemaMapKeywords = []string{
 	"$defs", "definitions", "dependencies", "dependentSchemas", "patternProperties", "properties",
 }
@@ -661,26 +667,28 @@ type schemaReport struct {
 	notes []string
 }
 
-// validateToolSchema walks a tool schema and describes what it cannot vouch
-// for. Nothing here fails a build.
+// validateSchemaKeys walks a raw schema and describes what it cannot vouch
+// for. Nothing here fails a build. subject names the owner for the message
+// (`tool "x"`, `task "y" result "z"`), since tool input/output and task result
+// schemas share this unvalidated surface.
 //
 // path starts at "input" or "output" and grows into the offending location, so
 // each message is unique: add() de-duplicates, and a bare key name would
 // collapse the same typo made in two different properties into one line.
-func validateToolSchema(tool, path string, schema map[string]any, report *schemaReport) {
+func validateSchemaKeys(subject, path string, schema map[string]any, report *schemaReport) {
 	for _, key := range slices.Sorted(maps.Keys(schema)) {
 		switch {
 		case schemaKeyIsExtension(key):
 			// vendor space, forwarded untouched
 		case schemaKeyLooksLikeYAMLAccident(key, schema[key]):
 			report.notes = add(report.notes, fmt.Sprintf(
-				"tool %q has an empty schema key %q at %s; an unquoted comma in a YAML flow mapping splits the entry, so quote the value if that text belongs to it",
-				tool, key, path))
+				"%s has an empty schema key %q at %s; an unquoted comma in a YAML flow mapping splits the entry, so quote the value if that text belongs to it",
+				subject, key, path))
 		default:
 			if _, ok := knownSchemaKeywords[key]; !ok {
 				report.notes = add(report.notes, fmt.Sprintf(
-					"tool %q has unrecognised schema key %q at %s; unmute does not read it",
-					tool, key, path))
+					"%s has unrecognised schema key %q at %s; unmute does not read it",
+					subject, key, path))
 			}
 		}
 		switch {
@@ -690,23 +698,23 @@ func validateToolSchema(tool, path string, schema map[string]any, report *schema
 				continue
 			}
 			for _, name := range slices.Sorted(maps.Keys(named)) {
-				validateToolSchemaValue(tool, path+"."+key+"."+name, named[name], report)
+				validateSchemaKeysValue(subject, path+"."+key+"."+name, named[name], report)
 			}
 		case slices.Contains(schemaValueKeywords, key):
-			validateToolSchemaValue(tool, path+"."+key, schema[key], report)
+			validateSchemaKeysValue(subject, path+"."+key, schema[key], report)
 		}
 	}
 }
 
-// validateToolSchemaValue descends one subschema position, which JSON Schema
+// validateSchemaKeysValue descends one subschema position, which JSON Schema
 // allows to be a schema, a list of schemas, or a bare bool (`items: false`).
-func validateToolSchemaValue(tool, path string, value any, report *schemaReport) {
+func validateSchemaKeysValue(subject, path string, value any, report *schemaReport) {
 	switch typed := value.(type) {
 	case map[string]any:
-		validateToolSchema(tool, path, typed, report)
+		validateSchemaKeys(subject, path, typed, report)
 	case []any:
 		for i, item := range typed {
-			validateToolSchemaValue(tool, fmt.Sprintf("%s[%d]", path, i), item, report)
+			validateSchemaKeysValue(subject, fmt.Sprintf("%s[%d]", path, i), item, report)
 		}
 	}
 }

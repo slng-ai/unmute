@@ -314,6 +314,16 @@ func Default() Table {
 				deny(Vapi, "Vapi has no faithful thinking-audio lowering"),
 				deny(Deepgram, "Deepgram has no faithful thinking-audio lowering"),
 			),
+			// Vapi-only on purpose, even though no driver enforces output today
+			// (grep `.Output` across internal/generate: no hits). The tag
+			// vocabulary has no slot for "declared, inert, legal everywhere":
+			// `warn` is defined as "works on all four" and every other use of it
+			// means works-with-a-caveat, while the honest tag for "not proven on
+			// any target yet" is `provisional`, which fails validation
+			// everywhere and would reject every package that declares an output.
+			// Choosing between implementing enforcement and taking that break is
+			// a maintainer call, so the gap is recorded in SCHEMA.md N20 rather
+			// than encoded here as a redefined tag.
 			FieldToolOutput: field(
 				warn(Vapi, "Vapi cannot enforce tool output schemas"),
 			),

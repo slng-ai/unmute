@@ -1030,6 +1030,58 @@ func TestSmokeV24PipecatSimplePromptStaticCheck(t *testing.T) {
 	runPipecatSmokeScript(t, "simple-prompt", nil, nil, pipecatStaticCheckScript)
 }
 
+// TestSmokeV24PipecatExamplesStaticCheck holds raw Pipecat output to the bar
+// LiveKit has had since V26, over the same examples: `uv run ruff check .`, the
+// exact command a user would run in a generated project. It closes the gap where
+// a lint regression in a Pipecat template was caught on one driver and missed on
+// the other, and it only became runnable once the emitted pyproject declared a
+// pinned ruff of its own.
+//
+// ty stays on simple-prompt (TestSmokeV24PipecatSimplePromptStaticCheck) rather
+// than widening here: run over multi-task and task-groups it reports real type
+// errors in emitted task code (self.context is `Unknown | None` at the snapshot
+// and aggregator call sites, self.state likewise where results are assigned).
+// Those are driver bugs to fix in their own change, not something to widen the
+// gate into and leave red.
+func TestSmokeV24PipecatExamplesStaticCheck(t *testing.T) {
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not available")
+	}
+	for _, example := range []string{"simple-prompt", "multi-task", "task-groups", "subagents"} {
+		t.Run(example, func(t *testing.T) {
+			pkg, err := spec.Load(examplePackagePath(example))
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Only the emitted project lands here: no smoke script alongside, so
+			// ruff sees exactly what a user would compile.
+			dir := t.TempDir()
+			for _, file := range artifact.Files {
+				path := filepath.Join(dir, file.Path)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, file.Content, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := exec.Command("uv", "run", "ruff", "check", ".")
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("uv run ruff check . failed:\n%s", out)
+			}
+		})
+	}
+}
+
 func runPipecatSmoke(t *testing.T, example string, mutate func(*ir.Target), mutateAgent func(*ir.Agent)) {
 	t.Helper()
 	runPipecatSmokeScript(t, example, mutate, mutateAgent, smokeCheckScript)

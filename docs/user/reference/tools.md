@@ -47,7 +47,7 @@ Required: yes, except for a `builtin` tool, which has none (the prebuilt owns it
 
 The shape the tool promises to return.
 
-Required: no. Values: a JSON Schema object. Default: none. Tag: warn. Enforced by generated code on code targets (LiveKit, Pipecat, Deepgram). The managed target (Vapi) has no slot for it and warns.
+Required: no. Values: a JSON Schema object. Default: none. Tag: warn. Declared and carried into `compile-report.json`, but not enforced on any target yet (SCHEMA.md N20); the warning you see comes from Vapi only. It is still worth writing: it documents what the tool returns.
 
 ### execution
 

@@ -852,6 +852,39 @@ func TestValidateToolSchemaWarnsOnUnrecognisedKey(t *testing.T) {
 	}
 }
 
+// TestValidateTaskResultSchemaKeysReported: a nested task result field carries a
+// raw schema (build.go stashes any unrecognised map as ResultField.Schema) and
+// the Pipecat driver serialises it through resultProperties/pyLiteral exactly as
+// it serialises tool properties. Same unvalidated surface, so the same walk has
+// to reach it, named for the field rather than for a tool.
+func TestValidateTaskResultSchemaKeysReported(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Tasks["collect"] = Task{
+		Instructions: "Collect the caller's account details.",
+		Result: map[string]ResultField{"details": {Schema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"city": map[string]any{"type": "string", "descriptoin": "typo"}},
+		}}},
+		Context: TaskContext{History: HistoryFull},
+	}
+	agent.Controls["run_collect"] = &Delegate{Kind: ControlDelegate, Task: "collect", When: "Collect details."}
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "run_collect")
+	agent.Agents["intake"] = intake
+
+	// safe_core also declares Vapi, which gates nested task results, so the run
+	// fails for that unrelated reason. What matters here is that the schema key
+	// lands in Warnings and never in Errors.
+	report, _ := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	want := `task "collect" result "details" has unrecognised schema key "descriptoin" at schema.properties.city`
+	if !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), want) {
+		t.Fatalf("want warning %q, got %#v", want, report.PerTarget[0].Warnings)
+	}
+	if strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "schema key") {
+		t.Fatalf("a schema key must never become an error: %#v", report.PerTarget[0].Errors)
+	}
+}
+
 func reportFor(report ValidateReport, provider Provider) TargetValidation {
 	for _, row := range report.PerTarget {
 		if row.Provider == provider {

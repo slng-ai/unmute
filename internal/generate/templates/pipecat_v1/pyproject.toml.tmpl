@@ -14,8 +14,11 @@ dependencies = [
 {{end}}{{if .Telephony}}    "redis>=5,<6",
 {{end}}]
 
+# Same checkers, same pins, same bar as the LiveKit driver: ruff is declared
+# here so a generated project can run the lint gate its README promises, and
+# it is pinned because ruff 0.16 widened its default rule selection.
 [dependency-groups]
-dev = ["ty"]
+dev = ["ruff==0.15.7", "ty"]
 
 # Console mode (`unmute dev --console`) talks over the local mic/speaker via
 # pipecat's LocalAudioTransport, which needs pyaudio (portaudio at build time —
