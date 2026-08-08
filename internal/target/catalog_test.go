@@ -134,7 +134,7 @@ func TestCheckVendor(t *testing.T) {
 	}
 }
 
-// TestLowerParams pins the generation-param half of the shared rulebook (N19).
+// TestLowerParams pins the generation-param half of the shared rulebook (N20).
 // The provenance split is the load-bearing part: a typed field lowers through
 // the entry's own kwarg and fails without a slot, while the author's own params
 // key is forwarded verbatim even when it shares one of our names, because that

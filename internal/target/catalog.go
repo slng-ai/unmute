@@ -85,7 +85,7 @@ type CallSpec struct {
 	// forwards verbatim and unvalidated (D10), but these four are Unmute
 	// vocabulary, so each entry states whether its class has a slot and what
 	// the vendor calls it (rime speed_alpha, sarvam pace). A zero FieldSpec
-	// means no slot and a set value is rejected (SCHEMA.md 6.2 rule 5, N19),
+	// means no slot and a set value is rejected (SCHEMA.md 6.2 rule 5, N20),
 	// never emitted as a kwarg the constructor does not accept.
 	Temperature FieldSpec
 	TopP        FieldSpec
@@ -348,7 +348,7 @@ func (s *CallSpec) ParamSlots() map[string]string {
 // It splits a binding's params by provenance (ir.Binding.Generation). A key the
 // compiler wrote from a typed generation field lowers through the entry's own
 // kwarg and fails when the entry has no slot: the value has nowhere to go
-// (SCHEMA.md 6.2 rule 5, N19), and emitting it anyway is Python that raises
+// (SCHEMA.md 6.2 rule 5, N20), and emitting it anyway is Python that raises
 // TypeError on the first call. A key the author wrote in params is forwarded
 // verbatim and never checked, even when it happens to share one of our names —
 // that is the single exception D2 carves out, and narrowing it here would take
@@ -357,7 +357,7 @@ func (s *CallSpec) ParamSlots() map[string]string {
 // label names the binding in errors ("speak.host"); empty means use the role.
 //
 // Lenient the same way CheckVendor is: a (framework, role) with no entries, or a
-// call-less row, forwards everything. See SCHEMA.md N19's scope note for why that
+// call-less row, forwards everything. See SCHEMA.md N20's scope note for why that
 // permanently excludes Vapi and Deepgram, and what covering them would need.
 func (c Catalog) LowerParams(fw Provider, role Role, label, vendor string, params, generation map[string]any) (map[string]any, error) {
 	if len(params) == 0 {

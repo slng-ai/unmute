@@ -459,7 +459,7 @@ type Binding struct {
 	// Generation records which Params keys Build wrote from the typed generation
 	// fields, rather than the author's own params map. The two are treated very
 	// differently: a typed field lowers through the entry's declared slot and
-	// fails without one (N19), while an author-supplied key is forwarded verbatim
+	// fails without one (N20), while an author-supplied key is forwarded verbatim
 	// and never checked, which is the one exception D2 carves out. Once folded
 	// they are indistinguishable by name, so provenance has to be carried.
 	// Unexported from both schemas on purpose: it is derivation bookkeeping, not

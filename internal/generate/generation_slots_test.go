@@ -8,7 +8,7 @@ import (
 	targetcap "github.com/slng/unmute/internal/target"
 )
 
-// The generation-slot smoke contract (N19, V36). The catalogue declares ~59
+// The generation-slot smoke contract (N20, V36). The catalogue declares ~59
 // kwarg names for the four typed generation params, hand-read off vendor docs
 // and plugin sources. A wrong name passes validate, passes compile and passes
 // ruff, then raises TypeError on the first live call — so the only real check

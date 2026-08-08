@@ -37,7 +37,7 @@ func TestValidateLanguage(t *testing.T) { // N16: language is validated per mode
 	}
 }
 
-// TestValidateGenerationParamSlots is N19: a generation param with no slot on
+// TestValidateGenerationParamSlots is N20: a generation param with no slot on
 // the resolved integration fails validate, not just generate. Before this the
 // kwarg was emitted regardless and the agent raised TypeError on its first
 // call. Both roles are covered because each carries different typed fields.
@@ -146,7 +146,7 @@ func TestValidateKeepsTheParamsEscapeHatch(t *testing.T) {
 // TestFoldParamsWritesGenerationParams closes the direction that actually bites:
 // foldParams writes its keys as literals, so a fifth typed field added there
 // without a matching target.GenerationParams entry would forward unchecked to
-// every vendor, which is the exact bug N19 exists to prevent.
+// every vendor, which is the exact bug N20 exists to prevent.
 func TestFoldParamsWritesGenerationParams(t *testing.T) {
 	temperature, topP, speed := 0.5, 0.9, 1.1
 	topK := 40

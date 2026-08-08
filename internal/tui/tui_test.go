@@ -546,7 +546,7 @@ func TestRunEditModels(t *testing.T) {
 	// Create, name, Models, Speak, edit model/voice/config rows, Back, Create, confirm.
 	// The params blob stays off Unmute's own generation names: those lower through
 	// the entry's declared slot, and Cartesia's speed nests in GenerationConfig,
-	// so params: {"speed": ...} is a slot error here (N19). pronunciation_dict_id
+	// so params: {"speed": ...} is a slot error here (N20). pronunciation_dict_id
 	// is a real top-level Cartesia Settings field and forwards verbatim.
 	got, err := Run(strings.NewReader("1\nagent\n2\n3\n1\n1\n2\n1\n3\nsonic-3\n4\nvoice-id\n6\n{\"pronunciation_dict_id\":\"dict-1\"}\n7\n5\n7\n\n"), &bytes.Buffer{}, true)
 	if err != nil {

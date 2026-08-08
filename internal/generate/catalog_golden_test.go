@@ -67,7 +67,7 @@ func TestCatalogResolutionGolden(t *testing.T) {
 		if len(call.SettingsArgs) > 0 {
 			fmt.Fprintf(&out, "settings: %s\n", joinKVs(call.SettingsArgs))
 		}
-		// Declared generation-param slots (N19), so changing one shows up in a
+		// Declared generation-param slots (N20), so changing one shows up in a
 		// reviewable diff rather than only in a behaviour change.
 		if slots := generationSlots(entry); slots != "" {
 			fmt.Fprintf(&out, "gen:      %s\n", slots)
@@ -137,7 +137,7 @@ func TestLanguageLoweringUsesCataloguedSlot(t *testing.T) {
 	}
 }
 
-// TestGenerationParamLoweringUsesCataloguedSlot is the generate half of N19:
+// TestGenerationParamLoweringUsesCataloguedSlot is the generate half of N20:
 // resolveService lowers a generation param through the entry's own kwarg and
 // refuses one with no slot, using the same Catalog.LowerParams that ir.Validate
 // calls. A green validate therefore cannot fail here.

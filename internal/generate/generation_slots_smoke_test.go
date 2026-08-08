@@ -10,7 +10,7 @@ import (
 	targetcap "github.com/slng/unmute/internal/target"
 )
 
-// The runtime half of N19. The catalogue's generation slots were read off
+// The runtime half of N20. The catalogue's generation slots were read off
 // vendor docs and plugin sources by hand, and nothing so far has proven a
 // single one of those kwarg names is real: a wrong name emits Python that
 // validates, compiles and formats, then raises TypeError on the first call.
@@ -84,7 +84,7 @@ func probeProfile(i int, role targetcap.Role) string {
 }
 
 // probeBinding fills the entry's declared slots, marking them as compiler-folded
-// so they lower through the catalogue instead of forwarding verbatim (N19). The
+// so they lower through the catalogue instead of forwarding verbatim (N20). The
 // values come from the entry itself, so a slot added later is probed with no
 // edit here; the author's own params, where a probe sets any, are left alone.
 func probeBinding(t *testing.T, framework targetcap.Provider, role targetcap.Role, binding ir.Binding) ir.Binding {
