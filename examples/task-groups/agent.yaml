@@ -27,12 +27,15 @@ agents:
     instructions: instructions.md
     model: reasoning
     voice: voice
-    tools: [manage_appointment]
+    tools:
+      - manage_appointment
 
 tasks:
   identify_customer:
     instructions: tasks/identify-customer.md
-    tools: [lookup_customer, create_customer]
+    tools:
+      - lookup_customer
+      - create_customer
     result:
       action: string
       customer_id: string
@@ -43,7 +46,8 @@ tasks:
 
   select_appointment:
     instructions: tasks/select-appointment.md
-    tools: [check_availability]
+    tools:
+      - check_availability
     result:
       service: string
       slot_id: string
@@ -53,7 +57,9 @@ tasks:
 
   finalize_appointment:
     instructions: tasks/finalize-appointment.md
-    tools: [book_appointment, cancel_appointment]
+    tools:
+      - book_appointment
+      - cancel_appointment
     result:
       action: string
       status: string
@@ -63,7 +69,10 @@ tasks:
 
 task_groups:
   appointment_flow:
-    steps: [identify_customer, select_appointment, finalize_appointment]
+    steps:
+      - identify_customer
+      - select_appointment
+      - finalize_appointment
     context_scope: shared
     then: return
     merge: results
@@ -85,13 +94,15 @@ conversation:
   greeting:
     speaks_first: agent
     text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
-  interruption: { enabled: true }
+  interruption:
+    enabled: true
 
 tracing:
   provider: langfuse
 
 channels:
-  web: { kind: realtime_audio }
+  web:
+    kind: realtime_audio
 
 capacity:
   peak_sessions: 5

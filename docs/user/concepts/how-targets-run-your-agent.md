@@ -23,16 +23,21 @@ models:
       model: "slng/deepgram/aura:2-en"
       voice: "aura-2-thalia-en"
   listen:
-    transcriber: { provider: deepgram, model: nova-3 }
+    transcriber:
+      provider: deepgram
+      model: nova-3
   turn:
-    detector: { provider: local, model: silero }
+    detector:
+      provider: local
+      model: silero
 
 agents:
   greeter:
     instructions: instructions.md
     model: routing_model
     voice: front_desk
-    tools: [to_billing]
+    tools:
+      - to_billing
 ```
 
 `targets.yaml` names the platform and overrides any model that platform cannot
@@ -50,7 +55,9 @@ targets:
     sdk_language: python
     models:
       # LiveKit uses its own turn detector, so override just that entry.
-      detector: { provider: livekit, model: turn-detector-mini }
+      detector:
+        provider: livekit
+        model: turn-detector-mini
 ```
 
 The model name is the join between the files: `agent.yaml` defines it, an agent
@@ -79,14 +86,17 @@ the context that crosses the boundary.
 
 ```yaml
 variables:
-  verified: { type: boolean, default: false }
+  verified:
+    type: boolean
+    default: false
 
 controls:
   to_billing:
     kind: agent_transfer
     to: billing
     when: The caller asks about billing or a refund.
-    requires: [verified]
+    requires:
+      - verified
     context:
       history: full
       variables: all
@@ -139,7 +149,9 @@ step sees, and `then` controls what happens after the final step.
 ```yaml
 task_groups:
   booking_flow:
-    steps: [find_slot, confirm_booking]
+    steps:
+      - find_slot
+      - confirm_booking
     context_scope: isolated
     then: return
     merge: results

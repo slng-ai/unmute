@@ -383,15 +383,12 @@ func TestDevTelephonyProvisionalRouteDoesNotFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	configured := strings.Replace(string(raw),
+	configured := mustReplace(t, string(raw),
 		"    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat",
-		"    transport: carrier-websocket\n    carrier: twilio\n    connection: primary_phone", 1)
-	configured = strings.Replace(configured,
+		"    transport: carrier-websocket\n    carrier: twilio\n    connection: primary_phone")
+	configured = mustReplace(t, configured,
 		"    sdk_language: python\n    models:",
-		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:", 1)
-	if configured == string(raw) {
-		t.Fatal("pipecat target fixture did not change")
-	}
+		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:")
 	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -400,12 +397,12 @@ func TestDevTelephonyProvisionalRouteDoesNotFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentConfigured := strings.Replace(string(agentRaw),
-		"channels:\n  web: { kind: realtime_audio }",
-		"channels:\n  web: { kind: realtime_audio }\n  phone:\n    kind: telephony\n    inbound: true\n    outbound: false\n    required_controls: [cold_transfer, hangup]", 1)
-	if agentConfigured == string(agentRaw) {
-		t.Fatal("agent channel fixture did not change")
-	}
+	// The trailing blank line is part of the anchor: it pins `kind` as the last
+	// key under `web:`, so adding a sibling key there fails this test loudly
+	// instead of splicing `phone:` into the middle of the `web:` mapping.
+	agentConfigured := mustReplace(t, string(agentRaw),
+		"channels:\n  web:\n    kind: realtime_audio\n\n",
+		"channels:\n  web:\n    kind: realtime_audio\n  phone:\n    kind: telephony\n    inbound: true\n    outbound: false\n    required_controls:\n      - cold_transfer\n      - hangup\n\n")
 	if err := os.WriteFile(agentPath, []byte(agentConfigured), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -483,15 +480,12 @@ func TestDevToRejectsInboundOnlyTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	configured := strings.Replace(string(raw),
+	configured := mustReplace(t, string(raw),
 		"    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat",
-		"    transport: carrier-websocket\n    carrier: twilio\n    connection: primary_phone", 1)
-	configured = strings.Replace(configured,
+		"    transport: carrier-websocket\n    carrier: twilio\n    connection: primary_phone")
+	configured = mustReplace(t, configured,
 		"    sdk_language: python\n    models:",
-		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:", 1)
-	if configured == string(raw) {
-		t.Fatal("target fixture did not change")
-	}
+		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:")
 	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -500,12 +494,12 @@ func TestDevToRejectsInboundOnlyTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentConfigured := strings.Replace(string(agentRaw),
-		"channels:\n  web: { kind: realtime_audio }",
-		"channels:\n  web: { kind: realtime_audio }\n  phone:\n    kind: telephony\n    inbound: true\n    outbound: false\n    required_controls: [cold_transfer, hangup]", 1)
-	if agentConfigured == string(agentRaw) {
-		t.Fatal("agent channel fixture did not change")
-	}
+	// The trailing blank line is part of the anchor: it pins `kind` as the last
+	// key under `web:`, so adding a sibling key there fails this test loudly
+	// instead of splicing `phone:` into the middle of the `web:` mapping.
+	agentConfigured := mustReplace(t, string(agentRaw),
+		"channels:\n  web:\n    kind: realtime_audio\n\n",
+		"channels:\n  web:\n    kind: realtime_audio\n  phone:\n    kind: telephony\n    inbound: true\n    outbound: false\n    required_controls:\n      - cold_transfer\n      - hangup\n\n")
 	if err := os.WriteFile(agentPath, []byte(agentConfigured), 0o600); err != nil {
 		t.Fatal(err)
 	}

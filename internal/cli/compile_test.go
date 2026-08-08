@@ -108,6 +108,25 @@ func copySafeCore(t *testing.T) string {
 	return dir
 }
 
+// mustReplace applies one fixture substitution and fails when the anchor is
+// gone. Every call carries its own guard on purpose: a single guard covering
+// several replacements passes as soon as any one of them lands, so a fixture
+// edit that stales one anchor patches the package halfway and the test then
+// asserts against a shape nobody intended.
+//
+// Anchors should be self-terminating (end on a blank line or a closing token)
+// rather than a prefix of an open block. A prefix still matches after someone
+// appends a key to that block, and the replacement then splices into the middle
+// of it. Failing loudly here is always better than editing the wrong place.
+func mustReplace(t *testing.T, src, old, new string) string {
+	t.Helper()
+	out := strings.Replace(src, old, new, 1)
+	if out == src {
+		t.Fatalf("fixture anchor not found, the fixture moved under this test: %q", old)
+	}
+	return out
+}
+
 func TestPrintTelephonyPlanUsesArtifactWithoutCarrierDispatch(t *testing.T) {
 	plan := &generate.TelephonyRuntimePlan{
 		Route:       ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "carrier-websocket", Carrier: "twilio"},

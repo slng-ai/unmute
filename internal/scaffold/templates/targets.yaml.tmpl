@@ -10,7 +10,7 @@ targets:
 [[if .TargetVersion]]    version: [[quote .TargetVersion]]
 [[end]][[if .SDKLanguage]]    sdk_language: [[.SDKLanguage]]
 [[end]][[if .DeploymentRegion]]    deployment_region: [[yaml .DeploymentRegion]]
-[[end]][[if .Pins]]    pins: [[.Pins]]
+[[end]][[if .Pins]]    pins:[[yamlBlock 6 .Pins]]
 [[end]][[if .Transport]]    transport: [[.Transport]]
 [[end]][[if .Carrier]]    carrier: [[.Carrier]]
 [[end]][[if .HumanTransfers]]    destinations:

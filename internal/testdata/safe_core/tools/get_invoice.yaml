@@ -4,15 +4,21 @@ description: Fetch the most recent invoice for a customer id. Returns the invoic
 input:
   type: object
   properties:
-    customer_id: { type: string, description: The customer id from lookup_customer }
-  required: [customer_id]
+    customer_id:
+      type: string
+      description: The customer id from lookup_customer
+  required:
+    - customer_id
 
 output:
   type: object
   properties:
-    invoice_id: { type: string }
-    total:      { type: number }
-    status:     { type: string }
+    invoice_id:
+      type: string
+    total:
+      type: number
+    status:
+      type: string
 
 execution: webhook
 url_env: GET_INVOICE_URL

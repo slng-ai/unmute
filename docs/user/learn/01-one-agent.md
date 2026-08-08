@@ -38,7 +38,9 @@ models:
       provider: slng
       model: "slng/deepgram/nova:3-en"
   turn:
-    vad: { provider: local, model: silero }
+    vad:
+      provider: local
+      model: silero
 
 agents:
   intake:
@@ -52,7 +54,8 @@ conversation:
     text: "Hi, you have reached Acme Support. How can I help you today?"
 
 channels:
-  web: { kind: realtime_audio }
+  web:
+    kind: realtime_audio
 
 capacity:
   peak_sessions: 40

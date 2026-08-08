@@ -10,8 +10,13 @@ conversation:
   interruption:
     enabled: true
     minimum_words: 2
-    ignore_phrases: [okay, right, uh-huh]
-  inactivity: { nudge_after: 15s, end_after: 45s }
+    ignore_phrases:
+      - okay
+      - right
+      - uh-huh
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
   max_duration: 20m
   thinking_audio: subtle
 ```

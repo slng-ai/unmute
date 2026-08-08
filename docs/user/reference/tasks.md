@@ -15,7 +15,10 @@ tasks:
     model: careful_reasoning
     result:
       verified_flag: boolean
-      tier: { enum: [free, pro] }
+      tier:
+        enum:
+          - free
+          - pro
     context:
       history: full
 ```
@@ -74,7 +77,8 @@ A `task_group` is an ordered list of steps. No edges, no cycles.
 ```yaml
 task_groups:
   triage:
-    steps: [collect]
+    steps:
+      - collect
     context_scope: isolated
     then: return
     merge: results

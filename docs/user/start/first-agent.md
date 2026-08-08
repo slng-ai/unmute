@@ -46,7 +46,9 @@ models:
       provider: slng
       model: "slng/deepgram/nova:3-en"
   turn:
-    detector: { provider: local, model: silero }
+    detector:
+      provider: local
+      model: silero
 
 agents:
   assistant:
@@ -62,7 +64,8 @@ conversation:
     enabled: true
 
 channels:
-  web: { kind: realtime_audio }
+  web:
+    kind: realtime_audio
 
 capacity:
   peak_sessions: 20
@@ -94,7 +97,9 @@ targets:
     version: "1.5.2"
     sdk_language: python
     models:
-      detector: { provider: livekit, model: turn-detector-mini }
+      detector:
+        provider: livekit
+        model: turn-detector-mini
 ```
 
 Pipecat uses the local Silero turn model from `agent.yaml`. LiveKit replaces

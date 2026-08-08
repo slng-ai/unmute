@@ -694,6 +694,164 @@ func testTelephonyChannel() Channel {
 	}
 }
 
+// TestValidateToolSchemaReportsYAMLAccidents: tool input/output are
+// map[string]any, so strict YAML decoding stops at that boundary and a bad key
+// travels into the emitted tool contract (Pipecat serializes the whole
+// properties map verbatim). A valueless spaced key is what an unquoted comma in
+// a YAML flow mapping leaves behind, and it is how a fixture shipped
+// `description: The requested date, e.g. 2026-08-14` as a truncated description
+// plus a null-valued key `e.g. 2026-08-14`.
+//
+// It is reported, never rejected. `{"e.g. 2026-08-14": null}` is a valid schema
+// because unknown keywords must be ignored whatever their value, so failing on
+// it would fail something N10 and D10 permit. Turning silence into a named,
+// path-precise warning is the whole win available here.
+func TestValidateToolSchemaReportsYAMLAccidents(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(tool *Tool)
+		want   string
+	}{
+		{
+			name:   "top level",
+			mutate: func(tool *Tool) { tool.Input["oops a space"] = nil },
+			want:   `has an empty schema key "oops a space" at input`,
+		},
+		{
+			name: "inside a property, the shape that shipped",
+			mutate: func(tool *Tool) {
+				prop := tool.Input["properties"].(map[string]any)["phone"].(map[string]any)
+				prop["e.g. 2026-08-14"] = nil
+			},
+			want: `has an empty schema key "e.g. 2026-08-14" at input.properties.phone`,
+		},
+		{
+			name: "inside items",
+			mutate: func(tool *Tool) {
+				prop := tool.Input["properties"].(map[string]any)["phone"].(map[string]any)
+				prop["items"] = map[string]any{"type": "string", "and more": nil}
+			},
+			want: `has an empty schema key "and more" at input.properties.phone.items`,
+		},
+		{
+			name: "inside draft-07 dependencies, which is a subschema position",
+			mutate: func(tool *Tool) {
+				tool.Input["dependencies"] = map[string]any{
+					"phone": map[string]any{"required": []any{"email"}, "and more": nil},
+				}
+			},
+			want: `has an empty schema key "and more" at input.dependencies.phone`,
+		},
+		{
+			name: "in output as well as input",
+			mutate: func(tool *Tool) {
+				tool.Output = map[string]any{"type": "object", "trailing text": nil}
+			},
+			want: `has an empty schema key "trailing text" at output`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := safeAgent(t)
+			tool := agent.Tools["lookup_customer"]
+			tc.mutate(&tool)
+			agent.Tools["lookup_customer"] = tool
+			report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+			if err != nil {
+				t.Fatalf("a legal schema must not fail: %v %#v", err, report.PerTarget)
+			}
+			if !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), tc.want) {
+				t.Fatalf("want warning %q, got %#v", tc.want, report.PerTarget[0].Warnings)
+			}
+		})
+	}
+}
+
+// TestValidateToolSchemaAcceptsValidSchemas: JSON Schema requires unknown
+// keywords to be ignored, and SCHEMA.md N10 inherits that by calling tool input
+// "a JSON Schema object" without narrowing it. So nothing valid may fail: not a
+// keyword the drivers never read, not a vendor extension, and not author data
+// under `default`/`examples`, which must never be descended into as if it were
+// a subschema.
+func TestValidateToolSchemaAcceptsValidSchemas(t *testing.T) {
+	agent := safeAgent(t)
+	tool := agent.Tools["lookup_customer"]
+	prop := tool.Input["properties"].(map[string]any)["phone"].(map[string]any)
+	prop["minLength"] = 12
+	prop["pattern"] = `^\+[0-9]+$`
+	prop["format"] = "phone"
+	prop["discriminator"] = "openapi dialect"
+	prop["x-vendor-hint"] = "vendor extension"
+	prop["default"] = map[string]any{"not_a_schema_key": true}
+	prop["examples"] = []any{map[string]any{"also_not_a_schema_key": true}}
+	agent.Tools["lookup_customer"] = tool
+
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("valid schema rejected: %v %#v", err, report.PerTarget)
+	}
+	if joined := strings.Join(report.PerTarget[0].Warnings, "\n"); strings.Contains(joined, "x-vendor-hint") ||
+		strings.Contains(joined, "discriminator") || strings.Contains(joined, "not_a_schema_key") {
+		t.Fatalf("valid schema warned: %q", joined)
+	}
+}
+
+// TestValidateToolSchemaWarnsOnUnrecognisedKey: a plain typo is legal JSON
+// Schema (unknown keywords are ignored), so it cannot fail the build. It still
+// reaches the provider unread, so it earns a warning: stderr, exit 0.
+//
+// The second case guards the boundary of the accident rule. A member name may
+// legally contain spaces, so whitespace alone must not fail; only the valueless
+// form does. A spaced key that carries a value is something a human wrote.
+func TestValidateToolSchemaWarnsOnUnrecognisedKey(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  string
+		set  any
+		want string
+	}{
+		{
+			name: "typo",
+			key:  "descriptoin",
+			set:  "typo for description",
+			want: `has unrecognised schema key "descriptoin" at input.properties.phone`,
+		},
+		{
+			name: "spaced key that carries a value is legal, not an accident",
+			key:  "my annotation",
+			set:  "deliberate",
+			want: `has unrecognised schema key "my annotation" at input.properties.phone`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := safeAgent(t)
+			tool := agent.Tools["lookup_customer"]
+			prop := tool.Input["properties"].(map[string]any)["phone"].(map[string]any)
+			prop[tc.key] = tc.set
+			agent.Tools["lookup_customer"] = tool
+
+			report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+			if err != nil {
+				t.Fatalf("an unrecognised keyword must not fail: %v", err)
+			}
+			joined := strings.Join(report.PerTarget[0].Warnings, "\n")
+			if !strings.Contains(joined, tc.want) {
+				t.Fatalf("want warning %q, got %#v", tc.want, report.PerTarget[0].Warnings)
+			}
+			// The warning must make no claim about the key surviving into the
+			// emitted project. That answer needs three axes: LiveKit drops
+			// unread keys everywhere; Pipecat keeps them only on the Flow-node
+			// path, where the properties map is serialised into bot.py verbatim;
+			// and a top-level input key is dropped by both. Any one-line summary
+			// is wrong often enough to mislead, so the matrix lives in N19.
+			for _, promise := range []string{"forwarded to the provider", "depends on the driver", "surviv", "reaches the provider"} {
+				if strings.Contains(joined, promise) {
+					t.Fatalf("warning makes an unsupportable survival claim %q: %q", promise, joined)
+				}
+			}
+		})
+	}
+}
+
 func reportFor(report ValidateReport, provider Provider) TargetValidation {
 	for _, row := range report.PerTarget {
 		if row.Provider == provider {

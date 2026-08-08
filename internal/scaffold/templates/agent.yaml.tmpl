@@ -14,14 +14,14 @@ models:
       description: [[.ModelDescription]]
 [[if .Reason.Provider]]      provider: [[.Reason.Provider]]
 [[end]][[if .Reason.Model]]      model: [[quote .Reason.Model]]
-[[end]][[if .Reason.Params]]      params: [[.Reason.Params]]
+[[end]][[if .Reason.Params]]      params:[[yamlBlock 8 .Reason.Params]]
 [[end]][[$fallbacks := $.FallbacksFor .ModelProfile]][[if $fallbacks]]      fallback:
 [[range $fallbacks]]        - [[.]]
 [[end]][[end]][[end]][[range .Fallbacks]]    [[.Name]]:
       description: fallback reasoning model
 [[if .Binding.Provider]]      provider: [[.Binding.Provider]]
 [[end]][[if .Binding.Model]]      model: [[quote .Binding.Model]]
-[[end]][[if .Binding.Params]]      params: [[.Binding.Params]]
+[[end]][[if .Binding.Params]]      params:[[yamlBlock 8 .Binding.Params]]
 [[end]][[end]]  speak:
 [[range .AllAgents]]    [[.VoiceProfile]]:
       description: [[.VoiceDescription]]
@@ -29,17 +29,21 @@ models:
 [[end]][[if .Speak.Model]]      model: [[quote .Speak.Model]]
 [[end]]      voice: [[quote .Speak.Voice]]
 [[if .Speak.Language]]      language: [[yaml .Speak.Language]]
-[[end]][[if .Speak.Params]]      params: [[.Speak.Params]]
+[[end]][[if .Speak.Params]]      params:[[yamlBlock 8 .Speak.Params]]
 [[end]][[end]][[if .Listen.Provider]]  listen:
     transcriber:
       provider: [[.Listen.Provider]]
       model: [[quote .Listen.Model]]
 [[if .Listen.Language]]      language: [[yaml .Listen.Language]]
-[[end]][[if .Listen.Params]]      params: [[.Listen.Params]]
+[[end]][[if .Listen.Params]]      params:[[yamlBlock 8 .Listen.Params]]
 [[end]][[end]][[if eq .Target "pipecat"]]  turn:
-    vad: { provider: local, model: silero }
+    vad:
+      provider: local
+      model: silero
 [[else if eq .Target "livekit"]]  turn:
-    detector: { provider: livekit, model: turn-detector-mini }
+    detector:
+      provider: livekit
+      model: turn-detector-mini
 [[end]]
 [[if .Variables]]variables:
 [[range .Variables]]  [[.Name]]:
@@ -61,7 +65,7 @@ models:
 [[$tools := $.TaskTools .Name]][[if $tools]]    tools:
 [[range $tools]]      - [[.]]
 [[end]][[end]][[if .Model]]    model: [[.Model]]
-[[end]]    result: [[.Result]]
+[[end]]    result:[[yamlBlock 6 .Result]]
     context:
       history: [[.History]]
 [[if .MaxMessages]]      max_messages: [[.MaxMessages]]
@@ -97,7 +101,7 @@ models:
     kind: delegate
     task: [[.Name]]
     when: [[quote .When]]
-[[if .Assign]]    assign: [[.Assign]]
+[[if .Assign]]    assign:[[yamlBlock 6 .Assign]]
 [[end]][[end]][[range .TaskGroups]]  [[.RunName]]:
     kind: delegate
     group: [[.Name]]
@@ -127,7 +131,8 @@ models:
 [[end]][[if .ThinkingAudio]]  thinking_audio: [[.ThinkingAudio]]
 [[end]]
 channels:
-[[range .AllChannels]][[if eq .Kind "realtime_audio"]]  [[.Name]]: { kind: realtime_audio }
+[[range .AllChannels]][[if eq .Kind "realtime_audio"]]  [[.Name]]:
+    kind: realtime_audio
 [[else]]  [[.Name]]:
     kind: telephony
     inbound: [[.Inbound]]

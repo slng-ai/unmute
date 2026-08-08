@@ -27,20 +27,30 @@ agents:
     instructions: instructions.md
     model: reasoning
     voice: voice
-    tools: [check_customer, manage_appointment]
+    tools:
+      - check_customer
+      - manage_appointment
 
 variables:
-  customer_id: { type: string }
-  customer_name: { type: string }
+  customer_id:
+    type: string
+  customer_name:
+    type: string
 
 tasks:
   customer_record:
     instructions: tasks/customer-record.md
-    tools: [lookup_customer, create_customer]
+    tools:
+      - lookup_customer
+      - create_customer
     result:
       customer_id: string
       customer_name: string
-      record_status: { enum: [existing, created, failed] }
+      record_status:
+        enum:
+          - existing
+          - created
+          - failed
       summary: string
     context:
       history: full
@@ -84,13 +94,15 @@ conversation:
   greeting:
     speaks_first: agent
     text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
-  interruption: { enabled: true }
+  interruption:
+    enabled: true
 
 tracing:
   provider: langfuse
 
 channels:
-  web: { kind: realtime_audio }
+  web:
+    kind: realtime_audio
 
 capacity:
   peak_sessions: 5

@@ -1002,7 +1002,7 @@ func TestLiveKitV1ConversationShapingAndAgentTools(t *testing.T) {
 		// Agent-level webhook tool on the greeter class, carrying the declared
 		// per-property schema (V2): descriptions via Annotated[..., Field(...)].
 		"class Greeter(IgnorePhrasesMixin, Agent):",
-		`async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:`,
+		`async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date, e.g. 2026-08-14")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:`,
 		// Interruption options ride turn_handling.
 		`interruption={"enabled": True, "min_words": 2},`,
 		// Generated ignore-phrase filter (lowercased phrases).

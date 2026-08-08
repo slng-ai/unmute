@@ -8,14 +8,20 @@ description: Look up a customer record by phone number or email. Returns the cus
 input:
   type: object
   properties:
-    phone: { type: string, description: Caller phone number in E.164 form }
-    email: { type: string, description: Caller email address }
+    phone:
+      type: string
+      description: Caller phone number in E.164 form
+    email:
+      type: string
+      description: Caller email address
 
 output:
   type: object
   properties:
-    customer_id: { type: string }
-    name:        { type: string }
+    customer_id:
+      type: string
+    name:
+      type: string
 
 execution: webhook
 url_env: LOOKUP_CUSTOMER_URL

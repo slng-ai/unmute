@@ -26,9 +26,13 @@ models:
       model: "slng/deepgram/aura:2-en"
       voice: "aura-2-thalia-en"
   listen:
-    transcriber: { provider: deepgram, model: nova-3 }
+    transcriber:
+      provider: deepgram
+      model: nova-3
   turn:
-    vad: { provider: local, model: silero }
+    vad:
+      provider: local
+      model: silero
 ```
 
 References must land in the right section: an agent's `voice:` names a `speak` entry; an agent's or task's `model:`, a `summarizer:`, and a `fallback` list name `think` entries; the top-level `listen:`/`turn:` selectors name entries of their sections (see [listen, turn, and placement](pipeline.md)). A name referenced but not defined is an error naming the reference; a reference into the wrong section is an error naming both kinds; the same name in two sections is an error.
@@ -129,7 +133,8 @@ models:
     transcriber:
       provider: slng
       model: "slng/deepgram/nova:3-en"
-      fallback: [backup_stt]
+      fallback:
+        - backup_stt
     backup_stt:
       provider: deepgram
       model: nova-3

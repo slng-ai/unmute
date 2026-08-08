@@ -8,12 +8,15 @@ At least one channel is required.
 
 ```yaml
 channels:
-  web: { kind: realtime_audio }
+  web:
+    kind: realtime_audio
   phone:
     kind: telephony
     inbound: true
     outbound: false
-    required_controls: [cold_transfer, hangup]
+    required_controls:
+      - cold_transfer
+      - hangup
 ```
 
 ### kind

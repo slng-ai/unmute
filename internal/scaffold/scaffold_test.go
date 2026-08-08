@@ -133,8 +133,11 @@ func TestWrite_targetChoices(t *testing.T) {
 		{
 			target:      "livekit",
 			targetsWant: []string{"livekit:", "provider: livekit", "sdk_language: python"},
-			agentWant:   []string{`voice: "aura-2-thalia-en"`, `params: {"speed":1}`, "provider: slng", "listen:", "turn:"},
-			env:         []string{"LIVEKIT_API_KEY=", "LIVEKIT_API_SECRET=", "LIVEKIT_URL=", "SLNG_API_KEY="},
+			// params arrives as compact JSON from the wizard and is rendered as
+			// block YAML like everything else, with `1` still an integer rather
+			// than widened to `1.0`.
+			agentWant: []string{`voice: "aura-2-thalia-en"`, "      params:\n        speed: 1\n", "provider: slng", "listen:", "turn:"},
+			env:       []string{"LIVEKIT_API_KEY=", "LIVEKIT_API_SECRET=", "LIVEKIT_URL=", "SLNG_API_KEY="},
 		},
 	} {
 		t.Run(tc.target, func(t *testing.T) {

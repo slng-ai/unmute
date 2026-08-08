@@ -21,10 +21,16 @@ models:
       model: "slng/deepgram/aura:2-en"
       voice: "aura-2-thalia-en"
   listen:
-    transcriber: { provider: deepgram, model: nova-3 }
-    experiment:  { provider: soniox, model: stt-rt-v5 }   # alternate, kept for testing
+    transcriber:
+      provider: deepgram
+      model: nova-3
+    experiment:   # alternate, kept for testing
+      provider: soniox
+      model: stt-rt-v5
   turn:
-    vad: { provider: local, model: silero }
+    vad:
+      provider: local
+      model: silero
 
 listen: transcriber   # swap the STT with this one line; omit when only one is defined
 
@@ -57,15 +63,21 @@ targets:
     sdk_language: python
     models:
       # Replace the local VAD entry with LiveKit's turn detector.
-      vad: { provider: livekit, model: turn-detector-mini }
+      vad:
+        provider: livekit
+        model: turn-detector-mini
 
   deepgram:
     provider: deepgram
     models:
       # Deepgram runs its own voices and STT, so override just those entries
       # (by name; an override replaces the whole entry):
-      front_desk: { model: aura-2-thalia-en }
-      transcriber: { model: flux, params: { eot_threshold: 0.7 } }  # turn rides the listen params: turn is integrated
+      front_desk:
+        model: aura-2-thalia-en
+      transcriber:   # turn rides the listen params: turn is integrated
+        model: flux
+        params:
+          eot_threshold: 0.7
 ```
 
 Each instance is named after its provider (`pipecat`, not `pipecat-dev`): what
@@ -91,7 +103,8 @@ Beyond the typed fields (`temperature`, `top_p`, `top_k`, `speed`), a model may 
 fast_reasoning:
   provider: openai
   model: gpt-4o-mini
-  params: { max_tokens: 512 }
+  params:
+    max_tokens: 512
 ```
 
 `params` is forwarded as-is and never validated, exactly like the rest of the model. It configures **only** that component. Platform-wide or telephony settings can never ride through it.

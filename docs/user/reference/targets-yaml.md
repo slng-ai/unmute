@@ -29,8 +29,12 @@ targets:
     provider: deepgram
     models:
       # override entries this target cannot run, by name (whole-entry replace)
-      front_desk: { model: aura-2-thalia-en }
-      transcriber: { model: flux, params: { eot_threshold: 0.7 } }
+      front_desk:
+        model: aura-2-thalia-en
+      transcriber:
+        model: flux
+        params:
+          eot_threshold: 0.7
 ```
 
 ## Instance fields

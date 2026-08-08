@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	targetcap "github.com/slng/unmute/internal/target"
 )
@@ -56,12 +57,16 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	if len(targets) == 0 {
 		return ValidateReport{}, fmt.Errorf("validate: no targets selected")
 	}
-	global := validateStructure(agent)
+	global, globalWarnings := validateStructure(agent)
 	global = append(global, validateConfiguredTargets(agent, caps)...)
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
 	failed := 0
 	for _, resolved := range targets {
-		row := TargetValidation{Name: resolved.Name, Provider: resolved.Provider, Errors: append([]string(nil), global...)}
+		row := TargetValidation{
+			Name: resolved.Name, Provider: resolved.Provider,
+			Errors:   append([]string(nil), global...),
+			Warnings: append([]string(nil), globalWarnings...),
+		}
 		validateTarget(agent, resolved, caps, &row)
 		report.ForwardedBindings = append(report.ForwardedBindings, forwardedBindings(resolved)...)
 		report.Sizing = append(report.Sizing, sizing(agent, resolved)...)
@@ -204,8 +209,11 @@ func validateConfiguredTargets(agent *Agent, caps targetcap.Table) []string {
 	return errors
 }
 
-func validateStructure(agent *Agent) []string {
-	var errors []string
+// validateStructure returns target-independent errors plus target-independent
+// warnings. The warnings seed every target row, because a schema key is a
+// property of the package, not of the target that compiles it.
+func validateStructure(agent *Agent) (errors, warnings []string) {
+	var schemas schemaReport
 	if agent.Version != 1 {
 		errors = add(errors, "version must be 1")
 	}
@@ -331,9 +339,11 @@ func validateStructure(agent *Agent) []string {
 		if tool.Input["type"] != "object" {
 			errors = add(errors, fmt.Sprintf("tool %q input must be a JSON Schema object", name))
 		}
+		validateToolSchema(name, "input", tool.Input, &schemas)
 		if tool.Output != nil && tool.Output["type"] != "object" {
 			errors = add(errors, fmt.Sprintf("tool %q output must be a JSON Schema object", name))
 		}
+		validateToolSchema(name, "output", tool.Output, &schemas)
 		switch tool.Execution {
 		case ToolLocal:
 			if tool.Handler == "" {
@@ -433,7 +443,7 @@ func validateStructure(agent *Agent) []string {
 			errors = add(errors, "conversation.interruption.enabled is required")
 		}
 	}
-	return errors
+	return errors, schemas.notes
 }
 
 func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *TargetValidation) {
@@ -548,6 +558,159 @@ func validateContext(context TaskContext, provider targetcap.Provider, caps targ
 // validateBuiltinTool checks a prebuilt tool: known id (V1), no webhook/local
 // fields (V3), and an effect that matches the registry (V5). The provider gate
 // (FieldToolBuiltin) is applied per target in validateTools (V4).
+// knownSchemaKeywords is what unmute recognises in a tool schema. It decides
+// whether an unrecognised key is worth mentioning; it never decides validity.
+//
+// JSON Schema is deliberately open: an implementation must ignore keywords it
+// does not know, and vendors rely on that (OpenAPI's `discriminator`, `x-`
+// extensions, whatever a provider adds next). SCHEMA.md N10 inherits that
+// openness by calling tool `input` "a JSON Schema object" without narrowing it,
+// and D10 says forwarded values are never validated because the provider is the
+// real validator. So a closed allow-list would reject schemas this repo's own
+// contract permits, and would rot every time a draft or a vendor adds a
+// keyword. Unrecognised keys therefore warn rather than fail.
+//
+// The list is generous on purpose, spanning draft-07 through 2020-12 plus the
+// OpenAPI dialect, so that using a real keyword stays quiet.
+var knownSchemaKeywords = map[string]struct{}{
+	// core and identifiers, draft-07 through 2020-12
+	"$anchor": {}, "$comment": {}, "$defs": {}, "$dynamicAnchor": {}, "$dynamicRef": {},
+	"$id": {}, "$recursiveAnchor": {}, "$recursiveRef": {}, "$ref": {}, "$schema": {},
+	"$vocabulary": {}, "definitions": {}, "id": {},
+	// applicators
+	"additionalItems": {}, "additionalProperties": {}, "allOf": {}, "anyOf": {},
+	"contains": {}, "dependencies": {}, "dependentSchemas": {}, "else": {}, "if": {},
+	"items": {}, "not": {}, "oneOf": {}, "patternProperties": {}, "prefixItems": {},
+	"properties": {}, "propertyNames": {}, "then": {}, "unevaluatedItems": {},
+	"unevaluatedProperties": {},
+	// validation
+	"const": {}, "dependentRequired": {}, "enum": {}, "exclusiveMaximum": {},
+	"exclusiveMinimum": {}, "maxContains": {}, "maxItems": {}, "maxLength": {},
+	"maxProperties": {}, "maximum": {}, "minContains": {}, "minItems": {},
+	"minLength": {}, "minProperties": {}, "minimum": {}, "multipleOf": {},
+	"pattern": {}, "required": {}, "type": {}, "uniqueItems": {},
+	// annotations and content
+	"contentEncoding": {}, "contentMediaType": {}, "contentSchema": {},
+	"default": {}, "deprecated": {}, "description": {}, "example": {}, "examples": {},
+	"format": {}, "readOnly": {}, "title": {}, "writeOnly": {},
+	// OpenAPI dialect, which several provider tool APIs accept verbatim
+	"discriminator": {}, "externalDocs": {}, "nullable": {}, "xml": {},
+}
+
+// schemaKeyLooksLikeYAMLAccident reports a valueless key containing whitespace,
+// which is what an unquoted comma inside a YAML flow mapping leaves behind: the
+// parser ends the previous entry at the comma and reads the remaining prose as
+// a bare key. `description: The requested date, e.g. 2026-08-14` becomes a
+// truncated description plus a null-valued key `e.g. 2026-08-14`, the shape
+// that shipped in a fixture and reached generated Python.
+//
+// This only selects a better warning message. It is deliberately not a failure
+// condition, because the shape is legal: a JSON Schema member name is an
+// unrestricted string and unknown keywords must be ignored whatever their value,
+// so `{"e.g. 2026-08-14": null}` is a valid schema. No key-shape rule can catch
+// this accident without also rejecting something valid, and N10 plus D10 say
+// unmute does not get to reject it.
+func schemaKeyLooksLikeYAMLAccident(key string, value any) bool {
+	return value == nil && strings.ContainsFunc(key, unicode.IsSpace)
+}
+
+// schemaKeyIsExtension reports a vendor extension, which is valid, expected,
+// and not worth a warning: `x-`/`X-` per OpenAPI, and `$`-prefixed per JSON
+// Schema's own reserved space.
+func schemaKeyIsExtension(key string) bool {
+	return strings.HasPrefix(key, "x-") || strings.HasPrefix(key, "X-") || strings.HasPrefix(key, "$")
+}
+
+// schemaMapKeywords hold a map of author-chosen name to subschema. Only the
+// values are schemas; the keys are the author's own property names and must
+// never be checked against the vocabulary.
+// draft-07's `dependencies` belongs here too: its values are either a subschema
+// or a plain string list, and validateToolSchemaValue handles both.
+var schemaMapKeywords = []string{
+	"$defs", "definitions", "dependencies", "dependentSchemas", "patternProperties", "properties",
+}
+
+// schemaValueKeywords hold a subschema directly, or a list of them. Anything
+// not listed here is left alone on purpose: `default`, `const`, `enum`, and
+// `examples` carry author data that may itself be an object, and recursing into
+// those would report a data key as an unknown schema keyword.
+var schemaValueKeywords = []string{
+	"additionalItems", "additionalProperties", "allOf", "anyOf", "contains",
+	"contentSchema", "else", "if", "items", "not", "oneOf", "prefixItems",
+	"propertyNames", "then", "unevaluatedItems", "unevaluatedProperties",
+}
+
+// schemaReport collects what a schema walk found. It carries notes only, and
+// that is the point: every note becomes a warning on stderr with exit 0, never
+// a failure. JSON Schema requires unknown keywords to be ignored, N10 inherits
+// that openness by calling tool input "a JSON Schema object" without narrowing
+// it, and D10 says forwarded values are never validated because the provider is
+// the real validator. Any key-shape rule strong enough to reject the accident
+// below would also reject a schema those three permit, so unmute reports rather
+// than refusing.
+//
+// The note says what unmute knows ("we do not read this") and stops there. It
+// deliberately makes no claim about whether the key survives into the emitted
+// project, because that answer needs three axes, not one: LiveKit reads five
+// named keys per property and drops the rest everywhere; Pipecat drops them too
+// except on the Flow-node path, where buildTool hands the whole `properties` map
+// to pyLiteral and it lands in bot.py verbatim; and a key at the top level of
+// `input` is dropped by both. "Depends on the driver" would be wrong often
+// enough to mislead, so the matrix lives in SCHEMA.md N19 where it fits.
+type schemaReport struct {
+	notes []string
+}
+
+// validateToolSchema walks a tool schema and describes what it cannot vouch
+// for. Nothing here fails a build.
+//
+// path starts at "input" or "output" and grows into the offending location, so
+// each message is unique: add() de-duplicates, and a bare key name would
+// collapse the same typo made in two different properties into one line.
+func validateToolSchema(tool, path string, schema map[string]any, report *schemaReport) {
+	for _, key := range slices.Sorted(maps.Keys(schema)) {
+		switch {
+		case schemaKeyIsExtension(key):
+			// vendor space, forwarded untouched
+		case schemaKeyLooksLikeYAMLAccident(key, schema[key]):
+			report.notes = add(report.notes, fmt.Sprintf(
+				"tool %q has an empty schema key %q at %s; an unquoted comma in a YAML flow mapping splits the entry, so quote the value if that text belongs to it",
+				tool, key, path))
+		default:
+			if _, ok := knownSchemaKeywords[key]; !ok {
+				report.notes = add(report.notes, fmt.Sprintf(
+					"tool %q has unrecognised schema key %q at %s; unmute does not read it",
+					tool, key, path))
+			}
+		}
+		switch {
+		case slices.Contains(schemaMapKeywords, key):
+			named, ok := schema[key].(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, name := range slices.Sorted(maps.Keys(named)) {
+				validateToolSchemaValue(tool, path+"."+key+"."+name, named[name], report)
+			}
+		case slices.Contains(schemaValueKeywords, key):
+			validateToolSchemaValue(tool, path+"."+key, schema[key], report)
+		}
+	}
+}
+
+// validateToolSchemaValue descends one subschema position, which JSON Schema
+// allows to be a schema, a list of schemas, or a bare bool (`items: false`).
+func validateToolSchemaValue(tool, path string, value any, report *schemaReport) {
+	switch typed := value.(type) {
+	case map[string]any:
+		validateToolSchema(tool, path, typed, report)
+	case []any:
+		for i, item := range typed {
+			validateToolSchemaValue(tool, fmt.Sprintf("%s[%d]", path, i), item, report)
+		}
+	}
+}
+
 func validateBuiltinTool(name string, tool Tool, errors *[]string) {
 	if tool.Input != nil || tool.Output != nil || tool.Handler != "" || tool.URLEnv != "" {
 		*errors = add(*errors, fmt.Sprintf("tool %q builtin execution takes no input, output, handler, or url_env", name))
