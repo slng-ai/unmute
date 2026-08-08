@@ -363,8 +363,10 @@ conversation:
 
 Remove `greeting.text` to let the model write the opening, or set
 `speaks_first: user` to wait for the caller. `thinking_audio` accepts `none` or
-`subtle`. If you omit the entire `greeting` block, LiveKit uses its target
-default and reports a warning because target defaults differ.
+`subtle`. If you omit the entire `greeting` block, the agent speaks first with a
+model-written opening, the same as `speaks_first: agent` with no `text`, and the
+same thing Pipecat does. It still reports a warning, because Vapi and Deepgram do
+not share that default. See [conversation](../reference/conversation.md).
 
 ## Configure phone calls and human transfers
 

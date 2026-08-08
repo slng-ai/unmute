@@ -101,9 +101,10 @@ func TestPipecatV1Golden(t *testing.T) {
 	}
 }
 
-// TestPipecatGreetingModes covers the three SCHEMA.md 4.8 combinations. Fixed
-// text bypasses the LLM; an omitted text still asks the model; user-first stays
-// silent (SPEC V1, V4, V5).
+// TestPipecatGreetingModes covers the three SCHEMA.md 4.8 combinations plus the
+// no-block default. Fixed text bypasses the LLM; an omitted text still asks the
+// model; user-first stays silent; an absent block takes the model-written
+// opening, same as LiveKit (SPEC V1, V4, V5, V6).
 func TestV32PipecatGreetingModes(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
@@ -152,6 +153,17 @@ func TestV32PipecatGreetingModes(t *testing.T) {
 				"TTSSpeakFrame",
 				"Greet the caller and offer to help.",
 			},
+		},
+		{
+			// No greeting block is not silence: it takes the model-written
+			// opening, the same default the LiveKit driver picks.
+			name:     "no greeting block",
+			greeting: nil,
+			want: []string{
+				`"content": "Greet the caller and offer to help."`,
+				"run_llm=True",
+			},
+			forbidden: []string{"TTSSpeakFrame"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
