@@ -11,3 +11,9 @@ __pycache__/
 .codex/worktrees/
 .firecrawl
 bin/
+
+# macOS Finder metadata
+.DS_Store
+
+# Python bytecode (emitted projects, smoke-test venvs)
+*.pyc
