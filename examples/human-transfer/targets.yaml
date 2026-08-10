@@ -1,0 +1,31 @@
+# One target: LiveKit over a Twilio Elastic SIP trunk.
+#
+# Warm transfer needs a route that can hold a private consultation leg while the
+# caller waits, and this is the only emitted route that can today. Pipecat's
+# Twilio carrier-WebSocket route emits cold transfer but not warm, so a package
+# using both shapes resolves to LiveKit SIP alone. `unmute validate` says so in
+# those words if you add a second target.
+targets:
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    transport: sip
+    carrier: twilio
+    connection: twilio_sip
+    models:
+      # LiveKit runs its own turn model rather than local Silero.
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+    # Symbolic names, resolved here so the model never sees a phone number and
+    # can never dial an arbitrary one. A destination is either a literal (E.164
+    # or a sip: URI) or the UPPER_SNAKE name of an environment variable holding
+    # one. Both forms are shown here on purpose.
+    destinations:
+      # A fixed number that is the same everywhere: keep it in the file.
+      billing_line: "+34910000001"
+      # One that differs per environment, or that you would rather not commit:
+      # name the variable instead. It lands in the generated .env.example and in
+      # the required-env list, and is read at call time.
+      supervisor_line: SUPERVISOR_PHONE_NUMBER

@@ -350,8 +350,8 @@ func TestBuildRejectsBadAndCollidingNames(t *testing.T) { // V7
 		{
 			name: "tool control collision",
 			mutate: func(pkg *packagespec.Package) {
-				destination, mode := "billing_line", "cold"
-				pkg.Agent.Controls["lookup_customer"] = packagespec.Control{Kind: "human_transfer", Destination: &destination, Mode: &mode}
+				destination := "billing_line"
+				pkg.Agent.Controls["lookup_customer"] = packagespec.Control{Kind: "human_transfer", Destination: &destination, Cold: &packagespec.ColdTransfer{}}
 			},
 			want: "collide",
 		},

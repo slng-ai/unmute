@@ -3,7 +3,9 @@ package generate
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/slng/unmute/internal/ir"
 	targetcap "github.com/slng/unmute/internal/target"
@@ -297,6 +299,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		for _, ht := range a.HumanTransfers {
 			data.HasColdTransfer = data.HasColdTransfer || !ht.Warm
 			data.HasWarmTransfer = data.HasWarmTransfer || ht.Warm
+			data.HasWarmBriefing = data.HasWarmBriefing || (ht.Warm && ht.Briefing != "")
 		}
 	}
 	// Snapshot the provider creds before telephony env is added: the web dev
@@ -748,8 +751,11 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 				return livekitAgent{}, fmt.Errorf("agent %q human_transfer %q: destination %q is not in the target's destinations map", name, ref, c.Destination)
 			}
 			ht := livekitHumanTransfer{
-				Method: ref, When: humanTransferWhen(c), To: dest,
-				Warm: c.Mode == ir.TransferWarm,
+				Method: ref, When: humanTransferWhen(c), ToExpr: destinationExpr(dest, env),
+				Warm:        c.Mode == ir.TransferWarm,
+				Briefing:    c.Briefing,
+				RingTimeout: ringTimeoutSeconds(c.RingTimeout),
+				Hangup:      c.OnUnavailable == ir.OnUnavailableHangup,
 			}
 			if ht.Warm {
 				// WarmTransferTask reads LIVEKIT_SIP_OUTBOUND_TRUNK itself.
@@ -1059,6 +1065,31 @@ func humanTransferWhen(c *ir.HumanTransfer) string {
 		return c.When
 	}
 	return "Transfer the caller to a human agent."
+}
+
+// destinationExpr renders a resolved destination as Python: a quoted literal,
+// or an os.environ lookup when the target defers it to an env var (N24). The
+// env name is registered so it reaches .env.example and the required-env list.
+func destinationExpr(destination string, env *envSet) string {
+	if name := ir.DestinationEnv(destination); name != "" {
+		env.add(name)
+		return livekitEnvRef(name)
+	}
+	return pyQuote(destination)
+}
+
+// ringTimeoutSeconds renders a validated ring_timeout as the float literal both
+// LiveKit APIs take. Empty stays empty so the emitted call omits the argument
+// and the platform default applies (SCHEMA N23).
+func ringTimeoutSeconds(value ir.Duration) string {
+	if value == "" {
+		return ""
+	}
+	duration, err := time.ParseDuration(string(value))
+	if err != nil {
+		return "" // ir.Validate already rejected it; never emit a broken literal
+	}
+	return strconv.FormatFloat(duration.Seconds(), 'f', -1, 64)
 }
 
 func delegateWhen(c *ir.Delegate) string {

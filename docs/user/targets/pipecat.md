@@ -224,7 +224,14 @@ Some features are in the schema and Pipecat itself supports them, but this first
 - **Voicemail detection** (`on_voicemail`) on carrier WebSocket routes.
 - **`mcp` tools.** Use `webhook` or `local` Python-handler tools, which are
   emitted.
-- **Warm human transfer.** The direct-carrier state machine is not enabled.
+- **Warm human transfer** (the `warm:` block). Pipecat itself supports warm
+  transfer; this driver does not emit it yet. The design targets the Twilio
+  carrier-WebSocket route: the person is dialed as a second phone call whose
+  media stream lands on the same bot process, the bot briefs them on that
+  private connection while the caller hears hold music on their own, and then
+  the bot bridges the two streams and goes silent for the rest of the call. It
+  works differently from LiveKit's, where the agent hangs up after connecting
+  the two. Cold transfer (`cold: {}`) is emitted today.
 - **Handoff and task context shaping beyond the defaults:** any `history` other
   than `full`, a subset `context.variables` list rather than `all`, and
   `include_tool_calls: false`. The handoff carries the running context; finer

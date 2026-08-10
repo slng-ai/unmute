@@ -569,7 +569,6 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 	}
 	task, group := stringValue(raw.Task), stringValue(raw.Group)
 	to, destination := stringValue(raw.To), stringValue(raw.Destination)
-	mode, briefing := stringValue(raw.Mode), stringValue(raw.Briefing)
 	switch kind {
 	case ControlDelegate:
 		if (task == "") == (group == "") {
@@ -611,25 +610,51 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 				return nil, fmt.Errorf("destination %q is missing from target %q", destination, name)
 			}
 		}
-		return &HumanTransfer{
-			Kind: ControlHumanTransfer, When: raw.When, Destination: destination,
-			Mode: TransferMode(mode), Briefing: Briefing(briefing),
-		}, nil
+		return buildHumanTransfer(raw, destination)
 	default:
 		return nil, fmt.Errorf("unknown control kind %q", raw.Kind)
 	}
+}
+
+// buildHumanTransfer resolves the `cold:`/`warm:` block into the IR control
+// (SCHEMA N23). The shape is the block name, so zero blocks and two blocks are
+// both errors here; `on_unavailable` resolves to its default so no driver reads
+// an empty value.
+func buildHumanTransfer(raw packagespec.Control, destination string) (Control, error) {
+	transfer := &HumanTransfer{Kind: ControlHumanTransfer, When: raw.When, Destination: destination}
+	switch {
+	case raw.Cold != nil && raw.Warm != nil:
+		return nil, fmt.Errorf("human_transfer declares both `cold:` and `warm:`: a transfer has exactly one shape")
+	case raw.Cold != nil:
+		transfer.Mode = TransferCold
+		transfer.RingTimeout = Duration(raw.Cold.RingTimeout)
+		transfer.OnUnavailable = OnUnavailable(raw.Cold.OnUnavailable)
+	case raw.Warm != nil:
+		transfer.Mode = TransferWarm
+		transfer.Briefing = raw.Warm.Briefing
+		transfer.RingTimeout = Duration(raw.Warm.RingTimeout)
+		transfer.OnUnavailable = OnUnavailable(raw.Warm.OnUnavailable)
+	default:
+		// A `cold:` written with no body decodes to nothing, so it lands here
+		// too: name the empty-body spelling rather than only the missing key.
+		return nil, fmt.Errorf("human_transfer has no shape block: add `cold: {}` (the braces are required for an empty block) or a `warm:` block")
+	}
+	if transfer.OnUnavailable == "" {
+		transfer.OnUnavailable = OnUnavailableReturn
+	}
+	return transfer, nil
 }
 
 func unexpectedControlField(raw packagespec.Control, kind ControlKind) string {
 	fields := map[string]bool{
 		"task": raw.Task != nil, "group": raw.Group != nil, "assign": raw.Assign != nil,
 		"to": raw.To != nil, "requires": raw.Requires != nil, "context": raw.Context != nil,
-		"destination": raw.Destination != nil, "mode": raw.Mode != nil, "briefing": raw.Briefing != nil,
+		"destination": raw.Destination != nil, "cold": raw.Cold != nil, "warm": raw.Warm != nil,
 	}
 	allowed := map[ControlKind]map[string]bool{
 		ControlDelegate:      {"task": true, "group": true, "assign": true},
 		ControlAgentTransfer: {"to": true, "requires": true, "context": true},
-		ControlHumanTransfer: {"destination": true, "mode": true, "briefing": true},
+		ControlHumanTransfer: {"destination": true, "cold": true, "warm": true},
 	}[kind]
 	for _, field := range slices.Sorted(maps.Keys(fields)) {
 		if fields[field] && !allowed[field] {
@@ -832,15 +857,10 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		if control.Kind != string(ControlHumanTransfer) {
 			continue
 		}
-		mode := stringValue(control.Mode)
-		features[targetcap.TelephonyFeature(mode+"_transfer")] = true
-		switch stringValue(control.Briefing) {
-		case string(BriefingSummary):
-			features[targetcap.TelephonyBriefingSummary] = true
-		case string(BriefingMessage):
-			features[targetcap.TelephonyBriefingMessage] = true
-		case string(BriefingWait):
-			features[targetcap.TelephonyBriefingWait] = true
+		// The shape block is the feature: SCHEMA N23 removed the briefing mode
+		// enum, so free-text briefing rides the warm row and resolves nothing.
+		if shape := control.TransferShape(); shape != "" {
+			features[targetcap.TelephonyFeature(shape+"_transfer")] = true
 		}
 	}
 	sources := make(map[string]VariableSource)
@@ -961,8 +981,24 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 	}
 }
 
+// validDestination accepts the three forms a transfer destination can take
+// (SCHEMA N24): an E.164 literal, a SIP URI, or the UPPER_SNAKE name of an
+// environment variable holding one of those. The three are unambiguous by
+// shape, so no extra key or suffix is needed to tell them apart: a literal
+// starts with `+`, a URI with `sip:`/`sips:`, and neither can be UPPER_SNAKE.
 func validDestination(value string) bool {
-	return e164Pattern.MatchString(value) || sipDestinationPath.MatchString(value)
+	return e164Pattern.MatchString(value) || sipDestinationPath.MatchString(value) ||
+		envNamePattern.MatchString(value)
+}
+
+// DestinationEnv reports the environment variable name a destination defers to,
+// or "" when it carries a literal. Drivers use it to decide between emitting the
+// value and emitting a lookup, and to register the name in `.env.example`.
+func DestinationEnv(value string) string {
+	if envNamePattern.MatchString(value) {
+		return value
+	}
+	return ""
 }
 
 // resolveBindings converts each used effective model into a Binding: think

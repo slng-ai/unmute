@@ -262,11 +262,13 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 				value.Destination = *control.Destination
 				value.Value = tgt.Destinations[value.Destination]
 			}
-			if control.Mode != nil {
-				value.Mode = *control.Mode
-			}
-			if control.Briefing != nil {
-				value.Briefing = *control.Briefing
+			value.Mode = control.TransferShape()
+			switch {
+			case control.Cold != nil:
+				value.RingTimeout, value.OnUnavailable = control.Cold.RingTimeout, control.Cold.OnUnavailable
+			case control.Warm != nil:
+				value.Briefing = control.Warm.Briefing
+				value.RingTimeout, value.OnUnavailable = control.Warm.RingTimeout, control.Warm.OnUnavailable
 			}
 			data.HumanTransfers = append(data.HumanTransfers, value)
 		}

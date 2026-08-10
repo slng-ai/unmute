@@ -287,9 +287,9 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
                 run_llm=True,
             )
         )
-{{if .CarrierTransfer}}        await telephony.cold_transfer(self.call_context["call_id"], {{pyq .ColdDestination}})
+{{if .CarrierTransfer}}        await telephony.cold_transfer(self.call_context["call_id"], {{.ColdDestination}})
 {{else}}        if _TRANSPORT is not None:
-            await _TRANSPORT.sip_call_transfer({"toEndPoint": {{pyq .ColdDestination}}})
+            await _TRANSPORT.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
 {{end}}
         await params.result_callback({"transferred": True})
 {{else if .Builtin}}{{if .Instructions}}        await params.llm.push_frame(

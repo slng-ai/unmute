@@ -14,13 +14,13 @@ type TelephonyKey struct {
 type TelephonyFeature string
 
 const (
-	TelephonyRouteSelected   TelephonyFeature = "route"
-	TelephonyInbound         TelephonyFeature = "inbound"
-	TelephonyOutbound        TelephonyFeature = "outbound"
-	TelephonyBriefingSummary TelephonyFeature = "briefing.summary"
-	TelephonyBriefingMessage TelephonyFeature = "briefing.message"
-	TelephonyBriefingWait    TelephonyFeature = "briefing.wait"
-	TelephonySourcePrefix                     = "source."
+	TelephonyRouteSelected TelephonyFeature = "route"
+	TelephonyInbound       TelephonyFeature = "inbound"
+	TelephonyOutbound      TelephonyFeature = "outbound"
+	// SCHEMA N23 removed the briefing mode enum (it was Vapi's transferPlan
+	// vocabulary and mapped to no code target), so there are no briefing.*
+	// features: a free-text briefing rides the warm_transfer control row.
+	TelephonySourcePrefix = "source."
 )
 
 type TelephonyEvidence struct {
@@ -170,7 +170,7 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		features := append([]TelephonyFeature{
 			TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(ColdTransfer),
 			TelephonyFeature(WarmTransfer), TelephonyFeature(Hangup),
-			TelephonyFeature(VoicemailDetection), TelephonyBriefingSummary,
+			TelephonyFeature(VoicemailDetection),
 		}, sourcesWithoutStream...)
 		add(LiveKit, "sip", selected.carrier, selected.docs, features...)
 		key := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: selected.carrier}

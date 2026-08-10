@@ -23,7 +23,8 @@ targets:
     connection: primary_phone
     # no model overrides: everything runs as defined in agent.yaml
     destinations:
-      billing_line: "+14155550123"
+      billing_line: "+14155550123"        # a literal, or name an env var:
+      supervisor_line: SUPERVISOR_NUMBER
 
   deepgram:
     provider: deepgram
@@ -49,7 +50,7 @@ targets:
 | `connection` | telephony routes | name of one `connections/<name>.yaml`; all telephony channels on this v1 target share it |
 | `deployment_region` | no | where the platform deploys the agent; forwarded as declared, never validated. Pipecat writes it to `pcc-deploy.toml`'s `region`; LiveKit puts it on the generated README's `lk agent create --region` (create-time, immutable). A model's own service region rides its `params`/`endpoint_env` instead. |
 | `models` | no | per-target overrides, keyed by model name, below |
-| `destinations` | if any `human_transfer` is used | map of symbolic name to phone number or SIP address |
+| `destinations` | if any `human_transfer` is used | map of symbolic name to an E.164 number, a `sip:` URI, or the UPPER_SNAKE name of an env var holding one (told apart by shape). See [controls](controls.md#destination) |
 
 Pipecat and LiveKit have drivers today; Vapi and Deepgram instances error on `compile` until their driver ships. `validate` still checks any provider against the schema. See the [target pages](../targets/pipecat.md).
 

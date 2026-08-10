@@ -663,8 +663,13 @@ controls:
   to_human:
     kind: human_transfer
     destination: billing_line
-    mode: cold
+    cold: {}
 ```
+
+The shape is a block, so `cold: {}` says "hand the caller off and drop out, with
+defaults". Swap it for a `warm:` block to keep the agent on the line and brief
+the person first. See [controls](../reference/controls.md#kind-human_transfer)
+for what goes inside each block.
 
 The target resolves `billing_line` to an E.164 number or SIP URI. The generated
 runtime never accepts a model-supplied arbitrary transfer destination. Warm

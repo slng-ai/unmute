@@ -689,12 +689,20 @@ func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env 
 	return built
 }
 
+// pipecatDestinationExpr renders a resolved destination as Python: a quoted
+// literal, or an os.environ lookup when the target defers it to an env var
+// (N24). The env name is registered so it reaches .env.example and REQUIRED_ENV.
+func pipecatDestinationExpr(destination string, env *envSet) string {
+	if name := ir.DestinationEnv(destination); name != "" {
+		env.add(name)
+		return "os.environ[" + pyLiteral(name) + "]"
+	}
+	return pyLiteral(destination)
+}
+
 // humanTransferTool lowers a cold human_transfer to a @tool that dials the
 // resolved destination over the Daily SIP transport (V5, cold only).
 func humanTransferTool(name string, c *ir.HumanTransfer, target ir.Target, env *envSet) (pipecatTool, error) {
-	if c.Mode != ir.TransferCold {
-		return pipecatTool{}, fmt.Errorf("human transfer %q mode %q has no Pipecat lowering", name, c.Mode)
-	}
 	destination, ok := target.Destinations[c.Destination]
 	if !ok {
 		return pipecatTool{}, fmt.Errorf("human transfer %q destination %q missing on target %q", name, c.Destination, target.Name)
@@ -708,11 +716,14 @@ func humanTransferTool(name string, c *ir.HumanTransfer, target ir.Target, env *
 	if desc == "" {
 		desc = "Transfer the caller to a human."
 	}
+	if c.Mode != ir.TransferCold {
+		return pipecatTool{}, fmt.Errorf("human transfer %q mode %q has no Pipecat lowering", name, c.Mode)
+	}
 	return pipecatTool{
 		Name: name, MethodName: name, Description: desc,
 		URLEnv: "", Args: nil, EndsCall: true,
 		// The destination rides through as the tool's fixed target; rendered by the template.
-		ColdDestination: destination, CarrierTransfer: carrierTransfer,
+		ColdDestination: pipecatDestinationExpr(destination, env), CarrierTransfer: carrierTransfer,
 	}, nil
 }
 

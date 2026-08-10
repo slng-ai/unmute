@@ -44,9 +44,7 @@ const (
 	FieldTransferRequires      Field = "controls.agent_transfer.requires"
 	FieldContextNoToolCalls    Field = "context.include_tool_calls.false"
 	FieldContextVariableSubset Field = "context.variables.list"
-	FieldBriefingSummary       Field = "controls.human_transfer.briefing.summary"
-	FieldBriefingMessage       Field = "controls.human_transfer.briefing.message"
-	FieldBriefingWait          Field = "controls.human_transfer.briefing.wait"
+	FieldTransferBriefing      Field = "controls.human_transfer.warm.briefing"
 	FieldGreetingUserFirst     Field = "conversation.greeting.user"
 	FieldGreetingModelWritten  Field = "conversation.greeting.model_written"
 	FieldGreetingAbsent        Field = "conversation.greeting.absent"
@@ -270,19 +268,12 @@ func Default() Table {
 				deny(Pipecat, "the Pipecat driver does not shape transfer context (variables subset) yet"),
 				deny(Vapi, "Vapi accepts transfer variables: all only"),
 			),
-			FieldBriefingSummary: field(
-				deny(Pipecat, "Pipecat has no summary briefing lowering"),
-				deny(Deepgram, "Deepgram has no summary briefing lowering"),
-			),
-			FieldBriefingMessage: field(
-				deny(LiveKit, "LiveKit supports summary briefing only"),
-				deny(Pipecat, "Pipecat has no message briefing lowering"),
-				deny(Deepgram, "Deepgram has no message briefing lowering"),
-			),
-			FieldBriefingWait: field(
-				deny(LiveKit, "LiveKit has no wait briefing lowering"),
-				deny(Pipecat, "Pipecat has no wait briefing lowering"),
-				deny(Deepgram, "Deepgram has no wait briefing lowering"),
+			// SCHEMA N23: `briefing` is free text, so there is no per-value row
+			// to resolve. It rides the warm_transfer control row, which already
+			// says which routes can carry a private consultation leg at all.
+			FieldTransferBriefing: field(
+				deny(Pipecat, "the Pipecat driver does not emit warm transfer yet, so it has nowhere to put a briefing"),
+				deny(Deepgram, "the Deepgram bridge has no warm-transfer briefing lowering"),
 			),
 			FieldGreetingUserFirst: field(
 				warn(Deepgram, "Deepgram silence for an omitted greeting is undocumented"),
@@ -412,7 +403,7 @@ func Default() Table {
 			),
 			WarmTransfer: controls(
 				control(),
-				controlDeny("Pipecat warm transfer ships upstream but this driver does not emit it yet"),
+				controlDeny("Pipecat warm transfer ships upstream but this driver does not emit it yet; the designed lowering is a two-socket bridge on the carrier-WebSocket Twilio route (human-transfer.md C9, T7)"),
 				controlNamedCarrier("twilio", "Vapi warm transfer requires carrier Twilio"),
 				controlNamedCarrier("twilio", "Deepgram transfer requires carrier Twilio in the generated bridge"),
 			),

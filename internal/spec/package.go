@@ -145,8 +145,42 @@ type Control struct {
 	Requires    []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
 	Context     *TransferContext  `json:"context,omitempty" yaml:"context,omitempty"`
 	Destination *string           `json:"destination,omitempty" yaml:"destination,omitempty"`
-	Mode        *string           `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Briefing    *string           `json:"briefing,omitempty" yaml:"briefing,omitempty"`
+	// A human_transfer names its shape with a block, never a `mode:` field, so a
+	// warm-only field on a cold transfer is unwritable rather than rejected by a
+	// cross-field rule (SCHEMA N23, the N19 argument applied to controls).
+	Cold *ColdTransfer `json:"cold,omitempty" yaml:"cold,omitempty"`
+	Warm *WarmTransfer `json:"warm,omitempty" yaml:"warm,omitempty"`
+}
+
+// ColdTransfer is the `cold:` block: hand the caller to the destination and drop
+// out. A cold transfer with nothing to configure is written `cold: {}`.
+type ColdTransfer struct {
+	RingTimeout   string `json:"ring_timeout,omitempty" yaml:"ring_timeout,omitempty"`
+	OnUnavailable string `json:"on_unavailable,omitempty" yaml:"on_unavailable,omitempty"`
+}
+
+// WarmTransfer is the `warm:` block: hold the caller, ring the person, brief
+// them, then bridge the two. `briefing` is free text (SCHEMA N23); the drivers
+// pass the call transcript alongside it on their own.
+type WarmTransfer struct {
+	Briefing      string `json:"briefing,omitempty" yaml:"briefing,omitempty"`
+	RingTimeout   string `json:"ring_timeout,omitempty" yaml:"ring_timeout,omitempty"`
+	OnUnavailable string `json:"on_unavailable,omitempty" yaml:"on_unavailable,omitempty"`
+}
+
+// TransferShape reports the shape block the control selects, or "" when it
+// carries neither. Build rejects zero and two, so a built package always
+// answers with exactly one.
+func (c Control) TransferShape() string {
+	switch {
+	case c.Cold != nil && c.Warm != nil:
+		return ""
+	case c.Cold != nil:
+		return "cold"
+	case c.Warm != nil:
+		return "warm"
+	}
+	return ""
 }
 
 // Tool is one tools/<name>.yaml. The top level is the contract with the model

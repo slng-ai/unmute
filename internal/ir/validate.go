@@ -1019,13 +1019,19 @@ func validateFallbacks(agent *Agent, resolved Target, caps targetcap.Table, row 
 	}
 }
 
+// validateHumanTransfer checks the resolved shape against the route (SCHEMA
+// N23). A free-text briefing resolves nothing on its own: it rides the warm
+// control row, so there is no briefing capability left to apply. On a telephony
+// target the route table already resolved the control, so only the block's own
+// values are checked here.
 func validateHumanTransfer(control *HumanTransfer, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
+	for _, err := range checkTransferBlock(control) {
+		row.Errors = add(row.Errors, err)
+	}
+	if control.Briefing != "" {
+		applyCapability(caps, targetcap.FieldTransferBriefing, provider, row)
+	}
 	if resolved.Telephony != nil {
-		switch control.Briefing {
-		case "", BriefingSummary, BriefingMessage, BriefingWait:
-		default:
-			row.Errors = add(row.Errors, fmt.Sprintf("unknown warm-transfer briefing %q", control.Briefing))
-		}
 		return
 	}
 	required := targetcap.ColdTransfer
@@ -1033,17 +1039,24 @@ func validateHumanTransfer(control *HumanTransfer, resolved Target, provider tar
 		required = targetcap.WarmTransfer
 	}
 	applyResolvedCapability(caps.Control(required, provider, resolved.Transport, resolved.Carrier), required, provider, row)
-	switch control.Briefing {
-	case "":
-	case BriefingSummary:
-		applyCapability(caps, targetcap.FieldBriefingSummary, provider, row)
-	case BriefingMessage:
-		applyCapability(caps, targetcap.FieldBriefingMessage, provider, row)
-	case BriefingWait:
-		applyCapability(caps, targetcap.FieldBriefingWait, provider, row)
-	default:
-		row.Errors = add(row.Errors, fmt.Sprintf("unknown warm-transfer briefing %q", control.Briefing))
+}
+
+// checkTransferBlock validates the block's own values, independent of target.
+func checkTransferBlock(control *HumanTransfer) []string {
+	var errs []string
+	if control.RingTimeout != "" {
+		errs = append(errs, validateDuration("ring_timeout", control.RingTimeout)...)
 	}
+	switch control.OnUnavailable {
+	case OnUnavailableReturn, OnUnavailableHangup:
+	default:
+		errs = append(errs, fmt.Sprintf("unknown on_unavailable %q: use %q or %q",
+			control.OnUnavailable, OnUnavailableReturn, OnUnavailableHangup))
+	}
+	if control.Briefing != "" && control.Mode != TransferWarm {
+		errs = append(errs, "briefing is legal in a `warm:` block only")
+	}
+	return errs
 }
 
 func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {

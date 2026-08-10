@@ -222,8 +222,18 @@ type HumanTransfer struct {
 	When        string
 	Destination string
 	Value       string
-	Mode        string
-	Briefing    string
+	// Mode is the shape block's name, `cold` or `warm` (SCHEMA N23). It is not
+	// written as a `mode:` field; it names the block the other values sit in.
+	Mode          string
+	Briefing      string
+	RingTimeout   string
+	OnUnavailable string
+}
+
+// BlockBody reports whether the shape block has anything under it. An empty one
+// must be written `cold: {}`, because a bare `cold:` decodes as absent.
+func (h HumanTransfer) BlockBody() bool {
+	return h.Briefing != "" || h.RingTimeout != "" || h.OnUnavailable != ""
 }
 
 type ModelFallback struct {

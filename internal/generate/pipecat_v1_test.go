@@ -1448,7 +1448,7 @@ func TestPipecatWarmHumanTransferFailsGeneration(t *testing.T) {
 	}
 	human := agent.Controls["to_human"].(*ir.HumanTransfer)
 	human.Mode = ir.TransferWarm
-	human.Briefing = ir.BriefingSummary
+	human.Briefing = "Say who is calling and why."
 	_, err = GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
 	if err == nil || !strings.Contains(err.Error(), `mode "warm" has no Pipecat lowering`) {
 		t.Fatalf("warm transfer must fail instead of lowering cold, got %v", err)

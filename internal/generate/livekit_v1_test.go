@@ -1167,7 +1167,9 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	for _, want := range []string{
 		"async def to_human(self, ctx: RunContext) -> str:",
 		"job_ctx = get_job_context()",
-		`await job_ctx.transfer_sip_participant(identity, "+14155550123", play_dialtone=True)`,
+		"rtc.ParticipantKind.PARTICIPANT_KIND_SIP",
+		`transfer_to="+14155550123",`,
+		"await job_ctx.api.sip.transfer_sip_participant(request)",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("cold agent.py missing %q", want)
@@ -1176,15 +1178,22 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 
 	human := agent.Controls["to_human"].(*ir.HumanTransfer)
 	human.Mode = ir.TransferWarm
-	human.Briefing = ir.BriefingSummary
+	human.Briefing = "Say who is calling and why."
+	human.RingTimeout = "30s"
+	human.OnUnavailable = ir.OnUnavailableReturn
 	artifact, err = Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
 		t.Fatalf("generate warm: %v", err)
 	}
 	botpy = artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		"from livekit.agents.beta.workflows import WarmTransferTask",
-		`result = await WarmTransferTask(sip_call_to="+14155550123")`,
+		"from livekit.agents.beta.workflows import WarmTransferTask, WorkflowInstructions",
+		`sip_call_to="+14155550123"`,
+		"chat_ctx=self.chat_ctx,",
+		`instructions=WorkflowInstructions(extra="Say who is calling and why."),`,
+		"ringing_timeout=30,",
+		"except ToolError as error:",
+		"room_options=room_io.RoomOptions(delete_room_on_close=False)",
 		"result.human_agent_identity",
 	} {
 		if !strings.Contains(botpy, want) {
@@ -1314,7 +1323,8 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		`_hydrate_livekit_context(session.userdata, call_context)`,
 		`_hydrate_call_start(session.userdata, call_start)`,
 		`await _livekit_entry_greeting(session)`,
-		`result = await WarmTransferTask(sip_call_to="+14155550123")`,
+		"result = await WarmTransferTask(",
+		`sip_call_to="+14155550123",`,
 	} {
 		if !strings.Contains(agentPy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -1465,9 +1475,9 @@ func configuredLiveKitSIP(t *testing.T) (*ir.Agent, ir.Target) {
 	pkg.Agent.Variables["campaign_id"] = spec.Variable{Type: "string", Source: "call_start", Default: "manual"}
 	pkg.Agent.Variables["provider_call_id"] = spec.Variable{Type: "string", Source: "call_id"}
 	pkg.Agent.Variables["call_direction"] = spec.Variable{Type: "string", Source: "direction"}
-	warm, summary := "warm", "summary"
 	human := pkg.Agent.Controls["to_human"]
-	human.Mode, human.Briefing = &warm, &summary
+	human.Cold = nil
+	human.Warm = &spec.WarmTransfer{Briefing: "Say who is calling and why."}
 	pkg.Agent.Controls["to_human"] = human
 
 	agent, err := ir.Build(pkg)
@@ -1739,8 +1749,8 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
 	back.Context.History = ir.HistorySummary
 	back.Context.Summarizer = "backup"
-	agent.Controls["to_human"] = &ir.HumanTransfer{Kind: ir.ControlHumanTransfer, Destination: "line", Mode: ir.TransferWarm, Briefing: ir.BriefingSummary}
-	agent.Controls["to_human_cold"] = &ir.HumanTransfer{Kind: ir.ControlHumanTransfer, Destination: "line", Mode: ir.TransferCold}
+	agent.Controls["to_human"] = &ir.HumanTransfer{Kind: ir.ControlHumanTransfer, Destination: "line", Mode: ir.TransferWarm, Briefing: "Say who is calling and why.", OnUnavailable: ir.OnUnavailableReturn}
+	agent.Controls["to_human_cold"] = &ir.HumanTransfer{Kind: ir.ControlHumanTransfer, Destination: "line", Mode: ir.TransferCold, RingTimeout: "20s", OnUnavailable: ir.OnUnavailableHangup}
 	agent.Tools["fetch_notes"] = ir.Tool{
 		Description: "Fetch the caller's saved notes.",
 		Input:       map[string]any{"type": "object", "properties": map[string]any{"topic": map[string]any{"type": "string"}}},

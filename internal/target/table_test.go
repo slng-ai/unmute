@@ -117,7 +117,7 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"},
 		{Provider: Pipecat, Transport: "sip", Carrier: "twilio"},
 	} {
-		if got := ResolveTelephonyFeature(key, TelephonyBriefingMessage); got.Tag != Gated {
+		if got := ResolveTelephonyFeature(key, TelephonyFeature(WarmTransfer)); got.Tag != Gated {
 			t.Fatalf("partial or unsupported route passed: %#v", got)
 		}
 	}
@@ -180,7 +180,7 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if got := ResolveTelephonyFeature(TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}, TelephonyRouteSelected); got.Tag != Gated {
 		t.Fatalf("unproven Exotel SIP route = %#v", got)
 	}
-	for _, feature := range []TelephonyFeature{TelephonyFeature(WarmTransfer), TelephonyBriefingSummary} {
+	for _, feature := range []TelephonyFeature{TelephonyFeature(WarmTransfer)} {
 		if got := ResolveTelephonyFeature(exact, feature); got.Tag != Gated {
 			t.Fatalf("Pipecat unemitted feature %s = %#v", feature, got)
 		}

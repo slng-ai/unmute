@@ -86,7 +86,7 @@ controls:
   to_human:
     kind: human_transfer
     destination: billing_line   # resolved per target in targets.yaml
-    mode: cold                  # warm is not emitted by every driver yet
+    cold: {}                    # the shape is a block, never a `mode:` field
 
 tools:
   - lookup_customer

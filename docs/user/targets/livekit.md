@@ -439,8 +439,10 @@ controls:
   to_human:
     kind: human_transfer
     destination: support_line
-    mode: warm
-    briefing: summary
+    warm:
+      briefing: Say who is calling and what they already tried. Ask if they can take it.
+      ring_timeout: 30s
+      on_unavailable: return_to_caller
 
 channels:
   phone:
@@ -678,7 +680,8 @@ remaining boundaries are explicit YAML choices, not silent omissions.
 | Twilio `connector` route | Provisional; generated bridge into a self-hosted LiveKit room, inbound/outbound/hangup, never inherits SIP capabilities |
 | A `provider: local` model (listen, speak, or think) | Supported |
 | `speak.endpoint_env` | Rejected; no LiveKit integration slot |
-| Warm `briefing: message` or `wait` | Rejected; use `summary` |
+| Warm `briefing` (free text) | Supported; added on top of the transcript LiveKit always passes along |
+| Warm transfer session | The agent leaves once the person is connected; caller and person carry on alone |
 
 ## Next steps
 

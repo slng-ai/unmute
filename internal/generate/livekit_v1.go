@@ -101,15 +101,26 @@ type livekitTransfer struct {
 	ResetVars   []livekitVar
 }
 
-// livekitHumanTransfer lowers a human_transfer control (V6): cold is a SIP
-// REFER through the job context; warm awaits the prebuilt WarmTransferTask
-// (beta.workflows, Beta on Python) whose consultation flow briefs the operator
-// (briefing: summary).
+// livekitHumanTransfer lowers a human_transfer control (V6, SCHEMA N23): cold is
+// a SIP REFER through the job context; warm awaits the prebuilt
+// WarmTransferTask (beta.workflows, Beta on Python), which dials the person,
+// plays hold music, briefs them from the chat context, and merges the calls.
 type livekitHumanTransfer struct {
 	Method string
 	When   string
-	To     string // resolved destination: a number or SIP URI
+	// ToExpr is the Python expression for the destination: a quoted literal,
+	// or os.environ["NAME"] when the target defers it to an env var (N24).
+	ToExpr string
 	Warm   bool
+	// Briefing is the free-text `warm.briefing`, lowered as the extra slot of
+	// the prebuilt's instructions. Empty means the prebuilt's own persona.
+	Briefing string
+	// RingTimeout is the emitted seconds value ("30.0"), empty when unset so the
+	// platform default applies.
+	RingTimeout string
+	// Hangup is on_unavailable: hangup. False is return_to_caller, which hands
+	// the model a refusal string and leaves the caller with the agent.
+	Hangup bool
 }
 
 // livekitOutbound is the telephony outbound + AMD voicemail lowering (V8/N6).
@@ -335,7 +346,8 @@ type livekitData struct {
 	NeedsMCP           bool        // mcp import (MCPServerHTTP)
 	NeedsEndCallTool   bool        // beta.tools EndCallTool import (prebuilt end_call)
 	HasColdTransfer    bool        // get_job_context import
-	HasWarmTransfer    bool        // WarmTransferTask import + trunk env
+	HasWarmTransfer    bool        // WarmTransferTask import + trunk env + room_options (B14)
+	HasWarmBriefing    bool        // WorkflowInstructions import (a warm.briefing is set)
 	Outbound           *livekitOutbound
 	Telephony          *livekitTelephony
 
@@ -372,7 +384,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTransferRequires:      true, // generated guard naming unmet vars (V7)
 	targetcap.FieldContextNoToolCalls:    true, // copy(exclude_function_call=True)
 	targetcap.FieldContextVariableSubset: true, // uncarried userdata fields reset (D7)
-	targetcap.FieldBriefingSummary:       true, // WarmTransferTask consultation flow
+	targetcap.FieldTransferBriefing:      true, // WarmTransferTask instructions extra (N23)
 	targetcap.FieldGreetingUserFirst:     true,
 	targetcap.FieldGreetingModelWritten:  true,
 	targetcap.FieldGreetingAbsent:        true,
@@ -404,7 +416,6 @@ var livekitEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 	targetcap.TelephonyFeature(targetcap.ColdTransfer):       true,
 	targetcap.TelephonyFeature(targetcap.WarmTransfer):       true,
 	targetcap.TelephonyFeature(targetcap.VoicemailDetection): true,
-	targetcap.TelephonyBriefingSummary:                       true,
 	"source.session_id":                                      true,
 	"source.carrier":                                         true,
 	"source.connection":                                      true,

@@ -504,11 +504,14 @@ messages and automatic call termination where Pipecat provides it.
 
 Warm transfer is not an automatic extension of that path. A Twilio call using
 bidirectional `<Connect><Stream>` cannot simultaneously be a Conference
-participant. The route must therefore prove a separate Pipecat media leg that
-can join the Conference, hold and restore the caller, brief the human, and
-remove only the AI leg. Until successful, declined, unanswered, failure, and
-duplicate-callback smokes prove that topology, `warm_transfer` remains
-provisional even if inbound, outbound, hangup, and cold transfer later pass.
+participant, which rules conference designs out for this route. The v1 shape is
+instead the two-socket bridge (human-transfer.md C9): dial the human as a second
+streamed call landing on the same process, hold the caller behind that
+transport's own mixer, brief the human on their private socket, then pump
+decoded audio between the two sockets. Until successful, declined, unanswered,
+failure, and duplicate-callback smokes prove that topology, `warm_transfer`
+remains provisional even if inbound, outbound, hangup, and cold transfer later
+pass.
 
 ### LiveKit routes
 
@@ -612,8 +615,17 @@ must state the carrier limitation.
 ### Warm transfer
 
 Warm transfer needs at least three participants and a durable state transition.
-For carrier WebSocket routes, the common behavior is conference-first even
-though every carrier uses different operations.
+For carrier WebSocket routes the selected v1 shape is **bridge-first** (amended
+2026-08-10, human-transfer.md C9): the AI dials the human as a second carrier
+call whose media stream terminates in a second WebSocket on the same process,
+briefs them there, then bridges the two sockets in software. Each human has a
+private media leg, so the hold music (a mixer on the caller's transport) and
+the private briefing (the supervisor's transport) cannot leak into each other
+by construction. Conference-first was the earlier common shape and remains the
+fallback for a carrier where a second streamed leg is impossible; on Twilio it
+is rejected for v1 because a bidirectional Media Stream leg cannot also be a
+Conference participant, so a conference design would have to tear down and
+rebuild media mid-call.
 
 ```mermaid
 stateDiagram-v2
@@ -631,7 +643,8 @@ The carrier adapter implements these operations:
 1. Put the caller and AI media leg in a conference or multi-party call.
 2. Hold the caller without ending the AI media stream.
 3. Dial the human destination.
-4. Brief the human using the selected supported briefing mode.
+4. Brief the human with the control's `warm.briefing` text plus the call
+   transcript (SCHEMA N23).
 5. Join the caller and human.
 6. Remove the AI participant.
 7. Restore the original call or end cleanly when any step fails.
@@ -928,7 +941,9 @@ The table needs explicit facts for these features:
 - Hold.
 - Voicemail detection.
 - IVR navigation.
-- Supported warm-transfer briefing modes.
+- Whether the route can carry a warm transfer's private briefing leg at all
+  (SCHEMA N23 removed the `briefing` mode enum; the briefing itself is free
+  text and is not a route capability).
 
 An emitter-agreement test must fail when validation marks a telephony feature
 supported but the selected generator doesn't emit it.
@@ -1039,13 +1054,14 @@ outbound call, one hangup, and one cold transfer against Twilio.
 This phase resolves the largest call-lifecycle risk before copying it to other
 carriers.
 
-1. Prove the conference-first topology with a Pipecat media participant.
+1. Prove the two-socket bridge topology: dial the human as a second streamed leg onto the same process, brief privately, bridge (human-transfer.md C9; conference-first is the rejected alternative).
 2. Hold and unhold the caller.
 3. Dial and brief the human.
 4. Remove the AI without ending the human call.
 5. Restore or terminate cleanly after failure.
 6. Add warm-transfer state and locks to the existing Redis control store.
-7. Record the supported briefing modes in the capability table.
+7. Record in the capability table whether the route can carry the private
+   briefing leg (SCHEMA N23: there are no briefing modes to record).
 
 Acceptance requires successful, declined, unanswered, and failed warm-transfer
 smokes with duplicate callback delivery.

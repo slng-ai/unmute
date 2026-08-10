@@ -109,9 +109,11 @@ models:
 [[end]][[range .HumanTransfers]]  [[.Name]]:
     kind: human_transfer
     destination: [[.Destination]]
-    mode: [[.Mode]]
 [[if .When]]    when: [[quote .When]]
-[[end]][[if .Briefing]]    briefing: [[.Briefing]]
+[[end]]    [[.Mode]]:[[if not .BlockBody]] {}[[end]]
+[[if .Briefing]]      briefing: [[quote .Briefing]]
+[[end]][[if .RingTimeout]]      ring_timeout: [[.RingTimeout]]
+[[end]][[if .OnUnavailable]]      on_unavailable: [[.OnUnavailable]]
 [[end]][[end]][[end]][[if .Tools]]tools:
 [[range .Tools]]  - [[.Name]]
 [[end]]

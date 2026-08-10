@@ -66,6 +66,7 @@ not built yet (they fail loud).
 | [internal/target/table.go](internal/target/table.go) | the core/warn/gated/provisional matrix: per-field, per-provider support + history/roles/fallback |
 | [SCHEMA.md](SCHEMA.md) | the human-readable truth the table encodes; **when code and this disagree, the doc wins** |
 | [docs/spec/driver-*.md](docs/spec/) | per-driver contracts (`§C` constraints, `§V` invariants, `§T` tasks, `§B` bugs) |
+| [docs/spec/human-transfer.md](spec/human-transfer.md), [prebuilt-tools.md](spec/prebuilt-tools.md) | cross-cutting feature specs: one authoring surface lowered by more than one driver |
 
 ## Tests worth knowing
 
