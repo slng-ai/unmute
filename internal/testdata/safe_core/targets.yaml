@@ -13,9 +13,16 @@ targets:
     sdk_language: python
     models:
       # override the vad entry: LiveKit runs its own turn model, not Silero
-      vad: { provider: livekit, model: turn-detector-mini, semantic_endpointing: preferred }
-      front_desk: { provider: elevenlabs, voice: cgSgspJ2msm6clMCkdW9 }
-      specialist: { provider: elevenlabs, voice: EXAVITQu4vr4xnSDxMaL }
+      vad:
+        provider: livekit
+        model: turn-detector-mini
+        semantic_endpointing: preferred
+      front_desk:
+        provider: elevenlabs
+        voice: cgSgspJ2msm6clMCkdW9
+      specialist:
+        provider: elevenlabs
+        voice: EXAVITQu4vr4xnSDxMaL
     destinations:
       billing_line: "+14155550123"
 
@@ -34,8 +41,12 @@ targets:
     models:
       # turn is integrated on Vapi; the vad entry is unused there. Endpointing
       # intent comes from the conversation block, not from a bound model.
-      front_desk: { provider: elevenlabs, voice: cgSgspJ2msm6clMCkdW9 }
-      specialist: { provider: elevenlabs, voice: EXAVITQu4vr4xnSDxMaL }
+      front_desk:
+        provider: elevenlabs
+        voice: cgSgspJ2msm6clMCkdW9
+      specialist:
+        provider: elevenlabs
+        voice: EXAVITQu4vr4xnSDxMaL
     destinations:
       billing_line: "+14155550123"
 
@@ -47,8 +58,14 @@ targets:
     models:
       # turn is integrated into listen on Deepgram: turn thresholds ride the
       # transcriber override's params, because that is where Deepgram puts them.
-      transcriber: { model: flux, params: { eot_threshold: 0.7 } }
-      front_desk: { model: aura-2-thalia-en }   # Deepgram voices, or a fixed third-party list
-      specialist: { model: aura-2-orion-en }
+      transcriber:
+        model: flux
+        params:
+          eot_threshold: 0.7
+      # both voices below are Deepgram voices, or a fixed third-party list
+      front_desk:
+        model: aura-2-thalia-en
+      specialist:
+        model: aura-2-orion-en
     destinations:
       billing_line: "+14155550123"

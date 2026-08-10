@@ -246,6 +246,7 @@ type Tool struct {
 	Handler       string           `json:"handler,omitempty" yaml:"handler,omitempty"`
 	HandlerSource string           `json:"-" yaml:"-"` // local handler file content, loaded by spec.Load
 	URLEnv        string           `json:"url_env,omitempty" yaml:"url_env,omitempty"`
+	Auth          *ToolAuth        `json:"auth,omitempty" yaml:"auth,omitempty"` // webhook auth; nil = unauthenticated
 	Interruption  ToolInterruption `json:"interruption,omitempty" yaml:"interruption,omitempty"`
 	Effect        ToolEffect       `json:"effect,omitempty" yaml:"effect,omitempty"`
 }
@@ -260,6 +261,26 @@ const (
 	ToolBuiltin        ToolExecution = "builtin"
 	ToolMCP            ToolExecution = "mcp"
 )
+
+// ToolAuth is a resolved webhook authentication scheme (SCHEMA §5). Defaults
+// are applied in Build, so every generator reads settled values; the token only
+// ever appears here as an environment variable name.
+type ToolAuth struct {
+	Type     ToolAuthType `json:"type" yaml:"type"`
+	TokenEnv string       `json:"token_env,omitempty" yaml:"token_env,omitempty"`
+	Header   string       `json:"header,omitempty" yaml:"header,omitempty"`
+}
+
+type ToolAuthType string
+
+const (
+	ToolAuthBearer ToolAuthType = "bearer"
+	ToolAuthAPIKey ToolAuthType = "api_key"
+)
+
+// DefaultAPIKeyHeader is the api_key header name applied in Build when the
+// block omits one.
+const DefaultAPIKeyHeader = "X-API-Key"
 
 type ToolInterruption string
 

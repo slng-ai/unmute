@@ -4,8 +4,11 @@
 
 ```yaml
 variables:
-  customer_id: { type: string }
-  verified:    { type: boolean, default: false }
+  customer_id:
+    type: string
+  verified:
+    type: boolean
+    default: false
 ```
 
 Variables are `core`: typed shared state works on all four targets. One driver note to keep in mind: on Deepgram live state lives in the generated bridge (template variables there are substitution-time only and visible to project members, so never route secrets through them).

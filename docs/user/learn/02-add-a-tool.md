@@ -23,17 +23,24 @@ description: Look up a customer record by phone number or email. Returns the cus
 input:
   type: object
   properties:
-    phone: { type: string, description: Caller phone number in E.164 form }
-    email: { type: string, description: Caller email address }
+    phone:
+      type: string
+      description: Caller phone number in E.164 form
+    email:
+      type: string
+      description: Caller email address
 
 output:
   type: object
   properties:
-    customer_id: { type: string }
-    name:        { type: string }
+    customer_id:
+      type: string
+    name:
+      type: string
 
-execution: webhook
-url_env: LOOKUP_CUSTOMER_URL
+webhook:
+  url_env: LOOKUP_CUSTOMER_URL
+
 interruption: provider_default
 effect: returns_data
 ```
@@ -48,9 +55,11 @@ agents:
     instructions: instructions.md
     model: fast_reasoning
     voice: front_desk
-    tools: [lookup_customer]      # this agent may call it
+    tools:   # this agent may call it
+      - lookup_customer
 
-tools: [lookup_customer]          # compile this tool file into the package
+tools:   # compile this tool file into the package
+  - lookup_customer
 ```
 
 Those two lists do different jobs, and mixing them up is the usual first mistake:
@@ -75,9 +84,9 @@ And mention it in the prompt so the model knows when to reach for it:
 
 **`output`** is the shape you promise to return. It is optional. On code targets like Pipecat it is enforced by generated code; on managed targets there is nowhere to check it, so it warns there.
 
-**`execution`** says where the tool runs. `webhook` means Unmute calls an HTTP endpoint you host. **This is the one execution kind that works on all four platforms; it is the safe choice.** Other kinds (`local` Python handlers, `mcp`, and more) exist but are gated per platform.
+**The `webhook:` block** says how the tool runs. There is exactly one such block per file and its name is the execution kind, so `webhook:` means Unmute calls an HTTP endpoint you host. **This is the one kind that works on all four platforms; it is the safe choice.** The other blocks (`local:` for a Python handler, `mcp:`, `builtin:`) are gated per platform. Writing two blocks, or none, or a block with nothing under it, is an error naming the file and the line.
 
-**`url_env`** names the environment variable that holds the endpoint URL. It is a variable name, never a URL. You set `LOOKUP_CUSTOMER_URL` in your `.env`. Keeping the URL out of the spec means the same spec points at your staging endpoint in dev and your real one in production.
+**`url_env`** names the environment variable that holds the endpoint URL. It is a variable name in `UPPER_SNAKE`, never a URL. You set `LOOKUP_CUSTOMER_URL` in your `.env`. Keeping the URL out of the spec means the same spec points at your staging endpoint in dev and your real one in production.
 
 **`interruption`** decides what happens if the caller talks while the tool is running. `provider_default` leaves it to the platform and is the safe value. `cancel` and `continue` give finer control on code targets.
 
@@ -103,11 +112,52 @@ async def lookup_customer(self, params: FunctionCallParams, phone: str = "", ema
 
 You never write or edit this. You change the spec and recompile.
 
+## If your endpoint needs credentials
+
+Most real endpoints do not accept anonymous POSTs. Add an `auth:` block inside
+`webhook:` and the generated code proves who it is. Two schemes:
+
+```yaml
+webhook:
+  url_env: LOOKUP_CUSTOMER_URL
+  auth:
+    type: bearer                       # Authorization: Bearer <token>
+    token_env: LOOKUP_CUSTOMER_TOKEN
+```
+
+```yaml
+webhook:
+  url_env: LOOKUP_CUSTOMER_URL
+  auth:
+    type: api_key                      # X-API-Key: <token>
+    token_env: LOOKUP_CUSTOMER_API_KEY
+    header: X-API-Key                  # optional, this is the default
+```
+
+The token is the **name** of an environment variable, never the value. You put
+the real value in your `.env`; the generated project lists the name in its
+`.env.example`. Signing (HMAC) and OAuth2 are not supported — for those, use a
+`local:` Python handler and make the request yourself.
+
+The emitted call gains one line:
+
+```python
+        response = await client.post(
+            os.environ["LOOKUP_CUSTOMER_URL"],
+            headers=_bearer("LOOKUP_CUSTOMER_TOKEN"),
+            json={"phone": phone, "email": email},
+            timeout=30.0,
+        )
+```
+
+This works on LiveKit and Pipecat. The managed targets configure tool auth on
+their own side, so `auth` fails there.
+
 ## What just got harder
 
 Not much, on purpose:
 
-- `execution: webhook` is `core`. Webhook tools work on all four platforms. If you only ever use webhook tools, tools never block you anywhere.
+- The `webhook:` block is `core`. Webhook tools work on all four platforms. If you only ever use webhook tools, tools never block you anywhere.
 - `output:` is `warn` on the managed target (Vapi), because it cannot enforce it. On Pipecat it is enforced.
 - `interruption: provider_default` and `effect` are `core`.
 
@@ -122,8 +172,8 @@ it, and you pick it by name instead of authoring a handler:
 
 ```yaml
 # tools/end_call.yaml
-execution: builtin
-builtin: end_call
+builtin:
+  id: end_call
 description: End the call once the caller's issue is resolved.   # optional
 instructions: Thank the caller and say goodbye.                  # optional
 ```
@@ -131,6 +181,6 @@ instructions: Thank the caller and say goodbye.                  # optional
 If you ran `unmute init`, this file is **already there** and attached to your entry
 agent, so a fresh agent can end its own calls out of the box. Keep it, change the
 wording, or delete the file to drop it. It runs on LiveKit and Pipecat only. Full
-details on the [tools reference page](../reference/tools.md#prebuilt-tools-execution-builtin).
+details on the [tools reference page](../reference/tools.md#builtin).
 
 Next: [03. Variables](03-variables.md), so the agent can remember what it looked up.

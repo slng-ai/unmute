@@ -6,18 +6,28 @@ description: >-
 input:
   type: object
   properties:
-    phone: { type: string, description: Customer phone number }
-  required: [phone]
+    phone:
+      type: string
+      description: Customer phone number
+  required:
+    - phone
 
 output:
   type: object
   properties:
-    found: { type: boolean }
-    customer_id: { type: string }
-    name: { type: string }
-  required: [found, customer_id, name]
+    found:
+      type: boolean
+    customer_id:
+      type: string
+    name:
+      type: string
+  required:
+    - found
+    - customer_id
+    - name
 
-execution: local
-handler: tools/lookup_customer.py
+local:
+  handler: tools/lookup_customer.py
+
 interruption: provider_default
 effect: returns_data

@@ -16,7 +16,7 @@ import (
 )
 
 // Automatic LiveKit SIP trunk and dispatch records for local development
-// (SPEC V4). The dev command creates them against the generated local stack
+// (compiler.md V36). The dev command creates them against the generated local stack
 // only, with the non-production key pair the Compose template hardcodes.
 // Production keeps the emitted sip-*.json + lk manual path.
 //

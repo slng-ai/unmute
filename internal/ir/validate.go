@@ -7,11 +7,15 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	targetcap "github.com/slng/unmute/internal/target"
 )
 
-var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+// envNamePattern is the UPPER_SNAKE shape every env var name in a package
+// takes. Requiring upper case also catches a pasted secret or URL where a
+// name belongs, which a mixed-case pattern would accept (compiler.md V36).
+var envNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 var languagePattern = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`)
 
 type ValidateReport struct {
@@ -56,12 +60,16 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	if len(targets) == 0 {
 		return ValidateReport{}, fmt.Errorf("validate: no targets selected")
 	}
-	global := validateStructure(agent)
+	global, globalWarnings := validateStructure(agent)
 	global = append(global, validateConfiguredTargets(agent, caps)...)
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
 	failed := 0
 	for _, resolved := range targets {
-		row := TargetValidation{Name: resolved.Name, Provider: resolved.Provider, Errors: append([]string(nil), global...)}
+		row := TargetValidation{
+			Name: resolved.Name, Provider: resolved.Provider,
+			Errors:   append([]string(nil), global...),
+			Warnings: append([]string(nil), globalWarnings...),
+		}
 		validateTarget(agent, resolved, caps, &row)
 		report.ForwardedBindings = append(report.ForwardedBindings, forwardedBindings(resolved)...)
 		report.Sizing = append(report.Sizing, sizing(agent, resolved)...)
@@ -204,8 +212,11 @@ func validateConfiguredTargets(agent *Agent, caps targetcap.Table) []string {
 	return errors
 }
 
-func validateStructure(agent *Agent) []string {
-	var errors []string
+// validateStructure returns target-independent errors plus target-independent
+// warnings. The warnings seed every target row, because a schema key is a
+// property of the package, not of the target that compiles it.
+func validateStructure(agent *Agent) (errors, warnings []string) {
+	var schemas schemaReport
 	if agent.Version != 1 {
 		errors = add(errors, "version must be 1")
 	}
@@ -266,6 +277,12 @@ func validateStructure(agent *Agent) []string {
 			if field.Enum != nil && len(field.Enum) == 0 {
 				errors = add(errors, fmt.Sprintf("task %q result %q enum must not be empty", name, fieldName))
 			}
+			// A nested result field carries a raw schema (build.go stashes any
+			// unrecognised map as ResultField.Schema), which the Pipecat driver
+			// serialises through resultProperties/pyLiteral exactly the way it
+			// serialises tool properties. Same unvalidated surface, so the same
+			// walk applies.
+			validateSchemaKeys(fmt.Sprintf("task %q result %q", name, fieldName), "schema", field.Schema, &schemas)
 		}
 		errors = append(errors, validateContextShape(name, task.Context)...)
 	}
@@ -321,6 +338,11 @@ func validateStructure(agent *Agent) []string {
 				errors = add(errors, fmt.Sprintf("tool %q instructions is legal for builtin execution only", name))
 			}
 		}
+		// auth lives in the webhook block, so a non-webhook tool can only carry
+		// one if the IR was built in code (tests, future drivers).
+		if tool.Auth != nil && tool.Execution != ToolWebhook {
+			errors = add(errors, fmt.Sprintf("tool %q auth is legal for webhook execution only", name))
+		}
 		if tool.Execution == ToolBuiltin {
 			validateBuiltinTool(name, tool, &errors)
 			continue
@@ -331,9 +353,11 @@ func validateStructure(agent *Agent) []string {
 		if tool.Input["type"] != "object" {
 			errors = add(errors, fmt.Sprintf("tool %q input must be a JSON Schema object", name))
 		}
+		validateSchemaKeys(fmt.Sprintf("tool %q", name), "input", tool.Input, &schemas)
 		if tool.Output != nil && tool.Output["type"] != "object" {
 			errors = add(errors, fmt.Sprintf("tool %q output must be a JSON Schema object", name))
 		}
+		validateSchemaKeys(fmt.Sprintf("tool %q", name), "output", tool.Output, &schemas)
 		switch tool.Execution {
 		case ToolLocal:
 			if tool.Handler == "" {
@@ -346,17 +370,18 @@ func validateStructure(agent *Agent) []string {
 			if tool.URLEnv == "" {
 				errors = add(errors, fmt.Sprintf("tool %q url_env is required for webhook execution", name))
 			} else if !envNamePattern.MatchString(tool.URLEnv) {
-				errors = add(errors, fmt.Sprintf("tool %q url_env must be an environment variable name", name))
+				errors = add(errors, fmt.Sprintf("tool %q url_env must be an UPPER_SNAKE environment variable name", name))
 			}
 			if tool.Handler != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler is legal for local execution only", name))
 			}
+			validateToolAuth(name, tool.Auth, &errors)
 		case ToolMCP:
 			// B3 (SCHEMA §5, 2026-07-16): url_env names the MCP server address.
 			if tool.URLEnv == "" {
 				errors = add(errors, fmt.Sprintf("tool %q url_env is required for mcp execution (the MCP server address env)", name))
 			} else if !envNamePattern.MatchString(tool.URLEnv) {
-				errors = add(errors, fmt.Sprintf("tool %q url_env must be an environment variable name", name))
+				errors = add(errors, fmt.Sprintf("tool %q url_env must be an UPPER_SNAKE environment variable name", name))
 			}
 			if tool.Handler != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler is legal for local execution only", name))
@@ -433,7 +458,7 @@ func validateStructure(agent *Agent) []string {
 			errors = add(errors, "conversation.interruption.enabled is required")
 		}
 	}
-	return errors
+	return errors, schemas.notes
 }
 
 func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *TargetValidation) {
@@ -548,6 +573,161 @@ func validateContext(context TaskContext, provider targetcap.Provider, caps targ
 // validateBuiltinTool checks a prebuilt tool: known id (V1), no webhook/local
 // fields (V3), and an effect that matches the registry (V5). The provider gate
 // (FieldToolBuiltin) is applied per target in validateTools (V4).
+// knownSchemaKeywords is what unmute recognises in a tool schema. It decides
+// whether an unrecognised key is worth mentioning; it never decides validity.
+//
+// JSON Schema is deliberately open: an implementation must ignore keywords it
+// does not know, and vendors rely on that (OpenAPI's `discriminator`, `x-`
+// extensions, whatever a provider adds next). SCHEMA.md N10 inherits that
+// openness by calling tool `input` "a JSON Schema object" without narrowing it,
+// and D10 says forwarded values are never validated because the provider is the
+// real validator. So a closed allow-list would reject schemas this repo's own
+// contract permits, and would rot every time a draft or a vendor adds a
+// keyword. Unrecognised keys therefore warn rather than fail.
+//
+// The list is generous on purpose, spanning draft-07 through 2020-12 plus the
+// OpenAPI dialect, so that using a real keyword stays quiet.
+var knownSchemaKeywords = map[string]struct{}{
+	// core and identifiers, draft-07 through 2020-12
+	"$anchor": {}, "$comment": {}, "$defs": {}, "$dynamicAnchor": {}, "$dynamicRef": {},
+	"$id": {}, "$recursiveAnchor": {}, "$recursiveRef": {}, "$ref": {}, "$schema": {},
+	"$vocabulary": {}, "definitions": {}, "id": {},
+	// applicators
+	"additionalItems": {}, "additionalProperties": {}, "allOf": {}, "anyOf": {},
+	"contains": {}, "dependencies": {}, "dependentSchemas": {}, "else": {}, "if": {},
+	"items": {}, "not": {}, "oneOf": {}, "patternProperties": {}, "prefixItems": {},
+	"properties": {}, "propertyNames": {}, "then": {}, "unevaluatedItems": {},
+	"unevaluatedProperties": {},
+	// validation
+	"const": {}, "dependentRequired": {}, "enum": {}, "exclusiveMaximum": {},
+	"exclusiveMinimum": {}, "maxContains": {}, "maxItems": {}, "maxLength": {},
+	"maxProperties": {}, "maximum": {}, "minContains": {}, "minItems": {},
+	"minLength": {}, "minProperties": {}, "minimum": {}, "multipleOf": {},
+	"pattern": {}, "required": {}, "type": {}, "uniqueItems": {},
+	// annotations and content
+	"contentEncoding": {}, "contentMediaType": {}, "contentSchema": {},
+	"default": {}, "deprecated": {}, "description": {}, "example": {}, "examples": {},
+	"format": {}, "readOnly": {}, "title": {}, "writeOnly": {},
+	// OpenAPI dialect, which several provider tool APIs accept verbatim
+	"discriminator": {}, "externalDocs": {}, "nullable": {}, "xml": {},
+}
+
+// schemaKeyLooksLikeYAMLAccident reports a valueless key containing whitespace,
+// which is what an unquoted comma inside a YAML flow mapping leaves behind: the
+// parser ends the previous entry at the comma and reads the remaining prose as
+// a bare key. `description: The requested date, e.g. 2026-08-14` becomes a
+// truncated description plus a null-valued key `e.g. 2026-08-14`, the shape
+// that shipped in a fixture and reached generated Python.
+//
+// This only selects a better warning message. It is deliberately not a failure
+// condition, because the shape is legal: a JSON Schema member name is an
+// unrestricted string and unknown keywords must be ignored whatever their value,
+// so `{"e.g. 2026-08-14": null}` is a valid schema. No key-shape rule can catch
+// this accident without also rejecting something valid, and N10 plus D10 say
+// unmute does not get to reject it.
+func schemaKeyLooksLikeYAMLAccident(key string, value any) bool {
+	return value == nil && strings.ContainsFunc(key, unicode.IsSpace)
+}
+
+// schemaKeyIsExtension reports a vendor extension, which is valid, expected,
+// and not worth a warning: `x-`/`X-` per OpenAPI, and `$`-prefixed per JSON
+// Schema's own reserved space.
+func schemaKeyIsExtension(key string) bool {
+	return strings.HasPrefix(key, "x-") || strings.HasPrefix(key, "X-") || strings.HasPrefix(key, "$")
+}
+
+// schemaMapKeywords hold a map of author-chosen name to subschema. Only the
+// values are schemas; the keys are the author's own property names and must
+// never be checked against the vocabulary.
+// draft-07's `dependencies` belongs here too: its values are either a subschema
+// or a plain string list, and validateSchemaKeysValue handles both.
+var schemaMapKeywords = []string{
+	"$defs", "definitions", "dependencies", "dependentSchemas", "patternProperties", "properties",
+}
+
+// schemaValueKeywords hold a subschema directly, or a list of them. Anything
+// not listed here is left alone on purpose: `default`, `const`, `enum`, and
+// `examples` carry author data that may itself be an object, and recursing into
+// those would report a data key as an unknown schema keyword.
+var schemaValueKeywords = []string{
+	"additionalItems", "additionalProperties", "allOf", "anyOf", "contains",
+	"contentSchema", "else", "if", "items", "not", "oneOf", "prefixItems",
+	"propertyNames", "then", "unevaluatedItems", "unevaluatedProperties",
+}
+
+// schemaReport collects what a schema walk found. It carries notes only, and
+// that is the point: every note becomes a warning on stderr with exit 0, never
+// a failure. JSON Schema requires unknown keywords to be ignored, N10 inherits
+// that openness by calling tool input "a JSON Schema object" without narrowing
+// it, and D10 says forwarded values are never validated because the provider is
+// the real validator. Any key-shape rule strong enough to reject the accident
+// below would also reject a schema those three permit, so unmute reports rather
+// than refusing.
+//
+// The note says what unmute knows ("we do not read this") and stops there. It
+// deliberately makes no claim about whether the key survives into the emitted
+// project, because that answer needs three axes, not one: LiveKit reads five
+// named keys per property and drops the rest everywhere; Pipecat drops them too
+// except on the Flow-node path, where buildTool hands the whole `properties` map
+// to pyLiteral and it lands in bot.py verbatim; and a key at the top level of
+// `input` is dropped by both. "Depends on the driver" would be wrong often
+// enough to mislead, so the matrix lives in SCHEMA.md N21 where it fits.
+type schemaReport struct {
+	notes []string
+}
+
+// validateSchemaKeys walks a raw schema and describes what it cannot vouch
+// for. Nothing here fails a build. subject names the owner for the message
+// (`tool "x"`, `task "y" result "z"`), since tool input/output and task result
+// schemas share this unvalidated surface.
+//
+// path starts at "input" or "output" and grows into the offending location, so
+// each message is unique: add() de-duplicates, and a bare key name would
+// collapse the same typo made in two different properties into one line.
+func validateSchemaKeys(subject, path string, schema map[string]any, report *schemaReport) {
+	for _, key := range slices.Sorted(maps.Keys(schema)) {
+		switch {
+		case schemaKeyIsExtension(key):
+			// vendor space, forwarded untouched
+		case schemaKeyLooksLikeYAMLAccident(key, schema[key]):
+			report.notes = add(report.notes, fmt.Sprintf(
+				"%s has an empty schema key %q at %s; an unquoted comma in a YAML flow mapping splits the entry, so quote the value if that text belongs to it",
+				subject, key, path))
+		default:
+			if _, ok := knownSchemaKeywords[key]; !ok {
+				report.notes = add(report.notes, fmt.Sprintf(
+					"%s has unrecognised schema key %q at %s; unmute does not read it",
+					subject, key, path))
+			}
+		}
+		switch {
+		case slices.Contains(schemaMapKeywords, key):
+			named, ok := schema[key].(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, name := range slices.Sorted(maps.Keys(named)) {
+				validateSchemaKeysValue(subject, path+"."+key+"."+name, named[name], report)
+			}
+		case slices.Contains(schemaValueKeywords, key):
+			validateSchemaKeysValue(subject, path+"."+key, schema[key], report)
+		}
+	}
+}
+
+// validateSchemaKeysValue descends one subschema position, which JSON Schema
+// allows to be a schema, a list of schemas, or a bare bool (`items: false`).
+func validateSchemaKeysValue(subject, path string, value any, report *schemaReport) {
+	switch typed := value.(type) {
+	case map[string]any:
+		validateSchemaKeys(subject, path, typed, report)
+	case []any:
+		for i, item := range typed {
+			validateSchemaKeysValue(subject, fmt.Sprintf("%s[%d]", path, i), item, report)
+		}
+	}
+}
+
 func validateBuiltinTool(name string, tool Tool, errors *[]string) {
 	if tool.Input != nil || tool.Output != nil || tool.Handler != "" || tool.URLEnv != "" {
 		*errors = add(*errors, fmt.Sprintf("tool %q builtin execution takes no input, output, handler, or url_env", name))
@@ -563,6 +743,41 @@ func validateBuiltinTool(name string, tool Tool, errors *[]string) {
 	}
 	if tool.Effect != ToolEffect(prebuilt.Effect) {
 		*errors = add(*errors, fmt.Sprintf("tool %q builtin %q fixes effect to %s, cannot be %q", name, tool.Builtin, prebuilt.Effect, tool.Effect))
+	}
+}
+
+// validateToolAuth checks a webhook auth block: a known scheme, exactly its own
+// fields, and an env name rather than a literal token (SCHEMA §5.3).
+func validateToolAuth(name string, auth *ToolAuth, errors *[]string) {
+	if auth == nil {
+		return
+	}
+	fail := func(format string, args ...any) {
+		*errors = add(*errors, fmt.Sprintf("tool %q auth "+format, append([]any{name}, args...)...))
+	}
+	switch auth.Type {
+	case ToolAuthBearer:
+		// header belongs to api_key, so a copy-paste between the two schemes
+		// fails instead of being silently ignored.
+		if auth.Header != "" {
+			fail("header is not a bearer field: bearer always sends Authorization")
+		}
+	case ToolAuthAPIKey:
+		if auth.Header == "" {
+			fail("header is required for api_key")
+		}
+	case "":
+		fail("type is required: bearer or api_key")
+		return
+	default:
+		fail("type must be bearer or api_key, not %q", auth.Type)
+		return
+	}
+	switch {
+	case auth.TokenEnv == "":
+		fail("token_env is required for %s", auth.Type)
+	case !envNamePattern.MatchString(auth.TokenEnv):
+		fail("token_env must be an UPPER_SNAKE environment variable name, never a secret value")
 	}
 }
 
@@ -835,6 +1050,9 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 			applyCapability(caps, targetcap.FieldToolProviderHosted, provider, row)
 		case ToolBuiltin:
 			applyCapability(caps, targetcap.FieldToolBuiltin, provider, row)
+		}
+		if tool.Auth != nil {
+			applyCapability(caps, targetcap.FieldToolAuth, provider, row)
 		}
 		if tool.Interruption != ToolProviderDefault {
 			applyCapability(caps, targetcap.FieldToolInterruption, provider, row)

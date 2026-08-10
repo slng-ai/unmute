@@ -34,15 +34,29 @@ func Load(dir string) (*Package, error) {
 		if filepath.Base(name) != name {
 			return nil, fmt.Errorf("agent.yaml: invalid tool name %q", name)
 		}
+		// The shape check runs before the decoder so an old flat file reads as a
+		// migration instruction instead of "unknown field" (V2).
+		file := filepath.Join("tools", name+".yaml")
+		content, err := pkg.readFile(file)
+		if err != nil {
+			return nil, err
+		}
+		block, err := checkToolShape(file, content)
+		if err != nil {
+			return nil, err
+		}
 		var tool Tool
-		if err := pkg.readYAML(filepath.Join("tools", name+".yaml"), &tool); err != nil {
+		if err := pkg.decode(file, content, &tool); err != nil {
+			return nil, err
+		}
+		if err := checkToolBlockBody(file, block, tool); err != nil {
 			return nil, err
 		}
 		pkg.Tools[name] = tool
 		// A local tool's handler travels with the package (code targets copy
 		// it into the generated project), so load it like instructions.
-		if tool.Execution == "local" {
-			handler := tool.Handler
+		if tool.Local != nil {
+			handler := tool.Local.Handler
 			if handler == "" {
 				handler = filepath.Join("tools", name+".py")
 			}
@@ -111,11 +125,24 @@ func (p *Package) readConnections() error {
 }
 
 func (p *Package) readYAML(name string, out any) error {
-	content, err := readWithin(p.Root, name)
+	content, err := p.readFile(name)
 	if err != nil {
 		return err
 	}
+	return p.decode(name, content, out)
+}
+
+// readFile reads a package file and records it for Location lookups.
+func (p *Package) readFile(name string) ([]byte, error) {
+	content, err := readWithin(p.Root, name)
+	if err != nil {
+		return nil, err
+	}
 	p.files[name] = content
+	return content, nil
+}
+
+func (p *Package) decode(name string, content []byte, out any) error {
 	if err := yaml.UnmarshalWithOptions(content, out, yaml.Strict()); err != nil {
 		return fmt.Errorf("%s: %w", name, err)
 	}

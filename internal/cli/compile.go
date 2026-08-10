@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/slng/unmute/internal/generate"
@@ -176,6 +177,7 @@ func writeArtifactFiles(warn io.Writer, outDir string, files []generate.File) (e
 		return err
 	}
 	ruffMissing := false
+	var invalidPython, ruffTrouble []string
 	for _, file := range files {
 		path := filepath.Join(outDir, file.Path)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -183,8 +185,14 @@ func writeArtifactFiles(warn io.Writer, outDir string, files []generate.File) (e
 		}
 		content := file.Content
 		if strings.HasSuffix(file.Path, ".py") {
-			formatted, found := formatPython(content)
+			formatted, found, unparseable, failure := formatPython(content)
 			content, ruffMissing = formatted, ruffMissing || !found
+			switch {
+			case unparseable:
+				invalidPython = append(invalidPython, fmt.Sprintf("%s: %v", file.Path, failure))
+			case failure != nil:
+				ruffTrouble = append(ruffTrouble, fmt.Sprintf("%s: %v", file.Path, failure))
+			}
 		}
 		if err := os.WriteFile(path, content, 0o644); err != nil {
 			return err
@@ -193,22 +201,79 @@ func writeArtifactFiles(warn io.Writer, outDir string, files []generate.File) (e
 	if ruffMissing && warn != nil {
 		fmt.Fprintln(warn, "warning: ruff not found on PATH; emitted Python left unformatted (install ruff for formatted output)")
 	}
+	// ruff ran and could not format, but not because the Python was bad. That is
+	// an environment problem, so it is reported and compile carries on with the
+	// unformatted source: failing here would reject valid output for a reason
+	// that has nothing to do with it.
+	if len(ruffTrouble) > 0 && warn != nil {
+		fmt.Fprintf(warn, "warning: ruff could not format %s; emitted Python left unformatted\n", strings.Join(ruffTrouble, "; "))
+	}
+	// The emitted Python does not parse. compile's whole job is to produce a
+	// runnable project, so reporting success here would be the silent downgrade
+	// D3 forbids. The files stay on disk deliberately, so the broken output can
+	// be read.
+	if len(invalidPython) > 0 {
+		return fmt.Errorf("emitted Python is not valid: %s", strings.Join(invalidPython, "; "))
+	}
 	return nil
 }
 
-// formatPython runs `ruff format` on Python source, best-effort. Returns the
-// input unchanged with found=false when ruff is not installed, and unchanged
-// (found=true) if ruff errors — formatting never fails generation.
-func formatPython(src []byte) (out []byte, found bool) {
+// unparseableMarker is how ruff reports source it could not parse:
+// "error: Failed to parse at 1:12: Expected a parameter ...".
+//
+// It is matched with the "error: " prefix on purpose. A broken ruff config
+// reports "ruff failed" followed by "  Cause: Failed to parse /path/ruff.toml",
+// which contains the same three words about a TOML file rather than about the
+// emitted Python. Both exit 2, so the exit code cannot tell them apart.
+const unparseableMarker = "error: Failed to parse"
+
+// ansiEscape matches the SGR sequences ruff wraps its diagnostics in when
+// colour is on. They land in the middle of the marker
+// ("\x1b[1;31merror\x1b[0m\x1b[1m:\x1b[0m \x1b[1mFailed to parse at \x1b[0m"),
+// so a literal match would miss and invalid Python would be waved through as a
+// mere environment problem.
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// formatPython runs `ruff format` on Python source, best-effort.
+//
+// Three outcomes, and the distinction is the point. found=false means ruff is
+// not installed, so the source is written unformatted. unparseable=true means
+// ruff parsed nothing because the generator emitted Python that is not valid,
+// which is a real defect the caller turns into a failed compile. Any other error
+// (a broken binary, an OOM, a future ruff whose CLI moved) returns a non-nil
+// failure with unparseable=false: it is reported, but it must never be blamed on
+// the generated code, because valid output would then fail to compile for a
+// reason that has nothing to do with it.
+//
+// --isolated stops ruff walking up the filesystem for configuration. That
+// removes the whole class of failures caused by an unrelated pyproject.toml or
+// ruff.toml above the working directory, and it makes the emitted formatting
+// depend only on the compiler rather than on where the user happened to run it.
+func formatPython(src []byte) (out []byte, found, unparseable bool, failure error) {
 	ruff, err := exec.LookPath("ruff")
 	if err != nil {
-		return src, false
+		return src, false, false, nil
 	}
-	cmd := exec.Command(ruff, "format", "-")
+	// --color never because the classifier reads this text. ruff colours its
+	// diagnostics when FORCE_COLOR or CLICOLOR_FORCE is set even with stderr
+	// piped, and NO_COLOR does not override those, so without this a developer
+	// or CI job that exports FORCE_COLOR would turn every parse failure into an
+	// unrecognised one and compile would report success on Python that cannot
+	// even be read.
+	cmd := exec.Command(ruff, "format", "--isolated", "--color", "never", "-")
 	cmd.Stdin = bytes.NewReader(src)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	formatted, err := cmd.Output()
 	if err != nil {
-		return src, true
+		// Stripped as well as suppressed: --color handles the ruff we know, and
+		// stripping keeps the classifier honest if some future version or
+		// another mechanism colours the output anyway.
+		detail := strings.TrimSpace(ansiEscape.ReplaceAllString(stderr.String(), ""))
+		if detail == "" {
+			detail = err.Error()
+		}
+		return src, true, strings.Contains(detail, unparseableMarker), errors.New(detail)
 	}
-	return formatted, true
+	return formatted, true, false, nil
 }

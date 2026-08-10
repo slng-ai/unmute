@@ -450,37 +450,64 @@ func flattenFallback(pkg *packagespec.Package, section map[string]packagespec.Mo
 	return flat, nil
 }
 
+// buildTool folds the authoring block (spec) into the flat resolved tool the
+// generators read (compiler.md V36). spec.Load has already rejected zero and
+// two-or-more blocks, so at most one arm sets the execution kind.
 func buildTool(name string, raw packagespec.Tool) Tool {
-	handler := raw.Handler
-	if raw.Execution == string(ToolLocal) && handler == "" {
-		handler = filepath.Join("tools", name+".py")
+	tool := Tool{
+		Description: raw.Description, Input: raw.Input, Output: raw.Output,
+		Execution: ToolExecution(raw.ExecutionKind()),
 	}
-	interruption := ToolInterruption(raw.Interruption)
-	if interruption == "" {
-		interruption = ToolProviderDefault
+	switch {
+	case raw.Webhook != nil:
+		tool.URLEnv = raw.Webhook.URLEnv
+		tool.Auth = buildToolAuth(raw.Webhook.Auth)
+	case raw.Local != nil:
+		tool.Handler = raw.Local.Handler
+		if tool.Handler == "" {
+			tool.Handler = filepath.Join("tools", name+".py")
+		}
+	case raw.MCP != nil:
+		tool.URLEnv = raw.MCP.URLEnv
+	case raw.Builtin != nil:
+		tool.Builtin = raw.Builtin.ID
+		tool.Instructions = raw.Builtin.Instructions
 	}
-	effect := ToolEffect(raw.Effect)
-	description := raw.Description
+	tool.Interruption = ToolInterruption(raw.Interruption)
+	if tool.Interruption == "" {
+		tool.Interruption = ToolProviderDefault
+	}
+	tool.Effect = ToolEffect(raw.Effect)
 	// A builtin tool takes its default effect and description from the prebuilt
 	// registry; Validate rejects an unknown id or a conflicting effect (V1, V5).
-	if raw.Execution == string(ToolBuiltin) {
-		if prebuilt, ok := targetcap.LookupPrebuilt(raw.Builtin); ok {
-			if effect == "" {
-				effect = ToolEffect(prebuilt.Effect)
+	if tool.Execution == ToolBuiltin {
+		if prebuilt, ok := targetcap.LookupPrebuilt(tool.Builtin); ok {
+			if tool.Effect == "" {
+				tool.Effect = ToolEffect(prebuilt.Effect)
 			}
-			if description == "" {
-				description = prebuilt.DefaultDescription
+			if tool.Description == "" {
+				tool.Description = prebuilt.DefaultDescription
 			}
 		}
 	}
-	if effect == "" {
-		effect = ToolReturnsData
+	if tool.Effect == "" {
+		tool.Effect = ToolReturnsData
 	}
-	return Tool{
-		Description: description, Input: raw.Input, Output: raw.Output, Execution: ToolExecution(raw.Execution),
-		Builtin: raw.Builtin, Instructions: raw.Instructions,
-		Handler: handler, URLEnv: raw.URLEnv, Interruption: interruption, Effect: effect,
+	return tool
+}
+
+// buildToolAuth resolves an auth block: the scheme's own default lands here so
+// every generator reads settled values. An unknown type passes through
+// unchanged for Validate to reject by name.
+func buildToolAuth(raw *packagespec.ToolAuth) *ToolAuth {
+	if raw == nil {
+		return nil
 	}
+	auth := &ToolAuth{Type: ToolAuthType(raw.Type), TokenEnv: raw.TokenEnv, Header: raw.Header}
+	if auth.Type == ToolAuthAPIKey && auth.Header == "" {
+		auth.Header = DefaultAPIKeyHeader
+	}
+	return auth
 }
 
 func buildResult(raw map[string]any) (map[string]ResultField, error) {

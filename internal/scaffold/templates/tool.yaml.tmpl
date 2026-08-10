@@ -1,14 +1,21 @@
-[[if eq .ExecutionKind "builtin"]]execution: builtin
-builtin: [[.Builtin]]
-[[if .Description]]description: [[quote .Description]]
-[[end]][[if .Instructions]]instructions: [[quote .Instructions]]
+[[if eq .ExecutionKind "builtin"]][[if .Description]]description: [[quote .Description]]
+[[end]]builtin:
+  id: [[.Builtin]]
+[[if .Instructions]]  instructions: [[quote .Instructions]]
 [[end]][[else]]description: [[quote .Description]]
-input: [[.Input]]
-[[if .Output]]output: [[.Output]]
-[[end]]execution: [[.ExecutionKind]]
-[[if .Handler]]handler: [[.Handler]]
-[[end]][[if .URLEnv]]url_env: [[.URLEnv]]
+input:[[yamlBlock 2 .Input]]
+[[if .Output]]output:[[yamlBlock 2 .Output]]
 [[end]]
+[[.ExecutionKind]]:[[if eq .ExecutionKind "client"]] {}
+[[else if eq .ExecutionKind "provider_hosted"]] {}
+[[else]]
+[[if eq .ExecutionKind "local"]]  handler: [[if .Handler]][[.Handler]][[else]]tools/[[.Name]].py[[end]]
+[[else if .URLEnv]]  url_env: [[.URLEnv]]
+[[end]][[end]][[if .Auth]]  auth:
+    type: [[.Auth.Type]]
+    token_env: [[.Auth.TokenEnv]]
+[[if .Auth.Header]]    header: [[.Auth.Header]]
+[[end]][[end]]
 interruption: provider_default
 effect: returns_data
 [[end]]

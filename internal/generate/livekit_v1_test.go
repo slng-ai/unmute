@@ -305,7 +305,10 @@ func TestV26LiveKitStaticCheckSurface(t *testing.T) {
 	if strings.Contains(toolFreeAgent, `api_key=os.environ.get("OPENAI_API_KEY")`) {
 		t.Error("required provider key must not be typed as optional")
 	}
-	for _, want := range []string{"[dependency-groups]", `"ruff"`, `"ty"`} {
+	// dl§V26 requires the checkers to be declared. The ruff version is pinned on
+	// purpose: unpinned, `uv` resolves whatever ruff shipped today, and 0.16
+	// widened its default rule selection enough to fail an unchanged generator.
+	for _, want := range []string{"[dependency-groups]", `"ruff==`, `"ty"`} {
 		if !strings.Contains(artifactFile(t, toolFree, "pyproject.toml"), want) {
 			t.Errorf("pyproject.toml missing %q", want)
 		}
@@ -335,6 +338,128 @@ func TestV26LiveKitStaticCheckSurface(t *testing.T) {
 	}
 	if strings.Contains(configuredTracing, "TracerProvider | None") {
 		t.Error("configured tracing provider must not be typed as optional")
+	}
+}
+
+// TestV26_LiveKitAgentWebhookImportsHTTPX guards B12: an agent that owns a
+// webhook tool must emit `import httpx` even when no task owns one. safe_core is
+// exactly this shape (agents own lookup_customer/get_invoice, no tasks), so its
+// agent.py called httpx.AsyncClient with no import (ruff F821, a V26 violation)
+// until the import need was computed over agent tools too, not just task tools.
+func TestV26_LiveKitAgentWebhookImportsHTTPX(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	agentPy := artifactFile(t, artifact, "agent.py")
+	if !strings.Contains(agentPy, "httpx.AsyncClient(") {
+		t.Fatal("fixture no longer lowers an agent webhook tool to httpx; pick one that does")
+	}
+	if !strings.Contains(agentPy, "import httpx") {
+		t.Error("agent.py calls httpx.AsyncClient but omits `import httpx` (ruff F821)")
+	}
+}
+
+// authFixtures are the two schemes plus what each must emit at the call site and
+// which env its token adds. Shared by the livekit and pipecat auth tests.
+var authFixtures = []struct {
+	Name     string
+	Auth     *ir.ToolAuth
+	CallSite string
+	Helper   string
+	Env      string
+}{
+	{
+		Name:     "bearer",
+		Auth:     &ir.ToolAuth{Type: ir.ToolAuthBearer, TokenEnv: "LOOKUP_CUSTOMER_TOKEN"},
+		CallSite: `headers=_bearer("LOOKUP_CUSTOMER_TOKEN"),`,
+		Helper:   `return {"Authorization": "Bearer " + os.environ[env]}`,
+		Env:      "LOOKUP_CUSTOMER_TOKEN",
+	},
+	{
+		Name:     "api_key",
+		Auth:     &ir.ToolAuth{Type: ir.ToolAuthAPIKey, TokenEnv: "LOOKUP_CUSTOMER_KEY", Header: "X-API-Key"},
+		CallSite: `headers=_api_key("X-API-Key", "LOOKUP_CUSTOMER_KEY"),`,
+		Helper:   `return {header: os.environ[env]}`,
+		Env:      "LOOKUP_CUSTOMER_KEY",
+	},
+}
+
+// authAgent loads safe_core and puts one auth block on its webhook tool.
+func authAgent(t *testing.T, auth *ir.ToolAuth) *ir.Agent {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := agent.Tools["lookup_customer"]
+	if tool.Execution != ir.ToolWebhook {
+		t.Fatal("fixture no longer has a webhook lookup_customer; pick one that does")
+	}
+	tool.Auth = auth
+	agent.Tools["lookup_customer"] = tool
+	return agent
+}
+
+// TestLiveKitV1WebhookAuth covers both schemes (SCHEMA §5.3): the call site
+// reads the right helper and the token env joins .env.example by name only.
+func TestLiveKitV1WebhookAuth(t *testing.T) {
+	for _, fixture := range authFixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			agent := authAgent(t, fixture.Auth)
+			artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+			if err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+			agentPy := artifactFile(t, artifact, "agent.py")
+			for _, want := range []string{fixture.CallSite, fixture.Helper} {
+				if !strings.Contains(agentPy, want) {
+					t.Errorf("agent.py missing %q:\n%s", want, agentPy)
+				}
+			}
+			if env := artifactFile(t, artifact, ".env.example"); !strings.Contains(env, fixture.Env) {
+				t.Errorf(".env.example missing %s", fixture.Env)
+			}
+			// Only the authenticated tool sends headers; get_invoice shares the file.
+			if strings.Count(agentPy, "headers=") != 1 {
+				t.Errorf("exactly one tool must send headers:\n%s", agentPy)
+			}
+		})
+	}
+}
+
+// TestLiveKitV1NoAuthHelpersWithoutAuth keeps every helper and its imports
+// conditional (V8/V26: no dead code) — safe_core declares no auth.
+func TestLiveKitV1NoAuthHelpersWithoutAuth(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	agentPy := artifactFile(t, artifact, "agent.py")
+	for _, unwanted := range []string{"_bearer", "_api_key"} {
+		if strings.Contains(agentPy, unwanted) {
+			t.Errorf("agent.py emits %q with no auth tool", unwanted)
+		}
 	}
 }
 
@@ -1002,7 +1127,7 @@ func TestLiveKitV1ConversationShapingAndAgentTools(t *testing.T) {
 		// Agent-level webhook tool on the greeter class, carrying the declared
 		// per-property schema (V2): descriptions via Annotated[..., Field(...)].
 		"class Greeter(IgnorePhrasesMixin, Agent):",
-		`async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:`,
+		`async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date, e.g. 2026-08-14")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:`,
 		// Interruption options ride turn_handling.
 		`interruption={"enabled": True, "min_words": 2},`,
 		// Generated ignore-phrase filter (lowercased phrases).

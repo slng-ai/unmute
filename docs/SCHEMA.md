@@ -58,7 +58,7 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
 - **N7.** Variable types are the four primitives: string, number, boolean, integer. An enum result field assigns into a string variable.
 - **N8.** All names (agents, tasks, groups, tools, controls, models, voices, variables, destinations) are lowercase snake_case. Names starting with an underscore are reserved by providers and rejected.
 - **N9.** `pipeline.turn` is optional in `agent.yaml`. Whether a turn binding is needed in `targets.yaml` follows the target's role table (section 6), not this block. Superseded by N15 (2026-07-19): the `pipeline` block itself is gone; the role-table rule lives on in section 6.2.
-- **N10.** Tool `input` is a JSON Schema object. All five targets accept JSON Schema tool inputs, so nesting is allowed here. `output` has the same shape but is only enforced on code targets; managed targets have no place to check it.
+- **N10.** Tool `input` is a JSON Schema object. All five targets accept JSON Schema tool inputs, so nesting is allowed here. `output` has the same shape; it was specified as enforced on code targets, but no driver implements that and it is unenforced everywhere today (N22).
 - **N11.** `greeting` is a block, not a scalar: `speaks_first: agent | user` plus an optional `text`. With `text`, the agent opens with those exact words every call. Without it, the model writes the opening from the prompt. This replaces the scalar `greeting: agent_first | user_first` spelling in the source document, which could not express a fixed opening line.
 - **N12.** Task `context` is the transfer context block without `variables`. Within one session the state store is already shared on all five primaries (LiveKit `userdata`, Pipecat flow state, Vapi Squad variables), so a task has nothing to filter; `context.variables` exists only on transfers.
 - **N13.** The return path is part of the contract: when a task or a `then: return` group completes, the owner receives the typed result only; the task's conversation turns are not appended to the owner's context. This is LiveKit's native `AgentTask` behavior (verified against LiveKit docs 2026-07-15: a task starts with an empty chat context and its turns are not propagated back). `TaskGroup` is different, and `summarize_chat_ctx=False` alone does not honor this: a `TaskGroup` is itself an `AgentTask`, so when it completes LiveKit merges the group's turns into the owner's context on handoff regardless of that flag (verified against the livekit-agents source 2026-07-15: `voice/agent.py` merges `old_agent.chat_ctx` with the task context on completion; `summarize_chat_ctx` only controls a separate summarization pass, not the merge). To keep the group's turns out of the owner the driver must snapshot the owner's chat context before awaiting the group and restore it afterward, returning only the typed results; it still passes `summarize_chat_ctx=False` to skip the wasteful summarization call. Generated on Pipecat and Deepgram. Vapi is n/a while single tasks fail there.
@@ -67,6 +67,13 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
 - **N16 (2026-07-20).** No package-level `language`. Language is a property of the model that hears or speaks it, so it lives only on model definitions (section 4.3): an optional BCP-47 tag on speak and listen entries. When set, it lowers through the catalogue entry's explicit language slot exactly as N14 established (an existing `params.language` stays an explicit per-integration override). When unset, **no language kwarg is emitted anywhere**: the provider default, or the language already encoded in the model route (`slng/deepgram/nova:3-en`), applies. No `en` is ever injected. Supersedes the top-level half of N14; old files with a top-level `language:` fail strict decode loudly (compiler V3).
 - **N17 (2026-07-20).** ElevenLabs leaves the target set. The managed-target group is Vapi alone; four primaries decide the schema (D1). Everything that existed only for the ElevenLabs target goes with it: its driver spec and generator, its target catalogue, the `unmute apply` command (ElevenLabs was its only wired provider; the pattern returns with the next managed driver), and the `region`/`edition` instance fields (their only consumer was ElevenLabs key residency). ElevenLabs the **model vendor** is untouched: the `elevenlabs` STT/TTS catalogue entries inside the Pipecat and LiveKit drivers stay (B4 breadth, compiler V20/V21). Dated verification records naming ElevenLabs elsewhere in this file and in §9/§B history are retained as history.
 - **N18 (2026-07-20).** `deployment_region` is a new optional instance field in `targets.yaml`: where the target platform runs the deployed agent. Free-form provider vocabulary, forwarded as declared, never validated or derived — a typo fails at the provider with its own error before anything irreversible exists. Lowering, verified against provider docs 2026-07-20: Pipecat Cloud takes it as the top-level `region` key in the emitted `pcc-deploy.toml` (line omitted when unset); LiveKit Cloud accepts a region only as the `lk agent create --region` flag (`us-east|eu-central|ap-south` today, immutable after creation, no `livekit.toml` key exists), so the generated README's deploy instructions carry the flag. A model's own service region is a different knob and intentionally stays on the model: `params` for kwarg-style pinning, `endpoint_env` for endpoint-style — an agent deployed in one region may pin a model endpoint in another.
+- **N19 (2026-08-10).** A tool's execution kind is a **block name**, not a field. `tools/*.yaml` keeps the model contract (`description`, `input`, `output`) and the two conversation scalars (`interruption`, `effect`) at the top level, and everything about how the tool runs moves inside exactly one block named after the kind: `webhook:`, `local:`, `mcp:`, `builtin:`, `client: {}`, `provider_hosted: {}` (section 5.2). The top-level `execution:`, `url_env:`, `handler:`, `builtin:` scalar, and `instructions:` keys are gone. The reason is that the flat shape let a field belong to no kind in particular: `handler` on a webhook tool, `url_env` on a builtin, `token_env` with no `auth` — each needed its own cross-field rule, and each rule was a place the schema could disagree with itself. With the kind as the block, a foreign field is unwritable and the rules disappear. `webhook:` also gains the optional `auth:` block (section 5.3, `bearer` and `api_key`), and `mcp:` is the slot a future MCP `auth:` lands in with no further shape change. Old files fail at load with the block form named and the line quoted, never a bare "unknown field" (compiler V36). Every `*_env` name is `UPPER_SNAKE`, so a pasted URL or secret fails validation instead of becoming a lookup that fails at call time.
+- **N20 (2026-08-08).** An absent `greeting` block has one default on every target whose driver actually emits an opening: the agent speaks first with a model-written opening, lowered exactly as `speaks_first: agent` without `text`. That is LiveKit and Pipecat today, the two shipped generators; the scope is deliberately "drivers that exist", not the code-target group, because Deepgram is a code target whose driver is unwritten and whose behavior for an omitted `agent.greeting` is undocumented (N6). This closes a real divergence: LiveKit already generated the opening, while Pipecat activated silently and waited, so the same source produced opposite first impressions on a call. Section 4.8 previously declined to name a default ("the target's own default applies"), which is what let the two drivers drift. Silence is not eligible to be the default, because a caller has no visual signal that the line is live and reads it as a dropped connection. Agent-speaks-first is also the established shape of a new package: `unmute init` scaffolds `speaks_first: agent`, though with a fixed `text` line rather than a model-written one, so what this amendment settles is only what happens once that block is deleted. `greeting.absent` stays **warn** rather than becoming core, and the warn now covers two different situations rather than one: Vapi is managed and applies its own native default, while Deepgram is simply unproven. When the Deepgram driver ships it adopts this default and its cell can go core; until then the warn is the honest answer. Declaring `speaks_first: user` is now the only way to get silence, which is the point: it has to be asked for. Amends 4.8; no authoring shape changes, so no file fails decode.
+- **N21 (2026-08-08).** Tool `input` and `output` keys are inspected and **reported, never rejected**. A key unmute does not recognise produces a warning on stderr with exit 0 naming the tool and the exact path, and a valueless key containing whitespace gets a sharper one that names the cause (`tool "check_availability" has an empty schema key "e.g. 2026-08-14" at input.properties.date; an unquoted comma in a YAML flow mapping splits the entry, so quote the value if that text belongs to it`).
+- **N22 (2026-08-08).** Tool `output` is **not enforced on any target**, and this entry exists because the schema said otherwise. N10 and the field table claimed it was "enforced by generated code on code targets", but no driver has ever read it — `.Output` appears nowhere in `internal/generate`. The documentation is corrected here and in the field table; the capability table is deliberately **unchanged**. Widening its Vapi-only warning to all four was tried and reverted: `warn` is defined in section 1 as "works on all four", and every other use of it in the table means works-with-a-caveat (placement ignored, endpointing advisory, minimum words lossy). "Declared and completely inert" is not that. The tag that does mean "not proven on any target yet" is `provisional`, and it fails validation everywhere, which would reject every package that declares an output today, including `safe_core` and every example. Choosing between implementing enforcement and taking that break is a maintainer decision, and quietly redefining `warn` to avoid making it would put the table at odds with its own vocabulary. Note this also stands against section 1's promise that "a field never silently does nothing": `output` does exactly that today, which is the strongest argument for closing it properly. Declaring it is still useful: it documents the tool contract and rides into `compile-report.json`. Enforcement needs a design call this document cannot make alone — what a generated agent should do when a tool returns a value that does not match, mid-conversation, after the call has already happened.
+  Nothing here fails a build, and that is a decision rather than an omission. JSON Schema requires an implementation to ignore keywords it does not know, whatever their value, so `{"e.g. 2026-08-14": null}` is itself a *valid* schema. N10 inherits that openness by calling tool `input` "a JSON Schema object" without restricting the vocabulary, and D10 says forwarded values are never validated because the provider is the real validator. No key-shape rule can catch this accident without also refusing something those three permit, and a closed allow-list would rot with each new draft or vendor keyword besides. So unmute reports rather than refusing; the win is turning silence into a named, path-precise message.
+  Why it matters: both fields decode into `map[string]any`, so the strict decode that rejects unknown fields everywhere else (compiler V3) stops at that boundary and anything typed inside can travel into the emitted tool contract: on the Pipecat Flow-node path the whole `properties` map is serialised verbatim into a `FlowsFunctionSchema`, so a bad key there reaches the model as part of the tool's advertised arguments. On every other path it is dropped instead, which is why the bug stayed invisible; the measured matrix is below. The bug that motivated this shipped in a fixture and was invisible for weeks: a comma inside an unquoted YAML flow scalar split `description: The requested date, e.g. 2026-08-14` into a truncated description plus a null-valued key `e.g. 2026-08-14`.
+  Inspection recurses through every subschema position across draft-07 to 2020-12 — the name-keyed containers (`properties`, `patternProperties`, `$defs`, `definitions`, `dependencies`, `dependentSchemas`) and the direct and list positions (`items`, `contains`, `propertyNames`, `if`/`then`/`else`, `not`, `allOf`/`anyOf`/`oneOf`, `prefixItems`, the `additional*`/`unevaluated*` pair, `contentSchema`) — and deliberately does **not** descend into keywords carrying author data (`default`, `const`, `enum`, `examples`), because an object-valued default would otherwise be read as a schema. Vendor extensions (`x-`, `$`-prefixed) are silent. The warning does **not** promise the key reaches the provider, because measured behaviour is not uniform: LiveKit reads five named keys per property (`type`, `enum`, `description`, plus `properties` and `required` above them) and drops everything else; Pipecat drops them too, except on the Flow-node path where `buildTool` hands the whole `properties` map to `pyLiteral` and it lands in `bot.py` verbatim. A key at the top level of `input` is dropped by both. So an unrecognised key survives in exactly one case out of four, and the answer needs three axes (driver, agent-tool versus task-tool, depth) rather than one. The warning therefore says only `unmute does not read it` and makes no survival claim at all: "depends on the driver" would be wrong often enough to mislead, and this table is the place with room to be exact. Task `result:` field schemas reach the same generator path (`ResultField.Schema`) and are covered by the same walk, reported against the field rather than a tool (`task "collect" result "details" has unrecognised schema key ... at schema.properties.city`).
 
 - **N16 (added 2026-07-20).** Telephony compilation is scoped to
   LiveKit and Pipecat. A telephony target selects exactly one Connection and
@@ -319,7 +326,7 @@ The three greeting combinations:
 - `speaks_first: agent` without `text`: the model writes the opening from the prompt, so it varies per call. Generated on LiveKit and Pipecat; native on Vapi (`firstMessageMode: assistant-speaks-first-with-model-generated-message`, verified 2026-07-15). **Generated with a warning on Deepgram** (review-corrected 2026-07-15: inject a synthetic turn at call start via `InjectUserMessage`/`InjectAgentMessage`, documented for orchestrated openings, though not framed as a first-class greeting mode).
 - `speaks_first: user`: native on Vapi (verified 2026-07-15), generated on LiveKit and Pipecat, warns on Deepgram (omission behavior undocumented).
 
-If the `greeting` block is absent, the target's own default applies and the driver warns, because provider defaults differ.
+If the `greeting` block is absent, the agent speaks first with a model-written opening: the two drivers that ship a generator (LiveKit, Pipecat) lower an absent block exactly like `speaks_first: agent` without `text`, so one source cannot open a call differently across them (N20). It still warns, because the remaining two targets do not share that default: Vapi is managed and applies its own native default, and Deepgram's behavior for an omitted `agent.greeting` is undocumented (N6) and its driver is unwritten.
 
 ### 4.9 channels
 
@@ -377,30 +384,95 @@ checked-in packages under `examples/` include it.
 
 ## 5. tools/*.yaml
 
-The file name is the tool name (N4). Four parts plus a description. Which agents see the tool is decided only by their `tools:` lists in `agent.yaml`, never here.
+The file name is the tool name (N4). The top level is the contract with the
+model plus the two conversation scalars; **how the tool runs lives in exactly
+one execution-keyed block** (rewritten 2026-08-10, N19, compiler T23). The block name
+is the execution kind, so a field belonging to another kind is unwritable rather
+than merely rejected. Which agents see the tool is decided only by their
+`tools:` lists in `agent.yaml`, never here.
+
+```yaml
+description: Search for a place by name, type, or area.
+
+input:
+  type: object
+  properties:
+    query:
+      type: string
+      description: 'e.g. "tapas bar in Madrid"'
+  required:
+    - query
+
+webhook:
+  url_env: LOOKUP_PLACES_URL
+  auth:
+    type: bearer
+    token_env: LOOKUP_PLACES_TOKEN
+
+effect: returns_data
+interruption: provider_default
+```
+
+### 5.1 Top level
 
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
-| `description` | yes, except `builtin` | text | core | What the LLM reads. Optional for `execution: builtin`, where the prebuilt registry supplies a default and this text is added on top (docs/spec/prebuilt-tools.md). |
-| `input` | yes, except `builtin` | JSON Schema object | core | Lowers natively everywhere (N10). A `builtin` tool has no `input`: the prebuilt owns its schema. |
-| `output` | no | JSON Schema object | warn | Enforced by generated code on code targets. Managed targets have no slot for it: warns there. Not legal on a `builtin` tool. |
-| `execution` | yes | `local \| client \| webhook \| provider_hosted \| builtin \| mcp` | see below | |
-| `builtin` | iff `execution: builtin` | prebuilt registry id (v1: `end_call`) | see below | Names a provider-shipped prebuilt tool the user selects instead of authoring a handler. Unknown id fails with file:line. |
-| `instructions` | no, `builtin` only | text | core | The prebuilt's closing/goodbye message (LiveKit `end_instructions`; Pipecat developer message). Illegal on a non-builtin tool. |
-| `handler` | iff `execution: local` | path, default `<name>.py` | | Code targets only. Not legal on a `builtin` tool. |
-| `url_env` | iff `execution: webhook` or `mcp` | env var name | core | Reference only, never a URL value. For `mcp` it names the MCP server address (driver-livekit B3, 2026-07-16: code targets have no other slot for it; managed targets may configure the server provider-side and ignore it). Not legal on a `builtin` tool. |
+| `description` | yes, except `builtin` | text | core | What the LLM reads. Optional for a `builtin` tool, where the prebuilt registry supplies a default and this text is added on top (docs/spec/prebuilt-tools.md). |
+| `input` | yes, except `builtin` | JSON Schema object | core | The parameters the model fills in; lowers natively everywhere (N10). A `builtin` tool has no `input`: the prebuilt owns its schema. |
+| `output` | no | JSON Schema object | warn | Declared and carried into the compile report, but **not enforced anywhere yet** (N22): no driver reads it. Only Vapi warns, and the tag is `warn` on that basis alone. Not legal on a `builtin` tool. |
+| one execution block | yes, exactly one | `webhook \| local \| mcp \| builtin \| client \| provider_hosted` | see 5.2 | Zero blocks and two-or-more blocks both fail at load with file:line. |
 | `interruption` | no, default `provider_default` | `continue \| cancel \| provider_default` | warn | Honored on Pipecat (`cancel_on_interruption`); LiveKit runs tools to completion, so non-default values warn there (2026-07-16). On managed targets only `provider_default` means anything; other values warn. |
 | `effect` | no, default `returns_data` | `returns_data \| ends_conversation` | core | Fixed by the registry for a `builtin` tool (`end_call` implies `ends_conversation`); a conflicting value fails. |
 
-Execution gating across the four:
+### 5.2 Execution blocks
 
-- `webhook`: works everywhere. **This is the safe choice.**
-- `local`: code targets only.
-- `mcp`: **fails on Deepgram** (no runtime MCP client). On LiveKit it requires SDK language Python; code targets read the server address from `url_env` (B3, 2026-07-16).
-- `builtin`: LiveKit and Pipecat host the prebuilt-tool registry (v1: `end_call`); **fails on Vapi and Deepgram** (no lowering). LiveKit lowers `end_call` to the beta `EndCallTool`; Pipecat to a bodyless end tool. See docs/spec/prebuilt-tools.md.
-- `client`, `provider_hosted`: gated per driver; each driver documents what it can host. Not part of the safe core yet.
+| Block | Fields | Gating |
+|---|---|---|
+| `webhook:` | `url_env` (required), `auth` (optional, 5.3) | works everywhere. **The safe choice.** |
+| `local:` | `handler` (path, default `tools/<name>.py`) | code targets only |
+| `mcp:` | `url_env` (the MCP server address) | **fails on Deepgram** (no runtime MCP client); on LiveKit needs `sdk_language: python` (driver-livekit B3, 2026-07-16). The block where MCP auth would land later. |
+| `builtin:` | `id` (prebuilt registry id, v1 `end_call`), `instructions` (optional closing line) | LiveKit and Pipecat host the registry; **fails on Vapi and Deepgram**. LiveKit lowers `end_call` to the beta `EndCallTool`, Pipecat to a bodyless end tool. Unknown id fails with file:line. |
+| `client: {}` / `provider_hosted: {}` | none | gated per driver; not part of the safe core |
 
-The Pipecat driver v1 emits `webhook`, `local`, and `builtin` tools (amended 2026-07-17, driver-pipecat T14: `local` lowers to the same `@tool` method, body awaiting the user handler from `tools/<name>.py`; `builtin` added 2026-07-22, prebuilt-tools T6); `mcp` stays maturity-gated there until the driver emits it.
+`url_env`, `handler`, and every `*_env` are **names, never values**: an env var
+name is `UPPER_SNAKE`, so a pasted URL or secret fails validation rather than
+landing in the spec.
+
+The Pipecat driver v1 emits the `webhook`, `local`, and `builtin` blocks
+(amended 2026-07-17, driver-pipecat T14: `local` lowers to the same `@tool`
+method, body awaiting the user handler from `tools/<name>.py`; `builtin` added
+2026-07-22, prebuilt-tools T6); `mcp` stays maturity-gated there until the
+driver emits it.
+
+### 5.3 Webhook auth (added 2026-08-10, compiler T23; hmac removed 2026-08-10)
+
+`webhook.auth` authenticates the POST. `type` selects the scheme, and every
+other field belongs to exactly one scheme — a field from the other scheme is an
+error, never silently ignored. The token is always an env var name.
+
+| Scheme | Fields | Sends |
+|---|---|---|
+| `bearer` | `token_env` | `Authorization: Bearer <token>` |
+| `api_key` | `token_env`, `header` (default `X-API-Key`) | `<header>: <token>` |
+
+```yaml
+webhook:
+  url_env: LOOKUP_PLACES_URL
+  auth:
+    type: api_key
+    token_env: LOOKUP_PLACES_API_KEY
+    header: X-API-Key
+```
+
+Rules and lowering:
+
+- Request signing (HMAC) and OAuth2 are **not in v1**, and neither is `basic`. A
+  tool that must sign its request uses a `local:` Python handler until a scheme
+  is specified.
+- Both code targets emit one helper per scheme actually declared, so a project
+  with no auth carries no auth code. A managed target configures its tool auth
+  provider-side, so `tools.auth` is **ok on LiveKit and Pipecat, fail on Vapi
+  and Deepgram**.
 
 ---
 
@@ -509,7 +581,7 @@ follows these rules exactly.
 
 1. Any number of agents with `agent_transfer` between them (T0 + T2).
 2. Every transfer context: `history: full`, `variables: all`.
-3. Tools: `execution: webhook`, `interruption: provider_default`, `effect: returns_data`.
+3. Tools: a `webhook:` block, `interruption: provider_default`, `effect: returns_data`.
 4. Omit human transfer while the exact LiveKit and Pipecat telephony routes are
    provisional. Their platform-level and offline-emitted capabilities remain
    visible in the matrix below, but are not part of the validation-safe core.
@@ -540,6 +612,7 @@ Feature by feature:
 | `thinking_audio` | ok | gated (v1) | fail | fail |
 | `provider: local` (listen/speak) | ok | ok | fail | fail |
 | webhook tools | ok | ok | ok | ok |
+| webhook `auth` (bearer/api_key) | ok | ok | fail | fail |
 | mcp tools | Python only | gated (v1) | ok | fail |
 | outbound + `on_voicemail` | ok | gated (v1) | ok | generated (warn) |
 | tracing `provider: langfuse` | ok | ok | fail | fail |

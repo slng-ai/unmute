@@ -61,6 +61,7 @@ const (
 	FieldToolClient            Field = "tools.execution.client"
 	FieldToolProviderHosted    Field = "tools.execution.provider_hosted"
 	FieldToolBuiltin           Field = "tools.execution.builtin"
+	FieldToolAuth              Field = "tools.auth"
 	FieldToolInterruption      Field = "tools.interruption.non_default"
 	FieldOutbound              Field = "channels.telephony.outbound"
 	FieldVoicemail             Field = "channels.telephony.on_voicemail"
@@ -286,8 +287,8 @@ func Default() Table {
 				warn(Deepgram, "Deepgram generates the opening with a synthetic turn"),
 			),
 			FieldGreetingAbsent: field(
-				warn(LiveKit, "LiveKit default greeting behavior applies"),
-				warn(Pipecat, "Pipecat default greeting behavior applies"),
+				warn(LiveKit, "LiveKit has no greeting block: the agent opens with a model-written line"),
+				warn(Pipecat, "Pipecat has no greeting block: the agent opens with a model-written line"),
 				warn(Vapi, "Vapi default greeting behavior applies"),
 				warn(Deepgram, "Deepgram default greeting behavior applies"),
 			),
@@ -314,6 +315,16 @@ func Default() Table {
 				deny(Vapi, "Vapi has no faithful thinking-audio lowering"),
 				deny(Deepgram, "Deepgram has no faithful thinking-audio lowering"),
 			),
+			// Vapi-only on purpose, even though no driver enforces output today
+			// (grep `.Output` across internal/generate: no hits). The tag
+			// vocabulary has no slot for "declared, inert, legal everywhere":
+			// `warn` is defined as "works on all four" and every other use of it
+			// means works-with-a-caveat, while the honest tag for "not proven on
+			// any target yet" is `provisional`, which fails validation
+			// everywhere and would reject every package that declares an output.
+			// Choosing between implementing enforcement and taking that break is
+			// a maintainer call, so the gap is recorded in SCHEMA.md N22 rather
+			// than encoded here as a redefined tag.
 			FieldToolOutput: field(
 				warn(Vapi, "Vapi cannot enforce tool output schemas"),
 			),
@@ -341,6 +352,12 @@ func Default() Table {
 				// docs/spec/prebuilt-tools.md); the rest still lack a lowering.
 				deny(Vapi, "Vapi builtin tools are not proven by its driver"),
 				deny(Deepgram, "Deepgram builtin tools are not proven by its driver"),
+			),
+			FieldToolAuth: field(
+				// The code drivers own the request, so they can send the header;
+				// a managed target configures its own tool auth provider-side.
+				deny(Vapi, "Vapi webhook auth is configured provider-side, not from the spec"),
+				deny(Deepgram, "the Deepgram driver does not emit webhook auth yet"),
 			),
 			FieldToolInterruption: field(
 				warn(LiveKit, "LiveKit runs tool executions to completion; a per-tool interruption preference is not enforced"),

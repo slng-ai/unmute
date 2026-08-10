@@ -3075,7 +3075,7 @@ func validateRequiredBasic(value string) error {
 var (
 	languagePattern   = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`)
 	identifierPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
-	envNamePattern    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	envNamePattern    = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 )
 
 func validateLanguage(value string) error {

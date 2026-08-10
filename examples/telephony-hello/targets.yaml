@@ -20,4 +20,6 @@ targets:
     carrier: twilio
     connection: twilio_voice
     models:
-      detector: { provider: livekit, model: turn-detector-mini }
+      detector:
+        provider: livekit
+        model: turn-detector-mini

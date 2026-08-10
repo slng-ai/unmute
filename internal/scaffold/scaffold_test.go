@@ -5,12 +5,16 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml"
+
+	"github.com/slng/unmute/internal/spec"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -133,8 +137,11 @@ func TestWrite_targetChoices(t *testing.T) {
 		{
 			target:      "livekit",
 			targetsWant: []string{"livekit:", "provider: livekit", "sdk_language: python"},
-			agentWant:   []string{`voice: "aura-2-thalia-en"`, `params: {"speed":1}`, "provider: slng", "listen:", "turn:"},
-			env:         []string{"LIVEKIT_API_KEY=", "LIVEKIT_API_SECRET=", "LIVEKIT_URL=", "SLNG_API_KEY="},
+			// params arrives as compact JSON from the wizard and is rendered as
+			// block YAML like everything else, with `1` still an integer rather
+			// than widened to `1.0`.
+			agentWant: []string{`voice: "aura-2-thalia-en"`, "      params:\n        speed: 1\n", "provider: slng", "listen:", "turn:"},
+			env:       []string{"LIVEKIT_API_KEY=", "LIVEKIT_API_SECRET=", "LIVEKIT_URL=", "SLNG_API_KEY="},
 		},
 	} {
 		t.Run(tc.target, func(t *testing.T) {
@@ -208,7 +215,7 @@ func TestDefaultToolsScaffoldsEndCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"execution: builtin", "builtin: end_call"} {
+	for _, want := range []string{"builtin:", "  id: end_call"} {
 		if !strings.Contains(string(tool), want) {
 			t.Errorf("end_call.yaml missing %q:\n%s", want, tool)
 		}
@@ -276,7 +283,7 @@ func TestWriteLocalToolManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := string(raw)
-	for _, want := range []string{"execution: local", "handler: tools/lookup_customer.py"} {
+	for _, want := range []string{"local:", "handler: tools/lookup_customer.py"} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("local tool manifest missing %q:\n%s", want, manifest)
 		}
@@ -481,5 +488,95 @@ func TestWrite_refusesNonEmpty(t *testing.T) {
 	}
 	if _, err := Write(dir, Data{Name: "x"}); err == nil {
 		t.Fatal("expected refusal to overwrite a non-empty dir")
+	}
+}
+
+// flowStyle matches a YAML flow mapping or flow sequence opening at a value
+// position or a list item. The two empty forms `client: {}` and
+// `provider_hosted: {}` are deliberately excluded: block style has no empty
+// form, so they are the only spelling N19 leaves for "intentionally empty"
+// (SPEC.md C3).
+var flowStyle = regexp.MustCompile(`(^|[-:][ \t]+)(\[[^\]]|\{[^}])`)
+
+// TestScaffoldToolManifestsAreBlockStyle pins the house rule for every
+// execution kind a tool file can carry, including the webhook `auth:` block.
+// The block-style restyle (PR #67) was written before the execution-keyed tool
+// shape landed, so it never saw `auth:` at all, and the two changes met for the
+// first time in the template. A regression here re-emits flow style from the
+// one place that regenerates packages.
+func TestScaffoldToolManifestsAreBlockStyle(t *testing.T) {
+	// speed is an integer on purpose: yamlBlock decodes as YAML rather than
+	// encoding/json so `1` does not widen to `1.0`. Params are forwarded to the
+	// provider verbatim under D10, so widening is a behaviour change (SPEC.md V6).
+	const input = `{"type":"object","properties":{"q":{"type":"string","enum":["a","b"]},"speed":{"type":"integer","default":1}},"required":["q"]}`
+	const output = `{"type":"object","properties":{"ok":{"type":"boolean"}}}`
+
+	for _, tc := range []struct {
+		name string
+		tool Tool
+	}{
+		{"local", Tool{Execution: "local", Handler: "tools/t.py"}},
+		{"webhook", Tool{Execution: "webhook", URLEnv: "T_URL"}},
+		{"webhook_bearer", Tool{Execution: "webhook", URLEnv: "T_URL",
+			Auth: &spec.ToolAuth{Type: "bearer", TokenEnv: "T_TOKEN"}}},
+		{"webhook_api_key", Tool{Execution: "webhook", URLEnv: "T_URL",
+			Auth: &spec.ToolAuth{Type: "api_key", TokenEnv: "T_KEY", Header: "X-Api-Key"}}},
+		{"mcp", Tool{Execution: "mcp", URLEnv: "T_URL"}},
+		{"client", Tool{Execution: "client"}},
+		{"provider_hosted", Tool{Execution: "provider_hosted"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tool := tc.tool
+			tool.Name, tool.Description = "t", "A tool"
+			tool.Input, tool.Output = input, output
+
+			data := Data{Name: "agent", Tools: []Tool{tool}}
+			data.SetTarget("pipecat")
+			dir := filepath.Join(t.TempDir(), "agent")
+			if _, err := Write(dir, data); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(filepath.Join(dir, "tools", "t.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			manifest := string(raw)
+
+			for i, line := range strings.Split(manifest, "\n") {
+				if flowStyle.MatchString(line) {
+					t.Errorf("line %d is flow style: %q\n%s", i+1, line, manifest)
+				}
+			}
+
+			// Block style is only worth anything if it still parses to the
+			// schema that went in.
+			var got struct {
+				Input map[string]any `yaml:"input"`
+			}
+			if err := yaml.Unmarshal(raw, &got); err != nil {
+				t.Fatalf("emitted tool file does not parse: %v\n%s", err, manifest)
+			}
+			// Sequences indent, the way every hand-authored package writes them.
+			// goccy's default dash column is legal YAML but would make the
+			// scaffold the one place that differs.
+			if !strings.Contains(manifest, "      enum:\n        - a\n        - b\n") {
+				t.Errorf("want an indented block sequence for enum:\n%s", manifest)
+			}
+			// V6 is a claim about the emitted text, so assert on the text:
+			// encoding/json would widen 1 to float64 and re-emit `default: 1.0`.
+			if !strings.Contains(manifest, "default: 1\n") || strings.Contains(manifest, "default: 1.0") {
+				t.Errorf("want `default: 1`, not a widened float:\n%s", manifest)
+			}
+			props, _ := got.Input["properties"].(map[string]any)
+			speed, _ := props["speed"].(map[string]any)
+			switch speed["default"].(type) {
+			case float32, float64:
+				t.Errorf("speed default decoded as %T — yamlBlock must not widen ints", speed["default"])
+			}
+			enum, _ := props["q"].(map[string]any)
+			if got, want := enum["enum"], []any{"a", "b"}; !reflect.DeepEqual(got, want) {
+				t.Errorf("enum = %#v, want %#v", got, want)
+			}
+		})
 	}
 }

@@ -2,26 +2,37 @@
 
 A tool is one file in the `tools/` folder. The **file name is the tool name**: `tools/lookup_customer.yaml` defines `lookup_customer`. There is no `name` field inside the file. Which agents see the tool is decided only by their `tools:` lists in `agent.yaml`, never here. See the [add-a-tool learn page](../learn/02-add-a-tool.md).
 
+The top level says what the model sees. **One block, named after the execution kind, says how the tool runs.** The two conversation settings stay at the top level.
+
 ```yaml
 description: Look up a customer record by phone number or email. Returns the customer id and name.
 
 input:
   type: object
   properties:
-    phone: { type: string, description: Caller phone number in E.164 form }
-    email: { type: string, description: Caller email address }
+    phone:
+      type: string
+      description: Caller phone number in E.164 form
+    email:
+      type: string
+      description: Caller email address
 
 output:
   type: object
   properties:
-    customer_id: { type: string }
-    name:        { type: string }
+    customer_id:
+      type: string
+    name:
+      type: string
 
-execution: webhook
-url_env: LOOKUP_CUSTOMER_URL
+webhook:
+  url_env: LOOKUP_CUSTOMER_URL
+
 interruption: provider_default
 effect: returns_data
 ```
+
+There is exactly one execution block per file. A file with no block, two blocks, or a block with an empty body is an error that names the file (and the line, when there is one to point at). Because the block name is the kind, a field that belongs to another kind has nowhere to go: you cannot write a `handler` on a webhook tool by mistake.
 
 ## Fields
 
@@ -41,77 +52,112 @@ Required: yes, except for a `builtin` tool, which has none (the prebuilt owns it
 
 The shape the tool promises to return.
 
-Required: no. Values: a JSON Schema object. Default: none. Tag: warn. Enforced by generated code on code targets (LiveKit, Pipecat, Deepgram). The managed target (Vapi) has no slot for it and warns.
+Required: no. Values: a JSON Schema object. Default: none. Tag: warn. Declared and carried into `compile-report.json`, but not enforced on any target yet (SCHEMA.md N22); the warning you see comes from Vapi only. It is still worth writing: it documents what the tool returns.
 
-### execution
+## Execution blocks
 
-Where the tool runs.
+Exactly one of these blocks says how the tool runs. The block name is the execution kind, so there is no separate `execution:` field.
 
-Required: yes. Values: `local | client | webhook | provider_hosted | builtin | mcp`. Default: none.
+| Block | What it does | Where it works |
+|---|---|---|
+| `webhook:` | calls an HTTP endpoint you host | all four targets. **The safe choice.** |
+| `local:` | runs a Python handler in your package | code targets only |
+| `builtin:` | picks a provider prebuilt tool by name | LiveKit and Pipecat only (see below) |
+| `mcp:` | mounts an MCP server | fails on Deepgram (no runtime MCP client); on LiveKit needs SDK language `python` |
+| `client: {}`, `provider_hosted: {}` | gated per driver | each driver documents what it can host |
 
-| Value | Where it works |
-|---|---|
-| `webhook` | all four targets. **The safe choice.** |
-| `local` | code targets only (a handler file in your package) |
-| `builtin` | a provider prebuilt tool you pick by name; LiveKit and Pipecat only (see below) |
-| `mcp` | fails on Deepgram (no runtime MCP client); on LiveKit needs SDK language `python` |
-| `client`, `provider_hosted` | gated per driver; each driver documents what it can host |
+On Pipecat, the driver emits the `webhook`, `local`, and `builtin` blocks. `mcp` remains a driver maturity gate.
 
-On Pipecat, the driver emits `webhook`, `local`, and `builtin` tools. `mcp` remains a driver
-maturity gate.
+### webhook:
 
-## Prebuilt tools (`execution: builtin`)
+```yaml
+webhook:
+  url_env: LOOKUP_CUSTOMER_URL     # required: env var name, never a URL
+  auth:                            # optional, see "Webhook auth" below
+    type: bearer
+    token_env: LOOKUP_CUSTOMER_TOKEN
+```
 
-Some tools you would otherwise hand-write are already shipped by the platforms.
-Instead of authoring a handler, you **pick** one by name. Today there is one: `end_call`,
-a tool the model calls to hang up when the caller is done.
+`url_env` names the environment variable holding the endpoint. It is a variable name, never a URL: the name must be `UPPER_SNAKE`, so a pasted URL fails validation. You set the real value in your `.env`; keeping it out of the spec means the same spec points at staging in dev and production in prod.
+
+### local:
+
+```yaml
+local:
+  handler: tools/lookup_customer.py   # optional, defaults to tools/<tool name>.py
+```
+
+Code targets only. The handler file travels with your package and is copied into the generated project.
+
+### mcp:
+
+```yaml
+mcp:
+  url_env: BOOKINGS_MCP_URL     # the MCP server address, by env var name
+```
+
+### builtin:
 
 ```yaml
 # tools/end_call.yaml  (the file name is still your tool name)
-execution: builtin
-builtin: end_call
 description: End the call once the caller's issue is resolved.   # optional, extra guidance for the model
-instructions: Thank the caller and say goodbye.                  # optional, the closing line
+
+builtin:
+  id: end_call
+  instructions: Thank the caller and say goodbye.                # optional, the closing line
 ```
 
-A prebuilt tool has **no `input`, `output`, `url_env`, or `handler`** — the platform owns
-its schema and behavior. Both fields are optional:
+Some tools you would otherwise hand-write are already shipped by the platforms. Instead of authoring a handler, you **pick** one by name. Today there is one: `end_call`, a tool the model calls to hang up when the caller is done.
 
-- `description` adds your own guidance on top of the built-in description (LiveKit `extra_description`; Pipecat tool docstring).
+A prebuilt tool has **no `input` or `output`** — the platform owns its schema and behavior. Both block fields beyond `id` are optional:
+
+- `description` (top level) adds your own guidance on top of the built-in description (LiveKit `extra_description`; Pipecat tool docstring).
 - `instructions` is the closing message (LiveKit `end_instructions`; a Pipecat developer message).
 
-`end_call` works on **LiveKit and Pipecat**. It fails on Vapi and Deepgram,
-which have no lowering for it. It ends the call, so its `effect` is fixed to
-`ends_conversation`.
+`end_call` works on **LiveKit and Pipecat**. It fails on Vapi and Deepgram, which have no lowering for it. It ends the call, so its `effect` is fixed to `ends_conversation`, and an unknown `id` is an error.
 
-**`end_call` is included by default.** `unmute init` scaffolds a `tools/end_call.yaml` and
-attaches it to your entry agent, and the create wizard seeds it too. Keep it, edit its
-wording, or delete the file (and its reference in `agent.yaml`) if you don't want it. If you
-switch a new agent to a managed target that can't host it, the wizard drops it for you.
+**`end_call` is included by default.** `unmute init` scaffolds a `tools/end_call.yaml` and attaches it to your entry agent, and the create wizard seeds it too. Keep it, edit its wording, or delete the file (and its reference in `agent.yaml`) if you don't want it. If you switch a new agent to a managed target that can't host it, the wizard drops it for you.
 
-### builtin
+## Webhook auth
 
-The prebuilt-tool id to use. See [Prebuilt tools](#prebuilt-tools-execution-builtin) above.
+Most real endpoints do not accept anonymous POSTs. `webhook.auth` says how the generated code proves who it is. `type` picks the scheme; `header` belongs to `api_key` only, and writing it on a `bearer` tool is an error rather than a silent no-op.
 
-Required: conditional (iff `execution: builtin`). Values: a prebuilt id (today: `end_call`). Default: none. An unknown id is an error.
+Works on LiveKit and Pipecat. Vapi and Deepgram fail: a managed target configures its tool auth on its own side.
 
-### instructions
+**The token is an environment variable name, never a value.** Names are `UPPER_SNAKE`, so a pasted token fails validation. It lands in the generated `.env.example`; on Pipecat it also joins the startup check, so a missing token fails when the bot boots instead of mid-call.
 
-The closing message for a prebuilt tool that ends the call.
+### type: bearer
 
-Required: no, and legal only on a `builtin` tool. Values: text. Default: none (the platform's default goodbye).
+```yaml
+webhook:
+  url_env: LOOKUP_PLACES_URL
+  auth:
+    type: bearer
+    token_env: LOOKUP_PLACES_TOKEN
+```
 
-### handler
+Sends `Authorization: Bearer <token>`.
 
-The Python handler file for a `local` tool.
+### type: api_key
 
-Required: conditional (iff `execution: local`). Values: a path, default `<name>.py`. Default: `<name>.py`. Code targets only.
+```yaml
+webhook:
+  url_env: LOOKUP_PLACES_URL
+  auth:
+    type: api_key
+    token_env: LOOKUP_PLACES_API_KEY
+    header: X-API-Key          # optional, this is the default
+```
 
-### url_env
+Sends the token verbatim in its own header.
 
-The environment variable holding the tool's endpoint. A variable name, never a URL value. For a `webhook` tool it is the webhook URL; for an `mcp` tool it is the MCP server address.
+`basic` auth, request signing (HMAC), and OAuth2 are not supported. If your
+endpoint needs one, use a `local:` Python handler, where you control the request
+yourself.
 
-Required: conditional (iff `execution: webhook` or `mcp`). Values: an environment variable name. Default: none. Targets: all four, core.
+## Conversation settings
+
+Both stay at the top level of the file: they describe what the call does to the conversation, not how the tool runs.
 
 ### interruption
 

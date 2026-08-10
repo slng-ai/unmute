@@ -41,7 +41,7 @@ func TestTelephonyAutoWebhookIsATwilioFactOnly(t *testing.T) {
 }
 
 // The dev command supplies the LiveKit SIP trunk IDs itself for local runs
-// (SPEC V4): every SIP route declares exactly those two names, each backed by
+// (compiler.md V36): every SIP route declares exactly those two names, each backed by
 // a runtime environment rule, and no other route declares any.
 func TestTelephonyDevSuppliedEnvironmentIsSIPTrunkIDs(t *testing.T) {
 	for key, route := range TelephonyRoutes() {

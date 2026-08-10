@@ -266,7 +266,7 @@ class FindSlot(AgentTask[dict]):
         self.session.generate_reply()
 
     @function_tool
-    async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:
+    async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date, e.g. 2026-08-14")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:
         """Find open table times for a date and party size. Returns the available time slots."""
         async with httpx.AsyncClient() as client:
             resp = await client.post(

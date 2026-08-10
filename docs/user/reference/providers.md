@@ -30,9 +30,13 @@ different speak providers.
 ```yaml
 models:
   listen:
-    transcriber: { provider: deepgram, model: nova-3 }
+    transcriber:
+      provider: deepgram
+      model: nova-3
   think:
-    primary_reasoning: { provider: openai, model: gpt-4o-mini }
+    primary_reasoning:
+      provider: openai
+      model: gpt-4o-mini
   speak:
     front_desk:
       provider: elevenlabs
@@ -91,9 +95,14 @@ This example defines listen and speak models and shows the emitted services:
 ```yaml
 models:
   listen:
-    transcriber: { provider: deepgram, model: nova-3 }
+    transcriber:
+      provider: deepgram
+      model: nova-3
   speak:
-    front_desk: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
+    front_desk:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
 ```
 
 ```python
@@ -164,9 +173,13 @@ This example defines LiveKit models backed by vendor plugins:
 ```yaml
 models:
   listen:
-    transcriber: { provider: deepgram, model: nova-3 }
+    transcriber:
+      provider: deepgram
+      model: nova-3
   speak:
-    front_desk: { provider: elevenlabs, voice: cgSgspJ2msm6clMCkdW9 }
+    front_desk:
+      provider: elevenlabs
+      voice: cgSgspJ2msm6clMCkdW9
 ```
 
 Watch the env names: the LiveKit ElevenLabs plugin reads `ELEVEN_API_KEY`, not `ELEVENLABS_API_KEY`. The emitted `.env.example` and compile report always list exactly what the project reads.

@@ -14,7 +14,7 @@ all remain provisional until their credentialed route smokes pass.
 
 1. Any number of agents with `agent_transfer` between them (T0 + T2).
 2. Every transfer context: `history: full`, `variables: all`.
-3. Tools: `execution: webhook`, `interruption: provider_default`, `effect: returns_data`.
+3. Tools: a `webhook:` block, `interruption: provider_default`, `effect: returns_data`.
 4. Human transfer: omit it while evaluating provisional Pipecat and LiveKit
    telephony routes. Their exact carrier behavior is not provider-wide.
 5. Models: hosted providers for `listen` and speak models (no `provider: local`). `turn` is a preference anyway.
@@ -52,6 +52,7 @@ all remain provisional until their credentialed route smokes pass.
 | `thinking_audio` | ok | gated (driver v1) | fail | fail |
 | `provider: local` (listen/speak) | ok | ok | fail | fail |
 | webhook tools | ok | ok | ok | ok |
+| webhook `auth` (bearer/api_key) | ok | ok | fail | fail |
 | mcp tools | Python only | gated (driver v1) | ok | fail |
 | outbound + `on_voicemail` | provisional on SIP routes | gated (voicemail not emitted) | ok | generated (warn) |
 | tracing `provider: langfuse` | ok | ok | fail | fail |

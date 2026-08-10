@@ -11,7 +11,8 @@ A group lists the tasks it runs as steps, and says what to do at the end:
 ```yaml
 task_groups:
   triage:
-    steps: [collect]
+    steps:
+      - collect
     context_scope: isolated
     then: return
     merge: results

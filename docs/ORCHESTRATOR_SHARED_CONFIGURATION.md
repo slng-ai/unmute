@@ -152,9 +152,13 @@ entry_agent: intake
 # does not appear here: its placement rides on the model profiles below.
 # On integrated-turn targets, turn placement is ignored with a warning.
 pipeline:
-  listen: { placement: api }
-  turn:   { placement: local, semantic_endpointing: preferred }  # required | preferred | off
-  speak:  { placement: api }
+  listen:
+    placement: api
+  turn:   # required | preferred | off
+    placement: local
+    semantic_endpointing: preferred
+  speak:
+    placement: api
 
 models:                      # reasoning profiles agents and tasks reference.
                              # Abstract on purpose: concrete model names and
@@ -162,22 +166,33 @@ models:                      # reasoning profiles agents and tasks reference.
   fast_reasoning:
     description: cheap, low-latency routing and small talk   # optional, human only
     placement: api
-    fallback: [careful_reasoning]   # ordered, cycle-checked; see section 4.1
+    fallback:   # ordered, cycle-checked; see section 4.1
+      - careful_reasoning
   careful_reasoning:
     placement: api
 
 voices:                      # voice profiles agents reference. Same pattern as
                              # models: abstract here, bound per target as
                              # speak.<profile> (section 4.2)
-  front_desk: { description: warm, concise }
-  specialist: { description: slower, more deliberate }
+  front_desk:
+    description: warm
+    concise:
+  specialist:
+    description: slower
+    more deliberate:
 
 # Typed shared state (section 4.3)
 variables:
-  customer_id: { type: string }
-  verified:    { type: boolean, default: false }
-  order_total: { type: number }
-  campaign_id: { type: string, source: call_start }   # must be supplied when
+  customer_id:
+    type: string
+  verified:
+    type: boolean
+    default: false
+  order_total:
+    type: number
+  campaign_id:   # must be supplied when
+    type: string
+    source: call_start
                                                       # the call starts
 
 # Agents (T0/T2)
@@ -186,39 +201,58 @@ agents:
     instructions: instructions.md
     model: fast_reasoning
     voice: front_desk
-    tools: [lookup_customer, verify_identity, to_billing]
+    tools:
+      - lookup_customer
+      - verify_identity
+      - to_billing
 
   billing:
     instructions: agents/billing.md
     model: careful_reasoning
     voice: specialist        # per-agent voices: native on LiveKit, Pipecat,
-    tools: [get_invoice, refund_flow, to_human]   # ElevenLabs (per Agent resource)
+    tools:   # ElevenLabs (per Agent resource)
+      - get_invoice
+      - refund_flow
+      - to_human
 
 # Tasks and task groups (T1)
 tasks:
   identity_check:
     instructions: tasks/identity_check.md
-    tools: [lookup_customer]
+    tools:
+      - lookup_customer
     model: fast_reasoning         # optional per-task override; forces job/
                                   # switcher lowering on Pipecat (condition 1)
     result:                       # flat name-to-type map (section 4.3);
-      customer_id: string         # enums spell as {enum: [a, b]}
+      customer_id: string         # an enum spells as a nested `enum:` block
+                                  # with one `- value` per line
       verified: boolean
-    context: { history: full }
+    context:
+      history: full
 
   collect_refund_reason:
     instructions: tasks/refund_reason.md
-    result: { reason: string }
-    context: { history: full }
+    result:
+      reason: string
+    context:
+      history: full
 
   confirm_refund:
     instructions: tasks/confirm_refund.md
-    result: { confirmed: { enum: [yes, no, unsure] } }
-    context: { history: full }
+    result:
+      confirmed:
+        enum:
+          - yes
+          - no
+          - unsure
+    context:
+      history: full
 
 task_groups:
   refund_flow_steps:
-    steps: [collect_refund_reason, confirm_refund]   # ordered, linear
+    steps:   # ordered, linear
+      - collect_refund_reason
+      - confirm_refund
     context_scope: shared      # shared | isolated (isolated: code targets only)
     then: return               # return | transfer | end; fails on Vapi (no
     # then_target: billing     # Squad return); required iff then: transfer
@@ -241,8 +275,8 @@ controls:
     kind: agent_transfer
     to: billing
     when: Caller asks about billing after identity is verified.
-    # requires: [verified]     # machine-checked guard. Generated check on code
-    #                          # targets; native only on Voiceflow (entry
+    # requires:                # machine-checked guard. Generated check on code
+    #   - verified             # targets; native only on Voiceflow (entry
     #                          # conditions); FAILS on Vapi and ElevenLabs.
     context:
       history: full            # REQUIRED: full | messages | last_n | summary | reset
@@ -260,7 +294,9 @@ controls:
 
 # Tools (section 4.4). Bodies live in tools/*.yaml, referenced here.
 # Availability is decided by the agents'/tasks' tools lists above.
-tools: [lookup_customer, get_invoice]
+tools:
+  - lookup_customer
+  - get_invoice
 
 # Conversation intent: outcomes, not provider knobs.
 # All lifecycle fields here are gated per target (see 2.1 and section 6).
@@ -272,10 +308,15 @@ conversation:
   interruption:
     enabled: true
     minimum_words: 2           # no word-count knob on ElevenLabs: warn
-    ignore_phrases: [okay, right, uh-huh]   # native on ElevenLabs and Vapi;
+    ignore_phrases:   # native on ElevenLabs and Vapi;
+      - okay
+      - right
+      - uh-huh
                                             # generated on LiveKit/Pipecat;
                                             # warn-and-drop on Deepgram
-  inactivity: { nudge_after: 15s, end_after: 45s }   # range-checked per target
+  inactivity:   # range-checked per target
+    nudge_after: 15s
+    end_after: 45s
   max_duration: 20m
   # thinking_audio: subtle     # none | subtle. Native on LiveKit, Pipecat,
                                # ElevenLabs; fails on Deepgram; no faithful
@@ -283,14 +324,17 @@ conversation:
 
 # Channels
 channels:
-  web:   { kind: realtime_audio }
+  web:
+    kind: realtime_audio
   phone:
     kind: telephony
     inbound: true
     outbound: false
     # control vocabulary: cold_transfer, warm_transfer, dtmf_send,
     # dtmf_receive, hold, hangup, voicemail_detection, ivr_navigation
-    required_controls: [cold_transfer, hangup]
+    required_controls:
+      - cold_transfer
+      - hangup
     # when outbound: true, a voicemail policy is required:
     # on_voicemail: hangup | leave_message   (behaviors unverified; section 9)
 
@@ -352,16 +396,28 @@ targets:
                                # pipecat.flows since 1.5.0; never pin the
                                # deprecated standalone pipecat-ai-flows.
     models:
-      listen: { provider: deepgram, model: nova-3 }
-      turn:   { provider: local, model: smart-turn }
+      listen:
+        provider: deepgram
+        model: nova-3
+      turn:
+        provider: local
+        model: smart-turn
       speak:
-        front_desk: { provider: slng, voice: nova-it, endpoint_env: SLNG_TTS_URL }
-        specialist: { provider: slng, voice: marco,   endpoint_env: SLNG_TTS_URL }
+        front_desk:
+          provider: slng
+          voice: nova-it
+          endpoint_env: SLNG_TTS_URL
+        specialist:
+          provider: slng
+          voice: marco
+          endpoint_env: SLNG_TTS_URL
       reason:
         fast_reasoning:
           provider: openai
           model: gpt-4o-mini
-          params: { temperature: 0.4, top_p: 0.9 }   # forwarded verbatim
+          params:   # forwarded verbatim
+            temperature: 0.4
+            top_p: 0.9
         careful_reasoning:
           provider: openai
           model: gpt-4o
@@ -374,14 +430,19 @@ targets:
       # listen and turn are integrated on ElevenLabs. The optional listen
       # binding tunes the built-in ASR (lowers into the asr block); it can
       # never name an outside STT model.
-      listen: { params: { user_input_audio_format: ulaw_8000 } }
+      listen:
+        params:
+          user_input_audio_format: ulaw_8000
       speak:
-        front_desk: { voice_id: "pNIn..." }
-        specialist: { voice_id: "EXAV..." }
+        front_desk:
+          voice_id: "pNIn..."
+        specialist:
+          voice_id: "EXAV..."
       reason:
         fast_reasoning:
           model: gemini-2.5-flash
-          params: { temperature: 0.3 }               # tuned per binding, since
+          params:   # tuned per binding, since
+            temperature: 0.3
         careful_reasoning:                           # the model differs per target
           model: claude-sonnet-4-5
     destinations:

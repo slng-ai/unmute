@@ -44,31 +44,39 @@ models:
       model: turn-detector-mini
 
 variables:
-  caller_phone: { type: string }
+  caller_phone:
+    type: string
 
 agents:
   greeter:
     instructions: instructions.md
     model: reasoning
     voice: host
-    tools: [to_reservations, to_events]
+    tools:
+      - to_reservations
+      - to_events
 
   reservations:
     instructions: agents/reservations.md
     model: reasoning
     voice: desk
-    tools: [do_reserve, back_to_greeter]
+    tools:
+      - do_reserve
+      - back_to_greeter
 
   events:
     instructions: agents/events.md
     model: reasoning
     voice: desk
-    tools: [do_event, back_to_greeter]
+    tools:
+      - do_event
+      - back_to_greeter
 
 tasks:
   find_slot:
     instructions: tasks/find_slot.md
-    tools: [check_availability]
+    tools:
+      - check_availability
     result:
       date: string
       time: string
@@ -87,7 +95,8 @@ tasks:
 
   confirm_booking:
     instructions: tasks/confirm_booking.md
-    tools: [send_confirmation]
+    tools:
+      - send_confirmation
     result:
       sent: boolean
     context:
@@ -95,13 +104,17 @@ tasks:
 
 task_groups:
   reserve_group:
-    steps: [find_slot, confirm_booking]
+    steps:
+      - find_slot
+      - confirm_booking
     context_scope: shared      # each step sees the group context; on LiveKit -> TaskGroup (warns, experimental)
     then: return               # control comes back to the reservations agent
     merge: results
 
   events_group:
-    steps: [qualify_event, confirm_booking]
+    steps:
+      - qualify_event
+      - confirm_booking
     context_scope: shared
     then: return
     merge: results
@@ -141,7 +154,9 @@ controls:
     group: events_group
     when: The caller is ready to plan their event; run the events flow.
 
-tools: [check_availability, send_confirmation]
+tools:
+  - check_availability
+  - send_confirmation
 
 conversation:
   greeting:
@@ -149,11 +164,14 @@ conversation:
     text: "Hi, this is Remy at Fern and Oak. Are you booking a table, or planning a private event?"
   interruption:
     enabled: true
-  inactivity: { nudge_after: 15s, end_after: 45s }
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
   max_duration: 20m
 
 channels:
-  web: { kind: realtime_audio }
+  web:
+    kind: realtime_audio
 
 capacity:
   peak_sessions: 20

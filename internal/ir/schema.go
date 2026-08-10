@@ -100,6 +100,7 @@ func enumOptions() *jsonschema.ForOptions {
 		reflect.TypeFor[ToolExecution]():    enum(ToolLocal, ToolClient, ToolWebhook, ToolProviderHosted, ToolBuiltin, ToolMCP),
 		reflect.TypeFor[ToolInterruption](): enum(ToolContinue, ToolCancel, ToolProviderDefault),
 		reflect.TypeFor[ToolEffect]():       enum(ToolReturnsData, ToolEndsConversation),
+		reflect.TypeFor[ToolAuthType]():     enum(ToolAuthBearer, ToolAuthAPIKey),
 		reflect.TypeFor[SpeaksFirst]():      enum(SpeaksFirstAgent, SpeaksFirstUser),
 		reflect.TypeFor[ThinkingAudio]():    enum(ThinkingNone, ThinkingSubtle),
 		reflect.TypeFor[ChannelKind]():      enum(ChannelRealtimeAudio, ChannelTelephony),

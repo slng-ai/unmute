@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -91,6 +92,55 @@ func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 						t.Fatal(err)
 					}
 				})
+			}
+		})
+	}
+}
+
+// TestPublicExamplesValidateAndGenerate is the shipped-example gate (compiler.md V36):
+// every package under examples/ must load, build, validate its **declared**
+// targets with zero errors, and generate for each one. Generating without
+// validating first would let an example ship that `unmute validate` rejects,
+// which is the command a reader runs before anything else.
+func TestPublicExamplesValidateAndGenerate(t *testing.T) {
+	root := filepath.Join("..", "..", "examples")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		t.Run(entry.Name(), func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join(root, entry.Name()))
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			if len(agent.Targets) == 0 {
+				t.Fatal("example declares no target")
+			}
+			var declared []ir.Target
+			for _, name := range slices.Sorted(maps.Keys(agent.Targets)) {
+				declared = append(declared, agent.Targets[name])
+			}
+			report, err := ir.Validate(agent, declared, target.Default())
+			if err != nil {
+				t.Fatalf("validate: %v\n%#v", err, report.PerTarget)
+			}
+			for _, row := range report.PerTarget {
+				if len(row.Errors) > 0 {
+					t.Errorf("target %q has errors: %v", row.Name, row.Errors)
+				}
+			}
+			for _, resolved := range declared {
+				if _, err := Generate(agent, resolved, target.Default()); err != nil {
+					t.Errorf("generate %q: %v", resolved.Name, err)
+				}
 			}
 		})
 	}
@@ -206,6 +256,44 @@ func TestExampleToolExposure(t *testing.T) {
 				if got := agent.Tasks[name].Tools; !slices.Equal(got, want) {
 					t.Errorf("task %q tools = %v, want %v", name, got, want)
 				}
+			}
+		})
+	}
+}
+
+// TestFixturePackagesValidate holds the internal fixtures to the same bar as the
+// public examples (SPEC V14): safe_core and remy back most of the suite, so a
+// fixture that stops validating would otherwise only surface as a confusing
+// failure somewhere downstream.
+func TestFixturePackagesValidate(t *testing.T) {
+	root := filepath.Join("..", "testdata")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, entry.Name(), "agent.yaml")); err != nil {
+			continue // not a package (golden dirs, handler fixtures)
+		}
+		t.Run(entry.Name(), func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join(root, entry.Name()))
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			var declared []ir.Target
+			for _, name := range slices.Sorted(maps.Keys(agent.Targets)) {
+				declared = append(declared, agent.Targets[name])
+			}
+			report, err := ir.Validate(agent, declared, target.Default())
+			if err != nil {
+				t.Fatalf("validate: %v\n%#v", err, report.PerTarget)
 			}
 		})
 	}

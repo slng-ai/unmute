@@ -246,6 +246,9 @@ func setImportNeeds(data *pipecatData) {
 			} else {
 				data.NeedsHTTPX = true // webhook tool POSTs with httpx
 			}
+			if t.Auth != nil {
+				data.AuthKinds.add(t.Auth.Kind) // one helper per scheme in use (V8)
+			}
 			if t.EndsCall {
 				data.NeedsEndFrame = true
 			}
@@ -266,6 +269,9 @@ func setImportNeeds(data *pipecatData) {
 						data.NeedsInspect = true
 					} else {
 						data.NeedsHTTPX = true // flows tool handlers POST with httpx
+					}
+					if t.Auth != nil {
+						data.AuthKinds.add(t.Auth.Kind)
 					}
 				}
 			}
@@ -569,8 +575,13 @@ func buildTool(name string, tool ir.Tool, env *envSet) pipecatTool {
 	if tool.URLEnv != "" {
 		env.add(tool.URLEnv)
 	}
+	// The token rides its own env var, never the spec (SCHEMA §5.3).
+	if tool.Auth != nil {
+		env.add(tool.Auth.TokenEnv)
+	}
 	built := pipecatTool{
 		Name: name, MethodName: name, Description: tool.Description, URLEnv: tool.URLEnv,
+		Auth:  loweredAuth(tool.Auth),
 		Local: tool.Execution == ir.ToolLocal, HandlerSource: tool.HandlerSource,
 		Builtin: tool.Builtin, Instructions: tool.Instructions,
 		EndsCall: tool.Effect == ir.ToolEndsConversation, Interruption: interruptionValue(tool.Interruption),
@@ -679,23 +690,21 @@ func pyArgTypeDefault(jsonType string, required bool) (pyType, pyDefault string)
 	return pyType, pyDefault
 }
 
+// defaultGreetingInstruction is the developer message behind a model-written
+// opening. The LiveKit driver hands the same words to generate_reply
+// (templates/livekit_v1/agent.py.tmpl), so both drivers open a call the same way.
+const defaultGreetingInstruction = "Greet the caller and offer to help."
+
 // applyConversation lowers the conversation block into the template model:
 // greeting activation, interruption turn-strategies, idle timeout, max duration.
 func applyConversation(c *ir.Conversation, data *pipecatData) {
-	data.GreetingRunLLM = "False" // no greeting → activate silently, wait for the caller
+	var greeting *ir.Greeting
+	if c != nil {
+		greeting = c.Greeting
+	}
+	applyGreeting(greeting, data)
 	if c == nil {
 		return
-	}
-	if c.Greeting != nil {
-		switch {
-		case c.Greeting.SpeaksFirst == ir.SpeaksFirstAgent && c.Greeting.Text != "":
-			data.GreetingText = c.Greeting.Text
-		case c.Greeting.SpeaksFirst == ir.SpeaksFirstAgent:
-			data.GreetingInstruction = "Greet the caller and offer to help."
-			data.GreetingRunLLM = "True"
-		default: // speaks_first: user — stay silent until the caller talks
-			data.GreetingRunLLM = "False"
-		}
 	}
 	if c.Interruption != nil {
 		interrupt := &pipecatInterrupt{MinWords: c.Interruption.MinimumWords, IgnorePhrase: c.Interruption.IgnorePhrases}
@@ -711,6 +720,24 @@ func applyConversation(c *ir.Conversation, data *pipecatData) {
 		data.Inactivity = &pipecatInactivity{NudgeSecs: durationSecs(c.Inactivity.NudgeAfter), EndSecs: durationSecs(c.Inactivity.EndAfter)}
 	}
 	data.MaxDurationSecs = durationSecs(c.MaxDuration)
+}
+
+// applyGreeting lowers greeting activation. With no greeting block the agent
+// opens with a model-written line, the same default livekitGreetingFor picks
+// (SCHEMA N20). Silence is never the default, because on a call it reads as a
+// dead line (docs/user/reference/conversation.md).
+func applyGreeting(g *ir.Greeting, data *pipecatData) {
+	if g == nil || (g.SpeaksFirst == ir.SpeaksFirstAgent && g.Text == "") {
+		data.GreetingInstruction = defaultGreetingInstruction
+		data.GreetingRunLLM = "True"
+		return
+	}
+	if g.SpeaksFirst == ir.SpeaksFirstAgent {
+		data.GreetingText = g.Text
+		data.GreetingRunLLM = "False"
+		return
+	}
+	data.GreetingRunLLM = "False" // speaks_first: user — stay silent until the caller talks
 }
 
 // durationSecs parses a Go-syntax IR duration to whole seconds; 0 if empty/invalid.

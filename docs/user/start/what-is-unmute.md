@@ -44,7 +44,9 @@ models:
       provider: slng
       model: "slng/deepgram/nova:3-en"
   turn:
-    vad: { provider: local, model: silero }
+    vad:
+      provider: local
+      model: silero
 
 agents:
   assistant:
@@ -58,7 +60,8 @@ conversation:
     text: "Hi, thanks for calling. How can I help you today?"
 
 channels:
-  web: { kind: realtime_audio }
+  web:
+    kind: realtime_audio
 
 capacity:
   peak_sessions: 10

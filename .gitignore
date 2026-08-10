@@ -6,7 +6,14 @@ my-test-agent/
 
 # Compiled target projects (reproducible via `unmute compile`; goldens are the tracked form)
 examples/*/build/
+
 __pycache__/
 .codex/worktrees/
 .firecrawl
 bin/
+
+# macOS Finder metadata
+.DS_Store
+
+# Python bytecode (emitted projects, smoke-test venvs)
+*.pyc

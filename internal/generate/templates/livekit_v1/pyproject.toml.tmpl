@@ -9,8 +9,12 @@ dependencies = [
 {{- end}}
 ]
 
+# The checkers are pinned, not floated. ruff 0.16 widened its default rule
+# selection, so an unpinned `ruff check .` turned every ruff release into a
+# failure of an unchanged generator. Bump deliberately, the way the compiler
+# pins jsonschema-go.
 [dependency-groups]
 dev = [
-    "ruff",
+    "ruff==0.15.7",
     "ty",
 ]

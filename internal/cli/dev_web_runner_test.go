@@ -77,7 +77,7 @@ func TestDevWebRunsComposeAndPassesEnv(t *testing.T) {
 
 // TestDevWebMissingDockerFailsWithInstallHint: with no docker binary the run
 // fails in preflight with the dev install message (Docker Desktop/Engine + the
-// Compose plugin) and points at --console; no compose command runs (SPEC V8).
+// Compose plugin) and points at --console; no compose command runs (SCHEMA §5.3: no dead code).
 func TestDevWebMissingDockerFailsWithInstallHint(t *testing.T) {
 	dir := copySafeCore(t)
 	restore := composeLookPath

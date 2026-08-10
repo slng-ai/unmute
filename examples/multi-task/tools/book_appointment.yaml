@@ -6,21 +6,36 @@ description: >-
 input:
   type: object
   properties:
-    customer_id: { type: string, description: ID returned by a customer tool }
+    customer_id:
+      type: string
+      description: ID returned by a customer tool
     service:
       type: string
-      enum: [haircut, hair-color, blowout]
-    slot_id: { type: string, description: ID returned by check_availability }
-  required: [customer_id, service, slot_id]
+      enum:
+        - haircut
+        - hair-color
+        - blowout
+    slot_id:
+      type: string
+      description: ID returned by check_availability
+  required:
+    - customer_id
+    - service
+    - slot_id
 
 output:
   type: object
   properties:
-    appointment_id: { type: string }
-    status: { type: string }
-  required: [appointment_id, status]
+    appointment_id:
+      type: string
+    status:
+      type: string
+  required:
+    - appointment_id
+    - status
 
-execution: local
-handler: tools/book_appointment.py
+local:
+  handler: tools/book_appointment.py
+
 interruption: provider_default
 effect: returns_data

@@ -44,7 +44,8 @@ controls:
     kind: agent_transfer
     to: billing
     when: Caller asks about billing, an invoice, or a refund.
-    requires: [verified]
+    requires:
+      - verified
     context:
       history: full
       variables: all

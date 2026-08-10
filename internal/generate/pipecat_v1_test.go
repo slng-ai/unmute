@@ -61,6 +61,59 @@ func TestPipecatV1BuiltinEndCallTool(t *testing.T) {
 	}
 }
 
+// TestPipecatV1WebhookAuth covers both schemes (SCHEMA §5.3): the @tool POST
+// reads the right helper and the token env joins .env.example and REQUIRED_ENV
+// by name.
+func TestPipecatV1WebhookAuth(t *testing.T) {
+	for _, fixture := range authFixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			agent := authAgent(t, fixture.Auth)
+			artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+			if err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+			bot := artifactFile(t, artifact, "bot.py")
+			for _, want := range []string{fixture.CallSite, fixture.Helper} {
+				if !strings.Contains(bot, want) {
+					t.Errorf("bot.py missing %q:\n%s", want, bot)
+				}
+			}
+			if strings.Count(bot, "headers=") != 1 {
+				t.Errorf("exactly one tool must send headers:\n%s", bot)
+			}
+			for _, file := range []string{".env.example", "bot.py"} {
+				// bot.py carries REQUIRED_ENV, so a missing secret fails at startup.
+				if !strings.Contains(artifactFile(t, artifact, file), fixture.Env) {
+					t.Errorf("%s missing %s", file, fixture.Env)
+				}
+			}
+		})
+	}
+}
+
+// TestPipecatV1NoAuthHelpersWithoutAuth keeps helpers and imports conditional
+// (V8, driver-pipecat V12) — safe_core declares no auth.
+func TestPipecatV1NoAuthHelpersWithoutAuth(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, unwanted := range []string{"_bearer", "_api_key"} {
+		if strings.Contains(bot, unwanted) {
+			t.Errorf("bot.py emits %q with no auth tool", unwanted)
+		}
+	}
+}
+
 // TestPipecatV1Golden emits the safe_core project to pipecat and compares the
 // full file set byte-for-byte (driver-pipecat T8, V10). Zero Python.
 func TestPipecatV1Golden(t *testing.T) {
@@ -101,9 +154,10 @@ func TestPipecatV1Golden(t *testing.T) {
 	}
 }
 
-// TestPipecatGreetingModes covers the three SCHEMA.md 4.8 combinations. Fixed
-// text bypasses the LLM; an omitted text still asks the model; user-first stays
-// silent (SPEC V1, V4, V5).
+// TestPipecatGreetingModes covers the three SCHEMA.md 4.8 combinations plus the
+// no-block default. Fixed text bypasses the LLM; an omitted text still asks the
+// model; user-first stays silent; an absent block takes the model-written
+// opening, same as LiveKit (SPEC V1, V4, V5, V6).
 func TestV32PipecatGreetingModes(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
@@ -152,6 +206,17 @@ func TestV32PipecatGreetingModes(t *testing.T) {
 				"TTSSpeakFrame",
 				"Greet the caller and offer to help.",
 			},
+		},
+		{
+			// No greeting block is not silence: it takes the model-written
+			// opening, the same default the LiveKit driver picks.
+			name:     "no greeting block",
+			greeting: nil,
+			want: []string{
+				`"content": "Greet the caller and offer to help."`,
+				"run_llm=True",
+			},
+			forbidden: []string{"TTSSpeakFrame"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
