@@ -396,8 +396,11 @@ description: Search for a place by name, type, or area.
 input:
   type: object
   properties:
-    query: { type: string, description: 'e.g. "tapas bar in Madrid"' }
-  required: [query]
+    query:
+      type: string
+      description: 'e.g. "tapas bar in Madrid"'
+  required:
+    - query
 
 webhook:
   url_env: LOOKUP_PLACES_URL
