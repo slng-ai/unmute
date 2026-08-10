@@ -21,7 +21,9 @@ conversation:
   thinking_audio: subtle
 ```
 
-If the whole `greeting` block is absent, the target's own default applies and the driver warns, because provider defaults differ.
+If the whole `greeting` block is absent, **the agent still speaks first with a model-written opening**, exactly as if you had written `speaks_first: agent` with no `text`. LiveKit and Pipecat both generate that same opening, so one package cannot start a call differently depending on the target you compiled. Silence is never the default: on a call the caller has no signal that the line is live, so it reads as a dropped connection.
+
+The driver still warns when the block is missing, because the other two targets do not share that default. Vapi runs your agent itself and applies its own native default. Deepgram has no generator yet, and its behavior for an omitted greeting is undocumented. So leaving the block out is portable across LiveKit and Pipecat, and an open question on the other two.
 
 ## greeting.speaks_first
 
@@ -44,11 +46,12 @@ The exact opening line, spoken word for word every call. May reference `{{variab
 
 Required: no. Values: text. Default: none. Targets: all four, core. (Native on Vapi and Deepgram; generated on LiveKit and Pipecat.)
 
-### The three greeting combinations
+### The greeting combinations
 
 - **`speaks_first: agent` with `text`**: a fixed opening, same words every call. Works on all four. The zero-warning safe choice.
 - **`speaks_first: agent` without `text`**: the model writes the opening from the prompt, so it varies. Generated on LiveKit and Pipecat, native on Vapi, **generated with a warning on Deepgram**.
 - **`speaks_first: user`**: the agent waits for the caller. Native on Vapi, generated on LiveKit and Pipecat, warns on Deepgram.
+- **No `greeting` block at all**: the same as `speaks_first: agent` without `text`, plus a warning. This is a default, not a separate mode, so if you want the agent to stay quiet you have to ask for it with `speaks_first: user`.
 
 ## interruption.enabled
 

@@ -287,8 +287,8 @@ func Default() Table {
 				warn(Deepgram, "Deepgram generates the opening with a synthetic turn"),
 			),
 			FieldGreetingAbsent: field(
-				warn(LiveKit, "LiveKit default greeting behavior applies"),
-				warn(Pipecat, "Pipecat default greeting behavior applies"),
+				warn(LiveKit, "LiveKit has no greeting block: the agent opens with a model-written line"),
+				warn(Pipecat, "Pipecat has no greeting block: the agent opens with a model-written line"),
 				warn(Vapi, "Vapi default greeting behavior applies"),
 				warn(Deepgram, "Deepgram default greeting behavior applies"),
 			),
