@@ -1309,7 +1309,10 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		`raise RuntimeError("call_start.campaign_id must be string")`,
 		`userdata.provider_call_id = value`,
 		`userdata.call_direction = value`,
-		`_hydrate_livekit_context(session.userdata, call_context, call_start)`,
+		// System sources and dispatched input variables hydrate through their own
+		// call, so one path serves telephony and a plain `dev --var` session alike.
+		`_hydrate_livekit_context(session.userdata, call_context)`,
+		`_hydrate_call_start(session.userdata, call_start)`,
 		`await _livekit_entry_greeting(session)`,
 		`result = await WarmTransferTask(sip_call_to="+14155550123")`,
 	} {
@@ -1318,9 +1321,14 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		}
 	}
 	hydrateAt := strings.Index(agentPy, "_hydrate_livekit_context(session.userdata")
+	callStartAt := strings.Index(agentPy, "_hydrate_call_start(session.userdata")
 	greetAt := strings.Index(agentPy, "await _livekit_entry_greeting(session)")
 	if hydrateAt < 0 || greetAt < 0 || hydrateAt > greetAt {
 		t.Error("LiveKit SIP context must hydrate before the first greeting")
+	}
+	// A greeting may name an input variable, so those must land first too.
+	if callStartAt < 0 || callStartAt > greetAt {
+		t.Error("dispatched input variables must hydrate before the first greeting")
 	}
 	env := artifactFile(t, artifact, ".env.example")
 	for _, name := range []string{

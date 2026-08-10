@@ -12,6 +12,7 @@ type Agent struct {
 	Listen       string                `json:"listen,omitempty" yaml:"listen,omitempty"`
 	Turn         string                `json:"turn,omitempty" yaml:"turn,omitempty"`
 	Variables    map[string]Variable   `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Secrets      map[string]Secret     `json:"secrets,omitempty" yaml:"secrets,omitempty"`
 	Agents       map[string]AgentDef   `json:"agents" yaml:"agents"`
 	Tasks        map[string]Task       `json:"tasks,omitempty" yaml:"tasks,omitempty"`
 	TaskGroups   map[string]TaskGroup  `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
@@ -76,9 +77,18 @@ const (
 )
 
 type Variable struct {
-	Type    PrimitiveType  `json:"type" yaml:"type"`
-	Default any            `json:"default,omitempty" yaml:"default,omitempty"`
-	Source  VariableSource `json:"source,omitempty" yaml:"source,omitempty"`
+	Type        PrimitiveType  `json:"type" yaml:"type"`
+	Default     any            `json:"default,omitempty" yaml:"default,omitempty"`
+	Source      VariableSource `json:"source,omitempty" yaml:"source,omitempty"`
+	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
+// Secret is a declared runtime environment value. Its name is the map key in
+// Agent.Secrets; Required is settled in Build (default true), so every consumer
+// reads a decided value.
+type Secret struct {
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
+	Required    bool   `json:"required" yaml:"required"`
 }
 
 type PrimitiveType string
@@ -102,6 +112,9 @@ const (
 	VariableSourceDirection  VariableSource = "direction"
 	VariableSourceFromNumber VariableSource = "from_number"
 	VariableSourceToNumber   VariableSource = "to_number"
+	// VariableSourceConversation marks a value the model saves mid-call through
+	// the generated update_variables tool (variable_secrets_specs.md N23).
+	VariableSourceConversation VariableSource = "conversation"
 )
 
 type AgentDef struct {
@@ -237,18 +250,23 @@ const (
 )
 
 type Tool struct {
-	Description   string           `json:"description,omitempty" yaml:"description,omitempty"`
-	Input         map[string]any   `json:"input,omitempty" yaml:"input,omitempty"`
-	Output        map[string]any   `json:"output,omitempty" yaml:"output,omitempty"`
-	Execution     ToolExecution    `json:"execution" yaml:"execution"`
-	Builtin       string           `json:"builtin,omitempty" yaml:"builtin,omitempty"` // prebuilt registry id (builtin only)
-	Instructions  string           `json:"instructions,omitempty" yaml:"instructions,omitempty"`
-	Handler       string           `json:"handler,omitempty" yaml:"handler,omitempty"`
-	HandlerSource string           `json:"-" yaml:"-"` // local handler file content, loaded by spec.Load
-	URLEnv        string           `json:"url_env,omitempty" yaml:"url_env,omitempty"`
-	Auth          *ToolAuth        `json:"auth,omitempty" yaml:"auth,omitempty"` // webhook auth; nil = unauthenticated
-	Interruption  ToolInterruption `json:"interruption,omitempty" yaml:"interruption,omitempty"`
-	Effect        ToolEffect       `json:"effect,omitempty" yaml:"effect,omitempty"`
+	Description   string         `json:"description,omitempty" yaml:"description,omitempty"`
+	Input         map[string]any `json:"input,omitempty" yaml:"input,omitempty"`
+	Output        map[string]any `json:"output,omitempty" yaml:"output,omitempty"`
+	Execution     ToolExecution  `json:"execution" yaml:"execution"`
+	Builtin       string         `json:"builtin,omitempty" yaml:"builtin,omitempty"` // prebuilt registry id (builtin only)
+	Instructions  string         `json:"instructions,omitempty" yaml:"instructions,omitempty"`
+	Handler       string         `json:"handler,omitempty" yaml:"handler,omitempty"`
+	HandlerSource string         `json:"-" yaml:"-"` // local handler file content, loaded by spec.Load
+	URLEnv        string         `json:"url_env,omitempty" yaml:"url_env,omitempty"`
+	// Path is the webhook path appended to URLEnv's base URL; may hold templates.
+	Path string `json:"path,omitempty" yaml:"path,omitempty"`
+	// Inject holds hidden request values, merged into the call and never shown to
+	// the model. String values may hold {{variable}} tokens.
+	Inject       map[string]any   `json:"inject,omitempty" yaml:"inject,omitempty"`
+	Auth         *ToolAuth        `json:"auth,omitempty" yaml:"auth,omitempty"` // webhook auth; nil = unauthenticated
+	Interruption ToolInterruption `json:"interruption,omitempty" yaml:"interruption,omitempty"`
+	Effect       ToolEffect       `json:"effect,omitempty" yaml:"effect,omitempty"`
 }
 
 type ToolExecution string

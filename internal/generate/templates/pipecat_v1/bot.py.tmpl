@@ -24,10 +24,12 @@ from __future__ import annotations
 
 import asyncio
 {{if .NeedsInspect}}import inspect
-{{end}}{{if .HasFlows}}import json
+{{end}}{{if or .HasFlows .CallStartVars}}import json
 {{end}}import os
-{{if .Telephony}}import sys
+{{if .NeedsRender}}import re
+{{end}}{{if .Telephony}}import sys
 {{end}}{{if .Variables}}from dataclasses import dataclass
+{{end}}{{if .NeedsRender}}from urllib.parse import quote
 {{end}}{{if .NeedsHTTPX}}
 import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
@@ -94,26 +96,71 @@ def require_env() -> None:
 @dataclass
 class State:
     """Typed call variables (SCHEMA 4.4), shared across agents."""
-{{range .Variables}}    {{.Name}}: {{.PyType}} = {{.Default}}
+{{range .Variables}}    {{.Name}}: {{.PyType}} = {{.Default}}{{if .Description}}  # {{.Description}}{{end}}
 {{end}}
+{{if .CallStartVars}}
+def _dispatched_call_start(call_context: dict | None) -> dict:
+    """Input variables arrive with the dispatch: the call context on a telephony
+    route, or UNMUTE_CALL_START for a local `unmute dev --var` session."""
+    values = dict((call_context or {}).get("call_start", {}))
+    raw = os.getenv("UNMUTE_CALL_START")
+    if raw:
+        try:
+            supplied = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("UNMUTE_CALL_START must be valid JSON") from exc
+        if not isinstance(supplied, dict):
+            raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
+        # The dispatch wins: env is the local stand-in for it.
+        for name, value in supplied.items():
+            values.setdefault(name, value)
+    return values
 
+{{end}}
 def build_state(call_context: dict | None = None) -> State:
     state = State()
-{{if .Telephony}}    context = call_context or {}
     missing = []
+{{if .Telephony}}    context = call_context or {}
 {{range .Telephony.SystemSources}}    value = context.get({{pyq .Source}})
     if value in (None, ""):
         missing.append({{pyq .Source}})
     else:
         setattr(state, {{pyq .Variable}}, value)
-{{end}}    call_start = context.get("call_start", {})
-{{range .Telephony.CallStart}}    if {{pyq .Name}} in call_start:
+{{end}}{{end}}{{if .CallStartVars}}    call_start = _dispatched_call_start(call_context)
+{{range .CallStartVars}}    if {{pyq .Name}} in call_start:
         setattr(state, {{pyq .Name}}, call_start[{{pyq .Name}}])
 {{if .Required}}    else:
         missing.append({{pyq .Name}})
-{{end}}{{end}}    if missing:
+{{end}}{{end}}{{end}}    if missing:
         raise RuntimeError(f"Missing call context fields: {', '.join(missing)}")
-{{end}}    return state
+    return state
+{{end}}{{if .NeedsRender}}
+_TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
+
+
+def _render(text: str, state, *, quote_values: bool = False) -> str:
+    """Substitute each variable token from the call state (SCHEMA 4.4 templates).
+    Only substituted values are URL-encoded, never the surrounding literal."""
+    if state is None:
+        return text
+
+    def _one(match: re.Match[str]) -> str:
+        value = getattr(state, match.group(1), None)
+        value = "" if value is None else str(value)
+        return quote(value, safe="") if quote_values else value
+
+    return _TEMPLATE.sub(_one, text)
+{{end}}{{if .NeedsRefusal}}
+
+def _refusal(tool: str, state, needed: list[tuple[str, str]]) -> str:
+    """Refuse a call whose injected variables are still unset (V4): the model is
+    told what to ask for, and no half-formed request is ever sent."""
+    unset = [(name, hint) for name, hint in needed if getattr(state, name, None) in (None, "")]
+    if not unset:
+        return ""
+    names = ", ".join(name for name, _ in unset)
+    hints = " ".join(f"{name}: {hint}" for name, hint in unset if hint)
+    return f"cannot call {tool} yet: {names} not set. Ask the caller first. {hints}".strip()
 {{end}}{{if gt .MaxDurationSecs 0}}
 async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
     await asyncio.sleep(timeout_secs)
@@ -139,7 +186,7 @@ def _api_key(header: str, env: str) -> dict[str, str]:
 # --- agents -----------------------------------------------------------------
 {{range .Agents}}
 
-def build_{{.Name}}_llm():
+def build_{{.Name}}_llm(state=None):
     return {{template "svc" .LLM.Call}}
 
 
@@ -160,15 +207,15 @@ async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: 
         )
     )
 {{end}}    await params.result_callback({"ended": True})
-{{else if .Local}}    result = tools.{{.Name}}.{{.Name}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Name}}={{$a.Name}}{{end}})
+{{else if .Local}}    result = tools.{{.Name}}.{{.Name}}({{.CallKwargs}})
     if inspect.isawaitable(result):
         result = await result
     await params.result_callback(result)
 {{else}}    async with httpx.AsyncClient() as client:
         response = await client.post(
-            os.environ[{{pyq .URLEnv}}],
+            {{.URLExpr}},
 {{if .Auth}}            headers={{.Auth.Expr}},
-{{end}}            json={ {{range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}} },
+{{end}}            json={{.JSONBody}},
             timeout=30.0,
         )
         response.raise_for_status()
@@ -184,8 +231,31 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
 {{end}}{{if $.HasFlows}}        self.context = context
 {{end}}{{if $.Telephony}}        self.call_context = call_context
 {{end}}
-        llm = build_{{.Name}}_llm()
+        llm = build_{{.Name}}_llm({{if $.Variables}}state{{end}})
         super().__init__({{pyq .Name}}, llm=llm, pipeline=Pipeline([llm, build_{{.Name}}_tts()]), bridged=())
+{{if $.NeedsStateBind}}
+    def _bind_state(self, handler):
+        """Give a module-level flows handler this worker's call state, so a task
+        tool can read injected variables the same way an agent tool does."""
+
+        async def _bound(args, flow_manager):
+            return await handler(args, flow_manager, state=self.state)
+
+        return _bound
+{{end}}{{if $.Capture}}
+    @tool(cancel_on_interruption=False)
+    async def {{$.Capture.Name}}(self, params: FunctionCallParams{{range $.Capture.Args}}, {{.Name}}: {{.PyType}} = {{.PyDefault}}{{end}}):
+        """{{$.Capture.Description}}
+
+        Args:
+{{range $.Capture.Args}}            {{.Name}} ({{.PyType}}):{{if .Description}} {{.Description}}{{end}}
+{{end}}        """
+        saved = []
+{{range $.Capture.Fields}}        if {{.}} is not None:
+            self.state.{{.}} = {{.}}
+            saved.append({{pyq .}})
+{{end}}        await params.result_callback({"saved": saved})
+{{end}}
 {{range .Transfers}}
     @tool(cancel_on_interruption=False)
     async def {{.MethodName}}(self, params: FunctionCallParams):
@@ -229,21 +299,31 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
             )
         )
 {{end}}        await params.result_callback({"ended": True})
-{{else if .Local}}        result = tools.{{.Name}}.{{.Name}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Name}}={{$a.Name}}{{end}})
+{{else if .Local}}{{if .NeedsState}}        state = self.state
+{{end}}{{if .Needed}}        refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
+        if refusal:
+            await params.result_callback({"refused": refusal})
+            return
+{{end}}        result = tools.{{.Name}}.{{.Name}}({{.CallKwargs}})
         if inspect.isawaitable(result):
             result = await result
         await params.result_callback(result)
-{{else}}        async with httpx.AsyncClient() as client:
+{{else}}{{if .NeedsState}}        state = self.state
+{{end}}{{if .Needed}}        refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
+        if refusal:
+            await params.result_callback({"refused": refusal})
+            return
+{{end}}        async with httpx.AsyncClient() as client:
             response = await client.post(
-                os.environ[{{pyq .URLEnv}}],
+                {{.URLExpr}},
 {{if .Auth}}                headers={{.Auth.Expr}},
-{{end}}                json={ {{range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}} },
+{{end}}                json={{.JSONBody}},
                 timeout=30.0,
             )
             response.raise_for_status()
             await params.result_callback(response.json())
 {{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.llm.push_frame(EndFrame())
-{{end}}{{end}}{{$agentPromptConst := .PromptConst}}{{range $d := .Delegates}}
+{{end}}{{end}}{{$agentPromptExpr := .PromptExpr}}{{range $d := .Delegates}}
     @tool
     async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
@@ -277,7 +357,7 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
                     description={{pyq .Description}},
                     properties={{.InputProps}},
                     required={{.InputRequired}},
-                    handler={{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .Name}}, _flow_tool_{{.Name}}){{else}}_flow_tool_{{.Name}}{{end}},
+                    handler={{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .Name}}, {{if .NeedsState}}self._bind_state(_flow_tool_{{.Name}}){{else}}_flow_tool_{{.Name}}{{end}}){{else}}{{if .NeedsState}}self._bind_state(_flow_tool_{{.Name}}){{else}}_flow_tool_{{.Name}}{{end}}{{end}},
                 ),
 {{end}}                FlowsFunctionSchema(
                     name={{pyq $t.FinishName}},
@@ -301,7 +381,7 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._{{$d.MethodName}}_snapshot
         await self.queue_frame(LLMUpdateSettingsFrame(
-            delta=LLMSettings(system_instruction={{$agentPromptConst}}),
+            delta=LLMSettings(system_instruction={{$agentPromptExpr}}),
         ))
         await self.flush_pipeline()
 {{if eq $d.Then "transfer"}}        self.context.set_messages(messages)
@@ -337,14 +417,17 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
 # re-registered function name always resolves to the same callable.
 {{range .FlowTools}}
 
-async def _flow_tool_{{.Name}}(args, flow_manager):
+async def _flow_tool_{{.Name}}(args, flow_manager{{if .NeedsState}}, state=None{{end}}):
     """{{.Description}}"""
-{{if .Local}}    result = tools.{{.Name}}.{{.Name}}(**dict(args))
+{{if .Needed}}    refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
+    if refusal:
+        return {"refused": refusal}
+{{end}}{{if .Local}}    result = tools.{{.Name}}.{{.Name}}(**dict(args){{range .Inject}}, {{.Key}}={{.Expr}}{{end}})
     if inspect.isawaitable(result):
         result = await result
     return result
 {{else}}    async with httpx.AsyncClient() as client:
-        response = await client.post(os.environ[{{pyq .URLEnv}}], {{if .Auth}}headers={{.Auth.Expr}}, {{end}}json=dict(args), timeout=30.0)
+        response = await client.post({{.URLExpr}}, {{if .Auth}}headers={{.Auth.Expr}}, {{end}}json={**dict(args){{range .Inject}}, {{pyq .Key}}: {{.Expr}}{{end}}}, timeout=30.0)
         response.raise_for_status()
         return response.json()
 {{end}}{{end}}
@@ -516,7 +599,7 @@ def build_stt():
 {{else}}            args=LLMWorkerActivationArgs(run_llm={{.GreetingRunLLM}}),
 {{end}}        )
 {{if .GreetingText}}        await next(agent for agent in agents if agent.name == {{pyq .EntryAgent}}).queue_frame(
-            TTSSpeakFrame({{pyq .GreetingText}})
+            TTSSpeakFrame({{.GreetingExpr}})
         )
 {{end}}
 {{if gt .MaxDurationSecs 0}}        asyncio.create_task(_end_after(main, {{.MaxDurationSecs}}))

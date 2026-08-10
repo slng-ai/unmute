@@ -21,6 +21,8 @@ services:
       - TWILIO_SIP_ADDRESS
       - TWILIO_SIP_PASSWORD
       - TWILIO_SIP_USERNAME
+      # optional: set by `unmute dev --var`; absent otherwise
+      - UNMUTE_CALL_START
     ports:
       - "${UNMUTE_TELEPHONY_PORT:-8081}:8081"
     depends_on:

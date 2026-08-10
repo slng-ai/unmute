@@ -3,6 +3,7 @@
 Status: locked, v1. Post-lock adversarial review (context7 + live provider docs) applied 2026-07-15, marked inline as "review-corrected": warm transfer on Pipecat/LiveKit, model-written opening on ElevenLabs/Deepgram, Deepgram outbound voicemail. These re-word or loosen gates; none changes the schema shape.
 Amended 2026-07-19 (N15): the `pipeline` and `voices` blocks are removed; models are defined once, concretely, in `agent.yaml`'s central `models:` map, grouped by kind (`think`/`speak`/`listen`/`turn`, each entry carrying `provider` + `model` as the old target bindings did), referenced by agents and by the top-level `listen`/`turn` selectors, with unreferenced entries kept as swappable alternates; `targets.yaml` shrinks to infrastructure plus optional per-target model overrides; `placement` is derived from `provider`; scaffold drops the `-dev` instance suffix. This one does change the authoring shape; old files fail strict decode loudly. (`reason` survives only as an internal role identifier — the `reason:` binding block is gone, so it is no longer user-facing; the think/speak vocabulary is the authoring surface.)
 Amended 2026-07-20 (N16, N17, N18): the top-level `language` field is removed — language is per-model only, and no language kwarg is emitted when a model does not set one (N16); ElevenLabs is removed from the target set — the managed group is Vapi alone, and the `region`/`edition` instance fields plus the `unmute apply` command go with it, while ElevenLabs the model vendor stays in the Pipecat/LiveKit catalogues (N17); `deployment_region` is added to target instances (N18). N16 and N17 change the authoring shape; old files fail strict decode loudly. Dated pre-removal verification notes naming ElevenLabs are kept as history.
+Amended 2026-08-10 (N23, N24): variables gain a `description` and a third origin, `source: conversation`, saved mid-call by a generated `update_variables` tool; `{{variable}}` substitution becomes real in four named places; and a new top-level `secrets:` block declares runtime environment values by name, driving each build's `.env.example` and a startup check. Both are additive — every existing package keeps loading and compiling unchanged. Detail in [docs/spec/variable_secrets_specs.md](spec/variable_secrets_specs.md).
 Date: 2026-07-15.
 Source: [ORCHESTRATOR_SHARED_CONFIGURATION.md](./ORCHESTRATOR_SHARED_CONFIGURATION.md). That file holds the research and the reasons. This file holds the decisions. If the two disagree, this file wins, and the other file should be fixed.
 
@@ -75,6 +76,12 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
   Why it matters: both fields decode into `map[string]any`, so the strict decode that rejects unknown fields everywhere else (compiler V3) stops at that boundary and anything typed inside can travel into the emitted tool contract: on the Pipecat Flow-node path the whole `properties` map is serialised verbatim into a `FlowsFunctionSchema`, so a bad key there reaches the model as part of the tool's advertised arguments. On every other path it is dropped instead, which is why the bug stayed invisible; the measured matrix is below. The bug that motivated this shipped in a fixture and was invisible for weeks: a comma inside an unquoted YAML flow scalar split `description: The requested date, e.g. 2026-08-14` into a truncated description plus a null-valued key `e.g. 2026-08-14`.
   Inspection recurses through every subschema position across draft-07 to 2020-12 — the name-keyed containers (`properties`, `patternProperties`, `$defs`, `definitions`, `dependencies`, `dependentSchemas`) and the direct and list positions (`items`, `contains`, `propertyNames`, `if`/`then`/`else`, `not`, `allOf`/`anyOf`/`oneOf`, `prefixItems`, the `additional*`/`unevaluated*` pair, `contentSchema`) — and deliberately does **not** descend into keywords carrying author data (`default`, `const`, `enum`, `examples`), because an object-valued default would otherwise be read as a schema. Vendor extensions (`x-`, `$`-prefixed) are silent. The warning does **not** promise the key reaches the provider, because measured behaviour is not uniform: LiveKit reads five named keys per property (`type`, `enum`, `description`, plus `properties` and `required` above them) and drops everything else; Pipecat drops them too, except on the Flow-node path where `buildTool` hands the whole `properties` map to `pyLiteral` and it lands in `bot.py` verbatim. A key at the top level of `input` is dropped by both. So an unrecognised key survives in exactly one case out of four, and the answer needs three axes (driver, agent-tool versus task-tool, depth) rather than one. The warning therefore says only `unmute does not read it` and makes no survival claim at all: "depends on the driver" would be wrong often enough to mislead, and this table is the place with room to be exact. Task `result:` field schemas reach the same generator path (`ResultField.Schema`) and are covered by the same walk, reported against the field rather than a tool (`task "collect" result "details" has unrecognised schema key ... at schema.properties.city`).
 
+- **N23 (2026-08-10).** Variables gain a `description` and a third origin, and templates become real. `variables` keeps being **one block**: origin is a property of a variable, not a separate kind of thing, so it stays in `source:` rather than splitting the block in two. The vocabulary is **input variables** (`source: call_start`), **system variables** (the runtime-owned sources that already existed), and **conversation variables** (`source: conversation`, new — the model saves the value mid-call). `description` is legal on every variable and feeds the generated capture tool, the compile report, and the generated README.
+  `{{variable}}` now substitutes, in exactly four places: `conversation.greeting.text`, agent and task instructions, tool `inject:` values, and `webhook.path`. The first two render **once at session start**, so they may only name a variable that has a value by then — an input variable, a system variable, or any variable with a `default`; a conversation variable without a default is an error there, because prompts are never re-rendered mid-call. The last two render **per tool call**, so a conversation variable is fine. A token that is not a declared variable fails with file:line, and one naming a secret fails saying secrets never flow through templates.
+  Declaring any conversation variable makes the drivers emit one tool, **`update_variables`**, whose parameters are exactly those variables with their types and descriptions, all optional, attached to every agent and task. The name is reserved. This is a deliberate exception to D8: it is generated plumbing like the `requires` guard, not a package tool.
+  Input variables arrive as one flat JSON object of name to value: the job dispatch metadata on LiveKit, the runner's call-start payload on Pipecat, and `unmute dev --var name=value` locally (which parses each value against its declared type and refuses an undeclared name). Full detail, including the per-target gates, in [docs/spec/variable_secrets_specs.md](spec/variable_secrets_specs.md).
+- **N24 (2026-08-10).** A new top-level `secrets:` block declares the runtime environment values a package needs. The map **key is the environment variable name** (`UPPER_SNAKE`), and the only fields are `description` and `required` (default `true`). There is deliberately no `default:` or `example:` field: anywhere a value could be written, one day a real one will be, and D12 says values never appear in any package file. Secrets are **never** reachable from a template (that is what N23's error says); they reach the call only through the existing `*_env` slots, the generated auth helpers, and `os.environ` in a local Python handler.
+  Two things follow from declaring them. Each code target's build writes a `build/<target>/.env.example` carrying every declared secret with its description above it, optional ones marked, plus the env names the route needs, and the referenced-but-undeclared ones labeled as such. And a generated runtime refuses to start when a `required: true` secret is missing or empty, naming it — the same contract tracing already had (4.11). An env name the package references but does not declare is a **warning on stderr, exit 0**, never an error: declaring secrets is opt-in, and a package written before this block existed still compiles unchanged.
 - **N16 (added 2026-07-20).** Telephony compilation is scoped to
   LiveKit and Pipecat. A telephony target selects exactly one Connection and
   one exact `(orchestrator, transport, carrier)` route. Connections live in
@@ -127,6 +134,7 @@ Named maps instead of lists, so every item has a stable identity and diffs stay 
 | `listen` | only when `models.listen` has 2+ entries | name of a listen model, see 4.2 | gated |
 | `turn` | only when `models.turn` has 2+ entries | name of a turn model, see 4.2 | warn |
 | `variables` | no | map, see 4.4 | core |
+| `secrets` | no | map of env var name to `{description, required}`, see 4.12 | core |
 | `agents` | yes, must include `entry_agent` | map, see 4.5 | core |
 | `tasks` | no | map, see 4.6 | gated (T1) |
 | `task_groups` | no | map, see 4.6 | gated (T1) |
@@ -210,7 +218,10 @@ Typed shared state. Task results, handoff payloads, and personalization all flow
 |---|---|---|---|---|
 | `type` | yes | `string \| number \| boolean \| integer` | core | |
 | `default` | no | value of that type | core | |
-| `source` | no | `call_start \| session_id \| carrier \| connection \| call_id \| stream_id \| direction \| from_number \| to_number` | gated | `call_start` is caller input. The remaining values are runtime-owned system sources and must be available on the exact route before the greeting. `stream_id` is optional only when no variable requests it. |
+| `source` | no | `call_start \| conversation \| session_id \| carrier \| connection \| call_id \| stream_id \| direction \| from_number \| to_number` | gated | `call_start` is caller input, dispatched with the call. `conversation` (N23) is saved by the model mid-call through the generated `update_variables` tool; it fails on Vapi and Deepgram. The remaining values are runtime-owned system sources and must be available on the exact route before the greeting. `stream_id` is optional only when no variable requests it. |
+| `description` | no | text | core | What the value is. Feeds the generated capture tool's schema, the compile report, and the generated README (N23). |
+
+A variable is referenced as `{{name}}` in four places (N23): `conversation.greeting.text`, agent and task instructions, tool `inject:` values, and `webhook.path`. The first two render once at session start and so may only name a variable that has a value by then; the last two render per tool call. A call-time render that hits an unset variable makes the tool refuse and tell the model what to ask for, rather than sending a half-formed request — except for a system variable, which no caller can be asked for.
 
 Notes that drivers must respect: on Deepgram, live state lives in the generated bridge, never in template variables (those are substitution-time only and visible to project members; never route secrets through them).
 
@@ -380,6 +391,36 @@ This stays schema version 1. Existing packages that want to retain the former
 automatic tracing output add the block above. `unmute init` omits it; the
 checked-in packages under `examples/` include it.
 
+### 4.12 secrets (added 2026-08-10, N24)
+
+The runtime environment values the package needs. The map **key is the
+environment variable name**; there is no field a value could be written into
+(D12).
+
+```yaml
+secrets:
+  SALON_API_URL:
+    description: Base URL of the booking API.
+  SALON_API_TOKEN:
+    description: Bearer token for the booking API.
+  OPENAI_API_KEY:
+    description: Key for the think model.
+    required: true
+```
+
+| Field | Required | Values | Tag | Notes |
+|---|---|---|---|---|
+| `description` | no | text | core | For humans, and for the generated `.env.example`. |
+| `required` | no, default `true` | bool | core | `true`: a generated runtime refuses to start without it, naming it. `false` marks an optional feature's credential. |
+
+The key must be `UPPER_SNAKE`, the same rule every `*_env` field follows (N19),
+so a pasted URL or secret fails validation instead of becoming a lookup that
+fails at call time. Secrets never flow through `{{...}}` templates (N23): they
+reach the call through `*_env` fields, the generated auth helpers, and
+`os.environ` in a local handler. Each code target's build writes a
+`.env.example` from this block. An env name the package references but never
+declares is a warning on stderr, exit 0.
+
 ---
 
 ## 5. tools/*.yaml
@@ -421,6 +462,7 @@ interruption: provider_default
 | `input` | yes, except `builtin` | JSON Schema object | core | The parameters the model fills in; lowers natively everywhere (N10). A `builtin` tool has no `input`: the prebuilt owns its schema. |
 | `output` | no | JSON Schema object | warn | Declared and carried into the compile report, but **not enforced anywhere yet** (N22): no driver reads it. Only Vapi warns, and the tag is `warn` on that basis alone. Not legal on a `builtin` tool. |
 | one execution block | yes, exactly one | `webhook \| local \| mcp \| builtin \| client \| provider_hosted` | see 5.2 | Zero blocks and two-or-more blocks both fail at load with file:line. |
+| `inject` | no | flat map of request key to scalar | gated (N23) | Values merged into the call and **never shown to the model**, so it can neither see nor overwrite them: the place a user id or a captured slot rides along. A string value may hold `{{variable}}` tokens; a value that is exactly one token keeps the variable's declared type. A key here may not also appear in `input.properties`. Legal on `webhook` and `local` only — the two kinds whose request unmute builds itself. Fails on Vapi and Deepgram. |
 | `interruption` | no, default `provider_default` | `continue \| cancel \| provider_default` | warn | Honored on Pipecat (`cancel_on_interruption`); LiveKit runs tools to completion, so non-default values warn there (2026-07-16). On managed targets only `provider_default` means anything; other values warn. |
 | `effect` | no, default `returns_data` | `returns_data \| ends_conversation` | core | Fixed by the registry for a `builtin` tool (`end_call` implies `ends_conversation`); a conflicting value fails. |
 
@@ -428,7 +470,7 @@ interruption: provider_default
 
 | Block | Fields | Gating |
 |---|---|---|
-| `webhook:` | `url_env` (required), `auth` (optional, 5.3) | works everywhere. **The safe choice.** |
+| `webhook:` | `url_env` (required), `path` (optional), `auth` (optional, 5.3) | works everywhere. **The safe choice.** `path` is appended to the env base URL, must start with `/`, may hold `{{variable}}` tokens whose rendered values are URL-encoded, and fails on Vapi and Deepgram (N23). |
 | `local:` | `handler` (path, default `tools/<name>.py`) | code targets only |
 | `mcp:` | `url_env` (the MCP server address) | **fails on Deepgram** (no runtime MCP client); on LiveKit needs `sdk_language: python` (driver-livekit B3, 2026-07-16). The block where MCP auth would land later. |
 | `builtin:` | `id` (prebuilt registry id, v1 `end_call`), `instructions` (optional closing line) | LiveKit and Pipecat host the registry; **fails on Vapi and Deepgram**. LiveKit lowers `end_call` to the beta `EndCallTool`, Pipecat to a bodyless end tool. Unknown id fails with file:line. |
@@ -589,6 +631,10 @@ follows these rules exactly.
 6. If the agent speaks first, give it a fixed `greeting.text`. A model-written opening is generated-with-warning on Deepgram (review-corrected 2026-07-15); a fixed line stays the zero-warning safe choice.
 7. Skip for now: single `tasks` (return to owner unverified on Vapi) and `task_groups` with `then: return` (fails on Vapi). A `task_group` with `then: transfer` or `end` does pass on all four (warning on LiveKit: TaskGroup experimental). Also skip `requires`, `thinking_audio`, telephony routes, warm transfer, `mcp` and `local` tools, tracing, and any history other than `full`. `fallback` passes everywhere when the chain stays within one provider on Vapi. Pipecat's current carrier routes do not emit the required voicemail handling, and every exact telephony route remains provisional until its credentialed smoke passes.
 8. Accept warnings: interruption tuning on Deepgram, turn model notes.
+9. No `{{variable}}` template in any prompt or greeting, no tool `inject:`, no
+   `webhook.path`, and no `source: conversation` variable: each fails on Vapi and
+   Deepgram (N23/N24). The four-target fixture cannot carry a feature two targets
+   refuse; a package targeting only LiveKit and Pipecat uses them freely.
 
 Feature by feature:
 
@@ -613,6 +659,11 @@ Feature by feature:
 | `provider: local` (listen/speak) | ok | ok | fail | fail |
 | webhook tools | ok | ok | ok | ok |
 | webhook `auth` (bearer/api_key) | ok | ok | fail | fail |
+| `{{variable}}` in prompts/greeting | ok | ok | fail | fail |
+| tool `inject:` | ok | ok | fail | fail |
+| `webhook.path` | ok | ok | fail | fail |
+| `source: conversation` (+ generated `update_variables`) | ok | ok | fail | fail |
+| `secrets:` block (`.env.example`, startup check) | ok | ok | n/a | n/a |
 | mcp tools | Python only | gated (v1) | ok | fail |
 | outbound + `on_voicemail` | ok | gated (v1) | ok | generated (warn) |
 | tracing `provider: langfuse` | ok | ok | fail | fail |

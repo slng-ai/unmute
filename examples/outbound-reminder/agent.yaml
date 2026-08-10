@@ -1,0 +1,93 @@
+# Outbound appointment reminder showing every runtime-value kind in one place
+# (docs/spec/variable_secrets_specs.md):
+#   input variables        customer_id, name, appointment_time (from the dispatch)
+#   system variable        dialed_number (runtime owned, source: to_number)
+#   conversation variable  reschedule_to (the model saves it mid call)
+#   secrets                env names only, values never appear in any file
+version: 1
+entry_agent: reminder
+
+variables:
+  customer_id:
+    type: string
+    source: call_start
+    description: CRM id of the customer this call is about. Used by the booking tools, never spoken.
+  name:
+    type: string
+    source: call_start
+    description: Customer's first name, used in the greeting and the prompt.
+  appointment_time:
+    type: string
+    source: call_start
+    description: Appointment start in spoken form, for example "tomorrow at 3 pm".
+  dialed_number:
+    type: string
+    source: to_number
+  reschedule_to:
+    type: string
+    source: conversation
+    description: New slot the customer asks for, in spoken form. Save it as soon as the customer names one.
+
+secrets:
+  SALON_API_URL:
+    description: Base URL of the salon booking API.
+  SALON_API_TOKEN:
+    description: Bearer token for the salon booking API.
+  OPENAI_API_KEY:
+    description: Key for the think model.
+  SLNG_API_KEY:
+    description: Key for the SLNG speech models.
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  reminder:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - confirm_appointment
+      - reschedule_appointment
+
+tools:
+  - confirm_appointment
+  - reschedule_appointment
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi {{name}}! This is Sage and Stone Salon calling about your appointment {{appointment_time}}. Does that time still work for you?"
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio
+  phone:
+    kind: telephony
+    inbound: false
+    outbound: true
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 4
+  peak_starts_per_second: 1
+  avg_session_duration: 2m

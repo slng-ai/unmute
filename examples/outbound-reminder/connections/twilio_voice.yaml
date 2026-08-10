@@ -1,0 +1,7 @@
+# Twilio account for the LiveKit Twilio connector route. Values are
+# environment variable names, never secrets.
+kind: telephony
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER

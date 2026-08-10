@@ -8,6 +8,8 @@ The agent can look a customer up, but the moment the tool returns, it forgets. *
 variables:
   customer_id:
     type: string
+    source: call_start
+    description: CRM id of the caller.
   verified:
     type: boolean
     default: false
@@ -16,12 +18,13 @@ variables:
 Each variable has:
 
 - **`type`**: one of `string`, `number`, `boolean`, `integer`. These four primitives are the common ground across all four platforms.
-- **`default`** (optional): the starting value. `verified` starts `false`. `customer_id` has no default, so it starts empty until something sets it.
-- **`source`** (optional): set it to `call_start` for a value that must be supplied when the call begins, for example a customer id passed in by an outbound dialer or a web session. Unmute checks that every `call_start` variable can actually be supplied on the channels you use.
+- **`default`** (optional): the starting value. `verified` starts `false`. `customer_id` has no default, so the call must supply it — and because a prompt below names it, unmute would refuse to compile if nothing could.
+- **`source`** (optional): where the value comes from. `call_start` for something supplied when the call begins, like a customer id from an outbound dialer or a web session. `conversation` for something the model learns while talking. One of the route values (`to_number`, `call_id`, and friends) for something the runtime owns. Unmute checks every source against the channels you use.
+- **`description`** (optional): what the value is, in one line. The model reads it when saving a conversation variable, and it shows up in the compile report.
 
 ## Use them in prompts and greetings
 
-A variable is written `{{name}}`, with no spaces inside the braces. Anywhere a prompt or a greeting line can reference one, it is substituted at runtime:
+A variable is written `{{name}}` (spaces inside the braces are fine). It works in four places: a greeting line, agent and task prompts, a tool's `inject:` values, and a `webhook.path`. Prompts and the greeting are rendered once when the session opens, so they may only name a variable that already has a value by then — one supplied at call start, one the runtime owns, or one with a `default`:
 
 ```markdown
 Use `get_invoice` to look up invoices for customer `{{customer_id}}`.
@@ -40,8 +43,20 @@ conversation:
 
 Two ways:
 
-- **At call start**, for `source: call_start` variables.
-- **During the call**, when a delegated task returns a result and you map that result into a variable. That is the `assign` step you will meet in [05. Tasks](05-tasks.md). It is the main way state changes mid-call.
+- **At call start**, for `source: call_start` variables. Locally that is `unmute dev --var name=value`; in production the value rides your target's dispatch payload.
+- **During the call, by the model**, for `source: conversation` variables. Declaring one gives you a tool called `update_variables` for free, attached to every agent and task, so the model can save what it hears. You never write that tool yourself.
+- **During the call, from a task result**, when a delegated task returns and you map that result into a variable. That is the `assign` step you will meet in [05. Tasks](05-tasks.md).
+
+## Sending a variable to a tool
+
+A tool can receive a variable directly, without the model ever seeing it, through
+the tool's `inject:` block. That is how a customer id reaches your API without
+the model being able to invent one. If an injected variable is not set yet, the
+tool refuses the call and tells the model to ask for it, instead of sending a
+half-formed request. See [tools](../reference/tools.md).
+
+Credentials are a separate thing and never travel through `{{...}}`: they are
+declared by name in [secrets](../reference/secrets.md).
 
 ## What Pipecat generates
 

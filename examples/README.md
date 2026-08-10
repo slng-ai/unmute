@@ -16,7 +16,9 @@ and Pipecat runs.
 | [`multi-task`](multi-task/) | One agent and two independent tasks | One task owns customer records; another owns appointments. |
 | [`task-groups`](task-groups/) | One agent and three ordered tasks | Shared context moves through customer identification, slot selection, and finalization. |
 | [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |
+| [`salon-support`](salon-support/) | One agent, variables and secrets, browser only | **Start here.** The one you can run in a minute: web audio, local tools, two model keys, no Twilio and no Langfuse. Shows a personalized greeting, a hidden tool parameter, and the model saving what the caller says. |
 | [`telephony-hello`](telephony-hello/) | A minimal inbound and outbound phone agent | Real Twilio calls on a laptop over both routes (Pipecat carrier-websocket and the LiveKit Twilio connector), driven by one `.env`. The smallest way to confirm your Twilio setup before wiring a real agent. |
+| [`outbound-reminder`](outbound-reminder/) | One outbound agent using variables and secrets | Input variables from the dispatch, a system variable from the route, a conversation variable the model saves mid call, and declared secrets. Tracks [docs/spec/variable_secrets_specs.md](../docs/spec/variable_secrets_specs.md) and compiles once that lands. |
 
 ## Test the tools
 

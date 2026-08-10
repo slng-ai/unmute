@@ -189,6 +189,20 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		collectTools(t.Tools, t.MCPServers)
 	}
 	sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
+	for _, a := range data.Agents {
+		for _, tool := range a.Tools {
+			if len(tool.Needed) > 0 {
+				data.NeedsRefusal = true
+			}
+		}
+	}
+	for _, t := range data.Tasks {
+		for _, tool := range t.Tools {
+			if len(tool.Needed) > 0 {
+				data.NeedsRefusal = true
+			}
+		}
+	}
 
 	// History-shaping helpers emit only when a transfer or task uses them (V5).
 	for _, a := range data.Agents {
@@ -230,9 +244,27 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		if v.Default != nil {
 			def = pyLiteral(v.Default)
 		}
-		data.Vars = append(data.Vars, livekitVar{Name: name, PyType: pyType(v.Type), Default: def})
+		data.Vars = append(data.Vars, livekitVar{Name: name, PyType: pyType(v.Type), Default: def, Description: v.Description})
+		if v.Source == ir.VariableSourceCallStart || v.Source == "" {
+			data.CallStartVars = append(data.CallStartVars, livekitCallStartVar{
+				Name: name, Type: string(v.Type), TypeCheck: livekitTypeCheck(v.Type),
+				Required: v.Default == nil && v.Source == ir.VariableSourceCallStart,
+			})
+		}
 	}
 	data.HasVars = len(data.Vars) > 0
+	data.Capture = buildLiveKitCapture(agent)
+	if len(data.CallStartVars) > 0 {
+		data.DevOptionalEnv = []string{"UNMUTE_CALL_START"}
+	}
+	data.RequiredSecrets = requiredSecretEnv(agent)
+	for _, name := range data.RequiredSecrets {
+		env.add(name)
+	}
+	data.NeedsRender = renderNeeds(agent)
+	if data.Capture != nil {
+		data.NeedsFunctionTools = true // the generated capture tool is a @function_tool too
+	}
 
 	// Prompt constants, ordered agents-then-tasks for a stable file.
 	for _, a := range data.Agents {
@@ -308,7 +340,30 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	data.PluginModules = collectLiveKitPlugins(data)
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
+	data.Secrets = secretDocs(agent, data.RequiredEnv)
 	return data, nil
+}
+
+// buildLiveKitCapture builds the generated update_variables tool: one optional
+// argument per conversation variable, writing the session userdata (V6).
+func buildLiveKitCapture(agent *ir.Agent) *livekitCapture {
+	fields := captureFields(agent)
+	if len(fields) == 0 {
+		return nil
+	}
+	capture := &livekitCapture{
+		Name: ir.CaptureToolName, Description: captureDescription(agent, fields), Fields: fields,
+	}
+	for _, name := range fields {
+		variable := agent.Variables[name]
+		// Every field is optional: the model saves what it has learned so far,
+		// one call or several, never all of them at once.
+		anno := pyType(variable.Type) + " | None"
+		capture.Args = append(capture.Args, livekitArg{
+			Name: name, PyType: pyType(variable.Type), Desc: variable.Description, Anno: anno,
+		})
+	}
+	return capture
 }
 
 func buildLiveKitTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*livekitTelephony, error) {
@@ -607,6 +662,11 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 		Name: name, Class: pyName(name), PromptConst: promptConst(name),
 		IsEntry: name == agent.EntryAgent,
 	}
+	// A templated prompt is re-rendered from the session state on entry; an
+	// untouched one keeps the bare module constant.
+	if ir.HasTemplate(def.Instructions) {
+		built.PromptExpr = promptExpr(promptConst(name), def.Instructions, "self.session.userdata")
+	}
 	if def.Model != entry.Model {
 		llm, err := livekitReasonLLM(agent, tgt, def.Model, env)
 		if err != nil {
@@ -632,7 +692,7 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 				mcpByEnv[tool.URLEnv] = append(mcpByEnv[tool.URLEnv], ref)
 				continue
 			}
-			lowered, err := buildLiveKitTool(ref, tool, env)
+			lowered, err := buildLiveKitTool(ref, tool, agent.Variables, env)
 			if err != nil {
 				return livekitAgent{}, fmt.Errorf("agent %q: %w", name, err)
 			}
@@ -785,6 +845,9 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 
 func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *envSet) (livekitTask, error) {
 	built := livekitTask{Name: name, Class: pyName(name), PromptConst: promptConst(name)}
+	if ir.HasTemplate(task.Instructions) {
+		built.PromptExpr = promptExpr(promptConst(name), task.Instructions, "self.session.userdata")
+	}
 	// Per-task model (B1): AgentTask takes its own llm=, resolved through the
 	// catalogue like any per-agent override. Same profile as the entry agent =
 	// the session default, no kwarg.
@@ -817,7 +880,7 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 			mcpByEnv[tool.URLEnv] = append(mcpByEnv[tool.URLEnv], ref)
 			continue
 		}
-		lowered, err := buildLiveKitTool(ref, tool, env)
+		lowered, err := buildLiveKitTool(ref, tool, agent.Variables, env)
 		if err != nil {
 			return livekitTask{}, fmt.Errorf("task %q: %w", name, err)
 		}
@@ -835,7 +898,16 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 // (agents and tasks share the shape); mcp tools mount as servers upstream. A
 // builtin tool becomes a prebuilt (EndCallTool) rendered into tools=, not a
 // method. client/provider_hosted stay table-denied.
-func buildLiveKitTool(name string, tool ir.Tool, env *envSet) (livekitTool, error) {
+// livekitStateExpr is how an emitted @function_tool reaches the call state.
+const livekitStateExpr = "ctx.userdata"
+
+func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variable, env *envSet) (livekitTool, error) {
+	inject, needed := loweredInject(tool, variables, livekitStateExpr)
+	args := livekitToolArgs(tool.Input)
+	argNames := make([]string, 0, len(args))
+	for _, arg := range args {
+		argNames = append(argNames, arg.Name)
+	}
 	switch tool.Execution {
 	case ir.ToolWebhook:
 		env.add(tool.URLEnv)
@@ -845,14 +917,19 @@ func buildLiveKitTool(name string, tool ir.Tool, env *envSet) (livekitTool, erro
 		}
 		return livekitTool{
 			Method: name, Description: tool.Description, URLEnv: tool.URLEnv,
+			URLExpr: urlExpr(tool, livekitStateExpr), Inject: inject, Needed: needed,
+			NeededLiteral:    neededLiteral(needed),
+			JSONBody:         requestBody(argNames, inject),
 			Auth:             loweredAuth(tool.Auth),
-			Args:             livekitToolArgs(tool.Input),
+			Args:             args,
 			EndsConversation: tool.Effect == ir.ToolEndsConversation,
 		}, nil
 	case ir.ToolLocal:
 		return livekitTool{
 			Method: name, Description: tool.Description, Local: true,
-			Args:             livekitToolArgs(tool.Input),
+			Inject: inject, Needed: needed, NeededLiteral: neededLiteral(needed),
+			CallKwargs:       callKwargs(argNames, inject),
+			Args:             args,
 			EndsConversation: tool.Effect == ir.ToolEndsConversation,
 		}, nil
 	case ir.ToolBuiltin:
@@ -1107,7 +1184,9 @@ func livekitGreetingFor(c *ir.Conversation) *livekitGreeting {
 	g := c.Greeting
 	switch {
 	case g.SpeaksFirst == ir.SpeaksFirstAgent && g.Text != "":
-		return &livekitGreeting{Say: g.Text}
+		// The fixed line may name variables known at call start (C11); it is
+		// rendered once, when the session opens.
+		return &livekitGreeting{Say: g.Text, Templated: ir.HasTemplate(g.Text)}
 	case g.SpeaksFirst == ir.SpeaksFirstAgent:
 		return &livekitGreeting{RunLLM: true}
 	default:

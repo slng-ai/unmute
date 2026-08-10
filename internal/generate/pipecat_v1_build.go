@@ -79,7 +79,26 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		if v.Default == nil {
 			pt, def = pt+" | None", "None"
 		}
-		data.Variables = append(data.Variables, pipecatVariable{Name: name, PyType: pt, Default: def, Source: string(v.Source)})
+		data.Variables = append(data.Variables, pipecatVariable{
+			Name: name, PyType: pt, Default: def, Source: string(v.Source), Description: v.Description,
+		})
+		// Dispatched input variables hydrate before the greeting on every
+		// channel, not just telephony: the web and console dev paths read the
+		// same payload out of UNMUTE_CALL_START (I.dispatch).
+		if v.Source == ir.VariableSourceCallStart || v.Source == "" {
+			data.CallStartVars = append(data.CallStartVars, pipecatCallStartVar{
+				Name: name, Type: string(v.Type), Required: v.Default == nil && v.Source == ir.VariableSourceCallStart,
+			})
+		}
+	}
+	data.Capture = buildPipecatCapture(agent)
+	if len(data.CallStartVars) > 0 {
+		data.DevOptionalEnv = []string{"UNMUTE_CALL_START"}
+	}
+	// Declared secrets join the startup check; a required one missing fails the
+	// bot before it answers a call (V12).
+	for _, name := range requiredSecretEnv(agent) {
+		env.add(name)
 	}
 	// Snapshot the provider creds before telephony env is added: the web dev
 	// image (compose.dev.yaml) runs bot.py over WebRTC and needs no telephony
@@ -96,6 +115,21 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		data.Notes = append(data.Notes, "turn role lowers to on-device VAD (Silero); its binding is advisory")
 	}
 	setImportNeeds(&data)
+	data.NeedsRender = renderNeeds(agent)
+	for _, tool := range data.FlowTools {
+		// A task tool reading call state needs it bound onto its module-level
+		// flows handler; agent @tool methods already have self.state.
+		if tool.NeedsState {
+			data.NeedsStateBind = true
+		}
+	}
+	for _, tools := range append([][]pipecatTool{data.FlowTools}, agentToolLists(data.Agents)...) {
+		for _, tool := range tools {
+			if len(tool.Needed) > 0 {
+				data.NeedsRefusal = true
+			}
+		}
+	}
 	data.Inline = inlineEligible(&data)
 	data.Imports, data.Extras, data.Deps = collectImportsExtras(data)
 	if data.Telephony != nil {
@@ -110,7 +144,40 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		slices.Sort(data.Deps)
 	}
 	data.RequiredEnv = env.sorted()
+	data.Secrets = secretDocs(agent, data.RequiredEnv)
 	return data, nil
+}
+
+// agentToolLists is every agent's @tool list, for whole-project scans.
+func agentToolLists(agents []pipecatAgent) [][]pipecatTool {
+	lists := make([][]pipecatTool, 0, len(agents))
+	for _, a := range agents {
+		lists = append(lists, a.Tools)
+	}
+	return lists
+}
+
+// buildPipecatCapture builds the generated update_variables tool: one optional
+// argument per conversation variable, each carrying its declared type and
+// description so the model knows what it is saving (V6).
+func buildPipecatCapture(agent *ir.Agent) *pipecatCapture {
+	fields := captureFields(agent)
+	if len(fields) == 0 {
+		return nil
+	}
+	capture := &pipecatCapture{
+		Name: ir.CaptureToolName, Description: captureDescription(agent, fields), Fields: fields,
+	}
+	for _, name := range fields {
+		variable := agent.Variables[name]
+		// Every field is optional: the model saves what it has learned so far,
+		// one call or several, never all of them at once.
+		capture.Args = append(capture.Args, pipecatArg{
+			Name: name, PyType: pyType(variable.Type) + " | None", PyDefault: "None",
+			Description: variable.Description,
+		})
+	}
+	return capture
 }
 
 func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*pipecatTelephony, error) {
@@ -187,7 +254,10 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 			telephony.CallStart = append(telephony.CallStart, pipecatCallStart{Name: variable, Type: string(def.Type), Required: def.Default == nil})
 			continue
 		}
-		if def.Source != "" {
+		// Only runtime-owned sources come from the call context (B3). A
+		// conversation variable listed here would make every call fail at
+		// startup on a context field that never exists.
+		if ir.IsSystemSource(def.Source) {
 			telephony.SystemSources = append(telephony.SystemSources, pipecatSystemSource{Variable: variable, Source: string(def.Source)})
 		}
 	}
@@ -222,6 +292,9 @@ func setImportNeeds(data *pipecatData) {
 	data.NeedsTurnStrategies = data.Interrupt != nil && data.Interrupt.MinWords > 0
 	data.NeedsAppendFrame = data.Inactivity != nil
 	data.NeedsEndFrame = data.MaxDurationSecs > 0
+	if data.Capture != nil {
+		data.NeedsFunctionCalls = true // the generated capture tool is a @tool too
+	}
 	for _, a := range data.Agents {
 		if len(a.Tools)+len(a.Transfers)+len(a.Delegates) > 0 {
 			data.NeedsFunctionCalls = true
@@ -397,7 +470,10 @@ func sortedKeys(set map[string]bool) []string {
 
 func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.AgentDef, env *envSet) (pipecatAgent, error) {
 	promptConst := promptConstName(name)
-	llm, err := agentLLMService(target.Models.Reason[def.Model], promptConst, env)
+	// A templated prompt is rendered per session from the call state; an untouched
+	// one stays the bare module constant it always was.
+	prompt := promptExpr(promptConst, def.Instructions, pipecatStateExpr)
+	llm, err := agentLLMService(target.Models.Reason[def.Model], prompt, env)
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
@@ -405,11 +481,14 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
-	built := pipecatAgent{Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions, PromptConst: promptConst, LLM: llm, TTS: tts}
+	built := pipecatAgent{
+		Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions,
+		PromptConst: promptConst, PromptExpr: prompt, LLM: llm, TTS: tts,
+	}
 
 	for _, ref := range def.Tools {
 		if tool, ok := agent.Tools[ref]; ok {
-			built.Tools = append(built.Tools, buildTool(ref, tool, env))
+			built.Tools = append(built.Tools, buildTool(ref, tool, agent.Variables, env))
 			continue
 		}
 		control, ok := agent.Controls[ref]
@@ -493,7 +572,7 @@ func buildTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (pipecat
 		if !ok {
 			return pipecatTask{}, fmt.Errorf("task %q references unknown tool %q", name, ref)
 		}
-		built.Tools = append(built.Tools, buildTool(ref, tool, env))
+		built.Tools = append(built.Tools, buildTool(ref, tool, agent.Variables, env))
 	}
 	return built, nil
 }
@@ -571,7 +650,11 @@ func transferReason(c *ir.AgentTransfer) string {
 	return "Transfer the caller to the " + c.To + " agent."
 }
 
-func buildTool(name string, tool ir.Tool, env *envSet) pipecatTool {
+// pipecatStateExpr is how emitted Pipecat code reaches the call state: an agent
+// @tool method has it on self, a flows handler receives it as a bound kwarg.
+const pipecatStateExpr = "state"
+
+func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env *envSet) pipecatTool {
 	if tool.URLEnv != "" {
 		env.add(tool.URLEnv)
 	}
@@ -579,14 +662,24 @@ func buildTool(name string, tool ir.Tool, env *envSet) pipecatTool {
 	if tool.Auth != nil {
 		env.add(tool.Auth.TokenEnv)
 	}
+	inject, needed := loweredInject(tool, variables, pipecatStateExpr)
 	built := pipecatTool{
 		Name: name, MethodName: name, Description: tool.Description, URLEnv: tool.URLEnv,
-		Auth:  loweredAuth(tool.Auth),
-		Local: tool.Execution == ir.ToolLocal, HandlerSource: tool.HandlerSource,
+		URLExpr: urlExpr(tool, pipecatStateExpr), Inject: inject, Needed: needed,
+		NeedsState: len(inject) > 0 || ir.HasTemplate(tool.Path),
+		Auth:       loweredAuth(tool.Auth),
+		Local:      tool.Execution == ir.ToolLocal, HandlerSource: tool.HandlerSource,
 		Builtin: tool.Builtin, Instructions: tool.Instructions,
 		EndsCall: tool.Effect == ir.ToolEndsConversation, Interruption: interruptionValue(tool.Interruption),
 	}
 	built.Args = append(built.Args, inputFields(tool.Input)...)
+	argNames := make([]string, 0, len(built.Args))
+	for _, arg := range built.Args {
+		argNames = append(argNames, arg.Name)
+	}
+	built.JSONBody = requestBody(argNames, inject)
+	built.CallKwargs = callKwargs(argNames, inject)
+	built.NeededLiteral = neededLiteral(needed)
 	// Flow nodes advertise the tool via a FlowsFunctionSchema, which takes the
 	// input schema verbatim rather than a Python signature.
 	props, _ := tool.Input["properties"].(map[string]any)
@@ -734,6 +827,12 @@ func applyGreeting(g *ir.Greeting, data *pipecatData) {
 	}
 	if g.SpeaksFirst == ir.SpeaksFirstAgent {
 		data.GreetingText = g.Text
+		// The fixed line may name variables known at call start (C11); it is
+		// rendered once, when the session opens.
+		data.GreetingExpr = pyQuote(g.Text)
+		if ir.HasTemplate(g.Text) {
+			data.GreetingExpr = fmt.Sprintf("_render(%s, %s)", pyQuote(g.Text), pipecatStateExpr)
+		}
 		data.GreetingRunLLM = "False"
 		return
 	}
