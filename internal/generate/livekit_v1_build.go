@@ -166,6 +166,9 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	collectTools := func(tools []livekitTool, servers []livekitMCPServer) {
 		data.NeedsMCP = data.NeedsMCP || len(servers) > 0
 		for _, tool := range tools {
+			if tool.URLEnv != "" {
+				data.NeedsHTTPX = true // webhook tool POSTs with httpx (agents + tasks own them)
+			}
 			if !tool.Local || seenLocal[tool.Method] {
 				continue
 			}
@@ -234,11 +237,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 	for _, t := range data.Tasks {
 		data.Prompts = append(data.Prompts, livekitPrompt{Const: t.PromptConst, Body: livekitTaskPrompt(agent.Tasks[t.Name], t.Result)})
-		for _, tool := range t.Tools {
-			if tool.URLEnv != "" {
-				data.NeedsHTTPX = true
-			}
-		}
 	}
 
 	applyLiveKitConversation(agent.Conversation, &data)
