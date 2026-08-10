@@ -184,6 +184,7 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | model-written opening (no `text`) | ok (generated) |
 | user speaks first | ok |
 | webhook tools | ok |
+| webhook `auth` (bearer/api_key) | ok |
 | tool `output` schema, `interruption`, `effect` | ok |
 | task (delegate and return) | ok |
 | per-task `model` | not yet (driver gate) |

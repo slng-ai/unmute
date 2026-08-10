@@ -16,7 +16,8 @@ output:
       type: array
       items: { type: string }
 
-execution: webhook              # the only execution kind proven on all five
-url_env: CHECK_AVAILABILITY_URL # env var name, never a value
+webhook:
+  url_env: CHECK_AVAILABILITY_URL  # env var name, never a value
+
 interruption: provider_default
 effect: returns_data

@@ -169,6 +169,9 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			if tool.URLEnv != "" {
 				data.NeedsHTTPX = true // webhook tool POSTs with httpx (agents + tasks own them)
 			}
+			if tool.Auth != nil {
+				data.AuthKinds.add(tool.Auth.Kind) // one helper per scheme in use (V8)
+			}
 			if !tool.Local || seenLocal[tool.Method] {
 				continue
 			}
@@ -836,8 +839,13 @@ func buildLiveKitTool(name string, tool ir.Tool, env *envSet) (livekitTool, erro
 	switch tool.Execution {
 	case ir.ToolWebhook:
 		env.add(tool.URLEnv)
+		// The token rides its own env var, never the spec (SCHEMA §5.3).
+		if tool.Auth != nil {
+			env.add(tool.Auth.TokenEnv)
+		}
 		return livekitTool{
 			Method: name, Description: tool.Description, URLEnv: tool.URLEnv,
+			Auth:             loweredAuth(tool.Auth),
 			Args:             livekitToolArgs(tool.Input),
 			EndsConversation: tool.Effect == ir.ToolEndsConversation,
 		}, nil

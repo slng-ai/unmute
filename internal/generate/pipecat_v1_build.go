@@ -246,6 +246,9 @@ func setImportNeeds(data *pipecatData) {
 			} else {
 				data.NeedsHTTPX = true // webhook tool POSTs with httpx
 			}
+			if t.Auth != nil {
+				data.AuthKinds.add(t.Auth.Kind) // one helper per scheme in use (V8)
+			}
 			if t.EndsCall {
 				data.NeedsEndFrame = true
 			}
@@ -266,6 +269,9 @@ func setImportNeeds(data *pipecatData) {
 						data.NeedsInspect = true
 					} else {
 						data.NeedsHTTPX = true // flows tool handlers POST with httpx
+					}
+					if t.Auth != nil {
+						data.AuthKinds.add(t.Auth.Kind)
 					}
 				}
 			}
@@ -569,8 +575,13 @@ func buildTool(name string, tool ir.Tool, env *envSet) pipecatTool {
 	if tool.URLEnv != "" {
 		env.add(tool.URLEnv)
 	}
+	// The token rides its own env var, never the spec (SCHEMA §5.3).
+	if tool.Auth != nil {
+		env.add(tool.Auth.TokenEnv)
+	}
 	built := pipecatTool{
 		Name: name, MethodName: name, Description: tool.Description, URLEnv: tool.URLEnv,
+		Auth:  loweredAuth(tool.Auth),
 		Local: tool.Execution == ir.ToolLocal, HandlerSource: tool.HandlerSource,
 		Builtin: tool.Builtin, Instructions: tool.Instructions,
 		EndsCall: tool.Effect == ir.ToolEndsConversation, Interruption: interruptionValue(tool.Interruption),

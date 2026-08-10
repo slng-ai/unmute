@@ -11,7 +11,10 @@ import (
 	targetcap "github.com/slng/unmute/internal/target"
 )
 
-var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+// envNamePattern is the UPPER_SNAKE shape every env var name in a package
+// takes. Requiring upper case also catches a pasted secret or URL where a
+// name belongs, which a mixed-case pattern would accept (compiler.md V36).
+var envNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 var languagePattern = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`)
 
 type ValidateReport struct {
@@ -321,6 +324,11 @@ func validateStructure(agent *Agent) []string {
 				errors = add(errors, fmt.Sprintf("tool %q instructions is legal for builtin execution only", name))
 			}
 		}
+		// auth lives in the webhook block, so a non-webhook tool can only carry
+		// one if the IR was built in code (tests, future drivers).
+		if tool.Auth != nil && tool.Execution != ToolWebhook {
+			errors = add(errors, fmt.Sprintf("tool %q auth is legal for webhook execution only", name))
+		}
 		if tool.Execution == ToolBuiltin {
 			validateBuiltinTool(name, tool, &errors)
 			continue
@@ -346,17 +354,18 @@ func validateStructure(agent *Agent) []string {
 			if tool.URLEnv == "" {
 				errors = add(errors, fmt.Sprintf("tool %q url_env is required for webhook execution", name))
 			} else if !envNamePattern.MatchString(tool.URLEnv) {
-				errors = add(errors, fmt.Sprintf("tool %q url_env must be an environment variable name", name))
+				errors = add(errors, fmt.Sprintf("tool %q url_env must be an UPPER_SNAKE environment variable name", name))
 			}
 			if tool.Handler != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler is legal for local execution only", name))
 			}
+			validateToolAuth(name, tool.Auth, &errors)
 		case ToolMCP:
 			// B3 (SCHEMA §5, 2026-07-16): url_env names the MCP server address.
 			if tool.URLEnv == "" {
 				errors = add(errors, fmt.Sprintf("tool %q url_env is required for mcp execution (the MCP server address env)", name))
 			} else if !envNamePattern.MatchString(tool.URLEnv) {
-				errors = add(errors, fmt.Sprintf("tool %q url_env must be an environment variable name", name))
+				errors = add(errors, fmt.Sprintf("tool %q url_env must be an UPPER_SNAKE environment variable name", name))
 			}
 			if tool.Handler != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler is legal for local execution only", name))
@@ -563,6 +572,41 @@ func validateBuiltinTool(name string, tool Tool, errors *[]string) {
 	}
 	if tool.Effect != ToolEffect(prebuilt.Effect) {
 		*errors = add(*errors, fmt.Sprintf("tool %q builtin %q fixes effect to %s, cannot be %q", name, tool.Builtin, prebuilt.Effect, tool.Effect))
+	}
+}
+
+// validateToolAuth checks a webhook auth block: a known scheme, exactly its own
+// fields, and an env name rather than a literal token (SCHEMA §5.3).
+func validateToolAuth(name string, auth *ToolAuth, errors *[]string) {
+	if auth == nil {
+		return
+	}
+	fail := func(format string, args ...any) {
+		*errors = add(*errors, fmt.Sprintf("tool %q auth "+format, append([]any{name}, args...)...))
+	}
+	switch auth.Type {
+	case ToolAuthBearer:
+		// header belongs to api_key, so a copy-paste between the two schemes
+		// fails instead of being silently ignored.
+		if auth.Header != "" {
+			fail("header is not a bearer field: bearer always sends Authorization")
+		}
+	case ToolAuthAPIKey:
+		if auth.Header == "" {
+			fail("header is required for api_key")
+		}
+	case "":
+		fail("type is required: bearer or api_key")
+		return
+	default:
+		fail("type must be bearer or api_key, not %q", auth.Type)
+		return
+	}
+	switch {
+	case auth.TokenEnv == "":
+		fail("token_env is required for %s", auth.Type)
+	case !envNamePattern.MatchString(auth.TokenEnv):
+		fail("token_env must be an UPPER_SNAKE environment variable name, never a secret value")
 	}
 }
 
@@ -835,6 +879,9 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 			applyCapability(caps, targetcap.FieldToolProviderHosted, provider, row)
 		case ToolBuiltin:
 			applyCapability(caps, targetcap.FieldToolBuiltin, provider, row)
+		}
+		if tool.Auth != nil {
+			applyCapability(caps, targetcap.FieldToolAuth, provider, row)
 		}
 		if tool.Interruption != ToolProviderDefault {
 			applyCapability(caps, targetcap.FieldToolInterruption, provider, row)

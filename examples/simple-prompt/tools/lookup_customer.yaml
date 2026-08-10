@@ -17,7 +17,8 @@ output:
     name: { type: string }
   required: [found, customer_id, name]
 
-execution: local
-handler: tools/lookup_customer.py
+local:
+  handler: tools/lookup_customer.py
+
 interruption: provider_default
 effect: returns_data

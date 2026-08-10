@@ -1,0 +1,4 @@
+description: "End the call when the caller is finished or says goodbye."
+
+builtin:
+  id: end_call

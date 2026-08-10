@@ -20,6 +20,7 @@ func TestSchemaDerivesUnionEnumsAndNameReferences(t *testing.T) { // V2
 		`"oneOf"`,
 		`"const":"delegate"`,
 		`"enum":["string","number","boolean","integer"]`,
+		`"enum":["bearer","api_key"]`, // webhook auth scheme (C2: every enum type gets a TypeSchemas override)
 		`"fallback"`,
 		`"items":{"type":"string"}`,
 		`"destinations"`,

@@ -208,7 +208,7 @@ func TestDefaultToolsScaffoldsEndCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"execution: builtin", "builtin: end_call"} {
+	for _, want := range []string{"builtin:", "  id: end_call"} {
 		if !strings.Contains(string(tool), want) {
 			t.Errorf("end_call.yaml missing %q:\n%s", want, tool)
 		}
@@ -276,7 +276,7 @@ func TestWriteLocalToolManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := string(raw)
-	for _, want := range []string{"execution: local", "handler: tools/lookup_customer.py"} {
+	for _, want := range []string{"local:", "handler: tools/lookup_customer.py"} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("local tool manifest missing %q:\n%s", want, manifest)
 		}

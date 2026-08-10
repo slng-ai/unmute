@@ -412,6 +412,88 @@ func TestValidateRejectsLiteralWebhookURL(t *testing.T) {
 	}
 }
 
+// bearerAuth and apiKeyAuth are the two schemes with their Build defaults
+// already applied, as validateToolAuth sees them.
+func bearerAuth() *ToolAuth {
+	return &ToolAuth{Type: ToolAuthBearer, TokenEnv: "LOOKUP_CUSTOMER_TOKEN"}
+}
+
+func apiKeyAuth() *ToolAuth {
+	return &ToolAuth{Type: ToolAuthAPIKey, TokenEnv: "LOOKUP_CUSTOMER_KEY", Header: DefaultAPIKeyHeader}
+}
+
+// withToolAuth puts an auth block on the fixture's webhook tool.
+func withToolAuth(t *testing.T, auth *ToolAuth) *Agent {
+	t.Helper()
+	agent := safeAgent(t)
+	tool := agent.Tools["lookup_customer"] // webhook in the fixture
+	tool.Auth = auth
+	agent.Tools["lookup_customer"] = tool
+	return agent
+}
+
+// TestValidateWebhookAuthSchemes covers both schemes (SCHEMA §5.3): each valid
+// form passes, and a missing token, a literal secret, a cross-scheme field, an
+// unknown scheme, and a missing type are all errors.
+func TestValidateWebhookAuthSchemes(t *testing.T) {
+	for name, auth := range map[string]*ToolAuth{"bearer": bearerAuth(), "api_key": apiKeyAuth()} {
+		t.Run(name+" passes", func(t *testing.T) {
+			agent := withToolAuth(t, auth)
+			if report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default()); err != nil {
+				t.Fatalf("%s webhook must validate on LiveKit: %v\n%#v", name, err, report.PerTarget)
+			}
+		})
+	}
+
+	literalToken := bearerAuth()
+	literalToken.TokenEnv = "sk-live-1234"
+	crossScheme := bearerAuth()
+	crossScheme.Header = "X-API-Key"
+	apiKeyNoHeader := apiKeyAuth()
+	apiKeyNoHeader.Header = ""
+
+	for _, tc := range []struct {
+		name string
+		auth *ToolAuth
+		want string
+	}{
+		{"bearer without token_env", &ToolAuth{Type: ToolAuthBearer}, "token_env is required"},
+		{"literal token", literalToken, "never a secret value"},
+		{"bearer carrying an api_key field", crossScheme, "header is not a bearer field"},
+		{"api_key without header", apiKeyNoHeader, "header is required for api_key"},
+		{"no type", &ToolAuth{TokenEnv: "LOOKUP_CUSTOMER_TOKEN"}, "type is required"},
+		{"hmac is not a scheme", &ToolAuth{Type: "hmac", TokenEnv: "LOOKUP_CUSTOMER_TOKEN"}, "type must be bearer or api_key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := withToolAuth(t, tc.auth)
+			report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+			if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), tc.want) {
+				t.Fatalf("want error containing %q: err=%v report=%#v", tc.want, err, report.PerTarget)
+			}
+		})
+	}
+
+	t.Run("auth on a local tool", func(t *testing.T) {
+		agent := safeAgent(t)
+		tool := agent.Tools["lookup_customer"]
+		tool.Execution, tool.URLEnv = ToolLocal, ""
+		tool.Handler, tool.Auth = "tools/lookup_customer.py", bearerAuth()
+		agent.Tools["lookup_customer"] = tool
+		report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+		if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "webhook execution only") {
+			t.Fatalf("auth outside a webhook tool must be rejected: err=%v report=%#v", err, report.PerTarget)
+		}
+	})
+
+	t.Run("gated on Vapi in provider words", func(t *testing.T) {
+		agent := withToolAuth(t, bearerAuth())
+		report, err := Validate(agent, []Target{targetFor(agent, ProviderVapi)}, targetcap.Default())
+		if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "Vapi") {
+			t.Fatalf("webhook auth on Vapi must gate in Vapi vocabulary: err=%v report=%#v", err, report.PerTarget)
+		}
+	})
+}
+
 // makeBuiltin rewrites an existing safe_core tool into a clean end_call
 // builtin, keeping its references intact.
 func makeBuiltin(agent *Agent, name string) {

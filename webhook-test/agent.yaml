@@ -1,0 +1,54 @@
+# Portable voice-agent spec (SCHEMA.md v1). Edit this, then `unmute validate .`
+# and `unmute compile .`. Nothing here is provider-specific — that lives in
+# targets.yaml.
+version: 1
+entry_agent: assistant
+
+# Every model is defined here once, in the central map grouped by kind (N15):
+# think (LLM), speak (TTS), listen (STT), turn (VAD). Agents reference think
+# and speak entries by name; the sole listen/turn entries select themselves.
+# Add alternates alongside and swap with a top-level `listen: <name>` pointer.
+models:
+  think:
+    assistant_model:
+      description: default reasoning model
+      provider: openai
+      model: "gpt-4.1-mini"
+  speak:
+    assistant_voice:
+      description: default voice
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector: { provider: livekit, model: turn-detector-mini }
+
+agents:
+  assistant:
+    instructions: instructions.md
+    model: assistant_model
+    voice: assistant_voice
+    tools:
+      - find_places
+      - end_call
+
+tools:
+  - find_places
+  - end_call
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, thanks for calling. How can I help you today?"
+
+channels:
+  web: { kind: realtime_audio }
+
+capacity:
+  peak_sessions: 10
+  max_sessions: 20
+  avg_session_duration: 5m

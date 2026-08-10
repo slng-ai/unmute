@@ -144,20 +144,85 @@ type Control struct {
 	Briefing    *string           `json:"briefing,omitempty" yaml:"briefing,omitempty"`
 }
 
+// Tool is one tools/<name>.yaml. The top level is the contract with the model
+// (description/input/output) plus the two conversation scalars; how the tool
+// runs lives in exactly one execution-keyed block, so a field belonging to
+// another execution kind is unwritable rather than merely rejected (SCHEMA §5.2).
 type Tool struct {
 	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
 	Input       map[string]any `json:"input,omitempty" yaml:"input,omitempty"`
 	Output      map[string]any `json:"output,omitempty" yaml:"output,omitempty"`
-	Execution   string         `json:"execution" yaml:"execution"`
-	// Builtin names a prebuilt-tool registry id; legal only with
-	// execution: builtin (docs/spec/prebuilt-tools.md).
-	Builtin string `json:"builtin,omitempty" yaml:"builtin,omitempty"`
-	// Instructions is the prebuilt's optional closing/goodbye text; builtin only.
-	Instructions string `json:"instructions,omitempty" yaml:"instructions,omitempty"`
-	Handler      string `json:"handler,omitempty" yaml:"handler,omitempty"`
-	URLEnv       string `json:"url_env,omitempty" yaml:"url_env,omitempty"`
+
+	Webhook        *ToolWebhook  `json:"webhook,omitempty" yaml:"webhook,omitempty"`
+	Local          *ToolLocal    `json:"local,omitempty" yaml:"local,omitempty"`
+	MCP            *ToolMCP      `json:"mcp,omitempty" yaml:"mcp,omitempty"`
+	Builtin        *ToolBuiltin  `json:"builtin,omitempty" yaml:"builtin,omitempty"`
+	Client         *ToolNoFields `json:"client,omitempty" yaml:"client,omitempty"`
+	ProviderHosted *ToolNoFields `json:"provider_hosted,omitempty" yaml:"provider_hosted,omitempty"`
+
 	Interruption string `json:"interruption,omitempty" yaml:"interruption,omitempty"`
 	Effect       string `json:"effect,omitempty" yaml:"effect,omitempty"`
+}
+
+// ToolWebhook is the `webhook:` block: an HTTP endpoint named by env var, with
+// optional authentication.
+type ToolWebhook struct {
+	URLEnv string    `json:"url_env" yaml:"url_env"`
+	Auth   *ToolAuth `json:"auth,omitempty" yaml:"auth,omitempty"`
+}
+
+// ToolLocal is the `local:` block: a Python handler in the package.
+type ToolLocal struct {
+	Handler string `json:"handler,omitempty" yaml:"handler,omitempty"`
+}
+
+// ToolMCP is the `mcp:` block: the MCP server address, named by env var. The
+// slot where MCP auth would land later, without a second shape change.
+type ToolMCP struct {
+	URLEnv string `json:"url_env" yaml:"url_env"`
+}
+
+// ToolBuiltin is the `builtin:` block: a prebuilt-tool registry id plus its
+// optional closing line (docs/spec/prebuilt-tools.md).
+type ToolBuiltin struct {
+	ID           string `json:"id" yaml:"id"`
+	Instructions string `json:"instructions,omitempty" yaml:"instructions,omitempty"`
+}
+
+// ToolNoFields is an execution kind with nothing to configure. Both kinds using
+// it stay gated on every target, so the empty block (`client: {}`) is only ever
+// written to hit that gate.
+type ToolNoFields struct{}
+
+// ToolAuth authenticates a webhook call. Type selects the scheme; the token is
+// always an env var name, and `header` belongs to api_key alone.
+type ToolAuth struct {
+	Type string `json:"type" yaml:"type"`
+	// bearer, api_key: the token's env var.
+	TokenEnv string `json:"token_env,omitempty" yaml:"token_env,omitempty"`
+	// api_key: header name (default X-API-Key).
+	Header string `json:"header,omitempty" yaml:"header,omitempty"`
+}
+
+// ExecutionKind reports the execution kind the file's block selects, or "" when
+// no block is present. Load rejects zero and two-or-more blocks, so a loaded
+// package always answers with exactly one kind.
+func (t Tool) ExecutionKind() string {
+	switch {
+	case t.Webhook != nil:
+		return "webhook"
+	case t.Local != nil:
+		return "local"
+	case t.MCP != nil:
+		return "mcp"
+	case t.Builtin != nil:
+		return "builtin"
+	case t.Client != nil:
+		return "client"
+	case t.ProviderHosted != nil:
+		return "provider_hosted"
+	}
+	return ""
 }
 
 type Conversation struct {

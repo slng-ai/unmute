@@ -73,7 +73,7 @@ func TestInit_seedsEndCallByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init did not scaffold the default end_call tool: %v", err)
 	}
-	for _, want := range []string{"execution: builtin", "builtin: end_call"} {
+	for _, want := range []string{"builtin:", "  id: end_call"} {
 		if !strings.Contains(string(tool), want) {
 			t.Errorf("end_call.yaml missing %q:\n%s", want, tool)
 		}

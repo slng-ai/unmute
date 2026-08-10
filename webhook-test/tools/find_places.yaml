@@ -1,0 +1,24 @@
+description: >-
+  Search for a place by name, type, or area, for example "tapas bar in Madrid"
+  or "pharmacy near Termini station". Call this whenever the caller asks where
+  something is, what a place is called, or for its address or contact details.
+  Returns the matching places.
+
+input:
+  type: object
+  properties:
+    query:
+      type: string
+      description: >-
+        The place search in plain language, as the caller phrased it, including
+        the city or area when they gave one. Example: "tapas bar in Madrid".
+  required: [query]
+
+webhook:
+  url_env: LOOKUP_PLACES_URL
+  auth:
+    type: bearer
+    token_env: LOOKUP_PLACES_TOKEN
+
+interruption: provider_default
+effect: returns_data

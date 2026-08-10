@@ -11,10 +11,8 @@ import (
 func TestBuildBuiltinToolResolvesRegistryDefaults(t *testing.T) {
 	pkg := loadSafeCore(t)
 	tool := pkg.Tools["lookup_customer"]
-	tool.Execution = "builtin"
-	tool.Builtin = "end_call"
-	tool.Instructions = "Thank the caller and say goodbye."
-	tool.Input, tool.Output, tool.URLEnv, tool.Handler, tool.Effect, tool.Description = nil, nil, "", "", "", ""
+	tool.Webhook, tool.Input, tool.Output, tool.Effect, tool.Description = nil, nil, nil, "", ""
+	tool.Builtin = &packagespec.ToolBuiltin{ID: "end_call", Instructions: "Thank the caller and say goodbye."}
 	pkg.Tools["lookup_customer"] = tool
 
 	agent, err := Build(pkg)

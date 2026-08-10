@@ -138,3 +138,81 @@ func TestSchemaIsDerivedFromPackage(t *testing.T) {
 		t.Fatal("derived authoring schema is missing tracing")
 	}
 }
+
+// writeToolPackage lays down the smallest package whose only tool is the given
+// file body, so a tool-shape error is the only thing Load can report.
+func writeToolPackage(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	files := map[string]string{
+		"agent.yaml": "version: 1\nentry_agent: intake\n" +
+			"models:\n  think:\n    m: { provider: openai, model: gpt-4o-mini }\n" +
+			"  speak:\n    v: { provider: slng, model: \"slng/deepgram/aura:2-en\", voice: aura-2-thalia-en }\n" +
+			"agents:\n  intake:\n    instructions: instructions.md\n    model: m\n    voice: v\n    tools: [probe]\n" +
+			"tools: [probe]\nchannels:\n  web: { kind: realtime_audio }\n",
+		"instructions.md":  "Be brief.\n",
+		"targets.yaml":     "targets:\n  livekit:\n    provider: livekit\n    version: \"1.5.2\"\n    sdk_language: python\n",
+		"tools/probe.yaml": body,
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// TestLoadToolShape covers the execution-block shape checks (SCHEMA §5.2): the
+// retired flat keys read as migration instructions, an empty or duplicated block
+// is named with its line, and every legal single-block form loads.
+func TestLoadToolShape(t *testing.T) {
+	const head = "description: Probe.\ninput: { type: object }\n"
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"flat execution", head + "\nexecution: webhook\nurl_env: PROBE_URL\n", "no longer a top-level field"},
+		{"flat url_env", head + "\nwebhook:\n  url_env: PROBE_URL\nurl_env: PROBE_URL\n", "move url_env inside"},
+		{"flat token_env", head + "\nwebhook:\n  url_env: PROBE_URL\ntoken_env: PROBE_TOKEN\n", "move token_env under"},
+		{"scalar builtin", "description: Probe.\n\nbuiltin: end_call\n", "`builtin:` is a block now"},
+		{"no block", head, "no execution block"},
+		{"two blocks", head + "\nwebhook:\n  url_env: PROBE_URL\nlocal:\n  handler: tools/probe.py\n", "two execution blocks"},
+		{"empty webhook block", head + "\nwebhook:\n", "block is empty"},
+		{"bare client block", head + "\nclient:\n", "needs an explicit empty body"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeToolPackage(t, tc.body))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want error containing %q, got %v", tc.want, err)
+			}
+			if !strings.Contains(err.Error(), "tools/probe.yaml") {
+				t.Errorf("error must name the file: %v", err)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name, body string
+		kind       string
+	}{
+		{"webhook", head + "\nwebhook:\n  url_env: PROBE_URL\n", "webhook"},
+		{"webhook with auth", head + "\nwebhook:\n  url_env: PROBE_URL\n  auth:\n    type: bearer\n    token_env: PROBE_TOKEN\n", "webhook"},
+		{"quoted block key", head + "\n\"webhook\":\n  url_env: PROBE_URL\n", "webhook"},
+		{"inline builtin block", "description: Probe.\n\nbuiltin: { id: end_call }\n", "builtin"},
+		{"explicit empty client", head + "\nclient: {}\n", "client"},
+		{"mcp", head + "\nmcp:\n  url_env: PROBE_MCP_URL\n", "mcp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg, err := Load(writeToolPackage(t, tc.body))
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			if got := pkg.Tools["probe"].ExecutionKind(); got != tc.kind {
+				t.Errorf("execution kind = %q, want %q", got, tc.kind)
+			}
+		})
+	}
+}

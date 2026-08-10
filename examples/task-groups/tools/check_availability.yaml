@@ -24,7 +24,8 @@ output:
         required: [slot_id, start_time]
   required: [slots]
 
-execution: local
-handler: tools/check_availability.py
+local:
+  handler: tools/check_availability.py
+
 interruption: provider_default
 effect: returns_data

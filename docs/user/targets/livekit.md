@@ -138,10 +138,23 @@ output:
   properties:
     status: { type: string }
 
-execution: webhook
-url_env: LOOKUP_ORDER_URL
+webhook:
+  url_env: LOOKUP_ORDER_URL
+
 interruption: provider_default
 effect: returns_data
+```
+
+If the endpoint needs credentials, add an `auth:` block. `bearer` and `api_key`
+both work here; the generated tool sends the header and reads the token from its
+environment variable at runtime:
+
+```yaml
+webhook:
+  url_env: LOOKUP_ORDER_URL
+  auth:
+    type: bearer
+    token_env: LOOKUP_ORDER_TOKEN
 ```
 
 ### Use a local tool
@@ -166,8 +179,9 @@ output:
       type: array
       items: { type: string }
 
-execution: local
-handler: tools/load_account_notes.py
+local:
+  handler: tools/load_account_notes.py
+
 interruption: provider_default
 effect: returns_data
 ```
@@ -187,8 +201,9 @@ input:
     query: { type: string }
   required: [query]
 
-execution: mcp
-url_env: SUPPORT_MCP_URL
+mcp:
+  url_env: SUPPORT_MCP_URL
+
 interruption: provider_default
 effect: returns_data
 ```

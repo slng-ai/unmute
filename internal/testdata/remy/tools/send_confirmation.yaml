@@ -14,7 +14,8 @@ output:
   properties:
     sent: { type: boolean }
 
-execution: webhook
-url_env: SEND_CONFIRMATION_URL
+webhook:
+  url_env: SEND_CONFIRMATION_URL
+
 interruption: provider_default
 effect: returns_data

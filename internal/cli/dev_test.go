@@ -352,7 +352,7 @@ func TestComposeLocalEnvironmentAndLiveKitConflicts(t *testing.T) { // telephony
 	}
 }
 
-// Trunk IDs are supplied by the dev command itself (SPEC V4): they are never
+// Trunk IDs are supplied by the dev command itself (compiler.md V36): they are never
 // demanded from the user and a user-set value is rejected, not overridden.
 func TestComposeDevSuppliedEnvironmentIsNeverDemandedAndRejectsOverrides(t *testing.T) {
 	plan := &generate.TelephonyRuntimePlan{
@@ -453,7 +453,7 @@ func TestSelectDevTargetRequiresNameForMultipleWithoutTTY(t *testing.T) {
 
 // TestDevConsoleAndTelephonyRejected: console (native, host audio) and
 // telephony (containerized) are mutually exclusive and refused up front,
-// before any generation or Docker (SPEC V7).
+// before any generation or Docker (SCHEMA §5.3).
 func TestDevConsoleAndTelephonyRejected(t *testing.T) {
 	dir := copySafeCore(t)
 	_, err := run(t, "dev", dir, "--target", "pipecat", "--console", "--telephony")

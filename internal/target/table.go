@@ -61,6 +61,7 @@ const (
 	FieldToolClient            Field = "tools.execution.client"
 	FieldToolProviderHosted    Field = "tools.execution.provider_hosted"
 	FieldToolBuiltin           Field = "tools.execution.builtin"
+	FieldToolAuth              Field = "tools.auth"
 	FieldToolInterruption      Field = "tools.interruption.non_default"
 	FieldOutbound              Field = "channels.telephony.outbound"
 	FieldVoicemail             Field = "channels.telephony.on_voicemail"
@@ -341,6 +342,12 @@ func Default() Table {
 				// docs/spec/prebuilt-tools.md); the rest still lack a lowering.
 				deny(Vapi, "Vapi builtin tools are not proven by its driver"),
 				deny(Deepgram, "Deepgram builtin tools are not proven by its driver"),
+			),
+			FieldToolAuth: field(
+				// The code drivers own the request, so they can send the header;
+				// a managed target configures its own tool auth provider-side.
+				deny(Vapi, "Vapi webhook auth is configured provider-side, not from the spec"),
+				deny(Deepgram, "the Deepgram driver does not emit webhook auth yet"),
 			),
 			FieldToolInterruption: field(
 				warn(LiveKit, "LiveKit runs tool executions to completion; a per-tool interruption preference is not enforced"),

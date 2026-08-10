@@ -365,6 +365,101 @@ func TestV26_LiveKitAgentWebhookImportsHTTPX(t *testing.T) {
 	}
 }
 
+// authFixtures are the two schemes plus what each must emit at the call site and
+// which env its token adds. Shared by the livekit and pipecat auth tests.
+var authFixtures = []struct {
+	Name     string
+	Auth     *ir.ToolAuth
+	CallSite string
+	Helper   string
+	Env      string
+}{
+	{
+		Name:     "bearer",
+		Auth:     &ir.ToolAuth{Type: ir.ToolAuthBearer, TokenEnv: "LOOKUP_CUSTOMER_TOKEN"},
+		CallSite: `headers=_bearer("LOOKUP_CUSTOMER_TOKEN"),`,
+		Helper:   `return {"Authorization": "Bearer " + os.environ[env]}`,
+		Env:      "LOOKUP_CUSTOMER_TOKEN",
+	},
+	{
+		Name:     "api_key",
+		Auth:     &ir.ToolAuth{Type: ir.ToolAuthAPIKey, TokenEnv: "LOOKUP_CUSTOMER_KEY", Header: "X-API-Key"},
+		CallSite: `headers=_api_key("X-API-Key", "LOOKUP_CUSTOMER_KEY"),`,
+		Helper:   `return {header: os.environ[env]}`,
+		Env:      "LOOKUP_CUSTOMER_KEY",
+	},
+}
+
+// authAgent loads safe_core and puts one auth block on its webhook tool.
+func authAgent(t *testing.T, auth *ir.ToolAuth) *ir.Agent {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := agent.Tools["lookup_customer"]
+	if tool.Execution != ir.ToolWebhook {
+		t.Fatal("fixture no longer has a webhook lookup_customer; pick one that does")
+	}
+	tool.Auth = auth
+	agent.Tools["lookup_customer"] = tool
+	return agent
+}
+
+// TestLiveKitV1WebhookAuth covers both schemes (SCHEMA §5.3): the call site
+// reads the right helper and the token env joins .env.example by name only.
+func TestLiveKitV1WebhookAuth(t *testing.T) {
+	for _, fixture := range authFixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			agent := authAgent(t, fixture.Auth)
+			artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+			if err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+			agentPy := artifactFile(t, artifact, "agent.py")
+			for _, want := range []string{fixture.CallSite, fixture.Helper} {
+				if !strings.Contains(agentPy, want) {
+					t.Errorf("agent.py missing %q:\n%s", want, agentPy)
+				}
+			}
+			if env := artifactFile(t, artifact, ".env.example"); !strings.Contains(env, fixture.Env) {
+				t.Errorf(".env.example missing %s", fixture.Env)
+			}
+			// Only the authenticated tool sends headers; get_invoice shares the file.
+			if strings.Count(agentPy, "headers=") != 1 {
+				t.Errorf("exactly one tool must send headers:\n%s", agentPy)
+			}
+		})
+	}
+}
+
+// TestLiveKitV1NoAuthHelpersWithoutAuth keeps every helper and its imports
+// conditional (V8/V26: no dead code) — safe_core declares no auth.
+func TestLiveKitV1NoAuthHelpersWithoutAuth(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	agentPy := artifactFile(t, artifact, "agent.py")
+	for _, unwanted := range []string{"_bearer", "_api_key"} {
+		if strings.Contains(agentPy, unwanted) {
+			t.Errorf("agent.py emits %q with no auth tool", unwanted)
+		}
+	}
+}
+
 // TestLiveKitV1MultiVendor proves the catalogue path end to end: the safe_core
 // livekit target binds Deepgram listen and ElevenLabs speak (per-vendor
 // plugins), one voice is rebound to Cartesia in-code, and the emitted project

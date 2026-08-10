@@ -120,8 +120,9 @@ type pipecatTool struct {
 	MethodName      string
 	Description     string
 	URLEnv          string
-	Local           bool   // execution: local — body imports + awaits tools/<name>.py (V13)
-	HandlerSource   string // local handler file content, copied into the artifact
+	Auth            *webhookAuth // nil = unauthenticated POST
+	Local           bool         // execution: local — body imports + awaits tools/<name>.py (V13)
+	HandlerSource   string       // local handler file content, copied into the artifact
 	Args            []pipecatArg
 	InputProps      string // Python literal: the input schema's properties object
 	InputRequired   string // Python literal: the input schema's required list
@@ -231,10 +232,11 @@ type pipecatData struct {
 
 	// Import needs: keep bot.py free of unused imports (only what a given spec
 	// actually exercises), so the emitted pipeline reads clean.
-	NeedsInspect        bool // any local tool (isawaitable on the user handler, V13)
-	NeedsHTTPX          bool // any webhook tool (agent @tool or flows handler)
-	NeedsFunctionCalls  bool // any @tool/transfer/delegate (FunctionCallParams)
-	NeedsTurnStrategies bool // interruption min-words strategy
+	NeedsInspect        bool        // any local tool (isawaitable on the user handler, V13)
+	NeedsHTTPX          bool        // any webhook tool (agent @tool or flows handler)
+	AuthKinds           authKindSet // webhook auth schemes in use: helpers + imports per scheme
+	NeedsFunctionCalls  bool        // any @tool/transfer/delegate (FunctionCallParams)
+	NeedsTurnStrategies bool        // interruption min-words strategy
 	NeedsEndFrame       bool
 	NeedsAppendFrame    bool
 	HasFlows            bool // any delegate (tasks run as Flows on the owner, C8)
@@ -287,6 +289,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolOutput:           true, // tool returns response.json()
 	targetcap.FieldToolLocal:            true, // @tool awaiting tools/<name>.py (T14, V13)
 	targetcap.FieldToolBuiltin:          true, // prebuilt end_call → bodyless end tool
+	targetcap.FieldToolAuth:             true, // _bearer Authorization header off token_env
 	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
 	targetcap.FieldTracingLangfuse:      true,
 }

@@ -14,7 +14,8 @@ output:
     total:      { type: number }
     status:     { type: string }
 
-execution: webhook
-url_env: GET_INVOICE_URL
+webhook:
+  url_env: GET_INVOICE_URL
+
 interruption: provider_default
 effect: returns_data

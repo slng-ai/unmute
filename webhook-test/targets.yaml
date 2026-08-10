@@ -1,0 +1,11 @@
+# One selected target, named after the provider (N15): what you test is what
+# you deploy. All models, including STT and VAD, are defined in agent.yaml;
+# this file carries the infrastructure plus an optional `models:` map that
+# overrides an entry, by name, for a target that cannot run it as defined.
+# Add more instances later if this package needs a second environment.
+# Secrets and URLs are env var names only.
+targets:
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python

@@ -1674,3 +1674,94 @@ func packageBytes(t *testing.T, root string) map[string]string {
 	}
 	return result
 }
+
+// TestMaintainToolBlocksRoundTrip is the shape gate for maintenance (SCHEMA §5.2):
+// every execution block a package can carry must survive a load → save → load
+// cycle. The webhook block also carries its auth, so a rewrite never drops a
+// tool's credentials, and the fieldless kinds must re-emit as `{}` — writing a
+// bare `client:` or a blank `url_env:` makes the package unloadable.
+func TestMaintainToolBlocksRoundTrip(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agent")
+	data := scaffold.Data{Name: "agent"}
+	// livekit: the only target that hosts every block this test writes (mcp is
+	// still a Pipecat driver gate).
+	data.SetTarget("livekit")
+	input := `{"type":"object","properties":{}}`
+	data.Tools = append(data.Tools,
+		scaffold.Tool{
+			Name: "lookup", Description: "Look up a customer.", Execution: "webhook",
+			URLEnv: "LOOKUP_URL", Input: input, AttachTo: []string{"assistant"},
+			Auth: &spec.ToolAuth{Type: "api_key", TokenEnv: "LOOKUP_KEY", Header: "X-API-Key"},
+		},
+		scaffold.Tool{
+			Name: "notes", Description: "Load notes.", Execution: "local",
+			Handler: "tools/notes.py", HandlerSource: "def notes():\n    return {}\n",
+			Input: input, AttachTo: []string{"assistant"},
+		},
+		scaffold.Tool{
+			Name: "search", Description: "Search the KB.", Execution: "mcp",
+			URLEnv: "SEARCH_MCP_URL", Input: input, AttachTo: []string{"assistant"},
+		},
+	)
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Save only rewrites when something changed; edit one field so the real
+	// write path runs rather than the no-change notice.
+	agent.data.Instructions += "\n\nBe brief."
+	if err := saveMaintained(newRunner(strings.NewReader("1\n1\n1\n1\n"), &bytes.Buffer{}, true), &agent); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := loadMaintained(root)
+	if err != nil {
+		t.Fatalf("saved package no longer loads: %v", err)
+	}
+	byName := map[string]scaffold.Tool{}
+	for _, tool := range reloaded.data.Tools {
+		byName[tool.Name] = tool
+	}
+	if got := byName["lookup"]; got.Execution != "webhook" || got.URLEnv != "LOOKUP_URL" ||
+		got.Auth == nil || got.Auth.Type != "api_key" || got.Auth.TokenEnv != "LOOKUP_KEY" || got.Auth.Header != "X-API-Key" {
+		t.Errorf("webhook tool round-trip lost fields: %#v (auth %#v)", got, got.Auth)
+	}
+	if got := byName["notes"]; got.Execution != "local" || got.Handler != "tools/notes.py" {
+		t.Errorf("local tool round-trip = %#v", got)
+	}
+	if got := byName["search"]; got.Execution != "mcp" || got.URLEnv != "SEARCH_MCP_URL" {
+		t.Errorf("mcp tool round-trip = %#v", got)
+	}
+}
+
+// TestScaffoldFieldlessToolBlocks covers the two execution kinds with no fields:
+// they must render as an explicit empty mapping, since a bare `client:` decodes
+// to nothing and would fail as an empty execution kind (SCHEMA §5.2).
+func TestScaffoldFieldlessToolBlocks(t *testing.T) {
+	for _, kind := range []string{"client", "provider_hosted"} {
+		t.Run(kind, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "agent")
+			data := scaffold.Data{Name: "agent"}
+			data.SetTarget(scaffold.DefaultTarget)
+			data.Tools = append(data.Tools, scaffold.Tool{
+				Name: "hosted", Description: "Hosted elsewhere.", Execution: kind,
+				Input: `{"type":"object","properties":{}}`,
+			})
+			if _, err := scaffold.Write(root, data); err != nil {
+				t.Fatal(err)
+			}
+			written, err := os.ReadFile(filepath.Join(root, "tools", "hosted.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(written), kind+": {}") {
+				t.Errorf("%s block must render as an explicit empty mapping:\n%s", kind, written)
+			}
+			if strings.Contains(string(written), "url_env:") {
+				t.Errorf("%s block must not carry url_env:\n%s", kind, written)
+			}
+		})
+	}
+}

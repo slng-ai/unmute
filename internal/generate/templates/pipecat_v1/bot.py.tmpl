@@ -118,7 +118,18 @@ def build_state(call_context: dict | None = None) -> State:
 async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
     await asyncio.sleep(timeout_secs)
     await worker.queue_frame(EndFrame())
-{{end}}
+{{end}}{{if .AuthKinds.Any}}
+# One helper per auth scheme a tool actually declares; the token is read from the
+# environment at call time and never appears in the spec.
+{{if .AuthKinds.Bearer}}
+def _bearer(env: str) -> dict[str, str]:
+    """auth: bearer — the Authorization header read from the tool's token_env."""
+    return {"Authorization": "Bearer " + os.environ[env]}
+{{end}}{{if .AuthKinds.APIKey}}
+def _api_key(header: str, env: str) -> dict[str, str]:
+    """auth: api_key — the token verbatim in its own header."""
+    return {header: os.environ[env]}
+{{end}}{{end}}
 # --- prompts ----------------------------------------------------------------
 # Agent system instructions as module constants: one copy each, referenced by
 # the LLM builder and any Flow restore (V2).
@@ -156,7 +167,8 @@ async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: 
 {{else}}    async with httpx.AsyncClient() as client:
         response = await client.post(
             os.environ[{{pyq .URLEnv}}],
-            json={ {{range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}} },
+{{if .Auth}}            headers={{.Auth.Expr}},
+{{end}}            json={ {{range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}} },
             timeout=30.0,
         )
         response.raise_for_status()
@@ -224,7 +236,8 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
 {{else}}        async with httpx.AsyncClient() as client:
             response = await client.post(
                 os.environ[{{pyq .URLEnv}}],
-                json={ {{range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}} },
+{{if .Auth}}                headers={{.Auth.Expr}},
+{{end}}                json={ {{range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end}} },
                 timeout=30.0,
             )
             response.raise_for_status()
@@ -331,7 +344,7 @@ async def _flow_tool_{{.Name}}(args, flow_manager):
         result = await result
     return result
 {{else}}    async with httpx.AsyncClient() as client:
-        response = await client.post(os.environ[{{pyq .URLEnv}}], json=dict(args), timeout=30.0)
+        response = await client.post(os.environ[{{pyq .URLEnv}}], {{if .Auth}}headers={{.Auth.Expr}}, {{end}}json=dict(args), timeout=30.0)
         response.raise_for_status()
         return response.json()
 {{end}}{{end}}

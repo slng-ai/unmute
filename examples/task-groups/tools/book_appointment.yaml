@@ -20,7 +20,8 @@ output:
     status: { type: string }
   required: [appointment_id, status]
 
-execution: local
-handler: tools/book_appointment.py
+local:
+  handler: tools/book_appointment.py
+
 interruption: provider_default
 effect: returns_data

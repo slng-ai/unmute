@@ -14,7 +14,8 @@ output:
     customer_id: { type: string }
     name:        { type: string }
 
-execution: webhook              # the only execution kind proven on all five
-url_env: LOOKUP_CUSTOMER_URL    # env var name, never a value
+webhook:
+  url_env: LOOKUP_CUSTOMER_URL  # env var name, never a value
+
 interruption: provider_default
 effect: returns_data

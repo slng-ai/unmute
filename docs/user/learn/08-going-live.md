@@ -86,7 +86,7 @@ prints each derived sizing line with its status and basis;
 
 None of your spec files ever hold a secret. This is a rule, not a convention:
 
-- Tool endpoints are **environment variable names** (`url_env: LOOKUP_CUSTOMER_URL`), never URLs.
+- Tool endpoints and secrets are **environment variable names** (`url_env: LOOKUP_CUSTOMER_URL`, `token_env: LOOKUP_CUSTOMER_TOKEN`), never values.
 - Provider keys are referenced by name (`OPENAI_API_KEY`, `SLNG_API_KEY`) and set in the environment, never written in `targets.yaml`.
 - Phone numbers in `destinations:` are configuration, not secrets, and may live in the target.
 

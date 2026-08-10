@@ -18,7 +18,8 @@ output:
     created: { type: boolean }
   required: [customer_id, name, created]
 
-execution: local
-handler: tools/create_customer.py
+local:
+  handler: tools/create_customer.py
+
 interruption: provider_default
 effect: returns_data

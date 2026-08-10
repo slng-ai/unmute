@@ -172,14 +172,26 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 
 	for _, name := range slices.Sorted(maps.Keys(pkg.Tools)) {
 		tool := pkg.Tools[name]
-		handlerPath := tool.Handler
-		if tool.Execution == "local" && handlerPath == "" {
-			handlerPath = filepath.Join("tools", name+".py")
-		}
+		// The execution block decides which fields exist; maintenance carries
+		// every one of them through, auth included, so a rewrite never drops a
+		// tool's credentials (compiler.md V36).
 		value := scaffold.Tool{
-			Name: name, Description: tool.Description, Execution: tool.Execution,
-			Handler: tool.Handler, HandlerSource: pkg.Handlers[handlerPath], URLEnv: tool.URLEnv,
+			Name: name, Description: tool.Description, Execution: tool.ExecutionKind(),
 			Input: jsonText(tool.Input), Output: jsonText(tool.Output),
+		}
+		switch {
+		case tool.Webhook != nil:
+			value.URLEnv, value.Auth = tool.Webhook.URLEnv, tool.Webhook.Auth
+		case tool.Local != nil:
+			handlerPath := tool.Local.Handler
+			if handlerPath == "" {
+				handlerPath = filepath.Join("tools", name+".py")
+			}
+			value.Handler, value.HandlerSource = tool.Local.Handler, pkg.Handlers[handlerPath]
+		case tool.MCP != nil:
+			value.URLEnv = tool.MCP.URLEnv
+		case tool.Builtin != nil:
+			value.Builtin, value.Instructions = tool.Builtin.ID, tool.Builtin.Instructions
 		}
 		for agentName, definition := range pkg.Agent.Agents {
 			if slices.Contains(definition.Tools, name) {

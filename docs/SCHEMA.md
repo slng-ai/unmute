@@ -67,6 +67,7 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
 - **N16 (2026-07-20).** No package-level `language`. Language is a property of the model that hears or speaks it, so it lives only on model definitions (section 4.3): an optional BCP-47 tag on speak and listen entries. When set, it lowers through the catalogue entry's explicit language slot exactly as N14 established (an existing `params.language` stays an explicit per-integration override). When unset, **no language kwarg is emitted anywhere**: the provider default, or the language already encoded in the model route (`slng/deepgram/nova:3-en`), applies. No `en` is ever injected. Supersedes the top-level half of N14; old files with a top-level `language:` fail strict decode loudly (compiler V3).
 - **N17 (2026-07-20).** ElevenLabs leaves the target set. The managed-target group is Vapi alone; four primaries decide the schema (D1). Everything that existed only for the ElevenLabs target goes with it: its driver spec and generator, its target catalogue, the `unmute apply` command (ElevenLabs was its only wired provider; the pattern returns with the next managed driver), and the `region`/`edition` instance fields (their only consumer was ElevenLabs key residency). ElevenLabs the **model vendor** is untouched: the `elevenlabs` STT/TTS catalogue entries inside the Pipecat and LiveKit drivers stay (B4 breadth, compiler V20/V21). Dated verification records naming ElevenLabs elsewhere in this file and in §9/§B history are retained as history.
 - **N18 (2026-07-20).** `deployment_region` is a new optional instance field in `targets.yaml`: where the target platform runs the deployed agent. Free-form provider vocabulary, forwarded as declared, never validated or derived — a typo fails at the provider with its own error before anything irreversible exists. Lowering, verified against provider docs 2026-07-20: Pipecat Cloud takes it as the top-level `region` key in the emitted `pcc-deploy.toml` (line omitted when unset); LiveKit Cloud accepts a region only as the `lk agent create --region` flag (`us-east|eu-central|ap-south` today, immutable after creation, no `livekit.toml` key exists), so the generated README's deploy instructions carry the flag. A model's own service region is a different knob and intentionally stays on the model: `params` for kwarg-style pinning, `endpoint_env` for endpoint-style — an agent deployed in one region may pin a model endpoint in another.
+- **N19 (2026-08-10).** A tool's execution kind is a **block name**, not a field. `tools/*.yaml` keeps the model contract (`description`, `input`, `output`) and the two conversation scalars (`interruption`, `effect`) at the top level, and everything about how the tool runs moves inside exactly one block named after the kind: `webhook:`, `local:`, `mcp:`, `builtin:`, `client: {}`, `provider_hosted: {}` (section 5.2). The top-level `execution:`, `url_env:`, `handler:`, `builtin:` scalar, and `instructions:` keys are gone. The reason is that the flat shape let a field belong to no kind in particular: `handler` on a webhook tool, `url_env` on a builtin, `token_env` with no `auth` — each needed its own cross-field rule, and each rule was a place the schema could disagree with itself. With the kind as the block, a foreign field is unwritable and the rules disappear. `webhook:` also gains the optional `auth:` block (section 5.3, `bearer` and `api_key`), and `mcp:` is the slot a future MCP `auth:` lands in with no further shape change. Old files fail at load with the block form named and the line quoted, never a bare "unknown field" (compiler V36). Every `*_env` name is `UPPER_SNAKE`, so a pasted URL or secret fails validation instead of becoming a lookup that fails at call time.
 
 - **N16 (added 2026-07-20).** Telephony compilation is scoped to
   LiveKit and Pipecat. A telephony target selects exactly one Connection and
@@ -377,30 +378,92 @@ checked-in packages under `examples/` include it.
 
 ## 5. tools/*.yaml
 
-The file name is the tool name (N4). Four parts plus a description. Which agents see the tool is decided only by their `tools:` lists in `agent.yaml`, never here.
+The file name is the tool name (N4). The top level is the contract with the
+model plus the two conversation scalars; **how the tool runs lives in exactly
+one execution-keyed block** (rewritten 2026-08-10, N19, compiler T23). The block name
+is the execution kind, so a field belonging to another kind is unwritable rather
+than merely rejected. Which agents see the tool is decided only by their
+`tools:` lists in `agent.yaml`, never here.
+
+```yaml
+description: Search for a place by name, type, or area.
+
+input:
+  type: object
+  properties:
+    query: { type: string, description: 'e.g. "tapas bar in Madrid"' }
+  required: [query]
+
+webhook:
+  url_env: LOOKUP_PLACES_URL
+  auth:
+    type: bearer
+    token_env: LOOKUP_PLACES_TOKEN
+
+effect: returns_data
+interruption: provider_default
+```
+
+### 5.1 Top level
 
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
-| `description` | yes, except `builtin` | text | core | What the LLM reads. Optional for `execution: builtin`, where the prebuilt registry supplies a default and this text is added on top (docs/spec/prebuilt-tools.md). |
-| `input` | yes, except `builtin` | JSON Schema object | core | Lowers natively everywhere (N10). A `builtin` tool has no `input`: the prebuilt owns its schema. |
+| `description` | yes, except `builtin` | text | core | What the LLM reads. Optional for a `builtin` tool, where the prebuilt registry supplies a default and this text is added on top (docs/spec/prebuilt-tools.md). |
+| `input` | yes, except `builtin` | JSON Schema object | core | The parameters the model fills in; lowers natively everywhere (N10). A `builtin` tool has no `input`: the prebuilt owns its schema. |
 | `output` | no | JSON Schema object | warn | Enforced by generated code on code targets. Managed targets have no slot for it: warns there. Not legal on a `builtin` tool. |
-| `execution` | yes | `local \| client \| webhook \| provider_hosted \| builtin \| mcp` | see below | |
-| `builtin` | iff `execution: builtin` | prebuilt registry id (v1: `end_call`) | see below | Names a provider-shipped prebuilt tool the user selects instead of authoring a handler. Unknown id fails with file:line. |
-| `instructions` | no, `builtin` only | text | core | The prebuilt's closing/goodbye message (LiveKit `end_instructions`; Pipecat developer message). Illegal on a non-builtin tool. |
-| `handler` | iff `execution: local` | path, default `<name>.py` | | Code targets only. Not legal on a `builtin` tool. |
-| `url_env` | iff `execution: webhook` or `mcp` | env var name | core | Reference only, never a URL value. For `mcp` it names the MCP server address (driver-livekit B3, 2026-07-16: code targets have no other slot for it; managed targets may configure the server provider-side and ignore it). Not legal on a `builtin` tool. |
+| one execution block | yes, exactly one | `webhook \| local \| mcp \| builtin \| client \| provider_hosted` | see 5.2 | Zero blocks and two-or-more blocks both fail at load with file:line. |
 | `interruption` | no, default `provider_default` | `continue \| cancel \| provider_default` | warn | Honored on Pipecat (`cancel_on_interruption`); LiveKit runs tools to completion, so non-default values warn there (2026-07-16). On managed targets only `provider_default` means anything; other values warn. |
 | `effect` | no, default `returns_data` | `returns_data \| ends_conversation` | core | Fixed by the registry for a `builtin` tool (`end_call` implies `ends_conversation`); a conflicting value fails. |
 
-Execution gating across the four:
+### 5.2 Execution blocks
 
-- `webhook`: works everywhere. **This is the safe choice.**
-- `local`: code targets only.
-- `mcp`: **fails on Deepgram** (no runtime MCP client). On LiveKit it requires SDK language Python; code targets read the server address from `url_env` (B3, 2026-07-16).
-- `builtin`: LiveKit and Pipecat host the prebuilt-tool registry (v1: `end_call`); **fails on Vapi and Deepgram** (no lowering). LiveKit lowers `end_call` to the beta `EndCallTool`; Pipecat to a bodyless end tool. See docs/spec/prebuilt-tools.md.
-- `client`, `provider_hosted`: gated per driver; each driver documents what it can host. Not part of the safe core yet.
+| Block | Fields | Gating |
+|---|---|---|
+| `webhook:` | `url_env` (required), `auth` (optional, 5.3) | works everywhere. **The safe choice.** |
+| `local:` | `handler` (path, default `tools/<name>.py`) | code targets only |
+| `mcp:` | `url_env` (the MCP server address) | **fails on Deepgram** (no runtime MCP client); on LiveKit needs `sdk_language: python` (driver-livekit B3, 2026-07-16). The block where MCP auth would land later. |
+| `builtin:` | `id` (prebuilt registry id, v1 `end_call`), `instructions` (optional closing line) | LiveKit and Pipecat host the registry; **fails on Vapi and Deepgram**. LiveKit lowers `end_call` to the beta `EndCallTool`, Pipecat to a bodyless end tool. Unknown id fails with file:line. |
+| `client: {}` / `provider_hosted: {}` | none | gated per driver; not part of the safe core |
 
-The Pipecat driver v1 emits `webhook`, `local`, and `builtin` tools (amended 2026-07-17, driver-pipecat T14: `local` lowers to the same `@tool` method, body awaiting the user handler from `tools/<name>.py`; `builtin` added 2026-07-22, prebuilt-tools T6); `mcp` stays maturity-gated there until the driver emits it.
+`url_env`, `handler`, and every `*_env` are **names, never values**: an env var
+name is `UPPER_SNAKE`, so a pasted URL or secret fails validation rather than
+landing in the spec.
+
+The Pipecat driver v1 emits the `webhook`, `local`, and `builtin` blocks
+(amended 2026-07-17, driver-pipecat T14: `local` lowers to the same `@tool`
+method, body awaiting the user handler from `tools/<name>.py`; `builtin` added
+2026-07-22, prebuilt-tools T6); `mcp` stays maturity-gated there until the
+driver emits it.
+
+### 5.3 Webhook auth (added 2026-08-10, compiler T23; hmac removed 2026-08-10)
+
+`webhook.auth` authenticates the POST. `type` selects the scheme, and every
+other field belongs to exactly one scheme — a field from the other scheme is an
+error, never silently ignored. The token is always an env var name.
+
+| Scheme | Fields | Sends |
+|---|---|---|
+| `bearer` | `token_env` | `Authorization: Bearer <token>` |
+| `api_key` | `token_env`, `header` (default `X-API-Key`) | `<header>: <token>` |
+
+```yaml
+webhook:
+  url_env: LOOKUP_PLACES_URL
+  auth:
+    type: api_key
+    token_env: LOOKUP_PLACES_API_KEY
+    header: X-API-Key
+```
+
+Rules and lowering:
+
+- Request signing (HMAC) and OAuth2 are **not in v1**, and neither is `basic`. A
+  tool that must sign its request uses a `local:` Python handler until a scheme
+  is specified.
+- Both code targets emit one helper per scheme actually declared, so a project
+  with no auth carries no auth code. A managed target configures its tool auth
+  provider-side, so `tools.auth` is **ok on LiveKit and Pipecat, fail on Vapi
+  and Deepgram**.
 
 ---
 
@@ -509,7 +572,7 @@ follows these rules exactly.
 
 1. Any number of agents with `agent_transfer` between them (T0 + T2).
 2. Every transfer context: `history: full`, `variables: all`.
-3. Tools: `execution: webhook`, `interruption: provider_default`, `effect: returns_data`.
+3. Tools: a `webhook:` block, `interruption: provider_default`, `effect: returns_data`.
 4. Omit human transfer while the exact LiveKit and Pipecat telephony routes are
    provisional. Their platform-level and offline-emitted capabilities remain
    visible in the matrix below, but are not part of the validation-safe core.
@@ -540,6 +603,7 @@ Feature by feature:
 | `thinking_audio` | ok | gated (v1) | fail | fail |
 | `provider: local` (listen/speak) | ok | ok | fail | fail |
 | webhook tools | ok | ok | ok | ok |
+| webhook `auth` (bearer/api_key) | ok | ok | fail | fail |
 | mcp tools | Python only | gated (v1) | ok | fail |
 | outbound + `on_voicemail` | ok | gated (v1) | ok | generated (warn) |
 | tracing `provider: langfuse` | ok | ok | fail | fail |

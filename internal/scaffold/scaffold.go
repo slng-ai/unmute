@@ -18,6 +18,7 @@ import (
 	"text/template"
 
 	"github.com/goccy/go-yaml"
+	"github.com/slng/unmute/internal/spec"
 	targetcap "github.com/slng/unmute/internal/target"
 )
 
@@ -104,10 +105,13 @@ type Tool struct {
 	// rendered into the tool declaration.
 	HandlerSource string
 	URLEnv        string
-	Input         string // JSON Schema object
-	Output        string // optional JSON Schema object
-	AttachTo      []string
-	AttachTasks   []string
+	// Auth is the webhook block's auth, carried verbatim so maintenance never
+	// drops a tool's credentials. The console does not edit it.
+	Auth        *spec.ToolAuth
+	Input       string // JSON Schema object
+	Output      string // optional JSON Schema object
+	AttachTo    []string
+	AttachTasks []string
 }
 
 // DefaultTools are the prebuilt tools every new agent starts with: the

@@ -17,6 +17,9 @@ agents and tasks share the shape (T15). */ -}}
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 os.environ[{{pyq .URLEnv}}],
+{{- if .Auth}}
+                headers={{.Auth.Expr}},
+{{- end}}
                 json={ {{- range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end -}} },
             )
             resp.raise_for_status()
@@ -154,6 +157,23 @@ async def _summarize(source: llm.ChatContext, summarizer: llm.LLM) -> llm.ChatCo
     out = llm.ChatContext()
     out.add_message(role="assistant", content="Summary of the conversation so far: " + "".join(parts))
     return out
+{{end}}
+{{end}}
+{{- if .AuthKinds.Any}}
+# --- webhook auth ------------------------------------------------------------
+# One helper per scheme a tool actually declares; the token is read from the
+# environment at call time and never appears in the spec.
+{{- if .AuthKinds.Bearer}}
+def _bearer(env: str) -> dict[str, str]:
+    """auth: bearer — the Authorization header read from the tool's token_env."""
+    return {"Authorization": "Bearer " + os.environ[env]}
+
+{{end}}
+{{- if .AuthKinds.APIKey}}
+def _api_key(header: str, env: str) -> dict[str, str]:
+    """auth: api_key — the token verbatim in its own header."""
+    return {header: os.environ[env]}
+
 {{end}}
 {{end}}
 {{- if .HasVars}}
