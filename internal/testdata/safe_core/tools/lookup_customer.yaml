@@ -4,15 +4,21 @@ description: Look up a customer record by phone number or email. Returns the cus
 input:
   type: object
   properties:
-    phone: { type: string, description: Caller phone number in E.164 form }
-    email: { type: string, description: Caller email address }
+    phone:
+      type: string
+      description: Caller phone number in E.164 form
+    email:
+      type: string
+      description: Caller email address
 
-# Output schemas are enforced on code targets only (SCHEMA.md, section 5).
+# Output schemas are declared only: no driver enforces one today (SCHEMA.md, N22).
 output:
   type: object
   properties:
-    customer_id: { type: string }
-    name:        { type: string }
+    customer_id:
+      type: string
+    name:
+      type: string
 
 webhook:
   url_env: LOOKUP_CUSTOMER_URL  # env var name, never a value

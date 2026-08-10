@@ -5,10 +5,17 @@ There is no `pipeline` block. Models are defined once in the [`models` sections]
 ```yaml
 models:
   listen:
-    transcriber: { provider: deepgram, model: nova-3 }
-    experiment:  { provider: soniox, model: stt-rt-v5 }   # alternate, kept for testing
+    transcriber:
+      provider: deepgram
+      model: nova-3
+    experiment:   # alternate, kept for testing
+      provider: soniox
+      model: stt-rt-v5
   turn:
-    vad: { provider: local, model: silero, semantic_endpointing: preferred }
+    vad:
+      provider: local
+      model: silero
+      semantic_endpointing: preferred
 
 listen: transcriber   # required only because two listen entries exist; swap in one line
 # turn: needs no selector, vad is the sole entry

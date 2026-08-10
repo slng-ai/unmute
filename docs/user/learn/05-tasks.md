@@ -14,7 +14,10 @@ tasks:
     instructions: tasks/collect.md
     result:
       verified_flag: boolean
-      tier: { enum: [free, pro] }
+      tier:
+        enum:
+          - free
+          - pro
     context:
       history: full
 ```

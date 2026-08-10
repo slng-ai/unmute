@@ -10,14 +10,20 @@ description: Look up a customer record by phone number or email. Returns the cus
 input:
   type: object
   properties:
-    phone: { type: string, description: Caller phone number in E.164 form }
-    email: { type: string, description: Caller email address }
+    phone:
+      type: string
+      description: Caller phone number in E.164 form
+    email:
+      type: string
+      description: Caller email address
 
 output:
   type: object
   properties:
-    customer_id: { type: string }
-    name:        { type: string }
+    customer_id:
+      type: string
+    name:
+      type: string
 
 webhook:
   url_env: LOOKUP_CUSTOMER_URL
@@ -46,7 +52,7 @@ Required: yes, except for a `builtin` tool, which has none (the prebuilt owns it
 
 The shape the tool promises to return.
 
-Required: no. Values: a JSON Schema object. Default: none. Tag: warn. Enforced by generated code on code targets (LiveKit, Pipecat, Deepgram). The managed target (Vapi) has no slot for it and warns.
+Required: no. Values: a JSON Schema object. Default: none. Tag: warn. Declared and carried into `compile-report.json`, but not enforced on any target yet (SCHEMA.md N22); the warning you see comes from Vapi only. It is still worth writing: it documents what the tool returns.
 
 ## Execution blocks
 

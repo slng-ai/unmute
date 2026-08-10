@@ -6,8 +6,11 @@ The agent can look a customer up, but the moment the tool returns, it forgets. *
 
 ```yaml
 variables:
-  customer_id: { type: string }
-  verified:    { type: boolean, default: false }
+  customer_id:
+    type: string
+  verified:
+    type: boolean
+    default: false
 ```
 
 Each variable has:

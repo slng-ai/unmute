@@ -608,7 +608,52 @@ func parseTemplate(name string, raw []byte) (*template.Template, error) {
 		"boolValue": func(value *bool) bool { return value != nil && *value },
 		"quote":     strconv.Quote,
 		"yaml":      yamlScalar,
+		"yamlBlock": blockYAML,
 	}).Delims("[[", "]]").Parse(string(raw))
+}
+
+// blockYAML re-renders a compact JSON value as block-style YAML nested under the
+// key that precedes it, indented by indent spaces and starting on its own line.
+//
+// The wizard carries `params`, `pins`, and tool `input`/`output` around as JSON
+// text (maintain.go jsonText), which is flow style. Interpolating it straight
+// into a template made `unmute init` emit the one thing the rest of the package
+// no longer contains, so a scaffolded agent disagreed with its own house style
+// the moment any of those fields was set.
+//
+// A scalar has no block form, so it stays on the key's line.
+func blockYAML(indent int, encoded string) (string, error) {
+	if strings.TrimSpace(encoded) == "" {
+		return "", nil
+	}
+	// Decoded as YAML, not JSON: JSON is a subset of YAML, and the YAML parser
+	// keeps `1` an integer where encoding/json would widen every number to
+	// float64 and re-emit it as `1.0`. Params are forwarded to the provider
+	// verbatim (D10), so a silent int-to-float change is a behaviour change.
+	var value any
+	if err := yaml.Unmarshal([]byte(encoded), &value); err != nil {
+		return "", fmt.Errorf("yamlBlock: %q: %w", encoded, err)
+	}
+	switch value.(type) {
+	case map[string]any, []any:
+	default:
+		return " " + encoded, nil
+	}
+	// IndentSequence matches how every hand-authored package in the repo writes
+	// a sequence (`enum:` then an indented `- value`). goccy's default puts the
+	// dash in the parent key's column, which is legal YAML and parses the same,
+	// but it would make a scaffolded file the one place that indents differently
+	// — the split this change exists to remove.
+	rendered, err := yaml.MarshalWithOptions(value, yaml.IndentSequence(true))
+	if err != nil {
+		return "", fmt.Errorf("yamlBlock: %q: %w", encoded, err)
+	}
+	pad := strings.Repeat(" ", indent)
+	var out strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(string(rendered), "\n"), "\n") {
+		out.WriteString("\n" + pad + line)
+	}
+	return out.String(), nil
 }
 
 func yamlScalar(value string) (string, error) {

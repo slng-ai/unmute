@@ -26,7 +26,9 @@ channels:
     kind: telephony
     inbound: true
     outbound: false
-    required_controls: [cold_transfer, hangup]
+    required_controls:
+      - cold_transfer
+      - hangup
 ```
 
 `inbound` and `outbound` are required booleans. `required_controls` names only
@@ -44,7 +46,9 @@ channels:
     kind: telephony
     inbound: true
     outbound: false
-    required_controls: [cold_transfer, hangup]
+    required_controls:
+      - cold_transfer
+      - hangup
 ```
 
 ```yaml
@@ -65,7 +69,9 @@ channels:
     inbound: true
     outbound: true
     on_voicemail: leave_message
-    required_controls: [cold_transfer, hangup]
+    required_controls:
+      - cold_transfer
+      - hangup
 ```
 
 ## Add a Connection
@@ -681,8 +687,12 @@ channels:
     on_voicemail: hangup
 
 variables:
-  campaign_id: { type: string, source: call_start }
-  provider_call_id: { type: string, source: call_id }
+  campaign_id:
+    type: string
+    source: call_start
+  provider_call_id:
+    type: string
+    source: call_id
 ```
 
 The generated authenticated start operation requires every non-defaulted

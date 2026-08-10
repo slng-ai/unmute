@@ -3,8 +3,8 @@
   id: [[.Builtin]]
 [[if .Instructions]]  instructions: [[quote .Instructions]]
 [[end]][[else]]description: [[quote .Description]]
-input: [[.Input]]
-[[if .Output]]output: [[.Output]]
+input:[[yamlBlock 2 .Input]]
+[[if .Output]]output:[[yamlBlock 2 .Output]]
 [[end]]
 [[.ExecutionKind]]:[[if eq .ExecutionKind "client"]] {}
 [[else if eq .ExecutionKind "provider_hosted"]] {}

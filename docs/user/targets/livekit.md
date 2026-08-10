@@ -39,7 +39,8 @@ models:
       provider: openai
       model: gpt-4o-mini
       temperature: 0.4
-      fallback: [backup_reasoning]
+      fallback:
+        - backup_reasoning
     backup_reasoning:
       description: Backup conversation model
       provider: openai
@@ -55,9 +56,13 @@ models:
       model: sonic-3
       voice: f786b574-daa5-4673-aa0c-cbe3e8534c02
   listen:
-    transcriber: { provider: slng, model: "slng/deepgram/nova:3-en" }
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
   turn:
-    detector: { provider: livekit, model: turn-detector-mini }
+    detector:
+      provider: livekit
+      model: turn-detector-mini
 
 agents:
   assistant:
@@ -130,13 +135,16 @@ description: Look up an order by its reference number.
 input:
   type: object
   properties:
-    order_id: { type: string }
-  required: [order_id]
+    order_id:
+      type: string
+  required:
+    - order_id
 
 output:
   type: object
   properties:
-    status: { type: string }
+    status:
+      type: string
 
 webhook:
   url_env: LOOKUP_ORDER_URL
@@ -169,15 +177,18 @@ description: Load the caller's saved account notes.
 input:
   type: object
   properties:
-    topic: { type: string }
-  required: [topic]
+    topic:
+      type: string
+  required:
+    - topic
 
 output:
   type: object
   properties:
     notes:
       type: array
-      items: { type: string }
+      items:
+        type: string
 
 local:
   handler: tools/load_account_notes.py
@@ -198,8 +209,10 @@ description: Search the support knowledge base.
 input:
   type: object
   properties:
-    query: { type: string }
-  required: [query]
+    query:
+      type: string
+  required:
+    - query
 
 mcp:
   url_env: SUPPORT_MCP_URL
@@ -216,9 +229,15 @@ agents:
     instructions: instructions.md
     model: primary_reasoning
     voice: front_desk
-    tools: [lookup_order, load_account_notes, search_knowledge]
+    tools:
+      - lookup_order
+      - load_account_notes
+      - search_knowledge
 
-tools: [lookup_order, load_account_notes, search_knowledge]
+tools:
+  - lookup_order
+  - load_account_notes
+  - search_knowledge
 ```
 
 LiveKit runs tool calls to completion. A non-default `interruption` value is
@@ -241,13 +260,17 @@ models:
       model: gpt-4o
 
 variables:
-  customer_id: { type: string }
-  verified: { type: boolean, default: false }
+  customer_id:
+    type: string
+  verified:
+    type: boolean
+    default: false
 
 tasks:
   verify_customer:
     instructions: tasks/verify_customer.md
-    tools: [lookup_order]
+    tools:
+      - lookup_order
     model: careful_reasoning
     result:
       customer_id: string
@@ -288,9 +311,13 @@ tasks:
         schema:
           type: object
           properties:
-            city: { type: string }
-            postal_code: { type: string }
-          required: [city, postal_code]
+            city:
+              type: string
+            postal_code:
+              type: string
+          required:
+            - city
+            - postal_code
     context:
       history: full
 ```
@@ -303,13 +330,17 @@ steps share conversation history, and `then` decides what happens afterward.
 ```yaml
 task_groups:
   booking_flow:
-    steps: [find_slot, confirm_booking]
+    steps:
+      - find_slot
+      - confirm_booking
     context_scope: shared
     then: return
     merge: results
 
   private_intake:
-    steps: [collect_identity, collect_request]
+    steps:
+      - collect_identity
+      - collect_request
     context_scope: isolated
     then: transfer
     then_target: specialist
@@ -342,12 +373,15 @@ controls:
     kind: agent_transfer
     to: specialist
     when: The verified caller needs specialist help.
-    requires: [verified]
+    requires:
+      - verified
     context:
       history: summary
       summarizer: summary_model
       include_tool_calls: false
-      variables: [customer_id, verified]
+      variables:
+        - customer_id
+        - verified
 ```
 
 LiveKit supports `full`, `messages`, `last_n`, `summary`, and `reset` history.
@@ -368,7 +402,10 @@ conversation:
   interruption:
     enabled: true
     minimum_words: 2
-    ignore_phrases: [okay, right, uh-huh]
+    ignore_phrases:
+      - okay
+      - right
+      - uh-huh
   inactivity:
     nudge_after: 15s
     end_after: 45s
@@ -393,7 +430,8 @@ agents:
     instructions: instructions.md
     model: primary_reasoning
     voice: front_desk
-    tools: [to_human]
+    tools:
+      - to_human
 
 controls:
   to_human:

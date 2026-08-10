@@ -8,13 +8,17 @@ agents:
     instructions: instructions.md
     model: fast_reasoning
     voice: front_desk
-    tools: [lookup_customer, to_billing]
+    tools:
+      - lookup_customer
+      - to_billing
 
   billing:
     instructions: agents/billing.md
     model: careful_reasoning
     voice: specialist
-    tools: [get_invoice, to_human]
+    tools:
+      - get_invoice
+      - to_human
 ```
 
 ## Fields

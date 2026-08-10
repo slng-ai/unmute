@@ -4,15 +4,25 @@ description: Send the caller a confirmation text for their booking. Call only af
 input:
   type: object
   properties:
-    name:    { type: string, description: The name the booking is under }
-    phone:   { type: string, description: Caller phone number in E.164 form }
-    summary: { type: string, description: One-line summary of the booking to include }
-  required: [name, phone, summary]
+    name:
+      type: string
+      description: The name the booking is under
+    phone:
+      type: string
+      description: Caller phone number in E.164 form
+    summary:
+      type: string
+      description: One-line summary of the booking to include
+  required:
+    - name
+    - phone
+    - summary
 
 output:
   type: object
   properties:
-    sent: { type: boolean }
+    sent:
+      type: boolean
 
 webhook:
   url_env: SEND_CONFIRMATION_URL

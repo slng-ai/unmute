@@ -1,0 +1,69 @@
+# Runs the two gates the repo already documents as required: `make test`
+# (L1-L3, zero Python) and `make lint`. Both are fast and hermetic.
+#
+# `make smoke` is deliberately absent. It needs Docker, network, and provider
+# credentials, it takes several minutes, and CLAUDE.md scopes it as opt-in and
+# never part of the PR gate. Run it locally before promoting a driver.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push supersedes an in-flight run for the same ref.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # Single source of truth: the version the module already declares.
+          go-version-file: go.mod
+          cache: true
+      - run: make test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Installed from the module proxy rather than via golangci-lint-action, so
+      # the version is pinned in one obvious place and CI runs the same `make
+      # lint` a developer runs. The v2 line matters: the checked-in
+      # .golangci.yml declares `version: "2"` and a v1 binary cannot read it.
+      - name: install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+      - run: make lint
+
+  # gofmt is not covered by `make fmt` in CI because that target rewrites files.
+  # Checking is the CI-safe half of it.
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - run: go vet ./...

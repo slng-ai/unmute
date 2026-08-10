@@ -84,15 +84,30 @@ packages, and emitted services are in the
 # agent.yaml — models defined once, by kind
 models:
   think:
-    fast_reasoning:    { provider: openai, model: gpt-4o-mini, temperature: 0.4 }
-    careful_reasoning: { provider: openai, model: gpt-4o }
+    fast_reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.4
+    careful_reasoning:
+      provider: openai
+      model: gpt-4o
   speak:
-    front_desk: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-thalia-en" }
-    specialist: { provider: slng, model: "slng/deepgram/aura:2-en", voice: "aura-2-orion-en" }
+    front_desk:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+    specialist:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-orion-en"
   listen:
-    transcriber: { provider: deepgram, model: nova-3 }
+    transcriber:
+      provider: deepgram
+      model: nova-3
   turn:
-    vad: { provider: local, model: silero }
+    vad:
+      provider: local
+      model: silero
 
 # targets.yaml — infrastructure only
 targets:

@@ -40,13 +40,16 @@ agents:
     instructions: instructions.md
     model: fast_reasoning
     voice: front_desk
-    tools: [lookup_customer, to_billing]   # intake can now transfer
+    tools:   # intake can now transfer
+      - lookup_customer
+      - to_billing
 
   billing:                                 # new agent
     instructions: agents/billing.md
     model: careful_reasoning
     voice: specialist
-    tools: [get_invoice]
+    tools:
+      - get_invoice
 
 controls:
   to_billing:
@@ -97,7 +100,8 @@ controls:
     kind: agent_transfer
     to: billing
     when: Caller asks about billing, an invoice, or a refund.
-    requires: [verified]        # refuse the handoff unless `verified` is set
+    requires:   # refuse the handoff unless `verified` is set
+      - verified
     context:
       history: full
       variables: all

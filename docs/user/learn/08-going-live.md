@@ -20,7 +20,9 @@ targets:
     sdk_language: python
     models:
       # LiveKit swaps the VAD entry for its own turn model
-      vad: { provider: livekit, model: turn-detector-mini }
+      vad:
+        provider: livekit
+        model: turn-detector-mini
 ```
 
 Pick one with `--target`, or compile every declared target by leaving it off:

@@ -6,15 +6,22 @@ description: >-
 input:
   type: object
   properties:
-    appointment_id: { type: string, description: Appointment ID to cancel }
-  required: [appointment_id]
+    appointment_id:
+      type: string
+      description: Appointment ID to cancel
+  required:
+    - appointment_id
 
 output:
   type: object
   properties:
-    appointment_id: { type: string }
-    status: { type: string }
-  required: [appointment_id, status]
+    appointment_id:
+      type: string
+    status:
+      type: string
+  required:
+    - appointment_id
+    - status
 
 local:
   handler: tools/cancel_appointment.py

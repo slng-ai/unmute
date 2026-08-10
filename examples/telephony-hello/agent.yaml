@@ -34,10 +34,12 @@ conversation:
   greeting:
     speaks_first: agent
     text: "Hi, you have reached the Unmute test line. How are you today?"
-  interruption: { enabled: true }
+  interruption:
+    enabled: true
 
 channels:
-  web: { kind: realtime_audio }
+  web:
+    kind: realtime_audio
   phone:
     kind: telephony
     inbound: true

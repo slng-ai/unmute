@@ -305,7 +305,10 @@ func TestV26LiveKitStaticCheckSurface(t *testing.T) {
 	if strings.Contains(toolFreeAgent, `api_key=os.environ.get("OPENAI_API_KEY")`) {
 		t.Error("required provider key must not be typed as optional")
 	}
-	for _, want := range []string{"[dependency-groups]", `"ruff"`, `"ty"`} {
+	// dl§V26 requires the checkers to be declared. The ruff version is pinned on
+	// purpose: unpinned, `uv` resolves whatever ruff shipped today, and 0.16
+	// widened its default rule selection enough to fail an unchanged generator.
+	for _, want := range []string{"[dependency-groups]", `"ruff==`, `"ty"`} {
 		if !strings.Contains(artifactFile(t, toolFree, "pyproject.toml"), want) {
 			t.Errorf("pyproject.toml missing %q", want)
 		}
@@ -1124,7 +1127,7 @@ func TestLiveKitV1ConversationShapingAndAgentTools(t *testing.T) {
 		// Agent-level webhook tool on the greeter class, carrying the declared
 		// per-property schema (V2): descriptions via Annotated[..., Field(...)].
 		"class Greeter(IgnorePhrasesMixin, Agent):",
-		`async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:`,
+		`async def check_availability(self, ctx: RunContext, date: Annotated[str, Field(description="The requested date, e.g. 2026-08-14")], party_size: Annotated[int, Field(description="Number of people")]) -> dict:`,
 		// Interruption options ride turn_handling.
 		`interruption={"enabled": True, "min_words": 2},`,
 		// Generated ignore-phrase filter (lowercased phrases).

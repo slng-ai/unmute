@@ -23,14 +23,20 @@ description: Look up a customer record by phone number or email. Returns the cus
 input:
   type: object
   properties:
-    phone: { type: string, description: Caller phone number in E.164 form }
-    email: { type: string, description: Caller email address }
+    phone:
+      type: string
+      description: Caller phone number in E.164 form
+    email:
+      type: string
+      description: Caller email address
 
 output:
   type: object
   properties:
-    customer_id: { type: string }
-    name:        { type: string }
+    customer_id:
+      type: string
+    name:
+      type: string
 
 webhook:
   url_env: LOOKUP_CUSTOMER_URL
@@ -49,9 +55,11 @@ agents:
     instructions: instructions.md
     model: fast_reasoning
     voice: front_desk
-    tools: [lookup_customer]      # this agent may call it
+    tools:   # this agent may call it
+      - lookup_customer
 
-tools: [lookup_customer]          # compile this tool file into the package
+tools:   # compile this tool file into the package
+  - lookup_customer
 ```
 
 Those two lists do different jobs, and mixing them up is the usual first mistake:

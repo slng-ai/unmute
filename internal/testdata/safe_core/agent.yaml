@@ -4,9 +4,9 @@
 #
 # What it deliberately avoids, and why:
 #   - tasks / task_groups: delegate-and-return is unverified on Vapi
-#   - history other than `full`: fails on ElevenLabs
+#   - history other than `full`: fails on Pipecat
 #   - requires:, fallback:, thinking_audio:, warm transfer: each fails
-#     on at least one of the five
+#     on at least one of the four
 #   - outbound calls: omitted; Deepgram's carrier-conditional lowering warns
 
 version: 1
@@ -51,21 +51,28 @@ models:
       semantic_endpointing: preferred
 
 variables:
-  customer_id: { type: string }
-  verified:    { type: boolean, default: false }
+  customer_id:
+    type: string
+  verified:
+    type: boolean
+    default: false
 
 agents:
   intake:
     instructions: instructions.md
     model: fast_reasoning
     voice: front_desk
-    tools: [lookup_customer, to_billing]
+    tools:
+      - lookup_customer
+      - to_billing
 
   billing:
     instructions: agents/billing.md
     model: careful_reasoning
     voice: specialist
-    tools: [get_invoice, to_human]
+    tools:
+      - get_invoice
+      - to_human
 
 controls:
   to_billing:
@@ -73,7 +80,7 @@ controls:
     to: billing
     when: Caller asks about billing, an invoice, or a refund.
     context:
-      history: full       # the only history value ElevenLabs accepts
+      history: full       # the only history value that works on all four
       variables: all      # the only variables value managed targets accept
 
   to_human:
@@ -81,7 +88,9 @@ controls:
     destination: billing_line   # resolved per target in targets.yaml
     mode: cold                  # warm is not emitted by every driver yet
 
-tools: [lookup_customer, get_invoice]
+tools:
+  - lookup_customer
+  - get_invoice
 
 conversation:
   greeting:
@@ -93,12 +102,18 @@ conversation:
   interruption:
     enabled: true
     minimum_words: 2
-    ignore_phrases: [okay, right, uh-huh]   # warns on Deepgram (dropped)
-  inactivity: { nudge_after: 15s, end_after: 45s }
+    ignore_phrases:   # warns on Deepgram (dropped)
+      - okay
+      - right
+      - uh-huh
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
   max_duration: 20m
 
 channels:
-  web: { kind: realtime_audio }
+  web:
+    kind: realtime_audio
 
 capacity:
   peak_sessions: 40

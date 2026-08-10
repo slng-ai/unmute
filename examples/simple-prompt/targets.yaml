@@ -5,7 +5,9 @@ targets:
     version: "1.5.2"
     sdk_language: python
     models:
-      detector: { provider: livekit, model: turn-detector-mini }
+      detector:
+        provider: livekit
+        model: turn-detector-mini
 
   pipecat:
     provider: pipecat
