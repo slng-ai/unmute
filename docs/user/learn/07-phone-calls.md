@@ -406,6 +406,18 @@ route matrix instead of the `*_SIP_*` names).
   tunnel cannot carry it, and Docker Desktop NAT may block it even when
   every local health check passes. The managed tunnel applies only to
   carrier webhook routes.
+- That limit is about **inbound**, and the two directions are not the same
+  problem. Inbound cannot work locally: the carrier opens the connection, so it
+  needs a public `sip:` URI to send the INVITE to and an address in your SDP it
+  can send RTP to, and a laptop behind NAT has neither. **Outbound** is your
+  side opening the connection, and Twilio replies to the address the RTP
+  actually came from rather than the one advertised in the SDP, so an outbound
+  call and a warm-transfer dial-out may well work from a laptop. The generated
+  Compose already publishes 5060 and the RTP range, which is what it would
+  need. We have not run it, so this is a plausible-but-untested note rather
+  than a supported path: if you try it, the thing to watch is whether Docker
+  Desktop's NAT rewrites the RTP source port. Use the connector route if you
+  want a laptop-testable LiveKit path today.
 - Provisional routes run now, cleanly and with no warning. Only the gated
   no-adapter routes (Exotel) fail closed, because there is nothing to run for
   them.
