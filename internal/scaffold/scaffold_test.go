@@ -580,3 +580,57 @@ func TestScaffoldToolManifestsAreBlockStyle(t *testing.T) {
 		})
 	}
 }
+
+// The scaffold writes the shape block with the transfer's settings inside it,
+// `destination` included (SCHEMA N25). Checked by decoding rather than by
+// grepping, so an indentation slip is a failure and not a passing substring.
+func TestWriteHumanTransferPutsDestinationInTheBlock(t *testing.T) {
+	dir := t.TempDir()
+	data := Data{Name: "agent"}
+	data.SetTarget("pipecat")
+	data.Channels = []Channel{{Name: "phone", Kind: "telephony", Inbound: true}}
+	data.HumanTransfers = []HumanTransfer{
+		{Name: "to_human", Agent: "assistant", When: "The caller asks for a person.",
+			Destination: "support_line", Value: "+14155550123", Mode: "cold"},
+		{Name: "to_manager", Agent: "assistant", When: "The caller asks for a manager.",
+			Destination: "manager_line", Value: "+14155550124", Mode: "warm",
+			Briefing: "Say who is calling.", RingTimeout: "20s", OnUnavailable: "hangup"},
+	}
+	if _, err := Write(dir, data); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Controls map[string]struct {
+			Kind        string  `yaml:"kind"`
+			Destination *string `yaml:"destination"`
+			Cold        *struct {
+				Destination string `yaml:"destination"`
+			} `yaml:"cold"`
+			Warm *struct {
+				Destination   string `yaml:"destination"`
+				Briefing      string `yaml:"briefing"`
+				RingTimeout   string `yaml:"ring_timeout"`
+				OnUnavailable string `yaml:"on_unavailable"`
+			} `yaml:"warm"`
+		} `yaml:"controls"`
+	}
+	if err := yaml.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("scaffolded agent.yaml does not parse: %v\n%s", err, raw)
+	}
+	cold := decoded.Controls["to_human"]
+	if cold.Destination != nil {
+		t.Error("destination must live inside the shape block, not above it")
+	}
+	if cold.Cold == nil || cold.Cold.Destination != "support_line" {
+		t.Errorf("cold block = %+v", cold.Cold)
+	}
+	warm := decoded.Controls["to_manager"].Warm
+	if warm == nil || warm.Destination != "manager_line" || warm.Briefing != "Say who is calling." ||
+		warm.RingTimeout != "20s" || warm.OnUnavailable != "hangup" {
+		t.Errorf("warm block = %+v", warm)
+	}
+}

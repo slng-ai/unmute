@@ -284,12 +284,13 @@ controls:
 
   to_human:
     kind: human_transfer
-    destination: billing_line  # symbolic; resolves via the target instance's
-                               # destinations map to a number or SIP URI
-    cold: {}                   # the shape is a block, not a `mode:` field
-                               # (SCHEMA N23). Exactly one of cold:/warm:.
-                               # cold lets the target pick blind vs SIP REFER.
-    # warm:                    # warm is gated per route (see 2.3)
+    cold:                      # the shape is a block, not a `mode:` field
+                               # (SCHEMA N23). Exactly one of cold:/warm:, and
+                               # the block carries the transfer's settings (N25).
+      destination: billing_line  # symbolic; resolves via the target instance's
+                                 # destinations map to a number or SIP URI
+    # warm:                    # warm is resolved per route (see 2.3)
+    #   destination: supervisor_line
     #   briefing: Say who is calling and what they already tried.
     #   ring_timeout: 30s      # both blocks take these two
     #   on_unavailable: return_to_caller   # return_to_caller | hangup

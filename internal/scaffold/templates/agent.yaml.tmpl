@@ -108,9 +108,9 @@ models:
     when: [[quote .When]]
 [[end]][[range .HumanTransfers]]  [[.Name]]:
     kind: human_transfer
-    destination: [[.Destination]]
 [[if .When]]    when: [[quote .When]]
-[[end]]    [[.Mode]]:[[if not .BlockBody]] {}[[end]]
+[[end]]    [[.Mode]]:
+      destination: [[.Destination]]
 [[if .Briefing]]      briefing: [[quote .Briefing]]
 [[end]][[if .RingTimeout]]      ring_timeout: [[.RingTimeout]]
 [[end]][[if .OnUnavailable]]      on_unavailable: [[.OnUnavailable]]

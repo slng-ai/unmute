@@ -10,8 +10,8 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 from fastapi import HTTPException, Request, WebSocket
 from fastapi.responses import Response
 from pipecat.runner.types import WebSocketRunnerArguments
-from twilio.base.exceptions import TwilioRestException
-from twilio.http.http_client import TwilioHttpClient
+{{if .Telephony.HasOutbound}}from twilio.base.exceptions import TwilioRestException
+{{end}}from twilio.http.http_client import TwilioHttpClient
 from twilio.request_validator import RequestValidator
 from twilio.rest import Client
 
@@ -22,13 +22,15 @@ from telephony_shared import (
     STATE,
     _env,
     _http_url,
-    _outbound_request,
-    _remember,
+{{if .Telephony.HasOutbound}}    _outbound_request,
+{{end}}    _remember,
     _require_accepting,
     _valid_destination,
     _websocket_url,
     app,
-    handle_media,
+{{if .Telephony.HasWarm}}    expect_transfer,
+    forget_transfer,
+{{end}}    handle_media,
 )
 
 
@@ -102,7 +104,34 @@ def normalized_context(runner_args: WebSocketRunnerArguments) -> dict:
     }
 
 
-async def cold_transfer(call_id: str, destination: str) -> None:
+{{if .Telephony.HasWarm}}async def start_warm_leg(destination: str, ring_timeout: float) -> tuple[asyncio.Future, str]:
+    """Dial the person on a second call that streams back to this process.
+
+    Same create-call path the outbound endpoint uses, with a transfer token in
+    the stream URL so the media socket lands on the call that dialled it.
+    Twilio's own `timeout` is the ring timeout: it stops ringing an unanswered
+    phone without the bot having to time it. Returns the future that resolves
+    when that socket arrives, and the token to release afterwards.
+    """
+    if not _valid_destination(destination):
+        raise RuntimeError("invalid compiled transfer destination")
+    token, arrival = expect_transfer()
+    try:
+        client = _client()
+        await asyncio.to_thread(
+            client.calls.create,
+            to=destination,
+            from_=_env(FROM_NUMBER_ENV),
+            twiml=_stream_twiml(token),
+            timeout=int(ring_timeout),
+        )
+    except Exception:
+        forget_transfer(token)
+        raise
+    return arrival, token
+
+
+{{end}}async def cold_transfer(call_id: str, destination: str) -> None:
     if not _valid_destination(destination):
         raise RuntimeError("invalid compiled transfer destination")
     if not await STATE.mark_once("transfer", call_id, SESSION_TTL_SECS):

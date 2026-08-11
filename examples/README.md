@@ -19,7 +19,7 @@ carry their own smaller tool sets.
 | [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |
 | [`salon-support`](salon-support/) | One agent, variables, browser only | **Start here.** The one you can run in a minute: web audio, local tools, no Twilio and no API to stand up. Shows a personalized greeting, a hidden tool parameter, and the model saving what the caller says. |
 | [`telephony-hello`](telephony-hello/) | A minimal inbound and outbound phone agent | Real Twilio calls on a laptop over both routes (Pipecat carrier-websocket and the LiveKit Twilio connector), driven by one `.env`. The smallest way to confirm your Twilio setup before wiring a real agent. |
-| [`human-transfer`](human-transfer/) | One phone agent, two ways to reach a person | Cold transfer hands the caller off and the agent drops out; warm transfer holds the caller, briefs a supervisor, then bridges the two. LiveKit over a Twilio SIP trunk. |
+| [`human-transfer`](human-transfer/) | One phone agent, two ways to reach a person | Cold transfer hands the caller off and the agent drops out; warm transfer holds the caller, briefs a supervisor, then bridges the two. Pipecat over Twilio Media Streams, on the Twilio account trio. |
 | [`outbound-reminder`](outbound-reminder/) | One outbound agent using variables and secrets | **The secrets example.** Input variables from the dispatch, a system variable from the route, a conversation variable the model saves mid call, and both ways a secret reaches a tool: `url_env`/`token_env` on two webhook tools, and `os.environ` inside one local handler. Design in [docs/spec/variable_secrets_specs.md](../docs/spec/variable_secrets_specs.md). |
 
 ## Compile an example

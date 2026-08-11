@@ -127,6 +127,15 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	twilio := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}
 	route := routes[twilio]
 	route.RequiredEnvironment = []string{"account_sid", "auth_token", "from_number"}
+	// Warm transfer is Twilio-only on this transport: the lowering is a bridge
+	// between two media WebSockets, and only Twilio's leg of it has been built
+	// and linted (human-transfer.md C7/C9). Telnyx and plivo keep failing warm
+	// in their own route's words until each has its own bridge and smoke.
+	route.Features[TelephonyFeature(WarmTransfer)] = TelephonyEvidence{
+		Feature: TelephonyFeature(WarmTransfer), Tag: Provisional,
+		Note: "route has not passed its credentialed smoke",
+		Docs: pipecat, Verified: "2026-08-11",
+	}
 	routes[twilio] = route
 	setPipecatRuntime(twilio, []string{
 		"get the Account SID and Auth Token from the Twilio Console account dashboard and select a Voice-capable number",

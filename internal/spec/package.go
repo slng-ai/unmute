@@ -136,25 +136,27 @@ type TransferContext struct {
 
 // Control is the strict superset decoded before Build selects the kind.
 type Control struct {
-	Kind        string            `json:"kind" yaml:"kind"`
-	When        string            `json:"when,omitempty" yaml:"when,omitempty"`
-	Task        *string           `json:"task,omitempty" yaml:"task,omitempty"`
-	Group       *string           `json:"group,omitempty" yaml:"group,omitempty"`
-	Assign      map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
-	To          *string           `json:"to,omitempty" yaml:"to,omitempty"`
-	Requires    []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
-	Context     *TransferContext  `json:"context,omitempty" yaml:"context,omitempty"`
-	Destination *string           `json:"destination,omitempty" yaml:"destination,omitempty"`
+	Kind     string            `json:"kind" yaml:"kind"`
+	When     string            `json:"when,omitempty" yaml:"when,omitempty"`
+	Task     *string           `json:"task,omitempty" yaml:"task,omitempty"`
+	Group    *string           `json:"group,omitempty" yaml:"group,omitempty"`
+	Assign   map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
+	To       *string           `json:"to,omitempty" yaml:"to,omitempty"`
+	Requires []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Context  *TransferContext  `json:"context,omitempty" yaml:"context,omitempty"`
 	// A human_transfer names its shape with a block, never a `mode:` field, so a
 	// warm-only field on a cold transfer is unwritable rather than rejected by a
-	// cross-field rule (SCHEMA N23, the N19 argument applied to controls).
+	// cross-field rule (SCHEMA N23, the N19 argument applied to controls). The
+	// block carries every parameter of the transfer, `destination` included, so
+	// there is no such thing as an empty shape block (SCHEMA N25).
 	Cold *ColdTransfer `json:"cold,omitempty" yaml:"cold,omitempty"`
 	Warm *WarmTransfer `json:"warm,omitempty" yaml:"warm,omitempty"`
 }
 
 // ColdTransfer is the `cold:` block: hand the caller to the destination and drop
-// out. A cold transfer with nothing to configure is written `cold: {}`.
+// out.
 type ColdTransfer struct {
+	Destination   string `json:"destination" yaml:"destination"`
 	RingTimeout   string `json:"ring_timeout,omitempty" yaml:"ring_timeout,omitempty"`
 	OnUnavailable string `json:"on_unavailable,omitempty" yaml:"on_unavailable,omitempty"`
 }
@@ -163,9 +165,23 @@ type ColdTransfer struct {
 // them, then bridge the two. `briefing` is free text (SCHEMA N23); the drivers
 // pass the call transcript alongside it on their own.
 type WarmTransfer struct {
+	Destination   string `json:"destination" yaml:"destination"`
 	Briefing      string `json:"briefing,omitempty" yaml:"briefing,omitempty"`
 	RingTimeout   string `json:"ring_timeout,omitempty" yaml:"ring_timeout,omitempty"`
 	OnUnavailable string `json:"on_unavailable,omitempty" yaml:"on_unavailable,omitempty"`
+}
+
+// TransferDestination reports the destination the selected shape block names.
+func (c Control) TransferDestination() string {
+	switch {
+	case c.Cold != nil && c.Warm != nil:
+		return ""
+	case c.Cold != nil:
+		return c.Cold.Destination
+	case c.Warm != nil:
+		return c.Warm.Destination
+	}
+	return ""
 }
 
 // TransferShape reports the shape block the control selects, or "" when it

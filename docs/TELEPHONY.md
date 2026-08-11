@@ -192,8 +192,10 @@ a runtime block. A credentialed smoke in CI, once it exists, only flips the
 route from provisional to verified there, with no change to whether it runs. The
 Twilio connector and the Pipecat Twilio route were confirmed on real inbound and
 outbound calls by the author. The Pipecat adapters contain inbound, outbound,
-hangup, and cold-transfer paths; voicemail detection and warm transfer stay
-gated. The LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
+hangup, and cold-transfer paths; the Twilio adapter also contains the
+warm-transfer two-socket bridge (emitted 2026-08-11, provisional until its
+Phase 3 smoke). Voicemail detection stays gated, as does warm transfer on
+Telnyx and Plivo. The LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
 cold-transfer, and warm-transfer paths. The LiveKit Twilio connector emitter
 contains inbound, outbound, and hangup paths; transfers and voicemail detection
 stay on the LiveKit SIP route.
@@ -1051,8 +1053,8 @@ outbound call, one hangup, and one cold transfer against Twilio.
 
 ### Phase 3: Prove warm transfer on Twilio
 
-This phase resolves the largest call-lifecycle risk before copying it to other
-carriers.
+The code for this phase is emitted; what is left is the proof. This phase
+resolves the largest call-lifecycle risk before copying it to other carriers.
 
 1. Prove the two-socket bridge topology: dial the human as a second streamed leg onto the same process, brief privately, bridge (human-transfer.md C9; conference-first is the rejected alternative).
 2. Hold and unhold the caller.
@@ -1064,7 +1066,9 @@ carriers.
    briefing leg (SCHEMA N23: there are no briefing modes to record).
 
 Acceptance requires successful, declined, unanswered, and failed warm-transfer
-smokes with duplicate callback delivery.
+smokes with duplicate callback delivery, and one of them must have a person
+listening on the caller's leg throughout the briefing: hold music and nothing
+else is the property the topology exists to guarantee (human-transfer.md V10).
 
 ### Phase 4: Add Telnyx as the second carrier
 

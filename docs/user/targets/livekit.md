@@ -438,8 +438,8 @@ agents:
 controls:
   to_human:
     kind: human_transfer
-    destination: support_line
     warm:
+      destination: support_line
       briefing: Say who is calling and what they already tried. Ask if they can take it.
       ring_timeout: 30s
       on_unavailable: return_to_caller
@@ -509,7 +509,15 @@ targets:
 
 Bind a target to the self-hosted `sip` route and one telephony Connection. The
 distinct Twilio `connector` route is a usable alternative that runs on a laptop;
-it cannot inherit SIP transfer behavior.
+it cannot inherit SIP transfer behavior, so human transfers need `transport:
+sip`.
+
+The two routes also ask for different Twilio credentials, because they use
+different Twilio products: `sip` uses Elastic SIP Trunking (a provisioned trunk,
+its own username and password, and a publicly reachable SIP endpoint on your
+side), while `connector` uses Programmable Voice and Media Streams (the account
+SID, auth token, and a number). See
+[why the same carrier asks for different credentials](../learn/07-phone-calls.md#why-the-same-carrier-asks-for-different-credentials).
 
 To configure several carriers, declare several LiveKit targets, such as
 `livekit_twilio` and `livekit_plivo`, and bind each to its own Connection. Each
@@ -624,7 +632,12 @@ unmute dev acme --target livekit_connector --telephony --to +15551234567
 voice webhook automatically, and places an outbound call with `--to`. Twilio
 reaches the bridge over HTTPS and WSS, so both inbound and outbound work fully on
 a laptop. The route supports inbound, outbound, and hangup; call transfers and
-voicemail detection stay on the SIP route.
+voicemail detection stay on the SIP route. The reason is what a transfer acts
+on: `transfer_sip_participant` sends a SIP REFER through the trunk and
+`WarmTransferTask` dials out on `LIVEKIT_SIP_OUTBOUND_TRUNK`, and on this route
+the caller is audio the bridge published into the room, with no trunk behind
+them. If you want transfers on the Twilio account trio alone, use the Pipecat
+carrier-WebSocket route, which does both shapes.
 
 ## Run it and talk to the agent
 

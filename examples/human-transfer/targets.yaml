@@ -1,23 +1,16 @@
-# One target: LiveKit over a Twilio Elastic SIP trunk.
+# One target: Pipecat over Twilio Media Streams, the same route (and the same
+# three credentials) as examples/telephony-hello.
 #
-# Warm transfer needs a route that can hold a private consultation leg while the
-# caller waits, and this is the only emitted route that can today. Pipecat's
-# Twilio carrier-WebSocket route emits cold transfer but not warm, so a package
-# using both shapes resolves to LiveKit SIP alone. `unmute validate` says so in
-# those words if you add a second target.
+# Both transfer shapes ride the carrier WebSocket, so a laptop plus
+# `unmute dev --telephony` is the whole setup: no SIP trunk, no public SIP or
+# RTP ports, nothing to provision in the console beyond a voice-capable number.
 targets:
-  livekit:
-    provider: livekit
-    version: "1.5.2"
-    sdk_language: python
-    transport: sip
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: carrier-websocket
     carrier: twilio
-    connection: twilio_sip
-    models:
-      # LiveKit runs its own turn model rather than local Silero.
-      detector:
-        provider: livekit
-        model: turn-detector-mini
+    connection: twilio_voice
     # Symbolic names, resolved here so the model never sees a phone number and
     # can never dial an arbitrary one. A destination is either a literal (E.164
     # or a sip: URI) or the UPPER_SNAKE name of an environment variable holding

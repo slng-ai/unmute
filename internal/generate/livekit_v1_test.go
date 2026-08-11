@@ -1477,7 +1477,7 @@ func configuredLiveKitSIP(t *testing.T) (*ir.Agent, ir.Target) {
 	pkg.Agent.Variables["call_direction"] = spec.Variable{Type: "string", Source: "direction"}
 	human := pkg.Agent.Controls["to_human"]
 	human.Cold = nil
-	human.Warm = &spec.WarmTransfer{Briefing: "Say who is calling and why."}
+	human.Warm = &spec.WarmTransfer{Destination: "billing_line", Briefing: "Say who is calling and why."}
 	pkg.Agent.Controls["to_human"] = human
 
 	agent, err := ir.Build(pkg)

@@ -1,8 +1,9 @@
 # Sage and Stone Salon's phone line, with two ways to reach a person.
 #
 # A human transfer names its shape with a block, never a `mode:` field
-# (SCHEMA.md N23). Exactly one of `cold:` or `warm:` is required, so a
-# warm-only field like `briefing` cannot be written on a cold transfer.
+# (SCHEMA.md N23). Exactly one of `cold:` or `warm:` is required, and the block
+# carries every parameter of the transfer (N25), so a warm-only field like
+# `briefing` cannot be written on a cold transfer.
 version: 1
 entry_agent: front_desk
 
@@ -38,21 +39,19 @@ agents:
 controls:
   # Cold: one call to the carrier. The caller's leg is rerouted, the agent
   # drops off, and billing answers knowing nothing about the call.
-  # `cold: {}` means "this shape, with defaults". The braces are required:
-  # a bare `cold:` decodes as no block at all.
   send_to_billing:
     kind: human_transfer
-    destination: billing_line
     when: The caller asks about an invoice, a refund, or a charge they do not recognise.
-    cold: {}
+    cold:
+      destination: billing_line
 
   # Warm: the caller waits on hold music while the agent rings the supervisor,
   # tells them what the call is about, and only then connects the two.
   escalate_to_supervisor:
     kind: human_transfer
-    destination: supervisor_line
     when: The caller is unhappy with how something was handled and asks for a manager.
     warm:
+      destination: supervisor_line
       # Free text, not a mode. The call transcript is passed along on its own,
       # so write what the supervisor needs on top of it.
       briefing: |

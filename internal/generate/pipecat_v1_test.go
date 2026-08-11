@@ -1437,7 +1437,110 @@ func TestPipecatEmitterMatchesCapabilityTable(t *testing.T) {
 	}
 }
 
-func TestPipecatWarmHumanTransferFailsGeneration(t *testing.T) {
+// The warm lowering on its own route: a hold mixer on the caller's transport, a
+// bridge on each leg, the second leg dialled onto its own media socket, and the
+// per-call handles in a context var rather than a module global (SPEC V4-V7).
+func TestPipecatWarmHumanTransferBridgesTwoSockets(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enablePackageTelephony(pkg)
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = "twilio"
+	configured.Connection = "primary_phone"
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
+	human := pkg.Agent.Controls["to_human"]
+	human.Cold = nil
+	human.Warm = &spec.WarmTransfer{
+		Destination: "billing_line", Briefing: "Say who is calling and why.", RingTimeout: "25s",
+	}
+	pkg.Agent.Controls["to_human"] = human
+
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"class _HoldMixer(BaseAudioMixer):",
+		"class _AudioBridge(FrameProcessor):",
+		"audio_out_mixer=_HoldMixer()",
+		`_CALLER: ContextVar[_CallerLeg | None] = ContextVar("unmute_caller_leg", default=None)`,
+		"caller_leg = _CallerLeg(transport, _AudioBridge(name=\"warm::caller\"))",
+		"caller_leg.bridge,",
+		"caller_leg.release()",
+		"await _warm_transfer(",
+		`briefing="Say who is calling and why."`,
+		"ring_timeout=25.0",
+		"hangup_on_unavailable=False",
+		"await caller_out.queue_frame(MixerEnableFrame(True))",
+		"caller.bridge.sink = supervisor.output()",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing warm-transfer lowering %q", want)
+		}
+	}
+	// The bot bridges for the rest of the call, so the accepted path must not
+	// end the session the way a cold transfer does (human-transfer V9).
+	warm := bot[strings.Index(bot, "if outcome == \"bridged\":"):]
+	if end := strings.Index(warm, "EndFrame()"); end >= 0 && end < strings.Index(warm, "hangup_on_unavailable") {
+		t.Error("a bridged warm transfer must not push EndFrame")
+	}
+	adapter := artifactFile(t, artifact, "telephony.py")
+	for _, want := range []string{
+		"async def start_warm_leg(destination: str, ring_timeout: float)",
+		"twiml=_stream_twiml(token),",
+		"timeout=int(ring_timeout),",
+		"forget_transfer(token)",
+	} {
+		if !strings.Contains(adapter, want) {
+			t.Errorf("telephony.py missing warm second leg %q", want)
+		}
+	}
+	shared := artifactFile(t, artifact, "telephony_shared.py")
+	for _, want := range []string{
+		"_PENDING_TRANSFERS: dict[str, asyncio.Future] = {}",
+		"def expect_transfer() -> tuple[str, asyncio.Future]:",
+		"arrival = _PENDING_TRANSFERS.pop(token, None)",
+		"await released.wait()",
+	} {
+		if !strings.Contains(shared, want) {
+			t.Errorf("telephony_shared.py missing transfer-token routing %q", want)
+		}
+	}
+	// A transfer leg rides an already-admitted session: admitting it again
+	// would spend a second capacity slot on one conversation.
+	transfer := shared[strings.Index(shared, "arrival = _PENDING_TRANSFERS.pop"):strings.Index(shared, "pending = await STATE.pending")]
+	if strings.Contains(transfer, "STATE.admit") {
+		t.Error("a warm transfer leg must not take a second admission slot")
+	}
+}
+
+// A package without a warm transfer emits none of the machinery (SPEC V4).
+func TestPipecatWithoutWarmTransferEmitsNoBridge(t *testing.T) {
+	agent := loadCompilerAgent(t)
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, forbidden := range []string{"_HoldMixer", "_AudioBridge", "_warm_transfer", "MixerEnableFrame", "ContextVar"} {
+		if strings.Contains(bot, forbidden) {
+			t.Errorf("bot.py emits warm-transfer machinery %q without a warm transfer", forbidden)
+		}
+	}
+}
+
+// Warm transfer is the two-socket bridge, so it needs one media socket per
+// human. safe_core's Pipecat target is Daily SIP, which has neither, and
+// generation must refuse rather than quietly lower the shape as cold.
+func TestPipecatWarmHumanTransferFailsOffTheBridgeRoute(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
@@ -1450,7 +1553,7 @@ func TestPipecatWarmHumanTransferFailsGeneration(t *testing.T) {
 	human.Mode = ir.TransferWarm
 	human.Briefing = "Say who is calling and why."
 	_, err = GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
-	if err == nil || !strings.Contains(err.Error(), `mode "warm" has no Pipecat lowering`) {
+	if err == nil || !strings.Contains(err.Error(), "warm has no Pipecat lowering on route") {
 		t.Fatalf("warm transfer must fail instead of lowering cold, got %v", err)
 	}
 }

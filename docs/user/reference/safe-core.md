@@ -48,7 +48,7 @@ all remain provisional until their credentialed route smokes pass.
 | `fallback:` (think) | ok | gated (driver v1) | conditional | ok |
 | `fallback:` (listen) | ok | gated (driver v1) | fail | fail |
 | human_transfer cold | provisional on SIP routes | provisional carrier REST | ok | carrier-conditional |
-| human_transfer warm | provisional on SIP routes | not emitted | Twilio only | carrier-conditional |
+| human_transfer warm | provisional on SIP routes | provisional on Twilio carrier WebSocket | Twilio only | carrier-conditional |
 | `thinking_audio` | ok | gated (driver v1) | fail | fail |
 | `provider: local` (listen/speak) | ok | ok | fail | fail |
 | webhook tools | ok | ok | ok | ok |

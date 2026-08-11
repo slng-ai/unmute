@@ -243,6 +243,8 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 			telephony.HasOutbound = true
 		case "cold_transfer":
 			telephony.HasCold = true
+		case "warm_transfer":
+			telephony.HasWarm = true
 		}
 	}
 	if telephony.HasOutbound {
@@ -304,6 +306,16 @@ func setImportNeeds(data *pipecatData) {
 				data.HasColdTransfer = data.HasColdTransfer || !t.CarrierTransfer
 				data.NeedsAppendFrame = true // cold transfer prompts the caller
 				data.NeedsEndFrame = data.NeedsEndFrame || !t.CarrierTransfer
+				continue
+			}
+			if t.WarmDestination != "" {
+				// warm transfer: hold prompt, hold mixer, two bridges, and an
+				// EndFrame only where on_unavailable says hang up.
+				data.HasWarmTransfer = true
+				data.NeedsAppendFrame = true
+				// The on_unavailable branch is emitted either way, so EndFrame
+				// is always used on a warm package rather than conditionally.
+				data.NeedsEndFrame = true
 				continue
 			}
 			if t.Builtin != "" {
@@ -368,8 +380,8 @@ func setImportNeeds(data *pipecatData) {
 	collectLocal(data.FlowTools)
 	sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
 
-	// pipecat.frames.frames names ride one merged import (V2); appended in
-	// alphabetical order so it already matches isort without a sort pass.
+	// pipecat.frames.frames names ride one merged import (V2), sorted at the end
+	// so the merged import matches isort whatever order the flags are read in.
 	if data.NeedsEndFrame {
 		data.FrameImports = append(data.FrameImports, "EndFrame")
 	}
@@ -386,6 +398,11 @@ func setImportNeeds(data *pipecatData) {
 	if data.GreetingText != "" {
 		data.FrameImports = append(data.FrameImports, "TTSSpeakFrame")
 	}
+	if data.HasWarmTransfer {
+		data.FrameImports = append(data.FrameImports,
+			"Frame", "InputAudioRawFrame", "MixerEnableFrame", "OutputAudioRawFrame")
+	}
+	slices.Sort(data.FrameImports)
 }
 
 // collectImportsExtras returns the deduped, sorted service imports for bot.py,
@@ -504,7 +521,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 				Reason: transferReason(c), Requires: c.Requires,
 			})
 		case *ir.HumanTransfer:
-			tool, err := humanTransferTool(ref, c, target, env)
+			tool, err := humanTransferTool(ref, name, c, target, env)
 			if err != nil {
 				return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 			}
@@ -700,9 +717,11 @@ func pipecatDestinationExpr(destination string, env *envSet) string {
 	return pyLiteral(destination)
 }
 
-// humanTransferTool lowers a cold human_transfer to a @tool that dials the
-// resolved destination over the Daily SIP transport (V5, cold only).
-func humanTransferTool(name string, c *ir.HumanTransfer, target ir.Target, env *envSet) (pipecatTool, error) {
+// humanTransferTool lowers a human_transfer to a @tool. Cold dials the resolved
+// destination and drops out (V5); warm dials a second leg onto its own media
+// socket, briefs it there, and bridges the two sockets in software, which needs
+// the carrier-WebSocket Twilio route (human-transfer.md C9).
+func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target, env *envSet) (pipecatTool, error) {
 	destination, ok := target.Destinations[c.Destination]
 	if !ok {
 		return pipecatTool{}, fmt.Errorf("human transfer %q destination %q missing on target %q", name, c.Destination, target.Name)
@@ -716,15 +735,42 @@ func humanTransferTool(name string, c *ir.HumanTransfer, target ir.Target, env *
 	if desc == "" {
 		desc = "Transfer the caller to a human."
 	}
-	if c.Mode != ir.TransferCold {
-		return pipecatTool{}, fmt.Errorf("human transfer %q mode %q has no Pipecat lowering", name, c.Mode)
+	tool := pipecatTool{Name: name, MethodName: name, Description: desc}
+	switch c.Mode {
+	case ir.TransferCold:
+		tool.EndsCall = true
+		tool.ColdDestination = pipecatDestinationExpr(destination, env)
+		tool.CarrierTransfer = carrierTransfer
+		return tool, nil
+	case ir.TransferWarm:
+		if !carrierTransfer || target.Telephony.Key.Carrier != "twilio" {
+			return pipecatTool{}, fmt.Errorf("human transfer %q: warm has no Pipecat lowering on route (%s, %s)", name, target.Transport, target.Carrier)
+		}
+		// The bot bridges the two legs for the rest of the call, so a warm
+		// transfer is not an ending tool the way cold is (V6).
+		tool.EndsCall = false
+		// A warm transfer must not be cancelled halfway: the second leg is
+		// already ringing, and a cancelled tool would leave it with nobody.
+		tool.Interruption = "continue"
+		tool.WarmDestination = pipecatDestinationExpr(destination, env)
+		tool.Briefing = c.Briefing
+		tool.RingTimeoutSecs = warmRingTimeout(c.RingTimeout)
+		tool.HangupOnUnavailable = c.OnUnavailable == ir.OnUnavailableHangup
+		tool.LLMBuilder, tool.TTSBuilder = "build_"+agent+"_llm", "build_"+agent+"_tts"
+		return tool, nil
 	}
-	return pipecatTool{
-		Name: name, MethodName: name, Description: desc,
-		URLEnv: "", Args: nil, EndsCall: true,
-		// The destination rides through as the tool's fixed target; rendered by the template.
-		ColdDestination: pipecatDestinationExpr(destination, env), CarrierTransfer: carrierTransfer,
-	}, nil
+	return pipecatTool{}, fmt.Errorf("human transfer %q mode %q has no Pipecat lowering", name, c.Mode)
+}
+
+// warmRingTimeout renders the ring timeout as a Python float. An unset one is
+// Twilio's own dial default (60 seconds), which is what "platform default"
+// means on this route.
+func warmRingTimeout(value ir.Duration) string {
+	secs := durationSecs(value)
+	if secs <= 0 {
+		return "60.0"
+	}
+	return fmt.Sprintf("%d.0", secs)
 }
 
 // inputFields flattens a tool input JSON Schema object into ordered args,

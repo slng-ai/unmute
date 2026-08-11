@@ -258,9 +258,9 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			data.Handoffs = append(data.Handoffs, value)
 		case "human_transfer":
 			value := scaffold.HumanTransfer{Name: name, Agent: firstNonempty(owners[name], "assistant"), When: control.When}
-			if control.Destination != nil {
-				value.Destination = *control.Destination
-				value.Value = tgt.Destinations[value.Destination]
+			if destination := control.TransferDestination(); destination != "" {
+				value.Destination = destination
+				value.Value = tgt.Destinations[destination]
 			}
 			value.Mode = control.TransferShape()
 			switch {

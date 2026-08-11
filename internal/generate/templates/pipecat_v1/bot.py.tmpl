@@ -23,11 +23,15 @@ the typed results.{{end}}
 from __future__ import annotations
 
 import asyncio
-{{if .NeedsInspect}}import inspect
+{{if .HasWarmTransfer}}import contextlib
+{{end}}{{if .NeedsInspect}}import inspect
 {{end}}{{if or .HasFlows .CallStartVars}}import json
+{{end}}{{if .HasWarmTransfer}}import math
 {{end}}import os
 {{if .NeedsRender}}import re
+{{end}}{{if .HasWarmTransfer}}import struct
 {{end}}{{if .Telephony}}import sys
+{{end}}{{if .HasWarmTransfer}}from contextvars import ContextVar
 {{end}}{{if .Variables}}from dataclasses import dataclass
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
 {{end}}{{if .NeedsHTTPX}}
@@ -37,7 +41,8 @@ import httpx
 {{end}}from dotenv import load_dotenv
 {{if .Telephony}}from loguru import logger
 {{end}}
-from pipecat.audio.vad.silero import SileroVADAnalyzer
+{{if .HasWarmTransfer}}from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
+{{end}}from pipecat.audio.vad.silero import SileroVADAnalyzer
 {{if not .Inline}}from pipecat.bus import BusBridgeProcessor
 {{end}}{{if .HasFlows}}from pipecat.flows import {{if .HasIsolated}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig
 {{end}}{{if .FrameImports}}from pipecat.frames.frames import {{join .FrameImports ", "}}
@@ -48,7 +53,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.runner.types import RunnerArguments
+{{if .HasWarmTransfer}}from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+{{end}}from pipecat.runner.types import RunnerArguments{{if .HasWarmTransfer}}, WebSocketRunnerArguments{{end}}
 from pipecat.runner.utils import create_transport
 {{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
 {{end}}{{if .NeedsRoleRestore}}from pipecat.services.settings import LLMSettings
@@ -177,7 +183,260 @@ def _api_key(header: str, env: str) -> dict[str, str]:
     """auth: api_key — the token verbatim in its own header."""
     return {header: os.environ[env]}
 {{end}}{{end}}
-# --- prompts ----------------------------------------------------------------
+{{if .HasWarmTransfer}}# --- warm transfer ----------------------------------------------------------
+# Two phone calls, two media WebSockets, one process. The caller keeps the
+# socket they arrived on and the person is dialled onto a second one, so hold
+# music and the private briefing are separate audio paths by construction and
+# neither can leak into the other (docs/spec/human-transfer.md C9).
+
+WARM_BRIEFING_TIMEOUT_SECS = 180.0
+
+
+def _hold_tone(sample_rate: int) -> bytes:
+    """A two-note loop, synthesized so no audio file has to ship or be resampled."""
+    loop = bytearray()
+    for hz, secs in ((392.0, 0.4), (523.25, 0.4), (0.0, 1.6)):
+        for index in range(int(sample_rate * secs)):
+            level = 0 if hz == 0 else int(5000 * math.sin(2 * math.pi * hz * index / sample_rate))
+            loop += struct.pack("<h", level)
+    return bytes(loop)
+
+
+class _HoldMixer(BaseAudioMixer):
+    """Hold music on one leg, switched on and off with MixerEnableFrame.
+
+    The output transport keeps pulling mixed frames while its audio queue is
+    empty, so enabling the mixer is all it takes for the caller to hear
+    something while they wait.
+    """
+
+    def __init__(self) -> None:
+        self._loop = b""
+        self._enabled = False
+        self._offset = 0
+
+    async def start(self, sample_rate: int) -> None:
+        self._loop = _hold_tone(sample_rate)
+
+    async def stop(self) -> None:
+        self._enabled = False
+
+    async def process_frame(self, frame) -> None:
+        if isinstance(frame, MixerEnableFrame):
+            self._enabled, self._offset = frame.enable, 0
+
+    async def mix(self, audio: bytes) -> bytes:
+        # Replace rather than sum: the bot is not speaking to this leg while it
+        # is on hold, so there is nothing to mix with and nothing to clip.
+        if not self._enabled or not self._loop:
+            return audio
+        out = bytearray()
+        while len(out) < len(audio):
+            chunk = self._loop[self._offset : self._offset + len(audio) - len(out)]
+            out += chunk
+            self._offset = (self._offset + len(chunk)) % len(self._loop)
+        return bytes(out)
+
+
+class _AudioBridge(FrameProcessor):
+    """One leg's inbound audio: dropped while muted, copied to `sink` while bridged.
+
+    Audio taken here never travels further down its own pipeline, so a caller on
+    hold is not transcribed and a bridged call reaches neither STT nor the LLM.
+    """
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name=name)
+        self.muted = False
+        self.sink: FrameProcessor | None = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, InputAudioRawFrame) and (self.muted or self.sink is not None):
+            if self.sink is not None:
+                await self.sink.queue_frame(
+                    OutputAudioRawFrame(
+                        audio=frame.audio,
+                        sample_rate=frame.sample_rate,
+                        num_channels=frame.num_channels,
+                    )
+                )
+            return
+        await self.push_frame(frame, direction)
+
+
+class _CallerLeg:
+    """This call's transport and bridge.
+
+    Per call, never a module global: the telephony app serves every call from
+    one process, so a global would hand a tool the wrong caller's socket.
+    """
+
+    def __init__(self, transport: BaseTransport, bridge: _AudioBridge) -> None:
+        self.transport = transport
+        self.bridge = bridge
+        self.holds: list[asyncio.Event] = []
+
+    def release(self) -> None:
+        """Let go of every transfer socket this call is holding open."""
+        for event in self.holds:
+            event.set()
+        self.holds.clear()
+
+
+_CALLER: ContextVar[_CallerLeg | None] = ContextVar("unmute_caller_leg", default=None)
+
+
+def _transcript(context: LLMContext) -> str:
+    lines = []
+    for message in context.get_messages():
+        role, content = message.get("role"), message.get("content")
+        if role in ("user", "assistant") and isinstance(content, str) and content:
+            lines.append(("Caller: " if role == "user" else "Agent: ") + content)
+    return "\n".join(lines)
+
+
+async def _brief_and_bridge(websocket, caller: _CallerLeg, instruction: str, build_llm, build_tts) -> str:
+    """Run the briefing on the person's own socket, then bridge or give up.
+
+    Returns "bridged" or "unavailable".
+    """
+    supervisor = await create_transport(
+        WebSocketRunnerArguments(
+            websocket=websocket, transport_type=None, body={}, session_id=None
+        ),
+        transport_params,
+    )
+    bridge = _AudioBridge(name="warm::supervisor")
+    verdict: asyncio.Future = asyncio.get_running_loop().create_future()
+
+    async def connect_to_caller(params: FunctionCallParams):
+        """Put the caller through now, once this person has agreed to take them."""
+        await params.result_callback({"connected": True})
+        if not verdict.done():
+            verdict.set_result("bridged")
+
+    async def decline_transfer(params: FunctionCallParams):
+        """Report that this person cannot take the call, so the agent goes back to the caller."""
+        await params.result_callback({"declined": True})
+        if not verdict.done():
+            verdict.set_result("unavailable")
+
+    context = LLMContext(
+        messages=[{"role": "system", "content": instruction}],
+        tools=[connect_to_caller, decline_transfer],
+    )
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        context, user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer())
+    )
+    worker = PipelineWorker(
+        Pipeline(
+            [
+                supervisor.input(),
+                bridge,
+                build_stt(),
+                user_aggregator,
+                build_llm(),
+                build_tts(),
+                supervisor.output(),
+                assistant_aggregator,
+            ]
+        ),
+        name="warm_transfer",
+        params=PipelineParams(enable_metrics=True),
+    )
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    briefing = asyncio.create_task(runner.run())
+    await worker.queue_frame(
+        LLMMessagesAppendFrame(
+            [{"role": "developer", "content": "Brief this person now, in two or three sentences."}],
+            run_llm=True,
+        )
+    )
+    try:
+        outcome = await asyncio.wait_for(verdict, WARM_BRIEFING_TIMEOUT_SECS)
+    except TimeoutError:
+        outcome = "unavailable"
+    if outcome == "bridged":
+        # Both legs keep the pipelines and sockets they already have; only the
+        # audio changes direction. The briefing worker stays up because it is
+        # what reads and writes the person's socket for the rest of the call.
+        bridge.sink = caller.transport.output()
+        caller.bridge.sink = supervisor.output()
+        caller.bridge.muted = False
+        return "bridged"
+    await runner.cancel()
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        await briefing
+    return "unavailable"
+
+
+async def _warm_transfer(
+    params: FunctionCallParams,
+    destination: str,
+    briefing: str,
+    ring_timeout: float,
+    hangup_on_unavailable: bool,
+    build_llm,
+    build_tts,
+) -> None:
+    caller = _CALLER.get()
+    if caller is None:
+        await params.result_callback({"refused": "This call cannot be warm transferred."})
+        return
+    instruction = briefing + "\n\nThe call so far:\n" + _transcript(params.context)
+    await params.llm.push_frame(
+        LLMMessagesAppendFrame(
+            [{"role": "developer", "content": "Tell the caller you are finding someone and ask them to hold."}],
+            run_llm=True,
+        )
+    )
+    caller_out = caller.transport.output()
+    caller.bridge.muted = True
+    await caller_out.queue_frame(MixerEnableFrame(True))
+    outcome, token, held = "unavailable", None, None
+    try:
+        arrival, token = await telephony.start_warm_leg(destination, ring_timeout)
+        websocket, held = await asyncio.wait_for(arrival, ring_timeout)
+        caller.holds.append(held)
+        outcome = await _brief_and_bridge(websocket, caller, instruction, build_llm, build_tts)
+    except TimeoutError:
+        logger.info("warm transfer: no answer within {} seconds", ring_timeout)
+    except Exception as exc:
+        logger.warning("warm transfer failed: {}", exc)
+    finally:
+        if token is not None:
+            telephony.forget_transfer(token)
+    if outcome == "bridged":
+        # The two humans have the call now and the bot copies audio between
+        # their sockets until one of them hangs up: no EndFrame, no goodbye.
+        await caller_out.queue_frame(MixerEnableFrame(False))
+        await params.result_callback({"transferred": True})
+        return
+    # Nobody took the call: put the caller back exactly as they were, then apply
+    # on_unavailable. A returned caller must hear a working agent.
+    if held is not None:
+        held.set()
+        caller.holds.remove(held)
+    caller.bridge.muted = False
+    await caller_out.queue_frame(MixerEnableFrame(False))
+    if hangup_on_unavailable:
+        await params.result_callback({"unavailable": True})
+        await params.llm.push_frame(
+            LLMMessagesAppendFrame(
+                [{"role": "developer", "content": "Tell the caller nobody is free right now, apologise briefly, and say goodbye."}],
+                run_llm=True,
+            )
+        )
+        await params.llm.push_frame(EndFrame())
+        return
+    await params.result_callback(
+        {"unavailable": True, "say": "Nobody was free to take the call. Apologise and carry on helping the caller."}
+    )
+
+
+{{end}}# --- prompts ----------------------------------------------------------------
 # Agent system instructions as module constants: one copy each, referenced by
 # the LLM builder and any Flow restore (V2).
 {{range .Agents}}{{.PromptConst}} = {{pytriple .Prompt}}
@@ -292,6 +551,15 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
             await _TRANSPORT.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
 {{end}}
         await params.result_callback({"transferred": True})
+{{else if .WarmDestination}}        await _warm_transfer(
+            params,
+            destination={{.WarmDestination}},
+            briefing={{pyq .Briefing}},
+            ring_timeout={{.RingTimeoutSecs}},
+            hangup_on_unavailable={{if .HangupOnUnavailable}}True{{else}}False{{end}},
+            build_llm={{.LLMBuilder}},
+            build_tts={{.TTSBuilder}},
+        )
 {{else if .Builtin}}{{if .Instructions}}        await params.llm.push_frame(
             LLMMessagesAppendFrame(
                 [{"role": "developer", "content": {{pyq .Instructions}}}],
@@ -436,7 +704,7 @@ async def _flow_tool_{{.Name}}(args, flow_manager{{if .NeedsState}}, state=None{
 transport_params: dict = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
-{{if .Telephony}}    {{pyq .Telephony.Carrier}}: lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True),
+{{if .Telephony}}    {{pyq .Telephony.Carrier}}: lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True{{if .HasWarmTransfer}}, audio_out_mixer=_HoldMixer(){{end}}),
 {{end}}
 }
 
@@ -522,6 +790,10 @@ def build_stt():
 {{end}}
 {{if .HasColdTransfer}}    global _TRANSPORT
     _TRANSPORT = transport
+{{end}}{{if .HasWarmTransfer}}    # Per call, not per process: a warm transfer needs this call's own transport
+    # and its own bridge, and every task of this call inherits the context var.
+    caller_leg = _CallerLeg(transport, _AudioBridge(name="warm::caller"))
+    _CALLER.set(caller_leg)
 {{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
@@ -547,7 +819,8 @@ def build_stt():
     pipeline = Pipeline(
         [
             transport.input(),
-            build_stt(),
+{{if .HasWarmTransfer}}            caller_leg.bridge,
+{{end}}            build_stt(),
             user_aggregator,
             bridge,
             transport.output(),
@@ -637,13 +910,14 @@ def build_stt():
             await runner.cancel()
 
     await runner.add_workers(main, *agents)
-{{if .Tracing}}
+{{if or .Tracing .HasWarmTransfer}}
     try:
         await runner.run()
     finally:
-        if tracing_enabled:
+{{if .Tracing}}        if tracing_enabled:
             flush_tracing()
-{{else}}
+{{end}}{{if .HasWarmTransfer}}        caller_leg.release()
+{{end}}{{else}}
     await runner.run()
 {{end}}{{end}}
 

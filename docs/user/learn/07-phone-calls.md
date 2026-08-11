@@ -178,11 +178,39 @@ for an unselected carrier.
 "Generated offline" means the emitter and credential-free checks exist. The
 route is usable now: public validation, compilation, and telephony development
 run it cleanly, with no warning. The Pipecat emitters contain inbound, outbound,
-hangup, and cold-transfer paths; voicemail and warm transfer remain gated. The
-LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
-cold-transfer, and warm-transfer paths. The LiveKit Twilio connector emitter
-contains inbound, outbound, and hangup paths; transfers and voicemail stay on
-the LiveKit SIP route.
+hangup, and cold-transfer paths, and the Twilio one also contains warm transfer;
+voicemail stays gated. The LiveKit SIP emitter contains inbound, outbound,
+voicemail, hangup, cold-transfer, and warm-transfer paths. The LiveKit Twilio
+connector emitter contains inbound, outbound, and hangup paths; transfers and
+voicemail stay on the LiveKit SIP route.
+
+### Why the same carrier asks for different credentials
+
+Look down the Twilio rows above and you see two different credential sets. That
+is not our naming: Twilio sells two products here, and each route uses one of
+them.
+
+| | Programmable Voice + Media Streams | Elastic SIP Trunking |
+|---|---|---|
+| What you get | REST API, TwiML, audio over a WebSocket | A SIP trunk: termination URI, credential list, origination URI |
+| Credentials | `account_sid`, `auth_token`, a voice number | `sip_address`, `sip_username`, `sip_password`, a number on the trunk |
+| Setup | Buy a voice-capable number | Create the trunk, point its origination URI at your SIP server |
+| Network | HTTPS and WSS only | SIP signalling plus RTP media, on public ports |
+| Used by | Pipecat `carrier-websocket`, LiveKit `connector` | LiveKit `sip` |
+
+Each orchestrator asks for the product its telephony stack speaks. Pipecat's
+telephony transport is a WebSocket that talks the Media Streams protocol, so it
+needs the first. LiveKit's telephony is LiveKit SIP, a server that terminates
+SIP from a carrier and bridges it into a room, so it needs the second.
+
+The practical consequence is the network row. HTTPS and WSS go through the
+managed tunnel, so the two Media-Streams routes run on a laptop. SIP and RTP do
+not tunnel, so the LiveKit SIP route needs a deployed, publicly reachable SIP
+endpoint even for a first call. That, and not the credentials themselves, is
+why the same carrier feels so different depending on the route.
+
+Telnyx and Plivo split the same way: their own API products feed the Pipecat
+routes, their own SIP trunking feeds LiveKit.
 
 ## Configure multiple carriers
 
@@ -610,7 +638,10 @@ unmute dev ./agent --target livekit --telephony --to +15551234567
 Twilio reaches the bridge over HTTPS and WSS, so both inbound and outbound work
 fully on a laptop. The connector supports inbound, outbound, and hangup. Call
 transfers and voicemail detection stay on the LiveKit SIP route, which the
-connector cannot inherit.
+connector cannot inherit: LiveKit's transfer calls act on a SIP participant, and
+on this route the caller is audio the bridge published into the room, with no
+trunk behind them. If you need transfers with only the Twilio account trio, the
+Pipecat carrier-WebSocket route does both shapes.
 
 #### Create the LiveKit resources
 
@@ -662,22 +693,68 @@ Author a symbolic destination in the portable control:
 controls:
   to_human:
     kind: human_transfer
-    destination: billing_line
-    cold: {}
+    cold:
+      destination: billing_line
 ```
 
-The shape is a block, so `cold: {}` says "hand the caller off and drop out, with
-defaults". Swap it for a `warm:` block to keep the agent on the line and brief
-the person first. See [controls](../reference/controls.md#kind-human_transfer)
-for what goes inside each block.
+The shape is a block, and the block holds the settings: `cold:` hands the caller
+off and drops out. Swap it for a `warm:` block to keep the agent on the line and
+brief the person first. See
+[controls](../reference/controls.md#kind-human_transfer) for what goes inside
+each block.
 
 The target resolves `billing_line` to an E.164 number or SIP URI. The generated
-runtime never accepts a model-supplied arbitrary transfer destination. Warm
-transfer is a separate route feature and stays gated until that exact carrier
-and transport pass their state-machine smoke. In particular, Twilio's
-bidirectional Media Stream leg cannot also be a Conference participant, so the
-Pipecat route must prove a separate conference media leg before it can claim a
-warm transfer.
+runtime never accepts a model-supplied arbitrary transfer destination.
+
+### Which routes can transfer
+
+Transfers are resolved per exact route, not per orchestrator, because each one
+is built out of what that route actually has.
+
+| Route | `cold:` | `warm:` |
+|---|---|---|
+| Pipecat `carrier-websocket` + Twilio | yes | yes |
+| Pipecat `carrier-websocket` + Telnyx or Plivo | yes | no |
+| LiveKit `sip` + Twilio, Telnyx, or Plivo | yes | yes |
+| LiveKit `connector` + Twilio | no | no |
+
+Two of those rows deserve a reason.
+
+**The LiveKit connector cannot transfer at all.** LiveKit's transfer calls act
+on a *SIP participant*: a cold transfer sends a SIP REFER through the trunk, and
+a warm one dials out on `LIVEKIT_SIP_OUTBOUND_TRUNK`. On the connector route the
+caller is not a SIP participant, they are audio our bridge published into the
+room, and there is no trunk to dial out on. So both calls have nothing to act
+on, and validation refuses instead of emitting code that fails on the phone.
+
+**Warm on Pipecat is Twilio-only.** The lowering is written against Twilio's
+Media Streams and its create-call API. Telnyx and Plivo need their own version,
+and each needs its own smoke before the gate opens.
+
+### What actually happens on the call
+
+On **Pipecat + Twilio**, cold is one REST call that redirects the caller's leg
+to `<Dial>`, after which the bot's socket closes and it is out of the call. Warm
+dials the person as a second streamed call into the same process: the caller
+hears hold music on their own socket, the person is briefed on theirs, and then
+the bot copies audio between the two sockets and stays silent until someone
+hangs up. One session, two carrier calls.
+
+On **LiveKit + SIP**, cold is a SIP REFER, so the carrier moves the caller's leg
+and the agent drops out. That needs Call Transfer (SIP REFER) enabled on the
+Twilio trunk with PSTN transfer ticked, or the carrier rejects it. Warm dials
+the person on the outbound trunk, briefs them away from the caller, moves them
+into the caller's room and shuts the agent's session down, so the two of them
+carry on alone.
+
+The caller cannot hear the difference. It shows up in your logs and your
+capacity planning: a Pipecat warm transfer holds its session open for the whole
+conversation, a LiveKit one does not.
+
+Every emitted route here stays provisional until its credentialed smoke passes.
+See [controls](../reference/controls.md#kind-human_transfer) for the fields and
+[examples/human-transfer](https://github.com/slng-ai/unmute_cli/tree/main/examples/human-transfer)
+for a package that does both shapes on the Twilio account trio.
 
 ## Start outbound calls
 

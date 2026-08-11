@@ -1,31 +1,33 @@
 # human-transfer
 
-Putting a caller through to a person, both ways, on one Twilio number.
+Putting a caller through to a person, both ways, on one Twilio number and the
+three credentials a Twilio account gives you.
 
 The salon's front desk can do two things this package cares about:
 
-- **`send_to_billing`** is a **cold** transfer. One call to the carrier, the
+- **`send_to_billing`** is a **cold** transfer. One REST call to Twilio, the
   caller's leg is rerouted, the agent drops off. Billing answers knowing nothing
   about the call.
 - **`escalate_to_supervisor`** is a **warm** transfer. The caller waits on hold
-  music while the agent rings the supervisor, tells them who is calling and why,
-  and only then connects the two. If the supervisor cannot take it, the agent
-  comes back to the caller.
+  music while the agent rings the supervisor on a second call, tells them who is
+  calling and why, and only then connects the two. If the supervisor cannot take
+  it, the agent comes back to the caller.
 
 ## The authoring shape
 
-The shape is a block name, never a `mode:` field:
+The shape is a block name, never a `mode:` field, and the block carries every
+setting of the transfer:
 
 ```yaml
 send_to_billing:
   kind: human_transfer
-  destination: billing_line
-  cold: {}
+  cold:
+    destination: billing_line
 
 escalate_to_supervisor:
   kind: human_transfer
-  destination: supervisor_line
   warm:
+    destination: supervisor_line
     briefing: Lead with the caller's name and what they are unhappy about.
     ring_timeout: 25s
     on_unavailable: return_to_caller
@@ -39,25 +41,27 @@ to the supervisor on its own, so use `briefing` for what matters on top of it.
 within `ring_timeout`, an explicit decline, voicemail, or a failed dial. See
 [controls](../../docs/user/reference/controls.md#kind-human_transfer).
 
-## Why one target
+## Why this route
 
-Warm transfer needs a route that can hold a private consultation leg while the
-caller waits, and LiveKit over a SIP trunk is the only route **unmute emits**
-that can today. This is a gap in our Pipecat driver, not in Pipecat: Pipecat
-supports warm transfer, and the Pipecat lowering is designed (a second phone
-call to the person, briefed on its own media socket while the caller hears hold
-music on theirs, then bridged in software) but not generated yet. See
-[docs/spec/human-transfer.md](../../docs/spec/human-transfer.md) §T7.
+Both shapes ride Twilio Media Streams, the same route as
+[telephony-hello](../telephony-hello). Warm transfer needs a way to talk to the
+person privately while the caller waits, and on this route that falls out of the
+topology: the supervisor is a second phone call with its own media WebSocket, so
+their audio and the caller's are separate by construction. The bot holds the
+caller with hold music on their socket, briefs the supervisor on theirs, and
+then copies audio between the two until someone hangs up.
 
-If you add a Pipecat target, `unmute validate` tells you exactly that rather than
-quietly dropping the feature:
+That last part is worth knowing: on this route the bot stays on the call as a
+silent bridge, so one warm transfer is two carrier calls but still one session.
+On LiveKit the agent hands over and shuts down instead. The caller cannot tell
+the difference; your logs and your phone bill can.
+
+Warm transfer is emitted for Twilio only. Point this package at Telnyx or Plivo
+and `unmute validate` says so rather than quietly dropping the feature:
 
 ```
-pipecat: telephony warm_transfer: telephony route (pipecat, carrier-websocket, twilio) does not support warm_transfer
+pipecat: telephony warm_transfer: telephony route (pipecat, carrier-websocket, telnyx) does not support warm_transfer
 ```
-
-Drop `escalate_to_supervisor` and a Pipecat carrier-WebSocket target validates
-green alongside this one.
 
 ## Set it up
 
@@ -77,29 +81,19 @@ dials the real desk from the same file.
 Either way the model never sees a phone number and can never dial an arbitrary
 one. It picks a symbolic name, and the target resolves it.
 
-In the Twilio console, under **Elastic SIP Trunking > Manage > Trunks**, create a
-trunk and:
-
-1. Enable **Call Transfer (SIP REFER)** and tick **Enable PSTN Transfer**.
-   Without this the cold transfer is rejected by the carrier.
-2. Point the trunk's origination URI at your public LiveKit SIP endpoint.
-3. Copy the trunk's SIP domain, username, and password.
-
-Then set the environment variables named in `connections/twilio_sip.yaml`, plus
-the LiveKit and model-provider keys listed in the generated `.env.example`:
+Everything needed is on the Twilio Console account dashboard plus one
+voice-capable number:
 
 ```sh
-TWILIO_SIP_ADDRESS=your-trunk.pstn.twilio.com
-TWILIO_SIP_USERNAME=...
-TWILIO_SIP_PASSWORD=...
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
 TWILIO_PHONE_NUMBER=+34...
-LIVEKIT_SIP_OUTBOUND_TRUNK=ST_...
 SUPERVISOR_PHONE_NUMBER=+34...
 ```
 
-`LIVEKIT_SIP_OUTBOUND_TRUNK` is what the warm transfer dials out on. `unmute dev
---telephony` creates the local trunk records and supplies it for you; production
-needs a real trunk ID.
+Both transfers use that same number: the cold one redirects the caller's call,
+the warm one dials the supervisor from it. No SIP trunk, no public SIP or RTP
+ports, nothing else to provision.
 
 ## Run it
 
@@ -111,6 +105,13 @@ bin/unmute validate examples/human-transfer
 bin/unmute compile examples/human-transfer
 ```
 
-The route is still marked provisional: the adapter is emitted and the code is
-real, but no credentialed smoke has run against Twilio yet. The compile report
-says so per feature, and it is the honest state, not a warning to ignore.
+`unmute dev --telephony` opens the tunnel and points the number's voice webhook
+at it, so a real call reaches the agent on your laptop. Add the model-provider
+keys from the generated `.env.example` first.
+
+The route is marked provisional: the code is emitted, linted and type-checked,
+and it has not yet been through a credentialed smoke with two real phones. The
+compile report says so per feature, and it is the honest state, not a warning to
+ignore. When you do try warm transfer against real numbers, listen on the
+caller's leg during the briefing: hearing hold music and nothing else is the one
+thing this design exists to guarantee.

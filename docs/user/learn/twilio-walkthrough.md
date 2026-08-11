@@ -181,6 +181,39 @@ unmute dev examples/telephony-hello --target livekit --telephony --to +155512345
 The CLI places the call and the bridge connects it into the room, exactly like
 the Pipecat route.
 
+## Part 3: transfer the caller to a person
+
+Both transfer shapes work on the Part 1 route with the same three credentials,
+so you can try them without touching SIP.
+[`examples/human-transfer`](https://github.com/slng-ai/unmute_cli/tree/main/examples/human-transfer)
+is a package that does both: a cold transfer that hands the caller off and drops
+out, and a warm one that holds the caller on music, rings a second number,
+briefs whoever answers, then connects the two.
+
+```bash
+cat > examples/human-transfer/.env <<'EOF'
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
+SUPERVISOR_PHONE_NUMBER=
+OPENAI_API_KEY=
+SLNG_API_KEY=
+EOF
+```
+
+```bash
+bin/unmute dev examples/human-transfer --telephony
+```
+
+`SUPERVISOR_PHONE_NUMBER` is the second phone the warm transfer rings, so use a
+number you can answer. Call the agent, ask for a manager, and you should hear
+hold music while the second phone rings.
+
+Warm transfer has not been through a credentialed smoke yet, so treat this as
+the first run rather than a proven path. If you do try it, keep listening on the
+caller's phone during the briefing: hold music and nothing else is the property
+the design exists to guarantee.
+
 ## Production: the LiveKit SIP route
 
 For production, LiveKit's stable multi-carrier path is a self-hosted SIP bridge
@@ -188,7 +221,10 @@ For production, LiveKit's stable multi-carrier path is a self-hosted SIP bridge
 for inbound, because Twilio talks SIP and RTP straight to your machine and an
 HTTPS tunnel cannot carry that. Set it up when you deploy on a host with public
 SIP and RTP reachability. The SIP route also supports call transfers and
-voicemail detection, which the connector does not. See
+voicemail detection, which the connector does not: LiveKit transfers act on a
+SIP participant, and the connector's caller is audio bridged into a room with no
+trunk behind it. Transfers alone are not a reason to move to SIP, since the
+Pipecat route in Part 1 does both shapes on the account credentials. See
 [07. Phone calls](07-phone-calls.md#configure-self-hosted-livekit-sip) and
 [Configure LiveKit in YAML](../targets/livekit.md) for the trunk fields and
 the environment it needs.

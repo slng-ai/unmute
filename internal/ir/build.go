@@ -568,7 +568,7 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 		return nil, fmt.Errorf("field %q is illegal with control kind %q", field, raw.Kind)
 	}
 	task, group := stringValue(raw.Task), stringValue(raw.Group)
-	to, destination := stringValue(raw.To), stringValue(raw.Destination)
+	to := stringValue(raw.To)
 	switch kind {
 	case ControlDelegate:
 		if (task == "") == (group == "") {
@@ -605,12 +605,16 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 		}
 		return &AgentTransfer{Kind: ControlAgentTransfer, When: raw.When, To: to, Requires: raw.Requires, Context: context}, nil
 	case ControlHumanTransfer:
+		transfer, err := buildHumanTransfer(raw)
+		if err != nil {
+			return nil, err
+		}
 		for name, target := range agent.Targets {
-			if _, ok := target.Destinations[destination]; !ok {
-				return nil, fmt.Errorf("destination %q is missing from target %q", destination, name)
+			if _, ok := target.Destinations[transfer.(*HumanTransfer).Destination]; !ok {
+				return nil, fmt.Errorf("destination %q is missing from target %q", transfer.(*HumanTransfer).Destination, name)
 			}
 		}
-		return buildHumanTransfer(raw, destination)
+		return transfer, nil
 	default:
 		return nil, fmt.Errorf("unknown control kind %q", raw.Kind)
 	}
@@ -620,24 +624,29 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 // (SCHEMA N23). The shape is the block name, so zero blocks and two blocks are
 // both errors here; `on_unavailable` resolves to its default so no driver reads
 // an empty value.
-func buildHumanTransfer(raw packagespec.Control, destination string) (Control, error) {
-	transfer := &HumanTransfer{Kind: ControlHumanTransfer, When: raw.When, Destination: destination}
+func buildHumanTransfer(raw packagespec.Control) (Control, error) {
+	transfer := &HumanTransfer{Kind: ControlHumanTransfer, When: raw.When}
 	switch {
 	case raw.Cold != nil && raw.Warm != nil:
 		return nil, fmt.Errorf("human_transfer declares both `cold:` and `warm:`: a transfer has exactly one shape")
 	case raw.Cold != nil:
 		transfer.Mode = TransferCold
+		transfer.Destination = raw.Cold.Destination
 		transfer.RingTimeout = Duration(raw.Cold.RingTimeout)
 		transfer.OnUnavailable = OnUnavailable(raw.Cold.OnUnavailable)
 	case raw.Warm != nil:
 		transfer.Mode = TransferWarm
+		transfer.Destination = raw.Warm.Destination
 		transfer.Briefing = raw.Warm.Briefing
 		transfer.RingTimeout = Duration(raw.Warm.RingTimeout)
 		transfer.OnUnavailable = OnUnavailable(raw.Warm.OnUnavailable)
 	default:
-		// A `cold:` written with no body decodes to nothing, so it lands here
-		// too: name the empty-body spelling rather than only the missing key.
-		return nil, fmt.Errorf("human_transfer has no shape block: add `cold: {}` (the braces are required for an empty block) or a `warm:` block")
+		// A block written with no body decodes to nothing, so it lands here too:
+		// name the field the block must carry rather than only the missing key.
+		return nil, fmt.Errorf("human_transfer has no shape block: add a `cold:` or `warm:` block with a `destination:`")
+	}
+	if transfer.Destination == "" {
+		return nil, fmt.Errorf("human_transfer `%s:` block requires a `destination:`", transfer.Mode)
 	}
 	if transfer.OnUnavailable == "" {
 		transfer.OnUnavailable = OnUnavailableReturn
@@ -649,12 +658,12 @@ func unexpectedControlField(raw packagespec.Control, kind ControlKind) string {
 	fields := map[string]bool{
 		"task": raw.Task != nil, "group": raw.Group != nil, "assign": raw.Assign != nil,
 		"to": raw.To != nil, "requires": raw.Requires != nil, "context": raw.Context != nil,
-		"destination": raw.Destination != nil, "cold": raw.Cold != nil, "warm": raw.Warm != nil,
+		"cold": raw.Cold != nil, "warm": raw.Warm != nil,
 	}
 	allowed := map[ControlKind]map[string]bool{
 		ControlDelegate:      {"task": true, "group": true, "assign": true},
 		ControlAgentTransfer: {"to": true, "requires": true, "context": true},
-		ControlHumanTransfer: {"destination": true, "cold": true, "warm": true},
+		ControlHumanTransfer: {"cold": true, "warm": true},
 	}[kind]
 	for _, field := range slices.Sorted(maps.Keys(fields)) {
 		if fields[field] && !allowed[field] {

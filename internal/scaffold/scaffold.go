@@ -230,12 +230,6 @@ type HumanTransfer struct {
 	OnUnavailable string
 }
 
-// BlockBody reports whether the shape block has anything under it. An empty one
-// must be written `cold: {}`, because a bare `cold:` decodes as absent.
-func (h HumanTransfer) BlockBody() bool {
-	return h.Briefing != "" || h.RingTimeout != "" || h.OnUnavailable != ""
-}
-
 type ModelFallback struct {
 	Name    string
 	Profile string

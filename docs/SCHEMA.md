@@ -90,6 +90,7 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
   This changes the authoring shape; old files fail strict decode loudly, with the block form named and the offending line quoted rather than a bare "unknown field" (compiler V3, the N19 error contract). Full design, both lowerings, and the three shipped-code bugs the research pass found in the LiveKit warm path are in [docs/spec/human-transfer.md](spec/human-transfer.md).
 
 - **N26 (2026-08-10).** A `destinations:` value may be an **environment variable name** instead of a literal. The three forms are unambiguous by shape, so no new key, suffix, or wrapper is needed: an E.164 literal starts with `+`, a SIP URI with `sip:`/`sips:`, and an UPPER_SNAKE token can only be an env var name. Drivers emit the literal verbatim or an `os.environ` lookup, and a named variable is registered in the generated `.env.example` and required-env list like every other one.
+- **N27 (2026-08-11).** The shape block carries **every parameter of the transfer**, `destination` included. N25 left `destination` above the block because both shapes need it, which produced `cold: {}`: a block naming a shape while the field that decides where the call goes sat outside it. The placement rule replaces the sharing rule — above the block is the tool (`kind`, `when`), inside it is the transfer — so a shape block always has a body and the empty-brace spelling leaves the surface. Old files fail strict decode at the `destination:` line.
   Literals-only was the previous rule and it does not hold up. Section 3 says `targets.yaml` carries "environment variable names and secret references only, never values", and `destinations` was the one field contradicting it. In practice that meant real phone numbers committed to git, and no way for staging to dial a test line while production dials the real desk without editing the file per environment. A phone number is not a secret, which is why literals stay legal and are still the right choice for a number that never changes; but "not a secret" is not the same as "never varies".
   What does **not** change: the model never sees a number and can never dial one. It picks a symbolic name, the target resolves it, and an unresolvable name fails before anything is generated. Deferring the value to the environment moves *when* the number is known, never *who* chooses it.
 
@@ -319,20 +320,20 @@ Transfer history support per target (Vapi column verified against provider docs 
 
 Vapi lowering, literal spellings verified 2026-07-15: `contextEngineeringPlan` is one of `all` (their default; ours is no default, D7), `userAndAssistantMessages`, `lastNMessages` plus `maxMessages`, `none`; no summary mode exists; `previousAssistantMessages` stays unexposed. For tasks this table collapses: code targets support all five values (generated), and Vapi is n/a while single tasks fail there.
 
-`kind: human_transfer` (rewritten 2026-08-10, N23; full design in [docs/spec/human-transfer.md](spec/human-transfer.md)):
+`kind: human_transfer` (rewritten 2026-08-10, N23; `destination` moved into the block 2026-08-11, N25; full design in [docs/spec/human-transfer.md](spec/human-transfer.md)):
 
-Two fields at the top level, then **exactly one block named after the transfer shape**. There is no `mode:` field: a warm-only field on a cold transfer is unwritable rather than rejected by a rule, exactly as N19 decided for tool execution.
+`kind` and `when`, then **exactly one block named after the transfer shape**, carrying every parameter of the transfer. There is no `mode:` field: a warm-only field on a cold transfer is unwritable rather than rejected by a rule, exactly as N19 decided for tool execution.
 
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
-| `destination` | yes | symbolic name | core | Resolves through the target instance's `destinations:` map to a number or SIP URI. Both shapes need it and both mean it identically, so it stays at the top level. |
-| one shape block | yes, exactly one | `cold: \| warm:` | gated | Zero blocks and two blocks both fail at load with file:line. A block with nothing set is written `cold: {}`, the spelling `client: {}` already uses (§5.2). |
+| one shape block | yes, exactly one | `cold: \| warm:` | gated | Zero blocks and two blocks both fail at load with file:line. A block always has a body, because `destination` lives in it. |
 
 Fields inside either block:
 
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
-| `ring_timeout` | no | duration | gated | How long to wait for the person to pick up. Omitted from the emitted call when unset, so the platform default applies (LiveKit: 30s). |
+| `destination` | yes | symbolic name | core | Resolves through the target instance's `destinations:` map to a number or SIP URI. |
+| `ring_timeout` | no | duration | gated | How long to wait for the person to pick up. Omitted from the emitted call when unset, so the platform default applies (LiveKit: 30s; the Pipecat Twilio route: Twilio's own 60s dial timeout). |
 | `on_unavailable` | no, default `return_to_caller` | `return_to_caller \| hangup` | gated | One concept covering every way the person does not take the call: no answer, declined, voicemail, dial failure. LiveKit surfaces all four as one `ToolError`, so the lowering is one branch, not four. |
 
 Fields inside `warm:` only:
@@ -686,7 +687,7 @@ Feature by feature:
 | `fallback:` (think) | ok | gated (v1) | conditional | ok |
 | `fallback:` (listen) | ok | gated (v1) | fail | fail |
 | human_transfer cold (`cold:`) | ok | Daily SIP, or provisional carrier REST on Twilio/Telnyx/Plivo | ok | carrier-conditional |
-| human_transfer warm (`warm:`) | native (Node stable, Python Beta) | **Pipecat supports it**; this driver does not emit it yet. Designed as a two-socket bridge on the carrier-WebSocket Twilio route, where each human has a private media socket so the briefing cannot leak to the caller ([human-transfer.md](spec/human-transfer.md) C9, T7) | Twilio only (stable path) | carrier-conditional |
+| human_transfer warm (`warm:`) | native (Node stable, Python Beta) | provisional on the carrier-WebSocket **Twilio** route: a two-socket bridge, where each human has a private media socket so the briefing cannot leak to the caller ([human-transfer.md](spec/human-transfer.md) C9). Telnyx and plivo fail until each has its own bridge | Twilio only (stable path) | carrier-conditional |
 | `thinking_audio` | ok | gated (v1) | fail | fail |
 | `provider: local` (listen/speak) | ok | ok | fail | fail |
 | webhook tools | ok | ok | ok | ok |
@@ -749,4 +750,4 @@ Still open:
 
 | Driver | Gated until emitted | Where |
 |---|---|---|
-| Pipecat v1 | `models.fallback`, `thinking_audio`, `outbound` + `on_voicemail`, `mcp` tools, warm transfer ([human-transfer.md](spec/human-transfer.md) §T7/§T8 lift it on the carrier-WebSocket Twilio route); transfer/task context shaping beyond the safe-core defaults — `history` other than `full`, `context.variables` subset, `include_tool_calls: false` (the workers handoff carries the running context; fine-grained shaping is not emitted yet). (`local` tools lifted 2026-07-17, driver-pipecat T14.) | [docs/spec/driver-pipecat.md](docs/spec/driver-pipecat.md) §T. Emitted: single agent, `agent_transfer` (+ `requires` guard), `tasks`, `task_groups` with `context_scope` (shared/isolated), `then` return/transfer/end, `local` tools (2026-07-17). |
+| Pipecat v1 | `models.fallback`, `thinking_audio`, `outbound` + `on_voicemail`, `mcp` tools, warm transfer on every route but carrier-WebSocket Twilio ([human-transfer.md](spec/human-transfer.md) C7); transfer/task context shaping beyond the safe-core defaults — `history` other than `full`, `context.variables` subset, `include_tool_calls: false` (the workers handoff carries the running context; fine-grained shaping is not emitted yet). (`local` tools lifted 2026-07-17, driver-pipecat T14.) | [docs/spec/driver-pipecat.md](docs/spec/driver-pipecat.md) §T. Emitted: single agent, `agent_transfer` (+ `requires` guard), `tasks`, `task_groups` with `context_scope` (shared/isolated), `then` return/transfer/end, `local` tools (2026-07-17). |

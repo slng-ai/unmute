@@ -180,9 +180,15 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if got := ResolveTelephonyFeature(TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}, TelephonyRouteSelected); got.Tag != Gated {
 		t.Fatalf("unproven Exotel SIP route = %#v", got)
 	}
-	for _, feature := range []TelephonyFeature{TelephonyFeature(WarmTransfer)} {
-		if got := ResolveTelephonyFeature(exact, feature); got.Tag != Gated {
-			t.Fatalf("Pipecat unemitted feature %s = %#v", feature, got)
+	// Warm transfer is the two-socket bridge, emitted for Twilio alone: the
+	// other two carrier-WebSocket carriers must still refuse it by name.
+	if got := ResolveTelephonyFeature(exact, TelephonyFeature(WarmTransfer)); got.Tag != Provisional || got.Smoke {
+		t.Fatalf("Pipecat Twilio warm transfer evidence = %#v", got)
+	}
+	for _, carrier := range []string{"telnyx", "plivo"} {
+		key := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: carrier}
+		if got := ResolveTelephonyFeature(key, TelephonyFeature(WarmTransfer)); got.Tag != Gated {
+			t.Fatalf("Pipecat %s warm transfer = %#v", carrier, got)
 		}
 	}
 }

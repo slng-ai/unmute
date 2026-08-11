@@ -165,9 +165,18 @@ Connection stores these names, while `.env` stores their values.
 
 Every generated row runs now and is tagged provisional: validation and
 compilation emit it cleanly, with no warning. The adapters contain inbound,
-outbound, hangup, and cold-transfer paths. An outbound channel runs without a
-voicemail policy; voicemail detection and warm transfer stay gated on Pipecat,
-so setting `on_voicemail` still fails validation on this route.
+outbound, hangup, and cold-transfer paths, and the Twilio adapter also contains
+warm transfer. An outbound channel runs without a voicemail policy; voicemail
+detection stays gated on Pipecat, so setting `on_voicemail` still fails
+validation on this route, as does a `warm:` block on Telnyx or Plivo.
+
+These routes use Twilio Programmable Voice and Media Streams, not SIP trunking,
+which is why they want the account SID and auth token rather than trunk
+credentials, and why they reach a laptop through the managed tunnel. Both
+transfer shapes are built out of that: a cold transfer redirects the caller's
+call over the REST API, and a warm one dials the person as a second streamed
+call whose media socket lands on the same process. See
+[why the same carrier asks for different credentials](../learn/07-phone-calls.md#why-the-same-carrier-asks-for-different-credentials).
 
 To configure several carriers, declare several Pipecat target instances, such
 as `pipecat_twilio` and `pipecat_telnyx`, and bind each to its own Connection.
@@ -224,14 +233,15 @@ Some features are in the schema and Pipecat itself supports them, but this first
 - **Voicemail detection** (`on_voicemail`) on carrier WebSocket routes.
 - **`mcp` tools.** Use `webhook` or `local` Python-handler tools, which are
   emitted.
-- **Warm human transfer** (the `warm:` block). Pipecat itself supports warm
-  transfer; this driver does not emit it yet. The design targets the Twilio
-  carrier-WebSocket route: the person is dialed as a second phone call whose
-  media stream lands on the same bot process, the bot briefs them on that
-  private connection while the caller hears hold music on their own, and then
-  the bot bridges the two streams and goes silent for the rest of the call. It
-  works differently from LiveKit's, where the agent hangs up after connecting
-  the two. Cold transfer (`cold: {}`) is emitted today.
+- **Warm human transfer** (the `warm:` block) on any route but the Twilio
+  carrier WebSocket. On that one it is emitted: the person is dialed as a second
+  phone call whose media stream lands on the same bot process, the bot briefs
+  them on that private socket while the caller hears hold music on their own,
+  and then the bot bridges the two sockets and goes silent for the rest of the
+  call. That differs from LiveKit, where the agent hands over and hangs up. On
+  Daily SIP and on the Telnyx and Plivo WebSocket routes, warm still fails by
+  name: one shared room gives the bot a single output track, so the briefing
+  and the hold music cannot be kept apart there.
 - **Handoff and task context shaping beyond the defaults:** any `history` other
   than `full`, a subset `context.variables` list rather than `all`, and
   `include_tool_calls: false`. The handoff carries the running context; finer

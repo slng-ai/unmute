@@ -126,21 +126,21 @@ Required: yes. Values: `all` or a list of names. Default: none.
 
 Puts the caller through to a person on a phone. See the [phone-calls learn page](../learn/07-phone-calls.md).
 
-There are two shapes, and they are different machines rather than two settings of one. You pick a shape by writing a block named after it. Exactly one block is required.
+There are two shapes, and they are different machines rather than two settings of one. You pick a shape by writing a block named after it. Exactly one block is required, and the block carries every setting of the transfer.
 
 ```yaml
 controls:
   send_to_billing:
     kind: human_transfer
-    destination: billing_line
     when: The caller asks to be put through to the billing team.
-    cold: {}
+    cold:
+      destination: billing_line
 
   escalate_to_supervisor:
     kind: human_transfer
-    destination: supervisor_line
     when: The caller is upset and asks for a manager.
     warm:
+      destination: supervisor_line
       briefing: |
         Give the caller's name and the invoice they are disputing.
         Say their identity is already verified.
@@ -151,13 +151,13 @@ controls:
 
 **Cold** is one call to the carrier. The caller's leg is rerouted, your agent drops off, and the person answers knowing nothing about the call.
 
-**Cold with nothing to configure is written `cold: {}`.** The empty braces are how YAML says "this block, with defaults", the same spelling [tools](tools.md) use for `client: {}`.
-
 **Warm** keeps your agent involved. The caller goes on hold with music, the agent rings the person on a second line, tells them what the call is about, then connects the two. If the person cannot take it, the agent comes back to the caller.
+
+Above the block you say what the tool is (`kind`, `when`). Inside it you say what the transfer does. A `cold:` block therefore always has at least a `destination:` under it.
 
 ### destination
 
-A symbolic name, resolved through the target instance's `destinations:` map. Both shapes need it and both mean it the same way, so it sits above the block.
+A symbolic name, resolved through the target instance's `destinations:` map. Required in both blocks.
 
 The map's value is one of three things, told apart by shape, so there is no extra key to learn:
 
@@ -180,12 +180,27 @@ Required: yes. Values: a symbolic name. Default: none. Targets: all four, core (
 |---|---|---|
 | LiveKit SIP with Twilio, Telnyx, or Plivo | Emitted offline; provisional | Emitted offline; provisional |
 | LiveKit Twilio Connector | No emitted adapter | No emitted adapter |
-| Pipecat carrier WebSocket with Twilio, Telnyx, or Plivo | Carrier REST path emitted offline; provisional | Designed (a second streamed call bridged in software, Twilio first); not emitted yet |
+| Pipecat carrier WebSocket with Twilio | Carrier REST path emitted offline; provisional | Emitted offline; provisional |
+| Pipecat carrier WebSocket with Telnyx or Plivo | Carrier REST path emitted offline; provisional | Not emitted yet |
 | Pipecat Daily SIP | Platform capability only; not an emitted v1 telephony route | Not the planned route: the shared room makes hold music and a private briefing conflict |
 | Vapi | native | needs the Twilio carrier (stable path) |
 | Deepgram | carrier-conditional | carrier-conditional |
 
+Two rows in that table surprise people.
+
+**The LiveKit Twilio Connector has no transfer of either shape.** LiveKit's
+transfer calls act on a SIP participant: cold sends a SIP REFER through the
+trunk, warm dials out on the outbound trunk. On the connector route the caller
+is audio a generated bridge published into the room and there is no trunk, so
+there is nothing for either call to act on. Use `transport: sip` for LiveKit
+transfers, or the Pipecat carrier WebSocket if you want both shapes on the
+Twilio account credentials.
+
+**Warm on Pipecat is Twilio-only.** The lowering is written against Twilio's
+Media Streams and its create-call API; Telnyx and Plivo need their own.
+
 Check the [phone-call route matrix](../learn/07-phone-calls.md#choose-a-supported-carrier-route)
+and [which routes can transfer](../learn/07-phone-calls.md#which-routes-can-transfer)
 before picking either shape. Every emitted Pipecat and LiveKit carrier route
 is still provisional today.
 
@@ -193,7 +208,7 @@ is still provisional today.
 
 How long the person's phone rings before the agent gives up.
 
-Required: no. Values: a duration (`30s`). Default: none written, so the platform default applies (LiveKit waits 30 seconds). Legal in both blocks.
+Required: no. Values: a duration (`30s`). Default: none written, so the platform default applies (LiveKit waits 30 seconds; the Pipecat Twilio route uses Twilio's own 60 second dial timeout). Legal in both blocks.
 
 ### on_unavailable
 
@@ -214,7 +229,7 @@ The conversation so far is always passed along with it, on every target that sup
 | Target | What happens | Tag |
 |---|---|---|
 | LiveKit SIP with Twilio, Telnyx, or Plivo | Added on top of the transcript summary, emitted offline on a provisional route | provisional |
-| Pipecat carrier WebSocket (Twilio) | Generated briefing on the person's own media socket, once the driver task lands | gated |
+| Pipecat carrier WebSocket (Twilio) | Generated briefing on the person's own media socket, plus the transcript | provisional |
 | Vapi | Mapped onto the provider's own transfer plan | gated |
 | Deepgram | fails | gated |
 
@@ -224,6 +239,6 @@ The two orchestrators finish a warm transfer differently, and it is worth knowin
 
 On **LiveKit** the agent moves the person into the caller's room and shuts itself down, so the caller and the person carry on alone.
 
-On **Pipecat** both phone calls end in WebSockets on the bot process, so there is nothing to leave: the bot stays on the call, silent, copying audio between the two sockets until someone hangs up.
+On **Pipecat** both phone calls end in WebSockets on the bot process, so there is nothing to leave: the bot stays on the call, silent, copying audio between the two sockets until someone hangs up. That also means one warm transfer is two carrier calls but still one session, so it counts once against `max_sessions` and twice on your phone bill.
 
 The caller cannot tell the difference: either way they stop hearing the agent and start hearing the person. It matters if you are reading logs, counting sessions, or [sizing capacity](channels-and-capacity.md), because a Pipecat warm transfer keeps its session open for the whole conversation.
