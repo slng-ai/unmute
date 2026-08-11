@@ -12,7 +12,7 @@ type Agent struct {
 	Listen       string                `json:"listen,omitempty" yaml:"listen,omitempty"`
 	Turn         string                `json:"turn,omitempty" yaml:"turn,omitempty"`
 	Variables    map[string]Variable   `json:"variables,omitempty" yaml:"variables,omitempty"`
-	Secrets      map[string]Secret     `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	Secrets      []string              `json:"secrets,omitempty" yaml:"secrets,omitempty"`
 	Agents       map[string]AgentDef   `json:"agents" yaml:"agents"`
 	Tasks        map[string]Task       `json:"tasks,omitempty" yaml:"tasks,omitempty"`
 	TaskGroups   map[string]TaskGroup  `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
@@ -83,13 +83,9 @@ type Variable struct {
 	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
-// Secret is a declared runtime environment value. Its name is the map key in
-// Agent.Secrets; Required is settled in Build (default true), so every consumer
-// reads a decided value.
-type Secret struct {
-	Description string `json:"description,omitempty" yaml:"description,omitempty"`
-	Required    bool   `json:"required" yaml:"required"`
-}
+// Agent.Secrets is the declared environment names, sorted in Build. A secret has
+// no fields: the name is the whole declaration, and every declared name is
+// required.
 
 type PrimitiveType string
 

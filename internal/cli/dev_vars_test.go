@@ -47,6 +47,7 @@ func TestCallStartPayload(t *testing.T) {
 		{"undeclared name", "nickname=Ada", `no variable "nickname" is declared`},
 		{"missing equals", "name", "must be name=value"},
 		{"runtime-owned source", "dialed_number=+15551234567", "the runtime supplies it"},
+		{"conversation source", "reschedule_to=friday at 3 pm", "saves it mid-call through update_variables"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := callStartPayload(agent, []string{tc.flag})

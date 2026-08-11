@@ -58,7 +58,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		Listen:       listenName,
 		Turn:         turnName,
 		Variables:    make(map[string]Variable, len(pkg.Agent.Variables)),
-		Secrets:      make(map[string]Secret, len(pkg.Agent.Secrets)),
+		Secrets:      slices.Sorted(slices.Values(pkg.Agent.Secrets)),
 		Agents:       make(map[string]AgentDef, len(pkg.Agent.Agents)),
 		Tasks:        make(map[string]Task, len(pkg.Agent.Tasks)),
 		TaskGroups:   make(map[string]TaskGroup, len(pkg.Agent.TaskGroups)),
@@ -77,13 +77,6 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 			Type: PrimitiveType(variable.Type), Default: variable.Default,
 			Source: VariableSource(variable.Source), Description: variable.Description,
 		}
-	}
-	for name, secret := range pkg.Agent.Secrets {
-		required := true
-		if secret.Required != nil {
-			required = *secret.Required
-		}
-		out.Secrets[name] = Secret{Description: secret.Description, Required: required}
 	}
 	for name, tool := range pkg.Tools {
 		built := buildTool(name, tool)

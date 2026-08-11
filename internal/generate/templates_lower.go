@@ -2,6 +2,7 @@ package generate
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -205,16 +206,9 @@ func captureDescription(agent *ir.Agent, names []string) string {
 }
 
 // requiredSecretEnv lists the declared secrets a generated runtime refuses to
-// start without, in name order (V12).
+// start without, in name order (V12). Every declared secret is required.
 func requiredSecretEnv(agent *ir.Agent) []string {
-	var names []string
-	for name, secret := range agent.Secrets {
-		if secret.Required {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
+	return slices.Clone(agent.Secrets)
 }
 
 // reportVariable is one variable as the compile report lists it: what it is,
@@ -231,8 +225,6 @@ type reportVariable struct {
 // sites that reference it so an unused declaration is visible too.
 type reportSecret struct {
 	Name         string   `json:"name"`
-	Required     bool     `json:"required"`
-	Description  string   `json:"description,omitempty"`
 	ReferencedBy []string `json:"referenced_by,omitempty"`
 }
 
@@ -256,57 +248,28 @@ func reportVariables(agent *ir.Agent) []reportVariable {
 
 // reportSecrets lists every declared secret with the sites naming it.
 func reportSecrets(agent *ir.Agent) []reportSecret {
-	names := make([]string, 0, len(agent.Secrets))
-	for name := range agent.Secrets {
-		names = append(names, name)
-	}
-	sort.Strings(names)
 	sites := ir.EnvReferenceSites(agent)
-	out := make([]reportSecret, 0, len(names))
-	for _, name := range names {
-		secret := agent.Secrets[name]
-		out = append(out, reportSecret{
-			Name: name, Required: secret.Required, Description: secret.Description,
-			ReferencedBy: sites[name],
-		})
+	out := make([]reportSecret, 0, len(agent.Secrets))
+	for _, name := range agent.Secrets {
+		out = append(out, reportSecret{Name: name, ReferencedBy: sites[name]})
 	}
 	return out
 }
 
-// secretDoc is one declared secret as the .env.example renders it (V11).
-type secretDoc struct {
-	Name        string
-	Description string
-	Optional    bool
-	// Source names where a non-secret env name comes from (a connection file),
-	// so a reader can tell declared secrets from route-supplied ones.
-	Source string
-}
-
-// secretDocs builds the .env.example model: declared secrets first, then env
-// names the package references without declaring, each labeled.
-func secretDocs(agent *ir.Agent, required []string) []secretDoc {
+// secretEnvDocs builds the .env.example model in two lists: the declared
+// secrets, then the env names the route needs that the package never declared,
+// which the template labels once as a group (V11). A secret carries no fields, so
+// a name is the whole entry.
+func secretEnvDocs(agent *ir.Agent, required []string) (declared, extra []string) {
 	// A package that declares nothing keeps the plain name list it always had,
 	// so nothing about its output changes (V16).
 	if len(agent.Secrets) == 0 {
-		return nil
-	}
-	docs := make([]secretDoc, 0, len(required))
-	declared := make(map[string]bool, len(agent.Secrets))
-	names := make([]string, 0, len(agent.Secrets))
-	for name := range agent.Secrets {
-		names = append(names, name)
-		declared[name] = true
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		secret := agent.Secrets[name]
-		docs = append(docs, secretDoc{Name: name, Description: secret.Description, Optional: !secret.Required})
+		return nil, nil
 	}
 	for _, name := range required {
-		if !declared[name] {
-			docs = append(docs, secretDoc{Name: name, Source: "required by the target or a connection"})
+		if !slices.Contains(agent.Secrets, name) {
+			extra = append(extra, name)
 		}
 	}
-	return docs
+	return slices.Clone(agent.Secrets), extra
 }

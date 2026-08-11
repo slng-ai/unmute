@@ -1,9 +1,10 @@
 # Sage and Stone Salon support desk: the smallest package that exercises
 # variables and secrets and that you can talk to in a browser right away.
 #
-# Nothing external is needed. The channel is web audio (no phone number), the
-# tools are local Python fixtures (no API to stand up), and the only secrets are
-# the two model keys.
+# Nothing external is needed. The channel is web audio (no phone number) and the
+# tools are local Python fixtures (no API to stand up), so no secret is spent on
+# a tool: the two model keys and the three Langfuse values below are all consumed
+# by the runtime itself.
 version: 1
 entry_agent: support_desk
 
@@ -24,10 +25,11 @@ variables:
     description: The service the caller wants, for example a haircut or a colour. Save it as soon as they say it.
 
 secrets:
-  OPENAI_API_KEY:
-    description: Key for the think model (OpenAI).
-  SLNG_API_KEY:
-    description: Key for the SLNG speech models (listen and speak).
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+  - LANGFUSE_BASE_URL
+  - LANGFUSE_SECRET_KEY
+  - LANGFUSE_PUBLIC_KEY
 
 models:
   think:
@@ -68,6 +70,9 @@ conversation:
     text: "Hi {{customer_name}}, thanks for calling Sage and Stone Salon. What can I do for you?"
   interruption:
     enabled: true
+
+tracing:
+  provider: langfuse
 
 channels:
   web:

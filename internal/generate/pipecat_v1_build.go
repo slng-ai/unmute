@@ -144,7 +144,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		slices.Sort(data.Deps)
 	}
 	data.RequiredEnv = env.sorted()
-	data.Secrets = secretDocs(agent, data.RequiredEnv)
+	data.Secrets, data.ExtraEnv = secretEnvDocs(agent, data.RequiredEnv)
 	return data, nil
 }
 

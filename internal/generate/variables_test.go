@@ -129,8 +129,9 @@ func TestSystemVariableDoesNotGateToolCall(t *testing.T) {
 	}
 }
 
-// Declared secrets drive .env.example, with each description above its name and
-// referenced-but-undeclared names labeled (V11).
+// Declared secrets drive .env.example, one bare name per line, with
+// referenced-but-undeclared names labeled (V11). A secret has no description to
+// carry: the name is the whole declaration.
 func TestEnvExampleDocumentsSecrets(t *testing.T) {
 	agent := loadOutboundReminder(t)
 	for _, name := range []string{"pipecat", "livekit"} {
@@ -140,9 +141,9 @@ func TestEnvExampleDocumentsSecrets(t *testing.T) {
 		}
 		env := artifactFile(t, artifact, ".env.example")
 		for _, want := range []string{
-			"# Bearer token for the salon booking API.\nSALON_API_TOKEN=",
-			"# Base URL of the salon booking API.\nSALON_API_URL=",
-			"# required by the target or a connection\nTWILIO_ACCOUNT_SID=",
+			"SALON_API_TOKEN=\nSALON_API_URL=",
+			"# required by the target or a connection\n",
+			"TWILIO_ACCOUNT_SID=",
 		} {
 			if !strings.Contains(env, want) {
 				t.Errorf("%s .env.example missing %q", name, want)

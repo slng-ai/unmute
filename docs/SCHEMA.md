@@ -80,8 +80,8 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
   `{{variable}}` now substitutes, in exactly four places: `conversation.greeting.text`, agent and task instructions, tool `inject:` values, and `webhook.path`. The first two render **once at session start**, so they may only name a variable that has a value by then — an input variable, a system variable, or any variable with a `default`; a conversation variable without a default is an error there, because prompts are never re-rendered mid-call. The last two render **per tool call**, so a conversation variable is fine. A token that is not a declared variable fails with file:line, and one naming a secret fails saying secrets never flow through templates.
   Declaring any conversation variable makes the drivers emit one tool, **`update_variables`**, whose parameters are exactly those variables with their types and descriptions, all optional, attached to every agent and task. The name is reserved. This is a deliberate exception to D8: it is generated plumbing like the `requires` guard, not a package tool.
   Input variables arrive as one flat JSON object of name to value: the job dispatch metadata on LiveKit, the runner's call-start payload on Pipecat, and `unmute dev --var name=value` locally (which parses each value against its declared type and refuses an undeclared name). Full detail, including the per-target gates, in [docs/spec/variable_secrets_specs.md](spec/variable_secrets_specs.md).
-- **N24 (2026-08-10).** A new top-level `secrets:` block declares the runtime environment values a package needs. The map **key is the environment variable name** (`UPPER_SNAKE`), and the only fields are `description` and `required` (default `true`). There is deliberately no `default:` or `example:` field: anywhere a value could be written, one day a real one will be, and D12 says values never appear in any package file. Secrets are **never** reachable from a template (that is what N23's error says); they reach the call only through the existing `*_env` slots, the generated auth helpers, and `os.environ` in a local Python handler.
-  Two things follow from declaring them. Each code target's build writes a `build/<target>/.env.example` carrying every declared secret with its description above it, optional ones marked, plus the env names the route needs, and the referenced-but-undeclared ones labeled as such. And a generated runtime refuses to start when a `required: true` secret is missing or empty, naming it — the same contract tracing already had (4.11). An env name the package references but does not declare is a **warning on stderr, exit 0**, never an error: declaring secrets is opt-in, and a package written before this block existed still compiles unchanged.
+- **N24 (2026-08-10, amended 2026-08-11).** A new top-level `secrets:` block declares the runtime environment values a package needs, as a **list of environment variable names** (`UPPER_SNAKE`). A secret has **no fields at all**. The block began as a map with `description` and `required`, and both are gone: a description restated the name it sat above and then had to be kept true in a second place, and `required: false` bought an optional-credential case no package ever wrote. Every listed name is required, a repeat is an error, and there is deliberately no `default:` or `example:` field, because anywhere a value could be written one day a real one will be, and D12 says values never appear in any package file. Secrets are **never** reachable from a template (that is what N23's error says); they reach the call only through the existing `*_env` slots, the generated auth helpers, and `os.environ` in a local Python handler.
+  Two things follow from declaring them. Each code target's build writes a `build/<target>/.env.example` listing every declared name, then the env names the route needs that the package never declared, labeled once as a group. And a generated runtime refuses to start when a declared secret is missing or empty, naming it — the same contract tracing already had (4.11). An env name the package references but does not declare is a **warning on stderr, exit 0**, never an error: declaring secrets is opt-in, and a package written before this block existed still compiles unchanged.
 - **N16 (added 2026-07-20).** Telephony compilation is scoped to
   LiveKit and Pipecat. A telephony target selects exactly one Connection and
   one exact `(orchestrator, transport, carrier)` route. Connections live in
@@ -134,7 +134,7 @@ Named maps instead of lists, so every item has a stable identity and diffs stay 
 | `listen` | only when `models.listen` has 2+ entries | name of a listen model, see 4.2 | gated |
 | `turn` | only when `models.turn` has 2+ entries | name of a turn model, see 4.2 | warn |
 | `variables` | no | map, see 4.4 | core |
-| `secrets` | no | map of env var name to `{description, required}`, see 4.12 | core |
+| `secrets` | no | list of env var names, see 4.12 | core |
 | `agents` | yes, must include `entry_agent` | map, see 4.5 | core |
 | `tasks` | no | map, see 4.6 | gated (T1) |
 | `task_groups` | no | map, see 4.6 | gated (T1) |
@@ -393,27 +393,21 @@ checked-in packages under `examples/` include it.
 
 ### 4.12 secrets (added 2026-08-10, N24)
 
-The runtime environment values the package needs. The map **key is the
-environment variable name**; there is no field a value could be written into
-(D12).
+The runtime environment values the package needs, as a **list of environment
+variable names**. A secret has no fields, so there is nothing a value could be
+written into (D12).
 
 ```yaml
 secrets:
-  SALON_API_URL:
-    description: Base URL of the booking API.
-  SALON_API_TOKEN:
-    description: Bearer token for the booking API.
-  OPENAI_API_KEY:
-    description: Key for the think model.
-    required: true
+  - SALON_API_URL
+  - SALON_API_TOKEN
+  - OPENAI_API_KEY
 ```
 
-| Field | Required | Values | Tag | Notes |
-|---|---|---|---|---|
-| `description` | no | text | core | For humans, and for the generated `.env.example`. |
-| `required` | no, default `true` | bool | core | `true`: a generated runtime refuses to start without it, naming it. `false` marks an optional feature's credential. |
+Every listed name is required: a generated runtime refuses to start without it,
+naming it. A name listed twice is an error, because a repeat is a typo.
 
-The key must be `UPPER_SNAKE`, the same rule every `*_env` field follows (N19),
+Each name must be `UPPER_SNAKE`, the same rule every `*_env` field follows (N19),
 so a pasted URL or secret fails validation instead of becoming a lookup that
 fails at call time. Secrets never flow through `{{...}}` templates (N23): they
 reach the call through `*_env` fields, the generated auth helpers, and

@@ -240,7 +240,8 @@ type pipecatData struct {
 	Variables           []pipecatVariable
 	CallStartVars       []pipecatCallStartVar // dispatched input variables (I.dispatch)
 	Capture             *pipecatCapture       // generated update_variables tool; nil without conversation variables
-	Secrets             []secretDoc           // declared secrets, for .env.example (V11)
+	Secrets             []string              // declared secrets, for .env.example (V11)
+	ExtraEnv            []string              // env the route needs that the package never declared
 	GreetingExpr        string                // Python expression for the fixed greeting line
 	GreetingText        string
 	GreetingInstruction string

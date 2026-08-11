@@ -4,37 +4,19 @@
 
 ```yaml
 secrets:
-  SALON_API_URL:
-    description: Base URL of the booking API.
-  SALON_API_TOKEN:
-    description: Bearer token for the booking API.
-  OPENAI_API_KEY:
-    description: Key for the think model.
-  SEGMENT_WRITE_KEY:
-    description: Analytics, only used when the customer opts in.
-    required: false
+  - SALON_API_URL
+  - SALON_API_TOKEN
+  - OPENAI_API_KEY
 ```
 
-The map key **is** the environment variable name, so it must be `UPPER_SNAKE`. There is no `default` or `example` field, on purpose: any field that could hold a value would eventually hold a real one.
+It is a plain list of environment variable names, each `UPPER_SNAKE`. A secret has no fields at all: no `description`, no `required`, and above all no `default` or `example`, because any field that could hold a value would eventually hold a real one. The name is the whole declaration, and every name you list is required.
 
-## Fields
-
-### description
-
-What the value is and where it comes from. It appears above the name in the generated `.env.example`, and in the compile report.
-
-Required: no. Values: text. Default: none.
-
-### required
-
-Whether the agent can run without it. With `required: true` (the default), a generated runtime refuses to start when the value is missing or empty, and names it. `required: false` marks a credential for an optional feature.
-
-Required: no. Values: `true | false`. Default: `true`.
+Listing the same name twice is an error, since a repeat is always a typo.
 
 ## What declaring them gives you
 
-- **A filled-in `.env.example`** in every build: each declared secret with its description above it, optional ones marked, plus the environment names your target and telephony connection need. Copy it to `.env` and fill in the blanks.
-- **A startup check**: a missing required value fails the agent immediately, with the name and description in the message, instead of surfacing as a confusing failure on the first tool call.
+- **A filled-in `.env.example`** in every build: every declared name, plus the environment names your target and telephony connection need, grouped and labeled. Copy it to `.env` and fill in the blanks.
+- **A startup check**: a missing value fails the agent immediately and names it, instead of surfacing as a confusing failure on the first tool call.
 - **A cross-check**: if your package references an environment variable it never declares, `unmute validate` prints a warning naming it and the file that references it. It is a warning, not an error, so adopting the block is never a breaking change.
 
 ## How a secret reaches the call

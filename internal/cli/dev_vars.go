@@ -32,8 +32,16 @@ func callStartPayload(agent *ir.Agent, flags []string) (string, error) {
 		if !declared {
 			return "", fmt.Errorf("--var %s: no variable %q is declared in agent.yaml", flag, name)
 		}
-		if ir.IsSystemSource(variable.Source) {
-			return "", fmt.Errorf("--var %s: %q has source %s, so the runtime supplies it, not you", flag, name, variable.Source)
+		// Only call_start reads the dispatch payload. A runtime-owned source
+		// arrives from the telephony route and a conversation source is captured
+		// mid-call, so seeding either would be accepted here and then dropped in
+		// build_state — the silent no-op V13 forbids.
+		if variable.Source != ir.VariableSourceCallStart {
+			reason := fmt.Sprintf("the model saves it mid-call through %s", ir.CaptureToolName)
+			if ir.IsSystemSource(variable.Source) {
+				reason = "the runtime supplies it"
+			}
+			return "", fmt.Errorf("--var %s: %q has source %s, so %s, not you", flag, name, variable.Source, reason)
 		}
 		value, err := parseVarValue(variable.Type, raw)
 		if err != nil {

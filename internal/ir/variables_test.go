@@ -87,7 +87,7 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 		{
 			name: "a secret key is an environment variable name",
 			mutet: func(pkg *packagespec.Package) {
-				pkg.Agent.Secrets = map[string]packagespec.Secret{"salon_token": {}}
+				pkg.Agent.Secrets = []string{"salon_token"}
 			},
 			want: "must be an UPPER_SNAKE environment variable name",
 		},
@@ -105,7 +105,7 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			pkg := loadSafeCore(t)
 			// Every case needs a variable to point at and a secret to confuse it with.
 			pkg.Agent.Variables["customer_id"] = packagespec.Variable{Type: "string", Source: "call_start", Default: "cus_1"}
-			pkg.Agent.Secrets = map[string]packagespec.Secret{"SALON_API_TOKEN": {Description: "token"}}
+			pkg.Agent.Secrets = []string{"SALON_API_TOKEN"}
 			if pkg.Agent.Conversation == nil {
 				pkg.Agent.Conversation = &packagespec.Conversation{}
 			}
@@ -167,7 +167,7 @@ func TestValidateGatesVariableFeatures(t *testing.T) {
 // and a package that declares some but not all still compiles (V10, C7).
 func TestUndeclaredSecretIsWarningOnly(t *testing.T) {
 	pkg := loadSafeCore(t)
-	pkg.Agent.Secrets = map[string]packagespec.Secret{"SALON_API_TOKEN": {Description: "token"}}
+	pkg.Agent.Secrets = []string{"SALON_API_TOKEN"}
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)

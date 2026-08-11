@@ -4,6 +4,10 @@
 version: 1
 entry_agent: greeter
 
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+
 models:
   think:
     reasoning:

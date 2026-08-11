@@ -27,14 +27,20 @@ var systemSources = []VariableSource{
 // conversation. Both drivers and the telephony plan key off this.
 func IsSystemSource(source VariableSource) bool { return slices.Contains(systemSources, source) }
 
-// checkSecrets enforces the secrets block's shape: the key IS the environment
-// variable name, so a lower-case or punctuated key is a typo that would
-// otherwise become a lookup failing at call time (V8).
+// checkSecrets enforces the secrets block's shape: an entry IS the environment
+// variable name, so a lower-case or punctuated one is a typo that would
+// otherwise become a lookup failing at call time (V8). A repeat is a typo too,
+// and a list, unlike the map this used to be, cannot catch one on its own.
 func checkSecrets(pkg *packagespec.Package) error {
-	for _, name := range sortedKeys(pkg.Agent.Secrets) {
+	seen := make(map[string]bool, len(pkg.Agent.Secrets))
+	for _, name := range pkg.Agent.Secrets {
 		if !envNamePattern.MatchString(name) {
 			return fmt.Errorf("%s: secret %q must be an UPPER_SNAKE environment variable name", pkg.Location("agent.yaml", name), name)
 		}
+		if seen[name] {
+			return fmt.Errorf("%s: secret %q is declared twice", pkg.Location("agent.yaml", name), name)
+		}
+		seen[name] = true
 	}
 	return nil
 }
@@ -94,7 +100,7 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 		where := pkg.Location(file, firstNonBlank(token, "{{"))
 		variable, ok := agent.Variables[ref]
 		if !ok {
-			if _, isSecret := agent.Secrets[ref]; isSecret || envNamePattern.MatchString(ref) {
+			if slices.Contains(agent.Secrets, ref) || envNamePattern.MatchString(ref) {
 				return fmt.Errorf("%s: %s references {{%s}}, but secrets never flow through templates; a secret reaches a tool through its own *_env field", where, site, ref)
 			}
 			return fmt.Errorf("%s: %s references {{%s}}, which is not a declared variable", where, site, ref)

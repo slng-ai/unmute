@@ -340,7 +340,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	data.PluginModules = collectLiveKitPlugins(data)
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
-	data.Secrets = secretDocs(agent, data.RequiredEnv)
+	data.Secrets, data.ExtraEnv = secretEnvDocs(agent, data.RequiredEnv)
 	return data, nil
 }
 

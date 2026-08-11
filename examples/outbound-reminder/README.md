@@ -33,7 +33,8 @@ the bearer auth of both tools, and the model keys are listed so the generated
 ## Run it
 
 Compile both targets, then copy either generated env template and fill it in.
-The template lists each declared secret with its description above it:
+The template lists every declared secret, then the names the target and the
+connection need, grouped under one label:
 
 ```sh
 bin/unmute compile examples/outbound-reminder

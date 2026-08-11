@@ -301,7 +301,8 @@ type livekitData struct {
 	Vars             []livekitVar
 	CallStartVars    []livekitCallStartVar // dispatched input variables (I.dispatch)
 	Capture          *livekitCapture       // generated update_variables tool; nil without conversation variables
-	Secrets          []secretDoc           // declared secrets, for .env.example (V11)
+	Secrets          []string              // declared secrets, for .env.example (V11)
+	ExtraEnv         []string              // env the route needs that the package never declared
 	RequiredSecrets  []string              // required secrets: a startup check refuses to run without them (V12)
 	LocalTools       []livekitLocalTool    // copied handler files (tools/<name>.py)
 	Pins             map[string]string     // plugin pins (C6): raise dep floors

@@ -17,7 +17,7 @@ A voice agent runs on four kinds of runtime values, and today only half of them 
 3. **Conversation variables**: learned by the model during the call. An inbound agent asks who is calling, saves `name` and `callback_number`, and later tools and transfers use them like any other variable.
 4. **Secrets**: runtime environment values. An API bearer token, a webhook base URL, a model key. Declared by name, never by value (D12), and consumed by tool auth, webhook URLs, and local Python handlers.
 
-The goal is one small authoring surface for all four: a `variables:` block (already exists, extended) and a `secrets:` block (new), plus one template syntax `{{name}}` that works in the greeting, in prompts, in hidden tool parameters, and in webhook URL paths. Everything is declared in the package with a description and an optional default, so `unmute` can validate references at compile time, generate a `.env.example`, check required env at startup, and give the model a typed way to save what it learns.
+The goal is one small authoring surface for all four: a `variables:` block (already exists, extended) and a `secrets:` block (new), plus one template syntax `{{name}}` that works in the greeting, in prompts, in hidden tool parameters, and in webhook URL paths. A variable is declared with a description and an optional default, a secret with nothing but its name, so `unmute` can validate references at compile time, generate a `.env.example`, check required env at startup, and give the model a typed way to save what it learns.
 
 **Naming decision.** The request proposed "system variables and LLM variables" as two blocks. This spec keeps **one `variables:` block** and puts the origin in the existing `source:` field instead, because origin is a property of a variable, not a different kind of thing: every consumer (`{{name}}` templates, `assign:`, `requires:`, tool injection) works on any variable no matter where its value came from, and a variable that changes origin (a `name` that is dispatched on outbound but asked for on inbound) should not have to move between blocks. The prose vocabulary is: **input variables** (`source: call_start`), **system variables** (the runtime-owned sources, already the schema's term), **conversation variables** (`source: conversation`, new). "LLM variables" is not schema vocabulary: every `source:` value names where the value comes from (the call start, the carrier, the conversation), not which component writes it. Secrets stay a separate block because they are a different thing entirely: env names with no type, no default, no template access, and a hard rule that values never appear in any file.
 
@@ -56,20 +56,16 @@ The goal is one small authoring surface for all four: a `variables:` block (alre
 
   `description` is legal on every variable. It feeds the generated capture tool schema, the dispatch section of the generated README, and the compile report. Any variable, whatever its source, may still be an `assign:` target and a `requires:` guard exactly as today.
 
-- I.authoring.secrets: `agent.yaml`, new top-level block. Key = env var name:
+- I.authoring.secrets: `agent.yaml`, new top-level block. A list of env var names:
 
   ```yaml
   secrets:
-    SALON_API_URL:
-      description: Base URL of the booking API.
-    SALON_API_TOKEN:
-      description: Bearer token for the booking API.
-    OPENAI_API_KEY:
-      description: Key for the think model.
-      required: true              # default true; false = optional feature
+    - SALON_API_URL
+    - SALON_API_TOKEN
+    - OPENAI_API_KEY
   ```
 
-  Fields: `description` (optional text), `required` (optional bool, default `true`). Nothing else.
+  No fields. The name is the whole declaration, every listed name is required, and a repeat is an error.
 
 - I.authoring.tool: `tools/<name>.yaml` gains one top-level field and one webhook field:
 
@@ -114,11 +110,11 @@ The goal is one small authoring surface for all four: a `variables:` block (alre
 
 - I.capture: the generated `update_variables` tool (C6). Description: "Save details the caller gives you, as soon as you learn them." plus one line per variable from its `description`. Input schema: one optional property per conversation variable, `additionalProperties: false`. Returns the saved names so the model gets confirmation. Unset means no value was ever provided; a declared `default` counts as a value; in emitted Python an unset conversation variable is `None` (fields are `Optional`), which is also what the `requires` guard and call-time refusal test.
 
-- I.pipecat.lowering: conversation variables become `State` fields defaulting to `None` (or the declared default); `update_variables` is one function-tool writing `self.state`; `render(text, state)` is a module-level helper (regex `{{\s*([a-z_][a-z0-9_]*)\s*}}`) applied to the greeting `TTSSpeakFrame` text and to each agent's and task's instructions at session start; the webhook helper merges rendered `inject` pairs into the body and appends the rendered, URL-encoded `path` to the base URL; the existing missing-env startup check (`bot.py` already raises on missing required env) extends to every `required: true` secret.
+- I.pipecat.lowering: conversation variables become `State` fields defaulting to `None` (or the declared default); `update_variables` is one function-tool writing `self.state`; `render(text, state)` is a module-level helper (regex `{{\s*([a-z_][a-z0-9_]*)\s*}}`) applied to the greeting `TTSSpeakFrame` text and to each agent's and task's instructions at session start; the webhook helper merges rendered `inject` pairs into the body and appends the rendered, URL-encoded `path` to the base URL; the existing missing-env startup check (`bot.py` already raises on missing required env) extends to every declared secret.
 
 - I.livekit.lowering: same shape on LiveKit vocabulary: conversation variables are `userdata` fields, `update_variables` is an `@function_tool` on every agent and task, `render` applies to `session.say`/greeting emission and instructions at construction, webhook helper and startup check as on Pipecat, dispatch metadata parsed into `userdata` at job start.
 
-- I.artifacts: every code-target build writes `build/<target>/.env.example`: each declared secret as a comment line (the description) plus `NAME=`, sorted, `required: false` ones marked optional; then the resolved Connection's env names (marked with the connection file they come from); then a commented section for referenced-but-undeclared env names (V10). The compile report gains a `variables` section (name, type, source, has-default, description) and a `secrets` section (name, required, referenced-by).
+- I.artifacts: every code-target build writes `build/<target>/.env.example`: each declared secret as a bare `NAME=` line, sorted; then one labeled group holding the resolved Connection's env names and any referenced-but-undeclared ones (V10). The compile report gains a `variables` section (name, type, source, has-default, description) and a `secrets` section (name, referenced-by).
 
 - I.schema.doc: SCHEMA.md amendments, landing with the feature (repo rule: doc wins):
   - New decision **N23** (variables): `description` field, `source: conversation`, the template contract (sites, render times, refusal), the generated `update_variables` tool and its D8 exception, C11's no-re-render rule.
@@ -134,11 +130,11 @@ The goal is one small authoring surface for all four: a `variables:` block (alre
 - V5: `source: conversation` resolved onto a target whose `FieldVariableConversation` is deny fails in that provider's own words; same for `FieldToolInject`, `FieldWebhookPath`, and `FieldTemplates` (C9).
 - V6: when at least one conversation variable exists, both shipped drivers emit `update_variables` attached to every agent and task, its schema listing exactly the conversation variables with their types and descriptions, `additionalProperties: false`. With zero conversation variables the tool does not exist anywhere in the output.
 - V7: `update_variables` is reserved: a user tool or control with that name fails with both names cited (C6). The generated tool lives in the one tool/control namespace (compiler C10).
-- V8: secret keys are valid `UPPER_SNAKE` env names; anything else fails with file:line naming the key. `secrets:` entries carry only `description` and `required` (strict decode).
+- V8: secret entries are valid `UPPER_SNAKE` env names; anything else fails with file:line naming the entry, as does the same name listed twice. `secrets:` is a list of names and carries no fields (strict decode).
 - V9: no package file ever contains a secret value: the `Secret` struct has no value-shaped field to write (C3), and `*_env` fields keep rejecting non-env-name values (N19).
 - V10: an env name referenced by the package (tool `url_env`, `token_env`, mcp `url_env`, model `endpoint_env`, the tracing trio when `tracing:` is present) but not declared in `secrets:` produces one warning listing each name and the file that references it, stderr exit 0, never an error (C7). Connection env names are exempt (declared in their own file). Declared-but-unreferenced secrets are silent (a local handler may read them in Python).
-- V11: `build/<target>/.env.example` lists every declared secret with its description, marks optional ones, includes the resolved Connection's env names, and appends referenced-but-undeclared names as comments; output is deterministic (sorted).
-- V12: generated runtimes fail startup when a `required: true` secret is missing or empty, with the description in the message, on both shipped drivers (same contract as the tracing env check, SCHEMA 4.11).
+- V11: `build/<target>/.env.example` lists every declared secret by name, then the resolved Connection's env names and any referenced-but-undeclared ones, labeled once as a group; output is deterministic (sorted).
+- V12: generated runtimes fail startup when a declared secret is missing or empty, naming it, on both shipped drivers (same contract as the tracing env check, SCHEMA 4.11).
 - V13: a dispatch value whose type does not match the declared variable type fails call setup naming the variable and the expected type; unknown dispatch keys are logged and ignored. `unmute dev --var` parses values by declared type and rejects undeclared names before starting.
 - V14: an injected value that is exactly one `{{token}}` keeps the variable's declared type in the emitted request; any other string renders to a string; path segments are URL-encoded. Goldens pin all three.
 - V15: templates render once at session start for greeting and instructions, per call for inject and path; no re-render machinery exists in the output (C11).

@@ -38,7 +38,7 @@ type AgentFile struct {
 	Listen       string               `json:"listen,omitempty" yaml:"listen,omitempty"`
 	Turn         string               `json:"turn,omitempty" yaml:"turn,omitempty"`
 	Variables    map[string]Variable  `json:"variables,omitempty" yaml:"variables,omitempty"`
-	Secrets      map[string]Secret    `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	Secrets      []string             `json:"secrets,omitempty" yaml:"secrets,omitempty"`
 	Agents       map[string]AgentDef  `json:"agents" yaml:"agents"`
 	Tasks        map[string]Task      `json:"tasks,omitempty" yaml:"tasks,omitempty"`
 	TaskGroups   map[string]TaskGroup `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
@@ -96,12 +96,6 @@ type Variable struct {
 // Secret declares one runtime environment value the package needs. The map key
 // IS the environment variable name (UPPER_SNAKE), so there is no field a value
 // could ever be written into (variable_secrets_specs.md C3, V9).
-type Secret struct {
-	Description string `json:"description,omitempty" yaml:"description,omitempty"`
-	// Required defaults to true; false marks an optional feature's credential.
-	Required *bool `json:"required,omitempty" yaml:"required,omitempty"`
-}
-
 type AgentDef struct {
 	Instructions string   `json:"instructions" yaml:"instructions"`
 	Model        string   `json:"model" yaml:"model"`

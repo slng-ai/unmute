@@ -29,14 +29,10 @@ variables:
     description: New slot the customer asks for, in spoken form. Save it as soon as the customer names one.
 
 secrets:
-  SALON_API_URL:
-    description: Base URL of the salon booking API.
-  SALON_API_TOKEN:
-    description: Bearer token for the salon booking API.
-  OPENAI_API_KEY:
-    description: Key for the think model.
-  SLNG_API_KEY:
-    description: Key for the SLNG speech models.
+  - SALON_API_URL
+  - SALON_API_TOKEN
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
 
 models:
   think:

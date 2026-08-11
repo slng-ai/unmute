@@ -1169,7 +1169,7 @@ func undeclaredSecretWarning(agent *Agent) string {
 	refs := referencedEnvNames(agent)
 	var missing []string
 	for _, name := range slices.Sorted(maps.Keys(refs)) {
-		if _, declared := agent.Secrets[name]; !declared {
+		if !slices.Contains(agent.Secrets, name) {
 			missing = append(missing, fmt.Sprintf("%s (%s)", name, refs[name]))
 		}
 	}
