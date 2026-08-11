@@ -1788,3 +1788,55 @@ func TestPipecatWebDevNeedsNoTelephonyEnv(t *testing.T) {
 		}
 	}
 }
+
+// T5: Daily's sip_call_transfer reports failure as a return value, never an
+// exception, so the generated cold tool must read it — an ignored error tells
+// the model the caller was transferred while they are still on the line. The
+// on_unavailable policy picks the branch: return_to_caller hands the model a
+// failure string; hangup says a goodbye and ends the call.
+func TestV1_DailyColdTransferHandlesTheReturnedError(t *testing.T) {
+	build := func(onUnavailable ir.OnUnavailable) string {
+		pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent, err := ir.Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		human := agent.Controls["to_human"].(*ir.HumanTransfer)
+		human.OnUnavailable = onUnavailable
+		artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return artifactFile(t, artifact, "bot.py")
+	}
+
+	returned := build(ir.OnUnavailableReturn)
+	for _, want := range []string{
+		"error = \"the transport is not connected\" if _TRANSPORT is None else (",
+		"await _TRANSPORT.sip_call_transfer(",
+		"if error is not None:",
+		"Tell the caller and keep helping them.",
+	} {
+		if !strings.Contains(returned, want) {
+			t.Errorf("return_to_caller bot.py missing %q", want)
+		}
+	}
+	if strings.Contains(returned, "the call is ending") {
+		t.Error("return_to_caller bot.py must not end the call on a failed transfer")
+	}
+
+	hangup := build(ir.OnUnavailableHangup)
+	for _, want := range []string{
+		"if error is not None:",
+		"nobody can take the call right now",
+		"The transfer could not be completed; the call is ending.",
+		"await params.llm.push_frame(EndFrame())",
+	} {
+		if !strings.Contains(hangup, want) {
+			t.Errorf("hangup bot.py missing %q", want)
+		}
+	}
+}

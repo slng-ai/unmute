@@ -300,11 +300,11 @@ func setImportNeeds(data *pipecatData) {
 		for _, t := range a.Tools {
 			if t.ColdDestination != "" {
 				// Daily SIP cold: the bot announces via an LLM append (the REFER
-				// keeps it streaming, B14) and ends its leg once the transfer
-				// completes.
+				// keeps it streaming, B14). EndFrame is only pushed when a failed
+				// transfer must hang up (T5).
 				data.HasColdTransfer = true
 				data.NeedsAppendFrame = true
-				data.NeedsEndFrame = true
+				data.NeedsEndFrame = data.NeedsEndFrame || t.HangupOnUnavailable
 				continue
 			}
 			if t.Builtin != "" {
@@ -726,6 +726,7 @@ func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target
 	case ir.TransferCold:
 		tool.EndsCall = true
 		tool.ColdDestination = pipecatDestinationExpr(destination, env)
+		tool.HangupOnUnavailable = c.OnUnavailable == ir.OnUnavailableHangup
 		return tool, nil
 	case ir.TransferWarm:
 		return pipecatTool{}, fmt.Errorf("human transfer %q: Pipecat has no native warm transfer; warm compiles on (livekit, sip) only", name)

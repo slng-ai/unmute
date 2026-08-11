@@ -139,6 +139,10 @@ type pipecatTool struct {
 	EndsCall        bool
 	Interruption    string // "cancel" | "continue" | "" (provider default)
 	ColdDestination string // set for a cold human_transfer: the resolved number/SIP URI (Daily SIP only)
+	// HangupOnUnavailable is the cold block's on_unavailable: hangup — a failed
+	// transfer says a goodbye and ends the call instead of returning the model
+	// a failure string (T5).
+	HangupOnUnavailable bool
 }
 
 // pipecatLocalTool is a copied handler file: tools/<name>.py in the project.

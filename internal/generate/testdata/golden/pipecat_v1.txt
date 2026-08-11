@@ -295,9 +295,17 @@ class BillingAgent(LLMWorker):
                 run_llm=True,
             )
         )
-        if _TRANSPORT is not None:
+        error = "the transport is not connected" if _TRANSPORT is None else (
             await _TRANSPORT.sip_call_transfer({"toEndPoint": "+14155550123"})
-
+        )
+        if error is not None:
+            # A failed transfer is a return value, not an exception, on this
+            # transport (T5). Ignoring it would tell the model the caller was
+            # transferred while they are still right here. on_unavailable
+            # decides what the caller gets instead.
+            logger.warning("cold transfer failed: {}", error)
+            await params.result_callback({"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."})
+            return
         await params.result_callback({"transferred": True})
 
 

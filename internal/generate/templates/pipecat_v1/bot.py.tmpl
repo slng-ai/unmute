@@ -294,9 +294,25 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
                 run_llm=True,
             )
         )
-        if _TRANSPORT is not None:
+        error = "the transport is not connected" if _TRANSPORT is None else (
             await _TRANSPORT.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
-
+        )
+        if error is not None:
+            # A failed transfer is a return value, not an exception, on this
+            # transport (T5). Ignoring it would tell the model the caller was
+            # transferred while they are still right here. on_unavailable
+            # decides what the caller gets instead.
+            logger.warning("cold transfer failed: {}", error)
+{{if .HangupOnUnavailable}}            await params.llm.push_frame(
+                LLMMessagesAppendFrame(
+                    [{"role": "developer", "content": "Tell the caller nobody can take the call right now, apologize, and say goodbye."}],
+                    run_llm=True,
+                )
+            )
+            await params.result_callback({"failed": "The transfer could not be completed; the call is ending."})
+            await params.llm.push_frame(EndFrame())
+{{else}}            await params.result_callback({"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."})
+{{end}}            return
         await params.result_callback({"transferred": True})
 {{else if .Builtin}}{{if .Instructions}}        await params.llm.push_frame(
             LLMMessagesAppendFrame(
