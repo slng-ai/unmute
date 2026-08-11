@@ -330,6 +330,7 @@ func testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t *testing.T, c
 		t.Fatal(err)
 	}
 	enablePackageTelephony(pkg)
+	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Transport = "carrier-websocket"
 	configured.Carrier = carrier
@@ -386,6 +387,7 @@ func TestSmokePipecatTelephonyRuntimeContracts(t *testing.T) { // telephony V20
 				t.Fatal(err)
 			}
 			enablePackageTelephony(pkg)
+			dropHumanTransfer(pkg)
 			configured := pkg.Targets["pipecat"]
 			configured.Transport, configured.Carrier, configured.Connection = "carrier-websocket", carrier, "primary_phone"
 			pkg.Targets = map[string]spec.Target{"pipecat": configured}

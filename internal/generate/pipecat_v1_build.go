@@ -241,10 +241,6 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 			telephony.HasInbound = true
 		case "outbound":
 			telephony.HasOutbound = true
-		case "cold_transfer":
-			telephony.HasCold = true
-		case "warm_transfer":
-			telephony.HasWarm = true
 		}
 	}
 	if telephony.HasOutbound {
@@ -303,21 +299,12 @@ func setImportNeeds(data *pipecatData) {
 		}
 		for _, t := range a.Tools {
 			if t.ColdDestination != "" {
-				data.HasColdTransfer = data.HasColdTransfer || !t.CarrierTransfer
-				// Only the Daily-SIP cold branch speaks via an LLM append; the
-				// carrier route announces inside the redirect TwiML, because a
-				// REST redirect cuts off a bot-spoken line the moment it lands
-				// (B14). So the append frame is needed only off the carrier route.
-				data.NeedsAppendFrame = data.NeedsAppendFrame || !t.CarrierTransfer
-				data.NeedsEndFrame = data.NeedsEndFrame || !t.CarrierTransfer
-				continue
-			}
-			if t.WarmDestination != "" {
-				// warm transfer: a detached conference orchestration. The
-				// briefing still speaks via an LLM append; hold, bridge, and
-				// hang-up are all carrier moves now, so no EndFrame and no mixer.
-				data.HasWarmTransfer = true
+				// Daily SIP cold: the bot announces via an LLM append (the REFER
+				// keeps it streaming, B14) and ends its leg once the transfer
+				// completes.
+				data.HasColdTransfer = true
 				data.NeedsAppendFrame = true
+				data.NeedsEndFrame = true
 				continue
 			}
 			if t.Builtin != "" {
@@ -715,20 +702,21 @@ func pipecatDestinationExpr(destination string, env *envSet) string {
 	return pyLiteral(destination)
 }
 
-// humanTransferTool lowers a human_transfer to a @tool. Cold dials the resolved
-// destination and drops out (V5); warm dials a second leg onto its own media
-// socket, briefs it there, and bridges the two sockets in software, which needs
-// the carrier-WebSocket Twilio route (human-transfer.md C9).
+// humanTransferTool lowers a human_transfer to a @tool. Only cold exists on
+// Pipecat, and only via Daily's native `sip_call_transfer` (SPEC C4, V1):
+// the bot announces, Daily reroutes the leg, the bot drops out. Warm has no
+// Pipecat primitive; the gate rejects it before this runs, and the error here
+// is the defense in depth for a gate bug.
 func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target, env *envSet) (pipecatTool, error) {
+	_ = agent
 	destination, ok := target.Destinations[c.Destination]
 	if !ok {
 		return pipecatTool{}, fmt.Errorf("human transfer %q destination %q missing on target %q", name, c.Destination, target.Name)
 	}
-	carrierTransfer := target.Telephony != nil && target.Telephony.Key.Provider == ir.ProviderPipecat &&
-		target.Telephony.Key.Transport == "carrier-websocket"
-	if !carrierTransfer {
-		env.add("DAILY_API_KEY")
+	if target.Telephony != nil {
+		return pipecatTool{}, fmt.Errorf("human transfer %q: the (%s, %s) route has no transfer primitive; Pipecat cold transfer rides the Daily route (transport daily-sip)", name, target.Telephony.Key.Transport, target.Telephony.Key.Carrier)
 	}
+	env.add("DAILY_API_KEY")
 	desc := c.When
 	if desc == "" {
 		desc = "Transfer the caller to a human."
@@ -738,37 +726,11 @@ func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target
 	case ir.TransferCold:
 		tool.EndsCall = true
 		tool.ColdDestination = pipecatDestinationExpr(destination, env)
-		tool.CarrierTransfer = carrierTransfer
 		return tool, nil
 	case ir.TransferWarm:
-		if !carrierTransfer || target.Telephony.Key.Carrier != "twilio" {
-			return pipecatTool{}, fmt.Errorf("human transfer %q: warm has no Pipecat lowering on route (%s, %s)", name, target.Transport, target.Carrier)
-		}
-		// The bot bridges the two legs for the rest of the call, so a warm
-		// transfer is not an ending tool the way cold is (V6).
-		tool.EndsCall = false
-		// A warm transfer must not be cancelled halfway: the second leg is
-		// already ringing, and a cancelled tool would leave it with nobody.
-		tool.Interruption = "continue"
-		tool.WarmDestination = pipecatDestinationExpr(destination, env)
-		tool.Briefing = c.Briefing
-		tool.RingTimeoutSecs = warmRingTimeout(c.RingTimeout)
-		tool.HangupOnUnavailable = c.OnUnavailable == ir.OnUnavailableHangup
-		tool.LLMBuilder, tool.TTSBuilder = "build_"+agent+"_llm", "build_"+agent+"_tts"
-		return tool, nil
+		return pipecatTool{}, fmt.Errorf("human transfer %q: Pipecat has no native warm transfer; warm compiles on (livekit, sip) only", name)
 	}
 	return pipecatTool{}, fmt.Errorf("human transfer %q mode %q has no Pipecat lowering", name, c.Mode)
-}
-
-// warmRingTimeout renders the ring timeout as a Python float. An unset one is
-// Twilio's own dial default (60 seconds), which is what "platform default"
-// means on this route.
-func warmRingTimeout(value ir.Duration) string {
-	secs := durationSecs(value)
-	if secs <= 0 {
-		return "60.0"
-	}
-	return fmt.Sprintf("%d.0", secs)
 }
 
 // inputFields flattens a tool input JSON Schema object into ordered args,

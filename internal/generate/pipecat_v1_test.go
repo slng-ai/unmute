@@ -966,6 +966,7 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		t.Fatal(err)
 	}
 	enablePackageTelephony(pkg)
+	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Transport = "carrier-websocket"
 	configured.Carrier = "twilio"
@@ -995,10 +996,8 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		`_validator().validate(_http_url(request.url.path), form, signature)`,
 		`_validator().validate(`,
 		`STATE.mark_once("inbound", call_id, SESSION_TTL_SECS)`,
-		`STATE.mark_once("transfer", call_id, SESSION_TTL_SECS)`,
 		`STATE.mark_once("status", event_id, SESSION_TTL_SECS)`,
 		`status_callback_event=["initiated", "ringing", "answered", "completed"]`,
-		`await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))`,
 		`destination, call_start = await _outbound_request(request)`,
 		`except TwilioRestException as exc:`,
 		`Twilio rejected the outbound call:`,
@@ -1063,7 +1062,6 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		`telephony.configure_pipecat_env()`,
 		`call_context = telephony.normalized_context(runner_args)`,
 		`agents = [BillingAgent(state=state, context=context, call_context=call_context), IntakeAgent(state=state, context=context, call_context=call_context)]`,
-		`await telephony.cold_transfer(self.call_context["call_id"], "+14155550123")`,
 		`logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())`,
 	} {
 		if !strings.Contains(bot, want) {
@@ -1101,7 +1099,6 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	for _, want := range []string{
 		"pipecat/carrier-websocket/twilio",
 		"Twilio phone-number voice",
-		"Cold transfer is destructive on this generated\nTwilio\nroute",
 		"UNMUTE_LOG_LEVEL=DEBUG",
 	} {
 		if !strings.Contains(readme, want) {
@@ -1154,6 +1151,12 @@ func assertGoldenFile(t *testing.T, path, got string, update bool) {
 
 func TestPipecatTwilioTelephonyRejectsConnectionVocabularyDrift(t *testing.T) { // telephony V3, V7
 	agent := loadCompilerAgent(t)
+	// The carrier routes carry no transfers (SPEC C1, V1); this fixture is
+	// about connection vocabulary, so the control goes.
+	delete(agent.Controls, "to_human")
+	billing := agent.Agents["billing"]
+	billing.Tools = []string{"get_invoice"}
+	agent.Agents["billing"] = billing
 	resolved := targetByProvider(t, agent, ir.ProviderPipecat)
 	resolved.Transport = "carrier-websocket"
 	resolved.Carrier = "twilio"
@@ -1181,6 +1184,7 @@ func TestPipecatTelnyxTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		t.Fatal(err)
 	}
 	enablePackageTelephony(pkg)
+	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Transport = "carrier-websocket"
 	configured.Carrier = "telnyx"
@@ -1262,7 +1266,6 @@ func TestPipecatTelnyxTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 		"pipecat/carrier-websocket/telnyx",
 		"Telnyx Voice API",
 		"API version 2",
-		"Cold transfer is destructive on this generated\nTelnyx\nroute",
 	} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("README.md missing Telnyx setup %q", want)
@@ -1276,6 +1279,7 @@ func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T
 		t.Fatal(err)
 	}
 	enablePackageTelephony(pkg)
+	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Transport = "carrier-websocket"
 	configured.Carrier = "plivo"
@@ -1309,8 +1313,6 @@ func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T
 		`keepCallAlive="true"`,
 		`contentType="audio/x-mulaw;rate=8000"`,
 		`answer_url=_http_url(f"/telephony/answer/{token}")`,
-		`_client().calls.transfer`,
-		`aleg_url=_http_url(f"/telephony/transfer/{token}")`,
 		`destination, call_start = await _outbound_request(request)`,
 		`await handle_media(websocket, token)`,
 		`"carrier": "plivo"`,
@@ -1349,7 +1351,6 @@ func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T
 		"pipecat/carrier-websocket/plivo",
 		"Plivo Voice XML",
 		"Hangup URL",
-		"Cold transfer is destructive on this generated\nPlivo\nroute",
 	} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("README.md missing Plivo setup %q", want)
@@ -1360,10 +1361,11 @@ func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T
 	for _, endpoint := range runtime.PublicEndpoints {
 		endpoints = append(endpoints, endpoint.Path)
 	}
-	for _, want := range []string{"/telephony/answer/{token}", "/telephony/transfer/{token}"} {
-		if !slices.Contains(endpoints, want) {
-			t.Errorf("runtime plan missing endpoint %s: %v", want, endpoints)
-		}
+	if !slices.Contains(endpoints, "/telephony/answer/{token}") {
+		t.Errorf("runtime plan missing endpoint /telephony/answer/{token}: %v", endpoints)
+	}
+	if slices.Contains(endpoints, "/telephony/transfer/{token}") {
+		t.Errorf("runtime plan still exposes the deleted transfer endpoint: %v", endpoints)
 	}
 }
 
@@ -1437,85 +1439,6 @@ func TestPipecatEmitterMatchesCapabilityTable(t *testing.T) {
 	}
 }
 
-// The warm lowering on its own route: a hold mixer on the caller's transport, a
-// bridge on each leg, the second leg dialled onto its own media socket, and the
-// per-call handles in a context var rather than a module global (SPEC V4-V7).
-// V17/V18/V19: warm transfer is a Twilio conference. The bot briefs the person
-// on a stream, then redirects them into a conference the caller already waits
-// in, and leaves the audio path. No hold mixer, no audio bridge, no per-leg
-// forwarding — the carrier owns hold and the bridge.
-func TestPipecatWarmHumanTransferUsesConference(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	enablePackageTelephony(pkg)
-	configured := pkg.Targets["pipecat"]
-	configured.Transport = "carrier-websocket"
-	configured.Carrier = "twilio"
-	configured.Connection = "primary_phone"
-	pkg.Targets = map[string]spec.Target{"pipecat": configured}
-	human := pkg.Agent.Controls["to_human"]
-	human.Cold = nil
-	human.Warm = &spec.WarmTransfer{
-		Destination: "billing_line", Briefing: "Say who is calling and why.", RingTimeout: "25s",
-	}
-	pkg.Agent.Controls["to_human"] = human
-
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bot := artifactFile(t, artifact, "bot.py")
-	for _, want := range []string{
-		"async def _run_warm(",
-		"async def _brief(",
-		"await telephony.hold_in_conference(caller_call_id, room)",
-		"await telephony.join_conference(supervisor_call_id, room)",
-		"await _warm_transfer(",
-		"self.call_context,",
-		`briefing="Say who is calling and why."`,
-		"ring_timeout=25.0",
-		"hangup_on_unavailable=False",
-	} {
-		if !strings.Contains(bot, want) {
-			t.Errorf("bot.py missing conference warm lowering %q", want)
-		}
-	}
-	// V18: the carrier owns hold and the bridge, so none of the in-process
-	// audio machinery is emitted.
-	for _, forbidden := range []string{"_HoldMixer", "_AudioBridge", "MixerEnableFrame", "caller_leg", "_CallerLeg"} {
-		if strings.Contains(bot, forbidden) {
-			t.Errorf("conference warm must not emit audio-path machinery %q", forbidden)
-		}
-	}
-	adapter := artifactFile(t, artifact, "telephony.py")
-	for _, want := range []string{
-		"async def start_warm_leg(destination: str, ring_timeout: float) -> tuple[asyncio.Future, str, str]:",
-		"return arrival, token, call.sid",
-		`startConferenceOnEnter="false"`,
-		`startConferenceOnEnter="true"`,
-		`endConferenceOnExit="true"`,
-		"async def hold_in_conference(caller_call_id: str, room: str)",
-		"async def join_conference(supervisor_call_id: str, room: str)",
-		"async def hangup_caller(call_id: str, message: str)",
-		"async def return_caller(caller_call_id: str, from_number: str, to_number: str)",
-	} {
-		if !strings.Contains(adapter, want) {
-			t.Errorf("telephony.py missing conference helper %q", want)
-		}
-	}
-	// V18: hold music is the carrier's, so the caller's conference sets no
-	// waitUrl attribute (an omitted waitUrl means Twilio's default hold music).
-	if strings.Contains(adapter, "waitUrl=") {
-		t.Error("warm hold must use the carrier default, never a waitUrl")
-	}
-}
-
 // A package without a warm transfer emits none of the machinery (SPEC V4).
 func TestPipecatWithoutWarmTransferEmitsNoBridge(t *testing.T) {
 	agent := loadCompilerAgent(t)
@@ -1531,10 +1454,11 @@ func TestPipecatWithoutWarmTransferEmitsNoBridge(t *testing.T) {
 	}
 }
 
-// Warm transfer is the two-socket bridge, so it needs one media socket per
-// human. safe_core's Pipecat target is Daily SIP, which has neither, and
-// generation must refuse rather than quietly lower the shape as cold.
-func TestPipecatWarmHumanTransferFailsOffTheBridgeRoute(t *testing.T) {
+// Pipecat has no native warm transfer on any route (SPEC C4, V1): the only
+// documented pattern is bot-owned audio, which this project deleted. The gate
+// rejects warm before generation; this is the emitter's defense in depth, and
+// it must refuse rather than quietly lower the shape as cold.
+func TestPipecatWarmHumanTransferFailsEverywhere(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
@@ -1547,7 +1471,7 @@ func TestPipecatWarmHumanTransferFailsOffTheBridgeRoute(t *testing.T) {
 	human.Mode = ir.TransferWarm
 	human.Briefing = "Say who is calling and why."
 	_, err = GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "warm has no Pipecat lowering on route") {
+	if err == nil || !strings.Contains(err.Error(), "Pipecat has no native warm transfer") {
 		t.Fatalf("warm transfer must fail instead of lowering cold, got %v", err)
 	}
 }
@@ -1652,6 +1576,19 @@ func enablePackageTelephony(pkg *spec.Package) {
 	}
 }
 
+// dropHumanTransfer removes safe_core's to_human control, its tool wiring, and
+// the channel's cold_transfer requirement, for fixtures on routes that carry
+// no transfer primitive (SPEC C1, V1): the carrier-websocket routes.
+func dropHumanTransfer(pkg *spec.Package) {
+	delete(pkg.Agent.Controls, "to_human")
+	billing := pkg.Agent.Agents["billing"]
+	billing.Tools = slices.DeleteFunc(slices.Clone(billing.Tools), func(name string) bool { return name == "to_human" })
+	pkg.Agent.Agents["billing"] = billing
+	phone := pkg.Agent.Channels["phone"]
+	phone.RequiredControls = []string{"hangup"}
+	pkg.Agent.Channels["phone"] = phone
+}
+
 // TestV14_ActivationGatedOnPipelineStart (driver-pipecat V14, B8): the entry
 // agent's activation must not race main's StartFrame — frames pushed into
 // BusBridge before it are dropped (greeting lost, tools never registered).
@@ -1714,6 +1651,7 @@ func TestPipecatCarrierWebsocketGreetsOnClientConnected(t *testing.T) {
 		t.Fatal(err)
 	}
 	enablePackageTelephony(pkg)
+	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Transport = "carrier-websocket"
 	configured.Carrier = "twilio"
@@ -1747,6 +1685,7 @@ func TestV8_OutboundEmptyCallStartRendersSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	enablePackageTelephony(pkg)
+	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Transport, configured.Carrier, configured.Connection = "carrier-websocket", "twilio", "primary_phone"
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}

@@ -5,7 +5,6 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -139,17 +138,7 @@ type pipecatTool struct {
 	Instructions    string // builtin end_call goodbye → developer message before EndFrame
 	EndsCall        bool
 	Interruption    string // "cancel" | "continue" | "" (provider default)
-	ColdDestination string // set for a cold human_transfer: the resolved number/SIP URI
-	CarrierTransfer bool   // carrier call-control adapter, not Daily SIP
-	// Warm human_transfer (carrier-websocket + twilio only): the second leg is
-	// dialled onto its own media socket and briefed there, then the two sockets
-	// are bridged (human-transfer.md C9).
-	WarmDestination     string
-	Briefing            string
-	RingTimeoutSecs     string // Python float literal; Twilio's own default when unset
-	HangupOnUnavailable bool
-	LLMBuilder          string // build_<agent>_llm, reused for the briefing leg
-	TTSBuilder          string
+	ColdDestination string // set for a cold human_transfer: the resolved number/SIP URI (Daily SIP only)
 }
 
 // pipecatLocalTool is a copied handler file: tools/<name>.py in the project.
@@ -220,8 +209,6 @@ type pipecatTelephony struct {
 	FromNumberEnv string
 	HasInbound    bool
 	HasOutbound   bool
-	HasCold       bool
-	HasWarm       bool
 	SystemSources []pipecatSystemSource
 	CallStart     []pipecatCallStart
 }
@@ -261,7 +248,6 @@ type pipecatData struct {
 	Inactivity          *pipecatInactivity
 	MaxDurationSecs     int
 	HasColdTransfer     bool
-	HasWarmTransfer     bool // any warm human_transfer: mixer, bridges, briefing leg
 	Transport           string
 	FrameImports        []string // pipecat.frames.frames names, merged into one import (V2)
 	Imports             []string
@@ -347,30 +333,18 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 }
 
 var pipecatEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
-	targetcap.TelephonyRouteSelected:                   true,
-	targetcap.TelephonyInbound:                         true,
-	targetcap.TelephonyOutbound:                        true,
-	targetcap.TelephonyFeature(targetcap.Hangup):       true,
-	targetcap.TelephonyFeature(targetcap.ColdTransfer): true,
-	"source.session_id":                                true,
-	"source.carrier":                                   true,
-	"source.connection":                                true,
-	"source.call_id":                                   true,
-	"source.stream_id":                                 true,
-	"source.direction":                                 true,
-	"source.from_number":                               true,
-	"source.to_number":                                 true,
-}
-
-// pipecatEmittedTelephonyFeaturesFor is that set for one carrier-WebSocket
-// carrier. Warm transfer is the two-socket bridge and only Twilio's leg of it
-// is emitted (human-transfer.md C7), so it is not a property of the transport.
-func pipecatEmittedTelephonyFeaturesFor(carrier string) map[targetcap.TelephonyFeature]bool {
-	features := maps.Clone(pipecatEmittedTelephonyFeatures)
-	if carrier == "twilio" {
-		features[targetcap.TelephonyFeature(targetcap.WarmTransfer)] = true
-	}
-	return features
+	targetcap.TelephonyRouteSelected:             true,
+	targetcap.TelephonyInbound:                   true,
+	targetcap.TelephonyOutbound:                  true,
+	targetcap.TelephonyFeature(targetcap.Hangup): true,
+	"source.session_id":                          true,
+	"source.carrier":                             true,
+	"source.connection":                          true,
+	"source.call_id":                             true,
+	"source.stream_id":                           true,
+	"source.direction":                           true,
+	"source.from_number":                         true,
+	"source.to_number":                           true,
 }
 
 // GeneratePipecat lowers a validated agent + pipecat target into a project.

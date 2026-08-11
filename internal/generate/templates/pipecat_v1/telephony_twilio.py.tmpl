@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-{{if .Telephony.HasWarm}}import contextlib
-{{end}}import os
+import os
 from urllib.parse import parse_qsl
 from xml.etree.ElementTree import Element, SubElement, tostring
 
@@ -29,9 +28,7 @@ from telephony_shared import (
     _valid_destination,
     _websocket_url,
     app,
-{{if .Telephony.HasWarm}}    expect_transfer,
-    forget_transfer,
-{{end}}    handle_media,
+    handle_media,
 )
 
 
@@ -74,21 +71,6 @@ def _stream_twiml(token: str) -> str:
     return tostring(response, encoding="unicode")
 
 
-# Spoken by the carrier, not the bot: a REST redirect ends our media stream the
-# instant it lands, so anything the bot is still saying is cut off. The <Say>
-# lives in the redirect TwiML, so Twilio plays it in full and only then dials.
-_COLD_TRANSFER_SAY = "Please hold. I'm connecting you to a member of our team now."
-
-
-def _dial_twiml(destination: str) -> str:
-    response = Element("Response")
-    say = SubElement(response, "Say")
-    say.text = _COLD_TRANSFER_SAY
-    dial = SubElement(response, "Dial")
-    dial.text = destination
-    return tostring(response, encoding="unicode")
-
-
 def configure_pipecat_env() -> None:
     """Pipecat's Twilio serializer reads canonical names; Connections may rename them."""
     os.environ["TWILIO_ACCOUNT_SID"] = _env(ACCOUNT_SID_ENV)
@@ -111,126 +93,6 @@ def normalized_context(runner_args: WebSocketRunnerArguments) -> dict:
         "to_number": pending["to_number"],
         "call_start": pending["call_start"],
     }
-
-
-{{if .Telephony.HasWarm}}# Warm transfer is a Twilio conference: the caller waits in it (hold music is
-# Twilio's own, so `waitUrl` is omitted), the person is briefed on a stream and
-# then redirected into the same conference, and this process leaves the audio
-# path. `startConferenceOnEnter=false` holds the caller until the person enters;
-# `endConferenceOnExit=true` on the person ends it when they hang up.
-_WARM_HOLD_SAY = "Please hold while I connect you."
-
-
-def _conference_hold_twiml(room: str) -> str:
-    response = Element("Response")
-    SubElement(response, "Say").text = _WARM_HOLD_SAY
-    dial = SubElement(response, "Dial")
-    conference = SubElement(
-        dial,
-        "Conference",
-        startConferenceOnEnter="false",
-        endConferenceOnExit="false",
-        beep="false",
-    )
-    conference.text = room
-    return tostring(response, encoding="unicode")
-
-
-def _conference_join_twiml(room: str) -> str:
-    response = Element("Response")
-    dial = SubElement(response, "Dial")
-    conference = SubElement(
-        dial,
-        "Conference",
-        startConferenceOnEnter="true",
-        endConferenceOnExit="true",
-        beep="false",
-    )
-    conference.text = room
-    return tostring(response, encoding="unicode")
-
-
-def _hangup_twiml(message: str) -> str:
-    response = Element("Response")
-    SubElement(response, "Say").text = message
-    SubElement(response, "Hangup")
-    return tostring(response, encoding="unicode")
-
-
-async def start_warm_leg(destination: str, ring_timeout: float) -> tuple[asyncio.Future, str, str]:
-    """Dial the person on a second call that streams back to this process.
-
-    Same create-call path the outbound endpoint uses, with a transfer token in
-    the stream URL so the media socket lands on the call that dialled it.
-    Twilio's own `timeout` is the ring timeout: it stops ringing an unanswered
-    phone without the bot having to time it. Returns the future that resolves
-    when that socket arrives, the token to release afterwards, and the person's
-    call SID (to redirect them into the conference on accept).
-    """
-    if not _valid_destination(destination):
-        raise RuntimeError("invalid compiled transfer destination")
-    token, arrival = expect_transfer()
-    try:
-        client = _client()
-        call = await asyncio.to_thread(
-            client.calls.create,
-            to=destination,
-            from_=_env(FROM_NUMBER_ENV),
-            twiml=_stream_twiml(token),
-            timeout=int(ring_timeout),
-        )
-    except Exception:
-        forget_transfer(token)
-        raise
-    return arrival, token, call.sid
-
-
-async def hold_in_conference(caller_call_id: str, room: str) -> None:
-    """Redirect the caller into the conference, where Twilio holds them."""
-    await asyncio.to_thread(
-        _client().calls(caller_call_id).update, twiml=_conference_hold_twiml(room)
-    )
-
-
-async def join_conference(supervisor_call_id: str, room: str) -> None:
-    """Redirect the briefed person into the conference; entry bridges the two."""
-    await asyncio.to_thread(
-        _client().calls(supervisor_call_id).update, twiml=_conference_join_twiml(room)
-    )
-
-
-async def hangup_leg(call_sid: str) -> None:
-    """Best-effort drop of a dialled leg (e.g. a declined person)."""
-    with contextlib.suppress(Exception):
-        await asyncio.to_thread(_client().calls(call_sid).update, status="completed")
-
-
-async def hangup_caller(call_id: str, message: str) -> None:
-    """Say a closing line to the caller and hang up (on_unavailable: hangup)."""
-    await asyncio.to_thread(
-        _client().calls(call_id).update, twiml=_hangup_twiml(message)
-    )
-
-
-async def return_caller(caller_call_id: str, from_number: str, to_number: str) -> None:
-    """Bring the caller back to a fresh agent session (on_unavailable: return)."""
-    token, _ = await _remember("inbound", from_number, to_number, {})
-    await asyncio.to_thread(
-        _client().calls(caller_call_id).update, twiml=_stream_twiml(token)
-    )
-
-
-{{end}}async def cold_transfer(call_id: str, destination: str) -> None:
-    if not _valid_destination(destination):
-        raise RuntimeError("invalid compiled transfer destination")
-    if not await STATE.mark_once("transfer", call_id, SESSION_TTL_SECS):
-        return
-    try:
-        client = _client()
-        await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))
-    except Exception:
-        await STATE.forget("transfer", call_id)
-        raise
 
 
 {{if .Telephony.HasInbound}}@app.post("/telephony/inbound")

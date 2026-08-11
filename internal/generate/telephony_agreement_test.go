@@ -49,7 +49,7 @@ func emittedTelephonyFeatures(key target.TelephonyKey) map[target.TelephonyFeatu
 	switch {
 	case key.Provider == target.Pipecat && key.Transport == "carrier-websocket":
 		if slices.Contains([]string{"twilio", "telnyx", "plivo"}, key.Carrier) {
-			return pipecatEmittedTelephonyFeaturesFor(key.Carrier)
+			return pipecatEmittedTelephonyFeatures
 		}
 	case key.Provider == target.LiveKit && key.Transport == "sip":
 		if slices.Contains([]string{"twilio", "telnyx", "plivo"}, key.Carrier) {

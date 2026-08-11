@@ -43,12 +43,6 @@ Normal logs default to `INFO`. Setting `UNMUTE_LOG_LEVEL=DEBUG` also enables
 upstream Pipecat parser diagnostics, which may include caller phone numbers;
 use debug logging only in a controlled environment.
 
-{{if .Telephony.HasCold}}Cold transfer is destructive on this generated
-{{if eq .Telephony.Carrier "twilio"}}Twilio{{else if eq .Telephony.Carrier "telnyx"}}Telnyx{{else if eq .Telephony.Carrier "plivo"}}Plivo{{end}}
-route: the adapter does not restore the original AI media stream when the
-destination fails. Treat transfer failure as call-ending behavior.
-
-{{end}}
 This route remains provisional until its credentialed smoke passes.
 {{else}}
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner

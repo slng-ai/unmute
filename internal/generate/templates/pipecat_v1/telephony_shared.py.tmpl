@@ -35,25 +35,6 @@ CALL_START_REQUIRED = frozenset((
 STATE = TelephonyState(os.getenv("REDIS_URL"), {{pyq .Project}}, {{.Telephony.MaxSessions}}, SESSION_TTL_SECS)
 _ACTIVE_MEDIA: set[WebSocket] = set()
 _DRAIN_TASK: asyncio.Task | None = None
-{{if .Telephony.HasWarm}}# Warm transfer: the person's leg is a second carrier call that streams back to
-# this process, so its media socket has to reach the call that dialled it
-# instead of starting a bot of its own. The token minted when the leg is dialled
-# is what matches them up, in memory: both sockets belong to one process by
-# construction, since the leg is dialled by the process holding the caller.
-_PENDING_TRANSFERS: dict[str, asyncio.Future] = {}
-
-
-def expect_transfer() -> tuple[str, asyncio.Future]:
-    """Register a transfer leg and return its token and its arrival future."""
-    token = secrets.token_urlsafe(32)
-    arrival: asyncio.Future = asyncio.get_running_loop().create_future()
-    _PENDING_TRANSFERS[token] = arrival
-    return token, arrival
-
-
-def forget_transfer(token: str) -> None:
-    _PENDING_TRANSFERS.pop(token, None)
-{{end}}
 
 
 async def _force_drain() -> None:
@@ -211,25 +192,7 @@ async def handle_media(
     if validator is not None and not validator(websocket):
         await websocket.close(code=4003)
         return
-{{if .Telephony.HasWarm}}    arrival = _PENDING_TRANSFERS.pop(token, None)
-    if arrival is not None:
-        # A warm transfer leg. It belongs to a session that is already admitted,
-        # so it takes no second admission slot: one session, two carrier calls.
-        if arrival.done():
-            await websocket.close(code=4003)
-            return
-        await websocket.accept()
-        _ACTIVE_MEDIA.add(websocket)
-        released = asyncio.Event()
-        try:
-            arrival.set_result((websocket, released))
-            # Hold the endpoint open for as long as the call uses the socket:
-            # returning from here would close it under the bridge.
-            await released.wait()
-        finally:
-            _ACTIVE_MEDIA.discard(websocket)
-        return
-{{end}}    pending = await STATE.pending(token, consume=True)
+    pending = await STATE.pending(token, consume=True)
     if pending is None:
         await websocket.close(code=4003)
         return

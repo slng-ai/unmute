@@ -95,9 +95,11 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		"source.direction", "source.from_number", "source.to_number",
 	}
 	pipecat := "https://docs.pipecat.ai/pipecat/learn/transports"
+	// No transfers on the carrier-websocket routes: Pipecat's own docs say the
+	// websocket transports have no call-transfer control, and a transfer needs
+	// a platform primitive (SPEC C1, V1). Cold on Pipecat is the Daily route.
 	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
 		features := append([]TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)}, sourcesWithStream...)
-		features = append(features, TelephonyFeature(ColdTransfer))
 		add(Pipecat, "carrier-websocket", carrier, pipecat, features...)
 	}
 	pipecatProcess := []TelephonyProcess{{
@@ -127,15 +129,6 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	twilio := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"}
 	route := routes[twilio]
 	route.RequiredEnvironment = []string{"account_sid", "auth_token", "from_number"}
-	// Warm transfer is Twilio-only on this transport: the lowering is a bridge
-	// between two media WebSockets, and only Twilio's leg of it has been built
-	// and linted (human-transfer.md C7/C9). Telnyx and plivo keep failing warm
-	// in their own route's words until each has its own bridge and smoke.
-	route.Features[TelephonyFeature(WarmTransfer)] = TelephonyEvidence{
-		Feature: TelephonyFeature(WarmTransfer), Tag: Provisional,
-		Note: "route has not passed its credentialed smoke",
-		Docs: pipecat, Verified: "2026-08-11",
-	}
 	routes[twilio] = route
 	setPipecatRuntime(twilio, []string{
 		"get the Account SID and Auth Token from the Twilio Console account dashboard and select a Voice-capable number",
@@ -164,7 +157,6 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		"assign the selected phone number to that XML Application and configure its Hangup URL as POST to the reported status endpoint",
 	},
 		TelephonyEndpointRule{Name: "outbound-answer", Method: "POST", Path: "/telephony/answer/{token}", AnyFeatures: []TelephonyFeature{TelephonyOutbound}},
-		TelephonyEndpointRule{Name: "transfer", Method: "POST", Path: "/telephony/transfer/{token}", AnyFeatures: []TelephonyFeature{TelephonyFeature(ColdTransfer)}},
 	)
 	exotel := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "exotel"}
 	routes[exotel] = TelephonyRoute{Key: exotel, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{

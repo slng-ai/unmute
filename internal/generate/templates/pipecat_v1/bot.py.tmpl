@@ -23,8 +23,7 @@ the typed results.{{end}}
 from __future__ import annotations
 
 import asyncio
-{{if .HasWarmTransfer}}import contextlib
-{{end}}{{if .NeedsInspect}}import inspect
+{{if .NeedsInspect}}import inspect
 {{end}}{{if or .HasFlows .CallStartVars}}import json
 {{end}}import os
 {{if .NeedsRender}}import re
@@ -36,7 +35,7 @@ import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}{{if .Telephony}}import telephony
 {{end}}from dotenv import load_dotenv
-{{if or .Telephony .HasColdTransfer .HasWarmTransfer}}from loguru import logger
+{{if or .Telephony .HasColdTransfer}}from loguru import logger
 {{end}}
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 {{if not .Inline}}from pipecat.bus import BusBridgeProcessor
@@ -49,7 +48,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.runner.types import RunnerArguments{{if .HasWarmTransfer}}, WebSocketRunnerArguments{{end}}
+from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 {{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
 {{end}}{{if .NeedsRoleRestore}}from pipecat.services.settings import LLMSettings
@@ -181,225 +180,7 @@ def _api_key(header: str, env: str) -> dict[str, str]:
     """auth: api_key — the token verbatim in its own header."""
     return {header: os.environ[env]}
 {{end}}{{end}}
-{{if .HasWarmTransfer}}# --- warm transfer ----------------------------------------------------------
-# Hold, briefing, and the final bridge belong to a Twilio conference, so this
-# process leaves the audio path the moment the two humans are joined. A warm
-# transfer therefore outlives the caller's bot session: redirecting the caller
-# into the conference closes their media socket and ends this session, so the
-# dial-brief-join runs as a task on the app loop, not in the pipeline
-# (docs/spec/human-transfer.md I.conference, V17-V19).
-
-WARM_BRIEFING_TIMEOUT_SECS = 180.0
-
-# Keep a strong reference to each in-flight transfer task; asyncio only holds a
-# weak one, so without this a transfer could be garbage-collected mid-call.
-_WARM_TASKS: set[asyncio.Task] = set()
-
-
-def _transcript(context: LLMContext) -> str:
-    lines = []
-    for message in context.get_messages():
-        role, content = message.get("role"), message.get("content")
-        if role in ("user", "assistant") and isinstance(content, str) and content:
-            lines.append(("Caller: " if role == "user" else "Agent: ") + content)
-    return "\n".join(lines)
-
-
-async def _brief(websocket, instruction: str, build_llm, build_tts) -> tuple[bool, WorkerRunner, asyncio.Task]:
-    """Brief the person on their own socket and return their yes/no.
-
-    No audio bridging: the conference does that. The running briefing worker is
-    returned so the caller can tear it down after it has decided what to do with
-    the person's leg (join the conference, or hang it up).
-    """
-    supervisor = await create_transport(
-        WebSocketRunnerArguments(
-            websocket=websocket, transport_type=None, body={}, session_id=None
-        ),
-        transport_params,
-    )
-    verdict: asyncio.Future = asyncio.get_running_loop().create_future()
-
-    async def connect_to_caller(params: FunctionCallParams):
-        """Put the caller through now, once this person has agreed to take them."""
-        await params.result_callback({"connected": True})
-        if not verdict.done():
-            verdict.set_result(True)
-
-    async def decline_transfer(params: FunctionCallParams):
-        """Report that this person cannot take the call, so the agent goes back to the caller."""
-        await params.result_callback({"declined": True})
-        if not verdict.done():
-            verdict.set_result(False)
-
-    context = LLMContext(
-        messages=[{"role": "system", "content": instruction}],
-        tools=[connect_to_caller, decline_transfer],
-    )
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
-        context, user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer())
-    )
-    worker = PipelineWorker(
-        Pipeline(
-            [
-                supervisor.input(),
-                build_stt(),
-                user_aggregator,
-                build_llm(),
-                build_tts(),
-                supervisor.output(),
-                assistant_aggregator,
-            ]
-        ),
-        name="warm_transfer",
-        params=PipelineParams(enable_metrics=True),
-    )
-    runner = WorkerRunner(handle_sigint=False)
-    await runner.add_workers(worker)
-    briefing = asyncio.create_task(runner.run())
-    await worker.queue_frame(
-        LLMMessagesAppendFrame(
-            [{"role": "developer", "content": "Brief this person now, in two or three sentences."}],
-            run_llm=True,
-        )
-    )
-    try:
-        accepted = await asyncio.wait_for(verdict, WARM_BRIEFING_TIMEOUT_SECS)
-    except TimeoutError:
-        accepted = False
-    return accepted, runner, briefing
-
-
-async def _teardown_briefing(runner: WorkerRunner, briefing: asyncio.Task) -> None:
-    with contextlib.suppress(asyncio.CancelledError, Exception):
-        await runner.cancel()
-    with contextlib.suppress(asyncio.CancelledError, Exception):
-        await briefing
-
-
-async def _warm_transfer(
-    params: FunctionCallParams,
-    call_context,
-    *,
-    destination: str,
-    briefing: str,
-    ring_timeout: float,
-    hangup_on_unavailable: bool,
-    build_llm,
-    build_tts,
-) -> None:
-    """Kick off the transfer and complete the tool at once.
-
-    The redirect that puts the caller on hold (inside ``_run_warm``) closes this
-    session's socket, so the work has to run detached and the tool must not wait
-    on it: a model left awaiting a result on a dying socket just hangs.
-    """
-    if not call_context:
-        await params.result_callback(
-            {"refused": "This session is not a phone call, so it cannot be warm transferred."}
-        )
-        return
-    # Role framing first, and the same words the LiveKit lowering uses: without
-    # it the model reads a transcript that ends in a complaint and treats the
-    # person who just picked up as the caller (B11).
-    transcript = _transcript(params.context)
-    instruction = (
-        "You are handing a live phone call to a colleague who has just picked up. "
-        "The person on this line is your colleague, never the caller. "
-        "Greet them, summarize the conversation so far, and ask whether they can take it. "
-        "Call connect_to_caller when they agree, decline_transfer when they cannot.\n\n"
-        + (briefing + "\n\n" if briefing else "")
-        + "The call so far:\n"
-        + transcript
-    )
-    task = asyncio.create_task(
-        _run_warm(
-            call_context["call_id"],
-            call_context["from_number"],
-            call_context["to_number"],
-            destination=destination,
-            instruction=instruction,
-            ring_timeout=ring_timeout,
-            hangup_on_unavailable=hangup_on_unavailable,
-            build_llm=build_llm,
-            build_tts=build_tts,
-        )
-    )
-    _WARM_TASKS.add(task)
-    task.add_done_callback(_WARM_TASKS.discard)
-    await params.result_callback({"transferred": True})
-
-
-async def _run_warm(
-    caller_call_id: str,
-    from_number: str,
-    to_number: str,
-    *,
-    destination: str,
-    instruction: str,
-    ring_timeout: float,
-    hangup_on_unavailable: bool,
-    build_llm,
-    build_tts,
-) -> None:
-    room = "warm-" + caller_call_id
-    # Hold the caller in the conference (Twilio plays its own hold music). This
-    # closes the caller's media socket and ends the main session; the rest runs
-    # here, detached.
-    await telephony.hold_in_conference(caller_call_id, room)
-    token = supervisor_call_id = released = None
-    try:
-        arrival, token, supervisor_call_id = await telephony.start_warm_leg(destination, ring_timeout)
-        websocket, released = await asyncio.wait_for(arrival, ring_timeout)
-    except TimeoutError:
-        logger.info("warm transfer: no answer within {} seconds", ring_timeout)
-        if token is not None:
-            telephony.forget_transfer(token)
-        await _warm_unavailable(caller_call_id, from_number, to_number, hangup_on_unavailable, supervisor_call_id)
-        return
-    except Exception as exc:
-        logger.warning("warm transfer failed: {}", exc)
-        if token is not None:
-            telephony.forget_transfer(token)
-        await _warm_unavailable(caller_call_id, from_number, to_number, hangup_on_unavailable, supervisor_call_id)
-        return
-    accepted, runner, briefing = await _brief(websocket, instruction, build_llm, build_tts)
-    telephony.forget_transfer(token)
-    if accepted:
-        # Move the person into the conference. The REST redirect ends the
-        # briefing stream (closing our socket), and Twilio bridges the two: this
-        # process is now out of the audio path (V17). The briefing worker is
-        # torn down after, and the media endpoint released.
-        await telephony.join_conference(supervisor_call_id, room)
-    else:
-        await _warm_unavailable(caller_call_id, from_number, to_number, hangup_on_unavailable, supervisor_call_id)
-    await _teardown_briefing(runner, briefing)
-    if released is not None:
-        released.set()
-
-
-async def _warm_unavailable(
-    caller_call_id: str,
-    from_number: str,
-    to_number: str,
-    hangup_on_unavailable: bool,
-    supervisor_call_id,
-) -> None:
-    """Nobody took the call: drop any dialled leg, then hang up or return the caller."""
-    if supervisor_call_id is not None:
-        await telephony.hangup_leg(supervisor_call_id)
-    if hangup_on_unavailable:
-        await telephony.hangup_caller(
-            caller_call_id, "Sorry, nobody is free to take the call right now. Goodbye."
-        )
-        return
-    # return_to_caller: bring the caller back to a fresh agent. The caller keeps
-    # their call; only the media leg is new. v1 returns them to a fresh session
-    # (they hear the greeting again); seeding it from the transcript is T11d.
-    await telephony.return_caller(caller_call_id, from_number, to_number)
-
-
-{{end}}# --- prompts ----------------------------------------------------------------
+# --- prompts ----------------------------------------------------------------
 # Agent system instructions as module constants: one copy each, referenced by
 # the LLM builder and any Flow restore (V2).
 {{range .Agents}}{{.PromptConst}} = {{pytriple .Prompt}}
@@ -504,17 +285,7 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
 {{range .Args}}            {{.Name}} ({{.PyType}}):{{if .Description}} {{.Description}}{{end}}{{if .Enum}} One of: {{join .Enum ", "}}.{{end}}
 {{end}}        """{{else}}"""{{end}}
 {{if .ColdDestination}}        logger.info("human transfer fired: {{.MethodName}} (cold)")
-{{if .CarrierTransfer}}        if not self.call_context:
-            # No carrier call to redirect: this session is the browser or the
-            # console, not the phone. Refuse in words the model can relay
-            # instead of raising on a missing call id.
-            await params.result_callback({"refused": "This session is not a phone call, so it cannot be transferred."})
-            return
-        # The caller is told inside the redirect TwiML (a <Say> before the
-        # <Dial>), not by the bot: a REST redirect ends our media stream at once,
-        # so a bot-spoken line would be cut off before the caller heard it (B14).
-        await telephony.cold_transfer(self.call_context["call_id"], {{.ColdDestination}})
-{{else}}        # Daily SIP transfers via REFER, which keeps the bot on the call
+        # Daily SIP transfers via REFER, which keeps the bot on the call
         # until the transfer completes, so the bot speaks the announcement
         # itself (the official daily-pstn-cold-transfer pattern).
         await params.llm.push_frame(
@@ -525,19 +296,8 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
         )
         if _TRANSPORT is not None:
             await _TRANSPORT.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
-{{end}}
+
         await params.result_callback({"transferred": True})
-{{else if .WarmDestination}}        logger.info("human transfer fired: {{.MethodName}} (warm)")
-        await _warm_transfer(
-            params,
-            self.call_context,
-            destination={{.WarmDestination}},
-            briefing={{pyq .Briefing}},
-            ring_timeout={{.RingTimeoutSecs}},
-            hangup_on_unavailable={{if .HangupOnUnavailable}}True{{else}}False{{end}},
-            build_llm={{.LLMBuilder}},
-            build_tts={{.TTSBuilder}},
-        )
 {{else if .Builtin}}{{if .Instructions}}        await params.llm.push_frame(
             LLMMessagesAppendFrame(
                 [{"role": "developer", "content": {{pyq .Instructions}}}],

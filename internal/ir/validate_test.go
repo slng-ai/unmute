@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -277,6 +278,16 @@ func TestValidateCodeTelephonyRequiresResolvedPlan(t *testing.T) {
 func TestValidateTelephonyProvisionalRouteIsUsableAndQuiet(t *testing.T) {
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
+	// The carrier-websocket routes carry no transfers (SPEC C1, V1), so the
+	// provisional-route fixture must not declare one: drop the control, its
+	// tool reference, and the channel's cold_transfer requirement.
+	delete(pkg.Agent.Controls, "to_human")
+	billing := pkg.Agent.Agents["billing"]
+	billing.Tools = slices.DeleteFunc(slices.Clone(billing.Tools), func(name string) bool { return name == "to_human" })
+	pkg.Agent.Agents["billing"] = billing
+	phone := pkg.Agent.Channels["phone"]
+	phone.RequiredControls = []string{"hangup"}
+	pkg.Agent.Channels["phone"] = phone
 	target := pkg.Targets["pipecat"]
 	target.Transport = "carrier-websocket"
 	target.Carrier = "twilio"

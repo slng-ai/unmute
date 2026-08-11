@@ -65,15 +65,6 @@ def _stream_xml(token: str) -> str:
     return tostring(response, encoding="unicode")
 
 
-{{if .Telephony.HasCold}}def _dial_xml(destination: str) -> str:
-    response = Element("Response")
-    dial = SubElement(response, "Dial")
-    kind = "User" if destination.startswith("sip:") else "Number"
-    SubElement(dial, kind).text = destination
-    return tostring(response, encoding="unicode")
-
-
-{{end}}
 def _client() -> RestClient:
     return RestClient(
         _env(AUTH_ID_ENV), _env(AUTH_TOKEN_ENV), timeout=CONTROL_TIMEOUT_SECS
@@ -104,33 +95,6 @@ def normalized_context(runner_args: WebSocketRunnerArguments) -> dict:
     }
 
 
-{{if .Telephony.HasCold}}async def _start_transfer(call_id: str, destination: str) -> None:
-    token = secrets.token_urlsafe(32)
-    await STATE.remember_pending(token, {
-        "destination": destination,
-    }, PENDING_TTL_SECS)
-    await asyncio.to_thread(
-        _client().calls.transfer,
-        legs="aleg",
-        aleg_url=_http_url(f"/telephony/transfer/{token}"),
-        aleg_method="POST",
-        call_uuid=call_id,
-    )
-
-
-async def cold_transfer(call_id: str, destination: str) -> None:
-    if not _valid_destination(destination):
-        raise RuntimeError("invalid compiled transfer destination")
-    if not await STATE.mark_once("transfer", call_id, SESSION_TTL_SECS):
-        return
-    try:
-        await _start_transfer(call_id, destination)
-    except Exception:
-        await STATE.forget("transfer", call_id)
-        raise
-
-
-{{end}}
 {{if .Telephony.HasInbound}}@app.post("/telephony/inbound")
 async def inbound(request: Request) -> Response:
     form = await _signed_form(request)
@@ -178,16 +142,6 @@ async def status(request: Request) -> dict[str, bool]:
     return {"accepted": True, "duplicate": duplicate}
 
 
-{{if .Telephony.HasCold}}@app.post("/telephony/transfer/{token}")
-async def transfer_instructions(request: Request, token: str) -> Response:
-    await _signed_form(request)
-    transfer = await STATE.pending(token, consume=True)
-    if transfer is None:
-        raise HTTPException(status_code=404, detail="unknown transfer")
-    return Response(_dial_xml(transfer["destination"]), media_type="application/xml")
-
-
-{{end}}
 @app.websocket("/telephony/ws/{token}")
 async def media(websocket: WebSocket, token: str) -> None:
     await handle_media(websocket, token)
