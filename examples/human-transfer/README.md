@@ -103,7 +103,7 @@ literal or the name of an env var holding one, and both forms are shown:
 
 ```yaml
 destinations:
-  billing_line: "+34910000001"              # fixed everywhere: keep it here
+  billing_line: BILLING_PHONE_NUMBER       # read from the environment at call time
   supervisor_line: SUPERVISOR_PHONE_NUMBER  # varies per environment: name a var
 ```
 

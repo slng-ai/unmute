@@ -23,14 +23,14 @@ targets:
     connection: twilio_voice
     # Symbolic names, resolved here so the model never sees a phone number and
     # can never dial an arbitrary one. A destination is either a literal (E.164
-    # or a sip: URI) or the UPPER_SNAKE name of an environment variable holding
-    # one. Both forms are shown here on purpose.
+    # or a sip: URI, e.g. billing_line: "+14155550123") or the UPPER_SNAKE name
+    # of an environment variable holding one. An env var name lands in the
+    # generated .env.example and the required-env list, and is read at call
+    # time. This example uses the env form for both, because any literal a
+    # repository could ship is a number nobody answers, and a transfer to it
+    # fails on a live call exactly when you are trying the example out.
     destinations:
-      # A fixed number that is the same everywhere: keep it in the file.
-      billing_line: "+34910000001"
-      # One that differs per environment, or that you would rather not commit:
-      # name the variable instead. It lands in the generated .env.example and in
-      # the required-env list, and is read at call time.
+      billing_line: BILLING_PHONE_NUMBER
       supervisor_line: SUPERVISOR_PHONE_NUMBER
 
   livekit:
@@ -48,5 +48,5 @@ targets:
     # The same two names the agent uses, resolved per target: a destination is
     # a property of where the call is placed from, not of the agent.
     destinations:
-      billing_line: "+34910000001"
+      billing_line: BILLING_PHONE_NUMBER
       supervisor_line: SUPERVISOR_PHONE_NUMBER

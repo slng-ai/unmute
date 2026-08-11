@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -298,5 +299,36 @@ func TestFixturePackagesValidate(t *testing.T) {
 				t.Fatalf("validate: %v\n%#v", err, report.PerTarget)
 			}
 		})
+	}
+}
+
+// V16/B9: a committed example never ships a literal transfer destination. Any
+// literal a repository can contain is a number nobody answers, so a live test
+// of the example dials a stranger or a carrier intercept ("el número marcado
+// no existe") and the call dies right where the demo should land. Every
+// destination in examples/*/targets.yaml is an UPPER_SNAKE env var name,
+// resolved from the tester's own environment at call time.
+func TestV16_ExampleDestinationsAreEnvironmentNames(t *testing.T) {
+	envName := regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+	root := filepath.Join("..", "..", "examples")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pkg, err := spec.Load(filepath.Join(root, entry.Name()))
+		if err != nil {
+			t.Fatalf("load %s: %v", entry.Name(), err)
+		}
+		for targetName, target := range pkg.Targets {
+			for symbol, value := range target.Destinations {
+				if !envName.MatchString(value) {
+					t.Errorf("%s/%s destination %q = %q is a literal; committed examples must name an env var", entry.Name(), targetName, symbol, value)
+				}
+			}
+		}
 	}
 }
