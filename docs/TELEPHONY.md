@@ -49,11 +49,23 @@ orchestrator's supported transport. The implementation follows these rules:
   failure mode); `--public-url` stays as the bring-your-own-tunnel path for
   any other client, ngrok included.
 - Configure the carrier voice webhook automatically where the carrier
-  definition records that fact. In v1 only the Pipecat carrier WebSocket
-  route with Twilio carries it: the dev command looks up the configured
-  number, sets its voice webhook to the plan's inbound endpoint, and prints
-  the previous value so the user can restore it. Other carriers keep printed
+  definition records that fact. Both Twilio Media Streams routes carry it, the
+  Pipecat carrier WebSocket route and the LiveKit Twilio connector: the dev
+  command looks up the configured number, sets its voice webhook to the plan's
+  inbound endpoint, and prints the previous value. Other carriers keep printed
   manual steps until their fact and implementation are added.
+- **Borrow the number, then give it back.** A quick tunnel URL dies with the
+  dev process, so a run that sets a webhook and walks away leaves a real phone
+  line aimed at a URL that no longer resolves. Every outward-facing change the
+  dev command makes has an undo that runs on every exit path after startup,
+  `ctrl-c` included, on its own context because the run's context is already
+  cancelled by then. `--no-webhook` skips the change altogether, for a shared
+  or production number a dev run must not write to.
+- For anything past a laptop, stop the URL rotating instead of rewriting the
+  number every run: give `cloudflared` a named tunnel with a fixed hostname,
+  set the number's webhook to it once, and run with `--no-webhook` from then
+  on. The automatic rewriting exists only because quick tunnel hostnames
+  change per run.
 - Create the local LiveKit SIP trunk and dispatch records automatically. For
   the LiveKit SIP route, after the local infrastructure services are
   healthy, the dev command creates or reuses (idempotently, by content) the
@@ -107,8 +119,8 @@ orchestrator already performs.
   numbers and never creates carrier applications or carrier SIP trunks. The
   one-time carrier console setup stays manual. Automatic setup applies only
   to Unmute-owned local development state: the number's voice webhook value
-  (restorable, previous value printed) and trunk records inside the user's
-  own self-hosted LiveKit SIP bridge.
+  (borrowed on start, printed, and put back on exit; `--no-webhook` opts out)
+  and trunk records inside the user's own self-hosted LiveKit SIP bridge.
 - Unmute does not proxy or transcode audio between Pipecat and LiveKit.
 - Unmute does not bundle a tunnel binary. The dev command manages an
   external `cloudflared` found on PATH; installing it is the user's one-time
@@ -807,13 +819,17 @@ The command performs these steps in this order:
    content-identical record is reused, never duplicated.
 9. Wait for every declared service health check and application readiness.
 10. Configure the carrier voice webhook automatically where the carrier
-    definition supports it (Twilio today), printing the previous webhook URL
-    so it can be restored. Print the remaining manual carrier configuration
+    definition supports it (Twilio today), printing the previous webhook URL,
+    and hold on to that value as the undo for step 12. Skip this entirely
+    under `--no-webhook`. Print the remaining manual carrier configuration
     for adapters without that fact.
 11. Print the call line ("call +1XXXXXXXXXX, ctrl-c to stop") and stream
     Compose logs using the existing `--verbose` behavior.
-12. Stop only the project-scoped Compose stack on interruption, preserve its
-    named data volumes, and kill the managed tunnel.
+12. Restore the carrier voice webhook to the value step 10 recorded, then stop
+    only the project-scoped Compose stack on interruption, preserve its named
+    data volumes, and kill the managed tunnel. The restore runs before the
+    containers go and on its own context, because interruption has already
+    cancelled the run's.
 
 `unmute dev --telephony` fails before application readiness if Docker Compose is
 unavailable, a service is unhealthy, or explicit external LiveKit values

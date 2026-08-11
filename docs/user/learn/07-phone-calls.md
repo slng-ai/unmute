@@ -52,7 +52,9 @@ channels:
 ```
 
 ```yaml
-# Outbound only: the agent places calls and must declare voicemail policy.
+# Outbound only: the agent places calls. on_voicemail is optional; set it when
+# you want a policy for reaching an answering machine, and only on a route that
+# can detect one.
 channels:
   phone:
     kind: telephony
@@ -331,9 +333,10 @@ at all.
 
 ### What gets configured on Twilio automatically
 
-For the Pipecat Twilio route, after the app is healthy the command looks up
-your `TWILIO_PHONE_NUMBER`, sets its voice webhook to the printed inbound
-endpoint, and prints the previous webhook value:
+On both Twilio Media Streams routes, the Pipecat carrier WebSocket and the
+LiveKit connector, the command looks up your `TWILIO_PHONE_NUMBER` once the app
+is healthy, sets its voice webhook to the printed inbound endpoint, and prints
+the previous value:
 
 ```text
 phone: Twilio voice webhook for +15550001111 set to https://<random>.trycloudflare.com/telephony/inbound (was: https://old.example/hook)
@@ -341,6 +344,40 @@ phone: Twilio voice webhook for +15550001111 set to https://<random>.trycloudfla
 
 It never buys numbers and never creates carrier trunks. Telnyx and Plivo
 keep printed manual steps for now.
+
+**Your number is borrowed, not taken.** When you stop the run, the old value
+goes back:
+
+```text
+phone: Twilio voice webhook for +15550001111 restored to https://old.example/hook
+```
+
+This matters more than it sounds. The tunnel hostname is random per run and
+dies with the process, so a run that rewrote your webhook and walked away
+would leave a real phone line pointing at a URL that no longer resolves. The
+next person to call would hear "an application error has occurred", and
+nothing in your own logs would show it, because the call never reaches you.
+The restore runs on every exit path, `ctrl-c` included.
+
+**To keep our hands off the number entirely**, pass `--no-webhook`. Nothing is
+written to Twilio and the public URL is printed for you to configure yourself:
+
+```sh
+unmute dev examples/telephony-hello --target pipecat --telephony --no-webhook
+```
+
+Use it for a number that is shared with someone else, serving production
+traffic, or managed by something other than this CLI.
+
+**If you are past experimenting**, stop the rewriting instead of relying on it.
+Give `cloudflared` a named tunnel with a fixed hostname, set the webhook to
+that hostname once in the Twilio console, and use `--no-webhook` from then on.
+The automatic rewrite exists only because quick tunnel hostnames rotate.
+
+One wrinkle worth knowing: restoring means putting back whatever was there. If
+a previous run left a dead tunnel URL on the number, the next run will read
+that as the old value and faithfully restore it. Clear it once by hand, then
+every run afterwards hands back something real.
 
 ### What gets created on your local LiveKit stack automatically
 
@@ -470,9 +507,9 @@ origin yourself. If the channel is outbound, generate a separate
 Carrier webhook setup by carrier:
 
 - For Twilio, `unmute dev --telephony` sets the number's voice webhook
-  automatically on every start and prints the previous value. In
-  deployment, set the voice webhook and call-status callback to the printed
-  endpoints yourself.
+  automatically on every start, prints the previous value, and restores it on
+  exit; `--no-webhook` skips the change entirely. In deployment, set the voice
+  webhook and call-status callback to the printed endpoints yourself.
 - For Telnyx, use a version 2 Voice API Application, set its webhook URL to
   the printed inbound endpoint, and assign the phone number to it.
 - For Plivo, create a Voice XML Application, set its Answer and Hangup URLs
@@ -719,6 +756,27 @@ off and drops out. Swap it for a `warm:` block to keep the agent on the line and
 brief the person first. See
 [controls](../reference/controls.md#kind-human_transfer) for what goes inside
 each block.
+
+**A `warm:` transfer needs `outbound: true` on the phone channel.** Warm holds
+the caller and then rings the person, and ringing someone is placing a call. So
+a package with a warm transfer places calls, whatever the channel says, and
+declaring `outbound: false` next to one is rejected:
+
+```text
+channel "phone" needs outbound: true; a warm transfer places a call to its destination
+```
+
+Cold is unaffected. It reroutes the call the caller already made and originates
+nothing, so it works on an inbound-only agent.
+
+Declaring the direction has a second payoff while you are building: it unlocks
+`--to`, which makes the agent ring **you**. That is how you test a transfer
+when you cannot receive the inbound call yourself, because the number is
+unreachable from where you are or is not cleared for incoming calls yet:
+
+```sh
+unmute dev examples/human-transfer --target livekit --telephony --to +15551234567
+```
 
 The target resolves `billing_line` to an E.164 number or SIP URI. The generated
 runtime never accepts a model-supplied arbitrary transfer destination.

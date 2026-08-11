@@ -308,7 +308,8 @@ Public ingress is managed for you: without `--public-url`, the command runs a
 cloudflared quick tunnel as a child process (install it once; macOS:
 `brew install cloudflared`) and supplies `UNMUTE_PUBLIC_URL` itself. On the
 Twilio route it then sets the number's voice webhook to the printed inbound
-endpoint on every start and prints the previous value. Pass
+endpoint on every start, prints the previous value, and restores it when you
+stop (`--no-webhook` leaves the number untouched). Pass
 `--public-url https://your-tunnel.example` to bring your own tunnel instead;
 that tunnel must remain running. Telephony logs will go to
 `build/<target>/telephony.log`; `--verbose` will follow them in the terminal.

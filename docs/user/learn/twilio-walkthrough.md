@@ -69,7 +69,8 @@ even if you use API keys elsewhere.
    `TWILIO_PHONE_NUMBER`.
 
 You do not need to configure the number's webhook by hand. The dev command
-sets it on every start and prints the previous value so you can restore it.
+sets it on every start, prints the previous value, and puts that value back
+when you stop. Pass `--no-webhook` if it should leave your number alone.
 
 ### Step 3: the outbound token is automatic
 
