@@ -219,14 +219,11 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	// bridge is our own open-source implementation of the Media Streams
 	// protocol; LiveKit's hosted connector is Cloud-only.
 	connector := TelephonyKey{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}
-	// Transfers are ours on this route, not LiveKit's: the bridge owns the
-	// Twilio CallSid, so cold is a REST redirect and warm is a second streamed
-	// call bridged in the same room (SPEC connector-transfers C2/C6). LiveKit's
-	// SIP prebuilts need a SIP participant and an outbound trunk, neither of
-	// which exists here.
+	// No transfers on this route: a transfer needs a platform primitive, and
+	// the connector has none — LiveKit's SIP prebuilts need a SIP participant
+	// and an outbound trunk, neither of which exists here (SPEC C1, V1).
 	connectorFeatures := append([]TelephonyFeature{
 		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup),
-		TelephonyFeature(ColdTransfer), TelephonyFeature(WarmTransfer),
 	}, sourcesWithStream...)
 	add(LiveKit, "connector", "twilio", "https://docs.livekit.io/telephony/connectors/twilio/", connectorFeatures...)
 	route = routes[connector]

@@ -74,8 +74,7 @@ spread into the tools= kwarg (docs/spec/prebuilt-tools.md). */ -}}
 {{- /* mcp_mounts renders an agent's/task's MCP servers (B3): one server per
 url_env, allowed_tools keeping D8 visibility. */ -}}
 {{define "mcp_mounts"}}mcp_servers=[{{range $i, $s := .}}{{if $i}}, {{end}}mcp.MCPServerHTTP(url=os.environ[{{pyq $s.URLEnv}}], allowed_tools=[{{range $j, $t := $s.Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]){{end}}]{{end -}}
-{{if or .NeedsAsyncio .HasConnectorTransfer}}import asyncio
-{{end}}{{if .HasConnectorTransfer}}import contextlib
+{{if .NeedsAsyncio}}import asyncio
 {{end}}{{if .NeedsInspect}}import inspect
 {{end}}{{if or .Outbound .Telephony .CallStartVars}}import json
 {{end}}import logging
@@ -97,7 +96,7 @@ import os
     NOT_GIVEN,
 {{- end}}
     Agent,
-{{- if or .NeedsTasks .HasConnectorWarm}}
+{{- if .NeedsTasks}}
     AgentTask,
 {{- end}}
     AgentServer,
@@ -119,7 +118,7 @@ import os
 {{- if .NeedsFunctionTools}}
     function_tool,
 {{- end}}
-{{- if or .HasColdTransfer .HasConnectorTransfer}}
+{{- if .HasColdTransfer}}
     get_job_context,
 {{- end}}
     inference,
@@ -390,84 +389,6 @@ async def _livekit_entry_greeting(session: AgentSession) -> None:
 
 
 {{- end}}
-{{- if .HasConnectorTransfer}}
-
-
-# --- human transfer over the Twilio connector ---------------------------------
-# The bridge holds the carrier powers (it owns the CallSid and the media
-# sockets) and we hold the conversation, so the two talk over LiveKit RPC. This
-# is our lowering, not LiveKit's SIP prebuilt: see connector-transfers C6.
-{{if .HasConnectorWarm}}async def _await_transfer_leg(room, ring_timeout: float):
-    """Wait for the dialled person to answer and join the room."""
-    deadline = asyncio.get_running_loop().time() + ring_timeout
-    while asyncio.get_running_loop().time() < deadline:
-        for participant in room.remote_participants.values():
-            if participant.identity == "twilio-supervisor":
-                return participant
-        await asyncio.sleep(0.25)
-    return None
-
-
-async def _cancel_warm_leg(room, bridge: str, token: str) -> None:
-    """Stop ringing, hang the second call up, and take the caller off hold."""
-    with contextlib.suppress(Exception):
-        await room.local_participant.perform_rpc(
-            destination_identity=bridge,
-            method="unmute.cancel_warm_leg",
-            payload=json.dumps({"token": token}),
-            response_timeout=15,
-        )
-
-
-class _WarmBriefing(AgentTask[bool]):
-    """Tell the person what the call is about, and let them accept or decline.
-
-    Awaited like any AgentTask: it completes True when they take the call and
-    False when they cannot. The transcript is interpolated into the
-    instructions rather than summarized by a model, which is what LiveKit's own
-    prebuilt does too (human-transfer.md C5).
-    """
-
-    def __init__(self, briefing: str, *, chat_ctx: llm.ChatContext) -> None:
-        history = "\n".join(
-            f"{'Caller' if item.role == 'user' else 'Assistant'}: {item.text_content}"
-            for item in chat_ctx.items
-            if getattr(item, "text_content", None) and item.role in ("user", "assistant")
-        )
-        super().__init__(
-            instructions=(
-                "You are handing a live phone call to a colleague who has just picked up. "
-                "Greet them, summarize the conversation so far, and ask whether they can take it. "
-                "Call connect_to_caller when they agree, decline_transfer when they cannot.\n\n"
-                + (briefing + "\n\n" if briefing else "")
-                + "Conversation so far:\n"
-                + (history or "(nothing said yet)")
-            ),
-        )
-
-    @function_tool
-    async def connect_to_caller(self, ctx: RunContext) -> str:
-        """Connect this person to the caller now."""
-        self.complete(True)
-        return "Connecting you now."
-
-    @function_tool
-    async def decline_transfer(self, ctx: RunContext) -> str:
-        """Record that this person cannot take the call."""
-        self.complete(False)
-        return "Understood."
-
-
-{{end}}async def _transfer_unavailable(ctx, reason: str, hangup: bool) -> str:
-    """on_unavailable, one policy for every way the person does not take it."""
-    if hangup:
-        await ctx.session.generate_reply(
-            instructions="Tell the caller nobody is available and say goodbye."
-        )
-        ctx.session.shutdown()
-        return f"Nobody took the transfer ({reason}); the call was ended."
-    return f"Nobody took the transfer ({reason}). Tell the caller and keep helping them."
-{{end}}
 {{- if .IgnorePhrases}}
 # --- interruption shaping ----------------------------------------------------
 IGNORE_PHRASES = [{{range $i, $p := .IgnorePhrases}}{{if $i}}, {{end}}{{pyq $p}}{{end}}]
@@ -566,87 +487,6 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         # picked and when — the transfer that ran is otherwise invisible in the
         # logs until the carrier request goes out.
         logger.info("human transfer fired: {{.Method}} ({{if .Warm}}warm{{else}}cold{{end}})")
-{{- if .Connector}}
-{{- if .Warm}}
-        # warm on the Twilio connector: our own lowering, because LiveKit's
-        # prebuilt needs a SIP participant and an outbound trunk and this route
-        # has neither. The bridge dials the person as a second streamed call and
-        # holds the caller on its own socket; the person joins this room, so the
-        # briefing is just this session listening to them instead of the caller.
-        job_ctx = get_job_context()
-        bridge = "twilio-bridge"
-        try:
-            started = json.loads(await job_ctx.room.local_participant.perform_rpc(
-                destination_identity=bridge,
-                method="unmute.start_warm_leg",
-                payload=json.dumps({"to": {{.ToExpr}}{{if .RingTimeout}}, "ring_timeout": {{.RingTimeout}}{{end}}}),
-                response_timeout=30,
-            ))
-        except Exception as error:
-            return await _transfer_unavailable(ctx, f"the call could not be placed ({error})", {{if .Hangup}}True{{else}}False{{end}})
-        token = started["token"]
-        person = await _await_transfer_leg(job_ctx.room{{if .RingTimeout}}, {{.RingTimeout}}{{else}}, 30.0{{end}})
-        if person is None:
-            await _cancel_warm_leg(job_ctx.room, bridge, token)
-            return await _transfer_unavailable(ctx, "nobody answered", {{if .Hangup}}True{{else}}False{{end}})
-        caller_identity = ctx.session.room_io.linked_participant
-        caller_identity = caller_identity.identity if caller_identity else None
-        # Listen to the person, not the caller, for the length of the briefing.
-        ctx.session.room_io.set_participant(person.identity)
-        accepted = await _WarmBriefing(
-            {{if .Briefing}}{{pyq .Briefing}}{{else}}""{{end}},
-            chat_ctx=self.chat_ctx,
-        )
-        if not accepted:
-            await _cancel_warm_leg(job_ctx.room, bridge, token)
-            ctx.session.room_io.set_participant(caller_identity)
-            return await _transfer_unavailable(ctx, "they could not take the call", {{if .Hangup}}True{{else}}False{{end}})
-        await job_ctx.room.local_participant.perform_rpc(
-            destination_identity=bridge,
-            method="unmute.connect_to_caller",
-            payload=json.dumps({"token": token}),
-            response_timeout=15,
-        )
-        # The bridge now copies audio between the two phone legs and neither
-        # hears us. The session stays up as the media path: ending it would drop
-        # both calls (connector-transfers C6).
-        ctx.session.input.set_audio_enabled(False)
-        ctx.session.output.set_audio_enabled(False)
-        return "The caller is now talking to the person; you are no longer on the call."
-{{- else}}
-        # cold on the Twilio connector: the bridge owns the CallSid, so this is
-        # one REST redirect of the caller's leg, the same call the Pipecat
-        # carrier route makes (connector-transfers C2).
-        #
-        # The tool speaks the announcement itself (V11/B4). Leaving it to the
-        # prompt lets a model say "putting you through" and never call this,
-        # which a caller cannot tell apart from a transfer that failed.
-        await ctx.session.say(
-            "Putting you through now, one moment.", allow_interruptions=False
-        )
-        job_ctx = get_job_context()
-        try:
-            await job_ctx.room.local_participant.perform_rpc(
-                destination_identity="twilio-bridge",
-                method="unmute.cold_transfer",
-                payload=json.dumps({"to": {{.ToExpr}}}),
-                response_timeout=30,
-            )
-        except Exception as error:
-{{- if .Hangup}}
-            # on_unavailable: hangup
-            await ctx.session.generate_reply(
-                instructions="Tell the caller the transfer failed and say goodbye."
-            )
-            ctx.session.shutdown()
-            return f"The transfer failed ({error}); the call was ended."
-{{- else}}
-            # on_unavailable: return_to_caller — the caller is still connected.
-            return f"The transfer failed ({error}). Tell the caller and keep helping them."
-{{- end}}
-        return "The caller was transferred."
-{{- end}}
-{{- else}}
 {{- if .Warm}}
         # warm: the prebuilt holds the caller with music, dials the person,
         # briefs them from the chat context, then merges the calls. Beta on
@@ -722,7 +562,6 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
             return f"The transfer failed ({error}). Tell the caller and keep helping them."
 {{- end}}
         return "The caller was transferred."
-{{- end}}
 {{- end}}
 {{end}}
 {{- range .Delegates}}

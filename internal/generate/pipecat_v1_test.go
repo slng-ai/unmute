@@ -1815,9 +1815,10 @@ func TestPipecatWebWaitsForRTVIClientReady(t *testing.T) {
 // TestPipecatWebDevNeedsNoTelephonyEnv is V10/B3: a telephony package must
 // still boot in the browser, where Redis, the carrier keys and the public URL
 // do not exist. bot.py checks provider credentials; telephony.py checks the
-// route's environment on top.
+// route's environment on top. telephony-hello is the fixture because it is
+// the committed example that keeps a Pipecat carrier telephony target.
 func TestPipecatWebDevNeedsNoTelephonyEnv(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "human-transfer"))
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "telephony-hello"))
 	if err != nil {
 		t.Fatal(err)
 	}

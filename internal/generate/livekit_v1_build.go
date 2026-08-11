@@ -297,15 +297,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 	for _, a := range data.Agents {
 		for _, ht := range a.HumanTransfers {
-			data.HasHumanTransfer = true
-			// The connector lowers both shapes itself, through the bridge's RPC
-			// surface, so it needs none of the SIP imports or the outbound trunk
-			// (connector-transfers C6).
-			if ht.Connector {
-				data.HasConnectorTransfer = true
-				data.HasConnectorWarm = data.HasConnectorWarm || ht.Warm
-				continue
-			}
 			data.HasColdTransfer = data.HasColdTransfer || !ht.Warm
 			data.HasWarmTransfer = data.HasWarmTransfer || ht.Warm
 			data.HasWarmBriefing = data.HasWarmBriefing || (ht.Warm && ht.Briefing != "")
@@ -765,9 +756,8 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 				Briefing:    c.Briefing,
 				RingTimeout: ringTimeoutSeconds(c.RingTimeout),
 				Hangup:      c.OnUnavailable == ir.OnUnavailableHangup,
-				Connector:   tgt.Telephony != nil && tgt.Telephony.Key.Transport == "connector",
 			}
-			if ht.Warm && !ht.Connector {
+			if ht.Warm {
 				// WarmTransferTask reads LIVEKIT_SIP_OUTBOUND_TRUNK itself.
 				env.add("LIVEKIT_SIP_OUTBOUND_TRUNK")
 			}

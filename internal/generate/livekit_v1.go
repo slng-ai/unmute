@@ -121,11 +121,6 @@ type livekitHumanTransfer struct {
 	// Hangup is on_unavailable: hangup. False is return_to_caller, which hands
 	// the model a refusal string and leaves the caller with the agent.
 	Hangup bool
-	// Connector selects our own lowering over the Twilio Media Streams bridge
-	// instead of LiveKit's SIP machinery: the bridge owns the CallSid, so cold
-	// is a REST redirect and warm is a second streamed call bridged in the same
-	// room, both driven by RPC (connector-transfers C2/C6).
-	Connector bool
 }
 
 // livekitOutbound is the telephony outbound + AMD voicemail lowering (V8/N6).
@@ -353,9 +348,6 @@ type livekitData struct {
 	HasColdTransfer      bool        // get_job_context import
 	HasWarmTransfer      bool        // WarmTransferTask import + trunk env + room_options (B14)
 	HasWarmBriefing      bool        // WorkflowInstructions import (a warm.briefing is set)
-	HasHumanTransfer     bool        // any shape: the connector bridge emits its transfer machinery
-	HasConnectorTransfer bool        // our own connector lowering: RPC helpers + asyncio/contextlib
-	HasConnectorWarm     bool        // the _WarmBriefing AgentTask and its imports
 	Outbound             *livekitOutbound
 	Telephony            *livekitTelephony
 
@@ -433,26 +425,24 @@ var livekitEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 	"source.to_number":                                       true,
 }
 
-// The LiveKit Twilio connector emits inbound, outbound, hangup and both
-// transfer shapes; voicemail detection has no AMD lowering here yet. The
-// transfers are ours, over the bridge's RPC surface, rather than LiveKit's SIP
-// prebuilts (connector-transfers C2/C6). It carries a Twilio stream id
-// (source.stream_id) since it rides Twilio Media Streams.
+// The LiveKit Twilio connector emits inbound, outbound, and hangup only;
+// transfers ride the platform's native SIP primitives, which need a SIP
+// participant and an outbound trunk, and this route has neither (SPEC C1).
+// Voicemail detection has no AMD lowering here yet. It carries a Twilio
+// stream id (source.stream_id) since it rides Twilio Media Streams.
 var livekitConnectorEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
-	targetcap.TelephonyRouteSelected:                   true,
-	targetcap.TelephonyFeature(targetcap.ColdTransfer): true,
-	targetcap.TelephonyFeature(targetcap.WarmTransfer): true,
-	targetcap.TelephonyInbound:                         true,
-	targetcap.TelephonyOutbound:                        true,
-	targetcap.TelephonyFeature(targetcap.Hangup):       true,
-	"source.session_id":                                true,
-	"source.carrier":                                   true,
-	"source.connection":                                true,
-	"source.call_id":                                   true,
-	"source.stream_id":                                 true,
-	"source.direction":                                 true,
-	"source.from_number":                               true,
-	"source.to_number":                                 true,
+	targetcap.TelephonyRouteSelected:             true,
+	targetcap.TelephonyInbound:                   true,
+	targetcap.TelephonyOutbound:                  true,
+	targetcap.TelephonyFeature(targetcap.Hangup): true,
+	"source.session_id":                          true,
+	"source.carrier":                             true,
+	"source.connection":                          true,
+	"source.call_id":                             true,
+	"source.stream_id":                           true,
+	"source.direction":                           true,
+	"source.from_number":                         true,
+	"source.to_number":                           true,
 }
 
 // GenerateLiveKit lowers a validated agent + livekit target into a project. The
