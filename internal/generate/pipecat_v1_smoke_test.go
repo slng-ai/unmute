@@ -698,7 +698,7 @@ from pipecat.services.settings import LLMSettings, STTSettings, TTSSettings  # n
 from pipecat.services.stt_service import STTService  # noqa: E402
 from pipecat.services.tts_service import TTSService  # noqa: E402
 from pipecat.utils.tracing.service_decorators import traced_llm, traced_stt, traced_tts  # noqa: E402
-from pipecat.workers.llm import LLMWorkerActivationArgs  # noqa: E402
+from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs  # noqa: E402
 from pipecat.workers.runner import WorkerRunner  # noqa: E402
 
 
@@ -845,12 +845,15 @@ async def main() -> None:
         additional_span_attributes={"langfuse.trace.name": tracing_config.TRACE_NAME},
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
+    # LLMWorker comes from pipecat, not from bot: the template drops that import
+    # when a package has both tracing and function calls, because the agent class
+    # extends TracedLLMWorker (itself an LLMWorker) and an unused import would
+    # fail the emitted project's own ruff gate.
     agent_types = [
         value
         for value in vars(bot).values()
         if isinstance(value, type)
-        and issubclass(value, bot.LLMWorker)
-        and value is not bot.LLMWorker
+        and issubclass(value, LLMWorker)
         and value.__module__ == "bot"
     ]
     assert len(agent_types) == 1, agent_types

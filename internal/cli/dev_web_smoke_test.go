@@ -50,7 +50,7 @@ func smokeDevArtifact(t *testing.T, targetName string) (composeFile, outDir stri
 	if err := writeArtifactFiles(nil, outDir, artifact.Files); err != nil {
 		t.Fatal(err)
 	}
-	env = scrubArtifactEnvironment(os.Environ(), artifactFileContent(t, artifact, ".env.example"))
+	env = placeholderArtifactEnvironment(os.Environ(), artifactFileContent(t, artifact, ".env.example"))
 	return filepath.Join(outDir, "compose.dev.yaml"), outDir, env
 }
 
