@@ -7,6 +7,20 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml ./
 RUN uv pip install --system .
 
+# Bake NLTK's sentence tokenizer into the image. Pipecat's TTS splits text into
+# sentences with it, and without it here the container downloads it on first
+# use — a live-call SSL race that, when it fails, silently mutes the agent
+# (B15). Pin the data dir so build and runtime agree on the path, retry through
+# the intermittent SSL flake, and assert it is present so a failure fails the
+# build rather than shipping a mute image.
+ENV NLTK_DATA=/usr/local/share/nltk_data
+RUN mkdir -p "$NLTK_DATA" && \
+    for i in 1 2 3 4 5; do \
+      python -c "import nltk; nltk.download('punkt_tab', download_dir='$NLTK_DATA')" && \
+      python -c "import nltk.data; nltk.data.find('tokenizers/punkt_tab')" && break || sleep 4; \
+    done; \
+    python -c "import nltk.data; nltk.data.find('tokenizers/punkt_tab')"
+
 COPY . .
 
 {{if .Telephony}}CMD ["uvicorn", "telephony:app", "--host", "0.0.0.0", "--port", "7860"]
