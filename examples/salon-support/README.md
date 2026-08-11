@@ -175,17 +175,22 @@ tools/book_appointment.yaml:22: tool "book_appointment" inject "customer_id" ref
 through its own *_env field
 ```
 
-The reasoning is that a template feeds things you might speak or send as data,
-and a credential is neither. Secrets travel by environment variable instead,
-through exactly three seams:
+The reasoning is the destination. A template renders into the greeting, a
+prompt, a tool argument, or a URL, so its value is spoken, logged, or traced.
+That is right for a customer name and wrong for a token. Secrets travel by
+environment variable instead, through exactly these seams:
 
 | Seam | Used for |
 |---|---|
 | a tool's `webhook.url_env`, `webhook.auth.token_env`, `mcp.url_env` | calling an authenticated API |
 | a model's `endpoint_env` | pointing a model at your own gateway |
-| `os.environ` inside a `local:` handler | a Python fixture that needs a credential |
+| `os.environ` inside a `local:` handler | a handler that builds its own request |
 
-This package deliberately uses none of the three. Its tools are local fixtures
+For a worked version of the first and the last, running side by side, see
+[examples/outbound-reminder](../outbound-reminder/README.md). The full
+reference is [docs/user/reference/secrets.md](../../docs/user/reference/secrets.md).
+
+This package deliberately uses none of the seams. Its tools are local fixtures
 that need no credential, so `book_appointment.py` reads no environment at all,
 and its five secrets are consumed by the runtime itself: two model keys and three
 Langfuse values for tracing. Declaring them by name still buys you the startup

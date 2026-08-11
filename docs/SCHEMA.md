@@ -415,6 +415,15 @@ reach the call through `*_env` fields, the generated auth helpers, and
 `.env.example` from this block. An env name the package references but never
 declares is a warning on stderr, exit 0.
 
+The cross-check reads the **body of every local handler** as well as the YAML
+sites, matching `os.environ["X"]`, `os.environ.get("X")`, and `os.getenv("X")`
+for `UPPER_SNAKE` names (amended 2026-08-11). A handler owns its own request, so
+its credential is named in Python rather than in a `*_env` field, and leaving
+that path unchecked was the one way a declared-secrets package could still fail
+on its first tool call. The scan is a text match, not a Python parse, so a name
+in a comment counts: the check over-reports rather than under-reports, since a
+spurious line costs one extra declaration and a miss costs a live call.
+
 ---
 
 ## 5. tools/*.yaml

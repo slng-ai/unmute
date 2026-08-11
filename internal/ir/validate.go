@@ -1126,6 +1126,12 @@ func EnvReferenceSites(agent *Agent) map[string][]string {
 	return sites
 }
 
+// handlerEnvRead matches the three ways a local Python handler reads an
+// environment variable: os.environ["X"], os.environ.get("X"), and os.getenv("X").
+// Only UPPER_SNAKE names are collected, the same convention every *_env field
+// enforces, so a lowercase lookup is never mistaken for a credential.
+var handlerEnvRead = regexp.MustCompile(`os\.(?:environ\.get\(|getenv\(|environ\[)\s*["']([A-Z][A-Z0-9_]*)["']`)
+
 // referencedEnvNames lists every environment variable the package points at,
 // with the site that names it, so an undeclared one can be reported (V10).
 // Connection env names are exempt: they are declared in their own file.
@@ -1143,6 +1149,15 @@ func referencedEnvNames(agent *Agent) map[string]string {
 			note(tool.URLEnv, fmt.Sprintf("tools/%s.yaml webhook.url_env", name))
 		case ToolMCP:
 			note(tool.URLEnv, fmt.Sprintf("tools/%s.yaml mcp.url_env", name))
+		case ToolLocal:
+			// A local handler owns its own request, so its credential is read in
+			// Python rather than named in YAML. Scanning the source is what keeps
+			// that path inside the same cross-check as every *_env field, instead
+			// of failing on the first tool call (V10).
+			site := fmt.Sprintf("%s os.environ", tool.Handler)
+			for _, match := range handlerEnvRead.FindAllStringSubmatch(tool.HandlerSource, -1) {
+				note(match[1], site)
+			}
 		}
 		if tool.Auth != nil {
 			note(tool.Auth.TokenEnv, fmt.Sprintf("tools/%s.yaml webhook.auth.token_env", name))

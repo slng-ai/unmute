@@ -10,9 +10,9 @@ code targets, Pipecat and LiveKit, from the same source. The design is in
 **Input variables** arrive with the dispatch, before the call rings:
 `customer_id`, `name`, and `appointment_time` in `agent.yaml` carry
 `source: call_start`. The greeting says "Hi {{name}}", the prompt in
-[instructions.md](instructions.md) is personalized the same way, and the two
-booking tools inject `customer_id` into every request, so the model never sees
-or invents it.
+[instructions.md](instructions.md) is personalized the same way, and every
+booking tool injects `customer_id` into its request, so the model never sees or
+invents it.
 
 **System variables** are owned by the runtime: `dialed_number` carries
 `source: to_number` and is filled by the telephony route, not by you.
@@ -27,8 +27,49 @@ refused with a message telling it to ask the caller first, and nothing is sent.
 
 **Secrets** are env names declared in the `secrets:` block, values never appear
 in any file. `SALON_API_URL` is the webhook base URL, `SALON_API_TOKEN` rides
-the bearer auth of both tools, and the model keys are listed so the generated
-`.env.example` and the startup check cover everything the runtime needs.
+the bearer auth of the two webhook tools, `SALON_API_SIGNING_KEY` is read by the
+one local handler, and the model keys are listed so the generated `.env.example`
+and the startup check cover everything the runtime needs.
+
+## Both ways a secret reaches a tool
+
+The three tools are here to show the two shapes side by side. Full reference in
+[docs/user/reference/secrets.md](../../docs/user/reference/secrets.md).
+
+**Named in YAML**, for a webhook tool. `confirm_appointment` and
+`reschedule_appointment` name their base URL and their token, and unmute writes
+the request:
+
+```yaml
+webhook:
+  url_env: SALON_API_URL
+  path: /customers/{{customer_id}}/appointments/confirm
+  auth:
+    type: bearer
+    token_env: SALON_API_TOKEN
+```
+
+**Read in Python**, for a local handler. `cancel_appointment` needs a signed
+request, and `webhook.auth` only speaks bearer and api_key, so the handler
+builds the signature itself and reads the key the ordinary way:
+
+```python
+key = os.environ["SALON_API_SIGNING_KEY"].encode()
+```
+
+There is no credential field on the `local:` block and nothing is passed into
+the function. `unmute validate` reads the handler, finds the name, and warns if
+`agent.yaml` never declared it:
+
+```
+Warnings:
+  pipecat: environment variables referenced but not declared in secrets:
+    SALON_API_SIGNING_KEY (tools/cancel_appointment.py os.environ)
+```
+
+Neither shape puts a value in a file, and neither is reachable from `{{...}}`:
+a template renders into the greeting, a prompt, a tool argument, or a URL, and
+all four are spoken, logged, or traced.
 
 ## Run it
 

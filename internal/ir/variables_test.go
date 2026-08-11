@@ -197,6 +197,43 @@ func TestUndeclaredSecretIsWarningOnly(t *testing.T) {
 	}
 }
 
+// A local handler owns its own request, so its credential is read in Python and
+// never appears in YAML. The cross-check reads the handler source, so an
+// undeclared name is still named instead of failing on the first call (V10).
+func TestHandlerEnvReadsAreCrossChecked(t *testing.T) {
+	agent := &Agent{
+		Secrets: []string{"SALON_API_URL"},
+		Tools: map[string]Tool{
+			"cancel_appointment": {
+				Execution: ToolLocal,
+				Handler:   "tools/cancel_appointment.py",
+				HandlerSource: `import os
+url = os.environ["SALON_API_URL"]
+key = os.environ.get('SALON_API_SIGNING_KEY')
+mode = os.getenv("SALON_API_MODE", "live")
+flag = os.getenv("debug")
+`,
+			},
+		},
+	}
+	refs := referencedEnvNames(agent)
+	for _, name := range []string{"SALON_API_URL", "SALON_API_SIGNING_KEY", "SALON_API_MODE"} {
+		if refs[name] != "tools/cancel_appointment.py os.environ" {
+			t.Errorf("%s site = %q, want the handler file", name, refs[name])
+		}
+	}
+	if _, ok := refs["debug"]; ok {
+		t.Error("a lowercase lookup is not an environment name reference")
+	}
+	warning := undeclaredSecretWarning(agent)
+	if !strings.Contains(warning, "SALON_API_SIGNING_KEY (tools/cancel_appointment.py os.environ)") {
+		t.Fatalf("warning must name the undeclared read and its file, got %q", warning)
+	}
+	if strings.Contains(warning, "SALON_API_URL") {
+		t.Fatalf("a declared secret must not be reported, got %q", warning)
+	}
+}
+
 func TestTemplateParsing(t *testing.T) {
 	if got := TemplateRefs("Hi {{name}}, your slot is {{ slot }} ({{name}})"); len(got) != 2 || got[0] != "name" || got[1] != "slot" {
 		t.Fatalf("TemplateRefs = %v", got)

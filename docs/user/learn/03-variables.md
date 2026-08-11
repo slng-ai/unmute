@@ -61,8 +61,11 @@ the model being able to invent one. If an injected variable is not set yet, the
 tool refuses the call and tells the model to ask for it, instead of sending a
 half-formed request. See [tools](../reference/tools.md).
 
-Credentials are a separate thing and never travel through `{{...}}`: they are
-declared by name in [secrets](../reference/secrets.md).
+Credentials are a separate thing and never travel through `{{...}}`. A template
+renders into the greeting, a prompt, a tool argument, or a URL, and all four of
+those are spoken, logged, or traced. So a tool that needs a credential names it
+with `webhook.auth.token_env`, or reads it with `os.environ` inside a `local:`
+handler. Both are in [secrets](../reference/secrets.md).
 
 ## What Pipecat generates
 

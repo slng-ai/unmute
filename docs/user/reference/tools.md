@@ -79,7 +79,7 @@ webhook:
     token_env: LOOKUP_CUSTOMER_TOKEN
 ```
 
-`url_env` names the environment variable holding the endpoint. It is a variable name, never a URL: the name must be `UPPER_SNAKE`, so a pasted URL fails validation. You set the real value in your `.env`; keeping it out of the spec means the same spec points at staging in dev and production in prod.
+`url_env` names the environment variable holding the endpoint. It is a variable name, never a URL: the name must be `UPPER_SNAKE`, so a pasted URL fails validation. You set the real value in your `.env`; keeping it out of the spec means the same spec points at staging in dev and production in prod. The generated code reads it as `os.environ["LOOKUP_CUSTOMER_URL"]` inside the request, so a rotated value needs no recompile. Declare the name under [`secrets:`](secrets.md) and it lands in `.env.example` and the startup check.
 
 `path` is optional and appended to that base URL. It must start with `/`, and it may carry `{{variable}}` tokens, whose values are URL-encoded when substituted (so a customer id containing a slash cannot change the route). Works on LiveKit and Pipecat; fails on Vapi and Deepgram.
 
@@ -91,6 +91,16 @@ local:
 ```
 
 Code targets only. The handler file travels with your package and is copied into the generated project.
+
+**A handler that needs a credential reads it itself**, with `os.environ` inside the function:
+
+```python
+def lookup_customer(phone):
+    token = os.environ["LOOKUP_CUSTOMER_TOKEN"]
+    ...
+```
+
+There is no credential field on the `local:` block and no secret object passed into your function. Your handler is normal Python and reads its own environment. Declare the name under [`secrets:`](secrets.md) so it reaches `.env.example` and the startup check; `unmute validate` scans handler bodies for these reads and warns about any name the package never declares.
 
 ### mcp:
 
@@ -127,7 +137,7 @@ Most real endpoints do not accept anonymous POSTs. `webhook.auth` says how the g
 
 Works on LiveKit and Pipecat. Vapi and Deepgram fail: a managed target configures its tool auth on its own side.
 
-**The token is an environment variable name, never a value.** Names are `UPPER_SNAKE`, so a pasted token fails validation. It lands in the generated `.env.example`; on Pipecat it also joins the startup check, so a missing token fails when the bot boots instead of mid-call.
+**The token is an environment variable name, never a value.** Names are `UPPER_SNAKE`, so a pasted token fails validation. It lands in the generated `.env.example`; on Pipecat it also joins the startup check, so a missing token fails when the bot boots instead of mid-call. [secrets](secrets.md) shows the emitted header helper and traces a token from `agent.yaml` to the running request.
 
 ### type: bearer
 
@@ -155,8 +165,9 @@ webhook:
 Sends the token verbatim in its own header.
 
 `basic` auth, request signing (HMAC), and OAuth2 are not supported. If your
-endpoint needs one, use a `local:` Python handler, where you control the request
-yourself.
+endpoint needs one, use a [`local:`](#local) Python handler, where you control
+the request yourself and read the credential with `os.environ`.
+`examples/outbound-reminder/tools/cancel_appointment.py` is a worked one.
 
 ## Conversation settings
 

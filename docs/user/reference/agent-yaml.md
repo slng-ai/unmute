@@ -44,7 +44,7 @@ Rules that hold across the whole package:
 | `listen` | only when `models.listen` has 2+ entries | name of a listen model | gated |
 | `turn` | only when `models.turn` has 2+ entries | name of a turn model | warn |
 | `variables` | no | map | core |
-| `secrets` | no | map of env var name to `{description, required}` | core |
+| `secrets` | no | list of env var names, see [secrets](secrets.md) | core |
 | `agents` | yes, must include `entry_agent` | map | core |
 | `tasks` | no | map | gated (T1) |
 | `task_groups` | no | map | gated (T1) |

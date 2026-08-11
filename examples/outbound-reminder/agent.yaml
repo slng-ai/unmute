@@ -4,6 +4,10 @@
 #   system variable        dialed_number (runtime owned, source: to_number)
 #   conversation variable  reschedule_to (the model saves it mid call)
 #   secrets                env names only, values never appear in any file
+#
+# The three tools also show both ways a secret reaches a call: the two webhook
+# tools name theirs in YAML (url_env, auth.token_env), and cancel_appointment
+# reads its signing key with os.environ inside its own Python handler.
 version: 1
 entry_agent: reminder
 
@@ -31,6 +35,7 @@ variables:
 secrets:
   - SALON_API_URL
   - SALON_API_TOKEN
+  - SALON_API_SIGNING_KEY
   - OPENAI_API_KEY
   - SLNG_API_KEY
 
@@ -62,10 +67,12 @@ agents:
     tools:
       - confirm_appointment
       - reschedule_appointment
+      - cancel_appointment
 
 tools:
   - confirm_appointment
   - reschedule_appointment
+  - cancel_appointment
 
 conversation:
   greeting:

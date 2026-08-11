@@ -87,4 +87,6 @@ Write `{{name}}` (spaces inside the braces are fine). It works in exactly four p
 
 "Has a value by then" means an input variable, a system variable, or any variable with a `default`. A conversation variable with no default fails to compile in a prompt, because there would be nothing to say. If a tool needs a value that is still unset when the model calls it, the tool refuses and tells the model what to ask the caller for, rather than sending a half-formed request.
 
-A token that does not name a declared variable is a compile error, so a typo is caught before the call. Secrets never work here: see [secrets](secrets.md).
+A token that does not name a declared variable is a compile error, so a typo is caught before the call.
+
+A token that names a **secret** is also a compile error, and deliberately so. Every template site renders into something spoken, prompted, traced, or logged, which is exactly where a credential must not go. A tool that needs a credential names it with `url_env` or `auth.token_env`, or reads it with `os.environ` in a `local:` handler. See [secrets](secrets.md).
