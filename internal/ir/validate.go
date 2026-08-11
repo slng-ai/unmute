@@ -1020,7 +1020,7 @@ func validateFallbacks(agent *Agent, resolved Target, caps targetcap.Table, row 
 }
 
 // validateHumanTransfer checks the resolved shape against the route (SCHEMA
-// N23). A free-text briefing resolves nothing on its own: it rides the warm
+// N25). A free-text briefing resolves nothing on its own: it rides the warm
 // control row, so there is no briefing capability left to apply. On a telephony
 // target the route table already resolved the control, so only the block's own
 // values are checked here.

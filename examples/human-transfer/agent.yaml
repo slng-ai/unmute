@@ -1,8 +1,8 @@
 # Sage and Stone Salon's phone line, with two ways to reach a person.
 #
 # A human transfer names its shape with a block, never a `mode:` field
-# (SCHEMA.md N23). Exactly one of `cold:` or `warm:` is required, and the block
-# carries every parameter of the transfer (N25), so a warm-only field like
+# (SCHEMA.md N25). Exactly one of `cold:` or `warm:` is required, and the block
+# carries every parameter of the transfer (N27), so a warm-only field like
 # `briefing` cannot be written on a cold transfer.
 version: 1
 entry_agent: front_desk

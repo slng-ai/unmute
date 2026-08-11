@@ -1068,7 +1068,7 @@ func humanTransferWhen(c *ir.HumanTransfer) string {
 }
 
 // destinationExpr renders a resolved destination as Python: a quoted literal,
-// or an os.environ lookup when the target defers it to an env var (N24). The
+// or an os.environ lookup when the target defers it to an env var (N26). The
 // env name is registered so it reaches .env.example and the required-env list.
 func destinationExpr(destination string, env *envSet) string {
 	if name := ir.DestinationEnv(destination); name != "" {
@@ -1080,7 +1080,7 @@ func destinationExpr(destination string, env *envSet) string {
 
 // ringTimeoutSeconds renders a validated ring_timeout as the float literal both
 // LiveKit APIs take. Empty stays empty so the emitted call omits the argument
-// and the platform default applies (SCHEMA N23).
+// and the platform default applies (SCHEMA N25).
 func ringTimeoutSeconds(value ir.Duration) string {
 	if value == "" {
 		return ""

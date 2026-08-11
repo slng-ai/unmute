@@ -582,7 +582,7 @@ func TestScaffoldToolManifestsAreBlockStyle(t *testing.T) {
 }
 
 // The scaffold writes the shape block with the transfer's settings inside it,
-// `destination` included (SCHEMA N25). Checked by decoding rather than by
+// `destination` included (SCHEMA N27). Checked by decoding rather than by
 // grepping, so an indentation slip is a failure and not a passing substring.
 func TestWriteHumanTransferPutsDestinationInTheBlock(t *testing.T) {
 	dir := t.TempDir()

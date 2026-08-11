@@ -222,7 +222,7 @@ type HumanTransfer struct {
 	When        string
 	Destination string
 	Value       string
-	// Mode is the shape block's name, `cold` or `warm` (SCHEMA N23). It is not
+	// Mode is the shape block's name, `cold` or `warm` (SCHEMA N25). It is not
 	// written as a `mode:` field; it names the block the other values sit in.
 	Mode          string
 	Briefing      string

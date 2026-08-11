@@ -646,7 +646,7 @@ The carrier adapter implements these operations:
 2. Hold the caller without ending the AI media stream.
 3. Dial the human destination.
 4. Brief the human with the control's `warm.briefing` text plus the call
-   transcript (SCHEMA N23).
+   transcript (SCHEMA N25).
 5. Join the caller and human.
 6. Remove the AI participant.
 7. Restore the original call or end cleanly when any step fails.
@@ -944,7 +944,7 @@ The table needs explicit facts for these features:
 - Voicemail detection.
 - IVR navigation.
 - Whether the route can carry a warm transfer's private briefing leg at all
-  (SCHEMA N23 removed the `briefing` mode enum; the briefing itself is free
+  (SCHEMA N25 removed the `briefing` mode enum; the briefing itself is free
   text and is not a route capability).
 
 An emitter-agreement test must fail when validation marks a telephony feature
@@ -1063,7 +1063,7 @@ resolves the largest call-lifecycle risk before copying it to other carriers.
 5. Restore or terminate cleanly after failure.
 6. Add warm-transfer state and locks to the existing Redis control store.
 7. Record in the capability table whether the route can carry the private
-   briefing leg (SCHEMA N23: there are no briefing modes to record).
+   briefing leg (SCHEMA N25: there are no briefing modes to record).
 
 Acceptance requires successful, declined, unanswered, and failed warm-transfer
 smokes with duplicate callback delivery, and one of them must have a person

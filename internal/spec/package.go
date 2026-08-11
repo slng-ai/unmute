@@ -146,9 +146,9 @@ type Control struct {
 	Context  *TransferContext  `json:"context,omitempty" yaml:"context,omitempty"`
 	// A human_transfer names its shape with a block, never a `mode:` field, so a
 	// warm-only field on a cold transfer is unwritable rather than rejected by a
-	// cross-field rule (SCHEMA N23, the N19 argument applied to controls). The
+	// cross-field rule (SCHEMA N25, the N19 argument applied to controls). The
 	// block carries every parameter of the transfer, `destination` included, so
-	// there is no such thing as an empty shape block (SCHEMA N25).
+	// there is no such thing as an empty shape block (SCHEMA N27).
 	Cold *ColdTransfer `json:"cold,omitempty" yaml:"cold,omitempty"`
 	Warm *WarmTransfer `json:"warm,omitempty" yaml:"warm,omitempty"`
 }
@@ -162,7 +162,7 @@ type ColdTransfer struct {
 }
 
 // WarmTransfer is the `warm:` block: hold the caller, ring the person, brief
-// them, then bridge the two. `briefing` is free text (SCHEMA N23); the drivers
+// them, then bridge the two. `briefing` is free text (SCHEMA N25); the drivers
 // pass the call transcript alongside it on their own.
 type WarmTransfer struct {
 	Destination   string `json:"destination" yaml:"destination"`

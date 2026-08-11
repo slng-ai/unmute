@@ -17,7 +17,7 @@ const (
 	TelephonyRouteSelected TelephonyFeature = "route"
 	TelephonyInbound       TelephonyFeature = "inbound"
 	TelephonyOutbound      TelephonyFeature = "outbound"
-	// SCHEMA N23 removed the briefing mode enum (it was Vapi's transferPlan
+	// SCHEMA N25 removed the briefing mode enum (it was Vapi's transferPlan
 	// vocabulary and mapped to no code target), so there are no briefing.*
 	// features: a free-text briefing rides the warm_transfer control row.
 	TelephonySourcePrefix = "source."

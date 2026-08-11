@@ -101,7 +101,7 @@ type livekitTransfer struct {
 	ResetVars   []livekitVar
 }
 
-// livekitHumanTransfer lowers a human_transfer control (V6, SCHEMA N23): cold is
+// livekitHumanTransfer lowers a human_transfer control (V6, SCHEMA N25): cold is
 // a SIP REFER through the job context; warm awaits the prebuilt
 // WarmTransferTask (beta.workflows, Beta on Python), which dials the person,
 // plays hold music, briefs them from the chat context, and merges the calls.
@@ -109,7 +109,7 @@ type livekitHumanTransfer struct {
 	Method string
 	When   string
 	// ToExpr is the Python expression for the destination: a quoted literal,
-	// or os.environ["NAME"] when the target defers it to an env var (N24).
+	// or os.environ["NAME"] when the target defers it to an env var (N26).
 	ToExpr string
 	Warm   bool
 	// Briefing is the free-text `warm.briefing`, lowered as the extra slot of
@@ -384,7 +384,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTransferRequires:      true, // generated guard naming unmet vars (V7)
 	targetcap.FieldContextNoToolCalls:    true, // copy(exclude_function_call=True)
 	targetcap.FieldContextVariableSubset: true, // uncarried userdata fields reset (D7)
-	targetcap.FieldTransferBriefing:      true, // WarmTransferTask instructions extra (N23)
+	targetcap.FieldTransferBriefing:      true, // WarmTransferTask instructions extra (N25)
 	targetcap.FieldGreetingUserFirst:     true,
 	targetcap.FieldGreetingModelWritten:  true,
 	targetcap.FieldGreetingAbsent:        true,

@@ -86,7 +86,7 @@ controls:
   to_human:
     kind: human_transfer
     # The shape is a block, never a `mode:` field, and the block carries every
-    # parameter of the transfer (SCHEMA N23, N25).
+    # parameter of the transfer (SCHEMA N25, N27).
     cold:
       destination: billing_line   # resolved per target in targets.yaml
 

@@ -212,7 +212,7 @@ type AgentTransfer struct {
 
 func (*AgentTransfer) control() {}
 
-// HumanTransfer is the resolved `cold:`/`warm:` control (SCHEMA N23). Mode is
+// HumanTransfer is the resolved `cold:`/`warm:` control (SCHEMA N25). Mode is
 // the resolved shape, not an authored field: the authoring surface is the block
 // name. Briefing is free text and is warm-only. OnUnavailable is resolved to its
 // default at Build time, so no driver ever reads an empty value.
@@ -247,7 +247,7 @@ const (
 // value covers every way that can happen (no answer within RingTimeout, an
 // explicit decline, voicemail, or a failed dial), because that is the shape the
 // platforms report: LiveKit's WarmTransferTask surfaces all four as one
-// ToolError (SCHEMA N23).
+// ToolError (SCHEMA N25).
 type OnUnavailable string
 
 const (

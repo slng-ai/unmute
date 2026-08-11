@@ -621,7 +621,7 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 }
 
 // buildHumanTransfer resolves the `cold:`/`warm:` block into the IR control
-// (SCHEMA N23). The shape is the block name, so zero blocks and two blocks are
+// (SCHEMA N25). The shape is the block name, so zero blocks and two blocks are
 // both errors here; `on_unavailable` resolves to its default so no driver reads
 // an empty value.
 func buildHumanTransfer(raw packagespec.Control) (Control, error) {
@@ -866,7 +866,7 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		if control.Kind != string(ControlHumanTransfer) {
 			continue
 		}
-		// The shape block is the feature: SCHEMA N23 removed the briefing mode
+		// The shape block is the feature: SCHEMA N25 removed the briefing mode
 		// enum, so free-text briefing rides the warm row and resolves nothing.
 		if shape := control.TransferShape(); shape != "" {
 			features[targetcap.TelephonyFeature(shape+"_transfer")] = true
@@ -991,7 +991,7 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 }
 
 // validDestination accepts the three forms a transfer destination can take
-// (SCHEMA N24): an E.164 literal, a SIP URI, or the UPPER_SNAKE name of an
+// (SCHEMA N26): an E.164 literal, a SIP URI, or the UPPER_SNAKE name of an
 // environment variable holding one of those. The three are unambiguous by
 // shape, so no extra key or suffix is needed to tell them apart: a literal
 // starts with `+`, a URI with `sip:`/`sips:`, and neither can be UPPER_SNAKE.

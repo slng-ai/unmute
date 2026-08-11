@@ -268,7 +268,7 @@ func Default() Table {
 				deny(Pipecat, "the Pipecat driver does not shape transfer context (variables subset) yet"),
 				deny(Vapi, "Vapi accepts transfer variables: all only"),
 			),
-			// SCHEMA N23: `briefing` is free text, so there is no per-value row
+			// SCHEMA N25: `briefing` is free text, so there is no per-value row
 			// to resolve. It rides the warm_transfer control row, which already
 			// says which routes can carry a private consultation leg at all.
 			FieldTransferBriefing: field(

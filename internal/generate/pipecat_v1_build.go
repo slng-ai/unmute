@@ -708,7 +708,7 @@ func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env 
 
 // pipecatDestinationExpr renders a resolved destination as Python: a quoted
 // literal, or an os.environ lookup when the target defers it to an env var
-// (N24). The env name is registered so it reaches .env.example and REQUIRED_ENV.
+// (N26). The env name is registered so it reaches .env.example and REQUIRED_ENV.
 func pipecatDestinationExpr(destination string, env *envSet) string {
 	if name := ir.DestinationEnv(destination); name != "" {
 		env.add(name)
