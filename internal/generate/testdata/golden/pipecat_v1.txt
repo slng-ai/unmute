@@ -272,9 +272,12 @@ class BillingAgent(LLMWorker):
     async def to_human(self, params: FunctionCallParams):
         """Transfer the caller to a human."""
         logger.info("human transfer fired: to_human (cold)")
+        # Daily SIP transfers via REFER, which keeps the bot on the call
+        # until the transfer completes, so the bot speaks the announcement
+        # itself (the official daily-pstn-cold-transfer pattern).
         await params.llm.push_frame(
             LLMMessagesAppendFrame(
-                [{"role": "developer", "content": "Tell the caller you are connecting them now, then wait."}],
+                [{"role": "developer", "content": "Tell the caller you are transferring them to a colleague now and to please hold, then wait."}],
                 run_llm=True,
             )
         )

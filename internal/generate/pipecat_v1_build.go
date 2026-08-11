@@ -304,7 +304,11 @@ func setImportNeeds(data *pipecatData) {
 		for _, t := range a.Tools {
 			if t.ColdDestination != "" {
 				data.HasColdTransfer = data.HasColdTransfer || !t.CarrierTransfer
-				data.NeedsAppendFrame = true // cold transfer prompts the caller
+				// Only the Daily-SIP cold branch speaks via an LLM append; the
+				// carrier route announces inside the redirect TwiML, because a
+				// REST redirect cuts off a bot-spoken line the moment it lands
+				// (B14). So the append frame is needed only off the carrier route.
+				data.NeedsAppendFrame = data.NeedsAppendFrame || !t.CarrierTransfer
 				data.NeedsEndFrame = data.NeedsEndFrame || !t.CarrierTransfer
 				continue
 			}

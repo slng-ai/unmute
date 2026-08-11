@@ -558,20 +558,26 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
 {{range .Args}}            {{.Name}} ({{.PyType}}):{{if .Description}} {{.Description}}{{end}}{{if .Enum}} One of: {{join .Enum ", "}}.{{end}}
 {{end}}        """{{else}}"""{{end}}
 {{if .ColdDestination}}        logger.info("human transfer fired: {{.MethodName}} (cold)")
-        await params.llm.push_frame(
-            LLMMessagesAppendFrame(
-                [{"role": "developer", "content": "Tell the caller you are connecting them now, then wait."}],
-                run_llm=True,
-            )
-        )
 {{if .CarrierTransfer}}        if not self.call_context:
             # No carrier call to redirect: this session is the browser or the
             # console, not the phone. Refuse in words the model can relay
             # instead of raising on a missing call id.
             await params.result_callback({"refused": "This session is not a phone call, so it cannot be transferred."})
             return
+        # The caller is told inside the redirect TwiML (a <Say> before the
+        # <Dial>), not by the bot: a REST redirect ends our media stream at once,
+        # so a bot-spoken line would be cut off before the caller heard it (B14).
         await telephony.cold_transfer(self.call_context["call_id"], {{.ColdDestination}})
-{{else}}        if _TRANSPORT is not None:
+{{else}}        # Daily SIP transfers via REFER, which keeps the bot on the call
+        # until the transfer completes, so the bot speaks the announcement
+        # itself (the official daily-pstn-cold-transfer pattern).
+        await params.llm.push_frame(
+            LLMMessagesAppendFrame(
+                [{"role": "developer", "content": "Tell the caller you are transferring them to a colleague now and to please hold, then wait."}],
+                run_llm=True,
+            )
+        )
+        if _TRANSPORT is not None:
             await _TRANSPORT.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
 {{end}}
         await params.result_callback({"transferred": True})

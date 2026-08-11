@@ -73,8 +73,16 @@ def _stream_twiml(token: str) -> str:
     return tostring(response, encoding="unicode")
 
 
+# Spoken by the carrier, not the bot: a REST redirect ends our media stream the
+# instant it lands, so anything the bot is still saying is cut off. The <Say>
+# lives in the redirect TwiML, so Twilio plays it in full and only then dials.
+_COLD_TRANSFER_SAY = "Please hold. I'm connecting you to a member of our team now."
+
+
 def _dial_twiml(destination: str) -> str:
     response = Element("Response")
+    say = SubElement(response, "Say")
+    say.text = _COLD_TRANSFER_SAY
     dial = SubElement(response, "Dial")
     dial.text = destination
     return tostring(response, encoding="unicode")
