@@ -613,6 +613,13 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         # cold on the Twilio connector: the bridge owns the CallSid, so this is
         # one REST redirect of the caller's leg, the same call the Pipecat
         # carrier route makes (connector-transfers C2).
+        #
+        # The tool speaks the announcement itself (V11/B4). Leaving it to the
+        # prompt lets a model say "putting you through" and never call this,
+        # which a caller cannot tell apart from a transfer that failed.
+        await ctx.session.say(
+            "Putting you through now, one moment.", allow_interruptions=False
+        )
         job_ctx = get_job_context()
         try:
             await job_ctx.room.local_participant.perform_rpc(

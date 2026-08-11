@@ -1817,3 +1817,40 @@ func TestPipecatWebWaitsForRTVIClientReady(t *testing.T) {
 		t.Errorf("on_client_ready must await pipeline_started before activate_entry (gate=%d, call=%d)", gate, call)
 	}
 }
+
+// TestPipecatWebDevNeedsNoTelephonyEnv is V10/B3: a telephony package must
+// still boot in the browser, where Redis, the carrier keys and the public URL
+// do not exist. bot.py checks provider credentials; telephony.py checks the
+// route's environment on top.
+func TestPipecatWebDevNeedsNoTelephonyEnv(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "human-transfer"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "bot.py")
+	start := strings.Index(botpy, "REQUIRED_ENV = [")
+	block := botpy[start : start+strings.Index(botpy[start:], "]")]
+	for _, telephonyOnly := range []string{"REDIS_URL", "UNMUTE_PUBLIC_URL", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"} {
+		if strings.Contains(block, telephonyOnly) {
+			t.Errorf("bot.py REQUIRED_ENV must not demand %q: it blocks the web dev run (V10)", telephonyOnly)
+		}
+	}
+	if !strings.Contains(block, "OPENAI_API_KEY") {
+		t.Error("bot.py REQUIRED_ENV lost the provider credentials it does need")
+	}
+	// The telephony app still requires the full set, so nothing is unchecked.
+	shared := artifactFile(t, artifact, "telephony_shared.py")
+	for _, want := range []string{"REDIS_URL", "UNMUTE_PUBLIC_URL", "TWILIO_ACCOUNT_SID"} {
+		if !strings.Contains(shared, want) {
+			t.Errorf("telephony_shared.py must still require %q", want)
+		}
+	}
+}

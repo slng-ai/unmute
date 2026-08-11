@@ -57,6 +57,9 @@ from pipecat_slng import SlngTTSService
 load_dotenv()
 
 MAIN_NAME = "main"
+# Provider credentials only. The telephony route's environment (Redis, carrier
+# keys, the public URL) is required by telephony.py, not here, so a telephony
+# package still runs in the browser with nothing but model keys (V10/B3).
 REQUIRED_ENV = [
     "DAILY_API_KEY",
     "DEEPGRAM_API_KEY",
