@@ -313,13 +313,11 @@ func setImportNeeds(data *pipecatData) {
 				continue
 			}
 			if t.WarmDestination != "" {
-				// warm transfer: hold prompt, hold mixer, two bridges, and an
-				// EndFrame only where on_unavailable says hang up.
+				// warm transfer: a detached conference orchestration. The
+				// briefing still speaks via an LLM append; hold, bridge, and
+				// hang-up are all carrier moves now, so no EndFrame and no mixer.
 				data.HasWarmTransfer = true
 				data.NeedsAppendFrame = true
-				// The on_unavailable branch is emitted either way, so EndFrame
-				// is always used on a warm package rather than conditionally.
-				data.NeedsEndFrame = true
 				continue
 			}
 			if t.Builtin != "" {
@@ -401,10 +399,6 @@ func setImportNeeds(data *pipecatData) {
 	}
 	if data.GreetingText != "" {
 		data.FrameImports = append(data.FrameImports, "TTSSpeakFrame")
-	}
-	if data.HasWarmTransfer {
-		data.FrameImports = append(data.FrameImports,
-			"Frame", "InputAudioRawFrame", "MixerEnableFrame", "OutputAudioRawFrame")
 	}
 	slices.Sort(data.FrameImports)
 }

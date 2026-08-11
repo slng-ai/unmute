@@ -1440,7 +1440,11 @@ func TestPipecatEmitterMatchesCapabilityTable(t *testing.T) {
 // The warm lowering on its own route: a hold mixer on the caller's transport, a
 // bridge on each leg, the second leg dialled onto its own media socket, and the
 // per-call handles in a context var rather than a module global (SPEC V4-V7).
-func TestPipecatWarmHumanTransferBridgesTwoSockets(t *testing.T) {
+// V17/V18/V19: warm transfer is a Twilio conference. The bot briefs the person
+// on a stream, then redirects them into a conference the caller already waits
+// in, and leaves the audio path. No hold mixer, no audio bridge, no per-leg
+// forwarding — the carrier owns hold and the bridge.
+func TestPipecatWarmHumanTransferUsesConference(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
@@ -1468,57 +1472,47 @@ func TestPipecatWarmHumanTransferBridgesTwoSockets(t *testing.T) {
 	}
 	bot := artifactFile(t, artifact, "bot.py")
 	for _, want := range []string{
-		"class _HoldMixer(BaseAudioMixer):",
-		"class _AudioBridge(FrameProcessor):",
-		"audio_out_mixer=_HoldMixer()",
-		`_CALLER: ContextVar[_CallerLeg | None] = ContextVar("unmute_caller_leg", default=None)`,
-		"caller_leg = _CallerLeg(transport, _AudioBridge(name=\"warm::caller\"))",
-		"caller_leg.bridge,",
-		"caller_leg.release()",
+		"async def _run_warm(",
+		"async def _brief(",
+		"await telephony.hold_in_conference(caller_call_id, room)",
+		"await telephony.join_conference(supervisor_call_id, room)",
 		"await _warm_transfer(",
+		"self.call_context,",
 		`briefing="Say who is calling and why."`,
 		"ring_timeout=25.0",
 		"hangup_on_unavailable=False",
-		"await caller_out.queue_frame(MixerEnableFrame(True))",
-		"caller.bridge.sink = supervisor.output()",
 	} {
 		if !strings.Contains(bot, want) {
-			t.Errorf("bot.py missing warm-transfer lowering %q", want)
+			t.Errorf("bot.py missing conference warm lowering %q", want)
 		}
 	}
-	// The bot bridges for the rest of the call, so the accepted path must not
-	// end the session the way a cold transfer does (human-transfer V9).
-	warm := bot[strings.Index(bot, "if outcome == \"bridged\":"):]
-	if end := strings.Index(warm, "EndFrame()"); end >= 0 && end < strings.Index(warm, "hangup_on_unavailable") {
-		t.Error("a bridged warm transfer must not push EndFrame")
+	// V18: the carrier owns hold and the bridge, so none of the in-process
+	// audio machinery is emitted.
+	for _, forbidden := range []string{"_HoldMixer", "_AudioBridge", "MixerEnableFrame", "caller_leg", "_CallerLeg"} {
+		if strings.Contains(bot, forbidden) {
+			t.Errorf("conference warm must not emit audio-path machinery %q", forbidden)
+		}
 	}
 	adapter := artifactFile(t, artifact, "telephony.py")
 	for _, want := range []string{
-		"async def start_warm_leg(destination: str, ring_timeout: float)",
-		"twiml=_stream_twiml(token),",
-		"timeout=int(ring_timeout),",
-		"forget_transfer(token)",
+		"async def start_warm_leg(destination: str, ring_timeout: float) -> tuple[asyncio.Future, str, str]:",
+		"return arrival, token, call.sid",
+		`startConferenceOnEnter="false"`,
+		`startConferenceOnEnter="true"`,
+		`endConferenceOnExit="true"`,
+		"async def hold_in_conference(caller_call_id: str, room: str)",
+		"async def join_conference(supervisor_call_id: str, room: str)",
+		"async def hangup_caller(call_id: str, message: str)",
+		"async def return_caller(caller_call_id: str, from_number: str, to_number: str)",
 	} {
 		if !strings.Contains(adapter, want) {
-			t.Errorf("telephony.py missing warm second leg %q", want)
+			t.Errorf("telephony.py missing conference helper %q", want)
 		}
 	}
-	shared := artifactFile(t, artifact, "telephony_shared.py")
-	for _, want := range []string{
-		"_PENDING_TRANSFERS: dict[str, asyncio.Future] = {}",
-		"def expect_transfer() -> tuple[str, asyncio.Future]:",
-		"arrival = _PENDING_TRANSFERS.pop(token, None)",
-		"await released.wait()",
-	} {
-		if !strings.Contains(shared, want) {
-			t.Errorf("telephony_shared.py missing transfer-token routing %q", want)
-		}
-	}
-	// A transfer leg rides an already-admitted session: admitting it again
-	// would spend a second capacity slot on one conversation.
-	transfer := shared[strings.Index(shared, "arrival = _PENDING_TRANSFERS.pop"):strings.Index(shared, "pending = await STATE.pending")]
-	if strings.Contains(transfer, "STATE.admit") {
-		t.Error("a warm transfer leg must not take a second admission slot")
+	// V18: hold music is the carrier's, so the caller's conference sets no
+	// waitUrl attribute (an omitted waitUrl means Twilio's default hold music).
+	if strings.Contains(adapter, "waitUrl=") {
+		t.Error("warm hold must use the carrier default, never a waitUrl")
 	}
 }
 
