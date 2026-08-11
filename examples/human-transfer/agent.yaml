@@ -74,7 +74,10 @@ channels:
   phone:
     kind: telephony
     inbound: true
-    outbound: false
+    # A warm transfer dials the supervisor, so this agent places calls either
+    # way. Declaring it also gives `unmute dev --telephony --to <your number>`,
+    # which is how you test a transfer when you cannot receive the inbound call.
+    outbound: true
 
 capacity:
   peak_sessions: 4

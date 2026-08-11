@@ -975,3 +975,34 @@ func reportFor(report ValidateReport, provider Provider) TargetValidation {
 	}
 	panic("report not found: " + provider)
 }
+
+// V12/B5: a warm transfer dials its destination, so a package containing one
+// must declare an outbound phone direction. examples/human-transfer shipped
+// with `outbound: false`, validated green, and then had `--to` refused as if
+// the direction had been removed from the driver (B5).
+func TestV12_WarmTransferRequiresOutboundDirection(t *testing.T) {
+	for _, outbound := range []bool{false, true} {
+		pkg := loadSafeCore(t)
+		enableTelephony(pkg)
+		phone := pkg.Agent.Channels["phone"]
+		phone.Outbound = &outbound
+		pkg.Agent.Channels["phone"] = phone
+		// The shipped cold transfer, made warm: same tool wiring, same
+		// destination, only the shape block differs.
+		human := pkg.Agent.Controls["to_human"]
+		human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
+		pkg.Agent.Controls["to_human"] = human
+		target := pkg.Targets["pipecat"]
+		target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
+		pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+		agent, err := Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		report, _ := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
+		joined := strings.Join(report.PerTarget[0].Errors, "\n")
+		if got := strings.Contains(joined, "needs outbound: true"); got == outbound {
+			t.Fatalf("outbound=%v: direction error present=%v, want %v:\n%s", outbound, got, !outbound, joined)
+		}
+	}
+}

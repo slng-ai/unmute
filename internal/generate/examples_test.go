@@ -3,6 +3,7 @@ package generate
 import (
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -162,16 +163,17 @@ func TestPublicExamplePackages(t *testing.T) {
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
-	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
+	// Artifacts must not be *committed*; compiling an example locally is normal
+	// and must not fail the suite, so ask git what is tracked rather than
+	// walking the working tree (B5).
+	tracked, err := exec.Command("git", "ls-files", "examples").Output()
+	if err != nil {
+		t.Skipf("git ls-files unavailable: %v", err)
+	}
+	for _, path := range strings.Split(strings.TrimSpace(string(tracked)), "\n") {
+		if strings.Contains(path, "/build/") || strings.HasSuffix(path, ".DS_Store") {
+			t.Errorf("forbidden committed example artifact: %s", path)
 		}
-		if entry.Name() == ".DS_Store" || entry.IsDir() && entry.Name() == "build" {
-			t.Errorf("forbidden public example artifact: %s", path)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
 	}
 }
 

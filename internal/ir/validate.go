@@ -1262,8 +1262,18 @@ func validateCapacity(agent *Agent, resolved Target, provider targetcap.Provider
 	}
 }
 
+// hasWarmTransfer reports whether any control dials a destination itself.
+func hasWarmTransfer(agent *Agent) bool {
+	for _, control := range agent.Controls {
+		if transfer, ok := control.(*HumanTransfer); ok && transfer.Mode == TransferWarm {
+			return true
+		}
+	}
+	return false
+}
+
 func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
-	for _, channel := range agent.Channels {
+	for channelName, channel := range agent.Channels {
 		if channel.Kind == ChannelTelephony && (provider == targetcap.LiveKit || provider == targetcap.Pipecat) && resolved.Telephony == nil {
 			row.Errors = add(row.Errors, "telephony channel requires a resolved Connection plan")
 			continue
@@ -1288,6 +1298,13 @@ func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider
 			}
 		}
 		if channel.Outbound == nil || !*channel.Outbound {
+			// A warm transfer dials the destination, so the agent places calls
+			// whatever the channel says. Declaring one direction and using the
+			// other is the spec lying about the emitted shape (V12/B5). One
+			// error per channel, not per control: the remedy is the same line.
+			if hasWarmTransfer(agent) {
+				row.Errors = add(row.Errors, fmt.Sprintf("channel %q needs outbound: true; a warm transfer places a call to its destination", channelName))
+			}
 			continue
 		}
 		// Voicemail handling is optional for outbound (T1): the carrier-websocket
