@@ -227,6 +227,9 @@ class _HoldMixer(BaseAudioMixer):
     async def process_frame(self, frame) -> None:
         if isinstance(frame, MixerEnableFrame):
             self._enabled, self._offset = frame.enable, 0
+            # The one observable fact that separates "hold music broken in the
+            # mixer" from "the enable frame never arrived" (B12).
+            logger.debug("hold mixer enabled={} loop_bytes={}", self._enabled, len(self._loop))
 
     async def mix(self, audio: bytes) -> bytes:
         # Replace rather than sum: the bot is not speaking to this leg while it
@@ -388,7 +391,18 @@ async def _warm_transfer(
     if caller is None:
         await params.result_callback({"refused": "This call cannot be warm transferred."})
         return
-    instruction = briefing + "\n\nThe call so far:\n" + _transcript(params.context)
+    # Role framing first, and the same words the LiveKit lowering uses: without
+    # it the model reads a transcript that ends in a complaint and treats the
+    # person who just picked up as the caller (B11).
+    instruction = (
+        "You are handing a live phone call to a colleague who has just picked up. "
+        "The person on this line is your colleague, never the caller. "
+        "Greet them, summarize the conversation so far, and ask whether they can take it. "
+        "Call connect_to_caller when they agree, decline_transfer when they cannot.\n\n"
+        + (briefing + "\n\n" if briefing else "")
+        + "The call so far:\n"
+        + _transcript(params.context)
+    )
     await params.llm.push_frame(
         LLMMessagesAppendFrame(
             [{"role": "developer", "content": "Tell the caller you are finding someone and ask them to hold."}],
