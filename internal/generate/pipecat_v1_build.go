@@ -300,11 +300,12 @@ func setImportNeeds(data *pipecatData) {
 		for _, t := range a.Tools {
 			if t.ColdDestination != "" {
 				// Daily SIP cold: the bot announces via an LLM append (the REFER
-				// keeps it streaming, B14). EndFrame is only pushed when a failed
-				// transfer must hang up (T5).
+				// keeps it streaming, B14) and always needs EndFrame — the
+				// on_dialout_answered handler ends the bot's leg once the human
+				// answers, and the hangup failure branch pushes it too (T5).
 				data.HasColdTransfer = true
 				data.NeedsAppendFrame = true
-				data.NeedsEndFrame = data.NeedsEndFrame || t.HangupOnUnavailable
+				data.NeedsEndFrame = true
 				continue
 			}
 			if t.Builtin != "" {

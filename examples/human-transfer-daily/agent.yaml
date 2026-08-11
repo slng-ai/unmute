@@ -1,0 +1,64 @@
+# Sage and Stone Salon's phone line on Pipecat over Daily, with one way to
+# reach a person: a cold transfer. Daily is the route where Pipecat has a
+# native transfer primitive (sip_call_transfer); warm transfer has no Pipecat
+# primitive at all, so it lives in the LiveKit example (../human-transfer).
+version: 1
+entry_agent: front_desk
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.3
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  front_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - send_to_billing
+
+controls:
+  # Cold: the bot announces the handoff, Daily reroutes the caller's leg via
+  # SIP REFER, and the bot drops off. Billing answers knowing nothing about
+  # the call.
+  send_to_billing:
+    kind: human_transfer
+    when: The caller asks about an invoice, a refund, or a charge they do not recognise.
+    cold:
+      destination: billing_line
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Sage and Stone Salon, this is the front desk. How can I help?"
+  interruption:
+    enabled: true
+
+# No phone channel: on this route the telephony is Daily's own. The number,
+# the dial-in webhook, and dial-out permission all live on the Daily domain
+# (configured through Pipecat Cloud), not in a generated telephony server.
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 4
+  max_sessions: 8
+  peak_starts_per_second: 1
+  avg_session_duration: 3m
