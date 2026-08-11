@@ -546,7 +546,13 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
                 run_llm=True,
             )
         )
-{{if .CarrierTransfer}}        await telephony.cold_transfer(self.call_context["call_id"], {{.ColdDestination}})
+{{if .CarrierTransfer}}        if not self.call_context:
+            # No carrier call to redirect: this session is the browser or the
+            # console, not the phone. Refuse in words the model can relay
+            # instead of raising on a missing call id.
+            await params.result_callback({"refused": "This session is not a phone call, so it cannot be transferred."})
+            return
+        await telephony.cold_transfer(self.call_context["call_id"], {{.ColdDestination}})
 {{else}}        if _TRANSPORT is not None:
             await _TRANSPORT.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
 {{end}}
