@@ -1914,3 +1914,93 @@ func TestV19_NativeReasonBeatsInferenceWildcard(t *testing.T) {
 		}
 	}
 }
+
+// TestLiveKitV1ConnectorHumanTransfer pins the connector lowering: our own
+// bridge RPC, never LiveKit's SIP calls, for both shapes (connector-transfers
+// V2/V5). The bridge and the agent are checked together because the RPC method
+// names are the contract between the two generated files.
+func TestLiveKitV1ConnectorHumanTransfer(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "human-transfer"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate connector: %v", err)
+	}
+	agentpy := artifactFile(t, artifact, "agent.py")
+	bridge := artifactFile(t, artifact, "telephony_bridge.py")
+
+	for _, want := range []string{
+		`method="unmute.cold_transfer"`,
+		`method="unmute.start_warm_leg"`,
+		`method="unmute.connect_to_caller"`,
+		"class _WarmBriefing(AgentTask[bool]):",
+		"ctx.session.room_io.set_participant(person.identity)",
+	} {
+		if !strings.Contains(agentpy, want) {
+			t.Errorf("connector agent.py missing %q", want)
+		}
+	}
+	// V2: the SIP machinery must not appear on this route. It would fail at
+	// runtime, because there is no SIP participant and no outbound trunk.
+	for _, unwanted := range []string{
+		"TransferSIPParticipantRequest",
+		"WarmTransferTask",
+		"LIVEKIT_SIP_OUTBOUND_TRUNK",
+	} {
+		if strings.Contains(agentpy, unwanted) {
+			t.Errorf("connector agent.py must not use SIP machinery, found %q", unwanted)
+		}
+	}
+	// V5: warm never ends the session on the accepted path. The bridge is the
+	// media path for the rest of the call, so a shutdown would drop both legs.
+	accepted := agentpy[strings.Index(agentpy, `method="unmute.connect_to_caller"`):]
+	accepted = accepted[:strings.Index(accepted, "you are no longer on the call")]
+	if strings.Contains(accepted, "ctx.session.shutdown()") {
+		t.Error("connector warm transfer must not shut the session down on the accepted path (V5)")
+	}
+	for _, want := range []string{
+		`register_rpc_method("unmute.cold_transfer")`,
+		`register_rpc_method("unmute.start_warm_leg")`,
+		`register_rpc_method("unmute.connect_to_caller")`,
+		"async def transfer_ws(",
+		"def _hold_loop() -> bytes:",
+		// V3/V4: the caller hears the hold loop, never the briefing, and no leg
+		// is ever forwarded its own audio.
+		"if leg.ws.closed or leg.hold or not leg.wants(identity):",
+		"return self.allow_peer and identity != self.identity",
+	} {
+		if !strings.Contains(bridge, want) {
+			t.Errorf("connector telephony_bridge.py missing %q", want)
+		}
+	}
+}
+
+// TestLiveKitConnectorBridgeUnchangedWithoutTransfer is V1: a package with no
+// human transfer must generate the bridge it generated before this feature, so
+// the transfer machinery cannot leak into every telephony project.
+func TestLiveKitConnectorBridgeUnchangedWithoutTransfer(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "telephony-hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bridge := artifactFile(t, artifact, "telephony_bridge.py")
+	for _, unwanted := range []string{"TRANSFERS", "class Leg:", "_hold_loop", "unmute.cold_transfer"} {
+		if strings.Contains(bridge, unwanted) {
+			t.Errorf("transfer-free bridge must not contain %q (V1)", unwanted)
+		}
+	}
+}
