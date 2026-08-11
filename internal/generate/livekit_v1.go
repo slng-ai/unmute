@@ -121,6 +121,11 @@ type livekitHumanTransfer struct {
 	// Hangup is on_unavailable: hangup. False is return_to_caller, which hands
 	// the model a refusal string and leaves the caller with the agent.
 	Hangup bool
+	// Connector selects our own lowering over the Twilio Media Streams bridge
+	// instead of LiveKit's SIP machinery: the bridge owns the CallSid, so cold
+	// is a REST redirect and warm is a second streamed call bridged in the same
+	// room, both driven by RPC (connector-transfers C2/C6).
+	Connector bool
 }
 
 // livekitOutbound is the telephony outbound + AMD voicemail lowering (V8/N6).
@@ -327,29 +332,32 @@ type livekitData struct {
 	InferenceUses    []string // bindings routed through LiveKit Inference (console needs cloud creds, C2/C7)
 	Tracing          bool
 
-	NeedsTasks         bool        // AgentTask import
-	NeedsTaskGroups    bool        // beta.workflows TaskGroup import
-	NeedsFunctionTools bool        // RunContext + function_tool imports
-	TypingImports      string      // `from typing import ...` names (Annotated/Literal), "" if none (V2)
-	NeedsField         bool        // `from pydantic import Field` — any tool arg carries a description (V2)
-	SingleAgentMinimal bool        // one agent, never a handoff target: drop the chat_ctx ctor plumbing (F3)
-	NeedsLLM           bool        // the `llm` module import (chat_ctx param, fallback chains, or history helpers)
-	NeedsHTTPX         bool        // any webhook tool
-	NeedsRender        bool        // any template site: the _render helper + re import
-	NeedsRefusal       bool        // any tool whose injected variables can be unset (V4)
-	AuthKinds          authKindSet // webhook auth schemes in use: helpers + imports per scheme
-	HasVars            bool        // Userdata dataclass + session userdata
-	NeedsLastN         bool        // the _last_n history helper
-	NeedsSummarize     bool        // the _summarize history helper
-	NeedsAsyncio       bool        // inactivity end / max_duration timers
-	NeedsInspect       bool        // local tool wrappers (isawaitable)
-	NeedsMCP           bool        // mcp import (MCPServerHTTP)
-	NeedsEndCallTool   bool        // beta.tools EndCallTool import (prebuilt end_call)
-	HasColdTransfer    bool        // get_job_context import
-	HasWarmTransfer    bool        // WarmTransferTask import + trunk env + room_options (B14)
-	HasWarmBriefing    bool        // WorkflowInstructions import (a warm.briefing is set)
-	Outbound           *livekitOutbound
-	Telephony          *livekitTelephony
+	NeedsTasks           bool        // AgentTask import
+	NeedsTaskGroups      bool        // beta.workflows TaskGroup import
+	NeedsFunctionTools   bool        // RunContext + function_tool imports
+	TypingImports        string      // `from typing import ...` names (Annotated/Literal), "" if none (V2)
+	NeedsField           bool        // `from pydantic import Field` — any tool arg carries a description (V2)
+	SingleAgentMinimal   bool        // one agent, never a handoff target: drop the chat_ctx ctor plumbing (F3)
+	NeedsLLM             bool        // the `llm` module import (chat_ctx param, fallback chains, or history helpers)
+	NeedsHTTPX           bool        // any webhook tool
+	NeedsRender          bool        // any template site: the _render helper + re import
+	NeedsRefusal         bool        // any tool whose injected variables can be unset (V4)
+	AuthKinds            authKindSet // webhook auth schemes in use: helpers + imports per scheme
+	HasVars              bool        // Userdata dataclass + session userdata
+	NeedsLastN           bool        // the _last_n history helper
+	NeedsSummarize       bool        // the _summarize history helper
+	NeedsAsyncio         bool        // inactivity end / max_duration timers
+	NeedsInspect         bool        // local tool wrappers (isawaitable)
+	NeedsMCP             bool        // mcp import (MCPServerHTTP)
+	NeedsEndCallTool     bool        // beta.tools EndCallTool import (prebuilt end_call)
+	HasColdTransfer      bool        // get_job_context import
+	HasWarmTransfer      bool        // WarmTransferTask import + trunk env + room_options (B14)
+	HasWarmBriefing      bool        // WorkflowInstructions import (a warm.briefing is set)
+	HasHumanTransfer     bool        // any shape: the connector bridge emits its transfer machinery
+	HasConnectorTransfer bool        // our own connector lowering: RPC helpers + asyncio/contextlib
+	HasConnectorWarm     bool        // the _WarmBriefing AgentTask and its imports
+	Outbound             *livekitOutbound
+	Telephony            *livekitTelephony
 
 	// Conversation shaping (V16).
 	ThinkingAudio          bool // subtle → BackgroundAudioPlayer thinking sound
@@ -425,22 +433,26 @@ var livekitEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 	"source.to_number":                                       true,
 }
 
-// The LiveKit Twilio connector emits inbound, outbound, and hangup only;
-// transfers and voicemail are not supported on this route yet. It carries a
-// Twilio stream id (source.stream_id) since it rides Twilio Media Streams.
+// The LiveKit Twilio connector emits inbound, outbound, hangup and both
+// transfer shapes; voicemail detection has no AMD lowering here yet. The
+// transfers are ours, over the bridge's RPC surface, rather than LiveKit's SIP
+// prebuilts (connector-transfers C2/C6). It carries a Twilio stream id
+// (source.stream_id) since it rides Twilio Media Streams.
 var livekitConnectorEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
-	targetcap.TelephonyRouteSelected:             true,
-	targetcap.TelephonyInbound:                   true,
-	targetcap.TelephonyOutbound:                  true,
-	targetcap.TelephonyFeature(targetcap.Hangup): true,
-	"source.session_id":                          true,
-	"source.carrier":                             true,
-	"source.connection":                          true,
-	"source.call_id":                             true,
-	"source.stream_id":                           true,
-	"source.direction":                           true,
-	"source.from_number":                         true,
-	"source.to_number":                           true,
+	targetcap.TelephonyRouteSelected:                   true,
+	targetcap.TelephonyFeature(targetcap.ColdTransfer): true,
+	targetcap.TelephonyFeature(targetcap.WarmTransfer): true,
+	targetcap.TelephonyInbound:                         true,
+	targetcap.TelephonyOutbound:                        true,
+	targetcap.TelephonyFeature(targetcap.Hangup):       true,
+	"source.session_id":                                true,
+	"source.carrier":                                   true,
+	"source.connection":                                true,
+	"source.call_id":                                   true,
+	"source.stream_id":                                 true,
+	"source.direction":                                 true,
+	"source.from_number":                               true,
+	"source.to_number":                                 true,
 }
 
 // GenerateLiveKit lowers a validated agent + livekit target into a project. The

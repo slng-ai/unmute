@@ -122,18 +122,22 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 		}
 	}
 	// The LiveKit Twilio connector is a usable route (its own open-source
-	// bridge): inbound, outbound, and hangup are provisional like the other
-	// live routes; transfers and voicemail stay gated (unsupported for now).
+	// bridge): inbound, outbound, hangup and both transfer shapes are
+	// provisional like the other live routes. The transfers are ours, built on
+	// the Twilio CallSid the bridge already holds, not LiveKit's SIP prebuilts
+	// (connector-transfers C2/C6). Voicemail detection stays gated: no AMD
+	// lowering exists on this route.
 	connector := TelephonyKey{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}
-	for _, feature := range []TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)} {
+	for _, feature := range []TelephonyFeature{
+		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup),
+		TelephonyFeature(ColdTransfer), TelephonyFeature(WarmTransfer),
+	} {
 		if got := ResolveTelephonyFeature(connector, feature); got.Tag != Provisional {
 			t.Fatalf("connector feature %s = %#v, want provisional", feature, got)
 		}
 	}
-	for _, feature := range []TelephonyFeature{TelephonyFeature(WarmTransfer), TelephonyFeature(ColdTransfer), TelephonyFeature(VoicemailDetection)} {
-		if got := ResolveTelephonyFeature(connector, feature); got.Tag != Gated {
-			t.Fatalf("connector unsupported feature %s = %#v, want gated", feature, got)
-		}
+	if got := ResolveTelephonyFeature(connector, TelephonyFeature(VoicemailDetection)); got.Tag != Gated {
+		t.Fatalf("connector voicemail detection = %#v, want gated", got)
 	}
 	required, optional, ok := TelephonyEnvironment(connector)
 	if !ok || len(optional) != 0 || strings.Join(required, ",") != "account_sid,auth_token,from_number" {

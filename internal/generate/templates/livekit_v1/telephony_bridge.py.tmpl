@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hmac
-import json
+{{if .HasHumanTransfer}}import contextlib
+{{end}}{{if .Telephony.HasOutbound}}import hmac
+{{end}}import json
 import logging
-import os
+{{if .HasHumanTransfer}}import math
+{{end}}import os
 import re
 import secrets
 from array import array
@@ -46,6 +48,14 @@ E164 = re.compile(r"\+[1-9][0-9]{7,14}")
 # media WebSocket URL. The signed webhook is the trust boundary; the token is
 # the capability that authorizes the matching WebSocket (popped on use).
 PENDING: dict[str, dict] = {}
+{{if .HasHumanTransfer}}
+# Pending human transfers, keyed by the same kind of token. A transfer token
+# resolves before a call token in media_ws: its WebSocket is the person being
+# transferred to, so it joins the caller's existing room instead of starting a
+# new call. Legs are indexed by room so the two can find each other.
+TRANSFERS: dict[str, dict] = {}
+LEGS: dict[str, "Leg"] = {}
+{{end}}
 
 
 def _env(name: str) -> str:
@@ -138,6 +148,93 @@ def _stream_twiml(token: str) -> str:
         f'<Response><Connect><Stream url="{url}"/></Connect></Response>'
     )
 
+{{if .HasHumanTransfer}}
+def _dial_twiml(destination: str) -> str:
+    # Cold transfer: the carrier reroutes the caller's leg and our media stream
+    # ends. Identical to the Pipecat carrier route's cold transfer, because it
+    # is the same Twilio product (connector-transfers C2).
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f"<Response><Dial>{destination}</Dial></Response>"
+    )
+
+
+# --- hold music --------------------------------------------------------------
+# Synthesized, not shipped: a bundled clip has to match the transport sample
+# rate and adds an asset with a licence question, while a two-note loop is a few
+# lines that match 8 kHz mu-law by construction (connector-transfers C4). Same
+# tone as the Pipecat route's _HoldMixer.
+def _hold_loop() -> bytes:
+    samples = array("h")
+    for hz, secs in ((392.0, 0.5), (523.25, 0.5), (0.0, 1.5)):
+        for index in range(int(SAMPLE_RATE * secs)):
+            value = 0.0 if hz == 0.0 else math.sin(2 * math.pi * hz * index / SAMPLE_RATE)
+            samples.append(int(6000 * value))
+    return pcm16_to_ulaw(samples.tobytes())
+
+
+_HOLD_ULAW: bytes = b""
+_HOLD_CHUNK = SAMPLE_RATE // 50  # 20 ms of 8 kHz mu-law, one byte per sample
+
+
+class Leg:
+    """One phone call: its WebSocket, and what that caller is allowed to hear.
+
+    Every leg writes its own downlink, so what reaches this phone is decided
+    here and nowhere else. During a briefing the caller's leg is held, and a
+    held leg is sent the hold loop instead of room audio, which is why briefing
+    audio cannot reach the caller (connector-transfers C4/V3).
+    """
+
+    def __init__(self, ws: web.WebSocketResponse, role: str) -> None:
+        self.ws = ws
+        self.role = role
+        self.stream_sid_ref: dict = {"value": None}
+        self.hold = False
+        self.allow_agent = True  # the agent's own speech
+        self.allow_peer = False  # the other phone leg, once bridged
+        self.room: rtc.Room | None = None
+
+    def wants(self, identity: str) -> bool:
+        # A phone leg is published by a bridge participant; anything else in the
+        # room is the agent. Never forward a leg its own audio (C7/V4).
+        if identity.startswith("twilio-"):
+            return self.allow_peer and identity != self.identity
+        return self.allow_agent
+
+    @property
+    def identity(self) -> str:
+        return "twilio-bridge" if self.role == "caller" else "twilio-supervisor"
+
+    async def send_ulaw(self, payload: bytes) -> None:
+        stream_sid = self.stream_sid_ref["value"]
+        if self.ws.closed or stream_sid is None:
+            return
+        await self.ws.send_json({
+            "event": "media",
+            "streamSid": stream_sid,
+            "media": {"payload": base64.b64encode(payload).decode("ascii")},
+        })
+
+
+async def hold_writer(leg: Leg) -> None:
+    """Feed a held leg the hold loop, 20 ms at a time, until the hold lifts."""
+    offset = 0
+    try:
+        while not leg.ws.closed:
+            if leg.hold and _HOLD_ULAW:
+                chunk = _HOLD_ULAW[offset : offset + _HOLD_CHUNK]
+                if len(chunk) < _HOLD_CHUNK:
+                    chunk += _HOLD_ULAW[: _HOLD_CHUNK - len(chunk)]
+                offset = (offset + _HOLD_CHUNK) % len(_HOLD_ULAW)
+                await leg.send_ulaw(chunk)
+            else:
+                offset = 0
+            await asyncio.sleep(0.02)
+    except Exception:
+        logger.exception("hold writer stopped")
+{{end}}
+
 
 async def health(_: web.Request) -> web.Response:
     return web.Response(text="ok")
@@ -217,7 +314,21 @@ def _dispatch_token(room_name: str, pending: dict, call_sid: str, stream_sid: st
     )
 
 
-async def forward_agent_audio(ws: web.WebSocketResponse, stream_sid_ref: dict, audio_track: rtc.Track) -> None:
+{{if .HasHumanTransfer}}async def forward_room_audio(leg: Leg, identity: str, audio_track: rtc.Track) -> None:
+    # Room audio out to this phone: resample to 8 kHz mono, mu-law, send. The
+    # per-frame `wants` check is what keeps a briefing off the caller's leg and
+    # a leg's own audio out of its downlink (C4/C7).
+    stream = rtc.AudioStream(audio_track, sample_rate=SAMPLE_RATE, num_channels=NUM_CHANNELS)
+    try:
+        async for event in stream:
+            if leg.ws.closed or leg.hold or not leg.wants(identity):
+                continue
+            await leg.send_ulaw(pcm16_to_ulaw(bytes(event.frame.data)))
+    except Exception:
+        logger.exception("room audio forwarding stopped for %s", identity)
+    finally:
+        await stream.aclose()
+{{else}}async def forward_agent_audio(ws: web.WebSocketResponse, stream_sid_ref: dict, audio_track: rtc.Track) -> None:
     # The agent's speech: resample to 8 kHz mono, mu-law encode, send to Twilio.
     stream = rtc.AudioStream(audio_track, sample_rate=SAMPLE_RATE, num_channels=NUM_CHANNELS)
     try:
@@ -230,12 +341,165 @@ async def forward_agent_audio(ws: web.WebSocketResponse, stream_sid_ref: dict, a
         logger.exception("agent audio forwarding stopped")
     finally:
         await stream.aclose()
+{{end}}{{if .HasHumanTransfer}}
+
+def register_transfer_rpc(leg: Leg, room: rtc.Room, room_name: str, call_sid: str) -> None:
+    """Expose the bridge's carrier powers to the agent as RPC methods.
+
+    The bridge is already a participant in the agent's room, so this needs no
+    Redis and no side channel (connector-transfers C3). Payloads and replies
+    are JSON strings, which is what perform_rpc carries.
+    """
+
+    @room.local_participant.register_rpc_method("unmute.cold_transfer")
+    async def _cold_transfer(data: rtc.RpcInvocationData) -> str:
+        destination = json.loads(data.payload or "{}").get("to", "")
+        if not E164.fullmatch(destination) and not destination.startswith("sip:"):
+            raise ValueError("invalid compiled transfer destination")
+        await asyncio.to_thread(_client().calls(call_sid).update, twiml=_dial_twiml(destination))
+        logger.info("cold transfer: caller leg %s redirected", call_sid)
+        return json.dumps({"transferred": True})
+
+    @room.local_participant.register_rpc_method("unmute.hold")
+    async def _hold(data: rtc.RpcInvocationData) -> str:
+        leg.hold = bool(json.loads(data.payload or "{}").get("on", False))
+        return json.dumps({"hold": leg.hold})
+
+    @room.local_participant.register_rpc_method("unmute.start_warm_leg")
+    async def _start_warm_leg(data: rtc.RpcInvocationData) -> str:
+        body = json.loads(data.payload or "{}")
+        destination = body.get("to", "")
+        if not E164.fullmatch(destination) and not destination.startswith("sip:"):
+            raise ValueError("invalid compiled transfer destination")
+        token = secrets.token_urlsafe(32)
+        TRANSFERS[token] = {"room": room_name, "caller_call_sid": call_sid, "call_sid": None}
+        create: dict = {
+            "to": destination,
+            "from_": _env({{pyq .Telephony.FromNumberEnv}}),
+            "twiml": _stream_twiml(token),
+            "status_callback": _https_url("/telephony/status"),
+            "status_callback_event": ["initiated", "ringing", "answered", "completed"],
+        }
+        ring_timeout = body.get("ring_timeout")
+        if ring_timeout:
+            create["timeout"] = int(ring_timeout)
+        try:
+            call = await asyncio.to_thread(lambda: _client().calls.create(**create))
+        except Exception as exc:
+            TRANSFERS.pop(token, None)
+            raise ValueError(f"the carrier rejected the call: {exc}") from exc
+        TRANSFERS[token]["call_sid"] = call.sid
+        leg.hold = True
+        logger.info("warm transfer: dialled %s as %s", destination, call.sid)
+        return json.dumps({"token": token, "call_id": call.sid})
+
+    @room.local_participant.register_rpc_method("unmute.connect_to_caller")
+    async def _connect_to_caller(data: rtc.RpcInvocationData) -> str:
+        token = json.loads(data.payload or "{}").get("token", "")
+        transfer = TRANSFERS.get(token)
+        supervisor = transfer.get("leg") if transfer else None
+        if supervisor is None:
+            raise ValueError("no answered transfer leg to connect")
+        # Each leg now hears the other and neither hears the agent: the bot is
+        # out of the conversation but stays as the media path (C6).
+        for side in (leg, supervisor):
+            side.allow_peer = True
+            side.allow_agent = False
+        leg.hold = False
+        logger.info("warm transfer: caller and person bridged")
+        return json.dumps({"bridged": True})
+
+    @room.local_participant.register_rpc_method("unmute.cancel_warm_leg")
+    async def _cancel_warm_leg(data: rtc.RpcInvocationData) -> str:
+        token = json.loads(data.payload or "{}").get("token", "")
+        transfer = TRANSFERS.pop(token, None)
+        leg.hold = False
+        if transfer and transfer.get("call_sid"):
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(
+                    _client().calls(transfer["call_sid"]).update, status="completed"
+                )
+        return json.dumps({"cancelled": True})
+{{end}}
 
 
-async def media_ws(request: web.Request) -> web.WebSocketResponse:
+{{if .HasHumanTransfer}}async def transfer_ws(ws: web.WebSocketResponse, token_key: str, transfer: dict) -> web.WebSocketResponse:
+    """The person a warm transfer dialled, arriving on their own media socket.
+
+    They join the caller's existing room as a second participant rather than
+    starting a call of their own, so no agent is dispatched for this leg.
+    """
+    leg = Leg(ws, role="supervisor")
+    transfer["leg"] = leg
+    source = rtc.AudioSource(SAMPLE_RATE, NUM_CHANNELS)
+    track = rtc.LocalAudioTrack.create_audio_track("supervisor", source)
+    room = rtc.Room()
+    leg.room = room
+    tasks: list = [asyncio.create_task(hold_writer(leg))]
+
+    @room.on("track_subscribed")
+    def _on_track(track_: rtc.Track, _publication, participant) -> None:
+        if track_.kind == rtc.TrackKind.KIND_AUDIO:
+            tasks.append(asyncio.create_task(forward_room_audio(leg, participant.identity, track_)))
+
+    connected = False
+    try:
+        async for message in ws:
+            if message.type != web.WSMsgType.TEXT:
+                continue
+            data = json.loads(message.data)
+            event = data.get("event")
+            if event == "start":
+                start = data.get("start", {})
+                leg.stream_sid_ref["value"] = start.get("streamSid") or data.get("streamSid")
+                token = (
+                    api.AccessToken()
+                    .with_identity(leg.identity)
+                    .with_grants(api.VideoGrants(
+                        room_join=True, room=transfer["room"], can_publish=True, can_subscribe=True
+                    ))
+                    .to_jwt()
+                )
+                await room.connect(_env("LIVEKIT_URL"), token)
+                await room.local_participant.publish_track(
+                    track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
+                )
+                connected = True
+                logger.info("transfer leg joined room %s", transfer["room"])
+            elif event == "media" and connected:
+                pcm = ulaw_to_pcm16(base64.b64decode(data["media"]["payload"]))
+                await source.capture_frame(
+                    rtc.AudioFrame(data=pcm, sample_rate=SAMPLE_RATE, num_channels=NUM_CHANNELS, samples_per_channel=len(pcm) // 2)
+                )
+            elif event == "stop":
+                break
+    except Exception:
+        logger.exception("transfer leg failed")
+    finally:
+        for task in tasks:
+            task.cancel()
+        TRANSFERS.pop(token_key, None)
+        caller = LEGS.get(transfer["room"])
+        if caller is not None:
+            # The person hung up: stop holding the caller and let the agent
+            # speak to them again (V7).
+            caller.hold = False
+            caller.allow_peer = False
+            caller.allow_agent = True
+        if connected:
+            await room.disconnect()
+    return ws
+
+
+{{end}}async def media_ws(request: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse()
     await ws.prepare(request)
     token_key = request.match_info["token"]
+{{- if .HasHumanTransfer}}
+    transfer = TRANSFERS.get(token_key)
+    if transfer is not None:
+        return await transfer_ws(ws, token_key, transfer)
+{{- end}}
     pending = PENDING.pop(token_key, None)
     if pending is None:
         logger.warning("media WS with unknown or already-used token; closing")
@@ -246,6 +510,17 @@ async def media_ws(request: web.Request) -> web.WebSocketResponse:
     source = rtc.AudioSource(SAMPLE_RATE, NUM_CHANNELS)
     track = rtc.LocalAudioTrack.create_audio_track("caller", source)
     room = rtc.Room()
+{{- if .HasHumanTransfer}}
+    leg = Leg(ws, role="caller")
+    stream_sid_ref = leg.stream_sid_ref
+    tasks: list = [asyncio.create_task(hold_writer(leg))]
+
+    @room.on("track_subscribed")
+    def _on_track(track_: rtc.Track, _publication, participant) -> None:
+        if track_.kind == rtc.TrackKind.KIND_AUDIO:
+            logger.info("subscribed to %s; forwarding when allowed", participant.identity)
+            tasks.append(asyncio.create_task(forward_room_audio(leg, participant.identity, track_)))
+{{- else}}
     stream_sid_ref: dict = {"value": None}
     tasks: list = []
 
@@ -254,6 +529,7 @@ async def media_ws(request: web.Request) -> web.WebSocketResponse:
         if track_.kind == rtc.TrackKind.KIND_AUDIO:
             logger.info("agent audio track subscribed; forwarding to the caller")
             tasks.append(asyncio.create_task(forward_agent_audio(ws, stream_sid_ref, track_)))
+{{- end}}
 
     connected = False
     try:
@@ -275,6 +551,11 @@ async def media_ws(request: web.Request) -> web.WebSocketResponse:
                     track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
                 )
                 connected = True
+{{- if .HasHumanTransfer}}
+                leg.room = room
+                LEGS[room_name] = leg
+                register_transfer_rpc(leg, room, room_name, call_sid)
+{{- end}}
                 logger.info("bridge joined room %s; caller audio published", room_name)
             elif event == "media" and connected:
                 pcm = ulaw_to_pcm16(base64.b64decode(data["media"]["payload"]))
@@ -291,6 +572,12 @@ async def media_ws(request: web.Request) -> web.WebSocketResponse:
     finally:
         for task in tasks:
             task.cancel()
+{{- if .HasHumanTransfer}}
+        LEGS.pop(f"call-{stream_sid_ref['value']}", None)
+        for name, held in list(LEGS.items()):
+            if held is leg:
+                LEGS.pop(name, None)
+{{- end}}
         if connected:
             await room.disconnect()
     return ws
@@ -312,4 +599,7 @@ def build_app() -> web.Application:
 
 if __name__ == "__main__":
     _mulaw_selfcheck()
+{{- if .HasHumanTransfer}}
+    _HOLD_ULAW = _hold_loop()
+{{- end}}
     web.run_app(build_app(), host="0.0.0.0", port=BRIDGE_PORT)
