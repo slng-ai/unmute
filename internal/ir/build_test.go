@@ -88,7 +88,7 @@ func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 	if got := strings.Join(plan.RequiredEnvironment, ","); got != "REDIS_URL,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,UNMUTE_PUBLIC_URL" {
 		t.Fatalf("required environment = %s", got)
 	}
-	if got := coordinationReasonNames(plan.CoordinationReasons); got != "admission,call_correlation,callback_idempotency,human_transfer" {
+	if got := coordinationReasonNames(plan.CoordinationReasons); got != "admission,call_correlation,callback_idempotency" {
 		t.Fatalf("coordination reasons = %s", got)
 	}
 	if plan.AutoWebhookEndpoint != "inbound" || len(plan.DevEnvironment) != 0 {

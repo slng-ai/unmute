@@ -4,8 +4,9 @@ Status: Adopted design, shipped for Twilio on both orchestrators. Updated
 July 23, 2026. Twilio runs end to end from `unmute dev --telephony`, inbound and
 outbound, on the Pipecat carrier-WebSocket route, the LiveKit Twilio connector,
 and LiveKit SIP, with a managed cloudflared tunnel, automatic Twilio webhook
-configuration, and automatic local LiveKit SIP trunk records. Telnyx, Plivo, and
-warm transfer are still in progress.
+configuration, and automatic local LiveKit SIP trunk records. Telnyx and
+Plivo are still in progress. Human transfers ride the platforms' native
+primitives on the LiveKit SIP and Pipecat Daily routes only ([TRANSFERS.md](TRANSFERS.md)).
 
 Unmute must share telephony intent, planning, and call context across
 orchestrators while keeping carrier media and call-control behavior in small,
@@ -203,14 +204,14 @@ provisional status is internal maturity tracking in `compile-report.json`, not
 a runtime block. A credentialed smoke in CI, once it exists, only flips the
 route from provisional to verified there, with no change to whether it runs. The
 Twilio connector and the Pipecat Twilio route were confirmed on real inbound and
-outbound calls by the author. The Pipecat adapters contain inbound, outbound,
-hangup, and cold-transfer paths; the Twilio adapter also contains the
-warm-transfer two-socket bridge (emitted 2026-08-11, provisional until its
-Phase 3 smoke). Voicemail detection stays gated, as does warm transfer on
-Telnyx and Plivo. The LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
-cold-transfer, and warm-transfer paths. The LiveKit Twilio connector emitter
-contains inbound, outbound, and hangup paths; transfers and voicemail detection
-stay on the LiveKit SIP route.
+outbound calls by the author. The Pipecat carrier adapters contain inbound, outbound,
+and hangup paths; they carry no transfers, because the websocket transports
+have no transfer primitive and transfers compile only where one exists
+(TRANSFERS.md). Voicemail detection stays gated. The LiveKit SIP emitter
+contains inbound, outbound, voicemail, hangup, cold-transfer, and
+warm-transfer paths, all on LiveKit's native primitives. The LiveKit Twilio
+connector emitter contains inbound, outbound, and hangup paths; transfers and
+voicemail detection stay on the LiveKit SIP route.
 
 ## What scales across carriers
 
@@ -246,8 +247,6 @@ tries to hide them behind unchecked configuration.
 | Pipecat serializer | Twilio | Telnyx | Plivo | Exotel |
 | Stream encoding | Carrier serializer owns it | Carrier serializer owns it | Carrier serializer owns it | Carrier serializer owns it |
 | Custom call data | Stream parameters | Query or encoded body | Query or encoded body | Gated; query data may be removed |
-| Cold transfer | Verified carrier control | Verified carrier control | Verified carrier control | Gated; unverified |
-| Warm primitives | Conference participants | Conference participants | Multi-party call | Unverified |
 
 The relevant Pipecat guides document inbound, outbound, local tunnel, and
 self-hosted WebSocket behavior:
@@ -267,9 +266,10 @@ Telnyx documents both its
 and [conference commands](https://developers.telnyx.com/docs/voice/programmable-voice/voice-api-commands-and-resources).
 Plivo documents
 [active call control](https://docs.plivo.com/docs/voice/api/calls) and
-[multi-party calling](https://docs.plivo.com/docs/voice/xml/conference). Exotel
-documents inbound and outbound streaming, but its warm-transfer behavior is not
-verified. Unmute must fail that capability until it is proven.
+[multi-party calling](https://docs.plivo.com/docs/voice/xml/conference).
+These call-control surfaces exist at the carriers, but Unmute does not build
+transfers out of them: transfers compile only where the platform ships the
+primitive ([TRANSFERS.md](TRANSFERS.md)).
 
 ## Credentials
 
@@ -466,9 +466,10 @@ requiring a Python base class:
 - Start an outbound call.
 - Normalize the initial call context.
 - End the active call.
-- Perform a cold transfer when supported.
-- Coordinate a warm transfer when supported.
 - Translate provider errors into stable runtime errors.
+
+Transfers are deliberately absent from this list: no carrier websocket route
+has a transfer primitive, so no adapter emits one (TRANSFERS.md).
 
 The Go generator selects and renders the implementation with a `switch`, which
 matches the repository's existing target-generator pattern. The generated
@@ -489,10 +490,6 @@ direction
 from_number
 to_number
 ```
-
-Transfer coordination may also retain provider-private call-leg and conference
-IDs. Those values stay inside the telephony runtime and never become portable
-Agent variables.
 
 The normalized values hydrate matching explicit system sources before the
 greeting or first model turn runs. Authored `source: call_start` variables come
@@ -516,16 +513,13 @@ The Pipecat adapter constructs the upstream serializer with the normalized
 stream and call identifiers. The serializer continues to own carrier audio
 messages and automatic call termination where Pipecat provides it.
 
-Warm transfer is not an automatic extension of that path. A Twilio call using
-bidirectional `<Connect><Stream>` cannot simultaneously be a Conference
-participant, which rules conference designs out for this route. The v1 shape is
-instead the two-socket bridge (human-transfer.md C9): dial the human as a second
-streamed call landing on the same process, hold the caller behind that
-transport's own mixer, brief the human on their private socket, then pump
-decoded audio between the two sockets. Until successful, declined, unanswered,
-failure, and duplicate-callback smokes prove that topology, `warm_transfer`
-remains provisional even if inbound, outbound, hangup, and cold transfer later
-pass.
+Transfers are not part of this path at all. Both custom transfer designs
+this route once carried (a REST-redirect cold and a bot-owned warm bridge,
+later a Twilio-conference warm) were built, live-tested, and deleted: each
+one made the generated process own the call's audio path and each live test
+found a new lifecycle bug there. Transfers now compile only where the
+platform ships the primitive, which for Pipecat is the Daily route
+(TRANSFERS.md); the deleted designs stay in git history.
 
 ### LiveKit routes
 
@@ -607,66 +601,22 @@ detection stay on the LiveKit SIP route.
 
 ## Human transfers
 
-Human transfer is a route capability, not an orchestrator-wide or
-carrier-wide boolean. Validation resolves the requested mode against the full
-combination of orchestrator, media route, and carrier.
+The full reference is [TRANSFERS.md](TRANSFERS.md): what is available, the
+yaml, the secrets, and the cloud test walkthroughs. The short version:
 
-### Cold transfer
-
-Cold transfer replaces or redirects the active caller leg and removes the AI
-after the carrier accepts the transfer.
-
-- Pipecat carrier WebSocket routes use the selected carrier's call-control
-  operation.
-- LiveKit SIP uses LiveKit's native SIP transfer.
-- LiveKit Twilio Connector uses Twilio call control only after the connector
-  spike proves cleanup behavior.
-
-The operation must preserve the original call if the destination fails when
-the carrier supports that behavior. Otherwise, validation or generated docs
-must state the carrier limitation.
-
-### Warm transfer
-
-Warm transfer needs at least three participants and a durable state transition.
-For carrier WebSocket routes the selected v1 shape is **bridge-first** (amended
-2026-08-10, human-transfer.md C9): the AI dials the human as a second carrier
-call whose media stream terminates in a second WebSocket on the same process,
-briefs them there, then bridges the two sockets in software. Each human has a
-private media leg, so the hold music (a mixer on the caller's transport) and
-the private briefing (the supervisor's transport) cannot leak into each other
-by construction. Conference-first was the earlier common shape and remains the
-fallback for a carrier where a second streamed leg is impossible; on Twilio it
-is rejected for v1 because a bidirectional Media Stream leg cannot also be a
-Conference participant, so a conference design would have to tear down and
-rebuild media mid-call.
-
-```mermaid
-stateDiagram-v2
-  [*] --> Connected
-  Connected --> Consulting: hold caller and dial human
-  Consulting --> Connected: human fails or declines
-  Consulting --> Briefing: human answers
-  Briefing --> Joined: unhold caller
-  Joined --> Transferred: remove AI
-  Transferred --> [*]
-```
-
-The carrier adapter implements these operations:
-
-1. Put the caller and AI media leg in a conference or multi-party call.
-2. Hold the caller without ending the AI media stream.
-3. Dial the human destination.
-4. Brief the human with the control's `warm.briefing` text plus the call
-   transcript (SCHEMA N25).
-5. Join the caller and human.
-6. Remove the AI participant.
-7. Restore the original call or end cleanly when any step fails.
-
-Twilio, Telnyx, and Plivo expose conference primitives that can support this
-shape. Each implementation still requires an independent smoke test. Exotel
-warm transfer remains gated until official documentation and a runtime proof
-establish the required operations.
+- A transfer compiles only on a route where the platform ships the
+  primitive, and validation names the working routes when it refuses.
+- **Cold** exists on `(livekit, sip)` (`TransferSIPParticipant`, a SIP REFER
+  through the trunk, which the trunk must allow) and on Pipecat's Daily
+  route (`transport.sip_call_transfer`; dial-out must be enabled on the
+  Daily domain).
+- **Warm** exists on `(livekit, sip)` only, as LiveKit's `WarmTransferTask`
+  prebuilt: hold music, the consult call, the briefing, and the merge are
+  the platform's machinery, and every failure comes back as one error that
+  `on_unavailable` answers.
+- The carrier websocket routes (both drivers) carry no transfers. The custom
+  designs this repository once built on them are deleted and live only in
+  git history.
 
 ### Transfer coordination state
 
@@ -676,21 +626,15 @@ It exists because telephony control crosses independent HTTP requests,
 WebSockets, callbacks, call legs, and admission decisions even when the audio
 session itself stays on one process.
 
-The **LiveKit Twilio connector** route has no Redis at all and does not gain
-one for transfers. Its bridge keeps the pending-call map, the pending-transfer
-map, and both call legs in one process, and the agent reaches the bridge over
-LiveKit RPC rather than through a store. That makes session affinity a v1
-deployment constraint rather than a code path: the second streamed call of a
-warm transfer must land on the process holding the caller's WebSocket, which
-the generated single-container compose guarantees. Running several bridge
-replicas behind one number needs a shared store and sticky token routing first,
-the same open item the Pipecat carrier routes carry.
+The **LiveKit Twilio connector** route has no Redis at all. Its bridge keeps
+the pending-call map and the call leg in one process, and running several
+bridge replicas behind one number needs a shared store and sticky token
+routing first, the same open item the Pipecat carrier routes carry.
 
 Generated Pipecat code uses Redis only for these bounded records:
 
 - Pending-call correlation and the minimum normalized call-start context.
 - Callback replay and idempotency markers.
-- Human-transfer state transitions and short-lived locks.
 - Active-session admission counters.
 
 Every record expires. Phone numbers and call-start values never appear in key
@@ -719,7 +663,6 @@ The reason-to-consumer mapping is closed and inspectable:
 | `livekit_control_plane` | LiveKit Server and LiveKit SIP |
 | `call_correlation` | Generated telephony application |
 | `callback_idempotency` | Generated telephony application |
-| `human_transfer` | Generated telephony application |
 | `admission` | Generated Pipecat telephony application |
 
 Every emitted plan has at least one applicable reason. Each reason's consumer
@@ -877,8 +820,7 @@ The deployment must provide the following runtime behavior:
   any active sessions it must force-close at its drain deadline.
 - Horizontal scaling based on active sessions, not HTTP request rate alone.
 - Carrier credentials and model credentials through environment secrets.
-- Redis for pending-call correlation, callback idempotency, human-transfer
-  state, and admission.
+- Redis for pending-call correlation, callback idempotency, and admission.
 - `INFO` logging by default. `UNMUTE_LOG_LEVEL=DEBUG` can expose phone numbers
   through upstream Pipecat parser diagnostics and is only for controlled use.
 
@@ -923,9 +865,6 @@ of the minimum implementation and cannot be deferred.
 - Redact credentials, phone numbers, and raw webhook bodies from normal logs.
 - Treat duplicate carrier callbacks as normal and process them idempotently.
 - Apply short request timeouts to carrier control calls.
-- Document when a carrier route cannot restore the original media stream after
-  a failed cold transfer; the generated Pipecat READMEs currently identify
-  that limitation for Twilio, Telnyx, and Plivo.
 - Retry only operations documented as safe to retry.
 - Return provider-appropriate success responses quickly, then process status
   events asynchronously when the carrier requires it.
@@ -1077,24 +1016,15 @@ This phase proves the complete carrier WebSocket route with one carrier.
 Acceptance requires one real inbound call, one real outbound call, one failed
 outbound call, one hangup, and one cold transfer against Twilio.
 
-### Phase 3: Prove warm transfer on Twilio
+### Phase 3: retired — warm transfer left the carrier routes
 
-The code for this phase is emitted; what is left is the proof. This phase
-resolves the largest call-lifecycle risk before copying it to other carriers.
-
-1. Prove the two-socket bridge topology: dial the human as a second streamed leg onto the same process, brief privately, bridge (human-transfer.md C9; conference-first is the rejected alternative).
-2. Hold and unhold the caller.
-3. Dial and brief the human.
-4. Remove the AI without ending the human call.
-5. Restore or terminate cleanly after failure.
-6. Add warm-transfer state and locks to the existing Redis control store.
-7. Record in the capability table whether the route can carry the private
-   briefing leg (SCHEMA N25: there are no briefing modes to record).
-
-Acceptance requires successful, declined, unanswered, and failed warm-transfer
-smokes with duplicate callback delivery, and one of them must have a person
-listening on the caller's leg throughout the briefing: hold music and nothing
-else is the property the topology exists to guarantee (human-transfer.md V10).
+This phase planned to prove a bot-owned warm transfer on the Twilio
+websocket route (a two-socket bridge, then a Twilio-conference redesign).
+Both were built and live-tested, and the tests kept finding lifecycle bugs
+that come with owning the audio path. The project backed off: transfers
+compile only where the platform ships the primitive, so warm transfer lives
+on `(livekit, sip)` as `WarmTransferTask` and nowhere else (TRANSFERS.md).
+The deleted designs remain in git history.
 
 ### Phase 4: Add Telnyx as the second carrier
 
@@ -1104,9 +1034,8 @@ and normalized behavior only where Twilio and Telnyx duplicate it.
 1. Add the verified Telnyx carrier definition.
 2. Emit TeXML and use Pipecat's Telnyx serializer.
 3. Map Telnyx call metadata to normalized call context.
-4. Add outbound, hangup, and cold transfer through Telnyx call control.
-5. Prove conference warm transfer independently.
-6. Run the same carrier contract and smoke scenarios.
+4. Add outbound and hangup through Telnyx call control.
+5. Run the same carrier contract and smoke scenarios.
 
 Acceptance requires adding Telnyx without changing Pipecat pipeline logic or
 LiveKit Agent logic.
@@ -1160,9 +1089,10 @@ self-hosted LiveKit room, so the route runs against a stock `livekit-server
    real calls.
 3. Connector participant metadata and Agent dispatch through job metadata.
    Done.
-4. Cold transfer cleanup. Not shipped; transfers stay on the SIP route.
-5. Conference-first warm transfer. Not shipped; stays on the SIP route.
-6. Unsupported controls stay gated and point at the SIP alternative. Done.
+4. Transfers: never on this route; they compile only where the platform
+   ships the primitive (TRANSFERS.md), and the gate names the SIP
+   alternative. Done.
+5. Unsupported controls stay gated and point at the SIP alternative. Done.
 
 The route ships with a pinned LiveKit version and a dated documentation link.
 Its live audio path is covered by the mu-law self-check, `py_compile`, `ruff`,
@@ -1282,8 +1212,8 @@ The plan keeps uncertain behavior gated rather than designing around guesses.
 
 - **Connection schema:** This is a locked-schema amendment and must be accepted
   before code changes begin.
-- **Warm transfer:** Conference semantics and private briefing differ by
-  carrier. Capability rows remain carrier- and route-specific.
+- **Warm transfer:** LiveKit SIP only, as the platform's own prebuilt.
+  Capability rows remain route-specific (TRANSFERS.md).
 - **LiveKit connector:** It is Twilio-only. SIP remains the stable
   multi-carrier path.
 - **Multiple phone channels:** The first implementation supports one telephony

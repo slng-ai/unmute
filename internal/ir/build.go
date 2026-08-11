@@ -955,9 +955,6 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 			TelephonyCoordinationReason{Name: "call_correlation", Consumers: []string{"application"}},
 			TelephonyCoordinationReason{Name: "callback_idempotency", Consumers: []string{"application"}},
 		)
-		if features[targetcap.TelephonyFeature(targetcap.ColdTransfer)] || features[targetcap.TelephonyFeature(targetcap.WarmTransfer)] {
-			reasons = append(reasons, TelephonyCoordinationReason{Name: "human_transfer", Consumers: []string{"application"}})
-		}
 	}
 	if resolved.Provider == ProviderLiveKit && resolved.Transport == "sip" {
 		admissionOwner = "livekit_dispatch"

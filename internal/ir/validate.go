@@ -1449,13 +1449,6 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 				row.Errors = add(row.Errors, fmt.Sprintf("Pipecat coordination reason %q is required", required))
 			}
 		}
-		needsHumanTransfer := false
-		for _, evidence := range plan.Evidence {
-			needsHumanTransfer = needsHumanTransfer || evidence.Feature == string(targetcap.ColdTransfer) || evidence.Feature == string(targetcap.WarmTransfer)
-		}
-		if needsHumanTransfer != seenReasons["human_transfer"] {
-			row.Errors = add(row.Errors, "Pipecat human_transfer coordination reason must match the selected transfer features")
-		}
 	}
 	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {
 		if len(seenReasons) != 1 || !seenReasons["livekit_control_plane"] {

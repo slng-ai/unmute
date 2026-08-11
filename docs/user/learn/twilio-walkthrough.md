@@ -184,36 +184,19 @@ the Pipecat route.
 
 ## Part 3: transfer the caller to a person
 
-Both transfer shapes work on the Part 1 and Part 2 routes with the same three
-credentials, so you can try them without touching SIP.
+Transfers do not run on the Part 1 and Part 2 routes: a transfer compiles
+only on a route where the platform ships the primitive, and the Media
+Streams routes carry media only. For LiveKit that route is `transport: sip`
+(cold is a SIP REFER through the trunk, warm is LiveKit's
+`WarmTransferTask`); for Pipecat it is the Daily route (cold only). The map,
+the yaml, the secrets, and the cloud test walkthroughs are in
+[TRANSFERS.md](../../TRANSFERS.md), and
 [`examples/human-transfer`](https://github.com/slng-ai/unmute_cli/tree/main/examples/human-transfer)
-is a package that does both: a cold transfer that hands the caller off and drops
-out, and a warm one that holds the caller on music, rings a second number,
-briefs whoever answers, then connects the two.
+is the package that does both shapes on LiveKit SIP.
 
-```bash
-cat > examples/human-transfer/.env <<'EOF'
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
-TWILIO_PHONE_NUMBER=
-SUPERVISOR_PHONE_NUMBER=
-OPENAI_API_KEY=
-SLNG_API_KEY=
-EOF
-```
-
-```bash
-bin/unmute dev examples/human-transfer --telephony
-```
-
-`SUPERVISOR_PHONE_NUMBER` is the second phone the warm transfer rings, so use a
-number you can answer. Call the agent, ask for a manager, and you should hear
-hold music while the second phone rings.
-
-Warm transfer has not been through a credentialed smoke yet, so treat this as
-the first run rather than a proven path. If you do try it, keep listening on the
-caller's phone during the briefing: hold music and nothing else is the property
-the design exists to guarantee.
+One useful preview needs no phone number at all: deploy the example and open
+the LiveKit Agent Console, ask for a manager, and the warm transfer rings
+the supervisor's real phone while you talk from the browser.
 
 ## When to move to the LiveKit SIP route
 
@@ -222,22 +205,20 @@ It is not laptop-testable for inbound, because Twilio talks SIP and RTP straight
 to your machine and an HTTPS tunnel cannot carry that, so set it up when you
 deploy on a host with public SIP and RTP reachability.
 
-It is worth being precise about why you would move, because "SIP is the
-production route" is not true as stated: Media Streams is the same Twilio
-product Part 1 and Part 2 run on, and all three routes here do both transfer
-shapes. What actually differs:
+It is worth being precise about why you would move: Media Streams is the
+same Twilio product Part 1 and Part 2 run on. What actually differs:
 
 | | Media Streams routes | LiveKit SIP |
 |---|---|---|
 | Telephony layer | ours, so each new capability is our work | LiveKit's, maintained upstream |
 | Media transport | TCP: a lost packet stalls the ones behind it | RTP over UDP: a lost packet is a click |
 | Cost per minute | Programmable Voice, roughly double | SIP trunking |
-| Warm transfer cost | two Programmable Voice legs for the whole conversation | a REFER hands the call off entirely |
+| Human transfers | none; media only | both shapes, on LiveKit's own primitives |
 | Carriers | Twilio only today | any SIP trunk provider or PBX |
 | Scale-out | one bridge process, session affinity | built to run replicated |
 
-Move to SIP for scale, for multi-carrier, or when you want LiveKit-maintained
-machinery. Stay on the connector otherwise. See
+Move to SIP for transfers, for scale, for multi-carrier, or when you want
+LiveKit-maintained machinery. Stay on the connector otherwise. See
 [07. Phone calls](07-phone-calls.md#configure-self-hosted-livekit-sip) and
 [Configure LiveKit in YAML](../targets/livekit.md) for the trunk fields and
 the environment it needs.

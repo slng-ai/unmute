@@ -163,7 +163,7 @@ The map's value is one of three things, told apart by shape, so there is no extr
 
 ```yaml
 destinations:
-  billing_line: "+34910000001"              # an E.164 number
+  billing_line: "+14155550123"              # an E.164 number
   overflow_desk: "sip:desk@example.com"     # a SIP URI
   supervisor_line: SUPERVISOR_PHONE_NUMBER  # an env var holding one of those
 ```
@@ -176,33 +176,28 @@ Required: yes. Values: a symbolic name. Default: none. Targets: all four, core (
 
 ### Which shapes work where
 
+One rule: a transfer compiles only on a route where the platform ships the
+primitive. The full map with sources and the test walkthroughs is
+[TRANSFERS.md](../../TRANSFERS.md).
+
 | Route | `cold:` | `warm:` |
 |---|---|---|
-| LiveKit SIP with Twilio, Telnyx, or Plivo | Emitted offline; provisional | Emitted offline; provisional |
-| LiveKit Twilio Connector | No emitted adapter | No emitted adapter |
-| Pipecat carrier WebSocket with Twilio | Carrier REST path emitted offline; provisional | Emitted offline; provisional |
-| Pipecat carrier WebSocket with Telnyx or Plivo | Carrier REST path emitted offline; provisional | Not emitted yet |
-| Pipecat Daily SIP | Platform capability only; not an emitted v1 telephony route | Not the planned route: the shared room makes hold music and a private briefing conflict |
+| LiveKit SIP with Twilio, Telnyx, or Plivo | `TransferSIPParticipant` (SIP REFER); provisional | `WarmTransferTask`; provisional |
+| Pipecat Daily (`transport: daily-sip`) | `sip_call_transfer`; provisional | Not supported |
+| LiveKit Twilio Connector | Not supported | Not supported |
+| Pipecat carrier WebSocket (any carrier) | Not supported | Not supported |
 | Vapi | native | needs the Twilio carrier (stable path) |
 | Deepgram | carrier-conditional | carrier-conditional |
 
-Two rows in that table surprise people.
+The "not supported" rows are firm, not pending. Those routes carry media
+only, and every transfer design this project once built on them meant owning
+the call's audio path; that work is deleted. Validation refuses a transfer
+there and names the routes that work.
 
-**The LiveKit Twilio Connector has no transfer of either shape.** LiveKit's
-transfer calls act on a SIP participant: cold sends a SIP REFER through the
-trunk, warm dials out on the outbound trunk. On the connector route the caller
-is audio a generated bridge published into the room and there is no trunk, so
-there is nothing for either call to act on. Use `transport: sip` for LiveKit
-transfers, or the Pipecat carrier WebSocket if you want both shapes on the
-Twilio account credentials.
-
-**Warm on Pipecat is Twilio-only.** The lowering is written against Twilio's
-Media Streams and its create-call API; Telnyx and Plivo need their own.
-
-Check the [phone-call route matrix](../learn/07-phone-calls.md#choose-a-supported-carrier-route)
-and [which routes can transfer](../learn/07-phone-calls.md#which-routes-can-transfer)
-before picking either shape. Every emitted Pipecat and LiveKit carrier route
-is still provisional today.
+**Warm is LiveKit-only.** Pipecat has no native warm transfer on any route;
+its documented warm pattern makes the bot the audio coordinator, which is
+the same class of complexity. A Pipecat warm package fails validation
+pointing at `(livekit, sip)`.
 
 ### ring_timeout
 
@@ -228,17 +223,11 @@ The conversation so far is always passed along with it, on every target that sup
 
 | Target | What happens | Tag |
 |---|---|---|
-| LiveKit SIP with Twilio, Telnyx, or Plivo | Added on top of the transcript summary, emitted offline on a provisional route | provisional |
-| Pipecat carrier WebSocket (Twilio) | Generated briefing on the person's own media socket, plus the transcript | provisional |
+| LiveKit SIP with Twilio, Telnyx, or Plivo | Passed to `WarmTransferTask` on top of the transcript | provisional |
+| Pipecat | fails; there is no warm transfer to brief | gated |
 | Vapi | Mapped onto the provider's own transfer plan | gated |
 | Deepgram | fails | gated |
 
 ### What warm transfer leaves behind
 
-The two orchestrators finish a warm transfer differently, and it is worth knowing which one you are on.
-
-On **LiveKit** the agent moves the person into the caller's room and shuts itself down, so the caller and the person carry on alone.
-
-On **Pipecat** both phone calls end in WebSockets on the bot process, so there is nothing to leave: the bot stays on the call, silent, copying audio between the two sockets until someone hangs up. That also means one warm transfer is two carrier calls but still one session, so it counts once against `max_sessions` and twice on your phone bill.
-
-The caller cannot tell the difference: either way they stop hearing the agent and start hearing the person. It matters if you are reading logs, counting sessions, or [sizing capacity](channels-and-capacity.md), because a Pipecat warm transfer keeps its session open for the whole conversation.
+`WarmTransferTask` moves the person into the caller's room and shuts the agent's session down, so the caller and the person carry on alone. The generated code passes `delete_room_on_close=False` so the room outlives the agent that made it.

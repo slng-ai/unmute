@@ -79,7 +79,7 @@ same placement (`fallback` is a think-model field).
 targets:
   livekit:
     provider: livekit
-    version: "1.5.2"
+    version: "1.6.4"
     sdk_language: python
     pins:
       livekit-plugins-slng: "1.7.0"
@@ -498,7 +498,7 @@ Bind the Connection and symbolic destinations to the exact route.
 targets:
   livekit:
     provider: livekit
-    version: "1.5.2"
+    version: "1.6.4"
     sdk_language: python
     transport: sip
     carrier: twilio
@@ -508,9 +508,9 @@ targets:
 ```
 
 Bind a target to the self-hosted `sip` route and one telephony Connection. The
-distinct Twilio `connector` route is a usable alternative that runs on a laptop;
-it does not inherit SIP transfer behavior; it has its own, built on the Twilio
-call the bridge already owns.
+distinct Twilio `connector` route is a usable laptop alternative for inbound,
+outbound, and hangup; it carries no transfers, because transfers compile only
+where the platform ships the primitive ([TRANSFERS.md](../../TRANSFERS.md)).
 
 The two routes also ask for different Twilio credentials, because they use
 different Twilio products: `sip` uses Elastic SIP Trunking (a provisioned trunk,
@@ -608,7 +608,7 @@ environment:
 targets:
   livekit_connector:
     provider: livekit
-    version: "1.5.2"
+    version: "1.6.4"
     sdk_language: python
     transport: connector
     carrier: twilio
@@ -630,20 +630,13 @@ unmute dev acme --target livekit_connector --telephony --to +15551234567
 
 `unmute dev --telephony` starts a managed cloudflared tunnel, sets the Twilio
 voice webhook automatically, and places an outbound call with `--to`. Twilio
-reaches the bridge over HTTPS and WSS, so both inbound and outbound work fully on
-a laptop. The route supports inbound, outbound, hangup, and both human-transfer
-shapes; voicemail detection stays on the SIP route.
+reaches the bridge over HTTPS and WSS, so both inbound and outbound work fully
+on a laptop. The route supports inbound, outbound, and hangup.
 
-Its transfers are not LiveKit's. `transfer_sip_participant` and
-`WarmTransferTask` act on a SIP participant and an outbound trunk, and this
-route has neither: the caller is audio the bridge published into the room. What
-the bridge does have is the Twilio call itself, so cold transfer is a REST
-redirect of the caller's leg, and warm transfer dials the person as a second
-streamed call that joins the same room. The agent drives both over LiveKit RPC.
-
-One consequence worth knowing: after a warm transfer on this route the bridge
-stays on the call, copying audio between the two legs, exactly like the Pipecat
-carrier route. On the SIP route the agent hands over and leaves.
+It carries no transfers. `transfer_sip_participant` and `WarmTransferTask`
+act on a SIP participant reached through a trunk, and this route has neither:
+the caller is audio the bridge published into a room. Transfers and voicemail
+detection live on the SIP route ([TRANSFERS.md](../../TRANSFERS.md)).
 
 ## Run it and talk to the agent
 
