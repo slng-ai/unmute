@@ -11,6 +11,10 @@ services:
       - {{.}}
 {{- end}}
 {{- end}}
+{{- range .DevOptionalEnv}}
+      # optional: set by `unmute dev --var`; absent otherwise
+      - {{.}}
+{{- end}}
     ports:
       - "${UNMUTE_TELEPHONY_PORT:-7860}:7860"
     depends_on:

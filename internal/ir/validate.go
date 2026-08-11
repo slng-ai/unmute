@@ -62,6 +62,7 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	}
 	global, globalWarnings := validateStructure(agent)
 	global = append(global, validateConfiguredTargets(agent, caps)...)
+	globalWarnings = add(globalWarnings, undeclaredSecretWarning(agent))
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
 	failed := 0
 	for _, resolved := range targets {
@@ -343,6 +344,16 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		if tool.Auth != nil && tool.Execution != ToolWebhook {
 			errors = add(errors, fmt.Sprintf("tool %q auth is legal for webhook execution only", name))
 		}
+		if tool.Path != "" && tool.Execution != ToolWebhook {
+			errors = add(errors, fmt.Sprintf("tool %q path is legal for webhook execution only", name))
+		}
+		if len(tool.Inject) > 0 {
+			switch tool.Execution {
+			case ToolWebhook, ToolLocal:
+			default:
+				errors = add(errors, fmt.Sprintf("tool %q inject is legal for webhook and local execution only", name))
+			}
+		}
 		if tool.Execution == ToolBuiltin {
 			validateBuiltinTool(name, tool, &errors)
 			continue
@@ -545,6 +556,7 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		}
 	}
 	validateTools(agent, resolved, provider, caps, row)
+	validateVariables(agent, provider, caps, row)
 	validateConversation(agent.Conversation, provider, caps, row)
 	validateTelephonyPlan(resolved.Telephony, row)
 	validateCapacity(agent, resolved, provider, row)
@@ -1054,10 +1066,132 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 		if tool.Auth != nil {
 			applyCapability(caps, targetcap.FieldToolAuth, provider, row)
 		}
+		if len(tool.Inject) > 0 {
+			applyCapability(caps, targetcap.FieldToolInject, provider, row)
+		}
+		if tool.Path != "" {
+			applyCapability(caps, targetcap.FieldWebhookPath, provider, row)
+		}
 		if tool.Interruption != ToolProviderDefault {
 			applyCapability(caps, targetcap.FieldToolInterruption, provider, row)
 		}
 	}
+}
+
+// validateVariables gates the two per-target variable features: capturing a
+// value mid-call, and rendering a template into a prompt or greeting before the
+// call starts (V5).
+func validateVariables(agent *Agent, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
+	for _, variable := range agent.Variables {
+		if variable.Source == VariableSourceConversation {
+			applyCapability(caps, targetcap.FieldVariableConversation, provider, row)
+			break
+		}
+	}
+	if agent.HasSessionStartTemplate() {
+		applyCapability(caps, targetcap.FieldTemplates, provider, row)
+	}
+}
+
+// HasSessionStartTemplate reports whether the greeting or any prompt carries a
+// template, which is what needs render support on the target. The generators
+// read it too, to decide whether to emit the render helper at all.
+func (a *Agent) HasSessionStartTemplate() bool {
+	if a.Conversation != nil && a.Conversation.Greeting != nil && HasTemplate(a.Conversation.Greeting.Text) {
+		return true
+	}
+	for _, def := range a.Agents {
+		if HasTemplate(def.Instructions) {
+			return true
+		}
+	}
+	for _, task := range a.Tasks {
+		if HasTemplate(task.Instructions) {
+			return true
+		}
+	}
+	return false
+}
+
+// EnvReferenceSites groups the package sites naming each environment variable,
+// so the compile report can show what a declared secret is actually used for.
+func EnvReferenceSites(agent *Agent) map[string][]string {
+	sites := make(map[string][]string)
+	for name, site := range referencedEnvNames(agent) {
+		sites[name] = append(sites[name], site)
+	}
+	for name := range sites {
+		slices.Sort(sites[name])
+	}
+	return sites
+}
+
+// handlerEnvRead matches the three ways a local Python handler reads an
+// environment variable: os.environ["X"], os.environ.get("X"), and os.getenv("X").
+// Only UPPER_SNAKE names are collected, the same convention every *_env field
+// enforces, so a lowercase lookup is never mistaken for a credential.
+var handlerEnvRead = regexp.MustCompile(`os\.(?:environ\.get\(|getenv\(|environ\[)\s*["']([A-Z][A-Z0-9_]*)["']`)
+
+// referencedEnvNames lists every environment variable the package points at,
+// with the site that names it, so an undeclared one can be reported (V10).
+// Connection env names are exempt: they are declared in their own file.
+func referencedEnvNames(agent *Agent) map[string]string {
+	refs := make(map[string]string)
+	note := func(name, site string) {
+		if name != "" && refs[name] == "" {
+			refs[name] = site
+		}
+	}
+	for _, name := range sortedKeys(agent.Tools) {
+		tool := agent.Tools[name]
+		switch tool.Execution {
+		case ToolWebhook:
+			note(tool.URLEnv, fmt.Sprintf("tools/%s.yaml webhook.url_env", name))
+		case ToolMCP:
+			note(tool.URLEnv, fmt.Sprintf("tools/%s.yaml mcp.url_env", name))
+		case ToolLocal:
+			// A local handler owns its own request, so its credential is read in
+			// Python rather than named in YAML. Scanning the source is what keeps
+			// that path inside the same cross-check as every *_env field, instead
+			// of failing on the first tool call (V10).
+			site := fmt.Sprintf("%s os.environ", tool.Handler)
+			for _, match := range handlerEnvRead.FindAllStringSubmatch(tool.HandlerSource, -1) {
+				note(match[1], site)
+			}
+		}
+		if tool.Auth != nil {
+			note(tool.Auth.TokenEnv, fmt.Sprintf("tools/%s.yaml webhook.auth.token_env", name))
+		}
+	}
+	for _, name := range sortedKeys(agent.Models) {
+		note(agent.Models[name].EndpointEnv, fmt.Sprintf("model %q endpoint_env", name))
+	}
+	if agent.Tracing != nil {
+		for _, name := range []string{"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"} {
+			note(name, "tracing.provider: langfuse")
+		}
+	}
+	return refs
+}
+
+// undeclaredSecretWarning reports env names the package references but never
+// declares. A warning, never an error: declaring secrets is opt-in, and a
+// package written before the block existed still compiles (C7, V10).
+func undeclaredSecretWarning(agent *Agent) string {
+	if len(agent.Secrets) == 0 {
+		return ""
+	}
+	refs := referencedEnvNames(agent)
+	var missing []string
+	for _, name := range slices.Sorted(maps.Keys(refs)) {
+		if !slices.Contains(agent.Secrets, name) {
+			missing = append(missing, fmt.Sprintf("%s (%s)", name, refs[name]))
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	return "environment variables referenced but not declared in secrets: " + strings.Join(missing, ", ")
 }
 
 func validateConversation(conversation *Conversation, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
@@ -1393,7 +1527,8 @@ func validVariableSource(value VariableSource) bool {
 	switch value {
 	case VariableSourceCallStart, VariableSourceSessionID, VariableSourceCarrier,
 		VariableSourceConnection, VariableSourceCallID, VariableSourceStreamID,
-		VariableSourceDirection, VariableSourceFromNumber, VariableSourceToNumber:
+		VariableSourceDirection, VariableSourceFromNumber, VariableSourceToNumber,
+		VariableSourceConversation:
 		return true
 	default:
 		return false

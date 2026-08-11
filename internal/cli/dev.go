@@ -29,6 +29,7 @@ import (
 func newDevCmd() *cobra.Command {
 	var uiPort, botPort, targetName, publicURL, to string
 	var noOpen, verbose, console, telephony bool
+	var vars []string
 
 	cmd := &cobra.Command{
 		Use:   "dev <agent-dir>",
@@ -45,6 +46,23 @@ func newDevCmd() *cobra.Command {
 			if to != "" {
 				if err := validateDialTarget(to); err != nil {
 					return err
+				}
+			}
+
+			// Input variables ride one JSON payload the generated runtimes read
+			// when no dispatch supplied them; setting it in this process's
+			// environment reaches every run path, container or not (I.dispatch).
+			if len(vars) > 0 {
+				agent, _, err := loadPackage(root, nil)
+				if err != nil {
+					return fmt.Errorf("dev %s: %w", root, err)
+				}
+				payload, err := callStartPayload(agent, vars)
+				if err != nil {
+					return fmt.Errorf("dev %s: %w", root, err)
+				}
+				if err := os.Setenv(CallStartEnv, payload); err != nil {
+					return fmt.Errorf("dev %s: %w", root, err)
 				}
 			}
 
@@ -70,6 +88,7 @@ func newDevCmd() *cobra.Command {
 	cmd.Flags().StringVar(&uiPort, "port", "8765", "port for the local dev UI")
 	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "host port the container publishes the agent on (Compose UNMUTE_DEV_PORT; with --telephony, UNMUTE_TELEPHONY_PORT)")
 	cmd.Flags().StringVar(&targetName, "target", "", "target instance name (required without a TTY when multiple exist)")
+	cmd.Flags().StringArrayVar(&vars, "var", nil, "seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open the browser automatically")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "follow container/agent logs on stderr (default: write to the log file only)")
 	cmd.Flags().BoolVar(&console, "console", false, "talk to the agent in the terminal over the local mic/speaker (no browser or dev server; --port/--bot-port/--no-open are ignored)")

@@ -1,0 +1,29 @@
+# The one tool here that is not a webhook, and the reason is the credential.
+# Cancelling needs a signed request, and webhook.auth only speaks bearer and
+# api_key, so the handler builds the signature itself. It reads the signing key
+# from the environment with os.environ, which is exactly what the generated
+# webhook code does with token_env: the name is declared, the value never is.
+description: Cancel the appointment outright. Call it only when the customer says plainly that they want to cancel, never when they want a different time.
+
+input:
+  type: object
+  properties: {}
+
+inject:
+  customer_id: "{{customer_id}}"
+
+output:
+  type: object
+  properties:
+    cancelled:
+      type: boolean
+    reference:
+      type: string
+  required:
+    - cancelled
+
+local:
+  handler: tools/cancel_appointment.py
+
+effect: returns_data
+interruption: provider_default

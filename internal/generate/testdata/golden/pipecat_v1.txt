@@ -48,6 +48,23 @@ serves a WebRTC test client you can open in the browser. Console mode needs the
 While iterating on the source spec, `unmute dev <source-dir>` recompiles this
 project and runs it for you behind a dev client.
 
+## Input variables
+
+This agent expects values supplied when the call starts:
+
+- `customer_id` (string)
+- `verified` (boolean)
+
+Locally, pass them with `unmute dev` on the source package:
+
+```sh
+unmute dev <source-dir> --var customer_id=... --var verified=...
+```
+
+In production the same values ride the runner's call-start payload as one flat
+JSON object, and the bot also reads them from the `UNMUTE_CALL_START`
+environment variable when the payload carries none.
+
 ## Required environment
 
 Set these before running (values are never written into the project):
@@ -81,6 +98,7 @@ the typed results.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from dataclasses import dataclass
 
@@ -142,8 +160,34 @@ class State:
     verified: bool = False
 
 
+def _dispatched_call_start(call_context: dict | None) -> dict:
+    """Input variables arrive with the dispatch: the call context on a telephony
+    route, or UNMUTE_CALL_START for a local `unmute dev --var` session."""
+    values = dict((call_context or {}).get("call_start", {}))
+    raw = os.getenv("UNMUTE_CALL_START")
+    if raw:
+        try:
+            supplied = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("UNMUTE_CALL_START must be valid JSON") from exc
+        if not isinstance(supplied, dict):
+            raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
+        # The dispatch wins: env is the local stand-in for it.
+        for name, value in supplied.items():
+            values.setdefault(name, value)
+    return values
+
+
 def build_state(call_context: dict | None = None) -> State:
     state = State()
+    missing = []
+    call_start = _dispatched_call_start(call_context)
+    if "customer_id" in call_start:
+        setattr(state, "customer_id", call_start["customer_id"])
+    if "verified" in call_start:
+        setattr(state, "verified", call_start["verified"])
+    if missing:
+        raise RuntimeError(f"Missing call context fields: {', '.join(missing)}")
     return state
 
 async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
@@ -158,7 +202,7 @@ BILLING_PROMPT = """# Billing agent (placeholder prompt)
 You are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
 
 - The caller was handed to you because they have a billing question. The conversation so far is in your context.
-- Use `get_invoice` to look up invoices for customer `{{customer_id}}`.
+- Use `get_invoice` to look up the caller's invoices. It takes the customer id, which the earlier lookup already established.
 - Explain charges calmly and clearly, one item at a time.
 - If the caller is not satisfied or asks for a person, transfer them with `to_human`.
 """
@@ -176,7 +220,7 @@ You are the front desk voice agent for Acme Support. This is a phone call, so ke
 # --- agents -----------------------------------------------------------------
 
 
-def build_billing_llm():
+def build_billing_llm(state=None):
     return OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
@@ -200,8 +244,9 @@ class BillingAgent(LLMWorker):
     def __init__(self, state=None, context=None, call_context=None) -> None:
         self.state = state
 
-        llm = build_billing_llm()
+        llm = build_billing_llm(state)
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
+
 
     @tool
     async def get_invoice(self, params: FunctionCallParams, customer_id: str):
@@ -213,7 +258,7 @@ class BillingAgent(LLMWorker):
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 os.environ["GET_INVOICE_URL"],
-                json={ "customer_id": customer_id },
+                json={"customer_id": customer_id},
                 timeout=30.0,
             )
             response.raise_for_status()
@@ -235,7 +280,7 @@ class BillingAgent(LLMWorker):
 
 
 
-def build_intake_llm():
+def build_intake_llm(state=None):
     return OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
@@ -260,8 +305,9 @@ class IntakeAgent(LLMWorker):
     def __init__(self, state=None, context=None, call_context=None) -> None:
         self.state = state
 
-        llm = build_intake_llm()
+        llm = build_intake_llm(state)
         super().__init__("intake", llm=llm, pipeline=Pipeline([llm, build_intake_tts()]), bridged=())
+
 
     @tool(cancel_on_interruption=False)
     async def to_billing(self, params: FunctionCallParams):
@@ -287,7 +333,7 @@ class IntakeAgent(LLMWorker):
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 os.environ["LOOKUP_CUSTOMER_URL"],
-                json={ "email": email, "phone": phone },
+                json={"email": email, "phone": phone},
                 timeout=30.0,
             )
             response.raise_for_status()
@@ -576,6 +622,18 @@ if __name__ == "__main__":
       "basis": "2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio"
     }
   ],
+  "variables": [
+    {
+      "name": "customer_id",
+      "type": "string",
+      "has_default": false
+    },
+    {
+      "name": "verified",
+      "type": "boolean",
+      "has_default": true
+    }
+  ],
   "notes": [
     "interruption ignore_phrases emitted as IGNORE_PHRASES; short phrases are also suppressed by the min-words turn-start strategy",
     "listen: deepgram via DeepgramSTTService (pipecat-ai[deepgram], verified 2026-07-15)",
@@ -601,6 +659,8 @@ services:
       - LOOKUP_CUSTOMER_URL
       - OPENAI_API_KEY
       - SLNG_API_KEY
+      # optional: set by `unmute dev --var`; absent otherwise
+      - UNMUTE_CALL_START
     ports:
       - "${UNMUTE_DEV_PORT:-7860}:7860"
     healthcheck:

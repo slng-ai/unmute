@@ -15,6 +15,10 @@ services:
       - {{.}}
 {{- end}}
 {{- end}}
+{{- range .DevOptionalEnv}}
+      # optional: set by `unmute dev --var`; absent otherwise
+      - {{.}}
+{{- end}}
     ports:
       - "${UNMUTE_TELEPHONY_PORT:-8081}:8081"
     depends_on:
@@ -82,7 +86,12 @@ services:
       livekit_server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "grep -q ':1F90 ' /proc/net/tcp"]
+      # 1F90 is health_port 8080 in hex. Both tables are read: the image has no
+      # shell utilities beyond grep, and Go binds the IPv6 wildcard for a
+      # port-only listen address, so the socket shows up in /proc/net/tcp6 and
+      # never in /proc/net/tcp. Reading only the v4 table reported this
+      # container unhealthy for its full retry budget while it was serving.
+      test: ["CMD-SHELL", "grep -q ':1F90 ' /proc/net/tcp /proc/net/tcp6"]
       interval: 2s
       timeout: 3s
       retries: 30

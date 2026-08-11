@@ -1,0 +1,21 @@
+# Both shipped code drivers, same agent, same Twilio account: the variables and
+# secrets surface compiles and runs identically on each.
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: carrier-websocket
+    carrier: twilio
+    connection: twilio_voice
+
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    transport: connector
+    carrier: twilio
+    connection: twilio_voice
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini

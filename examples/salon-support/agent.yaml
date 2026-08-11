@@ -1,0 +1,84 @@
+# Sage and Stone Salon support desk: the smallest package that exercises
+# variables and secrets and that you can talk to in a browser right away.
+#
+# Nothing external is needed. The channel is web audio (no phone number) and the
+# tools are local Python fixtures (no API to stand up), so no secret is spent on
+# a tool: the two model keys and the three Langfuse values below are all consumed
+# by the runtime itself.
+version: 1
+entry_agent: support_desk
+
+variables:
+  customer_name:
+    type: string
+    source: call_start
+    default: there
+    description: Caller's first name, used in the greeting and the prompt.
+  customer_id:
+    type: string
+    source: call_start
+    default: cus_1001
+    description: CRM id of the caller. The booking tool receives it directly; never say it out loud.
+  requested_service:
+    type: string
+    source: conversation
+    description: The service the caller wants, for example a haircut or a colour. Save it as soon as they say it.
+
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+  - LANGFUSE_BASE_URL
+  - LANGFUSE_SECRET_KEY
+  - LANGFUSE_PUBLIC_KEY
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.3
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  support_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - check_availability
+      - book_appointment
+
+tools:
+  - check_availability
+  - book_appointment
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi {{customer_name}}, thanks for calling Sage and Stone Salon. What can I do for you?"
+  interruption:
+    enabled: true
+
+tracing:
+  provider: langfuse
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 4
+  avg_session_duration: 3m

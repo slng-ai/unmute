@@ -1,6 +1,6 @@
 # Unmute CLI
 
-Go CLI that compiles a declarative voice-agent spec into orchestrator-native artifacts. Full design in `docs/ARCHITECTURE.md`; engineering detail in `docs/DEVELOPMENT.md`; glossary in `CONTEXT.md`; locked decisions in `docs/adr/`. **When code and a doc disagree, the doc wins — fix the code or open an issue.**
+Go CLI that compiles a declarative voice-agent spec into orchestrator-native artifacts. Full design in `docs/ARCHITECTURE.md`; the locked authoring contract in `docs/SCHEMA.md`; per-feature specs in `docs/spec/`; a get-around guide in `docs/REPO_MAP.md`. **When code and a doc disagree, the doc wins — fix the code or open an issue.**
 
 ## Voice contracts
 While writing documents or speaking with the user, always use a simple language and simple wording. 
@@ -31,7 +31,14 @@ Go structs are the schema source for their own surface: `internal/spec` derives 
 
 ## Layout
 `internal/` not `pkg/`. One file per command in `internal/cli/`. Hand-write cobra commands — **no `cobra-cli` generator**.
-The `docs/spec` holds all the specs of what we are building.
+
+## Specs
+Two kinds of spec, and only one of them is a file we keep.
+
+- **Complex features get a kept spec.** One file per feature in `docs/spec/`, tracked and committed like any other doc. This is the folder for work a future reader has to understand later: a driver, the compiler, the TUI, a surface as wide as variables and secrets. Amend the file when the design changes, and remember the rule at the top of this document: when the code and the spec disagree, the spec wins.
+- **Simple work gets no kept spec.** Write the working spec at the repo root as `SPEC.md`, build against it, then let it go. `SPEC.md` is gitignored and **must never be committed**. It is a scratch file, rewritten per feature, and a stale one in git history is worse than none.
+
+If something you started as simple turns out to be worth keeping, move it to `docs/spec/<feature>.md` and commit it there. That move is the only way a spec enters the repo.
 
 ## Skills
 - Ponytail for writing great code

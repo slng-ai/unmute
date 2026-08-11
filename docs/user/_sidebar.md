@@ -37,6 +37,7 @@
   - [listen, turn, and placement](reference/pipeline.md)
   - [channels and capacity](reference/channels-and-capacity.md)
   - [variables](reference/variables.md)
+  - [secrets](reference/secrets.md)
   - [providers](reference/providers.md)
   - [the safe core](reference/safe-core.md)
   - [the CLI](reference/cli.md)

@@ -6,8 +6,7 @@ the selected orchestrator runs natively. Unmute is not part of the generated
 agent's production process.
 
 This document defines the system boundaries, compiler flow, and runtime
-topologies. [SCHEMA.md](SCHEMA.md) defines the authoring contract,
-[CONTEXT.md](../CONTEXT.md) defines the shared vocabulary, and
+topologies. [SCHEMA.md](SCHEMA.md) defines the authoring contract, and
 [TELEPHONY.md](TELEPHONY.md) contains the detailed telephony design and
 verification state.
 
@@ -437,8 +436,6 @@ repeat:
   capability contracts.
 - [DEPLOYMENT.md](DEPLOYMENT.md) for self-hosted production deployment
   without LiveKit Cloud or Pipecat Cloud.
-- [CONTEXT.md](../CONTEXT.md) for domain terms and the compile-versus-runtime
-  vocabulary.
 - [TELEPHONY.md](TELEPHONY.md) for carrier routes, credentials, ports,
   generated services, and verification requirements.
 - [LiveKit target guide](user/targets/livekit.md) and

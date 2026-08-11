@@ -72,6 +72,7 @@ type pipecatAgent struct {
 	Class       string // Python class name
 	Prompt      string
 	PromptConst string // module constant holding Prompt (dedup: builder + restore, V2)
+	PromptExpr  string // PromptConst, or a render call when the prompt is templated
 	LLM         pipecatService
 	TTS         pipecatService
 	Tools       []pipecatTool
@@ -120,9 +121,16 @@ type pipecatTool struct {
 	MethodName      string
 	Description     string
 	URLEnv          string
-	Auth            *webhookAuth // nil = unauthenticated POST
-	Local           bool         // execution: local — body imports + awaits tools/<name>.py (V13)
-	HandlerSource   string       // local handler file content, copied into the artifact
+	URLExpr         string          // request URL expression (webhook.path renders into it)
+	Inject          []injectedValue // hidden request values, never advertised to the model
+	Needed          []neededVar     // unset ones refuse the call before it is sent (V4)
+	NeededLiteral   string          // Needed as a Python list of (name, hint) pairs
+	NeedsState      bool            // reads the call state: inside a Flow node it must be bound in
+	JSONBody        string          // full Python dict literal for the webhook body
+	CallKwargs      string          // full kwargs string for a local handler call
+	Auth            *webhookAuth    // nil = unauthenticated POST
+	Local           bool            // execution: local — body imports + awaits tools/<name>.py (V13)
+	HandlerSource   string          // local handler file content, copied into the artifact
 	Args            []pipecatArg
 	InputProps      string // Python literal: the input schema's properties object
 	InputRequired   string // Python literal: the input schema's required list
@@ -164,10 +172,28 @@ type pipecatTransfer struct {
 }
 
 type pipecatVariable struct {
-	Name    string
-	PyType  string
-	Default string // Python literal
-	Source  string
+	Name        string
+	PyType      string
+	Default     string // Python literal
+	Source      string
+	Description string
+}
+
+// pipecatCapture is the generated update_variables tool (V6): one optional
+// argument per conversation variable, writing the shared State.
+type pipecatCapture struct {
+	Name        string
+	Description string
+	Args        []pipecatArg
+	Fields      []string // conversation variable names, in schema order
+}
+
+// pipecatCallStartVar is one dispatched input variable, hydrated from the call
+// context or the dev UNMUTE_CALL_START payload before the greeting.
+type pipecatCallStartVar struct {
+	Name     string
+	Type     string
+	Required bool
 }
 
 type pipecatTelephony struct {
@@ -212,6 +238,11 @@ type pipecatData struct {
 	FlowTools           []pipecatTool      // deduped task tools, emitted as module-level flows handlers
 	LocalTools          []pipecatLocalTool // copied handler files (tools/<name>.py, V13)
 	Variables           []pipecatVariable
+	CallStartVars       []pipecatCallStartVar // dispatched input variables (I.dispatch)
+	Capture             *pipecatCapture       // generated update_variables tool; nil without conversation variables
+	Secrets             []string              // declared secrets, for .env.example (V11)
+	ExtraEnv            []string              // env the route needs that the package never declared
+	GreetingExpr        string                // Python expression for the fixed greeting line
 	GreetingText        string
 	GreetingInstruction string
 	GreetingRunLLM      string // "True" or "False"
@@ -226,6 +257,7 @@ type pipecatData struct {
 	Deps                []string // standalone pip deps for plugin services (e.g. pipecat-slng)
 	RequiredEnv         []string
 	DevEnv              []string // provider creds the web dev image needs, without telephony/coordination env (compose.dev.yaml)
+	DevOptionalEnv      []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
 	Notes               []string
 	Tracing             bool
 	Telephony           *pipecatTelephony
@@ -233,6 +265,9 @@ type pipecatData struct {
 	// Import needs: keep bot.py free of unused imports (only what a given spec
 	// actually exercises), so the emitted pipeline reads clean.
 	NeedsInspect        bool        // any local tool (isawaitable on the user handler, V13)
+	NeedsRender         bool        // any template site: the _render helper + re import
+	NeedsStateBind      bool        // any flow tool reading state (inject inside a task)
+	NeedsRefusal        bool        // any tool whose injected variables can be unset (V4)
 	NeedsHTTPX          bool        // any webhook tool (agent @tool or flows handler)
 	AuthKinds           authKindSet // webhook auth schemes in use: helpers + imports per scheme
 	NeedsFunctionCalls  bool        // any @tool/transfer/delegate (FunctionCallParams)
@@ -292,6 +327,10 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolAuth:             true, // _bearer Authorization header off token_env
 	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
 	targetcap.FieldTracingLangfuse:      true,
+	targetcap.FieldVariableConversation: true, // generated update_variables @tool writing State
+	targetcap.FieldToolInject:           true, // hidden request values merged from State
+	targetcap.FieldWebhookPath:          true, // rendered, URL-encoded path on the base URL
+	targetcap.FieldTemplates:            true, // _render over prompts and the greeting at session start
 }
 
 var pipecatEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
@@ -325,7 +364,7 @@ func GeneratePipecat(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedB
 	if err != nil {
 		return Artifact{}, err
 	}
-	report, err := pipecatReport(data, files, bindings, sizing)
+	report, err := pipecatReport(agent, data, files, bindings, sizing)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -440,10 +479,12 @@ type pipecatReportJSON struct {
 	RequiredEnv []string              `json:"required_env"`
 	Bindings    []ir.ForwardedBinding `json:"bindings,omitempty"`
 	Sizing      []ir.Sizing           `json:"sizing,omitempty"`
+	Variables   []reportVariable      `json:"variables,omitempty"`
+	Secrets     []reportSecret        `json:"secrets,omitempty"`
 	Notes       []string              `json:"notes,omitempty"`
 }
 
-func pipecatReport(data pipecatData, files []File, bindings []ir.ForwardedBinding, sizing []ir.Sizing) ([]byte, error) {
+func pipecatReport(agent *ir.Agent, data pipecatData, files []File, bindings []ir.ForwardedBinding, sizing []ir.Sizing) ([]byte, error) {
 	generated := make([]string, 0, len(files)+1)
 	for _, file := range files {
 		generated = append(generated, file.Path)
@@ -457,7 +498,9 @@ func pipecatReport(data pipecatData, files []File, bindings []ir.ForwardedBindin
 	out, err := json.MarshalIndent(pipecatReportJSON{
 		Target: data.Project, Provider: "pipecat", Version: data.Version, EntryAgent: data.EntryAgent,
 		Agents: agents, Files: generated, RequiredEnv: data.RequiredEnv,
-		Bindings: bindings, Sizing: sizing, Notes: data.Notes,
+		Bindings: bindings, Sizing: sizing,
+		Variables: reportVariables(agent), Secrets: reportSecrets(agent),
+		Notes: data.Notes,
 	}, "", "  ")
 	if err != nil {
 		return nil, err

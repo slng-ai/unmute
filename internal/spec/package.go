@@ -38,6 +38,7 @@ type AgentFile struct {
 	Listen       string               `json:"listen,omitempty" yaml:"listen,omitempty"`
 	Turn         string               `json:"turn,omitempty" yaml:"turn,omitempty"`
 	Variables    map[string]Variable  `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Secrets      []string             `json:"secrets,omitempty" yaml:"secrets,omitempty"`
 	Agents       map[string]AgentDef  `json:"agents" yaml:"agents"`
 	Tasks        map[string]Task      `json:"tasks,omitempty" yaml:"tasks,omitempty"`
 	TaskGroups   map[string]TaskGroup `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
@@ -86,11 +87,15 @@ type ModelDef struct {
 }
 
 type Variable struct {
-	Type    string `json:"type" yaml:"type"`
-	Default any    `json:"default,omitempty" yaml:"default,omitempty"`
-	Source  string `json:"source,omitempty" yaml:"source,omitempty"`
+	Type        string `json:"type" yaml:"type"`
+	Default     any    `json:"default,omitempty" yaml:"default,omitempty"`
+	Source      string `json:"source,omitempty" yaml:"source,omitempty"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
+// Secret declares one runtime environment value the package needs. The map key
+// IS the environment variable name (UPPER_SNAKE), so there is no field a value
+// could ever be written into (variable_secrets_specs.md C3, V9).
 type AgentDef struct {
 	Instructions string   `json:"instructions" yaml:"instructions"`
 	Model        string   `json:"model" yaml:"model"`
@@ -153,6 +158,11 @@ type Tool struct {
 	Input       map[string]any `json:"input,omitempty" yaml:"input,omitempty"`
 	Output      map[string]any `json:"output,omitempty" yaml:"output,omitempty"`
 
+	// Inject is a flat map of request key to scalar, merged into the call and
+	// never advertised to the model: a value may carry {{variable}} tokens.
+	// Legal on webhook, local, and mcp only (variable_secrets_specs.md V3).
+	Inject map[string]any `json:"inject,omitempty" yaml:"inject,omitempty"`
+
 	Webhook        *ToolWebhook  `json:"webhook,omitempty" yaml:"webhook,omitempty"`
 	Local          *ToolLocal    `json:"local,omitempty" yaml:"local,omitempty"`
 	MCP            *ToolMCP      `json:"mcp,omitempty" yaml:"mcp,omitempty"`
@@ -167,8 +177,11 @@ type Tool struct {
 // ToolWebhook is the `webhook:` block: an HTTP endpoint named by env var, with
 // optional authentication.
 type ToolWebhook struct {
-	URLEnv string    `json:"url_env" yaml:"url_env"`
-	Auth   *ToolAuth `json:"auth,omitempty" yaml:"auth,omitempty"`
+	URLEnv string `json:"url_env" yaml:"url_env"`
+	// Path is appended to the env base URL; it may carry {{variable}} tokens,
+	// whose rendered values are URL-encoded (variable_secrets_specs.md I.authoring.tool).
+	Path string    `json:"path,omitempty" yaml:"path,omitempty"`
+	Auth *ToolAuth `json:"auth,omitempty" yaml:"auth,omitempty"`
 }
 
 // ToolLocal is the `local:` block: a Python handler in the package.

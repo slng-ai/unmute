@@ -73,12 +73,15 @@ On Pipecat, the driver emits the `webhook`, `local`, and `builtin` blocks. `mcp`
 ```yaml
 webhook:
   url_env: LOOKUP_CUSTOMER_URL     # required: env var name, never a URL
+  path: /customers/{{customer_id}}  # optional, appended to the base URL
   auth:                            # optional, see "Webhook auth" below
     type: bearer
     token_env: LOOKUP_CUSTOMER_TOKEN
 ```
 
-`url_env` names the environment variable holding the endpoint. It is a variable name, never a URL: the name must be `UPPER_SNAKE`, so a pasted URL fails validation. You set the real value in your `.env`; keeping it out of the spec means the same spec points at staging in dev and production in prod.
+`url_env` names the environment variable holding the endpoint. It is a variable name, never a URL: the name must be `UPPER_SNAKE`, so a pasted URL fails validation. You set the real value in your `.env`; keeping it out of the spec means the same spec points at staging in dev and production in prod. The generated code reads it as `os.environ["LOOKUP_CUSTOMER_URL"]` inside the request, so a rotated value needs no recompile. Declare the name under [`secrets:`](secrets.md) and it lands in `.env.example` and the startup check.
+
+`path` is optional and appended to that base URL. It must start with `/`, and it may carry `{{variable}}` tokens, whose values are URL-encoded when substituted (so a customer id containing a slash cannot change the route). Works on LiveKit and Pipecat; fails on Vapi and Deepgram.
 
 ### local:
 
@@ -88,6 +91,16 @@ local:
 ```
 
 Code targets only. The handler file travels with your package and is copied into the generated project.
+
+**A handler that needs a credential reads it itself**, with `os.environ` inside the function:
+
+```python
+def lookup_customer(phone):
+    token = os.environ["LOOKUP_CUSTOMER_TOKEN"]
+    ...
+```
+
+There is no credential field on the `local:` block and no secret object passed into your function. Your handler is normal Python and reads its own environment. Declare the name under [`secrets:`](secrets.md) so it reaches `.env.example` and the startup check; `unmute validate` scans handler bodies for these reads and warns about any name the package never declares.
 
 ### mcp:
 
@@ -124,7 +137,7 @@ Most real endpoints do not accept anonymous POSTs. `webhook.auth` says how the g
 
 Works on LiveKit and Pipecat. Vapi and Deepgram fail: a managed target configures its tool auth on its own side.
 
-**The token is an environment variable name, never a value.** Names are `UPPER_SNAKE`, so a pasted token fails validation. It lands in the generated `.env.example`; on Pipecat it also joins the startup check, so a missing token fails when the bot boots instead of mid-call.
+**The token is an environment variable name, never a value.** Names are `UPPER_SNAKE`, so a pasted token fails validation. It lands in the generated `.env.example`; on Pipecat it also joins the startup check, so a missing token fails when the bot boots instead of mid-call. [secrets](secrets.md) shows the emitted header helper and traces a token from `agent.yaml` to the running request.
 
 ### type: bearer
 
@@ -152,12 +165,31 @@ webhook:
 Sends the token verbatim in its own header.
 
 `basic` auth, request signing (HMAC), and OAuth2 are not supported. If your
-endpoint needs one, use a `local:` Python handler, where you control the request
-yourself.
+endpoint needs one, use a [`local:`](#local) Python handler, where you control
+the request yourself and read the credential with `os.environ`.
+`examples/outbound-reminder/tools/cancel_appointment.py` is a worked one.
 
 ## Conversation settings
 
 Both stay at the top level of the file: they describe what the call does to the conversation, not how the tool runs.
+
+### inject
+
+Values merged into the tool call that the model never sees:
+
+```yaml
+inject:
+  customer_id: "{{customer_id}}"   # from a variable
+  channel: phone                   # or a literal
+```
+
+This is how a tool receives something the model should not have to guess or repeat back: a customer id from the dispatch, a slot the caller just named, a fixed channel label. Injected keys are invisible to the model, so it can neither read them nor override them, and a key here may not also appear in `input.properties`.
+
+A value that is exactly one `{{token}}` keeps the variable's declared type, so an `integer` variable arrives as a JSON number. Anything mixed with surrounding text renders to a string.
+
+If an injected variable is still unset when the model calls the tool, the call is refused with a message telling the model what to ask for, and no request is sent. A variable the runtime owns (a system source) never gates a call that way, since no caller can be asked for it.
+
+Legal on `webhook:` (merged into the POST body) and `local:` (merged into the handler's keyword arguments). Works on LiveKit and Pipecat; fails on Vapi and Deepgram.
 
 ### interruption
 

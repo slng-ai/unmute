@@ -66,6 +66,10 @@ const (
 	FieldOutbound              Field = "channels.telephony.outbound"
 	FieldVoicemail             Field = "channels.telephony.on_voicemail"
 	FieldTracingLangfuse       Field = "tracing.provider.langfuse"
+	FieldVariableConversation  Field = "variables.source.conversation"
+	FieldToolInject            Field = "tools.inject"
+	FieldWebhookPath           Field = "tools.webhook.path"
+	FieldTemplates             Field = "templates.session_start"
 	FieldFutureProvisional     Field = "future.provisional"
 )
 
@@ -374,6 +378,28 @@ func Default() Table {
 			FieldTracingLangfuse: field(
 				deny(Vapi, "Vapi has no Langfuse tracing lowering"),
 				deny(Deepgram, "the Deepgram driver does not emit Langfuse tracing"),
+			),
+			// Variables and secrets (variable_secrets_specs.md V5). The code
+			// drivers own the session state and the request, so they can capture
+			// a value mid-call and merge hidden parameters; a managed target can
+			// only do what its own API exposes, and the Deepgram driver is
+			// unwritten. Each row lifts when its provider mechanism is
+			// doc-verified (the verify table in that spec).
+			FieldVariableConversation: field(
+				deny(Vapi, "Vapi has no verified mid-call variable capture; a Vapi assistant cannot write back into its own variable values"),
+				deny(Deepgram, "the Deepgram driver does not emit variable capture yet"),
+			),
+			FieldToolInject: field(
+				deny(Vapi, "Vapi tool parameters come from the model; there is no verified server-side injection of hidden values"),
+				deny(Deepgram, "the Deepgram driver does not emit injected tool parameters yet"),
+			),
+			FieldWebhookPath: field(
+				deny(Vapi, "a Vapi tool posts to one fixed server URL; a per-call path is not part of its tool shape"),
+				deny(Deepgram, "the Deepgram driver does not emit webhook paths yet"),
+			),
+			FieldTemplates: field(
+				deny(Vapi, "Vapi's own dynamic-variable spelling is unverified here; unmute does not guess at a provider's template syntax"),
+				deny(Deepgram, "the Deepgram driver does not render templates; its template variables are substitution-time and visible to project members (SCHEMA 4.4)"),
 			),
 			FieldFutureProvisional: provisional(),
 		},

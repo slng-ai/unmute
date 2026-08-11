@@ -16,6 +16,8 @@ services:
       - TWILIO_PHONE_NUMBER
       - UNMUTE_OUTBOUND_TOKEN
       - UNMUTE_PUBLIC_URL
+      # optional: set by `unmute dev --var`; absent otherwise
+      - UNMUTE_CALL_START
     ports:
       - "${UNMUTE_TELEPHONY_PORT:-7860}:7860"
     depends_on:

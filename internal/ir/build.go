@@ -26,6 +26,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	if err := checkNames(pkg); err != nil {
 		return nil, err
 	}
+	if err := checkSecrets(pkg); err != nil {
+		return nil, err
+	}
 	if _, ok := pkg.Agent.Agents[pkg.Agent.EntryAgent]; !ok {
 		return nil, missing(pkg, "agent.yaml", "entry_agent", pkg.Agent.EntryAgent)
 	}
@@ -55,6 +58,7 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		Listen:       listenName,
 		Turn:         turnName,
 		Variables:    make(map[string]Variable, len(pkg.Agent.Variables)),
+		Secrets:      slices.Sorted(slices.Values(pkg.Agent.Secrets)),
 		Agents:       make(map[string]AgentDef, len(pkg.Agent.Agents)),
 		Tasks:        make(map[string]Task, len(pkg.Agent.Tasks)),
 		TaskGroups:   make(map[string]TaskGroup, len(pkg.Agent.TaskGroups)),
@@ -69,7 +73,10 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		out.Tracing = &Tracing{Provider: pkg.Agent.Tracing.Provider}
 	}
 	for name, variable := range pkg.Agent.Variables {
-		out.Variables[name] = Variable{Type: PrimitiveType(variable.Type), Default: variable.Default, Source: VariableSource(variable.Source)}
+		out.Variables[name] = Variable{
+			Type: PrimitiveType(variable.Type), Default: variable.Default,
+			Source: VariableSource(variable.Source), Description: variable.Description,
+		}
 	}
 	for name, tool := range pkg.Tools {
 		built := buildTool(name, tool)
@@ -189,6 +196,12 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 		}
 		out.Controls[name] = control
 	}
+	if err := checkInject(pkg); err != nil {
+		return nil, err
+	}
+	if err := checkTemplates(pkg, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -217,6 +230,14 @@ func checkNames(pkg *packagespec.Package) error {
 		if _, ok := pkg.Tools[name]; ok {
 			return fmt.Errorf("%s: tool and control name %q collide", pkg.Location("agent.yaml", name), name)
 		}
+	}
+	// The capture tool is generated whenever a conversation variable exists, so
+	// its name cannot also be a package tool or control (V7).
+	if _, ok := pkg.Tools[CaptureToolName]; ok {
+		return fmt.Errorf("%s: tool name %q is reserved: unmute generates %s for source: conversation variables", pkg.Location("agent.yaml", CaptureToolName), CaptureToolName, CaptureToolName)
+	}
+	if _, ok := pkg.Agent.Controls[CaptureToolName]; ok {
+		return fmt.Errorf("%s: control name %q is reserved: unmute generates %s for source: conversation variables", pkg.Location("agent.yaml", CaptureToolName), CaptureToolName, CaptureToolName)
 	}
 	for _, name := range sortedKeys(pkg.Connections) {
 		if !namePattern.MatchString(name) {
@@ -456,11 +477,12 @@ func flattenFallback(pkg *packagespec.Package, section map[string]packagespec.Mo
 func buildTool(name string, raw packagespec.Tool) Tool {
 	tool := Tool{
 		Description: raw.Description, Input: raw.Input, Output: raw.Output,
-		Execution: ToolExecution(raw.ExecutionKind()),
+		Execution: ToolExecution(raw.ExecutionKind()), Inject: raw.Inject,
 	}
 	switch {
 	case raw.Webhook != nil:
 		tool.URLEnv = raw.Webhook.URLEnv
+		tool.Path = raw.Webhook.Path
 		tool.Auth = buildToolAuth(raw.Webhook.Auth)
 	case raw.Local != nil:
 		tool.Handler = raw.Local.Handler
@@ -823,7 +845,9 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 	}
 	sources := make(map[string]VariableSource)
 	for name, variable := range agent.Variables {
-		if variable.Source == "" || variable.Source == VariableSourceCallStart {
+		// Only runtime-owned sources resolve against the route: a dispatched or
+		// model-captured value has nothing to do with the carrier.
+		if !IsSystemSource(variable.Source) {
 			continue
 		}
 		sources[name] = variable.Source

@@ -14,13 +14,18 @@ agents and tasks share the shape (T15). */ -}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict:
         {{triple .Description}}
+{{- if .Needed}}
+        refusal = _refusal({{pyq .Method}}, ctx.userdata, {{.NeededLiteral}})
+        if refusal:
+            return {"refused": refusal}
+{{- end}}
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                os.environ[{{pyq .URLEnv}}],
+                {{.URLExpr}},
 {{- if .Auth}}
                 headers={{.Auth.Expr}},
 {{- end}}
-                json={ {{- range $i, $a := .Args}}{{if $i}}, {{end}}{{pyq $a.Name}}: {{$a.Name}}{{end -}} },
+                json={{.JSONBody}},
             )
             resp.raise_for_status()
 {{- if .EndsConversation}}
@@ -34,7 +39,12 @@ the file defines a callable named like the tool; sync or async). */ -}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}}{{end}}) -> dict:
         {{triple .Description}}
-        result = tools.{{.Method}}.{{.Method}}({{range $i, $a := .Args}}{{if $i}}, {{end}}{{$a.Name}}={{$a.Name}}{{end}})
+{{- if .Needed}}
+        refusal = _refusal({{pyq .Method}}, ctx.userdata, {{.NeededLiteral}})
+        if refusal:
+            return {"refused": refusal}
+{{- end}}
+        result = tools.{{.Method}}.{{.Method}}({{.CallKwargs}})
         if inspect.isawaitable(result):
             result = await result
 {{- if .EndsConversation}}
@@ -44,6 +54,20 @@ the file defines a callable named like the tool; sync or async). */ -}}
 {{end -}}
 {{- /* method_tool dispatches on execution. */ -}}
 {{define "method_tool"}}{{if .Local}}{{template "local_tool" .}}{{else}}{{template "webhook_tool" .}}{{end}}{{end -}}
+{{- /* capture_tool is the generated update_variables tool: the model saves what
+it learns mid-call into the session userdata (variable_secrets_specs.md V6). */ -}}
+{{define "capture_tool"}}
+    @function_tool
+    async def {{.Name}}(self, ctx: RunContext{{range .Args}}, {{.Name}}: {{.Anno}} = None{{end}}) -> str:
+        {{triple .Description}}
+        saved = []
+{{- range .Fields}}
+        if {{.}} is not None:
+            ctx.userdata.{{.}} = {{.}}
+            saved.append({{pyq .}})
+{{- end}}
+        return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
+{{end -}}
 {{- /* prebuilt_list renders execution: builtin tools as SDK helper instances
 spread into the tools= kwarg (docs/spec/prebuilt-tools.md). */ -}}
 {{define "prebuilt_list"}}{{range $i, $p := .}}{{if $i}}, {{end}}{{if eq $p.Builtin "end_call"}}*EndCallTool(extra_description={{pyq $p.Description}}{{if $p.Instructions}}, end_instructions={{pyq $p.Instructions}}{{end}}).tools{{end}}{{end}}{{end -}}
@@ -52,11 +76,13 @@ url_env, allowed_tools keeping D8 visibility. */ -}}
 {{define "mcp_mounts"}}mcp_servers=[{{range $i, $s := .}}{{if $i}}, {{end}}mcp.MCPServerHTTP(url=os.environ[{{pyq $s.URLEnv}}], allowed_tools=[{{range $j, $t := $s.Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]){{end}}]{{end -}}
 {{if .NeedsAsyncio}}import asyncio
 {{end}}{{if .NeedsInspect}}import inspect
-{{end}}{{if or .Outbound .Telephony}}import json
+{{end}}{{if or .Outbound .Telephony .CallStartVars}}import json
 {{end}}import logging
 import os
-{{if .HasVars}}from dataclasses import dataclass
+{{if .NeedsRender}}import re
+{{end}}{{if .HasVars}}from dataclasses import dataclass
 {{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
+{{end}}{{if .NeedsRender}}from urllib.parse import quote
 {{end}}{{if .NeedsHTTPX}}import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
@@ -176,21 +202,66 @@ def _api_key(header: str, env: str) -> dict[str, str]:
 
 {{end}}
 {{end}}
+{{- if .RequiredSecrets}}
+# --- required environment ----------------------------------------------------
+# Declared secrets (agent.yaml secrets:). A missing one fails the session before
+# the agent answers, rather than at the first tool call.
+REQUIRED_ENV = [
+{{- range .RequiredSecrets}}
+    {{pyq .}},
+{{- end}}
+]
+
+
+def require_env() -> None:
+    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
+
+{{end}}
+{{- if .NeedsRender}}
+# --- templates ---------------------------------------------------------------
+_TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
+
+
+def _render(text: str, userdata, *, quote_values: bool = False) -> str:
+    """Substitute each variable token from the session userdata (SCHEMA 4.4).
+    Only substituted values are URL-encoded, never the surrounding literal."""
+    if userdata is None:
+        return text
+
+    def _one(match: re.Match[str]) -> str:
+        value = getattr(userdata, match.group(1), None)
+        value = "" if value is None else str(value)
+        return quote(value, safe="") if quote_values else value
+
+    return _TEMPLATE.sub(_one, text)
+
+{{end}}
+{{- if .NeedsRefusal}}
+def _refusal(tool: str, userdata, needed: list[tuple[str, str]]) -> str:
+    """Refuse a call whose injected variables are still unset (V4): the model is
+    told what to ask for, and no half-formed request is ever sent."""
+    unset = [(name, hint) for name, hint in needed if getattr(userdata, name, None) in (None, "")]
+    if not unset:
+        return ""
+    names = ", ".join(name for name, _ in unset)
+    hints = " ".join(f"{name}: {hint}" for name, hint in unset if hint)
+    return f"cannot call {tool} yet: {names} not set. Ask the caller first. {hints}".strip()
+
+{{end}}
 {{- if .HasVars}}
 # --- shared state ------------------------------------------------------------
 # Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
 @dataclass
 class Userdata:
 {{- range .Vars}}
-    {{.Name}}: {{.PyType}} | None = {{.Default}}
+    {{.Name}}: {{.PyType}} | None = {{.Default}}{{if .Description}}  # {{.Description}}{{end}}
 {{- end}}
 
 {{end}}
-{{- if .Telephony}}
-# --- LiveKit SIP call context -----------------------------------------------
-# UNVERIFIED: Recheck these LiveKit-specific APIs with the LiveKit docs MCP.
-# They were verified against docs.livekit.io on 2026-07-20 because MCP was not
-# available during generation.
+{{- if or .CallStartVars .Telephony}}
+# --- job metadata ------------------------------------------------------------
 def _livekit_job_metadata(raw: str) -> dict:
     if not raw:
         return {}
@@ -202,15 +273,28 @@ def _livekit_job_metadata(raw: str) -> dict:
         raise RuntimeError("LiveKit job metadata must be a JSON object")
     return metadata
 
-
-def _livekit_call_start(metadata: dict) -> dict:
-    call_start = metadata.get("call_start", {})
-    if not isinstance(call_start, dict):
-        raise RuntimeError("call_start must be a JSON object")
+{{end}}
+{{- if .CallStartVars}}
+# --- dispatched input variables ----------------------------------------------
+def _dispatched_call_start(metadata: dict | None = None) -> dict:
+    """Input variables arrive with the dispatch: the job metadata in production,
+    or UNMUTE_CALL_START for a local `unmute dev --var` session."""
+    values = dict((metadata or {}).get("call_start", {}))
+    raw = os.getenv("UNMUTE_CALL_START")
+    if raw:
+        try:
+            supplied = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("UNMUTE_CALL_START must be valid JSON") from exc
+        if not isinstance(supplied, dict):
+            raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
+        # The dispatch wins: env is the local stand-in for it.
+        for name, value in supplied.items():
+            values.setdefault(name, value)
     missing = []
-{{- range .Telephony.CallStart}}
-    if {{pyq .Name}} in call_start:
-        value = call_start[{{pyq .Name}}]
+{{- range .CallStartVars}}
+    if {{pyq .Name}} in values:
+        value = values[{{pyq .Name}}]
         if not ({{.TypeCheck}}):
             raise RuntimeError({{pyq (printf "call_start.%s must be %s" .Name .Type)}})
 {{- if .Required}}
@@ -220,9 +304,22 @@ def _livekit_call_start(metadata: dict) -> dict:
 {{- end}}
     if missing:
         raise RuntimeError("Missing call_start fields: " + ", ".join(missing))
-    return call_start
+    return values
 
 
+def _hydrate_call_start(userdata, values: dict) -> None:
+{{- range .CallStartVars}}
+    if {{pyq .Name}} in values:
+        userdata.{{.Name}} = values[{{pyq .Name}}]
+{{- end}}
+    return None
+
+{{end}}
+{{- if .Telephony}}
+# --- LiveKit SIP call context -----------------------------------------------
+# UNVERIFIED: Recheck these LiveKit-specific APIs with the LiveKit docs MCP.
+# They were verified against docs.livekit.io on 2026-07-20 because MCP was not
+# available during generation.
 {{- if eq .Telephony.Transport "connector"}}
 def _livekit_call_context(room_name: str, metadata: dict) -> dict:
     # The Twilio bridge writes every call fact into the job metadata, so the
@@ -261,7 +358,7 @@ def _livekit_call_context(room_name: str, participant, metadata: dict) -> dict:
 
 
 {{- if .HasVars}}
-def _hydrate_livekit_context(userdata: Userdata, context: dict, call_start: dict) -> None:
+def _hydrate_livekit_context(userdata: Userdata, context: dict) -> None:
     missing = []
 {{- range .Telephony.SystemSources}}
     value = context.get({{pyq .Source}})
@@ -270,10 +367,6 @@ def _hydrate_livekit_context(userdata: Userdata, context: dict, call_start: dict
     else:
         userdata.{{.Variable}} = value
 {{- end}}
-{{- range .Telephony.CallStart}}
-    if {{pyq .Name}} in call_start:
-        userdata.{{.Name}} = call_start[{{pyq .Name}}]
-{{- end}}
     if missing:
         raise RuntimeError("Missing LiveKit SIP context fields: " + ", ".join(missing))
 
@@ -281,7 +374,7 @@ def _hydrate_livekit_context(userdata: Userdata, context: dict, call_start: dict
 {{- end}}
 async def _livekit_entry_greeting(session: AgentSession) -> None:
 {{- if .Telephony.Greeting.Say}}
-    await session.say({{pyq .Telephony.Greeting.Say}})
+    await session.say({{if .Telephony.Greeting.Templated}}_render({{pyq .Telephony.Greeting.Say}}, session.userdata){{else}}{{pyq .Telephony.Greeting.Say}}{{end}})
 {{- else if .Telephony.Greeting.RunLLM}}
     session.generate_reply(instructions="Greet the caller and offer to help.")
 {{- else}}
@@ -337,9 +430,14 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         )
 
     async def on_enter(self) -> None:
+{{- if .PromptExpr}}
+        # The prompt names call variables, so it is rendered once the session
+        # state exists (C11: rendered at session start, never re-rendered).
+        await self.update_instructions({{.PromptExpr}})
+{{- end}}
 {{- if .Greeting}}
 {{- if .Greeting.Say}}
-        await self.session.say({{pyq .Greeting.Say}})
+        await self.session.say({{if .Greeting.Templated}}_render({{pyq .Greeting.Say}}, self.session.userdata){{else}}{{pyq .Greeting.Say}}{{end}})
 {{- else if .Greeting.RunLLM}}
         self.session.generate_reply(instructions="Greet the caller and offer to help.")
 {{- else}}
@@ -351,6 +449,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         self.session.generate_reply()
 {{- end}}
 {{- range .Tools}}{{template "method_tool" .}}{{end}}
+{{- if $.Capture}}{{template "capture_tool" $.Capture}}{{end}}
 {{range .Transfers}}
     @function_tool
     async def {{.Method}}(self, ctx: RunContext):
@@ -476,9 +575,13 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict
         super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if .MCPServers}}, {{template "mcp_mounts" .MCPServers}}{{end}}{{if .Prebuilt}}, tools=[{{template "prebuilt_list" .Prebuilt}}]{{end}})
 
     async def on_enter(self) -> None:
+{{- if .PromptExpr}}
+        await self.update_instructions({{.PromptExpr}})
+{{- end}}
         # The task's own instructions describe this step; let them drive the opening.
         self.session.generate_reply()
 {{range .Tools}}{{template "method_tool" .}}{{end}}
+{{- if $.Capture}}{{template "capture_tool" $.Capture}}{{end}}
     @function_tool
     async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}) -> None:
         """Record the result of this step and finish. complete() is the sole
@@ -514,6 +617,9 @@ server.setup_fnc = prewarm
 
 @server.rtc_session(agent_name={{pyq .AgentName}})
 async def entrypoint(ctx: JobContext) -> None:
+{{- if .RequiredSecrets}}
+    require_env()
+{{- end}}
     session = AgentSession{{if .HasVars}}[Userdata]{{end}}(
 {{- if .HasVars}}
         userdata=Userdata(),
@@ -588,15 +694,19 @@ async def entrypoint(ctx: JobContext) -> None:
     await ctx.wait_for_participant()
 {{- if .HasVars}}
     metadata = _livekit_job_metadata(ctx.job.metadata)
-    call_start = _livekit_call_start(metadata)
     call_context = _livekit_call_context(ctx.room.name, metadata)
-    _hydrate_livekit_context(session.userdata, call_context, call_start)
+    _hydrate_livekit_context(session.userdata, call_context)
+{{- if .CallStartVars}}
+    _hydrate_call_start(session.userdata, _dispatched_call_start(metadata))
+{{- end}}
 {{- end}}
     await session.start(agent={{.EntryClass}}(), room=ctx.room)
     await _livekit_entry_greeting(session)
 {{- else}}
     metadata = _livekit_job_metadata(ctx.job.metadata)
-    call_start = _livekit_call_start(metadata)
+{{- if .CallStartVars}}
+    call_start = _dispatched_call_start(metadata)
+{{- end}}
     outbound_job = "phone_number" in metadata
     phone_number = metadata.get("phone_number")
     await ctx.connect()
@@ -638,7 +748,10 @@ async def entrypoint(ctx: JobContext) -> None:
 
     call_context = _livekit_call_context(ctx.room.name, participant, metadata)
 {{- if .HasVars}}
-    _hydrate_livekit_context(session.userdata, call_context, call_start)
+    _hydrate_livekit_context(session.userdata, call_context)
+{{- if .CallStartVars}}
+    _hydrate_call_start(session.userdata, call_start)
+{{- end}}
 {{- end}}
     if not outbound_job:
         await session.start(agent={{.EntryClass}}(), room=ctx.room)
@@ -662,6 +775,11 @@ async def entrypoint(ctx: JobContext) -> None:
     await _livekit_entry_greeting(session)
 {{- end}}
 {{- else}}
+{{- if .CallStartVars}}
+    # Input variables land before the session starts, so the greeting and the
+    # prompts already see them (I.dispatch).
+    _hydrate_call_start(session.userdata, _dispatched_call_start(_livekit_job_metadata(ctx.job.metadata)))
+{{- end}}
     await session.start(agent={{.EntryClass}}(), room=ctx.room)
     await ctx.connect()
 {{- if .Outbound}}

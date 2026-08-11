@@ -74,7 +74,7 @@ Compiling a Vapi or Deepgram instance fails with `<provider> driver is not imple
 ## dev
 
 ```sh
-unmute dev <agent-dir> [--target <name>] [--console | --telephony [--public-url <https-url>] [--to <e164>]] [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
+unmute dev <agent-dir> [--target <name>] [--var name=value ...] [--console | --telephony [--public-url <https-url>] [--to <e164>]] [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
 ```
 
 The fastest loop for a **Pipecat or LiveKit** instance: compiles the selected target to `build/<name>/`, runs it locally, and lets you talk to the agent — in the browser (default) or in your terminal (`--console`). Whatever you build, you can speak to.
@@ -174,6 +174,58 @@ schema can hold any number of supported routes. Today each telephony target
 fails closed; after promotion, `compile` can select several targets or all of
 them, while `dev --telephony` runs one exact route at a time. Pass its instance
 name, such as `--target pipecat_twilio` or `--target livekit_plivo`.
+
+**Seeding variables (`--var name=value`).** Repeat the flag once per variable.
+It is the local stand-in for the dispatch payload production sends, so it works
+the same on every target and in every mode. The same flags run the same package
+on either driver:
+
+```sh
+unmute dev examples/salon-support --target pipecat \
+  --var customer_name=Ada \
+  --var customer_id=cus_2002
+```
+
+```sh
+unmute dev examples/salon-support --target livekit \
+  --var customer_name=Ada \
+  --var customer_id=cus_2002
+```
+
+Quote a value that contains spaces, and pass the whole `name=value` pair inside
+the quotes:
+
+```sh
+unmute dev examples/outbound-reminder --target pipecat \
+  --var customer_id=cus_1042 \
+  --var name=Ada \
+  --var "appointment_time=tomorrow at 3 pm"
+```
+
+`--var` is not web-only. It reaches console and telephony runs too, because the
+value is set before the mode is chosen:
+
+```sh
+unmute dev examples/salon-support --target pipecat --console --var customer_name=Ada
+```
+
+```sh
+unmute dev examples/outbound-reminder --target pipecat --telephony \
+  --to +15551234567 \
+  --var customer_id=cus_1042 --var name=Ada
+```
+
+Only `source: call_start` variables can be seeded, and every flag is checked
+before anything compiles or starts, so a mistake costs you no container:
+
+- An undeclared name is refused: `--var wrong=1: no variable "wrong" is declared in agent.yaml`.
+- A `source: conversation` variable is refused, because the model saves it mid-call: `--var reschedule_to=x: "reschedule_to" has source conversation, so the model saves it mid-call through update_variables, not you`.
+- A system source such as `to_number` is refused, because the runtime supplies it.
+- A value is parsed against the variable's declared type, so an `integer` variable rejects text instead of handing the bot a quoted string.
+
+Leave a flag out and the variable falls back to its declared `default`. A
+`call_start` variable with no default and no `--var` is what the tool guards
+send you back to ask for. See [variables](variables.md).
 
 - Web (default) and telephony modes require **Docker** with the Compose plugin.
   Console mode requires `uv` on your `PATH` (see

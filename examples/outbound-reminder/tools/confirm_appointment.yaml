@@ -1,0 +1,22 @@
+# The model calls this with no arguments. Everything the API needs is injected
+# from variables and secrets, so the model can never invent a customer id.
+description: Confirm that the existing appointment stays as booked. Call it when the customer says the time works.
+
+input:
+  type: object
+  properties: {}
+
+inject:
+  customer_id: "{{customer_id}}"
+  dialed_number: "{{dialed_number}}"
+  channel: phone
+
+webhook:
+  url_env: SALON_API_URL
+  path: /customers/{{customer_id}}/appointments/confirm
+  auth:
+    type: bearer
+    token_env: SALON_API_TOKEN
+
+effect: returns_data
+interruption: provider_default

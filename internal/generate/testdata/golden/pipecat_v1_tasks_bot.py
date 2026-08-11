@@ -88,8 +88,34 @@ class State:
     verified: bool = False
 
 
+def _dispatched_call_start(call_context: dict | None) -> dict:
+    """Input variables arrive with the dispatch: the call context on a telephony
+    route, or UNMUTE_CALL_START for a local `unmute dev --var` session."""
+    values = dict((call_context or {}).get("call_start", {}))
+    raw = os.getenv("UNMUTE_CALL_START")
+    if raw:
+        try:
+            supplied = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("UNMUTE_CALL_START must be valid JSON") from exc
+        if not isinstance(supplied, dict):
+            raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
+        # The dispatch wins: env is the local stand-in for it.
+        for name, value in supplied.items():
+            values.setdefault(name, value)
+    return values
+
+
 def build_state(call_context: dict | None = None) -> State:
     state = State()
+    missing = []
+    call_start = _dispatched_call_start(call_context)
+    if "customer_id" in call_start:
+        setattr(state, "customer_id", call_start["customer_id"])
+    if "verified" in call_start:
+        setattr(state, "verified", call_start["verified"])
+    if missing:
+        raise RuntimeError(f"Missing call context fields: {', '.join(missing)}")
     return state
 
 async def _end_after(worker: PipelineWorker, timeout_secs: float) -> None:
@@ -104,7 +130,7 @@ BILLING_PROMPT = """# Billing agent (placeholder prompt)
 You are the billing specialist for Acme Support. This is a phone call, so keep every answer to one or two short sentences.
 
 - The caller was handed to you because they have a billing question. The conversation so far is in your context.
-- Use `get_invoice` to look up invoices for customer `{{customer_id}}`.
+- Use `get_invoice` to look up the caller's invoices. It takes the customer id, which the earlier lookup already established.
 - Explain charges calmly and clearly, one item at a time.
 - If the caller is not satisfied or asks for a person, transfer them with `to_human`.
 """
@@ -122,7 +148,7 @@ You are the front desk voice agent for Acme Support. This is a phone call, so ke
 # --- agents -----------------------------------------------------------------
 
 
-def build_billing_llm():
+def build_billing_llm(state=None):
     return OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
@@ -147,8 +173,9 @@ class BillingAgent(TracedLLMWorker):
         self.state = state
         self.context = context
 
-        llm = build_billing_llm()
+        llm = build_billing_llm(state)
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
+
 
     @tool
     async def get_invoice(self, params: FunctionCallParams, customer_id: str):
@@ -160,7 +187,7 @@ class BillingAgent(TracedLLMWorker):
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 os.environ["GET_INVOICE_URL"],
-                json={ "customer_id": customer_id },
+                json={"customer_id": customer_id},
                 timeout=30.0,
             )
             response.raise_for_status()
@@ -182,7 +209,7 @@ class BillingAgent(TracedLLMWorker):
 
 
 
-def build_intake_llm():
+def build_intake_llm(state=None):
     return OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
@@ -208,8 +235,9 @@ class IntakeAgent(TracedLLMWorker):
         self.state = state
         self.context = context
 
-        llm = build_intake_llm()
+        llm = build_intake_llm(state)
         super().__init__("intake", llm=llm, pipeline=Pipeline([llm, build_intake_tts()]), bridged=())
+
 
     @tool(cancel_on_interruption=False)
     async def to_billing(self, params: FunctionCallParams):
@@ -235,7 +263,7 @@ class IntakeAgent(TracedLLMWorker):
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 os.environ["LOOKUP_CUSTOMER_URL"],
-                json={ "email": email, "phone": phone },
+                json={"email": email, "phone": phone},
                 timeout=30.0,
             )
             response.raise_for_status()
@@ -374,7 +402,7 @@ class IntakeAgent(TracedLLMWorker):
 async def _flow_tool_lookup_customer(args, flow_manager):
     """Look up a customer record by phone number or email. Returns the customer id and name."""
     async with httpx.AsyncClient() as client:
-        response = await client.post(os.environ["LOOKUP_CUSTOMER_URL"], json=dict(args), timeout=30.0)
+        response = await client.post(os.environ["LOOKUP_CUSTOMER_URL"], json={**dict(args)}, timeout=30.0)
         response.raise_for_status()
         return response.json()
 

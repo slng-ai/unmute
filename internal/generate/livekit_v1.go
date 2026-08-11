@@ -62,6 +62,7 @@ type livekitAgent struct {
 	Name           string
 	Class          string
 	PromptConst    string
+	PromptExpr     string // render call when the prompt is templated, else ""
 	IsEntry        bool
 	LLM            *livekitChain   // set only when it differs from the session default
 	TTS            *livekitService // set only when it differs from the session default
@@ -77,9 +78,13 @@ type livekitAgent struct {
 // livekitGreeting drives the entry agent's on_enter: a fixed line, a
 // model-written opening, or silence until the caller speaks.
 type livekitGreeting struct {
-	Say    string
-	RunLLM bool
-	Silent bool
+	Say string
+	// Templated marks a line naming variables known at call start (C11). The two
+	// emission sites reach the session state by different names, so each renders
+	// its own call rather than sharing one prebuilt expression.
+	Templated bool
+	RunLLM    bool
+	Silent    bool
 }
 
 // livekitTransfer carries the shaped context of an agent_transfer (V5): a
@@ -185,9 +190,28 @@ type livekitAssign struct {
 // livekitVar is one typed shared-state field on the generated Userdata
 // dataclass (SCHEMA 4.4; LiveKit session userdata).
 type livekitVar struct {
-	Name    string
-	PyType  string
-	Default string // Python literal; "None" when the spec declares none
+	Name        string
+	PyType      string
+	Default     string // Python literal; "None" when the spec declares none
+	Description string
+}
+
+// livekitCapture is the generated update_variables tool (V6): one optional
+// argument per conversation variable, writing the session userdata.
+type livekitCapture struct {
+	Name        string
+	Description string
+	Args        []livekitArg
+	Fields      []string
+}
+
+// livekitCallStartVar is one dispatched input variable, hydrated from the job
+// metadata or the dev UNMUTE_CALL_START payload before the greeting.
+type livekitCallStartVar struct {
+	Name      string
+	Type      string
+	TypeCheck string
+	Required  bool
 }
 
 type livekitStep struct {
@@ -200,6 +224,7 @@ type livekitTask struct {
 	Name        string
 	Class       string
 	PromptConst string
+	PromptExpr  string        // render call when the prompt is templated, else ""
 	LLM         *livekitChain // per-task model override (B1); nil = session LLM
 	Result      []livekitArg  // finish() args + the completed result dict
 	Tools       []livekitTool
@@ -211,7 +236,13 @@ type livekitTool struct {
 	Method           string
 	Description      string
 	URLEnv           string
-	Auth             *webhookAuth // nil = unauthenticated POST
+	URLExpr          string          // request URL expression (webhook.path renders into it)
+	Inject           []injectedValue // hidden request values, never advertised to the model
+	Needed           []neededVar     // unset ones refuse the call before it is sent (V4)
+	NeededLiteral    string          // Needed as a Python list of (name, hint) pairs
+	JSONBody         string          // full Python dict literal for the webhook body
+	CallKwargs       string          // full kwargs string for a local handler call
+	Auth             *webhookAuth    // nil = unauthenticated POST
 	Args             []livekitArg
 	Local            bool   // execution: local — call the copied handler module
 	Builtin          string // execution: builtin — prebuilt registry id (renders into tools=, not a method)
@@ -268,13 +299,19 @@ type livekitData struct {
 	Agents           []livekitAgent
 	Tasks            []livekitTask
 	Vars             []livekitVar
-	LocalTools       []livekitLocalTool // copied handler files (tools/<name>.py)
-	Pins             map[string]string  // plugin pins (C6): raise dep floors
+	CallStartVars    []livekitCallStartVar // dispatched input variables (I.dispatch)
+	Capture          *livekitCapture       // generated update_variables tool; nil without conversation variables
+	Secrets          []string              // declared secrets, for .env.example (V11)
+	ExtraEnv         []string              // env the route needs that the package never declared
+	RequiredSecrets  []string              // required secrets: a startup check refuses to run without them (V12)
+	LocalTools       []livekitLocalTool    // copied handler files (tools/<name>.py)
+	Pins             map[string]string     // plugin pins (C6): raise dep floors
 	Prompts          []livekitPrompt
 	PluginModules    []string // merged `from livekit.plugins import ...` names
 	Deps             []string
 	RequiredEnv      []string
 	DevEnv           []string // provider creds the web dev image needs (LIVEKIT_* are hardcoded in compose.dev.yaml)
+	DevOptionalEnv   []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
 	Notes            []string
 	InferenceUses    []string // bindings routed through LiveKit Inference (console needs cloud creds, C2/C7)
 	Tracing          bool
@@ -287,6 +324,8 @@ type livekitData struct {
 	SingleAgentMinimal bool        // one agent, never a handoff target: drop the chat_ctx ctor plumbing (F3)
 	NeedsLLM           bool        // the `llm` module import (chat_ctx param, fallback chains, or history helpers)
 	NeedsHTTPX         bool        // any webhook tool
+	NeedsRender        bool        // any template site: the _render helper + re import
+	NeedsRefusal       bool        // any tool whose injected variables can be unset (V4)
 	AuthKinds          authKindSet // webhook auth schemes in use: helpers + imports per scheme
 	HasVars            bool        // Userdata dataclass + session userdata
 	NeedsLastN         bool        // the _last_n history helper
@@ -351,6 +390,10 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldOutbound:              true, // SIP dial-out off job metadata
 	targetcap.FieldVoicemail:             true, // AMD machine-vm branches (N6)
 	targetcap.FieldTracingLangfuse:       true,
+	targetcap.FieldVariableConversation:  true, // generated update_variables @function_tool writing userdata
+	targetcap.FieldToolInject:            true, // hidden request values merged from userdata
+	targetcap.FieldWebhookPath:           true, // rendered, URL-encoded path on the base URL
+	targetcap.FieldTemplates:             true, // update_instructions/_render at session start
 }
 
 var livekitEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
@@ -404,7 +447,7 @@ func GenerateLiveKit(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedB
 	if err != nil {
 		return Artifact{}, err
 	}
-	report, err := livekitReport(data, files, bindings, sizing)
+	report, err := livekitReport(agent, data, files, bindings, sizing)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -650,10 +693,12 @@ type livekitReportJSON struct {
 	RequiredEnv []string              `json:"required_env"`
 	Bindings    []ir.ForwardedBinding `json:"bindings,omitempty"`
 	Sizing      []ir.Sizing           `json:"sizing,omitempty"`
+	Variables   []reportVariable      `json:"variables,omitempty"`
+	Secrets     []reportSecret        `json:"secrets,omitempty"`
 	Notes       []string              `json:"notes,omitempty"`
 }
 
-func livekitReport(data livekitData, files []File, bindings []ir.ForwardedBinding, sizing []ir.Sizing) ([]byte, error) {
+func livekitReport(agent *ir.Agent, data livekitData, files []File, bindings []ir.ForwardedBinding, sizing []ir.Sizing) ([]byte, error) {
 	generated := make([]string, 0, len(files)+1)
 	for _, file := range files {
 		generated = append(generated, file.Path)
@@ -671,7 +716,9 @@ func livekitReport(data livekitData, files []File, bindings []ir.ForwardedBindin
 	out, err := json.MarshalIndent(livekitReportJSON{
 		Target: data.Project, Provider: "livekit", Version: data.Version, EntryAgent: data.EntryClass,
 		Agents: agents, Tasks: tasks, Files: generated, RequiredEnv: data.RequiredEnv,
-		Bindings: bindings, Sizing: sizing, Notes: data.Notes,
+		Bindings: bindings, Sizing: sizing,
+		Variables: reportVariables(agent), Secrets: reportSecrets(agent),
+		Notes: data.Notes,
 	}, "", "  ")
 	if err != nil {
 		return nil, err

@@ -1,0 +1,40 @@
+# The model fills in one thing, the slot the caller picked. The customer id and
+# the service ride along from variables, so the model can neither invent a
+# customer nor re-guess a service the caller already named.
+#
+# requested_service has no default, so if the model tries to book before saving
+# it, the call is refused and the model is told to ask. That is the guard, and it
+# is worth trying on purpose.
+description: >-
+  Book the slot the caller picked. Pass only the slot_id returned by
+  check_availability; the customer and the service are already known.
+
+input:
+  type: object
+  properties:
+    slot_id:
+      type: string
+      description: ID returned by check_availability
+  required:
+    - slot_id
+
+inject:
+  customer_id: "{{customer_id}}"
+  service: "{{requested_service}}"
+
+output:
+  type: object
+  properties:
+    appointment_id:
+      type: string
+    status:
+      type: string
+  required:
+    - appointment_id
+    - status
+
+local:
+  handler: tools/book_appointment.py
+
+interruption: provider_default
+effect: returns_data

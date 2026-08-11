@@ -7,6 +7,10 @@ my-test-agent/
 # Compiled target projects (reproducible via `unmute compile`; goldens are the tracked form)
 examples/*/build/
 
+# Per-feature working spec (see CLAUDE.md "Specs"). Throwaway by design: a spec
+# worth keeping is moved to docs/spec/ and committed there instead.
+/SPEC.md
+
 __pycache__/
 .codex/worktrees/
 .firecrawl

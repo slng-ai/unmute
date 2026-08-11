@@ -44,7 +44,7 @@ func TestSmokeTelephonyComposeTopologies(t *testing.T) { // telephony V26
 			}
 			composeFile := filepath.Join(outDir, "compose.telephony.yaml")
 			project := composeProjectName(outDir, tc.name)
-			env := scrubArtifactEnvironment(os.Environ(), artifactFileContent(t, artifact, ".env.example"))
+			env := placeholderArtifactEnvironment(os.Environ(), artifactFileContent(t, artifact, ".env.example"))
 			env = setChildEnv(env, "UNMUTE_TELEPHONY_PORT", "0")
 			run := func(args ...string) ([]byte, error) {
 				cmd := exec.Command(docker, composeArgs(composeFile, project, args...)...)
@@ -56,7 +56,11 @@ func TestSmokeTelephonyComposeTopologies(t *testing.T) { // telephony V26
 			})
 
 			if output, err := run("up", "--build", "--detach", "--wait"); err != nil {
-				t.Fatalf("compose up: %v\n%s", err, output)
+				// `--wait` reports only "container X is unhealthy", which says
+				// nothing about why. Dump the service logs so a failure here is
+				// diagnosable from CI output alone.
+				logs, _ := run("logs", "--no-color")
+				t.Fatalf("compose up: %v\n%s\n--- service logs ---\n%s", err, output, logs)
 			}
 			assertComposeServices(t, run, tc.services)
 
@@ -146,11 +150,33 @@ func artifactFileContent(t *testing.T, artifact generate.Artifact, path string) 
 	return ""
 }
 
-func scrubArtifactEnvironment(env []string, example string) []string {
+// smokeEnvValue is the placeholder one generated environment name gets. The
+// values are deliberately fake and the public URL uses the reserved .invalid
+// TLD (RFC 2606), so nothing here is a credential and no host is reachable.
+func smokeEnvValue(name string) string {
+	if name == "UNMUTE_PUBLIC_URL" {
+		return "https://smoke.invalid" // must parse as an HTTPS origin
+	}
+	return "unmute-smoke-placeholder"
+}
+
+// placeholderArtifactEnvironment overrides every name the generated
+// `.env.example` lists, so an ambient credential in the developer's shell can
+// never make this test pass for the wrong reason.
+//
+// It sets placeholders rather than blanks. `/readyz` answers 503 while any
+// REQUIRED_ENV name is empty, so a blanked environment can never report the
+// topology ready: the healthcheck spends its thirty retries on 503s and every
+// subtest fails with an opaque "container is unhealthy". Presence is what the
+// readiness contract asks for, and presence is what this supplies.
+func placeholderArtifactEnvironment(env []string, example string) []string {
 	for _, line := range strings.Split(example, "\n") {
-		name, _, ok := strings.Cut(strings.TrimSpace(line), "=")
-		if ok && name != "" {
-			env = setChildEnv(env, name, "")
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if name, _, ok := strings.Cut(line, "="); ok && name != "" {
+			env = setChildEnv(env, name, smokeEnvValue(name))
 		}
 	}
 	return env

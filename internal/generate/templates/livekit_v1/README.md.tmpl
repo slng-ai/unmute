@@ -15,6 +15,29 @@ uv run agent.py console       # local terminal session
 uv run agent.py dev           # LiveKit development worker
 ```
 
+{{- if .CallStartVars}}
+
+## Input variables
+
+This agent expects values supplied when the call starts:
+
+{{range .CallStartVars}}- `{{.Name}}` ({{.Type}}){{if .Required}} — required{{end}}
+{{end}}
+Locally, pass them with `unmute dev` on the source package:
+
+```sh
+unmute dev <source-dir>{{range .CallStartVars}} --var {{.Name}}=...{{end}}
+```
+
+In production the same values ride the job dispatch metadata as one flat JSON
+object under `call_start`, for example:
+
+```sh
+lk dispatch create --room <room> --agent-name {{.AgentName}} \
+  --metadata '{"call_start": { {{range $i, $v := .CallStartVars}}{{if $i}}, {{end}}"{{$v.Name}}": "..."{{end}} }}'
+```
+{{- end}}
+
 ## Deploy
 
 Deployment is self-hosted: the worker connects out to a LiveKit Server you

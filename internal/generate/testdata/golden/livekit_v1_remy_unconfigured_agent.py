@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -117,6 +118,51 @@ When this step is complete, call `finish` with: date, headcount, occasion."""
 @dataclass
 class Userdata:
     caller_phone: str | None = None
+
+
+# --- job metadata ------------------------------------------------------------
+def _livekit_job_metadata(raw: str) -> dict:
+    if not raw:
+        return {}
+    try:
+        metadata = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("LiveKit job metadata must be valid JSON") from exc
+    if not isinstance(metadata, dict):
+        raise RuntimeError("LiveKit job metadata must be a JSON object")
+    return metadata
+
+
+# --- dispatched input variables ----------------------------------------------
+def _dispatched_call_start(metadata: dict | None = None) -> dict:
+    """Input variables arrive with the dispatch: the job metadata in production,
+    or UNMUTE_CALL_START for a local `unmute dev --var` session."""
+    values = dict((metadata or {}).get("call_start", {}))
+    raw = os.getenv("UNMUTE_CALL_START")
+    if raw:
+        try:
+            supplied = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("UNMUTE_CALL_START must be valid JSON") from exc
+        if not isinstance(supplied, dict):
+            raise RuntimeError("UNMUTE_CALL_START must be a JSON object")
+        # The dispatch wins: env is the local stand-in for it.
+        for name, value in supplied.items():
+            values.setdefault(name, value)
+    missing = []
+    if "caller_phone" in values:
+        value = values["caller_phone"]
+        if not (isinstance(value, str)):
+            raise RuntimeError("call_start.caller_phone must be string")
+    if missing:
+        raise RuntimeError("Missing call_start fields: " + ", ".join(missing))
+    return values
+
+
+def _hydrate_call_start(userdata, values: dict) -> None:
+    if "caller_phone" in values:
+        userdata.caller_phone = values["caller_phone"]
+    return None
 
 
 # --- agents ----------------------------------------------------------------
@@ -339,6 +385,9 @@ async def entrypoint(ctx: JobContext) -> None:
         )
         asyncio.create_task(_end_if_still_away())
 
+    # Input variables land before the session starts, so the greeting and the
+    # prompts already see them (I.dispatch).
+    _hydrate_call_start(session.userdata, _dispatched_call_start(_livekit_job_metadata(ctx.job.metadata)))
     await session.start(agent=Greeter(), room=ctx.room)
     await ctx.connect()
 
