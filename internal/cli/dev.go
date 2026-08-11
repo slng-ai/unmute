@@ -28,7 +28,7 @@ import (
 
 func newDevCmd() *cobra.Command {
 	var uiPort, botPort, targetName, publicURL, to string
-	var noOpen, verbose, console, telephony bool
+	var noOpen, verbose, console, telephony, noWebhook bool
 	var vars []string
 
 	cmd := &cobra.Command{
@@ -77,7 +77,7 @@ func newDevCmd() *cobra.Command {
 				return runDevConsole(cmd, root, selected)
 			}
 			if telephony {
-				return runDevTelephony(cmd, root, selected, publicURL, botPort, to, verbose)
+				return runDevTelephony(cmd, root, selected, publicURL, botPort, to, noWebhook, verbose)
 			}
 			// Default local mode: build and run the deployable container, served
 			// through one WebRTC web UI for both pipecat and livekit (SPEC V1).
@@ -95,13 +95,14 @@ func newDevCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&telephony, "telephony", false, "run the selected target's resolved telephony route (no browser UI)")
 	cmd.Flags().StringVar(&publicURL, "public-url", "", "exact public HTTPS origin for routes with carrier callbacks (requires --telephony)")
 	cmd.Flags().StringVar(&to, "to", "", "E.164 number to dial for an outbound telephony test (requires --telephony and an outbound-capable target)")
+	cmd.Flags().BoolVar(&noWebhook, "no-webhook", false, "do not touch the carrier number's webhook configuration (requires --telephony; point it at the printed public URL yourself)")
 	return cmd
 }
 
 // runDevTelephony is the fail-closed gate: loading and generation reject
 // every provisional or gated route before any tunnel, Docker, or carrier
 // call (SPEC V5). The post-gate orchestration lives in execDevTelephony.
-func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort, to string, verbose bool) error {
+func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort, to string, noWebhook, verbose bool) error {
 	agent, targets, err := loadPackage(root, []string{targetName})
 	if err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
@@ -123,7 +124,7 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort,
 	if artifact.Telephony == nil || len(artifact.Telephony.Services) == 0 {
 		return fmt.Errorf("dev %s: target %q has no executable telephony topology", root, resolved.Name)
 	}
-	opts := devTelephonyOptions{publicValue: publicValue, botPort: botPort, to: to, verbose: verbose}
+	opts := devTelephonyOptions{publicValue: publicValue, botPort: botPort, to: to, noWebhook: noWebhook, verbose: verbose}
 	if err := execDevTelephony(cmd, root, resolved.Name, artifact.Telephony, artifact.Files, opts); err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
 	}

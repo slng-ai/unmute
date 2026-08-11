@@ -93,7 +93,7 @@ func TestAutoConfigureCarrierWebhookRejectsUnimplementedCarrier(t *testing.T) {
 	plan.Route.Carrier = "telnyx"
 	plan.AutoWebhookEndpoint = "inbound"
 	public, _ := url.Parse("https://fake.trycloudflare.com")
-	err := autoConfigureCarrierWebhook(context.Background(), os.Stderr, "phone", plan, public, nil)
+	_, err := autoConfigureCarrierWebhook(context.Background(), os.Stderr, "phone", plan, public, nil)
 	if err == nil || !strings.Contains(err.Error(), "no implementation exists") {
 		t.Fatalf("unimplemented carrier error = %v", err)
 	}
@@ -121,12 +121,18 @@ func TestExecDevTelephonyConfiguresTwilioWebhookAfterReady(t *testing.T) {
 	if err := execDevTelephony(cmd, root, "phone", plan, composeFiles, devTelephonyOptions{botPort: "7861"}); err != nil {
 		t.Fatalf("execDevTelephony: %v\n%s", err, out.String())
 	}
-	if got := updates.Get("VoiceUrl"); got != "https://fake-zero.trycloudflare.com/telephony/inbound" {
-		t.Fatalf("VoiceUrl = %q", got)
+	// V14: the last write the carrier saw is the *restore*. The dev URL dies
+	// with this process, so leaving it on a real number aims a phone line at a
+	// dead tunnel (B7). The set itself is proven by the printed line below.
+	if got := updates.Get("VoiceUrl"); got != "https://old.example/hook" {
+		t.Fatalf("webhook was not restored on exit; final VoiceUrl = %q", got)
 	}
 	printed := out.String()
 	if !strings.Contains(printed, "Twilio voice webhook for +15550001111 set to https://fake-zero.trycloudflare.com/telephony/inbound (was: https://old.example/hook)") {
 		t.Fatalf("output missing webhook report:\n%s", printed)
+	}
+	if !strings.Contains(printed, "Twilio voice webhook for +15550001111 restored to https://old.example/hook") {
+		t.Fatalf("output missing webhook restore report:\n%s", printed)
 	}
 	raw, err := os.ReadFile(trace)
 	if err != nil {
@@ -138,5 +144,40 @@ func TestExecDevTelephonyConfiguresTwilioWebhookAfterReady(t *testing.T) {
 	// No secret value may appear in printed output (V6).
 	if strings.Contains(printed, "sekrit-auth-77") {
 		t.Fatalf("printed output leaks the auth token:\n%s", printed)
+	}
+}
+
+// V14: --no-webhook leaves the carrier's number configuration completely
+// alone. A shared or production number must survive a dev run untouched, so
+// there is no set and therefore nothing to restore.
+func TestExecDevTelephonyNoWebhookLeavesCarrierUntouched(t *testing.T) {
+	var updates url.Values
+	fakeTwilioAPI(t, "sekrit-auth-77", "https://old.example/hook", &updates)
+	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=sekrit-auth-77\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	fakeDocker(t, root)
+	cloudflared := root + "/cloudflared"
+	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restoreLook := tunnelLookPath
+	tunnelLookPath = func(string) (string, error) { return cloudflared, nil }
+	t.Cleanup(func() { tunnelLookPath = restoreLook })
+
+	plan := pipecatTwilioPlan()
+	plan.AutoWebhookEndpoint = "inbound"
+	cmd, out := telephonyTestCommand(t)
+	opts := devTelephonyOptions{botPort: "7861", noWebhook: true}
+	if err := execDevTelephony(cmd, root, "phone", plan, composeFiles, opts); err != nil {
+		t.Fatalf("execDevTelephony: %v\n%s", err, out.String())
+	}
+	if len(updates) != 0 {
+		t.Fatalf("--no-webhook must not write to the carrier, got %v", updates)
+	}
+	printed := out.String()
+	if !strings.Contains(printed, "--no-webhook, carrier number left untouched") {
+		t.Fatalf("output must say the number was left alone:\n%s", printed)
+	}
+	if strings.Contains(printed, "webhook for +15550001111 set to") {
+		t.Fatalf("--no-webhook must not report a set:\n%s", printed)
 	}
 }

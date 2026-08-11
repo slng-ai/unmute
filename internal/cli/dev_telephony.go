@@ -37,6 +37,7 @@ type devTelephonyOptions struct {
 	publicValue string
 	botPort     string
 	to          string // --to: E.164 to dial once the outbound-capable graph is healthy
+	noWebhook   bool   // --no-webhook: leave the carrier's number configuration alone
 	verbose     bool
 }
 
@@ -173,13 +174,29 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 			return env, nil
 		}
 	}
+	// Set by onReady, read by onStop: both close over it, so the restore
+	// survives into the shutdown path (V14).
+	var restoreWebhook func(context.Context) error
+	run.onStop = func(ctx context.Context) error {
+		if restoreWebhook == nil {
+			return nil
+		}
+		return restoreWebhook(ctx)
+	}
 	run.onReady = func(ctx context.Context) error {
 		// The webhook is reconfigured on every start: quick tunnel URLs
 		// rotate per run, and the previous value is printed for restore (V3).
-		if plan.AutoWebhookEndpoint != "" && public != nil {
-			if err := autoConfigureCarrierWebhook(ctx, cmd.OutOrStdout(), targetName, plan, public, childEnv); err != nil {
+		// --no-webhook opts out entirely, for a number this run must not touch.
+		if plan.AutoWebhookEndpoint != "" && public != nil && !opts.noWebhook {
+			restore, err := autoConfigureCarrierWebhook(ctx, cmd.OutOrStdout(), targetName, plan, public, childEnv)
+			if err != nil {
 				return err
 			}
+			restoreWebhook = restore
+		}
+		if opts.noWebhook && plan.AutoWebhookEndpoint != "" && public != nil {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: --no-webhook, carrier number left untouched; this run is reachable at %s\n",
+				targetName, strings.TrimSuffix(public.String(), "/"))
 		}
 		printDevCallLine(cmd.OutOrStdout(), plan, childEnv)
 		// Outbound-capable route: --to places one call now that the graph is
