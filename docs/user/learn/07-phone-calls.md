@@ -132,7 +132,8 @@ control APIs differ; selecting one never emits another carrier's SDK or
 credentials.
 
 LiveKit uses either `transport: sip` or the distinct `transport: connector`
-route. The connector is Twilio-only and cannot inherit SIP transfer behavior.
+route. The connector is Twilio-only, and its transfers are ours rather than
+LiveKit's SIP machinery.
 The SIP route uses this Connection vocabulary for Twilio, Telnyx, and Plivo:
 
 ```yaml
@@ -181,8 +182,8 @@ run it cleanly, with no warning. The Pipecat emitters contain inbound, outbound,
 hangup, and cold-transfer paths, and the Twilio one also contains warm transfer;
 voicemail stays gated. The LiveKit SIP emitter contains inbound, outbound,
 voicemail, hangup, cold-transfer, and warm-transfer paths. The LiveKit Twilio
-connector emitter contains inbound, outbound, and hangup paths; transfers and
-voicemail stay on the LiveKit SIP route.
+connector emitter contains inbound, outbound, hangup and both transfer shapes;
+voicemail detection stays on the LiveKit SIP route.
 
 ### Why the same carrier asks for different credentials
 
@@ -636,12 +637,16 @@ unmute dev ./agent --target livekit --telephony --to +15551234567
 ```
 
 Twilio reaches the bridge over HTTPS and WSS, so both inbound and outbound work
-fully on a laptop. The connector supports inbound, outbound, and hangup. Call
-transfers and voicemail detection stay on the LiveKit SIP route, which the
-connector cannot inherit: LiveKit's transfer calls act on a SIP participant, and
-on this route the caller is audio the bridge published into the room, with no
-trunk behind them. If you need transfers with only the Twilio account trio, the
-Pipecat carrier-WebSocket route does both shapes.
+fully on a laptop. The connector supports inbound, outbound, hangup, and both
+human-transfer shapes. Voicemail detection stays on the LiveKit SIP route.
+
+The transfers are the bridge's own work, because LiveKit's act on a SIP
+participant and this route has none: the caller is audio the bridge published
+into the room. The bridge does hold the Twilio call, so a cold transfer
+redirects it over the REST API and a warm one dials the person as a second
+streamed call that joins the same room. After a warm transfer the bridge stays
+on the call copying audio between the two legs, where the SIP route would have
+handed over and left.
 
 #### Create the LiveKit resources
 
@@ -711,21 +716,23 @@ runtime never accepts a model-supplied arbitrary transfer destination.
 Transfers are resolved per exact route, not per orchestrator, because each one
 is built out of what that route actually has.
 
-| Route | `cold:` | `warm:` |
-|---|---|---|
-| Pipecat `carrier-websocket` + Twilio | yes | yes |
-| Pipecat `carrier-websocket` + Telnyx or Plivo | yes | no |
-| LiveKit `sip` + Twilio, Telnyx, or Plivo | yes | yes |
-| LiveKit `connector` + Twilio | no | no |
+| Route | `cold:` | `warm:` | Runs on a laptop |
+|---|---|---|---|
+| Pipecat `carrier-websocket` + Twilio | yes | yes | yes |
+| Pipecat `carrier-websocket` + Telnyx or Plivo | yes | no | yes |
+| LiveKit `connector` + Twilio | yes | yes | yes |
+| LiveKit `sip` + Twilio, Telnyx, or Plivo | yes | yes | no |
 
 Two of those rows deserve a reason.
 
-**The LiveKit connector cannot transfer at all.** LiveKit's transfer calls act
-on a *SIP participant*: a cold transfer sends a SIP REFER through the trunk, and
-a warm one dials out on `LIVEKIT_SIP_OUTBOUND_TRUNK`. On the connector route the
-caller is not a SIP participant, they are audio our bridge published into the
-room, and there is no trunk to dial out on. So both calls have nothing to act
-on, and validation refuses instead of emitting code that fails on the phone.
+**The two LiveKit rows do transfers by completely different means.** On `sip`
+they are LiveKit's: a cold transfer is a SIP REFER through the trunk and a warm
+one is `WarmTransferTask` dialling out on `LIVEKIT_SIP_OUTBOUND_TRUNK`. Neither
+exists on `connector`, where the caller is audio our bridge published into a
+room, with no SIP participant and no trunk. What the bridge does have is the
+Twilio call, so its transfers are ours: cold redirects the caller's call over
+the REST API, and warm dials the person as a second streamed call that joins the
+same room. Same two shapes in your YAML, same experience on the phone.
 
 **Warm on Pipecat is Twilio-only.** The lowering is written against Twilio's
 Media Streams and its create-call API. Telnyx and Plivo need their own version,
@@ -739,6 +746,11 @@ dials the person as a second streamed call into the same process: the caller
 hears hold music on their own socket, the person is briefed on theirs, and then
 the bot copies audio between the two sockets and stays silent until someone
 hangs up. One session, two carrier calls.
+
+On **LiveKit + connector**, both shapes are the bridge's: cold redirects the
+caller's Twilio call, warm dials the person as a second streamed call into the
+same room. The agent listens to the person for the briefing, then the bridge
+copies audio between the two legs and the agent falls silent.
 
 On **LiveKit + SIP**, cold is a SIP REFER, so the carrier moves the caller's leg
 and the agent drops out. That needs Call Transfer (SIP REFER) enabled on the

@@ -5,15 +5,19 @@ Putting a caller through to a person, both ways, on both orchestrators, from one
 
 Two targets compile from the same controls:
 
-| Target | Twilio product | Credentials | Runs on a laptop |
+| Target | Route | Credentials | Runs on a laptop |
 |---|---|---|---|
-| `pipecat` | Programmable Voice + Media Streams | the account trio | yes, with `unmute dev --telephony` |
-| `livekit` | Elastic SIP Trunking | trunk address, username, password | no: needs a provisioned trunk and public SIP + RTP |
+| `pipecat` | Twilio Media Streams | the account trio | yes, with `unmute dev --telephony` |
+| `livekit` | Twilio Media Streams, bridged into a LiveKit room | the account trio | yes, with `unmute dev --telephony` |
 
-Start with `pipecat`. It is the one you can call today on the three credentials
-a Twilio account hands you. `livekit` is here so you can see the same two
-controls lower to a completely different machine, and it compiles offline with
-no credentials at all, because a Connection stores env var names, never values.
+Both run on the same three credentials a Twilio account hands you, and both do
+both shapes. Pick either with `--target`.
+
+The third way to run this package is LiveKit over a SIP trunk
+(`transport: sip`, `connections/twilio_sip.yaml`, kept in this folder). It does
+the same two shapes with LiveKit's own machinery, and it needs a provisioned
+Elastic SIP Trunk plus public SIP and RTP, so it is not laptop-testable. See
+[when to move to SIP](../../docs/user/learn/twilio-walkthrough.md#when-to-move-to-the-livekit-sip-route).
 
 The salon's front desk can do two things this package cares about:
 
@@ -66,11 +70,18 @@ the supervisor on theirs, then copies audio between the two. It stays on the
 call as a silent bridge, so one warm transfer is two carrier calls and one
 session that lasts as long as the conversation.
 
-**LiveKit** builds it out of rooms. `WarmTransferTask` dials the supervisor on
-the outbound trunk, briefs them away from the caller, moves them into the
-caller's room, and shuts the agent's session down. The two of them carry on
-alone, and the generated code passes `delete_room_on_close=False` so the room
-outlives the agent that made it.
+**LiveKit on the connector** builds it out of rooms, but the carrier moves are
+the same as Pipecat's, because it is the same Twilio product. The bridge dials
+the person as a second streamed call whose leg joins the caller's room; the
+agent points its ears at them with `room_io.set_participant`, briefs them, and
+then the bridge copies audio between the two legs. Like Pipecat, the bridge
+stays on the call.
+
+**LiveKit on a SIP trunk** is the one that differs. `WarmTransferTask` dials the
+supervisor on the outbound trunk, briefs them away from the caller, moves them
+into the caller's room, and shuts the agent's session down. The two of them
+carry on alone, and the generated code passes `delete_room_on_close=False` so
+the room outlives the agent that made it.
 
 The caller cannot tell the difference. Your logs and your capacity planning can.
 
@@ -81,8 +92,9 @@ Warm on Pipecat is emitted for Twilio only:
 pipecat: telephony warm_transfer: telephony route (pipecat, carrier-websocket, telnyx) does not support warm_transfer
 ```
 
-and LiveKit transfers need `transport: sip`, never the Twilio `connector` route,
-whose caller is not a SIP participant and so has nothing to REFER.
+and on LiveKit the two transports get there differently: `sip` uses LiveKit's
+SIP machinery, `connector` uses the bridge's own, and both are gated per exact
+route.
 
 ## Set it up
 
@@ -118,10 +130,15 @@ Both transfers use that same number: the cold one redirects the caller's call,
 the warm one dials the supervisor from it. No SIP trunk, no public SIP or RTP
 ports, nothing else to provision.
 
-### For the livekit target
+The `livekit` target uses the same three values: it is the same Twilio product,
+reached through our own Media Streams bridge instead of Pipecat's transport.
 
-A different Twilio product, so different values. In the console under **Elastic
-SIP Trunking > Manage > Trunks**, create a trunk, then:
+### For the SIP variant
+
+Only if you switch the livekit target to `transport: sip` and
+`connection: twilio_sip`. A different Twilio product, so different values. In
+the console under **Elastic SIP Trunking > Manage > Trunks**, create a trunk,
+then:
 
 1. Enable **Call Transfer (SIP REFER)** and tick **Enable PSTN Transfer**.
    Without it the carrier rejects the cold transfer.
@@ -139,7 +156,7 @@ SUPERVISOR_PHONE_NUMBER=+34...
 
 `LIVEKIT_SIP_OUTBOUND_TRUNK` is what the warm transfer dials out on. Inbound
 calls also need LiveKit SIP deployed with public SIP signalling and RTP, which
-is why this target does not run on a laptop even though it compiles on one.
+is why that variant does not run on a laptop even though it compiles on one.
 
 ## Run it
 
@@ -155,6 +172,10 @@ That writes `build/pipecat/` and `build/livekit/`, both from the same controls.
 
 ```sh
 bin/unmute dev examples/human-transfer --target pipecat --telephony
+```
+
+```sh
+bin/unmute dev examples/human-transfer --target livekit --telephony
 ```
 
 `unmute dev --telephony` opens the tunnel and points the number's voice webhook

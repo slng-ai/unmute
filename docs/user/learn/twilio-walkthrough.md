@@ -183,8 +183,8 @@ the Pipecat route.
 
 ## Part 3: transfer the caller to a person
 
-Both transfer shapes work on the Part 1 route with the same three credentials,
-so you can try them without touching SIP.
+Both transfer shapes work on the Part 1 and Part 2 routes with the same three
+credentials, so you can try them without touching SIP.
 [`examples/human-transfer`](https://github.com/slng-ai/unmute_cli/tree/main/examples/human-transfer)
 is a package that does both: a cold transfer that hands the caller off and drops
 out, and a warm one that holds the caller on music, rings a second number,
@@ -214,17 +214,29 @@ the first run rather than a proven path. If you do try it, keep listening on the
 caller's phone during the briefing: hold music and nothing else is the property
 the design exists to guarantee.
 
-## Production: the LiveKit SIP route
+## When to move to the LiveKit SIP route
 
-For production, LiveKit's stable multi-carrier path is a self-hosted SIP bridge
-(`transport: sip`) fed by a carrier Elastic SIP Trunk. It is not laptop-testable
-for inbound, because Twilio talks SIP and RTP straight to your machine and an
-HTTPS tunnel cannot carry that. Set it up when you deploy on a host with public
-SIP and RTP reachability. The SIP route also supports call transfers and
-voicemail detection, which the connector does not: LiveKit transfers act on a
-SIP participant, and the connector's caller is audio bridged into a room with no
-trunk behind it. Transfers alone are not a reason to move to SIP, since the
-Pipecat route in Part 1 does both shapes on the account credentials. See
+The SIP route (`transport: sip`) is LiveKit fed by a carrier Elastic SIP Trunk.
+It is not laptop-testable for inbound, because Twilio talks SIP and RTP straight
+to your machine and an HTTPS tunnel cannot carry that, so set it up when you
+deploy on a host with public SIP and RTP reachability.
+
+It is worth being precise about why you would move, because "SIP is the
+production route" is not true as stated: Media Streams is the same Twilio
+product Part 1 and Part 2 run on, and all three routes here do both transfer
+shapes. What actually differs:
+
+| | Media Streams routes | LiveKit SIP |
+|---|---|---|
+| Telephony layer | ours, so each new capability is our work | LiveKit's, maintained upstream |
+| Media transport | TCP: a lost packet stalls the ones behind it | RTP over UDP: a lost packet is a click |
+| Cost per minute | Programmable Voice, roughly double | SIP trunking |
+| Warm transfer cost | two Programmable Voice legs for the whole conversation | a REFER hands the call off entirely |
+| Carriers | Twilio only today | any SIP trunk provider or PBX |
+| Scale-out | one bridge process, session affinity | built to run replicated |
+
+Move to SIP for scale, for multi-carrier, or when you want LiveKit-maintained
+machinery. Stay on the connector otherwise. See
 [07. Phone calls](07-phone-calls.md#configure-self-hosted-livekit-sip) and
 [Configure LiveKit in YAML](../targets/livekit.md) for the trunk fields and
 the environment it needs.

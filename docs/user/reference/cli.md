@@ -124,8 +124,8 @@ call into a local, self-hosted LiveKit room, so it needs no LiveKit Cloud.
 `dev --telephony` starts a managed cloudflared tunnel, sets the Twilio voice
 webhook automatically, and places an outbound call with `--to`. Twilio only
 reaches the bridge over HTTPS and WSS, so both inbound and outbound work fully
-on a laptop. It supports inbound, outbound, and hangup; call transfers and
-voicemail detection stay on the LiveKit SIP route.
+on a laptop. It supports inbound, outbound, hangup and both transfer shapes;
+voicemail detection stays on the LiveKit SIP route.
 
 Telephony mode runs the generated `compose.telephony.yaml`; there is no
 host-process fallback or infrastructure flag. Pipecat carrier and LiveKit SIP

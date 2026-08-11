@@ -664,6 +664,16 @@ It exists because telephony control crosses independent HTTP requests,
 WebSockets, callbacks, call legs, and admission decisions even when the audio
 session itself stays on one process.
 
+The **LiveKit Twilio connector** route has no Redis at all and does not gain
+one for transfers. Its bridge keeps the pending-call map, the pending-transfer
+map, and both call legs in one process, and the agent reaches the bridge over
+LiveKit RPC rather than through a store. That makes session affinity a v1
+deployment constraint rather than a code path: the second streamed call of a
+warm transfer must land on the process holding the caller's WebSocket, which
+the generated single-container compose guarantees. Running several bridge
+replicas behind one number needs a shared store and sticky token routing first,
+the same open item the Pipecat carrier routes carry.
+
 Generated Pipecat code uses Redis only for these bounded records:
 
 - Pending-call correlation and the minimum normalized call-start context.
