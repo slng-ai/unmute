@@ -30,10 +30,15 @@ var livekitV1Templates embed.FS
 
 // beta.workflows (TaskGroup), AgentTask, and inference (LLM/TurnDetector) are all
 // present from livekit-agents 1.5.x. Range: >=1.5, <2.0 (verified against the
-// reference venv's 1.5.x, driver-livekit C7).
+// reference venv's 1.5.x, driver-livekit C7). The warm-transfer prebuilt is
+// beta and its surface moved inside the 1.x line (WorkflowInstructions became
+// InstructionParts / extra_instructions), so warm packages pin the minor
+// series the import was verified against: 1.6.4, checked in the reference
+// checkout on 2026-08-11 (SPEC V10).
 const (
-	livekitVersionMajor    = 1
-	livekitVersionMinMinor = 5
+	livekitVersionMajor      = 1
+	livekitVersionMinMinor   = 5
+	livekitWarmVerifiedMinor = 6
 )
 
 var livekitVersionPattern = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
@@ -327,29 +332,28 @@ type livekitData struct {
 	InferenceUses    []string // bindings routed through LiveKit Inference (console needs cloud creds, C2/C7)
 	Tracing          bool
 
-	NeedsTasks           bool        // AgentTask import
-	NeedsTaskGroups      bool        // beta.workflows TaskGroup import
-	NeedsFunctionTools   bool        // RunContext + function_tool imports
-	TypingImports        string      // `from typing import ...` names (Annotated/Literal), "" if none (V2)
-	NeedsField           bool        // `from pydantic import Field` — any tool arg carries a description (V2)
-	SingleAgentMinimal   bool        // one agent, never a handoff target: drop the chat_ctx ctor plumbing (F3)
-	NeedsLLM             bool        // the `llm` module import (chat_ctx param, fallback chains, or history helpers)
-	NeedsHTTPX           bool        // any webhook tool
-	NeedsRender          bool        // any template site: the _render helper + re import
-	NeedsRefusal         bool        // any tool whose injected variables can be unset (V4)
-	AuthKinds            authKindSet // webhook auth schemes in use: helpers + imports per scheme
-	HasVars              bool        // Userdata dataclass + session userdata
-	NeedsLastN           bool        // the _last_n history helper
-	NeedsSummarize       bool        // the _summarize history helper
-	NeedsAsyncio         bool        // inactivity end / max_duration timers
-	NeedsInspect         bool        // local tool wrappers (isawaitable)
-	NeedsMCP             bool        // mcp import (MCPServerHTTP)
-	NeedsEndCallTool     bool        // beta.tools EndCallTool import (prebuilt end_call)
-	HasColdTransfer      bool        // get_job_context import
-	HasWarmTransfer      bool        // WarmTransferTask import + trunk env + room_options (B14)
-	HasWarmBriefing      bool        // WorkflowInstructions import (a warm.briefing is set)
-	Outbound             *livekitOutbound
-	Telephony            *livekitTelephony
+	NeedsTasks         bool        // AgentTask import
+	NeedsTaskGroups    bool        // beta.workflows TaskGroup import
+	NeedsFunctionTools bool        // RunContext + function_tool imports
+	TypingImports      string      // `from typing import ...` names (Annotated/Literal), "" if none (V2)
+	NeedsField         bool        // `from pydantic import Field` — any tool arg carries a description (V2)
+	SingleAgentMinimal bool        // one agent, never a handoff target: drop the chat_ctx ctor plumbing (F3)
+	NeedsLLM           bool        // the `llm` module import (chat_ctx param, fallback chains, or history helpers)
+	NeedsHTTPX         bool        // any webhook tool
+	NeedsRender        bool        // any template site: the _render helper + re import
+	NeedsRefusal       bool        // any tool whose injected variables can be unset (V4)
+	AuthKinds          authKindSet // webhook auth schemes in use: helpers + imports per scheme
+	HasVars            bool        // Userdata dataclass + session userdata
+	NeedsLastN         bool        // the _last_n history helper
+	NeedsSummarize     bool        // the _summarize history helper
+	NeedsAsyncio       bool        // inactivity end / max_duration timers
+	NeedsInspect       bool        // local tool wrappers (isawaitable)
+	NeedsMCP           bool        // mcp import (MCPServerHTTP)
+	NeedsEndCallTool   bool        // beta.tools EndCallTool import (prebuilt end_call)
+	HasColdTransfer    bool        // get_job_context import
+	HasWarmTransfer    bool        // WarmTransferTask import + trunk env + room_options (B14)
+	Outbound           *livekitOutbound
+	Telephony          *livekitTelephony
 
 	// Conversation shaping (V16).
 	ThinkingAudio          bool // subtle → BackgroundAudioPlayer thinking sound

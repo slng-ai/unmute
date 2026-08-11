@@ -299,7 +299,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		for _, ht := range a.HumanTransfers {
 			data.HasColdTransfer = data.HasColdTransfer || !ht.Warm
 			data.HasWarmTransfer = data.HasWarmTransfer || ht.Warm
-			data.HasWarmBriefing = data.HasWarmBriefing || (ht.Warm && ht.Briefing != "")
 		}
 	}
 	// Snapshot the provider creds before telephony env is added: the web dev
@@ -1246,10 +1245,18 @@ func livekitDeps(data livekitData) []string {
 			packages[pinned(svc.Entry.Install.Package, svc.Entry.Install.Constraint)] = true
 		}
 	}
-	base := fmt.Sprintf("livekit-agents>=%d.%d", livekitVersionMajor, livekitVersionMinMinor)
+	// A warm transfer imports the beta WarmTransferTask, and a beta API is
+	// allowed to move between minor releases (it already renamed its
+	// instructions type once). So a warm package pins the minor series the
+	// import was verified against instead of floating to <2.0 (SPEC V10, C3).
+	constraint := fmt.Sprintf(">=%d.%d", livekitVersionMajor, livekitVersionMinMinor)
+	if data.HasWarmTransfer {
+		constraint = fmt.Sprintf(">=%d.%d,<%d.%d", livekitVersionMajor, livekitWarmVerifiedMinor,
+			livekitVersionMajor, livekitWarmVerifiedMinor+1)
+	}
+	base := "livekit-agents" + constraint
 	if len(extras) > 0 {
-		base = fmt.Sprintf("livekit-agents[%s]>=%d.%d",
-			strings.Join(sortedKeys(extras), ","), livekitVersionMajor, livekitVersionMinMinor)
+		base = fmt.Sprintf("livekit-agents[%s]%s", strings.Join(sortedKeys(extras), ","), constraint)
 	}
 	deps := append([]string{
 		base,

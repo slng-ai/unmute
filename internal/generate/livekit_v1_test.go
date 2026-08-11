@@ -1168,6 +1168,8 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 		"async def to_human(self, ctx: RunContext) -> str:",
 		"job_ctx = get_job_context()",
 		"rtc.ParticipantKind.PARTICIPANT_KIND_SIP",
+		// The tool speaks its own announcement (SPEC V4/B4).
+		`"Putting you through now, one moment.", allow_interruptions=False`,
 		`transfer_to="+14155550123",`,
 		"await job_ctx.api.sip.transfer_sip_participant(request)",
 	} {
@@ -1187,11 +1189,16 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	}
 	botpy = artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		"from livekit.agents.beta.workflows import WarmTransferTask, WorkflowInstructions",
+		"from livekit.agents.beta.workflows import WarmTransferTask",
 		`sip_call_to="+14155550123"`,
 		"chat_ctx=self.chat_ctx,",
-		`instructions=WorkflowInstructions(extra="Say who is calling and why."),`,
+		// extra_instructions is the 1.6-series briefing surface, verified in
+		// the reference checkout (SPEC C3, V10). WorkflowInstructions never
+		// existed there; emitting it was an ImportError at boot (T4).
+		`extra_instructions="Say who is calling and why.",`,
 		"ringing_timeout=30,",
+		// The tool speaks before the hold starts (SPEC V4/B4).
+		`"One moment while I bring a colleague on the line.", allow_interruptions=False`,
 		"except ToolError as error:",
 		"room_options=room_io.RoomOptions(delete_room_on_close=False)",
 		"result.human_agent_identity",
@@ -1199,6 +1206,14 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("warm agent.py missing %q", want)
 		}
+	}
+	if strings.Contains(botpy, "WorkflowInstructions") {
+		t.Error("agent.py imports WorkflowInstructions, which does not exist in the pinned livekit-agents (V10)")
+	}
+	// V10: a warm package pins the verified beta minor series, not <2.0.
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !strings.Contains(pyproject, ">=1.6,<1.7") {
+		t.Errorf("warm pyproject.toml must pin the verified livekit-agents minor series (V10):\n%s", pyproject)
 	}
 	envExample := artifactFile(t, artifact, ".env.example")
 	if !strings.Contains(envExample, "LIVEKIT_SIP_OUTBOUND_TRUNK") {

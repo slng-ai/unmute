@@ -137,7 +137,7 @@ import os
 {{- end}}
 )
 {{- if or .NeedsTaskGroups .HasWarmTransfer}}
-from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskGroup{{if .HasWarmTransfer}}, WarmTransferTask{{if .HasWarmBriefing}}, WorkflowInstructions{{end}}{{end}}{{else}}WarmTransferTask{{if .HasWarmBriefing}}, WorkflowInstructions{{end}}{{end}}
+from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskGroup{{if .HasWarmTransfer}}, WarmTransferTask{{end}}{{else}}WarmTransferTask{{end}}
 {{- end}}
 {{- if .HasWarmTransfer}}
 from livekit.agents.llm import ToolError
@@ -492,12 +492,18 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         # briefs them from the chat context, then merges the calls. Beta on
         # Python. Every unavailable case (no answer, decline, voicemail, failed
         # dial) arrives as one ToolError, with the caller already restored.
+        #
+        # The tool speaks its own line before the hold (V4/B4): the caller
+        # hears the handoff start instead of sudden hold music.
+        await ctx.session.say(
+            "One moment while I bring a colleague on the line.", allow_interruptions=False
+        )
         try:
             result = await WarmTransferTask(
                 sip_call_to={{.ToExpr}},
                 chat_ctx=self.chat_ctx,
 {{- if .Briefing}}
-                instructions=WorkflowInstructions(extra={{pyq .Briefing}}),
+                extra_instructions={{pyq .Briefing}},
 {{- end}}
 {{- if .RingTimeout}}
                 ringing_timeout={{.RingTimeout}},
@@ -538,6 +544,12 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         )
         if caller is None:
             return "There is no phone caller to transfer."
+        # The tool speaks the announcement itself (V4/B4): leaving it to the
+        # prompt lets a model say "putting you through" and never call this,
+        # which a caller cannot tell apart from a transfer that failed.
+        await ctx.session.say(
+            "Putting you through now, one moment.", allow_interruptions=False
+        )
         request = api.TransferSIPParticipantRequest(
             room_name=job_ctx.room.name,
             participant_identity=caller.identity,
