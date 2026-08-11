@@ -1,9 +1,15 @@
-# One target: Pipecat over Twilio Media Streams, the same route (and the same
-# three credentials) as examples/telephony-hello.
+# Both shapes, both orchestrators, one agent.yaml. The two targets differ only
+# in which Twilio product they use, which is the whole reason their credentials
+# differ (docs/user/learn/07-phone-calls.md#why-the-same-carrier-asks-for-different-credentials).
 #
-# Both transfer shapes ride the carrier WebSocket, so a laptop plus
-# `unmute dev --telephony` is the whole setup: no SIP trunk, no public SIP or
-# RTP ports, nothing to provision in the console beyond a voice-capable number.
+#   pipecat: Programmable Voice + Media Streams. Three account credentials, and
+#            `unmute dev --telephony` is the whole setup. Start here.
+#   livekit: Elastic SIP Trunking. Needs a provisioned trunk and a LiveKit SIP
+#            deployment with public SIP and RTP, so it compiles on a laptop but
+#            does not run on one.
+#
+# Both compile offline with no credentials at all: a Connection stores env var
+# names, never values.
 targets:
   pipecat:
     provider: pipecat
@@ -21,4 +27,22 @@ targets:
       # One that differs per environment, or that you would rather not commit:
       # name the variable instead. It lands in the generated .env.example and in
       # the required-env list, and is read at call time.
+      supervisor_line: SUPERVISOR_PHONE_NUMBER
+
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    transport: sip
+    carrier: twilio
+    connection: twilio_sip
+    models:
+      # LiveKit runs its own turn model rather than local Silero.
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+    # The same two names the agent uses, resolved per target: a destination is
+    # a property of where the call is placed from, not of the agent.
+    destinations:
+      billing_line: "+34910000001"
       supervisor_line: SUPERVISOR_PHONE_NUMBER
