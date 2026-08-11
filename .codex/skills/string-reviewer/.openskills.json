@@ -1,7 +1,0 @@
-{
-  "source": "google-gemini/gemini-cli",
-  "sourceType": "git",
-  "repoUrl": "https://github.com/google-gemini/gemini-cli",
-  "subpath": ".gemini/skills/string-reviewer",
-  "installedAt": "2026-07-16T15:13:51.284Z"
-}

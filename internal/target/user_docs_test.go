@@ -99,7 +99,6 @@ func TestTelephonyDocsContract(t *testing.T) {
 			"connections/primary_phone.yaml",
 			"any number of named targets and Connections",
 		},
-		"CONTEXT.md": {"**Telephony route**", "**Coordination mode**"},
 		"docs/TELEPHONY.md": {
 			"## Route matrix and package cardinality",
 			"gated routes with no adapter",

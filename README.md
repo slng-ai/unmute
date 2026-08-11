@@ -16,8 +16,8 @@ and Deepgram fail with `driver is not implemented` until theirs land.
 Where things live: user docs in [docs/user/](docs/user/README.md), the locked
 schema in [SCHEMA.md](docs/SCHEMA.md), driver specs in [docs/spec/](docs/spec/),
 the provider catalogue design and findings in
-[PROVIDER_CATALOG.md](docs/PROVIDER_CATALOG.md), vocabulary in
-[CONTEXT.md](CONTEXT.md), engineering rules in [CLAUDE.md](CLAUDE.md).
+[PROVIDER_CATALOG.md](docs/PROVIDER_CATALOG.md), a get-around guide in
+[REPO_MAP.md](docs/REPO_MAP.md), engineering rules in [CLAUDE.md](CLAUDE.md).
 
 ## Build
 

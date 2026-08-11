@@ -1,6 +1,6 @@
 # Unmute CLI
 
-Go CLI that compiles a declarative voice-agent spec into orchestrator-native artifacts. Full design in `docs/ARCHITECTURE.md`; engineering detail in `docs/DEVELOPMENT.md`; glossary in `CONTEXT.md`; locked decisions in `docs/adr/`. **When code and a doc disagree, the doc wins — fix the code or open an issue.**
+Go CLI that compiles a declarative voice-agent spec into orchestrator-native artifacts. Full design in `docs/ARCHITECTURE.md`; the locked authoring contract in `docs/SCHEMA.md`; per-feature specs in `docs/spec/`; a get-around guide in `docs/REPO_MAP.md`. **When code and a doc disagree, the doc wins — fix the code or open an issue.**
 
 ## Voice contracts
 While writing documents or speaking with the user, always use a simple language and simple wording. 
