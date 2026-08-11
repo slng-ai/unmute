@@ -203,3 +203,52 @@ func TestMCPResolvesSDKLanguageFromTable(t *testing.T) {
 		t.Fatalf("Python MCP capability = %#v", got)
 	}
 }
+
+// TestV1_TransfersCompileOnlyOnNativeRoutes is SPEC V1: a transfer control
+// compiles only where the platform documents the primitive. LiveKit SIP
+// trunks grant both shapes; every other telephony route refuses both, and the
+// refusal names the routes that work (SPEC C1). On the non-telephony side,
+// the Pipecat control rows allow cold on the Daily transport alone and deny
+// warm everywhere.
+func TestV1_TransfersCompileOnlyOnNativeRoutes(t *testing.T) {
+	cold, warm := TelephonyFeature(ColdTransfer), TelephonyFeature(WarmTransfer)
+	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
+		sip := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: carrier}
+		for _, feature := range []TelephonyFeature{cold, warm} {
+			if got := ResolveTelephonyFeature(sip, feature); got.Tag != Provisional {
+				t.Errorf("livekit sip %s %s = %#v, want provisional", carrier, feature, got)
+			}
+		}
+	}
+	noPrimitive := []TelephonyKey{
+		{Provider: LiveKit, Transport: "connector", Carrier: "twilio"},
+		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"},
+		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"},
+		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "plivo"},
+	}
+	for _, key := range noPrimitive {
+		coldGot := ResolveTelephonyFeature(key, cold)
+		if coldGot.Tag != Gated || !strings.Contains(coldGot.Note, "(livekit, sip)") || !strings.Contains(coldGot.Note, "daily-sip") {
+			t.Errorf("%v cold = %#v, want gated with the supported routes named", key, coldGot)
+		}
+		warmGot := ResolveTelephonyFeature(key, warm)
+		if warmGot.Tag != Gated || !strings.Contains(warmGot.Note, "(livekit, sip) trunks only") {
+			t.Errorf("%v warm = %#v, want gated with the supported routes named", key, warmGot)
+		}
+	}
+	table := Default()
+	if got := table.Control(ColdTransfer, Pipecat, "daily-sip", ""); got.Tag != Core {
+		t.Errorf("pipecat cold on daily-sip = %#v, want core", got)
+	}
+	if got := table.Control(ColdTransfer, Pipecat, "carrier-websocket", "twilio"); got.Tag != Gated {
+		t.Errorf("pipecat cold off daily-sip = %#v, want gated", got)
+	}
+	for _, transport := range []string{"daily-sip", "carrier-websocket", ""} {
+		if got := table.Control(WarmTransfer, Pipecat, transport, ""); got.Tag != Gated || !strings.Contains(got.Note, "(livekit, sip)") {
+			t.Errorf("pipecat warm on %q = %#v, want gated naming (livekit, sip)", transport, got)
+		}
+	}
+	if got := table.Capability(FieldTransferBriefing, Pipecat); got.Tag != Gated {
+		t.Errorf("pipecat briefing field = %#v, want gated (briefing rides the warm row)", got)
+	}
+}

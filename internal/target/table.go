@@ -272,6 +272,7 @@ func Default() Table {
 			// to resolve. It rides the warm_transfer control row, which already
 			// says which routes can carry a private consultation leg at all.
 			FieldTransferBriefing: field(
+				deny(Pipecat, "Pipecat has no warm transfer, so no briefing lowering (SPEC C4)"),
 				deny(Deepgram, "the Deepgram bridge has no warm-transfer briefing lowering"),
 			),
 			FieldGreetingUserFirst: field(
@@ -402,7 +403,7 @@ func Default() Table {
 			),
 			WarmTransfer: controls(
 				control(),
-				controlRoute("carrier-websocket", "twilio", "Pipecat warm transfer is the two-socket bridge, which needs one media socket per human: carrier WebSocket on Twilio (human-transfer.md C9)"),
+				controlDeny("Pipecat has no native warm transfer; warm compiles on (livekit, sip) only (SPEC C1, C4)"),
 				controlNamedCarrier("twilio", "Vapi warm transfer requires carrier Twilio"),
 				controlNamedCarrier("twilio", "Deepgram transfer requires carrier Twilio in the generated bridge"),
 			),
@@ -449,12 +450,8 @@ func controlTransport(transport, note string) ControlCapability {
 	return ControlCapability{Capability: Capability{Tag: Core}, Transport: transport, ConditionNote: note}
 }
 
-// controlRoute conditions a control on both halves of a route, for a lowering
-// whose shape depends on the transport as much as on the carrier.
-func controlRoute(transport, carrier, note string) ControlCapability {
-	return ControlCapability{
-		Capability: Capability{Tag: Core}, Transport: transport, Carrier: carrier, ConditionNote: note,
-	}
+func controlDeny(note string) ControlCapability {
+	return ControlCapability{Capability: Capability{Tag: Gated, Note: note}}
 }
 
 func controlNamedCarrier(carrier, note string) ControlCapability {

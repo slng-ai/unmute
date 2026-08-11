@@ -271,10 +271,16 @@ func ResolveTelephonyFeature(key TelephonyKey, feature TelephonyFeature) Telepho
 	}
 	evidence, ok := route.Features[feature]
 	if !ok {
-		return TelephonyEvidence{
-			Feature: feature, Tag: Gated,
-			Note: fmt.Sprintf("telephony route (%s, %s, %s) does not support %s", key.Provider, key.Transport, key.Carrier, feature),
+		note := fmt.Sprintf("telephony route (%s, %s, %s) does not support %s", key.Provider, key.Transport, key.Carrier, feature)
+		// Transfers ride platform primitives, so the refusal names where they
+		// exist (SPEC C1, V1): the author learns the fix, not just the no.
+		switch feature {
+		case TelephonyFeature(ColdTransfer):
+			note += "; cold transfer compiles on (livekit, sip) trunks and on Pipecat's Daily route (transport daily-sip)"
+		case TelephonyFeature(WarmTransfer):
+			note += "; warm transfer compiles on (livekit, sip) trunks only"
 		}
+		return TelephonyEvidence{Feature: feature, Tag: Gated, Note: note}
 	}
 	return evidence
 }

@@ -312,7 +312,6 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTaskGroupReturn:      true, // snapshot/restore + results injection
 	targetcap.FieldContextIsolated:      true, // per-node ContextStrategy RESET
 	targetcap.FieldTransferRequires:     true, // guard before activate_worker
-	targetcap.FieldTransferBriefing:     true, // warm briefing instruction on the person's leg
 	targetcap.FieldGreetingUserFirst:    true,
 	targetcap.FieldGreetingModelWritten: true,
 	targetcap.FieldGreetingAbsent:       true,

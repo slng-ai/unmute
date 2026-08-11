@@ -1017,3 +1017,49 @@ func TestV12_WarmTransferRequiresOutboundDirection(t *testing.T) {
 		}
 	}
 }
+
+// SPEC V1/C1: a transfer compiles only where the platform ships the
+// primitive, and the refusal names the routes that do. Warm on any Pipecat
+// target is refused by the control row; warm on a Pipecat carrier telephony
+// route is refused by the route table, with the supported routes named.
+func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
+	// Non-telephony Pipecat target (safe_core's daily-sip): the control row.
+	pkg := loadSafeCore(t)
+	human := pkg.Agent.Controls["to_human"]
+	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
+	pkg.Agent.Controls["to_human"] = human
+	pipecatTarget := pkg.Targets["pipecat"]
+	pkg.Targets = map[string]packagespec.Target{"pipecat": pipecatTarget}
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, _ := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
+	joined := strings.Join(report.PerTarget[0].Errors, "\n")
+	if !strings.Contains(joined, "no native warm transfer") || !strings.Contains(joined, "(livekit, sip)") {
+		t.Fatalf("warm on pipecat daily must fail naming (livekit, sip), got:\n%s", joined)
+	}
+
+	// Telephony route (carrier-websocket): the route table names the fix too.
+	pkg = loadSafeCore(t)
+	enableTelephony(pkg)
+	outbound := true
+	phone := pkg.Agent.Channels["phone"]
+	phone.Outbound = &outbound
+	pkg.Agent.Channels["phone"] = phone
+	human = pkg.Agent.Controls["to_human"]
+	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
+	pkg.Agent.Controls["to_human"] = human
+	carrier := pkg.Targets["pipecat"]
+	carrier.Transport, carrier.Carrier, carrier.Connection = "carrier-websocket", "twilio", "primary_phone"
+	pkg.Targets = map[string]packagespec.Target{"pipecat": carrier}
+	agent, err = Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, _ = Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
+	joined = strings.Join(report.PerTarget[0].Errors, "\n")
+	if !strings.Contains(joined, "warm transfer compiles on (livekit, sip) trunks only") {
+		t.Fatalf("warm on the carrier route must name the supported routes, got:\n%s", joined)
+	}
+}
