@@ -332,3 +332,40 @@ func TestV16_ExampleDestinationsAreEnvironmentNames(t *testing.T) {
 		}
 	}
 }
+
+// TestV11_TransfersDocListsEveryRequiredEnv is SPEC V11/C9: docs/TRANSFERS.md
+// is the one place that answers "which secrets do I need", so its tables must
+// name every env var the transfer examples' generated .env.example requires.
+// A new required name that is not documented fails here, not on a live rig.
+func TestV11_TransfersDocListsEveryRequiredEnv(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "TRANSFERS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for example, provider := range map[string]ir.Provider{
+		"human-transfer":       ir.ProviderLiveKit,
+		"human-transfer-daily": ir.ProviderPipecat,
+	} {
+		pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent, err := ir.Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
+		if err != nil {
+			t.Fatalf("%s: %v", example, err)
+		}
+		for _, line := range strings.Split(artifactFile(t, artifact, ".env.example"), "\n") {
+			name, _, found := strings.Cut(line, "=")
+			if !found || name == "" || strings.HasPrefix(name, "#") {
+				continue
+			}
+			if !strings.Contains(string(doc), name) {
+				t.Errorf("%s requires %s, which docs/TRANSFERS.md does not document (V11)", example, name)
+			}
+		}
+	}
+}
