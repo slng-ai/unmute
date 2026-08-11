@@ -43,7 +43,13 @@ conversation:
 
 Two ways:
 
-- **At call start**, for `source: call_start` variables. Locally that is `unmute dev --var name=value`; in production the value rides your target's dispatch payload.
+- **At call start**, for `source: call_start` variables. Locally that is `unmute dev --var name=value`, one flag per variable, and the same line works on either driver:
+
+  ```sh
+  unmute dev examples/salon-support --target pipecat --var customer_name=Ada --var customer_id=cus_2002
+  ```
+
+  In production the value rides your target's dispatch payload instead. Drop the flags and each variable falls back to its declared `default`, so the call still runs.
 - **During the call, by the model**, for `source: conversation` variables. Declaring one gives you a tool called `update_variables` for free, attached to every agent and task, so the model can save what it hears. You never write that tool yourself.
 - **During the call, from a task result**, when a delegated task returns and you map that result into a variable. That is the `assign` step you will meet in [05. Tasks](05-tasks.md).
 

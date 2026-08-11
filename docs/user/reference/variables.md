@@ -63,6 +63,15 @@ route metadata before the greeting; variable names never imply a source.
 ## How variables change
 
 - **At call start**, for `source: call_start` variables. Locally, pass them with `unmute dev --var name=value` (repeatable); in production they ride the target's own dispatch payload as one flat JSON object.
+
+  The same flags work on every target and in every dev mode, since `--var` only stands in for that dispatch payload:
+
+  ```sh
+  unmute dev examples/salon-support --target pipecat --var customer_name=Ada --var customer_id=cus_2002
+  unmute dev examples/salon-support --target livekit  --var customer_name=Ada --var customer_id=cus_2002
+  ```
+
+  Quote a value with spaces, pair included: `--var "appointment_time=tomorrow at 3 pm"`. Leave a flag out and the declared `default` applies. Only `call_start` variables can be seeded: an undeclared name, a system source, or a `source: conversation` variable is refused before anything starts, and each value is parsed against its declared type. See [cli](cli.md#dev).
 - **During the call**, through the generated `update_variables` tool for `source: conversation` variables, or through a task delegate's `assign`, which maps a task's typed result field into a variable. See [controls](controls.md) and [tasks](tasks.md).
 
 ## Using a variable
