@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import httpx
 from dotenv import load_dotenv
+from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
@@ -199,6 +200,7 @@ class BillingAgent(TracedLLMWorker):
     @tool
     async def to_human(self, params: FunctionCallParams):
         """Transfer the caller to a human."""
+        logger.info("human transfer fired: to_human (cold)")
         await params.llm.push_frame(
             LLMMessagesAppendFrame(
                 [{"role": "developer", "content": "Tell the caller you are connecting them now, then wait."}],

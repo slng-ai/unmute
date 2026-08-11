@@ -562,6 +562,10 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
     @function_tool
     async def {{.Method}}(self, ctx: RunContext) -> str:
         {{triple .When}}
+        # One line per firing, so a live test can see which control the model
+        # picked and when — the transfer that ran is otherwise invisible in the
+        # logs until the carrier request goes out.
+        logger.info("human transfer fired: {{.Method}} ({{if .Warm}}warm{{else}}cold{{end}})")
 {{- if .Connector}}
 {{- if .Warm}}
         # warm on the Twilio connector: our own lowering, because LiveKit's

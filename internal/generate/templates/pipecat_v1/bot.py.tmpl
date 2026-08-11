@@ -39,7 +39,7 @@ import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}{{if .Telephony}}import telephony
 {{end}}from dotenv import load_dotenv
-{{if .Telephony}}from loguru import logger
+{{if or .Telephony .HasColdTransfer .HasWarmTransfer}}from loguru import logger
 {{end}}
 {{if .HasWarmTransfer}}from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 {{end}}from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -543,7 +543,8 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
         Args:
 {{range .Args}}            {{.Name}} ({{.PyType}}):{{if .Description}} {{.Description}}{{end}}{{if .Enum}} One of: {{join .Enum ", "}}.{{end}}
 {{end}}        """{{else}}"""{{end}}
-{{if .ColdDestination}}        await params.llm.push_frame(
+{{if .ColdDestination}}        logger.info("human transfer fired: {{.MethodName}} (cold)")
+        await params.llm.push_frame(
             LLMMessagesAppendFrame(
                 [{"role": "developer", "content": "Tell the caller you are connecting them now, then wait."}],
                 run_llm=True,
@@ -560,7 +561,8 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
             await _TRANSPORT.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
 {{end}}
         await params.result_callback({"transferred": True})
-{{else if .WarmDestination}}        await _warm_transfer(
+{{else if .WarmDestination}}        logger.info("human transfer fired: {{.MethodName}} (warm)")
+        await _warm_transfer(
             params,
             destination={{.WarmDestination}},
             briefing={{pyq .Briefing}},
