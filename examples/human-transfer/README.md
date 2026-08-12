@@ -74,19 +74,42 @@ Numbers are inbound-only and cannot transfer). In the Twilio console under
 3. Copy the trunk's SIP domain, username, and password.
 
 ```sh
-TWILIO_SIP_ADDRESS=your-trunk.pstn.twilio.com
-TWILIO_SIP_USERNAME=...
-TWILIO_SIP_PASSWORD=...
-TWILIO_PHONE_NUMBER=+1...
-LIVEKIT_SIP_OUTBOUND_TRUNK=ST_...
+SIP_TRUNK_HOSTNAME=your-trunk.pstn.twilio.com
+SIP_AUTH_USERNAME=...
+SIP_AUTH_PASSWORD=...
+SIP_FROM_NUMBER=+1...
 BILLING_PHONE_NUMBER=+1...
 SUPERVISOR_PHONE_NUMBER=+1...
 ```
 
-`LIVEKIT_SIP_OUTBOUND_TRUNK` is what the warm transfer dials out on. The warm
-package pins `livekit-agents` to the minor series the prebuilt was verified
-against; do not loosen that pin, the task is beta and its surface has moved
-before.
+Those four `SIP_*` values are all the warm transfer needs. It dials the
+supervisor by passing them inline with the call, so **no LiveKit outbound trunk
+is registered** and `lk sip outbound create` is not part of this example.
+
+### If you set this example up before 2026-08-12
+
+Four variables were renamed and one was retired. The rename is because these are
+standard SIP trunk settings rather than one carrier's, and the same emitted code
+now dials through any SIP carrier with them (SCHEMA N33):
+
+```
+TWILIO_SIP_ADDRESS          ->  SIP_TRUNK_HOSTNAME
+TWILIO_SIP_USERNAME         ->  SIP_AUTH_USERNAME
+TWILIO_SIP_PASSWORD         ->  SIP_AUTH_PASSWORD
+TWILIO_PHONE_NUMBER         ->  SIP_FROM_NUMBER
+
+LIVEKIT_SIP_OUTBOUND_TRUNK  ->  delete it, nothing reads it
+```
+
+Keep `LIVEKIT_SIP_INBOUND_TRUNK` if you accept inbound calls. The stored trunk
+itself can be deleted with `lk sip outbound delete` whenever convenient; leaving
+it costs nothing but a stale record. If you would rather not rename anything,
+edit `connections/twilio_sip.yaml` back to your own names: the compiler carries
+whatever a Connection declares through verbatim.
+
+The warm package pins `livekit-agents` to the minor series the prebuilt was
+verified against; do not loosen that pin, the task is beta and its surface has
+moved before.
 
 ## Run it
 

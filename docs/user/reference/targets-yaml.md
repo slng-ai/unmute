@@ -47,7 +47,7 @@ targets:
 | `pins` | no | independently versioned packages (for example LiveKit plugins) get their own entries |
 | `sdk_language` | no | the LiveKit driver currently accepts `python` only |
 | `transport`, `carrier` | no | driver vocabulary; telephony controls resolve against these, never the brand alone |
-| `connection` | telephony routes | name of one `connections/<name>.yaml`; all telephony channels on this v1 target share it |
+| `connection` | telephony routes | name of one `connections/<name>.yaml`; all telephony channels on this v1 target share it. On a LiveKit SIP route its four SIP values reach the deployed agent's dial-out path directly: the agent passes them inline with each call, so no platform-side outbound trunk is registered (N33) |
 | `deployment_region` | no | where the platform deploys the agent: one region, or a list of them (N32). Forwarded as declared, never validated. See below. |
 | `models` | no | per-target overrides, keyed by model name, below |
 | `destinations` | if any `human_transfer` is used | map of symbolic name to an E.164 number, a `sip:` URI, or the UPPER_SNAKE name of an env var holding one (told apart by shape). See [controls](controls.md#destination) |
@@ -129,7 +129,15 @@ targets:
 
 Add another target and Connection for every additional supported carrier route.
 There is no package-level route-count setting and no multi-carrier target: one
-target always emits one adapter. See the
+target always emits one adapter.
+
+A Connection stores environment variable **names**, never values, and the names
+are yours to choose: the compiler carries whatever you write through verbatim and
+knows none of them. That is what lets the same emitted LiveKit SIP code dial
+through any SIP carrier, and why the shipped examples use plain
+`SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD` and
+`SIP_FROM_NUMBER` rather than carrier-prefixed ones (N33). A package written with
+carrier-prefixed names keeps working with no edit. See the
 [phone-call route matrix](../learn/07-phone-calls.md#choose-a-supported-carrier-route)
 for the accepted Pipecat and LiveKit combinations and Connection keys.
 

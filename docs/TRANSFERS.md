@@ -154,9 +154,8 @@ written into a package; a Connection stores env var names only.
 | `LIVEKIT_URL` | The LiveKit project URL (cloud or self-hosted). |
 | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | The project API key pair. |
 | `LIVEKIT_SIP_INBOUND_TRUNK` | Inbound trunk ID; the cold test's call arrives through it. |
-| `LIVEKIT_SIP_OUTBOUND_TRUNK` | Outbound trunk ID; the warm transfer dials the supervisor on it. |
-| `TWILIO_SIP_ADDRESS` / `TWILIO_SIP_USERNAME` / `TWILIO_SIP_PASSWORD` | The Elastic SIP trunk's domain and credential list entry. |
-| `TWILIO_PHONE_NUMBER` | The number on the trunk. |
+| `SIP_TRUNK_HOSTNAME` / `SIP_AUTH_USERNAME` / `SIP_AUTH_PASSWORD` | The Elastic SIP trunk's host and credential list entry. The agent dials out with these directly. |
+| `SIP_FROM_NUMBER` | The number on the trunk, and the number transfers are placed from. |
 | `OPENAI_API_KEY` / `SLNG_API_KEY` | The package's model providers. |
 | `REDIS_URL` | The coordination store for the telephony runtime. |
 | `BILLING_PHONE_NUMBER` / `SUPERVISOR_PHONE_NUMBER` | The transfer destinations, read at call time. |
@@ -192,8 +191,18 @@ need two phones to answer as "billing" and "supervisor".
 2. **Trunking, one-time**: create a Twilio Elastic SIP trunk; enable "Call
    Transfer (SIP REFER)" and "Enable PSTN Transfer"; attach a number; point
    its origination URI at your LiveKit SIP endpoint. In LiveKit, create the
-   inbound trunk plus a dispatch rule for the agent, and an outbound trunk;
-   export the outbound trunk ID as `LIVEKIT_SIP_OUTBOUND_TRUNK`.
+   inbound trunk plus a dispatch rule for the agent. **No outbound trunk.**
+   Since 2026-08-12 (SCHEMA N33) the generated agent dials out with the
+   carrier's own trunk settings passed inline, from the four `SIP_*` names in
+   section 3, so `lk sip outbound create` and `LIVEKIT_SIP_OUTBOUND_TRUNK` are
+   no longer part of this rig. If you set one up for an earlier build, drop the
+   variable and delete the trunk when convenient; nothing reads it. Inbound
+   cannot work the same way, because an unsolicited call arrives with no
+   request of ours for configuration to travel with, so the platform has to
+   already know which project owns the number and which room the caller joins.
+   Verified against [Inline trunk configuration](https://docs.livekit.io/telephony/making-calls/outbound-calls/#inline-trunk)
+   and [WarmTransferTask](https://docs.livekit.io/agents/prebuilt/tasks/warm-transfer/)
+   on 2026-08-12.
 3. **Deploy**: `unmute compile examples/human-transfer`, then follow the Deploy
    section of the generated `build/livekit/README.md`. It prints the exact
    commands for this package, including its region: the first deploy

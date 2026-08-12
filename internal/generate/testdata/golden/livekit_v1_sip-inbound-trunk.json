@@ -1,0 +1,8 @@
+{
+  "trunk": {
+    "name": "livekit twilio inbound",
+    "numbers": [
+      "${TWILIO_PHONE_NUMBER}"
+    ]
+  }
+}

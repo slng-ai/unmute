@@ -108,9 +108,12 @@ func TestTelephonyDocsContract(t *testing.T) {
 			"PLIVO_AUTH_ID",
 			"EXOTEL_API_KEY",
 			"LIVEKIT_API_KEY",
-			"TWILIO_SIP_ADDRESS",
-			"TELNYX_SIP_ADDRESS",
-			"PLIVO_SIP_ADDRESS",
+			// All three carriers now use one set of names on the SIP route:
+			// these are standard SIP trunk settings, not one vendor's, and the
+			// same emitted code dials through any of them (SCHEMA N33).
+			"SIP_TRUNK_HOSTNAME",
+			"SIP_AUTH_USERNAME",
+			"SIP_FROM_NUMBER",
 			"No generated adapter",
 		},
 		"docs/user/learn/07-phone-calls.md": {
@@ -122,7 +125,7 @@ func TestTelephonyDocsContract(t *testing.T) {
 		"docs/user/reference/providers.md":    {"## Use several providers in one target", "Telephony uses **carrier**"},
 		"docs/user/targets/pipecat.md":        {"### Telephony carrier integrations", "TELNYX_CONNECTION_ID", "PLIVO_AUTH_ID"},
 		"docs/user/targets/livekit.md": {
-			"TELNYX_SIP_ADDRESS", "PLIVO_SIP_ADDRESS", "not an audio buffer", "No emitted adapter", "10000-10100",
+			"SIP_TRUNK_HOSTNAME", "SIP_AUTH_PASSWORD", "not an audio buffer", "No emitted adapter", "10000-10100",
 		},
 	}
 	for path, terms := range checks {

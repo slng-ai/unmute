@@ -70,11 +70,12 @@ orchestrator's supported transport. The implementation follows these rules:
 - Create the local LiveKit SIP trunk and dispatch records automatically. For
   the LiveKit SIP route, after the local infrastructure services are
   healthy, the dev command creates or reuses (idempotently, by content) the
-  inbound trunk, outbound trunk, and individual-room dispatch rule against
-  the local server with the generated development key pair, and injects the
-  returned IDs as `LIVEKIT_SIP_INBOUND_TRUNK` and
-  `LIVEKIT_SIP_OUTBOUND_TRUNK`. Users never supply these two values for
-  local development. Carrier-side (Twilio console) trunk setup stays manual
+  inbound trunk and individual-room dispatch rule against the local server
+  with the generated development key pair, and injects the returned ID as
+  `LIVEKIT_SIP_INBOUND_TRUNK`. Users never supply that value for local
+  development. No outbound trunk is created: the agent dials out with the
+  carrier's trunk settings passed inline, so local and deployed use the same
+  mechanism (SCHEMA N33, 2026-08-12). Carrier-side (Twilio console) trunk setup stays manual
   and one-time.
 - Fail during validation when a carrier and route cannot provide a requested
   direction or control.
@@ -288,10 +289,10 @@ The initial route adapters use these names:
 | All Pipecat telephony routes | `REDIS_URL` | Generated Compose supplies the local value. In production, use the connection URL from the Redis service managed by your infrastructure operator. Store any password in the deployment secret store. |
 | LiveKit Twilio connector | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Local Compose supplies the non-production `devkey`/`secret` pair and a local `livekit-server --dev`; in production point these at your self-hosted LiveKit server. The connector needs no LiveKit Cloud and no Redis, and also needs the Twilio variables above. |
 | Self-hosted LiveKit SIP topology | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `REDIS_URL` | Create the API key and secret in the LiveKit Server `keys` configuration and use the same pair in LiveKit SIP. Set `LIVEKIT_URL` to that server and `REDIS_URL` to their shared Redis deployment. For inbound calls, point the carrier's origination URI at your public LiveKit SIP endpoint. |
-| LiveKit SIP with Twilio | `TWILIO_SIP_ADDRESS`, `TWILIO_SIP_USERNAME`, `TWILIO_SIP_PASSWORD`, `TWILIO_PHONE_NUMBER` | Twilio Console → Elastic SIP Trunking. Use the termination URI, Credential List username and password, and associated number. |
-| LiveKit SIP with Telnyx | `TELNYX_SIP_ADDRESS`, `TELNYX_SIP_USERNAME`, `TELNYX_SIP_PASSWORD`, `TELNYX_PHONE_NUMBER` | Telnyx Mission Control → SIP Trunking. Use the SIP connection address and credentials, and its assigned number. |
-| LiveKit SIP with Plivo | `PLIVO_SIP_ADDRESS`, `PLIVO_SIP_USERNAME`, `PLIVO_SIP_PASSWORD`, `PLIVO_PHONE_NUMBER` | Plivo Console → Zentrunk. Use the termination domain, outbound credential, and linked number. |
-| LiveKit SIP resource IDs | `LIVEKIT_SIP_INBOUND_TRUNK`, `LIVEKIT_SIP_OUTBOUND_TRUNK` | For local development, `unmute dev --telephony` creates the records itself and supplies both IDs; do not set them. For production, copy each `SIPTrunkID` printed by the generated `lk sip ... create` setup commands. Only requested directions and controls require their corresponding ID. |
+| LiveKit SIP with Twilio | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Twilio Console → Elastic SIP Trunking. Use the termination URI, Credential List username and password, and associated number. |
+| LiveKit SIP with Telnyx | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Telnyx Mission Control → SIP Trunking. Use the SIP connection address and credentials, and its assigned number. |
+| LiveKit SIP with Plivo | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Plivo Console → Zentrunk. Use the termination domain, outbound credential, and linked number. |
+| LiveKit SIP resource ID | `LIVEKIT_SIP_INBOUND_TRUNK` | Inbound only, and only when the channel accepts inbound calls. For local development, `unmute dev --telephony` creates the records itself and supplies the ID; do not set it. For production, copy the `SIPTrunkID` printed by `lk sip inbound create`. There is no outbound equivalent: dialling out carries the carrier's trunk settings inline (SCHEMA N33, 2026-08-12), so nothing is registered on the platform for it. |
 
 The generated Pipecat carrier-WebSocket outbound HTTP endpoint also requires
 `UNMUTE_OUTBOUND_TOKEN`. Generate this secret yourself with a cryptographically
@@ -746,8 +747,7 @@ The command performs these steps in this order:
 2. Resolve and print the provider-neutral runtime plan.
 3. Validate required carrier and model environment variables. Values the
    command supplies itself (`UNMUTE_PUBLIC_URL` under the managed tunnel,
-   `LIVEKIT_SIP_INBOUND_TRUNK`, `LIVEKIT_SIP_OUTBOUND_TRUNK`) are not
-   demanded from the user.
+   `LIVEKIT_SIP_INBOUND_TRUNK`) are not demanded from the user.
 4. Verify Docker Compose is available.
 5. Start the managed cloudflared tunnel when the plan has public endpoints
    and `--public-url` is absent, or take the `--public-url` origin as given.

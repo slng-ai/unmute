@@ -1106,3 +1106,91 @@ func TestValidateDeploymentRegions(t *testing.T) { // N32
 		})
 	}
 }
+
+// A warm transfer dials the destination itself, and since 2026-08-12 (SCHEMA
+// N33) it does that with the carrier's own SIP credentials passed inline. A
+// LiveKit target with no telephony Connection therefore has nothing to dial
+// with, and that is now a gated error naming the four values it needs.
+//
+// It used to validate green and then emit an agent that read
+// LIVEKIT_SIP_OUTBOUND_TRUNK, a LiveKit-assigned id the package never mentioned
+// and nobody was told to create: the exact defect this feature removed. Cold is
+// unaffected, because it acts on the caller's existing leg and dials nobody.
+func TestWarmTransferWithoutAConnectionIsGated(t *testing.T) {
+	pkg := loadSafeCore(t)
+	human := pkg.Agent.Controls["to_human"]
+	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
+	pkg.Agent.Controls["to_human"] = human
+	livekitTarget := pkg.Targets["livekit"]
+	pkg.Targets = map[string]packagespec.Target{"livekit": livekitTarget}
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, verr := Validate(agent, []Target{agent.Targets["livekit"]}, targetcap.Default())
+	if verr == nil {
+		t.Fatal("warm transfer with no telephony Connection must fail validation")
+	}
+	joined := strings.Join(report.PerTarget[0].Errors, "\n")
+	for _, want := range []string{"warm transfer needs a telephony Connection", "sip_address", "sip_username", "sip_password", "from_number"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("error must name %q, got:\n%s", want, joined)
+		}
+	}
+}
+
+// The same fixture with a cold transfer still validates, on the same
+// non-telephony target. Cold needs no trunk of either kind, so gating warm must
+// not have caught it.
+func TestColdTransferWithoutAConnectionStillValidates(t *testing.T) {
+	pkg := loadSafeCore(t)
+	livekitTarget := pkg.Targets["livekit"]
+	pkg.Targets = map[string]packagespec.Target{"livekit": livekitTarget}
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, verr := Validate(agent, []Target{agent.Targets["livekit"]}, targetcap.Default())
+	if verr != nil {
+		t.Fatalf("cold transfer on a non-telephony LiveKit target must still validate: %v\n%v", verr, report.PerTarget[0].Errors)
+	}
+}
+
+// FR-006 and SC-008: the four SIP values are required by the route itself, so a
+// Connection that omits one fails before any artifact is written. With the
+// stored trunk gone this is fatal rather than a fallback, so it is pinned here
+// rather than assumed.
+func TestSIPRouteRequiresEveryConnectionValue(t *testing.T) {
+	for _, missing := range []string{"sip_address", "sip_username", "sip_password", "from_number"} {
+		pkg := loadSafeCore(t)
+		enableTelephony(pkg)
+		human := pkg.Agent.Controls["to_human"]
+		human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
+		pkg.Agent.Controls["to_human"] = human
+		configured := pkg.Targets["livekit"]
+		configured.Transport, configured.Carrier, configured.Connection = "sip", "twilio", "primary_phone"
+		pkg.Targets = map[string]packagespec.Target{"livekit": configured}
+		connection := pkg.Connections["primary_phone"]
+		connection.Environment = map[string]string{
+			"sip_address": "SIP_TRUNK_HOSTNAME", "sip_username": "SIP_AUTH_USERNAME",
+			"sip_password": "SIP_AUTH_PASSWORD", "from_number": "SIP_FROM_NUMBER",
+		}
+		delete(connection.Environment, missing)
+		pkg.Connections["primary_phone"] = connection
+		agent, err := Build(pkg)
+		if err != nil {
+			if !strings.Contains(err.Error(), missing) {
+				t.Errorf("omitting %s failed without naming it: %v", missing, err)
+			}
+			continue
+		}
+		report, verr := Validate(agent, []Target{agent.Targets["livekit"]}, targetcap.Default())
+		if verr == nil {
+			t.Errorf("omitting %s from the Connection must fail validation", missing)
+			continue
+		}
+		if joined := strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(joined, missing) {
+			t.Errorf("omitting %s must be named in the error, got:\n%s", missing, joined)
+		}
+	}
+}

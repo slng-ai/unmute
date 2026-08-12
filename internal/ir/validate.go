@@ -1044,7 +1044,20 @@ func validateHumanTransfer(control *HumanTransfer, resolved Target, provider tar
 	if control.Mode == TransferWarm {
 		required = targetcap.WarmTransfer
 	}
+	before := len(row.Errors)
 	applyResolvedCapability(caps.Control(required, provider, resolved.Transport, resolved.Carrier), required, provider, row)
+	// A warm transfer dials the person itself, so it needs carrier SIP
+	// credentials, and those only exist on a target that binds a telephony
+	// Connection. Gated since 2026-08-12 (SCHEMA N33): the emitted agent passes
+	// the carrier's trunk settings inline, so a target with no Connection has
+	// nothing to dial with. It used to compile and then read a LiveKit trunk ID
+	// the package never mentioned, which is the defect this feature removed.
+	// Only when the provider itself allows warm, so a provider that denies it
+	// keeps failing in its own words (principle II). Cold is unaffected: it acts
+	// on the caller's existing leg and dials nobody.
+	if control.Mode == TransferWarm && len(row.Errors) == before {
+		row.Errors = add(row.Errors, "warm transfer needs a telephony Connection: it dials the destination itself, using the connection's sip_address, sip_username, sip_password and from_number")
+	}
 }
 
 // checkTransferBlock validates the block's own values, independent of target.

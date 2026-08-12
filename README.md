@@ -180,10 +180,10 @@ same `livekit/sip/<carrier>` plan. Their Connection vocabulary is:
 # connections/primary_phone.yaml
 kind: telephony
 environment:
-  sip_address: TWILIO_SIP_ADDRESS
-  sip_username: TWILIO_SIP_USERNAME
-  sip_password: TWILIO_SIP_PASSWORD
-  from_number: TWILIO_PHONE_NUMBER
+  sip_address: SIP_TRUNK_HOSTNAME
+  sip_username: SIP_AUTH_USERNAME
+  sip_password: SIP_AUTH_PASSWORD
+  from_number: SIP_FROM_NUMBER
 ```
 
 Set the target's `provider: livekit`, `transport: sip`, `carrier`, and

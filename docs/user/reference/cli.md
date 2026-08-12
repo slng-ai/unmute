@@ -133,9 +133,10 @@ routes build the generated application and version-pinned Redis; the LiveKit
 Twilio connector builds the application plus a local `livekit-server --dev` and
 needs no Redis. LiveKit SIP additionally starts
 version-pinned LiveKit Server and LiveKit SIP, then creates or reuses the local
-inbound trunk, outbound trunk, and dispatch rule itself and injects
-`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` before the
-application starts. Unmute preflights Docker Compose, waits for declared health
+inbound trunk and dispatch rule itself and injects
+`LIVEKIT_SIP_INBOUND_TRUNK` before the application starts. It creates no
+outbound trunk: the agent dials out with the carrier's trunk settings passed
+inline, so local and deployed use the same mechanism (SCHEMA N33, 2026-08-12). Unmute preflights Docker Compose, waits for declared health
 checks, prints the resolved service graph and carrier setup, configures the
 Twilio voice webhook automatically where the route carries that fact (printing
 the previous value), prints the call line, places an outbound call when `--to`

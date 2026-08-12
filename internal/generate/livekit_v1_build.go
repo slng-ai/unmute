@@ -293,7 +293,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		// (and non-telephony targets) drive data.Outbound.
 		if ch.Kind == ir.ChannelTelephony && ch.Outbound != nil && *ch.Outbound && tgt.Transport != "connector" {
 			data.Outbound = &livekitOutbound{LeaveMessage: ch.OnVoicemail == ir.VoicemailLeaveMessage}
-			env.add("LIVEKIT_SIP_OUTBOUND_TRUNK")
 			break
 		}
 	}
@@ -554,9 +553,10 @@ func buildLiveKitSIPTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*liv
 	if telephony.HasInbound {
 		env.add("LIVEKIT_SIP_INBOUND_TRUNK")
 	}
-	if telephony.HasOutbound || telephony.HasWarm {
-		env.add("LIVEKIT_SIP_OUTBOUND_TRUNK")
-	}
+	// No outbound trunk name: both dial-out paths carry the carrier's trunk
+	// settings inline, from the four names the Connection already declares
+	// (SCHEMA N33, 2026-08-12). Inbound still needs its trunk id, because an
+	// unsolicited call has no request for configuration to travel with.
 	return telephony, nil
 }
 
@@ -785,10 +785,10 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 				RingTimeout: ringTimeoutSeconds(c.RingTimeout),
 				Hangup:      c.OnUnavailable == ir.OnUnavailableHangup,
 			}
-			if ht.Warm {
-				// WarmTransferTask reads LIVEKIT_SIP_OUTBOUND_TRUNK itself.
-				env.add("LIVEKIT_SIP_OUTBOUND_TRUNK")
-			}
+			// A warm transfer needs no trunk environment name: the emitted
+			// _sip_trunk() passes the carrier's own settings inline, and the
+			// prebuilt then ignores LIVEKIT_SIP_OUTBOUND_TRUNK by its own
+			// documented precedence (verified in warm_transfer.py, 2026-08-12).
 			built.HumanTransfers = append(built.HumanTransfers, ht)
 		case *ir.Delegate:
 			delegate, err := buildLiveKitDelegate(agent, tgt, ref, c, env)

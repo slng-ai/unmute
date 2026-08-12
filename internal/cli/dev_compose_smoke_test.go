@@ -123,6 +123,11 @@ func smokeLiveKitSIPArtifact(t *testing.T) generate.Artifact {
 	target.Transport, target.Carrier, target.Connection = "sip", "twilio", "primary_phone"
 	pkg.Targets = map[string]spec.Target{"livekit": target}
 	connection := pkg.Connections["primary_phone"]
+	// Carrier-prefixed names on purpose. The shipped example moved to the plain
+	// SIP names on 2026-08-12 (SCHEMA N33), and the compiler knows none of
+	// either set: it carries whatever a Connection declares through verbatim.
+	// Keeping this fixture on the old names is what proves a package written
+	// before that change still compiles and dials unchanged.
 	connection.Environment = map[string]string{
 		"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
 		"sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",

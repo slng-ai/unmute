@@ -87,7 +87,7 @@ import os
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
 {{if .NeedsField}}from pydantic import Field
-{{end}}{{if or .Outbound .HasColdTransfer}}from livekit import api{{if .HasColdTransfer}}, rtc{{end}}
+{{end}}{{if or .Outbound .HasColdTransfer .HasWarmTransfer}}from livekit import api{{if .HasColdTransfer}}, rtc{{end}}
 {{end}}from livekit.agents import (
 {{- if .Outbound}}
     AMD,
@@ -219,6 +219,29 @@ def _refer_uri(destination: str) -> str:
     if destination.startswith(("tel:", "sip:", "sips:")):
         return destination
     return "tel:" + destination
+
+{{end}}
+{{- if and .Telephony (eq .Telephony.Transport "sip") (or .Telephony.HasOutbound .Telephony.HasWarm)}}
+# --- dial-out trunk ----------------------------------------------------------
+# The carrier's own trunk settings, sent inline with every dial. No stored
+# LiveKit outbound trunk is used or needed: CreateSIPParticipant takes the
+# configuration in its `trunk` field and WarmTransferTask takes the same object
+# as `sip_connection`, so nothing has to be registered on the platform first.
+# One function, every dial site, so a rotated credential cannot fix one path and
+# break another. Verified against livekit-agents 1.6.9 on 2026-08-12.
+def _sip_trunk() -> api.SIPOutboundConfig:
+    """The carrier trunk configuration, read from the Connection's env names."""
+    return api.SIPOutboundConfig(
+        hostname=os.environ[{{pyq .Telephony.SIPAddressEnv}}],
+        auth_username=os.environ[{{pyq .Telephony.SIPUsernameEnv}}],
+        auth_password=os.environ[{{pyq .Telephony.SIPPasswordEnv}}],
+    )
+
+
+def _sip_number() -> str:
+    """The number to call from. Required with an inline trunk, which carries no
+    number list for the platform to default from."""
+    return os.environ[{{pyq .Telephony.FromNumberEnv}}]
 
 {{end}}
 {{- if .RequiredSecrets}}
@@ -514,6 +537,10 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         try:
             result = await WarmTransferTask(
                 sip_call_to={{.DialExpr}},
+{{- if and $.Telephony (eq $.Telephony.Transport "sip")}}
+                sip_connection=_sip_trunk(),
+                sip_number=_sip_number(),
+{{- end}}
                 chat_ctx=self.chat_ctx,
 {{- if .Briefing}}
                 extra_instructions={{pyq .Briefing}},
@@ -829,7 +856,8 @@ async def entrypoint(ctx: JobContext) -> None:
             await ctx.api.sip.create_sip_participant(
                 api.CreateSIPParticipantRequest(
                     room_name=ctx.room.name,
-                    sip_trunk_id=os.environ["LIVEKIT_SIP_OUTBOUND_TRUNK"],
+                    trunk=_sip_trunk(),
+                    sip_number=_sip_number(),
                     sip_call_to=phone_number,
                     participant_identity="phone_user",
                     wait_until_answered=True,
@@ -898,7 +926,8 @@ async def entrypoint(ctx: JobContext) -> None:
             await ctx.api.sip.create_sip_participant(
                 api.CreateSIPParticipantRequest(
                     room_name=ctx.room.name,
-                    sip_trunk_id=os.environ["LIVEKIT_SIP_OUTBOUND_TRUNK"],
+                    trunk=_sip_trunk(),
+                    sip_number=_sip_number(),
                     sip_call_to=phone_number,
                     participant_identity="phone_user",
                     wait_until_answered=True,

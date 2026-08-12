@@ -139,16 +139,17 @@ The SIP route uses this Connection vocabulary for Twilio, Telnyx, and Plivo:
 # connections/primary_phone.yaml
 kind: telephony
 environment:
-  sip_address: TWILIO_SIP_ADDRESS
-  sip_username: TWILIO_SIP_USERNAME
-  sip_password: TWILIO_SIP_PASSWORD
-  from_number: TWILIO_PHONE_NUMBER
+  sip_address: SIP_TRUNK_HOSTNAME
+  sip_username: SIP_AUTH_USERNAME
+  sip_password: SIP_AUTH_PASSWORD
+  from_number: SIP_FROM_NUMBER
 ```
 
-Use equivalent environment names for the selected carrier
-(`TELNYX_SIP_ADDRESS`, `TELNYX_SIP_USERNAME`, `TELNYX_SIP_PASSWORD`,
-`TELNYX_PHONE_NUMBER` for Telnyx; `PLIVO_SIP_ADDRESS`, `PLIVO_SIP_USERNAME`,
-`PLIVO_SIP_PASSWORD`, `PLIVO_PHONE_NUMBER` for Plivo). Self-hosted
+The same four names serve Twilio, Telnyx and Plivo: they are standard SIP
+trunk settings, not one carrier's, and the deployed agent dials out with them
+directly. They are yours to choose, because the compiler carries whatever a
+Connection declares through verbatim, so a package already using
+`TWILIO_SIP_ADDRESS` and friends keeps working unchanged. Self-hosted
 LiveKit SIP also needs Redis because the LiveKit server and SIP service use it
 as a shared datastore and message bus. Pipecat also uses Redis, but only for
 opaque pending-call correlation, callback idempotency, and admission
@@ -390,8 +391,10 @@ local LiveKit server with the generated development key pair:
 
 Creation is idempotent. The local Redis volume keeps records across
 restarts, so a second run reuses them instead of duplicating. The returned
-IDs are injected as `LIVEKIT_SIP_INBOUND_TRUNK` and
-`LIVEKIT_SIP_OUTBOUND_TRUNK`; never set these two for local runs.
+ID is injected as `LIVEKIT_SIP_INBOUND_TRUNK`; never set it for local runs.
+No outbound trunk is created, locally or in a deployment: since 2026-08-12
+(SCHEMA N33) the agent dials out with the carrier's trunk settings passed
+inline, so local and deployed use the same mechanism.
 
 ### One-time carrier setup per model
 
@@ -423,12 +426,12 @@ LiveKit with Twilio (Elastic SIP Trunking):
 
 ```dotenv
 # .env for livekit + sip + twilio
-TWILIO_SIP_ADDRESS=
-TWILIO_SIP_USERNAME=
-TWILIO_SIP_PASSWORD=
-TWILIO_PHONE_NUMBER=
+SIP_TRUNK_HOSTNAME=
+SIP_AUTH_USERNAME=
+SIP_AUTH_PASSWORD=
+SIP_FROM_NUMBER=
 # Supplied by the command itself: REDIS_URL, LIVEKIT_URL, LIVEKIT_API_KEY,
-# LIVEKIT_API_SECRET, LIVEKIT_SIP_INBOUND_TRUNK, LIVEKIT_SIP_OUTBOUND_TRUNK.
+# LIVEKIT_API_SECRET, LIVEKIT_SIP_INBOUND_TRUNK.
 ```
 
 The Telnyx and Plivo `.env` files use the same shapes with their own names
@@ -529,11 +532,10 @@ when you fill in `.env`.
 
 | Value | Owned by | Meaning |
 |---|---|---|
-| `*_SIP_ADDRESS` | Carrier | Carrier termination address that LiveKit calls for outbound calls |
-| `*_SIP_USERNAME`, `*_SIP_PASSWORD` | Carrier | Credentials that LiveKit uses for outbound SIP authentication |
-| `*_PHONE_NUMBER` | Carrier | E.164 number associated with the carrier trunk |
-| `LIVEKIT_SIP_INBOUND_TRUNK` | LiveKit | ID returned by `lk sip inbound create` |
-| `LIVEKIT_SIP_OUTBOUND_TRUNK` | LiveKit | ID returned by `lk sip outbound create` |
+| `SIP_TRUNK_HOSTNAME` | Carrier | Carrier termination host the INVITE is sent to. Not a URI: no `sip:` prefix |
+| `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD` | Carrier | Credentials LiveKit authenticates the outbound call with |
+| `SIP_FROM_NUMBER` | Carrier | E.164 number on the trunk, and the number calls are placed from |
+| `LIVEKIT_SIP_INBOUND_TRUNK` | LiveKit | ID returned by `lk sip inbound create`, inbound only |
 
 The Connection stores only the environment variable names. Use the same four
 keys for Twilio, Telnyx, and Plivo:
@@ -542,10 +544,10 @@ keys for Twilio, Telnyx, and Plivo:
 # connections/twilio_sip.yaml
 kind: telephony
 environment:
-  sip_address: TWILIO_SIP_ADDRESS
-  sip_username: TWILIO_SIP_USERNAME
-  sip_password: TWILIO_SIP_PASSWORD
-  from_number: TWILIO_PHONE_NUMBER
+  sip_address: SIP_TRUNK_HOSTNAME
+  sip_username: SIP_AUTH_USERNAME
+  sip_password: SIP_AUTH_PASSWORD
+  from_number: SIP_FROM_NUMBER
 ```
 
 Bind the Connection to one exact LiveKit route:
@@ -603,10 +605,10 @@ for the carrier-side fields.
    phone number in `.env`:
 
 ```dotenv
-TWILIO_SIP_ADDRESS=your-trunk.pstn.twilio.com
-TWILIO_SIP_USERNAME=replace-with-credential-list-user
-TWILIO_SIP_PASSWORD=replace-with-credential-list-password
-TWILIO_PHONE_NUMBER=+14155550123
+SIP_TRUNK_HOSTNAME=your-trunk.pstn.twilio.com
+SIP_AUTH_USERNAME=replace-with-credential-list-user
+SIP_AUTH_PASSWORD=replace-with-credential-list-password
+SIP_FROM_NUMBER=+14155550123
 ```
 
 #### Configure Telnyx SIP
@@ -627,10 +629,10 @@ for the carrier-side fields.
    `.env`:
 
 ```dotenv
-TELNYX_SIP_ADDRESS=sip.telnyx.com
-TELNYX_SIP_USERNAME=replace-with-sip-user
-TELNYX_SIP_PASSWORD=replace-with-sip-password
-TELNYX_PHONE_NUMBER=+14155550123
+SIP_TRUNK_HOSTNAME=sip.telnyx.com
+SIP_AUTH_USERNAME=replace-with-sip-user
+SIP_AUTH_PASSWORD=replace-with-sip-password
+SIP_FROM_NUMBER=+14155550123
 ```
 
 Telnyx also requires its SIP username on the first outbound `INVITE`. The
@@ -653,10 +655,10 @@ for the carrier-side fields.
    number in `.env`:
 
 ```dotenv
-PLIVO_SIP_ADDRESS=12345678901234.zt.plivo.com
-PLIVO_SIP_USERNAME=replace-with-zentrunk-user
-PLIVO_SIP_PASSWORD=replace-with-zentrunk-password
-PLIVO_PHONE_NUMBER=+14155550123
+SIP_TRUNK_HOSTNAME=12345678901234.zt.plivo.com
+SIP_AUTH_USERNAME=replace-with-zentrunk-user
+SIP_AUTH_PASSWORD=replace-with-zentrunk-password
+SIP_FROM_NUMBER=+14155550123
 ```
 
 #### Handle Exotel
@@ -703,18 +705,23 @@ lk sip inbound create /tmp/unmute-sip-inbound-trunk.json
 
 envsubst < sip-dispatch-rule.json > /tmp/unmute-sip-dispatch-rule.json
 lk sip dispatch create /tmp/unmute-sip-dispatch-rule.json
-
-envsubst < sip-outbound-trunk.json > /tmp/unmute-sip-outbound-trunk.json
-lk sip outbound create /tmp/unmute-sip-outbound-trunk.json \
-  --auth-user "$SIP_USERNAME" \
-  --auth-pass "$SIP_PASSWORD"
-# Set LIVEKIT_SIP_OUTBOUND_TRUNK to the returned SIPTrunkID.
 ```
 
-Replace `SIP_USERNAME` and `SIP_PASSWORD` with the selected carrier's variable
-names. Only create the resources required by the channel directions and
-controls. The generated README contains the exact commands for that target.
-These manual commands are the production path.
+Inbound only, and both records are needed. An unsolicited call arrives with no
+request of yours for configuration to travel with, so the platform has to
+already know which project owns the number (the inbound trunk) and which room
+and agent the caller joins (the dispatch rule).
+
+**There is no outbound trunk to create.** Since 2026-08-12 (SCHEMA N33) the
+generated agent dials out by passing the carrier's own trunk settings inline
+with each call, from the four `SIP_*` names above, so `lk sip outbound create`
+and `LIVEKIT_SIP_OUTBOUND_TRUNK` are gone. Dialling out is your own code
+starting a call, so the settings can ride along with it; nothing has to be
+registered first.
+
+Only create the resources required by the channel directions. The generated
+README contains the exact commands for that target. These manual commands are
+the production path.
 
 For local development, none of that is needed:
 
@@ -723,9 +730,9 @@ unmute dev ./agent --target livekit_twilio --telephony
 ```
 
 The command starts Redis, LiveKit Server, and LiveKit SIP, creates or reuses
-the trunks and dispatch rule on that local server itself, injects
-`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK`, and then starts
-the Agent. It rejects external `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
+the inbound trunk and dispatch rule on that local server itself, injects
+`LIVEKIT_SIP_INBOUND_TRUNK`, and then starts the Agent. It creates no outbound
+trunk, because the agent dials out inline, exactly as a deployment does. It rejects external `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
 `LIVEKIT_API_SECRET`, `REDIS_URL`, and user-set trunk IDs because they
 conflict with the local topology. `ctrl-c` stops this package's Compose
 project and preserves its Redis data volume, so the created records survive

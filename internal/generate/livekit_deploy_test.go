@@ -273,10 +273,17 @@ func TestLiveKitEnvExampleSeparatesPlatformSuppliedNames(t *testing.T) {
 			t.Errorf("%s is still listed as the operator's to set", name)
 		}
 	}
-	for _, name := range []string{"BILLING_PHONE_NUMBER", "SUPERVISOR_PHONE_NUMBER", "OPENAI_API_KEY", "TWILIO_SIP_ADDRESS"} {
+	for _, name := range []string{"BILLING_PHONE_NUMBER", "SUPERVISOR_PHONE_NUMBER", "OPENAI_API_KEY", "SIP_TRUNK_HOSTNAME"} {
 		if !strings.Contains(operator, name+"=") {
 			t.Errorf("%s must stay the operator's to set", name)
 		}
+	}
+	// The stored outbound trunk is gone from the emitted project entirely
+	// (SCHEMA N33, 2026-08-12): the agent dials with the carrier's trunk
+	// settings inline, so this name is neither the operator's nor the
+	// platform's, it simply is not read.
+	if strings.Contains(env, "LIVEKIT_SIP_OUTBOUND_TRUNK") {
+		t.Error(".env.example still lists LIVEKIT_SIP_OUTBOUND_TRUNK")
 	}
 	// The report keeps the complete list: what the package requires has not
 	// changed, only who supplies each name.

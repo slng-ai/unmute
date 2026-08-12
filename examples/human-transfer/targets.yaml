@@ -3,8 +3,9 @@
 #
 #   livekit: Elastic SIP Trunking. Cold is a SIP REFER through the trunk
 #            (enable Call Transfer + PSTN Transfer on the Twilio trunk, see
-#            connections/twilio_sip.yaml); warm is LiveKit's WarmTransferTask
-#            and needs an outbound trunk (LIVEKIT_SIP_OUTBOUND_TRUNK).
+#            connections/twilio_sip.yaml); warm is LiveKit's WarmTransferTask,
+#            which dials the supervisor with the same four carrier values,
+#            passed inline. No LiveKit outbound trunk is registered.
 #
 # The package compiles offline with no credentials at all: a Connection stores
 # env var names, never values.

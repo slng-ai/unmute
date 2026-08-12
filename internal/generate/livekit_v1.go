@@ -702,19 +702,9 @@ func livekitSIPFiles(data livekitData) ([]File, error) {
 		}
 		files = append(files, file)
 	}
-	if telephony.HasOutbound || telephony.HasWarm {
-		file, err := encode("sip-outbound-trunk.json", map[string]any{
-			"trunk": map[string]any{
-				"name":    data.Project + " " + telephony.Carrier + " outbound",
-				"address": placeholder(telephony.SIPAddressEnv),
-				"numbers": []string{placeholder(telephony.FromNumberEnv)},
-			},
-		})
-		if err != nil {
-			return nil, err
-		}
-		files = append(files, file)
-	}
+	// No outbound-trunk input: nothing reads a stored outbound trunk any more.
+	// The emitted agent dials with the carrier's settings inline, so registering
+	// one would be a step whose output nothing consumes (SCHEMA N33, 2026-08-12).
 	return files, nil
 }
 

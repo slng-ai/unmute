@@ -183,18 +183,22 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		route.RuntimeEnvironment = []TelephonyEnvironmentRule{
 			{Name: "LIVEKIT_API_KEY"},
 			{Name: "LIVEKIT_API_SECRET"},
+			// Inbound only. Dialling out needs no stored trunk: the emitted agent
+			// passes the carrier's trunk settings inline with every call, from the
+			// four names the Connection declares (SCHEMA N33, 2026-08-12). Inbound
+			// cannot work that way, because an unsolicited call arrives with no
+			// request of ours for configuration to travel with.
 			{Name: "LIVEKIT_SIP_INBOUND_TRUNK", AnyFeatures: []TelephonyFeature{TelephonyInbound}},
-			{Name: "LIVEKIT_SIP_OUTBOUND_TRUNK", AnyFeatures: []TelephonyFeature{TelephonyOutbound, TelephonyFeature(WarmTransfer)}},
 			{Name: "LIVEKIT_URL"},
 			{Name: "REDIS_URL"},
 		}
 		route.LocallySuppliedEnvironment = []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL", "REDIS_URL"}
-		route.DevSuppliedEnvironment = []string{"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK"}
+		route.DevSuppliedEnvironment = []string{"LIVEKIT_SIP_INBOUND_TRUNK"}
 		route.ManualSteps = []string{
 			"get LIVEKIT_URL and the API key pair from the self-hosted LiveKit Server configuration; configure LiveKit Server and LiveKit SIP with the same Redis deployment",
 			"deploy LiveKit SIP with public SIP signaling and RTP ports, then point the carrier's origination URI at that public SIP endpoint",
-			"get the selected carrier SIP address, username, password, and phone number from its SIP trunking console",
-			"for production, materialize the generated SIP JSON inputs, create the LiveKit trunks and dispatch rule with lk, and copy the returned trunk IDs into the reported environment variables (unmute dev --telephony creates the local records and supplies both IDs itself)",
+			"get the selected carrier SIP address, username, password, and phone number from its SIP trunking console; these four reach the deployed agent's dial-out path directly, so no outbound trunk is registered",
+			"for inbound calls only, materialize the generated SIP JSON inputs, create the LiveKit inbound trunk and dispatch rule with lk, and copy the returned trunk ID into the reported environment variable (unmute dev --telephony creates the local records and supplies that ID itself)",
 		}
 		routes[key] = route
 	}

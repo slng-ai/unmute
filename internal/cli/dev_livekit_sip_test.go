@@ -136,9 +136,14 @@ func sipTestEnv() []string {
 	}
 }
 
-// V4: first run lists (empty), creates all three records with auth only in
-// the outbound request body; second run reuses every record and creates
-// nothing.
+// V4: first run lists (empty) and creates the two inbound records; second run
+// reuses both and creates nothing.
+//
+// No outbound trunk is created, since 2026-08-12 (SCHEMA N33): the generated
+// agent dials with the carrier's trunk settings inline, so local development
+// uses the same mechanism a deployment does. The SIP password therefore no
+// longer travels in any request body here, and the leak check below matters
+// more rather than less, because the values are still in the environment.
 func TestEnsureLiveKitSIPRecordsIsIdempotent(t *testing.T) {
 	fake, _ := newFakeSIPAdmin(t)
 	plan := livekitSIPPlan()
@@ -148,17 +153,20 @@ func TestEnsureLiveKitSIPRecordsIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if injected["LIVEKIT_SIP_INBOUND_TRUNK"] != "ST_in_1" || injected["LIVEKIT_SIP_OUTBOUND_TRUNK"] != "ST_out_1" {
+	if injected["LIVEKIT_SIP_INBOUND_TRUNK"] != "ST_in_1" {
 		t.Fatalf("injected = %v", injected)
 	}
+	if _, ok := injected["LIVEKIT_SIP_OUTBOUND_TRUNK"]; ok {
+		t.Fatalf("outbound trunk must not be created or injected: %v", injected)
+	}
 	first := strings.Join(fake.requests, ",")
-	for _, want := range []string{"ListSIPInboundTrunk,CreateSIPInboundTrunk", "ListSIPDispatchRule,CreateSIPDispatchRule", "ListSIPOutboundTrunk,CreateSIPOutboundTrunk"} {
+	for _, want := range []string{"ListSIPInboundTrunk,CreateSIPInboundTrunk", "ListSIPDispatchRule,CreateSIPDispatchRule"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("first run requests missing list-before-create %q: %s", want, first)
 		}
 	}
-	if !strings.Contains(fake.bodies["CreateSIPOutboundTrunk"], `"authPassword":"sip-sekrit-88"`) {
-		t.Fatalf("outbound create did not carry auth in the body: %s", fake.bodies["CreateSIPOutboundTrunk"])
+	if strings.Contains(first, "SIPOutboundTrunk") {
+		t.Fatalf("first run touched the outbound trunk API: %s", first)
 	}
 	if !strings.Contains(fake.bodies["CreateSIPDispatchRule"], `"roomPrefix":"call-"`) || !strings.Contains(fake.bodies["CreateSIPDispatchRule"], `"agentName":"phone"`) {
 		t.Fatalf("dispatch rule create = %s", fake.bodies["CreateSIPDispatchRule"])
@@ -177,7 +185,7 @@ func TestEnsureLiveKitSIPRecordsIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if injected["LIVEKIT_SIP_INBOUND_TRUNK"] != "ST_in_1" || injected["LIVEKIT_SIP_OUTBOUND_TRUNK"] != "ST_out_1" {
+	if injected["LIVEKIT_SIP_INBOUND_TRUNK"] != "ST_in_1" {
 		t.Fatalf("second run injected = %v", injected)
 	}
 	second := strings.Join(fake.requests, ",")
@@ -206,7 +214,7 @@ func TestEnsureLiveKitSIPRecordsReadsSnakeCaseResponses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if injected["LIVEKIT_SIP_INBOUND_TRUNK"] != "ST_in_9" || injected["LIVEKIT_SIP_OUTBOUND_TRUNK"] != "ST_out_9" {
+	if injected["LIVEKIT_SIP_INBOUND_TRUNK"] != "ST_in_9" {
 		t.Fatalf("injected = %v", injected)
 	}
 	if strings.Contains(strings.Join(fake.requests, ","), "Create") {
@@ -367,8 +375,13 @@ func TestExecDevTelephonySIPCreatesRecordsBetweenInfraAndApp(t *testing.T) {
 	if !strings.Contains(lines[0], "--wait livekit_server livekit_sip redis") || !strings.Contains(lines[0], "TRUNKS=/") {
 		t.Fatalf("infra up = %q", lines[0])
 	}
-	if !strings.Contains(lines[1], "TRUNKS=ST_in_1/ST_out_1") {
-		t.Fatalf("application up did not receive trunk IDs: %q", lines[1])
+	// Inbound only: the outbound half of the trace probe is empty because no
+	// outbound trunk is created any more (SCHEMA N33, 2026-08-12).
+	if !strings.Contains(lines[1], "TRUNKS=ST_in_1/") {
+		t.Fatalf("application up did not receive the inbound trunk ID: %q", lines[1])
+	}
+	if strings.Contains(lines[1], "TRUNKS=ST_in_1/ST_") {
+		t.Fatalf("application up received an outbound trunk ID: %q", lines[1])
 	}
 	if !strings.Contains(out.String(), "call +15550001111") {
 		t.Fatalf("call line missing:\n%s", out.String())

@@ -91,31 +91,10 @@ func ensureLiveKitSIPRecords(ctx context.Context, out io.Writer, targetName stri
 		fmt.Fprintf(out, "%s: LiveKit dispatch rule %q (%s)\n", targetName, dispatchName, action)
 	}
 
-	if needs("LIVEKIT_SIP_OUTBOUND_TRUNK") {
-		address := envValue(env, plan.Environment["sip_address"])
-		trunkID, reused, err := client.ensureRecord(ctx, "ListSIPOutboundTrunk", "CreateSIPOutboundTrunk",
-			map[string]any{"trunk": map[string]any{
-				"name": "unmute " + targetName + " outbound", "address": address, "numbers": []string{number},
-				// Auth goes into the request body only; never into emitted
-				// files, compose files, or printed output (V6, C6).
-				"authUsername": envValue(env, plan.Environment["sip_username"]),
-				"authPassword": envValue(env, plan.Environment["sip_password"]),
-			}},
-			"trunk",
-			// ponytail: list responses may redact auth fields, so identity is
-			// address+numbers; a changed password on the same address reuses
-			// the old record until the trunk is deleted by hand.
-			func(item sipRecord) bool {
-				return item.string("address") == address && slices.Equal(item.strings("numbers"), []string{number})
-			},
-			func(item sipRecord) string { return item.string("sipTrunkId", "sip_trunk_id") },
-		)
-		if err != nil {
-			return nil, fmt.Errorf("ensure LiveKit outbound trunk: %w", err)
-		}
-		injected["LIVEKIT_SIP_OUTBOUND_TRUNK"] = trunkID
-		fmt.Fprintf(out, "%s: LiveKit outbound trunk %s (%s)\n", targetName, trunkID, createdOrReused(reused))
-	}
+	// No outbound trunk is created here. The generated agent dials with the
+	// carrier's trunk settings inline, so local development uses the same
+	// mechanism a deployment does, and a transfer that works in one cannot fail
+	// in the other for want of a registered trunk (SCHEMA N33, 2026-08-12).
 	return injected, nil
 }
 

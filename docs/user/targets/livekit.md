@@ -463,19 +463,19 @@ carriers; only their environment-variable names and values change.
 # connections/primary_phone.yaml
 kind: telephony
 environment:
-  sip_address: TWILIO_SIP_ADDRESS
-  sip_username: TWILIO_SIP_USERNAME
-  sip_password: TWILIO_SIP_PASSWORD
-  from_number: TWILIO_PHONE_NUMBER
+  sip_address: SIP_TRUNK_HOSTNAME
+  sip_username: SIP_AUTH_USERNAME
+  sip_password: SIP_AUTH_PASSWORD
+  from_number: SIP_FROM_NUMBER
 ```
 
 The carrier matrix makes those values explicit:
 
 | Route | Carrier | Connection environment values | Generated integration | Status |
 |---|---|---|---|---|
-| `sip` | Twilio | `TWILIO_SIP_ADDRESS`, `TWILIO_SIP_USERNAME`, `TWILIO_SIP_PASSWORD`, `TWILIO_PHONE_NUMBER` | Self-hosted LiveKit SIP and Twilio trunk inputs | Offline-tested; provisional |
-| `sip` | Telnyx | `TELNYX_SIP_ADDRESS`, `TELNYX_SIP_USERNAME`, `TELNYX_SIP_PASSWORD`, `TELNYX_PHONE_NUMBER` | Self-hosted LiveKit SIP and Telnyx trunk inputs | Offline-tested; provisional |
-| `sip` | Plivo | `PLIVO_SIP_ADDRESS`, `PLIVO_SIP_USERNAME`, `PLIVO_SIP_PASSWORD`, `PLIVO_PHONE_NUMBER` | Self-hosted LiveKit SIP and Plivo trunk inputs | Offline-tested; provisional |
+| `sip` | Twilio | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Self-hosted LiveKit SIP and Twilio trunk inputs | Offline-tested; provisional |
+| `sip` | Telnyx | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Self-hosted LiveKit SIP and Telnyx trunk inputs | Offline-tested; provisional |
+| `sip` | Plivo | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Self-hosted LiveKit SIP and Plivo trunk inputs | Offline-tested; provisional |
 | `sip` | Exotel | Exotel SIP values | No emitted adapter | Gated pending provider-specific proof |
 | `connector` | Twilio | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | Generated bridge into a self-hosted LiveKit room | Offline-tested; provisional |
 
@@ -541,14 +541,14 @@ Telnyx Mission Control. For Plivo, use the Zentrunk termination domain,
 outbound credential, and linked number from the Plivo Console.
 
 Compilation emits the selected `sip-inbound-trunk.json`,
-`sip-outbound-trunk.json`, and `sip-dispatch-rule.json` inputs for production
-deployments. Materialize their
-environment placeholders with `envsubst`, then run the `lk sip ... create`
-commands in the generated README. Copy the returned IDs to
-`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` as requested by
-`.env.example`. For local development none of this is needed:
+and `sip-dispatch-rule.json` inputs for production deployments, for inbound
+calls only. Materialize their environment placeholders with `envsubst`, then run
+the `lk sip ... create` commands in the generated README. Copy the returned ID to
+`LIVEKIT_SIP_INBOUND_TRUNK` as requested by `.env.example`. There is no outbound
+trunk input: the agent dials out with the carrier's trunk settings passed inline
+(SCHEMA N33, 2026-08-12). For local development none of this is needed:
 `unmute dev --telephony` creates the same records on the local server itself
-and supplies both IDs.
+and supplies the ID.
 
 Self-hosted SIP runs LiveKit Server and LiveKit SIP against the same Redis.
 Redis is their shared datastore and message bus, so calls, SIP participants,
@@ -574,10 +574,10 @@ unmute dev acme --target livekit --telephony
 
 The command runs the whole bootstrap itself: Docker Compose builds the Agent and
 starts Redis, LiveKit Server, and LiveKit SIP first; the command then creates or
-reuses the inbound trunk, outbound trunk, and `call-` dispatch rule on that
-local server with the generated development key pair, injects the returned
-`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK`, and starts the
-application. Record creation is idempotent: the named Redis volume persists,
+reuses the inbound trunk and `call-` dispatch rule on that local server with
+the generated development key pair, injects the returned
+`LIVEKIT_SIP_INBOUND_TRUNK`, and starts the application. No outbound trunk is
+created, locally or in production. Record creation is idempotent: the named Redis volume persists,
 so restarts reuse existing records instead of duplicating them.
 
 Non-empty external `LIVEKIT_URL`, API key/secret, `REDIS_URL`, or trunk ID
