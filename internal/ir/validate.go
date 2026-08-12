@@ -29,6 +29,12 @@ type TargetValidation struct {
 	Provider Provider
 	Errors   []string
 	Warnings []string
+	// Prerequisites are account features the provider grants on request that this
+	// package's route needs. Neither errors nor warnings: unmute compiles the
+	// package correctly and cannot know what the author's account is allowed to
+	// do, so this states a fact about the route and never claims a failure
+	// (research D3). Reported at exit 0.
+	Prerequisites []targetcap.RouteAccountPrerequisite
 }
 
 type ForwardedBinding struct {
@@ -567,6 +573,72 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	validateTelephonyPlan(resolved.Telephony, row)
 	validateCapacity(agent, resolved, provider, row)
 	validateChannels(agent, resolved, provider, caps, row)
+	validateRoutePrerequisites(agent, resolved, provider, row)
+}
+
+func validateRoutePrerequisites(agent *Agent, resolved Target, provider targetcap.Provider, row *TargetValidation) {
+	row.Prerequisites = RoutePrerequisites(agent, resolved, provider)
+}
+
+// RoutePrerequisites returns the account features this package's route needs that
+// the provider grants on request.
+//
+// One function, two callers: `validate` reports these and the emitters carry them
+// into the generated project. Going through the same door is what stops the
+// command and the artifact disagreeing about what an account has to be allowed to
+// do (Principle III).
+//
+// Keyed on the route triple rather than on the resolved telephony plan, because
+// the Daily route has no plan: it declares no connection and no telephony
+// channel, so every other route fact is unreachable there.
+func RoutePrerequisites(agent *Agent, resolved Target, provider targetcap.Provider) []targetcap.RouteAccountPrerequisite {
+	candidates := targetcap.RouteAccountPrerequisites(provider, resolved.Transport, resolved.Carrier)
+	if len(candidates) == 0 {
+		return nil
+	}
+	used := routeCapabilitiesUsed(agent)
+	var applies []targetcap.RouteAccountPrerequisite
+	for _, prerequisite := range candidates {
+		if prerequisite.Needs(used) {
+			applies = append(applies, prerequisite)
+		}
+	}
+	return applies
+}
+
+// routeCapabilitiesUsed names the route capabilities this package exercises. It
+// is what keeps a prerequisite from becoming a standing banner: a package that
+// needs none of them must not be told about one.
+func routeCapabilitiesUsed(agent *Agent) []targetcap.TelephonyFeature {
+	var used []targetcap.TelephonyFeature
+	note := func(feature targetcap.TelephonyFeature) {
+		if !slices.Contains(used, feature) {
+			used = append(used, feature)
+		}
+	}
+	for _, control := range agent.Controls {
+		transfer, ok := control.(*HumanTransfer)
+		if !ok {
+			continue
+		}
+		if transfer.Mode == TransferWarm {
+			note(targetcap.TelephonyFeature(targetcap.WarmTransfer))
+			continue
+		}
+		note(targetcap.TelephonyFeature(targetcap.ColdTransfer))
+	}
+	for _, channel := range agent.Channels {
+		if channel.Kind != ChannelTelephony {
+			continue
+		}
+		if channel.Inbound != nil && *channel.Inbound {
+			note(targetcap.TelephonyInbound)
+		}
+		if channel.Outbound != nil && *channel.Outbound {
+			note(targetcap.TelephonyOutbound)
+		}
+	}
+	return used
 }
 
 func validateContext(context TaskContext, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {

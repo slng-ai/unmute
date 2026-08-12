@@ -47,6 +47,9 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		Transport:        target.Transport,
 		Tracing:          agent.Tracing != nil && agent.Tracing.Provider == "langfuse",
 	}
+	// Read through the same door validate uses, so the command and the emitted
+	// project cannot disagree about what the account has to be allowed to do.
+	data.Prerequisites = ir.RoutePrerequisites(agent, target, targetcap.Pipecat)
 	env := newEnvSet()
 	if data.Tracing {
 		for _, name := range []string{"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"} {
@@ -417,6 +420,42 @@ func setImportNeeds(data *pipecatData) {
 		data.FrameImports = append(data.FrameImports, "TTSSpeakFrame")
 	}
 	slices.Sort(data.FrameImports)
+	setDailyParams(data)
+}
+
+// setDailyParams picks the Daily route's transport classes and the one import
+// that carries them. It runs last because the import depends on HasColdTransfer,
+// and bot.py must import only what the package exercises.
+func setDailyParams(data *pipecatData) {
+	if data.Transport != "daily-sip" {
+		return
+	}
+	// Pipecat's create_transport assigns an inbound call's dialin_settings,
+	// api_key, and api_url straight onto whatever the params factory returns. The
+	// generic TransportParams is a Pydantic model that declares none of the three
+	// and allows no extras, so it raises and the call never connects. That was the
+	// whole reason an inbound Daily call could not be answered. DailyParams
+	// subclasses TransportParams and declares all three, so the kwargs already
+	// passed keep working. Verified by instantiating both against pipecat-ai
+	// 1.5.0 on 2026-08-12: the generic class raises ValueError, DailyParams
+	// accepts.
+	//
+	// The import is the API reference's spelling, not the shorter one in the
+	// telephony guides: 1.5.0 does not re-export the class from
+	// pipecat.transports.daily, so the guides' spelling is an ImportError.
+	// Confirmed by importing both paths from the installed package.
+	params := &pipecatTransportParams{
+		Class:  "DailyParams",
+		Import: "from pipecat.transports.daily.transport import DailyParams",
+	}
+	if data.HasColdTransfer {
+		// The transfer primitive is a Daily transport method, not a BaseTransport
+		// one, so the tool has to narrow before calling it. Both classes come from
+		// the same module, so they ride one import.
+		params.Transport = "DailyTransport"
+		params.Import = "from pipecat.transports.daily.transport import DailyParams, DailyTransport"
+	}
+	data.DailyParams = params
 }
 
 // collectImportsExtras returns the deduped, sorted service imports for bot.py,
@@ -758,7 +797,7 @@ func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target
 		tool.HangupOnUnavailable = c.OnUnavailable == ir.OnUnavailableHangup
 		return tool, nil
 	case ir.TransferWarm:
-		return pipecatTool{}, fmt.Errorf("human transfer %q: Pipecat has no native warm transfer; warm compiles on (livekit, sip) only", name)
+		return pipecatTool{}, fmt.Errorf("human transfer %q: this driver does not emit warm transfer yet (Daily documents the pattern; it needs the bot to own the call audio, tracked as feature 005); warm compiles on (livekit, sip) today", name)
 	}
 	return pipecatTool{}, fmt.Errorf("human transfer %q mode %q has no Pipecat lowering", name, c.Mode)
 }

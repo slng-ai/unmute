@@ -144,6 +144,26 @@ uses the local VAD. Semantic endpointing is also advisory.
   gated until authenticated WebSocket ingress is proven. Pipecat does not use
   a SIP trunk for these routes; see the
   [orchestrator comparison](../learn/07-phone-calls.md#configure-telephony-by-orchestrator).
+- **`transport: daily-sip`** takes phone calls over Daily PSTN. This is the one
+  Pipecat route with a transfer primitive, and it is the managed route: Daily
+  carries the call to your agent deployed on Pipecat Cloud, through the
+  platform's own dial-in webhook. It takes **no `carrier` and no `connection`**,
+  and you declare **no phone channel** for it: there is no carrier adapter to
+  configure, so the compiler derives what the route needs from the transport.
+
+  Three things follow from Daily owning the call, and the emitted `README.md`
+  spells all three out:
+
+  - **You attach a number to a deployed agent**, from the Pipecat Cloud dashboard
+    or Daily's REST API. You run no webhook server.
+  - **Dial-out has to be enabled on the Daily domain.** It is a paid feature
+    granted on request, and international dial-out is granted separately. Cold
+    transfer needs it, because it dials the destination. `unmute validate` names
+    this before you spend anything, and still exits 0: the package is correct,
+    the account may not be provisioned yet.
+  - **`unmute dev --telephony` refuses on this route**, because there is no local
+    topology to run. Talk to the agent in the browser or with `--console`, and get
+    a real phone call by deploying.
 
 ### Telephony carrier integrations
 
@@ -218,6 +238,9 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | `max_duration` | ok |
 | `provider: local` for listen and speak | ok |
 | carrier WebSocket telephony | provisional for generated Twilio, Telnyx, and Plivo adapters; Exotel is gated pending authenticated WebSocket ingress |
+| Daily PSTN telephony (`transport: daily-sip`) | provisional until its credentialed run is recorded; needs dial-out enabled on the Daily domain, which `validate` names |
+| cold human transfer (`cold:`) | ok on `transport: daily-sip`; no other Pipecat route has a transfer primitive |
+| warm human transfer (`warm:`) | not emitted yet, on any route. Daily documents the pattern (feature 005); the carrier WebSocket transports have no transfer control at all |
 
 Everything in the [learn pages](../learn/01-one-agent.md), including the guarded handoff, the task, and the task group, runs here. The one hard `fail` is the per-task `model:` override; it sits with the driver gates below.
 
@@ -231,10 +254,15 @@ Some features are in the schema and Pipecat itself supports them, but this first
 - **Voicemail detection** (`on_voicemail`) on carrier WebSocket routes.
 - **`mcp` tools.** Use `webhook` or `local` Python-handler tools, which are
   emitted.
-- **Warm human transfer** (the `warm:` block), on every route. Pipecat has
-  no native warm-transfer primitive, and the documented pattern makes the bot
-  own the call's audio path, which this project deliberately does not do.
-  Warm compiles on `(livekit, sip)` only, and validation says so by name.
+- **Warm human transfer** (the `warm:` block), on every route, for two different
+  reasons (checked 2026-08-12). On the **carrier WebSocket** routes the platform
+  has no transfer control at all, so there is nothing to build against. On the
+  **Daily** route Daily does document a warm pattern, and this project has not
+  built it yet: the pattern needs the generated bot to own the call's audio,
+  through a transfer coordinator, a hold-music mixer, and a gate per leg. That is
+  deliberate work rather than a default, tracked as feature 005. Either way warm
+  compiles on `(livekit, sip)` today and validation says so by name. The `warm:`
+  block you would write already exists and will not change when it lands.
   Cold compiles on the Daily route (`transport: daily-sip`), where
   `sip_call_transfer` is the platform's own primitive
   ([TRANSFERS.md](../../TRANSFERS.md)).

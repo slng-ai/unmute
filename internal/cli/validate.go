@@ -49,6 +49,21 @@ func runValidate(cmd *cobra.Command, dir string, names []string) error {
 		}
 		fmt.Fprintf(out, "%s %s (%s)\n", status, u.accent(row.Name), row.Provider)
 	}
+	// Prerequisites first, because they are the thing an author has to go and ask
+	// someone else for, and the lead time is theirs, not ours. Exit code stays 0:
+	// the package is correct, the account may not be provisioned yet.
+	wrotePrerequisites := false
+	for _, row := range report.PerTarget {
+		for _, prerequisite := range row.Prerequisites {
+			if !wrotePrerequisites {
+				fmt.Fprintln(cmd.ErrOrStderr(), "\nSetup prerequisites:")
+				wrotePrerequisites = true
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "  %s: %s: %s\n    %s (verified %s)\n",
+				row.Name, prerequisite.Name, prerequisite.Summary,
+				prerequisite.Docs, prerequisite.Verified)
+		}
+	}
 	wroteWarnings := false
 	for _, row := range report.PerTarget {
 		for _, warning := range row.Warnings {

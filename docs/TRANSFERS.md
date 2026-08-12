@@ -22,8 +22,8 @@ means the platform ships and maintains the primitive.
 |---|---|---|---|
 | livekit | `sip` (trunk) | **yes**: `TransferSIPParticipant`, a SIP REFER through the trunk. The caller leaves the room and the session ends. On failure the caller stays with the agent, so `on_unavailable` applies. | **yes**: `WarmTransferTask`, LiveKit's prebuilt. Hold music, the consult call, the briefing (transcript plus your `briefing` text), and the merge are all the task's. Every failure (no answer, decline, voicemail, failed dial) comes back as one error and `on_unavailable` applies. |
 | livekit | `connector` (Twilio websocket) | no | no |
-| pipecat | Daily (`transport: daily-sip`) | **yes**: `transport.sip_call_transfer`. The bot announces, Daily reroutes the leg, the bot drops off. Needs dial-out enabled on the Daily domain. | no |
-| pipecat | carrier websockets (twilio, telnyx, plivo, exotel) | no | no |
+| pipecat | Daily (`transport: daily-sip`) | **yes**: `transport.sip_call_transfer`. The bot announces, Daily reroutes the leg, the bot drops off. Needs dial-out enabled on the Daily domain. | **not emitted yet.** The platform supports it; this project has not built it. Feature 004. |
+| pipecat | carrier websockets (twilio, telnyx, plivo, exotel) | no: the platform has no transfer control on these transports | no: same reason |
 
 Sources: [LiveKit call forwarding](https://docs.livekit.io/telephony/features/transfers/cold.md),
 [LiveKit agent-assisted transfer](https://docs.livekit.io/telephony/features/transfers/warm.md),
@@ -32,16 +32,37 @@ Sources: [LiveKit call forwarding](https://docs.livekit.io/telephony/features/tr
 [Pipecat telephony overview](https://docs.pipecat.ai/pipecat/telephony/overview)
 (the websocket routes have "no advanced call center features like transfers").
 
-Why the two "no" rows are firm:
+**Every cell above says which of two things it means**, because they are not
+the same and mixing them up is how a document ends up lying. "no" means the
+platform does not ship the primitive. "not emitted yet" means it does and we
+have not built it. Corrected 2026-08-12: the Pipecat warm cell used to read
+"no", which was wrong.
 
-- The websocket routes (both drivers) carry media only. Everything this
-  project once built on them (REST redirects, Twilio conferences, in-process
-  audio bridges) meant owning the call's audio path, and every live test
-  found a new lifecycle bug there. That work is deleted, on purpose.
-- Pipecat has no warm primitive on any route. Its documented warm pattern
-  makes the bot the audio coordinator (dial-out into the same room, hold
-  mixer, audio gating), which is the same class of complexity. If a Pipecat
-  warm transfer is ever needed, it is its own decision, not a default.
+Why the websocket "no" rows are firm:
+
+- The websocket routes (both drivers) carry media only, and Pipecat's own
+  telephony overview says those transports have no call-transfer control.
+  Everything this project once built on them (REST redirects, Twilio
+  conferences, in-process audio bridges) meant owning the call's audio path,
+  and every live test found a new lifecycle bug there. That work is deleted,
+  on purpose, and the rule stands there.
+
+Why Pipecat warm on Daily says "not emitted yet" instead:
+
+- Daily documents two transfer patterns, cold and warm
+  ([Daily PSTN](https://docs.pipecat.ai/pipecat/telephony/daily-pstn),
+  verified 2026-08-12). So the platform is not the limit.
+- The warm pattern does put the generated bot in charge of audio: a transfer
+  coordinator, a hold-music mixer, and a gate per leg. That is the same class
+  of complexity the deleted work ran into, which is a real reason to build it
+  deliberately rather than by default. It is **not** a reason to write it down
+  as a platform limitation.
+- One thing makes Daily safer than the deleted designs: Daily's room is
+  already the bridge and the bot already owns it, so the gates sit inside a
+  pipeline we control instead of stitching two carrier sockets together.
+- Building it is **feature 005**. Nothing in `agent.yaml` needs to change for
+  it: the `warm:` block, its `destination`, `briefing`, `ring_timeout`, and
+  `on_unavailable` already exist and are already what LiveKit uses.
 
 Two platform facts worth knowing before you provision anything:
 
@@ -243,15 +264,53 @@ need two phones to answer as "billing" and "supervisor".
 5. **Failure drill**: point `BILLING_PHONE_NUMBER` at an undialable value
    and call again. Expect the agent to say the transfer did not work and
    keep helping (or hang up after a goodbye, per `on_unavailable`).
+6. **Double-request drill**: call again and ask to be put through twice in quick
+   succession. Expect **exactly one** transfer attempt. The bot keeps the first
+   attempt's answer and replays it, so a second ask cannot fire a second REFER,
+   and a transfer that failed cannot come back to the model as a success. Added
+   2026-08-12; before that there was no guard here at all.
 
 ### Teardown
 
 A test rig must not become a standing bill: release the Twilio number and
-trunk if they were test-only, release the Daily number, `pipecat cloud agent delete`
-the deployed bot, and delete unused LiveKit trunks and dispatch rules.
+trunk if they were test-only, `pipecat cloud agent delete` the deployed bot,
+delete the secret set if it was made for the test, and delete unused LiveKit
+trunks and dispatch rules.
+
+**The Daily number is the exception.** Daily does not allow releasing a number
+until **14 days after purchase**, and releasing is permanent once it is allowed
+(verified against
+[Daily phone numbers](https://docs.pipecat.ai/pipecat/telephony/daily-phone-numbers),
+2026-08-12). So it cannot be torn down with the rest of the rig: you own it, and
+pay for it, for at least a fortnight. Note the purchase date, then release it
+later with `scripts/daily-phone-number.sh release <id>`. Plan a Daily test rig
+knowing this, rather than discovering it on teardown day.
 
 ### Status
 
-Every transfer row above is **provisional until its recipe has been run as
-written**: LiveKit SIP cold, LiveKit SIP warm, Pipecat Daily cold. When a run
-finds a wrong step, the fix lands in this document first.
+A row is **verified** only once its recipe has been run as written, against real
+accounts, with the result dated below. Anything else is **provisional**, however
+much offline testing it has. When a run finds a wrong step, the fix lands in this
+document before it lands in code.
+
+| row | state | evidence |
+|---|---|---|
+| LiveKit SIP cold | provisional | no credentialed run recorded |
+| LiveKit SIP warm | provisional | no credentialed run recorded |
+| Pipecat Daily cold | provisional | no credentialed run recorded. Proven offline against real `pipecat-ai` 1.5.0 on 2026-08-12: the emitted transport accepts a real dial-in payload, the project passes `ruff` and `ty`, and the transfer attempts at most once. None of that is a phone call. |
+
+Nothing here is verified yet. Saying so plainly is the point: three rows sat
+under one sentence promising a run that had not happened, which reads as a record
+of success to anyone skimming.
+
+**What the Pipecat Daily row is waiting on**, specifically, is steps 1 through 6
+of the rig above, which need a Pipecat Cloud account, a Daily domain with dial-out
+granted, two answerable phones, and real per-minute money. Until someone does
+that, the honest claim is that inbound answering and cold transfer are *built and
+offline-proven*, not that they work.
+
+One defect this row already found without a phone call: every inbound Daily call
+failed while the transport was being built, because the generated bot handed the
+runner a parameter object that rejects a call's own details. Fixed 2026-08-12.
+That is why the row's offline evidence is worth recording even though it is not a
+run.

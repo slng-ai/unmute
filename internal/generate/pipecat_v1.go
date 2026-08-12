@@ -228,6 +228,19 @@ type pipecatCallStart struct {
 	Required bool
 }
 
+// pipecatTransportParams is the parameter object one transport key constructs,
+// plus the import that class needs. The two travel as one unit so an emitted
+// class structurally cannot lose its import — the same invariant the provider
+// catalogue holds for service classes (data-model TransportParamsClass).
+type pipecatTransportParams struct {
+	Class string
+	// Transport is the transport class the route's transfer primitive lives on,
+	// set only when the package emits a transfer. The tool narrows to it before
+	// calling the primitive, because the primitive is not on BaseTransport.
+	Transport string
+	Import    string
+}
+
 type pipecatData struct {
 	Project          string
 	Version          string
@@ -258,16 +271,24 @@ type pipecatData struct {
 	MaxDurationSecs     int
 	HasColdTransfer     bool
 	Transport           string
-	FrameImports        []string // pipecat.frames.frames names, merged into one import (V2)
-	Imports             []string
-	Extras              []string
-	Deps                []string // standalone pip deps for plugin services (e.g. pipecat-slng)
-	RequiredEnv         []string
-	DevEnv              []string // provider creds the web dev image needs, without telephony/coordination env (compose.dev.yaml)
-	DevOptionalEnv      []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
-	Notes               []string
-	Tracing             bool
-	Telephony           *pipecatTelephony
+	// DailyParams is the parameter object the "daily" transport key constructs on
+	// the Daily route, where the generic one cannot work. Nil everywhere else, so
+	// no other route churns and no package carries a Daily import it never uses.
+	DailyParams    *pipecatTransportParams
+	FrameImports   []string // pipecat.frames.frames names, merged into one import (V2)
+	Imports        []string
+	Extras         []string
+	Deps           []string // standalone pip deps for plugin services (e.g. pipecat-slng)
+	RequiredEnv    []string
+	DevEnv         []string // provider creds the web dev image needs, without telephony/coordination env (compose.dev.yaml)
+	DevOptionalEnv []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
+	Notes          []string
+	Tracing        bool
+	Telephony      *pipecatTelephony
+	// Prerequisites are the route's account features the provider grants on
+	// request, read from the rulebook in internal/target and never restated here.
+	// Present only when this package uses something that needs one.
+	Prerequisites []targetcap.RouteAccountPrerequisite
 
 	// Import needs: keep bot.py free of unused imports (only what a given spec
 	// actually exercises), so the emitted pipeline reads clean.
@@ -488,7 +509,10 @@ type pipecatReportJSON struct {
 	Sizing      []ir.Sizing           `json:"sizing,omitempty"`
 	Variables   []reportVariable      `json:"variables,omitempty"`
 	Secrets     []reportSecret        `json:"secrets,omitempty"`
-	Notes       []string              `json:"notes,omitempty"`
+	// Prerequisites are inspectable for the same reason the forwarded region is:
+	// a fact the compiler acted on has to be readable back out.
+	Prerequisites []targetcap.RouteAccountPrerequisite `json:"route_prerequisites,omitempty"`
+	Notes         []string                             `json:"notes,omitempty"`
 }
 
 func pipecatReport(agent *ir.Agent, data pipecatData, files []File, bindings []ir.ForwardedBinding, sizing []ir.Sizing) ([]byte, error) {
@@ -510,7 +534,8 @@ func pipecatReport(agent *ir.Agent, data pipecatData, files []File, bindings []i
 		Regions: regionList(data.DeploymentRegion), RequiredEnv: data.RequiredEnv,
 		Bindings: bindings, Sizing: sizing,
 		Variables: reportVariables(agent), Secrets: reportSecrets(agent),
-		Notes: data.Notes,
+		Prerequisites: data.Prerequisites,
+		Notes:         data.Notes,
 	}, "", "  ")
 	if err != nil {
 		return nil, err

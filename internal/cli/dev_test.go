@@ -130,6 +130,46 @@ func TestDev_help(t *testing.T) {
 	}
 }
 
+// FR-028: `--telephony` on the Daily route has nothing to offer, so it refuses.
+//
+// The refusal is the interesting part. Daily delivers phone calls through its own
+// infrastructure to a deployed agent, so there is no local topology to run, but
+// the author can still talk to this agent right now in two other modes. A silent
+// no-op here would be the flag that does nothing which Principle II forbids, and
+// a message saying telephony is unsupported would be false: Daily is the only
+// Pipecat telephony route there is.
+func TestDevTelephonyRefusesOnTheDailyRouteAndNamesWhatWorks(t *testing.T) {
+	cmd := newRootCmd()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	root := filepath.Join("..", "..", "examples", "human-transfer-daily")
+	cmd.SetArgs([]string{"dev", "--telephony", "--target", "pipecat", root})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("--telephony on the Daily route must refuse, got exit 0")
+	}
+	message := err.Error()
+	for _, want := range []string{
+		"daily-sip",       // names the route
+		"--console",       // names a mode that does work
+		"browser",         // names the other one
+		"deploy",          // points at how to get a real phone call
+		"human-transfer-", // names the package, so the fix is copy-pasteable
+	} {
+		if !strings.Contains(message, want) {
+			t.Errorf("refusal missing %q:\n%s", want, message)
+		}
+	}
+	// It must not claim the route has no telephony. It is the only Pipecat
+	// telephony route there is.
+	for _, forbidden := range []string{"no resolved telephony route", "not supported", "unsupported"} {
+		if strings.Contains(message, forbidden) {
+			t.Errorf("refusal says %q, which is false for this route:\n%s", forbidden, message)
+		}
+	}
+}
+
 func TestTelephonyDevPlanUsesExactPublicURLAndResolvedArtifact(t *testing.T) { // telephony V11, V17
 	public, err := parseTelephonyPublicURL("https://voice.example.com/unmute/")
 	if err != nil {

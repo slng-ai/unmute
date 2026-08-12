@@ -784,14 +784,19 @@ work. The map with sources lives in [TRANSFERS.md](../../TRANSFERS.md).
 | Route | `cold:` | `warm:` |
 |---|---|---|
 | LiveKit `sip` + Twilio, Telnyx, or Plivo | yes | yes |
-| Pipecat Daily (`transport: daily-sip`) | yes | no |
+| Pipecat Daily (`transport: daily-sip`) | yes | not yet |
 | Pipecat `carrier-websocket` (any carrier) | no | no |
 | LiveKit `connector` + Twilio | no | no |
 
-Warm exists only where the platform has a prebuilt for it: LiveKit's
-`WarmTransferTask` on the SIP route. Pipecat has no native warm transfer on
-any route, so a Pipecat warm package fails validation pointing at
-`(livekit, sip)`.
+"no" and "not yet" mean different things here (checked 2026-08-12). **"no"**
+means the platform has no transfer control on that transport, so there is
+nothing to build against. **"not yet"** means it does and we have not built it:
+Daily documents a warm pattern, but it puts the generated bot in charge of the
+call's audio, so it is deliberate work rather than a default. Tracked as
+feature 005.
+
+Either way, a Pipecat warm package fails validation today and points you at
+`(livekit, sip)`, where LiveKit's `WarmTransferTask` prebuilt does the job.
 
 ### What actually happens on the call
 

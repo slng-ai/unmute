@@ -412,7 +412,11 @@ func Default() Table {
 			),
 			WarmTransfer: controls(
 				control(),
-				controlDeny("Pipecat has no native warm transfer; warm compiles on (livekit, sip) only (SPEC C1, C4)"),
+				// Says which of two things it means, per N34: Daily documents warm,
+				// this driver has not built it (feature 005); the carrier websocket
+				// transports have no transfer control at all. Writing either as the
+				// other is the defect FR-032 exists to stop.
+				controlDeny("this driver does not emit warm transfer yet; Daily documents the pattern but it needs the bot to own the call audio, and Pipecat's websocket transports have no transfer control at all. Warm compiles on (livekit, sip) today (SPEC C1, C4)"),
 				controlNamedCarrier("twilio", "Vapi warm transfer requires carrier Twilio"),
 				controlNamedCarrier("twilio", "Deepgram transfer requires carrier Twilio in the generated bridge"),
 			),
