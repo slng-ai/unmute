@@ -38,7 +38,7 @@ Rules:
 |---|---|---|
 | C1 | `instructions=WorkflowInstructions(...)` is present. `extra_instructions=` appears in **no** emitted file. | FR-002 |
 | C2 | `persona=` is the module-level constant, never an inline string, so several warm transfers in one package share one text. | FR-001, principle III |
-| C3 | `extra=` carries the package's authored briefing verbatim when there is one, and the argument is **absent** when there is not. An empty string would delete the platform's own section rather than leave its default. | FR-002 |
+| C3 | `extra=` carries the package's authored briefing verbatim when there is one, and the argument is **absent** when there is not, because a no-op argument in emitted code is a thing a reader has to check. **Corrected during implementation, 2026-08-12.** This rule first said an empty string would delete the platform's own section. That is false for `extra`: it defaults to `""` and the platform holds no default text for that slot, so omitting it and passing `""` resolve to byte-identical instructions, measured inside 1.6.9 rather than read. It is true for `persona`, which has a `NOT_GIVEN` sentinel and a platform default behind it. The rule stands; only its reason changed. | FR-002 |
 | C4 | The conversation is read into `briefing_ctx` **once** and both the log line and `chat_ctx=` use that local. | FR-003, FR-006 |
 | C5 | The trunk and number arguments, the destination expression and the ring timeout are unchanged from what feature 002 emits. | FR-016 |
 

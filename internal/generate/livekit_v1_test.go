@@ -1210,13 +1210,21 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	}
 	botpy = artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		"from livekit.agents.beta.workflows import WarmTransferTask",
+		"from livekit.agents.beta.workflows import WarmTransferTask, WorkflowInstructions",
 		`sip_call_to="+14155550123"`,
-		"chat_ctx=self.chat_ctx,",
-		// extra_instructions is the 1.6-series briefing surface, verified in
-		// the reference checkout (SPEC C3, V10). WorkflowInstructions never
-		// existed there; emitting it was an ImportError at boot (T4).
-		`extra_instructions="Say who is calling and why.",`,
+		// The conversation is read into one local and that local is what is
+		// handed over, so the count logged beside it cannot describe something
+		// else (003 contract C4).
+		"chat_ctx=briefing_ctx,",
+		// instructions=WorkflowInstructions(...) is the supported briefing
+		// surface. extra_instructions is deprecated and the prebuilt warns and
+		// ignores it whenever instructions is given. WorkflowInstructions is the
+		// 1.6.9 name for what 1.6.4 called InstructionParts: the rename carries
+		// no alias, and it was verified by reading the installed package on
+		// 2026-08-12 rather than the older reference checkout.
+		"instructions=WorkflowInstructions(",
+		"persona=_BRIEFING_PERSONA,",
+		`extra="Say who is calling and why.",`,
 		"ringing_timeout=30,",
 		// The tool speaks before the hold starts (SPEC V4/B4).
 		`"One moment while I bring a colleague on the line.", allow_interruptions=False`,
@@ -1228,8 +1236,8 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 			t.Errorf("warm agent.py missing %q", want)
 		}
 	}
-	if strings.Contains(botpy, "WorkflowInstructions") {
-		t.Error("agent.py imports WorkflowInstructions, which does not exist in the pinned livekit-agents (V10)")
+	if strings.Contains(botpy, "extra_instructions") {
+		t.Error("agent.py still passes the deprecated extra_instructions, which the prebuilt ignores once instructions is given")
 	}
 	// V10: a warm package pins the verified beta minor series, not <2.0.
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
@@ -1262,7 +1270,8 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	// to, immediately after saying goodbye. Found on a live call 2026-08-12;
 	// upstream's own warm-transfer example returns nothing here too.
 	for _, want := range []string{
-		`logger.info("warm transfer merged: %s", result.human_agent_identity)`,
+		`"warm transfer merged after %ds: %s",`,
+		"result.human_agent_identity,",
 		"ctx.session.shutdown()",
 		"return None",
 	} {

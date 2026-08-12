@@ -20,7 +20,7 @@ means the platform ships and maintains the primitive.
 
 | driver | route | cold | warm |
 |---|---|---|---|
-| livekit | `sip` (trunk) | **yes**: `TransferSIPParticipant`, a SIP REFER through the trunk. The caller leaves the room and the session ends. On failure the caller stays with the agent, so `on_unavailable` applies. | **yes**: `WarmTransferTask`, LiveKit's prebuilt. Hold music, the consult call, the briefing (transcript plus your `briefing` text), and the merge are all the task's. Every failure (no answer, decline, voicemail, failed dial) comes back as one error and `on_unavailable` applies. |
+| livekit | `sip` (trunk) | **yes**: `TransferSIPParticipant`, a SIP REFER through the trunk. The caller leaves the room and the session ends. On failure the caller stays with the agent, so `on_unavailable` applies. | **yes**: `WarmTransferTask`, LiveKit's prebuilt. Hold music, the consult call and the merge are the task's. The **persona** that talks to the person is Unmute's since 2026-08-12 (SCHEMA N35), because the prebuilt's own never briefs unprompted; the transcript and your `briefing` text still land in the task's template. Every failure (no answer, decline, voicemail, failed dial) comes back as one error and `on_unavailable` applies. |
 | livekit | `connector` (Twilio websocket) | no | no |
 | pipecat | Daily (`transport: daily-sip`) | **yes**: `transport.sip_call_transfer`. The bot announces, Daily reroutes the leg, the bot drops off. Needs dial-out enabled on the Daily domain. | **not emitted yet.** The platform supports it; this project has not built it. Feature 004. |
 | pipecat | carrier websockets (twilio, telnyx, plivo, exotel) | no: the platform has no transfer control on these transports | no: same reason |
@@ -94,6 +94,95 @@ Open-source note: the LiveKit SIP server is self-hostable, so the `sip` route
 and both transfers work without LiveKit Cloud. Daily has no self-hosted
 option. The only fully open-source Pipecat telephony routes are the carrier
 websockets, and those cannot transfer.
+
+### What the person hears on a LiveKit warm transfer
+
+Added 2026-08-12 (SCHEMA N35). The person who answers hears the handover in the
+**first sentence**: who is on hold, what they want, what was already tried, then
+one question they can answer. No hello, no "how can I help", and no waiting to
+be asked what the call is about. When they say they can take it, the caller is
+put through.
+
+That is Unmute's prompt, not the platform's. The prebuilt ships its own persona
+saying to give the colleague context, but its lifecycle deliberately lets the
+human speak first and never briefs unprompted, so the agent's first turn is a
+*reply*. A reply to "hello" is a greeting. On 2026-08-12 a live warm transfer did
+exactly that: the manager answered, heard nothing, then got greeted like a
+stranger and had to ask what the call was about, which is the one thing a warm
+transfer exists to prevent. Verified against `livekit-agents` 1.6.9 as installed
+(`beta/workflows/warm_transfer.py`), 2026-08-12.
+
+Your `briefing` text is unchanged and still lands last, after the transcript. Use
+it for what is specific to your business: which fields to lead with, what the
+person needs to decide.
+
+**When the transcript is thin**, the person is told plainly that someone is on
+hold asking for a person and their details are not known yet, and asked whether
+they can take the call. That is a degraded transfer. A greeting would be a broken
+one.
+
+### The limit after the call is answered
+
+**`ring_timeout` covers ringing only.** Once the person picks up, nothing bounds
+the consultation, and the caller hears hold music for the whole of it. If the
+person answers and then never says yes or no, the caller can in principle hold
+until somebody hangs up.
+
+What the generated agent does about it is **ask**: the prompt tells the briefing
+model to decline the transfer, with the person's reason, when they say they
+cannot take it, when they go quiet, or when the conversation moves on without an
+answer. Declining is the prebuilt's own exit and it is the thing that stops the
+hold music and gives the caller back. So this is a mitigation and not a bound: a
+prompt is probabilistic.
+
+Why there is no bound: the platform has no post-answer timeout; the awaited
+result comes back through `asyncio.shield`, so a timeout on our side would raise
+in the generated code while the consultation kept running with the caller still
+muted and the music still playing; and the one method that stops the music and
+restores the caller is private. Read from `livekit-agents` 1.6.9 on 2026-08-12
+(`beta/workflows/warm_transfer.py`, `voice/agent.py`). Two ways to get a real
+bound are recorded in `specs/003-warm-transfer-briefing/plan.md`, and neither is
+worth its cost until somebody has met this limit in production. Documentation
+feedback asking upstream for a post-answer bound was sent on 2026-08-12.
+
+### Reading a transfer in the logs
+
+Added 2026-08-12 (SCHEMA N35), because the live failure above produced **no log
+line at all**, which left three different causes fitting the same evidence.
+`lk agent logs` now shows three `info` lines per transfer. Warm:
+
+```text
+human transfer fired: escalate_to_supervisor (warm)
+warm transfer dialling out: handing over 12 conversation messages
+warm transfer merged after 34s: sip_abc123
+```
+
+The third line is `warm transfer unavailable after <n>s: <reason>` instead
+whenever the transfer did not happen, for every reason: no answer, declined,
+voicemail, failed dial. Exactly one of the two appears. Line 2 with no line 3 is
+a consultation still running, or one that never ended, and that gap is itself the
+signal.
+
+Cold:
+
+```text
+human transfer fired: send_to_billing (cold)
+cold transfer referring the caller out
+cold transfer completed after 2s
+```
+
+or `cold transfer failed after <n>s: <reason>`.
+
+The message count on line 2 is what the agent handed over, not the smaller number
+the prebuilt's own transcript filter keeps. A count of **zero or one** means the
+briefing had nothing to work with, which is a different problem with a different
+fix from a briefing that was ignored. A healthy count means material was passed,
+not that the model used it.
+
+No log line carries a destination, a credential, an environment variable value, or
+the caller's words. The control name on the first line already says which
+destination fired, and the identity on the merge line is the platform's own value
+for the joined participant, which is not a phone number.
 
 ## 2. How to write the yaml
 
@@ -233,15 +322,28 @@ need two phones to answer as "billing" and "supervisor".
    on the first deploy. That README is the authority for the commands; this
    page deliberately does not copy them.
 4. **Warm test, no phone number needed**: open the Agent Console, talk to
-   the agent, ask for a manager. Expect: one spoken line, hold music, the
-   supervisor's phone rings, the supervisor is briefed as a colleague and
-   says "connect me", and the two of you are joined.
+   the agent, give a name and a complaint, ask for a manager. Expect: one spoken
+   line, hold music, the supervisor's phone rings, and the supervisor's **first
+   sentence** names the caller and the complaint and ends with a question. Say
+   you can take it and the two of you are joined. Keep `lk agent logs` open: the
+   three warm lines above tell you what happened even when the audio does not,
+   and the message count settles whether a bad briefing had nothing to work with
+   or ignored what it had.
 5. **Cold test**: call the Twilio number, ask about an invoice. Expect: one
    spoken line, then the billing phone rings and the agent is gone from the
-   call.
+   call. The log shows the three cold lines.
 6. **Failure drills**: let the supervisor leg ring out (expect
    `ring_timeout`, then the agent back with the caller, or a goodbye when
-   `on_unavailable: hangup`); answer and decline (same policy applies).
+   `on_unavailable: hangup`, and `warm transfer unavailable after <n>s` with a
+   duration close to `ring_timeout`); answer and decline (same policy, and the
+   log carries your reason).
+7. **The one drill that can fail and still ship**: answer the supervisor's phone,
+   say hello, then talk about anything except taking the call. Never say yes and
+   never say no. Expect the agent to ask again and then decline on your behalf,
+   and the caller to come back. If instead the caller keeps hearing hold music
+   and no third line appears, the mitigation did not hold. That is the limit
+   above, not a regression: record it, because nobody has a number for how often
+   a prompt-based exit works.
 
 ### Pipecat rig (cold)
 

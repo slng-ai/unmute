@@ -80,6 +80,7 @@ url_env, allowed_tools keeping D8 visibility. */ -}}
 {{end}}import logging
 import os
 {{if .NeedsRender}}import re
+{{end}}{{if or .HasWarmTransfer .HasColdTransfer}}import time
 {{end}}{{if .HasVars}}from dataclasses import dataclass
 {{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
@@ -137,7 +138,7 @@ import os
 {{- end}}
 )
 {{- if or .NeedsTaskGroups .HasWarmTransfer}}
-from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskGroup{{if .HasWarmTransfer}}, WarmTransferTask{{end}}{{else}}WarmTransferTask{{end}}
+from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskGroup{{end}}{{if and .NeedsTaskGroups .HasWarmTransfer}}, {{end}}{{if .HasWarmTransfer}}WarmTransferTask, WorkflowInstructions{{end}}
 {{- end}}
 {{- if .HasWarmTransfer}}
 from livekit.agents.llm import ToolError
@@ -242,6 +243,54 @@ def _sip_number() -> str:
     """The number to call from. Required with an inline trunk, which carries no
     number list for the platform to default from."""
     return os.environ[{{pyq .Telephony.FromNumberEnv}}]
+
+{{end}}
+{{- if .HasWarmTransfer}}
+# --- warm transfer briefing --------------------------------------------------
+# The persona the briefing agent wears while it talks to the colleague, in place
+# of the prebuilt's own. WarmTransferTask builds its instructions from a template
+# with three slots: this persona, the caller transcript, and the authored extra.
+# Only the persona is replaced. The platform still supplies the paragraph saying
+# who is who, the transcript itself, the sentence naming the tool that joins the
+# calls, and the instruction to open with a summary.
+#
+# Every paragraph below answers something observed on a live warm transfer on
+# 2026-08-12, where the colleague answered and heard "hello, how can I help":
+#   - open with the handover, because the prebuilt lets the human speak first and
+#     never briefs unprompted, so the agent's first turn is a reply, and a reply
+#     to "hello" is a greeting unless it is told otherwise;
+#   - name the cue, because joining the calls is this agent's own tool call and
+#     nothing else can trigger it, so the colleague has to be told what to say;
+#   - say what to do with a thin transcript, because a model asked to summarise
+#     nothing improvises a greeting;
+#   - decline out loud, because nothing on the platform bounds the consultation
+#     once the call is answered, and the caller is on hold for all of it.
+#
+# Verified against livekit-agents 1.6.9 on 2026-08-12
+# (beta/workflows/warm_transfer.py: PERSONA, INSTRUCTIONS_TEMPLATE).
+_BRIEFING_PERSONA = """\
+# Identity
+
+You are the assistant that took a caller's call. You are now on the phone to a colleague
+you called for help with it. The caller is not on this line: they are on hold and cannot
+hear any of this.
+
+# Goal
+
+Hand the caller over. Your first words are the handover, not a greeting. Do not say hello,
+do not offer help, and never wait to be asked what the call is about. Say who is on hold,
+what they want, and what was already tried or offered, then ask one question your colleague
+can answer. A few sentences, no more.
+
+Tell your colleague you will put the caller through as soon as they say they are ready.
+
+If the conversation history below is empty, or has no words from the caller in it, say that
+someone is on hold asking for a person, that you do not have their details yet, and ask
+whether your colleague can take the call. Say exactly that. Never greet instead.
+
+Your colleague may not be able to take it. If they say they cannot, if they go quiet, or if
+the conversation moves on without an answer, decline the transfer and give their reason. Do
+not leave the question open: the caller is holding for the whole of this conversation."""
 
 {{end}}
 {{- if .RequiredSecrets}}
@@ -541,6 +590,20 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         await ctx.session.say(
             "One moment while I bring a colleague on the line.", allow_interruptions=False
         )
+        # Read the conversation once and hand that same object over, so the
+        # number logged and the material passed cannot drift apart. The count is
+        # what was handed over, not the smaller number the prebuilt's own
+        # transcript filter keeps (it drops system messages, tool calls and empty
+        # text), so a count of zero or one means the briefing had nothing at all
+        # and a healthy count means material was passed, not that it was used.
+        # That distinction is the whole reason this line exists: on 2026-08-12 a
+        # warm transfer failed on a live call and left no log line to read.
+        briefing_ctx = self.chat_ctx
+        logger.info(
+            "warm transfer dialling out: handing over %d conversation messages",
+            len(briefing_ctx.items),
+        )
+        started = time.monotonic()
         try:
             result = await WarmTransferTask(
                 sip_call_to={{.DialExpr}},
@@ -548,10 +611,13 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
                 sip_connection=_sip_trunk(),
                 sip_number=_sip_number(),
 {{- end}}
-                chat_ctx=self.chat_ctx,
+                chat_ctx=briefing_ctx,
+                instructions=WorkflowInstructions(
+                    persona=_BRIEFING_PERSONA,
 {{- if .Briefing}}
-                extra_instructions={{pyq .Briefing}},
+                    extra={{pyq .Briefing}},
 {{- end}}
+                ),
 {{- if .RingTimeout}}
                 ringing_timeout={{.RingTimeout}},
 {{- end}}
@@ -561,7 +627,11 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
             # on_unavailable: hangup. The goodbye is spoken here, so the session
             # is over: no return value, or the LLM answers the tool and speaks
             # again on the way out.
-            logger.info("warm transfer unavailable, ending the call: %s", error)
+            logger.info(
+                "warm transfer unavailable after %ds: %s",
+                int(time.monotonic() - started),
+                error,
+            )
             await ctx.session.generate_reply(
                 instructions="Tell the caller nobody is available and say goodbye."
             )
@@ -569,7 +639,14 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
             return None
 {{- else}}
             # on_unavailable: return_to_caller. The caller is still here and the
-            # conversation continues, so the LLM does need this back.
+            # conversation continues, so the LLM does need this back. The line is
+            # logged here too: this branch wrote nothing until 2026-08-12, so the
+            # commonest failure was also the invisible one.
+            logger.info(
+                "warm transfer unavailable after %ds: %s",
+                int(time.monotonic() - started),
+                error,
+            )
             return f"Nobody took the transfer ({error}). Tell the caller and keep helping them."
 {{- end}}
         await ctx.session.say(
@@ -581,7 +658,11 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         # identity is logged rather than returned: returning it would hand the
         # LLM a tool result and it would take one more turn, which both of them
         # would hear (upstream's own example returns nothing here either).
-        logger.info("warm transfer merged: %s", result.human_agent_identity)
+        logger.info(
+            "warm transfer merged after %ds: %s",
+            int(time.monotonic() - started),
+            result.human_agent_identity,
+        )
         ctx.session.shutdown()
         return None
 {{- else}}
@@ -614,13 +695,21 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- if .RingTimeout}}
         request.ringing_timeout.FromNanoseconds(int({{.RingTimeout}} * 1e9))
 {{- end}}
+        # The REFER goes out here. Logged before the call, so a request that never
+        # returns is still visible as a phase the transfer reached.
+        logger.info("cold transfer referring the caller out")
+        started = time.monotonic()
         try:
             await job_ctx.api.sip.transfer_sip_participant(request)
         except (api.SipCallError, api.ServerError) as error:
 {{- if .Hangup}}
             # on_unavailable: hangup. The goodbye is spoken here and the session
             # ends, so nothing is returned to the LLM.
-            logger.info("cold transfer failed, ending the call: %s", error)
+            logger.info(
+                "cold transfer failed after %ds: %s",
+                int(time.monotonic() - started),
+                error,
+            )
             await ctx.session.generate_reply(
                 instructions="Tell the caller the transfer failed and say goodbye."
             )
@@ -629,12 +718,17 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- else}}
             # on_unavailable: return_to_caller — the caller is still in the room,
             # so the LLM does need this back.
+            logger.info(
+                "cold transfer failed after %ds: %s",
+                int(time.monotonic() - started),
+                error,
+            )
             return f"The transfer failed ({error}). Tell the caller and keep helping them."
 {{- end}}
         # A completed REFER takes the caller out of the room, which ends this
         # session on its own. Returning a value here would buy one LLM turn
         # spoken to nobody, racing the teardown.
-        logger.info("cold transfer completed")
+        logger.info("cold transfer completed after %ds", int(time.monotonic() - started))
         return None
 {{- end}}
 {{end}}

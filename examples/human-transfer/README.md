@@ -13,7 +13,9 @@ lives on the one route where LiveKit ships both: `transport: sip`.
   text, and connects the two when the supervisor agrees. Every way the
   supervisor does not take the call (no answer, decline, voicemail, failed
   dial) comes back as one failure, and `on_unavailable` decides what the
-  caller gets.
+  caller gets. Since 2026-08-12 the prompt the supervisor hears is Unmute's
+  rather than the prebuilt's, because the prebuilt's own never briefs
+  unprompted (SCHEMA N35).
 
 Cold on Pipecat is its own example: [human-transfer-daily](../human-transfer-daily),
 on the Daily route. Pipecat has no native warm transfer, which is why warm is
@@ -133,3 +135,43 @@ talk to the agent, ask for a manager, and the supervisor's real phone rings.
 The cold transfer needs one real inbound call through the trunk. The full
 walkthrough, including the failure drills and teardown, is in
 [docs/TRANSFERS.md](../../docs/TRANSFERS.md).
+
+## What a working transfer looks and sounds like
+
+Give the agent a name and a complaint before you ask for a manager, so the
+briefing has something to say. Then check both halves.
+
+**On the supervisor's phone**, the first sentence names the caller and what they
+are unhappy about and ends with a question. Something like "Nicola called about a
+colour correction Maya did on Tuesday, she is unhappy with the tone and I have
+already offered a redo. Can you take the call?" No hello, no "how can I help",
+and no waiting for you to ask what it is about. Say you can take it and the
+caller is put through.
+
+**In `lk agent logs`**, three lines per transfer. Warm, when it works:
+
+```text
+human transfer fired: escalate_to_supervisor (warm)
+warm transfer dialling out: handing over 12 conversation messages
+warm transfer merged after 34s: sip_abc123
+```
+
+The last line is `warm transfer unavailable after <n>s: <reason>` instead for
+every way the transfer did not happen. Cold:
+
+```text
+human transfer fired: send_to_billing (cold)
+cold transfer referring the caller out
+cold transfer completed after 2s
+```
+
+The message count is the one number worth reading. **Zero or one** means the
+briefing had nothing to work with, which is a different problem from a briefing
+that was ignored, and they have different fixes.
+
+One limit worth knowing before you test: `ring_timeout: 25s` bounds **ringing
+only**. Once the supervisor picks up, nothing bounds the consultation, and the
+caller is on hold for all of it. The agent is told to decline on the supervisor's
+behalf when they go quiet or never decide, which is a mitigation rather than a
+guarantee. [docs/TRANSFERS.md](../../docs/TRANSFERS.md) explains why there is no
+bound and what the alternatives cost.

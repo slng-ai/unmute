@@ -212,6 +212,8 @@ How long the person's phone rings before the agent gives up.
 
 Required: no. Values: a duration (`30s`). Default: none written, so the platform default applies (LiveKit waits 30 seconds; the Pipecat Twilio route uses Twilio's own 60 second dial timeout). Legal in both blocks.
 
+**It bounds ringing only.** On a LiveKit warm transfer, once the person picks up nothing bounds the consultation, and the caller hears hold music for the whole of it. The generated agent is told to decline on the person's behalf when they go quiet or never decide, which is a mitigation rather than a guarantee. Why there is no bound, and what a real one would cost, is in [TRANSFERS.md](../../TRANSFERS.md) (2026-08-12, SCHEMA N35).
+
 ### on_unavailable
 
 What happens when the person does not take the call. One field covers every way that can happen: nobody answers within `ring_timeout`, the person declines, the line goes to voicemail, or the call fails to connect at all.
@@ -224,13 +226,15 @@ With `return_to_caller` the agent picks the conversation back up and can explain
 
 What the agent tells the person before connecting them. Plain text, so write it the way you would brief a colleague.
 
-Required: no. Values: text. Default: none, and the target's own briefing wording applies. **Legal inside `warm:` only**, because there is nobody to brief on a cold transfer.
+Required: no. Values: text. Default: none. **Legal inside `warm:` only**, because there is nobody to brief on a cold transfer.
 
 The conversation so far is always passed along with it, on every target that supports warm transfer. You do not need to ask for a summary, and you do not need to declare a model to write one. Use `briefing` to say what matters *beyond* the transcript: what to lead with, what the person needs to decide, what has already been verified.
 
+Omitting it does **not** leave the person unbriefed on LiveKit. Since 2026-08-12 (SCHEMA N35) the generated agent carries its own prompt saying to open with the handover and never with a greeting, and your `briefing` text lands on top of that. What the person actually hears, and the log lines a transfer leaves, are in [TRANSFERS.md](../../TRANSFERS.md).
+
 | Target | What happens | Tag |
 |---|---|---|
-| LiveKit SIP with Twilio, Telnyx, or Plivo | Passed to `WarmTransferTask` on top of the transcript | provisional |
+| LiveKit SIP with Twilio, Telnyx, or Plivo | Passed to `WarmTransferTask` on top of the transcript and the generated agent's own briefing prompt | provisional |
 | Pipecat | fails; there is no warm transfer to brief | gated |
 | Vapi | Mapped onto the provider's own transfer plan | gated |
 | Deepgram | fails | gated |

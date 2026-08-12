@@ -134,7 +134,68 @@ python agent.py start
 
 See `docs/DEPLOYMENT.md` in the Unmute repository for the full self-hosted
 setup: server, Redis, firewall ports, sizing, and scaling.
-{{if .Tracing}}
+{{if or .HasWarmTransfer .HasColdTransfer}}
+## Human transfers
+{{if .HasWarmTransfer}}
+### What the person hears on a warm transfer
+
+The person who answers hears the handover in the **first sentence**: who is on
+hold, what they want, what was already tried, then one question they can answer.
+No hello, no "how can I help", and no waiting to be asked what the call is about.
+When they say they can take it, the caller is put through and this agent says one
+goodbye line and goes quiet.
+
+That prompt is `_BRIEFING_PERSONA` in `agent.py`, and the comment above it says
+why each paragraph is there. The prebuilt ships its own persona, but its lifecycle
+lets the person speak first and never briefs unprompted, so the agent's first turn
+is a reply, and a reply to "hello" is a greeting unless the prompt says otherwise.
+Your package's own `briefing` text still lands last, after the caller transcript.
+
+**One limit.** `ring_timeout` bounds **ringing only**. Once the person picks up,
+nothing bounds the consultation, and the caller hears hold music for all of it.
+The prompt tells this agent to decline on the person's behalf when they say they
+cannot take it, go quiet, or never decide, which is a mitigation and not a
+guarantee. If you see a caller held for minutes with no third log line, that is
+this limit, not a bug in the dial.
+{{end}}
+### Reading a transfer in the logs
+
+`lk agent logs` shows three `info` lines per transfer.
+{{if .HasWarmTransfer}}
+Warm:
+
+```text
+human transfer fired: <control name> (warm)
+warm transfer dialling out: handing over <n> conversation messages
+warm transfer merged after <n>s: <participant identity>
+```
+
+The third line is `warm transfer unavailable after <n>s: <reason>` instead for
+every way the transfer did not happen: no answer, declined, voicemail, failed
+dial. Exactly one of the two appears, and line 2 with no line 3 means the
+consultation is still running or never ended.
+
+The message count is the number worth reading. **Zero or one** means the briefing
+had nothing to work with, which is a different problem from a briefing that was
+ignored. A healthy count means material was handed over, not that the model used
+it.
+{{end}}
+{{- if .HasColdTransfer}}
+Cold:
+
+```text
+human transfer fired: <control name> (cold)
+cold transfer referring the caller out
+cold transfer completed after <n>s
+```
+
+or `cold transfer failed after <n>s: <reason>`. A fired line with no referring
+line means the room held no phone caller to transfer.
+{{end}}
+No log line carries a destination, a credential, an environment variable value,
+or the caller's words. The control name on the first line already says which
+destination fired.
+{{end}}{{if .Tracing}}
 ## Trace with Langfuse
 
 Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
