@@ -280,6 +280,71 @@ entry without checking whether a later entry supersedes it is how a
 non-contradiction becomes a finding, and it cost a requirement (FR-019) and a
 success criterion (SC-013) that both had to be withdrawn.
 
+## R9. A transfer tool must not return a value once the session is over
+
+**Found on a live call, 2026-08-12, after the inline dial-out was deployed and
+working.** The manager's phone rang, the briefing happened, the calls merged, and
+then the agent carried on talking to the caller and the manager together, trying
+to continue the conversation.
+
+**Cause**: the emitted tool ended like this.
+
+```python
+        await ctx.session.say("You are on the line with my colleague now. ...")
+        ctx.session.shutdown()
+        return "The caller is now connected to " + result.human_agent_identity + "."
+```
+
+A `@function_tool`'s return value is a **tool result**, and a tool result is fed
+back to the LLM, which then takes another turn. `AgentSession.shutdown()` is not
+async and does not stop that: it calls `_close_soon(..., drain=True)`, so the
+session drains pending work first, and the turn the return value just triggered
+is pending work. By then the room holds the caller **and** the person we had just
+said goodbye to, so both hear it.
+
+**Fix**: return nothing on every path where the session is over, and log what was
+worth keeping instead. Upstream's own example does exactly this, which is the
+strongest confirmation available:
+
+```python
+        await self.session.say(
+            "you are on the line with my supervisor. I'll be hanging up now.",
+            allow_interruptions=False,
+        )
+        self.session.shutdown()
+```
+
+Source: [examples/warm-transfer/warm_transfer.py](https://github.com/livekit/agents/tree/main/examples/warm-transfer),
+read 2026-08-12. Its tool is annotated `-> None` and returns nothing after the
+merge. The documented workflow agrees: step 5 is "Agent leaves, and the caller and
+manager continue the call".
+
+**Scope of the fix**: four paths returned a value after ending the session, and
+all four are now `return None`.
+
+| Path | Before | After |
+|---|---|---|
+| warm, merged | returned the merged identity | logs it, returns nothing |
+| warm, unavailable + `hangup` | returned a summary string | returns nothing |
+| cold, REFER completed | `"The caller was transferred."` | returns nothing |
+| cold, failed + `hangup` | returned a summary string | returns nothing |
+
+Three paths still return a string, correctly, because the caller is still there
+and the conversation continues: warm and cold with `on_unavailable:
+return_to_caller`, and cold with no SIP caller in the room. The tool's annotation
+became `-> str | None` to say so.
+
+**Why no test caught it**: every existing assertion checked what the emitted tool
+*contains*, and the offending line was a plausible-looking `return`. Nothing
+asserted what a tool must **not** hand back after `shutdown()`. Two assertions now
+do, one per transfer mode.
+
+**This predates the inline dial-out.** The `return` was there before feature 002;
+it was invisible until a warm transfer actually completed, which had never
+happened before because the trunk error stopped it first. That is the same shape
+as the `httpx` break in feature 001: the first working deploy is what exposes the
+defect behind the one that was blocking it.
+
 ## Summary of decisions
 
 | # | Decision |
@@ -291,4 +356,5 @@ success criterion (SC-013) that both had to be withdrawn.
 | R5 | Name the three things a stored trunk kept; claim nothing about inline and trunk caching |
 | R6 | Rename example, scaffold and documents; keep most test fixtures on the old names as SC-010 evidence |
 | R7 | Assert that a warm transfer cannot exist without a resolved SIP route, rather than assuming it |
+| R9 | A transfer tool returns a value only where the caller is still listening. Four session-ending paths returned one, which bought an extra LLM turn after the merge that both parties heard. Fixed to `return None`, matching upstream's own example. |
 | R8 | **Withdrawn.** N31 already supersedes N28 and agrees with the capability table, and it records that the connector transfers were built, live-tested and deleted rather than never built. N33 retires one sentence of N28's trunk wording; nothing else is owed. |

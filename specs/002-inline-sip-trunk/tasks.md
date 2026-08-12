@@ -15,7 +15,12 @@ call will never reach.
 **Organization**: grouped by user story, so each can be finished and checked on
 its own.
 
-**Status**: implemented 2026-08-12. 51 of 52 tasks done; **T051 (the live warm transfer) is the operator's** and is the only proof that the phone rings.
+**Status**: implemented and **live-verified** 2026-08-12. All 52 tasks done. The
+live call (T051) rang the manager, briefed them and merged the calls, which is
+what SC-001 asks for. It also exposed one defect the offline layer could not
+reach, now fixed as T053: the transfer tool returned a value after
+`session.shutdown()`, so the LLM took one more turn and spoke into a room holding
+both parties. See [research.md R9](./research.md#r9-a-transfer-tool-must-not-return-a-value-once-the-session-is-over).
 
 **Revision**: remediated after `/speckit-analyze` on 2026-08-12. Eight tasks were
 added for requirements that had zero coverage (FR-006, FR-007, FR-008, FR-013, the
@@ -197,7 +202,7 @@ promises something the table denies.
 - [X] T048 Run the gate in order: `make fmt`, `make lint`, `make build`, `make test`. All four must pass. Read any golden diff rather than accepting it.
 - [X] T049 Run `make smoke` and confirm the emitted Python imports, including the warm-only and cold-only fixtures. Also run `ruff check` over `build/livekit/agent.py`, since `_sip_trunk()` is new emitted Python and the constitution asks for emitted Python to be checked with `ruff` where available. This is the only layer that would catch `api.SIPOutboundConfig` moving on a pin bump.
 - [X] T050 Work through layer 1 of [quickstart.md](./quickstart.md) by hand against `build/livekit/`: the trunk name gone, one `_sip_trunk` definition with three callers, `sip_trunk_id` absent, the inbound files unmoved, and no compiler file naming the four env names.
-- [ ] T051 Place the live warm transfer described in layer 3 of [quickstart.md](./quickstart.md), with **no** `lk sip outbound create` ever run. Expect `human transfer fired: escalate_to_supervisor (warm)` in `lk agent logs` with no traceback after it. The absence of the `ValueError` is the whole result. This is the only proof that exists, because there is no laptop path to a transfer.
+- [X] T051 Place the live warm transfer described in layer 3 of [quickstart.md](./quickstart.md), with **no** `lk sip outbound create` ever run. Expect `human transfer fired: escalate_to_supervisor (warm)` in `lk agent logs` with no traceback after it. The absence of the `ValueError` is the whole result. This is the only proof that exists, because there is no laptop path to a transfer.
 - [X] T052 [P] Record in `specs/001-livekit-cloud-deploy/tasks.md` the two findings this feature surfaced but does not own: the `load_fnc` / `load_threshold` "not supported when hosting on Cloud" warnings and the deprecated `metrics_collected` event, from `internal/generate/templates/livekit_v1/agent.py.tmpl:706-710` and `:758`.
 
 ---
@@ -298,3 +303,10 @@ transfer regression later wants those apart.
 - `LIVEKIT_SIP_NUMBER` is never emitted and never will be. The number is passed explicitly.
 - Nothing in this feature touches the connector route, the Pipecat driver, cold transfer, or the inbound trunk and dispatch rule. T010, T011 and T022 are what make those three claims checkable rather than asserted.
 - The one thing no task can prove offline is that the phone rings. T051 is the only proof, and it is manual by nature.
+
+---
+
+## Phase 8: Found on the live call
+
+- [X] T053 Stop returning a value from a transfer tool on any path where the session is over, in `internal/generate/templates/livekit_v1/agent.py.tmpl`. A `@function_tool`'s return value is a tool result, the LLM answers it with another turn, and `AgentSession.shutdown()` drains pending work rather than cancelling it, so that turn is spoken after the goodbye, into a room holding the caller and the person they were handed to. Four paths changed to `return None` (warm merged, warm unavailable with `hangup`, cold completed, cold failed with `hangup`); three keep their string because the caller is still listening. The annotation became `-> str | None`. Matches upstream's own `examples/warm-transfer`, whose tool is `-> None` and returns nothing after the merge.
+- [X] T054 Pin it in `internal/generate/livekit_v1_test.go`: the warm path must log `warm transfer merged` and must not contain `The caller is now connected to `; the cold path must not contain `return "The caller was transferred."`; both must contain `return None`. Every existing assertion checked what the tool *contains*, and a plausible-looking `return` is exactly what that misses.

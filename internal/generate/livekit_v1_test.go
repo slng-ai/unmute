@@ -1165,7 +1165,11 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		"async def to_human(self, ctx: RunContext) -> str:",
+		// `str | None` since 2026-08-12: a function tool's return value is fed
+		// back to the LLM, which then takes another turn. That is right while
+		// the caller is still listening and wrong once the session is over, so
+		// the session-ending paths return nothing.
+		"async def to_human(self, ctx: RunContext) -> str | None:",
 		"job_ctx = get_job_context()",
 		"rtc.ParticipantKind.PARTICIPANT_KIND_SIP",
 		// The tool speaks its own announcement (SPEC V4/B4).
@@ -1179,6 +1183,15 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("cold agent.py missing %q", want)
 		}
+	}
+	// A completed REFER takes the caller out of the room, so the session ends on
+	// its own and the tool returns nothing. A return value here would buy one
+	// LLM turn spoken to nobody, racing the teardown.
+	if strings.Contains(botpy, `return "The caller was transferred."`) {
+		t.Error("cold agent.py returns to the LLM after the caller has already left the room")
+	}
+	if !strings.Contains(botpy, "return None") {
+		t.Error("cold agent.py does not end its transfer tool without a value")
 	}
 
 	// The warm half needs a telephony Connection: a warm transfer dials the
@@ -1242,6 +1255,23 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	}
 	if strings.Contains(botpy, "sip_trunk_id") {
 		t.Error("warm agent.py still passes a stored trunk id")
+	}
+	// After the merge the session is over, so the tool must hand the LLM
+	// nothing. Returning a value here bought one more LLM turn, spoken into a
+	// room that by then held the caller and the person we had just handed them
+	// to, immediately after saying goodbye. Found on a live call 2026-08-12;
+	// upstream's own warm-transfer example returns nothing here too.
+	for _, want := range []string{
+		`logger.info("warm transfer merged: %s", result.human_agent_identity)`,
+		"ctx.session.shutdown()",
+		"return None",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("warm agent.py missing %q", want)
+		}
+	}
+	if strings.Contains(botpy, "The caller is now connected to ") {
+		t.Error("warm agent.py returns the merge result to the LLM, which then speaks to the caller and the person again")
 	}
 	// FR-017: exactly the values needed to dial. Region pinning and transport
 	// are optional on the platform and nobody declared them.

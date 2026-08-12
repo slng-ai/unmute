@@ -517,11 +517,18 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{end}}
 {{- range .HumanTransfers}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext) -> str:
+    async def {{.Method}}(self, ctx: RunContext) -> str | None:
         {{triple .When}}
         # One line per firing, so a live test can see which control the model
         # picked and when — the transfer that ran is otherwise invisible in the
         # logs until the carrier request goes out.
+        #
+        # This tool returns a string only on the paths where the caller is still
+        # here and the conversation continues. A function tool's return value is
+        # fed back to the LLM, which then takes another turn: harmless while the
+        # caller is listening, wrong once the session is over. After a warm merge
+        # that turn would speak into a room holding the caller and the person we
+        # just handed them to, right after saying goodbye.
         logger.info("human transfer fired: {{.Method}} ({{if .Warm}}warm{{else}}cold{{end}})")
 {{- if .Warm}}
         # warm: the prebuilt holds the caller with music, dials the person,
@@ -551,14 +558,18 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
             )
         except ToolError as error:
 {{- if .Hangup}}
-            # on_unavailable: hangup
+            # on_unavailable: hangup. The goodbye is spoken here, so the session
+            # is over: no return value, or the LLM answers the tool and speaks
+            # again on the way out.
+            logger.info("warm transfer unavailable, ending the call: %s", error)
             await ctx.session.generate_reply(
                 instructions="Tell the caller nobody is available and say goodbye."
             )
             ctx.session.shutdown()
-            return f"Nobody took the transfer ({error}); the call was ended."
+            return None
 {{- else}}
-            # on_unavailable: return_to_caller
+            # on_unavailable: return_to_caller. The caller is still here and the
+            # conversation continues, so the LLM does need this back.
             return f"Nobody took the transfer ({error}). Tell the caller and keep helping them."
 {{- end}}
         await ctx.session.say(
@@ -566,9 +577,13 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
             allow_interruptions=False,
         )
         # The room outlives this session (delete_room_on_close=False), so the
-        # caller and the person stay connected after the agent shuts down.
+        # caller and the person stay connected after the agent shuts down. The
+        # identity is logged rather than returned: returning it would hand the
+        # LLM a tool result and it would take one more turn, which both of them
+        # would hear (upstream's own example returns nothing here either).
+        logger.info("warm transfer merged: %s", result.human_agent_identity)
         ctx.session.shutdown()
-        return "The caller is now connected to " + result.human_agent_identity + "."
+        return None
 {{- else}}
         # cold: SIP REFER through the job context. The caller leaves the room.
         job_ctx = get_job_context()
@@ -603,17 +618,24 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
             await job_ctx.api.sip.transfer_sip_participant(request)
         except (api.SipCallError, api.ServerError) as error:
 {{- if .Hangup}}
-            # on_unavailable: hangup
+            # on_unavailable: hangup. The goodbye is spoken here and the session
+            # ends, so nothing is returned to the LLM.
+            logger.info("cold transfer failed, ending the call: %s", error)
             await ctx.session.generate_reply(
                 instructions="Tell the caller the transfer failed and say goodbye."
             )
             ctx.session.shutdown()
-            return f"The transfer failed ({error}); the call was ended."
+            return None
 {{- else}}
-            # on_unavailable: return_to_caller — the caller is still in the room.
+            # on_unavailable: return_to_caller — the caller is still in the room,
+            # so the LLM does need this back.
             return f"The transfer failed ({error}). Tell the caller and keep helping them."
 {{- end}}
-        return "The caller was transferred."
+        # A completed REFER takes the caller out of the room, which ends this
+        # session on its own. Returning a value here would buy one LLM turn
+        # spoken to nobody, racing the teardown.
+        logger.info("cold transfer completed")
+        return None
 {{- end}}
 {{end}}
 {{- range .Delegates}}
