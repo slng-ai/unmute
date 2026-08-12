@@ -232,7 +232,7 @@ func TestV1_TransfersCompileOnlyOnNativeRoutes(t *testing.T) {
 			t.Errorf("%v cold = %#v, want gated with the supported routes named", key, coldGot)
 		}
 		warmGot := ResolveTelephonyFeature(key, warm)
-		if warmGot.Tag != Gated || !strings.Contains(warmGot.Note, "(livekit, sip) trunks only") {
+		if warmGot.Tag != Gated || !strings.Contains(warmGot.Note, "(livekit, sip) trunks") {
 			t.Errorf("%v warm = %#v, want gated with the supported routes named", key, warmGot)
 		}
 	}
@@ -250,5 +250,66 @@ func TestV1_TransfersCompileOnlyOnNativeRoutes(t *testing.T) {
 	}
 	if got := table.Capability(FieldTransferBriefing, Pipecat); got.Tag != Gated {
 		t.Errorf("pipecat briefing field = %#v, want gated (briefing rides the warm row)", got)
+	}
+}
+
+// The Daily route has no telephony plan (ir/build.go builds one only for a
+// declared connection), so the prerequisite lookup has to work off the route
+// triple alone. This is the seam the whole feature reads.
+func TestRouteAccountPrerequisitesAreReachableWithoutAPlan(t *testing.T) {
+	got := RouteAccountPrerequisites(Pipecat, "daily-sip", "")
+	if len(got) != 1 || got[0].Name != "daily_dialout" {
+		t.Fatalf("pipecat daily-sip prerequisites = %+v, want one daily_dialout", got)
+	}
+	if !got[0].Needs([]TelephonyFeature{TelephonyFeature(ColdTransfer)}) {
+		t.Error("daily_dialout must be needed by cold_transfer: a cold transfer dials the destination")
+	}
+	if !got[0].Needs([]TelephonyFeature{TelephonyOutbound}) {
+		t.Error("daily_dialout must be needed by outbound calling")
+	}
+	// The other half of the rule: one that always applies is a banner.
+	if got[0].Needs([]TelephonyFeature{TelephonyInbound}) {
+		t.Error("daily_dialout must not apply to an inbound-only package")
+	}
+	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
+		if got := RouteAccountPrerequisites(Pipecat, "carrier-websocket", carrier); len(got) != 0 {
+			t.Errorf("pipecat carrier-websocket %s prerequisites = %+v, want none", carrier, got)
+		}
+	}
+	if got := RouteAccountPrerequisites(LiveKit, "sip", "twilio"); len(got) != 0 {
+		t.Errorf("livekit sip prerequisites = %+v, want none", got)
+	}
+}
+
+// Every prerequisite is recorded the way every other provider claim in this
+// rulebook is: with the page it came from and the date it was checked. An empty
+// NeededBy would be a prerequisite nothing needs, which must not exist.
+func TestRouteAccountPrerequisitesAreEvidenced(t *testing.T) {
+	table := Default()
+	for _, rule := range routePrerequisites {
+		p := rule.prereq
+		if p.Name == "" || p.Summary == "" {
+			t.Errorf("prerequisite %+v needs a name and an actionable summary", p)
+		}
+		if len(p.NeededBy) == 0 {
+			t.Errorf("prerequisite %q has an empty NeededBy: a prerequisite nothing needs must not exist", p.Name)
+		}
+		if p.Docs == "" || p.Verified == "" {
+			t.Errorf("prerequisite %q = docs %q verified %q, want both set", p.Name, p.Docs, p.Verified)
+		}
+		// A prerequisite for a capability the route refuses is a prerequisite for
+		// something no package can reach, so it could never be reported. Checked
+		// against the control rows rather than restated, so the rulebook stays the
+		// one place the route's support is described.
+		for _, feature := range p.NeededBy {
+			control := TelephonyControl(feature)
+			if _, isControl := table.Controls[control]; !isControl {
+				continue
+			}
+			if got := table.Control(control, rule.provider, rule.transport, rule.carrier); got.Tag == Gated {
+				t.Errorf("prerequisite %q is needed by %q, which (%s, %s) refuses: %s",
+					p.Name, feature, rule.provider, rule.transport, got.Note)
+			}
+		}
 	}
 }

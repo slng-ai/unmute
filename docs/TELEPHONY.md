@@ -10,10 +10,25 @@ primitives on the LiveKit SIP and Pipecat Daily routes only ([TRANSFERS.md](TRAN
 
 Unmute must share telephony intent, planning, and call context across
 orchestrators while keeping carrier media and call-control behavior in small,
-carrier-specific adapters. This design supports local and self-hosted
-deployments for Pipecat and LiveKit without requiring Pipecat Cloud or LiveKit
-Cloud. It also scales from Twilio to Telnyx, Plivo, and Exotel without building
-a new media gateway.
+carrier-specific adapters. It also scales from Twilio to Telnyx, Plivo, and
+Exotel without building a new media gateway.
+
+**Local runs need no cloud account.** `unmute dev` and `unmute dev --telephony`
+work on the carrier-WebSocket, LiveKit connector, and LiveKit SIP routes with
+nothing but a carrier account and what runs on your machine. This is a claim
+about local runs only, and it stays true.
+
+**Remote deployment is a different question**, and since August 12, 2026 the
+answer is the managed clouds ([DEPLOYMENT.md](DEPLOYMENT.md)). Earlier wording
+here said the design supported deployments "without requiring Pipecat Cloud or
+LiveKit Cloud", which merged the two claims into one and read as a promise about
+deployment. Self-hosting a deployment still works and is still documented; it is
+not the supported path.
+
+One route is cloud-only by construction: Pipecat's Daily route. Daily carries the
+call to a deployed agent, so `unmute dev --telephony` has nothing to run there and
+refuses by name, pointing at the browser and console modes and at the deploy path
+([TRANSFERS.md](TRANSFERS.md)).
 
 <!-- prettier-ignore -->
 > [!NOTE]

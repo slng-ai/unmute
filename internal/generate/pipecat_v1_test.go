@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"encoding/json"
 	"flag"
 	"os"
 	"os/exec"
@@ -1454,10 +1455,13 @@ func TestPipecatWithoutWarmTransferEmitsNoBridge(t *testing.T) {
 	}
 }
 
-// Pipecat has no native warm transfer on any route (SPEC C4, V1): the only
-// documented pattern is bot-owned audio, which this project deleted. The gate
-// rejects warm before generation; this is the emitter's defense in depth, and
-// it must refuse rather than quietly lower the shape as cold.
+// This driver does not emit warm transfer yet (SPEC C4, V1, N33). The gate
+// rejects warm before generation; this is the emitter's defense in depth, and it
+// must refuse rather than quietly lower the shape as cold.
+//
+// The refusal's wording is part of the contract. Daily documents warm, so a
+// message saying the platform lacks it would send an author to look for a
+// different platform when what they actually need is feature 005.
 func TestPipecatWarmHumanTransferFailsEverywhere(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
@@ -1471,8 +1475,11 @@ func TestPipecatWarmHumanTransferFailsEverywhere(t *testing.T) {
 	human.Mode = ir.TransferWarm
 	human.Briefing = "Say who is calling and why."
 	_, err = GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "Pipecat has no native warm transfer") {
+	if err == nil || !strings.Contains(err.Error(), "does not emit warm transfer yet") {
 		t.Fatalf("warm transfer must fail instead of lowering cold, got %v", err)
+	}
+	if strings.Contains(err.Error(), "no native warm transfer") {
+		t.Errorf("the refusal claims a platform limitation Daily's own docs contradict: %v", err)
 	}
 }
 
@@ -1555,6 +1562,503 @@ func TestCheckPipecatVersion(t *testing.T) {
 			t.Errorf("checkPipecatVersion(%q): ok=%v, err=%v", tc.version, tc.ok, err)
 		}
 	}
+}
+
+// dailyTransportParamsClass returns the class the emitted transport_params map
+// constructs for one key, so a test can compare keys instead of pattern-matching
+// a whole file.
+func transportParamsClass(t *testing.T, bot, key string) string {
+	t.Helper()
+	pattern := regexp.MustCompile(`(?m)^\s*"` + regexp.QuoteMeta(key) + `":\s*lambda:\s*([A-Za-z_][A-Za-z0-9_]*)\(`)
+	match := pattern.FindStringSubmatch(bot)
+	if match == nil {
+		t.Fatalf("transport_params has no %q entry", key)
+	}
+	return match[1]
+}
+
+// FR-005 / contracts invariant 5: a route that can receive a phone call must
+// build its transport with a parameter object that accepts inbound call fields.
+//
+// Asserted as a property, not as the string "DailyParams". Pipecat's
+// create_transport assigns dialin_settings, api_key, and api_url straight onto
+// whatever the factory returns, and the generic TransportParams is a Pydantic
+// model that declares none of them and allows no extras — so every inbound Daily
+// call died while the transport was being built. The offline half of the proof is
+// that the Daily key uses a different, imported class from the browser key; the
+// L4 smoke instantiates it against the real package, which is the only layer
+// that can prove the fields actually land.
+func TestUS1_DailyTransportAcceptsInboundCallFields(t *testing.T) {
+	agent := loadCompilerAgent(t)
+	resolved := targetByProvider(t, agent, ir.ProviderPipecat)
+	if resolved.Transport != "daily-sip" {
+		t.Fatalf("fixture transport = %q, want daily-sip", resolved.Transport)
+	}
+	artifact, err := GeneratePipecat(agent, resolved, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+
+	daily := transportParamsClass(t, bot, "daily")
+	generic := transportParamsClass(t, bot, "webrtc")
+	if daily == generic {
+		t.Errorf("the daily key builds %s, the same class as the browser key: "+
+			"create_transport assigns dialin_settings, api_key, and api_url onto it, "+
+			"and the generic class declares none of them, so every inbound call fails", daily)
+	}
+	// Class and import travel as one unit, so an emitted class structurally
+	// cannot lose its import.
+	if !regexp.MustCompile(`(?m)^from [\w.]+ import (?:[\w, ]*\b)?` + regexp.QuoteMeta(daily) + `\b`).MatchString(bot) {
+		t.Errorf("bot.py builds %s for the daily key but never imports it", daily)
+	}
+}
+
+// Research D2: the fix is scoped to the Daily route. A package that is not on it
+// keeps the generic class for every key and emits no Daily import, because
+// bot.py imports only what the package exercises and an unconditional change
+// would rewrite every Pipecat golden.
+func TestUS1_NonDailyRouteKeepsGenericTransportParams(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enablePackageTelephony(pkg)
+	dropHumanTransfer(pkg)
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = "twilio"
+	configured.Connection = "primary_phone"
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := GeneratePipecat(agent, agent.Targets["pipecat"], nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	generic := transportParamsClass(t, bot, "webrtc")
+	if got := transportParamsClass(t, bot, "daily"); got != generic {
+		t.Errorf("carrier-websocket route builds %s for the daily key, want the generic %s: "+
+			"this route never receives a Daily call, and a Daily import here is a dead import", got, generic)
+	}
+	if strings.Contains(bot, "pipecat.transports.daily") {
+		t.Error("bot.py imports a Daily transport module on a carrier-websocket package")
+	}
+}
+
+// carrierWebsocketArtifact builds the other Pipecat route shape, so the
+// cross-route invariants can compare the two rather than assert one in
+// isolation.
+func carrierWebsocketArtifact(t *testing.T, carrier string) Artifact {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enablePackageTelephony(pkg)
+	dropHumanTransfer(pkg)
+	configured := pkg.Targets["pipecat"]
+	configured.Transport = "carrier-websocket"
+	configured.Carrier = carrier
+	configured.Connection = "primary_phone"
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
+	// Each carrier names its own credentials; the fixture ships Twilio's.
+	if env := carrierEnvironment[carrier]; env != nil {
+		connection := pkg.Connections["primary_phone"]
+		connection.Environment = env
+		pkg.Connections["primary_phone"] = connection
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, agent.Targets["pipecat"], target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return artifact
+}
+
+var carrierEnvironment = map[string]map[string]string{
+	"telnyx": {
+		"api_key":       "TELNYX_API_KEY",
+		"public_key":    "TELNYX_PUBLIC_KEY",
+		"connection_id": "TELNYX_CONNECTION_ID",
+		"from_number":   "TELNYX_PHONE_NUMBER",
+	},
+	"plivo": {
+		"auth_id":     "PLIVO_AUTH_ID",
+		"auth_token":  "PLIVO_AUTH_TOKEN",
+		"from_number": "PLIVO_PHONE_NUMBER",
+	},
+}
+
+func dailyArtifact(t *testing.T) Artifact {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg.Targets = map[string]spec.Target{"pipecat": pkg.Targets["pipecat"]}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, agent.Targets["pipecat"], target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return artifact
+}
+
+func artifactPaths(artifact Artifact) []string {
+	paths := make([]string, 0, len(artifact.Files))
+	for _, file := range artifact.Files {
+		paths = append(paths, file.Path)
+	}
+	return paths
+}
+
+// FR-008 / contracts invariant 8: a second transfer request in the same call
+// produces no second attempt.
+//
+// The property is identical on every route; only the mechanism differs. The
+// carrier routes hold it in the shared control store. The Daily route has no
+// such store, must not gain one (contracts/artifacts.md forbids the service here
+// and the constitution forbids an idle one), and needs no such store, because one
+// process serves one call. So the assertion is written against the property.
+//
+// Before this feature there was no guard at all on this route: two requests in
+// one call fired two platform transfers.
+func TestUS2_DailyTransferAttemptsOnce(t *testing.T) {
+	bot := artifactFile(t, dailyArtifact(t), "bot.py")
+	primitive := strings.Index(bot, "sip_call_transfer(")
+	if primitive < 0 {
+		t.Fatal("fixture emits no Daily transfer")
+	}
+	// Named structurally rather than by symbol, so the assertion survives the
+	// guard being renamed or reshaped: somewhere between the tool's docstring
+	// and the primitive there must be a condition that returns early.
+	body := bot[:primitive]
+	tool := body[strings.LastIndex(body, "    async def "):]
+	if !strings.Contains(tool, "if ") || !strings.Contains(tool, "return") {
+		t.Errorf("nothing between the transfer tool's start and sip_call_transfer can stop a "+
+			"second attempt; a caller who asks twice is transferred twice:\n%s", tool)
+	}
+	// A repeat request must not be told the transfer succeeded when it failed, so
+	// the failure paths have to record what they return.
+	for _, want := range []string{
+		`await params.result_callback(_TRANSFER_RESULT)`,
+		`_TRANSFER_RESULT = {"transferred": True}`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing %q: a replayed answer must be the answer the attempt produced", want)
+		}
+	}
+	// It must not reach for the shared store, which this route does not have.
+	if strings.Contains(bot, "STATE.mark_once") || strings.Contains(bot, "REDIS_URL") {
+		t.Error("bot.py guards the Daily transfer through the shared control store, " +
+			"which this route does not declare and must not gain")
+	}
+}
+
+// Invariant 1: a Daily project declares no service and no public endpoint of its
+// own. Asserted against the artifact's runtime description and file list, not
+// against README prose, because prose is not what gets deployed.
+func TestUS2_DailyProjectDeclaresNoServiceOrEndpoint(t *testing.T) {
+	artifact := dailyArtifact(t)
+	if artifact.Telephony != nil {
+		t.Errorf("Daily artifact carries a telephony runtime plan (%d services, %d endpoints); "+
+			"the platform's managed dial-in is the ingress",
+			len(artifact.Telephony.Services), len(artifact.Telephony.PublicEndpoints))
+	}
+	for _, forbidden := range []string{
+		"telephony.py", "telephony_shared.py", "telephony_state.py", "compose.telephony.yaml",
+	} {
+		if slices.Contains(artifactPaths(artifact), forbidden) {
+			t.Errorf("Daily artifact emits %s: nothing on this route serves carrier traffic", forbidden)
+		}
+	}
+	if !slices.Contains(artifactPaths(artifact), "pcc-deploy.toml") {
+		t.Error("Daily artifact emits no deploy manifest")
+	}
+	report := artifactFile(t, artifact, "compile-report.json")
+	for _, forbidden := range []string{"REDIS_URL", "UNMUTE_PUBLIC_URL", "UNMUTE_OUTBOUND_TOKEN"} {
+		if strings.Contains(report, forbidden) {
+			t.Errorf("Daily project requires %s, which nothing on this route reads", forbidden)
+		}
+	}
+}
+
+// Invariant 2, a regression guard: this feature must not shrink the route it is
+// not touching.
+func TestUS2_CarrierWebsocketKeepsItsRuntime(t *testing.T) {
+	artifact := carrierWebsocketArtifact(t, "twilio")
+	plan := artifact.Telephony
+	if plan == nil {
+		t.Fatal("carrier-websocket artifact lost its telephony runtime plan")
+	}
+	if len(plan.Processes) == 0 || len(plan.PublicEndpoints) == 0 {
+		t.Errorf("carrier-websocket plan = %d processes, %d endpoints, want both non-empty",
+			len(plan.Processes), len(plan.PublicEndpoints))
+	}
+	if plan.Coordination == "" {
+		t.Error("carrier-websocket plan lost its coordination service")
+	}
+	for _, want := range []string{"telephony.py", "telephony_shared.py", "compose.telephony.yaml"} {
+		if !slices.Contains(artifactPaths(artifact), want) {
+			t.Errorf("carrier-websocket artifact no longer emits %s", want)
+		}
+	}
+}
+
+// Invariant 3: neither shape's credentials appear in the other. By set
+// comparison, so a credential added later to one route cannot quietly show up in
+// both without this failing.
+func TestUS2_RouteShapesDoNotShareCredentials(t *testing.T) {
+	daily := requiredEnvOf(t, dailyArtifact(t))
+	carrier := requiredEnvOf(t, carrierWebsocketArtifact(t, "twilio"))
+	carrierOnly := []string{"REDIS_URL", "UNMUTE_PUBLIC_URL", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"}
+	for _, name := range carrierOnly {
+		if slices.Contains(daily, name) {
+			t.Errorf("the Daily route asks for %q, which only the self-hosted media path needs", name)
+		}
+	}
+	// The Daily route's own transfer destination must not leak the other way.
+	if slices.Contains(carrier, "BILLING_PHONE_NUMBER") {
+		t.Error("the carrier-websocket route asks for a transfer destination but emits no transfer")
+	}
+	if len(daily) == 0 || len(carrier) == 0 {
+		t.Fatalf("required env sets = daily %v, carrier %v; an empty set proves nothing", daily, carrier)
+	}
+}
+
+// Invariant 4: no transfer tool on any carrier websocket route. The base branch
+// deleted these deliberately, because those transports carry no transfer
+// primitive. This guards the deletion against a later change to shared emitter
+// code putting it back.
+func TestUS2_NoTransferToolOnCarrierWebsocketRoutes(t *testing.T) {
+	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
+		bot := artifactFile(t, carrierWebsocketArtifact(t, carrier), "bot.py")
+		for _, forbidden := range []string{"sip_call_transfer", "sip_refer", "_TRANSFER_RESULT"} {
+			if strings.Contains(bot, forbidden) {
+				t.Errorf("%s bot.py emits %q: this transport has no transfer primitive", carrier, forbidden)
+			}
+		}
+	}
+}
+
+// The prerequisite has one home, in the rulebook. It has to reach both places an
+// author reads: the instructions they follow and the report they can inspect.
+func TestUS3_PrerequisiteReachesReadmeAndReport(t *testing.T) {
+	artifact := dailyArtifact(t)
+	readme := artifactFile(t, artifact, "README.md")
+	for _, want := range []string{
+		"Account prerequisites", "daily_dialout", "dial-out",
+		"https://docs.pipecat.ai/pipecat-cloud/guides/telephony/daily-dial-out", "2026-08-12",
+	} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README.md missing %q", want)
+		}
+	}
+	// International dial-out is granted separately per domain, which is the part
+	// an author discovers on the first cross-border call otherwise.
+	if !strings.Contains(readme, "international") {
+		t.Error("README.md does not mention that international dial-out is enabled separately")
+	}
+	report := artifactFile(t, artifact, "compile-report.json")
+	if !strings.Contains(report, `"route_prerequisites"`) || !strings.Contains(report, "daily_dialout") {
+		t.Errorf("compile-report.json does not record the route prerequisite:\n%s", report)
+	}
+}
+
+// A prerequisite that always prints is a banner. Compiled without anything that
+// dials out, the project must carry no prerequisite text at all.
+func TestUS3_NoPrerequisiteWithoutTheCapability(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(pkg.Agent.Controls, "to_human")
+	billing := pkg.Agent.Agents["billing"]
+	billing.Tools = slices.DeleteFunc(slices.Clone(billing.Tools), func(name string) bool { return name == "to_human" })
+	pkg.Agent.Agents["billing"] = billing
+	pkg.Targets = map[string]spec.Target{"pipecat": pkg.Targets["pipecat"]}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, agent.Targets["pipecat"], target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"README.md", "compile-report.json"} {
+		content := artifactFile(t, artifact, path)
+		for _, forbidden := range []string{"daily_dialout", "Account prerequisites", "route_prerequisites"} {
+			if strings.Contains(content, forbidden) {
+				t.Errorf("%s names %q for a package that never dials out", path, forbidden)
+			}
+		}
+	}
+}
+
+// FR-011: every credential the route needs, the transfer destination included,
+// joins the startup check, so a missing value fails the bot by name at boot
+// instead of arriving as a call nobody answers.
+func TestUS3_TransferDestinationIsInTheStartupCheck(t *testing.T) {
+	// The example, not the fixture: a destination may be a literal or the name of
+	// an env var read at call time, and only the env-name form has a credential to
+	// check. A committed package uses the env form, because any number a
+	// repository ships is a number nobody answers.
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "human-transfer-daily"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, agent.Targets["pipecat"], target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	env := artifactFile(t, artifact, ".env.example")
+	for _, name := range requiredEnvOf(t, artifact) {
+		if !strings.Contains(bot, `"`+name+`"`) {
+			t.Errorf("required env %q is not in bot.py's startup check", name)
+		}
+		if !strings.Contains(env, name) {
+			t.Errorf("required env %q is not in .env.example", name)
+		}
+	}
+	// The destination reaches the emitted code as an env read, never as a value.
+	if !strings.Contains(bot, "BILLING_PHONE_NUMBER") {
+		t.Error("bot.py does not read the transfer destination from the environment")
+	}
+	if strings.Contains(bot, "+1415") {
+		t.Error("bot.py contains a dialable literal; destinations are env names only")
+	}
+}
+
+// dailyArtifactWithRegion compiles the Daily fixture for one declared region, or
+// for none when region is empty.
+func dailyArtifactWithRegion(t *testing.T, region string) Artifact {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := pkg.Targets["pipecat"]
+	if region != "" {
+		configured.DeploymentRegion = spec.Regions{region}
+	}
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, agent.Targets["pipecat"], target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return artifact
+}
+
+// FR-013 / contracts invariant 6: one declared region reaches every emitted
+// reference. The agent and its credential store have to land in the same region,
+// because a store in the wrong one cannot be read by the agent and the failure
+// names neither side.
+func TestUS4_OneRegionReachesEveryReference(t *testing.T) {
+	const region = "eu-central"
+	artifact := dailyArtifactWithRegion(t, region)
+	manifest := artifactFile(t, artifact, "pcc-deploy.toml")
+	if !strings.Contains(manifest, `region = "`+region+`"`) {
+		t.Errorf("pcc-deploy.toml does not carry the declared region:\n%s", manifest)
+	}
+	readme := artifactFile(t, artifact, "README.md")
+	if !strings.Contains(readme, "secrets set") || !strings.Contains(readme, "--region "+region) {
+		t.Errorf("the credential-store command does not carry the declared region:\n%s", readme)
+	}
+	// No other region may appear anywhere: a second one would mean a second
+	// authored value, which is the failure this invariant exists to prevent.
+	for _, other := range []string{"us-west", "us-east", "ap-south"} {
+		if strings.Contains(manifest, other) {
+			t.Errorf("pcc-deploy.toml names %q as well as the declared region", other)
+		}
+	}
+}
+
+// The absent case, which is the one that silently misconfigures. Two facts, not
+// one, because they fail independently: which region the agent goes to, and that
+// the credential store follows the same default.
+func TestUS4_NoRegionStatesTheDefaultForBothSides(t *testing.T) {
+	artifact := dailyArtifactWithRegion(t, "")
+	if manifest := artifactFile(t, artifact, "pcc-deploy.toml"); strings.Contains(manifest, "region") {
+		t.Errorf("pcc-deploy.toml invents a region when the package declares none:\n%s", manifest)
+	}
+	readme := artifactFile(t, artifact, "README.md")
+	if !strings.Contains(readme, "us-west") {
+		t.Error("the instructions do not say which region applies by default")
+	}
+	if !strings.Contains(readme, "secret set") || !strings.Contains(readme, "wrong region cannot be read") {
+		t.Errorf("the instructions do not say the credential store follows the same default:\n%s", readme)
+	}
+}
+
+// Principle II: a value unmute forwards without checking has to be readable back
+// out, so the region appears in the report whether or not the platform likes it.
+func TestUS4_ForwardedRegionIsInTheReport(t *testing.T) {
+	report := artifactFile(t, dailyArtifactWithRegion(t, "ap-south"), "compile-report.json")
+	if !strings.Contains(report, `"deployment_regions"`) || !strings.Contains(report, "ap-south") {
+		t.Errorf("compile-report.json does not record the forwarded region:\n%s", report)
+	}
+	absent := artifactFile(t, dailyArtifactWithRegion(t, ""), "compile-report.json")
+	if strings.Contains(absent, "deployment_regions") {
+		t.Errorf("compile-report.json reports a region the package never declared:\n%s", absent)
+	}
+}
+
+// US5: the emitted instructions describe how an outbound call is started and say
+// what identity the recipient sees, given the package cannot choose one.
+//
+// Documentation only, and deliberately so. There is no way to *declare* outbound
+// calling on this route: a telephony channel requires a carrier connection plan,
+// the Daily route has none, and adding a channel here is what FR-002 rules out.
+// Outbound is started by the platform against the deployed agent, so describing
+// it needs no authoring surface, and pretending the package controls it would.
+func TestUS5_OutboundInstructionsNameTheIdentityAndThePermission(t *testing.T) {
+	readme := artifactFile(t, dailyArtifact(t), "README.md")
+	for _, want := range []string{
+		"Place an outbound call",
+		"https://api.pipecat.daily.co/v1/public/",
+		`"enable_dialout": true`,
+		"dialout_settings",
+		// The recipient's identity is the provider's choice, and saying so is the
+		// point: an author who assumes otherwise learns it from a stranger's
+		// caller display.
+		"recipient sees a number you did not choose",
+		"picks one of your purchased numbers at random",
+		"international dial-out is",
+	} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README.md missing %q", want)
+		}
+	}
+}
+
+func requiredEnvOf(t *testing.T, artifact Artifact) []string {
+	t.Helper()
+	var report struct {
+		RequiredEnv []string `json:"required_env"`
+	}
+	if err := json.Unmarshal([]byte(artifactFile(t, artifact, "compile-report.json")), &report); err != nil {
+		t.Fatal(err)
+	}
+	return report.RequiredEnv
 }
 
 func targetByProvider(t *testing.T, agent *ir.Agent, provider ir.Provider) ir.Target {
@@ -1815,7 +2319,11 @@ func TestV1_DailyColdTransferHandlesTheReturnedError(t *testing.T) {
 
 	returned := build(ir.OnUnavailableReturn)
 	for _, want := range []string{
-		"error = \"the transport is not connected\" if _TRANSPORT is None else (",
+		// The primitive is a Daily transport method, so the tool narrows to that
+		// transport first; a browser or console session gets a named failure
+		// rather than an AttributeError.
+		"if isinstance(_TRANSPORT, DailyTransport):",
+		"this session is not a phone call, so it cannot be transferred",
 		"await _TRANSPORT.sip_call_transfer(",
 		"if error is not None:",
 		"Tell the caller and keep helping them.",

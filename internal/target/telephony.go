@@ -257,6 +257,78 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	return routes
 }
 
+// RouteAccountPrerequisite is a platform feature the provider grants on request
+// rather than by default, which a route cannot work without.
+//
+// It carries no tag on purpose. The four tags describe whether *unmute* can
+// honour a field: core never fails, warn prints, gated refuses, provisional
+// fails until proven. An account permission is none of those — unmute compiles
+// the package perfectly, and whether the author's account has the feature is
+// unknowable at compile time. Gating it would refuse correct packages; warning
+// would print on every compile forever and train authors to ignore stderr. So
+// it states a fact about the route and never claims a failure (research D3).
+type RouteAccountPrerequisite struct {
+	Name     string             `json:"name"`
+	Summary  string             `json:"summary"`
+	NeededBy []TelephonyFeature `json:"needed_by"`
+	Docs     string             `json:"docs"`
+	Verified string             `json:"verified"`
+}
+
+// Needs reports whether the package uses anything this prerequisite is needed
+// by. Both directions matter: a prerequisite that always prints is a banner
+// rather than a warning, which is the noise failure mode research D3 rejects.
+func (p RouteAccountPrerequisite) Needs(used []TelephonyFeature) bool {
+	for _, feature := range used {
+		if slices.Contains(p.NeededBy, feature) {
+			return true
+		}
+	}
+	return false
+}
+
+type routePrerequisiteRule struct {
+	provider  Provider
+	transport string
+	carrier   string // "" matches any carrier on the transport
+	prereq    RouteAccountPrerequisite
+}
+
+// routePrerequisites is the only home for these facts. The emitter, the docs,
+// and the validate report all read them from here (Principle III).
+var routePrerequisites = []routePrerequisiteRule{{
+	provider: Pipecat, transport: "daily-sip",
+	prereq: RouteAccountPrerequisite{
+		Name: "daily_dialout",
+		Summary: "Ask Daily to enable dial-out on the domain that owns the number: " +
+			"it is a paid feature granted on request, and international dial-out is enabled separately per domain.",
+		NeededBy: []TelephonyFeature{TelephonyFeature(ColdTransfer), TelephonyOutbound},
+		Docs:     "https://docs.pipecat.ai/pipecat-cloud/guides/telephony/daily-dial-out",
+		Verified: "2026-08-12",
+	},
+}}
+
+// RouteAccountPrerequisites returns the account features a route needs.
+//
+// It takes the route triple rather than a resolved telephony plan, because the
+// Daily route has neither a connection nor a telephony channel and so never
+// gets a plan (ir/build.go sets one only when a connection is declared). Every
+// other route fact is reached through that plan, which is why this one needs
+// its own door.
+func RouteAccountPrerequisites(provider Provider, transport, carrier string) []RouteAccountPrerequisite {
+	var out []RouteAccountPrerequisite
+	for _, rule := range routePrerequisites {
+		if rule.provider != provider || rule.transport != transport {
+			continue
+		}
+		if rule.carrier != "" && rule.carrier != carrier {
+			continue
+		}
+		out = append(out, rule.prereq)
+	}
+	return out
+}
+
 func TelephonyEnvironment(key TelephonyKey) (required, optional []string, ok bool) {
 	route, ok := TelephonyRoutes()[key]
 	if !ok {
@@ -282,7 +354,7 @@ func ResolveTelephonyFeature(key TelephonyKey, feature TelephonyFeature) Telepho
 		case TelephonyFeature(ColdTransfer):
 			note += "; cold transfer compiles on (livekit, sip) trunks and on Pipecat's Daily route (transport daily-sip)"
 		case TelephonyFeature(WarmTransfer):
-			note += "; warm transfer compiles on (livekit, sip) trunks only"
+			note += "; warm transfer compiles on (livekit, sip) trunks today"
 		}
 		return TelephonyEvidence{Feature: feature, Tag: Gated, Note: note}
 	}

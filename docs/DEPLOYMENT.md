@@ -1,13 +1,22 @@
 # Self-hosted deployment
 
-Status: Adopted stance, July 23, 2026. For now, Unmute deployments do not use
-LiveKit Cloud or Pipecat Cloud. Everything below runs on infrastructure you
-control.
+Status: Adopted stance, August 12, 2026. Remote deployment uses the managed
+clouds: Pipecat Cloud for the Pipecat driver, LiveKit Cloud for LiveKit. Local
+runs still need no cloud account at all, and that is a separate claim, kept in
+[TELEPHONY.md](TELEPHONY.md) where `unmute dev` lives.
 
-The generated artifacts stay compatible with the managed clouds, but the
-supported path is self-hosted. This document records what you need to take the
-emitted Docker image and run a full, production-ready voice AI application
-without either cloud.
+This document records what you need to take the emitted Docker image and run it
+on infrastructure you control. That path still works and is still documented.
+What changed is which one is supported: for a deployment, the managed cloud is.
+
+Superseded stance, kept as history: *"Adopted stance, July 23, 2026. For now,
+Unmute deployments do not use LiveKit Cloud or Pipecat Cloud. Everything below
+runs on infrastructure you control."* That sentence conflated two things. Local
+runs needing no cloud account was true and still is. Deployments avoiding the
+managed clouds was a choice, and it has been reversed.
+
+The generated artifacts stay compatible with both, because the compiler emits an
+ordinary container and a manifest, not a hosting decision.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) explains the runtime shapes this document
 deploys. [TELEPHONY.md](TELEPHONY.md) owns the telephony details and its

@@ -1036,8 +1036,14 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 	}
 	report, _ := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
 	joined := strings.Join(report.PerTarget[0].Errors, "\n")
-	if !strings.Contains(joined, "no native warm transfer") || !strings.Contains(joined, "(livekit, sip)") {
+	if !strings.Contains(joined, "does not emit warm transfer yet") || !strings.Contains(joined, "(livekit, sip)") {
 		t.Fatalf("warm on pipecat daily must fail naming (livekit, sip), got:\n%s", joined)
+	}
+	// N34 / FR-032: the refusal must not claim the platform cannot do it. Daily
+	// documents warm; this driver has not built it. Saying the first when you mean
+	// the second sends an author looking for a different platform.
+	if strings.Contains(joined, "no native warm transfer") || strings.Contains(joined, "Pipecat has no warm") {
+		t.Errorf("the refusal states a platform limitation Daily's own docs contradict:\n%s", joined)
 	}
 
 	// Telephony route (carrier-websocket): the route table names the fix too.
@@ -1059,7 +1065,7 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 	}
 	report, _ = Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
 	joined = strings.Join(report.PerTarget[0].Errors, "\n")
-	if !strings.Contains(joined, "warm transfer compiles on (livekit, sip) trunks only") {
+	if !strings.Contains(joined, "warm transfer compiles on (livekit, sip) trunks") {
 		t.Fatalf("warm on the carrier route must name the supported routes, got:\n%s", joined)
 	}
 }

@@ -148,6 +148,70 @@ func TestPublicExamplesValidateAndGenerate(t *testing.T) {
 	}
 }
 
+// FR-031 / SC-008: an existing package keeps its meaning. The Daily-route work
+// must reach the Daily route and nothing else.
+//
+// Written as a scoping property rather than against a stored copy of every
+// example's old output. A byte-for-byte baseline would need a golden per example
+// per file, and it would go stale on the first unrelated template edit, at which
+// point the honest question ("did this feature widen?") gets buried in noise.
+// The property is the same and it is checkable directly: none of this feature's
+// additions may appear on any target that is not the Daily route.
+//
+// A failure here means the change was made unconditionally. Narrow it, do not
+// extend this list.
+func TestDailyRouteWorkDoesNotReachOtherTargets(t *testing.T) {
+	// Every marker this feature adds to an emitted project.
+	markers := []string{
+		"DailyParams", "pipecat.transports.daily",
+		"_TRANSFER_RESULT", "## Phone calls",
+		"Account prerequisites", "route_prerequisites", "daily_dialout",
+	}
+	root := filepath.Join("..", "..", "examples")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkedDaily := false
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pkg, err := spec.Load(filepath.Join(root, entry.Name()))
+		if err != nil {
+			t.Fatalf("%s: load: %v", entry.Name(), err)
+		}
+		agent, err := ir.Build(pkg)
+		if err != nil {
+			t.Fatalf("%s: build: %v", entry.Name(), err)
+		}
+		for _, name := range slices.Sorted(maps.Keys(agent.Targets)) {
+			resolved := agent.Targets[name]
+			daily := resolved.Provider == ir.ProviderPipecat && resolved.Transport == "daily-sip"
+			artifact, err := Generate(agent, resolved, target.Default())
+			if err != nil {
+				t.Fatalf("%s/%s: generate: %v", entry.Name(), name, err)
+			}
+			for _, file := range artifact.Files {
+				for _, marker := range markers {
+					if !strings.Contains(string(file.Content), marker) {
+						continue
+					}
+					if !daily {
+						t.Errorf("%s/%s (%s, transport %q) emits %q: this feature must reach the Daily route only",
+							entry.Name(), name, resolved.Provider, resolved.Transport, file.Path)
+					}
+					checkedDaily = checkedDaily || daily
+				}
+			}
+		}
+	}
+	// A test that finds the markers nowhere would pass while proving nothing.
+	if !checkedDaily {
+		t.Error("no example exercises the Daily route, so this test cannot tell scoped from absent")
+	}
+}
+
 func TestPublicExamplePackages(t *testing.T) {
 	root := filepath.Join("..", "..", "examples")
 	entries, err := os.ReadDir(root)

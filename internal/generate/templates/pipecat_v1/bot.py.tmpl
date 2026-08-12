@@ -54,7 +54,8 @@ from pipecat.runner.utils import create_transport
 {{end}}{{if .NeedsRoleRestore}}from pipecat.services.settings import LLMSettings
 {{end}}{{if .NeedsLanguage}}from pipecat.transcriptions.language import Language
 {{end}}from pipecat.transports.base_transport import BaseTransport, TransportParams
-{{if .Telephony}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+{{if .DailyParams}}{{.DailyParams.Import}}
+{{end}}{{if .Telephony}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 {{end}}{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
@@ -87,6 +88,17 @@ REQUIRED_ENV = [
 {{end}}{{end}}{{if .HasColdTransfer}}
 # Set once the transport exists, so an agent's cold-transfer @tool can reach it.
 _TRANSPORT: BaseTransport | None = None
+# One call gets one transfer attempt. Holds the first attempt's result so a
+# caller who asks twice replays it instead of firing a second REFER, and so a
+# transfer that failed can never come back to the model as a success.
+#
+# ponytail: a module-level value, not the shared control store the carrier
+# routes use for this. That store is deliberately absent here: this route
+# declares no Redis, and adding one to remember a fact that never outlives the
+# call would be an idle service. On this route one process serves one call, so
+# module scope is call scope. If that ever stops being true, this has to become
+# per-session state keyed on the call id.
+_TRANSFER_RESULT: dict | None = None
 {{end}}
 
 def require_env() -> None:
@@ -285,6 +297,14 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
 {{range .Args}}            {{.Name}} ({{.PyType}}):{{if .Description}} {{.Description}}{{end}}{{if .Enum}} One of: {{join .Enum ", "}}.{{end}}
 {{end}}        """{{else}}"""{{end}}
 {{if .ColdDestination}}        logger.info("human transfer fired: {{.MethodName}} (cold)")
+        global _TRANSFER_RESULT
+        if _TRANSFER_RESULT is not None:
+            # Asked twice. Replay the first answer rather than dial again.
+            await params.result_callback(_TRANSFER_RESULT)
+            return
+        # Claimed before the primitive runs, not after: a request arriving while
+        # the REFER is still in flight must not slip past the guard.
+        _TRANSFER_RESULT = {"in_progress": "A transfer is already under way; do not start another."}
         # Daily SIP transfers via REFER, which keeps the bot on the call
         # until the transfer completes, so the bot speaks the announcement
         # itself (the official daily-pstn-cold-transfer pattern).
@@ -294,9 +314,13 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
                 run_llm=True,
             )
         )
-        error = "the transport is not connected" if _TRANSPORT is None else (
-            await _TRANSPORT.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
-        )
+        if isinstance(_TRANSPORT, {{$.DailyParams.Transport}}):
+            error = await _TRANSPORT.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
+        else:
+            # No phone call, so nothing to hand over: the browser and console
+            # transports carry no transfer primitive. Failing here by name beats
+            # raising, and beats telling the model the caller was transferred.
+            error = "this session is not a phone call, so it cannot be transferred"
         if error is not None:
             # A failed transfer is a return value, not an exception, on this
             # transport (T5). Ignoring it would tell the model the caller was
@@ -309,11 +333,14 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
                     run_llm=True,
                 )
             )
-            await params.result_callback({"failed": "The transfer could not be completed; the call is ending."})
+            _TRANSFER_RESULT = {"failed": "The transfer could not be completed; the call is ending."}
+            await params.result_callback(_TRANSFER_RESULT)
             await params.llm.push_frame(EndFrame())
-{{else}}            await params.result_callback({"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."})
+{{else}}            _TRANSFER_RESULT = {"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."}
+            await params.result_callback(_TRANSFER_RESULT)
 {{end}}            return
-        await params.result_callback({"transferred": True})
+        _TRANSFER_RESULT = {"transferred": True}
+        await params.result_callback(_TRANSFER_RESULT)
 {{else if .Builtin}}{{if .Instructions}}        await params.llm.push_frame(
             LLMMessagesAppendFrame(
                 [{"role": "developer", "content": {{pyq .Instructions}}}],
@@ -457,7 +484,10 @@ async def _flow_tool_{{.Name}}(args, flow_manager{{if .NeedsState}}, state=None{
 # --- transport & run --------------------------------------------------------
 transport_params: dict = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
-    "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+    # The runner assigns an inbound call's dial-in settings and Daily credentials
+    # onto whatever this returns, so on the Daily route it has to be the params
+    # class that declares them. The generic one rejects the assignment.
+    "daily": lambda: {{if .DailyParams}}{{.DailyParams.Class}}{{else}}TransportParams{{end}}(audio_in_enabled=True, audio_out_enabled=True),
 {{if .Telephony}}    {{pyq .Telephony.Carrier}}: lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True),
 {{end}}
 }

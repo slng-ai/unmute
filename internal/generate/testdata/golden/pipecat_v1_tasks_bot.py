@@ -37,6 +37,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.settings import LLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.daily.transport import DailyParams, DailyTransport
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
@@ -76,6 +77,17 @@ IGNORE_PHRASES = ["okay", "right", "uh-huh"]
 
 # Set once the transport exists, so an agent's cold-transfer @tool can reach it.
 _TRANSPORT: BaseTransport | None = None
+# One call gets one transfer attempt. Holds the first attempt's result so a
+# caller who asks twice replays it instead of firing a second REFER, and so a
+# transfer that failed can never come back to the model as a success.
+#
+# ponytail: a module-level value, not the shared control store the carrier
+# routes use for this. That store is deliberately absent here: this route
+# declares no Redis, and adding one to remember a fact that never outlives the
+# call would be an idle service. On this route one process serves one call, so
+# module scope is call scope. If that ever stops being true, this has to become
+# per-session state keyed on the call id.
+_TRANSFER_RESULT: dict | None = None
 
 
 def require_env() -> None:
@@ -201,6 +213,14 @@ class BillingAgent(TracedLLMWorker):
     async def to_human(self, params: FunctionCallParams):
         """Transfer the caller to a human."""
         logger.info("human transfer fired: to_human (cold)")
+        global _TRANSFER_RESULT
+        if _TRANSFER_RESULT is not None:
+            # Asked twice. Replay the first answer rather than dial again.
+            await params.result_callback(_TRANSFER_RESULT)
+            return
+        # Claimed before the primitive runs, not after: a request arriving while
+        # the REFER is still in flight must not slip past the guard.
+        _TRANSFER_RESULT = {"in_progress": "A transfer is already under way; do not start another."}
         # Daily SIP transfers via REFER, which keeps the bot on the call
         # until the transfer completes, so the bot speaks the announcement
         # itself (the official daily-pstn-cold-transfer pattern).
@@ -210,18 +230,24 @@ class BillingAgent(TracedLLMWorker):
                 run_llm=True,
             )
         )
-        error = "the transport is not connected" if _TRANSPORT is None else (
-            await _TRANSPORT.sip_call_transfer({"toEndPoint": "+14155550123"})
-        )
+        if isinstance(_TRANSPORT, DailyTransport):
+            error = await _TRANSPORT.sip_call_transfer({"toEndPoint": "+14155550123"})
+        else:
+            # No phone call, so nothing to hand over: the browser and console
+            # transports carry no transfer primitive. Failing here by name beats
+            # raising, and beats telling the model the caller was transferred.
+            error = "this session is not a phone call, so it cannot be transferred"
         if error is not None:
             # A failed transfer is a return value, not an exception, on this
             # transport (T5). Ignoring it would tell the model the caller was
             # transferred while they are still right here. on_unavailable
             # decides what the caller gets instead.
             logger.warning("cold transfer failed: {}", error)
-            await params.result_callback({"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."})
+            _TRANSFER_RESULT = {"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."}
+            await params.result_callback(_TRANSFER_RESULT)
             return
-        await params.result_callback({"transferred": True})
+        _TRANSFER_RESULT = {"transferred": True}
+        await params.result_callback(_TRANSFER_RESULT)
 
 
 
@@ -426,7 +452,10 @@ async def _flow_tool_lookup_customer(args, flow_manager):
 # --- transport & run --------------------------------------------------------
 transport_params: dict = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
-    "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+    # The runner assigns an inbound call's dial-in settings and Daily credentials
+    # onto whatever this returns, so on the Daily route it has to be the params
+    # class that declares them. The generic one rejects the assignment.
+    "daily": lambda: DailyParams(audio_in_enabled=True, audio_out_enabled=True),
 
 }
 

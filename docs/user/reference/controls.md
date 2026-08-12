@@ -194,10 +194,17 @@ only, and every transfer design this project once built on them meant owning
 the call's audio path; that work is deleted. Validation refuses a transfer
 there and names the routes that work.
 
-**Warm is LiveKit-only.** Pipecat has no native warm transfer on any route;
-its documented warm pattern makes the bot the audio coordinator, which is
-the same class of complexity. A Pipecat warm package fails validation
-pointing at `(livekit, sip)`.
+**Warm compiles on LiveKit SIP only, today.** A Pipecat warm package fails
+validation pointing at `(livekit, sip)`.
+
+Worth being exact about why, because the two reasons are different (checked
+2026-08-12). On Pipecat's **carrier websocket** routes the platform has no
+call-transfer control at all, so warm cannot be built there. On Pipecat's
+**Daily** route the platform does document warm; we have not built it yet,
+because the pattern puts the generated bot in charge of the call's audio and
+that is a deliberate piece of work rather than a default. Tracked as feature
+005. The `warm:` block you would write for it already exists and does not
+change.
 
 ### ring_timeout
 
