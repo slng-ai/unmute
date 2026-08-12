@@ -49,9 +49,23 @@ Two platform facts worth knowing before you provision anything:
   docs state `TransferSipParticipant` is not yet supported on them. Unmute's
   documented telephony provider for the LiveKit route is Twilio Elastic SIP
   Trunking, by decision.
-- **The trunk must allow REFER** for LiveKit cold. On Twilio: enable "Call
-  Transfer (SIP REFER)" and "Enable PSTN Transfer" on the trunk. Plivo has
-  REFER on by default (destination form
+- **The trunk must allow REFER** for LiveKit cold. On Twilio it is a
+  per-trunk setting
+  ([Call Transfer via SIP REFER](https://www.twilio.com/docs/sip-trunking/call-transfer)):
+  in the console under **Elastic SIP Trunking > Manage > Trunks > your
+  trunk**, enable **Call Transfers** and tick **Enable PSTN Transfer**, or do
+  it with the CLI:
+
+  ```sh
+  twilio api trunking v1 trunks update --sid <trunk-sid> \
+    --transfer-mode enable-all --transfer-caller-id from-transferee
+  ```
+
+  Caller ID for the transfer target is that trunk setting (`Transferee` shows
+  the caller's number, `Transferor` the trunk's), never per-call. Two Twilio
+  restrictions to know: transfers to emergency services (911/933) are not
+  supported, and the referred-to leg keeps billing per-minute trunking
+  charges. Plivo has REFER on by default (destination form
   `sip:+E164@<trunk-id>.zt.plivo.com`); Telnyx is supported
   (`sip:+E164@sip.telnyx.com`).
 

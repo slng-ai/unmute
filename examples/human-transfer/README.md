@@ -67,7 +67,8 @@ The trunk side is Twilio Elastic SIP Trunking (by decision; LiveKit Phone
 Numbers are inbound-only and cannot transfer). In the Twilio console under
 **Elastic SIP Trunking > Manage > Trunks**, create a trunk, then:
 
-1. Enable **Call Transfer (SIP REFER)** and tick **Enable PSTN Transfer**.
+1. Enable **Call Transfers** and tick **Enable PSTN Transfer**
+   ([Twilio: Call Transfer via SIP REFER](https://www.twilio.com/docs/sip-trunking/call-transfer)).
    Without it the carrier rejects the cold transfer.
 2. Point the trunk's origination URI at your LiveKit SIP endpoint.
 3. Copy the trunk's SIP domain, username, and password.
