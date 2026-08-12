@@ -63,6 +63,7 @@ const (
 	FieldToolInterruption      Field = "tools.interruption.non_default"
 	FieldOutbound              Field = "channels.telephony.outbound"
 	FieldVoicemail             Field = "channels.telephony.on_voicemail"
+	FieldDeploymentMultiRegion Field = "deployment_region.multiple"
 	FieldTracingLangfuse       Field = "tracing.provider.langfuse"
 	FieldVariableConversation  Field = "variables.source.conversation"
 	FieldToolInject            Field = "tools.inject"
@@ -369,6 +370,14 @@ func Default() Table {
 			FieldTracingLangfuse: field(
 				deny(Vapi, "Vapi has no Langfuse tracing lowering"),
 				deny(Deepgram, "the Deepgram driver does not emit Langfuse tracing"),
+			),
+			// Several regions in one deployment_region (N32). LiveKit creates
+			// one deployment per region from one build directory; every other
+			// provider is gated, each in its own words. Verified 2026-08-12.
+			FieldDeploymentMultiRegion: field(
+				deny(Pipecat, "Pipecat Cloud agent names are globally unique across regions, so a second region needs a differently named agent: declare one region here and deploy the second with `pipecat cloud deploy <name>-<region> --region <region>`"),
+				deny(Vapi, "Vapi has no per-region deployment to fan out to"),
+				deny(Deepgram, "the Deepgram driver does not emit a deployment at all, let alone one per region"),
 			),
 			// Variables and secrets (variable_secrets_specs.md V5). The code
 			// drivers own the session state and the request, so they can capture

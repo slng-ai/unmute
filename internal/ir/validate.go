@@ -484,6 +484,12 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	if agent.Tracing != nil {
 		applyCapability(caps, targetcap.FieldTracingLangfuse, provider, row)
 	}
+	row.Errors = append(row.Errors, validateRegions(resolved.DeploymentRegions)...)
+	// Only a list of more than one is gated: one region works everywhere the
+	// field works, and the scalar form has since N18.
+	if len(resolved.DeploymentRegions) > 1 {
+		applyCapability(caps, targetcap.FieldDeploymentMultiRegion, provider, row)
+	}
 	// Placement gates read the resolved per-target bindings (N15): a per-target
 	// override can change where a model runs, so the effective binding decides.
 	if b := resolved.Models.Listen; b != nil && b.Placement == PlacementLocal {
@@ -1485,6 +1491,24 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 
 func applyResolvedCapability(capability targetcap.Capability, control targetcap.TelephonyControl, provider targetcap.Provider, row *TargetValidation) {
 	applyCapabilityValue(capability, string(control), provider, row)
+}
+
+// validateRegions rejects the two authoring mistakes a region list can hold. A
+// duplicate is never deduplicated silently: two first deploys against one config
+// file name is a confusing thing to debug.
+func validateRegions(regions []string) []string {
+	var errors []string
+	seen := make(map[string]bool, len(regions))
+	for _, region := range regions {
+		switch {
+		case region == "":
+			errors = add(errors, "deployment_region has an empty entry")
+		case seen[region]:
+			errors = add(errors, fmt.Sprintf("deployment_region lists %q twice", region))
+		}
+		seen[region] = true
+	}
+	return errors
 }
 
 func applyCapabilityValue(capability targetcap.Capability, name string, provider targetcap.Provider, row *TargetValidation) {

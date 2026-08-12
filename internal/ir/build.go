@@ -794,9 +794,12 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 	built := Target{
 		Name: name, Provider: Provider(raw.Provider), Version: raw.Version, Pins: raw.Pins,
 		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier, Connection: raw.Connection,
-		DeploymentRegion: raw.DeploymentRegion,
-		Models:           resolveBindings(agent, used, raw.Models),
-		Destinations:     raw.Destinations,
+		// Declared order, no deduplication, no region invented when none is
+		// declared: validate rejects a duplicate and each README states what
+		// the platform does with an empty list.
+		DeploymentRegions: raw.DeploymentRegion,
+		Models:            resolveBindings(agent, used, raw.Models),
+		Destinations:      raw.Destinations,
 	}
 	if raw.Connection != "" && telephony {
 		built.Telephony = buildTelephonyPlan(pkg, agent, built)

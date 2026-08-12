@@ -13,14 +13,34 @@ import (
 	targetcap "github.com/slng/unmute/internal/target"
 )
 
+// firstRegion is the one region a Pipecat target may declare, or "" for none.
+func firstRegion(regions []string) string {
+	if len(regions) == 0 {
+		return ""
+	}
+	return regions[0]
+}
+
+// regionList puts a single region back into the list shape the compile report
+// uses on both drivers, so one key means one thing everywhere.
+func regionList(region string) []string {
+	if region == "" {
+		return nil
+	}
+	return []string{region}
+}
+
 // buildPipecatData lowers the resolved IR + target into the template model.
 // Bindings (model/voice/params) are forwarded verbatim; only their provider
 // selects the Pipecat service class and api-key env (C11).
 func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	data := pipecatData{
-		Project:          target.Name,
-		Version:          target.Version,
-		DeploymentRegion: target.DeploymentRegion,
+		Project: target.Name,
+		Version: target.Version,
+		// At most one region reaches this driver: a list of several is a gated
+		// validation error (FieldDeploymentMultiRegion), which runs before any
+		// artifact exists.
+		DeploymentRegion: firstRegion(target.DeploymentRegions),
 		MainName:         "main",
 		EntryAgent:       agent.EntryAgent,
 		EntryClass:       pyName(agent.EntryAgent),
@@ -145,6 +165,14 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	}
 	data.RequiredEnv = env.sorted()
 	data.Secrets, data.ExtraEnv = secretEnvDocs(agent, data.RequiredEnv)
+	// The platform's own naming convention (my-agent-secrets). Keyed on the whole
+	// required-env list, not the declared `secrets:` block: .env.example lists
+	// required env either way, and a deployed agent with no provider keys looks
+	// healthy and fails on its first call. A package needing no environment at
+	// all gets no set and deploys without one.
+	if len(data.RequiredEnv) > 0 {
+		data.SecretSet = data.Project + "-secrets"
+	}
 	return data, nil
 }
 

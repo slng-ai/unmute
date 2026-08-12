@@ -1840,3 +1840,14 @@ func TestV1_DailyColdTransferHandlesTheReturnedError(t *testing.T) {
 		}
 	}
 }
+
+// N32: several regions is a Pipecat gate, not a Pipecat feature. The agreement
+// test alone would also pass if both sides were wrong together, so name the row.
+func TestPipecatDoesNotClaimMultiRegion(t *testing.T) {
+	if pipecatEmittedFields[target.FieldDeploymentMultiRegion] {
+		t.Error("pipecatEmittedFields claims deployment_region.multiple, but one Pipecat agent deploys to one region")
+	}
+	if tag := target.Default().Capability(target.FieldDeploymentMultiRegion, target.Pipecat).Tag; tag != target.Gated {
+		t.Errorf("deployment_region.multiple on pipecat = %q, want gated", tag)
+	}
+}

@@ -48,11 +48,58 @@ targets:
 | `sdk_language` | no | the LiveKit driver currently accepts `python` only |
 | `transport`, `carrier` | no | driver vocabulary; telephony controls resolve against these, never the brand alone |
 | `connection` | telephony routes | name of one `connections/<name>.yaml`; all telephony channels on this v1 target share it |
-| `deployment_region` | no | where the platform deploys the agent; forwarded as declared, never validated. Pipecat writes it to `pcc-deploy.toml`'s `region`; LiveKit puts it on the generated README's `lk agent create --region` (create-time, immutable). A model's own service region rides its `params`/`endpoint_env` instead. |
+| `deployment_region` | no | where the platform deploys the agent: one region, or a list of them (N32). Forwarded as declared, never validated. See below. |
 | `models` | no | per-target overrides, keyed by model name, below |
 | `destinations` | if any `human_transfer` is used | map of symbolic name to an E.164 number, a `sip:` URI, or the UPPER_SNAKE name of an env var holding one (told apart by shape). See [controls](controls.md#destination) |
 
 Pipecat and LiveKit have drivers today; Vapi and Deepgram instances error on `compile` until their driver ships. `validate` still checks any provider against the schema. See the [target pages](../targets/pipecat.md).
+
+## Deployment region
+
+One region, or several. Both shapes are the same field, and a one-element list
+behaves exactly like the scalar:
+
+```yaml
+targets:
+  livekit:
+    provider: livekit
+    deployment_region: eu-central       # one region
+
+  livekit_multi:
+    provider: livekit
+    deployment_region:                  # several: one deployment each
+      - us-east
+      - eu-central
+```
+
+- **A list of more than one is LiveKit only.** Each region becomes its own
+  deployment from the one build directory, and the generated
+  `build/<target>/README.md` prints one first-deploy and one redeploy command per
+  region, each naming its own config file. Every deployment keeps the package's
+  single dispatch name, so callers reach the nearest one.
+- **On Pipecat a list of more than one fails validation**, because agent names
+  are globally unique across regions there: a second region is a differently
+  named agent. Declare one region, and the generated README prints the single
+  extra command that puts a second agent in another region with its own secret
+  set. Declaring two Pipecat instances, one per region, works too.
+- **Unset is fine on both.** LiveKit's first deploy then asks which region to
+  use, so set the field when the deploy has to be unattended. Pipecat uses your
+  organisation's default region (`us-west` unless you changed it).
+- **Region codes are never validated** and this repository keeps no list of
+  them: the value is forwarded exactly as written and the platform CLI rejects a
+  wrong one. The same region twice in one list is an error rather than being
+  quietly deduplicated.
+- **Fixed once deployed.** On LiveKit a region cannot be moved: creating in the
+  new region and deleting the old agent is the procedure, and the generated
+  README says so. Nothing is promised about moving a Pipecat agent's region,
+  because the platform documents nothing either way.
+- A model's own service region is a different knob and rides its
+  `params`/`endpoint_env` instead. An agent deployed in one region may pin a
+  model endpoint in another.
+
+Every declared region appears in `build/<target>/compile-report.json` as
+`deployment_regions`, so what was sent can be read back without opening the
+source package.
 
 ## Multiple telephony routes
 

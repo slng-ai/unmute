@@ -21,9 +21,10 @@ One row per declared region, built in `livekit_v1_build.go` and consumed by the 
 |---|---|---|
 | `Region` | the declared region | that row's region |
 | `ConfigFile` | empty, so commands use the platform default name | `livekit.<region>.toml` |
-| `RegionFlag` | ` --region <region>` on the first-deploy command only | same, per row |
 
-With no region declared there are no rows, and the README states that the platform prompts for one. A one-element list behaves exactly like the scalar form: default file name, no per-region naming.
+The two flags are built in the template from those fields (` --region` on the first-deploy command only, ` --config` only when `ConfigFile` is set) rather than being pre-rendered in Go: assembling shell fragments in the emitter reads worse than the template does, and the observable contract is the same.
+
+With no region declared there is exactly **one** row, with both fields empty: the commands are identical minus the flag, and the README states separately that the platform prompts for a region. That keeps the template one `range` rather than two branches. A one-element list behaves exactly like the scalar form: default file name, no per-region naming.
 
 ## Validation rules
 

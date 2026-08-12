@@ -90,6 +90,46 @@ Set these before running (values are never written into the project):
 - `OPENAI_API_KEY`
 - `SLNG_API_KEY`
 
+## Deploy to Pipecat Cloud
+
+Authenticate once first with `pipecat cloud auth login`. After that, one command
+does the first deploy and every later one: `pipecat cloud deploy` builds the image
+in the cloud from this project's `Dockerfile` and deploys it. That is why the
+manifest names no image; naming one switches cloud builds off.
+
+Create the secret set first, because the manifest already references it and a
+deploy cannot start without it:
+
+```sh
+cp .env.example .env            # then fill in the values
+pipecat cloud secrets set pipecat-secrets --file .env
+pipecat cloud deploy
+pipecat cloud agent status pipecat
+```
+
+Run the same `secrets set` command again to change a value. If that set name is
+already taken (secret-set names are globally unique across the platform), create
+yours under another name and pass `--secrets <other-name>` on the deploy command,
+which overrides the manifest.
+
+Deploying the same agent name again updates the existing agent rather than making
+a second one. Sessions already running finish on the old image, and a deploy that
+fails leaves the previous ready version serving traffic. `status` reporting
+`ready` is the deploy actually being usable.
+
+No warm instance is kept: the manifest declares no replica count, because the
+source package declares none. Add `--min-agents <n>` on the deploy command if you
+want a pool held ready.
+
+### Region
+
+No region is declared, so the agent goes to your organisation's default region
+(`us-west` unless you changed it). A secret set defaults to
+`us-west` regardless, so if you changed that organisation default, pass an
+explicit `--region` to both commands: a set in the wrong region cannot be read
+by the agent. Set `deployment_region` on this target in `targets.yaml` to
+choose one, and `pipecat cloud regions list` to see what is available.
+
 
 ## Agents
 
@@ -701,10 +741,8 @@ services:
       start_period: 10s
 === pcc-deploy.toml ===
 agent_name = "pipecat"
-image = "pipecat:latest"
+secret_set = "pipecat-secrets"
 
-[scaling]
-min_agents = 1
 === pyproject.toml ===
 [project]
 name = "pipecat"

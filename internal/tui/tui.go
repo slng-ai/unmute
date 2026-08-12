@@ -2647,15 +2647,23 @@ func editCapacity(runner *fieldRunner, data *scaffold.Data) error {
 
 func editAdvancedTarget(runner *fieldRunner, data *scaffold.Data) error {
 	for {
+		// deployment_region holds one region or several (N32), so it is one
+		// comma-separated field: joined for display, split on save. Without the
+		// save hook a multi-region package would lose every region but the
+		// first the moment someone opened this form to edit something else.
+		regions := strings.Join(data.DeploymentRegions, ", ")
 		fields := []struct {
 			title, help string
 			value       *string
 			validate    func(string) error
+			save        func(string)
 		}{
-			{"Target version", "Driver/framework version pin.", &data.TargetVersion, validateBasic},
-			{"SDK language (optional)", "For example python on LiveKit.", &data.SDKLanguage, validateBasic},
-			{"Deployment region (optional)", "Where the platform deploys the agent; forwarded as declared (Pipecat pcc-deploy region, LiveKit lk agent create --region).", &data.DeploymentRegion, validateBasic},
-			{"Pins (optional JSON object)", "Independently versioned target packages.", &data.Pins, validateParams},
+			{"Target version", "Driver/framework version pin.", &data.TargetVersion, validateBasic, nil},
+			{"SDK language (optional)", "For example python on LiveKit.", &data.SDKLanguage, validateBasic, nil},
+			{"Deployment region (optional)", "Where the platform deploys the agent; forwarded as declared. One region, or several separated by commas for one deployment per region (LiveKit only).", &regions, validateBasic, func(value string) {
+				data.DeploymentRegions = parsePhrases(value)
+			}},
+			{"Pins (optional JSON object)", "Independently versioned target packages.", &data.Pins, validateParams, nil},
 		}
 		options := make([]huh.Option[string], 0, len(fields)+1)
 		for i, field := range fields {
@@ -2670,6 +2678,9 @@ func editAdvancedTarget(runner *fieldRunner, data *scaffold.Data) error {
 		field := fields[index]
 		if _, err := runner.input(field.title, field.help, field.value, field.validate); err != nil {
 			return err
+		}
+		if field.save != nil {
+			field.save(*field.value)
 		}
 	}
 }

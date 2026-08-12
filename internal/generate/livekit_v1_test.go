@@ -1170,7 +1170,10 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 		"rtc.ParticipantKind.PARTICIPANT_KIND_SIP",
 		// The tool speaks its own announcement (SPEC V4/B4).
 		`"Putting you through now, one moment.", allow_interruptions=False`,
-		`transfer_to="+14155550123",`,
+		// A REFER destination is a URI, not a bare number: this asserted
+		// `transfer_to="+14155550123"` until 2026-08-12, which is a shape no
+		// LiveKit example uses and which Plivo's Refer-To rules forbid outright.
+		`transfer_to="tel:+14155550123",`,
 		"await job_ctx.api.sip.transfer_sip_participant(request)",
 	} {
 		if !strings.Contains(botpy, want) {
@@ -1644,8 +1647,12 @@ func TestLiveKitV1PinsAndSDKLanguage(t *testing.T) {
 	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, `"livekit-plugins-slng>=1.7.0"`) {
 		t.Errorf("pin did not raise the plugin floor:\n%s", pyproject)
 	}
-	if !strings.Contains(artifactFile(t, artifact, "livekit.toml"), `id = "livekit"`) {
-		t.Error("livekit.toml missing the agent id")
+	// No deployment config file is emitted: the platform assigns both of its
+	// values, and its presence makes `lk agent create` refuse (FR-008).
+	for _, file := range artifact.Files {
+		if strings.HasPrefix(file.Path, "livekit") && strings.HasSuffix(file.Path, ".toml") {
+			t.Errorf("emitted %s; LiveKit Cloud writes that file itself", file.Path)
+		}
 	}
 
 	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.0.0"}

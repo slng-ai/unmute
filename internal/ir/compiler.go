@@ -450,18 +450,18 @@ type TelephonyFeatureEvidence struct {
 }
 
 type Target struct {
-	Name             string            `json:"name" yaml:"name"`
-	Provider         Provider          `json:"provider" yaml:"provider"`
-	Version          string            `json:"version,omitempty" yaml:"version,omitempty"`
-	Pins             map[string]string `json:"pins,omitempty" yaml:"pins,omitempty"`
-	SDKLanguage      string            `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
-	Transport        string            `json:"transport,omitempty" yaml:"transport,omitempty"`
-	Carrier          string            `json:"carrier,omitempty" yaml:"carrier,omitempty"`
-	Connection       string            `json:"connection,omitempty" yaml:"connection,omitempty"`
-	DeploymentRegion string            `json:"deployment_region,omitempty" yaml:"deployment_region,omitempty"`
-	Models           Bindings          `json:"models" yaml:"models"`
-	Destinations     map[string]string `json:"destinations,omitempty" yaml:"destinations,omitempty"`
-	Telephony        *TelephonyPlan    `json:"telephony,omitempty" yaml:"telephony,omitempty"`
+	Name              string            `json:"name" yaml:"name"`
+	Provider          Provider          `json:"provider" yaml:"provider"`
+	Version           string            `json:"version,omitempty" yaml:"version,omitempty"`
+	Pins              map[string]string `json:"pins,omitempty" yaml:"pins,omitempty"`
+	SDKLanguage       string            `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
+	Transport         string            `json:"transport,omitempty" yaml:"transport,omitempty"`
+	Carrier           string            `json:"carrier,omitempty" yaml:"carrier,omitempty"`
+	Connection        string            `json:"connection,omitempty" yaml:"connection,omitempty"`
+	DeploymentRegions []string          `json:"deployment_regions,omitempty" yaml:"deployment_regions,omitempty"`
+	Models            Bindings          `json:"models" yaml:"models"`
+	Destinations      map[string]string `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	Telephony         *TelephonyPlan    `json:"telephony,omitempty" yaml:"telephony,omitempty"`
 }
 
 type Provider string

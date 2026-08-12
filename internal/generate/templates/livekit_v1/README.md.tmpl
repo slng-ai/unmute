@@ -40,11 +40,93 @@ lk dispatch create --room <room> --agent-name {{.AgentName}} \
 
 ## Deploy
 
-Deployment is self-hosted: the worker connects out to a LiveKit Server you
-run and needs no inbound ports. Build the generated `Dockerfile` into an
-image, set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` to your
-server's values plus the provider keys from `.env.example`, then start the
-worker:
+Two supported paths: LiveKit Cloud with the `lk` CLI, or a worker you host
+yourself. Both run this project as generated.
+
+### Option 1: LiveKit Cloud
+
+Before the first command: authenticate once with `lk cloud auth`, then set the
+project this agent belongs to as the default (`lk project list`, then
+`lk project set-default "<name>"`). Without a default project every command
+below fails with a subdomain mismatch that does not say which side is wrong.
+
+The first deploy registers the agent, builds the image from the generated
+`Dockerfile`, and writes the `livekit.toml` this directory deliberately does not
+ship, because the platform assigns both of its values.
+
+```sh
+cp .env.example .env            # then fill in the values
+{{range .Deploys}}lk agent create{{if .Region}} --region {{.Region}}{{end}}{{if .ConfigFile}} --config {{.ConfigFile}}{{end}} --secrets-file .env
+{{end}}```
+
+Every later version is a redeploy, which needs that config file and the
+`Dockerfile` in this directory:
+
+```sh
+{{range .Deploys}}lk agent deploy{{if .ConfigFile}} --config {{.ConfigFile}}{{end}}
+{{end}}```
+
+`create` is the first deploy and refuses to run when a config file of that name
+already exists. `deploy` ships a new version of an agent that already exists and
+takes no region. Running them the wrong way round either refuses or registers a
+second billable agent with dispatch split between versions.
+
+#### Secrets
+
+`--secrets-file .env` sends every name in `.env.example` to the platform, which
+injects them as environment variables. `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
+`LIVEKIT_API_SECRET` are supplied by the platform itself: the CLI drops them
+from the file, they must not be set in the image, and their absence from the
+deployed secret list is correct rather than a mistake.
+{{- if .PlatformEnv}}
+
+`.env.example` groups those names in a labelled section at the end, together
+with anything else this deployment does not need from you. On LiveKit Cloud the
+SIP service is managed, so `REDIS_URL` belongs to a self-hosted deployment and is
+never read by the agent. Leave that section blank for a Cloud deploy.
+{{- end}}
+
+Change a value later without a full redeploy:
+
+```sh
+lk agent update-secrets --secrets-file .env              # merges into the existing set
+lk agent update-secrets --secrets-file .env --overwrite  # replaces the whole set
+```
+
+#### Region
+{{if .Deploys}}{{if (index .Deploys 0).Region}}
+Region is chosen at the first deploy and is immutable. Moving one means creating
+the agent in the new region and deleting the old one; the platform will not move
+it in place.
+{{- if gt (len .DeploymentRegions) 1}} Each region is its own deployment with its
+own config file, and all of them keep the `{{.AgentName}}` dispatch name, so
+callers reach the nearest one.
+{{- end}}
+{{- else}}
+No region is declared, so the first deploy asks which one to use. Set
+`deployment_region` on this target in `targets.yaml` to keep the deploy
+unattended. It is fixed at the first deploy and cannot be moved afterwards.
+{{- end}}{{end}}
+
+#### Check it, and recover it
+
+```sh
+lk agent status                 # Sleeping is healthy on plans that scale to zero
+lk agent logs
+lk agent config --id CA_xxx     # rebuild a lost config file, then deploy again
+```
+
+`unmute compile` preserves any `livekit*.toml` the platform wrote here, so a
+recompile does not cost you the agent. If a config file belongs to a different
+project than the current default, the deploy fails with that same subdomain
+mismatch: check `lk project list` and set the default that matches the file.
+
+### Option 2: self-hosted worker
+
+The worker connects out to a LiveKit Server you run and needs no inbound ports.
+Build the generated `Dockerfile` into an image, set `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` to your server's values plus the
+provider keys from `.env.example`, then start the worker:
 
 ```sh
 python agent.py start
@@ -52,9 +134,6 @@ python agent.py start
 
 See `docs/DEPLOYMENT.md` in the Unmute repository for the full self-hosted
 setup: server, Redis, firewall ports, sizing, and scaling.
-
-Compatibility note: the project also runs on LiveKit Cloud with the `lk` CLI
-(`lk agent create{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}`), but that is not the supported path.
 {{if .Tracing}}
 ## Trace with Langfuse
 

@@ -6,7 +6,13 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml ./
 RUN uv pip install --system .
 
-COPY . .
+# LiveKit Cloud requires a non-root run user. It owns /app because the agent
+# downloads model files on first run and would otherwise have nowhere to write:
+# COPY runs as root, so without --chown this directory stays root-owned.
+RUN useradd --home-dir /app --shell /usr/sbin/nologin appuser \
+ && chown appuser:appuser /app
+COPY --chown=appuser:appuser . .
+USER appuser
 
 # LiveKit Cloud / the worker runner start agent.py; `python agent.py dev` for local runs.
 CMD ["python", "agent.py", "start"]

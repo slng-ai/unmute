@@ -1765,3 +1765,57 @@ func TestScaffoldFieldlessToolBlocks(t *testing.T) {
 		})
 	}
 }
+
+// N32: deployment_region can hold several regions, and the maintain flow rewrites
+// targets.yaml from scaffold.Data. A field that could hold only one region would
+// silently drop the rest of an author's list on any unrelated edit, so both the
+// editor field and the round-trip are checked here.
+func TestMaintainKeepsEveryDeploymentRegion(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "agent")
+	data := scaffold.Data{Name: "agent"}
+	data.SetTarget("livekit")
+	data.DeploymentRegions = []string{"us-east", "eu-central"}
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(agent.data.DeploymentRegions, ","); got != "us-east,eu-central" {
+		t.Fatalf("regions after load = %q, want both in order", got)
+	}
+	agent.data.Instructions += "\n\nBe brief."
+	if err := saveMaintained(newRunner(strings.NewReader("1\n1\n1\n1\n"), &bytes.Buffer{}, true), &agent); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(root, "targets.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(manifest), "deployment_region:\n      - us-east\n      - eu-central\n") {
+		t.Fatalf("several regions did not round-trip as a list:\n%s", manifest)
+	}
+	reloaded, err := loadMaintained(root)
+	if err != nil {
+		t.Fatalf("saved package no longer loads: %v", err)
+	}
+	if got := strings.Join(reloaded.data.DeploymentRegions, ","); got != "us-east,eu-central" {
+		t.Fatalf("regions after save = %q, want both in order", got)
+	}
+}
+
+// The advanced-target form edits the list as one comma-separated field, so the
+// split on save is what keeps a second region.
+func TestAdvancedTargetFormSplitsRegions(t *testing.T) { // N32
+	data := scaffold.Data{Name: "agent"}
+	data.SetTarget("livekit")
+	// Pick the third field (deployment region), type both regions, then Back.
+	runner := newRunner(strings.NewReader("3\nus-east, eu-central\n5\n"), &bytes.Buffer{}, true)
+	if err := editAdvancedTarget(runner, &data); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(data.DeploymentRegions, ","); got != "us-east,eu-central" {
+		t.Fatalf("regions = %q, want both split and trimmed", got)
+	}
+}

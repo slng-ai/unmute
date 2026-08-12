@@ -229,9 +229,14 @@ type pipecatCallStart struct {
 }
 
 type pipecatData struct {
-	Project             string
-	Version             string
-	DeploymentRegion    string
+	Project          string
+	Version          string
+	DeploymentRegion string
+	// SecretSet names the platform secret set the README tells the operator to
+	// create; empty when the package declares no secrets. The manifest names it
+	// so a deploy that skipped that step fails at deploy time rather than on a
+	// live call.
+	SecretSet           string
 	MainName            string
 	EntryAgent          string
 	EntryClass          string
@@ -477,6 +482,7 @@ type pipecatReportJSON struct {
 	EntryAgent  string                `json:"entry_agent"`
 	Agents      []string              `json:"agents"`
 	Files       []string              `json:"generated_files"`
+	Regions     []string              `json:"deployment_regions,omitempty"`
 	RequiredEnv []string              `json:"required_env"`
 	Bindings    []ir.ForwardedBinding `json:"bindings,omitempty"`
 	Sizing      []ir.Sizing           `json:"sizing,omitempty"`
@@ -498,7 +504,10 @@ func pipecatReport(agent *ir.Agent, data pipecatData, files []File, bindings []i
 	}
 	out, err := json.MarshalIndent(pipecatReportJSON{
 		Target: data.Project, Provider: "pipecat", Version: data.Version, EntryAgent: data.EntryAgent,
-		Agents: agents, Files: generated, RequiredEnv: data.RequiredEnv,
+		Agents: agents, Files: generated,
+		// Forwarded without checking, so it must be readable back (constitution).
+		// A list of one on this target: several regions never reach generate.
+		Regions: regionList(data.DeploymentRegion), RequiredEnv: data.RequiredEnv,
 		Bindings: bindings, Sizing: sizing,
 		Variables: reportVariables(agent), Secrets: reportSecrets(agent),
 		Notes: data.Notes,

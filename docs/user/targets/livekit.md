@@ -664,7 +664,9 @@ Compose network, and the browser reaches it on the published ports (`7880` for
 signalling, `7881` for the TCP fallback, `7882/udp` for the UDP mux). The page
 mints a token and joins a fresh room; your agent is dispatched to that room
 automatically. To point at LiveKit Cloud or your own deployment instead, deploy
-the built image yourself; local dev always runs the containerized dev server.
+the built image; local dev always runs the containerized dev server. The
+generated `build/livekit/README.md` has a Deploy section with the exact commands
+for that package, on LiveKit Cloud and self-hosted.
 
 Both modes read shared keys from the current directory's `.env`, then apply
 package-root `.env` overrides. Press `ctrl-c` to stop and the stack comes down

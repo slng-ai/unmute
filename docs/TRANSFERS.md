@@ -161,6 +161,10 @@ written into a package; a Connection stores env var names only.
 | `REDIS_URL` | The coordination store for the telephony runtime. |
 | `BILLING_PHONE_NUMBER` / `SUPERVISOR_PHONE_NUMBER` | The transfer destinations, read at call time. |
 
+On LiveKit Cloud the first three are supplied by the platform: `lk` drops them
+from a secrets file and the deployed agent gets its own. Set them for local runs
+and for a self-hosted server; do not try to send them as secrets.
+
 **Pipecat rig** (`examples/human-transfer-daily`):
 
 | Name | What it is |
@@ -178,16 +182,26 @@ need two phones to answer as "billing" and "supervisor".
 
 ### LiveKit rig (cold and warm)
 
-1. **Accounts**: a LiveKit Cloud project (or self-hosted LiveKit with its
-   SIP server) and a Twilio account. LiveKit Phone Numbers are not an
-   option here (inbound-only, no transfer support).
+1. **Accounts and CLI**: a LiveKit Cloud project (or self-hosted LiveKit with
+   its SIP server) and a Twilio account. LiveKit Phone Numbers are not an
+   option here (inbound-only, no transfer support). Authenticate the CLI with
+   `lk cloud auth` and set the project as the default with
+   `lk project set-default "<name>"`; without a default project every deploy
+   command fails with a subdomain mismatch that does not say which side is
+   wrong.
 2. **Trunking, one-time**: create a Twilio Elastic SIP trunk; enable "Call
    Transfer (SIP REFER)" and "Enable PSTN Transfer"; attach a number; point
    its origination URI at your LiveKit SIP endpoint. In LiveKit, create the
    inbound trunk plus a dispatch rule for the agent, and an outbound trunk;
    export the outbound trunk ID as `LIVEKIT_SIP_OUTBOUND_TRUNK`.
-3. **Deploy**: `unmute compile examples/human-transfer`, then
-   `lk agent deploy` from `build/livekit/`, with the section-3 env set.
+3. **Deploy**: `unmute compile examples/human-transfer`, then follow the Deploy
+   section of the generated `build/livekit/README.md`. It prints the exact
+   commands for this package, including its region: the first deploy
+   (`lk agent create`, which also writes the `livekit.toml` the build directory
+   does not ship) is a different command from every later one
+   (`lk agent deploy`), and the section-3 env goes in as `--secrets-file .env`
+   on the first deploy. That README is the authority for the commands; this
+   page deliberately does not copy them.
 4. **Warm test, no phone number needed**: open the Agent Console, talk to
    the agent, ask for a manager. Expect: one spoken line, hold music, the
    supervisor's phone rings, the supervisor is briefed as a colleague and
@@ -201,13 +215,17 @@ need two phones to answer as "billing" and "supervisor".
 
 ### Pipecat rig (cold)
 
-1. **Accounts**: Pipecat Cloud (`pcc auth login`) and a Daily domain with a
-   purchased phone number and **dial-out enabled** (required by
+1. **Accounts and CLI**: Pipecat Cloud (`pipecat cloud auth login`) and a Daily domain
+   with a purchased phone number and **dial-out enabled** (required by
    `sip_call_transfer`; ask Daily support if the dashboard does not offer
    it).
-2. **Deploy**: `unmute compile examples/human-transfer-daily`, then
-   `pcc deploy` from `build/pipecat/` (the emitted `pcc-deploy.toml` is the
-   manifest); set the section-3 secrets with `pcc secrets set`.
+2. **Deploy**: `unmute compile examples/human-transfer-daily`, then follow the
+   Deploy section of the generated `build/pipecat/README.md`. The order matters:
+   create the secret set from `.env` with `pipecat cloud secrets set` **first**,
+   because the emitted `pcc-deploy.toml` already names it, then
+   `pipecat cloud deploy`, which builds the image in the cloud from the emitted
+   `Dockerfile`. Check `pipecat cloud agent status` reports `ready`. That README
+   prints the exact commands, this page does not copy them.
 3. **Dial-in**: connect the Daily number to the deployed agent with Pipecat
    Cloud's managed dial-in webhook (dashboard or REST API). No webhook
    server of yours is involved.
@@ -220,7 +238,7 @@ need two phones to answer as "billing" and "supervisor".
 ### Teardown
 
 A test rig must not become a standing bill: release the Twilio number and
-trunk if they were test-only, release the Daily number, `pcc agent delete`
+trunk if they were test-only, release the Daily number, `pipecat cloud agent delete`
 the deployed bot, and delete unused LiveKit trunks and dispatch rules.
 
 ### Status

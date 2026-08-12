@@ -125,14 +125,14 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	}
 	tgt := pkg.Targets[targetNames[0]]
 	data := scaffold.Data{
-		Name:             filepath.Base(pkg.Root),
-		Target:           tgt.Provider,
-		EntryAgent:       pkg.Agent.EntryAgent,
-		TargetVersion:    tgt.Version,
-		SDKLanguage:      tgt.SDKLanguage,
-		DeploymentRegion: tgt.DeploymentRegion,
-		Transport:        tgt.Transport,
-		Carrier:          tgt.Carrier,
+		Name:              filepath.Base(pkg.Root),
+		Target:            tgt.Provider,
+		EntryAgent:        pkg.Agent.EntryAgent,
+		TargetVersion:     tgt.Version,
+		SDKLanguage:       tgt.SDKLanguage,
+		DeploymentRegions: tgt.DeploymentRegion,
+		Transport:         tgt.Transport,
+		Carrier:           tgt.Carrier,
 	}
 	data.Pins = jsonText(tgt.Pins)
 	if def, ok := effectiveModelDef(pkg, tgt, "listen"); ok {

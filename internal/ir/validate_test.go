@@ -1063,3 +1063,46 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 		t.Fatalf("warm on the carrier route must name the supported routes, got:\n%s", joined)
 	}
 }
+
+// deployment_region takes one region or several (N32). Several is LiveKit only:
+// every other provider is gated in its own words, before any artifact exists.
+func TestValidateDeploymentRegions(t *testing.T) { // N32
+	for _, tc := range []struct {
+		name     string
+		provider Provider
+		regions  []string
+		want     string // "" means the package must validate cleanly
+	}{
+		{"one on pipecat", ProviderPipecat, []string{"us-west"}, ""},
+		{"one on livekit", ProviderLiveKit, []string{"us-east"}, ""},
+		{"several on livekit", ProviderLiveKit, []string{"us-east", "eu-central"}, ""},
+		{"none", ProviderLiveKit, nil, ""},
+		{"several on pipecat", ProviderPipecat, []string{"us-west", "us-east"}, "globally unique across regions"},
+		{"several on vapi", ProviderVapi, []string{"us-west", "us-east"}, "Vapi has no per-region deployment"},
+		{"duplicate", ProviderLiveKit, []string{"us-east", "us-east"}, `lists "us-east" twice`},
+		{"empty entry", ProviderLiveKit, []string{"us-east", ""}, "empty entry"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := safeAgent(t)
+			target := targetFor(agent, tc.provider)
+			target.DeploymentRegions = tc.regions
+			report, err := Validate(agent, []Target{target}, targetcap.Default())
+			text := strings.Join(report.PerTarget[0].Errors, "\n")
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("want a clean package, got %v: %q", err, text)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("want an error mentioning %q, got a clean package", tc.want)
+			}
+			if !strings.Contains(text, tc.want) {
+				t.Fatalf("missing %q in %q", tc.want, text)
+			}
+			if !strings.Contains(text, "deployment_region") && !strings.Contains(text, "region") {
+				t.Fatalf("error does not name the field: %q", text)
+			}
+		})
+	}
+}

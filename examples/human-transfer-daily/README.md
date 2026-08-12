@@ -39,9 +39,10 @@ bin/unmute validate examples/human-transfer-daily
 bin/unmute compile examples/human-transfer-daily
 ```
 
-That writes `build/pipecat/`. Deploy with `pcc deploy` from the build
-directory (the emitted `pcc-deploy.toml` carries the manifest), set secrets
-with `pcc secrets set`, connect the Daily number in the Pipecat Cloud
-dashboard, then call the number and ask about an invoice. The full
-walkthrough, including teardown, is in
+That writes `build/pipecat/`. Its own `README.md` has a Deploy section printing
+the exact commands: create the secret set from `.env` first, because the emitted
+`pcc-deploy.toml` already names it, then `pipecat cloud deploy`, which builds the
+image in the cloud from the emitted `Dockerfile`. After that, connect the Daily
+number in the Pipecat Cloud dashboard, then call the number and ask about an
+invoice. The full walkthrough, including teardown, is in
 [docs/TRANSFERS.md](../../docs/TRANSFERS.md).

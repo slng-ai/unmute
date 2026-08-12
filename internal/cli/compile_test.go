@@ -211,3 +211,42 @@ func TestCompileFailsWithNoTargets(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// LiveKit Cloud writes livekit.toml into the build directory on the first
+// deploy, naming the project and the assigned agent. A recompile that destroyed
+// it would break `lk agent deploy` and push the operator back to
+// `lk agent create`, which registers a second billable agent.
+func TestWriteArtifactFilesPreservesPlatformConfig(t *testing.T) {
+	dir := t.TempDir()
+	written := map[string]string{
+		".env":                    "OPENAI_API_KEY=keep-me\n",
+		"livekit.toml":            "[project]\n  subdomain = \"my-project\"\n\n[agent]\n  id = \"CA_abc123\"\n",
+		"livekit.us-east.toml":    "[project]\n  subdomain = \"my-project\"\n\n[agent]\n  id = \"CA_east\"\n",
+		"livekit.eu-central.toml": "[project]\n  subdomain = \"my-project\"\n\n[agent]\n  id = \"CA_central\"\n",
+	}
+	for name, content := range written {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A file the emitter does own must still be replaced.
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeArtifactFiles(nil, dir, []generate.File{{Path: "README.md", Content: []byte("generated\n")}}); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range written {
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("%s did not survive the rewrite: %v", name, err)
+		}
+		if string(got) != want {
+			t.Errorf("%s changed during the rewrite:\n%s", name, got)
+		}
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "README.md")); err != nil || string(got) != "generated\n" {
+		t.Errorf("README.md = %q (err %v), want the regenerated content", got, err)
+	}
+}

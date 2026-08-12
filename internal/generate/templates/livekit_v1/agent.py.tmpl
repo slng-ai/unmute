@@ -208,6 +208,19 @@ def _api_key(header: str, env: str) -> dict[str, str]:
 
 {{end}}
 {{end}}
+{{- if .HasColdTransfer}}
+# --- cold transfer destination -----------------------------------------------
+# TransferSIPParticipant's transfer_to is a URI, not a bare number: it becomes
+# the Refer-To of the outgoing SIP REFER. `tel:+E164` covers Twilio and Telnyx;
+# a provider that needs its trunk host in the Refer-To (Plivo) takes the
+# `sip:+E164@<trunk>` form, which a destination may already carry (SCHEMA N26).
+def _refer_uri(destination: str) -> str:
+    """The destination as a REFER URI, adding `tel:` only to a bare number."""
+    if destination.startswith(("tel:", "sip:", "sips:")):
+        return destination
+    return "tel:" + destination
+
+{{end}}
 {{- if .RequiredSecrets}}
 # --- required environment ----------------------------------------------------
 # Declared secrets (agent.yaml secrets:). A missing one fails the session before
@@ -500,7 +513,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         )
         try:
             result = await WarmTransferTask(
-                sip_call_to={{.ToExpr}},
+                sip_call_to={{.DialExpr}},
                 chat_ctx=self.chat_ctx,
 {{- if .Briefing}}
                 extra_instructions={{pyq .Briefing}},

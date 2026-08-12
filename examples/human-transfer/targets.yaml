@@ -16,6 +16,11 @@ targets:
     transport: sip
     carrier: twilio
     connection: twilio_sip
+    # Where LiveKit Cloud runs the deployed agent. Declared so the first deploy
+    # does not stop to ask, which is what the transfer test rig needs. Forwarded
+    # exactly as written; `lk` is the validator, and the region is fixed once the
+    # agent exists. A list here would deploy once per region.
+    deployment_region: eu-central
     models:
       # LiveKit runs its own turn model rather than local Silero.
       detector:

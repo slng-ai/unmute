@@ -48,7 +48,7 @@ pipeline and its tools are plain functions on the LLM context, so the generated
 | `pyproject.toml` | Pinned dependencies. Only the services your spec uses are included. |
 | `Dockerfile` | A container image for deployment. |
 | `compose.dev.yaml` | The local dev stack `unmute dev` runs: one `application` service built from the `Dockerfile`, no coordination store. |
-| `pcc-deploy.toml` | Pipecat Cloud deploy config for non-telephony targets. |
+| `pcc-deploy.toml` | The manifest `pipecat cloud deploy` reads, for non-telephony targets: the agent name, its region, and the secret set holding its environment. It deliberately names no image, so the platform builds the emitted `Dockerfile` in the cloud. |
 | `compose.telephony.yaml` | The generated application plus version-pinned Redis for telephony targets. |
 | `README.md` | A quickstart for the generated project. |
 | `.env.example` | The exact environment variables this spec needs, ready to copy to `.env`. |
@@ -326,7 +326,7 @@ cp .env.example .env    # fill in your keys
 uv run bot.py           # open the URL it prints to talk to the agent
 ```
 
-For hosting, the project ships a `Dockerfile` and a `pcc-deploy.toml` for Pipecat Cloud. Because the output is an ordinary Python project, you can also run it anywhere you run Python.
+For hosting, the project ships a `Dockerfile` and a `pcc-deploy.toml` for Pipecat Cloud, and its own `README.md` has a Deploy section with the exact commands: create the secret set from `.env`, then `pipecat cloud deploy`, which builds that Dockerfile in the cloud. Because the output is an ordinary Python project, you can also run it anywhere you run Python.
 
 ## Where to go next
 

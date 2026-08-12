@@ -98,10 +98,25 @@ override shared values. When you `compile`, Unmute writes a
 `build/<target>/.env.example` listing the exact variables that target needs.
 The `compile-report.json` lists the required environment too.
 
-For deployment, both generated projects include a `Dockerfile`. Pipecat adds
-`pcc-deploy.toml` for Pipecat Cloud; LiveKit adds `livekit.toml`. Both are
-ordinary Python projects, so you can supply the listed environment variables
-through any host and run them without Unmute present.
+For deployment, both generated projects include a `Dockerfile`, and both cloud
+platforms build that Dockerfile for you rather than pulling an image you push.
+Both are also ordinary Python projects, so you can supply the listed environment
+variables through any host and run them without Unmute present.
+
+**Pipecat Cloud.** The build adds `pcc-deploy.toml`, the manifest
+`pipecat cloud deploy` reads. It names the agent, its region, and the secret set
+holding its environment, and deliberately names no image, because naming one
+switches the cloud build off. Create the secret set from `.env` first, then
+deploy. The generated `build/pipecat/README.md` prints both commands.
+
+**LiveKit Cloud.** The build adds no `livekit.toml`. That file holds the project
+subdomain and the `CA_...` agent ID, which the platform assigns, so `lk agent
+create` writes it on your first deploy and refuses to run if one is already
+there. `unmute compile` preserves it from then on, so a recompile does not cost
+you the agent. The first deploy and every later redeploy are two different
+commands (`lk agent create`, then `lk agent deploy`), and secrets go in as
+`--secrets-file .env` on the first one. The generated `build/livekit/README.md`
+prints the exact sequence for this package, including its region.
 
 ## From local Compose to production
 

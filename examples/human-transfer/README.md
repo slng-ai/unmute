@@ -98,8 +98,11 @@ bin/unmute validate examples/human-transfer
 bin/unmute compile examples/human-transfer
 ```
 
-That writes `build/livekit/`. Deploy it with `lk agent deploy` from the build
-directory, or run the worker yourself.
+That writes `build/livekit/`. Its own `README.md` has a Deploy section printing
+the exact commands for this package, including its region: on LiveKit Cloud the
+first deploy and every later one are different commands, and the build directory
+ships no `livekit.toml` because the platform writes that itself. Self-hosting the
+worker is documented there too.
 
 Testing is not local: SIP signaling and RTP do not fit a tunnel. The warm
 transfer needs **no phone number at all**: open the LiveKit Agent Console,

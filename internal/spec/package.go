@@ -344,7 +344,7 @@ type Target struct {
 	Transport        string              `json:"transport,omitempty" yaml:"transport,omitempty"`
 	Carrier          string              `json:"carrier,omitempty" yaml:"carrier,omitempty"`
 	Connection       string              `json:"connection,omitempty" yaml:"connection,omitempty"`
-	DeploymentRegion string              `json:"deployment_region,omitempty" yaml:"deployment_region,omitempty"` // where the platform deploys the agent (N18)
+	DeploymentRegion Regions             `json:"deployment_region,omitempty" yaml:"deployment_region,omitempty"` // where the platform deploys the agent: one region or several (N18, widened by N32)
 	Models           map[string]ModelDef `json:"models,omitempty" yaml:"models,omitempty"`                       // per-target overrides (N15), keyed by model name / listen / turn
 	Destinations     map[string]string   `json:"destinations,omitempty" yaml:"destinations,omitempty"`
 }

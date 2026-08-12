@@ -77,6 +77,70 @@ Set these before running (values are never written into the project):
 
 {{range .RequiredEnv}}- `{{.}}`
 {{end}}
+## Deploy to Pipecat Cloud
+
+Authenticate once first with `pipecat cloud auth login`. After that, one command
+does the first deploy and every later one: `pipecat cloud deploy` builds the image
+in the cloud from this project's `Dockerfile` and deploys it. That is why the
+manifest names no image; naming one switches cloud builds off.
+{{if .SecretSet}}
+Create the secret set first, because the manifest already references it and a
+deploy cannot start without it:
+
+```sh
+cp .env.example .env            # then fill in the values
+pipecat cloud secrets set {{.SecretSet}} --file .env{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}
+pipecat cloud deploy
+pipecat cloud agent status {{.Project}}
+```
+
+Run the same `secrets set` command again to change a value. If that set name is
+already taken (secret-set names are globally unique across the platform), create
+yours under another name and pass `--secrets <other-name>` on the deploy command,
+which overrides the manifest.
+{{- else}}
+This package declares no secrets, so there is no secret set to create:
+
+```sh
+pipecat cloud deploy
+pipecat cloud agent status {{.Project}}
+```
+{{- end}}
+
+Deploying the same agent name again updates the existing agent rather than making
+a second one. Sessions already running finish on the old image, and a deploy that
+fails leaves the previous ready version serving traffic. `status` reporting
+`ready` is the deploy actually being usable.
+
+No warm instance is kept: the manifest declares no replica count, because the
+source package declares none. Add `--min-agents <n>` on the deploy command if you
+want a pool held ready.
+
+### Region
+{{if .DeploymentRegion}}
+This agent deploys to `{{.DeploymentRegion}}`, from the manifest.{{if .SecretSet}} Its secret set
+carries the same region, because a set is region-scoped and an agent can only
+read one in its own region.{{end}}
+
+A second region is a second agent, because agent names are globally unique
+across regions:
+
+```sh
+{{if .SecretSet}}pipecat cloud secrets set {{.Project}}-<region>-secrets --file .env --region <region>
+pipecat cloud deploy {{.Project}}-<region> --region <region> --secrets {{.Project}}-<region>-secrets
+{{else}}pipecat cloud deploy {{.Project}}-<region> --region <region>
+{{end}}```
+
+`pipecat cloud regions list` prints the regions available to you.
+{{- else}}
+No region is declared, so the agent goes to your organisation's default region
+(`us-west` unless you changed it).{{if .SecretSet}} A secret set defaults to
+`us-west` regardless, so if you changed that organisation default, pass an
+explicit `--region` to both commands: a set in the wrong region cannot be read
+by the agent.{{end}} Set `deployment_region` on this target in `targets.yaml` to
+choose one, and `pipecat cloud regions list` to see what is available.
+{{- end}}
+
 {{if .Tracing}}
 ## Trace with Langfuse
 
