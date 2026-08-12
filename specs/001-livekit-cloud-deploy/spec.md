@@ -197,7 +197,7 @@ The user changes the source package, recompiles, and ships a new version to the 
 - **FR-002**: No generated file MUST carry a platform-assigned identity: no LiveKit project subdomain or agent ID, and no value a deploy hands back. A build directory MUST stay portable between projects, organisations, and accounts.
 - **FR-003**: Each generated README MUST carry a Deploy section written for that platform's real flow: for LiveKit, first deploy then redeploy, labelled; for Pipecat, one deploy command with the fact that redeploying the same name updates the existing agent.
 - **FR-004**: Each generated README MUST document how to inject the package's declared environment on that platform, using the env file the package already generates: for LiveKit, the env file passed to the first deploy plus the update-secrets command and whether it merges or replaces; for Pipecat, creating the named secret set from the env file before the deploy, plus how to update it later.
-- **FR-005**: The LiveKit README MUST state that `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` are supplied by the platform and must not be sent as secrets.
+- **FR-005**: The LiveKit README MUST state that `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` are supplied by the platform and must not be sent as secrets. This is the one part of FR-004 that is called out separately, because their absence from a secret list reads as an omission unless the artifact says otherwise.
 - **FR-006**: Every claim about either platform's deploy contract MUST cite the page it came from and carry the 2026-08-12 verification date, in whichever repository document states it. Nothing may promise an in-place region move on Pipecat, which no source confirms.
 - **FR-007**: Every repository document and template MUST use each platform's current CLI name. The `pcc ...` form is retired and MUST NOT appear.
 
@@ -212,7 +212,8 @@ The user changes the source package, recompiles, and ships a new version to the 
 
 - **FR-012**: The emitted manifest MUST NOT name an image unless the package is asking for a pre-built one from a registry, because naming an image turns off the cloud build that the documented deploy depends on.
 - **FR-013**: When the package declares secrets, the emitted manifest MUST name the secret set the README tells the user to create, so the manifest is self-describing and a deploy that skipped the secrets step fails at deploy time rather than on a call.
-- **FR-014**: The generated README MUST show how to reach a second region: one deploy command with a differently named agent and its own region, plus that region's own secret set.
+- **FR-014**: The generated README MUST show how to reach a second region: one deploy command with a differently named agent and its own region, plus that region's own secret set. It MUST also say what to do when a secret-set name is already taken, since those names are globally unique and the deploy command can override the manifest.
+- **FR-027**: The emitted manifest MUST NOT declare a replica count the package never declared. The hardcoded `[scaling] min_agents = 1` goes: machine sizes and replica counts are derived from declared `capacity` and printed in the report, never written as a literal, and this one also bills for a warm instance the platform would not keep by default. A warm pool stays available to the operator as a deploy-time flag, named in the README. *(Numbered out of sequence on purpose: added by the 2026-08-12 analysis pass, so existing references stay stable.)*
 
 ### Region
 
@@ -254,6 +255,7 @@ The user changes the source package, recompiles, and ships a new version to the 
 - **SC-008**: **Every** value Unmute forwards without checking, each declared region included, can be read back from the compile report without opening the source package.
 - **SC-009**: **Zero** occurrences of a retired CLI name remain in the repository's documents and templates.
 - **SC-010**: T8 is unblocked on both rows: the warm transfer can be attempted in the LiveKit Agent Console straight after its deploy with no phone number, and the Daily cold transfer has a deployed bot to call.
+- **SC-011**: **Zero** generated files declare a machine size or replica count that the package did not declare.
 
 ## Assumptions
 
@@ -265,5 +267,5 @@ The user changes the source package, recompiles, and ships a new version to the 
 - Recompile safety on LiveKit comes from preserving the platform-written config files, mirroring the existing `.env` preservation. Pipecat needs no equivalent because its agent is a mutable manifest keyed by name with no local state.
 - Each generated README stays the single home for its platform's deploy commands. Repository documents point at it rather than restating it, so a command cannot drift in one place and not the other.
 - These fixes are emitter-wide on both drivers, so every compiled package changes shape and the goldens change with them. That diff gets read before it is committed; it is not a mechanical regeneration.
-- Out of scope: pinning particular callers to a particular region, pre-built or private-registry images beyond not breaking the cloud build, Pipecat agent profiles and scaling knobs, LiveKit self-hosted guidance beyond keeping it documented and labelled, and running the live transfer tests themselves, which is T8's own work once this unblocks it.
+- Out of scope: pinning particular callers to a particular region, pre-built or private-registry images beyond not breaking the cloud build, Pipecat agent profiles, deriving a replica count from declared `capacity` (removing the hardcoded one is in scope per FR-027; deriving a real one is a separate feature), LiveKit self-hosted guidance beyond keeping it documented and labelled, and running the live transfer tests themselves, which is T8's own work once this unblocks it.
 - The examples' pinned Agents SDK series is at or above the version the LiveKit Agent Console needs, so the Console half of the rig works without loosening a pin that exists because the warm transfer task is beta.

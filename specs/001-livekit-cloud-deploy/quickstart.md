@@ -19,7 +19,7 @@ grep -n "deployment_regions" \
   examples/human-transfer/build/livekit/compile-report.json
 
 bin/unmute compile examples/human-transfer-daily
-cat examples/human-transfer-daily/build/pipecat/pcc-deploy.toml   # no image key, secret_set present
+cat examples/human-transfer-daily/build/pipecat/pcc-deploy.toml   # no image, no min_agents, secret_set present
 grep -n "secrets set\|cloud deploy\|--region" \
   examples/human-transfer-daily/build/pipecat/README.md
 ```
@@ -44,7 +44,7 @@ bin/unmute compile examples/human-transfer
 cat examples/human-transfer/build/livekit/livekit.toml    # byte-identical
 ```
 
-Goldens: regenerate with each package's own `-update` flag and **read the diff** before committing. Expect exactly the changes in [contracts/artifacts.md](./contracts/artifacts.md): a file removed on the LiveKit side, a key removed and a key added on the Pipecat side, two rewritten README sections, and `deployment_regions` in both reports. Anything else in that diff is a bug in the change, not a golden that needs updating.
+Goldens: regenerate with each package's own `-update` flag and **read the diff** before committing. Expect exactly the changes in [contracts/artifacts.md](./contracts/artifacts.md): a file removed on the LiveKit side, two keys removed and one added on the Pipecat side, two rewritten README sections, and `deployment_regions` in both reports. The transfer-emitting parts of `agent.py` and `bot.py` must be untouched. Anything else in that diff is a bug in the change, not a golden that needs updating.
 
 Optional, needs `uv`:
 

@@ -61,7 +61,7 @@ Read by `ir.Validate` and by the LiveKit emitted-fields map, so the existing emi
 
 | File | Before | After |
 |---|---|---|
-| `pcc-deploy.toml` | `agent_name`, `image = "<project>:latest"`, `region` when set, `[scaling]` | `agent_name`, `region` when set, `secret_set` when the package declares secrets, `[scaling]`. **No `image`**, because that key switches off the cloud build the documented deploy depends on |
+| `pcc-deploy.toml` | `agent_name`, `image = "<project>:latest"`, `region` when set, `[scaling] min_agents = 1` | `agent_name`, `region` when set, `secret_set` when the package declares secrets. **No `image`**, because that key switches off the cloud build the documented deploy depends on, and **no `min_agents`**, because it is a replica count the package never declared and it bills for a warm instance |
 | `README.md` | no Deploy section at all | Deploy section: create the secret set from the env file, deploy, check status, what a redeploy of the same name does, the default region, and the one extra command for a second region |
 | `compile-report.json` | no region | `deployment_regions` when declared (a single-element list on this target) |
 | everything else | unchanged | unchanged |

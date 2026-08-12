@@ -72,13 +72,23 @@ All platform claims verified 2026-08-12 against live documentation, per Constitu
 
 **Alternatives considered.** Emitting a `livekit.toml.example` (the CLI does not read it, so it is decoration that invites a copy into the real name). Emitting the file with a placeholder subdomain (still refuses, and now with a confusing value in it). Always using per-region names (churn for the 99% case).
 
-## D8: the Dockerfile gets a non-root user and nothing else
+## D8: the Dockerfile gets a non-root user with somewhere to write, and nothing else
 
-**Decision.** Add an unprivileged user and switch to it after the dependency install; widen `.dockerignore` from `.env` to also exclude `.env.*`, `.venv/`, and `__pycache__/`. Do not adopt the platform's two-stage template.
+**Decision.** Add an unprivileged user, give it ownership of the working directory (or a writable cache directory), and switch to it after the dependency install; widen `.dockerignore` from `.env` to also exclude `.env.*`, `.venv/`, and `__pycache__/`. Do not adopt the platform's two-stage template.
 
-**Rationale.** Non-root is a documented requirement, so leaving it is a known deviation. The ignore list is what keeps the uploaded build context under the 1 GB cap after somebody has run the project locally in that directory. The two-stage rewrite (uv base image, `uv sync --locked`, separate build stage) buys cold-start and image size, which nothing in this feature is blocked on, and it would need a lockfile the generated project does not have.
+**Rationale.** Non-root is a documented requirement, so leaving it is a known deviation. Ownership is not separable from it: `COPY . .` runs as root today, so `/app` is root-owned, and a user whose home is `/app` has nowhere to write when the agent fetches model files on first run. The platform's own published template does `COPY --from=build --chown=appuser:appuser` for that exact reason. This also matters locally, not only on deploy: `unmute dev` in the browser runs this same image through the generated Compose file, which mounts nothing and overrides no user, so a wrong ownership decision breaks local development too. `internal/cli/dev_web_smoke_test.go` (build tag `smoke`) is the check. The ignore list is what keeps the uploaded build context under the 1 GB cap after somebody has run the project locally in that directory. The two-stage rewrite (uv base image, `uv sync --locked`, separate build stage) buys cold-start and image size, which nothing in this feature is blocked on, and it would need a lockfile the generated project does not have.
 
 **Alternatives considered.** Full template parity with the platform's published Dockerfile: more diff, more to keep in sync with an upstream that changes, no observed failure fixed. Leaving the Dockerfile alone: leaves a documented requirement unmet for the sake of four lines.
+
+## D11: the Pipecat manifest stops declaring a replica count
+
+**Decision.** Drop the hardcoded `[scaling] min_agents = 1` from the emitted manifest. The platform default (nothing kept warm) applies, and the README names `--min-agents` as the operator's knob.
+
+**Rationale.** The constitution is explicit that machine sizes and replica counts are derived from declared `capacity` and printed in the report, never written as literals, and `1` is a literal nobody declared. It is not free either: it holds a warm instance and bills for it, which is a surprising default to inherit from a compiler. Removing it is the same discipline the region field already follows, where an unset value invents no default. Deriving a real `min_agents` from `capacity` is a separate feature, not this one.
+
+**Alternatives considered.** Leaving it and documenting why (keeps a cost the author never asked for). Deriving it from `ir.Sizing` now (correct eventually, but it needs a benchmarked coefficient, and the constitution says an underived number stays marked `unbenchmarked` rather than being guessed into a manifest).
+
+**Check to leave behind.** An assertion that the emitted manifest carries no `min_agents`, plus the golden diff.
 
 ## D9: the TUI keeps a list without becoming a list editor
 

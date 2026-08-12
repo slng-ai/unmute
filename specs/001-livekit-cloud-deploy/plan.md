@@ -10,7 +10,7 @@ Two generated artifacts cannot be deployed to the cloud each was written for, an
 
 On top of that, `deployment_region` widens from one string to one-or-many. LiveKit fans a list out to one `lk agent create` per region with a per-region config file; Pipecat refuses a list of more than one, by name, quoting its own globally-unique-agent-name rule, and documents the extra command instead. Every declared region reaches the compile report, which the constitution already requires of forwarded values and which neither driver does today.
 
-Nothing about transfers changes. The work is four Go packages, six templates, and eight documents, with the goldens on both drivers rewritten deliberately.
+Nothing about transfers changes. The work is four Go packages, six templates, and six documents, with the goldens on both drivers rewritten deliberately.
 
 ## Technical Context
 
@@ -43,6 +43,7 @@ Nothing about transfers changes. The work is four Go packages, six templates, an
 | **III. One source of truth** | The region fact keeps one home (`deployment_region`); no plural twin field is added. The multi-region rule lands as one row in `internal/target/table.go` and is read by validation and by the emitters, never re-described. Both derived schemas stay derived; the one `TypeSchemas` override needed follows the existing IR precedent rather than hand-authoring JSON. Each generated README is the single home for its platform's commands, and the repository documents point at it. |
 | **IV. The document wins** | Every platform claim carries its source and the 2026-08-12 verification date. `docs/SCHEMA.md` gains amendment **N32** in the same change as the code, and `docs/user/` is corrected where this change falsifies it. The per-driver invariants that used to hold these facts (`compiler.md` V35, `driver-livekit.md` V27, `driver-pipecat.md` V29) retired with `docs/spec/` in commit `063289c`, so their role passes to this feature's [contracts/](./contracts/) and to the tests that encode them. One thing those retired rows got wrong is not carried forward: V27 printed a fixed list of region codes, and a platform's code list is exactly what goes stale. |
 | **V. Whatever compiles can be spoken to** | This closes the last gap between a green compile and a call you can hear: the artifact now reaches the cloud the transfers need. `validate` reach is unchanged (all four providers); `compile` reach is unchanged (two drivers). |
+| **Derived, never declared** | The Pipecat manifest stops declaring `min_agents = 1`, a replica count no package declared and no `capacity` derived. Deriving a real one belongs to a later feature; inventing one in a template is what the rule forbids, and this one silently bills for a warm instance. |
 | **Secrets** | No secret value is written anywhere. LiveKit's flow passes the generated `.env` to the platform CLI; Pipecat's names a secret set the user creates from the same file. Names only, `UPPER_SNAKE`, as today. |
 | **Gate** | `make fmt`, `make lint`, `make build`, `make test` must pass; `make smoke` stays opt in. Goldens are regenerated with their own `-update` flags and the diffs are read before committing. |
 
@@ -141,7 +142,7 @@ Ordered so that each phase leaves the suite green. The schema widening comes fir
 
 **C. LiveKit artifact.** Delete the template and its entry in the emitted set, rewrite the Deploy section around real commands, add the per-region views, add the non-root user, widen the ignore list, put the regions in the report.
 
-**D. Pipecat artifact.** Drop the `image` key, add `secret_set` when the package declares secrets, add the Deploy section, put the region in the report.
+**D. Pipecat artifact.** Drop the `image` key and the hardcoded `min_agents`, add `secret_set` when the package declares secrets, add the Deploy section, put the region in the report.
 
 **E. Recompile safety.** Generalise the existing `.env` preservation in `writeArtifactFiles` to also keep any `livekit*.toml` the platform wrote, with the one test that fails if it stops working.
 

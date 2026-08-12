@@ -53,7 +53,8 @@ One thing to carry into planning: **FR-026 is the trap in this feature.** An
 existing test asserts the removed LiveKit config file is present and carries a
 particular id; the emitted file lists are pinned in goldens for both drivers; so
 are the compile reports that FR-020 adds every declared region to, and the
-Pipecat manifest that FR-012 stops naming an image. All of them describe the
+Pipecat manifest that FR-012 stops naming an image and FR-027 stops giving a
+replica count. All of them describe the
 current artifact, which is an artifact that cannot deploy, so all of them will
 fail. Each must be changed with the diff read rather than regenerated blind.
 

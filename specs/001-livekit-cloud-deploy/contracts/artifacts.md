@@ -27,7 +27,7 @@ The generated project is the deliverable. These are the assertions a test should
 | Both LiveKit Cloud and self-hosted, each labelled | Both are real paths |
 | No sentence calling either path unsupported | A working command must not be disclaimed |
 
-**`Dockerfile` must contain**: an unprivileged user and a `USER` switch before the start command; no `LIVEKIT_URL`, `LIVEKIT_API_KEY`, or `LIVEKIT_API_SECRET`; the existing fixed `start` command and explicit `WORKDIR`.
+**`Dockerfile` must contain**: an unprivileged user and a `USER` switch before the start command, with the working directory owned by that user or a writable cache directory given to it, because the agent fetches model files at first run and a root-owned `/app` would leave it nowhere to write; no `LIVEKIT_URL`, `LIVEKIT_API_KEY`, or `LIVEKIT_API_SECRET`; the existing fixed `start` command and explicit `WORKDIR`. The image `unmute dev` runs in the browser is this same image, so a mistake here breaks local development as well as the deploy.
 
 **`.dockerignore` must exclude**: `.env`, `.env.*`, `.venv/`, `__pycache__/`.
 
@@ -42,7 +42,8 @@ The generated project is the deliverable. These are the assertions a test should
 | No `image` key | The key is documented as switching cloud builds off, and the emitted value is not a resolvable image URL, so the documented deploy cannot work while it is there |
 | `region = "<declared>"` when a region is declared, exactly one, and no region line otherwise | Unchanged from V29, except that "exactly one" is now enforced upstream by validation |
 | `secret_set = "<project>-secrets"` when the package declares secrets, and no such key otherwise | So the manifest describes where its environment comes from, and a deploy that skipped the secrets step fails at deploy time rather than on a call |
-| `agent_name` and `[scaling]` as today | Unchanged |
+| `agent_name` as today | Unchanged |
+| No `min_agents`, and no `[scaling]` table if that leaves it empty | A replica count the package never declared is neither derived nor free: it bills for a warm instance the platform would not keep by default. A warm pool stays available as a deploy-time flag |
 
 **`README.md` must contain**
 
@@ -56,6 +57,8 @@ The generated project is the deliverable. These are the assertions a test should
 | A line stating that deploying the same agent name again updates the existing agent | So nobody invents a second name to be safe |
 | The one extra command pair for a second region: its own secret set in that region, and a deploy under a differently named agent | Agent names are globally unique across regions |
 | The status command | "Deployed" is not the same as `ready` |
+| What to do when the secret-set name is already taken: those names are globally unique, and `--secrets <other-name>` on the deploy command overrides the manifest | Otherwise a name collision is a dead end with no documented escape |
+| That a warm instance pool is opt-in with `--min-agents`, because the package declares no replica count | The manifest no longer keeps one warm, so the operator should know the knob exists |
 
 **`compile-report.json` must contain**: `deployment_regions` with the single declared region, absent when none is declared.
 
