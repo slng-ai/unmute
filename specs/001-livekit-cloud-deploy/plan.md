@@ -41,7 +41,7 @@ Nothing about transfers changes. The work is four Go packages, six templates, an
 | **I. Compile ahead of time** | No runtime layer is added and no platform is called at compile time. Region values are lowered into commands and manifests at generate time. `build/` stays disposable except for files the *platform* wrote, which the compiler never authors. Python stays template-only. |
 | **II. Fail loud, never average** | A Pipecat instance with more than one region is a **gated** error naming the target and quoting Pipecat's own words, before any artifact exists. A duplicate region is an error, never silently deduplicated. Nothing degrades to a warning, and no region is invented when none is declared: each README states what the platform does instead. |
 | **III. One source of truth** | The region fact keeps one home (`deployment_region`); no plural twin field is added. The multi-region rule lands as one row in `internal/target/table.go` and is read by validation and by the emitters, never re-described. Both derived schemas stay derived; the one `TypeSchemas` override needed follows the existing IR precedent rather than hand-authoring JSON. Each generated README is the single home for its platform's commands, and the repository documents point at it. |
-| **IV. The document wins** | Every platform claim carries its source and the 2026-08-12 verification date. `docs/SCHEMA.md` gains amendment **N32** in the same change as the code. The affected invariants (`compiler.md` V35, `driver-livekit.md` V27/T3/T23, `driver-pipecat.md` V29/T27) are amended, not left to drift. `V27`'s current list of region codes is removed, because printing a platform's code list as fixed is the thing that goes stale. |
+| **IV. The document wins** | Every platform claim carries its source and the 2026-08-12 verification date. `docs/SCHEMA.md` gains amendment **N32** in the same change as the code, and `docs/user/` is corrected where this change falsifies it. The per-driver invariants that used to hold these facts (`compiler.md` V35, `driver-livekit.md` V27, `driver-pipecat.md` V29) retired with `docs/spec/` in commit `063289c`, so their role passes to this feature's [contracts/](./contracts/) and to the tests that encode them. One thing those retired rows got wrong is not carried forward: V27 printed a fixed list of region codes, and a platform's code list is exactly what goes stale. |
 | **V. Whatever compiles can be spoken to** | This closes the last gap between a green compile and a call you can hear: the artifact now reaches the cloud the transfers need. `validate` reach is unchanged (all four providers); `compile` reach is unchanged (two drivers). |
 | **Secrets** | No secret value is written anywhere. LiveKit's flow passes the generated `.env` to the platform CLI; Pipecat's names a secret set the user creates from the same file. Names only, `UPPER_SNAKE`, as today. |
 | **Gate** | `make fmt`, `make lint`, `make build`, `make test` must pass; `make smoke` stays opt in. Goldens are regenerated with their own `-update` flags and the diffs are read before committing. |
@@ -108,11 +108,12 @@ internal/
 docs/
 ├── SCHEMA.md                   # amendment N32 (the one-or-many widening)
 ├── TRANSFERS.md                # section 4: both rigs, current CLI names, secret steps
-├── spec/compiler.md            # V35 + a task row
-├── spec/driver-livekit.md      # V27, T3, T23 amended; new rows for no-toml and per-region
-├── spec/driver-pipecat.md      # V29 amended; new rows for image, secret_set, README deploy
 ├── user/reference/targets-yaml.md  # one-or-many, unset behaviour per platform
-└── user/learn/08-going-live.md # stops saying LiveKit adds livekit.toml
+├── user/reference/secrets.md   # deploy-time secret injection, if it describes it today
+└── user/learn/08-going-live.md # both platforms' deploy paragraphs corrected
+
+# docs/spec/ is retired (commit 063289c). The invariants it held for these
+# drivers now live in specs/001-livekit-cloud-deploy/contracts/ and in tests.
 
 examples/
 ├── human-transfer/targets.yaml # declares a region so the T8 rig is non-interactive

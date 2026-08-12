@@ -98,4 +98,4 @@ All platform claims verified 2026-08-12 against live documentation, per Constitu
 
 ## Open question, deliberately not closed
 
-Neither platform documents what happens if an existing agent is redeployed into a different region. LiveKit states region is immutable; Pipecat says nothing either way. Nothing in this feature promises an in-place move on either target, and compile does not try to detect a change, because it is offline and cannot know where a live agent runs. If the Pipecat behaviour is ever established, it belongs in `driver-pipecat.md` with its date and source, not in an assumption here.
+Neither platform documents what happens if an existing agent is redeployed into a different region. LiveKit states region is immutable; Pipecat says nothing either way. Nothing in this feature promises an in-place move on either target, and compile does not try to detect a change, because it is offline and cannot know where a live agent runs. If the Pipecat behaviour is ever established, it belongs in [contracts/deploy-commands.md](./contracts/deploy-commands.md) with its date and source, not in an assumption here.
