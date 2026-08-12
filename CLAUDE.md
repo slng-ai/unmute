@@ -32,16 +32,8 @@ Go structs are the schema source for their own surface: `internal/spec` derives 
 ## Layout
 `internal/` not `pkg/`. One file per command in `internal/cli/`. Hand-write cobra commands — **no `cobra-cli` generator**.
 
-## Specs
-Two kinds of spec, and only one of them is a file we keep.
-
-- **Complex features get a kept spec.** One file per feature in `docs/spec/`, tracked and committed like any other doc. This is the folder for work a future reader has to understand later: a driver, the compiler, the TUI, a surface as wide as variables and secrets. Amend the file when the design changes, and remember the rule at the top of this document: when the code and the spec disagree, the spec wins.
-- **Simple work gets no kept spec.** Write the working spec at the repo root as `SPEC.md`, build against it, then let it go. `SPEC.md` is gitignored and **must never be committed**. It is a scratch file, rewritten per feature, and a stale one in git history is worse than none.
-
-If something you started as simple turns out to be worth keeping, move it to `docs/spec/<feature>.md` and commit it there. That move is the only way a spec enters the repo.
-
 ## Skills
 - Ponytail for writing great code
-- Spec to write specs before building
+- Always use spec kit skill for SDD (spec driven development) that should be used for any feature development
 - Build for building out the specs
 - find-docs skill to use context7 cli for searching docs
