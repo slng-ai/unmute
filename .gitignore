@@ -21,3 +21,4 @@ bin/
 
 # Python bytecode (emitted projects, smoke-test venvs)
 *.pyc
+.claude/worktrees/
