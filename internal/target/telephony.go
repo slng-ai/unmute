@@ -41,11 +41,7 @@ type TelephonyRoute struct {
 	PublicEndpoints            []TelephonyEndpointRule
 	RuntimeEnvironment         []TelephonyEnvironmentRule
 	LocallySuppliedEnvironment []string
-	// DevSuppliedEnvironment names required env values that `unmute dev
-	// --telephony` supplies itself for local runs (users never set them
-	// locally; production still supplies real values).
-	DevSuppliedEnvironment []string
-	ManualSteps            []string
+	ManualSteps                []string
 	// AutoWebhookEndpoint names the public endpoint the dev command sets as
 	// the carrier's voice webhook automatically on every start. Empty means
 	// the carrier keeps printed manual steps. This is a carrier fact, not a
@@ -180,25 +176,26 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		route.Processes = []TelephonyProcess{{
 			Name: "agent", Command: []string{"uv", "run", "agent.py", "dev"}, Health: "/", Readiness: "/",
 		}}
+		// No trunk ID here. Dialling out needs no stored trunk: the emitted agent
+		// passes the carrier's trunk settings inline with every call, from the
+		// four names the Connection declares (SCHEMA N33, 2026-08-12). Inbound
+		// does need its two platform records, because an unsolicited call arrives
+		// with no request of ours for configuration to travel with, but the
+		// emitted telephony-setup.sh resolves them by phone number at
+		// provisioning time, so no environment name carries the ID (SCHEMA N36,
+		// 2026-08-12).
 		route.RuntimeEnvironment = []TelephonyEnvironmentRule{
 			{Name: "LIVEKIT_API_KEY"},
 			{Name: "LIVEKIT_API_SECRET"},
-			// Inbound only. Dialling out needs no stored trunk: the emitted agent
-			// passes the carrier's trunk settings inline with every call, from the
-			// four names the Connection declares (SCHEMA N33, 2026-08-12). Inbound
-			// cannot work that way, because an unsolicited call arrives with no
-			// request of ours for configuration to travel with.
-			{Name: "LIVEKIT_SIP_INBOUND_TRUNK", AnyFeatures: []TelephonyFeature{TelephonyInbound}},
 			{Name: "LIVEKIT_URL"},
 			{Name: "REDIS_URL"},
 		}
 		route.LocallySuppliedEnvironment = []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL", "REDIS_URL"}
-		route.DevSuppliedEnvironment = []string{"LIVEKIT_SIP_INBOUND_TRUNK"}
 		route.ManualSteps = []string{
-			"get LIVEKIT_URL and the API key pair from the self-hosted LiveKit Server configuration; configure LiveKit Server and LiveKit SIP with the same Redis deployment",
-			"deploy LiveKit SIP with public SIP signaling and RTP ports, then point the carrier's origination URI at that public SIP endpoint",
+			"get LIVEKIT_URL and the API key pair from the LiveKit Cloud project settings, or from a self-hosted LiveKit Server configuration; a self-hosted deployment configures LiveKit Server and LiveKit SIP with the same Redis deployment",
+			"point the carrier's origination URI at the LiveKit project SIP URI with transport=tcp (the LiveKit Cloud project settings page, or lk project list --json with the p_ prefix dropped from ProjectId); for a self-hosted deployment, deploy LiveKit SIP with public SIP signaling and RTP ports and point origination at that public SIP endpoint instead",
 			"get the selected carrier SIP address, username, password, and phone number from its SIP trunking console; these four reach the deployed agent's dial-out path directly, so no outbound trunk is registered",
-			"for inbound calls only, materialize the generated SIP JSON inputs, create the LiveKit inbound trunk and dispatch rule with lk, and copy the returned trunk ID into the reported environment variable (unmute dev --telephony creates the local records and supplies that ID itself)",
+			"for inbound calls only, run bash telephony-setup.sh from the build directory: it resolves the inbound trunk by phone number and creates the trunk and dispatch rule, so no record ID is ever copied by hand (unmute dev --telephony creates the local records itself)",
 		}
 		routes[key] = route
 	}

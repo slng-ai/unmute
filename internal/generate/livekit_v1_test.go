@@ -1390,7 +1390,7 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	}
 	for path, wants := range map[string][]string{
 		"sip-inbound-trunk.json": {`${TWILIO_PHONE_NUMBER}`, `twilio inbound`},
-		"sip-dispatch-rule.json": {`${LIVEKIT_SIP_INBOUND_TRUNK}`, `"agentName": "livekit"`, `\"direction\":\"inbound\"`},
+		"sip-dispatch-rule.json": {`${UNMUTE_SIP_TRUNK_ID}`, `"agentName": "livekit"`, `\"direction\":\"inbound\"`},
 	} {
 		content := artifactFile(t, artifact, path)
 		for _, want := range wants {
@@ -1450,7 +1450,6 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	// shipped example moved to the plain SIP names keeps working unchanged.
 	for _, name := range []string{
 		"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "REDIS_URL",
-		"LIVEKIT_SIP_INBOUND_TRUNK",
 		"TWILIO_SIP_ADDRESS", "TWILIO_SIP_USERNAME", "TWILIO_SIP_PASSWORD", "TWILIO_PHONE_NUMBER",
 	} {
 		if !strings.Contains(env, name+"=") {
@@ -1464,7 +1463,7 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	}
 	readme := artifactFile(t, artifact, "README.md")
 	for _, want := range []string{
-		"Configure self-hosted LiveKit SIP", "SIP trunking console", "twilio provider guide", "REDIS_URL", "not an audio hop",
+		"## Telephony setup", "SIP trunking console", "twilio provider guide", "REDIS_URL", "not an audio hop",
 		"no LiveKit outbound trunk is registered",
 		"UNMUTE_LIVEKIT_SIP_PORT", "UNMUTE_LIVEKIT_RTP_PORT_RANGE", "UNMUTE_LIVEKIT_PORT",
 	} {
@@ -1520,10 +1519,14 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		t.Fatalf("runtime process = %#v", runtime.Processes)
 	}
 	required := strings.Join(runtime.RequiredEnv, ",")
-	for _, want := range []string{"REDIS_URL", "LIVEKIT_SIP_INBOUND_TRUNK", "TWILIO_SIP_PASSWORD"} {
+	for _, want := range []string{"REDIS_URL", "TWILIO_SIP_PASSWORD"} {
 		if !strings.Contains(required, want) {
 			t.Errorf("runtime required env missing %s: %s", want, required)
 		}
+	}
+	// No environment name carries a trunk ID in either direction (SCHEMA N36).
+	if strings.Contains(required, "LIVEKIT_SIP_INBOUND_TRUNK") {
+		t.Errorf("runtime still requires the retired inbound trunk name: %s", required)
 	}
 	if strings.Contains(required, "LIVEKIT_SIP_URI") {
 		t.Errorf("runtime still requires the unused LIVEKIT_SIP_URI: %s", required)

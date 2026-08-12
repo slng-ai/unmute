@@ -1455,13 +1455,6 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		}
 		localEnvironment[name] = true
 	}
-	devEnvironment := make(map[string]bool, len(plan.DevEnvironment))
-	for _, name := range plan.DevEnvironment {
-		if name == "" || devEnvironment[name] || !requiredEnvironment[name] {
-			row.Errors = add(row.Errors, "telephony dev-supplied environment must be unique and required by the runtime")
-		}
-		devEnvironment[name] = true
-	}
 	if plan.AutoWebhookEndpoint != "" {
 		if !slices.ContainsFunc(plan.PublicEndpoints, func(e TelephonyEndpoint) bool { return e.Name == plan.AutoWebhookEndpoint }) {
 			row.Errors = add(row.Errors, "telephony auto-webhook endpoint must name an emitted public endpoint")

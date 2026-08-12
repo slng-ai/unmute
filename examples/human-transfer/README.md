@@ -101,11 +101,15 @@ TWILIO_SIP_PASSWORD         ->  SIP_AUTH_PASSWORD
 TWILIO_PHONE_NUMBER         ->  SIP_FROM_NUMBER
 
 LIVEKIT_SIP_OUTBOUND_TRUNK  ->  delete it, nothing reads it
+LIVEKIT_SIP_INBOUND_TRUNK   ->  delete it too, nothing reads it either
 ```
 
-Keep `LIVEKIT_SIP_INBOUND_TRUNK` if you accept inbound calls. The stored trunk
-itself can be deleted with `lk sip outbound delete` whenever convenient; leaving
-it costs nothing but a stale record. If you would rather not rename anything,
+Both trunk-ID variables are retired. The outbound one went with inline dialling
+(SCHEMA N33); the inbound one went when `telephony-setup.sh` started resolving
+the trunk by phone number (SCHEMA N36), so setting it changes nothing. The stored
+outbound trunk itself can be deleted with `lk sip outbound delete` whenever
+convenient; leaving it costs nothing but a stale record. Keep the inbound trunk
+and its dispatch rule: incoming calls still need both, and the script reuses them. If you would rather not rename anything,
 edit `connections/twilio_sip.yaml` back to your own names: the compiler carries
 whatever a Connection declares through verbatim.
 
@@ -132,7 +136,13 @@ worker is documented there too.
 Testing is not local: SIP signaling and RTP do not fit a tunnel. The warm
 transfer needs **no phone number at all**: open the LiveKit Agent Console,
 talk to the agent, ask for a manager, and the supervisor's real phone rings.
-The cold transfer needs one real inbound call through the trunk. The full
+
+**The cold transfer cannot be tested that way.** It refers the caller's *existing*
+SIP leg out, and an Agent Console session has no SIP leg, so there is nothing to
+act on: the tool fires, logs `cold transfer skipped: no phone caller in the room`,
+and the agent carries on. Cold needs one real inbound call through the trunk, which
+means the inbound trunk and the dispatch rule from the generated README must exist
+and the rule must name **this** package's agent. The full
 walkthrough, including the failure drills and teardown, is in
 [docs/TRANSFERS.md](../../docs/TRANSFERS.md).
 

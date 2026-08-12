@@ -15,7 +15,7 @@
       }
     },
     "trunk_ids": [
-      "${LIVEKIT_SIP_INBOUND_TRUNK}"
+      "${UNMUTE_SIP_TRUNK_ID}"
     ]
   }
 }

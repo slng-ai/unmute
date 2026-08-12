@@ -119,7 +119,7 @@ func TestTelephonyDocsContract(t *testing.T) {
 		"docs/user/learn/07-phone-calls.md": {
 			"## Choose a supported carrier route", "## Configure multiple carriers",
 			"## Configure telephony by orchestrator", "Pipecat does not use your carrier's SIP trunk",
-			"### Configure self-hosted LiveKit SIP", "LIVEKIT_SIP_INBOUND_TRUNK", "10000-10100",
+			"#### Create the LiveKit resources", "telephony-setup.sh", "10000-10100",
 		},
 		"docs/user/reference/targets-yaml.md": {"## Multiple telephony routes", "pipecat_twilio", "livekit_telnyx"},
 		"docs/user/reference/providers.md":    {"## Use several providers in one target", "Telephony uses **carrier**"},

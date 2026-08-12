@@ -35,6 +35,9 @@ needed=$(sed -n '1,/^# Supplied for you/p' "$EXAMPLE" | grep -oE '^[A-Z_][A-Z0-9
 for name in $needed; do
   value=$(grep -E "^${name}=" "$ENV_FILE" | head -1 | cut -d= -f2-)
   if ! grep -qE "^${name}=" "$ENV_FILE"; then
+    # No special case for a trunk ID any more: none is asked for. Inbound records
+    # are created by the emitted telephony-setup.sh, which resolves the trunk by
+    # phone number (SCHEMA N36, 2026-08-12).
     echo "  MISSING  $name"
     fail=1
   elif [ -z "$value" ]; then

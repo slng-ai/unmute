@@ -543,20 +543,19 @@ func buildLiveKitSIPTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*liv
 	telephony := &livekitTelephony{
 		Transport: "sip", Carrier: plan.Key.Carrier, Connection: plan.Connection,
 		ProviderDocs: docs,
-		CredentialHint: "the selected carrier's SIP trunking console; use its termination address, " +
-			"authentication username and password, and linked phone number",
-		SIPAddressEnv: plan.Environment["sip_address"], SIPUsernameEnv: plan.Environment["sip_username"],
+		// Short on purpose: the README's runbook now dictates which console tab
+		// each value comes from, so this says where to be, not what to do.
+		CredentialHint: "your carrier's SIP trunking console",
+		SIPAddressEnv:  plan.Environment["sip_address"], SIPUsernameEnv: plan.Environment["sip_username"],
 		SIPPasswordEnv: plan.Environment["sip_password"], FromNumberEnv: plan.Environment["from_number"],
 	}
 	fillLiveKitTelephonyCommon(telephony, agent, plan)
 	env.add("REDIS_URL")
-	if telephony.HasInbound {
-		env.add("LIVEKIT_SIP_INBOUND_TRUNK")
-	}
-	// No outbound trunk name: both dial-out paths carry the carrier's trunk
-	// settings inline, from the four names the Connection already declares
-	// (SCHEMA N33, 2026-08-12). Inbound still needs its trunk id, because an
-	// unsolicited call has no request for configuration to travel with.
+	// No trunk name of either direction. Both dial-out paths carry the carrier's
+	// trunk settings inline, from the four names the Connection already declares
+	// (SCHEMA N33, 2026-08-12). Inbound still needs its two platform records, but
+	// the emitted telephony-setup.sh resolves them by phone number, so no
+	// environment name carries the ID (SCHEMA N36, 2026-08-12).
 	return telephony, nil
 }
 

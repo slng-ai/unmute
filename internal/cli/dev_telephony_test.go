@@ -36,7 +36,7 @@ func fakeTelephonyRoot(t *testing.T, env string) (root, trace string) {
 func fakeDocker(t *testing.T, dir string) {
 	t.Helper()
 	script := filepath.Join(dir, "docker")
-	body := "#!/bin/sh\nprintf '%s | UNMUTE_PUBLIC_URL=%s | TRUNKS=%s/%s\\n' \"$*\" \"$UNMUTE_PUBLIC_URL\" \"$LIVEKIT_SIP_INBOUND_TRUNK\" \"$LIVEKIT_SIP_OUTBOUND_TRUNK\" >> \"$TRACE_FILE\"\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"
+	body := "#!/bin/sh\nprintf '%s | UNMUTE_PUBLIC_URL=%s | HOOK=%s/%s\\n' \"$*\" \"$UNMUTE_PUBLIC_URL\" \"$UNMUTE_TEST_HOOK_ONE\" \"$UNMUTE_TEST_HOOK_TWO\" >> \"$TRACE_FILE\"\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"
 	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestComposeExecutorRunsInfraServicesThenHookThenFullGraph(t *testing.T) {
 	dir := t.TempDir()
 	trace := filepath.Join(dir, "trace.log")
 	fake := filepath.Join(dir, "docker")
-	body := "#!/bin/sh\nprintf '%s | TRUNKS=%s/%s\\n' \"$*\" \"$LIVEKIT_SIP_INBOUND_TRUNK\" \"$LIVEKIT_SIP_OUTBOUND_TRUNK\" >> \"$TRACE_FILE\"\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"
+	body := "#!/bin/sh\nprintf '%s | HOOK=%s/%s\\n' \"$*\" \"$UNMUTE_TEST_HOOK_ONE\" \"$UNMUTE_TEST_HOOK_TWO\" >> \"$TRACE_FILE\"\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"
 	if err := os.WriteFile(fake, []byte(body), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -243,8 +243,8 @@ func TestComposeExecutorRunsInfraServicesThenHookThenFullGraph(t *testing.T) {
 		infraServices: []string{"redis", "livekit_server", "livekit_sip"},
 		beforeApp: func(_ context.Context, env []string) ([]string, error) {
 			hookRan = true
-			env = setChildEnv(env, "LIVEKIT_SIP_INBOUND_TRUNK", "ST_in")
-			return setChildEnv(env, "LIVEKIT_SIP_OUTBOUND_TRUNK", "ST_out"), nil
+			env = setChildEnv(env, "UNMUTE_TEST_HOOK_ONE", "one")
+			return setChildEnv(env, "UNMUTE_TEST_HOOK_TWO", "two"), nil
 		},
 	})
 	if err != nil || !hookRan {
@@ -258,11 +258,11 @@ func TestComposeExecutorRunsInfraServicesThenHookThenFullGraph(t *testing.T) {
 	if len(lines) < 3 {
 		t.Fatalf("trace too short:\n%s", raw)
 	}
-	if !strings.Contains(lines[0], "--wait redis livekit_server livekit_sip") || !strings.Contains(lines[0], "TRUNKS=/") {
-		t.Fatalf("first up was not trunk-free infra: %q", lines[0])
+	if !strings.Contains(lines[0], "--wait redis livekit_server livekit_sip") || !strings.Contains(lines[0], "HOOK=/") {
+		t.Fatalf("first up ran before the hook, so it must not see the hook's environment: %q", lines[0])
 	}
 	full := lines[1]
-	if !strings.HasSuffix(strings.Split(full, " | ")[0], "--wait") || !strings.Contains(full, "TRUNKS=ST_in/ST_out") {
+	if !strings.HasSuffix(strings.Split(full, " | ")[0], "--wait") || !strings.Contains(full, "HOOK=one/two") {
 		t.Fatalf("full up did not carry hook-extended env: %q", full)
 	}
 }

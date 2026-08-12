@@ -653,10 +653,18 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 	return files, nil
 }
 
-// livekitSIPFiles emits provisioner inputs rather than provisioning external
-// state. UNVERIFIED: recheck the JSON shapes with the LiveKit docs MCP before
-// promoting this route; they were verified against docs.livekit.io on
-// 2026-07-20 because the MCP server was unavailable.
+// livekitSIPFiles emits provisioner inputs and the script that feeds them to
+// `lk`, rather than provisioning external state itself. Only the SIP route
+// reaches here: the caller's !connector guard keeps the connector out, which has
+// no SIP trunk even though it accepts inbound calls.
+//
+// JSON shapes re-verified 2026-08-12 with the LiveKit docs MCP
+// (docs.livekit.io/telephony/start/sip-trunk-setup): an inbound trunk is a name
+// plus its numbers, and a dispatch rule is a name plus a rule, with
+// dispatchRuleIndividual and roomPrefix for one room per caller. A rule with no
+// trunk list matches every trunk in the project, which is why trunk_ids is
+// always written and telephony-setup.sh refuses to create a rule without a
+// resolved ID.
 func livekitSIPFiles(data livekitData) ([]File, error) {
 	telephony := data.Telephony
 	if telephony == nil {
@@ -684,8 +692,10 @@ func livekitSIPFiles(data livekitData) ([]File, error) {
 		files = append(files, file)
 		file, err = encode("sip-dispatch-rule.json", map[string]any{
 			"dispatch_rule": map[string]any{
-				"name":      data.Project + " inbound",
-				"trunk_ids": []string{placeholder("LIVEKIT_SIP_INBOUND_TRUNK")},
+				"name": data.Project + " inbound",
+				// Substituted by telephony-setup.sh, not by the environment: no
+				// variable of this name is ever set or read anywhere.
+				"trunk_ids": []string{placeholder("UNMUTE_SIP_TRUNK_ID")},
 				"rule": map[string]any{
 					"dispatchRuleIndividual": map[string]any{"roomPrefix": "call-"},
 				},
@@ -701,6 +711,13 @@ func livekitSIPFiles(data livekitData) ([]File, error) {
 			return nil, err
 		}
 		files = append(files, file)
+		// The operator's one command. It resolves the trunk by phone number and
+		// substitutes both files itself, so no ID is ever transcribed.
+		script, err := renderLiveKitV1("telephony-setup.sh", data)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, File{Path: "telephony-setup.sh", Content: script})
 	}
 	// No outbound-trunk input: nothing reads a stored outbound trunk any more.
 	// The emitted agent dials with the carrier's settings inline, so registering

@@ -392,23 +392,29 @@ func TestComposeLocalEnvironmentAndLiveKitConflicts(t *testing.T) { // telephony
 	}
 }
 
-// Trunk IDs are supplied by the dev command itself (compiler.md V36): they are never
-// demanded from the user and a user-set value is rejected, not overridden.
-func TestComposeDevSuppliedEnvironmentIsNeverDemandedAndRejectsOverrides(t *testing.T) {
+// No environment name carries a trunk ID any more (SCHEMA N36), so nothing is
+// dev-supplied on this route: the dev command creates the records and the local
+// LiveKit SIP service reads them itself. A stale retired value left in a `.env`
+// is now simply ignored, which is what the README's retirement sentence tells the
+// operator. The local topology guard still fails loud for the names the generated
+// Compose owns, which is the case that would otherwise point a local run at
+// someone's real deployment.
+func TestComposeIgnoresRetiredTrunkNamesAndStillGuardsLocalTopology(t *testing.T) {
 	plan := &generate.TelephonyRuntimePlan{
-		RequiredEnv:      []string{"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK", "LIVEKIT_URL", "TWILIO_SIP_PASSWORD"},
+		RequiredEnv:      []string{"LIVEKIT_URL", "TWILIO_SIP_PASSWORD"},
 		LocalEnvironment: []string{"LIVEKIT_URL"},
-		DevSuppliedEnv:   []string{"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK"},
 	}
 	if got := externalTelephonyEnv(plan); strings.Join(got, ",") != "TWILIO_SIP_PASSWORD" {
 		t.Fatalf("external env = %v", got)
 	}
-	err := rejectLocalTopologyConflicts(plan, []string{"LIVEKIT_SIP_INBOUND_TRUNK=ST_stale"})
-	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_SIP_INBOUND_TRUNK is supplied by `unmute dev --telephony` itself") {
-		t.Fatalf("dev-supplied override = %v", err)
+	for _, stale := range []string{"LIVEKIT_SIP_INBOUND_TRUNK=ST_stale", "LIVEKIT_SIP_OUTBOUND_TRUNK=ST_stale"} {
+		if err := rejectLocalTopologyConflicts(plan, []string{stale}); err != nil {
+			t.Fatalf("a retired name must be ignored, not reported: %v", err)
+		}
 	}
-	if err := rejectLocalTopologyConflicts(plan, []string{"LIVEKIT_SIP_OUTBOUND_TRUNK="}); err != nil {
-		t.Fatalf("empty dev-supplied override should not conflict: %v", err)
+	err := rejectLocalTopologyConflicts(plan, []string{"LIVEKIT_URL=wss://production.example"})
+	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_URL conflicts") {
+		t.Fatalf("local topology conflict = %v", err)
 	}
 }
 

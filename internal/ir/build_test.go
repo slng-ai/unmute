@@ -91,8 +91,8 @@ func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 	if got := coordinationReasonNames(plan.CoordinationReasons); got != "admission,call_correlation,callback_idempotency" {
 		t.Fatalf("coordination reasons = %s", got)
 	}
-	if plan.AutoWebhookEndpoint != "inbound" || len(plan.DevEnvironment) != 0 {
-		t.Fatalf("auto webhook = %q, dev environment = %v", plan.AutoWebhookEndpoint, plan.DevEnvironment)
+	if plan.AutoWebhookEndpoint != "inbound" {
+		t.Fatalf("auto webhook = %q", plan.AutoWebhookEndpoint)
 	}
 }
 
@@ -148,9 +148,10 @@ func TestBuildLiveKitSIPUsesSharedDispatchPlan(t *testing.T) { // telephony T10,
 	if got := strings.Join(plan.LocalEnvironment, ","); got != "LIVEKIT_API_KEY,LIVEKIT_API_SECRET,LIVEKIT_URL,REDIS_URL" {
 		t.Fatalf("LiveKit SIP locally supplied environment = %s", got)
 	}
-	// Fixture is inbound-only, so only the inbound trunk ID is dev-supplied.
-	if got := strings.Join(plan.DevEnvironment, ","); got != "LIVEKIT_SIP_INBOUND_TRUNK" {
-		t.Fatalf("LiveKit SIP dev-supplied environment = %s", got)
+	// No environment name carries a trunk ID: the emitted telephony-setup.sh
+	// resolves the inbound records by phone number (SCHEMA N36).
+	if got := strings.Join(plan.RequiredEnvironment, ","); strings.Contains(got, "TRUNK") {
+		t.Fatalf("LiveKit SIP required environment still carries a trunk ID: %s", got)
 	}
 	if plan.AutoWebhookEndpoint != "" {
 		t.Fatalf("LiveKit SIP auto webhook = %q", plan.AutoWebhookEndpoint)

@@ -86,9 +86,10 @@ orchestrator's supported transport. The implementation follows these rules:
   the LiveKit SIP route, after the local infrastructure services are
   healthy, the dev command creates or reuses (idempotently, by content) the
   inbound trunk and individual-room dispatch rule against the local server
-  with the generated development key pair, and injects the returned ID as
-  `LIVEKIT_SIP_INBOUND_TRUNK`. Users never supply that value for local
-  development. No outbound trunk is created: the agent dials out with the
+  with the generated development key pair. Nothing is injected into the
+  application's environment: the records are platform state the local LiveKit
+  SIP service reads for itself, and no environment name carries their IDs
+  (SCHEMA N36, 2026-08-12). No outbound trunk is created: the agent dials out with the
   carrier's trunk settings passed inline, so local and deployed use the same
   mechanism (SCHEMA N33, 2026-08-12). Carrier-side (Twilio console) trunk setup stays manual
   and one-time.
@@ -307,7 +308,7 @@ The initial route adapters use these names:
 | LiveKit SIP with Twilio | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Twilio Console → Elastic SIP Trunking. Use the termination URI, Credential List username and password, and associated number. |
 | LiveKit SIP with Telnyx | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Telnyx Mission Control → SIP Trunking. Use the SIP connection address and credentials, and its assigned number. |
 | LiveKit SIP with Plivo | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Plivo Console → Zentrunk. Use the termination domain, outbound credential, and linked number. |
-| LiveKit SIP resource ID | `LIVEKIT_SIP_INBOUND_TRUNK` | Inbound only, and only when the channel accepts inbound calls. For local development, `unmute dev --telephony` creates the records itself and supplies the ID; do not set it. For production, copy the `SIPTrunkID` printed by `lk sip inbound create`. There is no outbound equivalent: dialling out carries the carrier's trunk settings inline (SCHEMA N33, 2026-08-12), so nothing is registered on the platform for it. |
+| LiveKit SIP resource IDs | none | No environment name carries a trunk ID in either direction. Inbound still needs its two platform records, and the emitted `telephony-setup.sh` creates them, resolving the trunk by the phone number you already have (SCHEMA N36, 2026-08-12); `unmute dev --telephony` creates the local pair itself. Dialling out registers nothing at all, because it carries the carrier's trunk settings inline (SCHEMA N33, 2026-08-12). |
 
 The generated Pipecat carrier-WebSocket outbound HTTP endpoint also requires
 `UNMUTE_OUTBOUND_TOKEN`. Generate this secret yourself with a cryptographically
@@ -762,7 +763,8 @@ The command performs these steps in this order:
 2. Resolve and print the provider-neutral runtime plan.
 3. Validate required carrier and model environment variables. Values the
    command supplies itself (`UNMUTE_PUBLIC_URL` under the managed tunnel,
-   `LIVEKIT_SIP_INBOUND_TRUNK`) are not demanded from the user.
+   `UNMUTE_OUTBOUND_TOKEN` on the routes that dial out over HTTP) are not
+   demanded from the user.
 4. Verify Docker Compose is available.
 5. Start the managed cloudflared tunnel when the plan has public endpoints
    and `--public-url` is absent, or take the `--public-url` origin as given.

@@ -120,7 +120,23 @@ yet, and one lucky run is not it.
 
 ### Run D: the cold transfer still works
 
-Ask about an invoice. The caller should be referred out.
+**This run needs a real phone call, not the Agent Console.** Cold refers the caller's
+existing SIP leg out, and a console session has no SIP leg, so from the console the tool
+logs `cold transfer skipped: no phone caller in the room` and the agent carries on. That
+is by design, the platform's own example carries the same guard, and it was learned the
+hard way on 2026-08-12 (research R8). Runs A through C do work from the console, because
+warm dials out.
+
+Before the first cold run, the inbound path must exist once: an inbound trunk for the
+package's number, and a dispatch rule that names **this** package's agent. Both files are
+in the build directory and the generated README's "Create the LiveKit SIP resources"
+section holds the exact commands. Check with `lk sip dispatch list` that a rule points at
+`agentName: livekit`; a rule pointing at another agent name sends the call elsewhere and
+this worker never sees it. The Twilio number's origination URI must point at the LiveKit
+project's SIP endpoint, and the trunk the call arrives on must have Call Transfer (SIP
+REFER) and PSTN transfer enabled.
+
+Then call the number and ask about an invoice. The caller should be referred out.
 
 Expected log: the fired line, `cold transfer referring the caller out`, then
 `cold transfer completed after <n>s`. Nothing else about cold transfer changed, and its

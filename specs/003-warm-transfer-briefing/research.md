@@ -248,3 +248,101 @@ emitted logging setup believing it to be the cause, and so that the option stays
 record if a future defect genuinely needs framework internals visible. If it is ever
 wanted, the right shape is a documented opt-in environment variable in the generated
 project, not a default.
+
+---
+
+## R8. What `LIVEKIT_SIP_INBOUND_TRUNK` is for, and what it is not
+
+Added 2026-08-12, after the first live cold test. The author challenged the claim that
+this variable is needed for cold transfer, on the grounds that the platform's call
+forwarding page never mentions it. **The challenge is upheld.**
+
+**Decision**: the variable is a provisioning input for the inbound call path, nothing
+else. It is not part of cold transfer, it is not read by the deployed agent, and it is
+not a deploy blocker. An earlier reply in this feature's session called its absence from
+`.env` a deploy failure, and that framing was wrong.
+
+**Evidence, all from 2026-08-12:**
+
+- The platform's cold transfer page (`docs.livekit.io/telephony/features/transfers/cold.md`,
+  rendered 2026-08-12) never names it, because `TransferSIPParticipant` takes a room name,
+  a participant identity and a destination. No trunk argument exists. The REFER rides the
+  SIP session the caller is already on, so LiveKit knows the trunk from the call itself.
+- `grep -c LIVEKIT_SIP_INBOUND_TRUNK build/livekit/agent.py` returns **0**. The runtime
+  never reads it. It appears only in `sip-dispatch-rule.json` (as the `trunk_ids`
+  placeholder), the README step that materializes that file, `.env.example`, the compile
+  report, and the local dev compose.
+- In the compiler it is `internal/generate/livekit_v1.go` line ~688 (the dispatch rule
+  placeholder) and `livekit_v1_build.go` (the env listing); `internal/ir` classifies it as
+  dev-supplied, which is why `unmute dev --telephony` fills it automatically.
+
+**What it actually does**: the generated dispatch rule must be scoped to one inbound
+trunk, because a dispatch rule with no `trunk_ids` matches every trunk in the project,
+and this project (`slng-atlas`) is shared and holds production trunks. The variable is
+the author's handle for "my trunk" when running the one-time
+`envsubst | lk sip dispatch create` step from the generated README. After that step it
+has no further use on a Cloud deployment.
+
+**Why it is still in `.env.example`**: the README's provisioning commands read it from
+the shell, and `unmute dev --telephony` supplies it. That placement is defensible but the
+section does not say "one-time provisioning, not a runtime secret", and this session
+proves the omission misleads. Follow-up recorded in tasks.md: label it in the emitted
+`.env.example`, out of this feature's scope (FR-016, no authoring or classification
+change).
+
+**The related by-design fact**: cold transfer cannot be exercised from the Agent Console,
+because there is no SIP participant to refer. The platform's own example on the same page
+carries the identical guard (`if sip_participant is None: return "no active SIP caller to
+transfer"`). Warm works from the console because it dials out. The emitted line
+`cold transfer skipped: no phone caller in the room` (contract 2alt) is this fact made
+visible in a log.
+
+---
+
+## R9. Can the trunk variable go away entirely, the way the outbound trunk did?
+
+Asked by the author on 2026-08-12, right after R8: outbound dialling needs only the four
+carrier values since N33, so why should inbound keep a LiveKit-named variable at all?
+
+**Decision, two halves.**
+
+**The platform records cannot go away.** An unsolicited INVITE arrives with no request of
+ours for configuration to ride on, so the platform must already hold two facts: this
+number belongs to this project (the inbound trunk), and calls to it go to this agent (the
+dispatch rule). The telephony overview says this in its own words: LiveKit SIP exists "to
+respond to SIP requests, mediate trunk authentication, and match dispatch rules". This is
+the same asymmetry N33 recorded, and no carrier setting changes it. The carrier's side is
+one manual fact too: the Twilio trunk's origination URI must point at the project's SIP
+endpoint.
+
+**The variable can go away.** Read from `livekit_sip.proto` in the public protocol
+repository on 2026-08-12, `SIPDispatchRuleInfo` has three scoping fields:
+
+- `trunk_ids` (field 3): what we emit today, documented on the dispatch rule page.
+- `inbound_numbers` (field 7): "will only accept a call made **from** these numbers".
+  Caller filtering. Not useful here.
+- `numbers` (field 13): "will only accept a call made **to** these numbers". This is the
+  package's own from-number, which the Connection already declares.
+
+Two shapes follow:
+
+- **Shape A, cleanest**: emit the dispatch rule scoped by `numbers` with the from-number
+  placeholder instead of `trunk_ids`. Both provisioning files then materialize from
+  values the package already holds, and `LIVEKIT_SIP_INBOUND_TRUNK` leaves every surface.
+  **Gated (principle IV)**: the field exists in the protocol with an explicit comment,
+  but the dispatch rule documentation page does not describe it and nothing here proves
+  the Cloud SIP service enforces it. The failure mode of an unenforced scope is a rule
+  with empty `trunk_ids`, which the docs say matches **every** trunk in the project.
+  `slng-atlas` is shared and carries production trunks, so an unenforced scope would
+  steal live calls. Verify in a throwaway project first, never in this one.
+- **Shape B, documented behaviour only**: keep `trunk_ids`, but resolve the ID
+  mechanically at provisioning time. `ListSIPInboundTrunk` filters trunks by number, so
+  the README's commands can look the ID up from the from-number and pass it through a
+  shell variable that never lands in `.env`, `.env.example`, the required-env list or
+  the compile report.
+
+**Scope**: either shape moves `sip-dispatch-rule.json`, the env classification in
+`livekit_v1_build.go`, the README template, the `internal/ir` dev-supplied list and the
+frozen goldens, so this is its own feature, not an amendment to 003. Until then the
+operator's workaround is already real: export the ID in the shell for the two
+provisioning commands and never store it.

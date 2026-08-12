@@ -19,6 +19,8 @@ import (
 	"syscall"
 
 	"github.com/slng/unmute/internal/generate"
+	"github.com/slng/unmute/internal/ir"
+	"github.com/slng/unmute/internal/target"
 	"github.com/spf13/cobra"
 )
 
@@ -157,19 +159,16 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 		env: childEnv, output: processOut,
 		stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr(), logPath: logPath,
 	}
-	if len(plan.DevSuppliedEnv) > 0 {
+	if planCreatesLiveKitSIPRecords(plan) {
 		// LiveKit SIP: infrastructure first, then trunk and dispatch records
-		// against the local server, then the application with the IDs (V4).
+		// against the local server, then the application (V4). This is the gate
+		// for the whole two-phase startup, not a display detail: without it the
+		// application starts before any record exists and an inbound call has
+		// nowhere to land.
 		run.infraServices = telephonyInfraServices(plan)
 		run.beforeApp = func(ctx context.Context, env []string) ([]string, error) {
-			injected, err := ensureLiveKitSIPRecords(ctx, cmd.OutOrStdout(), targetName, plan, env)
-			if err != nil {
+			if err := ensureLiveKitSIPRecords(ctx, cmd.OutOrStdout(), targetName, plan, env); err != nil {
 				return nil, err
-			}
-			for _, name := range plan.DevSuppliedEnv {
-				if injected[name] != "" {
-					env = setChildEnv(env, name, injected[name])
-				}
 			}
 			return env, nil
 		}
@@ -260,6 +259,18 @@ func printDevCallLine(out io.Writer, plan *generate.TelephonyRuntimePlan, env []
 		return
 	}
 	fmt.Fprintf(out, "\n  \033[1;32m▸\033[0m call %s  ·  ctrl-c to stop\n\n", number)
+}
+
+// planCreatesLiveKitSIPRecords reports whether `unmute dev --telephony` creates
+// the local inbound trunk and dispatch rule for this plan, which is also what
+// switches the startup into two phases: infrastructure, then records, then the
+// application. Only a LiveKit SIP route that accepts calls has those records.
+// The connector and the Pipecat carrier routes carry the inbound feature too but
+// have no SIP trunk at all, and an outbound-only package needs no record of
+// either kind (SCHEMA N36, 2026-08-12).
+func planCreatesLiveKitSIPRecords(plan *generate.TelephonyRuntimePlan) bool {
+	return plan.Route.Provider == ir.ProviderLiveKit && plan.Route.Transport == "sip" &&
+		planHasTelephonyFeature(plan, string(target.TelephonyInbound))
 }
 
 func planHasTelephonyFeature(plan *generate.TelephonyRuntimePlan, feature string) bool {

@@ -540,15 +540,17 @@ Telnyx, use the SIP connection address, credentials, and assigned number from
 Telnyx Mission Control. For Plivo, use the Zentrunk termination domain,
 outbound credential, and linked number from the Plivo Console.
 
-Compilation emits the selected `sip-inbound-trunk.json`,
-and `sip-dispatch-rule.json` inputs for production deployments, for inbound
-calls only. Materialize their environment placeholders with `envsubst`, then run
-the `lk sip ... create` commands in the generated README. Copy the returned ID to
-`LIVEKIT_SIP_INBOUND_TRUNK` as requested by `.env.example`. There is no outbound
-trunk input: the agent dials out with the carrier's trunk settings passed inline
-(SCHEMA N33, 2026-08-12). For local development none of this is needed:
-`unmute dev --telephony` creates the same records on the local server itself
-and supplies the ID.
+Compilation emits `sip-inbound-trunk.json` and `sip-dispatch-rule.json` for
+production deployments, for inbound calls only, plus the `telephony-setup.sh`
+that feeds them to `lk`. Run `bash telephony-setup.sh` from the build directory:
+it resolves the inbound trunk by the phone number in your `.env`, creates the
+trunk and the dispatch rule, reuses whatever already exists, and needs no record
+ID copied anywhere, so no environment name carries one (SCHEMA N36,
+2026-08-12). The generated README's `## Telephony setup` section dictates the
+carrier half. There is no outbound trunk input: the agent dials out with the
+carrier's trunk settings passed inline (SCHEMA N33, 2026-08-12). For local
+development none of this is needed: `unmute dev --telephony` creates the same
+records on the local server itself.
 
 Self-hosted SIP runs LiveKit Server and LiveKit SIP against the same Redis.
 Redis is their shared datastore and message bus, so calls, SIP participants,
@@ -575,13 +577,15 @@ unmute dev acme --target livekit --telephony
 The command runs the whole bootstrap itself: Docker Compose builds the Agent and
 starts Redis, LiveKit Server, and LiveKit SIP first; the command then creates or
 reuses the inbound trunk and `call-` dispatch rule on that local server with
-the generated development key pair, injects the returned
-`LIVEKIT_SIP_INBOUND_TRUNK`, and starts the application. No outbound trunk is
-created, locally or in production. Record creation is idempotent: the named Redis volume persists,
+the generated development key pair, and then starts the application. The records
+are platform state the local LiveKit SIP service reads for itself, so nothing is
+injected into the application's environment. No outbound trunk is created,
+locally or in production. Record creation is idempotent: the named Redis volume persists,
 so restarts reuse existing records instead of duplicating them.
 
-Non-empty external `LIVEKIT_URL`, API key/secret, `REDIS_URL`, or trunk ID
-values conflict with this local graph and are rejected. `--verbose` follows
+Non-empty external `LIVEKIT_URL`, API key/secret, or `REDIS_URL` values
+conflict with this local graph and are rejected. A retired trunk-ID variable left
+in your `.env` is ignored, because nothing reads it. `--verbose` follows
 Compose logs; normal output is retained in `build/livekit/telephony.log`.
 Stopping preserves the named Redis volume. Remember that a real call still
 needs carrier-reachable SIP signaling and RTP; the local stack runs, but an

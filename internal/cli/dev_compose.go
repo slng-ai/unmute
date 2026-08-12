@@ -54,11 +54,8 @@ func preflightComposeCore(ctx context.Context, env []string, missingHint string)
 }
 
 func externalTelephonyEnv(plan *generate.TelephonyRuntimePlan) []string {
-	supplied := make(map[string]bool, len(plan.LocalEnvironment)+len(plan.DevSuppliedEnv))
+	supplied := make(map[string]bool, len(plan.LocalEnvironment))
 	for _, name := range plan.LocalEnvironment {
-		supplied[name] = true
-	}
-	for _, name := range plan.DevSuppliedEnv {
 		supplied[name] = true
 	}
 	result := make([]string, 0, len(plan.RequiredEnv))
@@ -81,11 +78,6 @@ func rejectLocalTopologyConflicts(plan *generate.TelephonyRuntimePlan, env []str
 	for _, name := range plan.LocalEnvironment {
 		if values[name] != "" {
 			return fmt.Errorf("%s conflicts with the generated local LiveKit SIP topology; unset it for `unmute dev --telephony`", name)
-		}
-	}
-	for _, name := range plan.DevSuppliedEnv {
-		if values[name] != "" {
-			return fmt.Errorf("%s is supplied by `unmute dev --telephony` itself; unset it for local runs", name)
 		}
 	}
 	return nil

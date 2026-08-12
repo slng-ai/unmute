@@ -254,3 +254,34 @@ instructions inside the real `livekit-agents` 1.6.9, and
 lines. Run A three times, Run C three times, Runs B and D once each, and record
 the first sentence, the message count, the outcome line and the duration for
 every one.
+
+### T030 live-run record
+
+| Run | Date | Result |
+|---|---|---|
+| A1 | 2026-08-12 | **Pass.** Warm transfer from the Agent Console: hold music, supervisor dialled, briefed, merged. Author's words: "worked well". First sentence and message count not yet captured; needed before the row is complete. |
+| D (first attempt) | 2026-08-12 | **Invalid run, productive failure.** Attempted from the Agent Console, where cold cannot work: no SIP leg to refer. The tool took the no-caller branch, which logged nothing, and the run was read as a broken transfer. Two things came out of it: the branch now logs `cold transfer skipped: no phone caller in the room` (contract 2alt, reversing the contract's own first decision), and research R8 records what `LIVEKIT_SIP_INBOUND_TRUNK` is actually for after the author correctly challenged it as a supposed requirement of cold transfer. |
+
+Still owed: A2, A3, B, C1 through C3, and a real Run D through a phone call once
+the inbound trunk and a dispatch rule naming this package's agent exist
+(`lk sip dispatch list` showed no rule for `agentName: livekit` on 2026-08-12; every
+rule in the shared project points at a default-region agent).
+
+### Follow-ups recorded here, out of this feature's scope
+
+1. **A transfer-carrying golden fixture** (from the T002 note above).
+2. **Label `LIVEKIT_SIP_INBOUND_TRUNK` in the emitted `.env.example`** as a one-time
+   provisioning input rather than a runtime secret. The agent never reads it (research
+   R8); it exists to scope the dispatch rule at `lk sip dispatch create` time. Today it
+   sits in the main section with no note, which is what let it be mistaken for a cold
+   transfer requirement and for a deploy blocker. One emitted comment line, but it is an
+   emitted-surface change and belongs in its own commit with its own golden read.
+3. **Retire `LIVEKIT_SIP_INBOUND_TRUNK` from the operator surface** (supersedes the
+   labelling idea in item 2). Research R9 holds the verified options: scope the emitted
+   dispatch rule by called number (`numbers`, protocol field 13, needs live verification
+   in a throwaway project before it can be the default) or resolve the trunk ID by
+   number at provisioning time with documented APIs only. Either way the variable leaves
+   `.env.example`, the required-env list and the compile report, and inbound joins
+   outbound in needing only the four carrier values plus one carrier-side origination
+   URI. Feature-sized: it moves the dispatch rule artifact, the env classification, the
+   README template, the ir dev-supplied list and the goldens 003 froze.

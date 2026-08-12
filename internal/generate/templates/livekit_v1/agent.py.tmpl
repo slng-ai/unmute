@@ -679,7 +679,24 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
             None,
         )
         if caller is None:
-            return "There is no phone caller to transfer."
+            # No SIP leg in the room, so there is nothing to refer. The usual
+            # cause is a session that never arrived by phone: an Agent Console
+            # run, a browser session, or a dispatch rule pointing at a different
+            # agent. Cold acts on the caller's own leg, so unlike warm it cannot
+            # be tested without a real inbound call.
+            #
+            # This branch logged nothing until 2026-08-12. On a live test that
+            # day it fired, spoke a vague reply, and left an operator reading a
+            # log that showed the tool firing and then simply stopping. The
+            # earlier reasoning was that line 1 plus the absence of line 2 says
+            # this on its own; absence is only a signal to somebody who already
+            # knows to look for it.
+            logger.info("cold transfer skipped: no phone caller in the room")
+            return (
+                "There is no phone caller to transfer, because this session did not "
+                "arrive by phone. Tell the caller you cannot put them through and "
+                "keep helping them."
+            )
         # The tool speaks the announcement itself (V4/B4): leaving it to the
         # prompt lets a model say "putting you through" and never call this,
         # which a caller cannot tell apart from a transfer that failed.

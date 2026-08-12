@@ -40,32 +40,24 @@ func TestTelephonyAutoWebhookIsATwilioFactOnly(t *testing.T) {
 	}
 }
 
-// The dev command supplies the LiveKit SIP trunk ID itself for local runs
-// (compiler.md V36): every SIP route declares exactly that one name, backed by
-// a runtime environment rule, and no other route declares any.
-//
-// Inbound only, since 2026-08-12 (SCHEMA N33). Dialling out carries the
-// carrier's trunk settings inline, so there is no outbound trunk to register
-// locally or in a deployment, and local now uses the same mechanism production
-// does. Inbound cannot work that way: an unsolicited call arrives with no
-// request of ours for configuration to travel with.
-func TestTelephonyDevSuppliedEnvironmentIsSIPTrunkIDs(t *testing.T) {
+// No route asks the operator for a trunk ID in either direction (SCHEMA N33 for
+// outbound, N36 for inbound). Dialling out carries the carrier's trunk settings
+// inline with every call. Inbound cannot work that way, because an unsolicited
+// call arrives with no request of ours for configuration to travel with, so it
+// keeps its two platform records, but the emitted telephony-setup.sh resolves
+// them by phone number at provisioning time. An environment name that carried an
+// ID is the thing this feature retired, so the table must never grow one back.
+func TestTelephonyRuntimeEnvironmentCarriesNoTrunkIDs(t *testing.T) {
 	for key, route := range TelephonyRoutes() {
-		if key.Provider == LiveKit && key.Transport == "sip" && len(route.Features) > 0 {
-			if got := strings.Join(route.DevSuppliedEnvironment, ","); got != "LIVEKIT_SIP_INBOUND_TRUNK" {
-				t.Fatalf("route %v dev-supplied environment = %q", key, got)
+		for _, rule := range route.RuntimeEnvironment {
+			if strings.Contains(rule.Name, "TRUNK") {
+				t.Errorf("route %v runtime environment carries the trunk ID %s", key, rule.Name)
 			}
-			for _, name := range route.DevSuppliedEnvironment {
-				if !slices.ContainsFunc(route.RuntimeEnvironment, func(rule TelephonyEnvironmentRule) bool {
-					return rule.Name == name
-				}) {
-					t.Fatalf("route %v dev-supplied %s has no runtime environment rule", key, name)
-				}
-			}
-			continue
 		}
-		if len(route.DevSuppliedEnvironment) != 0 {
-			t.Fatalf("route %v unexpectedly declares dev-supplied environment %v", key, route.DevSuppliedEnvironment)
+		for _, name := range route.LocallySuppliedEnvironment {
+			if strings.Contains(name, "TRUNK") {
+				t.Errorf("route %v locally supplied environment carries the trunk ID %s", key, name)
+			}
 		}
 	}
 }

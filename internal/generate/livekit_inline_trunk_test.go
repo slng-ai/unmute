@@ -256,12 +256,13 @@ func TestInlineTrunkLeavesNoTraceInAnyArtifact(t *testing.T) {
 			t.Errorf("%s still names the retired outbound trunk", file.Path)
 		}
 	}
-	// Inbound is untouched: an unsolicited call arrives with no request of ours
-	// for configuration to travel with, so the platform has to already hold it.
-	for _, path := range []string{"sip-inbound-trunk.json", "sip-dispatch-rule.json"} {
-		if content := artifactFile(t, artifact, path); !strings.Contains(content, "${LIVEKIT_SIP_INBOUND_TRUNK}") && path == "sip-dispatch-rule.json" {
-			t.Errorf("%s no longer scopes itself to the inbound trunk", path)
-		}
+	// Inbound still needs both platform records: an unsolicited call arrives with
+	// no request of ours for configuration to travel with. Only the way the
+	// dispatch rule names its trunk changed, from an environment name to the
+	// token telephony-setup.sh substitutes (SCHEMA N36).
+	artifactFile(t, artifact, "sip-inbound-trunk.json")
+	if content := artifactFile(t, artifact, "sip-dispatch-rule.json"); !strings.Contains(content, "${UNMUTE_SIP_TRUNK_ID}") {
+		t.Error("sip-dispatch-rule.json no longer scopes itself to the inbound trunk")
 	}
 }
 

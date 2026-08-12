@@ -223,6 +223,24 @@ func TestColdTransferLogContract(t *testing.T) {
 	if referring < 0 || request < 0 || referring > request {
 		t.Error("cold agent.py logs the referral after making it, so a hung request leaves no trace")
 	}
+	// The no-caller branch logs too. Added 2026-08-12 after a live test hit it
+	// from the Agent Console, where there is no SIP leg to refer: the tool fired,
+	// the agent said something vague, and the log showed line 1 and then nothing.
+	// The contract used to say the absence of line 2 covered this, which is only
+	// true for a reader who already knows to look for an absence.
+	if !strings.Contains(agentPy, `logger.info("cold transfer skipped: no phone caller in the room")`) {
+		t.Error("cold agent.py leaves the no-phone-caller branch unlogged; a live test read that silence as a broken transfer")
+	}
+	skipped := strings.Index(agentPy, "cold transfer skipped")
+	if skipped < 0 || skipped > referring {
+		t.Error("the skipped line must be in the early-return branch, before the referral")
+	}
+	// It has to say why, or the next reader repeats the same test from the
+	// console and reaches the same wrong conclusion.
+	if !strings.Contains(agentPy, "did not \"\n                \"arrive by phone") &&
+		!strings.Contains(agentPy, "this session did not arrive by phone") {
+		t.Error("the returned message does not tell the model why there is nobody to transfer")
+	}
 }
 
 // contracts/transfer-log.md L5, L6 and L7, enforced structurally rather than by

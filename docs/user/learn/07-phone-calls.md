@@ -384,17 +384,16 @@ For the LiveKit SIP route, the command creates these records against your
 local LiveKit server with the generated development key pair:
 
 - an inbound trunk for your number,
-- an outbound trunk (address and auth from your `*_SIP_*` values; the
-  password goes only into the API request, never into files or logs),
 - an individual-room dispatch rule (`call-` room prefix) that dispatches the
   generated agent.
 
 Creation is idempotent. The local Redis volume keeps records across
-restarts, so a second run reuses them instead of duplicating. The returned
-ID is injected as `LIVEKIT_SIP_INBOUND_TRUNK`; never set it for local runs.
-No outbound trunk is created, locally or in a deployment: since 2026-08-12
-(SCHEMA N33) the agent dials out with the carrier's trunk settings passed
-inline, so local and deployed use the same mechanism.
+restarts, so a second run reuses them instead of duplicating. Nothing is
+injected into the application's environment: the records are platform state the
+local LiveKit SIP service reads for itself, and no environment name carries their
+IDs (SCHEMA N36, 2026-08-12). No outbound trunk is created, locally or in a
+deployment: since 2026-08-12 (SCHEMA N33) the agent dials out with the carrier's
+trunk settings passed inline, so local and deployed use the same mechanism.
 
 ### One-time carrier setup per model
 
@@ -431,7 +430,7 @@ SIP_AUTH_USERNAME=
 SIP_AUTH_PASSWORD=
 SIP_FROM_NUMBER=
 # Supplied by the command itself: REDIS_URL, LIVEKIT_URL, LIVEKIT_API_KEY,
-# LIVEKIT_API_SECRET, LIVEKIT_SIP_INBOUND_TRUNK.
+# LIVEKIT_API_SECRET.
 ```
 
 The Telnyx and Plivo `.env` files use the same shapes with their own names
@@ -535,7 +534,6 @@ when you fill in `.env`.
 | `SIP_TRUNK_HOSTNAME` | Carrier | Carrier termination host the INVITE is sent to. Not a URI: no `sip:` prefix |
 | `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD` | Carrier | Credentials LiveKit authenticates the outbound call with |
 | `SIP_FROM_NUMBER` | Carrier | E.164 number on the trunk, and the number calls are placed from |
-| `LIVEKIT_SIP_INBOUND_TRUNK` | LiveKit | ID returned by `lk sip inbound create`, inbound only |
 
 The Connection stores only the environment variable names. Use the same four
 keys for Twilio, Telnyx, and Plivo:
@@ -694,18 +692,17 @@ live on the LiveKit SIP route ([TRANSFERS.md](../../TRANSFERS.md)).
 
 #### Create the LiveKit resources
 
-Compile the target and materialize the generated JSON. The committed inputs
-contain environment variable placeholders; `envsubst` resolves them from your
-exported environment.
+Compile the target, then run the emitted script from the build directory:
 
 ```sh
-envsubst < sip-inbound-trunk.json > /tmp/unmute-sip-inbound-trunk.json
-lk sip inbound create /tmp/unmute-sip-inbound-trunk.json
-# Set LIVEKIT_SIP_INBOUND_TRUNK to the returned SIPTrunkID.
-
-envsubst < sip-dispatch-rule.json > /tmp/unmute-sip-dispatch-rule.json
-lk sip dispatch create /tmp/unmute-sip-dispatch-rule.json
+bash telephony-setup.sh
 ```
+
+It reads your phone number, finds the inbound trunk that claims it, creates the
+trunk and the dispatch rule when they do not exist yet, and reuses them when they
+do. Everything is found by the number, so no record ID is copied between commands
+and no environment name holds one (SCHEMA N36, 2026-08-12). It needs `lk`,
+authenticated against the project, and `jq`.
 
 Inbound only, and both records are needed. An unsolicited call arrives with no
 request of yours for configuration to travel with, so the platform has to
@@ -719,9 +716,8 @@ and `LIVEKIT_SIP_OUTBOUND_TRUNK` are gone. Dialling out is your own code
 starting a call, so the settings can ride along with it; nothing has to be
 registered first.
 
-Only create the resources required by the channel directions. The generated
-README contains the exact commands for that target. These manual commands are
-the production path.
+The generated README's `## Telephony setup` section is the authority for this
+package: it dictates the carrier steps too, in the order they have to happen.
 
 For local development, none of that is needed:
 
@@ -730,11 +726,11 @@ unmute dev ./agent --target livekit_twilio --telephony
 ```
 
 The command starts Redis, LiveKit Server, and LiveKit SIP, creates or reuses
-the inbound trunk and dispatch rule on that local server itself, injects
-`LIVEKIT_SIP_INBOUND_TRUNK`, and then starts the Agent. It creates no outbound
-trunk, because the agent dials out inline, exactly as a deployment does. It rejects external `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
-`LIVEKIT_API_SECRET`, `REDIS_URL`, and user-set trunk IDs because they
-conflict with the local topology. `ctrl-c` stops this package's Compose
+the inbound trunk and dispatch rule on that local server itself, and then starts
+the Agent. It creates no outbound trunk, because the agent dials out inline,
+exactly as a deployment does. It rejects external `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and `REDIS_URL` because they conflict
+with the local topology. `ctrl-c` stops this package's Compose
 project and preserves its Redis data volume, so the created records survive
 restarts and are reused, not duplicated.
 

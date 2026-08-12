@@ -173,6 +173,21 @@ cold transfer completed after 2s
 
 or `cold transfer failed after <n>s: <reason>`.
 
+There is a fourth cold line, and it is the one you are most likely to meet first:
+
+```text
+human transfer fired: send_to_billing (cold)
+cold transfer skipped: no phone caller in the room
+```
+
+**Cold cannot be tested from the Agent Console.** It refers the caller's *existing*
+SIP leg, and a console session has no SIP leg, so there is nothing to act on. Warm
+works from the console because it dials out and needs no inbound leg. This is why
+the two have different test rigs above, and it is what this line says when you mix
+them up. The other cause is a dispatch rule pointing at a different agent name, so
+the call never reaches this worker: check `lk sip dispatch list` against the
+`agentName` in the generated `sip-dispatch-rule.json`.
+
 The message count on line 2 is what the agent handed over, not the smaller number
 the prebuilt's own transcript filter keeps. A count of **zero or one** means the
 briefing had nothing to work with, which is a different problem with a different
@@ -263,14 +278,17 @@ written into a package; a Connection stores env var names only.
 |---|---|
 | `LIVEKIT_URL` | The LiveKit project URL (cloud or self-hosted). |
 | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | The project API key pair. |
-| `LIVEKIT_SIP_INBOUND_TRUNK` | Inbound trunk ID; the cold test's call arrives through it. |
 | `SIP_TRUNK_HOSTNAME` / `SIP_AUTH_USERNAME` / `SIP_AUTH_PASSWORD` | The Elastic SIP trunk's host and credential list entry. The agent dials out with these directly. |
 | `SIP_FROM_NUMBER` | The number on the trunk, and the number transfers are placed from. |
 | `OPENAI_API_KEY` / `SLNG_API_KEY` | The package's model providers. |
 | `REDIS_URL` | The coordination store for the telephony runtime. |
 | `BILLING_PHONE_NUMBER` / `SUPERVISOR_PHONE_NUMBER` | The transfer destinations, read at call time. |
 
-On LiveKit Cloud the first three are supplied by the platform: `lk` drops them
+No trunk ID of either direction appears here any more: the generated
+`telephony-setup.sh` resolves the inbound trunk by phone number when it creates
+the records (SCHEMA N36, 2026-08-12).
+
+On LiveKit Cloud the first two rows are supplied by the platform: `lk` drops them
 from a secrets file and the deployed agent gets its own. Set them for local runs
 and for a self-hosted server; do not try to send them as secrets.
 
@@ -298,10 +316,15 @@ need two phones to answer as "billing" and "supervisor".
    `lk project set-default "<name>"`; without a default project every deploy
    command fails with a subdomain mismatch that does not say which side is
    wrong.
-2. **Trunking, one-time**: create a Twilio Elastic SIP trunk; enable "Call
-   Transfer (SIP REFER)" and "Enable PSTN Transfer"; attach a number; point
-   its origination URI at your LiveKit SIP endpoint. In LiveKit, create the
-   inbound trunk plus a dispatch rule for the agent. **No outbound trunk.**
+2. **Trunking, one-time**: compile the package first, then follow the
+   `## Telephony setup` section of the generated `build/livekit/README.md`. It
+   dictates the Twilio steps for this package and its own env names: create an
+   Elastic SIP trunk, set termination and its credential list, point origination
+   at your LiveKit project SIP URI, attach a number, and enable "Call Transfer
+   (SIP REFER)" and "Enable PSTN Transfer" for cold. The LiveKit side is one
+   command, `bash telephony-setup.sh`, which creates the inbound trunk and the
+   dispatch rule and finds them by phone number, so no record ID is copied
+   anywhere (SCHEMA N36, 2026-08-12). **No outbound trunk.**
    Since 2026-08-12 (SCHEMA N33) the generated agent dials out with the
    carrier's own trunk settings passed inline, from the four `SIP_*` names in
    section 3, so `lk sip outbound create` and `LIVEKIT_SIP_OUTBOUND_TRUNK` are

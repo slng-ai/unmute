@@ -934,14 +934,6 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 	}
 	slices.Sort(requiredEnvironment)
 	requiredEnvironment = slices.Compact(requiredEnvironment)
-	// Dev-supplied names only count when the requested features actually
-	// require them (e.g. no outbound trunk ID for an inbound-only channel).
-	devEnvironment := make([]string, 0, len(route.DevSuppliedEnvironment))
-	for _, name := range route.DevSuppliedEnvironment {
-		if slices.Contains(requiredEnvironment, name) {
-			devEnvironment = append(devEnvironment, name)
-		}
-	}
 	// The auto-webhook fact only survives when the named endpoint is emitted
 	// (an outbound-only channel has no inbound endpoint to point Twilio at).
 	autoWebhook := route.AutoWebhookEndpoint
@@ -983,7 +975,7 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		Environment: maps.Clone(connection.Environment), Destinations: maps.Clone(resolved.Destinations),
 		SystemSources: sources, Evidence: evidence,
 		Processes: processes, PublicEndpoints: endpoints, RequiredEnvironment: requiredEnvironment,
-		LocalEnvironment: slices.Clone(route.LocallySuppliedEnvironment), DevEnvironment: devEnvironment,
+		LocalEnvironment:    slices.Clone(route.LocallySuppliedEnvironment),
 		AutoWebhookEndpoint: autoWebhook, ManualSteps: slices.Clone(route.ManualSteps),
 		Services: services, Coordination: coordination,
 		CoordinationReasons: reasons, AdmissionOwner: admissionOwner,
