@@ -14,8 +14,8 @@ Commands: `init`, `validate`, `compile`, `dev`
 and Deepgram fail with `driver is not implemented` until theirs land.
 
 Where things live: user docs in [docs/user/](docs/user/README.md), the locked
-schema in [SCHEMA.md](docs/SCHEMA.md), driver specs in [docs/spec/](docs/spec/),
-the provider catalogue design and findings in
+schema in [SCHEMA.md](docs/SCHEMA.md), per-feature specs in [specs/](specs/)
+(GitHub Spec Kit), the provider catalogue design and findings in
 [PROVIDER_CATALOG.md](docs/PROVIDER_CATALOG.md), a get-around guide in
 [REPO_MAP.md](docs/REPO_MAP.md), engineering rules in [CLAUDE.md](CLAUDE.md).
 
@@ -41,8 +41,8 @@ make docs          # serves docs/user/ on http://localhost:3000
 
 Then open `http://localhost:3000` and browse the Start / Learn / Concepts /
 Reference / Targets sidebar. Edit any `docs/user/**/*.md` and the open page
-live-reloads on save. Only `docs/user/` is served, so the engineering specs in
-`docs/spec/` stay out of the site.
+live-reloads on save. Only `docs/user/` is served, so the engineering docs in
+`docs/` stay out of the site.
 
 Direct equivalent: `npx --yes docsify-cli serve docs/user --port 3000`.
 
@@ -120,8 +120,8 @@ bin/unmute dev "examples/telephony-hello" --telephony --target pipecat --to +YOU
 Validation covers all four targets. These drivers still lack an executable
 generation path:
 
-- Vapi and Deepgram drivers (specs exist in `docs/spec/`; generation fails
-  clearly today).
+- Vapi and Deepgram drivers (validation covers both; generation fails clearly
+  today).
 - Per-driver maturity gates are listed on each target page in
   [docs/user/targets/](docs/user/targets/) and fail loud rather than silently
   dropping behavior.

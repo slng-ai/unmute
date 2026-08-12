@@ -4,7 +4,7 @@ Status: research and recommendations, August 11, 2026. Nothing in this
 document is implemented yet. It records what Unmute should add so that a
 deployed agent is a state of the art deployment on every platform we target,
 and where we deliberately stop. Before any code, the chosen parts become a
-kept spec under `docs/spec/`.
+feature spec under [specs/](../specs/), written with GitHub Spec Kit.
 
 The bar: an agent deployed from an Unmute package should match or beat the
 official production guidance of its platform (self-hosted LiveKit, self-hosted
@@ -235,7 +235,7 @@ covers and what remains the operator's.
 operator and calls the Compose files "development topologies, not production
 recipes". Emitting derived manifests with operator overlays is an amendment to
 that stance, not a violation of it, but it needs a deliberate edit to the
-architecture document and a kept spec under `docs/spec/` before any code. By
+architecture document and a feature spec under `specs/` before any code. By
 the repo's own definition this is a complex feature.
 
 ## Sources

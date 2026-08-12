@@ -65,8 +65,8 @@ not built yet (they fail loud).
 |---|---|
 | [internal/target/table.go](internal/target/table.go) | the core/warn/gated/provisional matrix: per-field, per-provider support + history/roles/fallback |
 | [SCHEMA.md](SCHEMA.md) | the human-readable truth the table encodes; **when code and this disagree, the doc wins** |
-| [docs/spec/driver-*.md](docs/spec/) | per-driver contracts (`§C` constraints, `§V` invariants, `§T` tasks, `§B` bugs) |
-| [docs/spec/human-transfer.md](spec/human-transfer.md), [prebuilt-tools.md](spec/prebuilt-tools.md) | cross-cutting feature specs: one authoring surface lowered by more than one driver |
+| [internal/generate/pipecat_v1.go](internal/generate/pipecat_v1.go), [livekit_v1.go](internal/generate/livekit_v1.go) | each driver's lowering: what a field actually emits, plus its maturity gates |
+| [TRANSFERS.md](TRANSFERS.md) | human transfers end to end: which routes support cold and warm, the yaml, the secrets, the tests |
 
 ## Tests worth knowing
 
@@ -95,3 +95,6 @@ every provider binding emits.
 
 - [docs/user/](docs/user/README.md) — user-facing reference, one page per `agent.yaml` block + targets + providers + CLI.
 - [PROVIDER_CATALOG.md](PROVIDER_CATALOG.md) — the catalogue's design, findings, and how-to-extend recipe.
+- [specs/](../specs/) — per-feature specs, written with [GitHub Spec Kit](https://github.com/github/spec-kit): one `specs/<nnn>-<slug>/` folder per feature holding `spec.md`, `plan.md`, `tasks.md`, and checklists. Feature work starts here; the kept docs above are what a merged feature updates.
+
+Citations in older notes like `compiler V3`, `driver-pipecat T14`, or `tui.md C14` point at the retired `docs/spec/` driver specs. They are history, kept in git only: `git show 959af97:docs/spec/compiler.md`.

@@ -3,7 +3,7 @@
 An outbound reminder call for the Sage and Stone Salon, built to show every
 runtime-value kind in one small package. It compiles and runs on both shipped
 code targets, Pipecat and LiveKit, from the same source. The design is in
-[docs/spec/variable_secrets_specs.md](../../docs/spec/variable_secrets_specs.md).
+[SCHEMA.md](../../docs/SCHEMA.md) sections 4.4 (variables) and 4.12 (secrets).
 
 ## The four kinds, and where each shows up
 

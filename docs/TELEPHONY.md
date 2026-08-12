@@ -882,8 +882,8 @@ The first schema and compiler changes touch these files:
 
 - Amend `SCHEMA.md` with Connections, target connection selection, and the
   one-telephony-connection v1 invariant.
-- Align `CONTEXT.md` and `ORCHESTRATOR_SHARED_CONFIGURATION.md` with the adopted
-  shape.
+- Align `ARCHITECTURE.md` and `ORCHESTRATOR_SHARED_CONFIGURATION.md` with the
+  adopted shape.
 - Add strict Connection loading under `internal/spec`.
 - Add resolved Connection and telephony plan types under `internal/ir`.
 - Resolve the plan in `ir.Build`.
@@ -983,7 +983,7 @@ runtime behavior.
 4. Define the normalized call-start variables.
 5. Define route-specific telephony capability rows.
 
-Acceptance requires `SCHEMA.md`, `CONTEXT.md`, and the compiler specification to
+Acceptance requires `SCHEMA.md`, `ARCHITECTURE.md`, and this document to
 describe one consistent ownership model.
 
 ### Phase 1: Resolve and validate the plan

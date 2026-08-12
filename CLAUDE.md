@@ -1,6 +1,6 @@
 # Unmute CLI
 
-Go CLI that compiles a declarative voice-agent spec into orchestrator-native artifacts. Full design in `docs/ARCHITECTURE.md`; the locked authoring contract in `docs/SCHEMA.md`; per-feature specs in `docs/spec/`; a get-around guide in `docs/REPO_MAP.md`. **When code and a doc disagree, the doc wins — fix the code or open an issue.**
+Go CLI that compiles a declarative voice-agent spec into orchestrator-native artifacts. Full design in `docs/ARCHITECTURE.md`; the locked authoring contract in `docs/SCHEMA.md`; per-feature specs in `specs/<nnn>-<slug>/` (GitHub Spec Kit); a get-around guide in `docs/REPO_MAP.md`. **When code and a doc disagree, the doc wins — fix the code or open an issue.**
 
 ## Voice contracts
 While writing documents or speaking with the user, always use a simple language and simple wording. 
@@ -10,7 +10,7 @@ Unmute is written in Go, so you mantian **Go code** but you also write some pyth
 
 ## Tooling
 - Go 1.24 (pin in `go.mod`); `CGO_ENABLED=0` static binary; version stamped at link time, never hardcoded.
-- Direct deps — `cobra`, `goccy/go-yaml` (gives line/col on parse errors), `google/jsonschema-go` (**v0.x — pin the exact version, bump deliberately**), and the Charm TUI stack: `charmbracelet/bubbletea` + `bubbles` + `lipgloss` power the interactive console (custom MVU styled with Lip Gloss), while `charmbracelet/huh` v1.0.0 is scoped to the accessible/headless renderer only. **The interactive path imports no `huh`; Lip Gloss is expected there. All color lives in `internal/style` — no color literal anywhere else** (docs/spec/tui.md C14). Everything else is stdlib. **No new dep for what a few lines of stdlib do — justify any addition in the PR.** No `viper` until a real global config file exists.
+- Direct deps — `cobra`, `goccy/go-yaml` (gives line/col on parse errors), `google/jsonschema-go` (**v0.x — pin the exact version, bump deliberately**), and the Charm TUI stack: `charmbracelet/bubbletea` + `bubbles` + `lipgloss` power the interactive console (custom MVU styled with Lip Gloss), while `charmbracelet/huh` v1.0.0 is scoped to the accessible/headless renderer only. **The interactive path imports no `huh`; Lip Gloss is expected there. All color lives in `internal/style` — no color literal anywhere else** (guarded by `internal/style/style_test.go`). Everything else is stdlib. **No new dep for what a few lines of stdlib do — justify any addition in the PR.** No `viper` until a real global config file exists.
 - `golangci-lint` from day one (`.golangci.yml`).
 - Make targets: `build test smoke lint fmt install`.
 
@@ -34,6 +34,5 @@ Go structs are the schema source for their own surface: `internal/spec` derives 
 
 ## Skills
 - Ponytail for writing great code
-- Always use spec kit skill for SDD (spec driven development) that should be used for any feature development
-- Build for building out the specs
+- GitHub Spec Kit for SDD (spec driven development) on any feature work: `/speckit-specify` → `specs/<nnn>-<slug>/spec.md`, then `/speckit-plan`, `/speckit-tasks`, `/speckit-implement`. Specs live in `specs/`, never in `docs/`.
 - find-docs skill to use context7 cli for searching docs

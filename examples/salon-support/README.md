@@ -221,6 +221,6 @@ word.
 
 The reference pages are [variables](../../docs/user/reference/variables.md) and
 [secrets](../../docs/user/reference/secrets.md); the design is in
-[docs/spec/variable_secrets_specs.md](../../docs/spec/variable_secrets_specs.md).
+[SCHEMA.md](../../docs/SCHEMA.md) sections 4.4 and 4.12.
 For the same surface on a real outbound phone call, see
 [outbound-reminder](../outbound-reminder/), which needs Twilio and a booking API.
