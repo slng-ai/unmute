@@ -526,20 +526,27 @@ Do these in the [Twilio Console](https://console.twilio.com), in this order.
    pipecat cloud organizations list
    ```
 
-   That prints **two** columns, and you need the second one:
+   **You want the machine slug, not your display name.** The output has more than
+   one column and their headings differ between CLI versions, so go by the shape
+   of the value rather than by the heading:
 
    ```text
-   Organization        Name
-   ──────────────────────────────────────
-   Default Workspace   three-random-words-12345 (active)
+   Organization Name   Organization ID           Active
+   ─────────────────────────────────────────────────────
+   your-display-name   three-random-words-12345  active
+                       ^^^^^^^^^^^^^^^^^^^^^^^^ this one
    ```
 
-   The value you want is `three-random-words-12345`: the slug under **Name**, not
-   the display name under **Organization**, and without the `(active)` marker. It
-   has no spaces. Getting this wrong is the most common way this route fails, and
-   it fails in the least helpful way: the caller hears the spoken line, then
-   silence, and **your agent's log stays completely empty**, because a connection
-   the platform refuses never reaches your agent at all.
+   The value you want looks like `three-random-words-12345`: lowercase words
+   joined by hyphens, ending in a number, never a space in it. Depending on your
+   CLI version that column is headed **Organization ID** or just **Name**. It is
+   never the human-readable name you chose, and never carries the `(active)`
+   marker.
+
+   Getting this wrong is the most common way this route fails, and it fails in the
+   least helpful way: the caller hears the spoken line, then silence, and **your
+   agent's log stays completely empty**, because a connection the platform refuses
+   never reaches your agent at all.
 {{if .CloudWebsocket.HasInbound}}
 3. **Create a TwiML Bin** holding exactly this, with your organization name in
    place of `YOUR_ORGANIZATION`. Console path: TwiML, TwiML Bins, then the plus
@@ -769,7 +776,7 @@ indistinguishable by ear.
 | What happens | Where to look |
 |---|---|
 | A working agent answers, but not this one | The number is still on a SIP trunk or an old webhook, so your markup was never consulted. Read the number's configuration with the command above. |
-| The call connects, the spoken line plays, then silence and a drop | Either the service host in your markup is wrong or this agent is not `ready`. **The tell is that this agent's log is empty**: a connection the platform refuses never reaches it. Check `pipecat cloud agent status {{.Project}}` first. Then re-read the service host: the agent name is `{{.Project}}`, and the organization is the **Name** column of `pipecat cloud organizations list` (the slug, no spaces, no `(active)`), which is carrier action 2. Twilio's own call log names the stream error outright, under Monitor, Logs, Calls. |
+| The call connects, the spoken line plays, then silence and a drop | Either the service host in your markup is wrong or this agent is not `ready`. **The tell is that this agent's log is empty**: a connection the platform refuses never reaches it. Check `pipecat cloud agent status {{.Project}}` first. Then re-read the service host: the agent name is `{{.Project}}`, and the organization is the **slug** from `pipecat cloud organizations list`, the one shaped like `three-random-words-12345`, never your display name (carrier action 2). Twilio's own call log names the stream error outright, under Monitor, Logs, Calls. |
 | The spoken line plays, a long silence, then the agent | A cold start. Keep a warm instance with `--min-agents 1` on the deploy, or keep the spoken line. |
 | Silence or degraded audio, everything else correct | Your markup names a different region than this deployment. The address in this file is the right one; re-paste it. |
 | Nothing in the agent log at all | The call never reached the platform. That is the first row, or the number is not the one you think. |

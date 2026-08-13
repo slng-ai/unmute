@@ -188,10 +188,13 @@ func TestCloudWebsocketBinMarkupIsDictated(t *testing.T) {
 		`<Parameter name="from_number" value="{{From}}"/>`,           // Twilio's own Bin templating
 		`<Parameter name="to_number" value="{{To}}"/>`,               //
 		"pipecat cloud organizations list",                           // where the one value comes from
-		// Which column, because the command prints two and the wrong one is the
-		// most common way this route fails (2026-08-13, from a live attempt).
-		"the slug under **Name**",
-		"without the `(active)` marker",
+		// Which value, because the command prints several columns whose headings
+		// differ between CLI versions, and the wrong one is the most common way this
+		// route fails (2026-08-13, from a live attempt: the display name was pasted
+		// where the organization slug belongs, and the agent log stayed empty).
+		"machine slug, not your display name",
+		"three-random-words-12345",
+		"never the human-readable name",
 		"twilio api core incoming-phone-numbers list", // read the state, do not listen
 	} {
 		if !strings.Contains(section, want) {
