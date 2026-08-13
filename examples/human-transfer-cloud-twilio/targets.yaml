@@ -1,0 +1,26 @@
+# Pipecat on the platform's native carrier stream: your own Twilio number, a
+# small piece of static markup in the Twilio console, and Pipecat Cloud
+# terminating the call's audio itself (SCHEMA N38).
+#
+# Three fields select it, all of them fields the vocabulary already had:
+# transport, carrier, connection. Nothing is hosted by you on this route: the
+# build emits no process, and the generated runbook has no hosting step.
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: cloud-websocket
+    carrier: twilio
+    # The connection is here because this package places calls and hands calls to
+    # a person; both speak to Twilio's API in your name. A package that only
+    # receives calls on this route needs no connection at all.
+    connection: twilio_voice
+    # Where Pipecat Cloud runs the deployed agent. Declared so the first deploy
+    # does not stop to ask, and so the generated runbook can dictate the matching
+    # regional stream address.
+    deployment_region: us-west
+    # The destination is the UPPER_SNAKE name of an env var holding an E.164
+    # number or a sip: URI, read at call time. No phone number is ever written
+    # into this package.
+    destinations:
+      billing_line: BILLING_PHONE_NUMBER

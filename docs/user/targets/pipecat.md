@@ -138,6 +138,38 @@ uses the local VAD. Semantic endpointing is also advisory.
 ### Transport
 
 - **WebRTC** is the default and is what `unmute dev` uses to serve a browser test client. You do not configure it.
+- **`transport: cloud-websocket`** is the one route where **you host nothing**.
+  Pipecat Cloud terminates your carrier's media stream itself, on its own
+  endpoint; a small piece of static markup in the carrier's console (a TwiML Bin)
+  names your agent, and the platform starts it. It requires `carrier: twilio`.
+  `connection:` is required only when the package **places or redirects** calls:
+  receiving one needs no carrier credentials, because the platform receives it
+  without them.
+
+  ```yaml
+  targets:
+    pipecat:
+      provider: pipecat
+      version: "1.5.0"
+      transport: cloud-websocket
+      carrier: twilio
+      connection: twilio_voice     # omit on a receive-only package
+  ```
+
+  Three Connection keys: `account_sid`, `auth_token`, `from_number`. The first two
+  authenticate the one request that hands a live call to a person and the outbound
+  command; `from_number` is the caller identity the recipient sees, and it may be
+  the same number that receives calls. **There is no `sip_address`, no
+  `sip_username`, and no `sip_password`**, and the route refuses all three by
+  name, naming the accepted set: nothing on this route speaks SIP.
+
+  The build emits **no new file**: the file list is exactly a plain Pipecat Cloud
+  build's. The generated README dictates the carrier console work in four steps,
+  three of them clicks and one a `pipecat cloud organizations list`. Cold transfer
+  works here, by replacing the live call's markup; the limit is that a failed
+  transfer brings back a **fresh** agent that does not remember the call, which is
+  what the Daily carrier form buys with its helper. The route comparison is in
+  [TELEPHONY.md](../../TELEPHONY.md).
 - **`transport: carrier-websocket`** selects direct Twilio, Telnyx, or Plivo
   media streaming for telephony. It also requires `carrier` and `connection`;
   support is resolved for that exact tuple. The Exotel value is recognized but
@@ -284,12 +316,13 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | `inactivity` nudge and end | ok |
 | `max_duration` | ok |
 | `provider: local` for listen and speak | ok |
+| Pipecat Cloud carrier stream (`transport: cloud-websocket`) | provisional until its credentialed run is recorded (SCHEMA N38). Twilio only for now; the platform terminates other carriers' streams and each needs its own dictated markup. **Nothing is hosted by you**, so the build emits no process and no endpoint |
 | carrier WebSocket telephony | provisional for generated Twilio, Telnyx, and Plivo adapters; Exotel is gated pending authenticated WebSocket ingress |
 | Daily telephony, Daily's number (`transport: daily-sip`) | provisional until its credentialed run is recorded; needs dial-out enabled on the Daily domain, which `validate` names |
 | Daily telephony, your own number (`transport: daily-sip` + `carrier:`) | provisional until its credentialed run is recorded (SCHEMA N37); same dial-out approval, no Daily number needed. Twilio only for now: a second carrier is one forwarding action and one block of instruction text, and the structure for it already ships |
-| cold human transfer (`cold:`) | ok on `transport: daily-sip`, on both forms; no other Pipecat route has a transfer primitive |
-| telephony call-source variables (caller number, called number, call id, direction) | ok on the carrier WebSocket routes; **refused by name** on `transport: daily-sip`, because the code that fills them is part of the adapter that route does not emit |
-| warm human transfer (`warm:`) | not emitted yet, on any route. Daily documents the pattern (feature 005); the carrier WebSocket transports have no transfer control at all |
+| cold human transfer (`cold:`) | ok on `transport: daily-sip` (both forms) and on `transport: cloud-websocket`; the carrier WebSocket routes have no transfer primitive. The two differ in what a **failed** transfer does: Daily keeps the same session, `cloud-websocket` brings back a fresh agent |
+| telephony call-source variables (caller number, called number, call id, direction) | ok on the carrier WebSocket routes; **refused by name** on `transport: daily-sip` and `transport: cloud-websocket`, because the code that fills them is part of the adapter neither route emits |
+| warm human transfer (`warm:`) | not emitted on any Pipecat route, and the refusals say why per route: Daily documents the pattern and this project has not built it (feature 005); the carrier WebSocket transports have no transfer control at all; `cloud-websocket` would need a callback endpoint you host, which is the cost that route exists to remove |
 
 Everything in the [learn pages](../learn/01-one-agent.md), including the guarded handoff, the task, and the task group, runs here. The one hard `fail` is the per-task `model:` override; it sits with the driver gates below.
 
@@ -312,9 +345,12 @@ Some features are in the schema and Pipecat itself supports them, but this first
   deliberate work rather than a default, tracked as feature 005. Either way warm
   compiles on `(livekit, sip)` today and validation says so by name. The `warm:`
   block you would write already exists and will not change when it lands.
-  Cold compiles on the Daily route (`transport: daily-sip`), where
-  `sip_call_transfer` is the platform's own primitive
-  ([TRANSFERS.md](../../TRANSFERS.md)), on both of that route's forms. The carrier
+  On **`cloud-websocket`** there is a third reason, and it is a trade rather than
+  a gap: acting on how the destination's leg ended needs a callback endpoint you
+  host, and hosting nothing is what that route is for. Cold compiles on the Daily
+  route (`transport: daily-sip`), where `sip_call_transfer` is the platform's own
+  primitive ([TRANSFERS.md](../../TRANSFERS.md)), on both of that route's forms,
+  and on `cloud-websocket` by replacing the live call's markup. The Daily carrier
   form will carry warm unchanged when it lands: a carrier call joins the same room
   a Daily-provisioned one joins, so only the supervisor leg's destination composes
   differently.

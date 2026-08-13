@@ -4,6 +4,17 @@
 
 Two halves. The offline half needs no account of any kind and proves the compiler's promises; it is what CI runs. The live half needs the accounts the spec's Dependencies name and proves the calls; its results are recorded, dated, in `tasks.md`, and they are what lifts the route's capabilities out of provisional (spec FR-020).
 
+**Amendment, 2026-08-13.** This route no longer ships a public example. Feature
+007 (`specs/007-pipecat-native-websocket`) added a route that does the same job
+with nothing for the operator to host, and replaced this route's example with
+`examples/human-transfer-cloud-twilio`. **Step 1's commands below no longer
+resolve.** Everything they proved is proved instead against the fixture
+`internal/testdata/daily_carrier`, which is this exact declaration shape, by
+`go test ./internal/generate -run TestCarrier` and the tests in
+`internal/generate/pipecat_carrier_telephony_test.go`. To compile this route by
+hand, run `go run . compile internal/testdata/daily_carrier`. The route itself is
+unchanged: same code, same rows, same guards.
+
 ## Offline half (no credentials, no Python)
 
 1. **The carrier example compiles.**

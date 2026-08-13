@@ -2,6 +2,7 @@ package ir
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -672,4 +673,146 @@ func enableTelephony(pkg *packagespec.Package) {
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
 		RequiredControls: []string{"cold_transfer", "hangup"},
 	}
+}
+
+// TestBuildResolvesPipecatCloudWebsocketPlan walks every row of the guard table
+// in specs/007-pipecat-native-websocket/data-model.md section 2, plus the SIP-key
+// refusal. The row that matters most is the first: on this route a package that
+// only *receives* calls needs no connection at all, because the platform receives
+// the call without credentials (SCHEMA N38).
+func TestBuildResolvesPipecatCloudWebsocketPlan(t *testing.T) {
+	cloudWebsocket := func(t *testing.T, connection bool, outbound bool, transfer bool) *packagespec.Package {
+		t.Helper()
+		pkg := loadSafeCore(t)
+		inbound := true
+		controls := []string{"hangup"}
+		if transfer {
+			controls = append(controls, "cold_transfer")
+		}
+		pkg.Agent.Channels["phone"] = packagespec.Channel{
+			Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
+			RequiredControls: controls,
+		}
+		if !transfer {
+			delete(pkg.Agent.Controls, "to_human")
+			billing := pkg.Agent.Agents["billing"]
+			billing.Tools = slices.DeleteFunc(slices.Clone(billing.Tools), func(name string) bool { return name == "to_human" })
+			pkg.Agent.Agents["billing"] = billing
+		}
+		target := pkg.Targets["pipecat"]
+		target.Transport, target.Carrier = "cloud-websocket", "twilio"
+		if connection {
+			target.Connection = "twilio_voice"
+			pkg.Connections = map[string]packagespec.Connection{"twilio_voice": {
+				Kind: "telephony", Environment: map[string]string{
+					"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
+					"from_number": "TWILIO_PHONE_NUMBER",
+				},
+			}}
+		} else {
+			target.Connection = ""
+			pkg.Connections = map[string]packagespec.Connection{}
+		}
+		pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+		return pkg
+	}
+
+	t.Run("phone inbound only, no connection: valid", func(t *testing.T) {
+		agent, err := Build(cloudWebsocket(t, false, false, false))
+		if err != nil {
+			t.Fatalf("a receive-only package on this route must compile with no connection: %v", err)
+		}
+		built := agent.Targets["pipecat"]
+		if built.Connection != "" {
+			t.Errorf("connection = %q, want empty", built.Connection)
+		}
+		plan := built.Telephony
+		if plan == nil {
+			t.Fatal("no telephony plan, so the route would resolve and emit nothing: the silent downgrade")
+		}
+		if plan.Key.Transport != "cloud-websocket" || plan.Key.Carrier != "twilio" {
+			t.Fatalf("route = %#v", plan.Key)
+		}
+		if len(plan.Environment) != 0 {
+			t.Errorf("environment = %v, want none: receiving a call needs no credentials", plan.Environment)
+		}
+		// The row's defining shape: nothing for the operator to run or host.
+		if len(plan.Processes) != 0 || len(plan.PublicEndpoints) != 0 {
+			t.Errorf("plan declares %d process(es) and %d endpoint(s), want none of either", len(plan.Processes), len(plan.PublicEndpoints))
+		}
+		if got := strings.Join(plan.Services, ","); got != "application" {
+			t.Errorf("services = %q, want application only", got)
+		}
+		if got := coordinationReasonNames(plan.CoordinationReasons); got != "admission" {
+			t.Errorf("coordination reasons = %q, want admission only", got)
+		}
+	})
+
+	t.Run("outbound without a connection names the three keys", func(t *testing.T) {
+		_, err := Build(cloudWebsocket(t, false, true, false))
+		if err == nil {
+			t.Fatal("a package that places calls compiled with no carrier credentials")
+		}
+		for _, want := range []string{"account_sid", "auth_token", "from_number", "caller identity", "only receives calls"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("the refusal is missing %q: %v", want, err)
+			}
+		}
+	})
+
+	t.Run("a transfer without a connection names the three keys", func(t *testing.T) {
+		_, err := Build(cloudWebsocket(t, false, false, true))
+		if err == nil {
+			t.Fatal("a package that redirects calls compiled with no carrier credentials")
+		}
+		if !strings.Contains(err.Error(), "places or redirects calls") {
+			t.Errorf("the refusal does not say why a connection is needed: %v", err)
+		}
+	})
+
+	t.Run("a connection with no phone channel is dead weight", func(t *testing.T) {
+		pkg := cloudWebsocket(t, true, false, false)
+		delete(pkg.Agent.Channels, "phone")
+		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), "no telephony channel") {
+			t.Fatalf("got %v", err)
+		}
+	})
+
+	t.Run("a SIP key names the key, the route, and the accepted set", func(t *testing.T) {
+		pkg := cloudWebsocket(t, true, true, false)
+		connection := pkg.Connections["twilio_voice"]
+		connection.Environment["sip_address"] = "SIP_TRUNK_HOSTNAME"
+		pkg.Connections = map[string]packagespec.Connection{"twilio_voice": connection}
+		_, err := Build(pkg)
+		if err == nil {
+			t.Fatal("a SIP key on this route compiled; nothing here speaks SIP")
+		}
+		for _, want := range []string{"sip_address", "cloud-websocket", "it accepts", "account_sid, auth_token, from_number"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("the refusal is missing %q: %v", want, err)
+			}
+		}
+	})
+
+	t.Run("outbound with a connection resolves the organization", func(t *testing.T) {
+		agent, err := Build(cloudWebsocket(t, true, true, false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan := agent.Targets["pipecat"].Telephony
+		if !slices.Contains(plan.RequiredEnvironment, "PIPECAT_CLOUD_ORGANIZATION") {
+			t.Errorf("required environment = %v, want PIPECAT_CLOUD_ORGANIZATION: outbound markup has to name the service host", plan.RequiredEnvironment)
+		}
+	})
+
+	t.Run("inbound only does not ask for the organization", func(t *testing.T) {
+		agent, err := Build(cloudWebsocket(t, false, false, false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan := agent.Targets["pipecat"].Telephony
+		if slices.Contains(plan.RequiredEnvironment, "PIPECAT_CLOUD_ORGANIZATION") {
+			t.Errorf("a receive-only package is asked for PIPECAT_CLOUD_ORGANIZATION, which nothing on it reads: %v", plan.RequiredEnvironment)
+		}
+	})
 }

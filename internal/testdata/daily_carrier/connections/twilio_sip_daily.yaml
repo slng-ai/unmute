@@ -1,0 +1,7 @@
+# The four keys SCHEMA N37 fixed for this route. Names, never values.
+kind: telephony
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  sip_address: SIP_TRUNK_HOSTNAME
+  from_number: SIP_FROM_NUMBER

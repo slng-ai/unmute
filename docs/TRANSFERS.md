@@ -24,6 +24,7 @@ means the platform ships and maintains the primitive.
 | livekit | `connector` (Twilio websocket) | no | no |
 | pipecat | Daily, Daily-provisioned number (`transport: daily-sip`) | **yes**: `transport.sip_call_transfer`. The bot announces, Daily reroutes the leg, the bot drops off. Needs dial-out enabled on the Daily domain. | **not emitted yet.** The platform supports it; this project has not built it. Feature 004. |
 | pipecat | Daily, your own carrier (`transport: daily-sip` + `carrier:`) | **yes, same primitive**: `transport.sip_call_transfer`, with the destination composed as a SIP URI at your trunk's termination address, so the leg leaves through your own carrier (SCHEMA N37, verified against [Daily transfers](https://docs.daily.co/guides/products/dial-in-dial-out/transfers) 2026-08-12: `sipCallTransfer` works for dial-in legs, SIP-to-SIP and SIP-to-PSTN both supported). Same dial-out approval on the Daily domain. **Provisional**: documented by category rather than by this exact interconnect topology, so it stays provisional until its live run is recorded in `specs/006-pipecat-carrier-telephony/tasks.md`. | **not emitted yet**, same reason as the row above, and the carrier leg will carry warm unchanged when it lands: a carrier call joins the same room as a Daily-provisioned one, and only the supervisor leg's destination composes differently. |
+| pipecat | Pipecat Cloud carrier stream (`transport: cloud-websocket` + `carrier: twilio`) | **yes**, by a different mechanism: one request replaces the live call's markup at your carrier, keyed on its call id. A spoken line, `<Dial answerOnBridge="true">` on a destination read from the environment, and the bot's part ends. **Its one limit, stated plainly**: if the dial does not connect, the caller hears a spoken failure line and comes back to a **fresh** agent that does not remember the call, because deciding anything else would need a callback endpoint you host and this route hosts nothing. The same happens when a completed transfer ends by the other side hanging up first. **Provisional** until its live run is recorded in `specs/007-pipecat-native-websocket/tasks.md`. | no, by trade: a warm handoff has to act on how the destination's leg ended, which needs that same hosted callback. The refusal names it. |
 | pipecat | carrier websockets (twilio, telnyx, plivo, exotel) | no: the platform has no transfer control on these transports | no: same reason |
 
 Sources: [LiveKit call forwarding](https://docs.livekit.io/telephony/features/transfers/cold.md),
@@ -281,8 +282,13 @@ The complete packages live in
 [examples/human-transfer](../examples/human-transfer) (LiveKit, both shapes),
 [examples/human-transfer-daily](../examples/human-transfer-daily)
 (Pipecat, cold, Daily-provisioned number), and
-[examples/human-transfer-daily-twilio](../examples/human-transfer-daily-twilio)
-(Pipecat, cold, your own carrier).
+[examples/human-transfer-cloud-twilio](../examples/human-transfer-cloud-twilio)
+(Pipecat, cold, your own carrier, nothing hosted by you).
+
+The Daily carrier form has no public example any more. Feature 007 replaced it
+with the route above, which does the same job without a server to host; the route
+keeps its code, its rows here, and its guards, against the fixture
+`internal/testdata/daily_carrier`. Its `targets.yaml` is the snippet above.
 
 ### Why the carrier leg keeps Daily in the call
 
@@ -331,11 +337,28 @@ and for a self-hosted server; do not try to send them as secrets.
 | `OPENAI_API_KEY` / `SLNG_API_KEY` | The package's model providers. |
 | `BILLING_PHONE_NUMBER` | The transfer destination, read at call time. |
 
-**Pipecat rig, your own carrier** (`examples/human-transfer-daily-twilio`). Two
-groups, because two different things read them: the deployed agent reads the
-agent-side names and those are what go in the platform secret set, while the
-operator-run `telephony_helper.py` reads the helper-side names and the agent never
-does.
+**Pipecat rig, your own carrier, nothing hosted**
+(`examples/human-transfer-cloud-twilio`). One group, because one thing reads them:
+the deployed agent. There is no second side on this route, so every name below
+belongs in the platform secret set.
+
+| Name | What it is |
+|---|---|
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | The REST credentials for the one request that hands a live call to a person, and for the outbound command. |
+| `TWILIO_PHONE_NUMBER` | The caller identity the recipient sees. A voice-capable number you own in this account, or a caller ID verified on it; the same number receives calls. |
+| `PIPECAT_CLOUD_ORGANIZATION` | Your organization name, from `pipecat cloud organizations list`. The transfer's reconnect markup has to name `<agent>.<organization>`, and the compiler knows only the agent name. |
+| `OPENAI_API_KEY` / `SLNG_API_KEY` | The package's model providers. |
+| `BILLING_PHONE_NUMBER` | The transfer destination, read at call time. |
+
+There is no `DAILY_API_KEY` here and no `REDIS_URL`: this route touches no Daily
+API and keeps no shared record. A **receive-only** package on this route needs
+none of the first three either.
+
+**Pipecat rig, the Daily carrier form** (the fixture
+`internal/testdata/daily_carrier`). Two groups, because two different things read
+them: the deployed agent reads the agent-side names and those are what go in the
+platform secret set, while the operator-run `telephony_helper.py` reads the
+helper-side names and the agent never does.
 
 | Name | Side | What it is |
 |---|---|---|

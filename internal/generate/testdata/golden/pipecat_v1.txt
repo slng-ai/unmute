@@ -313,7 +313,7 @@ IGNORE_PHRASES = ["okay", "right", "uh-huh"]
 # Set once the transport exists, so an agent's cold-transfer @tool can reach it.
 _TRANSPORT: BaseTransport | None = None
 # One call gets one transfer attempt. Holds the first attempt's result so a
-# caller who asks twice replays it instead of firing a second REFER, and so a
+# caller who asks twice replays it instead of firing a second one, and so a
 # transfer that failed can never come back to the model as a success.
 #
 # ponytail: a module-level value, not the shared control store the carrier
@@ -453,7 +453,7 @@ class BillingAgent(LLMWorker):
             await params.result_callback(_TRANSFER_RESULT)
             return
         # Claimed before the primitive runs, not after: a request arriving while
-        # the REFER is still in flight must not slip past the guard.
+        # the first one is still in flight must not slip past the guard.
         _TRANSFER_RESULT = {"in_progress": "A transfer is already under way; do not start another."}
         # Daily SIP transfers via REFER, which keeps the bot on the call
         # until the transfer completes, so the bot speaks the announcement

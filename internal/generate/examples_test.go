@@ -164,7 +164,7 @@ func TestDailyRouteWorkDoesNotReachOtherTargets(t *testing.T) {
 	// Every marker this feature adds to an emitted project.
 	markers := []string{
 		"DailyParams", "pipecat.transports.daily",
-		"_TRANSFER_RESULT", "## Phone calls",
+		"## Phone calls",
 		"Account prerequisites", "route_prerequisites", "daily_dialout",
 		// The carrier leg's own markers (SCHEMA N37): the emitted helper, the
 		// forward-once guard, and the runbook's opening line. Carrier work must not
@@ -176,6 +176,11 @@ func TestDailyRouteWorkDoesNotReachOtherTargets(t *testing.T) {
 		// anything this feature added.
 		"telephony_helper.py", "_CALL_FORWARDED", "One piece runs outside the platform",
 	}
+	// _TRANSFER_RESULT used to be on that list and is not any more. It is the
+	// one-attempt-per-call guard, and specs/007 reuses the same discipline on the
+	// Pipecat Cloud websocket route deliberately (data-model section 6), so it now
+	// marks "a route that emits a cold transfer" rather than "the Daily route".
+	// The Daily-only markers above are what still scopes this test.
 	root := filepath.Join("..", "..", "examples")
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -233,7 +238,13 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	want := []string{"human-transfer", "human-transfer-daily", "human-transfer-daily-twilio", "multi-task", "outbound-reminder", "salon-support", "simple-prompt", "subagents", "task-groups", "telephony-hello"}
+	// One telephony example per use case (spec 007 FR-016): warm+inbound on
+	// LiveKit (human-transfer), cold+inbound on Pipecat over Twilio with nothing
+	// hosted (human-transfer-cloud-twilio), inbound+outbound (telephony-hello).
+	// human-transfer-daily is the no-carrier Daily form and is untouched.
+	// human-transfer-daily-twilio was removed with feature 007; its route keeps its
+	// guards against internal/testdata/daily_carrier instead.
+	want := []string{"human-transfer", "human-transfer-cloud-twilio", "human-transfer-daily", "multi-task", "outbound-reminder", "salon-support", "simple-prompt", "subagents", "task-groups", "telephony-hello"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}

@@ -166,6 +166,7 @@ for an unselected carrier.
 
 | Framework | Target route | Carrier | Required Connection keys | Status |
 |---|---|---|---|---|
+| Pipecat | `cloud-websocket` | Twilio | `account_sid`, `auth_token`, `from_number`, and **none at all** on a receive-only package | Generated offline; provisional |
 | Pipecat | `carrier-websocket` | Twilio | `account_sid`, `auth_token`, `from_number` | Generated offline; provisional |
 | Pipecat | `carrier-websocket` | Telnyx | `api_key`, `public_key`, `connection_id`, `from_number` | Generated offline; provisional |
 | Pipecat | `carrier-websocket` | Plivo | `auth_id`, `auth_token`, `from_number` | Generated offline; provisional |
@@ -471,6 +472,7 @@ credentials and a different `transport` on each orchestrator.
 | LiveKit | Twilio, Telnyx, or Plivo | `sip` | Yes | Offline-tested; provisional |
 | LiveKit | Exotel | `sip` | Not yet | Gated; no emitted setup |
 | LiveKit | Twilio | `connector` | No | Offline-tested; provisional |
+| Pipecat | Twilio | `cloud-websocket` | No | Offline-tested; provisional |
 | Pipecat | Twilio, Telnyx, or Plivo | `carrier-websocket` | No | Offline-tested; provisional |
 | Pipecat | Exotel | `carrier-websocket` | No | Gated; no emitted adapter |
 | Pipecat | none, Daily owns the number | `daily-sip` | No | Offline-tested; provisional |
@@ -481,6 +483,35 @@ credentials and a different `transport` on each orchestrator.
 > The provisional routes in this table run now. Validation, compilation, and
 > `unmute dev --telephony` generate and run them cleanly, with no warning. Only
 > the gated Exotel rows fail, because there is no adapter to run.
+
+### Which Pipecat route, if your carrier is Twilio
+
+Three routes reach a Pipecat target from a Twilio number, and one question
+separates them: **what do you want to be running?**
+
+- **Nothing.** `transport: cloud-websocket`. Pipecat Cloud terminates the call's
+  audio itself; your number points at a small piece of static markup in the Twilio
+  console, and the generated README dictates it in four steps. This is the
+  recommendation for the common case. Cold transfer works; a **failed** transfer
+  brings back a fresh agent that does not remember the call.
+- **A small webhook server, so a failed transfer keeps the same agent.**
+  `transport: daily-sip` with `carrier: twilio`. The build emits
+  `telephony_helper.py` and you host it wherever calls should land.
+- **The whole application, on your own infrastructure.**
+  `transport: carrier-websocket`. Also the only Pipecat route that binds
+  `source.*` call-source variables.
+
+The full comparison, including what each needs from the carrier account, is in
+[TELEPHONY.md](../../TELEPHONY.md).
+
+The shipped examples are one per use case:
+
+| Example | Use case | Targets |
+|---|---|---|
+| `examples/telephony-hello` | inbound and outbound, nothing else | Pipecat (`cloud-websocket`) and LiveKit (`connector`), one `.env` |
+| `examples/human-transfer-cloud-twilio` | cold transfer and inbound, hosting nothing | Pipecat (`cloud-websocket`) |
+| `examples/human-transfer` | warm transfer and inbound | LiveKit (`sip`) |
+| `examples/human-transfer-daily` | cold transfer on a Daily-provisioned number | Pipecat (`daily-sip`, no carrier) |
 
 ### Configure a Pipecat carrier WebSocket
 
@@ -887,15 +918,19 @@ work. The map with sources lives in [TRANSFERS.md](../../TRANSFERS.md).
 | LiveKit `sip` + Twilio, Telnyx, or Plivo | yes | yes |
 | Pipecat Daily (`transport: daily-sip`), Daily's number | yes | not yet |
 | Pipecat Daily (`transport: daily-sip`), your own number | yes | not yet |
+| Pipecat `cloud-websocket` + Twilio | yes | no, by trade |
 | Pipecat `carrier-websocket` (any carrier) | no | no |
 | LiveKit `connector` + Twilio | no | no |
 
-"no" and "not yet" mean different things here (checked 2026-08-12). **"no"**
-means the platform has no transfer control on that transport, so there is
-nothing to build against. **"not yet"** means it does and we have not built it:
-Daily documents a warm pattern, but it puts the generated bot in charge of the
-call's audio, so it is deliberate work rather than a default. Tracked as
-feature 005.
+The three answers in the `warm:` column mean three different things (checked
+2026-08-13). **"no"** means the platform has no transfer control on that
+transport at all, so there is nothing to build against. **"not yet"** means it
+does and we have not built it: Daily documents a warm pattern, but it puts the
+generated bot in charge of the call's audio, so it is deliberate work rather than
+a default. Tracked as feature 005. **"no, by trade"** means it is buyable and the
+route declines to buy it: a warm handoff has to act on how the destination's leg
+ended, which on `cloud-websocket` needs a callback endpoint you host, and hosting
+nothing is that route's whole reason to exist. The refusal message says so.
 
 Either way, a Pipecat warm package fails validation today and points you at
 `(livekit, sip)`, where LiveKit's `WarmTransferTask` prebuilt does the job.

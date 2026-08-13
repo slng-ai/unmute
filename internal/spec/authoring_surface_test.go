@@ -138,3 +138,83 @@ func TestDailyRouteFormsNeedNoNewAuthoringField(t *testing.T) {
 		}
 	}
 }
+
+// The Pipecat Cloud native carrier WebSocket route (SCHEMA N38) is one more
+// value in `transport`, and that is the whole authoring change. Two shapes load:
+// a pure-inbound package with **no connection at all**, because the platform
+// receives the call without credentials, and the full shape with a connection for
+// packages that place or redirect calls. Neither grows a property, which is what
+// makes this a route rather than a feature (spec FR-002).
+func TestCloudWebsocketRouteNeedsNoNewAuthoringField(t *testing.T) {
+	write := func(t *testing.T, files map[string]string) *Package {
+		t.Helper()
+		dir := t.TempDir()
+		for name, content := range files {
+			path := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		pkg, err := Load(dir)
+		if err != nil {
+			t.Fatalf("a cloud-websocket target must load: %v", err)
+		}
+		return pkg
+	}
+	channels := "channels:\n  phone:\n    kind: telephony\n    inbound: true\n" +
+		"capacity:\n  peak_sessions: 2\n  max_sessions: 4\n  peak_starts_per_second: 1\n  avg_session_duration: 3m\n"
+
+	inbound := write(t, map[string]string{
+		"instructions.md": "Help the caller.\n",
+		"agent.yaml": "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n" +
+			channels,
+		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.5.0\"\n" +
+			"    transport: cloud-websocket\n    carrier: twilio\n",
+	})
+	got := inbound.Targets["pipecat"]
+	if got.Transport != "cloud-websocket" || got.Carrier != "twilio" {
+		t.Fatalf("pure-inbound form = %#v, want transport and carrier only", got)
+	}
+	if got.Connection != "" {
+		t.Errorf("connection = %q, want empty: receiving a call on this route needs no credentials", got.Connection)
+	}
+
+	full := write(t, map[string]string{
+		"instructions.md": "Help the caller.\n",
+		"agent.yaml": "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n" +
+			channels,
+		"connections/twilio_voice.yaml": "kind: telephony\nenvironment:\n" +
+			"  account_sid: TWILIO_ACCOUNT_SID\n  auth_token: TWILIO_AUTH_TOKEN\n" +
+			"  from_number: TWILIO_PHONE_NUMBER\n",
+		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.5.0\"\n" +
+			"    transport: cloud-websocket\n    carrier: twilio\n    connection: twilio_voice\n",
+	})
+	if built := full.Targets["pipecat"]; built.Connection != "twilio_voice" {
+		t.Fatalf("connection form = %#v, want the existing connection field set", built)
+	}
+
+	schema, err := Schema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	// Everything this route was tempted to ask for and does not: the platform
+	// endpoint, the organization, the auth mode, the markup itself.
+	for _, name := range []string{
+		"organization", "websocket_auth", "service_host", "stream_url", "twiml", "bin", "websocket_url",
+	} {
+		if found := searchSchema(decoded, name); found != nil {
+			t.Errorf("derived authoring schema grew a %q property: %v", name, found)
+		}
+	}
+}

@@ -184,7 +184,9 @@ func TestDevTelephonyRefusesOnTheDailyCarrierFormAndNamesTheHelper(t *testing.T)
 	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
-	root := filepath.Join("..", "..", "examples", "human-transfer-daily-twilio")
+	// The fixture, not an example: feature 007 removed this route's public example
+	// and kept its guards (specs/007-pipecat-native-websocket T054).
+	root := filepath.Join("..", "testdata", "daily_carrier")
 	cmd.SetArgs([]string{"dev", "--telephony", "--target", "pipecat", root})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("--telephony on the Daily carrier form must refuse, got exit 0")
@@ -724,4 +726,65 @@ func contains(s []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// The route reaches the local flow rather than a refusal. Every other Pipecat
+// carrier form refuses `--telephony` for its own true reason, so this asserts the
+// absence of all of those messages as well as the presence of the real one: the
+// failure an operator with no credentials should see is the credential list, not
+// "this route cannot be run locally".
+func TestDevTelephonyOnTheCloudWebsocketRouteReachesTheLocalFlow(t *testing.T) {
+	dir := copySafeCore(t)
+	targetsPath := filepath.Join(dir, "targets.yaml")
+	raw, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := mustReplace(t, string(raw),
+		"    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat",
+		"    transport: cloud-websocket\n    carrier: twilio\n    connection: primary_phone")
+	configured = mustReplace(t, configured,
+		"    destinations:\n      billing_line: \"+14155550123\"\n\n  vapi:",
+		"    destinations:\n      billing_line: BILLING_PHONE_NUMBER\n\n  vapi:")
+	// The phone channel below is package-wide, so the LiveKit target needs a route
+	// too or the build refuses before this command's dispatch is ever reached.
+	configured = mustReplace(t, configured,
+		"    sdk_language: python\n    models:",
+		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:")
+	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agentPath := filepath.Join(dir, "agent.yaml")
+	agentRaw, err := os.ReadFile(agentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentConfigured := mustReplace(t, string(agentRaw),
+		"channels:\n  web:\n    kind: realtime_audio\n\n",
+		"channels:\n  web:\n    kind: realtime_audio\n  phone:\n    kind: telephony\n    inbound: true\n    outbound: false\n    required_controls:\n      - cold_transfer\n      - hangup\n\n")
+	if err := os.WriteFile(agentPath, []byte(agentConfigured), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = run(t, "dev", dir, "--target", "pipecat", "--telephony", "--public-url", "https://voice.example.com")
+	if err == nil {
+		t.Fatal("with no carrier credentials the local flow must refuse")
+	}
+	message := err.Error()
+	// The real failure, named.
+	for _, want := range []string{"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("the refusal does not name %q:\n%s", want, message)
+		}
+	}
+	// Every message that would mean the command never got as far as trying.
+	for _, forbidden := range []string{
+		"no resolved telephony route", "no executable telephony topology",
+		"no local telephony topology", "cannot run it for you", "telephony_helper.py",
+		"credentialed smoke", "not supported", "unsupported",
+	} {
+		if strings.Contains(message, forbidden) {
+			t.Errorf("the route refused instead of running: %q appears in\n%s", forbidden, message)
+		}
+	}
 }

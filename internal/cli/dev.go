@@ -121,6 +121,29 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort,
 			"use `unmute dev %s` in the browser or `unmute dev --console %s` in the terminal",
 			root, resolved.Name, resolved.Carrier, root, root, root)
 	}
+	// The platform-terminated carrier route runs the phone path locally with one
+	// command. It gets its own orchestration rather than the Compose graph below,
+	// because production on this route hosts nothing: there is no compose file, no
+	// helper, and no endpoint of ours, so the local session is the compiled agent,
+	// a tunnel, and the number borrowed for the length of it.
+	if devCloudWebsocketRoute(resolved) {
+		plan := generate.TelephonyRuntimePlanFor(resolved)
+		if plan == nil {
+			return fmt.Errorf("dev %s: target %q has no resolved telephony route", root, resolved.Name)
+		}
+		if to != "" && !planHasTelephonyFeature(plan, "outbound") {
+			return fmt.Errorf("dev %s: --to needs an outbound-capable target; %q has no outbound direction (set channels.phone outbound: true)", root, resolved.Name)
+		}
+		artifact, err := generate.Generate(agent, resolved, target.Default())
+		if err != nil {
+			return fmt.Errorf("dev %s: %w", root, err)
+		}
+		opts := devTelephonyOptions{publicValue: publicValue, botPort: botPort, to: to, noWebhook: noWebhook, verbose: verbose}
+		if err := execDevCloudWebsocket(cmd, root, resolved.Name, artifact.Telephony, artifact.Files, opts); err != nil {
+			return fmt.Errorf("dev %s: %w", root, err)
+		}
+		return nil
+	}
 	plan := generate.TelephonyRuntimePlanFor(resolved)
 	if plan == nil {
 		// The Daily route is telephony, so the generic message would be false. It

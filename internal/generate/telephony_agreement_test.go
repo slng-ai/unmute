@@ -55,6 +55,10 @@ func emittedTelephonyFeatures(key target.TelephonyKey) map[target.TelephonyFeatu
 		if key.Carrier == "twilio" {
 			return pipecatDailyCarrierEmittedTelephonyFeatures
 		}
+	case key.Provider == target.Pipecat && key.Transport == "cloud-websocket":
+		if key.Carrier == "twilio" {
+			return pipecatCloudWebsocketEmittedTelephonyFeatures
+		}
 	case key.Provider == target.LiveKit && key.Transport == "sip":
 		if slices.Contains([]string{"twilio", "telnyx", "plivo"}, key.Carrier) {
 			return livekitEmittedTelephonyFeatures
@@ -86,6 +90,32 @@ func TestV8TelephonyComposeShipsOSILicensedCoordinationStore(t *testing.T) {
 		}
 		if !strings.Contains(content, "image: valkey/valkey:") {
 			t.Errorf("%s does not pin the Valkey coordination store", golden)
+		}
+	}
+}
+
+// A row that declares no process must produce a build with no process artifact.
+//
+// The emitter agreement above proves every granted feature has code behind it,
+// which is a claim about features. This is the other half for the Pipecat Cloud
+// websocket route, whose whole point is a *shape*: the operator hosts nothing, so
+// the build must carry nothing for them to run. A route row can promise that and
+// an emitter can quietly break it, so both ends are asserted.
+func TestRouteWithNoProcessesEmitsNoProcessArtifact(t *testing.T) {
+	routes := target.TelephonyRoutes()
+	key := target.TelephonyKey{Provider: target.Pipecat, Transport: "cloud-websocket", Carrier: "twilio"}
+	if route := routes[key]; len(route.Processes) != 0 || len(route.PublicEndpoints) != 0 {
+		t.Fatalf("route %v now declares a process or an endpoint; this test no longer describes it", key)
+	}
+	artifact := compileCloudWebsocketExample(t)
+	// Every artifact any route emits for the operator to run, or for a runtime to
+	// run on their behalf. None of them may appear here.
+	for _, path := range []string{
+		"telephony.py", "telephony_helper.py", "telephony_shared.py", "telephony_state.py",
+		"compose.telephony.yaml", "telephony_bridge.py", "telephony-setup.sh",
+	} {
+		if hasArtifactFile(artifact, path) {
+			t.Errorf("build emits %s; this route declares no process, so there is nothing for the operator to run", path)
 		}
 	}
 }

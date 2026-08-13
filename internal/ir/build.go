@@ -785,7 +785,25 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 		}
 	}
 	telephony := hasTelephonyChannel(agent)
-	if telephony && (raw.Provider == string(ProviderLiveKit) || raw.Provider == string(ProviderPipecat)) && raw.Connection == "" {
+	// One route makes the connection conditional, and it is the point of the route:
+	// on (pipecat, cloud-websocket) the platform terminates the carrier's stream
+	// itself, so receiving a call needs no carrier credentials at all. Placing one,
+	// or redirecting one to a human, still does (SCHEMA N38, research D4/F4).
+	cloudWebsocket := raw.Provider == string(ProviderPipecat) && raw.Transport == "cloud-websocket"
+	needsConnection := telephony
+	if cloudWebsocket {
+		needsConnection = telephony && packagePlacesCalls(pkg, agent)
+	}
+	if needsConnection && (raw.Provider == string(ProviderLiveKit) || raw.Provider == string(ProviderPipecat)) && raw.Connection == "" {
+		if cloudWebsocket {
+			// Name all three keys and what each is for. A message that says only
+			// "requires connection" sends the author to the schema; this one sends them
+			// to the three lines they have to write.
+			return Target{}, fmt.Errorf("%s: target %q places or redirects calls, so it requires connection: "+
+				"account_sid and auth_token authenticate the request to your carrier, and from_number is the caller "+
+				"identity the recipient sees. A package that only receives calls on this route needs no connection at all",
+				pkg.Location("targets.yaml", name+":"), name)
+		}
 		return Target{}, fmt.Errorf("%s: target %q requires connection for telephony", pkg.Location("targets.yaml", name+":"), name)
 	}
 	if !telephony && raw.Connection != "" {
@@ -825,13 +843,42 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 		Models:            resolveBindings(agent, used, raw.Models),
 		Destinations:      raw.Destinations,
 	}
-	if raw.Connection != "" && telephony {
+	// A pure-inbound cloud-websocket package has no connection and still has a
+	// route: the plan is what tells the emitter to emit the Bin, the transport
+	// entry, and the runbook. Without this it would compile as a package with
+	// telephony declared and no telephony emitted, which is the silent downgrade
+	// Principle II forbids.
+	if telephony && (raw.Connection != "" || cloudWebsocket) {
 		built.Telephony = buildTelephonyPlan(pkg, agent, built)
-		if err := validateTelephonyEnvironment(pkg, built.Telephony); err != nil {
-			return Target{}, err
+		if raw.Connection != "" {
+			if err := validateTelephonyEnvironment(pkg, built.Telephony); err != nil {
+				return Target{}, err
+			}
 		}
 	}
 	return built, nil
+}
+
+// packagePlacesCalls reports whether the package dials anybody: an outbound phone
+// direction, or a human transfer, which dials its destination whatever the
+// channel says. Both need the carrier credentials; receiving a call does not.
+//
+// The controls are read from the raw package rather than the built agent because
+// controls are built *after* targets (they resolve destinations against a target),
+// so agent.Controls is still empty here. buildTelephonyPlan reads them the same
+// way, for the same reason.
+func packagePlacesCalls(pkg *packagespec.Package, agent *Agent) bool {
+	for _, channel := range agent.Channels {
+		if channel.Kind == ChannelTelephony && channel.Outbound != nil && *channel.Outbound {
+			return true
+		}
+	}
+	for _, control := range pkg.Agent.Controls {
+		if control.Kind == string(ControlHumanTransfer) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateTelephonyEnvironment(pkg *packagespec.Package, plan *TelephonyPlan) error {
@@ -850,9 +897,17 @@ func validateTelephonyEnvironment(pkg *packagespec.Package, plan *TelephonyPlan)
 			return fmt.Errorf("%s: connection %q requires environment key %q for route (%s, %s, %s)", pkg.Location(path, "environment:"), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
 		}
 	}
+	accepted := append(slices.Clone(required), optional...)
+	slices.Sort(accepted)
 	for _, name := range sortedKeys(plan.Environment) {
 		if !allowed[name] {
-			return fmt.Errorf("%s: connection %q environment key %q is not accepted by route (%s, %s, %s)", pkg.Location(path, name), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+			// The accepted set rides the message. Without it the author learns which
+			// key is wrong and has to go looking for which keys are right, and on the
+			// cloud-websocket route the three SIP keys are the exact mistake somebody
+			// moving from another route will make (spec FR-009).
+			return fmt.Errorf("%s: connection %q environment key %q is not accepted by route (%s, %s, %s); it accepts %s",
+				pkg.Location(path, name), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier,
+				strings.Join(accepted, ", "))
 		}
 	}
 	return nil
@@ -969,7 +1024,15 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 	reasons := []TelephonyCoordinationReason{
 		{Name: "admission", Consumers: []string{"application"}},
 	}
-	if resolved.Provider == ProviderPipecat && resolved.Transport == "daily-sip" {
+	if resolved.Provider == ProviderPipecat && resolved.Transport == "cloud-websocket" {
+		// One service, and it is the agent: the platform hosts it in production and
+		// `unmute dev --telephony` runs the same application locally. No Redis,
+		// because nothing here outlives a call, and none of the Pipecat correlation
+		// reasons, because each names a Redis-backed record this route never keeps.
+		// The route row's empty Processes says the operator runs nothing; this says
+		// what the thing they do not run is (data-model section 1).
+		services = []string{"application"}
+	} else if resolved.Provider == ProviderPipecat && resolved.Transport == "daily-sip" {
 		// The Daily carrier route keeps no shared control record (specs/004
 		// FR-027): the transfer guard is in-process because one process serves one
 		// call, and the room, not a store, correlates the legs. So no redis, and

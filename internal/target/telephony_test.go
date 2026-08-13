@@ -128,3 +128,87 @@ func TestTelephonyRouteEnvironmentKeysHoldTheRenameLine(t *testing.T) {
 		}
 	}
 }
+
+// TestPipecatCloudWebsocketRouteRow pins the row's defining difference from every
+// other telephony row: it declares no process and no public endpoint, because the
+// operator hosts nothing (spec FR-001, data-model section 1). A future edit that
+// gives this route a process has changed what the route *is*, and that is worth
+// failing a test over.
+func TestPipecatCloudWebsocketRouteRow(t *testing.T) {
+	key := TelephonyKey{Provider: Pipecat, Transport: "cloud-websocket", Carrier: "twilio"}
+	route, ok := TelephonyRoutes()[key]
+	if !ok {
+		t.Fatal("the Pipecat Cloud websocket route is missing from the table")
+	}
+	want := []TelephonyFeature{
+		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound,
+		TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup),
+	}
+	if len(route.Features) != len(want) {
+		t.Errorf("route grants %d features, want exactly %d: %v", len(route.Features), len(want), route.Features)
+	}
+	for _, feature := range want {
+		evidence, granted := route.Features[feature]
+		if !granted {
+			t.Errorf("feature %q is not granted", feature)
+			continue
+		}
+		if evidence.Tag != Provisional {
+			t.Errorf("feature %q tag = %q, want provisional until a dated live run", feature, evidence.Tag)
+		}
+		if evidence.Docs == "" || evidence.Verified == "" {
+			t.Errorf("feature %q lacks docs or a verification date", feature)
+		}
+		if !strings.Contains(evidence.Note, "no call has been placed") {
+			t.Errorf("feature %q note = %q, want the specific gap named", feature, evidence.Note)
+		}
+	}
+	if len(route.Processes) != 0 {
+		t.Errorf("route declares %d process(es); zero operator-hosted infrastructure is the feature", len(route.Processes))
+	}
+	if len(route.PublicEndpoints) != 0 {
+		t.Errorf("route declares %d public endpoint(s); the operator hosts none", len(route.PublicEndpoints))
+	}
+	if route.AutoWebhookEndpoint != "" {
+		t.Errorf("route names auto-webhook endpoint %q, but production points the number at a console object", route.AutoWebhookEndpoint)
+	}
+	if got := strings.Join(route.RequiredEnvironment, ","); got != "account_sid,auth_token,from_number" {
+		t.Errorf("required environment = %q, want the three carrier keys", got)
+	}
+	if len(route.RuntimeEnvironment) != 1 || route.RuntimeEnvironment[0].Name != "PIPECAT_CLOUD_ORGANIZATION" {
+		t.Errorf("runtime environment = %+v, want only PIPECAT_CLOUD_ORGANIZATION", route.RuntimeEnvironment)
+	}
+	if len(route.ManualSteps) == 0 {
+		t.Error("route has no dictated carrier steps, so `unmute validate` can tell nobody what to do")
+	}
+	// The Daily carrier row is the comparison the docs make, so the difference is
+	// asserted rather than described: that one runs a helper, this one runs nothing.
+	daily := TelephonyRoutes()[TelephonyKey{Provider: Pipecat, Transport: "daily-sip", Carrier: "twilio"}]
+	if len(daily.Processes) == 0 {
+		t.Error("the Daily carrier row lost its helper process, so this comparison no longer means anything")
+	}
+}
+
+// The refusal has to name what it would take. An author reading "no warm
+// transfer" needs to know whether to change route or change platform.
+func TestPipecatCloudWebsocketRefusesWarmTransferByNamingTheCost(t *testing.T) {
+	key := TelephonyKey{Provider: Pipecat, Transport: "cloud-websocket", Carrier: "twilio"}
+	evidence := ResolveTelephonyFeature(key, TelephonyFeature(WarmTransfer))
+	if evidence.Tag != Gated {
+		t.Fatalf("warm transfer tag = %q, want gated", evidence.Tag)
+	}
+	for _, want := range []string{"callback endpoint you host", "hosting\nnothing", "livekit, sip"} {
+		if !strings.Contains(evidence.Note, strings.ReplaceAll(want, "\n", " ")) {
+			t.Errorf("warm refusal %q does not mention %q", evidence.Note, want)
+		}
+	}
+	if strings.Contains(evidence.Note, "cannot") {
+		t.Errorf("warm refusal %q blames the platform; it is this project that has not built it", evidence.Note)
+	}
+	// A call source is refused too, and its refusal already names the routes that
+	// fill one, so an author who wants the caller's number has somewhere to go.
+	source := ResolveTelephonyFeature(key, "source.from_number")
+	if source.Tag != Gated || !strings.Contains(source.Note, "carrier-websocket") {
+		t.Errorf("call-source refusal = %q (%s), want gated and naming where sources work", source.Note, source.Tag)
+	}
+}

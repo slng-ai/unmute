@@ -1,6 +1,7 @@
 # Two Twilio telephony targets against the same inbound+outbound agent, both
 # driven by one .env (the Twilio account trio + model keys):
-#   pipecat: carrier-websocket over Twilio Media Streams.
+#   pipecat: Pipecat Cloud terminates the Twilio Media Stream itself, so nothing
+#            is hosted by you in production (SCHEMA N38).
 #   livekit: the LiveKit Twilio connector, also Twilio Media Streams, bridged
 #            into a local LiveKit room. Both test fully on a laptop through the
 #            managed tunnel; neither needs a SIP trunk or public SIP/RTP.
@@ -8,8 +9,10 @@ targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: carrier-websocket
+    transport: cloud-websocket
     carrier: twilio
+    # The connection is here because this agent places outbound calls; a
+    # receive-only package on this route needs none at all.
     connection: twilio_voice
 
   livekit:

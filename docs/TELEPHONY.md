@@ -211,7 +211,8 @@ not the number of targets, is the limit:
 | Pipecat | `carrier-websocket` | Plivo | Direct carrier adapter and Pipecat Plivo serializer | Runs; provisional |
 | Pipecat | `carrier-websocket` | Exotel | No generated adapter | Gated; no adapter |
 | Pipecat | `daily-sip` | (none) | Daily-provisioned number; Daily's own infrastructure delivers the call to the deployed agent | Runs; provisional. Cloud-only |
-| Pipecat | `daily-sip` | Twilio | Your carrier forwards the call over SIP into the same per-call Daily room. Emits `telephony_helper.py`, an operator-run webhook server, plus a carrier block in the bot (SCHEMA N37) | Runs; provisional. Cloud-only |
+| Pipecat | `daily-sip` | Twilio | Your carrier forwards the call over SIP into the same per-call Daily room. Emits `telephony_helper.py`, an operator-run webhook server, plus a carrier block in the bot (SCHEMA N37) | Runs; provisional. Cloud-only. No public example: the route keeps its guards against `internal/testdata/daily_carrier` |
+| Pipecat | `cloud-websocket` | Twilio | Pipecat Cloud terminates the carrier's Media Stream itself, named by a static TwiML Bin in the carrier console. **No emitted process and no endpoint of yours**, in production or ever (SCHEMA N38) | Runs; provisional. Cloud-only |
 | LiveKit | `sip` | Twilio | Self-hosted LiveKit SIP and Twilio trunk inputs | Runs; provisional |
 | LiveKit | `sip` | Telnyx | Self-hosted LiveKit SIP and Telnyx trunk inputs | Runs; provisional |
 | LiveKit | `sip` | Plivo | Self-hosted LiveKit SIP and Plivo trunk inputs | Runs; provisional |
@@ -604,6 +605,100 @@ The no-carrier form has no local topology at all. The carrier form has one, the
 helper, but the CLI cannot run it somewhere the operator's carrier can reach, so
 the emitted README dictates the helper plus a tunnel instead. Browser and console
 modes work on both, unchanged.
+
+### Which Twilio route on Pipecat, and why
+
+Three routes now connect a Twilio number to a Pipecat target, and the deciding
+difference is one thing: **what you host.**
+
+| | `cloud-websocket` | `daily-sip` + carrier | `carrier-websocket` |
+|---|---|---|---|
+| What you host in production | **nothing** | a webhook server (`telephony_helper.py`), forever | the whole application, plus a Redis |
+| Where the agent runs | Pipecat Cloud | Pipecat Cloud | wherever you deploy the container |
+| What the number points at | a TwiML Bin in the Twilio console | your running helper's URL | your running application's URL |
+| What the carrier account needs | a voice-capable number | a number, an Elastic SIP trunk, and an IP access list for Daily's addresses | a voice-capable number |
+| Transfers | cold, by replacing the live call's markup | cold, by Daily's own transfer primitive | none: the websocket transports have no transfer primitive |
+| A failed transfer | brings back a **fresh** agent that does not remember the call | keeps the **same** session alive | not applicable |
+| Call sources as spec variables (`source.*`) | no | no | yes |
+| Local `unmute dev --telephony` | yes, one command | no; the emitted runbook dictates the helper beside a tunnel | yes, one command |
+
+**Recommendation for the common case: `cloud-websocket`.** If you have a Twilio
+number and you want an agent on the end of it, this is the route with nothing to
+run, nothing to keep awake, and nothing to pay for beyond the platform and the
+calls. Take one of the other two for a specific reason:
+
+- **`daily-sip` with a carrier** when a failed transfer must come back to the
+  *same* agent, mid-conversation, remembering what was said. That needs something
+  of yours listening for how the dial ended, and hosting the helper is what buys
+  it.
+- **`carrier-websocket`** when the agent cannot run on Pipecat Cloud at all (your
+  own cluster, your own network boundary), or when the spec binds `source.*`
+  variables to the caller's number.
+
+One thing is true on all three and worth saying once:
+**no Pipecat route offers warm transfer today.**
+Warm compiles on `(livekit, sip)` trunks, and
+`examples/human-transfer` is the example. Nothing about these routes blocks it;
+this project has not built it.
+
+The shipped examples are one per use case: `examples/human-transfer` (warm
+transfer, LiveKit), `examples/human-transfer-cloud-twilio` (cold transfer on
+`cloud-websocket`), and `examples/telephony-hello` (inbound and outbound, both a
+Pipecat and a LiveKit target off one `.env`).
+
+### Pipecat Cloud native carrier stream (`cloud-websocket`)
+
+The platform terminates the carrier's media stream on its own endpoint,
+`wss://api.pipecat.daily.co/ws/twilio`, or its regional form when the target
+declares a region. A static TwiML Bin in the Twilio console names the agent with a
+`_pipecatCloudServiceHost` parameter (`<agent>.<organization>`), and the platform
+starts the deployed agent on the stream. The compiler emits **no new file** for
+this route: the build's file list is exactly a plain Pipecat Cloud build's, and a
+test asserts equality rather than describing it.
+
+What each piece does:
+
+- **The Bin** carries a spoken line before `<Connect>`, because a cold start is
+  longer than the two seconds a caller will wait in silence, and Twilio's own
+  `{{From}}` / `{{To}}` substitutions as custom parameters, which is what
+  populates the caller and callee fields the bot reads.
+- **The bot** reads `runner_args.transport_type` and `runner_args.call_data`
+  right after the transport exists. That is the whole session detection: a
+  session with `transport_type == "twilio"` is a phone call, `direction` in the
+  parsed body marks an outbound one, and everything else behaves exactly as on a
+  package with no telephony. The per-call environment check runs at that point,
+  so a browser session is never asked for a carrier credential.
+- **Outbound** is one request to Twilio with the markup inline. It has to
+  originate at the carrier, because on this route nothing of the operator's
+  exists to originate it.
+- **The cold transfer** replaces the live call's markup by its `CallSid`: a
+  spoken line, `<Dial answerOnBridge="true">` on a destination read from the
+  environment, then a spoken failure line and a `<Connect><Stream>` back to the
+  same service host. It is sequential rather than conditional because branching
+  on the dial's outcome needs an `action` callback URL, which is a hosted
+  endpoint, which this route exists to not have.
+
+**A pure-inbound package on this route needs no carrier credentials at all.** The
+platform receives the call without them, and the connection becomes required only
+when the package places or redirects a call. One capability changes shape with
+them rather than appearing: with credentials the agent ends a call through the
+carrier's call control, without them by closing the stream, which ends the call
+because the Bin has nothing after `<Connect>`.
+
+The deploy manifest carries `websocket_auth = "none"`, explicitly. A static Bin
+cannot fetch a token, so that is the only working value, and the platform's own
+documentation states the default both ways. What limits who can open a session is
+knowledge of the `<agent>.<organization>` string: not a secret in the
+cryptographic sense, but a capability, and the emitted README says so in those
+words.
+
+`unmute dev --telephony` runs the phone path locally: the compiled agent in
+pipecat's own Twilio transport mode (which answers the carrier webhook itself, so
+no markup is created), a cloudflared tunnel, the number's voice configuration
+pointed at it for the session, and restored on every exit path including an
+interrupt. The production Bin is never touched. Outbound is the one thing that
+does not run locally, and for a reason worth stating: an outbound call's markup
+names the deployed agent, so the call reaches the platform rather than the laptop.
 
 ### LiveKit routes
 

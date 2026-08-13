@@ -1,4 +1,18 @@
 agent_name = {{pyq .Project}}
 {{if .DeploymentRegion}}region = {{pyq .DeploymentRegion}}
 {{end}}{{if .SecretSet}}secret_set = {{pyq .SecretSet}}
+{{end}}{{if .CloudWebsocket}}
+# Your carrier connects to the platform's stream endpoint directly, and a static
+# piece of markup in a carrier console cannot fetch a token first, so token
+# authentication is structurally impossible on this route. The working value is
+# written here rather than inherited, for two reasons: the platform's own
+# documentation states the default both ways (one page says "none", another says
+# new agents default to requiring a token), and a security posture is worth
+# reading in the manifest instead of guessing from a version.
+#
+# What limits who can start a session, then, is knowledge of the
+# "<agent>.<organization>" string your markup carries. Treat it like a
+# capability: not a secret in the cryptographic sense, but anyone holding it can
+# open sessions you pay for. The README says the same thing in the same words.
+websocket_auth = "none"
 {{end}}

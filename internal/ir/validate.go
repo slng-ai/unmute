@@ -1424,8 +1424,17 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 	if plan.Coordination != "shared" {
 		row.Errors = add(row.Errors, "telephony coordination must be shared")
 	}
-	if len(plan.Processes) == 0 {
+	// One route runs nothing of the operator's, so an empty process list is the
+	// expected shape there and a mistake everywhere else (SCHEMA N38).
+	hostsNothing := plan.Key.Provider == ProviderPipecat && plan.Key.Transport == "cloud-websocket"
+	if len(plan.Processes) == 0 && !hostsNothing {
 		row.Errors = add(row.Errors, "telephony plan has no runtime process")
+	}
+	if len(plan.Processes) > 0 && hostsNothing {
+		row.Errors = add(row.Errors, "the Pipecat Cloud websocket route runs no process of yours; a process here contradicts the route")
+	}
+	if len(plan.PublicEndpoints) > 0 && hostsNothing {
+		row.Errors = add(row.Errors, "the Pipecat Cloud websocket route hosts no endpoint of yours; an endpoint here contradicts the route")
 	}
 	seenProcesses := make(map[string]bool, len(plan.Processes))
 	for _, process := range plan.Processes {
@@ -1475,8 +1484,11 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 	allowedServices := map[string]bool{"application": true}
 	requiredServices := []string{"application"}
 	switch {
-	case isPipecatDailyCarrier:
-		// application only, already in both sets.
+	case isPipecatDailyCarrier, hostsNothing:
+		// application only, already in both sets. On the cloud-websocket route the
+		// application is the deployed agent: the platform hosts it, and dev runs the
+		// same one locally, which is why an empty process list and one application
+		// service are the same route rather than a contradiction.
 	case isLiveKitSIP:
 		allowedServices["redis"] = true
 		allowedServices["livekit_server"] = true
@@ -1539,7 +1551,7 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		// (SCHEMA N37), so requiring them there would demand a reason for a service
 		// the same validation forbids.
 		required := []string{"admission", "call_correlation", "callback_idempotency"}
-		if isPipecatDailyCarrier {
+		if isPipecatDailyCarrier || hostsNothing {
 			required = []string{"admission"}
 		}
 		for _, name := range required {
@@ -1549,6 +1561,9 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		}
 		if isPipecatDailyCarrier && len(seenReasons) != 1 {
 			row.Errors = add(row.Errors, "the Pipecat Daily carrier route coordinates only admission")
+		}
+		if hostsNothing && len(seenReasons) != 1 {
+			row.Errors = add(row.Errors, "the Pipecat Cloud websocket route coordinates only admission")
 		}
 	}
 	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {

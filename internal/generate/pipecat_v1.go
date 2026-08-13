@@ -256,6 +256,42 @@ type pipecatDailyCarrier struct {
 	OptionalEnv []string
 }
 
+// pipecatCloudWebsocket is the (pipecat, cloud-websocket, twilio) data group:
+// the carrier streams the call straight to Pipecat Cloud and the operator hosts
+// nothing (SCHEMA N38).
+//
+// A third separate field, for the reason pipecatDailyCarrier is a second one:
+// every site that reads `.Telephony` means "carrier-websocket, with a helper
+// process and a Redis", and every site that reads `.DailyCarrier` means "a SIP
+// leg into a Daily room". This route is neither, and a group that half-matches
+// either would arm emitted code that cannot work here. Three narrow fields
+// cannot make that mistake; one widened field would only have to avoid it.
+type pipecatCloudWebsocket struct {
+	Carrier    string
+	Connection string
+	// Connection env names. All three are empty on a pure-inbound package, which
+	// declares no connection at all because the platform receives the call without
+	// credentials (research F4, D4).
+	AccountSIDEnv string
+	AuthTokenEnv  string
+	FromNumberEnv string
+	// OrganizationEnv completes the service host. Set only when this package
+	// composes TwiML of its own (outbound or a transfer); the compiler knows the
+	// agent name and cannot know the organization (research D5).
+	OrganizationEnv string
+	HasInbound      bool
+	HasOutbound     bool
+	// StreamURL is the platform's carrier endpoint, regional when the target
+	// declares a region. Computed once, in one place, and read by the Bin, the
+	// outbound command, and the transfer markup, so the three cannot disagree
+	// about where the audio goes (data-model section 3).
+	StreamURL string
+	// CallEnv is what a *phone call* adds to the process environment: nothing on a
+	// pure-inbound package, the carrier names and the organization otherwise. A
+	// browser or console session on the same package reads none of them.
+	CallEnv []string
+}
+
 type pipecatSystemSource struct {
 	Variable string
 	Source   string
@@ -327,6 +363,10 @@ type pipecatData struct {
 	// means that. The Daily carrier leg is DailyCarrier; see its doc comment.
 	Telephony    *pipecatTelephony
 	DailyCarrier *pipecatDailyCarrier
+	// CloudWebsocket is the platform-terminated carrier stream (SCHEMA N38): the
+	// one route where the operator hosts nothing. See its type's doc comment for
+	// why it is a third field rather than a widening of either other one.
+	CloudWebsocket *pipecatCloudWebsocket
 	// Prerequisites are the route's account features the provider grants on
 	// request, read from the rulebook in internal/target and never restated here.
 	// Present only when this package uses something that needs one.
@@ -423,6 +463,21 @@ var pipecatEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 // emitter can keep: no `source.*` entries, because the fill path for those lives
 // in the carrier-websocket adapter this route does not emit (research D11/R14).
 var pipecatDailyCarrierEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
+	targetcap.TelephonyRouteSelected:                   true,
+	targetcap.TelephonyInbound:                         true,
+	targetcap.TelephonyOutbound:                        true,
+	targetcap.TelephonyFeature(targetcap.ColdTransfer): true,
+	targetcap.TelephonyFeature(targetcap.Hangup):       true,
+}
+
+// pipecatCloudWebsocketEmittedTelephonyFeatures is the (pipecat,
+// cloud-websocket, twilio) half of the emitter agreement. Hand-written like the
+// Daily carrier's, and holding the same five features the row grants: no
+// `source.*` entries, because the call-source table is filled by the
+// carrier-websocket adapter this route does not emit. The Bin's from_number and
+// to_number parameters reach the bot's call_data, which is a different surface
+// from a bound spec variable.
+var pipecatCloudWebsocketEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 	targetcap.TelephonyRouteSelected:                   true,
 	targetcap.TelephonyInbound:                         true,
 	targetcap.TelephonyOutbound:                        true,

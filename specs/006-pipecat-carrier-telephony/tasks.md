@@ -361,3 +361,39 @@ The whole feature is additive behind the carrier declaration. If a live phase fa
 - Every platform claim written into an emitted file or a document carries its source and verification date from [research.md](research.md)
 - No em or en dashes in emitted text or documents; plain wording throughout
 - Commit after each task or logical group; stop at any checkpoint to validate a story on its own
+
+---
+
+## The route lost its public example, 2026-08-13
+
+Recorded here because it changes how this feature's open tasks are run, not what
+they are.
+
+Feature 007 (`specs/007-pipecat-native-websocket`) added
+`(pipecat, cloud-websocket, twilio)`: the same carrier, the same platform, the
+same cold transfer, and **nothing for the operator to host**. Beside it, this
+route's helper stopped being a cost worth recommending in an example. So
+`examples/human-transfer-daily-twilio` was deleted and
+`examples/human-transfer-cloud-twilio` took its place in the shipped set
+(007 FR-016).
+
+**What did not change.** This route keeps its capability rows, its emitted code,
+its templates, its goldens, and every guard in
+`internal/generate/pipecat_carrier_telephony_test.go`. Nothing about the route
+was deprecated: it is still the only Pipecat route where a **failed** transfer
+comes back to the same agent session, and the route comparison in
+`docs/TELEPHONY.md` says so and says when to choose it.
+
+**What changed for the open tasks here.** The declaration shape now lives in the
+fixture `internal/testdata/daily_carrier` instead of an example directory. Any
+remaining live task on this route runs against that fixture:
+
+```sh
+go run . validate internal/testdata/daily_carrier
+go run . compile  internal/testdata/daily_carrier
+```
+
+`internal/cli/dev_test.go`'s refusal test and the quickstart's offline half both
+read the fixture now. A dated note at the top of
+[quickstart.md](quickstart.md) says the same thing where somebody following it
+would hit it.

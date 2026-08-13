@@ -1,0 +1,74 @@
+# Sage and Stone Salon's phone line on Pipecat Cloud, reached through the salon's
+# own Twilio number, with one way to reach a person: a cold transfer.
+#
+# The same salon as ../human-transfer-daily. What differs is how the call gets
+# here: Twilio streams the audio straight to Pipecat Cloud, so nothing in this
+# package has to be hosted by anybody (SCHEMA N38).
+version: 1
+entry_agent: front_desk
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.3
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  front_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - send_to_billing
+
+controls:
+  # Cold: one request replaces the live call's markup at Twilio. The caller hears
+  # a line, the destination rings, and this agent's part is over. If the dial
+  # never connects, the same markup speaks a failure line and puts the caller
+  # back with a fresh agent, because deciding anything else would need an
+  # endpoint hosted by you.
+  send_to_billing:
+    kind: human_transfer
+    when: The caller asks about an invoice, a refund, or a charge they do not recognise.
+    cold:
+      destination: billing_line
+
+conversation:
+  greeting:
+    speaks_first: agent
+    # Names its own line on purpose. This salon exists on three targets with the
+    # same voice and the same model, and one Twilio number can only point at one
+    # of them at a time, so if you are testing more than one you want to hear
+    # which answered rather than deduce it from logs.
+    text: "Sage and Stone Salon on the Pipecat Cloud line, this is the front desk. How can I help?"
+  interruption:
+    enabled: true
+
+channels:
+  phone:
+    kind: telephony
+    inbound: true
+    # Outbound is declared because it is how you test a transfer without waiting
+    # for somebody to call you: place a call to your own mobile, then ask the
+    # agent for billing.
+    outbound: true
+
+capacity:
+  peak_sessions: 4
+  max_sessions: 8
+  peak_starts_per_second: 1
+  avg_session_duration: 3m

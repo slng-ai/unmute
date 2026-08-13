@@ -522,3 +522,155 @@ func TestExecDevTelephonyInboundOnlyHasNoDialOutText(t *testing.T) {
 		t.Fatalf("inbound-only target should print its dial-in number:\n%s", out.String())
 	}
 }
+
+// cloudWebsocketPlan is the (pipecat, cloud-websocket, twilio) shape: the three
+// carrier names, and **no processes and no public endpoints**, because the
+// operator hosts nothing (SCHEMA N38).
+func cloudWebsocketPlan() *generate.TelephonyRuntimePlan {
+	return &generate.TelephonyRuntimePlan{
+		Route:       ir.TelephonyKey{Provider: ir.ProviderPipecat, Transport: "cloud-websocket", Carrier: "twilio"},
+		RequiredEnv: []string{"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER", "PIPECAT_CLOUD_ORGANIZATION"},
+		Environment: map[string]string{
+			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN", "from_number": "TWILIO_PHONE_NUMBER",
+		},
+		Evidence:     []ir.TelephonyFeatureEvidence{{Feature: "inbound", Tag: "provisional"}},
+		Services:     []string{"application"},
+		Coordination: "shared",
+		ManualSteps:  []string{"create a TwiML Bin"},
+	}
+}
+
+// fakeUV puts a `uv` on PATH that runs the given shell body. The local phone path
+// starts the compiled agent with `uv run bot.py`, so this is what stands in for it.
+func fakeUV(t *testing.T, dir, body string) {
+	t.Helper()
+	script := filepath.Join(dir, "uv")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"+body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+var cloudWebsocketFiles = []generate.File{{Path: "bot.py", Content: []byte("# generated\n")}}
+
+// The route has no Compose graph and no credentials of the dev command's own, so
+// the one thing it must refuse by name is a missing carrier credential. Refusing
+// by name matters more here than elsewhere: a deployed pure-inbound agent on this
+// route needs none of them, so an operator can reasonably be surprised that a
+// local session does.
+func TestExecDevCloudWebsocketRefusesMissingCredentialsByName(t *testing.T) {
+	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\n")
+	cmd, _ := telephonyTestCommand(t)
+	err := execDevCloudWebsocket(cmd, root, "phone", cloudWebsocketPlan(), cloudWebsocketFiles,
+		devTelephonyOptions{botPort: "7861", publicValue: "https://voice.example.com"})
+	if err == nil {
+		t.Fatal("a session with no auth token and no number must refuse")
+	}
+	for _, want := range []string{"TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER", "hosts nothing in production"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal is missing %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "TWILIO_ACCOUNT_SID") {
+		t.Errorf("the refusal names a value that is set: %v", err)
+	}
+}
+
+// The borrowed-state rule: a dev session takes a real phone line and must give it
+// back on **every** exit path. All three are exercised, because they are three
+// different code paths reaching one deferred restore, and the one that matters
+// most in practice (ctrl-c) is the one a test is least likely to cover.
+func TestExecDevCloudWebsocketRestoresTheNumberOnEveryExitPath(t *testing.T) {
+	cases := []struct {
+		name      string
+		agentBody string
+		cancel    bool
+		wantErr   bool
+	}{
+		{name: "clean exit", agentBody: "exit 0\n"},
+		{name: "the agent fails", agentBody: "echo boom 1>&2\nexit 3\n", wantErr: true},
+		{name: "interrupted", agentBody: "sleep 30\n", cancel: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root, _ := fakeTelephonyRoot(t,
+				"TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\nPIPECAT_CLOUD_ORGANIZATION=org\n")
+			fakeUV(t, root, tc.agentBody)
+			var updates url.Values
+			var calls []string
+			server := fakeTwilioAPIRecording(t, "token", "https://old.example/hook", &updates, &calls)
+			_ = server
+
+			cmd, out := telephonyTestCommand(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			cmd.SetContext(ctx)
+			defer cancel()
+			if tc.cancel {
+				// The interrupt path: signal.NotifyContext derives from this context, so
+				// cancelling it reaches exactly the branch a ctrl-c reaches.
+				go func() {
+					time.Sleep(300 * time.Millisecond)
+					cancel()
+				}()
+			}
+			err := execDevCloudWebsocket(cmd, root, "phone", cloudWebsocketPlan(), cloudWebsocketFiles,
+				devTelephonyOptions{botPort: "7861", publicValue: "https://voice.example.com"})
+			if tc.wantErr && err == nil {
+				t.Fatalf("a failing agent must surface an error:\n%s", out.String())
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("execDevCloudWebsocket: %v\n%s", err, out.String())
+			}
+			// Two updates: the borrow and the restore, in that order, and the last
+			// value is what the number had before.
+			if len(calls) != 2 {
+				t.Fatalf("the number was updated %d time(s), want 2 (borrow and restore): %v", len(calls), calls)
+			}
+			if calls[0] != "https://voice.example.com/" {
+				t.Errorf("the session pointed the number at %q, want the local runner's webhook path", calls[0])
+			}
+			if calls[1] != "https://old.example/hook" {
+				t.Errorf("the number was left pointing at %q, not what it had before", calls[1])
+			}
+			printed := out.String()
+			for _, want := range []string{"restored on exit", "TwiML Bin is untouched", "borrowed +15550001111"} {
+				if !strings.Contains(printed, want) {
+					t.Errorf("the session did not state %q:\n%s", want, printed)
+				}
+			}
+		})
+	}
+}
+
+// fakeTwilioAPIRecording is fakeTwilioAPI plus an ordered log of every VoiceUrl
+// the session wrote, which is how the borrow-and-restore pair is asserted.
+func fakeTwilioAPIRecording(t *testing.T, authToken, existingVoiceURL string, updates *url.Values, calls *[]string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	current := existingVoiceURL
+	mux.HandleFunc("GET /2010-04-01/Accounts/account/IncomingPhoneNumbers.json", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"incoming_phone_numbers":[{"sid":"PN123","voice_url":"` + current + `"}]}`))
+	})
+	mux.HandleFunc("POST /2010-04-01/Accounts/account/IncomingPhoneNumbers/PN123.json", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		*updates = r.PostForm
+		current = r.PostForm.Get("VoiceUrl")
+		*calls = append(*calls, current)
+		_, _ = w.Write([]byte(`{"sid":"PN123"}`))
+	})
+	// Anything else is a request this route must never make: no call creation, no
+	// markup, nothing at the platform.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the local session made an unexpected carrier request: %s %s", r.Method, r.URL.Path)
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	restore := twilioAPIBase
+	twilioAPIBase = server.URL
+	t.Cleanup(func() { twilioAPIBase = restore })
+	return server
+}

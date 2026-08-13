@@ -1340,3 +1340,119 @@ func TestSIPRouteRequiresEveryConnectionValue(t *testing.T) {
 		}
 	}
 }
+
+// cloudWebsocketPackage is safe_core on (pipecat, cloud-websocket, twilio) in the
+// shape that needs a connection: a cold transfer, which places a call.
+func cloudWebsocketPackage(t *testing.T) *packagespec.Package {
+	t.Helper()
+	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
+	target := pkg.Targets["pipecat"]
+	target.Transport, target.Carrier, target.Connection = "cloud-websocket", "twilio", "twilio_voice"
+	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+	pkg.Connections = map[string]packagespec.Connection{"twilio_voice": {
+		Kind: "telephony", Environment: map[string]string{
+			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
+			"from_number": "TWILIO_PHONE_NUMBER",
+		},
+	}}
+	return pkg
+}
+
+// The route where the operator hosts nothing has to validate with an **empty**
+// process list, and that has to stay illegal everywhere else. Both halves are
+// asserted, because a relaxed check that relaxed too far would look identical
+// from the passing side (SCHEMA N38).
+func TestValidatePipecatCloudWebsocketHostsNothing(t *testing.T) {
+	agent, err := Build(cloudWebsocketPackage(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["pipecat"]
+	if len(resolved.Telephony.Processes) != 0 {
+		t.Fatalf("the plan declares %d process(es); this test no longer describes the route", len(resolved.Telephony.Processes))
+	}
+	report, _ := Validate(agent, []Target{resolved}, targetcap.Default())
+	if errs := report.PerTarget[0].Errors; len(errs) != 0 {
+		t.Fatalf("the Pipecat Cloud websocket route must validate cleanly, got:\n%s", strings.Join(errs, "\n"))
+	}
+
+	// A fabricated plan that gives this route a process contradicts the route, and
+	// says so rather than passing quietly.
+	withProcess := resolved
+	plan := *resolved.Telephony
+	plan.Processes = []TelephonyProcess{{Name: "agent", Command: []string{"uv", "run", "bot.py"}, Health: "/", Readiness: "/"}}
+	withProcess.Telephony = &plan
+	report, _ = Validate(agent, []Target{withProcess}, targetcap.Default())
+	if joined := strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(joined, "runs no process of yours") {
+		t.Fatalf("a process on this route must fail by name, got:\n%s", joined)
+	}
+
+	// An endpoint likewise: this route hosts none.
+	withEndpoint := resolved
+	plan = *resolved.Telephony
+	plan.PublicEndpoints = []TelephonyEndpoint{{Name: "inbound", Method: "POST", Path: "/call"}}
+	withEndpoint.Telephony = &plan
+	report, _ = Validate(agent, []Target{withEndpoint}, targetcap.Default())
+	if joined := strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(joined, "hosts no endpoint of yours") {
+		t.Fatalf("an endpoint on this route must fail by name, got:\n%s", joined)
+	}
+
+	// Redis, and any coordination reason beyond admission, stay out.
+	withRedis := resolved
+	plan = *resolved.Telephony
+	plan.Services = []string{"application", "redis"}
+	withRedis.Telephony = &plan
+	report, _ = Validate(agent, []Target{withRedis}, targetcap.Default())
+	if joined := strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(joined, `unexpected service "redis"`) {
+		t.Fatalf("a redis service on this route must fail by name, got:\n%s", joined)
+	}
+	withReason := resolved
+	plan = *resolved.Telephony
+	plan.CoordinationReasons = append(slices.Clone(plan.CoordinationReasons),
+		TelephonyCoordinationReason{Name: "call_correlation", Consumers: []string{"application"}})
+	withReason.Telephony = &plan
+	report, _ = Validate(agent, []Target{withReason}, targetcap.Default())
+	if joined := strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(joined, "coordinates only admission") {
+		t.Fatalf("a second coordination reason on this route must fail, got:\n%s", joined)
+	}
+
+	// And the routes that do run something still require it: the relaxation is
+	// keyed on this route, not on Pipecat.
+	cwPkg := loadSafeCore(t)
+	enableTelephony(cwPkg)
+	cw := cwPkg.Targets["pipecat"]
+	cw.Transport, cw.Carrier, cw.Connection = "carrier-websocket", "twilio", "primary_phone"
+	cwPkg.Targets = map[string]packagespec.Target{"pipecat": cw}
+	cwAgent, err := Build(cwPkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwTarget := cwAgent.Targets["pipecat"]
+	cwPlan := *cwTarget.Telephony
+	cwPlan.Processes = nil
+	cwTarget.Telephony = &cwPlan
+	report, _ = Validate(cwAgent, []Target{cwTarget}, targetcap.Default())
+	if joined := strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(joined, "no runtime process") {
+		t.Fatalf("a process-free carrier-websocket plan must still fail, got:\n%s", joined)
+	}
+}
+
+// The route refuses telephony call sources by name, for the same reason the Daily
+// carrier route does: the code that fills them is the carrier-websocket adapter
+// neither route emits.
+func TestValidatePipecatCloudWebsocketRefusesCallSources(t *testing.T) {
+	pkg := cloudWebsocketPackage(t)
+	pkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(VariableSourceFromNumber)}
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, _ := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
+	joined := strings.Join(report.PerTarget[0].Errors, "\n")
+	for _, want := range []string{"source.from_number", "cloud-websocket", "carrier-websocket"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("the refusal is missing %q, got:\n%s", want, joined)
+		}
+	}
+}

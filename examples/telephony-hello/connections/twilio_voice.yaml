@@ -1,5 +1,13 @@
-# Twilio for the Pipecat carrier-websocket route: Programmable Voice + Media
-# Streams. Values are environment variable names, never secrets.
+# Twilio for both targets in this package: Programmable Voice + Media Streams.
+# Values are environment variable names, never secrets.
+#
+# The same three names on the Pipecat Cloud carrier stream route and on the
+# LiveKit Twilio connector, and the same three ../human-transfer-cloud-twilio
+# uses, so one .env drives every Twilio example here.
+#
+# from_number is the caller identity the recipient sees: a voice-capable number
+# you own in this account (or a caller ID verified on it). The same number
+# receives calls, which is why one value serves both directions.
 kind: telephony
 environment:
   account_sid: TWILIO_ACCOUNT_SID

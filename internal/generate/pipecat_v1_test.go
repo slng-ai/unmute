@@ -2313,21 +2313,15 @@ func TestPipecatWebWaitsForRTVIClientReady(t *testing.T) {
 // TestPipecatWebDevNeedsNoTelephonyEnv is V10/B3: a telephony package must
 // still boot in the browser, where Redis, the carrier keys and the public URL
 // do not exist. bot.py checks provider credentials; telephony.py checks the
-// route's environment on top. telephony-hello is the fixture because it is
-// the committed example that keeps a Pipecat carrier telephony target.
+// route's environment on top.
+//
+// The fixture is the carrier-websocket route, because that is the route with a
+// telephony.py to check the rest. It used to be examples/telephony-hello, whose
+// Pipecat target moved to the platform-terminated route in feature 007; that
+// route's own version of this invariant is
+// TestCloudWebsocketPureInboundAsksForNothing.
 func TestPipecatWebDevNeedsNoTelephonyEnv(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "telephony-hello"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
-	if err != nil {
-		t.Fatalf("generate: %v", err)
-	}
+	artifact := carrierWebsocketArtifact(t, "twilio")
 	botpy := artifactFile(t, artifact, "bot.py")
 	start := strings.Index(botpy, "REQUIRED_ENV = [")
 	block := botpy[start : start+strings.Index(botpy[start:], "]")]
