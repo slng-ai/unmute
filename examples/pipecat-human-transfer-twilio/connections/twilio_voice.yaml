@@ -1,7 +1,7 @@
 # Twilio, the account side of the Pipecat Cloud carrier stream route. Values are
 # environment variable names, never secrets.
 #
-# The same three names ../../telephony-hello uses, verbatim, so one `.env` drives
+# The same three names ../../twilio-telephony-hello uses, verbatim, so one `.env` drives
 # every Twilio example in this repository. Future carriers follow the same
 # <CARRIER>_* shape.
 #

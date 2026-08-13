@@ -145,7 +145,7 @@ the same carrier credentials outbound uses.
 handoff and the destination ringing. Then repeat with the destination declining
 and observe the caller still connected. Offline: the transfer tool is emitted
 exactly when declared, the destination is an environment name (never a literal),
-and the failure path speaks.
+and the handback path speaks the same line whichever way the dial ended.
 
 **Acceptance Scenarios**:
 

@@ -242,13 +242,13 @@ func TestPublicExamplePackages(t *testing.T) {
 	// One telephony example per use case (spec 007 FR-016): warm+inbound on
 	// LiveKit (livekit-human-transfer), cold+inbound on Pipecat over Twilio with
 	// nothing hosted (pipecat-human-transfer-twilio), inbound+outbound
-	// (telephony-hello). pipecat-human-transfer-daily is the no-carrier Daily form
+	// (twilio-telephony-hello). pipecat-human-transfer-daily is the no-carrier Daily form
 	// and is untouched. human-transfer-daily-twilio was removed with feature 007;
 	// its route keeps its guards against internal/testdata/daily_carrier instead.
 	//
 	// A telephony example whose behaviour is one provider's names that provider
 	// first, because the route is the thing a reader is choosing between.
-	want := []string{"livekit-human-transfer", "multi-task", "outbound-reminder", "pipecat-human-transfer-daily", "pipecat-human-transfer-twilio", "salon-support", "simple-prompt", "subagents", "task-groups", "telephony-hello"}
+	want := []string{"livekit-human-transfer", "multi-task", "outbound-reminder", "pipecat-human-transfer-daily", "pipecat-human-transfer-twilio", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -266,12 +266,18 @@ func TestPublicExamplePackages(t *testing.T) {
 	}
 }
 
-// The shipped telephony example (telephony-hello) is a complete,
-// schema-faithful package with real adapters on both targets: Pipecat
-// carrier-websocket and the LiveKit Twilio connector. Both are provisional
-// (adapter present, no credentialed smoke yet) and usable, so both generate.
+// The shipped telephony example (twilio-telephony-hello) is a complete,
+// schema-faithful package carrying the route each platform recommends for Twilio:
+// Pipecat on the platform's own carrier stream, and LiveKit on a SIP trunk. Both
+// are provisional (adapter present, no credentialed smoke yet) and usable, so both
+// generate.
+//
+// The transports are asserted by name because that pairing is the example's whole
+// subject. It used to pair cloud-websocket with the LiveKit Twilio connector, which
+// tested better on a laptop and taught a route with no transfer primitive; the
+// connector keeps its own coverage through examples/outbound-reminder.
 func TestTelephonyExampleGeneratesProvisionalRoute(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "telephony-hello"))
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "twilio-telephony-hello"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,12 +285,14 @@ func TestTelephonyExampleGeneratesProvisionalRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	livekit, ok := agent.Targets["livekit"]
-	if !ok || livekit.Telephony == nil || livekit.Transport != "connector" {
-		t.Fatalf("livekit target is not the resolved connector route: %#v", livekit.Telephony)
-	}
-	for _, name := range []string{"livekit", "pipecat"} {
-		resolved := agent.Targets[name]
+	for name, transport := range map[string]string{"livekit": "sip", "pipecat": "cloud-websocket"} {
+		resolved, ok := agent.Targets[name]
+		if !ok || resolved.Telephony == nil || resolved.Transport != transport {
+			t.Fatalf("target %q is not the resolved %s route: %#v", name, transport, resolved.Telephony)
+		}
+		if resolved.Carrier != "twilio" {
+			t.Fatalf("target %q carrier = %q, want twilio", name, resolved.Carrier)
+		}
 		if _, err := Generate(agent, resolved, target.Default()); err != nil {
 			t.Fatalf("provisional telephony route %q must generate, got %v", name, err)
 		}
@@ -514,7 +522,7 @@ func TestExampleAndDocLinksIntoExamplesResolve(t *testing.T) {
 }
 
 // An example's own README must name every route its targets declare. This is the
-// one that would have caught `telephony-hello` describing a carrier-websocket
+// one that would have caught `twilio-telephony-hello` describing a carrier-websocket
 // Pipecat target for the length of the feature that moved it to another route: the
 // generated runbook was right the whole time, and the page a reader opens first
 // was wrong.

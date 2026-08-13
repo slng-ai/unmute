@@ -153,14 +153,22 @@ func TestPipecatCloudWebsocketRouteRow(t *testing.T) {
 			t.Errorf("feature %q is not granted", feature)
 			continue
 		}
+		// The tag tracks a credentialed smoke in CI, which no route in this table
+		// has, so it stays provisional even after the live calls of 2026-08-13.
 		if evidence.Tag != Provisional {
-			t.Errorf("feature %q tag = %q, want provisional until a dated live run", feature, evidence.Tag)
+			t.Errorf("feature %q tag = %q, want provisional until a credentialed smoke runs in CI", feature, evidence.Tag)
 		}
 		if evidence.Docs == "" || evidence.Verified == "" {
 			t.Errorf("feature %q lacks docs or a verification date", feature)
 		}
-		if !strings.Contains(evidence.Note, "no call has been placed") {
-			t.Errorf("feature %q note = %q, want the specific gap named", feature, evidence.Note)
+		// The note tracks what a human actually did, which is the half a reader
+		// trusts. Both clauses are required: what ran, and what is still unrun. A
+		// note carrying only the good half is how a row starts reading as a record
+		// of success.
+		for _, clause := range []string{"live inbound and cold transfer run 2026-08-13", "decline path", "has not been run"} {
+			if !strings.Contains(evidence.Note, clause) {
+				t.Errorf("feature %q note = %q, want it to name %q", feature, evidence.Note, clause)
+			}
 		}
 	}
 	if len(route.Processes) != 0 {

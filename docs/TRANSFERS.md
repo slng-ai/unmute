@@ -15,6 +15,33 @@ and the telephony docs point at.
 
 ## 1. What is available
 
+### Three mechanisms, which is why the routes differ
+
+"Transfer to a human" is not one feature with several implementations. The
+shipped routes use three different mechanisms, and each one decides what is
+possible on its route before any of our code runs.
+
+| Mechanism | Where | What actually happens | What it costs |
+|---|---|---|---|
+| **SIP REFER** | LiveKit `sip` | The agent asks the carrier to hand the caller's **existing SIP leg** somewhere else (`TransferSIPParticipant`). The caller leaves the room; the session ends. | The trunk must allow REFER. Nothing else. |
+| **Room reroute** | Pipecat `daily-sip`, both forms | Daily moves the caller's leg out of the room it is in (`transport.sip_call_transfer`) and the bot drops off. | Dial-out granted on the Daily domain. |
+| **Markup replacement** | Pipecat `cloud-websocket` | One request to the carrier **replaces the live call's instructions**, keyed on its call id: speak a line, `<Dial answerOnBridge="true">` the destination. The bot's part of the call ends there. | The session cannot survive it. Whatever happens to the dial, the caller meets a **fresh** agent, because knowing more would need a callback endpoint this route exists to avoid hosting. |
+
+Two consequences fall straight out of that:
+
+- **Warm exists on exactly one mechanism.** A warm handoff has to hold the
+  caller, dial a person, listen to how *that* leg ended, and only then merge.
+  SIP REFER and the room reroute both let a platform primitive own that
+  (LiveKit ships one as `WarmTransferTask`; Daily documents the pattern and we
+  have not built it). Markup replacement cannot: once the markup is replaced,
+  the bot has no leg to hold and no way to be told the outcome.
+- **The websocket routes have no mechanism at all**, so they have no transfer.
+  Both Pipecat `carrier-websocket` and LiveKit `connector` carry media and
+  nothing else. Building a transfer there means owning the audio path, which
+  this project deleted on purpose (see "Why the websocket 'no' rows are firm").
+
+The rest of this section is the same information per route, with sources.
+
 Verified against the platforms' live documentation on 2026-08-11. "Native"
 means the platform ships and maintains the primitive.
 
@@ -24,7 +51,7 @@ means the platform ships and maintains the primitive.
 | livekit | `connector` (Twilio websocket) | no | no |
 | pipecat | Daily, Daily-provisioned number (`transport: daily-sip`) | **yes**: `transport.sip_call_transfer`. The bot announces, Daily reroutes the leg, the bot drops off. Needs dial-out enabled on the Daily domain. | **not emitted yet.** The platform supports it; this project has not built it. Feature 004. |
 | pipecat | Daily, your own carrier (`transport: daily-sip` + `carrier:`) | **yes, same primitive**: `transport.sip_call_transfer`, with the destination composed as a SIP URI at your trunk's termination address, so the leg leaves through your own carrier (SCHEMA N37, verified against [Daily transfers](https://docs.daily.co/guides/products/dial-in-dial-out/transfers) 2026-08-12: `sipCallTransfer` works for dial-in legs, SIP-to-SIP and SIP-to-PSTN both supported). Same dial-out approval on the Daily domain. **Provisional**: documented by category rather than by this exact interconnect topology, so it stays provisional until its live run is recorded in `specs/006-pipecat-carrier-telephony/tasks.md`. | **not emitted yet**, same reason as the row above, and the carrier leg will carry warm unchanged when it lands: a carrier call joins the same room as a Daily-provisioned one, and only the supervisor leg's destination composes differently. |
-| pipecat | Pipecat Cloud carrier stream (`transport: cloud-websocket` + `carrier: twilio`) | **yes**, by a different mechanism: one request replaces the live call's markup at your carrier, keyed on its call id. A spoken line, `<Dial answerOnBridge="true">` on a destination read from the environment, and the bot's part ends. **Its one limit, stated plainly**: if the dial does not connect, the caller hears a spoken failure line and comes back to a **fresh** agent that does not remember the call, because deciding anything else would need a callback endpoint you host and this route hosts nothing. The same happens when a completed transfer ends by the other side hanging up first. **Provisional** until its live run is recorded in `specs/007-pipecat-native-websocket/tasks.md`. | no, by trade: a warm handoff has to act on how the destination's leg ended, which needs that same hosted callback. The refusal names it. |
+| pipecat | Pipecat Cloud carrier stream (`transport: cloud-websocket` + `carrier: twilio`) | **yes**, by a different mechanism: one request replaces the live call's markup at your carrier, keyed on its call id. A spoken line, `<Dial answerOnBridge="true">` on a destination read from the environment, and the bot's part ends. **Its one limit, stated plainly**: when the dial ends, the caller hears a spoken handback line and comes back to a **fresh** agent that does not remember the call, because deciding anything else would need a callback endpoint you host and this route hosts nothing. "When the dial ends" covers both endings, the destination hanging up as well as a dial that never connected, which is why that line names neither. **Provisional** until its live run is recorded in `specs/007-pipecat-native-websocket/tasks.md`. | no, by trade: a warm handoff has to act on how the destination's leg ended, which needs that same hosted callback. The refusal names it. |
 | pipecat | carrier websockets (twilio, telnyx, plivo, exotel) | no: the platform has no transfer control on these transports | no: same reason |
 
 Sources: [LiveKit call forwarding](https://docs.livekit.io/telephony/features/transfers/cold.md),
@@ -502,16 +529,34 @@ accounts, with the result dated below. Anything else is **provisional**, however
 much offline testing it has. When a run finds a wrong step, the fix lands in this
 document before it lands in code.
 
+**Two different scales share the word "verified", so read which one a page means.**
+This table is about **a phone call somebody made**: the recipe run as written,
+against real accounts, dated. The `provisional` / `verified` tag in
+`compile-report.json` is about **a credentialed smoke running in CI**, which does not
+exist yet, so every route tag stays `provisional` regardless of what is recorded
+here. A row below can be verified while its code tag reads provisional, and that is
+not a contradiction.
+
 | row | state | evidence |
 |---|---|---|
-| LiveKit SIP cold | provisional | no credentialed run recorded |
-| LiveKit SIP warm | provisional | no credentialed run recorded |
+| LiveKit SIP cold | **verified 2026-08-12** | run as written on a real Twilio Elastic SIP Trunk and a deployed LiveKit Cloud agent: a call to `SIP_FROM_NUMBER` was answered by the agent, the caller asked for billing, the destination's phone rang, the agent left the call, and the three cold log lines came back clean. This run is also what found N33: the first attempt raised `ValueError` from the prebuilt's constructor because a build directory cannot mint a platform-assigned trunk ID, which is why dial-out now passes the carrier's settings inline. |
+| LiveKit SIP warm | **verified 2026-08-12** | run as written from the LiveKit Agent Console against a deployed agent: the supervisor's real phone rang, the caller held, and the two were merged. This run is what found N35: the prebuilt's own prompt never briefs unprompted, so the supervisor heard a greeting rather than the briefing, and the persona the supervisor hears is Unmute's from that date. |
 | Pipecat Daily cold, Daily-provisioned number | provisional | no credentialed run recorded. Proven offline against real `pipecat-ai` 1.5.0 on 2026-08-12: the emitted transport accepts a real dial-in payload, the project passes `ruff` and `ty`, and the transfer attempts at most once. None of that is a phone call. |
 | Pipecat Daily cold, your own carrier | provisional | no credentialed run recorded. Built and offline-proven 2026-08-13: the route validates Redis-free, the destination composes as a SIP URI at the trunk's termination address, the at-most-one-attempt guard and the caller-stays-connected branches are unchanged from the row above, and the emitted Python passes `ruff`. Daily documents `sipCallTransfer` for dial-in legs by category, never for this exact interconnect topology, so the run in `specs/006-pipecat-carrier-telephony/tasks.md` is what this row is waiting on. |
+| Pipecat Cloud carrier stream, inbound | **verified 2026-08-13** | run as written on a real Twilio number and a deployed Pipecat Cloud agent: a static TwiML Bin, a call to the number, the agent answered and held a conversation. Two defects came out of this run rather than out of review. **F15:** `TwilioFrameSerializer` raises when `auto_hang_up` is left on and credentials are falsy, which every receive-only build hit, found by driving a synthetic Media Streams handshake into the built container. **The organization value:** a display name where the hyphenated slug belongs is refused by the platform before the agent starts, so the agent's own log stays empty and the failure looks like ours. The runbook's wording was wrong twice before it was right. |
+| Pipecat Cloud carrier stream, cold transfer | **verified 2026-08-13**, except the decline path | run as written on the same deployment: the caller asked about an invoice, the agent spoke its handoff line, the destination's phone rang, and the caller was connected. **What has not been run is the decline drill**: letting the destination ring out or reject, and confirming the caller hears the failure line and then a fresh agent rather than silence. That path is emitted and offline-proven (the markup is sequential, so the failure `<Say>` and the reconnect run only when the `<Dial>` never connects), and it is the path a caller meets on a bad day, so it is called out rather than folded into the row above. |
 
-Nothing here is verified yet. Saying so plainly is the point: three rows sat
-under one sentence promising a run that had not happened, which reads as a record
-of success to anyone skimming.
+Two of the six rows above are still waiting on a phone call, and one is waiting on a
+single path within it. Saying which, per row, is the point: these rows once sat under
+one sentence promising a run that had not happened, which reads as a record of
+success to anyone skimming.
+
+**What the verified rows changed about how this document works.** Every one of the
+three live runs found something no amount of offline testing had: a trunk ID that a
+build directory cannot mint, a prebuilt that never briefs unprompted, and a
+serializer that raises on a receive-only build. That is the argument for the rule
+this page sets for itself, that a wrong step is fixed here before it is fixed in
+code.
 
 **What the Pipecat Daily row is waiting on**, specifically, is steps 1 through 6
 of the rig above, which need a Pipecat Cloud account, a Daily domain with dial-out

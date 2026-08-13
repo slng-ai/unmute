@@ -158,7 +158,7 @@ func TestEnvExampleDocumentsSecrets(t *testing.T) {
 // A package with no variables keeps its previous output: none of the machinery
 // appears (V16).
 func TestNoVariablesEmitsNoMachinery(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "telephony-hello"))
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "twilio-telephony-hello"))
 	if err != nil {
 		t.Fatal(err)
 	}

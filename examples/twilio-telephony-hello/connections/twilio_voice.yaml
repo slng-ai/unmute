@@ -1,9 +1,10 @@
-# Twilio for both targets in this package: Programmable Voice + Media Streams.
+# Twilio's REST account credentials, used by the pipecat target here.
 # Values are environment variable names, never secrets.
 #
-# The same three names on the Pipecat Cloud carrier stream route and on the
-# LiveKit Twilio connector, and the same three ../pipecat-human-transfer-twilio
-# uses, so one .env drives every Twilio example here.
+# The same three names ../pipecat-human-transfer-twilio uses, so one .env drives
+# every Pipecat Twilio example in this repository. The livekit target in this
+# package reads ./twilio_sip.yaml instead: its route dials through a trunk, not
+# through this API.
 #
 # from_number is the caller identity the recipient sees: a voice-capable number
 # you own in this account (or a caller ID verified on it). The same number

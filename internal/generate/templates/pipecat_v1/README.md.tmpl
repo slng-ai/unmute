@@ -705,18 +705,23 @@ can still refuse a call live on the **account**:
 
 When the agent hands the caller to a person, one request replaces the live call's
 markup at your carrier: a spoken line, then the destination dialled with ringback
-audible, then (only if that dial never connects) another spoken line and the
-caller put back with this agent. The destination is read from the environment at
-call time, so no phone number is written into this project.
+audible, then a second spoken line and the caller put back with a fresh agent.
+The destination is read from the environment at call time, so no phone number is
+written into this project.
 
 Two limits, and they are limits of having nothing hosted rather than accidents:
 
-- **A failed transfer brings back a fresh agent that does not remember the call.**
-  Deciding what to do about a failed dial needs a callback endpoint you host,
-  which is exactly the cost this route exists to remove, so the fallback is
-  written into the markup up front instead.
-- **The same happens when the person you transferred to hangs up first.** The
-  caller hears the line and meets a fresh agent, and can simply hang up.
+- **The caller comes back to a fresh agent that does not remember the call, and
+  that happens however the dial ended.** Your carrier runs the verbs after the
+  dial when the person hangs up exactly as it does when the line was busy or
+  nobody answered, and telling those apart needs a callback endpoint you host,
+  which is the cost this route exists to remove. So the second spoken line says
+  only what is true either way (`Putting you back to the assistant.`) and never
+  claims nobody answered. Do not reword it into a failure line: a completed
+  transfer would then apologise to every caller the person helped.
+- **A completed transfer therefore ends with the agent greeting them again.** The
+  caller can simply hang up. Only the caller hanging up first stops the document
+  before that line.
 
 If you need the same agent to survive a failed transfer, use the Daily carrier route.
 See the route comparison in `docs/TELEPHONY.md`.
@@ -778,10 +783,12 @@ within a couple of seconds, then this agent.
 {{end}}{{if .HasColdTransfer}}
 **{{if .CloudWebsocket.HasOutbound}}{{if .CloudWebsocket.HasInbound}}{{if .SecretSet}}8{{else}}7{{end}}{{else}}{{if .SecretSet}}6{{else}}5{{end}}{{end}}{{else}}{{if .SecretSet}}7{{else}}6{{end}}{{end}}. Test a transfer, both ways.** On a call, ask for the person this agent can
 hand you to. Expected: the spoken line, the destination ringing, and the agent
-gone once it answers. Then run it again with the destination **declining or not
-answering**: expected is the failure line and a fresh agent, never silence. That
-second run is the one worth doing, because it is the path a caller meets on a bad
-day.
+gone once it answers. Then let the person **hang up first**: expected is the
+handback line and a fresh agent greeting the caller, never silence and never a
+drop. Then run it a third time with the destination **declining or not
+answering**: expected is the same handback line and the same fresh agent, because
+the markup cannot tell the two endings apart. Those last two runs are the ones
+worth doing; they are what a caller meets on an ordinary day and on a bad one.
 {{end}}
 One log, and only one: `pipecat cloud agent logs {{.Project}}`. There is no
 second place to look on this route, because there is no second thing running.
@@ -837,7 +844,9 @@ indistinguishable by ear.
 {{- end}}
 {{- if .HasColdTransfer}}
 | The transfer never rings the destination | The per-call check refuses a missing destination by name at session start, so if the session started, read the agent log for the update request's response. |
+| The transfer works, then the handback line plays and the call **drops** instead of the agent coming back | Same cause as the second row, in the one place the value is not something you pasted: `{{.CloudWebsocket.OrganizationEnv}}` in your deployed secret set has to be the organization **slug** (`three-random-words-12345`), not your display name. Your hand-typed Bin can be right while that value is wrong, which is why incoming calls work and only the handback fails. **The tell is a second session that never appears in this agent's log**, plus Twilio error `31921` on the call under Monitor, Logs, Calls. Fix `.env`, re-run the `secrets set` command, and redeploy. |
 {{- end}}
+| An `ERROR` line reading `BusBridge Trying to process LLMServiceMetadataFrame ... but StartFrame not received yet` | Harmless, and nothing of yours caused it. Both pipelines start at once; the transport pipeline's start waits on the transcriber's WebSocket, so the agent's LLM announces itself a moment before the bridge is ready and that announcement is dropped. It carries one flag, `is_realtime_service`, which is false for every model this project binds, and the processor that would read it ignores a false one. It appears when a provider connects slowly and not otherwise. |
 {{end}}{{if and (eq .Transport "daily-sip") (not .DailyCarrier)}}
 ## Phone calls
 

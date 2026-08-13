@@ -11,7 +11,7 @@ The tools use no network or durable storage; they are fixtures for local LiveKit
 and Pipecat runs. `salon-support`, `outbound-reminder`, and the telephony
 packages carry their own smaller tool sets.
 
-The telephony examples are **one per use case**: `telephony-hello` for inbound and
+The telephony examples are **one per use case**: `twilio-telephony-hello` for inbound and
 outbound, `pipecat-human-transfer-twilio` for a cold transfer with nothing hosted,
 `livekit-human-transfer` for a warm transfer, and `pipecat-human-transfer-daily` for a
 Daily-provisioned number. Which Twilio route to pick is answered in
@@ -21,9 +21,10 @@ Daily-provisioned number. Which Twilio route to pick is answered in
 caller through to a person works differently on each platform (LiveKit does it over
 a SIP trunk with a native primitive for both cold and warm; Pipecat does it over
 Twilio Media Streams, cold only), so those packages are not interchangeable and
-their names say which one you are reading. `telephony-hello` and
-`outbound-reminder` carry a target per provider instead, because there the point is
-that the same agent compiles for both.
+their names say which one you are reading. `twilio-telephony-hello` is named after
+its **carrier** instead, because it carries one target per provider and the point is
+comparing how one carrier reaches each platform. `outbound-reminder` is named after
+neither, because it is about variables and secrets and happens to compile for both.
 
 | Package | Structure | Responsibility split |
 |---|---|---|
@@ -32,9 +33,9 @@ that the same agent compiles for both.
 | [`task-groups`](task-groups/) | One agent and three ordered tasks | Shared context moves through customer identification, slot selection, and finalization. |
 | [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |
 | [`salon-support`](salon-support/) | One agent, variables, browser only | **Start here.** The one you can run in a minute: web audio, local tools, no Twilio and no API to stand up. Shows a personalized greeting, a hidden tool parameter, and the model saving what the caller says. |
-| [`telephony-hello`](telephony-hello/) | A minimal inbound and outbound phone agent | Real Twilio calls over two routes from one `.env`: Pipecat on the platform's own carrier stream (`cloud-websocket`, nothing hosted by you) and the LiveKit Twilio connector (which you host). The smallest way to confirm your Twilio setup before wiring a real agent. |
+| [`twilio-telephony-hello`](twilio-telephony-hello/) | A minimal inbound and outbound phone agent | Real Twilio calls on the route each platform recommends: Pipecat on the platform's own carrier stream (`cloud-websocket`, Media Streams, nothing hosted by you) and LiveKit on a Twilio Elastic SIP Trunk (`sip`, the route with transfers and voicemail). Two mechanisms side by side, and between them you can hear both call directions on a laptop. |
 | [`livekit-human-transfer`](livekit-human-transfer/) | One phone agent, two ways to reach a person | Cold transfer hands the caller off and the agent drops out; warm transfer holds the caller, briefs a supervisor, then bridges the two. **LiveKit only**, over a Twilio SIP trunk: warm transfer compiles on no other route today. |
-| [`pipecat-human-transfer-twilio`](pipecat-human-transfer-twilio/) | Cold transfer and inbound, with nothing hosted | The same salon on Pipecat Cloud, reached through your own Twilio number. Your number points at a small piece of static markup in the Twilio console; no server of yours is in the path. A failed transfer brings back a fresh agent, which is the trade for hosting nothing. |
+| [`pipecat-human-transfer-twilio`](pipecat-human-transfer-twilio/) | Cold transfer and inbound, with nothing hosted | The same salon on Pipecat Cloud, reached through your own Twilio number. Your number points at a small piece of static markup in the Twilio console; no server of yours is in the path. However the transfer ends, the caller comes back to a fresh agent, which is the trade for hosting nothing. |
 | [`pipecat-human-transfer-daily`](pipecat-human-transfer-daily/) | Cold transfer on a Daily-provisioned number | The same salon on Pipecat over Daily's own number, so there is no carrier account to set up at all. |
 | [`outbound-reminder`](outbound-reminder/) | One outbound agent using variables and secrets | **The secrets example.** Input variables from the dispatch, a system variable from the route, a conversation variable the model saves mid call, and both ways a secret reaches a tool: `url_env`/`token_env` on two webhook tools, and `os.environ` inside one local handler. Design in [SCHEMA.md](../docs/SCHEMA.md) sections 4.4 and 4.12. |
 

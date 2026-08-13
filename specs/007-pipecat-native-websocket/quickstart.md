@@ -85,10 +85,13 @@ Note what is absent from this list: any machine that stays running.
    answer. Record the caller identity displayed.
 4. **Cold transfer (spec US3, SC-004).** On an inbound call, ask for the
    person; expect the announcement, the destination ringing with ringback
-   audible, the agent gone on answer. Then the drill that matters: destination
-   declines; expect the spoken failure line and a fresh agent session, and
-   confirm the caller was never in silence. Record attempts and outcomes,
-   including the fresh-session limit behaving as documented.
+   audible, the agent gone on answer. Then the two drills that matter, because
+   the markup cannot tell them apart: let the destination **answer and hang up
+   first**, then run it again with the destination **declining**. Both must give
+   the same outcome-neutral handback line and a fresh agent session, neither may
+   leave the caller in silence, and neither may apologise for a failure. Record
+   attempts and outcomes, including the fresh-session limit behaving as
+   documented.
 5. **Failure mapping.** Break one thing at a time and confirm the
    troubleshooting map is honest: misspell the organization in the Bin (connect
    then drop → the map's row); stop short of `ready` and call (spoken line then

@@ -41,9 +41,12 @@ One account and three values, plus one lookup:
 | `BILLING_PHONE_NUMBER` | wherever the transfer should land; your own mobile works for a test |
 | your organization slug | `pipecat cloud organizations list`, pasted into the markup once. It is the hyphenated machine slug (`zonal-bison-orange-168`), not your display name; the CLI's heading for that column has changed between versions |
 
-The same three `TWILIO_*` names [telephony-hello](../telephony-hello) uses, so one
-`.env` drives every Twilio example here. Values never go in this package; the
-package carries environment variable **names** only.
+The same three `TWILIO_*` names
+[twilio-telephony-hello](../twilio-telephony-hello)'s Pipecat target uses, so one
+`.env` drives every Pipecat Twilio example here. (Its LiveKit target reads four
+`SIP_*` names instead, because a SIP trunk's dial-out settings are not the account's
+REST credentials.) Values never go in this package; the package carries environment
+variable **names** only.
 
 **No Daily key, and no Daily anything.** This route touches no Daily API, so
 `DAILY_API_KEY` is not required and is not asked for. That is the visible
@@ -81,9 +84,11 @@ That runs this agent on your machine behind a cloudflared tunnel and borrows the
 declared number's voice configuration for the length of the session, putting the
 previous one back when you stop it. Your TwiML Bin is never touched, because the
 local runner answers Twilio's webhook itself. One limit worth knowing: the
-transfer's own markup names the **deployed** stream address, so if a dial fails
-during a local session the caller comes back to the deployed agent rather than to
-your laptop.
+transfer's own markup names the **deployed** stream address, so a transfer during
+a local session hands the caller back to the deployed agent rather than to your
+laptop. `PIPECAT_CLOUD_ORGANIZATION` therefore has to be the organization
+**slug** even for a local run, or that handback reaches nothing and the call
+simply drops.
 
 ## Deploy to Pipecat Cloud
 
@@ -150,12 +155,14 @@ exists to remove. Warm compiles on LiveKit SIP today, in
 [livekit-human-transfer](../livekit-human-transfer). The capability map with sources is
 [docs/TRANSFERS.md](../../docs/TRANSFERS.md).
 
-**Session survival through a failed transfer.** If the dial does not connect, the
-caller hears a spoken line and meets a **fresh** agent that does not remember the
-call. Same when a completed transfer ends because the other side hangs up first.
-Both are limits of having no callback endpoint, both are written into the
-generated runbook, and the Daily carrier route is the one that keeps the session.
-The route comparison is in [docs/TELEPHONY.md](../../docs/TELEPHONY.md).
+**Session survival through a transfer.** However the dial ends, the caller hears
+one spoken line and meets a **fresh** agent that does not remember the call. That
+is both endings: a dial that never connected, and a completed transfer the person
+ended by hanging up first. Nothing in the markup can tell them apart without a
+callback endpoint, so the line names neither ("Putting you back to the
+assistant."). Both endings are written into the generated runbook, and the Daily
+carrier route is the one that keeps the session. The route comparison is in
+[docs/TELEPHONY.md](../../docs/TELEPHONY.md).
 
 **Caller-number variables.** A variable sourced from the caller's number, the
 called number, the call identifier, or the direction is refused on this route, by

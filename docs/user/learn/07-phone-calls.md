@@ -363,7 +363,7 @@ The restore runs on every exit path, `ctrl-c` included.
 written to Twilio and the public URL is printed for you to configure yourself:
 
 ```sh
-unmute dev examples/telephony-hello --target pipecat --telephony --no-webhook
+unmute dev examples/twilio-telephony-hello --target pipecat --telephony --no-webhook
 ```
 
 Use it for a number that is shared with someone else, serving production
@@ -542,7 +542,7 @@ The shipped examples are one per use case:
 
 | Example | Use case | Targets |
 |---|---|---|
-| `examples/telephony-hello` | inbound and outbound, nothing else | Pipecat (`cloud-websocket`) and LiveKit (`connector`), one `.env` |
+| `examples/twilio-telephony-hello` | inbound and outbound, nothing else | Pipecat (`cloud-websocket`) and LiveKit (`sip`), the route each platform recommends for Twilio |
 | `examples/pipecat-human-transfer-twilio` | cold transfer and inbound, hosting nothing | Pipecat (`cloud-websocket`) |
 | `examples/livekit-human-transfer` | warm transfer and inbound | LiveKit (`sip`) |
 | `examples/pipecat-human-transfer-daily` | cold transfer on a Daily-provisioned number | Pipecat (`daily-sip`, no carrier) |
@@ -551,8 +551,10 @@ The transfer examples name their provider first because putting a caller through
 to a person is not one feature with two implementations. LiveKit does it over a SIP
 trunk, with a native primitive for cold **and** warm; Pipecat does it over Twilio
 Media Streams, cold only. Those packages are not interchangeable, so the name says
-which platform you are reading about. `telephony-hello` carries a target per
-provider instead, because there the point is that one agent compiles for both.
+which platform you are reading about. `twilio-telephony-hello` is named after the
+**carrier** instead, because it carries one target per provider: the point there is
+comparing how the same carrier reaches each platform, over Media Streams on one and
+over a SIP trunk on the other.
 
 ### Configure a Pipecat carrier WebSocket
 
@@ -990,6 +992,22 @@ On **Pipecat + Daily**, cold is `sip_call_transfer`: the bot announces the
 handoff, Daily reroutes the caller's leg, and the bot drops off once the
 person answers. A failed transfer comes back as a result the tool reads, and
 `on_unavailable` decides whether the agent keeps helping or says goodbye.
+
+On **Pipecat + `cloud-websocket`**, cold is neither of those. There is no SIP leg
+to refer and no room to reroute, so the agent instead sends one request to your
+carrier that **replaces the live call's instructions**: speak a line, dial the
+destination, then speak a second line and hand the caller back to a new session.
+The bot's part of the call ends when the markup is replaced. That second line
+plays **whenever the dial ends**, and that includes the person hanging up after a
+perfectly good conversation, not only a dial that never connected. A static
+document cannot tell the two apart, so the line says only what is true of both
+and never apologises for a failure that may not have happened. That is also why
+this route cannot keep the session across a transfer and cannot do warm at all:
+it has no leg left to hold and nothing tells it how the other side's leg ended.
+
+Three mechanisms, then, not one feature: refer the existing leg, reroute the room,
+or replace the instructions. Which one your route has is what decides whether cold
+keeps the session and whether warm exists at all.
 
 Every transfer route stays provisional until its recipe in
 [TRANSFERS.md](../../TRANSFERS.md) has been run as written. See

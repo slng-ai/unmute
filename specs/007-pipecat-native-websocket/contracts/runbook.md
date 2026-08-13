@@ -90,11 +90,12 @@ platform's documented model for direct carrier connections.
 
 Where a cold transfer is declared, the runbook states, in operator words, the two
 limits whose canonical specification is [carrier-markup.md](carrier-markup.md)
-§3: a failed transfer
-brings back a fresh agent that does not remember the call, and a completed
-transfer that ends by the other side hanging up does the same. The route
-comparison in the docs is linked as "if you need the same agent to survive a
-failed transfer, use the Daily carrier route".
+§3: the caller comes back to a fresh agent that does not remember the call, and
+that happens however the dial ended, a completed transfer the other side hung up
+on included. The runbook says so in those terms and quotes the outcome-neutral
+handback line rather than describing it as a failure line. The route comparison in
+the docs is linked as "if you need the same agent to survive a failed transfer,
+use the Daily carrier route".
 
 ## Part seven: when something does not work
 

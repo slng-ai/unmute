@@ -145,13 +145,14 @@ What a session is, decided once, right after the transport exists:
 Reuses 006's module-scope `_TRANSFER_RESULT` discipline unchanged: one process
 serves one call, the result of an attempt is recorded before the model sees it,
 and a second request replays the recorded outcome rather than re-firing. The
-transfer's TwiML (announce → update → sequential failure continuation) is
+transfer's TwiML (announce → update → sequential handback continuation) is
 specified in contracts/carrier-markup.md; its one state transition worth naming:
 
 ```
 announced → twiml_updated → (stream closes; session ends)
-                             └─ on dial failure, carrier-side: caller hears the
-                                failure line and reconnects as a NEW session
+                             └─ when the dial ends, carrier-side, however it
+                                ended: caller hears the outcome-neutral handback
+                                line and reconnects as a NEW session
 ```
 
 The new session is a fresh inbound phone session with no memory; that limit is

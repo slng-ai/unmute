@@ -171,9 +171,10 @@ uses the local VAD. Semantic endpointing is also advisory.
   The build emits **no new file**: the file list is exactly a plain Pipecat Cloud
   build's. The generated README dictates the carrier console work in four steps,
   three of them clicks and one a `pipecat cloud organizations list`. Cold transfer
-  works here, by replacing the live call's markup; the limit is that a failed
-  transfer brings back a **fresh** agent that does not remember the call, which is
-  what the Daily carrier form buys with its helper. The route comparison is in
+  works here, by replacing the live call's markup; the limit is that **any** ending
+  brings back a **fresh** agent that does not remember the call, a dial nobody
+  answered and a person hanging up alike, which is what the Daily carrier form
+  buys with its helper. The route comparison is in
   [TELEPHONY.md](../../TELEPHONY.md).
 - **`transport: carrier-websocket`** selects direct Twilio, Telnyx, or Plivo
   media streaming for telephony. It also requires `carrier` and `connection`;
@@ -325,7 +326,7 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | carrier WebSocket telephony | provisional for generated Twilio, Telnyx, and Plivo adapters; Exotel is gated pending authenticated WebSocket ingress |
 | Daily telephony, Daily's number (`transport: daily-sip`) | provisional until its credentialed run is recorded; needs dial-out enabled on the Daily domain, which `validate` names |
 | Daily telephony, your own number (`transport: daily-sip` + `carrier:`) | provisional until its credentialed run is recorded (SCHEMA N37); same dial-out approval, no Daily number needed. Twilio only for now: a second carrier is one forwarding action and one block of instruction text, and the structure for it already ships |
-| cold human transfer (`cold:`) | ok on `transport: daily-sip` (both forms) and on `transport: cloud-websocket`; the carrier WebSocket routes have no transfer primitive. The two differ in what a **failed** transfer does: Daily keeps the same session, `cloud-websocket` brings back a fresh agent |
+| cold human transfer (`cold:`) | ok on `transport: daily-sip` (both forms) and on `transport: cloud-websocket`; the carrier WebSocket routes have no transfer primitive. The two differ in what happens when the dial ends: Daily keeps the same session and returns to it only on a failed dial, `cloud-websocket` speaks a handback line and brings back a fresh agent whichever way the dial ended |
 | telephony call-source variables (caller number, called number, call id, direction) | ok on the carrier WebSocket routes; **refused by name** on `transport: daily-sip` and `transport: cloud-websocket`, because the code that fills them is part of the adapter neither route emits |
 | warm human transfer (`warm:`) | not emitted on any Pipecat route, and the refusals say why per route: Daily documents the pattern and this project has not built it (feature 005); the carrier WebSocket transports have no transfer control at all; `cloud-websocket` would need a callback endpoint you host, which is the cost that route exists to remove |
 

@@ -2316,7 +2316,7 @@ func TestPipecatWebWaitsForRTVIClientReady(t *testing.T) {
 // route's environment on top.
 //
 // The fixture is the carrier-websocket route, because that is the route with a
-// telephony.py to check the rest. It used to be examples/telephony-hello, whose
+// telephony.py to check the rest. It used to be examples/twilio-telephony-hello, whose
 // Pipecat target moved to the platform-terminated route in feature 007; that
 // route's own version of this invariant is
 // TestCloudWebsocketPureInboundAsksForNothing.

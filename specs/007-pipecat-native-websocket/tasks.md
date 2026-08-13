@@ -125,14 +125,14 @@ under `examples/`; their `build/` directories are disposable output.
 
 ## Phase 5: User Story 3 - Cold transfer to a human (Priority: P2)
 
-**Goal**: the caller reaches a person through the operator's own carrier account, and a failed transfer never leaves the caller stranded silently.
+**Goal**: the caller reaches a person through the operator's own carrier account, and no ending of the dial leaves the caller stranded silently or told something the markup cannot know.
 
-**Independent Test**: on a live inbound call, ask for the person; then repeat with the destination declining. Offline: the transfer dials an environment name, never a literal, and the failure verbs follow the dial.
+**Independent Test**: on a live inbound call, ask for the person; then repeat twice, once letting the destination answer and hang up first, once with it declining. Both endings must produce the same handback. Offline: the transfer dials an environment name, never a literal; the handback verbs follow the dial; no spoken line names an outcome.
 
 ### Tests for User Story 3
 
 - [X] T042 [P] [US3] Add `TestCloudWebsocketTransferUpdatesTheLiveCall` to `internal/generate/pipecat_cloud_websocket_test.go`, asserting the emitted transfer announces first, then updates the call by its id, and composes `<Dial answerOnBridge="true">` around a destination read from the environment
-- [X] T043 [P] [US3] Add `TestCloudWebsocketTransferFailurePathIsSequential` to `internal/generate/pipecat_cloud_websocket_test.go`, asserting the spoken failure line and the reconnect stream follow the `<Dial>` in the same markup, and that the reconnect names the same service host as the Bin
+- [X] T043 [P] [US3] Add `TestCloudWebsocketTransferHandbackIsSequentialAndOutcomeNeutral` (named `...TransferFailurePathIsSequential` until the 2026-08-13 live run; see carrier-markup.md §3 amendment) to `internal/generate/pipecat_cloud_websocket_test.go`, asserting the spoken handback line and the reconnect stream follow the `<Dial>` in the same markup, that no spoken line claims an outcome the markup cannot know, and that the reconnect names the same service host as the Bin
 - [X] T044 [P] [US3] Add `TestCloudWebsocketTransferHonestyIsWritten` to `internal/generate/pipecat_cloud_websocket_test.go`, asserting the emitted README states the fresh-session limit and the destination-hangs-up-first case when a transfer is declared
 - [X] T045 [P] [US3] Add a warm-transfer refusal test to `internal/generate/pipecat_cloud_websocket_test.go`, asserting the message says which thing it means and does not claim the platform cannot do it
 
@@ -202,10 +202,10 @@ under `examples/`; their `build/` directories are disposable output.
 - [X] T068 [P] Run `make fmt`, `make lint`, and `go test ./...`, and confirm ruff is clean on every emitted example via `go test ./internal/generate -run TestPublicExamplesEmitLintCleanPython`
 - [X] T069 Diff every example's build output against T001's baseline, confirm every untouched route is byte-identical, and list the deliberate changes (the new `examples/human-transfer-cloud-twilio`, the `examples/telephony-hello` target move, the deleted `examples/human-transfer-daily-twilio`) under Phase 8 findings in `specs/007-pipecat-native-websocket/tasks.md`
 - [X] T070 [P] Prove the emitted image end to end with Docker per [quickstart.md](quickstart.md) offline step 6 and record the result
-- [ ] T071 Run the live half of [quickstart.md](quickstart.md) and record each result, dated, in the Live Run Record below
-- [ ] T071f Close the `examples/telephony-hello` audit (spec FR-016a, the live half): deploy it to Pipecat Cloud and have the operator confirm a real inbound call and a real outbound call work, recording their dated confirmation in the Live Run Record below. The example is not audited until they say the deployed agent works
-- [ ] T072 Lift `provisional` in `internal/target/telephony.go` only for the capabilities the live runs actually proved, and update the note on the rest to say what is still missing
-- [ ] T073 Update the route comparison and `docs/TRANSFERS.md` status text so no document claims more than the Live Run Record shows
+- [ ] T071 Run the live half of [quickstart.md](quickstart.md) and record each result, dated, in the Live Run Record below (T071a and T071c recorded 2026-08-13; T071b, T071d, T071e and the decline drill remain)
+- [ ] T071f Close the `examples/twilio-telephony-hello` audit (spec FR-016a, the live half): deploy it and have the operator confirm a real inbound call and a real outbound call work, recording their dated confirmation in the Live Run Record below. The example is not audited until they say the deployed agent works. **Scope changed 2026-08-13**: the package was renamed from `telephony-hello` and its LiveKit target moved from `connector` to `sip`, so the audit is now one confirmation per platform, and the two are asymmetric on purpose (Pipecat can be confirmed inbound locally, LiveKit outbound locally, each one's other direction only on a deploy)
+- [X] T072 Lift `provisional` in `internal/target/telephony.go` only for the capabilities the live runs actually proved, and update the note on the rest to say what is still missing. **Closed 2026-08-13 by separating the two things this task conflated.** The tag tracks a credentialed smoke in CI, which no route in the table has, so no tag was lifted and lifting one is a CI change rather than a phone call. The note tracks what a human did, and the old one ("no call has been placed through this endpoint yet") had become false, so it now names both halves: the live inbound and cold transfer of 2026-08-13, and the decline path that is still unrun. The LiveKit SIP Twilio row got the same treatment for its 2026-08-12 runs
+- [X] T073 Update the route comparison and `docs/TRANSFERS.md` status text so no document claims more than the Live Run Record shows. **Closed 2026-08-13.** `docs/TRANSFERS.md`'s Status table gained two rows for this route (inbound verified; cold transfer verified except the decline path) and now states plainly that "verified" there means a call somebody made, while the code tag means a CI smoke. `docs/TELEPHONY.md`'s matrix carries the dated confirmations per row and no longer implies that provisional means untested on a phone
 
 ---
 
@@ -381,11 +381,21 @@ had the most new code behind it.
 
 ### What is not done, and why
 
-T071, T071f, T072, and T073 are the live half. Nothing has been called through
-this endpoint yet, so all five capability rows stay `provisional` with the note
-"built and offline-proven; no call has been placed through this endpoint yet", and
-every document says the same. A row loses `provisional` only against a dated line
-in the Live Run Record above.
+**Updated 2026-08-13, after the first live calls.** T072 and T073 are closed, and
+closing them meant taking apart something they had run together. `provisional` in
+`internal/target/telephony.go` tracks a **credentialed smoke in CI**, which no route
+in that table has, so no tag moved and none will until CI grows one. What did move is
+the **note**, because it tracks what a person actually did and it had gone stale on
+the same day the calls happened.
+
+What is still open is T071 and T071f. Inbound (T071a) and a completed cold transfer
+(T071c) passed on 2026-08-13. Outbound (T071b), the failure mapping drill (T071d),
+the local `dev --telephony` restore check (T071e), and **the decline drill** are
+unrun. The decline drill is the one that matters most of the four: it is the path a
+caller meets on a bad day, and the only evidence for it today is that the emitted
+markup is sequential, so the failure line and the reconnect can only run when the
+dial never connects. T071f's scope also changed with the example rename and its
+LiveKit target's move to `sip`.
 
 ---
 

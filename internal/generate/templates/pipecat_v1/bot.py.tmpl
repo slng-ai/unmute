@@ -224,17 +224,19 @@ def _service_host() -> str:
 def _transfer_twiml(destination: str, caller: str) -> str:
     """The whole transfer, as one document your carrier will run in order.
 
-    Announce, dial, and (only if the dial never connects) speak a line and put
-    the caller back with a fresh agent. It is sequential rather than conditional
-    because branching on how the dial ended needs a callback endpoint, and having
-    no endpoint of yours is what this route is for. The caller therefore never
-    sits in silence, whichever way the dial goes.
+    Announce, dial, then hand the caller back to a fresh agent. What follows the
+    dial runs however the dial *ended*, not only when it failed: your carrier
+    moves to the next verb when the destination hangs up exactly as it does when
+    the destination was busy or never answered, and telling those apart needs a
+    callback endpoint of yours, which is the cost this route exists to remove.
+    So the line before the reconnect says only what is true either way and never
+    claims nobody answered. Only the caller hanging up stops the document.
     """
     return (
         "<Response>"
         "<Say>Connecting you to a colleague now.</Say>"
         f'<Dial answerOnBridge="true" timeout="25">{destination}</Dial>'
-        "<Say>Sorry, we could not reach anyone. Let me take over again.</Say>"
+        "<Say>Putting you back to the assistant.</Say>"
         f'<Connect><Stream url="{STREAM_URL}">'
         f'<Parameter name="_pipecatCloudServiceHost" value="{_service_host()}"/>'
         f'<Parameter name="from_number" value="{caller}"/>'

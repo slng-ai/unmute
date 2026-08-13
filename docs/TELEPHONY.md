@@ -212,8 +212,8 @@ not the number of targets, is the limit:
 | Pipecat | `carrier-websocket` | Exotel | No generated adapter | Gated; no adapter |
 | Pipecat | `daily-sip` | (none) | Daily-provisioned number; Daily's own infrastructure delivers the call to the deployed agent | Runs; provisional. Cloud-only |
 | Pipecat | `daily-sip` | Twilio | Your carrier forwards the call over SIP into the same per-call Daily room. Emits `telephony_helper.py`, an operator-run webhook server, plus a carrier block in the bot (SCHEMA N37) | Runs; provisional. Cloud-only. No public example: the route keeps its guards against `internal/testdata/daily_carrier` |
-| Pipecat | `cloud-websocket` | Twilio | Pipecat Cloud terminates the carrier's Media Stream itself, named by a static TwiML Bin in the carrier console. **No emitted process and no endpoint of yours**, in production or ever (SCHEMA N38) | Runs; provisional. Cloud-only |
-| LiveKit | `sip` | Twilio | Self-hosted LiveKit SIP and Twilio trunk inputs | Runs; provisional |
+| Pipecat | `cloud-websocket` | Twilio | Pipecat Cloud terminates the carrier's Media Stream itself, named by a static TwiML Bin in the carrier console. **No emitted process and no endpoint of yours**, in production or ever (SCHEMA N38) | Runs; provisional. Cloud-only. Real inbound call and cold transfer confirmed 2026-08-13; the transfer's decline path is unrun |
+| LiveKit | `sip` | Twilio | Self-hosted LiveKit SIP and Twilio trunk inputs | Runs; provisional. Real inbound call, cold transfer and warm transfer confirmed 2026-08-12 |
 | LiveKit | `sip` | Telnyx | Self-hosted LiveKit SIP and Telnyx trunk inputs | Runs; provisional |
 | LiveKit | `sip` | Plivo | Self-hosted LiveKit SIP and Plivo trunk inputs | Runs; provisional |
 | LiveKit | `sip` | Exotel | No generated adapter | Gated; no adapter |
@@ -222,9 +222,16 @@ not the number of targets, is the limit:
 "Runs; provisional" means the route runs in the public CLI now, and its
 provisional status is internal maturity tracking in `compile-report.json`, not
 a runtime block. A credentialed smoke in CI, once it exists, only flips the
-route from provisional to verified there, with no change to whether it runs. The
-Twilio connector and the Pipecat Twilio route were confirmed on real inbound and
-outbound calls by the author. The Pipecat carrier adapters contain inbound, outbound,
+route from provisional to verified there, with no change to whether it runs.
+
+**Provisional is not the same as untested on a phone**, and four rows above say so.
+The tag tracks a CI smoke that does not exist yet for any route; the dated notes
+track calls somebody actually made. Four routes now have live evidence: the Pipecat
+Twilio carrier-websocket route and the LiveKit Twilio connector (inbound and
+outbound), LiveKit SIP over Twilio (inbound, cold and warm transfer, 2026-08-12),
+and the Pipecat Cloud carrier stream (inbound and cold transfer, 2026-08-13). The
+per-transfer record, with what each run found, is the Status table in
+[TRANSFERS.md](TRANSFERS.md). The Pipecat carrier adapters contain inbound, outbound,
 and hangup paths; they carry no transfers, because the websocket transports
 have no transfer primitive and transfers compile only where one exists
 (TRANSFERS.md). Voicemail detection stays gated. The LiveKit SIP emitter
@@ -232,6 +239,19 @@ contains inbound, outbound, voicemail, hangup, cold-transfer, and
 warm-transfer paths, all on LiveKit's native primitives. The LiveKit Twilio
 connector emitter contains inbound, outbound, and hangup paths; transfers and
 voicemail detection stay on the LiveKit SIP route.
+
+**Transfer to a human, per route, in one line each.** These are three different
+mechanisms rather than one feature implemented three times, which is why the
+capability differs. [TRANSFERS.md](TRANSFERS.md) is the authority and carries the
+sources.
+
+| Route | Cold | Warm | Mechanism |
+|---|---|---|---|
+| LiveKit `sip` | yes | **yes, the only one** | SIP REFER on the caller's existing leg, and `WarmTransferTask` for the held-and-briefed shape |
+| Pipecat `daily-sip`, either form | yes | not built (feature 005) | Daily reroutes the caller's leg out of the room; the bot drops off |
+| Pipecat `cloud-websocket` | yes | no, by trade | one request replaces the live call's markup at the carrier; the session cannot survive it, so the caller meets a fresh agent |
+| Pipecat `carrier-websocket` | no | no | the transport has no transfer control |
+| LiveKit `connector` | no | no | same: media only, no platform primitive |
 
 ## What scales across carriers
 
@@ -618,7 +638,7 @@ difference is one thing: **what you host.**
 | What the number points at | a TwiML Bin in the Twilio console | your running helper's URL | your running application's URL |
 | What the carrier account needs | a voice-capable number | a number, an Elastic SIP trunk, and an IP access list for Daily's addresses | a voice-capable number |
 | Transfers | cold, by replacing the live call's markup | cold, by Daily's own transfer primitive | none: the websocket transports have no transfer primitive |
-| A failed transfer | brings back a **fresh** agent that does not remember the call | keeps the **same** session alive | not applicable |
+| After a transfer, however the dial ended | a spoken handback line and a **fresh** agent that does not remember the call, whether the dial failed or the person hung up | keeps the **same** session alive, and only a failed dial returns to it | not applicable |
 | Call sources as spec variables (`source.*`) | no | no | yes |
 | Local `unmute dev --telephony` | yes, one command | no; the emitted runbook dictates the helper beside a tunnel | yes, one command |
 
@@ -643,14 +663,18 @@ this project has not built it.
 
 The shipped examples are one per use case: `examples/livekit-human-transfer` (warm
 transfer, LiveKit), `examples/pipecat-human-transfer-twilio` (cold transfer on
-`cloud-websocket`), and `examples/telephony-hello` (inbound and outbound, both a
-Pipecat and a LiveKit target off one `.env`).
+`cloud-websocket`), and `examples/twilio-telephony-hello` (inbound and outbound, on
+the route each platform recommends for Twilio: `cloud-websocket` on Pipecat and
+`sip` on LiveKit, so the two mechanisms sit side by side in one package).
 
 The transfer examples carry their provider in the name because the transfer is the
 platform's primitive, not ours: a LiveKit SIP REFER and a Twilio TwiML redirect are
 different mechanisms with different capabilities, so those packages cannot be swapped
-for one another. Examples that are about something else, like `telephony-hello` and
-`examples/outbound-reminder`, declare a target per provider instead.
+for one another. `examples/twilio-telephony-hello` carries its **carrier** in the name
+instead, because it holds one target per provider and its subject is how that one
+carrier reaches each of them. `examples/outbound-reminder` names neither: it is about
+variables and secrets, and it declares the two self-hosted routes because its
+`source: to_number` variable is filled only by a carrier adapter.
 
 ### Pipecat Cloud native carrier stream (`cloud-websocket`)
 
@@ -679,10 +703,12 @@ What each piece does:
   exists to originate it.
 - **The cold transfer** replaces the live call's markup by its `CallSid`: a
   spoken line, `<Dial answerOnBridge="true">` on a destination read from the
-  environment, then a spoken failure line and a `<Connect><Stream>` back to the
+  environment, then a spoken handback line and a `<Connect><Stream>` back to the
   same service host. It is sequential rather than conditional because branching
   on the dial's outcome needs an `action` callback URL, which is a hosted
-  endpoint, which this route exists to not have.
+  endpoint, which this route exists to not have. So the handback runs however the
+  dial ended, the destination hanging up included, and its line says only what is
+  true of both endings rather than claiming nobody answered.
 
 **A pure-inbound package on this route needs no carrier credentials at all.** The
 platform receives the call without them, and the connection becomes required only

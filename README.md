@@ -104,16 +104,23 @@ talk to the agent. It reads `.env` from the current directory, then the package
 root, so from the repository root the copies above are optional. Add `--console`
 to talk over the terminal mic and speaker instead of the browser.
 
-Telephony works the same way, for the example that supports it:
+Telephony works the same way, and which direction you can test locally depends on
+the transport rather than on the CLI:
 
 ```sh
-bin/unmute dev "examples/telephony-hello" --telephony --target livekit
-bin/unmute dev "examples/telephony-hello" --telephony --target pipecat
+# Inbound on a real call to your own number: Pipecat over Twilio Media Streams.
+# A tunnel carries it, so the call lands on your laptop.
+bin/unmute dev "examples/twilio-telephony-hello" --telephony --target pipecat
 
-# add --to to place an outbound call
-bin/unmute dev "examples/telephony-hello" --telephony --target livekit --to +YOURNUMBER
-bin/unmute dev "examples/telephony-hello" --telephony --target pipecat --to +YOURNUMBER
+# Outbound on a real call: LiveKit over a Twilio SIP trunk. The call starts from
+# your side, so it goes out from your laptop.
+bin/unmute dev "examples/twilio-telephony-hello" --telephony --target livekit --to +YOURNUMBER
 ```
+
+The other two combinations are deploy exercises, and the example's README says why:
+an inbound SIP call needs the carrier to reach SIP signalling and RTP, which no
+HTTPS tunnel provides, and a Pipecat outbound call is created at Twilio naming the
+**deployed** agent, so there is nothing local for it to reach.
 
 ## Not implemented yet
 

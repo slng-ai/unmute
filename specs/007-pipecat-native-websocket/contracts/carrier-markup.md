@@ -73,7 +73,7 @@ the announcement is the first verb inside it:
 <Response>
   <Say>Connecting you to a colleague now.</Say>
   <Dial answerOnBridge="true" timeout="25">DESTINATION</Dial>
-  <Say>Sorry, we could not reach anyone. Let me take over again.</Say>
+  <Say>Putting you back to the assistant.</Say>
   <Connect>
     <Stream url="wss://[region.]api.pipecat.daily.co/ws/twilio">
       <Parameter name="_pipecatCloudServiceHost" value="AGENT_NAME.ORG_FROM_ENV"/>
@@ -101,9 +101,23 @@ trade the inbound Bin's cold-start line already makes on this route.
   call time; no number literal is ever emitted (spec FR-007).
 - `answerOnBridge` keeps the caller hearing ringback rather than dead air while
   the destination rings.
-- The verbs after `<Dial>` are the failure path, reached sequentially: a static
-  document cannot branch on the dial's outcome, and branching would need a
+- The verbs after `<Dial>` are the **handback** path, reached sequentially: a
+  static document cannot branch on the dial's outcome, and branching would need a
   hosted callback, which this route exists to not have (research D7).
+
+**Amendment, 2026-08-13 (live run).** The second `<Say>` is outcome-neutral, and
+it used to read "Sorry, we could not reach anyone. Let me take over again."
+Calling that the *failure* path was the error. Twilio runs the verb after `<Dial>`
+when the destination **hangs up** exactly as it does on busy or no answer (Twilio
+`<Dial>` documentation, re-read 2026-08-13: "the subsequent verbs execute if the
+called party hangs up, the line is busy, or there is no answer"). Only the caller
+hanging up first stops the document. So the old line apologised to every caller a
+**completed** transfer had just served, which a live call on 2026-08-13 heard
+after a real person had spoken to the caller for six seconds. Limit 2 below
+already said that continuation runs on a completed transfer, so the markup and
+this contract disagreed with each other, and the markup was the wrong one. The
+line now states only what both endings share. A generator test forbids any
+outcome claim in the emitted document.
 
 **Stated limits. This is their canonical specification** (plan, research D7, the
 runbook, and the emitted README all reference this section rather than restating
@@ -122,5 +136,6 @@ Rendered-output tests assert: the three markups share one wss URL and one
 service host rendering; the Bin carries the `<Say>` line, both template
 substitutions, and the compiled agent name; the outbound TwiML exists exactly
 when outbound is declared and carries `direction=outbound`; the transfer TwiML
-dials an env-read destination, never a literal, and its failure verbs follow the
-`<Dial>`; no secret-looking literal appears in any of the three.
+dials an env-read destination, never a literal, its handback verbs follow the
+`<Dial>`, and no spoken line in it claims an outcome; no secret-looking literal
+appears in any of the three.

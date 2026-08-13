@@ -200,6 +200,23 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		}
 		routes[key] = route
 	}
+	// Twilio is the one SIP carrier anybody has called through. Both transfer shapes
+	// were run on a real trunk and a deployed agent on 2026-08-12, with dated
+	// evidence in docs/TRANSFERS.md, and each run found a defect no offline test had
+	// (SCHEMA N33 and N35). The tag still says provisional because that tracks a
+	// credentialed smoke in CI, which no route here has; the note is what tracks
+	// whether a human made a call, and leaving the generic line on this row would
+	// under-report the only route with live evidence on both shapes. Telnyx and
+	// Plivo keep the generic note, because nobody has called through them.
+	sipTwilio := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "twilio"}
+	route = routes[sipTwilio]
+	for feature, evidence := range route.Features {
+		evidence.Verified = "2026-08-12"
+		evidence.Note = "live inbound, cold transfer and warm transfer run 2026-08-12 " +
+			"(docs/TRANSFERS.md); no credentialed smoke runs in CI on any route"
+		route.Features[feature] = evidence
+	}
+	routes[sipTwilio] = route
 	exotel = TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}
 	routes[exotel] = TelephonyRoute{Key: exotel, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{
 		"sip_address", "sip_username", "sip_password", "from_number",
@@ -291,11 +308,22 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	route = routes[cloudWebsocket]
 	for feature, evidence := range route.Features {
 		evidence.Verified = "2026-08-13"
-		// All five are built and offline-proven and none has had a live call, so all
-		// five stay provisional. The note names the one specific gap rather than the
-		// generic line, and a row loses provisional only against a dated line in
-		// specs/007-pipecat-native-websocket/tasks.md.
-		evidence.Note = "built and offline-proven; no call has been placed through this endpoint yet"
+		// The tag stays provisional and the note stopped being generic on the same
+		// day, for two different reasons, and conflating them is what made the old
+		// note wrong.
+		//
+		// The **tag** tracks whether a credentialed smoke runs in CI. None does, on
+		// any route in this table, so every row here is provisional and lifting one
+		// is a CI change rather than a phone call.
+		//
+		// The **note** tracks what anybody actually did. Live inbound and a live
+		// cold transfer were run on a deployed agent on 2026-08-13 (dated evidence
+		// in docs/TRANSFERS.md), so the previous note, "no call has been placed
+		// through this endpoint yet", became false and is the kind of stale line a
+		// reader is right to trust. What is genuinely unrun is the decline path.
+		evidence.Note = "live inbound and cold transfer run 2026-08-13 (docs/TRANSFERS.md); " +
+			"the transfer's decline path is emitted and offline-proven but has not been run; " +
+			"no credentialed smoke runs in CI on any route"
 		route.Features[feature] = evidence
 	}
 	// Required only when the package places or redirects calls. Receiving a call

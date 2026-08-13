@@ -1,0 +1,46 @@
+# The same inbound+outbound agent on the route each platform actually
+# recommends for Twilio, so this package is where you compare them:
+#
+#   pipecat: transport cloud-websocket. Twilio streams the call's audio to
+#            Pipecat Cloud, named by a static TwiML Bin. Nothing of yours is
+#            hosted, in production or ever (SCHEMA N38).
+#   livekit: transport sip. A Twilio Elastic SIP Trunk carries the call into
+#            LiveKit SIP, which is the default multi-carrier LiveKit route and the
+#            only one with transfer and voicemail primitives (docs/TELEPHONY.md).
+#
+# Two mechanisms, two credential groups, one agent. The LiveKit target used to be
+# the Twilio connector here, which was easier to test on a laptop and taught a
+# route with no transfers; it stays available and is exercised by
+# ../outbound-reminder.
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: cloud-websocket
+    carrier: twilio
+    # Present because this agent places outbound calls; a receive-only package on
+    # this route needs no connection at all.
+    connection: twilio_voice
+    # Pinned so both targets in this package say where they run. On this route the
+    # one line also picks the regional stream address the TwiML Bin has to name,
+    # and the region of the secret set the agent reads. `pipecat cloud regions
+    # list` prints yours; codes are forwarded as written (SCHEMA N32).
+    deployment_region: eu-central
+
+  livekit:
+    provider: livekit
+    version: "1.6.4"
+    sdk_language: python
+    transport: sip
+    carrier: twilio
+    # A different connection from the pipecat target's, because a SIP trunk's
+    # dial-out settings are not the account's REST credentials.
+    connection: twilio_sip
+    # Where LiveKit Cloud runs the agent. Declared so the first deploy does not
+    # stop to ask. Forwarded exactly as written; `lk` is the validator.
+    deployment_region: eu-central
+    models:
+      # LiveKit runs its own turn model rather than local Silero.
+      detector:
+        provider: livekit
+        model: turn-detector-mini
