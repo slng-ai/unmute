@@ -151,10 +151,10 @@ func TestDevTelephonyRefusesOnTheDailyRouteAndNamesWhatWorks(t *testing.T) {
 	}
 	message := err.Error()
 	for _, want := range []string{
-		"daily-sip",       // names the route
-		"--console",       // names a mode that does work
-		"browser",         // names the other one
-		"deploy",          // points at how to get a real phone call
+		"daily-sip",                    // names the route
+		"--console",                    // names a mode that does work
+		"browser",                      // names the other one
+		"deploy",                       // points at how to get a real phone call
 		"pipecat-human-transfer-daily", // names the package, so the fix is copy-pasteable
 	} {
 		if !strings.Contains(message, want) {
