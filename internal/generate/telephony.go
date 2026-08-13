@@ -15,9 +15,6 @@ type TelephonyRuntimePlan struct {
 	PublicEndpoints  []TelephonyEndpoint `json:"public_endpoints,omitempty"`
 	RequiredEnv      []string            `json:"required_env"`
 	LocalEnvironment []string            `json:"locally_supplied_environment"`
-	// DevSuppliedEnv names required env values the dev command supplies
-	// itself for local runs; they are never demanded from the user.
-	DevSuppliedEnv []string `json:"dev_supplied_environment,omitempty"`
 	// Environment maps the Connection's carrier vocabulary keys to the env
 	// var names the user chose (names only, never values).
 	Environment map[string]string `json:"environment,omitempty"`
@@ -55,7 +52,7 @@ func TelephonyRuntimePlanFor(target ir.Target) *TelephonyRuntimePlan {
 		Route: plan.Key, Evidence: slices.Clone(plan.Evidence), Coordination: plan.Coordination,
 		Processes: processes, PublicEndpoints: slices.Clone(plan.PublicEndpoints),
 		RequiredEnv: slices.Clone(plan.RequiredEnvironment), LocalEnvironment: slices.Clone(plan.LocalEnvironment),
-		DevSuppliedEnv: slices.Clone(plan.DevEnvironment), Environment: maps.Clone(plan.Environment),
+		Environment:         maps.Clone(plan.Environment),
 		AutoWebhookEndpoint: plan.AutoWebhookEndpoint,
 		ManualSteps:         slices.Clone(plan.ManualSteps), Services: slices.Clone(plan.Services),
 		Reasons: reasons, AdmissionOwner: plan.AdmissionOwner,

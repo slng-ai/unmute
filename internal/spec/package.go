@@ -136,17 +136,67 @@ type TransferContext struct {
 
 // Control is the strict superset decoded before Build selects the kind.
 type Control struct {
-	Kind        string            `json:"kind" yaml:"kind"`
-	When        string            `json:"when,omitempty" yaml:"when,omitempty"`
-	Task        *string           `json:"task,omitempty" yaml:"task,omitempty"`
-	Group       *string           `json:"group,omitempty" yaml:"group,omitempty"`
-	Assign      map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
-	To          *string           `json:"to,omitempty" yaml:"to,omitempty"`
-	Requires    []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
-	Context     *TransferContext  `json:"context,omitempty" yaml:"context,omitempty"`
-	Destination *string           `json:"destination,omitempty" yaml:"destination,omitempty"`
-	Mode        *string           `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Briefing    *string           `json:"briefing,omitempty" yaml:"briefing,omitempty"`
+	Kind     string            `json:"kind" yaml:"kind"`
+	When     string            `json:"when,omitempty" yaml:"when,omitempty"`
+	Task     *string           `json:"task,omitempty" yaml:"task,omitempty"`
+	Group    *string           `json:"group,omitempty" yaml:"group,omitempty"`
+	Assign   map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
+	To       *string           `json:"to,omitempty" yaml:"to,omitempty"`
+	Requires []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
+	Context  *TransferContext  `json:"context,omitempty" yaml:"context,omitempty"`
+	// A human_transfer names its shape with a block, never a `mode:` field, so a
+	// warm-only field on a cold transfer is unwritable rather than rejected by a
+	// cross-field rule (SCHEMA N25, the N19 argument applied to controls). The
+	// block carries every parameter of the transfer, `destination` included, so
+	// there is no such thing as an empty shape block (SCHEMA N27).
+	Cold *ColdTransfer `json:"cold,omitempty" yaml:"cold,omitempty"`
+	Warm *WarmTransfer `json:"warm,omitempty" yaml:"warm,omitempty"`
+}
+
+// ColdTransfer is the `cold:` block: hand the caller to the destination and drop
+// out.
+type ColdTransfer struct {
+	Destination   string `json:"destination" yaml:"destination"`
+	RingTimeout   string `json:"ring_timeout,omitempty" yaml:"ring_timeout,omitempty"`
+	OnUnavailable string `json:"on_unavailable,omitempty" yaml:"on_unavailable,omitempty"`
+}
+
+// WarmTransfer is the `warm:` block: hold the caller, ring the person, brief
+// them, then bridge the two. `briefing` is free text (SCHEMA N25); the drivers
+// pass the call transcript alongside it on their own.
+type WarmTransfer struct {
+	Destination   string `json:"destination" yaml:"destination"`
+	Briefing      string `json:"briefing,omitempty" yaml:"briefing,omitempty"`
+	RingTimeout   string `json:"ring_timeout,omitempty" yaml:"ring_timeout,omitempty"`
+	OnUnavailable string `json:"on_unavailable,omitempty" yaml:"on_unavailable,omitempty"`
+}
+
+// TransferDestination reports the destination the selected shape block names.
+func (c Control) TransferDestination() string {
+	switch {
+	case c.Cold != nil && c.Warm != nil:
+		return ""
+	case c.Cold != nil:
+		return c.Cold.Destination
+	case c.Warm != nil:
+		return c.Warm.Destination
+	}
+	return ""
+}
+
+// TransferShape reports the shape block the control selects, or "" when it
+// carries neither. Build rejects zero and two, so a built package always
+// answers with exactly one.
+func (c Control) TransferShape() string {
+	switch {
+	case c.Cold != nil && c.Warm != nil:
+		return ""
+	case c.Cold != nil:
+		return "cold"
+	case c.Warm != nil:
+		return "warm"
+	}
+	return ""
 }
 
 // Tool is one tools/<name>.yaml. The top level is the contract with the model
@@ -294,7 +344,7 @@ type Target struct {
 	Transport        string              `json:"transport,omitempty" yaml:"transport,omitempty"`
 	Carrier          string              `json:"carrier,omitempty" yaml:"carrier,omitempty"`
 	Connection       string              `json:"connection,omitempty" yaml:"connection,omitempty"`
-	DeploymentRegion string              `json:"deployment_region,omitempty" yaml:"deployment_region,omitempty"` // where the platform deploys the agent (N18)
+	DeploymentRegion Regions             `json:"deployment_region,omitempty" yaml:"deployment_region,omitempty"` // where the platform deploys the agent: one region or several (N18, widened by N32)
 	Models           map[string]ModelDef `json:"models,omitempty" yaml:"models,omitempty"`                       // per-target overrides (N15), keyed by model name / listen / turn
 	Destinations     map[string]string   `json:"destinations,omitempty" yaml:"destinations,omitempty"`
 }

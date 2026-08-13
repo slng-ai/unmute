@@ -96,7 +96,7 @@ func enumOptions() *jsonschema.ForOptions {
 		reflect.TypeFor[GroupThen]():        enum(GroupReturn, GroupTransfer, GroupEnd),
 		reflect.TypeFor[GroupMerge]():       enum(GroupMergeResults),
 		reflect.TypeFor[TransferMode]():     enum(TransferCold, TransferWarm),
-		reflect.TypeFor[Briefing]():         enum(BriefingSummary, BriefingMessage, BriefingWait),
+		reflect.TypeFor[OnUnavailable]():    enum(OnUnavailableReturn, OnUnavailableHangup),
 		reflect.TypeFor[ToolExecution]():    enum(ToolLocal, ToolClient, ToolWebhook, ToolProviderHosted, ToolBuiltin, ToolMCP),
 		reflect.TypeFor[ToolInterruption](): enum(ToolContinue, ToolCancel, ToolProviderDefault),
 		reflect.TypeFor[ToolEffect]():       enum(ToolReturnsData, ToolEndsConversation),

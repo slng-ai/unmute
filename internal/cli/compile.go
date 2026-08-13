@@ -139,39 +139,39 @@ func loadPackage(dir string, names []string) (*ir.Agent, []ir.Target, error) {
 	return agent, targets, nil
 }
 
+// preservedPatterns names the files a rewrite of a build directory must not
+// destroy. `build/<target>/` is disposable by design (constitution: artifacts
+// are regenerated, never edited), and these are the two deliberate exceptions,
+// both written there by somebody other than the compiler:
+//
+//   - `.env` holds the operator's real values. Long-standing behaviour.
+//   - `livekit*.toml` is written by LiveKit Cloud on the first deploy and names
+//     the project subdomain and the assigned agent ID. Losing it breaks
+//     `lk agent deploy` and sends people back to `lk agent create`, which
+//     registers a *second* billable agent and splits dispatch between two
+//     versions. The glob covers the platform's per-region naming
+//     (`livekit.us-east.toml`) and is safe precisely because the emitter never
+//     produces a file matching it.
+var preservedPatterns = []string{".env", "livekit*.toml"}
+
+type preservedFile struct {
+	path    string
+	content []byte
+	mode    os.FileMode
+}
+
 // writeArtifactFiles writes a code-target project into a clean build dir,
 // applying a best-effort `ruff format` pass to emitted Python (SPEC C1/V2): the
 // generator stays template-only, the write path polishes layout. ruff is
 // optional — absent, the (already valid, F-clean) source is written unformatted
 // and a single warning goes to warn.
 func writeArtifactFiles(warn io.Writer, outDir string, files []generate.File) (err error) {
-	dotenvPath := filepath.Join(outDir, ".env")
-	var dotenv []byte
-	var dotenvMode os.FileMode
-	if info, statErr := os.Lstat(dotenvPath); statErr == nil {
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("preserve %s: not a regular file", dotenvPath)
-		}
-		dotenv, err = os.ReadFile(dotenvPath)
-		if err != nil {
-			return fmt.Errorf("preserve %s: %w", dotenvPath, err)
-		}
-		dotenvMode = info.Mode().Perm()
-		defer func() {
-			if mkdirErr := os.MkdirAll(outDir, 0o755); mkdirErr != nil {
-				err = errors.Join(err, fmt.Errorf("restore %s: %w", dotenvPath, mkdirErr))
-				return
-			}
-			if writeErr := os.WriteFile(dotenvPath, dotenv, dotenvMode); writeErr != nil {
-				err = errors.Join(err, fmt.Errorf("restore %s: %w", dotenvPath, writeErr))
-				return
-			}
-			if chmodErr := os.Chmod(dotenvPath, dotenvMode); chmodErr != nil {
-				err = errors.Join(err, fmt.Errorf("restore mode for %s: %w", dotenvPath, chmodErr))
-			}
-		}()
-	} else if !os.IsNotExist(statErr) {
-		return fmt.Errorf("inspect %s: %w", dotenvPath, statErr)
+	preserved, err := readPreserved(outDir)
+	if err != nil {
+		return err
+	}
+	if len(preserved) > 0 {
+		defer func() { err = errors.Join(err, restorePreserved(outDir, preserved)) }()
 	}
 	if err := os.RemoveAll(outDir); err != nil {
 		return err
@@ -216,6 +216,51 @@ func writeArtifactFiles(warn io.Writer, outDir string, files []generate.File) (e
 		return fmt.Errorf("emitted Python is not valid: %s", strings.Join(invalidPython, "; "))
 	}
 	return nil
+}
+
+// readPreserved snapshots the preservedPatterns matches in a build directory
+// before it is rewritten. A match that is not a regular file fails loud rather
+// than being silently replaced.
+func readPreserved(outDir string) ([]preservedFile, error) {
+	var preserved []preservedFile
+	for _, pattern := range preservedPatterns {
+		matches, err := filepath.Glob(filepath.Join(outDir, pattern))
+		if err != nil {
+			return nil, fmt.Errorf("inspect %s: %w", pattern, err)
+		}
+		for _, path := range matches {
+			info, err := os.Lstat(path)
+			if err != nil {
+				return nil, fmt.Errorf("inspect %s: %w", path, err)
+			}
+			if !info.Mode().IsRegular() {
+				return nil, fmt.Errorf("preserve %s: not a regular file", path)
+			}
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("preserve %s: %w", path, err)
+			}
+			preserved = append(preserved, preservedFile{path: path, content: content, mode: info.Mode().Perm()})
+		}
+	}
+	return preserved, nil
+}
+
+func restorePreserved(outDir string, preserved []preservedFile) error {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return fmt.Errorf("restore %s: %w", outDir, err)
+	}
+	var errs []error
+	for _, file := range preserved {
+		if err := os.WriteFile(file.path, file.content, file.mode); err != nil {
+			errs = append(errs, fmt.Errorf("restore %s: %w", file.path, err))
+			continue
+		}
+		if err := os.Chmod(file.path, file.mode); err != nil {
+			errs = append(errs, fmt.Errorf("restore mode for %s: %w", file.path, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // unparseableMarker is how ruff reports source it could not parse:

@@ -52,71 +52,47 @@ var liveKitSIPAdminBase = func(env []string) string {
 }
 
 // ensureLiveKitSIPRecords creates or reuses the local trunk and dispatch
-// records and returns the env entries to inject. Idempotent by content:
-// listing runs first and a content-identical record is reused, because the
-// Redis volume persists across restarts (V4).
-func ensureLiveKitSIPRecords(ctx context.Context, out io.Writer, targetName string, plan *generate.TelephonyRuntimePlan, env []string) (map[string]string, error) {
+// records. Idempotent by content: listing runs first and a content-identical
+// record is reused, because the Redis volume persists across restarts (V4).
+//
+// Nothing is injected into the child environment. The records are platform state
+// the local LiveKit SIP service reads for itself, and no emitted Python ever
+// looked up their IDs (specs/003 R8, SCHEMA N36).
+func ensureLiveKitSIPRecords(ctx context.Context, out io.Writer, targetName string, plan *generate.TelephonyRuntimePlan, env []string) error {
 	base := liveKitSIPAdminBase(env)
 	token, err := mintLiveKitSIPAdminToken(liveKitSIPComposeKey, liveKitSIPComposeSecret, time.Now())
 	if err != nil {
-		return nil, err
+		return err
 	}
 	client := &sipAdminClient{base: base, token: token}
 	number := envValue(env, plan.Environment["from_number"])
-	needs := func(name string) bool { return slices.Contains(plan.DevSuppliedEnv, name) }
-	injected := map[string]string{}
-
-	if needs("LIVEKIT_SIP_INBOUND_TRUNK") {
-		numbers := []string{}
-		if number != "" {
-			numbers = append(numbers, number)
-		}
-		trunkID, reused, err := client.ensureRecord(ctx, "ListSIPInboundTrunk", "CreateSIPInboundTrunk",
-			map[string]any{"trunk": map[string]any{"name": "unmute " + targetName + " inbound", "numbers": numbers}},
-			"trunk",
-			func(item sipRecord) bool { return slices.Equal(item.strings("numbers"), numbers) },
-			func(item sipRecord) string { return item.string("sipTrunkId", "sip_trunk_id") },
-		)
-		if err != nil {
-			return nil, fmt.Errorf("ensure LiveKit inbound trunk: %w", err)
-		}
-		injected["LIVEKIT_SIP_INBOUND_TRUNK"] = trunkID
-		fmt.Fprintf(out, "%s: LiveKit inbound trunk %s (%s)\n", targetName, trunkID, createdOrReused(reused))
-
-		dispatchName := "unmute " + targetName + " inbound"
-		action, err := client.ensureDispatchRule(ctx, dispatchName, targetName, trunkID)
-		if err != nil {
-			return nil, fmt.Errorf("ensure LiveKit dispatch rule: %w", err)
-		}
-		fmt.Fprintf(out, "%s: LiveKit dispatch rule %q (%s)\n", targetName, dispatchName, action)
+	numbers := []string{}
+	if number != "" {
+		numbers = append(numbers, number)
 	}
-
-	if needs("LIVEKIT_SIP_OUTBOUND_TRUNK") {
-		address := envValue(env, plan.Environment["sip_address"])
-		trunkID, reused, err := client.ensureRecord(ctx, "ListSIPOutboundTrunk", "CreateSIPOutboundTrunk",
-			map[string]any{"trunk": map[string]any{
-				"name": "unmute " + targetName + " outbound", "address": address, "numbers": []string{number},
-				// Auth goes into the request body only; never into emitted
-				// files, compose files, or printed output (V6, C6).
-				"authUsername": envValue(env, plan.Environment["sip_username"]),
-				"authPassword": envValue(env, plan.Environment["sip_password"]),
-			}},
-			"trunk",
-			// ponytail: list responses may redact auth fields, so identity is
-			// address+numbers; a changed password on the same address reuses
-			// the old record until the trunk is deleted by hand.
-			func(item sipRecord) bool {
-				return item.string("address") == address && slices.Equal(item.strings("numbers"), []string{number})
-			},
-			func(item sipRecord) string { return item.string("sipTrunkId", "sip_trunk_id") },
-		)
-		if err != nil {
-			return nil, fmt.Errorf("ensure LiveKit outbound trunk: %w", err)
-		}
-		injected["LIVEKIT_SIP_OUTBOUND_TRUNK"] = trunkID
-		fmt.Fprintf(out, "%s: LiveKit outbound trunk %s (%s)\n", targetName, trunkID, createdOrReused(reused))
+	trunkID, reused, err := client.ensureRecord(ctx, "ListSIPInboundTrunk", "CreateSIPInboundTrunk",
+		map[string]any{"trunk": map[string]any{"name": "unmute " + targetName + " inbound", "numbers": numbers}},
+		"trunk",
+		func(item sipRecord) bool { return slices.Equal(item.strings("numbers"), numbers) },
+		func(item sipRecord) string { return item.string("sipTrunkId", "sip_trunk_id") },
+	)
+	if err != nil {
+		return fmt.Errorf("ensure LiveKit inbound trunk: %w", err)
 	}
-	return injected, nil
+	fmt.Fprintf(out, "%s: LiveKit inbound trunk %s (%s)\n", targetName, trunkID, createdOrReused(reused))
+
+	dispatchName := "unmute " + targetName + " inbound"
+	action, err := client.ensureDispatchRule(ctx, dispatchName, targetName, trunkID)
+	if err != nil {
+		return fmt.Errorf("ensure LiveKit dispatch rule: %w", err)
+	}
+	fmt.Fprintf(out, "%s: LiveKit dispatch rule %q (%s)\n", targetName, dispatchName, action)
+
+	// No outbound trunk is created here. The generated agent dials with the
+	// carrier's trunk settings inline, so local development uses the same
+	// mechanism a deployment does, and a transfer that works in one cannot fail
+	// in the other for want of a registered trunk (SCHEMA N33, 2026-08-12).
+	return nil
 }
 
 func createdOrReused(reused bool) string {

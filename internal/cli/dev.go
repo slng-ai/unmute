@@ -28,7 +28,7 @@ import (
 
 func newDevCmd() *cobra.Command {
 	var uiPort, botPort, targetName, publicURL, to string
-	var noOpen, verbose, console, telephony bool
+	var noOpen, verbose, console, telephony, noWebhook bool
 	var vars []string
 
 	cmd := &cobra.Command{
@@ -77,7 +77,7 @@ func newDevCmd() *cobra.Command {
 				return runDevConsole(cmd, root, selected)
 			}
 			if telephony {
-				return runDevTelephony(cmd, root, selected, publicURL, botPort, to, verbose)
+				return runDevTelephony(cmd, root, selected, publicURL, botPort, to, noWebhook, verbose)
 			}
 			// Default local mode: build and run the deployable container, served
 			// through one WebRTC web UI for both pipecat and livekit (SPEC V1).
@@ -95,20 +95,69 @@ func newDevCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&telephony, "telephony", false, "run the selected target's resolved telephony route (no browser UI)")
 	cmd.Flags().StringVar(&publicURL, "public-url", "", "exact public HTTPS origin for routes with carrier callbacks (requires --telephony)")
 	cmd.Flags().StringVar(&to, "to", "", "E.164 number to dial for an outbound telephony test (requires --telephony and an outbound-capable target)")
+	cmd.Flags().BoolVar(&noWebhook, "no-webhook", false, "do not touch the carrier number's webhook configuration (requires --telephony; point it at the printed public URL yourself)")
 	return cmd
 }
 
 // runDevTelephony is the fail-closed gate: loading and generation reject
 // every provisional or gated route before any tunnel, Docker, or carrier
 // call (SPEC V5). The post-gate orchestration lives in execDevTelephony.
-func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort, to string, verbose bool) error {
+func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort, to string, noWebhook, verbose bool) error {
 	agent, targets, err := loadPackage(root, []string{targetName})
 	if err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
 	}
 	resolved := targets[0]
+	// Both Daily forms refuse, and the two refusals say different true things.
+	// The carrier form has a plan, so it would otherwise fall through to the
+	// generic "no executable telephony topology" line below, which is false: it has
+	// a topology, it just is not one this command can run for you.
+	if resolved.Provider == ir.ProviderPipecat && resolved.Transport == "daily-sip" && resolved.Carrier != "" {
+		return fmt.Errorf("dev %s: target %q reaches its phone calls through your own carrier (%s) on the Pipecat Daily route, "+
+			"and the piece that answers the carrier is the emitted telephony_helper.py, which you run yourself; "+
+			"this command cannot run it for you because your carrier has to be able to reach it. "+
+			"Run `unmute compile %s` and follow the Telephony setup section of the emitted README, which is the helper "+
+			"beside a tunnel, two commands. To talk to this agent right now with no phone at all, "+
+			"use `unmute dev %s` in the browser or `unmute dev --console %s` in the terminal",
+			root, resolved.Name, resolved.Carrier, root, root, root)
+	}
+	// The platform-terminated carrier route runs the phone path locally with one
+	// command. It gets its own orchestration rather than the Compose graph below,
+	// because production on this route hosts nothing: there is no compose file, no
+	// helper, and no endpoint of ours, so the local session is the compiled agent,
+	// a tunnel, and the number borrowed for the length of it.
+	if devCloudWebsocketRoute(resolved) {
+		plan := generate.TelephonyRuntimePlanFor(resolved)
+		if plan == nil {
+			return fmt.Errorf("dev %s: target %q has no resolved telephony route", root, resolved.Name)
+		}
+		if to != "" && !planHasTelephonyFeature(plan, "outbound") {
+			return fmt.Errorf("dev %s: --to needs an outbound-capable target; %q has no outbound direction (set channels.phone outbound: true)", root, resolved.Name)
+		}
+		artifact, err := generate.Generate(agent, resolved, target.Default())
+		if err != nil {
+			return fmt.Errorf("dev %s: %w", root, err)
+		}
+		opts := devTelephonyOptions{publicValue: publicValue, botPort: botPort, to: to, noWebhook: noWebhook, verbose: verbose}
+		if err := execDevCloudWebsocket(cmd, root, resolved.Name, artifact.Telephony, artifact.Files, opts); err != nil {
+			return fmt.Errorf("dev %s: %w", root, err)
+		}
+		return nil
+	}
 	plan := generate.TelephonyRuntimePlanFor(resolved)
 	if plan == nil {
+		// The Daily route is telephony, so the generic message would be false. It
+		// simply has nothing to run locally: Daily's own infrastructure carries the
+		// call to a deployed agent. Name the route, name the two modes that do work
+		// on it right now, and point at how a real phone call happens (FR-028).
+		if resolved.Transport == "daily-sip" {
+			return fmt.Errorf("dev %s: target %q runs on the Pipecat Daily route (transport daily-sip), "+
+				"where Daily carries the phone call to a deployed agent, so there is no local telephony "+
+				"topology to run; talk to this agent now with `unmute dev %s` in the browser or "+
+				"`unmute dev --console %s` in the terminal, and for a real phone call run "+
+				"`unmute compile %s` and follow the Deploy and Phone calls sections of the emitted README",
+				root, resolved.Name, root, root, root)
+		}
 		return fmt.Errorf("dev %s: target %q has no resolved telephony route", root, resolved.Name)
 	}
 	// --to only makes sense for an outbound-capable target; reject before
@@ -123,7 +172,7 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort,
 	if artifact.Telephony == nil || len(artifact.Telephony.Services) == 0 {
 		return fmt.Errorf("dev %s: target %q has no executable telephony topology", root, resolved.Name)
 	}
-	opts := devTelephonyOptions{publicValue: publicValue, botPort: botPort, to: to, verbose: verbose}
+	opts := devTelephonyOptions{publicValue: publicValue, botPort: botPort, to: to, noWebhook: noWebhook, verbose: verbose}
 	if err := execDevTelephony(cmd, root, resolved.Name, artifact.Telephony, artifact.Files, opts); err != nil {
 		return fmt.Errorf("dev %s: %w", root, err)
 	}

@@ -63,12 +63,19 @@ func TestPublicExamplesEmitLintCleanPython(t *testing.T) {
 					if !strings.HasSuffix(file.Path, ".py") {
 						continue
 					}
-					// The telephony adapter modules carry pre-existing unused
+					// The carrier-websocket adapter modules carry pre-existing unused
 					// imports (fastapi Response, _require_accepting) that predate
 					// this check and belong to a separate change. Everything this
-					// gate is here to protect — the driver's main module and the
-					// copied tool handlers — is covered.
-					if strings.HasPrefix(file.Path, "telephony") {
+					// gate is here to protect — the driver's main module, the
+					// emitted call-forwarding helper, and the copied tool handlers
+					// — is covered.
+					//
+					// Named exactly rather than by prefix: telephony_helper.py
+					// shares the prefix and is new, so a prefix skip would exempt
+					// it from the one check that catches an undefined name in it.
+					if slices.Contains([]string{
+						"telephony.py", "telephony_shared.py", "telephony_state.py",
+					}, file.Path) {
 						continue
 					}
 					path := filepath.Join(dir, file.Path)

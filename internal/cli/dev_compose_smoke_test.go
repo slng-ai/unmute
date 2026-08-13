@@ -89,7 +89,13 @@ func smokePipecatTelephonyArtifact(t *testing.T) generate.Artifact {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enableSmokeTelephony(pkg)
+	// The carrier-websocket routes carry media only: SCHEMA N31 made human
+	// transfers native-route-only, so safe_core's cold transfer cannot ride this
+	// one and asking for it fails the build. This test is about the local Compose
+	// graph, not transfers, so the fixture drops the transfer and asks the route
+	// for nothing it does not have.
+	dropHumanTransfers(pkg)
+	enableSmokeTelephony(pkg, "hangup")
 	target := pkg.Targets["pipecat"]
 	target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
 	pkg.Targets = map[string]spec.Target{"pipecat": target}
@@ -110,11 +116,18 @@ func smokeLiveKitSIPArtifact(t *testing.T) generate.Artifact {
 	if err != nil {
 		t.Fatal(err)
 	}
-	enableSmokeTelephony(pkg)
+	// The SIP route has the cold-transfer primitive (N31), so this one keeps
+	// safe_core's transfer and requires the control.
+	enableSmokeTelephony(pkg, "cold_transfer", "hangup")
 	target := pkg.Targets["livekit"]
 	target.Transport, target.Carrier, target.Connection = "sip", "twilio", "primary_phone"
 	pkg.Targets = map[string]spec.Target{"livekit": target}
 	connection := pkg.Connections["primary_phone"]
+	// Carrier-prefixed names on purpose. The shipped example moved to the plain
+	// SIP names on 2026-08-12 (SCHEMA N33), and the compiler knows none of
+	// either set: it carries whatever a Connection declares through verbatim.
+	// Keeping this fixture on the old names is what proves a package written
+	// before that change still compiles and dials unchanged.
 	connection.Environment = map[string]string{
 		"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
 		"sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
@@ -131,11 +144,30 @@ func smokeLiveKitSIPArtifact(t *testing.T) generate.Artifact {
 	return artifact
 }
 
-func enableSmokeTelephony(pkg *spec.Package) {
+// enableSmokeTelephony puts an inbound phone channel on the package. The
+// required controls are per route, because a route that cannot do one fails the
+// build rather than degrading (SCHEMA N31).
+func enableSmokeTelephony(pkg *spec.Package, requiredControls ...string) {
 	inbound, outbound := true, false
 	pkg.Agent.Channels["phone"] = spec.Channel{
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
-		RequiredControls: []string{"cold_transfer", "hangup"},
+		RequiredControls: requiredControls,
+	}
+}
+
+// dropHumanTransfers removes safe_core's cold transfer, for a route that has no
+// transfer primitive. The control is attached to an agent's tool list, so both
+// sides go, otherwise the reference dangles.
+func dropHumanTransfers(pkg *spec.Package) {
+	for name, control := range pkg.Agent.Controls {
+		if control.Kind != "human_transfer" {
+			continue
+		}
+		delete(pkg.Agent.Controls, name)
+		for agentName, agent := range pkg.Agent.Agents {
+			agent.Tools = slices.DeleteFunc(agent.Tools, func(tool string) bool { return tool == name })
+			pkg.Agent.Agents[agentName] = agent
+		}
 	}
 }
 

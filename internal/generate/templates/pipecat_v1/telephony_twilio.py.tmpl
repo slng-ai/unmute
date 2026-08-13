@@ -10,8 +10,8 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 from fastapi import HTTPException, Request, WebSocket
 from fastapi.responses import Response
 from pipecat.runner.types import WebSocketRunnerArguments
-from twilio.base.exceptions import TwilioRestException
-from twilio.http.http_client import TwilioHttpClient
+{{if .Telephony.HasOutbound}}from twilio.base.exceptions import TwilioRestException
+{{end}}from twilio.http.http_client import TwilioHttpClient
 from twilio.request_validator import RequestValidator
 from twilio.rest import Client
 
@@ -22,8 +22,8 @@ from telephony_shared import (
     STATE,
     _env,
     _http_url,
-    _outbound_request,
-    _remember,
+{{if .Telephony.HasOutbound}}    _outbound_request,
+{{end}}    _remember,
     _require_accepting,
     _valid_destination,
     _websocket_url,
@@ -71,13 +71,6 @@ def _stream_twiml(token: str) -> str:
     return tostring(response, encoding="unicode")
 
 
-def _dial_twiml(destination: str) -> str:
-    response = Element("Response")
-    dial = SubElement(response, "Dial")
-    dial.text = destination
-    return tostring(response, encoding="unicode")
-
-
 def configure_pipecat_env() -> None:
     """Pipecat's Twilio serializer reads canonical names; Connections may rename them."""
     os.environ["TWILIO_ACCOUNT_SID"] = _env(ACCOUNT_SID_ENV)
@@ -100,19 +93,6 @@ def normalized_context(runner_args: WebSocketRunnerArguments) -> dict:
         "to_number": pending["to_number"],
         "call_start": pending["call_start"],
     }
-
-
-async def cold_transfer(call_id: str, destination: str) -> None:
-    if not _valid_destination(destination):
-        raise RuntimeError("invalid compiled transfer destination")
-    if not await STATE.mark_once("transfer", call_id, SESSION_TTL_SECS):
-        return
-    try:
-        client = _client()
-        await asyncio.to_thread(client.calls(call_id).update, twiml=_dial_twiml(destination))
-    except Exception:
-        await STATE.forget("transfer", call_id)
-        raise
 
 
 {{if .Telephony.HasInbound}}@app.post("/telephony/inbound")

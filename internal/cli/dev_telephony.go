@@ -19,6 +19,8 @@ import (
 	"syscall"
 
 	"github.com/slng/unmute/internal/generate"
+	"github.com/slng/unmute/internal/ir"
+	"github.com/slng/unmute/internal/target"
 	"github.com/spf13/cobra"
 )
 
@@ -37,6 +39,7 @@ type devTelephonyOptions struct {
 	publicValue string
 	botPort     string
 	to          string // --to: E.164 to dial once the outbound-capable graph is healthy
+	noWebhook   bool   // --no-webhook: leave the carrier's number configuration alone
 	verbose     bool
 }
 
@@ -156,30 +159,43 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 		env: childEnv, output: processOut,
 		stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr(), logPath: logPath,
 	}
-	if len(plan.DevSuppliedEnv) > 0 {
+	if planCreatesLiveKitSIPRecords(plan) {
 		// LiveKit SIP: infrastructure first, then trunk and dispatch records
-		// against the local server, then the application with the IDs (V4).
+		// against the local server, then the application (V4). This is the gate
+		// for the whole two-phase startup, not a display detail: without it the
+		// application starts before any record exists and an inbound call has
+		// nowhere to land.
 		run.infraServices = telephonyInfraServices(plan)
 		run.beforeApp = func(ctx context.Context, env []string) ([]string, error) {
-			injected, err := ensureLiveKitSIPRecords(ctx, cmd.OutOrStdout(), targetName, plan, env)
-			if err != nil {
+			if err := ensureLiveKitSIPRecords(ctx, cmd.OutOrStdout(), targetName, plan, env); err != nil {
 				return nil, err
-			}
-			for _, name := range plan.DevSuppliedEnv {
-				if injected[name] != "" {
-					env = setChildEnv(env, name, injected[name])
-				}
 			}
 			return env, nil
 		}
 	}
+	// Set by onReady, read by onStop: both close over it, so the restore
+	// survives into the shutdown path (V14).
+	var restoreWebhook func(context.Context) error
+	run.onStop = func(ctx context.Context) error {
+		if restoreWebhook == nil {
+			return nil
+		}
+		return restoreWebhook(ctx)
+	}
 	run.onReady = func(ctx context.Context) error {
 		// The webhook is reconfigured on every start: quick tunnel URLs
 		// rotate per run, and the previous value is printed for restore (V3).
-		if plan.AutoWebhookEndpoint != "" && public != nil {
-			if err := autoConfigureCarrierWebhook(ctx, cmd.OutOrStdout(), targetName, plan, public, childEnv); err != nil {
+		// --no-webhook opts out entirely, for a number this run must not touch.
+		if plan.AutoWebhookEndpoint != "" && public != nil && !opts.noWebhook {
+			restore, err := autoConfigureCarrierWebhook(ctx, cmd.OutOrStdout(), targetName, plan, public, childEnv)
+			if err != nil {
 				return err
 			}
+			restoreWebhook = restore
+		}
+		if opts.noWebhook && plan.AutoWebhookEndpoint != "" && public != nil {
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: --no-webhook, carrier number left untouched; this run is reachable at %s\n",
+				targetName, strings.TrimSuffix(public.String(), "/"))
 		}
 		printDevCallLine(cmd.OutOrStdout(), plan, childEnv)
 		// Outbound-capable route: --to places one call now that the graph is
@@ -243,6 +259,18 @@ func printDevCallLine(out io.Writer, plan *generate.TelephonyRuntimePlan, env []
 		return
 	}
 	fmt.Fprintf(out, "\n  \033[1;32m▸\033[0m call %s  ·  ctrl-c to stop\n\n", number)
+}
+
+// planCreatesLiveKitSIPRecords reports whether `unmute dev --telephony` creates
+// the local inbound trunk and dispatch rule for this plan, which is also what
+// switches the startup into two phases: infrastructure, then records, then the
+// application. Only a LiveKit SIP route that accepts calls has those records.
+// The connector and the Pipecat carrier routes carry the inbound feature too but
+// have no SIP trunk at all, and an outbound-only package needs no record of
+// either kind (SCHEMA N36, 2026-08-12).
+func planCreatesLiveKitSIPRecords(plan *generate.TelephonyRuntimePlan) bool {
+	return plan.Route.Provider == ir.ProviderLiveKit && plan.Route.Transport == "sip" &&
+		planHasTelephonyFeature(plan, string(target.TelephonyInbound))
 }
 
 func planHasTelephonyFeature(plan *generate.TelephonyRuntimePlan, feature string) bool {

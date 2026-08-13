@@ -54,11 +54,8 @@ func preflightComposeCore(ctx context.Context, env []string, missingHint string)
 }
 
 func externalTelephonyEnv(plan *generate.TelephonyRuntimePlan) []string {
-	supplied := make(map[string]bool, len(plan.LocalEnvironment)+len(plan.DevSuppliedEnv))
+	supplied := make(map[string]bool, len(plan.LocalEnvironment))
 	for _, name := range plan.LocalEnvironment {
-		supplied[name] = true
-	}
-	for _, name := range plan.DevSuppliedEnv {
 		supplied[name] = true
 	}
 	result := make([]string, 0, len(plan.RequiredEnv))
@@ -81,11 +78,6 @@ func rejectLocalTopologyConflicts(plan *generate.TelephonyRuntimePlan, env []str
 	for _, name := range plan.LocalEnvironment {
 		if values[name] != "" {
 			return fmt.Errorf("%s conflicts with the generated local LiveKit SIP topology; unset it for `unmute dev --telephony`", name)
-		}
-	}
-	for _, name := range plan.DevSuppliedEnv {
-		if values[name] != "" {
-			return fmt.Errorf("%s is supplied by `unmute dev --telephony` itself; unset it for local runs", name)
 		}
 	}
 	return nil
@@ -136,6 +128,10 @@ type telephonyComposeRun struct {
 	infraServices      []string
 	beforeApp          func(ctx context.Context, env []string) ([]string, error)
 	onReady            func(ctx context.Context) error
+	// onStop undoes what onReady did to the outside world. It runs on every
+	// exit path after startup, including ctrl-c, with its own context: the
+	// run's ctx is already cancelled by then (V14).
+	onStop func(ctx context.Context) error
 }
 
 func runTelephonyCompose(ctx context.Context, run telephonyComposeRun) error {
@@ -187,6 +183,15 @@ func runTelephonyCompose(ctx context.Context, run telephonyComposeRun) error {
 		return failStartup(err)
 	}
 	defer func() {
+		// Undo the outward-facing changes before the containers go, and on a
+		// fresh context: ctrl-c has already cancelled ctx by this point (V14).
+		if run.onStop != nil {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := run.onStop(stopCtx); err != nil {
+				fmt.Fprintf(stderr, "warning: %v\n", err)
+			}
+		}
 		if err := cleanup(); err != nil {
 			fmt.Fprintf(stderr, "warning: stop telephony Compose project %s: %v\n", project, err)
 		}

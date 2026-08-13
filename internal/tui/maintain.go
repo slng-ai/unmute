@@ -125,14 +125,14 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 	}
 	tgt := pkg.Targets[targetNames[0]]
 	data := scaffold.Data{
-		Name:             filepath.Base(pkg.Root),
-		Target:           tgt.Provider,
-		EntryAgent:       pkg.Agent.EntryAgent,
-		TargetVersion:    tgt.Version,
-		SDKLanguage:      tgt.SDKLanguage,
-		DeploymentRegion: tgt.DeploymentRegion,
-		Transport:        tgt.Transport,
-		Carrier:          tgt.Carrier,
+		Name:              filepath.Base(pkg.Root),
+		Target:            tgt.Provider,
+		EntryAgent:        pkg.Agent.EntryAgent,
+		TargetVersion:     tgt.Version,
+		SDKLanguage:       tgt.SDKLanguage,
+		DeploymentRegions: tgt.DeploymentRegion,
+		Transport:         tgt.Transport,
+		Carrier:           tgt.Carrier,
 	}
 	data.Pins = jsonText(tgt.Pins)
 	if def, ok := effectiveModelDef(pkg, tgt, "listen"); ok {
@@ -258,15 +258,17 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			data.Handoffs = append(data.Handoffs, value)
 		case "human_transfer":
 			value := scaffold.HumanTransfer{Name: name, Agent: firstNonempty(owners[name], "assistant"), When: control.When}
-			if control.Destination != nil {
-				value.Destination = *control.Destination
-				value.Value = tgt.Destinations[value.Destination]
+			if destination := control.TransferDestination(); destination != "" {
+				value.Destination = destination
+				value.Value = tgt.Destinations[destination]
 			}
-			if control.Mode != nil {
-				value.Mode = *control.Mode
-			}
-			if control.Briefing != nil {
-				value.Briefing = *control.Briefing
+			value.Mode = control.TransferShape()
+			switch {
+			case control.Cold != nil:
+				value.RingTimeout, value.OnUnavailable = control.Cold.RingTimeout, control.Cold.OnUnavailable
+			case control.Warm != nil:
+				value.Briefing = control.Warm.Briefing
+				value.RingTimeout, value.OnUnavailable = control.Warm.RingTimeout, control.Warm.OnUnavailable
 			}
 			data.HumanTransfers = append(data.HumanTransfers, value)
 		}

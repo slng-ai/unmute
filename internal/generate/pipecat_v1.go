@@ -138,8 +138,11 @@ type pipecatTool struct {
 	Instructions    string // builtin end_call goodbye → developer message before EndFrame
 	EndsCall        bool
 	Interruption    string // "cancel" | "continue" | "" (provider default)
-	ColdDestination string // set for a cold human_transfer: the resolved number/SIP URI
-	CarrierTransfer bool   // carrier call-control adapter, not Daily SIP
+	ColdDestination string // set for a cold human_transfer: the resolved number/SIP URI (Daily SIP only)
+	// HangupOnUnavailable is the cold block's on_unavailable: hangup — a failed
+	// transfer says a goodbye and ends the call instead of returning the model
+	// a failure string (T5).
+	HangupOnUnavailable bool
 }
 
 // pipecatLocalTool is a copied handler file: tools/<name>.py in the project.
@@ -210,9 +213,83 @@ type pipecatTelephony struct {
 	FromNumberEnv string
 	HasInbound    bool
 	HasOutbound   bool
-	HasCold       bool
 	SystemSources []pipecatSystemSource
 	CallStart     []pipecatCallStart
+}
+
+// pipecatDailyCarrier is the (pipecat, daily-sip, twilio) data group: the
+// carrier leg on the Daily route (SCHEMA N37).
+//
+// It is deliberately a *separate* field from pipecatTelephony rather than a
+// widening of it. Twenty-two emitted sites read `.Telephony` as "this is a
+// carrier-websocket route" — nine in README.md.tmpl, eleven in bot.py.tmpl, one
+// each in Dockerfile.tmpl and pyproject.toml.tmpl — plus four in the driver's Go
+// (pipecat_v1.go's artifact branch, pipecat_v1_build.go's carrier deps,
+// buildPipecatTelephony, and inlineEligible). Giving this route a
+// pipecatTelephony would arm every one of them, and a missed narrowing fails
+// quietly: a carrier build would gain the whole carrier-websocket artifact set
+// and lose its deploy manifest. A second field cannot arm any of them, so the
+// trap never exists (research item 1, task T011a).
+type pipecatDailyCarrier struct {
+	Carrier    string
+	Connection string
+	// Connection env names (SCHEMA N37's key set). No sip_username or
+	// sip_password: Daily's dial-out carries no SIP credential auth on any
+	// documented surface, so termination authenticates by IP allow-list.
+	AccountSIDEnv string
+	AuthTokenEnv  string
+	SIPAddressEnv string
+	FromNumberEnv string
+	HasInbound    bool
+	HasOutbound   bool
+	// AgentEnv and HelperEnv split the required environment by who reads it. The
+	// deployed agent reads AgentEnv; the operator-run helper reads HelperEnv and
+	// OptionalEnv where they run it, and none of the helper's own names belongs in
+	// the platform secret set (contracts/environment.md).
+	AgentEnv  []string
+	HelperEnv []string
+	// CallEnv is what a *phone call* adds to the agent's own environment: the
+	// carrier names, and nothing the process already checks at startup. A browser
+	// or console session on this package reads none of them, so asking for them
+	// unconditionally would break the two modes that work with no phone at all.
+	CallEnv     []string
+	OptionalEnv []string
+}
+
+// pipecatCloudWebsocket is the (pipecat, cloud-websocket, twilio) data group:
+// the carrier streams the call straight to Pipecat Cloud and the operator hosts
+// nothing (SCHEMA N38).
+//
+// A third separate field, for the reason pipecatDailyCarrier is a second one:
+// every site that reads `.Telephony` means "carrier-websocket, with a helper
+// process and a Redis", and every site that reads `.DailyCarrier` means "a SIP
+// leg into a Daily room". This route is neither, and a group that half-matches
+// either would arm emitted code that cannot work here. Three narrow fields
+// cannot make that mistake; one widened field would only have to avoid it.
+type pipecatCloudWebsocket struct {
+	Carrier    string
+	Connection string
+	// Connection env names. All three are empty on a pure-inbound package, which
+	// declares no connection at all because the platform receives the call without
+	// credentials (research F4, D4).
+	AccountSIDEnv string
+	AuthTokenEnv  string
+	FromNumberEnv string
+	// OrganizationEnv completes the service host. Set only when this package
+	// composes TwiML of its own (outbound or a transfer); the compiler knows the
+	// agent name and cannot know the organization (research D5).
+	OrganizationEnv string
+	HasInbound      bool
+	HasOutbound     bool
+	// StreamURL is the platform's carrier endpoint, regional when the target
+	// declares a region. Computed once, in one place, and read by the Bin, the
+	// outbound command, and the transfer markup, so the three cannot disagree
+	// about where the audio goes (data-model section 3).
+	StreamURL string
+	// CallEnv is what a *phone call* adds to the process environment: nothing on a
+	// pure-inbound package, the carrier names and the organization otherwise. A
+	// browser or console session on the same package reads none of them.
+	CallEnv []string
 }
 
 type pipecatSystemSource struct {
@@ -226,10 +303,28 @@ type pipecatCallStart struct {
 	Required bool
 }
 
+// pipecatTransportParams is the parameter object one transport key constructs,
+// plus the import that class needs. The two travel as one unit so an emitted
+// class structurally cannot lose its import — the same invariant the provider
+// catalogue holds for service classes (data-model TransportParamsClass).
+type pipecatTransportParams struct {
+	Class string
+	// Transport is the transport class the route's transfer primitive lives on,
+	// set only when the package emits a transfer. The tool narrows to it before
+	// calling the primitive, because the primitive is not on BaseTransport.
+	Transport string
+	Import    string
+}
+
 type pipecatData struct {
-	Project             string
-	Version             string
-	DeploymentRegion    string
+	Project          string
+	Version          string
+	DeploymentRegion string
+	// SecretSet names the platform secret set the README tells the operator to
+	// create; empty when the package declares no secrets. The manifest names it
+	// so a deploy that skipped that step fails at deploy time rather than on a
+	// live call.
+	SecretSet           string
 	MainName            string
 	EntryAgent          string
 	EntryClass          string
@@ -251,16 +346,31 @@ type pipecatData struct {
 	MaxDurationSecs     int
 	HasColdTransfer     bool
 	Transport           string
-	FrameImports        []string // pipecat.frames.frames names, merged into one import (V2)
-	Imports             []string
-	Extras              []string
-	Deps                []string // standalone pip deps for plugin services (e.g. pipecat-slng)
-	RequiredEnv         []string
-	DevEnv              []string // provider creds the web dev image needs, without telephony/coordination env (compose.dev.yaml)
-	DevOptionalEnv      []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
-	Notes               []string
-	Tracing             bool
-	Telephony           *pipecatTelephony
+	// DailyParams is the parameter object the "daily" transport key constructs on
+	// the Daily route, where the generic one cannot work. Nil everywhere else, so
+	// no other route churns and no package carries a Daily import it never uses.
+	DailyParams    *pipecatTransportParams
+	FrameImports   []string // pipecat.frames.frames names, merged into one import (V2)
+	Imports        []string
+	Extras         []string
+	Deps           []string // standalone pip deps for plugin services (e.g. pipecat-slng)
+	RequiredEnv    []string
+	DevEnv         []string // provider creds the web dev image needs, without telephony/coordination env (compose.dev.yaml)
+	DevOptionalEnv []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
+	Notes          []string
+	Tracing        bool
+	// Telephony means the carrier-websocket route, and every site that reads it
+	// means that. The Daily carrier leg is DailyCarrier; see its doc comment.
+	Telephony    *pipecatTelephony
+	DailyCarrier *pipecatDailyCarrier
+	// CloudWebsocket is the platform-terminated carrier stream (SCHEMA N38): the
+	// one route where the operator hosts nothing. See its type's doc comment for
+	// why it is a third field rather than a widening of either other one.
+	CloudWebsocket *pipecatCloudWebsocket
+	// Prerequisites are the route's account features the provider grants on
+	// request, read from the rulebook in internal/target and never restated here.
+	// Present only when this package uses something that needs one.
+	Prerequisites []targetcap.RouteAccountPrerequisite
 
 	// Import needs: keep bot.py free of unused imports (only what a given spec
 	// actually exercises), so the emitted pipeline reads clean.
@@ -334,19 +444,45 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 }
 
 var pipecatEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
+	targetcap.TelephonyRouteSelected:             true,
+	targetcap.TelephonyInbound:                   true,
+	targetcap.TelephonyOutbound:                  true,
+	targetcap.TelephonyFeature(targetcap.Hangup): true,
+	"source.session_id":                          true,
+	"source.carrier":                             true,
+	"source.connection":                          true,
+	"source.call_id":                             true,
+	"source.stream_id":                           true,
+	"source.direction":                           true,
+	"source.from_number":                         true,
+	"source.to_number":                           true,
+}
+
+// pipecatDailyCarrierEmittedTelephonyFeatures is the (pipecat, daily-sip,
+// twilio) half of the same agreement. Hand-written, so it holds only what the
+// emitter can keep: no `source.*` entries, because the fill path for those lives
+// in the carrier-websocket adapter this route does not emit (research D11/R14).
+var pipecatDailyCarrierEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 	targetcap.TelephonyRouteSelected:                   true,
 	targetcap.TelephonyInbound:                         true,
 	targetcap.TelephonyOutbound:                        true,
-	targetcap.TelephonyFeature(targetcap.Hangup):       true,
 	targetcap.TelephonyFeature(targetcap.ColdTransfer): true,
-	"source.session_id":                                true,
-	"source.carrier":                                   true,
-	"source.connection":                                true,
-	"source.call_id":                                   true,
-	"source.stream_id":                                 true,
-	"source.direction":                                 true,
-	"source.from_number":                               true,
-	"source.to_number":                                 true,
+	targetcap.TelephonyFeature(targetcap.Hangup):       true,
+}
+
+// pipecatCloudWebsocketEmittedTelephonyFeatures is the (pipecat,
+// cloud-websocket, twilio) half of the emitter agreement. Hand-written like the
+// Daily carrier's, and holding the same five features the row grants: no
+// `source.*` entries, because the call-source table is filled by the
+// carrier-websocket adapter this route does not emit. The Bin's from_number and
+// to_number parameters reach the bot's call_data, which is a different surface
+// from a bound spec variable.
+var pipecatCloudWebsocketEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
+	targetcap.TelephonyRouteSelected:                   true,
+	targetcap.TelephonyInbound:                         true,
+	targetcap.TelephonyOutbound:                        true,
+	targetcap.TelephonyFeature(targetcap.ColdTransfer): true,
+	targetcap.TelephonyFeature(targetcap.Hangup):       true,
 }
 
 // GeneratePipecat lowers a validated agent + pipecat target into a project.
@@ -424,6 +560,12 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 	} else {
 		outputs = append(outputs, struct{ tmpl, path string }{"pcc-deploy.toml", "pcc-deploy.toml"})
 	}
+	// Both Daily forms deploy to Pipecat Cloud, so both keep the manifest the
+	// branch above just emitted. The carrier form adds the one artifact the
+	// operator runs themselves.
+	if data.DailyCarrier != nil {
+		outputs = append(outputs, struct{ tmpl, path string }{"telephony_helper.py", "telephony_helper.py"})
+	}
 	var files []File
 	for _, o := range outputs {
 		content, err := renderPipecatV1(o.tmpl, data)
@@ -432,7 +574,10 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		}
 		files = append(files, File{Path: o.path, Content: content})
 	}
-	files = append(files, File{Path: ".dockerignore", Content: []byte(".env\n")})
+	// Same set as the LiveKit driver's: secrets never reach the image, and a local
+	// `uv run` in this directory leaves a virtualenv behind that would otherwise
+	// be uploaded as build context on every deploy.
+	files = append(files, File{Path: ".dockerignore", Content: []byte(".env\n.env.*\n.venv/\n__pycache__/\n")})
 	// Local tool handlers are copied verbatim from the source package (SCHEMA
 	// §5: code targets host the handler; V13).
 	if len(data.LocalTools) > 0 {
@@ -476,12 +621,16 @@ type pipecatReportJSON struct {
 	EntryAgent  string                `json:"entry_agent"`
 	Agents      []string              `json:"agents"`
 	Files       []string              `json:"generated_files"`
+	Regions     []string              `json:"deployment_regions,omitempty"`
 	RequiredEnv []string              `json:"required_env"`
 	Bindings    []ir.ForwardedBinding `json:"bindings,omitempty"`
 	Sizing      []ir.Sizing           `json:"sizing,omitempty"`
 	Variables   []reportVariable      `json:"variables,omitempty"`
 	Secrets     []reportSecret        `json:"secrets,omitempty"`
-	Notes       []string              `json:"notes,omitempty"`
+	// Prerequisites are inspectable for the same reason the forwarded region is:
+	// a fact the compiler acted on has to be readable back out.
+	Prerequisites []targetcap.RouteAccountPrerequisite `json:"route_prerequisites,omitempty"`
+	Notes         []string                             `json:"notes,omitempty"`
 }
 
 func pipecatReport(agent *ir.Agent, data pipecatData, files []File, bindings []ir.ForwardedBinding, sizing []ir.Sizing) ([]byte, error) {
@@ -497,10 +646,14 @@ func pipecatReport(agent *ir.Agent, data pipecatData, files []File, bindings []i
 	}
 	out, err := json.MarshalIndent(pipecatReportJSON{
 		Target: data.Project, Provider: "pipecat", Version: data.Version, EntryAgent: data.EntryAgent,
-		Agents: agents, Files: generated, RequiredEnv: data.RequiredEnv,
+		Agents: agents, Files: generated,
+		// Forwarded without checking, so it must be readable back (constitution).
+		// A list of one on this target: several regions never reach generate.
+		Regions: regionList(data.DeploymentRegion), RequiredEnv: data.RequiredEnv,
 		Bindings: bindings, Sizing: sizing,
 		Variables: reportVariables(agent), Secrets: reportSecrets(agent),
-		Notes: data.Notes,
+		Prerequisites: data.Prerequisites,
+		Notes:         data.Notes,
 	}, "", "  ")
 	if err != nil {
 		return nil, err

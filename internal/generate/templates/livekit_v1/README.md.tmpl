@@ -40,11 +40,107 @@ lk dispatch create --room <room> --agent-name {{.AgentName}} \
 
 ## Deploy
 
-Deployment is self-hosted: the worker connects out to a LiveKit Server you
-run and needs no inbound ports. Build the generated `Dockerfile` into an
-image, set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` to your
-server's values plus the provider keys from `.env.example`, then start the
-worker:
+Two supported paths: LiveKit Cloud with the `lk` CLI, or a worker you host
+yourself. Both run this project as generated.
+
+### Option 1: LiveKit Cloud
+
+Before the first command: authenticate once with `lk cloud auth`, then set the
+project this agent belongs to as the default (`lk project list`, then
+`lk project set-default "<name>"`). Without a default project every command
+below fails with a subdomain mismatch that does not say which side is wrong.
+
+The first deploy registers the agent, builds the image from the generated
+`Dockerfile`, and writes the `livekit.toml` this directory deliberately does not
+ship, because the platform assigns both of its values.
+
+```sh
+cp .env.example .env            # then fill in the values
+{{range .Deploys}}lk agent create{{if .Region}} --region {{.Region}}{{end}}{{if .ConfigFile}} --config {{.ConfigFile}}{{end}} --secrets-file .env
+{{end}}```
+
+Every later version is a redeploy, which needs that config file and the
+`Dockerfile` in this directory:
+
+```sh
+{{range .Deploys}}lk agent deploy{{if .ConfigFile}} --config {{.ConfigFile}}{{end}}
+{{end}}```
+
+`create` is the first deploy and refuses to run when a config file of that name
+already exists. `deploy` ships a new version of an agent that already exists and
+takes no region. Running them the wrong way round either refuses or registers a
+second billable agent with dispatch split between versions.
+
+#### Secrets
+
+`--secrets-file .env` sends every name in `.env.example` to the platform, which
+injects them as environment variables. `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
+`LIVEKIT_API_SECRET` are supplied by the platform itself: the CLI drops them
+from the file, they must not be set in the image, and their absence from the
+deployed secret list is correct rather than a mistake.
+{{- if .PlatformEnv}}
+
+`.env.example` groups those names in a labelled section at the end, together
+with anything else this deployment does not need from you. On LiveKit Cloud the
+SIP service is managed, so `REDIS_URL` belongs to a self-hosted deployment and is
+never read by the agent. Leave that section blank for a Cloud deploy.
+{{- end}}
+
+**Every name in that file must be a valid shell identifier**: letters, digits and
+underscores, never starting with a digit. The platform exports your secrets with a
+shell, so one bad name fails at export and that value is simply missing at
+runtime. The agent then dies later, somewhere unrelated, and the only trace is a
+single line near the top of `lk agent logs`:
+
+```text
+/etc/run/env: line 2: export: `11LABS_API_KEY=...': not a valid identifier
+```
+
+If you see that, rename the variable in `.env` (`ELEVENLABS_API_KEY`, not
+`11LABS_API_KEY`) or delete the line, then run the overwrite command below.
+Merging is not enough: the bad name stays until something replaces the whole set.
+
+Change a value later without a full redeploy:
+
+```sh
+lk agent update-secrets --secrets-file .env              # merges into the existing set
+lk agent update-secrets --secrets-file .env --overwrite  # replaces the whole set
+```
+
+#### Region
+{{if .Deploys}}{{if (index .Deploys 0).Region}}
+Region is chosen at the first deploy and is immutable. Moving one means creating
+the agent in the new region and deleting the old one; the platform will not move
+it in place.
+{{- if gt (len .DeploymentRegions) 1}} Each region is its own deployment with its
+own config file, and all of them keep the `{{.AgentName}}` dispatch name, so
+callers reach the nearest one.
+{{- end}}
+{{- else}}
+No region is declared, so the first deploy asks which one to use. Set
+`deployment_region` on this target in `targets.yaml` to keep the deploy
+unattended. It is fixed at the first deploy and cannot be moved afterwards.
+{{- end}}{{end}}
+
+#### Check it, and recover it
+
+```sh
+lk agent status                 # Sleeping is healthy on plans that scale to zero
+lk agent logs
+lk agent config --id CA_xxx     # rebuild a lost config file, then deploy again
+```
+
+`unmute compile` preserves any `livekit*.toml` the platform wrote here, so a
+recompile does not cost you the agent. If a config file belongs to a different
+project than the current default, the deploy fails with that same subdomain
+mismatch: check `lk project list` and set the default that matches the file.
+
+### Option 2: self-hosted worker
+
+The worker connects out to a LiveKit Server you run and needs no inbound ports.
+Build the generated `Dockerfile` into an image, set `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` to your server's values plus the
+provider keys from `.env.example`, then start the worker:
 
 ```sh
 python agent.py start
@@ -52,10 +148,79 @@ python agent.py start
 
 See `docs/DEPLOYMENT.md` in the Unmute repository for the full self-hosted
 setup: server, Redis, firewall ports, sizing, and scaling.
+{{if or .HasWarmTransfer .HasColdTransfer}}
+## Human transfers
+{{if .HasWarmTransfer}}
+### What the person hears on a warm transfer
 
-Compatibility note: the project also runs on LiveKit Cloud with the `lk` CLI
-(`lk agent create{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}`), but that is not the supported path.
-{{if .Tracing}}
+The person who answers hears the handover in the **first sentence**: who is on
+hold, what they want, what was already tried, then one question they can answer.
+No hello, no "how can I help", and no waiting to be asked what the call is about.
+When they say they can take it, the caller is put through and this agent says one
+goodbye line and goes quiet.
+
+That prompt is `_BRIEFING_PERSONA` in `agent.py`, and the comment above it says
+why each paragraph is there. The prebuilt ships its own persona, but its lifecycle
+lets the person speak first and never briefs unprompted, so the agent's first turn
+is a reply, and a reply to "hello" is a greeting unless the prompt says otherwise.
+Your package's own `briefing` text still lands last, after the caller transcript.
+
+**One limit.** `ring_timeout` bounds **ringing only**. Once the person picks up,
+nothing bounds the consultation, and the caller hears hold music for all of it.
+The prompt tells this agent to decline on the person's behalf when they say they
+cannot take it, go quiet, or never decide, which is a mitigation and not a
+guarantee. If you see a caller held for minutes with no third log line, that is
+this limit, not a bug in the dial.
+{{end}}
+### Reading a transfer in the logs
+
+`lk agent logs` shows three `info` lines per transfer.
+{{if .HasWarmTransfer}}
+Warm:
+
+```text
+human transfer fired: <control name> (warm)
+warm transfer dialling out: handing over <n> conversation messages
+warm transfer merged after <n>s: <participant identity>
+```
+
+The third line is `warm transfer unavailable after <n>s: <reason>` instead for
+every way the transfer did not happen: no answer, declined, voicemail, failed
+dial. Exactly one of the two appears, and line 2 with no line 3 means the
+consultation is still running or never ended.
+
+The message count is the number worth reading. **Zero or one** means the briefing
+had nothing to work with, which is a different problem from a briefing that was
+ignored. A healthy count means material was handed over, not that the model used
+it.
+{{end}}
+{{- if .HasColdTransfer}}
+Cold:
+
+```text
+human transfer fired: <control name> (cold)
+cold transfer referring the caller out
+cold transfer completed after <n>s
+```
+
+or `cold transfer failed after <n>s: <reason>`. There is a fourth line, and it is
+the one most people meet first:
+
+```text
+cold transfer skipped: no phone caller in the room
+```
+
+**Cold cannot be tested from the Agent Console.** It refers the caller's *existing*
+SIP leg out, and a console session has no SIP leg, so there is nothing to act on.
+Warm works from the console because it dials out instead. The other cause of this
+line is a dispatch rule pointing at a different agent name, so the call never
+reaches this worker: compare `lk sip dispatch list` with the `agentName` in the
+`sip-dispatch-rule.json` in this directory.
+{{end}}
+No log line carries a destination, a credential, an environment variable value,
+or the caller's words. The control name on the first line already says which
+destination fired.
+{{end}}{{if .Tracing}}
 ## Trace with Langfuse
 
 Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
@@ -111,72 +276,324 @@ bearer token to `/telephony/outbound` from your own application.
 The bridge and worker are stateless: run more replicas behind one number. Each
 call is one LiveKit room, and the join token dispatches the worker into it.
 {{- else}}
-## Configure self-hosted LiveKit SIP
+## Telephony setup
 
-This project uses the `livekit/sip/{{.Telephony.Carrier}}` route. Unmute emits
-the selected worker and SIP setup inputs. The generated Compose file starts
-local LiveKit, Redis, and LiveKit SIP services for development; it does not
-provision production infrastructure or carrier resources. This route was
-checked against the official web documentation on July 20, 2026, but not
-through the LiveKit docs MCP server.
+Your carrier's SIP trunk carries the phone calls and LiveKit runs this agent, on
+the `livekit/sip/{{.Telephony.Carrier}}` route. Setting it up is {{if .HasColdTransfer}}six{{else}}five{{end}} actions in
+your carrier's account{{if .Telephony.HasInbound}}, then one command here{{end}}. The carrier part is yours to do:
+nobody but you can sign in to your carrier account, so every step is written out
+below.
+
+You need two tools: `lk`, the LiveKit CLI, authenticated against this project
+(`lk cloud auth`), and `jq`. Nothing else.
 
 ### Required configuration and credentials
 
 Set these values in `.env` or your deployment secret store:
 
-- `LIVEKIT_URL`: the WebSocket URL of your self-hosted LiveKit Server.
-- `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`: a key pair from the `keys`
-  section of that server's configuration. LiveKit SIP uses the same pair.
-- `REDIS_URL`: the Redis deployment shared by LiveKit Server and LiveKit SIP.
 - `{{.Telephony.SIPAddressEnv}}`, `{{.Telephony.SIPUsernameEnv}}`, and
-  `{{.Telephony.SIPPasswordEnv}}`: {{.Telephony.CredentialHint}}.
-- `{{.Telephony.FromNumberEnv}}`: the phone number linked to that SIP trunk.
-{{if .Telephony.HasInbound}}- `LIVEKIT_SIP_INBOUND_TRUNK`: the ID printed by
-  `lk sip inbound create`.
-{{end}}{{if or .Telephony.HasOutbound .Telephony.HasWarm}}- `LIVEKIT_SIP_OUTBOUND_TRUNK`: the ID printed by
-  `lk sip outbound create`.
-{{end}}
-Use the
-[{{.Telephony.Carrier}} provider guide]({{.Telephony.ProviderDocs}}) for the
-carrier-side trunk fields. A normal HTTPS tunnel doesn't expose SIP signaling
-or RTP. Generated local Compose defaults to SIP port `5060` and UDP RTP ports
-`10000-10100`; set `UNMUTE_LIVEKIT_SIP_PORT` and
-`UNMUTE_LIVEKIT_RTP_PORT_RANGE` when those host ports are unavailable. Set
-`UNMUTE_LIVEKIT_PORT` to move the host-side LiveKit API port from `7880`.
+  `{{.Telephony.SIPPasswordEnv}}`: the address your carrier's trunk accepts calls
+  on, and the username and password it accepts them with, from
+  {{.Telephony.CredentialHint}}. The termination step below is where you get all
+  three.
+- `{{.Telephony.FromNumberEnv}}`: the phone number linked to that trunk, in
+  E.164 form like `+15551234567`.
+- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`: your LiveKit
+  connection. On LiveKit Cloud the platform injects these into the deployed
+  agent; set them yourself for a local run or a self-hosted server.
+- `REDIS_URL`: the Redis that LiveKit Server and LiveKit SIP share. LiveKit
+  Cloud runs its own and this agent never reads it; a self-hosted deployment
+  needs one, and the generated Compose file starts one for local runs.
 
-### Create the LiveKit SIP resources
+A normal HTTPS tunnel doesn't expose SIP signaling or RTP. Generated local
+Compose defaults to SIP port `5060` and UDP RTP ports `10000-10100`; set
+`UNMUTE_LIVEKIT_SIP_PORT` and `UNMUTE_LIVEKIT_RTP_PORT_RANGE` when those host
+ports are unavailable. Set `UNMUTE_LIVEKIT_PORT` to move the host-side LiveKit
+API port from `7880`.
+### Get your origination URI
 
-Materialize the generated JSON before passing it to `lk`. The committed inputs
-contain variable names only; the `/tmp` copies contain resolved configuration
-and must not be committed. Export the values in your shell first;
-`envsubst` doesn't read `.env` itself.
+Both parts below need one value: the SIP address your carrier hands incoming calls
+to. On LiveKit Cloud it is built from your **project ID**, not from your project
+URL: drop the `p_` prefix from the ID and put the rest in front of
+`.sip.livekit.cloud`. The two subdomains are different strings, so guessing from
+`LIVEKIT_URL` gives an address that rings nowhere.
 
-{{if .Telephony.HasInbound}}
+Run this to print every project you have configured, each with its SIP URI:
+
 ```sh
-envsubst < sip-inbound-trunk.json > /tmp/unmute-sip-inbound-trunk.json
-lk sip inbound create /tmp/unmute-sip-inbound-trunk.json
-# Set LIVEKIT_SIP_INBOUND_TRUNK to the returned SIPTrunkID.
-
-envsubst < sip-dispatch-rule.json > /tmp/unmute-sip-dispatch-rule.json
-lk sip dispatch create /tmp/unmute-sip-dispatch-rule.json
+lk project list --json |
+  jq -r '.[] | "\(.Name)  \(.URL)  ->  sip:\(.ProjectId | sub("^p_";"")).sip.livekit.cloud;transport=tcp"'
 ```
 
-Point the carrier's origination URI at your public LiveKit SIP endpoint (the
-address you deployed LiveKit SIP on). The dispatch rule creates one `call-*`
-room per inbound call and dispatches the `{{.AgentName}}` worker with
-`direction: inbound` metadata.
-{{end}}
-{{if or .Telephony.HasOutbound .Telephony.HasWarm}}
+Take the line for the project this agent deploys to, and use the third column.
+`lk project list` on its own marks the default project with `*`. Look at how
+little the URL column and the SIP column have in common: that is why the SIP
+address cannot be guessed from `LIVEKIT_URL`.
+
+Keep that output piped through `jq`. The raw `--json` listing also contains your
+project API key and secret, so it is not something to paste anywhere.
+
+To use it in the commands below, set it once by project name:
+
 ```sh
-envsubst < sip-outbound-trunk.json > /tmp/unmute-sip-outbound-trunk.json
-lk sip outbound create /tmp/unmute-sip-outbound-trunk.json \
-  --auth-user "${{.Telephony.SIPUsernameEnv}}" \
-  --auth-pass "${{.Telephony.SIPPasswordEnv}}"
-# Set LIVEKIT_SIP_OUTBOUND_TRUNK to the returned SIPTrunkID.
+LK_PROJECT="<the name from that list>"
+LK_SIP_URI=$(lk project list --json | jq -r --arg n "$LK_PROJECT" \
+  '.[] | select(.Name==$n) | "sip:\(.ProjectId | sub("^p_";"")).sip.livekit.cloud;transport=tcp"' | head -1)
+echo "$LK_SIP_URI"
 ```
 
-For an outbound call, dispatch this agent to a new room with JSON job metadata
-in this shape:
+*Self-hosted LiveKit:* there is no project SIP URI. The address is the public SIP
+signaling endpoint of the LiveKit SIP service you deployed.
+
+{{if eq .Telephony.Carrier "twilio"}}
+### At your carrier (Twilio)
+
+Do these in the [Twilio Console](https://console.twilio.com), in this order. Each
+one names the console path, and the CLI equivalent where Twilio has one.
+
+1. **Get a voice-capable phone number.** Phone Numbers, Manage, Buy a number,
+   with the Voice capability. Skip this if you already own the number you want
+   this agent to use.
+2. **Create an Elastic SIP trunk.** Elastic SIP Trunking, Manage, Trunks, Create
+   new SIP trunk. One trunk carries everything below.
+3. **Termination, which lets this agent place calls.** On the trunk's Termination
+   tab, set the Termination SIP URI to a domain name you choose ending in
+   `pstn.twilio.com`, for example `my-agent.pstn.twilio.com`. That one domain is
+   the value of `{{.Telephony.SIPAddressEnv}}`; there is no second address to
+   look for. Then under Authentication, select or create a Credential List: the
+   username and password you put in it are the values of
+   `{{.Telephony.SIPUsernameEnv}}` and `{{.Telephony.SIPPasswordEnv}}`.
+4. **Origination, which lets calls reach this agent.**{{if not .Telephony.HasInbound}} Only needed if you want
+   this number to receive calls; this package only places them.{{end}} On the
+   trunk's Origination tab, add an Origination URI: your LiveKit project SIP URI
+   with `;transport=tcp` on the end, like
+   `sip:abc123def.sip.livekit.cloud;transport=tcp`. Leave priority and weight at
+   1 and tick Enabled. Two ways to get that URI: read it from the LiveKit Cloud
+   project settings page, or derive it from the project ID with the command in
+   **Get your origination URI** below. **Do not build it from `LIVEKIT_URL`**:
+   the project URL subdomain and the SIP subdomain are different strings.
+
+   *Self-hosted LiveKit:* there is no project SIP URI. Point origination at the
+   public SIP signaling address of the LiveKit SIP service you deployed instead.
+   Every other step on this page is the same.
+5. **Attach the number to the trunk.** The trunk's Numbers tab, Add an existing
+   number. The number you attach is the value of
+   `{{.Telephony.FromNumberEnv}}`. CLI: `twilio api trunking v1 trunks
+   phone-numbers create --trunk-sid <trunk-sid> --phone-number-sid <number-sid>`.
+{{- if .HasColdTransfer}}
+6. **Turn transfer on, because this agent hands calls to a person.** On the same
+   trunk, under Features: set Call Transfer (SIP REFER) to Enabled,
+   tick Enable PSTN Transfer, and choose a Caller ID for Transfer Target. CLI:
+   `twilio api trunking v1 trunks update --sid <trunk-sid> --transfer-mode
+   enable-all --transfer-caller-id from-transferee`. Transfer caller ID is a
+   trunk setting, never something one call can choose.
+{{- end}}
+
+LiveKit's own version of these steps is the
+[{{.Telephony.Carrier}} provider guide]({{.Telephony.ProviderDocs}}), if you want
+a second description of the same thing.
+
+#### The same steps as commands
+
+Prerequisites: the [Twilio CLI](https://www.twilio.com/docs/twilio-cli/getting-started/install)
+with a profile (`twilio login`), plus `lk` and `jq`. Run the block from this
+directory, top to bottom, with `LK_SIP_URI` already set above. Nothing is
+copied by hand:
+each command finds what it needs from the one before it, by the domain and number
+you already know. Verified against `twilio-cli` 6.2.4 and `lk` 2.18.2 on
+2026-08-12.
+
+```sh
+# You choose these two. The domain must be unique across Twilio and end in
+# pstn.twilio.com. Twilio requires the password to be 12 characters or longer,
+# mixed case, with at least one digit.
+TRUNK_DOMAIN="{{.Project}}-trunk.pstn.twilio.com"
+SIP_USERNAME="{{.Project}}-agent"
+read -rsp "SIP password: " SIP_PASSWORD; echo
+
+# The number you already own, read from .env exactly as telephony-setup.sh reads it.
+NUMBER=$(sed -n 's/^{{.Telephony.FromNumberEnv}}=//p' ./.env | head -1 | tr -d "\r\"'")
+
+# Steps 1 and 2: the trunk, then its SID looked up by the domain you just chose.
+# Already have a trunk? Skip the create and list what you have instead:
+#   twilio api:trunking:v1:trunks:list -o json |
+#     jq -r '.[] | "\(.friendlyName)  \(.domainName)  \(.sid)"'
+twilio api:trunking:v1:trunks:create --friendly-name "{{.Project}}" --domain-name "$TRUNK_DOMAIN"
+TRUNK_SID=$(twilio api:trunking:v1:trunks:list -o json |
+  jq -r --arg d "$TRUNK_DOMAIN" '.[] | select(.domainName==$d) | .sid')
+
+# Step 3, termination: the trunk domain is the address, and a credential list
+# holds the username and password. Three commands: create the list, put the
+# credential in it, attach it to the trunk.
+twilio api:core:sip:credential-lists:create --friendly-name "{{.Project}}"
+CL_SID=$(twilio api:core:sip:credential-lists:list -o json |
+  jq -r --arg n "{{.Project}}" '.[] | select(.friendlyName==$n) | .sid' | head -1)
+twilio api:core:sip:credential-lists:credentials:create --credential-list-sid "$CL_SID" \
+  --username "$SIP_USERNAME" --password "$SIP_PASSWORD"
+twilio api:trunking:v1:trunks:credential-lists:create --trunk-sid "$TRUNK_SID" \
+  --credential-list-sid "$CL_SID"
+
+# Step 4, origination: where Twilio sends calls that arrive on your number.
+twilio api:trunking:v1:trunks:origination-urls:create --trunk-sid "$TRUNK_SID" \
+  --friendly-name "LiveKit SIP" --sip-url "$LK_SIP_URI" --weight 1 --priority 1 --enabled
+
+# Step 5: attach the number to the trunk.
+NUMBER_SID=$(twilio phone-numbers:list -o json |
+  jq -r --arg n "$NUMBER" '.[] | select(.phoneNumber==$n) | .sid')
+twilio api:trunking:v1:trunks:phone-numbers:create --trunk-sid "$TRUNK_SID" \
+  --phone-number-sid "$NUMBER_SID"
+{{- if .HasColdTransfer}}
+
+# Step 6: allow transfers, including out to the phone network. Without this the
+# carrier rejects the cold transfer.
+twilio api:trunking:v1:trunks:update --sid "$TRUNK_SID" \
+  --transfer-mode enable-all --transfer-caller-id from-transferee
+{{- end}}
+
+# Finally, put the three termination values in .env:
+#   {{.Telephony.SIPAddressEnv}}=$TRUNK_DOMAIN
+#   {{.Telephony.SIPUsernameEnv}}=$SIP_USERNAME
+#   {{.Telephony.SIPPasswordEnv}}=the password you typed above
+```
+
+#### Check the carrier side
+
+```sh
+twilio phone-numbers:list -o json |
+  jq -r --arg n "$NUMBER" '.[] | select(.phoneNumber==$n) | "trunk: \(.trunkSid // "none")"'
+twilio api:trunking:v1:trunks:list -o json |
+  jq -r --arg s "$TRUNK_SID" '.[] | select(.sid==$s) | "transfers: \(.transferMode), caller id: \(.transferCallerId)"'
+twilio api:trunking:v1:trunks:origination-urls:list --trunk-sid "$TRUNK_SID" -o json |
+  jq -r '.[] | "origination: \(.sipUrl) enabled=\(.enabled)"'
+```
+
+Expect the trunk SID you just created, `transfers: enable-all`, and your LiveKit
+SIP URI enabled. These three lines are the three ways this side goes wrong:
+`trunk: none` means calls to that number never reach LiveKit;
+`transfers: disable-all` or `sip-only` is what makes a cold transfer to a phone
+number fail; a missing or disabled origination URI means the call arrives at
+Twilio and stops there.
+{{else}}
+### At your carrier
+
+Your carrier's console names these differently, so here is what has to be true
+rather than where to click. The
+[{{.Telephony.Carrier}} provider guide]({{.Telephony.ProviderDocs}}) has that
+carrier's own paths.
+
+1. A voice-capable phone number you own.
+2. A SIP trunk on your carrier account. One trunk carries everything below.
+3. A termination address, which is where this agent sends the calls it places,
+   with username and password authentication. Those three values are
+   `{{.Telephony.SIPAddressEnv}}`, `{{.Telephony.SIPUsernameEnv}}`, and
+   `{{.Telephony.SIPPasswordEnv}}`.
+4. An origination target, which is where the carrier sends incoming calls: your
+   LiveKit project SIP URI with `;transport=tcp` on the end, from **Get your
+   origination URI** below.{{if not .Telephony.HasInbound}} Only needed if you want this number to
+   receive calls; this package only places them.{{end}}
+
+   *Self-hosted LiveKit:* there is no project SIP URI. Point origination at the
+   public SIP signaling address of the LiveKit SIP service you deployed instead.
+5. That phone number attached to that trunk. Its value is
+   `{{.Telephony.FromNumberEnv}}`.
+{{- if .HasColdTransfer}}
+6. Transfer enabled on the trunk, including transfers out to the phone network,
+   because this agent hands callers to a person.
+{{- end}}
+{{end}}
+{{- if .Telephony.HasInbound}}
+### At LiveKit
+
+One command, run from this directory with `.env` filled in:
+
+```sh
+bash telephony-setup.sh
+```
+
+It creates the two records an incoming call needs, and it finds them by your
+phone number, so there is no ID to copy anywhere:
+
+- the inbound trunk, which claims your number for this LiveKit project;
+- the dispatch rule, which routes calls on that number to this agent, one
+  `call-*` room per caller.
+
+Only incoming calls need records like these. A call arrives with no request of
+yours for configuration to travel with, so the platform has to already know
+which project owns the number and where the caller goes. Placing a call is the
+opposite: your own code starts it, so the trunk settings ride along.
+
+Run the command again any time. Whatever already exists is reused, and it says
+which. Two failures it can report: your number is already claimed by a trunk
+this project cannot see, which means someone else owns it; or `lk` is not
+authenticated, which `lk cloud auth` fixes.
+
+Earlier builds of this project also needed `LIVEKIT_SIP_INBOUND_TRUNK` in the
+environment. That variable is retired and nothing reads it, so delete it from
+`.env` and from your platform secrets.
+{{- end}}
+{{- if .Telephony.HasInbound}}
+
+### Take it live, in order
+
+The two halves above can be done in either order, but a call only works once both
+exist and the agent is running. This is the whole sequence, from a compiled build
+directory:
+
+1. **Carrier**: the steps above. If you already have a trunk, the two that are
+   easy to miss are attaching your number to it and, for a cold transfer, the
+   transfer toggles. A number that is not on the trunk never reaches LiveKit, no
+   matter how right the origination URI is.
+2. **LiveKit records**: `bash telephony-setup.sh`, then run it again and expect
+   every line to say reused.
+3. **The agent**: `lk agent deploy` from this directory (or `lk agent create` the
+   first time, see Deploy above), then `lk agent update-secrets --secrets-file .env
+   --overwrite` if you changed `.env`. Check `lk agent status`.
+4. **Call your number** from a phone. The agent answers.
+{{- if .HasColdTransfer}} Ask for whatever the cold
+   transfer covers; you should be connected onward and the agent should drop out.
+{{- end}}
+5. **Read `lk agent logs`.** The transfer lines are listed under Human transfers
+   below. Check the top of the log too: that is where a bad secret name shows up.
+
+If the call rings and drops with no agent, work backwards: does
+`lk sip inbound list` show a trunk claiming your number, does `lk sip dispatch list`
+show a rule for it naming `{{.AgentName}}`, and does `lk agent status` show the
+agent up. Each of those is one of the three steps above.
+{{- end}}
+{{- if or .HasColdTransfer .HasWarmTransfer}}
+
+### What transfers need
+{{if .HasColdTransfer}}
+Cold transfer needs nothing at LiveKit beyond the records above. It refers the
+caller's existing call out through your carrier, so the carrier toggles in
+step 6 are its only setting. It cannot be tested from the Agent Console, because
+a console session has no phone leg to refer. When the logs say
+`cold transfer failed after <n>s`, the usual cause is that step 6 was skipped:
+Call Transfer (SIP REFER) or PSTN transfer is off on the trunk.
+{{end}}{{if .HasWarmTransfer}}
+Warm transfer needs nothing at LiveKit either. It places a second call with the
+four carrier values above, so termination is what it depends on.
+{{end}}{{- end}}
+{{- if or .Telephony.HasOutbound .Telephony.HasWarm}}
+### How dialling out works
+
+Those four carrier values are all this agent needs to dial out. It passes them
+inline with every call, so **no LiveKit outbound trunk is registered and none is
+read**. If you set up an earlier build of this project, `lk sip outbound create`
+and `LIVEKIT_SIP_OUTBOUND_TRUNK` are no longer part of it: delete that variable,
+and delete the trunk itself with `lk sip outbound delete` when you like. Setting
+it changes nothing, because nothing reads it.
+
+What a stored trunk did carry and inline configuration does not: a list of
+caller-ID numbers the platform picks from per call, trunk metadata copied onto
+every SIP participant, and one place to change the host without touching a
+deployment. If you need one of those, the platform feature still exists; it is
+just not something this project emits.
+{{- end}}
+{{if .Telephony.HasOutbound}}
+### Place an outbound call
+
+Dispatch this agent to a new room with JSON job metadata in this shape:
 
 ```json
 {
@@ -187,8 +604,8 @@ in this shape:
 ```
 
 The worker validates the E.164 destination and authored `call_start` fields
-before dialing. It uses the stored outbound trunk for outbound calls and warm
-transfers.
+before dialing, then dials with the carrier's trunk settings inline. Nothing
+has to be registered on the platform first.
 {{end}}
 
 ### Scale the route

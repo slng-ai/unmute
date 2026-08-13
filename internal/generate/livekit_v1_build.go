@@ -2,8 +2,11 @@ package generate
 
 import (
 	"fmt"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/slng/unmute/internal/ir"
 	targetcap "github.com/slng/unmute/internal/target"
@@ -35,15 +38,16 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		return livekitData{}, err
 	}
 	data := livekitData{
-		Project:          tgt.Name,
-		Version:          tgt.Version,
-		DeploymentRegion: tgt.DeploymentRegion,
-		AgentName:        tgt.Name,
-		EntryAgent:       agent.EntryAgent,
-		EntryClass:       pyName(agent.EntryAgent),
-		TurnVersion:      turnVersion,
-		Pins:             tgt.Pins,
-		Tracing:          agent.Tracing != nil && agent.Tracing.Provider == "langfuse",
+		Project:           tgt.Name,
+		Version:           tgt.Version,
+		DeploymentRegions: tgt.DeploymentRegions,
+		Deploys:           livekitDeploys(tgt.DeploymentRegions),
+		AgentName:         tgt.Name,
+		EntryAgent:        agent.EntryAgent,
+		EntryClass:        pyName(agent.EntryAgent),
+		TurnVersion:       turnVersion,
+		Pins:              tgt.Pins,
+		Tracing:           agent.Tracing != nil && agent.Tracing.Provider == "langfuse",
 	}
 	if data.Tracing {
 		for _, name := range []string{"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"} {
@@ -289,7 +293,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		// (and non-telephony targets) drive data.Outbound.
 		if ch.Kind == ir.ChannelTelephony && ch.Outbound != nil && *ch.Outbound && tgt.Transport != "connector" {
 			data.Outbound = &livekitOutbound{LeaveMessage: ch.OnVoicemail == ir.VoicemailLeaveMessage}
-			env.add("LIVEKIT_SIP_OUTBOUND_TRUNK")
 			break
 		}
 	}
@@ -341,7 +344,30 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
 	data.Secrets, data.ExtraEnv = secretEnvDocs(agent, data.RequiredEnv)
+	data.PlatformEnv, data.OperatorEnv = splitPlatformEnv(data.RequiredEnv, tgt.Telephony)
 	return data, nil
+}
+
+// splitPlatformEnv separates the names the operator must supply from the names
+// something else supplies. The route already declares the second set
+// (LocallySuppliedEnvironment): on LiveKit Cloud the platform injects
+// LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET into a deployed agent and
+// drops them from any secrets file, and its managed SIP service owns Redis,
+// which no emitted Python reads on this driver. Listing those beside the
+// operator's own keys made a deployed agent look as though it needed a Redis it
+// can never use, so the emitted env file labels them instead.
+func splitPlatformEnv(required []string, plan *ir.TelephonyPlan) (platform, operator []string) {
+	if plan == nil {
+		return nil, required
+	}
+	for _, name := range required {
+		if slices.Contains(plan.LocalEnvironment, name) {
+			platform = append(platform, name)
+			continue
+		}
+		operator = append(operator, name)
+	}
+	return platform, operator
 }
 
 // buildLiveKitCapture builds the generated update_variables tool: one optional
@@ -517,19 +543,19 @@ func buildLiveKitSIPTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*liv
 	telephony := &livekitTelephony{
 		Transport: "sip", Carrier: plan.Key.Carrier, Connection: plan.Connection,
 		ProviderDocs: docs,
-		CredentialHint: "the selected carrier's SIP trunking console; use its termination address, " +
-			"authentication username and password, and linked phone number",
-		SIPAddressEnv: plan.Environment["sip_address"], SIPUsernameEnv: plan.Environment["sip_username"],
+		// Short on purpose: the README's runbook now dictates which console tab
+		// each value comes from, so this says where to be, not what to do.
+		CredentialHint: "your carrier's SIP trunking console",
+		SIPAddressEnv:  plan.Environment["sip_address"], SIPUsernameEnv: plan.Environment["sip_username"],
 		SIPPasswordEnv: plan.Environment["sip_password"], FromNumberEnv: plan.Environment["from_number"],
 	}
 	fillLiveKitTelephonyCommon(telephony, agent, plan)
 	env.add("REDIS_URL")
-	if telephony.HasInbound {
-		env.add("LIVEKIT_SIP_INBOUND_TRUNK")
-	}
-	if telephony.HasOutbound || telephony.HasWarm {
-		env.add("LIVEKIT_SIP_OUTBOUND_TRUNK")
-	}
+	// No trunk name of either direction. Both dial-out paths carry the carrier's
+	// trunk settings inline, from the four names the Connection already declares
+	// (SCHEMA N33, 2026-08-12). Inbound still needs its two platform records, but
+	// the emitted telephony-setup.sh resolves them by phone number, so no
+	// environment name carries the ID (SCHEMA N36, 2026-08-12).
 	return telephony, nil
 }
 
@@ -748,13 +774,20 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 				return livekitAgent{}, fmt.Errorf("agent %q human_transfer %q: destination %q is not in the target's destinations map", name, ref, c.Destination)
 			}
 			ht := livekitHumanTransfer{
-				Method: ref, When: humanTransferWhen(c), To: dest,
-				Warm: c.Mode == ir.TransferWarm,
+				Method: ref, When: humanTransferWhen(c),
+				// Cold is a SIP REFER, whose destination must be a URI; warm
+				// dials a number. Two positions, two shapes, one destination.
+				ToExpr:      referURIExpr(dest, env),
+				DialExpr:    destinationExpr(dest, env),
+				Warm:        c.Mode == ir.TransferWarm,
+				Briefing:    c.Briefing,
+				RingTimeout: ringTimeoutSeconds(c.RingTimeout),
+				Hangup:      c.OnUnavailable == ir.OnUnavailableHangup,
 			}
-			if ht.Warm {
-				// WarmTransferTask reads LIVEKIT_SIP_OUTBOUND_TRUNK itself.
-				env.add("LIVEKIT_SIP_OUTBOUND_TRUNK")
-			}
+			// A warm transfer needs no trunk environment name: the emitted
+			// _sip_trunk() passes the carrier's own settings inline, and the
+			// prebuilt then ignores LIVEKIT_SIP_OUTBOUND_TRUNK by its own
+			// documented precedence (verified in warm_transfer.py, 2026-08-12).
 			built.HumanTransfers = append(built.HumanTransfers, ht)
 		case *ir.Delegate:
 			delegate, err := buildLiveKitDelegate(agent, tgt, ref, c, env)
@@ -1061,6 +1094,62 @@ func humanTransferWhen(c *ir.HumanTransfer) string {
 	return "Transfer the caller to a human agent."
 }
 
+// destinationExpr renders a resolved destination as Python: a quoted literal,
+// or an os.environ lookup when the target defers it to an env var (N26). The
+// env name is registered so it reaches .env.example and the required-env list.
+func destinationExpr(destination string, env *envSet) string {
+	if name := ir.DestinationEnv(destination); name != "" {
+		env.add(name)
+		return livekitEnvRef(name)
+	}
+	return pyQuote(destination)
+}
+
+// referURIExpr renders a cold-transfer destination for the `transfer_to` field
+// of TransferSIPParticipant, which takes a **URI** rather than a bare number:
+// `tel:+15105550100`, or `sip:+15105550100@<host>` for a provider that needs the
+// trunk host in the Refer-To (Plivo documents that form as mandatory). Verified
+// 2026-08-12 against the call-forwarding guide, whose own Python example writes
+// `transfer_to=f"tel:{transfer_to}"`. A bare E.164 appears in no documented
+// example, so it is normalised rather than forwarded.
+//
+// A literal is normalised here, at compile time. An env-var destination cannot
+// be, because its value is only known on the call, so it goes through the
+// emitted `_refer_uri` helper instead.
+func referURIExpr(destination string, env *envSet) string {
+	if name := ir.DestinationEnv(destination); name != "" {
+		env.add(name)
+		return "_refer_uri(" + livekitEnvRef(name) + ")"
+	}
+	return pyQuote(referURI(destination))
+}
+
+// referURI adds the `tel:` scheme to a bare number and leaves an authored URI
+// alone. A destination may already be a `sip:` URI (SCHEMA N26), and double
+// prefixing one would break the transfer it was written for.
+func referURI(destination string) string {
+	for _, scheme := range []string{"tel:", "sip:", "sips:"} {
+		if strings.HasPrefix(destination, scheme) {
+			return destination
+		}
+	}
+	return "tel:" + destination
+}
+
+// ringTimeoutSeconds renders a validated ring_timeout as the float literal both
+// LiveKit APIs take. Empty stays empty so the emitted call omits the argument
+// and the platform default applies (SCHEMA N25).
+func ringTimeoutSeconds(value ir.Duration) string {
+	if value == "" {
+		return ""
+	}
+	duration, err := time.ParseDuration(string(value))
+	if err != nil {
+		return "" // ir.Validate already rejected it; never emit a broken literal
+	}
+	return strconv.FormatFloat(duration.Seconds(), 'f', -1, 64)
+}
+
 func delegateWhen(c *ir.Delegate) string {
 	if c.When != "" {
 		return c.When
@@ -1215,21 +1304,36 @@ func livekitDeps(data livekitData) []string {
 			packages[pinned(svc.Entry.Install.Package, svc.Entry.Install.Constraint)] = true
 		}
 	}
-	base := fmt.Sprintf("livekit-agents>=%d.%d", livekitVersionMajor, livekitVersionMinMinor)
+	// A warm transfer imports the beta WarmTransferTask, and a beta API is
+	// allowed to move between minor releases (it already renamed its
+	// instructions type once). So a warm package pins the minor series the
+	// import was verified against instead of floating to <2.0 (SPEC V10, C3).
+	constraint := fmt.Sprintf(">=%d.%d", livekitVersionMajor, livekitVersionMinMinor)
+	if data.HasWarmTransfer {
+		constraint = fmt.Sprintf(">=%d.%d,<%d.%d", livekitVersionMajor, livekitWarmVerifiedMinor,
+			livekitVersionMajor, livekitWarmVerifiedMinor+1)
+	}
+	base := "livekit-agents" + constraint
 	if len(extras) > 0 {
-		base = fmt.Sprintf("livekit-agents[%s]>=%d.%d",
-			strings.Join(sortedKeys(extras), ","), livekitVersionMajor, livekitVersionMinMinor)
+		base = fmt.Sprintf("livekit-agents[%s]%s", strings.Join(sortedKeys(extras), ","), constraint)
 	}
 	deps := append([]string{
 		base,
 		pinned("livekit-plugins-silero", ">=1.6.1"),
 		"python-dotenv",
+		// httpx is unconditional, and not only for our own webhook tools.
+		// `livekit/agents/inference/llm.py` imports it while livekit-agents
+		// declares no httpx dependency: it used to arrive transitively through
+		// `openai`, and openai 3.0 switched to the `httpx2` distribution. Since
+		// `livekit/agents/__init__.py` imports `inference` eagerly, a package
+		// that pulls httpx from nowhere else cannot import livekit.agents at
+		// all. Verified 2026-08-12 against livekit-agents 1.6.9 and openai
+		// 3.0.0 in a clean container: undeclared by the former, absent from the
+		// latter. Drop this when livekit-agents declares its own.
+		"httpx",
 	}, sortedKeys(packages)...)
 	if data.Tracing {
 		deps = append(deps, "langfuse>=3", "opentelemetry-sdk>=1.33,<2")
-	}
-	if data.NeedsHTTPX {
-		deps = append(deps, "httpx")
 	}
 	// The connector bridge is a standalone aiohttp server that places outbound
 	// Twilio calls and validates inbound webhook signatures. livekit-agents

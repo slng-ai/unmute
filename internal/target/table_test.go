@@ -117,13 +117,14 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"},
 		{Provider: Pipecat, Transport: "sip", Carrier: "twilio"},
 	} {
-		if got := ResolveTelephonyFeature(key, TelephonyBriefingMessage); got.Tag != Gated {
+		if got := ResolveTelephonyFeature(key, TelephonyFeature(WarmTransfer)); got.Tag != Gated {
 			t.Fatalf("partial or unsupported route passed: %#v", got)
 		}
 	}
 	// The LiveKit Twilio connector is a usable route (its own open-source
 	// bridge): inbound, outbound, and hangup are provisional like the other
-	// live routes; transfers and voicemail stay gated (unsupported for now).
+	// live routes; transfers and voicemail stay gated. A transfer needs a
+	// platform primitive and this route has none (SPEC C1, V1).
 	connector := TelephonyKey{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}
 	for _, feature := range []TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)} {
 		if got := ResolveTelephonyFeature(connector, feature); got.Tag != Provisional {
@@ -153,6 +154,26 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if strings.Join(runtime.LocallySuppliedEnvironment, ",") != "REDIS_URL" {
 		t.Fatalf("Pipecat locally supplied environment = %v", runtime.LocallySuppliedEnvironment)
 	}
+	// The Daily carrier leg (SCHEMA N37): five provisional features, no call
+	// sources, and every granted feature carries its docs and its date.
+	dailyCarrier := TelephonyKey{Provider: Pipecat, Transport: "daily-sip", Carrier: "twilio"}
+	for _, feature := range []TelephonyFeature{
+		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound,
+		TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup),
+	} {
+		got := ResolveTelephonyFeature(dailyCarrier, feature)
+		if got.Tag != Provisional || got.Docs == "" || got.Verified == "" || got.Smoke {
+			t.Fatalf("daily carrier feature %s = %#v, want provisional with docs and a date", feature, got)
+		}
+	}
+	for _, feature := range []TelephonyFeature{
+		TelephonyFeature(WarmTransfer), TelephonyFeature(VoicemailDetection),
+		"source.from_number", "source.to_number", "source.call_id", "source.direction",
+	} {
+		if got := ResolveTelephonyFeature(dailyCarrier, feature); got.Tag != Gated {
+			t.Fatalf("daily carrier feature %s = %#v, want gated", feature, got)
+		}
+	}
 	telnyx := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"}
 	required, optional, ok = TelephonyEnvironment(telnyx)
 	if !ok || len(optional) != 0 || strings.Join(required, ",") != "api_key,public_key,connection_id,from_number" {
@@ -180,9 +201,15 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if got := ResolveTelephonyFeature(TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}, TelephonyRouteSelected); got.Tag != Gated {
 		t.Fatalf("unproven Exotel SIP route = %#v", got)
 	}
-	for _, feature := range []TelephonyFeature{TelephonyFeature(WarmTransfer), TelephonyBriefingSummary} {
-		if got := ResolveTelephonyFeature(exact, feature); got.Tag != Gated {
-			t.Fatalf("Pipecat unemitted feature %s = %#v", feature, got)
+	// No transfers on the carrier-websocket routes, either shape: a transfer
+	// needs a platform primitive and Pipecat's websocket transports have none
+	// (SPEC C1, V1). Every carrier refuses both by name.
+	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
+		key := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: carrier}
+		for _, feature := range []TelephonyFeature{TelephonyFeature(ColdTransfer), TelephonyFeature(WarmTransfer)} {
+			if got := ResolveTelephonyFeature(key, feature); got.Tag != Gated {
+				t.Fatalf("Pipecat %s %s = %#v, want gated", carrier, feature, got)
+			}
 		}
 	}
 }
@@ -194,5 +221,121 @@ func TestMCPResolvesSDKLanguageFromTable(t *testing.T) {
 	}
 	if got := table.CapabilityForValue(FieldToolMCP, LiveKit, "python"); got.Tag != Core {
 		t.Fatalf("Python MCP capability = %#v", got)
+	}
+}
+
+// TestV1_TransfersCompileOnlyOnNativeRoutes is SPEC V1: a transfer control
+// compiles only where the platform documents the primitive. LiveKit SIP
+// trunks grant both shapes; every other telephony route refuses both, and the
+// refusal names the routes that work (SPEC C1). On the non-telephony side,
+// the Pipecat control rows allow cold on the Daily transport alone and deny
+// warm everywhere.
+func TestV1_TransfersCompileOnlyOnNativeRoutes(t *testing.T) {
+	cold, warm := TelephonyFeature(ColdTransfer), TelephonyFeature(WarmTransfer)
+	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
+		sip := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: carrier}
+		for _, feature := range []TelephonyFeature{cold, warm} {
+			if got := ResolveTelephonyFeature(sip, feature); got.Tag != Provisional {
+				t.Errorf("livekit sip %s %s = %#v, want provisional", carrier, feature, got)
+			}
+		}
+	}
+	noPrimitive := []TelephonyKey{
+		{Provider: LiveKit, Transport: "connector", Carrier: "twilio"},
+		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "twilio"},
+		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"},
+		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "plivo"},
+	}
+	for _, key := range noPrimitive {
+		coldGot := ResolveTelephonyFeature(key, cold)
+		if coldGot.Tag != Gated || !strings.Contains(coldGot.Note, "(livekit, sip)") || !strings.Contains(coldGot.Note, "daily-sip") {
+			t.Errorf("%v cold = %#v, want gated with the supported routes named", key, coldGot)
+		}
+		warmGot := ResolveTelephonyFeature(key, warm)
+		if warmGot.Tag != Gated || !strings.Contains(warmGot.Note, "(livekit, sip) trunks") {
+			t.Errorf("%v warm = %#v, want gated with the supported routes named", key, warmGot)
+		}
+	}
+	table := Default()
+	if got := table.Control(ColdTransfer, Pipecat, "daily-sip", ""); got.Tag != Core {
+		t.Errorf("pipecat cold on daily-sip = %#v, want core", got)
+	}
+	if got := table.Control(ColdTransfer, Pipecat, "carrier-websocket", "twilio"); got.Tag != Gated {
+		t.Errorf("pipecat cold off daily-sip = %#v, want gated", got)
+	}
+	for _, transport := range []string{"daily-sip", "carrier-websocket", ""} {
+		if got := table.Control(WarmTransfer, Pipecat, transport, ""); got.Tag != Gated || !strings.Contains(got.Note, "(livekit, sip)") {
+			t.Errorf("pipecat warm on %q = %#v, want gated naming (livekit, sip)", transport, got)
+		}
+	}
+	if got := table.Capability(FieldTransferBriefing, Pipecat); got.Tag != Gated {
+		t.Errorf("pipecat briefing field = %#v, want gated (briefing rides the warm row)", got)
+	}
+}
+
+// The Daily route has no telephony plan (ir/build.go builds one only for a
+// declared connection), so the prerequisite lookup has to work off the route
+// triple alone. This is the seam the whole feature reads.
+func TestRouteAccountPrerequisitesAreReachableWithoutAPlan(t *testing.T) {
+	got := RouteAccountPrerequisites(Pipecat, "daily-sip", "")
+	if len(got) != 1 || got[0].Name != "daily_dialout" {
+		t.Fatalf("pipecat daily-sip prerequisites = %+v, want one daily_dialout", got)
+	}
+	if !got[0].Needs([]TelephonyFeature{TelephonyFeature(ColdTransfer)}) {
+		t.Error("daily_dialout must be needed by cold_transfer: a cold transfer dials the destination")
+	}
+	if !got[0].Needs([]TelephonyFeature{TelephonyOutbound}) {
+		t.Error("daily_dialout must be needed by outbound calling")
+	}
+	// The other half of the rule: one that always applies is a banner.
+	if got[0].Needs([]TelephonyFeature{TelephonyInbound}) {
+		t.Error("daily_dialout must not apply to an inbound-only package")
+	}
+	// The rule matches any carrier on the transport, so the carrier form inherits
+	// it: dial-out approval is a Daily domain fact, and whose trunk carries the
+	// media does not change it (SCHEMA N37, research F2).
+	if got := RouteAccountPrerequisites(Pipecat, "daily-sip", "twilio"); len(got) != 1 || got[0].Name != "daily_dialout" {
+		t.Fatalf("pipecat daily-sip twilio prerequisites = %+v, want the one daily_dialout row", got)
+	}
+	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
+		if got := RouteAccountPrerequisites(Pipecat, "carrier-websocket", carrier); len(got) != 0 {
+			t.Errorf("pipecat carrier-websocket %s prerequisites = %+v, want none", carrier, got)
+		}
+	}
+	if got := RouteAccountPrerequisites(LiveKit, "sip", "twilio"); len(got) != 0 {
+		t.Errorf("livekit sip prerequisites = %+v, want none", got)
+	}
+}
+
+// Every prerequisite is recorded the way every other provider claim in this
+// rulebook is: with the page it came from and the date it was checked. An empty
+// NeededBy would be a prerequisite nothing needs, which must not exist.
+func TestRouteAccountPrerequisitesAreEvidenced(t *testing.T) {
+	table := Default()
+	for _, rule := range routePrerequisites {
+		p := rule.prereq
+		if p.Name == "" || p.Summary == "" {
+			t.Errorf("prerequisite %+v needs a name and an actionable summary", p)
+		}
+		if len(p.NeededBy) == 0 {
+			t.Errorf("prerequisite %q has an empty NeededBy: a prerequisite nothing needs must not exist", p.Name)
+		}
+		if p.Docs == "" || p.Verified == "" {
+			t.Errorf("prerequisite %q = docs %q verified %q, want both set", p.Name, p.Docs, p.Verified)
+		}
+		// A prerequisite for a capability the route refuses is a prerequisite for
+		// something no package can reach, so it could never be reported. Checked
+		// against the control rows rather than restated, so the rulebook stays the
+		// one place the route's support is described.
+		for _, feature := range p.NeededBy {
+			control := TelephonyControl(feature)
+			if _, isControl := table.Controls[control]; !isControl {
+				continue
+			}
+			if got := table.Control(control, rule.provider, rule.transport, rule.carrier); got.Tag == Gated {
+				t.Errorf("prerequisite %q is needed by %q, which (%s, %s) refuses: %s",
+					p.Name, feature, rule.provider, rule.transport, got.Note)
+			}
+		}
 	}
 }

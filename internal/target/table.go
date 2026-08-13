@@ -44,9 +44,7 @@ const (
 	FieldTransferRequires      Field = "controls.agent_transfer.requires"
 	FieldContextNoToolCalls    Field = "context.include_tool_calls.false"
 	FieldContextVariableSubset Field = "context.variables.list"
-	FieldBriefingSummary       Field = "controls.human_transfer.briefing.summary"
-	FieldBriefingMessage       Field = "controls.human_transfer.briefing.message"
-	FieldBriefingWait          Field = "controls.human_transfer.briefing.wait"
+	FieldTransferBriefing      Field = "controls.human_transfer.warm.briefing"
 	FieldGreetingUserFirst     Field = "conversation.greeting.user"
 	FieldGreetingModelWritten  Field = "conversation.greeting.model_written"
 	FieldGreetingAbsent        Field = "conversation.greeting.absent"
@@ -65,6 +63,7 @@ const (
 	FieldToolInterruption      Field = "tools.interruption.non_default"
 	FieldOutbound              Field = "channels.telephony.outbound"
 	FieldVoicemail             Field = "channels.telephony.on_voicemail"
+	FieldDeploymentMultiRegion Field = "deployment_region.multiple"
 	FieldTracingLangfuse       Field = "tracing.provider.langfuse"
 	FieldVariableConversation  Field = "variables.source.conversation"
 	FieldToolInject            Field = "tools.inject"
@@ -270,19 +269,12 @@ func Default() Table {
 				deny(Pipecat, "the Pipecat driver does not shape transfer context (variables subset) yet"),
 				deny(Vapi, "Vapi accepts transfer variables: all only"),
 			),
-			FieldBriefingSummary: field(
-				deny(Pipecat, "Pipecat has no summary briefing lowering"),
-				deny(Deepgram, "Deepgram has no summary briefing lowering"),
-			),
-			FieldBriefingMessage: field(
-				deny(LiveKit, "LiveKit supports summary briefing only"),
-				deny(Pipecat, "Pipecat has no message briefing lowering"),
-				deny(Deepgram, "Deepgram has no message briefing lowering"),
-			),
-			FieldBriefingWait: field(
-				deny(LiveKit, "LiveKit has no wait briefing lowering"),
-				deny(Pipecat, "Pipecat has no wait briefing lowering"),
-				deny(Deepgram, "Deepgram has no wait briefing lowering"),
+			// SCHEMA N25: `briefing` is free text, so there is no per-value row
+			// to resolve. It rides the warm_transfer control row, which already
+			// says which routes can carry a private consultation leg at all.
+			FieldTransferBriefing: field(
+				deny(Pipecat, "Pipecat has no warm transfer, so no briefing lowering (SPEC C4)"),
+				deny(Deepgram, "the Deepgram bridge has no warm-transfer briefing lowering"),
 			),
 			FieldGreetingUserFirst: field(
 				warn(Deepgram, "Deepgram silence for an omitted greeting is undocumented"),
@@ -379,6 +371,14 @@ func Default() Table {
 				deny(Vapi, "Vapi has no Langfuse tracing lowering"),
 				deny(Deepgram, "the Deepgram driver does not emit Langfuse tracing"),
 			),
+			// Several regions in one deployment_region (N32). LiveKit creates
+			// one deployment per region from one build directory; every other
+			// provider is gated, each in its own words. Verified 2026-08-12.
+			FieldDeploymentMultiRegion: field(
+				deny(Pipecat, "Pipecat Cloud agent names are globally unique across regions, so a second region needs a differently named agent: declare one region here and deploy the second with `pipecat cloud deploy <name>-<region> --region <region>`"),
+				deny(Vapi, "Vapi has no per-region deployment to fan out to"),
+				deny(Deepgram, "the Deepgram driver does not emit a deployment at all, let alone one per region"),
+			),
 			// Variables and secrets (variable_secrets_specs.md V5). The code
 			// drivers own the session state and the request, so they can capture
 			// a value mid-call and merge hidden parameters; a managed target can
@@ -412,7 +412,11 @@ func Default() Table {
 			),
 			WarmTransfer: controls(
 				control(),
-				controlDeny("Pipecat warm transfer ships upstream but this driver does not emit it yet"),
+				// Says which of two things it means, per N34: Daily documents warm,
+				// this driver has not built it (feature 005); the carrier websocket
+				// transports have no transfer control at all. Writing either as the
+				// other is the defect FR-032 exists to stop.
+				controlDeny("this driver does not emit warm transfer yet; Daily documents the pattern but it needs the bot to own the call audio, and Pipecat's websocket transports have no transfer control at all. Warm compiles on (livekit, sip) today (SPEC C1, C4)"),
 				controlNamedCarrier("twilio", "Vapi warm transfer requires carrier Twilio"),
 				controlNamedCarrier("twilio", "Deepgram transfer requires carrier Twilio in the generated bridge"),
 			),
@@ -455,12 +459,12 @@ func control() ControlCapability {
 	return ControlCapability{Capability: Capability{Tag: Core}}
 }
 
-func controlDeny(note string) ControlCapability {
-	return ControlCapability{Capability: Capability{Tag: Gated, Note: note}}
-}
-
 func controlTransport(transport, note string) ControlCapability {
 	return ControlCapability{Capability: Capability{Tag: Core}, Transport: transport, ConditionNote: note}
+}
+
+func controlDeny(note string) ControlCapability {
+	return ControlCapability{Capability: Capability{Tag: Gated, Note: note}}
 }
 
 func controlNamedCarrier(carrier, note string) ControlCapability {

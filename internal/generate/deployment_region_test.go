@@ -16,7 +16,7 @@ func TestDeploymentRegionPipecat(t *testing.T) {
 	agent := loadCompilerAgent(t)
 	tgt := targetByProvider(t, agent, ir.ProviderPipecat)
 
-	tgt.DeploymentRegion = "eu-west1"
+	tgt.DeploymentRegions = []string{"eu-west1"}
 	set, err := Generate(agent, tgt, target.Default())
 	if err != nil {
 		t.Fatal(err)
@@ -25,7 +25,7 @@ func TestDeploymentRegionPipecat(t *testing.T) {
 		t.Errorf("set: pcc-deploy.toml missing region:\n%s", got)
 	}
 
-	tgt.DeploymentRegion = ""
+	tgt.DeploymentRegions = nil
 	unset, err := Generate(agent, tgt, target.Default())
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestDeploymentRegionLiveKit(t *testing.T) {
 	agent := loadCompilerAgent(t)
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
 
-	tgt.DeploymentRegion = "eu-central"
+	tgt.DeploymentRegions = []string{"eu-central"}
 	set, err := Generate(agent, tgt, target.Default())
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +52,7 @@ func TestDeploymentRegionLiveKit(t *testing.T) {
 		t.Errorf("set: README has a doubled blank line:\n%s", setREADME)
 	}
 
-	tgt.DeploymentRegion = ""
+	tgt.DeploymentRegions = nil
 	unset, err := Generate(agent, tgt, target.Default())
 	if err != nil {
 		t.Fatal(err)

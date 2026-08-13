@@ -1,0 +1,10 @@
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: daily-sip
+    carrier: twilio
+    connection: twilio_sip_daily
+    deployment_region: us-west
+    destinations:
+      billing_line: BILLING_PHONE_NUMBER

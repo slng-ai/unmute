@@ -92,21 +92,6 @@ def normalized_context(runner_args: WebSocketRunnerArguments) -> dict:
     }
 
 
-async def cold_transfer(call_id: str, destination: str) -> None:
-    if not _valid_destination(destination):
-        raise RuntimeError("invalid compiled transfer destination")
-    if not await STATE.mark_once("transfer", call_id, SESSION_TTL_SECS):
-        return
-    try:
-        await _call_api("POST", f"/calls/{call_id}/actions/transfer", {
-            "to": destination,
-            "command_id": secrets.token_urlsafe(24),
-        })
-    except Exception:
-        await STATE.forget("transfer", call_id)
-        raise
-
-
 {{if .Telephony.HasInbound}}@app.post("/telephony/inbound")
 async def inbound(request: Request) -> dict[str, bool]:
     data = await _signed_event(request)

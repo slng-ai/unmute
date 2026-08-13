@@ -79,7 +79,7 @@ same placement (`fallback` is a think-model field).
 targets:
   livekit:
     provider: livekit
-    version: "1.5.2"
+    version: "1.6.4"
     sdk_language: python
     pins:
       livekit-plugins-slng: "1.7.0"
@@ -438,9 +438,11 @@ agents:
 controls:
   to_human:
     kind: human_transfer
-    destination: support_line
-    mode: warm
-    briefing: summary
+    warm:
+      destination: support_line
+      briefing: Say who is calling and what they already tried. Ask if they can take it.
+      ring_timeout: 30s
+      on_unavailable: return_to_caller
 
 channels:
   phone:
@@ -461,19 +463,19 @@ carriers; only their environment-variable names and values change.
 # connections/primary_phone.yaml
 kind: telephony
 environment:
-  sip_address: TWILIO_SIP_ADDRESS
-  sip_username: TWILIO_SIP_USERNAME
-  sip_password: TWILIO_SIP_PASSWORD
-  from_number: TWILIO_PHONE_NUMBER
+  sip_address: SIP_TRUNK_HOSTNAME
+  sip_username: SIP_AUTH_USERNAME
+  sip_password: SIP_AUTH_PASSWORD
+  from_number: SIP_FROM_NUMBER
 ```
 
 The carrier matrix makes those values explicit:
 
 | Route | Carrier | Connection environment values | Generated integration | Status |
 |---|---|---|---|---|
-| `sip` | Twilio | `TWILIO_SIP_ADDRESS`, `TWILIO_SIP_USERNAME`, `TWILIO_SIP_PASSWORD`, `TWILIO_PHONE_NUMBER` | Self-hosted LiveKit SIP and Twilio trunk inputs | Offline-tested; provisional |
-| `sip` | Telnyx | `TELNYX_SIP_ADDRESS`, `TELNYX_SIP_USERNAME`, `TELNYX_SIP_PASSWORD`, `TELNYX_PHONE_NUMBER` | Self-hosted LiveKit SIP and Telnyx trunk inputs | Offline-tested; provisional |
-| `sip` | Plivo | `PLIVO_SIP_ADDRESS`, `PLIVO_SIP_USERNAME`, `PLIVO_SIP_PASSWORD`, `PLIVO_PHONE_NUMBER` | Self-hosted LiveKit SIP and Plivo trunk inputs | Offline-tested; provisional |
+| `sip` | Twilio | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Self-hosted LiveKit SIP and Twilio trunk inputs | Offline-tested; provisional |
+| `sip` | Telnyx | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Self-hosted LiveKit SIP and Telnyx trunk inputs | Offline-tested; provisional |
+| `sip` | Plivo | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Self-hosted LiveKit SIP and Plivo trunk inputs | Offline-tested; provisional |
 | `sip` | Exotel | Exotel SIP values | No emitted adapter | Gated pending provider-specific proof |
 | `connector` | Twilio | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` | Generated bridge into a self-hosted LiveKit room | Offline-tested; provisional |
 
@@ -483,7 +485,7 @@ voicemail, hangup, cold-transfer, and warm-transfer paths. The Twilio connector
 also runs now and is provisional: its generated `telephony_bridge.py` speaks the
 Twilio Media Streams protocol and bridges the call into a local, self-hosted
 LiveKit room, with no LiveKit Cloud. It supports inbound, outbound, and hangup;
-transfers and voicemail stay on the SIP route. Only the Exotel LiveKit route is
+voicemail detection stays on the SIP route. Only the Exotel LiveKit route is
 gated and fails closed.
 Follow the
 [SIP trunking guide](../learn/07-phone-calls.md#configure-telephony-by-orchestrator)
@@ -496,7 +498,7 @@ Bind the Connection and symbolic destinations to the exact route.
 targets:
   livekit:
     provider: livekit
-    version: "1.5.2"
+    version: "1.6.4"
     sdk_language: python
     transport: sip
     carrier: twilio
@@ -506,8 +508,16 @@ targets:
 ```
 
 Bind a target to the self-hosted `sip` route and one telephony Connection. The
-distinct Twilio `connector` route is a usable alternative that runs on a laptop;
-it cannot inherit SIP transfer behavior.
+distinct Twilio `connector` route is a usable laptop alternative for inbound,
+outbound, and hangup; it carries no transfers, because transfers compile only
+where the platform ships the primitive ([TRANSFERS.md](../../TRANSFERS.md)).
+
+The two routes also ask for different Twilio credentials, because they use
+different Twilio products: `sip` uses Elastic SIP Trunking (a provisioned trunk,
+its own username and password, and a publicly reachable SIP endpoint on your
+side), while `connector` uses Programmable Voice and Media Streams (the account
+SID, auth token, and a number). See
+[why the same carrier asks for different credentials](../learn/07-phone-calls.md#why-the-same-carrier-asks-for-different-credentials).
 
 To configure several carriers, declare several LiveKit targets, such as
 `livekit_twilio` and `livekit_plivo`, and bind each to its own Connection. Each
@@ -530,15 +540,44 @@ Telnyx, use the SIP connection address, credentials, and assigned number from
 Telnyx Mission Control. For Plivo, use the Zentrunk termination domain,
 outbound credential, and linked number from the Plivo Console.
 
-Compilation emits the selected `sip-inbound-trunk.json`,
-`sip-outbound-trunk.json`, and `sip-dispatch-rule.json` inputs for production
-deployments. Materialize their
-environment placeholders with `envsubst`, then run the `lk sip ... create`
-commands in the generated README. Copy the returned IDs to
-`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` as requested by
-`.env.example`. For local development none of this is needed:
-`unmute dev --telephony` creates the same records on the local server itself
-and supplies both IDs.
+Three carrier facts decide whether a call works, and none of them is an Unmute
+setting, which is why the generated README dictates them rather than the compiler
+doing them for you.
+
+- **The number has to be attached to the trunk.** Incoming calls enter through the
+  trunk, so a number that is not on it never reaches LiveKit, whatever else is
+  configured.
+- **Origination points at LiveKit, termination points at the phone network.** The
+  names are the carrier's point of view. Termination is your three dial-out values;
+  origination is one address, and on LiveKit Cloud it is built from the **project
+  ID** (`sip:<ID without p_>.sip.livekit.cloud;transport=tcp`), not from
+  `LIVEKIT_URL`, whose subdomain is a different string entirely.
+- **Cold transfer lives or dies on the trunk's transfer settings.** It is a SIP
+  REFER on the caller's existing leg, so Call Transfer and PSTN transfer must both
+  be enabled at the carrier. Nothing on the LiveKit side substitutes for that, and
+  nothing in the package can detect it before the transfer fires.
+
+Compilation emits `sip-inbound-trunk.json` and `sip-dispatch-rule.json` for
+production deployments, for inbound calls only, plus the `telephony-setup.sh`
+that feeds them to `lk`. Run `bash telephony-setup.sh` from the build directory:
+it resolves the inbound trunk by the phone number in your `.env`, creates the
+trunk and the dispatch rule, reuses whatever already exists, and needs no record
+ID copied anywhere, so no environment name carries one (SCHEMA N36,
+2026-08-12). The generated README's `## Telephony setup` section dictates the
+carrier half, and its `### Take it live, in order` list is the sequence that gets a
+package answering calls: carrier, then this script, then deploy the agent, then
+call your own number and read `lk agent logs`. There is no outbound trunk input:
+the agent dials out with the carrier's trunk settings passed inline (SCHEMA N33,
+2026-08-12). For local development none of this is needed: `unmute dev --telephony`
+creates the same records on the local server itself.
+
+One deployment rule that bites here rather than at compile time: every name in the
+`.env` you upload as secrets must be a valid shell identifier, letters, digits and
+underscores, never starting with a digit. LiveKit Cloud exports secrets with a
+shell, so `11LABS_API_KEY` fails at export, the value is missing at runtime, and
+the only evidence is one `not a valid identifier` line at the top of
+`lk agent logs`. Rename it, then re-upload with `--overwrite`, because a merge
+leaves the bad name behind.
 
 Self-hosted SIP runs LiveKit Server and LiveKit SIP against the same Redis.
 Redis is their shared datastore and message bus, so calls, SIP participants,
@@ -564,14 +603,16 @@ unmute dev acme --target livekit --telephony
 
 The command runs the whole bootstrap itself: Docker Compose builds the Agent and
 starts Redis, LiveKit Server, and LiveKit SIP first; the command then creates or
-reuses the inbound trunk, outbound trunk, and `call-` dispatch rule on that
-local server with the generated development key pair, injects the returned
-`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK`, and starts the
-application. Record creation is idempotent: the named Redis volume persists,
+reuses the inbound trunk and `call-` dispatch rule on that local server with
+the generated development key pair, and then starts the application. The records
+are platform state the local LiveKit SIP service reads for itself, so nothing is
+injected into the application's environment. No outbound trunk is created,
+locally or in production. Record creation is idempotent: the named Redis volume persists,
 so restarts reuse existing records instead of duplicating them.
 
-Non-empty external `LIVEKIT_URL`, API key/secret, `REDIS_URL`, or trunk ID
-values conflict with this local graph and are rejected. `--verbose` follows
+Non-empty external `LIVEKIT_URL`, API key/secret, or `REDIS_URL` values
+conflict with this local graph and are rejected. A retired trunk-ID variable left
+in your `.env` is ignored, because nothing reads it. `--verbose` follows
 Compose logs; normal output is retained in `build/livekit/telephony.log`.
 Stopping preserves the named Redis volume. Remember that a real call still
 needs carrier-reachable SIP signaling and RTP; the local stack runs, but an
@@ -598,7 +639,7 @@ environment:
 targets:
   livekit_connector:
     provider: livekit
-    version: "1.5.2"
+    version: "1.6.4"
     sdk_language: python
     transport: connector
     carrier: twilio
@@ -620,9 +661,13 @@ unmute dev acme --target livekit_connector --telephony --to +15551234567
 
 `unmute dev --telephony` starts a managed cloudflared tunnel, sets the Twilio
 voice webhook automatically, and places an outbound call with `--to`. Twilio
-reaches the bridge over HTTPS and WSS, so both inbound and outbound work fully on
-a laptop. The route supports inbound, outbound, and hangup; call transfers and
-voicemail detection stay on the SIP route.
+reaches the bridge over HTTPS and WSS, so both inbound and outbound work fully
+on a laptop. The route supports inbound, outbound, and hangup.
+
+It carries no transfers. `transfer_sip_participant` and `WarmTransferTask`
+act on a SIP participant reached through a trunk, and this route has neither:
+the caller is audio the bridge published into a room. Transfers and voicemail
+detection live on the SIP route ([TRANSFERS.md](../../TRANSFERS.md)).
 
 ## Run it and talk to the agent
 
@@ -650,7 +695,9 @@ Compose network, and the browser reaches it on the published ports (`7880` for
 signalling, `7881` for the TCP fallback, `7882/udp` for the UDP mux). The page
 mints a token and joins a fresh room; your agent is dispatched to that room
 automatically. To point at LiveKit Cloud or your own deployment instead, deploy
-the built image yourself; local dev always runs the containerized dev server.
+the built image; local dev always runs the containerized dev server. The
+generated `build/livekit/README.md` has a Deploy section with the exact commands
+for that package, on LiveKit Cloud and self-hosted.
 
 Both modes read shared keys from the current directory's `.env`, then apply
 package-root `.env` overrides. Press `ctrl-c` to stop and the stack comes down
@@ -678,7 +725,8 @@ remaining boundaries are explicit YAML choices, not silent omissions.
 | Twilio `connector` route | Provisional; generated bridge into a self-hosted LiveKit room, inbound/outbound/hangup, never inherits SIP capabilities |
 | A `provider: local` model (listen, speak, or think) | Supported |
 | `speak.endpoint_env` | Rejected; no LiveKit integration slot |
-| Warm `briefing: message` or `wait` | Rejected; use `summary` |
+| Warm `briefing` (free text) | Supported; added on top of the transcript LiveKit always passes along |
+| Warm transfer session | The agent leaves once the person is connected; caller and person carry on alone |
 
 ## Next steps
 

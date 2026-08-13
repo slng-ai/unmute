@@ -1,0 +1,14 @@
+# Pipecat on the Daily route: the one Pipecat transport with a native
+# transfer primitive (docs/TRANSFERS.md). Cold transfer needs dial-out
+# enabled on the Daily domain.
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: daily-sip
+    # The destination is the UPPER_SNAKE name of an env var holding an E.164
+    # number or a sip: URI, read at call time. A committed example never ships
+    # a dialable literal: any number a repository ships is a number nobody
+    # answers.
+    destinations:
+      billing_line: BILLING_PHONE_NUMBER

@@ -3,7 +3,16 @@
 An outbound reminder call for the Sage and Stone Salon, built to show every
 runtime-value kind in one small package. It compiles and runs on both shipped
 code targets, Pipecat and LiveKit, from the same source. The design is in
-[docs/spec/variable_secrets_specs.md](../../docs/spec/variable_secrets_specs.md).
+[SCHEMA.md](../../docs/SCHEMA.md) sections 4.4 (variables) and 4.12 (secrets).
+
+Both targets here are **self-hosted** routes, chosen because this example is about
+runtime values rather than about telephony: Pipecat on `transport:
+carrier-websocket` (the container answers the carrier itself) and LiveKit on
+`transport: connector` (the generated bridge puts the call in a local LiveKit
+room). Its `dialed_number` variable is why: `source: to_number` is filled by the
+carrier adapter, and those are the routes that emit one. The Pipecat routes that
+host nothing refuse that source by name, so a package needing it belongs here. The
+route comparison is in [docs/TELEPHONY.md](../../docs/TELEPHONY.md).
 
 ## The four kinds, and where each shows up
 
@@ -96,3 +105,13 @@ declares is refused rather than quietly ignored.
 In production the same three values ride the target's own dispatch payload as
 one flat JSON object; each build's own README prints the exact spelling for its
 driver.
+
+## Deploy it
+
+Both routes here host something of yours, which is what makes deploying them the
+same job twice rather than two different jobs: a process that answers your carrier,
+behind a public HTTPS origin, with the number's voice webhook pointed at it.
+`build/pipecat/README.md` and `build/livekit/README.md` each carry their own
+platform commands, required variables, and carrier steps. If you want a phone route
+with nothing to host, that is a different transport, and
+[docs/TELEPHONY.md](../../docs/TELEPHONY.md) compares them.

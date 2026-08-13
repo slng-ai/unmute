@@ -80,6 +80,7 @@ url_env, allowed_tools keeping D8 visibility. */ -}}
 {{end}}import logging
 import os
 {{if .NeedsRender}}import re
+{{end}}{{if or .HasWarmTransfer .HasColdTransfer}}import time
 {{end}}{{if .HasVars}}from dataclasses import dataclass
 {{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
@@ -87,7 +88,7 @@ import os
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
 {{if .NeedsField}}from pydantic import Field
-{{end}}{{if .Outbound}}from livekit import api
+{{end}}{{if or .Outbound .HasColdTransfer .HasWarmTransfer}}from livekit import api{{if .HasColdTransfer}}, rtc{{end}}
 {{end}}from livekit.agents import (
 {{- if .Outbound}}
     AMD,
@@ -129,12 +130,18 @@ import os
     mcp,
 {{- end}}
     metrics,
+{{- if .HasWarmTransfer}}
+    room_io,
+{{- end}}
 {{- if or .IgnorePhrases .STT.Chain}}
     stt,
 {{- end}}
 )
 {{- if or .NeedsTaskGroups .HasWarmTransfer}}
-from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskGroup{{if .HasWarmTransfer}}, WarmTransferTask{{end}}{{else}}WarmTransferTask{{end}}
+from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskGroup{{end}}{{if and .NeedsTaskGroups .HasWarmTransfer}}, {{end}}{{if .HasWarmTransfer}}WarmTransferTask, WorkflowInstructions{{end}}
+{{- end}}
+{{- if .HasWarmTransfer}}
+from livekit.agents.llm import ToolError
 {{- end}}
 {{- if .NeedsEndCallTool}}
 from livekit.agents.beta.tools import EndCallTool  # prebuilt end_call (beta)
@@ -201,6 +208,90 @@ def _api_key(header: str, env: str) -> dict[str, str]:
     return {header: os.environ[env]}
 
 {{end}}
+{{end}}
+{{- if .HasColdTransfer}}
+# --- cold transfer destination -----------------------------------------------
+# TransferSIPParticipant's transfer_to is a URI, not a bare number: it becomes
+# the Refer-To of the outgoing SIP REFER. `tel:+E164` covers Twilio and Telnyx;
+# a provider that needs its trunk host in the Refer-To (Plivo) takes the
+# `sip:+E164@<trunk>` form, which a destination may already carry (SCHEMA N26).
+def _refer_uri(destination: str) -> str:
+    """The destination as a REFER URI, adding `tel:` only to a bare number."""
+    if destination.startswith(("tel:", "sip:", "sips:")):
+        return destination
+    return "tel:" + destination
+
+{{end}}
+{{- if and .Telephony (eq .Telephony.Transport "sip") (or .Telephony.HasOutbound .Telephony.HasWarm)}}
+# --- dial-out trunk ----------------------------------------------------------
+# The carrier's own trunk settings, sent inline with every dial. No stored
+# LiveKit outbound trunk is used or needed: CreateSIPParticipant takes the
+# configuration in its `trunk` field and WarmTransferTask takes the same object
+# as `sip_connection`, so nothing has to be registered on the platform first.
+# One function, every dial site, so a rotated credential cannot fix one path and
+# break another. Verified against livekit-agents 1.6.9 on 2026-08-12.
+def _sip_trunk() -> api.SIPOutboundConfig:
+    """The carrier trunk configuration, read from the Connection's env names."""
+    return api.SIPOutboundConfig(
+        hostname=os.environ[{{pyq .Telephony.SIPAddressEnv}}],
+        auth_username=os.environ[{{pyq .Telephony.SIPUsernameEnv}}],
+        auth_password=os.environ[{{pyq .Telephony.SIPPasswordEnv}}],
+    )
+
+
+def _sip_number() -> str:
+    """The number to call from. Required with an inline trunk, which carries no
+    number list for the platform to default from."""
+    return os.environ[{{pyq .Telephony.FromNumberEnv}}]
+
+{{end}}
+{{- if .HasWarmTransfer}}
+# --- warm transfer briefing --------------------------------------------------
+# The persona the briefing agent wears while it talks to the colleague, in place
+# of the prebuilt's own. WarmTransferTask builds its instructions from a template
+# with three slots: this persona, the caller transcript, and the authored extra.
+# Only the persona is replaced. The platform still supplies the paragraph saying
+# who is who, the transcript itself, the sentence naming the tool that joins the
+# calls, and the instruction to open with a summary.
+#
+# Every paragraph below answers something observed on a live warm transfer on
+# 2026-08-12, where the colleague answered and heard "hello, how can I help":
+#   - open with the handover, because the prebuilt lets the human speak first and
+#     never briefs unprompted, so the agent's first turn is a reply, and a reply
+#     to "hello" is a greeting unless it is told otherwise;
+#   - name the cue, because joining the calls is this agent's own tool call and
+#     nothing else can trigger it, so the colleague has to be told what to say;
+#   - say what to do with a thin transcript, because a model asked to summarise
+#     nothing improvises a greeting;
+#   - decline out loud, because nothing on the platform bounds the consultation
+#     once the call is answered, and the caller is on hold for all of it.
+#
+# Verified against livekit-agents 1.6.9 on 2026-08-12
+# (beta/workflows/warm_transfer.py: PERSONA, INSTRUCTIONS_TEMPLATE).
+_BRIEFING_PERSONA = """\
+# Identity
+
+You are the assistant that took a caller's call. You are now on the phone to a colleague
+you called for help with it. The caller is not on this line: they are on hold and cannot
+hear any of this.
+
+# Goal
+
+Hand the caller over. Your first words are the handover, not a greeting. Do not say hello,
+do not offer help, and never wait to be asked what the call is about. Say who is on hold,
+what they want, and what was already tried or offered, then ask one question your colleague
+can answer. A few sentences, no more.
+
+Tell your colleague you will put the caller through as soon as they say they are ready.
+
+If the conversation history below is empty, or has no words from the caller in it, say that
+someone is on hold asking for a person, that you do not have their details yet, and ask
+whether your colleague can take the call. Say exactly that. Never greet instead.
+
+Your colleague may not be able to take it. If they say they cannot, if they go quiet, or if
+the conversation moves on without an answer, decline the transfer and give their reason. Do
+not leave the question open: the caller is holding for the whole of this conversation."""
+
 {{end}}
 {{- if .RequiredSecrets}}
 # --- required environment ----------------------------------------------------
@@ -475,19 +566,187 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{end}}
 {{- range .HumanTransfers}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext) -> str:
+    async def {{.Method}}(self, ctx: RunContext) -> str | None:
         {{triple .When}}
+        # One line per firing, so a live test can see which control the model
+        # picked and when — the transfer that ran is otherwise invisible in the
+        # logs until the carrier request goes out.
+        #
+        # This tool returns a string only on the paths where the caller is still
+        # here and the conversation continues. A function tool's return value is
+        # fed back to the LLM, which then takes another turn: harmless while the
+        # caller is listening, wrong once the session is over. After a warm merge
+        # that turn would speak into a room holding the caller and the person we
+        # just handed them to, right after saying goodbye.
+        logger.info("human transfer fired: {{.Method}} ({{if .Warm}}warm{{else}}cold{{end}})")
 {{- if .Warm}}
-        # mode: warm — the prebuilt consultation flow briefs the human agent
-        # (briefing: summary) before connecting the caller. Beta on Python.
-        result = await WarmTransferTask(sip_call_to={{pyq .To}})
-        return "The caller is now connected to " + result.human_agent_identity + "."
+        # warm: the prebuilt holds the caller with music, dials the person,
+        # briefs them from the chat context, then merges the calls. Beta on
+        # Python. Every unavailable case (no answer, decline, voicemail, failed
+        # dial) arrives as one ToolError, with the caller already restored.
+        #
+        # The tool speaks its own line before the hold (V4/B4): the caller
+        # hears the handoff start instead of sudden hold music.
+        await ctx.session.say(
+            "One moment while I bring a colleague on the line.", allow_interruptions=False
+        )
+        # Read the conversation once and hand that same object over, so the
+        # number logged and the material passed cannot drift apart. The count is
+        # what was handed over, not the smaller number the prebuilt's own
+        # transcript filter keeps (it drops system messages, tool calls and empty
+        # text), so a count of zero or one means the briefing had nothing at all
+        # and a healthy count means material was passed, not that it was used.
+        # That distinction is the whole reason this line exists: on 2026-08-12 a
+        # warm transfer failed on a live call and left no log line to read.
+        briefing_ctx = self.chat_ctx
+        logger.info(
+            "warm transfer dialling out: handing over %d conversation messages",
+            len(briefing_ctx.items),
+        )
+        started = time.monotonic()
+        try:
+            result = await WarmTransferTask(
+                sip_call_to={{.DialExpr}},
+{{- if and $.Telephony (eq $.Telephony.Transport "sip")}}
+                sip_connection=_sip_trunk(),
+                sip_number=_sip_number(),
+{{- end}}
+                chat_ctx=briefing_ctx,
+                instructions=WorkflowInstructions(
+                    persona=_BRIEFING_PERSONA,
+{{- if .Briefing}}
+                    extra={{pyq .Briefing}},
+{{- end}}
+                ),
+{{- if .RingTimeout}}
+                ringing_timeout={{.RingTimeout}},
+{{- end}}
+            )
+        except ToolError as error:
+{{- if .Hangup}}
+            # on_unavailable: hangup. The goodbye is spoken here, so the session
+            # is over: no return value, or the LLM answers the tool and speaks
+            # again on the way out.
+            logger.info(
+                "warm transfer unavailable after %ds: %s",
+                int(time.monotonic() - started),
+                error,
+            )
+            await ctx.session.generate_reply(
+                instructions="Tell the caller nobody is available and say goodbye."
+            )
+            ctx.session.shutdown()
+            return None
 {{- else}}
-        # mode: cold — SIP REFER through the job context.
+            # on_unavailable: return_to_caller. The caller is still here and the
+            # conversation continues, so the LLM does need this back. The line is
+            # logged here too: this branch wrote nothing until 2026-08-12, so the
+            # commonest failure was also the invisible one.
+            logger.info(
+                "warm transfer unavailable after %ds: %s",
+                int(time.monotonic() - started),
+                error,
+            )
+            return f"Nobody took the transfer ({error}). Tell the caller and keep helping them."
+{{- end}}
+        await ctx.session.say(
+            "You are on the line with my colleague now. I will leave you to it.",
+            allow_interruptions=False,
+        )
+        # The room outlives this session (delete_room_on_close=False), so the
+        # caller and the person stay connected after the agent shuts down. The
+        # identity is logged rather than returned: returning it would hand the
+        # LLM a tool result and it would take one more turn, which both of them
+        # would hear (upstream's own example returns nothing here either).
+        logger.info(
+            "warm transfer merged after %ds: %s",
+            int(time.monotonic() - started),
+            result.human_agent_identity,
+        )
+        ctx.session.shutdown()
+        return None
+{{- else}}
+        # cold: SIP REFER through the job context. The caller leaves the room.
         job_ctx = get_job_context()
-        identity = next(iter(job_ctx.room.remote_participants))
-        await job_ctx.transfer_sip_participant(identity, {{pyq .To}}, play_dialtone=True)
-        return "The caller was transferred."
+        # Pick the SIP caller by kind: identities are assigned at dispatch, and a
+        # room can hold more than one participant.
+        caller = next(
+            (
+                participant
+                for participant in job_ctx.room.remote_participants.values()
+                if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+            ),
+            None,
+        )
+        if caller is None:
+            # No SIP leg in the room, so there is nothing to refer. The usual
+            # cause is a session that never arrived by phone: an Agent Console
+            # run, a browser session, or a dispatch rule pointing at a different
+            # agent. Cold acts on the caller's own leg, so unlike warm it cannot
+            # be tested without a real inbound call.
+            #
+            # This branch logged nothing until 2026-08-12. On a live test that
+            # day it fired, spoke a vague reply, and left an operator reading a
+            # log that showed the tool firing and then simply stopping. The
+            # earlier reasoning was that line 1 plus the absence of line 2 says
+            # this on its own; absence is only a signal to somebody who already
+            # knows to look for it.
+            logger.info("cold transfer skipped: no phone caller in the room")
+            return (
+                "There is no phone caller to transfer, because this session did not "
+                "arrive by phone. Tell the caller you cannot put them through and "
+                "keep helping them."
+            )
+        # The tool speaks the announcement itself (V4/B4): leaving it to the
+        # prompt lets a model say "putting you through" and never call this,
+        # which a caller cannot tell apart from a transfer that failed.
+        await ctx.session.say(
+            "Putting you through now, one moment.", allow_interruptions=False
+        )
+        request = api.TransferSIPParticipantRequest(
+            room_name=job_ctx.room.name,
+            participant_identity=caller.identity,
+            transfer_to={{.ToExpr}},
+            play_dialtone=True,
+        )
+{{- if .RingTimeout}}
+        request.ringing_timeout.FromNanoseconds(int({{.RingTimeout}} * 1e9))
+{{- end}}
+        # The REFER goes out here. Logged before the call, so a request that never
+        # returns is still visible as a phase the transfer reached.
+        logger.info("cold transfer referring the caller out")
+        started = time.monotonic()
+        try:
+            await job_ctx.api.sip.transfer_sip_participant(request)
+        except (api.SipCallError, api.ServerError) as error:
+{{- if .Hangup}}
+            # on_unavailable: hangup. The goodbye is spoken here and the session
+            # ends, so nothing is returned to the LLM.
+            logger.info(
+                "cold transfer failed after %ds: %s",
+                int(time.monotonic() - started),
+                error,
+            )
+            await ctx.session.generate_reply(
+                instructions="Tell the caller the transfer failed and say goodbye."
+            )
+            ctx.session.shutdown()
+            return None
+{{- else}}
+            # on_unavailable: return_to_caller — the caller is still in the room,
+            # so the LLM does need this back.
+            logger.info(
+                "cold transfer failed after %ds: %s",
+                int(time.monotonic() - started),
+                error,
+            )
+            return f"The transfer failed ({error}). Tell the caller and keep helping them."
+{{- end}}
+        # A completed REFER takes the caller out of the room, which ends this
+        # session on its own. Returning a value here would buy one LLM turn
+        # spoken to nobody, racing the teardown.
+        logger.info("cold transfer completed after %ds", int(time.monotonic() - started))
+        return None
 {{- end}}
 {{end}}
 {{- range .Delegates}}
@@ -700,7 +959,7 @@ async def entrypoint(ctx: JobContext) -> None:
     _hydrate_call_start(session.userdata, _dispatched_call_start(metadata))
 {{- end}}
 {{- end}}
-    await session.start(agent={{.EntryClass}}(), room=ctx.room)
+    await session.start(agent={{.EntryClass}}(), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
     await _livekit_entry_greeting(session)
 {{- else}}
     metadata = _livekit_job_metadata(ctx.job.metadata)
@@ -708,7 +967,9 @@ async def entrypoint(ctx: JobContext) -> None:
     call_start = _dispatched_call_start(metadata)
 {{- end}}
     outbound_job = "phone_number" in metadata
+{{- if .Outbound}}
     phone_number = metadata.get("phone_number")
+{{- end}}
     await ctx.connect()
 
     if outbound_job:
@@ -720,7 +981,7 @@ async def entrypoint(ctx: JobContext) -> None:
             or not 8 <= len(phone_number) <= 16
         ):
             raise RuntimeError("phone_number must be an E.164 number")
-        await session.start(agent={{.EntryClass}}(), room=ctx.room)
+        await session.start(agent={{.EntryClass}}(), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
         if not session.room_io:
             raise RuntimeError("session room_io is unavailable")
         session.room_io.set_participant("phone_user")
@@ -728,25 +989,25 @@ async def entrypoint(ctx: JobContext) -> None:
             await ctx.api.sip.create_sip_participant(
                 api.CreateSIPParticipantRequest(
                     room_name=ctx.room.name,
-                    sip_trunk_id=os.environ["LIVEKIT_SIP_OUTBOUND_TRUNK"],
+                    trunk=_sip_trunk(),
+                    sip_number=_sip_number(),
                     sip_call_to=phone_number,
                     participant_identity="phone_user",
                     wait_until_answered=True,
                 )
             )
-            participant = await ctx.wait_for_participant(identity="phone_user")
+            {{if .HasVars}}participant = {{end}}await ctx.wait_for_participant(identity="phone_user")
             amd_result = await detector.execute()
 {{- else}}
         raise RuntimeError("this LiveKit SIP route does not accept outbound jobs")
 {{- end}}
     else:
 {{- if .Telephony.HasInbound}}
-        participant = await ctx.wait_for_participant()
+        {{if .HasVars}}participant = {{end}}await ctx.wait_for_participant()
 {{- else}}
         raise RuntimeError("outbound LiveKit SIP job metadata requires phone_number")
 {{- end}}
 
-    call_context = _livekit_call_context(ctx.room.name, participant, metadata)
 {{- if .HasVars}}
     _hydrate_livekit_context(session.userdata, call_context)
 {{- if .CallStartVars}}
@@ -754,7 +1015,7 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- end}}
 {{- end}}
     if not outbound_job:
-        await session.start(agent={{.EntryClass}}(), room=ctx.room)
+        await session.start(agent={{.EntryClass}}(), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
 {{- if .Outbound}}
     else:
         if amd_result.category == "machine-vm":
@@ -780,7 +1041,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # prompts already see them (I.dispatch).
     _hydrate_call_start(session.userdata, _dispatched_call_start(_livekit_job_metadata(ctx.job.metadata)))
 {{- end}}
-    await session.start(agent={{.EntryClass}}(), room=ctx.room)
+    await session.start(agent={{.EntryClass}}(), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
     await ctx.connect()
 {{- if .Outbound}}
 
@@ -798,7 +1059,8 @@ async def entrypoint(ctx: JobContext) -> None:
             await ctx.api.sip.create_sip_participant(
                 api.CreateSIPParticipantRequest(
                     room_name=ctx.room.name,
-                    sip_trunk_id=os.environ["LIVEKIT_SIP_OUTBOUND_TRUNK"],
+                    trunk=_sip_trunk(),
+                    sip_number=_sip_number(),
                     sip_call_to=phone_number,
                     participant_identity="phone_user",
                     wait_until_answered=True,

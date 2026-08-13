@@ -13,20 +13,43 @@ import (
 	targetcap "github.com/slng/unmute/internal/target"
 )
 
+// firstRegion is the one region a Pipecat target may declare, or "" for none.
+func firstRegion(regions []string) string {
+	if len(regions) == 0 {
+		return ""
+	}
+	return regions[0]
+}
+
+// regionList puts a single region back into the list shape the compile report
+// uses on both drivers, so one key means one thing everywhere.
+func regionList(region string) []string {
+	if region == "" {
+		return nil
+	}
+	return []string{region}
+}
+
 // buildPipecatData lowers the resolved IR + target into the template model.
 // Bindings (model/voice/params) are forwarded verbatim; only their provider
 // selects the Pipecat service class and api-key env (C11).
 func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	data := pipecatData{
-		Project:          target.Name,
-		Version:          target.Version,
-		DeploymentRegion: target.DeploymentRegion,
+		Project: target.Name,
+		Version: target.Version,
+		// At most one region reaches this driver: a list of several is a gated
+		// validation error (FieldDeploymentMultiRegion), which runs before any
+		// artifact exists.
+		DeploymentRegion: firstRegion(target.DeploymentRegions),
 		MainName:         "main",
 		EntryAgent:       agent.EntryAgent,
 		EntryClass:       pyName(agent.EntryAgent),
 		Transport:        target.Transport,
 		Tracing:          agent.Tracing != nil && agent.Tracing.Provider == "langfuse",
 	}
+	// Read through the same door validate uses, so the command and the emitted
+	// project cannot disagree about what the account has to be allowed to do.
+	data.Prerequisites = ir.RoutePrerequisites(agent, target, targetcap.Pipecat)
 	env := newEnvSet()
 	if data.Tracing {
 		for _, name := range []string{"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"} {
@@ -108,6 +131,14 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	if err != nil {
 		return pipecatData{}, err
 	}
+	data.DailyCarrier, err = buildPipecatDailyCarrier(agent, target, env)
+	if err != nil {
+		return pipecatData{}, err
+	}
+	data.CloudWebsocket, err = buildPipecatCloudWebsocket(agent, target, env)
+	if err != nil {
+		return pipecatData{}, err
+	}
 
 	applyConversation(agent.Conversation, &data)
 	data.Notes = append(data.Notes, serviceNotes(data)...)
@@ -144,7 +175,43 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		slices.Sort(data.Deps)
 	}
 	data.RequiredEnv = env.sorted()
+	if data.DailyCarrier != nil {
+		// Whatever the helper reads is not the deployed agent's business, so the
+		// two groups are split here, once, and every surface reads the split
+		// (contracts/environment.md).
+		for _, name := range data.RequiredEnv {
+			if slices.Contains(data.DailyCarrier.HelperEnv, name) {
+				continue
+			}
+			data.DailyCarrier.AgentEnv = append(data.DailyCarrier.AgentEnv, name)
+			// DevEnv is the provider-credential snapshot the process already checks
+			// at startup, so the phone call's own check is the remainder: exactly
+			// what a call adds, listed once.
+			if !slices.Contains(data.DevEnv, name) {
+				data.DailyCarrier.CallEnv = append(data.DailyCarrier.CallEnv, name)
+			}
+		}
+	}
+	if data.CloudWebsocket != nil {
+		// What a phone call adds, and nothing more. DevEnv is the provider-credential
+		// snapshot the process already checks at startup, so the remainder is exactly
+		// the carrier names plus the organization. A pure-inbound package's remainder
+		// is empty, which is the shape the route exists to produce (spec FR-005/FR-008).
+		for _, name := range data.RequiredEnv {
+			if !slices.Contains(data.DevEnv, name) {
+				data.CloudWebsocket.CallEnv = append(data.CloudWebsocket.CallEnv, name)
+			}
+		}
+	}
 	data.Secrets, data.ExtraEnv = secretEnvDocs(agent, data.RequiredEnv)
+	// The platform's own naming convention (my-agent-secrets). Keyed on the whole
+	// required-env list, not the declared `secrets:` block: .env.example lists
+	// required env either way, and a deployed agent with no provider keys looks
+	// healthy and fails on its first call. A package needing no environment at
+	// all gets no set and deploys without one.
+	if len(data.RequiredEnv) > 0 {
+		data.SecretSet = data.Project + "-secrets"
+	}
 	return data, nil
 }
 
@@ -180,9 +247,45 @@ func buildPipecatCapture(agent *ir.Agent) *pipecatCapture {
 	return capture
 }
 
+// pipecatConnectionVocabulary checks the Connection's key set against the route
+// row in both directions — a missing required key and an unaccepted key each
+// fail naming the route — and registers every required name so it reaches
+// .env.example, REQUIRED_ENV, and the compile report. One home for the check,
+// shared by the carrier-websocket routes and the Daily carrier leg.
+func pipecatConnectionVocabulary(plan *ir.TelephonyPlan, env *envSet) error {
+	required, optional, ok := targetcap.TelephonyEnvironment(targetcap.TelephonyKey{
+		Provider: targetcap.Pipecat, Transport: plan.Key.Transport, Carrier: plan.Key.Carrier,
+	})
+	if !ok {
+		return fmt.Errorf("pipecat telephony route (%s, %s, %s) has no environment vocabulary", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+	}
+	allowed := make(map[string]bool, len(required)+len(optional))
+	for _, key := range append(required, optional...) {
+		allowed[key] = true
+	}
+	for _, key := range required {
+		name := plan.Environment[key]
+		if name == "" {
+			return fmt.Errorf("pipecat telephony route %s requires connection environment key %q", plan.Key.Carrier, key)
+		}
+		env.add(name)
+	}
+	for _, key := range slices.Sorted(maps.Keys(plan.Environment)) {
+		if !allowed[key] {
+			return fmt.Errorf("pipecat telephony route %s does not accept connection environment key %q", plan.Key.Carrier, key)
+		}
+	}
+	return nil
+}
+
 func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*pipecatTelephony, error) {
 	plan := resolved.Telephony
 	if plan == nil {
+		return nil, nil
+	}
+	if plan.Key.Provider == ir.ProviderPipecat && (plan.Key.Transport == "daily-sip" || plan.Key.Transport == "cloud-websocket") {
+		// Both carrier routes have their own data group, so nothing that reads
+		// .Telephony (and means carrier-websocket) can see either of them.
 		return nil, nil
 	}
 	if plan.Key.Provider != ir.ProviderPipecat || plan.Key.Transport != "carrier-websocket" {
@@ -196,27 +299,8 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 	default:
 		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no emitted adapter", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
 	}
-	required, optional, ok := targetcap.TelephonyEnvironment(targetcap.TelephonyKey{
-		Provider: targetcap.Pipecat, Transport: plan.Key.Transport, Carrier: plan.Key.Carrier,
-	})
-	if !ok {
-		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no environment vocabulary", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
-	}
-	allowed := make(map[string]bool, len(required)+len(optional))
-	for _, key := range append(required, optional...) {
-		allowed[key] = true
-	}
-	for _, key := range required {
-		name := plan.Environment[key]
-		if name == "" {
-			return nil, fmt.Errorf("pipecat telephony route %s requires connection environment key %q", plan.Key.Carrier, key)
-		}
-		env.add(name)
-	}
-	for _, key := range slices.Sorted(maps.Keys(plan.Environment)) {
-		if !allowed[key] {
-			return nil, fmt.Errorf("pipecat telephony route %s does not accept connection environment key %q", plan.Key.Carrier, key)
-		}
+	if err := pipecatConnectionVocabulary(plan, env); err != nil {
+		return nil, err
 	}
 	env.add("UNMUTE_PUBLIC_URL")
 	env.add("REDIS_URL")
@@ -241,8 +325,6 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 			telephony.HasInbound = true
 		case "outbound":
 			telephony.HasOutbound = true
-		case "cold_transfer":
-			telephony.HasCold = true
 		}
 	}
 	if telephony.HasOutbound {
@@ -264,6 +346,131 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 	return telephony, nil
 }
 
+// buildPipecatDailyCarrier lowers the (pipecat, daily-sip, <carrier>) route: the
+// operator's own carrier forwards the call over SIP into the same per-call Daily
+// room the no-carrier form uses (SCHEMA N37).
+//
+// Neither REDIS_URL nor UNMUTE_PUBLIC_URL is added. This route keeps no shared
+// control record, and the helper's public URL is the operator's to choose and
+// give to the carrier, so nothing here needs to know it.
+func buildPipecatDailyCarrier(agent *ir.Agent, resolved ir.Target, env *envSet) (*pipecatDailyCarrier, error) {
+	plan := resolved.Telephony
+	if plan == nil || plan.Key.Provider != ir.ProviderPipecat || plan.Key.Transport != "daily-sip" {
+		return nil, nil
+	}
+	if plan.Key.Carrier != "twilio" {
+		// The route row is the real gate; this is the emitter's half of it, so a
+		// carrier whose forwarding action and runbook text nobody has written
+		// cannot compile to a build that looks complete.
+		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no emitted carrier forwarding action", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+	}
+	if agent.Capacity == nil || agent.Capacity.PeakStartsPerSecond <= 0 {
+		return nil, fmt.Errorf("pipecat telephony requires positive capacity.peak_starts_per_second")
+	}
+	if err := pipecatConnectionVocabulary(plan, env); err != nil {
+		return nil, err
+	}
+	carrier := &pipecatDailyCarrier{
+		Carrier: plan.Key.Carrier, Connection: plan.Connection,
+		AccountSIDEnv: plan.Environment["account_sid"], AuthTokenEnv: plan.Environment["auth_token"],
+		SIPAddressEnv: plan.Environment["sip_address"], FromNumberEnv: plan.Environment["from_number"],
+	}
+	for _, evidence := range plan.Evidence {
+		switch evidence.Feature {
+		case "inbound":
+			carrier.HasInbound = true
+		case "outbound":
+			carrier.HasOutbound = true
+		}
+	}
+	// The helper's own name, singular. DAILY_API_KEY is not one of them: the room
+	// is the platform's to create, so the helper never calls Daily. It stays on
+	// the agent side, where a local `uv run bot.py` mints its own room with it.
+	//
+	// No outbound trigger token, because the helper has no endpoint that places a
+	// call: outbound is started against the platform with the same public key,
+	// exactly as it is on a Daily-provisioned number. A token guarding an endpoint
+	// that does not exist would be one more value to invent and keep.
+	carrier.HelperEnv = []string{"PIPECAT_CLOUD_API_KEY"}
+	for _, name := range carrier.HelperEnv {
+		env.add(name)
+	}
+	env.add("DAILY_API_KEY")
+	// Optional, so never required and never in the startup check: hold audio the
+	// operator hosts, and the Daily room geography. Absent means the emitted
+	// default (a spoken hold line) and Daily's own default region.
+	carrier.OptionalEnv = []string{"UNMUTE_DAILY_ROOM_GEO", "UNMUTE_HOLD_AUDIO_URL"}
+	return carrier, nil
+}
+
+// pipecatCloudStreamURL is the platform's carrier stream endpoint, regional when
+// the target declares a region (research F1). One function, called once, so the
+// Bin the README dictates, the outbound command, and the transfer markup all
+// render the same host: three copies of a URL is three chances to point a call at
+// the wrong region (data-model section 3).
+func pipecatCloudStreamURL(carrier, region string) string {
+	host := "api.pipecat.daily.co"
+	if region != "" {
+		host = region + "." + host
+	}
+	return "wss://" + host + "/ws/" + carrier
+}
+
+// buildPipecatCloudWebsocket lowers the (pipecat, cloud-websocket, <carrier>)
+// route: the carrier streams the call's audio to the platform, which starts this
+// agent. Nothing of the operator's runs anywhere (SCHEMA N38).
+//
+// No REDIS_URL and no UNMUTE_PUBLIC_URL, and the absence is the whole point:
+// there is no coordination record to keep and no endpoint of ours to have a
+// public address.
+func buildPipecatCloudWebsocket(agent *ir.Agent, resolved ir.Target, env *envSet) (*pipecatCloudWebsocket, error) {
+	plan := resolved.Telephony
+	if plan == nil || plan.Key.Provider != ir.ProviderPipecat || plan.Key.Transport != "cloud-websocket" {
+		return nil, nil
+	}
+	if plan.Key.Carrier != "twilio" {
+		// The platform terminates Telnyx, Plivo, and Exotel streams too (research
+		// F9), and each needs its own dictated console markup and its own call
+		// control. The route row is the real gate; this is the emitter's half of it,
+		// so a carrier whose runbook nobody has written cannot compile to a build
+		// that looks finished.
+		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no dictated carrier markup yet; the platform terminates other carriers' streams, but this project has only written Twilio's", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+	}
+	carrier := &pipecatCloudWebsocket{
+		Carrier:   plan.Key.Carrier,
+		StreamURL: pipecatCloudStreamURL(plan.Key.Carrier, firstRegion(resolved.DeploymentRegions)),
+	}
+	// A pure-inbound package declares no connection, so there is no vocabulary to
+	// check and no name to register. Skipping the round trip is not a shortcut: a
+	// connection is what carries the key set, and this shape has none.
+	if plan.Connection != "" {
+		if err := pipecatConnectionVocabulary(plan, env); err != nil {
+			return nil, err
+		}
+		carrier.Connection = plan.Connection
+		carrier.AccountSIDEnv = plan.Environment["account_sid"]
+		carrier.AuthTokenEnv = plan.Environment["auth_token"]
+		carrier.FromNumberEnv = plan.Environment["from_number"]
+	}
+	for _, evidence := range plan.Evidence {
+		switch evidence.Feature {
+		case "inbound":
+			carrier.HasInbound = true
+		case "outbound":
+			carrier.HasOutbound = true
+		}
+	}
+	// The organization is needed exactly when this package composes TwiML that has
+	// to name the service host: an outbound call, or a transfer's reconnect. The
+	// plan already resolved that condition against the route row, so read it there
+	// rather than re-deriving it (Principle III).
+	if slices.Contains(plan.RequiredEnvironment, "PIPECAT_CLOUD_ORGANIZATION") {
+		carrier.OrganizationEnv = "PIPECAT_CLOUD_ORGANIZATION"
+		env.add(carrier.OrganizationEnv)
+	}
+	return carrier, nil
+}
+
 // inlineEligible reports whether the bot collapses to the inline single-agent
 // shape (F3): the LLM sits directly in the main pipeline with its tools as
 // module-level direct functions in LLMContext, no bus / BusBridge / LLMWorker /
@@ -275,6 +482,14 @@ func inlineEligible(data *pipecatData) bool {
 	// shape lacks (module-level tools can't reach self.state; the greeting has no
 	// activate_worker to carry a developer message), so they keep the bus path.
 	if len(data.Agents) != 1 || data.Tracing || data.Telephony != nil || data.HasColdTransfer {
+		return false
+	}
+	// The carrier leg registers transport event handlers (the forward-once
+	// dial-in-ready handler, the dial-out observers), which the inline shape has
+	// no place for. The platform-terminated route reads the parsed handshake and
+	// checks the call's environment before the conversation starts, which the
+	// inline shape also has nowhere to put.
+	if data.DailyCarrier != nil || data.CloudWebsocket != nil {
 		return false
 	}
 	if len(data.Variables) > 0 || data.GreetingInstruction != "" {
@@ -301,9 +516,20 @@ func setImportNeeds(data *pipecatData) {
 		}
 		for _, t := range a.Tools {
 			if t.ColdDestination != "" {
-				data.HasColdTransfer = data.HasColdTransfer || !t.CarrierTransfer
-				data.NeedsAppendFrame = true // cold transfer prompts the caller
-				data.NeedsEndFrame = data.NeedsEndFrame || !t.CarrierTransfer
+				// Daily SIP cold: the bot announces via an LLM append (the REFER
+				// keeps it streaming, B14) and always needs EndFrame — the
+				// on_dialout_answered handler ends the bot's leg once the human
+				// answers, and the hangup failure branch pushes it too (T5).
+				data.HasColdTransfer = true
+				data.NeedsAppendFrame = true
+				data.NeedsEndFrame = true
+				if data.CloudWebsocket != nil {
+					// The platform-terminated route needs EndFrame only when a failed
+					// transfer is asked to hang up. A completed transfer ends the stream at
+					// the carrier, so there is nothing here to end, and an EndFrame import
+					// that nothing pushes fails the emitted project's own lint gate.
+					data.NeedsEndFrame = t.HangupOnUnavailable || data.MaxDurationSecs > 0
+				}
 				continue
 			}
 			if t.Builtin != "" {
@@ -368,8 +594,8 @@ func setImportNeeds(data *pipecatData) {
 	collectLocal(data.FlowTools)
 	sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
 
-	// pipecat.frames.frames names ride one merged import (V2); appended in
-	// alphabetical order so it already matches isort without a sort pass.
+	// pipecat.frames.frames names ride one merged import (V2), sorted at the end
+	// so the merged import matches isort whatever order the flags are read in.
 	if data.NeedsEndFrame {
 		data.FrameImports = append(data.FrameImports, "EndFrame")
 	}
@@ -386,6 +612,44 @@ func setImportNeeds(data *pipecatData) {
 	if data.GreetingText != "" {
 		data.FrameImports = append(data.FrameImports, "TTSSpeakFrame")
 	}
+	slices.Sort(data.FrameImports)
+	setDailyParams(data)
+}
+
+// setDailyParams picks the Daily route's transport classes and the one import
+// that carries them. It runs last because the import depends on HasColdTransfer,
+// and bot.py must import only what the package exercises.
+func setDailyParams(data *pipecatData) {
+	if data.Transport != "daily-sip" {
+		return
+	}
+	// Pipecat's create_transport assigns an inbound call's dialin_settings,
+	// api_key, and api_url straight onto whatever the params factory returns. The
+	// generic TransportParams is a Pydantic model that declares none of the three
+	// and allows no extras, so it raises and the call never connects. That was the
+	// whole reason an inbound Daily call could not be answered. DailyParams
+	// subclasses TransportParams and declares all three, so the kwargs already
+	// passed keep working. Verified by instantiating both against pipecat-ai
+	// 1.5.0 on 2026-08-12: the generic class raises ValueError, DailyParams
+	// accepts.
+	//
+	// The import is the API reference's spelling, not the shorter one in the
+	// telephony guides: 1.5.0 does not re-export the class from
+	// pipecat.transports.daily, so the guides' spelling is an ImportError.
+	// Confirmed by importing both paths from the installed package.
+	params := &pipecatTransportParams{
+		Class:  "DailyParams",
+		Import: "from pipecat.transports.daily.transport import DailyParams",
+	}
+	// The transport class itself is needed for one reason: a transfer primitive is
+	// a Daily transport method rather than a BaseTransport one, so the tool has to
+	// narrow before calling it. Both classes come from the same module, so they
+	// ride one import.
+	if data.HasColdTransfer {
+		params.Transport = "DailyTransport"
+		params.Import = "from pipecat.transports.daily.transport import DailyParams, DailyTransport"
+	}
+	data.DailyParams = params
 }
 
 // collectImportsExtras returns the deduped, sorted service imports for bot.py,
@@ -405,6 +669,12 @@ func collectImportsExtras(data pipecatData) (imports, extras, deps []string) {
 	depSet := map[string]bool{}
 	if data.Transport == "daily-sip" {
 		extraSet["daily"] = true
+	}
+	if data.CloudWebsocket != nil {
+		// This project terminates a carrier's WebSocket, so it declares the extra
+		// that carries the machinery rather than inheriting fastapi from `runner`
+		// (research D12/F10).
+		extraSet["websocket"] = true
 	}
 	note := func(entry targetcap.Entry) {
 		if entry.Import != "" {
@@ -504,7 +774,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 				Reason: transferReason(c), Requires: c.Requires,
 			})
 		case *ir.HumanTransfer:
-			tool, err := humanTransferTool(ref, c, target, env)
+			tool, err := humanTransferTool(ref, name, c, target, env)
 			if err != nil {
 				return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 			}
@@ -689,31 +959,70 @@ func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env 
 	return built
 }
 
-// humanTransferTool lowers a cold human_transfer to a @tool that dials the
-// resolved destination over the Daily SIP transport (V5, cold only).
-func humanTransferTool(name string, c *ir.HumanTransfer, target ir.Target, env *envSet) (pipecatTool, error) {
-	if c.Mode != ir.TransferCold {
-		return pipecatTool{}, fmt.Errorf("human transfer %q mode %q has no Pipecat lowering", name, c.Mode)
+// pipecatDestinationExpr renders a resolved destination as Python: a quoted
+// literal, or an os.environ lookup when the target defers it to an env var
+// (N26). The env name is registered so it reaches .env.example and REQUIRED_ENV.
+func pipecatDestinationExpr(destination string, env *envSet) string {
+	if name := ir.DestinationEnv(destination); name != "" {
+		env.add(name)
+		return "os.environ[" + pyLiteral(name) + "]"
 	}
+	return pyLiteral(destination)
+}
+
+// humanTransferTool lowers a human_transfer to a @tool. Only cold exists on
+// Pipecat, and only via Daily's native `sip_call_transfer` (SPEC C4, V1):
+// the bot announces, Daily reroutes the leg, the bot drops out. Warm has no
+// Pipecat primitive; the gate rejects it before this runs, and the error here
+// is the defense in depth for a gate bug.
+func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target, env *envSet) (pipecatTool, error) {
+	_ = agent
 	destination, ok := target.Destinations[c.Destination]
 	if !ok {
 		return pipecatTool{}, fmt.Errorf("human transfer %q destination %q missing on target %q", name, c.Destination, target.Name)
 	}
-	carrierTransfer := target.Telephony != nil && target.Telephony.Key.Provider == ir.ProviderPipecat &&
-		target.Telephony.Key.Transport == "carrier-websocket"
-	if !carrierTransfer {
+	// The Daily route carries the transfer whether the number is Daily's or the
+	// operator's: a carrier call arrives as a SIP dial-in participant in the same
+	// room, and Daily documents sipCallTransfer as working for dial-in legs with
+	// SIP-to-SIP and SIP-to-PSTN both supported (research F4, 2026-08-12). Every
+	// other Pipecat route still has no primitive at all.
+	carrierLeg := target.Telephony != nil && target.Telephony.Key.Transport == "daily-sip"
+	// The platform-terminated carrier route transfers by updating the live call's
+	// TwiML at the carrier, keyed on its CallSid (research F5, D7). Different
+	// primitive, same promise: the caller reaches a person and is never stranded
+	// silently.
+	cloudWebsocket := target.Telephony != nil && target.Telephony.Key.Transport == "cloud-websocket"
+	if target.Telephony != nil && !carrierLeg && !cloudWebsocket {
+		return pipecatTool{}, fmt.Errorf("human transfer %q: the (%s, %s) route has no transfer primitive; Pipecat cold transfer rides the Daily route (transport daily-sip) or the platform's carrier stream (transport cloud-websocket)", name, target.Telephony.Key.Transport, target.Telephony.Key.Carrier)
+	}
+	if !cloudWebsocket {
+		// Every Daily form mints or joins a room with this key. The
+		// platform-terminated route touches no Daily API at all, so demanding the key
+		// would make a working package fail its startup check on a value nothing reads.
 		env.add("DAILY_API_KEY")
 	}
 	desc := c.When
 	if desc == "" {
 		desc = "Transfer the caller to a human."
 	}
-	return pipecatTool{
-		Name: name, MethodName: name, Description: desc,
-		URLEnv: "", Args: nil, EndsCall: true,
-		// The destination rides through as the tool's fixed target; rendered by the template.
-		ColdDestination: destination, CarrierTransfer: carrierTransfer,
-	}, nil
+	tool := pipecatTool{Name: name, MethodName: name, Description: desc}
+	switch c.Mode {
+	case ir.TransferCold:
+		tool.EndsCall = true
+		tool.ColdDestination = pipecatDestinationExpr(destination, env)
+		if carrierLeg {
+			// On a carrier target every outbound leg goes through the operator's own
+			// trunk, so the destination becomes a SIP URI at the trunk's termination
+			// address (research F2). Composed at call time by _carrier_sip, because a
+			// destination deferred to an environment variable has no value here.
+			tool.ColdDestination = "_carrier_sip(" + tool.ColdDestination + ")"
+		}
+		tool.HangupOnUnavailable = c.OnUnavailable == ir.OnUnavailableHangup
+		return tool, nil
+	case ir.TransferWarm:
+		return pipecatTool{}, fmt.Errorf("human transfer %q: this driver does not emit warm transfer yet (Daily documents the pattern; it needs the bot to own the call audio, tracked as feature 005); warm compiles on (livekit, sip) today", name)
+	}
+	return pipecatTool{}, fmt.Errorf("human transfer %q mode %q has no Pipecat lowering", name, c.Mode)
 }
 
 // inputFields flattens a tool input JSON Schema object into ordered args,

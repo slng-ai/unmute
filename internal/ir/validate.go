@@ -29,6 +29,12 @@ type TargetValidation struct {
 	Provider Provider
 	Errors   []string
 	Warnings []string
+	// Prerequisites are account features the provider grants on request that this
+	// package's route needs. Neither errors nor warnings: unmute compiles the
+	// package correctly and cannot know what the author's account is allowed to
+	// do, so this states a fact about the route and never claims a failure
+	// (research D3). Reported at exit 0.
+	Prerequisites []targetcap.RouteAccountPrerequisite
 }
 
 type ForwardedBinding struct {
@@ -484,6 +490,12 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	if agent.Tracing != nil {
 		applyCapability(caps, targetcap.FieldTracingLangfuse, provider, row)
 	}
+	row.Errors = append(row.Errors, validateRegions(resolved.DeploymentRegions)...)
+	// Only a list of more than one is gated: one region works everywhere the
+	// field works, and the scalar form has since N18.
+	if len(resolved.DeploymentRegions) > 1 {
+		applyCapability(caps, targetcap.FieldDeploymentMultiRegion, provider, row)
+	}
 	// Placement gates read the resolved per-target bindings (N15): a per-target
 	// override can change where a model runs, so the effective binding decides.
 	if b := resolved.Models.Listen; b != nil && b.Placement == PlacementLocal {
@@ -561,6 +573,72 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	validateTelephonyPlan(resolved.Telephony, row)
 	validateCapacity(agent, resolved, provider, row)
 	validateChannels(agent, resolved, provider, caps, row)
+	validateRoutePrerequisites(agent, resolved, provider, row)
+}
+
+func validateRoutePrerequisites(agent *Agent, resolved Target, provider targetcap.Provider, row *TargetValidation) {
+	row.Prerequisites = RoutePrerequisites(agent, resolved, provider)
+}
+
+// RoutePrerequisites returns the account features this package's route needs that
+// the provider grants on request.
+//
+// One function, two callers: `validate` reports these and the emitters carry them
+// into the generated project. Going through the same door is what stops the
+// command and the artifact disagreeing about what an account has to be allowed to
+// do (Principle III).
+//
+// Keyed on the route triple rather than on the resolved telephony plan, because
+// the Daily route has no plan: it declares no connection and no telephony
+// channel, so every other route fact is unreachable there.
+func RoutePrerequisites(agent *Agent, resolved Target, provider targetcap.Provider) []targetcap.RouteAccountPrerequisite {
+	candidates := targetcap.RouteAccountPrerequisites(provider, resolved.Transport, resolved.Carrier)
+	if len(candidates) == 0 {
+		return nil
+	}
+	used := routeCapabilitiesUsed(agent)
+	var applies []targetcap.RouteAccountPrerequisite
+	for _, prerequisite := range candidates {
+		if prerequisite.Needs(used) {
+			applies = append(applies, prerequisite)
+		}
+	}
+	return applies
+}
+
+// routeCapabilitiesUsed names the route capabilities this package exercises. It
+// is what keeps a prerequisite from becoming a standing banner: a package that
+// needs none of them must not be told about one.
+func routeCapabilitiesUsed(agent *Agent) []targetcap.TelephonyFeature {
+	var used []targetcap.TelephonyFeature
+	note := func(feature targetcap.TelephonyFeature) {
+		if !slices.Contains(used, feature) {
+			used = append(used, feature)
+		}
+	}
+	for _, control := range agent.Controls {
+		transfer, ok := control.(*HumanTransfer)
+		if !ok {
+			continue
+		}
+		if transfer.Mode == TransferWarm {
+			note(targetcap.TelephonyFeature(targetcap.WarmTransfer))
+			continue
+		}
+		note(targetcap.TelephonyFeature(targetcap.ColdTransfer))
+	}
+	for _, channel := range agent.Channels {
+		if channel.Kind != ChannelTelephony {
+			continue
+		}
+		if channel.Inbound != nil && *channel.Inbound {
+			note(targetcap.TelephonyInbound)
+		}
+		if channel.Outbound != nil && *channel.Outbound {
+			note(targetcap.TelephonyOutbound)
+		}
+	}
+	return used
 }
 
 func validateContext(context TaskContext, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
@@ -1019,31 +1097,57 @@ func validateFallbacks(agent *Agent, resolved Target, caps targetcap.Table, row 
 	}
 }
 
+// validateHumanTransfer checks the resolved shape against the route (SCHEMA
+// N25). A free-text briefing resolves nothing on its own: it rides the warm
+// control row, so there is no briefing capability left to apply. On a telephony
+// target the route table already resolved the control, so only the block's own
+// values are checked here.
 func validateHumanTransfer(control *HumanTransfer, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
+	for _, err := range checkTransferBlock(control) {
+		row.Errors = add(row.Errors, err)
+	}
+	if control.Briefing != "" {
+		applyCapability(caps, targetcap.FieldTransferBriefing, provider, row)
+	}
 	if resolved.Telephony != nil {
-		switch control.Briefing {
-		case "", BriefingSummary, BriefingMessage, BriefingWait:
-		default:
-			row.Errors = add(row.Errors, fmt.Sprintf("unknown warm-transfer briefing %q", control.Briefing))
-		}
 		return
 	}
 	required := targetcap.ColdTransfer
 	if control.Mode == TransferWarm {
 		required = targetcap.WarmTransfer
 	}
+	before := len(row.Errors)
 	applyResolvedCapability(caps.Control(required, provider, resolved.Transport, resolved.Carrier), required, provider, row)
-	switch control.Briefing {
-	case "":
-	case BriefingSummary:
-		applyCapability(caps, targetcap.FieldBriefingSummary, provider, row)
-	case BriefingMessage:
-		applyCapability(caps, targetcap.FieldBriefingMessage, provider, row)
-	case BriefingWait:
-		applyCapability(caps, targetcap.FieldBriefingWait, provider, row)
-	default:
-		row.Errors = add(row.Errors, fmt.Sprintf("unknown warm-transfer briefing %q", control.Briefing))
+	// A warm transfer dials the person itself, so it needs carrier SIP
+	// credentials, and those only exist on a target that binds a telephony
+	// Connection. Gated since 2026-08-12 (SCHEMA N33): the emitted agent passes
+	// the carrier's trunk settings inline, so a target with no Connection has
+	// nothing to dial with. It used to compile and then read a LiveKit trunk ID
+	// the package never mentioned, which is the defect this feature removed.
+	// Only when the provider itself allows warm, so a provider that denies it
+	// keeps failing in its own words (principle II). Cold is unaffected: it acts
+	// on the caller's existing leg and dials nobody.
+	if control.Mode == TransferWarm && len(row.Errors) == before {
+		row.Errors = add(row.Errors, "warm transfer needs a telephony Connection: it dials the destination itself, using the connection's sip_address, sip_username, sip_password and from_number")
 	}
+}
+
+// checkTransferBlock validates the block's own values, independent of target.
+func checkTransferBlock(control *HumanTransfer) []string {
+	var errs []string
+	if control.RingTimeout != "" {
+		errs = append(errs, validateDuration("ring_timeout", control.RingTimeout)...)
+	}
+	switch control.OnUnavailable {
+	case OnUnavailableReturn, OnUnavailableHangup:
+	default:
+		errs = append(errs, fmt.Sprintf("unknown on_unavailable %q: use %q or %q",
+			control.OnUnavailable, OnUnavailableReturn, OnUnavailableHangup))
+	}
+	if control.Briefing != "" && control.Mode != TransferWarm {
+		errs = append(errs, "briefing is legal in a `warm:` block only")
+	}
+	return errs
 }
 
 func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
@@ -1249,8 +1353,18 @@ func validateCapacity(agent *Agent, resolved Target, provider targetcap.Provider
 	}
 }
 
+// hasWarmTransfer reports whether any control dials a destination itself.
+func hasWarmTransfer(agent *Agent) bool {
+	for _, control := range agent.Controls {
+		if transfer, ok := control.(*HumanTransfer); ok && transfer.Mode == TransferWarm {
+			return true
+		}
+	}
+	return false
+}
+
 func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
-	for _, channel := range agent.Channels {
+	for channelName, channel := range agent.Channels {
 		if channel.Kind == ChannelTelephony && (provider == targetcap.LiveKit || provider == targetcap.Pipecat) && resolved.Telephony == nil {
 			row.Errors = add(row.Errors, "telephony channel requires a resolved Connection plan")
 			continue
@@ -1275,6 +1389,13 @@ func validateChannels(agent *Agent, resolved Target, provider targetcap.Provider
 			}
 		}
 		if channel.Outbound == nil || !*channel.Outbound {
+			// A warm transfer dials the destination, so the agent places calls
+			// whatever the channel says. Declaring one direction and using the
+			// other is the spec lying about the emitted shape (V12/B5). One
+			// error per channel, not per control: the remedy is the same line.
+			if hasWarmTransfer(agent) {
+				row.Errors = add(row.Errors, fmt.Sprintf("channel %q needs outbound: true; a warm transfer places a call to its destination", channelName))
+			}
 			continue
 		}
 		// Voicemail handling is optional for outbound (T1): the carrier-websocket
@@ -1303,8 +1424,17 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 	if plan.Coordination != "shared" {
 		row.Errors = add(row.Errors, "telephony coordination must be shared")
 	}
-	if len(plan.Processes) == 0 {
+	// One route runs nothing of the operator's, so an empty process list is the
+	// expected shape there and a mistake everywhere else (SCHEMA N38).
+	hostsNothing := plan.Key.Provider == ProviderPipecat && plan.Key.Transport == "cloud-websocket"
+	if len(plan.Processes) == 0 && !hostsNothing {
 		row.Errors = add(row.Errors, "telephony plan has no runtime process")
+	}
+	if len(plan.Processes) > 0 && hostsNothing {
+		row.Errors = add(row.Errors, "the Pipecat Cloud websocket route runs no process of yours; a process here contradicts the route")
+	}
+	if len(plan.PublicEndpoints) > 0 && hostsNothing {
+		row.Errors = add(row.Errors, "the Pipecat Cloud websocket route hosts no endpoint of yours; an endpoint here contradicts the route")
 	}
 	seenProcesses := make(map[string]bool, len(plan.Processes))
 	for _, process := range plan.Processes {
@@ -1334,13 +1464,6 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		}
 		localEnvironment[name] = true
 	}
-	devEnvironment := make(map[string]bool, len(plan.DevEnvironment))
-	for _, name := range plan.DevEnvironment {
-		if name == "" || devEnvironment[name] || !requiredEnvironment[name] {
-			row.Errors = add(row.Errors, "telephony dev-supplied environment must be unique and required by the runtime")
-		}
-		devEnvironment[name] = true
-	}
 	if plan.AutoWebhookEndpoint != "" {
 		if !slices.ContainsFunc(plan.PublicEndpoints, func(e TelephonyEndpoint) bool { return e.Name == plan.AutoWebhookEndpoint }) {
 			row.Errors = add(row.Errors, "telephony auto-webhook endpoint must name an emitted public endpoint")
@@ -1355,9 +1478,17 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 	// Server only (no Redis, no SIP bridge).
 	isLiveKitSIP := plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip"
 	isLiveKitConnector := plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "connector"
+	// The Pipecat Daily carrier route runs the operator's helper and nothing
+	// else: no Redis, because it keeps no shared control record (SCHEMA N37).
+	isPipecatDailyCarrier := plan.Key.Provider == ProviderPipecat && plan.Key.Transport == "daily-sip"
 	allowedServices := map[string]bool{"application": true}
 	requiredServices := []string{"application"}
 	switch {
+	case isPipecatDailyCarrier, hostsNothing:
+		// application only, already in both sets. On the cloud-websocket route the
+		// application is the deployed agent: the platform hosts it, and dev runs the
+		// same one locally, which is why an empty process list and one application
+		// service are the same route rather than a contradiction.
 	case isLiveKitSIP:
 		allowedServices["redis"] = true
 		allowedServices["livekit_server"] = true
@@ -1414,17 +1545,25 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		}
 	}
 	if plan.Key.Provider == ProviderPipecat {
-		for _, required := range []string{"admission", "call_correlation", "callback_idempotency"} {
-			if !seenReasons[required] {
-				row.Errors = add(row.Errors, fmt.Sprintf("Pipecat coordination reason %q is required", required))
+		// The two correlation reasons describe Redis-backed records, so they are
+		// required exactly where Redis is: the carrier-websocket routes. The Daily
+		// carrier leg keeps no such record and admits calls through the room
+		// (SCHEMA N37), so requiring them there would demand a reason for a service
+		// the same validation forbids.
+		required := []string{"admission", "call_correlation", "callback_idempotency"}
+		if isPipecatDailyCarrier || hostsNothing {
+			required = []string{"admission"}
+		}
+		for _, name := range required {
+			if !seenReasons[name] {
+				row.Errors = add(row.Errors, fmt.Sprintf("Pipecat coordination reason %q is required", name))
 			}
 		}
-		needsHumanTransfer := false
-		for _, evidence := range plan.Evidence {
-			needsHumanTransfer = needsHumanTransfer || evidence.Feature == string(targetcap.ColdTransfer) || evidence.Feature == string(targetcap.WarmTransfer)
+		if isPipecatDailyCarrier && len(seenReasons) != 1 {
+			row.Errors = add(row.Errors, "the Pipecat Daily carrier route coordinates only admission")
 		}
-		if needsHumanTransfer != seenReasons["human_transfer"] {
-			row.Errors = add(row.Errors, "Pipecat human_transfer coordination reason must match the selected transfer features")
+		if hostsNothing && len(seenReasons) != 1 {
+			row.Errors = add(row.Errors, "the Pipecat Cloud websocket route coordinates only admission")
 		}
 	}
 	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {
@@ -1462,6 +1601,24 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 
 func applyResolvedCapability(capability targetcap.Capability, control targetcap.TelephonyControl, provider targetcap.Provider, row *TargetValidation) {
 	applyCapabilityValue(capability, string(control), provider, row)
+}
+
+// validateRegions rejects the two authoring mistakes a region list can hold. A
+// duplicate is never deduplicated silently: two first deploys against one config
+// file name is a confusing thing to debug.
+func validateRegions(regions []string) []string {
+	var errors []string
+	seen := make(map[string]bool, len(regions))
+	for _, region := range regions {
+		switch {
+		case region == "":
+			errors = add(errors, "deployment_region has an empty entry")
+		case seen[region]:
+			errors = add(errors, fmt.Sprintf("deployment_region lists %q twice", region))
+		}
+		seen[region] = true
+	}
+	return errors
 }
 
 func applyCapabilityValue(capability targetcap.Capability, name string, provider targetcap.Provider, row *TargetValidation) {

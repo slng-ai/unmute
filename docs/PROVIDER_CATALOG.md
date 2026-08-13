@@ -1,7 +1,7 @@
 # Provider catalogue
 
 Status: design accepted, pilot landed (Pipecat + LiveKit), 2026-07-15.
-Scope: how (framework × role × provider) selections become injected code: imports, dependencies, service instantiation. Companion to [SCHEMA.md](./SCHEMA.md) (which owns what a binding *is*) and the driver specs (which own each lowering). Where this file and SCHEMA.md disagree, SCHEMA.md wins.
+Scope: how (framework × role × provider) selections become injected code: imports, dependencies, service instantiation. Companion to [SCHEMA.md](./SCHEMA.md) (which owns what a binding *is*) and the driver generators in `internal/generate/` (which own each lowering). Where this file and SCHEMA.md disagree, SCHEMA.md wins.
 
 Decisions carried in from review (2026-07-15):
 

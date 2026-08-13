@@ -130,6 +130,91 @@ func TestDev_help(t *testing.T) {
 	}
 }
 
+// FR-028: `--telephony` on the Daily route has nothing to offer, so it refuses.
+//
+// The refusal is the interesting part. Daily delivers phone calls through its own
+// infrastructure to a deployed agent, so there is no local topology to run, but
+// the author can still talk to this agent right now in two other modes. A silent
+// no-op here would be the flag that does nothing which Principle II forbids, and
+// a message saying telephony is unsupported would be false: Daily is the only
+// Pipecat telephony route there is.
+func TestDevTelephonyRefusesOnTheDailyRouteAndNamesWhatWorks(t *testing.T) {
+	cmd := newRootCmd()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	root := filepath.Join("..", "..", "examples", "pipecat-human-transfer-daily")
+	cmd.SetArgs([]string{"dev", "--telephony", "--target", "pipecat", root})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("--telephony on the Daily route must refuse, got exit 0")
+	}
+	message := err.Error()
+	for _, want := range []string{
+		"daily-sip",                    // names the route
+		"--console",                    // names a mode that does work
+		"browser",                      // names the other one
+		"deploy",                       // points at how to get a real phone call
+		"pipecat-human-transfer-daily", // names the package, so the fix is copy-pasteable
+	} {
+		if !strings.Contains(message, want) {
+			t.Errorf("refusal missing %q:\n%s", want, message)
+		}
+	}
+	// It must not claim the route has no telephony. It is the only Pipecat
+	// telephony route there is.
+	for _, forbidden := range []string{"no resolved telephony route", "not supported", "unsupported"} {
+		if strings.Contains(message, forbidden) {
+			t.Errorf("refusal says %q, which is false for this route:\n%s", forbidden, message)
+		}
+	}
+}
+
+// The carrier form of the Daily route refuses too, and it has to refuse for a
+// different reason, in different words. It *does* have a local telephony
+// topology: the emitted helper. What it does not have is a way for this command
+// to run that helper somewhere the operator's carrier can reach, which is the
+// whole point of the tunnel the README dictates.
+//
+// The no-carrier message would be false here ("no local telephony topology to
+// run"), and the generic "no executable telephony topology" line would be false
+// too, since this route resolves a plan with a process in it.
+func TestDevTelephonyRefusesOnTheDailyCarrierFormAndNamesTheHelper(t *testing.T) {
+	cmd := newRootCmd()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	// The fixture, not an example: feature 007 removed this route's public example
+	// and kept its guards (specs/007-pipecat-native-websocket T054).
+	root := filepath.Join("..", "testdata", "daily_carrier")
+	cmd.SetArgs([]string{"dev", "--telephony", "--target", "pipecat", root})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("--telephony on the Daily carrier form must refuse, got exit 0")
+	} else {
+		message := err.Error()
+		for _, want := range []string{
+			"telephony_helper.py", // names the artifact that does the work
+			"README",              // names where the two commands are written out
+			"tunnel",              // names the local test path rather than denying one
+			"twilio",              // names the carrier the target declared
+			"--console",           // still names a mode that works right now
+		} {
+			if !strings.Contains(message, want) {
+				t.Errorf("refusal missing %q:\n%s", want, message)
+			}
+		}
+		for _, forbidden := range []string{
+			"no local telephony topology",      // false: the helper is one
+			"no executable telephony topology", // false: the plan has a process
+			"not supported", "unsupported",
+		} {
+			if strings.Contains(message, forbidden) {
+				t.Errorf("refusal says %q, which is false for this route:\n%s", forbidden, message)
+			}
+		}
+	}
+}
+
 func TestTelephonyDevPlanUsesExactPublicURLAndResolvedArtifact(t *testing.T) { // telephony V11, V17
 	public, err := parseTelephonyPublicURL("https://voice.example.com/unmute/")
 	if err != nil {
@@ -352,23 +437,29 @@ func TestComposeLocalEnvironmentAndLiveKitConflicts(t *testing.T) { // telephony
 	}
 }
 
-// Trunk IDs are supplied by the dev command itself (compiler.md V36): they are never
-// demanded from the user and a user-set value is rejected, not overridden.
-func TestComposeDevSuppliedEnvironmentIsNeverDemandedAndRejectsOverrides(t *testing.T) {
+// No environment name carries a trunk ID any more (SCHEMA N36), so nothing is
+// dev-supplied on this route: the dev command creates the records and the local
+// LiveKit SIP service reads them itself. A stale retired value left in a `.env`
+// is now simply ignored, which is what the README's retirement sentence tells the
+// operator. The local topology guard still fails loud for the names the generated
+// Compose owns, which is the case that would otherwise point a local run at
+// someone's real deployment.
+func TestComposeIgnoresRetiredTrunkNamesAndStillGuardsLocalTopology(t *testing.T) {
 	plan := &generate.TelephonyRuntimePlan{
-		RequiredEnv:      []string{"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK", "LIVEKIT_URL", "TWILIO_SIP_PASSWORD"},
+		RequiredEnv:      []string{"LIVEKIT_URL", "TWILIO_SIP_PASSWORD"},
 		LocalEnvironment: []string{"LIVEKIT_URL"},
-		DevSuppliedEnv:   []string{"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK"},
 	}
 	if got := externalTelephonyEnv(plan); strings.Join(got, ",") != "TWILIO_SIP_PASSWORD" {
 		t.Fatalf("external env = %v", got)
 	}
-	err := rejectLocalTopologyConflicts(plan, []string{"LIVEKIT_SIP_INBOUND_TRUNK=ST_stale"})
-	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_SIP_INBOUND_TRUNK is supplied by `unmute dev --telephony` itself") {
-		t.Fatalf("dev-supplied override = %v", err)
+	for _, stale := range []string{"LIVEKIT_SIP_INBOUND_TRUNK=ST_stale", "LIVEKIT_SIP_OUTBOUND_TRUNK=ST_stale"} {
+		if err := rejectLocalTopologyConflicts(plan, []string{stale}); err != nil {
+			t.Fatalf("a retired name must be ignored, not reported: %v", err)
+		}
 	}
-	if err := rejectLocalTopologyConflicts(plan, []string{"LIVEKIT_SIP_OUTBOUND_TRUNK="}); err != nil {
-		t.Fatalf("empty dev-supplied override should not conflict: %v", err)
+	err := rejectLocalTopologyConflicts(plan, []string{"LIVEKIT_URL=wss://production.example"})
+	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_URL conflicts") {
+		t.Fatalf("local topology conflict = %v", err)
 	}
 }
 
@@ -635,4 +726,65 @@ func contains(s []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// The route reaches the local flow rather than a refusal. Every other Pipecat
+// carrier form refuses `--telephony` for its own true reason, so this asserts the
+// absence of all of those messages as well as the presence of the real one: the
+// failure an operator with no credentials should see is the credential list, not
+// "this route cannot be run locally".
+func TestDevTelephonyOnTheCloudWebsocketRouteReachesTheLocalFlow(t *testing.T) {
+	dir := copySafeCore(t)
+	targetsPath := filepath.Join(dir, "targets.yaml")
+	raw, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := mustReplace(t, string(raw),
+		"    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat",
+		"    transport: cloud-websocket\n    carrier: twilio\n    connection: primary_phone")
+	configured = mustReplace(t, configured,
+		"    destinations:\n      billing_line: \"+14155550123\"\n\n  vapi:",
+		"    destinations:\n      billing_line: BILLING_PHONE_NUMBER\n\n  vapi:")
+	// The phone channel below is package-wide, so the LiveKit target needs a route
+	// too or the build refuses before this command's dispatch is ever reached.
+	configured = mustReplace(t, configured,
+		"    sdk_language: python\n    models:",
+		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:")
+	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agentPath := filepath.Join(dir, "agent.yaml")
+	agentRaw, err := os.ReadFile(agentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentConfigured := mustReplace(t, string(agentRaw),
+		"channels:\n  web:\n    kind: realtime_audio\n\n",
+		"channels:\n  web:\n    kind: realtime_audio\n  phone:\n    kind: telephony\n    inbound: true\n    outbound: false\n    required_controls:\n      - cold_transfer\n      - hangup\n\n")
+	if err := os.WriteFile(agentPath, []byte(agentConfigured), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = run(t, "dev", dir, "--target", "pipecat", "--telephony", "--public-url", "https://voice.example.com")
+	if err == nil {
+		t.Fatal("with no carrier credentials the local flow must refuse")
+	}
+	message := err.Error()
+	// The real failure, named.
+	for _, want := range []string{"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("the refusal does not name %q:\n%s", want, message)
+		}
+	}
+	// Every message that would mean the command never got as far as trying.
+	for _, forbidden := range []string{
+		"no resolved telephony route", "no executable telephony topology",
+		"no local telephony topology", "cannot run it for you", "telephony_helper.py",
+		"credentialed smoke", "not supported", "unsupported",
+	} {
+		if strings.Contains(message, forbidden) {
+			t.Errorf("the route refused instead of running: %q appears in\n%s", forbidden, message)
+		}
+	}
 }

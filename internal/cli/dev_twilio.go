@@ -31,8 +31,9 @@ var telephonyHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
 // autoConfigureCarrierWebhook dispatches the plan's auto-webhook fact to the
 // carrier implementation. A fact without an implementation is a hard error:
-// carrier facts are data, and data must not promise what no code does.
-func autoConfigureCarrierWebhook(ctx context.Context, out io.Writer, targetName string, plan *generate.TelephonyRuntimePlan, public *url.URL, env []string) error {
+// carrier facts are data, and data must not promise what no code does. It
+// returns the undo, to be called when the dev process stops (V14).
+func autoConfigureCarrierWebhook(ctx context.Context, out io.Writer, targetName string, plan *generate.TelephonyRuntimePlan, public *url.URL, env []string) (func(context.Context) error, error) {
 	path := ""
 	for _, endpoint := range plan.PublicEndpoints {
 		if endpoint.Name == plan.AutoWebhookEndpoint {
@@ -40,7 +41,7 @@ func autoConfigureCarrierWebhook(ctx context.Context, out io.Writer, targetName 
 		}
 	}
 	if path == "" {
-		return fmt.Errorf("auto-webhook endpoint %q is not among the plan's public endpoints", plan.AutoWebhookEndpoint)
+		return nil, fmt.Errorf("auto-webhook endpoint %q is not among the plan's public endpoints", plan.AutoWebhookEndpoint)
 	}
 	// Signature validation in the generated app derives its URLs only from
 	// UNMUTE_PUBLIC_URL, so the webhook must be derived the same way (V3).
@@ -52,15 +53,25 @@ func autoConfigureCarrierWebhook(ctx context.Context, out io.Writer, targetName 
 		number := envValue(env, plan.Environment["from_number"])
 		previous, err := configureTwilioVoiceWebhook(ctx, accountSID, authToken, number, voiceURL)
 		if err != nil {
-			return fmt.Errorf("configure Twilio voice webhook: %w", err)
+			return nil, fmt.Errorf("configure Twilio voice webhook: %w", err)
 		}
-		if previous == "" {
-			previous = "unset"
+		shown := previous
+		if shown == "" {
+			shown = "unset"
 		}
-		fmt.Fprintf(out, "%s: Twilio voice webhook for %s set to %s (was: %s)\n", targetName, number, voiceURL, previous)
-		return nil
+		fmt.Fprintf(out, "%s: Twilio voice webhook for %s set to %s (was: %s)\n", targetName, number, voiceURL, shown)
+		// The dev URL dies with this process, so leaving it on the number aims a
+		// real phone line at a dead tunnel until the next run. Hand back the undo
+		// (V14/B7).
+		return func(restoreCtx context.Context) error {
+			if _, err := configureTwilioVoiceWebhook(restoreCtx, accountSID, authToken, number, previous); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "%s: Twilio voice webhook for %s restored to %s\n", targetName, number, shown)
+			return nil
+		}, nil
 	default:
-		return fmt.Errorf("carrier %q declares automatic webhook configuration but no implementation exists", plan.Route.Carrier)
+		return nil, fmt.Errorf("carrier %q declares automatic webhook configuration but no implementation exists", plan.Route.Carrier)
 	}
 }
 

@@ -30,12 +30,16 @@ import asyncio
 {{end}}{{if .Telephony}}import sys
 {{end}}{{if .Variables}}from dataclasses import dataclass
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
-{{end}}{{if .NeedsHTTPX}}
+{{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}
+import aiohttp
+{{end}}{{end}}{{if .CloudWebsocket}}{{if .HasColdTransfer}}
+import aiohttp
+{{end}}{{end}}{{if .NeedsHTTPX}}
 import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}{{if .Telephony}}import telephony
 {{end}}from dotenv import load_dotenv
-{{if .Telephony}}from loguru import logger
+{{if or .Telephony .HasColdTransfer .DailyCarrier .CloudWebsocket}}from loguru import logger
 {{end}}
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 {{if not .Inline}}from pipecat.bus import BusBridgeProcessor
@@ -54,7 +58,8 @@ from pipecat.runner.utils import create_transport
 {{end}}{{if .NeedsRoleRestore}}from pipecat.services.settings import LLMSettings
 {{end}}{{if .NeedsLanguage}}from pipecat.transcriptions.language import Language
 {{end}}from pipecat.transports.base_transport import BaseTransport, TransportParams
-{{if .Telephony}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+{{if .DailyParams}}{{.DailyParams.Import}}
+{{end}}{{if or .Telephony .CloudWebsocket}}from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 {{end}}{{if .NeedsTurnStrategies}}from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
@@ -77,13 +82,30 @@ load_dotenv()
 logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())
 
 {{end}}MAIN_NAME = {{pyq .MainName}}
-REQUIRED_ENV = [
-{{range .RequiredEnv}}    {{pyq .}},
+{{if .CloudWebsocket}}# What every session needs, whatever channel it arrives on. What a *phone call*
+# adds is CALL_REQUIRED_ENV below, checked separately, so this package still runs
+# in the browser with nothing but model keys (V10/B3).
+{{else}}# Provider credentials only. The telephony route's environment (Redis, carrier
+# keys, the public URL) is required by telephony.py, not here, so a telephony
+# package still runs in the browser with nothing but model keys (V10/B3).
+{{end}}REQUIRED_ENV = [
+{{range .DevEnv}}    {{pyq .}},
 {{end}}]
 {{if .Interrupt}}{{if .Interrupt.IgnorePhrase}}IGNORE_PHRASES = [{{range $i, $p := .Interrupt.IgnorePhrase}}{{if $i}}, {{end}}{{pyq $p}}{{end}}]
 {{end}}{{end}}{{if .HasColdTransfer}}
-# Set once the transport exists, so an agent's cold-transfer @tool can reach it.
+{{if not .CloudWebsocket}}# Set once the transport exists, so an agent's cold-transfer @tool can reach it.
 _TRANSPORT: BaseTransport | None = None
+{{end}}# One call gets one transfer attempt. Holds the first attempt's result so a
+# caller who asks twice replays it instead of firing a second one, and so a
+# transfer that failed can never come back to the model as a success.
+#
+# ponytail: a module-level value, not the shared control store the carrier
+# routes use for this. That store is deliberately absent here: this route
+# declares no Redis, and adding one to remember a fact that never outlives the
+# call would be an idle service. On this route one process serves one call, so
+# module scope is call scope. If that ever stops being true, this has to become
+# per-session state keyed on the call id.
+_TRANSFER_RESULT: dict | None = None
 {{end}}
 
 def require_env() -> None:
@@ -91,7 +113,237 @@ def require_env() -> None:
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
+{{if .CloudWebsocket}}
+# --- the carrier stream ------------------------------------------------------
+# Your carrier streams the call's audio straight to Pipecat Cloud, which starts
+# this agent. Nothing of yours is in the path, so there is nothing here that
+# answers a webhook or holds a call open. The runner has already parsed the
+# carrier's handshake by the time run_bot starts; everything below reads that
+# parsed result and never re-parses it.
 
+# What a phone call adds to REQUIRED_ENV above, checked only on a phone call: a
+# browser or console session on this package reads none of these and must not be
+# asked for them. The check runs before the caller hears anything, so a missing
+# value can never first show up as a failed transfer on a call somebody is
+# paying for.
+CALL_REQUIRED_ENV = [
+{{range .CloudWebsocket.CallEnv}}    {{pyq .}},
+{{end}}]
+
+# Set by _phone_session, read by anything that has to name this call to your
+# carrier. Module scope is call scope here: one session serves one call.
+_PHONE_CALL: dict | None = None
+
+
+def _phone_session(runner_args: RunnerArguments) -> dict | None:
+    """The parsed carrier handshake, or None when this is not a phone call.
+
+    The runner sets transport_type and call_data while building the transport, so
+    this reads facts rather than deriving them. A browser or console session has
+    neither and must behave exactly as it does on a package with no telephony.
+    """
+    global _PHONE_CALL
+    if getattr(runner_args, "transport_type", None) != {{pyq .CloudWebsocket.Carrier}}:
+        return None
+    missing = [name for name in CALL_REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(f"Missing environment for a phone call: {', '.join(missing)}")
+    call = dict(getattr(runner_args, "call_data", None) or {})
+    _PHONE_CALL = call
+    direction = (call.get("body") or {}).get("direction", "inbound")
+    logger.info("phone call {} ({})", call.get("call_id"), direction)
+    return call
+
+
+def _pipeline_audio_rates() -> dict:
+    """Run the pipeline at the carrier's own sample rate, on a phone call only.
+
+    Twilio Media Streams is 8 kHz mono in both directions. Pipecat's defaults are
+    16 kHz in and 24 kHz out, so without this every inbound frame is upsampled and
+    every outbound frame is downsampled, for the whole call, in exchange for no
+    information at all: there is nothing above 4 kHz in the audio to recover. The
+    transport's own guide asks for these two values for exactly that reason.
+
+    A browser or console session on the same package keeps the defaults, where
+    8 kHz would throw away quality those channels really have.
+    """
+    if not _PHONE_CALL:
+        return {}
+    return {"audio_in_sample_rate": 8000, "audio_out_sample_rate": 8000}
+{{if not .CloudWebsocket.AccountSIDEnv}}
+
+async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
+    """The carrier's stream, with the call ended by closing the socket.
+
+    This package receives calls and never places or redirects one, so it holds no
+    carrier credentials at all. The framework's own telephony path cannot be used
+    for that: it always asks the serializer to hang the call up through the
+    carrier's REST API, and the serializer refuses to be built without credentials
+    for it (`auto_hang_up is enabled but missing required parameters`, verified
+    against pipecat-ai 1.5.0 on 2026-08-13). So the transport is built here, with
+    automatic hangup off.
+
+    Nothing is lost. Closing the stream ends the call, because the markup your
+    number points at has nothing after `<Connect>`. Declare a connection and this
+    function is not emitted at all: the framework's path is used, and the agent
+    ends calls through the carrier's own call control.
+    """
+    from pipecat.runner.utils import parse_telephony_websocket
+    from pipecat.serializers.twilio import TwilioFrameSerializer
+    from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
+
+    transport_type, call_data = await parse_telephony_websocket(runner_args.websocket)
+    # Set the same two attributes the framework's path sets, so _phone_session
+    # above reads the handshake the same way whichever path built the transport.
+    runner_args.transport_type = transport_type
+    runner_args.call_data = call_data
+    params = transport_params[transport_type]()
+    params.add_wav_header = False
+    params.serializer = TwilioFrameSerializer(
+        stream_sid=call_data["stream_id"],
+        call_sid=call_data["call_id"],
+        params=TwilioFrameSerializer.InputParams(auto_hang_up=False),
+    )
+    return FastAPIWebsocketTransport(websocket=runner_args.websocket, params=params)
+{{end}}
+{{if .HasColdTransfer}}
+STREAM_URL = {{pyq .CloudWebsocket.StreamURL}}
+
+
+def _service_host() -> str:
+    """The string that names this agent to the platform.
+
+    The same value your TwiML Bin carries: the compiled agent name plus your
+    organization, which the compiler cannot know. Read here because the transfer
+    below composes markup of its own, and that markup has to point the caller
+    back at this agent if the transfer fails.
+    """
+    return "{{.Project}}." + os.environ[{{pyq .CloudWebsocket.OrganizationEnv}}]
+
+
+def _transfer_twiml(destination: str, caller: str) -> str:
+    """The whole transfer, as one document your carrier will run in order.
+
+    Announce, dial, then hand the caller back to a fresh agent. What follows the
+    dial runs however the dial *ended*, not only when it failed: your carrier
+    moves to the next verb when the destination hangs up exactly as it does when
+    the destination was busy or never answered, and telling those apart needs a
+    callback endpoint of yours, which is the cost this route exists to remove.
+    So the line before the reconnect says only what is true either way and never
+    claims nobody answered. Only the caller hanging up stops the document.
+    """
+    return (
+        "<Response>"
+        "<Say>Connecting you to a colleague now.</Say>"
+        f'<Dial answerOnBridge="true" timeout="25">{destination}</Dial>'
+        "<Say>Putting you back to the assistant.</Say>"
+        f'<Connect><Stream url="{STREAM_URL}">'
+        f'<Parameter name="_pipecatCloudServiceHost" value="{_service_host()}"/>'
+        f'<Parameter name="from_number" value="{caller}"/>'
+        "</Stream></Connect>"
+        "</Response>"
+    )
+
+
+async def _update_carrier_call(call_id: str, twiml: str) -> None:
+    """Replace the live call's document at your carrier, by its own call id.
+
+    This is the one request in the whole project made in the carrier's own words,
+    and it is call control rather than provisioning: the call already exists. One
+    HTTPS request, so no carrier SDK.
+    """
+    account_sid = os.environ[{{pyq .CloudWebsocket.AccountSIDEnv}}]
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_id}.json"
+    auth = aiohttp.BasicAuth(account_sid, os.environ[{{pyq .CloudWebsocket.AuthTokenEnv}}])
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, auth=auth, data={"Twiml": twiml}) as response:
+            if response.status >= 400:
+                raise RuntimeError(
+                    f"carrier call update failed with {response.status}: {await response.text()}"
+                )
+{{end}}{{end}}{{if .DailyCarrier}}
+# --- the carrier leg ---------------------------------------------------------
+# The call arrives through your own carrier and joins this room over SIP. Only
+# the forwarding request below speaks the carrier's own words; everything else
+# here is a Daily room participant like any other.
+
+
+def _carrier_sip(destination: str) -> str:
+    """A destination dialled through your own trunk.
+
+    Every outbound leg on this route leaves through your carrier, so an E.164
+    number becomes a SIP URI at your trunk's termination address. Composed here,
+    at call time, because a destination deferred to an environment variable has
+    no value until now. A destination that is already a SIP URI is dialled as
+    written.
+    """
+    if destination.startswith(("sip:", "sips:")):
+        return destination
+    return f"sip:{destination}@{os.environ[{{pyq .DailyCarrier.SIPAddressEnv}}]}"
+
+
+# What a phone call adds to REQUIRED_ENV above, checked only on a phone call: a
+# browser or console session on this package reads none of these and must not be
+# asked for them. The check runs before the call is answered, so a missing value
+# can never first show up as a failed transfer on a call somebody is paying for.
+CALL_REQUIRED_ENV = [
+{{range .DailyCarrier.CallEnv}}    {{pyq .}},
+{{end}}]
+
+
+def _carrier_session(runner_args: RunnerArguments) -> dict | None:
+    """The call details the helper started this session with, validated.
+
+    Returns None when this session is not a phone call at all: a browser or
+    console session carries no call details and must behave exactly as it does
+    on a package with no carrier. A body that claims to be a call but is missing
+    a field fails here, by field name, rather than half-way through the call.
+    """
+    body = getattr(runner_args, "body", None)
+    if not isinstance(body, dict) or not body.get("direction"):
+        return None
+    missing = [name for name in CALL_REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(f"Missing environment for a phone call: {', '.join(missing)}")
+    direction = body["direction"]
+    if direction == "inbound":
+        # The call id and nothing else. The room is the platform's, handed to this
+        # session the ordinary way, and the room's SIP address arrives from Daily
+        # when it goes live, so neither belongs in a body somebody else wrote.
+        required = ("call_sid",)
+    elif direction == "outbound":
+        required = ("dialout",)
+    else:
+        raise RuntimeError(f"call body direction must be inbound or outbound, not {direction!r}")
+    missing = [field for field in required if not body.get(field)]
+    if missing:
+        raise RuntimeError(f"call body is missing required fields: {', '.join(missing)}")
+    return body
+{{if .DailyCarrier.HasInbound}}
+# The room's SIP leg can signal ready more than once, so the forward is claimed
+# once and never repeated. Module scope is call scope here: one process serves
+# one call.
+_CALL_FORWARDED = False
+
+{{if eq .DailyCarrier.Carrier "twilio"}}
+async def _forward_carrier_call(call_sid: str, sip_uri: str) -> None:
+    """Point the live call at this room's SIP address.
+
+    This is the one request in the whole project made in the carrier's own words,
+    and it is call control rather than provisioning: the call already exists and
+    the carrier just handed it to us. One HTTPS request, so no carrier SDK.
+    """
+    account_sid = os.environ[{{pyq .DailyCarrier.AccountSIDEnv}}]
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
+    twiml = f"<Response><Dial><Sip>{sip_uri}</Sip></Dial></Response>"
+    auth = aiohttp.BasicAuth(account_sid, os.environ[{{pyq .DailyCarrier.AuthTokenEnv}}])
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, auth=auth, data={"Twiml": twiml}) as response:
+            if response.status >= 400:
+                raise RuntimeError(
+                    f"carrier call update failed with {response.status}: {await response.text()}"
+                )
+{{end}}{{end}}{{end}}
 {{if .Variables}}
 @dataclass
 class State:
@@ -281,18 +533,101 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
         Args:
 {{range .Args}}            {{.Name}} ({{.PyType}}):{{if .Description}} {{.Description}}{{end}}{{if .Enum}} One of: {{join .Enum ", "}}.{{end}}
 {{end}}        """{{else}}"""{{end}}
-{{if .ColdDestination}}        await params.llm.push_frame(
+{{if .ColdDestination}}        logger.info("human transfer fired: {{.MethodName}} (cold)")
+        global _TRANSFER_RESULT
+        if _TRANSFER_RESULT is not None:
+            # Asked twice. Replay the first answer rather than dial again.
+            await params.result_callback(_TRANSFER_RESULT)
+            return
+        # Claimed before the primitive runs, not after: a request arriving while
+        # the first one is still in flight must not slip past the guard.
+        _TRANSFER_RESULT = {"in_progress": "A transfer is already under way; do not start another."}
+{{if $.CloudWebsocket}}        if not _PHONE_CALL or not _PHONE_CALL.get("call_id"):
+            # No phone call, so nothing to hand over: the browser and console
+            # transports have no call for your carrier to redirect. Saying so beats
+            # raising, and beats telling the model the caller was transferred.
+            _TRANSFER_RESULT = {"failed": "this session is not a phone call, so it cannot be transferred"}
+            await params.result_callback(_TRANSFER_RESULT)
+            return
+        # The announcement is the first verb of the document below, spoken by your
+        # carrier rather than by this agent. Applying the update replaces the call's
+        # document, which tears this media stream down, so a line the agent started
+        # speaking would be cut off by its own transfer.
+        try:
+            await _update_carrier_call(
+                _PHONE_CALL["call_id"],
+                _transfer_twiml({{.ColdDestination}}, (_PHONE_CALL.get("body") or {}).get("from_number", "")),
+            )
+        except Exception as exc:
+            # The request failed, so the call is untouched and the caller is still
+            # here listening. Tell them, and never report a transfer that did not
+            # happen.
+            logger.warning("cold transfer failed: {}", exc)
+{{if .HangupOnUnavailable}}            await params.llm.push_frame(
+                LLMMessagesAppendFrame(
+                    [{"role": "developer", "content": "Tell the caller nobody can take the call right now, apologize, and say goodbye."}],
+                    run_llm=True,
+                )
+            )
+            _TRANSFER_RESULT = {"failed": "The transfer could not be completed; the call is ending."}
+            await params.result_callback(_TRANSFER_RESULT)
+            await params.llm.push_frame(EndFrame())
+{{else}}            await params.llm.push_frame(
+                LLMMessagesAppendFrame(
+                    [{"role": "developer", "content": "Tell the caller the transfer did not go through and that you will keep helping them."}],
+                    run_llm=True,
+                )
+            )
+            _TRANSFER_RESULT = {"failed": f"The transfer could not be completed ({exc}). Tell the caller and keep helping them."}
+            await params.result_callback(_TRANSFER_RESULT)
+{{end}}            return
+        # The stream ends as your carrier applies the document. Recorded first so a
+        # request that arrives in that window replays this rather than re-firing.
+        _TRANSFER_RESULT = {"transferred": True}
+        await params.result_callback(_TRANSFER_RESULT)
+{{else}}        # Daily SIP transfers via REFER, which keeps the bot on the call
+        # until the transfer completes, so the bot speaks the announcement
+        # itself (the official daily-pstn-cold-transfer pattern).
+        await params.llm.push_frame(
             LLMMessagesAppendFrame(
-                [{"role": "developer", "content": "Tell the caller you are connecting them now, then wait."}],
+                [{"role": "developer", "content": "Tell the caller you are transferring them to a colleague now and to please hold, then wait."}],
                 run_llm=True,
             )
         )
-{{if .CarrierTransfer}}        await telephony.cold_transfer(self.call_context["call_id"], {{pyq .ColdDestination}})
-{{else}}        if _TRANSPORT is not None:
-            await _TRANSPORT.sip_call_transfer({"toEndPoint": {{pyq .ColdDestination}}})
-{{end}}
-        await params.result_callback({"transferred": True})
-{{else if .Builtin}}{{if .Instructions}}        await params.llm.push_frame(
+        # sip_call_transfer, not sip_refer, and the choice is the same on both
+        # Daily forms. REFER would take Daily out of the media path and stop its
+        # billing, but it needs the originating SIP system to honour REFER, which
+        # neither platform documents for a carrier interconnect leg. So Daily
+        # stays anchored after a completed transfer and both legs keep billing
+        # until the call ends; the README states that cost.
+        if isinstance(_TRANSPORT, {{$.DailyParams.Transport}}):
+            error = await _TRANSPORT.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
+        else:
+            # No phone call, so nothing to hand over: the browser and console
+            # transports carry no transfer primitive. Failing here by name beats
+            # raising, and beats telling the model the caller was transferred.
+            error = "this session is not a phone call, so it cannot be transferred"
+        if error is not None:
+            # A failed transfer is a return value, not an exception, on this
+            # transport (T5). Ignoring it would tell the model the caller was
+            # transferred while they are still right here. on_unavailable
+            # decides what the caller gets instead.
+            logger.warning("cold transfer failed: {}", error)
+{{if .HangupOnUnavailable}}            await params.llm.push_frame(
+                LLMMessagesAppendFrame(
+                    [{"role": "developer", "content": "Tell the caller nobody can take the call right now, apologize, and say goodbye."}],
+                    run_llm=True,
+                )
+            )
+            _TRANSFER_RESULT = {"failed": "The transfer could not be completed; the call is ending."}
+            await params.result_callback(_TRANSFER_RESULT)
+            await params.llm.push_frame(EndFrame())
+{{else}}            _TRANSFER_RESULT = {"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."}
+            await params.result_callback(_TRANSFER_RESULT)
+{{end}}            return
+        _TRANSFER_RESULT = {"transferred": True}
+        await params.result_callback(_TRANSFER_RESULT)
+{{end}}{{else if .Builtin}}{{if .Instructions}}        await params.llm.push_frame(
             LLMMessagesAppendFrame(
                 [{"role": "developer", "content": {{pyq .Instructions}}}],
                 run_llm=True,
@@ -435,8 +770,15 @@ async def _flow_tool_{{.Name}}(args, flow_manager{{if .NeedsState}}, state=None{
 # --- transport & run --------------------------------------------------------
 transport_params: dict = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
-    "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+    # The runner assigns an inbound call's dial-in settings and Daily credentials
+    # onto whatever this returns, so on the Daily route it has to be the params
+    # class that declares them. The generic one rejects the assignment.
+    "daily": lambda: {{if .DailyParams}}{{.DailyParams.Class}}{{else}}TransportParams{{end}}(audio_in_enabled=True, audio_out_enabled=True),
 {{if .Telephony}}    {{pyq .Telephony.Carrier}}: lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True),
+{{end}}{{if .CloudWebsocket}}    # Your carrier's stream, terminated by Pipecat Cloud. The runner attaches the
+    # carrier's frame serializer itself, reading the stream and call ids out of the
+    # handshake, so this declares the audio directions and nothing else.
+    {{pyq .CloudWebsocket.Carrier}}: lambda: FastAPIWebsocketParams(audio_in_enabled=True, audio_out_enabled=True),
 {{end}}
 }
 
@@ -517,10 +859,18 @@ def build_stt():
 
 {{else}}async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activate_on_start: bool = False) -> None:
     require_env()
-{{if .Tracing}}
+{{if .DailyCarrier}}    # Validated before anything is built: a malformed call body fails by field
+    # name rather than mid-call. None means this is not a phone session.
+    carrier_call = _carrier_session(runner_args)
+{{end}}{{if .CloudWebsocket}}    # Decided once, right after the transport exists: is this a phone call at all?
+    # Everything a call needs is checked here, before the caller hears anything.
+    # None means browser or console, which behave exactly as they do on a package
+    # with no telephony.
+    _phone_session(runner_args)
+{{end}}{{if .Tracing}}
     tracing_enabled = setup_langfuse_tracing()
 {{end}}
-{{if .HasColdTransfer}}    global _TRANSPORT
+{{if and .HasColdTransfer (not .CloudWebsocket)}}    global _TRANSPORT
     _TRANSPORT = transport
 {{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
@@ -561,7 +911,7 @@ def build_stt():
         enable_tracing=tracing_enabled,
         additional_span_attributes={"langfuse.trace.name": TRACE_NAME},
 {{end}}
-        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True{{if .CloudWebsocket}}, **_pipeline_audio_rates(){{end}}),
     )
 {{if .Tracing}}
     if tracing_enabled:
@@ -576,12 +926,71 @@ def build_stt():
                 run_llm=True,
             )
         )
-{{end}}{{if .HasColdTransfer}}
+{{end}}{{if and .HasColdTransfer (not .CloudWebsocket)}}
     @transport.event_handler("on_dialout_answered")
     async def on_dialout_answered(transport, data):
         # Cold transfer: the human answered, so the bot leaves the call.
-        await main.queue_frame(EndFrame())
-{{end}}
+{{if .DailyCarrier}}        if _TRANSFER_RESULT is None:
+            # No transfer is under way, so this is the outbound call this session
+            # exists for and the recipient has just picked up. Ending here would
+            # hang up on the person we called.
+            return
+{{end}}        await main.queue_frame(EndFrame())
+{{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}
+    if carrier_call and carrier_call["direction"] == "inbound":
+
+        @transport.event_handler("on_dialin_ready")
+        async def on_dialin_ready(transport, sip_endpoint):
+            # Daily says which address the room is reachable on and that it is
+            # live, both in this one event. Waiting for it is the point: the
+            # address exists from the moment the room does, but a call sent there
+            # before the leg is up is a call that goes nowhere.
+            #
+            # The guard is claimed before the request goes out, not after: a
+            # second ready signal arriving while the first forward is still in
+            # flight must not forward the same call twice.
+            global _CALL_FORWARDED
+            if _CALL_FORWARDED:
+                return
+            _CALL_FORWARDED = True
+            try:
+                await _forward_carrier_call(carrier_call["call_sid"], sip_endpoint)
+            except Exception as exc:
+                # Named, not swallowed. The caller is still on the helper's hold
+                # audio, and this line is what says why they never got further.
+                logger.error("forwarding carrier call {} failed: {}", carrier_call["call_sid"], exc)
+                return
+            logger.info("carrier call {} forwarded into the room", carrier_call["call_sid"])
+{{end}}{{if .DailyCarrier.HasOutbound}}
+    if carrier_call and carrier_call["direction"] == "outbound":
+
+        @transport.event_handler("on_joined")
+        async def on_joined(transport, data):
+            # Dialled through your own trunk: a SIP URI, and the provider Daily
+            # documents for a carrier interconnect leg.
+            await transport.start_dialout(
+                {
+                    "sipUri": carrier_call["dialout"]["sip_uri"],
+                    "displayName": MAIN_NAME,
+                    "provider": "daily",
+                }
+            )
+
+        @transport.event_handler("on_dialout_connected")
+        async def on_dialout_connected(transport, data):
+            logger.info("dial-out connected: {}", data)
+
+        @transport.event_handler("on_dialout_stopped")
+        async def on_dialout_stopped(transport, data):
+            # A leg the carrier rejected ends here with its cause named, rather
+            # than as a call that simply never rang.
+            logger.warning("dial-out stopped: {}", data)
+            await runner.cancel()
+
+        @transport.event_handler("on_dialout_warning")
+        async def on_dialout_warning(transport, data):
+            logger.warning("dial-out warning: {}", data)
+{{end}}{{end}}
     pipeline_started = asyncio.Event()
     entry_started = False
 
@@ -614,14 +1023,18 @@ def build_stt():
             await activate_entry()
 
     if not activate_on_start:
-{{if or (eq .Transport "daily-sip") (eq .Transport "carrier-websocket")}}
+{{if or (eq .Transport "daily-sip") (eq .Transport "carrier-websocket") (eq .Transport "cloud-websocket")}}
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
             # Telephony transports (carrier WebSocket, Daily SIP) have no RTVI
             # client-ready handshake: the carrier opens a raw media WebSocket and
             # the bot initiates once that connection is open and main's StartFrame
             # has traversed (Pipecat Twilio dial-in flow; SPEC V2).
-            await pipeline_started.wait()
+{{if .CloudWebsocket}}            #
+            # This is also all an outbound call needs. Your carrier opens the stream
+            # when the person answers, so the greeting below meets a human rather
+            # than ringback, and there is no ringing state to handle.
+{{end}}            await pipeline_started.wait()
             await activate_entry()
 {{else}}
         @main.rtvi.event_handler("on_client_ready")
@@ -645,15 +1058,22 @@ def build_stt():
             flush_tracing()
 {{else}}
     await runner.run()
-{{end}}{{end}}
-
+{{end}}
+{{end}}
 
 async def bot(runner_args: RunnerArguments) -> None:
 {{if .Telephony}}    require_env()
     telephony.configure_pipecat_env()
 {{end}}
-    transport = await create_transport(runner_args, transport_params)
-    await run_bot(transport, runner_args)
+{{if and .CloudWebsocket (not .CloudWebsocket.AccountSIDEnv)}}    # A websocket session is a phone call on this route, and this package holds no
+    # carrier credentials, so it builds that transport itself (see
+    # _carrier_transport). Everything else, browser and console, is the framework's.
+    if getattr(runner_args, "websocket", None) is not None:
+        transport = await _carrier_transport(runner_args)
+    else:
+        transport = await create_transport(runner_args, transport_params)
+{{else}}    transport = await create_transport(runner_args, transport_params)
+{{end}}    await run_bot(transport, runner_args)
 
 
 async def console_main() -> None:

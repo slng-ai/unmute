@@ -1,0 +1,40 @@
+# Transfers ride the platform's native primitives, so the target routes are
+# the ones where those primitives exist (docs/TRANSFERS.md):
+#
+#   livekit: Elastic SIP Trunking. Cold is a SIP REFER through the trunk
+#            (enable Call Transfer + PSTN Transfer on the Twilio trunk, see
+#            connections/twilio_sip.yaml); warm is LiveKit's WarmTransferTask,
+#            which dials the supervisor with the same four carrier values,
+#            passed inline. No LiveKit outbound trunk is registered.
+#
+# The package compiles offline with no credentials at all: a Connection stores
+# env var names, never values.
+targets:
+  livekit:
+    provider: livekit
+    version: "1.6.4"
+    sdk_language: python
+    transport: sip
+    carrier: twilio
+    connection: twilio_sip
+    # Where LiveKit Cloud runs the deployed agent. Declared so the first deploy
+    # does not stop to ask, which is what the transfer test rig needs. Forwarded
+    # exactly as written; `lk` is the validator, and the region is fixed once the
+    # agent exists. A list here would deploy once per region.
+    deployment_region: eu-central
+    models:
+      # LiveKit runs its own turn model rather than local Silero.
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+    # Symbolic names, resolved here so the model never sees a phone number and
+    # can never dial an arbitrary one. A destination is either a literal (E.164
+    # or a sip: URI, e.g. billing_line: "+14155550123") or the UPPER_SNAKE name
+    # of an environment variable holding one. An env var name lands in the
+    # generated .env.example and the required-env list, and is read at call
+    # time. This example uses the env form for both, because any literal a
+    # repository could ship is a number nobody answers, and a transfer to it
+    # fails on a live call exactly when you are trying the example out.
+    destinations:
+      billing_line: BILLING_PHONE_NUMBER
+      supervisor_line: SUPERVISOR_PHONE_NUMBER

@@ -74,7 +74,7 @@ Compiling a Vapi or Deepgram instance fails with `<provider> driver is not imple
 ## dev
 
 ```sh
-unmute dev <agent-dir> [--target <name>] [--var name=value ...] [--console | --telephony [--public-url <https-url>] [--to <e164>]] [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
+unmute dev <agent-dir> [--target <name>] [--var name=value ...] [--console | --telephony [--public-url <https-url>] [--to <e164>] [--no-webhook]] [--port 8765] [--bot-port 7860] [--no-open] [--verbose]
 ```
 
 The fastest loop for a **Pipecat or LiveKit** instance: compiles the selected target to `build/<name>/`, runs it locally, and lets you talk to the agent — in the browser (default) or in your terminal (`--console`). Whatever you build, you can speak to.
@@ -124,8 +124,8 @@ call into a local, self-hosted LiveKit room, so it needs no LiveKit Cloud.
 `dev --telephony` starts a managed cloudflared tunnel, sets the Twilio voice
 webhook automatically, and places an outbound call with `--to`. Twilio only
 reaches the bridge over HTTPS and WSS, so both inbound and outbound work fully
-on a laptop. It supports inbound, outbound, and hangup; call transfers and
-voicemail detection stay on the LiveKit SIP route.
+on a laptop. It supports inbound, outbound, hangup and both transfer shapes;
+voicemail detection stays on the LiveKit SIP route.
 
 Telephony mode runs the generated `compose.telephony.yaml`; there is no
 host-process fallback or infrastructure flag. Pipecat carrier and LiveKit SIP
@@ -133,19 +133,39 @@ routes build the generated application and version-pinned Redis; the LiveKit
 Twilio connector builds the application plus a local `livekit-server --dev` and
 needs no Redis. LiveKit SIP additionally starts
 version-pinned LiveKit Server and LiveKit SIP, then creates or reuses the local
-inbound trunk, outbound trunk, and dispatch rule itself and injects
-`LIVEKIT_SIP_INBOUND_TRUNK` and `LIVEKIT_SIP_OUTBOUND_TRUNK` before the
-application starts. Unmute preflights Docker Compose, waits for declared health
+inbound trunk and dispatch rule itself before the application starts; no
+environment name carries their IDs (SCHEMA N36, 2026-08-12). It creates no
+outbound trunk: the agent dials out with the carrier's trunk settings passed
+inline, so local and deployed use the same mechanism (SCHEMA N33, 2026-08-12). Unmute preflights Docker Compose, waits for declared health
 checks, prints the resolved service graph and carrier setup, configures the
 Twilio voice webhook automatically where the route carries that fact (printing
 the previous value), prints the call line, places an outbound call when `--to`
-is set, follows Compose logs under `--verbose`, and stops only its deterministic
-project on `ctrl-c` without removing data volumes or leaving the tunnel
-running.
+is set, follows Compose logs under `--verbose`, and on `ctrl-c` restores the
+webhook it changed and stops only its deterministic project, without removing
+data volumes or leaving the tunnel running.
+
+**Your phone number is borrowed, not taken.** A quick tunnel hostname changes
+every run, so `dev --telephony` rewrites the number's voice webhook on start.
+It also puts the old value back when you stop, on every exit path including
+`ctrl-c`. Without that, the number would sit pointing at a tunnel that no
+longer resolves, and the next real call would get "an application error has
+occurred" instead of your agent.
+
+**Leaving the number alone (`--no-webhook`).** Skips the rewrite entirely and
+prints the public URL so you can point the number at it yourself. Use it for a
+number that is shared, in production, or configured by something other than
+this CLI. Nothing is written to the carrier, so nothing needs restoring.
+
+For a stable setup, do not rely on the rewrite at all: give `cloudflared` a
+named tunnel with a fixed hostname, set the webhook to it once in the carrier
+console, and run with `--no-webhook` from then on.
 
 **Outbound dial-out (`--to <e164>`).** On an outbound-capable target, pass
 `--to +15551234567` and, once the container is healthy, the dev command places
-one call to that number and prints the returned call id. The CLI mints the
+one call to that number and prints the returned call id. This is also the way
+to test a phone agent when you cannot receive the inbound call, because the
+number is unreachable from where you are or is not yet cleared to accept
+calls: have the agent ring you instead. The CLI mints the
 dial-out secret `UNMUTE_OUTBOUND_TOKEN` itself, injects it into the container,
 and never demands it from `.env` or prints it. `--to` requires `--telephony`
 and a resolved direction that includes outbound; it is rejected on an

@@ -1,0 +1,21 @@
+{
+  "dispatch_rule": {
+    "name": "livekit inbound",
+    "roomConfig": {
+      "agents": [
+        {
+          "agentName": "livekit",
+          "metadata": "{\"direction\":\"inbound\"}"
+        }
+      ]
+    },
+    "rule": {
+      "dispatchRuleIndividual": {
+        "roomPrefix": "call-"
+      }
+    },
+    "trunk_ids": [
+      "${UNMUTE_SIP_TRUNK_ID}"
+    ]
+  }
+}

@@ -51,7 +51,20 @@ entry point + version check), and `templates/`:
 | Target | Build | Templates | Notes |
 |---|---|---|---|
 | Pipecat | [pipecat_v1_build.go](internal/generate/pipecat_v1_build.go) | [templates/pipecat_v1/](internal/generate/templates/pipecat_v1/) (`bot.py.tmpl`) | code target |
+| Pipecat telephony | same `build.go`, two data groups | `telephony_{twilio,telnyx,plivo}.py.tmpl` + `telephony_shared.py.tmpl` for the carrier-WebSocket routes; `telephony_helper.py.tmpl` for the Daily route's carrier form | see the note below |
 | LiveKit | [livekit_v1_build.go](internal/generate/livekit_v1_build.go) | [templates/livekit_v1/](internal/generate/templates/livekit_v1/) (`agent.py.tmpl`) | code target |
+
+**Reading Pipecat telephony emission:** the driver's template data carries **two**
+telephony groups, and which one is set decides everything. `pipecatData.Telephony`
+means the carrier-WebSocket routes, and roughly twenty-two emitted sites read it
+that way. `pipecatData.DailyCarrier` means the Daily route's carrier form
+(SCHEMA N37) and is the only thing the helper, the bot's carrier block, and the
+README runbook read. They are separate fields on purpose: one field for both would
+switch all twenty-two sites on for a route that wants none of them, and getting
+that wrong fails quietly. Start at `buildPipecatDailyCarrier` in
+[pipecat_v1_build.go](internal/generate/pipecat_v1_build.go), and at
+`renderPipecatFiles` in [pipecat_v1.go](internal/generate/pipecat_v1.go) for which
+files each form emits.
 
 **Shared codegen glue:** [internal/generate/service_call.go](internal/generate/service_call.go)
 turns `catalogue entry + binding` into a rendered constructor (`ServiceCall`),
@@ -65,7 +78,8 @@ not built yet (they fail loud).
 |---|---|
 | [internal/target/table.go](internal/target/table.go) | the core/warn/gated/provisional matrix: per-field, per-provider support + history/roles/fallback |
 | [SCHEMA.md](SCHEMA.md) | the human-readable truth the table encodes; **when code and this disagree, the doc wins** |
-| [docs/spec/driver-*.md](docs/spec/) | per-driver contracts (`§C` constraints, `§V` invariants, `§T` tasks, `§B` bugs) |
+| [internal/generate/pipecat_v1.go](internal/generate/pipecat_v1.go), [livekit_v1.go](internal/generate/livekit_v1.go) | each driver's lowering: what a field actually emits, plus its maturity gates |
+| [TRANSFERS.md](TRANSFERS.md) | human transfers end to end: which routes support cold and warm, the yaml, the secrets, the tests |
 
 ## Tests worth knowing
 
@@ -74,6 +88,7 @@ not built yet (they fail loud).
 | [internal/target/catalog_test.go](internal/target/catalog_test.go) | catalogue invariants; `TestSlngEverywhere`; `TestCheckVendor` |
 | [internal/generate/catalog_golden_test.go](internal/generate/catalog_golden_test.go) | every entry's emitted call, pinned in `testdata/golden/catalog_resolution.txt` |
 | [internal/generate/pipecat_v1_test.go](internal/generate/pipecat_v1_test.go), [livekit_v1_test.go](internal/generate/livekit_v1_test.go) | per-driver goldens + provider assertions |
+| [internal/generate/pipecat_carrier_telephony_test.go](internal/generate/pipecat_carrier_telephony_test.go) | the Daily carrier form's three contracts: which files it emits (and which it must not), the agent-side/helper-side environment split, and the README runbook |
 | [internal/generate/pipecat_v1_smoke_test.go](internal/generate/pipecat_v1_smoke_test.go) | L4 smoke (build tag `smoke`): real `uv` install, import, instantiate every service |
 
 Golden outputs live in [internal/generate/testdata/golden/](internal/generate/testdata/golden/).
@@ -82,7 +97,7 @@ every provider binding emits.
 
 ## Public examples and internal fixtures
 
-- [examples/README.md](examples/README.md) — runnable LiveKit/Pipecat matrix
+- [examples/README.md](../examples/README.md) — runnable LiveKit/Pipecat matrix
   using one salon workflow across a large prompt, independent tasks, a task
   group, and two-agent handoffs.
 - [internal/testdata/safe_core/](internal/testdata/safe_core/) — internal
@@ -94,3 +109,6 @@ every provider binding emits.
 
 - [docs/user/](docs/user/README.md) — user-facing reference, one page per `agent.yaml` block + targets + providers + CLI.
 - [PROVIDER_CATALOG.md](PROVIDER_CATALOG.md) — the catalogue's design, findings, and how-to-extend recipe.
+- [specs/](../specs/) — per-feature specs, written with [GitHub Spec Kit](https://github.com/github/spec-kit): one `specs/<nnn>-<slug>/` folder per feature holding `spec.md`, `plan.md`, `tasks.md`, and checklists. Feature work starts here; the kept docs above are what a merged feature updates.
+
+Citations in older notes like `compiler V3`, `driver-pipecat T14`, or `tui.md C14` point at the retired `docs/spec/` driver specs. They are history, kept in git only: `git show 959af97:docs/spec/compiler.md`.

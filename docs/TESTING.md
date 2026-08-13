@@ -132,7 +132,19 @@ go test ./internal/generate -run TestServiceInfoCoversEveryMappedClass
 
 # Pipecat driver-v1 maturity gates (fallback, warm transfer, voicemail, etc.)
 go test ./internal/ir -run TestValidatePipecatMaturityGates
+
+# A warm transfer dials its destination, so it cannot be declared on a channel
+# with outbound: false (livekit-human-transfer V15 / SCHEMA N30)
+go test ./internal/ir -run TestV12_WarmTransferRequiresOutboundDirection
 ```
+
+**Repo-hygiene checks read git, not the working tree.**
+`TestPublicExamplePackages` forbids *committed* build artifacts under
+`examples/`, and asks `git ls-files` to find them. It used to walk the
+filesystem, which meant compiling an example locally, the normal way to check
+that an example works, broke `go test ./...` until you deleted your own output.
+A hygiene rule about what is committed must be written against what is
+committed.
 
 ## Golden files
 

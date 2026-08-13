@@ -568,8 +568,7 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 		return nil, fmt.Errorf("field %q is illegal with control kind %q", field, raw.Kind)
 	}
 	task, group := stringValue(raw.Task), stringValue(raw.Group)
-	to, destination := stringValue(raw.To), stringValue(raw.Destination)
-	mode, briefing := stringValue(raw.Mode), stringValue(raw.Briefing)
+	to := stringValue(raw.To)
 	switch kind {
 	case ControlDelegate:
 		if (task == "") == (group == "") {
@@ -606,30 +605,65 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 		}
 		return &AgentTransfer{Kind: ControlAgentTransfer, When: raw.When, To: to, Requires: raw.Requires, Context: context}, nil
 	case ControlHumanTransfer:
+		transfer, err := buildHumanTransfer(raw)
+		if err != nil {
+			return nil, err
+		}
 		for name, target := range agent.Targets {
-			if _, ok := target.Destinations[destination]; !ok {
-				return nil, fmt.Errorf("destination %q is missing from target %q", destination, name)
+			if _, ok := target.Destinations[transfer.(*HumanTransfer).Destination]; !ok {
+				return nil, fmt.Errorf("destination %q is missing from target %q", transfer.(*HumanTransfer).Destination, name)
 			}
 		}
-		return &HumanTransfer{
-			Kind: ControlHumanTransfer, When: raw.When, Destination: destination,
-			Mode: TransferMode(mode), Briefing: Briefing(briefing),
-		}, nil
+		return transfer, nil
 	default:
 		return nil, fmt.Errorf("unknown control kind %q", raw.Kind)
 	}
+}
+
+// buildHumanTransfer resolves the `cold:`/`warm:` block into the IR control
+// (SCHEMA N25). The shape is the block name, so zero blocks and two blocks are
+// both errors here; `on_unavailable` resolves to its default so no driver reads
+// an empty value.
+func buildHumanTransfer(raw packagespec.Control) (Control, error) {
+	transfer := &HumanTransfer{Kind: ControlHumanTransfer, When: raw.When}
+	switch {
+	case raw.Cold != nil && raw.Warm != nil:
+		return nil, fmt.Errorf("human_transfer declares both `cold:` and `warm:`: a transfer has exactly one shape")
+	case raw.Cold != nil:
+		transfer.Mode = TransferCold
+		transfer.Destination = raw.Cold.Destination
+		transfer.RingTimeout = Duration(raw.Cold.RingTimeout)
+		transfer.OnUnavailable = OnUnavailable(raw.Cold.OnUnavailable)
+	case raw.Warm != nil:
+		transfer.Mode = TransferWarm
+		transfer.Destination = raw.Warm.Destination
+		transfer.Briefing = raw.Warm.Briefing
+		transfer.RingTimeout = Duration(raw.Warm.RingTimeout)
+		transfer.OnUnavailable = OnUnavailable(raw.Warm.OnUnavailable)
+	default:
+		// A block written with no body decodes to nothing, so it lands here too:
+		// name the field the block must carry rather than only the missing key.
+		return nil, fmt.Errorf("human_transfer has no shape block: add a `cold:` or `warm:` block with a `destination:`")
+	}
+	if transfer.Destination == "" {
+		return nil, fmt.Errorf("human_transfer `%s:` block requires a `destination:`", transfer.Mode)
+	}
+	if transfer.OnUnavailable == "" {
+		transfer.OnUnavailable = OnUnavailableReturn
+	}
+	return transfer, nil
 }
 
 func unexpectedControlField(raw packagespec.Control, kind ControlKind) string {
 	fields := map[string]bool{
 		"task": raw.Task != nil, "group": raw.Group != nil, "assign": raw.Assign != nil,
 		"to": raw.To != nil, "requires": raw.Requires != nil, "context": raw.Context != nil,
-		"destination": raw.Destination != nil, "mode": raw.Mode != nil, "briefing": raw.Briefing != nil,
+		"cold": raw.Cold != nil, "warm": raw.Warm != nil,
 	}
 	allowed := map[ControlKind]map[string]bool{
 		ControlDelegate:      {"task": true, "group": true, "assign": true},
 		ControlAgentTransfer: {"to": true, "requires": true, "context": true},
-		ControlHumanTransfer: {"destination": true, "mode": true, "briefing": true},
+		ControlHumanTransfer: {"cold": true, "warm": true},
 	}[kind]
 	for _, field := range slices.Sorted(maps.Keys(fields)) {
 		if fields[field] && !allowed[field] {
@@ -751,26 +785,100 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 		}
 	}
 	telephony := hasTelephonyChannel(agent)
-	if telephony && (raw.Provider == string(ProviderLiveKit) || raw.Provider == string(ProviderPipecat)) && raw.Connection == "" {
+	// One route makes the connection conditional, and it is the point of the route:
+	// on (pipecat, cloud-websocket) the platform terminates the carrier's stream
+	// itself, so receiving a call needs no carrier credentials at all. Placing one,
+	// or redirecting one to a human, still does (SCHEMA N38, research D4/F4).
+	cloudWebsocket := raw.Provider == string(ProviderPipecat) && raw.Transport == "cloud-websocket"
+	needsConnection := telephony
+	if cloudWebsocket {
+		needsConnection = telephony && packagePlacesCalls(pkg, agent)
+	}
+	if needsConnection && (raw.Provider == string(ProviderLiveKit) || raw.Provider == string(ProviderPipecat)) && raw.Connection == "" {
+		if cloudWebsocket {
+			// Name all three keys and what each is for. A message that says only
+			// "requires connection" sends the author to the schema; this one sends them
+			// to the three lines they have to write.
+			return Target{}, fmt.Errorf("%s: target %q places or redirects calls, so it requires connection: "+
+				"account_sid and auth_token authenticate the request to your carrier, and from_number is the caller "+
+				"identity the recipient sees. A package that only receives calls on this route needs no connection at all",
+				pkg.Location("targets.yaml", name+":"), name)
+		}
 		return Target{}, fmt.Errorf("%s: target %q requires connection for telephony", pkg.Location("targets.yaml", name+":"), name)
 	}
 	if !telephony && raw.Connection != "" {
 		return Target{}, fmt.Errorf("%s: target %q sets connection but has no telephony channel", pkg.Location("targets.yaml", "connection:"), name)
 	}
+	// The Daily route has two forms (SCHEMA N37), and on it `carrier`,
+	// `connection`, and a telephony channel are mutually required. The two guards
+	// above name a missing connection and a missing channel; these two name the
+	// combinations they cannot.
+	//
+	// The second matters more than it looks. Without it a `daily-sip` target that
+	// names a carrier and forgets the connection compiles as a plain
+	// Daily-provisioned build, silently ignoring the carrier: green validation, no
+	// helper emitted, and an author who finds out when a call to their own number
+	// goes nowhere. That is exactly the silent downgrade Principle II forbids, and
+	// this feature is what made the field mean something here.
+	if raw.Provider == string(ProviderPipecat) && raw.Transport == "daily-sip" {
+		if telephony && raw.Carrier == "" {
+			return Target{}, fmt.Errorf("%s: target %q requires carrier for telephony on transport daily-sip; "+
+				"a Daily-provisioned number carries its own calls and needs neither a connection nor a telephony channel",
+				pkg.Location("targets.yaml", name+":"), name)
+		}
+		if raw.Carrier != "" && !telephony {
+			return Target{}, fmt.Errorf("%s: target %q sets carrier %q on transport daily-sip but has no telephony channel; "+
+				"a carrier leg needs carrier, connection, and a channels.phone entry together, "+
+				"and a Daily-provisioned number needs none of the three",
+				pkg.Location("targets.yaml", "carrier:"), name, raw.Carrier)
+		}
+	}
 	built := Target{
 		Name: name, Provider: Provider(raw.Provider), Version: raw.Version, Pins: raw.Pins,
 		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier, Connection: raw.Connection,
-		DeploymentRegion: raw.DeploymentRegion,
-		Models:           resolveBindings(agent, used, raw.Models),
-		Destinations:     raw.Destinations,
+		// Declared order, no deduplication, no region invented when none is
+		// declared: validate rejects a duplicate and each README states what
+		// the platform does with an empty list.
+		DeploymentRegions: raw.DeploymentRegion,
+		Models:            resolveBindings(agent, used, raw.Models),
+		Destinations:      raw.Destinations,
 	}
-	if raw.Connection != "" && telephony {
+	// A pure-inbound cloud-websocket package has no connection and still has a
+	// route: the plan is what tells the emitter to emit the Bin, the transport
+	// entry, and the runbook. Without this it would compile as a package with
+	// telephony declared and no telephony emitted, which is the silent downgrade
+	// Principle II forbids.
+	if telephony && (raw.Connection != "" || cloudWebsocket) {
 		built.Telephony = buildTelephonyPlan(pkg, agent, built)
-		if err := validateTelephonyEnvironment(pkg, built.Telephony); err != nil {
-			return Target{}, err
+		if raw.Connection != "" {
+			if err := validateTelephonyEnvironment(pkg, built.Telephony); err != nil {
+				return Target{}, err
+			}
 		}
 	}
 	return built, nil
+}
+
+// packagePlacesCalls reports whether the package dials anybody: an outbound phone
+// direction, or a human transfer, which dials its destination whatever the
+// channel says. Both need the carrier credentials; receiving a call does not.
+//
+// The controls are read from the raw package rather than the built agent because
+// controls are built *after* targets (they resolve destinations against a target),
+// so agent.Controls is still empty here. buildTelephonyPlan reads them the same
+// way, for the same reason.
+func packagePlacesCalls(pkg *packagespec.Package, agent *Agent) bool {
+	for _, channel := range agent.Channels {
+		if channel.Kind == ChannelTelephony && channel.Outbound != nil && *channel.Outbound {
+			return true
+		}
+	}
+	for _, control := range pkg.Agent.Controls {
+		if control.Kind == string(ControlHumanTransfer) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateTelephonyEnvironment(pkg *packagespec.Package, plan *TelephonyPlan) error {
@@ -789,9 +897,17 @@ func validateTelephonyEnvironment(pkg *packagespec.Package, plan *TelephonyPlan)
 			return fmt.Errorf("%s: connection %q requires environment key %q for route (%s, %s, %s)", pkg.Location(path, "environment:"), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
 		}
 	}
+	accepted := append(slices.Clone(required), optional...)
+	slices.Sort(accepted)
 	for _, name := range sortedKeys(plan.Environment) {
 		if !allowed[name] {
-			return fmt.Errorf("%s: connection %q environment key %q is not accepted by route (%s, %s, %s)", pkg.Location(path, name), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+			// The accepted set rides the message. Without it the author learns which
+			// key is wrong and has to go looking for which keys are right, and on the
+			// cloud-websocket route the three SIP keys are the exact mistake somebody
+			// moving from another route will make (spec FR-009).
+			return fmt.Errorf("%s: connection %q environment key %q is not accepted by route (%s, %s, %s); it accepts %s",
+				pkg.Location(path, name), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier,
+				strings.Join(accepted, ", "))
 		}
 	}
 	return nil
@@ -832,15 +948,10 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		if control.Kind != string(ControlHumanTransfer) {
 			continue
 		}
-		mode := stringValue(control.Mode)
-		features[targetcap.TelephonyFeature(mode+"_transfer")] = true
-		switch stringValue(control.Briefing) {
-		case string(BriefingSummary):
-			features[targetcap.TelephonyBriefingSummary] = true
-		case string(BriefingMessage):
-			features[targetcap.TelephonyBriefingMessage] = true
-		case string(BriefingWait):
-			features[targetcap.TelephonyBriefingWait] = true
+		// The shape block is the feature: SCHEMA N25 removed the briefing mode
+		// enum, so free-text briefing rides the warm row and resolves nothing.
+		if shape := control.TransferShape(); shape != "" {
+			features[targetcap.TelephonyFeature(shape+"_transfer")] = true
 		}
 	}
 	sources := make(map[string]VariableSource)
@@ -902,14 +1013,6 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 	}
 	slices.Sort(requiredEnvironment)
 	requiredEnvironment = slices.Compact(requiredEnvironment)
-	// Dev-supplied names only count when the requested features actually
-	// require them (e.g. no outbound trunk ID for an inbound-only channel).
-	devEnvironment := make([]string, 0, len(route.DevSuppliedEnvironment))
-	for _, name := range route.DevSuppliedEnvironment {
-		if slices.Contains(requiredEnvironment, name) {
-			devEnvironment = append(devEnvironment, name)
-		}
-	}
 	// The auto-webhook fact only survives when the named endpoint is emitted
 	// (an outbound-only channel has no inbound endpoint to point Twilio at).
 	autoWebhook := route.AutoWebhookEndpoint
@@ -921,14 +1024,27 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 	reasons := []TelephonyCoordinationReason{
 		{Name: "admission", Consumers: []string{"application"}},
 	}
-	if resolved.Provider == ProviderPipecat {
+	if resolved.Provider == ProviderPipecat && resolved.Transport == "cloud-websocket" {
+		// One service, and it is the agent: the platform hosts it in production and
+		// `unmute dev --telephony` runs the same application locally. No Redis,
+		// because nothing here outlives a call, and none of the Pipecat correlation
+		// reasons, because each names a Redis-backed record this route never keeps.
+		// The route row's empty Processes says the operator runs nothing; this says
+		// what the thing they do not run is (data-model section 1).
+		services = []string{"application"}
+	} else if resolved.Provider == ProviderPipecat && resolved.Transport == "daily-sip" {
+		// The Daily carrier route keeps no shared control record (specs/004
+		// FR-027): the transfer guard is in-process because one process serves one
+		// call, and the room, not a store, correlates the legs. So no redis, and
+		// none of the Pipecat reasons below, which each describe a Redis-backed
+		// record this route does not keep. Same Redis-free shape the LiveKit
+		// connector route already has.
+		services = []string{"application"}
+	} else if resolved.Provider == ProviderPipecat {
 		reasons = append(reasons,
 			TelephonyCoordinationReason{Name: "call_correlation", Consumers: []string{"application"}},
 			TelephonyCoordinationReason{Name: "callback_idempotency", Consumers: []string{"application"}},
 		)
-		if features[targetcap.TelephonyFeature(targetcap.ColdTransfer)] || features[targetcap.TelephonyFeature(targetcap.WarmTransfer)] {
-			reasons = append(reasons, TelephonyCoordinationReason{Name: "human_transfer", Consumers: []string{"application"}})
-		}
 	}
 	if resolved.Provider == ProviderLiveKit && resolved.Transport == "sip" {
 		admissionOwner = "livekit_dispatch"
@@ -954,15 +1070,31 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		Environment: maps.Clone(connection.Environment), Destinations: maps.Clone(resolved.Destinations),
 		SystemSources: sources, Evidence: evidence,
 		Processes: processes, PublicEndpoints: endpoints, RequiredEnvironment: requiredEnvironment,
-		LocalEnvironment: slices.Clone(route.LocallySuppliedEnvironment), DevEnvironment: devEnvironment,
+		LocalEnvironment:    slices.Clone(route.LocallySuppliedEnvironment),
 		AutoWebhookEndpoint: autoWebhook, ManualSteps: slices.Clone(route.ManualSteps),
 		Services: services, Coordination: coordination,
 		CoordinationReasons: reasons, AdmissionOwner: admissionOwner,
 	}
 }
 
+// validDestination accepts the three forms a transfer destination can take
+// (SCHEMA N26): an E.164 literal, a SIP URI, or the UPPER_SNAKE name of an
+// environment variable holding one of those. The three are unambiguous by
+// shape, so no extra key or suffix is needed to tell them apart: a literal
+// starts with `+`, a URI with `sip:`/`sips:`, and neither can be UPPER_SNAKE.
 func validDestination(value string) bool {
-	return e164Pattern.MatchString(value) || sipDestinationPath.MatchString(value)
+	return e164Pattern.MatchString(value) || sipDestinationPath.MatchString(value) ||
+		envNamePattern.MatchString(value)
+}
+
+// DestinationEnv reports the environment variable name a destination defers to,
+// or "" when it carries a literal. Drivers use it to decide between emitting the
+// value and emitting a lookup, and to register the name in `.env.example`.
+func DestinationEnv(value string) string {
+	if envNamePattern.MatchString(value) {
+		return value
+	}
+	return ""
 }
 
 // resolveBindings converts each used effective model into a Binding: think

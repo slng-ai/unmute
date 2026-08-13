@@ -43,18 +43,21 @@ Normal logs default to `INFO`. Setting `UNMUTE_LOG_LEVEL=DEBUG` also enables
 upstream Pipecat parser diagnostics, which may include caller phone numbers;
 use debug logging only in a controlled environment.
 
-{{if .Telephony.HasCold}}Cold transfer is destructive on this generated
-{{if eq .Telephony.Carrier "twilio"}}Twilio{{else if eq .Telephony.Carrier "telnyx"}}Telnyx{{else if eq .Telephony.Carrier "plivo"}}Plivo{{end}}
-route: the adapter does not restore the original AI media stream when the
-destination fails. Treat transfer failure as call-ending behavior.
-
-{{end}}
 This route remains provisional until its credentialed smoke passes.
 {{else}}
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner
 serves a WebRTC test client you can open in the browser. Console mode needs the
 `console` extra (pyaudio; `brew install portaudio` first on macOS).
-{{end}}
+{{if .DailyCarrier}}
+Those two are for talking to the agent right now, with no phone involved. For a
+real phone call through your own number, deploy first and then follow
+**Telephony setup** below.
+{{end}}{{if .CloudWebsocket}}
+Those two are for talking to the agent right now, with no phone involved. For a
+real phone call through your own number, see **Telephony setup** below: deploy,
+then a few actions in your carrier's console, and nothing running on your side
+at all.
+{{end}}{{end}}
 While iterating on the source spec, `unmute dev <source-dir>` recompiles this
 project and runs it for you behind a dev client.
 
@@ -80,8 +83,868 @@ environment variable when the payload carries none.
 ## Required environment
 
 Set these before running (values are never written into the project):
+{{if .DailyCarrier}}
+Two groups, because two different things read them. The deployed agent reads the
+agent-side names, so those are what belong in the platform secret set. The helper
+you run reads the helper-side names, and the agent reads none of them.
 
+Agent side:
+
+{{range .DailyCarrier.AgentEnv}}- `{{.}}`
+{{end}}
+Helper side:
+
+{{range .DailyCarrier.HelperEnv}}- `{{.}}`
+{{end}}
+Helper side, optional:
+
+{{range .DailyCarrier.OptionalEnv}}- `{{.}}`
+{{end}}{{else}}
 {{range .RequiredEnv}}- `{{.}}`
+{{end}}{{if .CloudWebsocket}}{{if .CloudWebsocket.CallEnv}}
+One group, because one thing reads them: the deployed agent. There is no second
+side on this route, so every name above belongs in the platform secret set.
+{{end}}{{end}}{{end}}
+## Deploy to Pipecat Cloud
+
+Authenticate once first with `pipecat cloud auth login`. After that, one command
+does the first deploy and every later one: `pipecat cloud deploy` builds the image
+in the cloud from this project's `Dockerfile` and deploys it. That is why the
+manifest names no image; naming one switches cloud builds off.
+{{if .SecretSet}}
+Create the secret set first, because the manifest already references it and a
+deploy cannot start without it:
+
+```sh
+cp .env.example .env            # then fill in the values
+pipecat cloud secrets set {{.SecretSet}} --file .env{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}
+pipecat cloud deploy
+pipecat cloud agent status {{.Project}}
+```
+
+Run the same `secrets set` command again to change a value. If that set name is
+already taken (secret-set names are globally unique across the platform), create
+yours under another name and pass `--secrets <other-name>` on the deploy command,
+which overrides the manifest.
+{{- if .DailyCarrier}}
+
+The set only needs the agent-side names listed under **Required environment**.
+The helper-side names are read where you run the helper and the deployed agent
+never reads them, so delete their lines from the copy you upload if you would
+rather they never reach the platform.
+{{- end}}
+{{- else}}
+This package declares no secrets, so there is no secret set to create:
+
+```sh
+pipecat cloud deploy
+pipecat cloud agent status {{.Project}}
+```
+{{- end}}
+
+Deploying the same agent name again updates the existing agent rather than making
+a second one. Sessions already running finish on the old image, and a deploy that
+fails leaves the previous ready version serving traffic. `status` reporting
+`ready` is the deploy actually being usable.
+
+No warm instance is kept: the manifest declares no replica count, because the
+source package declares none. Add `--min-agents <n>` on the deploy command if you
+want a pool held ready.
+
+### Region
+{{if .DeploymentRegion}}
+This agent deploys to `{{.DeploymentRegion}}`, from the manifest.{{if .SecretSet}} Its secret set
+carries the same region, because a set is region-scoped and an agent can only
+read one in its own region.{{end}}
+
+A second region is a second agent, because agent names are globally unique
+across regions:
+
+```sh
+{{if .SecretSet}}pipecat cloud secrets set {{.Project}}-<region>-secrets --file .env --region <region>
+pipecat cloud deploy {{.Project}}-<region> --region <region> --secrets {{.Project}}-<region>-secrets
+{{else}}pipecat cloud deploy {{.Project}}-<region> --region <region>
+{{end}}```
+
+`pipecat cloud regions list` prints the regions available to you.
+{{- else}}
+No region is declared, so the agent goes to your organisation's default region
+(`us-west` unless you changed it).{{if .SecretSet}} A secret set defaults to
+`us-west` regardless, so if you changed that organisation default, pass an
+explicit `--region` to both commands: a set in the wrong region cannot be read
+by the agent.{{end}} Set `deployment_region` on this target in `targets.yaml` to
+choose one, and `pipecat cloud regions list` to see what is available.
+{{- end}}
+{{if .DailyCarrier}}
+## Telephony setup
+
+Setting this up is {{if or .DailyCarrier.HasOutbound .HasColdTransfer}}{{if .DailyCarrier.HasInbound}}four{{else}}three{{end}}{{else}}two{{end}} actions in your carrier's account and
+{{if .DailyCarrier.HasInbound}}two commands{{else}}nothing{{end}} to run here. The carrier part is yours to do, because nobody but
+you can sign in to your carrier account, so every step is written out.
+
+### Who does what
+
+Three parties are involved and it helps to know which is which before you start.
+
+- **Your carrier**, named in the first part below, owns the phone number. It is
+  where a caller's call arrives, and it is where you tell that number where to
+  send the call.
+- **Daily** is the audio bridge. Your carrier hands the call to Daily over SIP,
+  and this agent joins the same Daily room the caller is in.
+- **Pipecat Cloud** runs this agent. It is where you deployed it in the section
+  above.
+
+Nothing in this project touches your carrier's settings. The carrier actions below
+are dictated for you to do.
+{{if .DailyCarrier.HasInbound}}
+### Why there is a helper
+
+`telephony_helper.py`, in this directory, is the one piece that runs outside all
+three. You run it, and here is why it has to exist.
+
+Daily creates a new room for each call, and each room has its own SIP address. So
+there is no single fixed address your carrier could be pointed at once and left
+alone. Something has to be there the moment a call arrives, ask the platform to
+start this agent on a fresh room with a SIP address on it, and keep the caller
+hearing something while the agent boots. The agent hands the call over itself,
+once Daily says that address is live. That is the whole job. The helper does not
+make the room, does not answer the caller's questions, does not touch your
+carrier's configuration, and keeps nothing between calls.
+
+It has to be reachable whenever you want calls to land. Hosting it for real
+(a public address, TLS) is yours to arrange; the tunnel below is for testing.
+{{end}}
+{{/* Action 2 is the incoming-call webhook, so it only exists when this package
+receives calls. The two dial-out actions renumber behind it rather than leaving a
+gap, because a numbered list that skips a number reads as a missing step. */}}
+{{- $trunk := "3"}}{{$acl := "4"}}{{if not .DailyCarrier.HasInbound}}{{$trunk = "2"}}{{$acl = "3"}}{{end}}
+{{- if eq .DailyCarrier.Carrier "twilio"}}
+### At your carrier (Twilio)
+
+Do these in the [Twilio Console](https://console.twilio.com), in this order.
+
+1. **A voice-capable number.** Phone Numbers, Manage, Buy a number, with the
+   Voice capability. Skip this if you already own the number you want. If you set
+   up the LiveKit target from this repository, the same account and the same
+   number serve this one, and you already own everything in action {{$trunk}} as well.
+{{- if .DailyCarrier.HasInbound}}
+2. **Point the number at the helper.** Phone Numbers, Manage, Active Numbers,
+   your number, Configure. Set "A call comes in" to a Webhook, method POST, at
+   `https://<your helper host>/call`. That host is what the tunnel command below
+   prints, so run it first and paste what it gives you.
+{{- end}}
+{{- if or .DailyCarrier.HasOutbound .HasColdTransfer}}
+{{$trunk}}. **A trunk termination address, because this agent places calls.** Elastic SIP
+   Trunking, Manage, Trunks: create a trunk or reuse the one you have. On its
+   Termination tab, set the Termination SIP URI to a domain ending in
+   `pstn.twilio.com`. That whole domain is the value of
+   `{{.DailyCarrier.SIPAddressEnv}}`. **Pick a prefix nobody could guess**, because
+   action {{$acl}} authenticates callers by address rather than by password.
+{{$acl}}. **Allow Daily's addresses to use that trunk.** Elastic SIP Trunking, Manage,
+   Access Control Lists: create an IP access control list holding the `sip.hosts`
+   entries from <https://ip-info.daily.co/ips/ip-info.json>, then attach it to the
+   trunk's Termination under Authentication. There is no credential list to set
+   up here and no username or password to store: Daily's outbound SIP carries no
+   credentials on any documented surface, so the address list is the whole of it.
+   That list changes; Daily publishes changes in the same file three days ahead.
+   If termination starts rejecting calls, re-read it.
+{{- end}}
+{{if .DailyCarrier.HasInbound}}
+Two console paths worth knowing, because moving a number between targets uses
+both. A number joins or leaves a trunk on the trunk's **Numbers** tab (Elastic SIP
+Trunking, Manage, Trunks, your trunk). Its webhook lives on **Phone Numbers,
+Manage, Active Numbers**, your number, Configure. To read which of the two a
+number currently uses, without clicking:
+
+```sh
+twilio api core incoming-phone-numbers list \
+  --properties phoneNumber,trunkSid,voiceUrl
+```
+
+A `trunkSid` means the call goes to that trunk. An empty `trunkSid` with a
+`voiceUrl` means it goes to that URL. See **One number serves one target at a
+time** below for why that matters.
+{{end}}
+{{else}}
+### At your carrier
+
+We do not have dictated console paths for `{{.DailyCarrier.Carrier}}`, so here are
+the obligations in your carrier's own terms. Its own guide is the place to look
+for the exact screens; the route's documentation is
+<https://docs.pipecat.ai/pipecat/telephony/daily-sip>.
+
+1. **A voice-capable number**, one you own.
+{{- if .DailyCarrier.HasInbound}}
+2. **Point that number's incoming-call handling at the helper**, as an HTTP POST
+   webhook to `https://<your helper host>/call`.
+{{- end}}
+{{- if or .DailyCarrier.HasOutbound .HasColdTransfer}}
+{{$trunk}}. **A SIP trunk with a termination address** this agent can send calls to. That
+   address is the value of `{{.DailyCarrier.SIPAddressEnv}}`. Choose a
+   non-guessable prefix, because of action {{$acl}}.
+{{$acl}}. **Allow Daily's SIP addresses on that trunk**, from the `sip.hosts` entries in
+   <https://ip-info.daily.co/ips/ip-info.json>. This route authenticates by
+   address list, not by credentials. The list is dynamic and changes are published
+   in the same file three days ahead.
+{{- end}}
+{{end}}
+### On this side
+{{if .DailyCarrier.HasInbound}}
+Two commands, and they are only needed for **incoming** calls. Deploy the agent
+first: a call that lands before `agent status` reports `ready` gets the helper's
+failure line rather than a conversation.
+
+The first starts the helper, reading every value it needs from the `.env` you
+filled in:
+
+```sh
+uv run telephony_helper.py
+```
+
+The second gives it a public address, in a second terminal, so your carrier can
+reach it:
+
+```sh
+cloudflared tunnel --url http://localhost:7860
+```
+
+The tunnel prints an HTTPS URL. That URL plus `/call` is what carrier action 2
+takes. Any tunnel works; `ngrok http 7860` is the same thing.
+
+Check it is up with `curl https://<your helper host>/healthz`, which answers
+`{"status": "ok"}` and nothing else. It exists so you can tell "helper down" from
+"helper up, something else broken".
+{{else}}
+Nothing to run. This package places calls and never receives them, so there is no
+carrier webhook to answer: see **Place an outbound call** below, which talks to the platform
+directly.
+{{end}}{{if .DailyCarrier.HasOutbound}}
+### Place an outbound call
+
+Outbound is started against the platform, not against the helper: the helper is
+only there to answer incoming calls. One command, and it needs nothing the deploy
+did not already need.
+
+```sh
+curl -X POST https://api.pipecat.daily.co/v1/public/{{.Project}}/start \
+  -H "Authorization: Bearer $PIPECAT_CLOUD_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d "{\"createDailyRoom\": true,
+       \"dailyRoomProperties\": {\"enable_dialout\": true},
+       \"body\": {\"direction\": \"outbound\",
+                  \"dialout\": {\"sip_uri\": \"sip:+15551230000@$SIP_TRUNK_HOSTNAME\"}}}"
+```
+
+Change the number; the trunk address comes from your environment, so there is
+nothing to look up. The call leaves through **your own trunk**, which is why the
+destination is a SIP address rather than a bare number.
+
+**What the recipient sees is governed at your carrier**, by the trunk and the
+numbers your account owns. This project does not choose it and cannot: nothing on
+the dial-out side accepts a caller identity for a SIP destination. If the wrong
+number shows, that is a carrier-side setting.
+
+You do not need to buy a number from Daily for this. The dial-out approval named
+under **Account prerequisites** is required, and it covers dialling a SIP address
+exactly as it covers dialling a phone number.
+{{end}}{{if .HasColdTransfer}}
+### What a transfer costs
+
+A completed transfer dials the destination **through your own trunk**, so that
+leg is yours and it bills at your carrier's rate. Daily also stays in the call
+path afterwards and both legs keep billing until the call ends. The alternative
+would take Daily out of the path, but it needs your carrier to honour SIP REFER
+on a leg neither platform documents that way, so this project does not use it.
+
+The account prerequisite is the same dial-out approval under **Account
+prerequisites**; there is nothing extra to turn on for transfers.
+{{end}}
+### Every step, in order, from a source change to a phone call
+
+The whole loop, so nothing has to be pieced together from the sections above. Run
+it from the **source package**, not from this directory: this directory is
+generated output and recompiling overwrites it.
+
+**1. Recompile after any source change.** From the repository that holds the
+source package:
+
+```sh
+unmute validate <source-dir>
+unmute compile <source-dir>
+```
+
+`validate` exits 0 and names any account prerequisite; `compile` rewrites
+`<source-dir>/build/{{.Project}}/`, which is this directory. Skipping this after a
+source edit deploys the previous version, which is the single easiest way to spend
+an afternoon.
+
+**2. Move into the build directory.** Every command below runs here:
+
+```sh
+cd <source-dir>/build/{{.Project}}
+```
+
+**3. Fill the environment, once.** `.env` is not regenerated over, so this
+survives recompiles:
+
+```sh
+cp .env.example .env      # then fill in the values, agent side and helper side
+```
+{{if .SecretSet}}
+**4. Push the secrets.** The platform reads them from the set, not from `.env`:
+
+```sh
+pipecat cloud secrets set {{.SecretSet}} --file .env{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}
+```
+
+Re-run this whenever a value changes. The set only needs the agent-side names;
+see the note in **Deploy to Pipecat Cloud** above.
+
+**5. Deploy, and wait for ready.**
+{{else}}
+**4. Deploy, and wait for ready.**
+{{end}}
+```sh
+pipecat cloud deploy
+pipecat cloud agent status {{.Project}}
+```
+
+Do not place a call until `status` reports `ready`. Deploying again updates the
+same agent rather than making a second one.
+{{if .DailyCarrier.HasInbound}}
+**{{if .SecretSet}}6{{else}}5{{end}}. Start the helper and expose it**, in two terminals, then point your number at
+the printed URL per carrier action 2. Only needed once per session; the number's
+setting only changes when the URL does.
+
+```sh
+uv run telephony_helper.py
+```
+
+```sh
+cloudflared tunnel --url http://localhost:7860
+```
+
+**{{if .SecretSet}}7{{else}}6{{end}}. Test an incoming call.** Ring your own number from a phone. Expected: you
+hear the hold line within a couple of seconds, then the agent speaks. Two log
+lines, in two different places: the helper's terminal says
+`inbound call ... started session ...`, and the agent's log says
+`carrier call ... forwarded into the room` exactly once, however many times the
+room signals ready.
+{{end}}{{if .DailyCarrier.HasOutbound}}
+**{{if .DailyCarrier.HasInbound}}{{if .SecretSet}}8{{else}}7{{end}}{{else}}{{if .SecretSet}}6{{else}}5{{end}}{{end}}. Test an outgoing call.** See **Place an outbound call** below. Expected: the number you
+named rings, and the agent speaks when you answer.
+{{end}}{{if .HasColdTransfer}}
+**{{if .DailyCarrier.HasOutbound}}{{if .DailyCarrier.HasInbound}}{{if .SecretSet}}9{{else}}8{{end}}{{else}}{{if .SecretSet}}7{{else}}6{{end}}{{end}}{{else}}{{if .SecretSet}}8{{else}}7{{end}}{{end}}. Test a transfer, both ways.** On a call, ask for the person the agent can
+hand you to. Expected: you hear the handoff line, the destination rings, and the
+agent is gone once it answers. Then run it again with the destination **declining
+or not answering**: expected is that you are still connected and the agent says so.
+That second run is the one worth doing, because it is the path a caller actually
+meets on a bad day.
+{{end}}
+Logs for any of it: `pipecat cloud agent logs {{.Project}}` for the agent, and the
+helper's own terminal for everything before the call reached it.
+
+### One number serves one target at a time
+
+A number's Voice configuration is **either** a webhook **or** a SIP trunk, never
+both, so there is never a question of which one answers: whichever the number
+points at is the one that gets the call. Both agents can stay deployed the whole
+time, and taking one down is not how you switch between them.
+
+Moving a number is two changes, and the order matters.
+**Take it off the trunk first, then set the webhook.**
+Setting the webhook while the number is still on a trunk does not move it, and
+that failure is silent: the trunk keeps taking the calls and this project's log
+stays empty. Moving it back is the reverse, so clear the webhook and
+**put it back on the trunk.**
+
+Read where a number points before wondering which agent answered. It is a setting,
+not a mystery, and the carrier part above has the exact command for reading it. If
+two of your agents share a greeting and a voice they are indistinguishable by ear,
+so read the configuration or the logs rather than listening.
+
+### When something does not work
+
+What the caller hears, and what it means:
+
+| What happens | Where to look |
+|---|---|
+| Carrier error tone, or a recorded announcement | The webhook URL is wrong, or the helper is not reachable from the internet. Check `/healthz` through the tunnel URL, not through localhost. |
+| A working agent answers, but not this one | The number is still on a SIP trunk, so the trunk took the call and this project never saw it. The helper's log is empty, which is the tell. See **One number serves one target at a time**. If two of your agents share a greeting and a voice, they are indistinguishable by ear, so read the log rather than listening. |
+| The caller hears the hold line and nothing more | The agent never joined, or the forward failed. The helper's log names which: an agent that would not start logs the platform's own error text, and a forward that failed logs `forwarding carrier call ... failed`. |
+| The caller hears the failure line straight away | The agent would not start, and the helper's log carries the platform's own words for why. `PCC-1001` means the deployment is not in a ready state, so check `agent status` before anything else. A missing platform secret and a name that was never deployed both land here too. |
+{{- if .DailyCarrier.HasOutbound}}
+| An outbound call never rings | The allow-list first (carrier action 4), then the termination address. Both fail the same way from the caller's side, and the bot's `dial-out stopped` log line carries the carrier's reason. |
+{{- end}}
+
+The helper never starts half-configured: a missing value stops it at startup with
+the names printed, one per line. If it started, its own environment is complete.
+{{end}}{{if .CloudWebsocket}}
+## Telephony setup
+
+**Nothing runs on your side and nothing is hosted by you.** Your carrier streams
+the call's audio straight to Pipecat Cloud, which starts this agent.
+
+{{if .CloudWebsocket.HasInbound}}The whole setup is **four steps**: three in your carrier's console, plus one
+lookup command you can run anywhere.{{else}}The whole setup is **two steps**: one in your carrier's console, plus one lookup
+command you can run anywhere.{{end}} In production there is nothing of yours to
+run, host, or keep awake.
+
+### Who does what
+
+Two parties, and neither of them is you.
+
+- **Twilio** owns the phone number and holds the small piece of call markup that
+  sends a call's audio to the platform.
+- **Pipecat Cloud** runs this agent and receives that audio directly.
+
+The carrier part is yours to do, because nobody but you can sign in to your
+carrier account, so every step is written out.
+
+### At your carrier (Twilio)
+
+Do these in the [Twilio Console](https://console.twilio.com), in this order.
+
+1. **A voice-capable number you own in this Twilio account.** Phone Numbers,
+   Manage, Buy a number, with the Voice capability. Skip this if you already own
+   the number you want. If another target in this repository already uses a
+   Twilio number, the same account and the same number serve this one.
+{{if or .CloudWebsocket.HasOutbound .HasColdTransfer}}
+   This same number is also what the person you call sees, and there is nothing
+   else to enable on it: voice capability is the whole requirement. See
+   **What the recipient sees** below for the two account-level things that can
+   still refuse a call.
+{{end}}{{if .CloudWebsocket.HasInbound}}
+   Take the number off any SIP trunk first. A number attached to a trunk ignores
+   its voice configuration completely, and it does so silently, so the markup you
+   create in step 3 would never be consulted. See **One number serves one target
+   at a time** below.
+{{end}}
+2. **Your organization name**, the one value the compiler cannot know:
+
+   ```sh
+   pipecat cloud organizations list
+   ```
+
+   **You want the machine slug, not your display name.** The output has more than
+   one column and their headings differ between CLI versions, so go by the shape
+   of the value rather than by the heading:
+
+   ```text
+   Organization Name   Organization ID           Active
+   ─────────────────────────────────────────────────────
+   your-display-name   three-random-words-12345  active
+                       ^^^^^^^^^^^^^^^^^^^^^^^^ this one
+   ```
+
+   The value you want looks like `three-random-words-12345`: lowercase words
+   joined by hyphens, ending in a number, never a space in it. Depending on your
+   CLI version that column is headed **Organization ID** or just **Name**. It is
+   never the human-readable name you chose, and never carries the `(active)`
+   marker.
+
+   Getting this wrong is the most common way this route fails, and it fails in the
+   least helpful way: the caller hears the spoken line, then silence, and **your
+   agent's log stays completely empty**, because a connection the platform refuses
+   never reaches your agent at all.
+{{if .CloudWebsocket.HasInbound}}
+3. **Create a TwiML Bin** holding exactly this, with your organization name in
+   place of `YOUR_ORGANIZATION`. Console path: TwiML, TwiML Bins, then the plus
+   button. Name it anything; the content is what matters.
+
+   ```xml
+   <?xml version="1.0" encoding="UTF-8"?>
+   <Response>
+     <Say>Connecting you now.</Say>
+     <Connect>
+       <Stream url="{{.CloudWebsocket.StreamURL}}">
+         <Parameter name="_pipecatCloudServiceHost" value="{{.Project}}.YOUR_ORGANIZATION"/>
+         <Parameter name="from_number" value="{{"{{From}}"}}"/>
+         <Parameter name="to_number" value="{{"{{To}}"}}"/>
+       </Stream>
+     </Connect>
+   </Response>
+   ```
+
+   Four things in there are deliberate:
+
+   - **The spoken line comes first.** Starting this agent takes a few seconds
+     from cold, and a caller who hears nothing hangs up. Delete the `<Say>` line
+     once you keep a warm instance (`--min-agents 1` on the deploy).
+   - **The address is already the right one**, including the region: this file
+     was generated for this deployment, so paste it as it is rather than copying
+     one from a guide.
+   - **The agent name is already filled in.** `YOUR_ORGANIZATION` is the only
+     substitution you make.
+   - **`{{"{{From}}"}}` and `{{"{{To}}"}}` are Twilio's own Bin substitutions**, not
+     placeholders for you to fill. Twilio replaces them per call, and they are
+     how this agent learns who called.
+
+4. **Point the number at that Bin.** Phone Numbers, Manage, Active Numbers,
+   your number, Voice Configuration, "A call comes in", choose TwiML Bin, pick
+   the one you just made, Save.
+
+   Read the state back rather than testing by ear:
+
+   ```sh
+   twilio api core incoming-phone-numbers list \
+     --properties phoneNumber,trunkSid,voiceUrl
+   ```
+
+   An empty `trunkSid` is what you want. A `trunkSid` with a value means the
+   trunk still owns the call and your Bin is never reached.
+{{end}}
+### One region, three places
+
+{{if .DeploymentRegion}}This agent's region is `{{.DeploymentRegion}}`, declared once in the source
+package's `targets.yaml` as `deployment_region`.{{else}}This agent declares no region, so it goes to your organisation's default and the
+address above is the default endpoint.{{end}} Three things are derived from that
+one declaration, and the platform requires them to agree:
+
+| What | Where it lands | Why it has to match |
+|---|---|---|
+| where this agent runs | `region` in `pcc-deploy.toml` | it is the deployment |
+| where its secrets live | the `--region` on the `secrets set` command | an agent can only read a secret set from its own region |
+| where your carrier streams to | the `wss://` address in the markup above | a regional stream endpoint routes **only** to agents deployed in that region |
+
+Following this file keeps all three in step, because all three are rendered from
+the same declaration. To move region, change that one line in `targets.yaml`,
+recompile, and re-paste the address into your Bin. `pipecat cloud regions list`
+prints what is available to you.
+
+Two things bite when you move an agent that already exists:
+
+- **Agent names are globally unique across regions**, so `{{.Project}}` cannot exist
+  in two regions at once. Either delete the old deployment first, or deploy the new
+  region under another name and change the agent half of the service host in your
+  Bin to match it.
+- **A secret set is region-scoped and its name is global.** Create one for the new
+  region under a new name and pass `--secrets <that name>` on the deploy, or delete
+  the old set first.
+
+Where these steps come from, if you want the upstream reading:
+
+- The working example this route is modelled on:
+  <https://github.com/pipecat-ai/pipecat-examples/tree/main/twilio-chatbot>
+- The wire protocol between your carrier and the platform:
+  <https://www.twilio.com/docs/voice/media-streams/websocket-messages>
+- What a TwiML Bin is and how to create one:
+  <https://help.twilio.com/articles/360043489573-Getting-started-with-TwiML-Bins>
+- Regions, and the rule that the stream endpoint must match the deployment:
+  <https://docs.pipecat.ai/pipecat-cloud/guides/regions>
+
+### On this side
+
+**Nothing, in production.** That is the whole section, and the absence is the
+feature. Deploy per **Deploy to Pipecat Cloud** above, wait for `ready`, and the
+number works.{{if .CloudWebsocket.CallEnv}} (This package places or redirects calls, so fill the
+names under **Required environment** and push the secret set before deploying.){{end}}
+
+### Hear it locally first (optional)
+
+One command, before any deploy, from the **source package**:
+
+```sh
+unmute dev --telephony <source-dir>
+```
+
+It starts this agent on your machine, opens a cloudflared tunnel so Twilio can
+reach it, points the declared number's voice configuration at that tunnel for the
+length of the session. The number's previous voice configuration is restored when
+the session ends, including when you stop it with ctrl-c. Call the number and you
+are talking to the code on your laptop.
+
+Two things worth knowing:
+
+- **No markup is created locally, and your TwiML Bin is never touched.** The
+  local runner answers Twilio's webhook itself. Only the number's voice
+  configuration moves, and only for the session.
+- **This subsection is the only place a tunnel appears.** The production path
+  above has none, because there is nothing of yours for a tunnel to reach.
+{{if .CloudWebsocket.HasOutbound}}
+### Place an outbound call
+
+One command against Twilio's API. The TwiML rides inline, so there is nothing to
+create in the console and nothing of yours for the call to come back to:
+
+```sh
+curl -X POST "https://api.twilio.com/2010-04-01/Accounts/$TWILIO_ACCOUNT_SID/Calls.json" \
+  -u "$TWILIO_ACCOUNT_SID:$TWILIO_AUTH_TOKEN" \
+  --data-urlencode "To=+15551230000" \
+  --data-urlencode "From=${{.CloudWebsocket.FromNumberEnv}}" \
+  --data-urlencode 'Twiml=<Response><Connect><Stream url="{{.CloudWebsocket.StreamURL}}"><Parameter name="_pipecatCloudServiceHost" value="{{.Project}}.'"$PIPECAT_CLOUD_ORGANIZATION"'"/><Parameter name="direction" value="outbound"/></Stream></Connect></Response>'
+```
+
+Change `To`; everything else is read from your environment. Expected: the phone
+rings showing your own number, and this agent speaks when it is answered. There
+is no `<Say>` before the stream here on purpose, because a person is already
+listening by then and the agent's greeting should be the first thing they hear.
+
+Failures print in Twilio's own words. Nothing is swallowed and nothing reports
+success it did not have.
+
+### What the recipient sees
+
+`From` is the caller identity. It must be **a voice-capable number you own in
+this Twilio account, or a caller ID verified on it**, and when the destination is
+a phone number the caller identity has to be a phone number too. It may be the
+same number that receives calls, which is why one environment value serves both
+directions here.
+
+There is nothing to switch on for outbound on the number itself. Two things that
+can still refuse a call live on the **account**:
+
+- **The destination country's voice permissions.** Twilio keeps dialling
+  permissions per country, and separately for low-risk, high-risk special
+  service, and high-risk toll-fraud numbers. Console: Voice, Settings,
+  Geographic Permissions.
+- **A trial account can only call verified numbers.** The errors say so by
+  number: `21219` and `14111`. Verify the recipient, or upgrade the account.
+{{end}}{{if .HasColdTransfer}}
+### What a transfer does, and what it cannot do
+
+When the agent hands the caller to a person, one request replaces the live call's
+markup at your carrier: a spoken line, then the destination dialled with ringback
+audible, then a second spoken line and the caller put back with a fresh agent.
+The destination is read from the environment at call time, so no phone number is
+written into this project.
+
+Two limits, and they are limits of having nothing hosted rather than accidents:
+
+- **The caller comes back to a fresh agent that does not remember the call, and
+  that happens however the dial ended.** Your carrier runs the verbs after the
+  dial when the person hangs up exactly as it does when the line was busy or
+  nobody answered, and telling those apart needs a callback endpoint you host,
+  which is the cost this route exists to remove. So the second spoken line says
+  only what is true either way (`Putting you back to the assistant.`) and never
+  claims nobody answered. Do not reword it into a failure line: a completed
+  transfer would then apologise to every caller the person helped.
+- **A completed transfer therefore ends with the agent greeting them again.** The
+  caller can simply hang up. Only the caller hanging up first stops the document
+  before that line.
+
+If you need the same agent to survive a failed transfer, use the Daily carrier route.
+See the route comparison in `docs/TELEPHONY.md`.
+{{end}}
+### Security, in one paragraph
+
+This route's deploy manifest sets `websocket_auth = "none"`, because a static
+piece of markup in a carrier console cannot fetch a token first. What limits who
+can start a session, then, is knowing the `{{.Project}}.<your organization>`
+string your markup carries. Treat that string like a capability: it is not a
+secret in the cryptographic sense, but anyone holding it can open sessions you
+pay for. This is the platform's documented model for carriers that connect
+directly.
+
+### Every step, in order, from a source change to a phone call
+
+Run it from the **source package**, not from this directory: this directory is
+generated output and recompiling overwrites it.
+
+**1. Recompile after any source change.**
+
+```sh
+unmute validate <source-dir>
+unmute compile <source-dir>
+```
+
+**2. Move into the build directory.**
+
+```sh
+cd <source-dir>/build/{{.Project}}
+```
+{{if .SecretSet}}
+**3. Fill the environment and push it.** `.env` is not regenerated over, so this
+survives recompiles:
+
+```sh
+cp .env.example .env      # then fill in the values
+pipecat cloud secrets set {{.SecretSet}} --file .env{{if .DeploymentRegion}} --region {{.DeploymentRegion}}{{end}}
+```
+
+**4. Deploy, and wait for ready.**
+{{else}}
+**3. Deploy, and wait for ready.**
+{{end}}
+```sh
+pipecat cloud deploy
+pipecat cloud agent status {{.Project}}
+```
+
+Do not place or expect a call until `status` reports `ready`.
+{{if .CloudWebsocket.HasInbound}}
+**{{if .SecretSet}}5{{else}}4{{end}}. Do the carrier part once**, per **At your carrier** above. It only changes
+again if you change region or agent name.
+
+**{{if .SecretSet}}6{{else}}5{{end}}. Test an incoming call.** Ring your own number. Expected: the spoken line
+within a couple of seconds, then this agent.
+{{end}}{{if .CloudWebsocket.HasOutbound}}
+**{{if .CloudWebsocket.HasInbound}}{{if .SecretSet}}7{{else}}6{{end}}{{else}}{{if .SecretSet}}5{{else}}4{{end}}{{end}}. Test an outgoing call**, per **Place an outbound call** above.
+{{end}}{{if .HasColdTransfer}}
+**{{if .CloudWebsocket.HasOutbound}}{{if .CloudWebsocket.HasInbound}}{{if .SecretSet}}8{{else}}7{{end}}{{else}}{{if .SecretSet}}6{{else}}5{{end}}{{end}}{{else}}{{if .SecretSet}}7{{else}}6{{end}}{{end}}. Test a transfer, both ways.** On a call, ask for the person this agent can
+hand you to. Expected: the spoken line, the destination ringing, and the agent
+gone once it answers. Then let the person **hang up first**: expected is the
+handback line and a fresh agent greeting the caller, never silence and never a
+drop. Then run it a third time with the destination **declining or not
+answering**: expected is the same handback line and the same fresh agent, because
+the markup cannot tell the two endings apart. Those last two runs are the ones
+worth doing; they are what a caller meets on an ordinary day and on a bad one.
+{{end}}
+One log, and only one: `pipecat cloud agent logs {{.Project}}`. There is no
+second place to look on this route, because there is no second thing running.
+
+### If the call feels slow
+
+The platform writes the numbers into that log, so read them before changing
+anything. Two lines answer almost every latency question:
+
+```text
+[pcc-observability] First bot speech | latency=2.297s
+[pcc-observability] Latency breakdown | events: ["...STT: TTFB 17.651s", "...LLM: TTFB 2.215s", ...]
+```
+
+- **First bot speech** counts from inside the process only. If it reads about two
+  seconds and your caller waited much longer, the difference was the container
+  starting: see the cold-start row above and deploy with `--min-agents 1`.
+- **The breakdown** attributes each turn to a service by name. One service far
+  above the others is that provider, not this project and not the platform: take
+  it up with them, or bind a different provider for that role in the source
+  package and recompile.
+- **End-of-turn detection sits between the two.** The pipeline waits to be sure
+  the caller has finished before it answers, which costs a second or two per turn
+  on purpose. It is the difference between an agent that interrupts and one that
+  feels polite.
+{{if .CloudWebsocket.HasInbound}}
+### One number serves one target at a time
+
+A number's Voice configuration is **either** a webhook or a TwiML Bin or a SIP
+trunk, never two at once, so there is never a question of which answers:
+whichever the number points at is the one that gets the call. Both of your agents
+can stay deployed the whole time, and taking one down is not how you switch
+between them.
+
+Moving a number off a trunk and onto a Bin is two changes, and the order matters:
+**take it off the trunk first, then set the Bin.** Setting the Bin while the
+number is still on a trunk does not move it, and that failure is silent. Read
+where a number points with the command in step 4 rather than wondering which
+agent answered. If two of your agents share a greeting and a voice they are
+indistinguishable by ear.
+{{end}}
+### When something does not work
+
+| What happens | Where to look |
+|---|---|
+| A working agent answers, but not this one | The number is still on a SIP trunk or an old webhook, so your markup was never consulted. Read the number's configuration with the command above. |
+| The call connects, the spoken line plays, then silence and a drop | Either the service host in your markup is wrong or this agent is not `ready`. **The tell is that this agent's log is empty**: a connection the platform refuses never reaches it. Check `pipecat cloud agent status {{.Project}}` first. Then re-read the service host: the agent name is `{{.Project}}`, and the organization is the **slug** from `pipecat cloud organizations list`, the one shaped like `three-random-words-12345`, never your display name (carrier action 2). Twilio's own call log names the stream error outright, under Monitor, Logs, Calls. |
+| The spoken line plays, a long silence, then the agent | A **cold start**, and it is the single biggest thing you can fix. With no warm instance the platform has to start a container after the call arrives: schedule it, import pipecat, load the voice-activity and end-of-turn models. That is the silence, and it happens on the first call after every idle period, not just after a deploy. Deploy with `pipecat cloud deploy --min-agents 1` and it goes away. That flag applies to the deploy you pass it on, so pass it every time: this manifest is regenerated by `unmute compile`, so a `[scaling]` block hand-added to it does not survive the next recompile. Your agent's own log tells you which half you are looking at: `[pcc-observability] First bot speech | latency=...` measures only the part inside the process, so if that says two seconds and the caller waited twelve, the other ten were the container starting. |
+| Silence or degraded audio, everything else correct | Your markup names a different region than this deployment. The address in this file is the right one; re-paste it. |
+| Nothing in the agent log at all | The call never reached the platform. That is the first row, or the number is not the one you think. |
+{{- if .CloudWebsocket.HasOutbound}}
+| The outbound command errors | Read Twilio's own words in the response. The two account-level causes are under **What the recipient sees**: the destination country's permissions, and the trial-account restriction on unverified numbers. Neither is a property of your number. |
+{{- end}}
+{{- if .HasColdTransfer}}
+| The transfer never rings the destination | The per-call check refuses a missing destination by name at session start, so if the session started, read the agent log for the update request's response. |
+| The transfer works, then the handback line plays and the call **drops** instead of the agent coming back | Same cause as the second row, in the one place the value is not something you pasted: `{{.CloudWebsocket.OrganizationEnv}}` in your deployed secret set has to be the organization **slug** (`three-random-words-12345`), not your display name. Your hand-typed Bin can be right while that value is wrong, which is why incoming calls work and only the handback fails. **The tell is a second session that never appears in this agent's log**, plus Twilio error `31921` on the call under Monitor, Logs, Calls. Fix `.env`, re-run the `secrets set` command, and redeploy. |
+{{- end}}
+| An `ERROR` line reading `BusBridge Trying to process LLMServiceMetadataFrame ... but StartFrame not received yet` | Harmless, and nothing of yours caused it. Both pipelines start at once; the transport pipeline's start waits on the transcriber's WebSocket, so the agent's LLM announces itself a moment before the bridge is ready and that announcement is dropped. It carries one flag, `is_realtime_service`, which is false for every model this project binds, and the processor that would read it ignores a false one. It appears when a provider connects slowly and not otherwise. |
+{{end}}{{if and (eq .Transport "daily-sip") (not .DailyCarrier)}}
+## Phone calls
+
+This agent answers phone calls over Daily PSTN. Daily's own infrastructure
+carries the call and hands it to this deployed agent, so nothing here listens on
+a public port and there is no webhook server of yours in the path.
+
+### Buy a phone number
+
+Numbers come from your Daily account, with your Daily API key. That is a
+different key from the Pipecat Cloud one that starts sessions.
+
+```sh
+curl --request GET --url 'https://api.daily.co/v1/list-available-numbers?region=US' \
+  --header "Authorization: Bearer $DAILY_API_KEY"
+
+curl --request POST --url 'https://api.daily.co/v1/buy-phone-number' \
+  --header "Authorization: Bearer $DAILY_API_KEY" \
+  --header 'Content-Type: application/json' \
+  --data '{"number": "+1XXXXXXXXXX"}'
+```
+
+You get back an `id` and a `number`. Keep the `id`: outbound calling wants it as
+the `callerId`, not the number. `GET /v1/purchased-phone-numbers` lists them
+again.
+
+**A number cannot be released for 14 days after purchase**, and releasing is then
+permanent. Plan a test number knowing you own it for at least two weeks.
+
+### Attach the number to this agent
+
+Point it at this agent. Two ways, same result:
+
+- **Dashboard**: Pipecat Cloud, then Settings, then Telephony, and pick this
+  agent.
+- **Daily REST API**: set the domain's pinless dial-in to this agent's managed
+  webhook.
+
+```sh
+curl --location 'https://api.daily.co/v1' \
+  --header "Authorization: Bearer $DAILY_API_KEY" \
+  --header 'Content-Type: application/json' \
+  --data '{"properties": {"pinless_dialin": [
+      {"phone_number": "<your Daily number>",
+       "room_creation_api": "https://api.pipecat.daily.co/v1/public/webhooks/<org_id>/{{.Project}}/dialin"}
+  ]}}'
+```
+
+`<org_id>` is your Pipecat Cloud organisation id, from the dashboard. The webhook
+is the platform's own, so you do not run or host it.
+
+Attach the number after `agent status` reports `ready`. The webhook names this
+agent, so a number pointed at an agent that is not deployed yet gives the caller
+silence rather than an error you can see.
+
+### Place an outbound call
+
+Outbound is started by the platform against this deployed agent, not by anything
+in this project. Ask it to create a room with dial-out allowed and give it the
+number to dial:
+
+```sh
+curl --request POST \
+  --url https://api.pipecat.daily.co/v1/public/{{.Project}}/start \
+  --header "Authorization: Bearer $PIPECAT_CLOUD_API_KEY" \
+  --header 'Content-Type: application/json' \
+  --data '{"createDailyRoom": true,
+           "dailyRoomProperties": {"enable_dialout": true},
+           "body": {"dialout_settings": [{"phoneNumber": "+1..."}]}}'
+```
+
+Two things to know before the first call:
+
+- **The recipient sees a number you did not choose, unless you name one here.**
+  With no `callerId`, the platform picks one of your purchased numbers at random.
+  You can pin it in the call above by passing the purchased number's **id** (from
+  `GET /v1/purchased-phone-numbers`), not the number itself:
+
+  ```json
+  "dialout_settings": [{"phoneNumber": "+1...", "callerId": "<id of a number you own>"}]
+  ```
+
+  The source package cannot declare this, so it is a choice you make per call.
+  A `sipUri` works in place of `phoneNumber` for a SIP destination.
+- **Dial-out has to be enabled on the domain**, and international dial-out is
+  granted separately from domestic. See the prerequisites below.
+{{end}}{{if .Prerequisites}}
+## Account prerequisites
+
+This project uses features the provider grants on request rather than by
+default. Ask for them before the first live call, because the lead time is
+theirs, not yours.
+
+{{range .Prerequisites}}- **{{.Name}}**: {{.Summary}}
+  Documentation: {{.Docs}} (checked {{.Verified}})
+{{end}}
+Nothing here is a problem with this project. It compiles and deploys either way;
+the call is what fails if the account cannot do it yet.
 {{end}}
 {{if .Tracing}}
 ## Trace with Langfuse

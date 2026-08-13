@@ -124,50 +124,126 @@ Required: yes. Values: `all` or a list of names. Default: none.
 
 ## kind: human_transfer
 
-Transfers the caller to a person on a phone. See the [phone-calls learn page](../learn/07-phone-calls.md).
+Puts the caller through to a person on a phone. See the [phone-calls learn page](../learn/07-phone-calls.md).
+
+There are two shapes, and they are different machines rather than two settings of one. You pick a shape by writing a block named after it. Exactly one block is required, and the block carries every setting of the transfer.
 
 ```yaml
 controls:
-  to_human:
+  send_to_billing:
     kind: human_transfer
-    destination: billing_line
-    mode: cold
+    when: The caller asks to be put through to the billing team.
+    cold:
+      destination: billing_line
+
+  escalate_to_supervisor:
+    kind: human_transfer
+    when: The caller is upset and asks for a manager.
+    warm:
+      destination: supervisor_line
+      briefing: |
+        Give the caller's name and the invoice they are disputing.
+        Say their identity is already verified.
+        Ask whether they can take the call.
+      ring_timeout: 30s
+      on_unavailable: return_to_caller
 ```
+
+**Cold** is one call to the carrier. The caller's leg is rerouted, your agent drops off, and the person answers knowing nothing about the call.
+
+**Warm** keeps your agent involved. The caller goes on hold with music, the agent rings the person on a second line, tells them what the call is about, then connects the two. If the person cannot take it, the agent comes back to the caller.
+
+Above the block you say what the tool is (`kind`, `when`). Inside it you say what the transfer does. A `cold:` block therefore always has at least a `destination:` under it.
 
 ### destination
 
-A symbolic name, resolved through the target instance's `destinations:` map to a phone number or SIP address.
+A symbolic name, resolved through the target instance's `destinations:` map. Required in both blocks.
 
-Required: yes. Values: a symbolic name. Default: none. Targets: all four, core (resolution). The transport that carries it gates per target; see `mode`.
+The map's value is one of three things, told apart by shape, so there is no extra key to learn:
 
-### mode
+```yaml
+destinations:
+  billing_line: "+14155550123"              # an E.164 number
+  overflow_desk: "sip:desk@example.com"     # a SIP URI
+  supervisor_line: SUPERVISOR_PHONE_NUMBER  # an env var holding one of those
+```
 
-Required: yes. Values: `cold | warm`. Default: none.
+Use the env var form for a number that differs between staging and production, or one you would rather not commit. It lands in the generated `.env.example` and the required-env list, and is read at call time.
 
-| Route | Cold | Warm |
+Either way the model never sees a phone number and cannot dial one. It picks the symbolic name and the target resolves it.
+
+Required: yes. Values: a symbolic name. Default: none. Targets: all four, core (resolution). The transport that carries it gates per target; see the route table below.
+
+### Which shapes work where
+
+One rule: a transfer compiles only on a route where the platform ships the
+primitive. The full map with sources and the test walkthroughs is
+[TRANSFERS.md](../../TRANSFERS.md).
+
+| Route | `cold:` | `warm:` |
 |---|---|---|
-| LiveKit SIP with Twilio, Telnyx, or Plivo | Emitted offline; provisional | Emitted offline; provisional |
-| LiveKit Twilio Connector | No emitted adapter | No emitted adapter |
-| Pipecat carrier WebSocket with Twilio, Telnyx, or Plivo | Carrier REST path emitted offline; provisional | Not emitted |
-| Pipecat Daily SIP | Platform capability only; not an emitted v1 telephony route | Not emitted |
+| LiveKit SIP with Twilio, Telnyx, or Plivo | `TransferSIPParticipant` (SIP REFER); provisional | `WarmTransferTask`; provisional |
+| Pipecat Daily, Daily's number (`transport: daily-sip`) | `sip_call_transfer`; provisional | Not emitted yet |
+| Pipecat Daily, your own number (`transport: daily-sip` + `carrier:`) | `sip_call_transfer`, destination composed at your trunk's termination address; provisional | Not emitted yet |
+| LiveKit Twilio Connector | Not supported | Not supported |
+| Pipecat carrier WebSocket (any carrier) | Not supported | Not supported |
 | Vapi | native | needs the Twilio carrier (stable path) |
 | Deepgram | carrier-conditional | carrier-conditional |
 
-Cold transfers the caller and the agent drops off. Warm keeps the agent on to
-brief the human first. See the
-[phone-call route matrix](../learn/07-phone-calls.md#choose-a-supported-carrier-route)
-before selecting either mode; all emitted Pipecat and LiveKit carrier routes
-remain provisional today.
+The two phrasings mean different things, and the difference is the whole point
+(checked 2026-08-13). **"Not supported"** means the platform ships no transfer
+control on that route, so there is nothing to build against; those rows are firm,
+not pending. Every transfer design this project once built on them meant owning the
+call's audio path, and that work is deleted. **"Not emitted yet"** means the
+platform does ship it and this project has not written it: Daily documents a warm
+pattern on both Daily forms and it is deliberate work rather than a default.
+Validation refuses a transfer in either case and names the routes that work.
+
+**Warm compiles on LiveKit SIP only, today.** A Pipecat warm package fails
+validation pointing at `(livekit, sip)`.
+
+Worth being exact about why, because the two reasons are different (checked
+2026-08-12). On Pipecat's **carrier websocket** routes the platform has no
+call-transfer control at all, so warm cannot be built there. On Pipecat's
+**Daily** route the platform does document warm; we have not built it yet,
+because the pattern puts the generated bot in charge of the call's audio and
+that is a deliberate piece of work rather than a default. Tracked as feature
+005. The `warm:` block you would write for it already exists and does not
+change.
+
+### ring_timeout
+
+How long the person's phone rings before the agent gives up.
+
+Required: no. Values: a duration (`30s`). Default: none written, so the platform default applies (LiveKit waits 30 seconds; the Pipecat Twilio route uses Twilio's own 60 second dial timeout). Legal in both blocks.
+
+**It bounds ringing only.** On a LiveKit warm transfer, once the person picks up nothing bounds the consultation, and the caller hears hold music for the whole of it. The generated agent is told to decline on the person's behalf when they go quiet or never decide, which is a mitigation rather than a guarantee. Why there is no bound, and what a real one would cost, is in [TRANSFERS.md](../../TRANSFERS.md) (2026-08-12, SCHEMA N35).
+
+### on_unavailable
+
+What happens when the person does not take the call. One field covers every way that can happen: nobody answers within `ring_timeout`, the person declines, the line goes to voicemail, or the call fails to connect at all.
+
+Required: no. Values: `return_to_caller | hangup`. Default: `return_to_caller`. Legal in both blocks.
+
+With `return_to_caller` the agent picks the conversation back up and can explain, try another destination, or carry on helping. With `hangup` it says goodbye and ends the call.
 
 ### briefing
 
-What the agent tells the human on a warm transfer.
+What the agent tells the person before connecting them. Plain text, so write it the way you would brief a colleague.
 
-Required: conditional (warm only). Values: `summary | message | wait`. Default: none.
+Required: no. Values: text. Default: none. **Legal inside `warm:` only**, because there is nobody to brief on a cold transfer.
+
+The conversation so far is always passed along with it, on every target that supports warm transfer. You do not need to ask for a summary, and you do not need to declare a model to write one. Use `briefing` to say what matters *beyond* the transcript: what to lead with, what the person needs to decide, what has already been verified.
+
+Omitting it does **not** leave the person unbriefed on LiveKit. Since 2026-08-12 (SCHEMA N35) the generated agent carries its own prompt saying to open with the handover and never with a greeting, and your `briefing` text lands on top of that. What the person actually hears, and the log lines a transfer leaves, are in [TRANSFERS.md](../../TRANSFERS.md).
 
 | Target | What happens | Tag |
 |---|---|---|
-| LiveKit SIP with Twilio, Telnyx, or Plivo | `summary`, emitted offline on a provisional route | provisional |
-| Pipecat | fails (warm not emitted yet) | gated |
-| Vapi | all three | gated |
+| LiveKit SIP with Twilio, Telnyx, or Plivo | Passed to `WarmTransferTask` on top of the transcript and the generated agent's own briefing prompt | provisional |
+| Pipecat | fails; there is no warm transfer to brief | gated |
+| Vapi | Mapped onto the provider's own transfer plan | gated |
 | Deepgram | fails | gated |
+
+### What warm transfer leaves behind
+
+`WarmTransferTask` moves the person into the caller's room and shuts the agent's session down, so the caller and the person carry on alone. The generated code passes `delete_room_on_close=False` so the room outlives the agent that made it.

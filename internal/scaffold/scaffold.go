@@ -38,40 +38,40 @@ const (
 
 // Data is the v1 agent configuration rendered by the scaffold templates.
 type Data struct {
-	Name             string
-	Target           string
-	Channel          string
-	Channels         []Channel
-	EntryAgent       string
-	Transport        string
-	Carrier          string
-	TargetVersion    string
-	SDKLanguage      string
-	DeploymentRegion string
-	Pins             string
-	Greeting         string
-	ModelGreeting    bool
-	SpeaksFirst      string
-	Interruption     *bool
-	MinimumWords     int
-	IgnorePhrases    []string
-	NudgeAfter       string
-	EndAfter         string
-	MaxDuration      string
-	ThinkingAudio    string
-	Instructions     string
-	Listen           Binding
-	Reason           Binding
-	Speak            Binding
-	Variables        []Variable
-	Tools            []Tool
-	Agents           []Agent
-	Handoffs         []Handoff
-	Tasks            []Task
-	TaskGroups       []TaskGroup
-	HumanTransfers   []HumanTransfer
-	Fallbacks        []ModelFallback
-	Capacity         Capacity
+	Name              string
+	Target            string
+	Channel           string
+	Channels          []Channel
+	EntryAgent        string
+	Transport         string
+	Carrier           string
+	TargetVersion     string
+	SDKLanguage       string
+	DeploymentRegions []string
+	Pins              string
+	Greeting          string
+	ModelGreeting     bool
+	SpeaksFirst       string
+	Interruption      *bool
+	MinimumWords      int
+	IgnorePhrases     []string
+	NudgeAfter        string
+	EndAfter          string
+	MaxDuration       string
+	ThinkingAudio     string
+	Instructions      string
+	Listen            Binding
+	Reason            Binding
+	Speak             Binding
+	Variables         []Variable
+	Tools             []Tool
+	Agents            []Agent
+	Handoffs          []Handoff
+	Tasks             []Task
+	TaskGroups        []TaskGroup
+	HumanTransfers    []HumanTransfer
+	Fallbacks         []ModelFallback
+	Capacity          Capacity
 }
 
 // Binding is one concrete role choice collected by the wizard. Params is an
@@ -222,8 +222,12 @@ type HumanTransfer struct {
 	When        string
 	Destination string
 	Value       string
-	Mode        string
-	Briefing    string
+	// Mode is the shape block's name, `cold` or `warm` (SCHEMA N25). It is not
+	// written as a `mode:` field; it names the block the other values sit in.
+	Mode          string
+	Briefing      string
+	RingTimeout   string
+	OnUnavailable string
 }
 
 type ModelFallback struct {
@@ -246,7 +250,7 @@ func (d *Data) SetTarget(provider string) {
 	d.Carrier = ""
 	d.TargetVersion = ""
 	d.SDKLanguage = ""
-	d.DeploymentRegion = ""
+	d.DeploymentRegions = nil
 	d.Pins = ""
 	switch provider {
 	case "pipecat":

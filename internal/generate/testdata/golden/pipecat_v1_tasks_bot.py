@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import httpx
 from dotenv import load_dotenv
+from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusBridgeProcessor
@@ -36,6 +37,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.settings import LLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.daily.transport import DailyParams, DailyTransport
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
@@ -57,6 +59,9 @@ from pipecat_slng import SlngTTSService
 load_dotenv()
 
 MAIN_NAME = "main"
+# Provider credentials only. The telephony route's environment (Redis, carrier
+# keys, the public URL) is required by telephony.py, not here, so a telephony
+# package still runs in the browser with nothing but model keys (V10/B3).
 REQUIRED_ENV = [
     "DAILY_API_KEY",
     "DEEPGRAM_API_KEY",
@@ -72,6 +77,17 @@ IGNORE_PHRASES = ["okay", "right", "uh-huh"]
 
 # Set once the transport exists, so an agent's cold-transfer @tool can reach it.
 _TRANSPORT: BaseTransport | None = None
+# One call gets one transfer attempt. Holds the first attempt's result so a
+# caller who asks twice replays it instead of firing a second one, and so a
+# transfer that failed can never come back to the model as a success.
+#
+# ponytail: a module-level value, not the shared control store the carrier
+# routes use for this. That store is deliberately absent here: this route
+# declares no Redis, and adding one to remember a fact that never outlives the
+# call would be an idle service. On this route one process serves one call, so
+# module scope is call scope. If that ever stops being true, this has to become
+# per-session state keyed on the call id.
+_TRANSFER_RESULT: dict | None = None
 
 
 def require_env() -> None:
@@ -196,16 +212,48 @@ class BillingAgent(TracedLLMWorker):
     @tool
     async def to_human(self, params: FunctionCallParams):
         """Transfer the caller to a human."""
+        logger.info("human transfer fired: to_human (cold)")
+        global _TRANSFER_RESULT
+        if _TRANSFER_RESULT is not None:
+            # Asked twice. Replay the first answer rather than dial again.
+            await params.result_callback(_TRANSFER_RESULT)
+            return
+        # Claimed before the primitive runs, not after: a request arriving while
+        # the first one is still in flight must not slip past the guard.
+        _TRANSFER_RESULT = {"in_progress": "A transfer is already under way; do not start another."}
+        # Daily SIP transfers via REFER, which keeps the bot on the call
+        # until the transfer completes, so the bot speaks the announcement
+        # itself (the official daily-pstn-cold-transfer pattern).
         await params.llm.push_frame(
             LLMMessagesAppendFrame(
-                [{"role": "developer", "content": "Tell the caller you are connecting them now, then wait."}],
+                [{"role": "developer", "content": "Tell the caller you are transferring them to a colleague now and to please hold, then wait."}],
                 run_llm=True,
             )
         )
-        if _TRANSPORT is not None:
-            await _TRANSPORT.sip_call_transfer({"toEndPoint": "+14155550123"})
-
-        await params.result_callback({"transferred": True})
+        # sip_call_transfer, not sip_refer, and the choice is the same on both
+        # Daily forms. REFER would take Daily out of the media path and stop its
+        # billing, but it needs the originating SIP system to honour REFER, which
+        # neither platform documents for a carrier interconnect leg. So Daily
+        # stays anchored after a completed transfer and both legs keep billing
+        # until the call ends; the README states that cost.
+        if isinstance(_TRANSPORT, DailyTransport):
+            error = await _TRANSPORT.sip_call_transfer({"toEndPoint": "+14155550123"})
+        else:
+            # No phone call, so nothing to hand over: the browser and console
+            # transports carry no transfer primitive. Failing here by name beats
+            # raising, and beats telling the model the caller was transferred.
+            error = "this session is not a phone call, so it cannot be transferred"
+        if error is not None:
+            # A failed transfer is a return value, not an exception, on this
+            # transport (T5). Ignoring it would tell the model the caller was
+            # transferred while they are still right here. on_unavailable
+            # decides what the caller gets instead.
+            logger.warning("cold transfer failed: {}", error)
+            _TRANSFER_RESULT = {"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."}
+            await params.result_callback(_TRANSFER_RESULT)
+            return
+        _TRANSFER_RESULT = {"transferred": True}
+        await params.result_callback(_TRANSFER_RESULT)
 
 
 
@@ -410,7 +458,10 @@ async def _flow_tool_lookup_customer(args, flow_manager):
 # --- transport & run --------------------------------------------------------
 transport_params: dict = {
     "webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
-    "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
+    # The runner assigns an inbound call's dial-in settings and Daily credentials
+    # onto whatever this returns, so on the Daily route it has to be the params
+    # class that declares them. The generic one rejects the assignment.
+    "daily": lambda: DailyParams(audio_in_enabled=True, audio_out_enabled=True),
 
 }
 

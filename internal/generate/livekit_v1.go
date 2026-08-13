@@ -30,10 +30,15 @@ var livekitV1Templates embed.FS
 
 // beta.workflows (TaskGroup), AgentTask, and inference (LLM/TurnDetector) are all
 // present from livekit-agents 1.5.x. Range: >=1.5, <2.0 (verified against the
-// reference venv's 1.5.x, driver-livekit C7).
+// reference venv's 1.5.x, driver-livekit C7). The warm-transfer prebuilt is
+// beta and its surface moved inside the 1.x line (WorkflowInstructions became
+// InstructionParts / extra_instructions), so warm packages pin the minor
+// series the import was verified against: 1.6.4, checked in the reference
+// checkout on 2026-08-11 (SPEC V10).
 const (
-	livekitVersionMajor    = 1
-	livekitVersionMinMinor = 5
+	livekitVersionMajor      = 1
+	livekitVersionMinMinor   = 5
+	livekitWarmVerifiedMinor = 6
 )
 
 var livekitVersionPattern = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
@@ -101,15 +106,31 @@ type livekitTransfer struct {
 	ResetVars   []livekitVar
 }
 
-// livekitHumanTransfer lowers a human_transfer control (V6): cold is a SIP
-// REFER through the job context; warm awaits the prebuilt WarmTransferTask
-// (beta.workflows, Beta on Python) whose consultation flow briefs the operator
-// (briefing: summary).
+// livekitHumanTransfer lowers a human_transfer control (V6, SCHEMA N25): cold is
+// a SIP REFER through the job context; warm awaits the prebuilt
+// WarmTransferTask (beta.workflows, Beta on Python), which dials the person,
+// plays hold music, briefs them from the chat context, and merges the calls.
 type livekitHumanTransfer struct {
 	Method string
 	When   string
-	To     string // resolved destination: a number or SIP URI
-	Warm   bool
+	// ToExpr is the cold-transfer destination as a SIP REFER **URI** expression:
+	// a quoted `tel:`/`sip:` literal, or _refer_uri(os.environ["NAME"]) when the
+	// target defers it to an env var (N26) whose value is only known on the call.
+	ToExpr string
+	// DialExpr is the same destination as a number to dial, for the warm path:
+	// a quoted literal or os.environ["NAME"], with no URI scheme, because
+	// WarmTransferTask's sip_call_to takes a phone number.
+	DialExpr string
+	Warm     bool
+	// Briefing is the free-text `warm.briefing`, lowered as the extra slot of
+	// the prebuilt's instructions. Empty means the prebuilt's own persona.
+	Briefing string
+	// RingTimeout is the emitted seconds value ("30.0"), empty when unset so the
+	// platform default applies.
+	RingTimeout string
+	// Hangup is on_unavailable: hangup. False is return_to_caller, which hands
+	// the model a refusal string and leaves the caller with the agent.
+	Hangup bool
 }
 
 // livekitOutbound is the telephony outbound + AMD voicemail lowering (V8/N6).
@@ -285,36 +306,52 @@ type livekitPrompt struct {
 	Body  string
 }
 
+// livekitDeploy is one row of the README's deploy commands: one per declared
+// region, or a single region-less row when the package declares none.
+type livekitDeploy struct {
+	Region string
+	// ConfigFile is empty for a single deployment, so its commands use the
+	// platform's default file name; several regions get the platform's own
+	// per-region naming (livekit.<region>.toml).
+	ConfigFile string
+}
+
 type livekitData struct {
-	Project          string
-	Version          string
-	DeploymentRegion string
-	AgentName        string
-	EntryAgent       string
-	EntryClass       string
-	STT              livekitChain
-	SessionLLM       livekitChain
-	SessionTTS       livekitService
-	TurnVersion      string
-	Agents           []livekitAgent
-	Tasks            []livekitTask
-	Vars             []livekitVar
-	CallStartVars    []livekitCallStartVar // dispatched input variables (I.dispatch)
-	Capture          *livekitCapture       // generated update_variables tool; nil without conversation variables
-	Secrets          []string              // declared secrets, for .env.example (V11)
-	ExtraEnv         []string              // env the route needs that the package never declared
-	RequiredSecrets  []string              // required secrets: a startup check refuses to run without them (V12)
-	LocalTools       []livekitLocalTool    // copied handler files (tools/<name>.py)
-	Pins             map[string]string     // plugin pins (C6): raise dep floors
-	Prompts          []livekitPrompt
-	PluginModules    []string // merged `from livekit.plugins import ...` names
-	Deps             []string
-	RequiredEnv      []string
-	DevEnv           []string // provider creds the web dev image needs (LIVEKIT_* are hardcoded in compose.dev.yaml)
-	DevOptionalEnv   []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
-	Notes            []string
-	InferenceUses    []string // bindings routed through LiveKit Inference (console needs cloud creds, C2/C7)
-	Tracing          bool
+	Project           string
+	Version           string
+	DeploymentRegions []string
+	Deploys           []livekitDeploy
+	AgentName         string
+	EntryAgent        string
+	EntryClass        string
+	STT               livekitChain
+	SessionLLM        livekitChain
+	SessionTTS        livekitService
+	TurnVersion       string
+	Agents            []livekitAgent
+	Tasks             []livekitTask
+	Vars              []livekitVar
+	CallStartVars     []livekitCallStartVar // dispatched input variables (I.dispatch)
+	Capture           *livekitCapture       // generated update_variables tool; nil without conversation variables
+	Secrets           []string              // declared secrets, for .env.example (V11)
+	ExtraEnv          []string              // env the route needs that the package never declared
+	RequiredSecrets   []string              // required secrets: a startup check refuses to run without them (V12)
+	LocalTools        []livekitLocalTool    // copied handler files (tools/<name>.py)
+	Pins              map[string]string     // plugin pins (C6): raise dep floors
+	Prompts           []livekitPrompt
+	PluginModules     []string // merged `from livekit.plugins import ...` names
+	Deps              []string
+	RequiredEnv       []string
+	// PlatformEnv is the required-env names something other than the operator
+	// supplies, and OperatorEnv is the rest. Both are subsets of RequiredEnv,
+	// which stays the complete list.
+	PlatformEnv    []string
+	OperatorEnv    []string
+	DevEnv         []string // provider creds the web dev image needs (LIVEKIT_* are hardcoded in compose.dev.yaml)
+	DevOptionalEnv []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
+	Notes          []string
+	InferenceUses  []string // bindings routed through LiveKit Inference (console needs cloud creds, C2/C7)
+	Tracing        bool
 
 	NeedsTasks         bool        // AgentTask import
 	NeedsTaskGroups    bool        // beta.workflows TaskGroup import
@@ -335,7 +372,7 @@ type livekitData struct {
 	NeedsMCP           bool        // mcp import (MCPServerHTTP)
 	NeedsEndCallTool   bool        // beta.tools EndCallTool import (prebuilt end_call)
 	HasColdTransfer    bool        // get_job_context import
-	HasWarmTransfer    bool        // WarmTransferTask import + trunk env
+	HasWarmTransfer    bool        // WarmTransferTask import + trunk env + room_options (B14)
 	Outbound           *livekitOutbound
 	Telephony          *livekitTelephony
 
@@ -372,7 +409,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTransferRequires:      true, // generated guard naming unmet vars (V7)
 	targetcap.FieldContextNoToolCalls:    true, // copy(exclude_function_call=True)
 	targetcap.FieldContextVariableSubset: true, // uncarried userdata fields reset (D7)
-	targetcap.FieldBriefingSummary:       true, // WarmTransferTask consultation flow
+	targetcap.FieldTransferBriefing:      true, // WarmTransferTask instructions extra (N25)
 	targetcap.FieldGreetingUserFirst:     true,
 	targetcap.FieldGreetingModelWritten:  true,
 	targetcap.FieldGreetingAbsent:        true,
@@ -390,6 +427,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldOutbound:              true, // SIP dial-out off job metadata
 	targetcap.FieldVoicemail:             true, // AMD machine-vm branches (N6)
 	targetcap.FieldTracingLangfuse:       true,
+	targetcap.FieldDeploymentMultiRegion: true, // one README deploy row per declared region, own config file
 	targetcap.FieldVariableConversation:  true, // generated update_variables @function_tool writing userdata
 	targetcap.FieldToolInject:            true, // hidden request values merged from userdata
 	targetcap.FieldWebhookPath:           true, // rendered, URL-encoded path on the base URL
@@ -404,7 +442,6 @@ var livekitEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 	targetcap.TelephonyFeature(targetcap.ColdTransfer):       true,
 	targetcap.TelephonyFeature(targetcap.WarmTransfer):       true,
 	targetcap.TelephonyFeature(targetcap.VoicemailDetection): true,
-	targetcap.TelephonyBriefingSummary:                       true,
 	"source.session_id":                                      true,
 	"source.carrier":                                         true,
 	"source.connection":                                      true,
@@ -415,8 +452,10 @@ var livekitEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 }
 
 // The LiveKit Twilio connector emits inbound, outbound, and hangup only;
-// transfers and voicemail are not supported on this route yet. It carries a
-// Twilio stream id (source.stream_id) since it rides Twilio Media Streams.
+// transfers ride the platform's native SIP primitives, which need a SIP
+// participant and an outbound trunk, and this route has neither (SPEC C1).
+// Voicemail detection has no AMD lowering here yet. It carries a Twilio
+// stream id (source.stream_id) since it rides Twilio Media Streams.
 var livekitConnectorEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 	targetcap.TelephonyRouteSelected:             true,
 	targetcap.TelephonyInbound:                   true,
@@ -534,6 +573,26 @@ func checkLiveKitVersion(version string) error {
 	return nil
 }
 
+// livekitDeploys turns declared regions into the README's deploy rows. No region
+// declared is still one row: the commands are the same, minus the flag, and the
+// README says the platform will ask which region to use. Several regions become
+// one deployment each, named the platform's way so `create` does not refuse on
+// the second one.
+func livekitDeploys(regions []string) []livekitDeploy {
+	if len(regions) == 0 {
+		return []livekitDeploy{{}}
+	}
+	deploys := make([]livekitDeploy, 0, len(regions))
+	for _, region := range regions {
+		row := livekitDeploy{Region: region}
+		if len(regions) > 1 {
+			row.ConfigFile = "livekit." + region + ".toml"
+		}
+		deploys = append(deploys, row)
+	}
+	return deploys
+}
+
 func renderLiveKitFiles(data livekitData) ([]File, error) {
 	outputs := []struct{ tmpl, path string }{
 		{"agent.py", "agent.py"},
@@ -542,7 +601,10 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		{"env.example", ".env.example"},
 		{"Dockerfile", "Dockerfile"},
 		{"compose.dev.yaml", "compose.dev.yaml"},
-		{"livekit.toml", "livekit.toml"},
+		// No livekit.toml: both of its values (project subdomain, CA_ agent id)
+		// are assigned by LiveKit Cloud, and `lk agent create` refuses to run
+		// when a file of that name already exists. The platform writes it on the
+		// first deploy and unmute compile preserves it from then on.
 	}
 	if data.Tracing {
 		outputs = append(outputs, struct{ tmpl, path string }{"tracing.py", "tracing.py"})
@@ -568,7 +630,9 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 		}
 		files = append(files, File{Path: o.path, Content: content})
 	}
-	files = append(files, File{Path: ".dockerignore", Content: []byte(".env\n")})
+	// Both clouds build from this directory, and LiveKit caps the uploaded
+	// context at 1 GB, so local run leftovers are excluded too.
+	files = append(files, File{Path: ".dockerignore", Content: []byte(".env\n.env.*\n.venv/\n__pycache__/\n")})
 	// SIP trunk JSON inputs are for the SIP route only; the connector uses no
 	// SIP trunks.
 	if !connector {
@@ -589,10 +653,18 @@ func renderLiveKitFiles(data livekitData) ([]File, error) {
 	return files, nil
 }
 
-// livekitSIPFiles emits provisioner inputs rather than provisioning external
-// state. UNVERIFIED: recheck the JSON shapes with the LiveKit docs MCP before
-// promoting this route; they were verified against docs.livekit.io on
-// 2026-07-20 because the MCP server was unavailable.
+// livekitSIPFiles emits provisioner inputs and the script that feeds them to
+// `lk`, rather than provisioning external state itself. Only the SIP route
+// reaches here: the caller's !connector guard keeps the connector out, which has
+// no SIP trunk even though it accepts inbound calls.
+//
+// JSON shapes re-verified 2026-08-12 with the LiveKit docs MCP
+// (docs.livekit.io/telephony/start/sip-trunk-setup): an inbound trunk is a name
+// plus its numbers, and a dispatch rule is a name plus a rule, with
+// dispatchRuleIndividual and roomPrefix for one room per caller. A rule with no
+// trunk list matches every trunk in the project, which is why trunk_ids is
+// always written and telephony-setup.sh refuses to create a rule without a
+// resolved ID.
 func livekitSIPFiles(data livekitData) ([]File, error) {
 	telephony := data.Telephony
 	if telephony == nil {
@@ -620,8 +692,10 @@ func livekitSIPFiles(data livekitData) ([]File, error) {
 		files = append(files, file)
 		file, err = encode("sip-dispatch-rule.json", map[string]any{
 			"dispatch_rule": map[string]any{
-				"name":      data.Project + " inbound",
-				"trunk_ids": []string{placeholder("LIVEKIT_SIP_INBOUND_TRUNK")},
+				"name": data.Project + " inbound",
+				// Substituted by telephony-setup.sh, not by the environment: no
+				// variable of this name is ever set or read anywhere.
+				"trunk_ids": []string{placeholder("UNMUTE_SIP_TRUNK_ID")},
 				"rule": map[string]any{
 					"dispatchRuleIndividual": map[string]any{"roomPrefix": "call-"},
 				},
@@ -637,20 +711,17 @@ func livekitSIPFiles(data livekitData) ([]File, error) {
 			return nil, err
 		}
 		files = append(files, file)
-	}
-	if telephony.HasOutbound || telephony.HasWarm {
-		file, err := encode("sip-outbound-trunk.json", map[string]any{
-			"trunk": map[string]any{
-				"name":    data.Project + " " + telephony.Carrier + " outbound",
-				"address": placeholder(telephony.SIPAddressEnv),
-				"numbers": []string{placeholder(telephony.FromNumberEnv)},
-			},
-		})
+		// The operator's one command. It resolves the trunk by phone number and
+		// substitutes both files itself, so no ID is ever transcribed.
+		script, err := renderLiveKitV1("telephony-setup.sh", data)
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, file)
+		files = append(files, File{Path: "telephony-setup.sh", Content: script})
 	}
+	// No outbound-trunk input: nothing reads a stored outbound trunk any more.
+	// The emitted agent dials with the carrier's settings inline, so registering
+	// one would be a step whose output nothing consumes (SCHEMA N33, 2026-08-12).
 	return files, nil
 }
 
@@ -690,6 +761,7 @@ type livekitReportJSON struct {
 	Agents      []string              `json:"agents"`
 	Tasks       []string              `json:"tasks,omitempty"`
 	Files       []string              `json:"generated_files"`
+	Regions     []string              `json:"deployment_regions,omitempty"`
 	RequiredEnv []string              `json:"required_env"`
 	Bindings    []ir.ForwardedBinding `json:"bindings,omitempty"`
 	Sizing      []ir.Sizing           `json:"sizing,omitempty"`
@@ -715,7 +787,9 @@ func livekitReport(agent *ir.Agent, data livekitData, files []File, bindings []i
 	}
 	out, err := json.MarshalIndent(livekitReportJSON{
 		Target: data.Project, Provider: "livekit", Version: data.Version, EntryAgent: data.EntryClass,
-		Agents: agents, Tasks: tasks, Files: generated, RequiredEnv: data.RequiredEnv,
+		Agents: agents, Tasks: tasks, Files: generated,
+		// Forwarded without checking, so it must be readable back (constitution).
+		Regions: data.DeploymentRegions, RequiredEnv: data.RequiredEnv,
 		Bindings: bindings, Sizing: sizing,
 		Variables: reportVariables(agent), Secrets: reportSecrets(agent),
 		Notes: data.Notes,

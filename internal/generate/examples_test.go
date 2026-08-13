@@ -1,9 +1,12 @@
 package generate
 
 import (
+	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -146,6 +149,84 @@ func TestPublicExamplesValidateAndGenerate(t *testing.T) {
 	}
 }
 
+// FR-031 / SC-008: an existing package keeps its meaning. The Daily-route work
+// must reach the Daily route and nothing else.
+//
+// Written as a scoping property rather than against a stored copy of every
+// example's old output. A byte-for-byte baseline would need a golden per example
+// per file, and it would go stale on the first unrelated template edit, at which
+// point the honest question ("did this feature widen?") gets buried in noise.
+// The property is the same and it is checkable directly: none of this feature's
+// additions may appear on any target that is not the Daily route.
+//
+// A failure here means the change was made unconditionally. Narrow it, do not
+// extend this list.
+func TestDailyRouteWorkDoesNotReachOtherTargets(t *testing.T) {
+	// Every marker this feature adds to an emitted project.
+	markers := []string{
+		"DailyParams", "pipecat.transports.daily",
+		"## Phone calls",
+		"Account prerequisites", "route_prerequisites", "daily_dialout",
+		// The carrier leg's own markers (SCHEMA N37): the emitted helper, the
+		// forward-once guard, and the runbook's opening line. Carrier work must not
+		// leak onto a target that is not the Daily route either.
+		//
+		// The runbook's *heading* would be the obvious third marker and it is the
+		// wrong one: the LiveKit SIP route heads its own runbook "Telephony setup"
+		// too (specs/005), so it names a shape both drivers share rather than
+		// anything this feature added.
+		"telephony_helper.py", "_CALL_FORWARDED", "One piece runs outside the platform",
+	}
+	// _TRANSFER_RESULT used to be on that list and is not any more. It is the
+	// one-attempt-per-call guard, and specs/007 reuses the same discipline on the
+	// Pipecat Cloud websocket route deliberately (data-model section 6), so it now
+	// marks "a route that emits a cold transfer" rather than "the Daily route".
+	// The Daily-only markers above are what still scopes this test.
+	root := filepath.Join("..", "..", "examples")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkedDaily := false
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pkg, err := spec.Load(filepath.Join(root, entry.Name()))
+		if err != nil {
+			t.Fatalf("%s: load: %v", entry.Name(), err)
+		}
+		agent, err := ir.Build(pkg)
+		if err != nil {
+			t.Fatalf("%s: build: %v", entry.Name(), err)
+		}
+		for _, name := range slices.Sorted(maps.Keys(agent.Targets)) {
+			resolved := agent.Targets[name]
+			daily := resolved.Provider == ir.ProviderPipecat && resolved.Transport == "daily-sip"
+			artifact, err := Generate(agent, resolved, target.Default())
+			if err != nil {
+				t.Fatalf("%s/%s: generate: %v", entry.Name(), name, err)
+			}
+			for _, file := range artifact.Files {
+				for _, marker := range markers {
+					if !strings.Contains(string(file.Content), marker) {
+						continue
+					}
+					if !daily {
+						t.Errorf("%s/%s (%s, transport %q) emits %q: this feature must reach the Daily route only",
+							entry.Name(), name, resolved.Provider, resolved.Transport, file.Path)
+					}
+					checkedDaily = checkedDaily || daily
+				}
+			}
+		}
+	}
+	// A test that finds the markers nowhere would pass while proving nothing.
+	if !checkedDaily {
+		t.Error("no example exercises the Daily route, so this test cannot tell scoped from absent")
+	}
+}
+
 func TestPublicExamplePackages(t *testing.T) {
 	root := filepath.Join("..", "..", "examples")
 	entries, err := os.ReadDir(root)
@@ -158,29 +239,45 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	want := []string{"multi-task", "outbound-reminder", "salon-support", "simple-prompt", "subagents", "task-groups", "telephony-hello"}
+	// One telephony example per use case (spec 007 FR-016): warm+inbound on
+	// LiveKit (livekit-human-transfer), cold+inbound on Pipecat over Twilio with
+	// nothing hosted (pipecat-human-transfer-twilio), inbound+outbound
+	// (twilio-telephony-hello). pipecat-human-transfer-daily is the no-carrier Daily form
+	// and is untouched. human-transfer-daily-twilio was removed with feature 007;
+	// its route keeps its guards against internal/testdata/daily_carrier instead.
+	//
+	// A telephony example whose behaviour is one provider's names that provider
+	// first, because the route is the thing a reader is choosing between.
+	want := []string{"livekit-human-transfer", "multi-task", "outbound-reminder", "pipecat-human-transfer-daily", "pipecat-human-transfer-twilio", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
-	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
+	// Artifacts must not be *committed*; compiling an example locally is normal
+	// and must not fail the suite, so ask git what is tracked rather than
+	// walking the working tree (B5).
+	tracked, err := exec.Command("git", "ls-files", "examples").Output()
+	if err != nil {
+		t.Skipf("git ls-files unavailable: %v", err)
+	}
+	for _, path := range strings.Split(strings.TrimSpace(string(tracked)), "\n") {
+		if strings.Contains(path, "/build/") || strings.HasSuffix(path, ".DS_Store") {
+			t.Errorf("forbidden committed example artifact: %s", path)
 		}
-		if entry.Name() == ".DS_Store" || entry.IsDir() && entry.Name() == "build" {
-			t.Errorf("forbidden public example artifact: %s", path)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
 	}
 }
 
-// The shipped telephony example (telephony-hello) is a complete,
-// schema-faithful package with real adapters on both targets: Pipecat
-// carrier-websocket and the LiveKit Twilio connector. Both are provisional
-// (adapter present, no credentialed smoke yet) and usable, so both generate.
+// The shipped telephony example (twilio-telephony-hello) is a complete,
+// schema-faithful package carrying the route each platform recommends for Twilio:
+// Pipecat on the platform's own carrier stream, and LiveKit on a SIP trunk. Both
+// are provisional (adapter present, no credentialed smoke yet) and usable, so both
+// generate.
+//
+// The transports are asserted by name because that pairing is the example's whole
+// subject. It used to pair cloud-websocket with the LiveKit Twilio connector, which
+// tested better on a laptop and taught a route with no transfer primitive; the
+// connector keeps its own coverage through examples/outbound-reminder.
 func TestTelephonyExampleGeneratesProvisionalRoute(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "telephony-hello"))
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "twilio-telephony-hello"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,12 +285,14 @@ func TestTelephonyExampleGeneratesProvisionalRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	livekit, ok := agent.Targets["livekit"]
-	if !ok || livekit.Telephony == nil || livekit.Transport != "connector" {
-		t.Fatalf("livekit target is not the resolved connector route: %#v", livekit.Telephony)
-	}
-	for _, name := range []string{"livekit", "pipecat"} {
-		resolved := agent.Targets[name]
+	for name, transport := range map[string]string{"livekit": "sip", "pipecat": "cloud-websocket"} {
+		resolved, ok := agent.Targets[name]
+		if !ok || resolved.Telephony == nil || resolved.Transport != transport {
+			t.Fatalf("target %q is not the resolved %s route: %#v", name, transport, resolved.Telephony)
+		}
+		if resolved.Carrier != "twilio" {
+			t.Fatalf("target %q carrier = %q, want twilio", name, resolved.Carrier)
+		}
 		if _, err := Generate(agent, resolved, target.Default()); err != nil {
 			t.Fatalf("provisional telephony route %q must generate, got %v", name, err)
 		}
@@ -294,6 +393,177 @@ func TestFixturePackagesValidate(t *testing.T) {
 			report, err := ir.Validate(agent, declared, target.Default())
 			if err != nil {
 				t.Fatalf("validate: %v\n%#v", err, report.PerTarget)
+			}
+		})
+	}
+}
+
+// V16/B9: a committed example never ships a literal transfer destination. Any
+// literal a repository can contain is a number nobody answers, so a live test
+// of the example dials a stranger or a carrier intercept ("el número marcado
+// no existe") and the call dies right where the demo should land. Every
+// destination in examples/*/targets.yaml is an UPPER_SNAKE env var name,
+// resolved from the tester's own environment at call time.
+func TestV16_ExampleDestinationsAreEnvironmentNames(t *testing.T) {
+	envName := regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+	root := filepath.Join("..", "..", "examples")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pkg, err := spec.Load(filepath.Join(root, entry.Name()))
+		if err != nil {
+			t.Fatalf("load %s: %v", entry.Name(), err)
+		}
+		for targetName, target := range pkg.Targets {
+			for symbol, value := range target.Destinations {
+				if !envName.MatchString(value) {
+					t.Errorf("%s/%s destination %q = %q is a literal; committed examples must name an env var", entry.Name(), targetName, symbol, value)
+				}
+			}
+		}
+	}
+}
+
+// TestV11_TransfersDocListsEveryRequiredEnv is SPEC V11/C9: docs/TRANSFERS.md
+// is the one place that answers "which secrets do I need", so its tables must
+// name every env var the transfer examples' generated .env.example requires.
+// A new required name that is not documented fails here, not on a live rig.
+func TestV11_TransfersDocListsEveryRequiredEnv(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "TRANSFERS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for example, provider := range map[string]ir.Provider{
+		"livekit-human-transfer":       ir.ProviderLiveKit,
+		"pipecat-human-transfer-daily": ir.ProviderPipecat,
+	} {
+		pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent, err := ir.Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
+		if err != nil {
+			t.Fatalf("%s: %v", example, err)
+		}
+		for _, line := range strings.Split(artifactFile(t, artifact, ".env.example"), "\n") {
+			name, _, found := strings.Cut(line, "=")
+			if !found || name == "" || strings.HasPrefix(name, "#") {
+				continue
+			}
+			if !strings.Contains(string(doc), name) {
+				t.Errorf("%s requires %s, which docs/TRANSFERS.md does not document (V11)", example, name)
+			}
+		}
+	}
+}
+
+// The generated README is the runbook, and almost nobody reads it before they
+// have already read the example's own page and the docs. So those two have to stay
+// true on their own, and "stay true" is a thing a test can hold rather than a
+// thing a person remembers.
+//
+// These two are deliberately narrow. They do not check prose: a document is free
+// to say that an example was removed, which is history worth keeping. They check
+// the two claims that go stale silently and mislead a reader who acts on them: a
+// link that no longer resolves, and a README describing a route its package no
+// longer declares.
+
+// Every relative link an example page offers must resolve, and any link anywhere
+// in the docs that points into examples/ must resolve too. Deleting or renaming an
+// example fails this until every page that sends a reader there is fixed.
+func TestExampleAndDocLinksIntoExamplesResolve(t *testing.T) {
+	link := regexp.MustCompile(`\[[^\]]*\]\(([^)\s]+)`)
+	check := func(page string, onlyExamples bool) {
+		raw, err := os.ReadFile(page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range link.FindAllStringSubmatch(string(raw), -1) {
+			target, _, _ := strings.Cut(match[1], "#")
+			if target == "" || strings.HasPrefix(target, "http://") ||
+				strings.HasPrefix(target, "https://") || strings.HasPrefix(target, "mailto:") {
+				continue
+			}
+			if onlyExamples && !strings.Contains(target, "examples/") {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(filepath.Dir(page), target)); err != nil {
+				t.Errorf("%s links to %q, which does not exist", page, target)
+			}
+		}
+	}
+	for _, root := range []string{filepath.Join("..", "..", "examples"), filepath.Join("..", "..", "docs")} {
+		onlyExamples := strings.HasSuffix(root, "docs")
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() && entry.Name() == "build" {
+				return fs.SkipDir
+			}
+			if !entry.IsDir() && strings.HasSuffix(path, ".md") {
+				check(path, onlyExamples)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// An example's own README must name every route its targets declare. This is the
+// one that would have caught `twilio-telephony-hello` describing a carrier-websocket
+// Pipecat target for the length of the feature that moved it to another route: the
+// generated runbook was right the whole time, and the page a reader opens first
+// was wrong.
+func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
+	root := filepath.Join("..", "..", "examples")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		t.Run(entry.Name(), func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join(root, entry.Name()))
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			var routed []string
+			for name, target := range pkg.Targets {
+				if target.Transport != "" {
+					routed = append(routed, name)
+				}
+			}
+			if len(routed) == 0 {
+				// Nothing declares a route, so there is no route claim to keep true.
+				// The four structural examples live in the index table in
+				// examples/README.md and need no page of their own.
+				return
+			}
+			readme, err := os.ReadFile(filepath.Join(root, entry.Name(), "README.md"))
+			if err != nil {
+				t.Fatalf("this example declares a route (%s) and has no README to describe it: %v", strings.Join(routed, ", "), err)
+			}
+			for name, target := range pkg.Targets {
+				if target.Transport == "" {
+					continue // browser-only targets declare no route to describe
+				}
+				if !strings.Contains(string(readme), target.Transport) {
+					t.Errorf("target %q declares transport %q, which this example's README never mentions", name, target.Transport)
+				}
 			}
 		})
 	}

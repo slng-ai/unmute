@@ -14,8 +14,8 @@ Commands: `init`, `validate`, `compile`, `dev`
 and Deepgram fail with `driver is not implemented` until theirs land.
 
 Where things live: user docs in [docs/user/](docs/user/README.md), the locked
-schema in [SCHEMA.md](docs/SCHEMA.md), driver specs in [docs/spec/](docs/spec/),
-the provider catalogue design and findings in
+schema in [SCHEMA.md](docs/SCHEMA.md), per-feature specs in [specs/](specs/)
+(GitHub Spec Kit), the provider catalogue design and findings in
 [PROVIDER_CATALOG.md](docs/PROVIDER_CATALOG.md), a get-around guide in
 [REPO_MAP.md](docs/REPO_MAP.md), engineering rules in [CLAUDE.md](CLAUDE.md).
 
@@ -41,8 +41,8 @@ make docs          # serves docs/user/ on http://localhost:3000
 
 Then open `http://localhost:3000` and browse the Start / Learn / Concepts /
 Reference / Targets sidebar. Edit any `docs/user/**/*.md` and the open page
-live-reloads on save. Only `docs/user/` is served, so the engineering specs in
-`docs/spec/` stay out of the site.
+live-reloads on save. Only `docs/user/` is served, so the engineering docs in
+`docs/` stay out of the site.
 
 Direct equivalent: `npx --yes docsify-cli serve docs/user --port 3000`.
 
@@ -104,24 +104,31 @@ talk to the agent. It reads `.env` from the current directory, then the package
 root, so from the repository root the copies above are optional. Add `--console`
 to talk over the terminal mic and speaker instead of the browser.
 
-Telephony works the same way, for the example that supports it:
+Telephony works the same way, and which direction you can test locally depends on
+the transport rather than on the CLI:
 
 ```sh
-bin/unmute dev "examples/telephony-hello" --telephony --target livekit
-bin/unmute dev "examples/telephony-hello" --telephony --target pipecat
+# Inbound on a real call to your own number: Pipecat over Twilio Media Streams.
+# A tunnel carries it, so the call lands on your laptop.
+bin/unmute dev "examples/twilio-telephony-hello" --telephony --target pipecat
 
-# add --to to place an outbound call
-bin/unmute dev "examples/telephony-hello" --telephony --target livekit --to +YOURNUMBER
-bin/unmute dev "examples/telephony-hello" --telephony --target pipecat --to +YOURNUMBER
+# Outbound on a real call: LiveKit over a Twilio SIP trunk. The call starts from
+# your side, so it goes out from your laptop.
+bin/unmute dev "examples/twilio-telephony-hello" --telephony --target livekit --to +YOURNUMBER
 ```
+
+The other two combinations are deploy exercises, and the example's README says why:
+an inbound SIP call needs the carrier to reach SIP signalling and RTP, which no
+HTTPS tunnel provides, and a Pipecat outbound call is created at Twilio naming the
+**deployed** agent, so there is nothing local for it to reach.
 
 ## Not implemented yet
 
 Validation covers all four targets. These drivers still lack an executable
 generation path:
 
-- Vapi and Deepgram drivers (specs exist in `docs/spec/`; generation fails
-  clearly today).
+- Vapi and Deepgram drivers (validation covers both; generation fails clearly
+  today).
 - Per-driver maturity gates are listed on each target page in
   [docs/user/targets/](docs/user/targets/) and fail loud rather than silently
   dropping behavior.
@@ -180,10 +187,10 @@ same `livekit/sip/<carrier>` plan. Their Connection vocabulary is:
 # connections/primary_phone.yaml
 kind: telephony
 environment:
-  sip_address: TWILIO_SIP_ADDRESS
-  sip_username: TWILIO_SIP_USERNAME
-  sip_password: TWILIO_SIP_PASSWORD
-  from_number: TWILIO_PHONE_NUMBER
+  sip_address: SIP_TRUNK_HOSTNAME
+  sip_username: SIP_AUTH_USERNAME
+  sip_password: SIP_AUTH_PASSWORD
+  from_number: SIP_FROM_NUMBER
 ```
 
 Set the target's `provider: livekit`, `transport: sip`, `carrier`, and

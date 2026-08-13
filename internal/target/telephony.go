@@ -3,6 +3,7 @@ package target
 import (
 	"fmt"
 	"slices"
+	"strings"
 )
 
 type TelephonyKey struct {
@@ -14,13 +15,13 @@ type TelephonyKey struct {
 type TelephonyFeature string
 
 const (
-	TelephonyRouteSelected   TelephonyFeature = "route"
-	TelephonyInbound         TelephonyFeature = "inbound"
-	TelephonyOutbound        TelephonyFeature = "outbound"
-	TelephonyBriefingSummary TelephonyFeature = "briefing.summary"
-	TelephonyBriefingMessage TelephonyFeature = "briefing.message"
-	TelephonyBriefingWait    TelephonyFeature = "briefing.wait"
-	TelephonySourcePrefix                     = "source."
+	TelephonyRouteSelected TelephonyFeature = "route"
+	TelephonyInbound       TelephonyFeature = "inbound"
+	TelephonyOutbound      TelephonyFeature = "outbound"
+	// SCHEMA N25 removed the briefing mode enum (it was Vapi's transferPlan
+	// vocabulary and mapped to no code target), so there are no briefing.*
+	// features: a free-text briefing rides the warm_transfer control row.
+	TelephonySourcePrefix = "source."
 )
 
 type TelephonyEvidence struct {
@@ -41,11 +42,7 @@ type TelephonyRoute struct {
 	PublicEndpoints            []TelephonyEndpointRule
 	RuntimeEnvironment         []TelephonyEnvironmentRule
 	LocallySuppliedEnvironment []string
-	// DevSuppliedEnvironment names required env values that `unmute dev
-	// --telephony` supplies itself for local runs (users never set them
-	// locally; production still supplies real values).
-	DevSuppliedEnvironment []string
-	ManualSteps            []string
+	ManualSteps                []string
 	// AutoWebhookEndpoint names the public endpoint the dev command sets as
 	// the carrier's voice webhook automatically on every start. Empty means
 	// the carrier keeps printed manual steps. This is a carrier fact, not a
@@ -95,9 +92,11 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		"source.direction", "source.from_number", "source.to_number",
 	}
 	pipecat := "https://docs.pipecat.ai/pipecat/learn/transports"
+	// No transfers on the carrier-websocket routes: Pipecat's own docs say the
+	// websocket transports have no call-transfer control, and a transfer needs
+	// a platform primitive (SPEC C1, V1). Cold on Pipecat is the Daily route.
 	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
 		features := append([]TelephonyFeature{TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup)}, sourcesWithStream...)
-		features = append(features, TelephonyFeature(ColdTransfer))
 		add(Pipecat, "carrier-websocket", carrier, pipecat, features...)
 	}
 	pipecatProcess := []TelephonyProcess{{
@@ -155,7 +154,6 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		"assign the selected phone number to that XML Application and configure its Hangup URL as POST to the reported status endpoint",
 	},
 		TelephonyEndpointRule{Name: "outbound-answer", Method: "POST", Path: "/telephony/answer/{token}", AnyFeatures: []TelephonyFeature{TelephonyOutbound}},
-		TelephonyEndpointRule{Name: "transfer", Method: "POST", Path: "/telephony/transfer/{token}", AnyFeatures: []TelephonyFeature{TelephonyFeature(ColdTransfer)}},
 	)
 	exotel := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "exotel"}
 	routes[exotel] = TelephonyRoute{Key: exotel, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{
@@ -170,7 +168,7 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		features := append([]TelephonyFeature{
 			TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(ColdTransfer),
 			TelephonyFeature(WarmTransfer), TelephonyFeature(Hangup),
-			TelephonyFeature(VoicemailDetection), TelephonyBriefingSummary,
+			TelephonyFeature(VoicemailDetection),
 		}, sourcesWithoutStream...)
 		add(LiveKit, "sip", selected.carrier, selected.docs, features...)
 		key := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: selected.carrier}
@@ -179,24 +177,46 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		route.Processes = []TelephonyProcess{{
 			Name: "agent", Command: []string{"uv", "run", "agent.py", "dev"}, Health: "/", Readiness: "/",
 		}}
+		// No trunk ID here. Dialling out needs no stored trunk: the emitted agent
+		// passes the carrier's trunk settings inline with every call, from the
+		// four names the Connection declares (SCHEMA N33, 2026-08-12). Inbound
+		// does need its two platform records, because an unsolicited call arrives
+		// with no request of ours for configuration to travel with, but the
+		// emitted telephony-setup.sh resolves them by phone number at
+		// provisioning time, so no environment name carries the ID (SCHEMA N36,
+		// 2026-08-12).
 		route.RuntimeEnvironment = []TelephonyEnvironmentRule{
 			{Name: "LIVEKIT_API_KEY"},
 			{Name: "LIVEKIT_API_SECRET"},
-			{Name: "LIVEKIT_SIP_INBOUND_TRUNK", AnyFeatures: []TelephonyFeature{TelephonyInbound}},
-			{Name: "LIVEKIT_SIP_OUTBOUND_TRUNK", AnyFeatures: []TelephonyFeature{TelephonyOutbound, TelephonyFeature(WarmTransfer)}},
 			{Name: "LIVEKIT_URL"},
 			{Name: "REDIS_URL"},
 		}
 		route.LocallySuppliedEnvironment = []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL", "REDIS_URL"}
-		route.DevSuppliedEnvironment = []string{"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK"}
 		route.ManualSteps = []string{
-			"get LIVEKIT_URL and the API key pair from the self-hosted LiveKit Server configuration; configure LiveKit Server and LiveKit SIP with the same Redis deployment",
-			"deploy LiveKit SIP with public SIP signaling and RTP ports, then point the carrier's origination URI at that public SIP endpoint",
-			"get the selected carrier SIP address, username, password, and phone number from its SIP trunking console",
-			"for production, materialize the generated SIP JSON inputs, create the LiveKit trunks and dispatch rule with lk, and copy the returned trunk IDs into the reported environment variables (unmute dev --telephony creates the local records and supplies both IDs itself)",
+			"get LIVEKIT_URL and the API key pair from the LiveKit Cloud project settings, or from a self-hosted LiveKit Server configuration; a self-hosted deployment configures LiveKit Server and LiveKit SIP with the same Redis deployment",
+			"point the carrier's origination URI at the LiveKit project SIP URI with transport=tcp (the LiveKit Cloud project settings page, or lk project list --json with the p_ prefix dropped from ProjectId); for a self-hosted deployment, deploy LiveKit SIP with public SIP signaling and RTP ports and point origination at that public SIP endpoint instead",
+			"get the selected carrier SIP address, username, password, and phone number from its SIP trunking console; these four reach the deployed agent's dial-out path directly, so no outbound trunk is registered",
+			"for inbound calls only, run bash telephony-setup.sh from the build directory: it resolves the inbound trunk by phone number and creates the trunk and dispatch rule, so no record ID is ever copied by hand (unmute dev --telephony creates the local records itself)",
 		}
 		routes[key] = route
 	}
+	// Twilio is the one SIP carrier anybody has called through. Both transfer shapes
+	// were run on a real trunk and a deployed agent on 2026-08-12, with dated
+	// evidence in docs/TRANSFERS.md, and each run found a defect no offline test had
+	// (SCHEMA N33 and N35). The tag still says provisional because that tracks a
+	// credentialed smoke in CI, which no route here has; the note is what tracks
+	// whether a human made a call, and leaving the generic line on this row would
+	// under-report the only route with live evidence on both shapes. Telnyx and
+	// Plivo keep the generic note, because nobody has called through them.
+	sipTwilio := TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "twilio"}
+	route = routes[sipTwilio]
+	for feature, evidence := range route.Features {
+		evidence.Verified = "2026-08-12"
+		evidence.Note = "live inbound, cold transfer and warm transfer run 2026-08-12 " +
+			"(docs/TRANSFERS.md); no credentialed smoke runs in CI on any route"
+		route.Features[feature] = evidence
+	}
+	routes[sipTwilio] = route
 	exotel = TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "exotel"}
 	routes[exotel] = TelephonyRoute{Key: exotel, Features: map[TelephonyFeature]TelephonyEvidence{}, RequiredEnvironment: []string{
 		"sip_address", "sip_username", "sip_password", "from_number",
@@ -209,7 +229,131 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	// only the application container and a local `livekit-server --dev`. This
 	// bridge is our own open-source implementation of the Media Streams
 	// protocol; LiveKit's hosted connector is Cloud-only.
+	// The Pipecat Daily route with a carrier leg (SCHEMA N37). The carrier owns
+	// the number and forwards the call over SIP into the same per-call Daily room
+	// a Daily-provisioned call joins, so the agent, the room, and the transfer
+	// primitive are the ones the no-carrier form already uses.
+	//
+	// No `source.*` features. The generated bot reads call sources out of a
+	// context table that only the carrier-websocket adapters fill, and this route
+	// emits no adapter, so granting them would let a package validate green and
+	// receive empty values on a live call (research D11/R14, 2026-08-12).
+	dailyCarrier := TelephonyKey{Provider: Pipecat, Transport: "daily-sip", Carrier: "twilio"}
+	add(Pipecat, "daily-sip", "twilio", "https://docs.pipecat.ai/pipecat/telephony/daily-sip",
+		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound,
+		TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup))
+	route = routes[dailyCarrier]
+	for feature, evidence := range route.Features {
+		evidence.Verified = "2026-08-12"
+		// Every feature here is built and offline-proven and none has had a live
+		// call, so all five stay provisional. The note says what is missing rather
+		// than repeating the generic line, because on this route the gap is one
+		// specific thing: nobody has placed a call through a carrier trunk yet.
+		// A row loses provisional only against a dated line in
+		// specs/006-pipecat-carrier-telephony/tasks.md.
+		evidence.Note = "built and offline-proven; no call has been placed through a carrier trunk yet"
+		route.Features[feature] = evidence
+	}
+	route.RequiredEnvironment = []string{"account_sid", "auth_token", "sip_address", "from_number"}
+	// Processes, PublicEndpoints, and Services below describe the *operator-run
+	// helper*, not the deployed agent. Every other route means the application by
+	// these fields and a reader will assume the same here, so: the agent deployed
+	// to Pipecat Cloud still exposes nothing of its own. The helper is an emitted
+	// artifact the operator runs beside the build, and it is truthfully the one
+	// process this route runs (data-model section 1, research D5).
+	route.Processes = []TelephonyProcess{{
+		Name: "telephony-helper", Command: []string{"uv", "run", "telephony_helper.py"},
+		Health: "/healthz", Readiness: "/healthz",
+	}}
+	// The helper answers incoming calls and nothing else. Dialling out is started
+	// against the platform directly, exactly as it is on a Daily-provisioned
+	// number, so there is no endpoint here that spends money and therefore no
+	// token to guard one.
+	route.PublicEndpoints = []TelephonyEndpointRule{
+		{Name: "inbound", Method: "POST", Path: "/call", AnyFeatures: []TelephonyFeature{TelephonyInbound}},
+		{Name: "health", Method: "GET", Path: "/healthz"},
+	}
+	// Only what the *deployed agent* reads. The helper's own names (the platform
+	// public key, the outbound trigger token, the two optional knobs) are a driver
+	// fact and are registered by the emitter, not here.
+	route.RuntimeEnvironment = []TelephonyEnvironmentRule{{Name: "DAILY_API_KEY"}}
+	// No AutoWebhookEndpoint: the CLI never writes a carrier webhook on this
+	// route. Pointing the number at the helper is a dictated carrier action,
+	// because the helper's public URL is the operator's to choose.
+	route.ManualSteps = []string{
+		"select a Voice-capable number in the Twilio Console (or reuse the one the LiveKit setup already uses; a number serves one target at a time)",
+		"set that number's \"A call comes in\" to a webhook, POST, at https://<your helper host>/call",
+		"create or reuse an Elastic SIP Trunk and note its termination address; that value is the sip_address environment name, and the prefix should be one nobody can guess because termination here authenticates by address list rather than by password",
+		"create an IP access control list holding the sip.hosts entries from https://ip-info.daily.co/ips/ip-info.json and attach it to the trunk's termination; the list is dynamic and changes are published in the same file three days ahead",
+	}
+	routes[dailyCarrier] = route
+	// The Pipecat Cloud native carrier WebSocket (SCHEMA N38). The carrier streams
+	// the call's audio straight to the platform's own endpoint, named by a piece of
+	// static markup in the carrier's console, and the platform starts the agent.
+	//
+	// Read the two empty fields below as the feature: `Processes` and
+	// `PublicEndpoints` are empty because **the operator hosts nothing**. Every
+	// other route fills at least one of them. This is the only row in the table
+	// where a reader should expect both to be empty, and validate has a matching
+	// branch so an empty process list is a valid plan here and nowhere else.
+	//
+	// No `source.*` features, same reason as the Daily carrier row: the call-source
+	// table is filled by the carrier-websocket adapters, and this route emits no
+	// adapter at all. The Bin's from_number/to_number parameters reach the bot's
+	// call_data, which is a different thing from a bound spec variable.
+	cloudWebsocket := TelephonyKey{Provider: Pipecat, Transport: "cloud-websocket", Carrier: "twilio"}
+	add(Pipecat, "cloud-websocket", "twilio", "https://docs.pipecat.ai/pipecat-cloud/guides/telephony/twilio-websocket",
+		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound,
+		TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup))
+	route = routes[cloudWebsocket]
+	for feature, evidence := range route.Features {
+		evidence.Verified = "2026-08-13"
+		// The tag stays provisional and the note stopped being generic on the same
+		// day, for two different reasons, and conflating them is what made the old
+		// note wrong.
+		//
+		// The **tag** tracks whether a credentialed smoke runs in CI. None does, on
+		// any route in this table, so every row here is provisional and lifting one
+		// is a CI change rather than a phone call.
+		//
+		// The **note** tracks what anybody actually did. Live inbound and a live
+		// cold transfer were run on a deployed agent on 2026-08-13 (dated evidence
+		// in docs/TRANSFERS.md), so the previous note, "no call has been placed
+		// through this endpoint yet", became false and is the kind of stale line a
+		// reader is right to trust. What is genuinely unrun is the decline path.
+		evidence.Note = "live inbound and cold transfer run 2026-08-13 (docs/TRANSFERS.md); " +
+			"the transfer's decline path is emitted and offline-proven but has not been run; " +
+			"no credentialed smoke runs in CI on any route"
+		route.Features[feature] = evidence
+	}
+	// Required only when the package places or redirects calls. Receiving a call
+	// needs none of the three: the platform terminates the carrier's stream itself
+	// and the emitted bot never speaks to the carrier's API (research F4, D4).
+	// ir.Build carries that conditionality; the row states the vocabulary.
+	route.RequiredEnvironment = []string{"account_sid", "auth_token", "from_number"}
+	// The organization name completes the service host the outbound command and the
+	// transfer markup have to name. The compiler knows the agent name and cannot
+	// know this, so it is read by name at call time (research D5).
+	route.RuntimeEnvironment = []TelephonyEnvironmentRule{{
+		Name:        "PIPECAT_CLOUD_ORGANIZATION",
+		AnyFeatures: []TelephonyFeature{TelephonyOutbound, TelephonyFeature(ColdTransfer)},
+	}}
+	// No AutoWebhookEndpoint: in production the number points at a TwiML Bin, which
+	// is a console object rather than a URL, so there is nothing for the CLI to
+	// write. `unmute dev --telephony` does point the number at its tunnel, and it
+	// does that against the runner's own local webhook, not against a route
+	// endpoint, which is why no endpoint appears above.
+	route.ManualSteps = []string{
+		"select a Voice-capable number you own in this Twilio account (or reuse the one another target already uses; a number serves one target at a time), and take it off any SIP trunk first, because a number on a trunk ignores its voice configuration silently",
+		"run `pipecat cloud organizations list` and note the organization name; it is the one value the compiler cannot know",
+		"create a TwiML Bin holding the exact markup the generated README dictates, with the organization name pasted in (Twilio Console, TwiML Bins, create)",
+		"point the number's \"A call comes in\" at that TwiML Bin (Phone Numbers, Manage, Active Numbers, your number, Voice Configuration)",
+	}
+	routes[cloudWebsocket] = route
 	connector := TelephonyKey{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}
+	// No transfers on this route: a transfer needs a platform primitive, and
+	// the connector has none — LiveKit's SIP prebuilts need a SIP participant
+	// and an outbound trunk, neither of which exists here (SPEC C1, V1).
 	connectorFeatures := append([]TelephonyFeature{
 		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound, TelephonyFeature(Hangup),
 	}, sourcesWithStream...)
@@ -249,6 +393,80 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	return routes
 }
 
+// RouteAccountPrerequisite is a platform feature the provider grants on request
+// rather than by default, which a route cannot work without.
+//
+// It carries no tag on purpose. The four tags describe whether *unmute* can
+// honour a field: core never fails, warn prints, gated refuses, provisional
+// fails until proven. An account permission is none of those — unmute compiles
+// the package perfectly, and whether the author's account has the feature is
+// unknowable at compile time. Gating it would refuse correct packages; warning
+// would print on every compile forever and train authors to ignore stderr. So
+// it states a fact about the route and never claims a failure (research D3).
+type RouteAccountPrerequisite struct {
+	Name     string             `json:"name"`
+	Summary  string             `json:"summary"`
+	NeededBy []TelephonyFeature `json:"needed_by"`
+	Docs     string             `json:"docs"`
+	Verified string             `json:"verified"`
+}
+
+// Needs reports whether the package uses anything this prerequisite is needed
+// by. Both directions matter: a prerequisite that always prints is a banner
+// rather than a warning, which is the noise failure mode research D3 rejects.
+func (p RouteAccountPrerequisite) Needs(used []TelephonyFeature) bool {
+	for _, feature := range used {
+		if slices.Contains(p.NeededBy, feature) {
+			return true
+		}
+	}
+	return false
+}
+
+type routePrerequisiteRule struct {
+	provider  Provider
+	transport string
+	carrier   string // "" matches any carrier on the transport
+	prereq    RouteAccountPrerequisite
+}
+
+// routePrerequisites is the only home for these facts. The emitter, the docs,
+// and the validate report all read them from here (Principle III).
+var routePrerequisites = []routePrerequisiteRule{{
+	provider: Pipecat, transport: "daily-sip",
+	prereq: RouteAccountPrerequisite{
+		Name: "daily_dialout",
+		Summary: "Ask Daily to enable dial-out on the domain the agent's rooms belong to: " +
+			"it is a paid feature granted on request, per domain, and international dial-out is enabled separately. " +
+			"It covers dialling a SIP URI as well as a PSTN number, so a target that carries its calls " +
+			"through its own carrier trunk needs the same approval and needs no purchased Daily number.",
+		NeededBy: []TelephonyFeature{TelephonyFeature(ColdTransfer), TelephonyOutbound},
+		Docs:     "https://docs.pipecat.ai/pipecat-cloud/guides/telephony/daily-dial-out",
+		Verified: "2026-08-12",
+	},
+}}
+
+// RouteAccountPrerequisites returns the account features a route needs.
+//
+// It takes the route triple rather than a resolved telephony plan, because the
+// Daily route has neither a connection nor a telephony channel and so never
+// gets a plan (ir/build.go sets one only when a connection is declared). Every
+// other route fact is reached through that plan, which is why this one needs
+// its own door.
+func RouteAccountPrerequisites(provider Provider, transport, carrier string) []RouteAccountPrerequisite {
+	var out []RouteAccountPrerequisite
+	for _, rule := range routePrerequisites {
+		if rule.provider != provider || rule.transport != transport {
+			continue
+		}
+		if rule.carrier != "" && rule.carrier != carrier {
+			continue
+		}
+		out = append(out, rule.prereq)
+	}
+	return out
+}
+
 func TelephonyEnvironment(key TelephonyKey) (required, optional []string, ok bool) {
 	route, ok := TelephonyRoutes()[key]
 	if !ok {
@@ -267,10 +485,42 @@ func ResolveTelephonyFeature(key TelephonyKey, feature TelephonyFeature) Telepho
 	}
 	evidence, ok := route.Features[feature]
 	if !ok {
-		return TelephonyEvidence{
-			Feature: feature, Tag: Gated,
-			Note: fmt.Sprintf("telephony route (%s, %s, %s) does not support %s", key.Provider, key.Transport, key.Carrier, feature),
+		note := fmt.Sprintf("telephony route (%s, %s, %s) does not support %s", key.Provider, key.Transport, key.Carrier, feature)
+		// Transfers ride platform primitives, so the refusal names where they
+		// exist (SPEC C1, V1): the author learns the fix, not just the no.
+		switch {
+		case feature == TelephonyFeature(ColdTransfer):
+			note += "; cold transfer compiles on (livekit, sip) trunks and on both Pipecat carrier routes (transport daily-sip and transport cloud-websocket)"
+		case feature == TelephonyFeature(WarmTransfer):
+			if key.Provider == Pipecat && key.Transport == "cloud-websocket" {
+				// Say what it would take, not that it cannot be done. A warm transfer
+				// needs to branch on how the destination's leg ended, and on this route
+				// the only thing that could branch is a callback endpoint the operator
+				// hosts, which is the exact cost this route exists to remove. So the
+				// refusal names the trade rather than blaming the platform (SCHEMA N34).
+				return TelephonyEvidence{Feature: feature, Tag: Gated, Note: fmt.Sprintf(
+					"telephony route (%s, %s, %s) does not emit warm transfer: a warm handoff has to act on how the "+
+						"destination's leg ended, which on this route needs a callback endpoint you host, and hosting "+
+						"nothing is what this route is for; warm transfer compiles on (livekit, sip) trunks today",
+					key.Provider, key.Transport, key.Carrier)}
+			}
+			if key.Provider == Pipecat && key.Transport == "daily-sip" {
+				// Daily documents warm on this route and this project has not built
+				// it. Saying the platform cannot do it would send an author looking
+				// for a different platform when what they need is the feature that
+				// emits it (SCHEMA N34's wording rule).
+				note = fmt.Sprintf("telephony route (%s, %s, %s) does not emit warm transfer yet: Daily documents the pattern and this project has not built it",
+					key.Provider, key.Transport, key.Carrier)
+			}
+			note += "; warm transfer compiles on (livekit, sip) trunks today"
+		case strings.HasPrefix(string(feature), TelephonySourcePrefix):
+			// A call source is filled by an emitted adapter reading the carrier's
+			// own payload. The routes that emit one are the routes that grant it,
+			// so the refusal names them: an author who wants the caller's number
+			// has a route to move to, not just a no.
+			note += "; telephony call sources are filled by the emitted carrier adapter, so they compile on Pipecat's carrier-websocket routes and on (livekit, sip) and (livekit, connector) trunks"
 		}
+		return TelephonyEvidence{Feature: feature, Tag: Gated, Note: note}
 	}
 	return evidence
 }

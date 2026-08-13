@@ -1,0 +1,25 @@
+# Twilio, the account side of the Pipecat Cloud carrier stream route. Values are
+# environment variable names, never secrets.
+#
+# The same three names ../../twilio-telephony-hello uses, verbatim, so one `.env` drives
+# every Twilio example in this repository. Future carriers follow the same
+# <CARRIER>_* shape.
+#
+# Three names, and the route accepts only these three. There is no sip_address,
+# no sip_username, and no sip_password: nothing on this route speaks SIP, and
+# declaring one of them fails at compile time naming the key and the accepted
+# set.
+#
+# What each is for:
+#   account_sid + auth_token  authenticate the one request that hands a live call
+#                             to a person, and the outbound command in the runbook
+#   from_number               the caller identity the person you call sees. A
+#                             voice-capable number you own in this account (or a
+#                             caller ID verified on it); it may be the same number
+#                             that receives calls, which is why one value serves
+#                             both directions
+kind: telephony
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER

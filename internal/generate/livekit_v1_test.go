@@ -1165,35 +1165,129 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		"async def to_human(self, ctx: RunContext) -> str:",
+		// `str | None` since 2026-08-12: a function tool's return value is fed
+		// back to the LLM, which then takes another turn. That is right while
+		// the caller is still listening and wrong once the session is over, so
+		// the session-ending paths return nothing.
+		"async def to_human(self, ctx: RunContext) -> str | None:",
 		"job_ctx = get_job_context()",
-		`await job_ctx.transfer_sip_participant(identity, "+14155550123", play_dialtone=True)`,
+		"rtc.ParticipantKind.PARTICIPANT_KIND_SIP",
+		// The tool speaks its own announcement (SPEC V4/B4).
+		`"Putting you through now, one moment.", allow_interruptions=False`,
+		// A REFER destination is a URI, not a bare number: this asserted
+		// `transfer_to="+14155550123"` until 2026-08-12, which is a shape no
+		// LiveKit example uses and which Plivo's Refer-To rules forbid outright.
+		`transfer_to="tel:+14155550123",`,
+		"await job_ctx.api.sip.transfer_sip_participant(request)",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("cold agent.py missing %q", want)
 		}
 	}
+	// A completed REFER takes the caller out of the room, so the session ends on
+	// its own and the tool returns nothing. A return value here would buy one
+	// LLM turn spoken to nobody, racing the teardown.
+	if strings.Contains(botpy, `return "The caller was transferred."`) {
+		t.Error("cold agent.py returns to the LLM after the caller has already left the room")
+	}
+	if !strings.Contains(botpy, "return None") {
+		t.Error("cold agent.py does not end its transfer tool without a value")
+	}
 
-	human := agent.Controls["to_human"].(*ir.HumanTransfer)
-	human.Mode = ir.TransferWarm
-	human.Briefing = ir.BriefingSummary
-	artifact, err = Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	// The warm half needs a telephony Connection: a warm transfer dials the
+	// destination itself, and since 2026-08-12 (SCHEMA N33) it does that with
+	// the carrier's own SIP credentials, so a target with no Connection is a
+	// gated validation error rather than a package that reads a trunk ID it
+	// never declared. This used to mutate the non-telephony target in place,
+	// which exercised a shape nobody can author.
+	warmAgent, warmTarget := configuredLiveKitSIP(t)
+	human := warmAgent.Controls["to_human"].(*ir.HumanTransfer)
+	human.RingTimeout = "30s"
+	human.OnUnavailable = ir.OnUnavailableReturn
+	artifact, err = Generate(warmAgent, warmTarget, target.Default())
 	if err != nil {
 		t.Fatalf("generate warm: %v", err)
 	}
 	botpy = artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		"from livekit.agents.beta.workflows import WarmTransferTask",
-		`result = await WarmTransferTask(sip_call_to="+14155550123")`,
+		"from livekit.agents.beta.workflows import WarmTransferTask, WorkflowInstructions",
+		`sip_call_to="+14155550123"`,
+		// The conversation is read into one local and that local is what is
+		// handed over, so the count logged beside it cannot describe something
+		// else (003 contract C4).
+		"chat_ctx=briefing_ctx,",
+		// instructions=WorkflowInstructions(...) is the supported briefing
+		// surface. extra_instructions is deprecated and the prebuilt warns and
+		// ignores it whenever instructions is given. WorkflowInstructions is the
+		// 1.6.9 name for what 1.6.4 called InstructionParts: the rename carries
+		// no alias, and it was verified by reading the installed package on
+		// 2026-08-12 rather than the older reference checkout.
+		"instructions=WorkflowInstructions(",
+		"persona=_BRIEFING_PERSONA,",
+		`extra="Say who is calling and why.",`,
+		"ringing_timeout=30,",
+		// The tool speaks before the hold starts (SPEC V4/B4).
+		`"One moment while I bring a colleague on the line.", allow_interruptions=False`,
+		"except ToolError as error:",
+		"room_options=room_io.RoomOptions(delete_room_on_close=False)",
 		"result.human_agent_identity",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("warm agent.py missing %q", want)
 		}
 	}
+	if strings.Contains(botpy, "extra_instructions") {
+		t.Error("agent.py still passes the deprecated extra_instructions, which the prebuilt ignores once instructions is given")
+	}
+	// V10: a warm package pins the verified beta minor series, not <2.0.
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !strings.Contains(pyproject, ">=1.6,<1.7") {
+		t.Errorf("warm pyproject.toml must pin the verified livekit-agents minor series (V10):\n%s", pyproject)
+	}
+	// A warm transfer needs no platform-assigned trunk identity: it dials with
+	// the carrier's own trunk settings, passed inline (SCHEMA N33, 2026-08-12).
+	// What it does need is the four Connection values, and the inline form makes
+	// the from-number mandatory because there is no trunk number to default to.
 	envExample := artifactFile(t, artifact, ".env.example")
-	if !strings.Contains(envExample, "LIVEKIT_SIP_OUTBOUND_TRUNK") {
-		t.Error(".env.example missing LIVEKIT_SIP_OUTBOUND_TRUNK for warm transfer")
+	if strings.Contains(envExample, "LIVEKIT_SIP_OUTBOUND_TRUNK") {
+		t.Error(".env.example still lists LIVEKIT_SIP_OUTBOUND_TRUNK for a warm transfer")
+	}
+	for _, want := range []string{
+		"sip_connection=_sip_trunk(),",
+		"sip_number=_sip_number(),",
+		"def _sip_trunk() -> api.SIPOutboundConfig:",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("warm agent.py missing %q", want)
+		}
+	}
+	if strings.Contains(botpy, "sip_trunk_id") {
+		t.Error("warm agent.py still passes a stored trunk id")
+	}
+	// After the merge the session is over, so the tool must hand the LLM
+	// nothing. Returning a value here bought one more LLM turn, spoken into a
+	// room that by then held the caller and the person we had just handed them
+	// to, immediately after saying goodbye. Found on a live call 2026-08-12;
+	// upstream's own warm-transfer example returns nothing here too.
+	for _, want := range []string{
+		`"warm transfer merged after %ds: %s",`,
+		"result.human_agent_identity,",
+		"ctx.session.shutdown()",
+		"return None",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("warm agent.py missing %q", want)
+		}
+	}
+	if strings.Contains(botpy, "The caller is now connected to ") {
+		t.Error("warm agent.py returns the merge result to the LLM, which then speaks to the caller and the person again")
+	}
+	// FR-017: exactly the values needed to dial. Region pinning and transport
+	// are optional on the platform and nobody declared them.
+	for _, forbidden := range []string{"destination_country", "transport="} {
+		if strings.Contains(botpy, forbidden) {
+			t.Errorf("warm agent.py emits %q, which no Connection declared", forbidden)
+		}
 	}
 }
 
@@ -1249,7 +1343,12 @@ func TestLiveKitV1OutboundVoicemail(t *testing.T) {
 		for _, want := range []string{
 			"async with AMD(session, participant_identity=\"phone_user\") as detector:",
 			"api.CreateSIPParticipantRequest(",
-			`sip_trunk_id=os.environ["LIVEKIT_SIP_OUTBOUND_TRUNK"],`,
+			// Inline trunk configuration, not a stored trunk id (SCHEMA N33,
+			// 2026-08-12). CreateSIPParticipant takes the settings in `trunk`
+			// and requires `sip_number` with them, because inline configuration
+			// carries no number list to default from.
+			"trunk=_sip_trunk(),",
+			"sip_number=_sip_number(),",
 			"wait_until_answered=True,",
 			"result = await detector.execute()",
 			tc.want,
@@ -1257,6 +1356,9 @@ func TestLiveKitV1OutboundVoicemail(t *testing.T) {
 			if !strings.Contains(botpy, want) {
 				t.Errorf("%s agent.py missing %q", tc.action, want)
 			}
+		}
+		if strings.Contains(botpy, "sip_trunk_id") {
+			t.Errorf("%s agent.py still passes a stored trunk id", tc.action)
 		}
 	}
 }
@@ -1268,16 +1370,27 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, path := range []string{"sip-inbound-trunk.json", "sip-outbound-trunk.json", "sip-dispatch-rule.json"} {
+	for _, path := range []string{"sip-inbound-trunk.json", "sip-dispatch-rule.json"} {
 		content := artifactFile(t, artifact, path)
 		if !json.Valid([]byte(content)) {
 			t.Errorf("%s is not valid JSON:\n%s", path, content)
 		}
+		// Pinned as goldens on 2026-08-12, before the inline dial-out change,
+		// so "inbound is untouched" is a byte comparison inside the repository
+		// rather than a diff against a copy somebody made in /tmp.
+		assertGoldenFile(t, filepath.Join("testdata", "golden", "livekit_v1_"+path), content, *updateLiveKitV1)
+	}
+	// No outbound-trunk input is emitted any more: nothing reads a stored
+	// outbound trunk, so an input file for creating one would be a step whose
+	// output nothing consumes (SCHEMA N33, 2026-08-12).
+	for _, file := range artifact.Files {
+		if file.Path == "sip-outbound-trunk.json" {
+			t.Error("sip-outbound-trunk.json must not be emitted")
+		}
 	}
 	for path, wants := range map[string][]string{
-		"sip-inbound-trunk.json":  {`${TWILIO_PHONE_NUMBER}`, `twilio inbound`},
-		"sip-outbound-trunk.json": {`${TWILIO_SIP_ADDRESS}`, `${TWILIO_PHONE_NUMBER}`},
-		"sip-dispatch-rule.json":  {`${LIVEKIT_SIP_INBOUND_TRUNK}`, `"agentName": "livekit"`, `\"direction\":\"inbound\"`},
+		"sip-inbound-trunk.json": {`${TWILIO_PHONE_NUMBER}`, `twilio inbound`},
+		"sip-dispatch-rule.json": {`${UNMUTE_SIP_TRUNK_ID}`, `"agentName": "livekit"`, `\"direction\":\"inbound\"`},
 	} {
 		content := artifactFile(t, artifact, path)
 		for _, want := range wants {
@@ -1314,7 +1427,8 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		`_hydrate_livekit_context(session.userdata, call_context)`,
 		`_hydrate_call_start(session.userdata, call_start)`,
 		`await _livekit_entry_greeting(session)`,
-		`result = await WarmTransferTask(sip_call_to="+14155550123")`,
+		"result = await WarmTransferTask(",
+		`sip_call_to="+14155550123",`,
 	} {
 		if !strings.Contains(agentPy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -1331,23 +1445,38 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		t.Error("dispatched input variables must hydrate before the first greeting")
 	}
 	env := artifactFile(t, artifact, ".env.example")
+	// This fixture keeps the carrier-prefixed names on purpose. The compiler
+	// carries whatever a Connection declares, so a package written before the
+	// shipped example moved to the plain SIP names keeps working unchanged.
 	for _, name := range []string{
 		"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "REDIS_URL",
-		"LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK",
 		"TWILIO_SIP_ADDRESS", "TWILIO_SIP_USERNAME", "TWILIO_SIP_PASSWORD", "TWILIO_PHONE_NUMBER",
 	} {
 		if !strings.Contains(env, name+"=") {
 			t.Errorf(".env.example missing %s", name)
 		}
 	}
+	// Dialling out registers nothing on the platform, so the stored outbound
+	// trunk is not a name this package asks anybody for (SCHEMA N33).
+	if strings.Contains(env, "LIVEKIT_SIP_OUTBOUND_TRUNK") {
+		t.Error(".env.example still lists LIVEKIT_SIP_OUTBOUND_TRUNK")
+	}
 	readme := artifactFile(t, artifact, "README.md")
 	for _, want := range []string{
-		"Configure self-hosted LiveKit SIP", "SIP trunking console", "twilio provider guide", "REDIS_URL", "not an audio hop",
-		`--auth-user "$TWILIO_SIP_USERNAME"`, `--auth-pass "$TWILIO_SIP_PASSWORD"`,
+		"## Telephony setup", "SIP trunking console", "twilio provider guide", "REDIS_URL", "not an audio hop",
+		"no LiveKit outbound trunk is registered",
 		"UNMUTE_LIVEKIT_SIP_PORT", "UNMUTE_LIVEKIT_RTP_PORT_RANGE", "UNMUTE_LIVEKIT_PORT",
 	} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("README.md missing %q", want)
+		}
+	}
+	// The README still names the retired command and variable, on purpose, to
+	// tell an operator who set up an earlier build that both are gone. What it
+	// must not do is instruct anybody to create the trunk.
+	for _, forbidden := range []string{"envsubst < sip-outbound-trunk.json", "Set LIVEKIT_SIP_OUTBOUND_TRUNK"} {
+		if strings.Contains(readme, forbidden) {
+			t.Errorf("README.md still tells the reader to create the outbound trunk: %q", forbidden)
 		}
 	}
 	compose := artifactFile(t, artifact, "compose.telephony.yaml")
@@ -1390,13 +1519,22 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		t.Fatalf("runtime process = %#v", runtime.Processes)
 	}
 	required := strings.Join(runtime.RequiredEnv, ",")
-	for _, want := range []string{"REDIS_URL", "LIVEKIT_SIP_INBOUND_TRUNK", "LIVEKIT_SIP_OUTBOUND_TRUNK", "TWILIO_SIP_PASSWORD"} {
+	for _, want := range []string{"REDIS_URL", "TWILIO_SIP_PASSWORD"} {
 		if !strings.Contains(required, want) {
 			t.Errorf("runtime required env missing %s: %s", want, required)
 		}
 	}
+	// No environment name carries a trunk ID in either direction (SCHEMA N36).
+	if strings.Contains(required, "LIVEKIT_SIP_INBOUND_TRUNK") {
+		t.Errorf("runtime still requires the retired inbound trunk name: %s", required)
+	}
 	if strings.Contains(required, "LIVEKIT_SIP_URI") {
 		t.Errorf("runtime still requires the unused LIVEKIT_SIP_URI: %s", required)
+	}
+	// Dialling out needs no stored trunk, so the runtime asks for no trunk id
+	// it cannot get from the carrier (SCHEMA N33, 2026-08-12).
+	if strings.Contains(required, "LIVEKIT_SIP_OUTBOUND_TRUNK") {
+		t.Errorf("runtime still requires the retired outbound trunk id: %s", required)
 	}
 	if strings.Contains(required, "UNMUTE_OUTBOUND_TOKEN") {
 		t.Errorf("LiveKit SIP runtime requires unused outbound token: %s", required)
@@ -1465,9 +1603,9 @@ func configuredLiveKitSIP(t *testing.T) (*ir.Agent, ir.Target) {
 	pkg.Agent.Variables["campaign_id"] = spec.Variable{Type: "string", Source: "call_start", Default: "manual"}
 	pkg.Agent.Variables["provider_call_id"] = spec.Variable{Type: "string", Source: "call_id"}
 	pkg.Agent.Variables["call_direction"] = spec.Variable{Type: "string", Source: "direction"}
-	warm, summary := "warm", "summary"
 	human := pkg.Agent.Controls["to_human"]
-	human.Mode, human.Briefing = &warm, &summary
+	human.Cold = nil
+	human.Warm = &spec.WarmTransfer{Destination: "billing_line", Briefing: "Say who is calling and why."}
 	pkg.Agent.Controls["to_human"] = human
 
 	agent, err := ir.Build(pkg)
@@ -1619,8 +1757,12 @@ func TestLiveKitV1PinsAndSDKLanguage(t *testing.T) {
 	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, `"livekit-plugins-slng>=1.7.0"`) {
 		t.Errorf("pin did not raise the plugin floor:\n%s", pyproject)
 	}
-	if !strings.Contains(artifactFile(t, artifact, "livekit.toml"), `id = "livekit"`) {
-		t.Error("livekit.toml missing the agent id")
+	// No deployment config file is emitted: the platform assigns both of its
+	// values, and its presence makes `lk agent create` refuse (FR-008).
+	for _, file := range artifact.Files {
+		if strings.HasPrefix(file.Path, "livekit") && strings.HasSuffix(file.Path, ".toml") {
+			t.Errorf("emitted %s; LiveKit Cloud writes that file itself", file.Path)
+		}
 	}
 
 	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.0.0"}
@@ -1739,8 +1881,14 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
 	back.Context.History = ir.HistorySummary
 	back.Context.Summarizer = "backup"
-	agent.Controls["to_human"] = &ir.HumanTransfer{Kind: ir.ControlHumanTransfer, Destination: "line", Mode: ir.TransferWarm, Briefing: ir.BriefingSummary}
-	agent.Controls["to_human_cold"] = &ir.HumanTransfer{Kind: ir.ControlHumanTransfer, Destination: "line", Mode: ir.TransferCold}
+	// Cold, not warm. A warm transfer dials the destination itself and needs a
+	// telephony Connection for the carrier credentials (SCHEMA N33,
+	// 2026-08-12), which this non-telephony fixture does not have. Warm's
+	// lowering is covered on a SIP target by
+	// TestLiveKitV1HumanTransferColdAndWarm and
+	// TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting.
+	agent.Controls["to_human"] = &ir.HumanTransfer{Kind: ir.ControlHumanTransfer, Destination: "line", Mode: ir.TransferCold, OnUnavailable: ir.OnUnavailableReturn}
+	agent.Controls["to_human_cold"] = &ir.HumanTransfer{Kind: ir.ControlHumanTransfer, Destination: "line", Mode: ir.TransferCold, RingTimeout: "20s", OnUnavailable: ir.OnUnavailableHangup}
 	agent.Tools["fetch_notes"] = ir.Tool{
 		Description: "Fetch the caller's saved notes.",
 		Input:       map[string]any{"type": "object", "properties": map[string]any{"topic": map[string]any{"type": "string"}}},

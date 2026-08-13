@@ -1,0 +1,58 @@
+# Minimal phone agent for telephony testing, both directions.
+# It only greets and chats: no tools, no tasks, no transfer, so nothing here
+# needs a capability that either Twilio route lacks. Both directions are
+# declared under channels.phone, which is what makes this package able to test a
+# call coming in and a call going out with the same agent.
+version: 1
+entry_agent: greeter
+
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  greeter:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, you have reached the Unmute test line. How are you today?"
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: true
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 4
+  peak_starts_per_second: 1
+  avg_session_duration: 2m

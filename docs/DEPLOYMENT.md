@@ -1,13 +1,22 @@
 # Self-hosted deployment
 
-Status: Adopted stance, July 23, 2026. For now, Unmute deployments do not use
-LiveKit Cloud or Pipecat Cloud. Everything below runs on infrastructure you
-control.
+Status: Adopted stance, August 12, 2026. Remote deployment uses the managed
+clouds: Pipecat Cloud for the Pipecat driver, LiveKit Cloud for LiveKit. Local
+runs still need no cloud account at all, and that is a separate claim, kept in
+[TELEPHONY.md](TELEPHONY.md) where `unmute dev` lives.
 
-The generated artifacts stay compatible with the managed clouds, but the
-supported path is self-hosted. This document records what you need to take the
-emitted Docker image and run a full, production-ready voice AI application
-without either cloud.
+This document records what you need to take the emitted Docker image and run it
+on infrastructure you control. That path still works and is still documented.
+What changed is which one is supported: for a deployment, the managed cloud is.
+
+Superseded stance, kept as history: *"Adopted stance, July 23, 2026. For now,
+Unmute deployments do not use LiveKit Cloud or Pipecat Cloud. Everything below
+runs on infrastructure you control."* That sentence conflated two things. Local
+runs needing no cloud account was true and still is. Deployments avoiding the
+managed clouds was a choice, and it has been reversed.
+
+The generated artifacts stay compatible with both, because the compiler emits an
+ordinary container and a manifest, not a hosting decision.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) explains the runtime shapes this document
 deploys. [TELEPHONY.md](TELEPHONY.md) owns the telephony details and its
@@ -20,7 +29,7 @@ everything that belongs to the environment.
 
 | The compiler emits | You provide |
 |---|---|
-| The Python project and a `Dockerfile` (`python:3.12-slim` base) | A place to run containers (VM, Kubernetes, or similar) |
+| The Python project and a `Dockerfile` (`python:3.12-slim` base, or `dailyco/pipecat-base` where the target deploys to Pipecat Cloud) | A place to run containers (VM, Kubernetes, or similar) |
 | An `.env.example` naming every required variable | The secret values, from your secret store |
 | Local Compose files for development | Production networking, TLS, DNS, and ingress |
 | Deployment metadata and a compile report | Redis, scaling policy, and monitoring |
@@ -153,6 +162,20 @@ signaling endpoint and the media itself on the bot port (7860).
   open work, not a settled path.
 
 ### Phone calls
+
+**Only one of the three Pipecat phone routes is self-hosted, and this section is
+about that one** (`transport: carrier-websocket`). The other two host nothing of
+yours in production and so have nothing on this page to run:
+
+- `transport: cloud-websocket`: Pipecat Cloud terminates the carrier's stream
+  itself. No process, no ingress, no Redis. Its region, its secret set's region,
+  and the stream endpoint in its carrier markup are all derived from one
+  `deployment_region` declaration, and the platform requires them to agree.
+- `transport: daily-sip` with a `carrier`: one small emitted webhook server that
+  you run, and nothing else. The deployed agent still exposes nothing.
+
+Both are described in [TELEPHONY.md](TELEPHONY.md), which also compares the three
+and recommends one for the common case. What follows is the self-hosted route.
 
 The telephony image starts the generated FastAPI application with uvicorn on
 port 7860. Production must provide:

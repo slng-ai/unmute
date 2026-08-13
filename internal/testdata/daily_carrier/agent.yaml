@@ -1,0 +1,60 @@
+# The (pipecat, daily-sip, twilio) carrier form, as a fixture.
+#
+# This package exists because feature 007 removed the public example that used to
+# carry this route (specs/007-pipecat-native-websocket FR-016): the route keeps
+# its code, its capability rows, and its guards, and stops shipping an example
+# that would recommend it over the route with nothing to host. Everything the
+# route's tests need is here.
+version: 1
+entry_agent: front_desk
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+  speak:
+    voice:
+      provider: openai
+      model: tts-1
+      voice: alloy
+  listen:
+    transcriber:
+      provider: openai
+      model: whisper-1
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  front_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - send_to_billing
+
+controls:
+  send_to_billing:
+    kind: human_transfer
+    when: The caller asks about an invoice or a refund.
+    cold:
+      destination: billing_line
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Front desk on the Daily carrier line. How can I help?"
+
+channels:
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: true
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 4
+  peak_starts_per_second: 1
+  avg_session_duration: 3m

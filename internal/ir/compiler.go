@@ -212,12 +212,18 @@ type AgentTransfer struct {
 
 func (*AgentTransfer) control() {}
 
+// HumanTransfer is the resolved `cold:`/`warm:` control (SCHEMA N25). Mode is
+// the resolved shape, not an authored field: the authoring surface is the block
+// name. Briefing is free text and is warm-only. OnUnavailable is resolved to its
+// default at Build time, so no driver ever reads an empty value.
 type HumanTransfer struct {
-	Kind        ControlKind  `json:"kind" yaml:"kind"`
-	When        string       `json:"when,omitempty" yaml:"when,omitempty"`
-	Destination string       `json:"destination" yaml:"destination"`
-	Mode        TransferMode `json:"mode" yaml:"mode"`
-	Briefing    Briefing     `json:"briefing,omitempty" yaml:"briefing,omitempty"`
+	Kind          ControlKind   `json:"kind" yaml:"kind"`
+	When          string        `json:"when,omitempty" yaml:"when,omitempty"`
+	Destination   string        `json:"destination" yaml:"destination"`
+	Mode          TransferMode  `json:"mode" yaml:"mode"`
+	Briefing      string        `json:"briefing,omitempty" yaml:"briefing,omitempty"`
+	RingTimeout   Duration      `json:"ring_timeout,omitempty" yaml:"ring_timeout,omitempty"`
+	OnUnavailable OnUnavailable `json:"on_unavailable" yaml:"on_unavailable"`
 }
 
 func (*HumanTransfer) control() {}
@@ -237,12 +243,16 @@ const (
 	TransferWarm TransferMode = "warm"
 )
 
-type Briefing string
+// OnUnavailable is what happens when the person does not take the call. One
+// value covers every way that can happen (no answer within RingTimeout, an
+// explicit decline, voicemail, or a failed dial), because that is the shape the
+// platforms report: LiveKit's WarmTransferTask surfaces all four as one
+// ToolError (SCHEMA N25).
+type OnUnavailable string
 
 const (
-	BriefingSummary Briefing = "summary"
-	BriefingMessage Briefing = "message"
-	BriefingWait    Briefing = "wait"
+	OnUnavailableReturn OnUnavailable = "return_to_caller"
+	OnUnavailableHangup OnUnavailable = "hangup"
 )
 
 type Tool struct {
@@ -397,7 +407,6 @@ type TelephonyPlan struct {
 	PublicEndpoints     []TelephonyEndpoint           `json:"public_endpoints,omitempty" yaml:"public_endpoints,omitempty"`
 	RequiredEnvironment []string                      `json:"required_environment" yaml:"required_environment"`
 	LocalEnvironment    []string                      `json:"locally_supplied_environment" yaml:"locally_supplied_environment"`
-	DevEnvironment      []string                      `json:"dev_supplied_environment,omitempty" yaml:"dev_supplied_environment,omitempty"`
 	AutoWebhookEndpoint string                        `json:"auto_webhook_endpoint,omitempty" yaml:"auto_webhook_endpoint,omitempty"`
 	ManualSteps         []string                      `json:"manual_steps,omitempty" yaml:"manual_steps,omitempty"`
 	Services            []string                      `json:"services" yaml:"services"`
@@ -440,18 +449,18 @@ type TelephonyFeatureEvidence struct {
 }
 
 type Target struct {
-	Name             string            `json:"name" yaml:"name"`
-	Provider         Provider          `json:"provider" yaml:"provider"`
-	Version          string            `json:"version,omitempty" yaml:"version,omitempty"`
-	Pins             map[string]string `json:"pins,omitempty" yaml:"pins,omitempty"`
-	SDKLanguage      string            `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
-	Transport        string            `json:"transport,omitempty" yaml:"transport,omitempty"`
-	Carrier          string            `json:"carrier,omitempty" yaml:"carrier,omitempty"`
-	Connection       string            `json:"connection,omitempty" yaml:"connection,omitempty"`
-	DeploymentRegion string            `json:"deployment_region,omitempty" yaml:"deployment_region,omitempty"`
-	Models           Bindings          `json:"models" yaml:"models"`
-	Destinations     map[string]string `json:"destinations,omitempty" yaml:"destinations,omitempty"`
-	Telephony        *TelephonyPlan    `json:"telephony,omitempty" yaml:"telephony,omitempty"`
+	Name              string            `json:"name" yaml:"name"`
+	Provider          Provider          `json:"provider" yaml:"provider"`
+	Version           string            `json:"version,omitempty" yaml:"version,omitempty"`
+	Pins              map[string]string `json:"pins,omitempty" yaml:"pins,omitempty"`
+	SDKLanguage       string            `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
+	Transport         string            `json:"transport,omitempty" yaml:"transport,omitempty"`
+	Carrier           string            `json:"carrier,omitempty" yaml:"carrier,omitempty"`
+	Connection        string            `json:"connection,omitempty" yaml:"connection,omitempty"`
+	DeploymentRegions []string          `json:"deployment_regions,omitempty" yaml:"deployment_regions,omitempty"`
+	Models            Bindings          `json:"models" yaml:"models"`
+	Destinations      map[string]string `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+	Telephony         *TelephonyPlan    `json:"telephony,omitempty" yaml:"telephony,omitempty"`
 }
 
 type Provider string

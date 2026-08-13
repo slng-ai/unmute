@@ -46,9 +46,9 @@ pipeline and its tools are plain functions on the LLM context, so the generated
 |---|---|
 | `bot.py` | The whole agent: the pipeline, every agent worker, every task flow, tools, handoffs. |
 | `pyproject.toml` | Pinned dependencies. Only the services your spec uses are included. |
-| `Dockerfile` | A container image for deployment. |
+| `Dockerfile` | A container image for deployment. On a target that deploys to Pipecat Cloud it is built on `dailyco/pipecat-base`, because the platform starts a session by calling `/bot` on the container and that route is the base image's. A plain Python base serves nothing the platform calls, so the deployment never reaches ready. Telephony targets, which are self-hosted, keep the plain base and their own server command. |
 | `compose.dev.yaml` | The local dev stack `unmute dev` runs: one `application` service built from the `Dockerfile`, no coordination store. |
-| `pcc-deploy.toml` | Pipecat Cloud deploy config for non-telephony targets. |
+| `pcc-deploy.toml` | The manifest `pipecat cloud deploy` reads, for non-telephony targets: the agent name, its region, and the secret set holding its environment. It deliberately names no image, so the platform builds the emitted `Dockerfile` in the cloud. |
 | `compose.telephony.yaml` | The generated application plus version-pinned Redis for telephony targets. |
 | `README.md` | A quickstart for the generated project. |
 | `.env.example` | The exact environment variables this spec needs, ready to copy to `.env`. |
@@ -138,12 +138,117 @@ uses the local VAD. Semantic endpointing is also advisory.
 ### Transport
 
 - **WebRTC** is the default and is what `unmute dev` uses to serve a browser test client. You do not configure it.
+- **`transport: cloud-websocket`** is the one route where **you host nothing**.
+  Pipecat Cloud terminates your carrier's media stream itself, on its own
+  endpoint; a small piece of static markup in the carrier's console (a TwiML Bin)
+  names your agent, and the platform starts it. It requires `carrier: twilio`.
+  `connection:` is required only when the package **places or redirects** calls:
+  receiving one needs no carrier credentials, because the platform receives it
+  without them.
+
+  ```yaml
+  targets:
+    pipecat:
+      provider: pipecat
+      version: "1.5.0"
+      transport: cloud-websocket
+      carrier: twilio
+      connection: twilio_voice     # omit on a receive-only package
+  ```
+
+  Three Connection keys: `account_sid`, `auth_token`, `from_number`. The first two
+  authenticate the one request that hands a live call to a person and the outbound
+  command; `from_number` is the caller identity the recipient sees, and it may be
+  the same number that receives calls. **There is no `sip_address`, no
+  `sip_username`, and no `sip_password`**, and the route refuses all three by
+  name, naming the accepted set: nothing on this route speaks SIP.
+
+  `deployment_region` is the only place a region is written: the deploy manifest,
+  the secret set's region, and the `wss://` host in every piece of markup are all
+  derived from it, because the platform routes a regional stream endpoint only to
+  agents deployed in that region.
+
+  The build emits **no new file**: the file list is exactly a plain Pipecat Cloud
+  build's. The generated README dictates the carrier console work in four steps,
+  three of them clicks and one a `pipecat cloud organizations list`. Cold transfer
+  works here, by replacing the live call's markup; the limit is that **any** ending
+  brings back a **fresh** agent that does not remember the call, a dial nobody
+  answered and a person hanging up alike, which is what the Daily carrier form
+  buys with its helper. The route comparison is in
+  [TELEPHONY.md](../../TELEPHONY.md).
 - **`transport: carrier-websocket`** selects direct Twilio, Telnyx, or Plivo
   media streaming for telephony. It also requires `carrier` and `connection`;
   support is resolved for that exact tuple. The Exotel value is recognized but
   gated until authenticated WebSocket ingress is proven. Pipecat does not use
   a SIP trunk for these routes; see the
   [orchestrator comparison](../learn/07-phone-calls.md#configure-telephony-by-orchestrator).
+- **`transport: daily-sip`** is the one Pipecat route with a transfer primitive,
+  and it is the managed route: the call arrives in a Daily room and your agent runs
+  on Pipecat Cloud. It comes in **two forms**, and which one you get depends on
+  whose number it is (SCHEMA N37).
+
+  **Daily's number (no `carrier`).** You buy the number from Daily and point it at
+  your deployed agent. It takes **no `carrier` and no `connection`**, and you
+  declare **no phone channel**: there is no carrier to configure, so the compiler
+  derives what the route needs from the transport. Nothing of yours is in the call
+  path: no server, no public port. This is the least infrastructure of any
+  telephony route in this project.
+
+  **Your own number (`carrier:` plus `connection:` plus `channels.phone`).** Your
+  carrier owns the number and forwards the call over SIP into the same Daily room.
+  All three fields are required together, and a partial declaration fails naming
+  the one you left out. Choose this form when you already hold a voice-capable
+  number, or when you cannot provision Daily numbers.
+
+  ```yaml
+  targets:
+    pipecat:
+      provider: pipecat
+      version: "1.5.0"
+      transport: daily-sip
+      carrier: twilio
+      connection: twilio_sip_daily
+  ```
+
+  Four Connection keys: `account_sid`, `auth_token`, `sip_address`, `from_number`.
+  The first two move the inbound call into the room; `sip_address` is your trunk's
+  termination address, and every outbound leg, transfers included, leaves through
+  it. **There is no `sip_username` and no `sip_password`**, and the route rejects
+  both by name. Daily's dial-out accepts a SIP address with no credential field on
+  any documented surface, so a key here would promise authentication nothing
+  performs. Your trunk allows Daily by IP address list instead, and the generated
+  README dictates that step with the address list's URL.
+
+  This form emits one extra file, `telephony_helper.py`, and **you run it**. Daily
+  makes one room per call and its SIP addresses are per room, so your carrier has
+  no static address to forward to. The helper answers your carrier, asks the
+  platform to start your agent on a fresh room with a SIP address on it, and keeps
+  the caller hearing something while the agent boots; the agent then moves the live
+  call into the room once Daily says the address is live. The deployed
+  agent still exposes no endpoint of its own. The generated README's "Telephony
+  setup" section is the whole runbook: four actions at your carrier, two commands
+  here.
+
+  Things that are true of both forms, and that the emitted `README.md` spells out:
+
+  - **Dial-out has to be enabled on the Daily domain.** It is a paid feature
+    granted on request, and international dial-out is granted separately. Cold
+    transfer needs it, because it dials the destination, and so does outbound. It
+    covers dialling a SIP address as well as a phone number, so the carrier form
+    needs the same approval and needs **no purchased Daily number**. `unmute
+    validate` names this before you spend anything, and still exits 0: the package
+    is correct, the account may not be provisioned yet.
+  - **`unmute dev --telephony` refuses**, on both forms, with a different message
+    for each. On Daily's number there is no local topology at all. On your own
+    number there is one, the helper, but the CLI cannot put it somewhere your
+    carrier can reach; the README's two commands are the local path. Either way,
+    talk to the agent in the browser or with `--console` right now, and get a real
+    phone call by deploying.
+  - **Caller-number variables are refused**, on both forms, by name. A variable
+    sourced from the caller's number, the called number, the call identifier, or
+    the direction has no fill path on this route: the code that puts those values
+    where the agent reads them is part of the carrier-WebSocket adapter, which this
+    route does not emit. The refusal names the routes where they do work.
 
 ### Telephony carrier integrations
 
@@ -165,9 +270,16 @@ Connection stores these names, while `.env` stores their values.
 
 Every generated row runs now and is tagged provisional: validation and
 compilation emit it cleanly, with no warning. The adapters contain inbound,
-outbound, hangup, and cold-transfer paths. An outbound channel runs without a
-voicemail policy; voicemail detection and warm transfer stay gated on Pipecat,
-so setting `on_voicemail` still fails validation on this route.
+outbound, and hangup paths; they carry no transfers, because the websocket
+transports have no transfer primitive ([TRANSFERS.md](../../TRANSFERS.md)).
+An outbound channel runs without a voicemail policy; voicemail detection
+stays gated on Pipecat, so setting `on_voicemail` still fails validation on
+this route.
+
+These routes use Twilio Programmable Voice and Media Streams, not SIP trunking,
+which is why they want the account SID and auth token rather than trunk
+credentials, and why they reach a laptop through the managed tunnel. See
+[why the same carrier asks for different credentials](../learn/07-phone-calls.md#why-the-same-carrier-asks-for-different-credentials).
 
 To configure several carriers, declare several Pipecat target instances, such
 as `pipecat_twilio` and `pipecat_telnyx`, and bind each to its own Connection.
@@ -210,7 +322,13 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | `inactivity` nudge and end | ok |
 | `max_duration` | ok |
 | `provider: local` for listen and speak | ok |
+| Pipecat Cloud carrier stream (`transport: cloud-websocket`) | provisional until its credentialed run is recorded (SCHEMA N38). Twilio only for now; the platform terminates other carriers' streams and each needs its own dictated markup. **Nothing is hosted by you**, so the build emits no process and no endpoint |
 | carrier WebSocket telephony | provisional for generated Twilio, Telnyx, and Plivo adapters; Exotel is gated pending authenticated WebSocket ingress |
+| Daily telephony, Daily's number (`transport: daily-sip`) | provisional until its credentialed run is recorded; needs dial-out enabled on the Daily domain, which `validate` names |
+| Daily telephony, your own number (`transport: daily-sip` + `carrier:`) | provisional until its credentialed run is recorded (SCHEMA N37); same dial-out approval, no Daily number needed. Twilio only for now: a second carrier is one forwarding action and one block of instruction text, and the structure for it already ships |
+| cold human transfer (`cold:`) | ok on `transport: daily-sip` (both forms) and on `transport: cloud-websocket`; the carrier WebSocket routes have no transfer primitive. The two differ in what happens when the dial ends: Daily keeps the same session and returns to it only on a failed dial, `cloud-websocket` speaks a handback line and brings back a fresh agent whichever way the dial ended |
+| telephony call-source variables (caller number, called number, call id, direction) | ok on the carrier WebSocket routes; **refused by name** on `transport: daily-sip` and `transport: cloud-websocket`, because the code that fills them is part of the adapter neither route emits |
+| warm human transfer (`warm:`) | not emitted on any Pipecat route, and the refusals say why per route: Daily documents the pattern and this project has not built it (feature 005); the carrier WebSocket transports have no transfer control at all; `cloud-websocket` would need a callback endpoint you host, which is the cost that route exists to remove |
 
 Everything in the [learn pages](../learn/01-one-agent.md), including the guarded handoff, the task, and the task group, runs here. The one hard `fail` is the per-task `model:` override; it sits with the driver gates below.
 
@@ -224,7 +342,24 @@ Some features are in the schema and Pipecat itself supports them, but this first
 - **Voicemail detection** (`on_voicemail`) on carrier WebSocket routes.
 - **`mcp` tools.** Use `webhook` or `local` Python-handler tools, which are
   emitted.
-- **Warm human transfer.** The direct-carrier state machine is not enabled.
+- **Warm human transfer** (the `warm:` block), on every route, for two different
+  reasons (checked 2026-08-12). On the **carrier WebSocket** routes the platform
+  has no transfer control at all, so there is nothing to build against. On the
+  **Daily** route Daily does document a warm pattern, and this project has not
+  built it yet: the pattern needs the generated bot to own the call's audio,
+  through a transfer coordinator, a hold-music mixer, and a gate per leg. That is
+  deliberate work rather than a default, tracked as feature 005. Either way warm
+  compiles on `(livekit, sip)` today and validation says so by name. The `warm:`
+  block you would write already exists and will not change when it lands.
+  On **`cloud-websocket`** there is a third reason, and it is a trade rather than
+  a gap: acting on how the destination's leg ended needs a callback endpoint you
+  host, and hosting nothing is what that route is for. Cold compiles on the Daily
+  route (`transport: daily-sip`), where `sip_call_transfer` is the platform's own
+  primitive ([TRANSFERS.md](../../TRANSFERS.md)), on both of that route's forms,
+  and on `cloud-websocket` by replacing the live call's markup. The Daily carrier
+  form will carry warm unchanged when it lands: a carrier call joins the same room
+  a Daily-provisioned one joins, so only the supervisor leg's destination composes
+  differently.
 - **Handoff and task context shaping beyond the defaults:** any `history` other
   than `full`, a subset `context.variables` list rather than `all`, and
   `include_tool_calls: false`. The handoff carries the running context; finer
@@ -291,7 +426,8 @@ Public ingress is managed for you: without `--public-url`, the command runs a
 cloudflared quick tunnel as a child process (install it once; macOS:
 `brew install cloudflared`) and supplies `UNMUTE_PUBLIC_URL` itself. On the
 Twilio route it then sets the number's voice webhook to the printed inbound
-endpoint on every start and prints the previous value. Pass
+endpoint on every start, prints the previous value, and restores it when you
+stop (`--no-webhook` leaves the number untouched). Pass
 `--public-url https://your-tunnel.example` to bring your own tunnel instead;
 that tunnel must remain running. Telephony logs will go to
 `build/<target>/telephony.log`; `--verbose` will follow them in the terminal.
@@ -312,7 +448,7 @@ cp .env.example .env    # fill in your keys
 uv run bot.py           # open the URL it prints to talk to the agent
 ```
 
-For hosting, the project ships a `Dockerfile` and a `pcc-deploy.toml` for Pipecat Cloud. Because the output is an ordinary Python project, you can also run it anywhere you run Python.
+For hosting, the project ships a `Dockerfile` and a `pcc-deploy.toml` for Pipecat Cloud, and its own `README.md` has a Deploy section with the exact commands: create the secret set from `.env`, then `pipecat cloud deploy`, which builds that Dockerfile in the cloud. Because the output is an ordinary Python project, you can also run it anywhere you run Python.
 
 ## Where to go next
 

@@ -4,15 +4,31 @@ Status: Adopted design, shipped for Twilio on both orchestrators. Updated
 July 23, 2026. Twilio runs end to end from `unmute dev --telephony`, inbound and
 outbound, on the Pipecat carrier-WebSocket route, the LiveKit Twilio connector,
 and LiveKit SIP, with a managed cloudflared tunnel, automatic Twilio webhook
-configuration, and automatic local LiveKit SIP trunk records. Telnyx, Plivo, and
-warm transfer are still in progress.
+configuration, and automatic local LiveKit SIP trunk records. Telnyx and
+Plivo are still in progress. Human transfers ride the platforms' native
+primitives on the LiveKit SIP and Pipecat Daily routes only ([TRANSFERS.md](TRANSFERS.md)).
 
 Unmute must share telephony intent, planning, and call context across
 orchestrators while keeping carrier media and call-control behavior in small,
-carrier-specific adapters. This design supports local and self-hosted
-deployments for Pipecat and LiveKit without requiring Pipecat Cloud or LiveKit
-Cloud. It also scales from Twilio to Telnyx, Plivo, and Exotel without building
-a new media gateway.
+carrier-specific adapters. It also scales from Twilio to Telnyx, Plivo, and
+Exotel without building a new media gateway.
+
+**Local runs need no cloud account.** `unmute dev` and `unmute dev --telephony`
+work on the carrier-WebSocket, LiveKit connector, and LiveKit SIP routes with
+nothing but a carrier account and what runs on your machine. This is a claim
+about local runs only, and it stays true.
+
+**Remote deployment is a different question**, and since August 12, 2026 the
+answer is the managed clouds ([DEPLOYMENT.md](DEPLOYMENT.md)). Earlier wording
+here said the design supported deployments "without requiring Pipecat Cloud or
+LiveKit Cloud", which merged the two claims into one and read as a promise about
+deployment. Self-hosting a deployment still works and is still documented; it is
+not the supported path.
+
+One route is cloud-only by construction: Pipecat's Daily route. Daily carries the
+call to a deployed agent, so `unmute dev --telephony` has nothing to run there and
+refuses by name, pointing at the browser and console modes and at the deploy path
+([TRANSFERS.md](TRANSFERS.md)).
 
 <!-- prettier-ignore -->
 > [!NOTE]
@@ -49,19 +65,33 @@ orchestrator's supported transport. The implementation follows these rules:
   failure mode); `--public-url` stays as the bring-your-own-tunnel path for
   any other client, ngrok included.
 - Configure the carrier voice webhook automatically where the carrier
-  definition records that fact. In v1 only the Pipecat carrier WebSocket
-  route with Twilio carries it: the dev command looks up the configured
-  number, sets its voice webhook to the plan's inbound endpoint, and prints
-  the previous value so the user can restore it. Other carriers keep printed
+  definition records that fact. Both Twilio Media Streams routes carry it, the
+  Pipecat carrier WebSocket route and the LiveKit Twilio connector: the dev
+  command looks up the configured number, sets its voice webhook to the plan's
+  inbound endpoint, and prints the previous value. Other carriers keep printed
   manual steps until their fact and implementation are added.
+- **Borrow the number, then give it back.** A quick tunnel URL dies with the
+  dev process, so a run that sets a webhook and walks away leaves a real phone
+  line aimed at a URL that no longer resolves. Every outward-facing change the
+  dev command makes has an undo that runs on every exit path after startup,
+  `ctrl-c` included, on its own context because the run's context is already
+  cancelled by then. `--no-webhook` skips the change altogether, for a shared
+  or production number a dev run must not write to.
+- For anything past a laptop, stop the URL rotating instead of rewriting the
+  number every run: give `cloudflared` a named tunnel with a fixed hostname,
+  set the number's webhook to it once, and run with `--no-webhook` from then
+  on. The automatic rewriting exists only because quick tunnel hostnames
+  change per run.
 - Create the local LiveKit SIP trunk and dispatch records automatically. For
   the LiveKit SIP route, after the local infrastructure services are
   healthy, the dev command creates or reuses (idempotently, by content) the
-  inbound trunk, outbound trunk, and individual-room dispatch rule against
-  the local server with the generated development key pair, and injects the
-  returned IDs as `LIVEKIT_SIP_INBOUND_TRUNK` and
-  `LIVEKIT_SIP_OUTBOUND_TRUNK`. Users never supply these two values for
-  local development. Carrier-side (Twilio console) trunk setup stays manual
+  inbound trunk and individual-room dispatch rule against the local server
+  with the generated development key pair. Nothing is injected into the
+  application's environment: the records are platform state the local LiveKit
+  SIP service reads for itself, and no environment name carries their IDs
+  (SCHEMA N36, 2026-08-12). No outbound trunk is created: the agent dials out with the
+  carrier's trunk settings passed inline, so local and deployed use the same
+  mechanism (SCHEMA N33, 2026-08-12). Carrier-side (Twilio console) trunk setup stays manual
   and one-time.
 - Fail during validation when a carrier and route cannot provide a requested
   direction or control.
@@ -107,8 +137,8 @@ orchestrator already performs.
   numbers and never creates carrier applications or carrier SIP trunks. The
   one-time carrier console setup stays manual. Automatic setup applies only
   to Unmute-owned local development state: the number's voice webhook value
-  (restorable, previous value printed) and trunk records inside the user's
-  own self-hosted LiveKit SIP bridge.
+  (borrowed on start, printed, and put back on exit; `--no-webhook` opts out)
+  and trunk records inside the user's own self-hosted LiveKit SIP bridge.
 - Unmute does not proxy or transcode audio between Pipecat and LiveKit.
 - Unmute does not bundle a tunnel binary. The dev command manages an
   external `cloudflared` found on PATH; installing it is the user's one-time
@@ -180,7 +210,10 @@ not the number of targets, is the limit:
 | Pipecat | `carrier-websocket` | Telnyx | Direct carrier adapter and Pipecat Telnyx serializer | Runs; provisional |
 | Pipecat | `carrier-websocket` | Plivo | Direct carrier adapter and Pipecat Plivo serializer | Runs; provisional |
 | Pipecat | `carrier-websocket` | Exotel | No generated adapter | Gated; no adapter |
-| LiveKit | `sip` | Twilio | Self-hosted LiveKit SIP and Twilio trunk inputs | Runs; provisional |
+| Pipecat | `daily-sip` | (none) | Daily-provisioned number; Daily's own infrastructure delivers the call to the deployed agent | Runs; provisional. Cloud-only |
+| Pipecat | `daily-sip` | Twilio | Your carrier forwards the call over SIP into the same per-call Daily room. Emits `telephony_helper.py`, an operator-run webhook server, plus a carrier block in the bot (SCHEMA N37) | Runs; provisional. Cloud-only. No public example: the route keeps its guards against `internal/testdata/daily_carrier` |
+| Pipecat | `cloud-websocket` | Twilio | Pipecat Cloud terminates the carrier's Media Stream itself, named by a static TwiML Bin in the carrier console. **No emitted process and no endpoint of yours**, in production or ever (SCHEMA N38) | Runs; provisional. Cloud-only. Real inbound call and cold transfer confirmed 2026-08-13; the transfer's decline path is unrun |
+| LiveKit | `sip` | Twilio | Self-hosted LiveKit SIP and Twilio trunk inputs | Runs; provisional. Real inbound call, cold transfer and warm transfer confirmed 2026-08-12 |
 | LiveKit | `sip` | Telnyx | Self-hosted LiveKit SIP and Telnyx trunk inputs | Runs; provisional |
 | LiveKit | `sip` | Plivo | Self-hosted LiveKit SIP and Plivo trunk inputs | Runs; provisional |
 | LiveKit | `sip` | Exotel | No generated adapter | Gated; no adapter |
@@ -189,14 +222,36 @@ not the number of targets, is the limit:
 "Runs; provisional" means the route runs in the public CLI now, and its
 provisional status is internal maturity tracking in `compile-report.json`, not
 a runtime block. A credentialed smoke in CI, once it exists, only flips the
-route from provisional to verified there, with no change to whether it runs. The
-Twilio connector and the Pipecat Twilio route were confirmed on real inbound and
-outbound calls by the author. The Pipecat adapters contain inbound, outbound,
-hangup, and cold-transfer paths; voicemail detection and warm transfer stay
-gated. The LiveKit SIP emitter contains inbound, outbound, voicemail, hangup,
-cold-transfer, and warm-transfer paths. The LiveKit Twilio connector emitter
-contains inbound, outbound, and hangup paths; transfers and voicemail detection
-stay on the LiveKit SIP route.
+route from provisional to verified there, with no change to whether it runs.
+
+**Provisional is not the same as untested on a phone**, and four rows above say so.
+The tag tracks a CI smoke that does not exist yet for any route; the dated notes
+track calls somebody actually made. Four routes now have live evidence: the Pipecat
+Twilio carrier-websocket route and the LiveKit Twilio connector (inbound and
+outbound), LiveKit SIP over Twilio (inbound, cold and warm transfer, 2026-08-12),
+and the Pipecat Cloud carrier stream (inbound and cold transfer, 2026-08-13). The
+per-transfer record, with what each run found, is the Status table in
+[TRANSFERS.md](TRANSFERS.md). The Pipecat carrier adapters contain inbound, outbound,
+and hangup paths; they carry no transfers, because the websocket transports
+have no transfer primitive and transfers compile only where one exists
+(TRANSFERS.md). Voicemail detection stays gated. The LiveKit SIP emitter
+contains inbound, outbound, voicemail, hangup, cold-transfer, and
+warm-transfer paths, all on LiveKit's native primitives. The LiveKit Twilio
+connector emitter contains inbound, outbound, and hangup paths; transfers and
+voicemail detection stay on the LiveKit SIP route.
+
+**Transfer to a human, per route, in one line each.** These are three different
+mechanisms rather than one feature implemented three times, which is why the
+capability differs. [TRANSFERS.md](TRANSFERS.md) is the authority and carries the
+sources.
+
+| Route | Cold | Warm | Mechanism |
+|---|---|---|---|
+| LiveKit `sip` | yes | **yes, the only one** | SIP REFER on the caller's existing leg, and `WarmTransferTask` for the held-and-briefed shape |
+| Pipecat `daily-sip`, either form | yes | not built (feature 005) | Daily reroutes the caller's leg out of the room; the bot drops off |
+| Pipecat `cloud-websocket` | yes | no, by trade | one request replaces the live call's markup at the carrier; the session cannot survive it, so the caller meets a fresh agent |
+| Pipecat `carrier-websocket` | no | no | the transport has no transfer control |
+| LiveKit `connector` | no | no | same: media only, no platform primitive |
 
 ## What scales across carriers
 
@@ -232,8 +287,6 @@ tries to hide them behind unchecked configuration.
 | Pipecat serializer | Twilio | Telnyx | Plivo | Exotel |
 | Stream encoding | Carrier serializer owns it | Carrier serializer owns it | Carrier serializer owns it | Carrier serializer owns it |
 | Custom call data | Stream parameters | Query or encoded body | Query or encoded body | Gated; query data may be removed |
-| Cold transfer | Verified carrier control | Verified carrier control | Verified carrier control | Gated; unverified |
-| Warm primitives | Conference participants | Conference participants | Multi-party call | Unverified |
 
 The relevant Pipecat guides document inbound, outbound, local tunnel, and
 self-hosted WebSocket behavior:
@@ -253,9 +306,10 @@ Telnyx documents both its
 and [conference commands](https://developers.telnyx.com/docs/voice/programmable-voice/voice-api-commands-and-resources).
 Plivo documents
 [active call control](https://docs.plivo.com/docs/voice/api/calls) and
-[multi-party calling](https://docs.plivo.com/docs/voice/xml/conference). Exotel
-documents inbound and outbound streaming, but its warm-transfer behavior is not
-verified. Unmute must fail that capability until it is proven.
+[multi-party calling](https://docs.plivo.com/docs/voice/xml/conference).
+These call-control surfaces exist at the carriers, but Unmute does not build
+transfers out of them: transfers compile only where the platform ships the
+primitive ([TRANSFERS.md](TRANSFERS.md)).
 
 ## Credentials
 
@@ -271,13 +325,14 @@ The initial route adapters use these names:
 | Pipecat with Telnyx | `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_PHONE_NUMBER` | Telnyx Mission Control Portal → API Keys, Public Key, and the Voice API Application details page. The application ID is the Connection ID. |
 | Pipecat with Plivo | `PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN`, `PLIVO_PHONE_NUMBER` | Plivo Console dashboard → API Keys and Phone Numbers. The Auth Token validates V3 webhook signatures. |
 | Pipecat with Exotel | `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`, `EXOTEL_ACCOUNT_SID`, `EXOTEL_SUBDOMAIN`, `EXOTEL_PHONE_NUMBER`, `EXOTEL_APP_ID` | Exotel Dashboard → API Settings for the key, token, Account SID, and regional subdomain; use the ExoPhone and call-flow application ID from the Voice dashboard. |
-| All Pipecat telephony routes | `REDIS_URL` | Generated Compose supplies the local value. In production, use the connection URL from the Redis service managed by your infrastructure operator. Store any password in the deployment secret store. |
+| Pipecat carrier-WebSocket routes | `REDIS_URL` | Generated Compose supplies the local value. In production, use the connection URL from the Redis service managed by your infrastructure operator. Store any password in the deployment secret store. The Daily route needs no Redis on either form. |
+| Pipecat `daily-sip` with your own carrier | agent side: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `SIP_TRUNK_HOSTNAME`, `SIP_FROM_NUMBER`, `DAILY_API_KEY`. Helper side: `PIPECAT_CLOUD_API_KEY`, and optionally `UNMUTE_HOLD_AUDIO_URL` and `UNMUTE_DAILY_ROOM_GEO` | Twilio Console → Account dashboard for the REST pair, Elastic SIP Trunking → Termination for the address, Daily dashboard for the API key, Pipecat Cloud dashboard for the public key. **No SIP username or password**: the route rejects both, because Daily's dial-out carries no credential field on any documented surface and termination authenticates Daily by IP allow-list instead (`https://ip-info.daily.co/ips/ip-info.json`, read 2026-08-12). **No `UNMUTE_OUTBOUND_TOKEN`** either: the helper answers incoming calls only, so it has no endpoint that spends money to guard, and outbound is started against the platform. The helper-side names are read where the operator runs the helper and never belong in the platform secret set. |
 | LiveKit Twilio connector | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Local Compose supplies the non-production `devkey`/`secret` pair and a local `livekit-server --dev`; in production point these at your self-hosted LiveKit server. The connector needs no LiveKit Cloud and no Redis, and also needs the Twilio variables above. |
 | Self-hosted LiveKit SIP topology | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `REDIS_URL` | Create the API key and secret in the LiveKit Server `keys` configuration and use the same pair in LiveKit SIP. Set `LIVEKIT_URL` to that server and `REDIS_URL` to their shared Redis deployment. For inbound calls, point the carrier's origination URI at your public LiveKit SIP endpoint. |
-| LiveKit SIP with Twilio | `TWILIO_SIP_ADDRESS`, `TWILIO_SIP_USERNAME`, `TWILIO_SIP_PASSWORD`, `TWILIO_PHONE_NUMBER` | Twilio Console → Elastic SIP Trunking. Use the termination URI, Credential List username and password, and associated number. |
-| LiveKit SIP with Telnyx | `TELNYX_SIP_ADDRESS`, `TELNYX_SIP_USERNAME`, `TELNYX_SIP_PASSWORD`, `TELNYX_PHONE_NUMBER` | Telnyx Mission Control → SIP Trunking. Use the SIP connection address and credentials, and its assigned number. |
-| LiveKit SIP with Plivo | `PLIVO_SIP_ADDRESS`, `PLIVO_SIP_USERNAME`, `PLIVO_SIP_PASSWORD`, `PLIVO_PHONE_NUMBER` | Plivo Console → Zentrunk. Use the termination domain, outbound credential, and linked number. |
-| LiveKit SIP resource IDs | `LIVEKIT_SIP_INBOUND_TRUNK`, `LIVEKIT_SIP_OUTBOUND_TRUNK` | For local development, `unmute dev --telephony` creates the records itself and supplies both IDs; do not set them. For production, copy each `SIPTrunkID` printed by the generated `lk sip ... create` setup commands. Only requested directions and controls require their corresponding ID. |
+| LiveKit SIP with Twilio | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Twilio Console → Elastic SIP Trunking. Use the termination URI, Credential List username and password, and associated number. |
+| LiveKit SIP with Telnyx | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Telnyx Mission Control → SIP Trunking. Use the SIP connection address and credentials, and its assigned number. |
+| LiveKit SIP with Plivo | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Plivo Console → Zentrunk. Use the termination domain, outbound credential, and linked number. |
+| LiveKit SIP resource IDs | none | No environment name carries a trunk ID in either direction. Inbound still needs its two platform records, and the emitted `telephony-setup.sh` creates them, resolving the trunk by the phone number you already have (SCHEMA N36, 2026-08-12); `unmute dev --telephony` creates the local pair itself. Dialling out registers nothing at all, because it carries the carrier's trunk settings inline (SCHEMA N33, 2026-08-12). |
 
 The generated Pipecat carrier-WebSocket outbound HTTP endpoint also requires
 `UNMUTE_OUTBOUND_TOKEN`. Generate this secret yourself with a cryptographically
@@ -452,9 +507,10 @@ requiring a Python base class:
 - Start an outbound call.
 - Normalize the initial call context.
 - End the active call.
-- Perform a cold transfer when supported.
-- Coordinate a warm transfer when supported.
 - Translate provider errors into stable runtime errors.
+
+Transfers are deliberately absent from this list: no carrier websocket route
+has a transfer primitive, so no adapter emits one (TRANSFERS.md).
 
 The Go generator selects and renders the implementation with a `switch`, which
 matches the repository's existing target-generator pattern. The generated
@@ -475,10 +531,6 @@ direction
 from_number
 to_number
 ```
-
-Transfer coordination may also retain provider-private call-leg and conference
-IDs. Those values stay inside the telephony runtime and never become portable
-Agent variables.
 
 The normalized values hydrate matching explicit system sources before the
 greeting or first model turn runs. Authored `source: call_start` variables come
@@ -502,13 +554,199 @@ The Pipecat adapter constructs the upstream serializer with the normalized
 stream and call identifiers. The serializer continues to own carrier audio
 messages and automatic call termination where Pipecat provides it.
 
-Warm transfer is not an automatic extension of that path. A Twilio call using
-bidirectional `<Connect><Stream>` cannot simultaneously be a Conference
-participant. The route must therefore prove a separate Pipecat media leg that
-can join the Conference, hold and restore the caller, brief the human, and
-remove only the AI leg. Until successful, declined, unanswered, failure, and
-duplicate-callback smokes prove that topology, `warm_transfer` remains
-provisional even if inbound, outbound, hangup, and cold transfer later pass.
+Transfers are not part of this path at all. Both custom transfer designs
+this route once carried (a REST-redirect cold and a bot-owned warm bridge,
+later a Twilio-conference warm) were built, live-tested, and deleted: each
+one made the generated process own the call's audio path and each live test
+found a new lifecycle bug there. Transfers now compile only where the
+platform ships the primitive, which for Pipecat is the Daily route
+(TRANSFERS.md); the deleted designs stay in git history.
+
+### Pipecat Daily route, two forms
+
+`transport: daily-sip` is where Pipecat telephony has a transfer primitive, and
+it has two forms. Both deploy the same agent to Pipecat Cloud and both put the
+call in a Daily room; what differs is who owns the number.
+
+**Daily-provisioned (no carrier).** You buy the number from Daily and point the
+domain's pinless dial-in at the platform's own managed webhook. Nothing of yours
+is in the path: no server, no public port, no local topology. This is the
+zero-infrastructure inbound path and it is unchanged.
+
+**Your own carrier (`carrier:` plus `connection:` plus a `channels.phone` entry,
+SCHEMA N37).** Your carrier owns the number and forwards the call over SIP into a
+per-call Daily room, with `provider="daily"`. The agent sees a room participant
+whichever carrier carried the call, so nothing per-carrier lives in the agent
+except one request.
+
+The carrier form needs one moving part the other does not, because Daily's SIP
+addresses are per room and rooms are created per call: there is no static address a
+carrier can forward to. So the build emits `telephony_helper.py`. It is an
+**operator-run artifact**, not part of the deployment: you run it beside the build,
+your carrier's webhook reaches it, and it starts the deployed agent with
+`createDailyRoom: true` and the SIP interconnect asked for in
+`dailyRoomProperties`, then answers the carrier with hold audio so the caller is
+not in silence while the agent boots. The room is the platform's, handed to the
+agent the way every other Pipecat Cloud session gets one, and the agent moves the
+live call into it, exactly once, on the room's SIP-ready signal, using the address
+that signal carries.
+
+The helper deliberately does **not** create the room itself, and this was learned
+the hard way on 2026-08-13: a start request with `createDailyRoom: false` reaches
+the agent as `PipecatSessionArguments`, which carries no room, and pipecat's
+transport factory refuses it by name. A helper-made room is a room the platform
+never tells the agent about. It also means the helper reads no `DAILY_API_KEY`. **The
+deployed agent still exposes no public endpoint of its own**, which is the shape
+rule the Daily route has always had.
+
+Read the route row's `Processes`, `PublicEndpoints`, and `Services` with that in
+mind: on every other route those fields describe the deployed application, and on
+this one they describe the helper.
+
+The helper answers incoming calls and nothing else. Dialling out is started against
+the platform's own start endpoint, with a room asked for as dial-out enabled and the
+composed SIP address in the body, which is one command and the same shape the
+no-carrier form already uses. So the helper has no endpoint that places a call, and
+therefore no bearer token guarding one: this route is the only Pipecat telephony
+route with no `UNMUTE_OUTBOUND_TOKEN`. An internet-reachable endpoint that could
+dial arbitrary numbers through the operator's trunk would need that guard; not
+having the endpoint is better than guarding it well.
+
+There is no Redis on either form. The carrier form keeps no shared control record:
+one process serves one call, the room correlates the legs, and the transfer's
+at-most-once guard is in-process. Outbound legs and the cold transfer both leave
+through the operator's own trunk, composed as `sip:<number>@<termination address>`,
+which is why the Connection mixes the carrier REST vocabulary with the SIP one and
+carries no SIP credentials at all (Daily's dial-out has no credential field on any
+documented surface; termination authenticates Daily by IP allow-list).
+
+Local `unmute dev --telephony` refuses on both forms, and for different reasons.
+The no-carrier form has no local topology at all. The carrier form has one, the
+helper, but the CLI cannot run it somewhere the operator's carrier can reach, so
+the emitted README dictates the helper plus a tunnel instead. Browser and console
+modes work on both, unchanged.
+
+### Which Twilio route on Pipecat, and why
+
+Three routes now connect a Twilio number to a Pipecat target, and the deciding
+difference is one thing: **what you host.**
+
+| | `cloud-websocket` | `daily-sip` + carrier | `carrier-websocket` |
+|---|---|---|---|
+| What you host in production | **nothing** | a webhook server (`telephony_helper.py`), forever | the whole application, plus a Redis |
+| Where the agent runs | Pipecat Cloud | Pipecat Cloud | wherever you deploy the container |
+| What the number points at | a TwiML Bin in the Twilio console | your running helper's URL | your running application's URL |
+| What the carrier account needs | a voice-capable number | a number, an Elastic SIP trunk, and an IP access list for Daily's addresses | a voice-capable number |
+| Transfers | cold, by replacing the live call's markup | cold, by Daily's own transfer primitive | none: the websocket transports have no transfer primitive |
+| After a transfer, however the dial ended | a spoken handback line and a **fresh** agent that does not remember the call, whether the dial failed or the person hung up | keeps the **same** session alive, and only a failed dial returns to it | not applicable |
+| Call sources as spec variables (`source.*`) | no | no | yes |
+| Local `unmute dev --telephony` | yes, one command | no; the emitted runbook dictates the helper beside a tunnel | yes, one command |
+
+**Recommendation for the common case: `cloud-websocket`.** If you have a Twilio
+number and you want an agent on the end of it, this is the route with nothing to
+run, nothing to keep awake, and nothing to pay for beyond the platform and the
+calls. Take one of the other two for a specific reason:
+
+- **`daily-sip` with a carrier** when a failed transfer must come back to the
+  *same* agent, mid-conversation, remembering what was said. That needs something
+  of yours listening for how the dial ended, and hosting the helper is what buys
+  it.
+- **`carrier-websocket`** when the agent cannot run on Pipecat Cloud at all (your
+  own cluster, your own network boundary), or when the spec binds `source.*`
+  variables to the caller's number.
+
+One thing is true on all three and worth saying once:
+**no Pipecat route offers warm transfer today.**
+Warm compiles on `(livekit, sip)` trunks, and
+`examples/livekit-human-transfer` is the example. Nothing about these routes blocks it;
+this project has not built it.
+
+The shipped examples are one per use case: `examples/livekit-human-transfer` (warm
+transfer, LiveKit), `examples/pipecat-human-transfer-twilio` (cold transfer on
+`cloud-websocket`), and `examples/twilio-telephony-hello` (inbound and outbound, on
+the route each platform recommends for Twilio: `cloud-websocket` on Pipecat and
+`sip` on LiveKit, so the two mechanisms sit side by side in one package).
+
+The transfer examples carry their provider in the name because the transfer is the
+platform's primitive, not ours: a LiveKit SIP REFER and a Twilio TwiML redirect are
+different mechanisms with different capabilities, so those packages cannot be swapped
+for one another. `examples/twilio-telephony-hello` carries its **carrier** in the name
+instead, because it holds one target per provider and its subject is how that one
+carrier reaches each of them. `examples/outbound-reminder` names neither: it is about
+variables and secrets, and it declares the two self-hosted routes because its
+`source: to_number` variable is filled only by a carrier adapter.
+
+### Pipecat Cloud native carrier stream (`cloud-websocket`)
+
+The platform terminates the carrier's media stream on its own endpoint,
+`wss://api.pipecat.daily.co/ws/twilio`, or its regional form when the target
+declares a region. A static TwiML Bin in the Twilio console names the agent with a
+`_pipecatCloudServiceHost` parameter (`<agent>.<organization>`), and the platform
+starts the deployed agent on the stream. The compiler emits **no new file** for
+this route: the build's file list is exactly a plain Pipecat Cloud build's, and a
+test asserts equality rather than describing it.
+
+What each piece does:
+
+- **The Bin** carries a spoken line before `<Connect>`, because a cold start is
+  longer than the two seconds a caller will wait in silence, and Twilio's own
+  `{{From}}` / `{{To}}` substitutions as custom parameters, which is what
+  populates the caller and callee fields the bot reads.
+- **The bot** reads `runner_args.transport_type` and `runner_args.call_data`
+  right after the transport exists. That is the whole session detection: a
+  session with `transport_type == "twilio"` is a phone call, `direction` in the
+  parsed body marks an outbound one, and everything else behaves exactly as on a
+  package with no telephony. The per-call environment check runs at that point,
+  so a browser session is never asked for a carrier credential.
+- **Outbound** is one request to Twilio with the markup inline. It has to
+  originate at the carrier, because on this route nothing of the operator's
+  exists to originate it.
+- **The cold transfer** replaces the live call's markup by its `CallSid`: a
+  spoken line, `<Dial answerOnBridge="true">` on a destination read from the
+  environment, then a spoken handback line and a `<Connect><Stream>` back to the
+  same service host. It is sequential rather than conditional because branching
+  on the dial's outcome needs an `action` callback URL, which is a hosted
+  endpoint, which this route exists to not have. So the handback runs however the
+  dial ended, the destination hanging up included, and its line says only what is
+  true of both endings rather than claiming nobody answered.
+
+**A pure-inbound package on this route needs no carrier credentials at all.** The
+platform receives the call without them, and the connection becomes required only
+when the package places or redirects a call. One capability changes shape with
+them rather than appearing: with credentials the agent ends a call through the
+carrier's call control, without them by closing the stream, which ends the call
+because the Bin has nothing after `<Connect>`.
+
+The deploy manifest carries `websocket_auth = "none"`, explicitly. A static Bin
+cannot fetch a token, so that is the only working value, and the platform's own
+documentation states the default both ways. What limits who can open a session is
+knowledge of the `<agent>.<organization>` string: not a secret in the
+cryptographic sense, but a capability, and the emitted README says so in those
+words.
+
+`unmute dev --telephony` runs the phone path locally: the compiled agent in
+pipecat's own Twilio transport mode (which answers the carrier webhook itself, so
+no markup is created), a cloudflared tunnel, the number's voice configuration
+pointed at it for the session, and restored on every exit path including an
+interrupt. The production Bin is never touched. Outbound is the one thing that
+does not run locally, and for a reason worth stating: an outbound call's markup
+names the deployed agent, so the call reaches the platform rather than the laptop.
+
+**One region, three places, one declaration.** `deployment_region` on the target
+is the only place a region is written, and three things are derived from it: the
+`region` in the emitted `pcc-deploy.toml`, the `--region` on the emitted
+`secrets set` command, and the `wss://<region>.api.pipecat.daily.co/...` host in
+all three pieces of markup (the Bin, the outbound command, the transfer's
+reconnect). The platform requires them to agree: a regional stream endpoint
+routes **only** to agents deployed in that region, and an agent can only read a
+secret set from its own region. An agreement test asserts the chain rather than
+trusting it, and the emitted runbook explains it, because the first region change
+is where somebody edits one of the three by hand.
+
+Region codes stay unvalidated here, per SCHEMA N32: they are forwarded exactly as
+written and the platform CLI is the validator. On this route that holds up, because
+a mistyped region fails `pipecat cloud deploy` before any call is placed. What the
+compiler does prevent is the mismatch, by rendering all three from one value.
 
 ### LiveKit routes
 
@@ -590,56 +828,22 @@ detection stay on the LiveKit SIP route.
 
 ## Human transfers
 
-Human transfer is a route capability, not an orchestrator-wide or
-carrier-wide boolean. Validation resolves the requested mode against the full
-combination of orchestrator, media route, and carrier.
+The full reference is [TRANSFERS.md](TRANSFERS.md): what is available, the
+yaml, the secrets, and the cloud test walkthroughs. The short version:
 
-### Cold transfer
-
-Cold transfer replaces or redirects the active caller leg and removes the AI
-after the carrier accepts the transfer.
-
-- Pipecat carrier WebSocket routes use the selected carrier's call-control
-  operation.
-- LiveKit SIP uses LiveKit's native SIP transfer.
-- LiveKit Twilio Connector uses Twilio call control only after the connector
-  spike proves cleanup behavior.
-
-The operation must preserve the original call if the destination fails when
-the carrier supports that behavior. Otherwise, validation or generated docs
-must state the carrier limitation.
-
-### Warm transfer
-
-Warm transfer needs at least three participants and a durable state transition.
-For carrier WebSocket routes, the common behavior is conference-first even
-though every carrier uses different operations.
-
-```mermaid
-stateDiagram-v2
-  [*] --> Connected
-  Connected --> Consulting: hold caller and dial human
-  Consulting --> Connected: human fails or declines
-  Consulting --> Briefing: human answers
-  Briefing --> Joined: unhold caller
-  Joined --> Transferred: remove AI
-  Transferred --> [*]
-```
-
-The carrier adapter implements these operations:
-
-1. Put the caller and AI media leg in a conference or multi-party call.
-2. Hold the caller without ending the AI media stream.
-3. Dial the human destination.
-4. Brief the human using the selected supported briefing mode.
-5. Join the caller and human.
-6. Remove the AI participant.
-7. Restore the original call or end cleanly when any step fails.
-
-Twilio, Telnyx, and Plivo expose conference primitives that can support this
-shape. Each implementation still requires an independent smoke test. Exotel
-warm transfer remains gated until official documentation and a runtime proof
-establish the required operations.
+- A transfer compiles only on a route where the platform ships the
+  primitive, and validation names the working routes when it refuses.
+- **Cold** exists on `(livekit, sip)` (`TransferSIPParticipant`, a SIP REFER
+  through the trunk, which the trunk must allow) and on Pipecat's Daily
+  route (`transport.sip_call_transfer`; dial-out must be enabled on the
+  Daily domain).
+- **Warm** exists on `(livekit, sip)` only, as LiveKit's `WarmTransferTask`
+  prebuilt: hold music, the consult call, the briefing, and the merge are
+  the platform's machinery, and every failure comes back as one error that
+  `on_unavailable` answers.
+- The carrier websocket routes (both drivers) carry no transfers. The custom
+  designs this repository once built on them are deleted and live only in
+  git history.
 
 ### Transfer coordination state
 
@@ -649,11 +853,15 @@ It exists because telephony control crosses independent HTTP requests,
 WebSockets, callbacks, call legs, and admission decisions even when the audio
 session itself stays on one process.
 
+The **LiveKit Twilio connector** route has no Redis at all. Its bridge keeps
+the pending-call map and the call leg in one process, and running several
+bridge replicas behind one number needs a shared store and sticky token
+routing first, the same open item the Pipecat carrier routes carry.
+
 Generated Pipecat code uses Redis only for these bounded records:
 
 - Pending-call correlation and the minimum normalized call-start context.
 - Callback replay and idempotency markers.
-- Human-transfer state transitions and short-lived locks.
 - Active-session admission counters.
 
 Every record expires. Phone numbers and call-start values never appear in key
@@ -682,7 +890,6 @@ The reason-to-consumer mapping is closed and inspectable:
 | `livekit_control_plane` | LiveKit Server and LiveKit SIP |
 | `call_correlation` | Generated telephony application |
 | `callback_idempotency` | Generated telephony application |
-| `human_transfer` | Generated telephony application |
 | `admission` | Generated Pipecat telephony application |
 
 Every emitted plan has at least one applicable reason. Each reason's consumer
@@ -766,7 +973,7 @@ The command performs these steps in this order:
 2. Resolve and print the provider-neutral runtime plan.
 3. Validate required carrier and model environment variables. Values the
    command supplies itself (`UNMUTE_PUBLIC_URL` under the managed tunnel,
-   `LIVEKIT_SIP_INBOUND_TRUNK`, `LIVEKIT_SIP_OUTBOUND_TRUNK`) are not
+   `UNMUTE_OUTBOUND_TOKEN` on the routes that dial out over HTTP) are not
    demanded from the user.
 4. Verify Docker Compose is available.
 5. Start the managed cloudflared tunnel when the plan has public endpoints
@@ -782,13 +989,17 @@ The command performs these steps in this order:
    content-identical record is reused, never duplicated.
 9. Wait for every declared service health check and application readiness.
 10. Configure the carrier voice webhook automatically where the carrier
-    definition supports it (Twilio today), printing the previous webhook URL
-    so it can be restored. Print the remaining manual carrier configuration
+    definition supports it (Twilio today), printing the previous webhook URL,
+    and hold on to that value as the undo for step 12. Skip this entirely
+    under `--no-webhook`. Print the remaining manual carrier configuration
     for adapters without that fact.
 11. Print the call line ("call +1XXXXXXXXXX, ctrl-c to stop") and stream
     Compose logs using the existing `--verbose` behavior.
-12. Stop only the project-scoped Compose stack on interruption, preserve its
-    named data volumes, and kill the managed tunnel.
+12. Restore the carrier voice webhook to the value step 10 recorded, then stop
+    only the project-scoped Compose stack on interruption, preserve its named
+    data volumes, and kill the managed tunnel. The restore runs before the
+    containers go and on its own context, because interruption has already
+    cancelled the run's.
 
 `unmute dev --telephony` fails before application readiness if Docker Compose is
 unavailable, a service is unhealthy, or explicit external LiveKit values
@@ -836,8 +1047,7 @@ The deployment must provide the following runtime behavior:
   any active sessions it must force-close at its drain deadline.
 - Horizontal scaling based on active sessions, not HTTP request rate alone.
 - Carrier credentials and model credentials through environment secrets.
-- Redis for pending-call correlation, callback idempotency, human-transfer
-  state, and admission.
+- Redis for pending-call correlation, callback idempotency, and admission.
 - `INFO` logging by default. `UNMUTE_LOG_LEVEL=DEBUG` can expose phone numbers
   through upstream Pipecat parser diagnostics and is only for controlled use.
 
@@ -882,9 +1092,6 @@ of the minimum implementation and cannot be deferred.
 - Redact credentials, phone numbers, and raw webhook bodies from normal logs.
 - Treat duplicate carrier callbacks as normal and process them idempotently.
 - Apply short request timeouts to carrier control calls.
-- Document when a carrier route cannot restore the original media stream after
-  a failed cold transfer; the generated Pipecat READMEs currently identify
-  that limitation for Twilio, Telnyx, and Plivo.
 - Retry only operations documented as safe to retry.
 - Return provider-appropriate success responses quickly, then process status
   events asynchronously when the carrier requires it.
@@ -902,8 +1109,8 @@ The first schema and compiler changes touch these files:
 
 - Amend `SCHEMA.md` with Connections, target connection selection, and the
   one-telephony-connection v1 invariant.
-- Align `CONTEXT.md` and `ORCHESTRATOR_SHARED_CONFIGURATION.md` with the adopted
-  shape.
+- Align `ARCHITECTURE.md` and `ORCHESTRATOR_SHARED_CONFIGURATION.md` with the
+  adopted shape.
 - Add strict Connection loading under `internal/spec`.
 - Add resolved Connection and telephony plan types under `internal/ir`.
 - Resolve the plan in `ir.Build`.
@@ -928,7 +1135,9 @@ The table needs explicit facts for these features:
 - Hold.
 - Voicemail detection.
 - IVR navigation.
-- Supported warm-transfer briefing modes.
+- Whether the route can carry a warm transfer's private briefing leg at all
+  (SCHEMA N25 removed the `briefing` mode enum; the briefing itself is free
+  text and is not a route capability).
 
 An emitter-agreement test must fail when validation marks a telephony feature
 supported but the selected generator doesn't emit it.
@@ -1001,7 +1210,7 @@ runtime behavior.
 4. Define the normalized call-start variables.
 5. Define route-specific telephony capability rows.
 
-Acceptance requires `SCHEMA.md`, `CONTEXT.md`, and the compiler specification to
+Acceptance requires `SCHEMA.md`, `ARCHITECTURE.md`, and this document to
 describe one consistent ownership model.
 
 ### Phase 1: Resolve and validate the plan
@@ -1034,21 +1243,15 @@ This phase proves the complete carrier WebSocket route with one carrier.
 Acceptance requires one real inbound call, one real outbound call, one failed
 outbound call, one hangup, and one cold transfer against Twilio.
 
-### Phase 3: Prove warm transfer on Twilio
+### Phase 3: retired — warm transfer left the carrier routes
 
-This phase resolves the largest call-lifecycle risk before copying it to other
-carriers.
-
-1. Prove the conference-first topology with a Pipecat media participant.
-2. Hold and unhold the caller.
-3. Dial and brief the human.
-4. Remove the AI without ending the human call.
-5. Restore or terminate cleanly after failure.
-6. Add warm-transfer state and locks to the existing Redis control store.
-7. Record the supported briefing modes in the capability table.
-
-Acceptance requires successful, declined, unanswered, and failed warm-transfer
-smokes with duplicate callback delivery.
+This phase planned to prove a bot-owned warm transfer on the Twilio
+websocket route (a two-socket bridge, then a Twilio-conference redesign).
+Both were built and live-tested, and the tests kept finding lifecycle bugs
+that come with owning the audio path. The project backed off: transfers
+compile only where the platform ships the primitive, so warm transfer lives
+on `(livekit, sip)` as `WarmTransferTask` and nowhere else (TRANSFERS.md).
+The deleted designs remain in git history.
 
 ### Phase 4: Add Telnyx as the second carrier
 
@@ -1058,9 +1261,8 @@ and normalized behavior only where Twilio and Telnyx duplicate it.
 1. Add the verified Telnyx carrier definition.
 2. Emit TeXML and use Pipecat's Telnyx serializer.
 3. Map Telnyx call metadata to normalized call context.
-4. Add outbound, hangup, and cold transfer through Telnyx call control.
-5. Prove conference warm transfer independently.
-6. Run the same carrier contract and smoke scenarios.
+4. Add outbound and hangup through Telnyx call control.
+5. Run the same carrier contract and smoke scenarios.
 
 Acceptance requires adding Telnyx without changing Pipecat pipeline logic or
 LiveKit Agent logic.
@@ -1114,9 +1316,10 @@ self-hosted LiveKit room, so the route runs against a stock `livekit-server
    real calls.
 3. Connector participant metadata and Agent dispatch through job metadata.
    Done.
-4. Cold transfer cleanup. Not shipped; transfers stay on the SIP route.
-5. Conference-first warm transfer. Not shipped; stays on the SIP route.
-6. Unsupported controls stay gated and point at the SIP alternative. Done.
+4. Transfers: never on this route; they compile only where the platform
+   ships the primitive (TRANSFERS.md), and the gate names the SIP
+   alternative. Done.
+5. Unsupported controls stay gated and point at the SIP alternative. Done.
 
 The route ships with a pinned LiveKit version and a dated documentation link.
 Its live audio path is covered by the mu-law self-check, `py_compile`, `ruff`,
@@ -1236,8 +1439,8 @@ The plan keeps uncertain behavior gated rather than designing around guesses.
 
 - **Connection schema:** This is a locked-schema amendment and must be accepted
   before code changes begin.
-- **Warm transfer:** Conference semantics and private briefing differ by
-  carrier. Capability rows remain carrier- and route-specific.
+- **Warm transfer:** LiveKit SIP only, as the platform's own prebuilt.
+  Capability rows remain route-specific (TRANSFERS.md).
 - **LiveKit connector:** It is Twilio-only. SIP remains the stable
   multi-carrier path.
 - **Multiple phone channels:** The first implementation supports one telephony

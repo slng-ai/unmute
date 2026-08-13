@@ -330,6 +330,7 @@ func testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t *testing.T, c
 		t.Fatal(err)
 	}
 	enablePackageTelephony(pkg)
+	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Transport = "carrier-websocket"
 	configured.Carrier = carrier
@@ -386,6 +387,7 @@ func TestSmokePipecatTelephonyRuntimeContracts(t *testing.T) { // telephony V20
 				t.Fatal(err)
 			}
 			enablePackageTelephony(pkg)
+			dropHumanTransfer(pkg)
 			configured := pkg.Targets["pipecat"]
 			configured.Transport, configured.Carrier, configured.Connection = "carrier-websocket", carrier, "primary_phone"
 			pkg.Targets = map[string]spec.Target{"pipecat": configured}
@@ -944,6 +946,78 @@ async def main() -> None:
 asyncio.run(main())
 `
 
+const pipecatDailyInboundSmokeScript = `"""Smoke check: the Daily transport params accept a real inbound call.
+
+This is the only layer that can prove the fix. The offline tests can see that
+the emitted class differs from the generic one and that its import is present;
+they cannot see whether the framework can actually assign an inbound call's
+details onto it. So this runs the framework's own wiring against the emitted
+factory, with a real dial-in payload and with an empty one.
+"""
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot  # noqa: E402
+from pipecat.runner.types import DailyDialinRequest  # noqa: E402
+from pipecat.runner.utils import _maybe_apply_daily_dialin  # noqa: E402
+from pipecat.transports.base_transport import TransportParams  # noqa: E402
+
+factory = bot.transport_params["daily"]
+
+# 1. A real inbound call. Pipecat Cloud's managed dial-in webhook hands the
+#    runner this payload; create_transport merges it onto the factory's result.
+body = {
+    "dialin_settings": {"call_id": "call-smoke", "call_domain": "domain-smoke"},
+    "daily_api_key": "smoke-daily-key",
+    "daily_api_url": "https://api.daily.co/v1",
+}
+params = factory()
+_maybe_apply_daily_dialin(params, DailyDialinRequest.model_validate(body))
+assert params.dialin_settings is not None, "inbound dial-in settings did not land"
+assert params.dialin_settings.call_id == "call-smoke"
+assert params.dialin_settings.call_domain == "domain-smoke"
+assert params.api_key == "smoke-daily-key"
+assert params.api_url == "https://api.daily.co/v1"
+
+# The same payload against the generic class is the defect this feature fixed.
+# If this ever stops raising, the offline scoping test is measuring nothing.
+generic = TransportParams(audio_in_enabled=True, audio_out_enabled=True)
+try:
+    _maybe_apply_daily_dialin(generic, DailyDialinRequest.model_validate(body))
+except Exception:
+    pass
+else:
+    raise AssertionError(
+        "the generic params class accepted inbound call fields; "
+        "the Daily-specific class may no longer be needed"
+    )
+
+# 2. No call details at all: the documented no-op path, and the one every
+#    browser and console session takes. It must behave exactly as before.
+for empty in (None, {}, {"unrelated": "content"}):
+    plain = factory()
+    _maybe_apply_daily_dialin(plain, empty)
+    assert plain.dialin_settings is None, f"{empty!r} invented dial-in settings"
+    assert not plain.api_key, f"{empty!r} invented an api_key"
+    assert plain.audio_in_enabled and plain.audio_out_enabled, "audio kwargs lost"
+
+print("daily inbound params ok")
+`
+
+// TestSmokePipecatV1DailyInboundParamsAcceptCall is US1's proof. The emitted
+// Daily factory is handed a real dial-in payload through Pipecat's own wiring
+// and the fields have to land; the same payload against the generic class must
+// still raise, which is what keeps the fix necessary rather than decorative.
+//
+// It also covers FR-006, the empty-body path: a session carrying no call details
+// behaves exactly as it did before, which is every browser and console run.
+func TestSmokePipecatV1DailyInboundParamsAcceptCall(t *testing.T) {
+	runPipecatSmokeScript(t, "pipecat-human-transfer-daily", nil, nil, pipecatDailyInboundSmokeScript)
+}
+
 // TestSmokePipecatV1ServicesInstantiate proves the safe_core emission end to
 // end (V9, L4): uv resolves the emitted pyproject (network), bot.py imports,
 // and every emitted service constructor accepts its emitted kwargs
@@ -1031,6 +1105,17 @@ func TestSmokeV17PipecatSpeechTracing(t *testing.T) {
 
 func TestSmokeV24PipecatSimplePromptStaticCheck(t *testing.T) {
 	runPipecatSmokeScript(t, "simple-prompt", nil, nil, pipecatStaticCheckScript)
+}
+
+// The Daily route needs its own ty run, because the transfer path is the one
+// place the emitted bot calls a method that is not on BaseTransport. simple-prompt
+// emits no transfer, so it could never have caught this: the route shipped a
+// project that failed the very lint gate its own README promises. It now narrows
+// with isinstance before calling the primitive, which fixes the type error and
+// turns a browser-session transfer request from an AttributeError into a named
+// failure the model can act on.
+func TestSmokeV24PipecatDailyTransferStaticCheck(t *testing.T) {
+	runPipecatSmokeScript(t, "pipecat-human-transfer-daily", nil, nil, pipecatStaticCheckScript)
 }
 
 // TestSmokeV24PipecatExamplesStaticCheck holds raw Pipecat output to the bar

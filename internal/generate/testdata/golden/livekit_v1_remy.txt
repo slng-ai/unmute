@@ -1,5 +1,8 @@
 === .dockerignore ===
 .env
+.env.*
+.venv/
+__pycache__/
 === .env.example ===
 CHECK_AVAILABILITY_URL=
 LANGFUSE_BASE_URL=
@@ -21,7 +24,13 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml ./
 RUN uv pip install --system .
 
-COPY . .
+# LiveKit Cloud requires a non-root run user. It owns /app because the agent
+# downloads model files on first run and would otherwise have nowhere to write:
+# COPY runs as root, so without --chown this directory stays root-owned.
+RUN useradd --home-dir /app --shell /usr/sbin/nologin appuser \
+ && chown appuser:appuser /app
+COPY --chown=appuser:appuser . .
+USER appuser
 
 # LiveKit Cloud / the worker runner start agent.py; `python agent.py dev` for local runs.
 CMD ["python", "agent.py", "start"]
@@ -65,11 +74,91 @@ lk dispatch create --room <room> --agent-name livekit \
 
 ## Deploy
 
-Deployment is self-hosted: the worker connects out to a LiveKit Server you
-run and needs no inbound ports. Build the generated `Dockerfile` into an
-image, set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` to your
-server's values plus the provider keys from `.env.example`, then start the
-worker:
+Two supported paths: LiveKit Cloud with the `lk` CLI, or a worker you host
+yourself. Both run this project as generated.
+
+### Option 1: LiveKit Cloud
+
+Before the first command: authenticate once with `lk cloud auth`, then set the
+project this agent belongs to as the default (`lk project list`, then
+`lk project set-default "<name>"`). Without a default project every command
+below fails with a subdomain mismatch that does not say which side is wrong.
+
+The first deploy registers the agent, builds the image from the generated
+`Dockerfile`, and writes the `livekit.toml` this directory deliberately does not
+ship, because the platform assigns both of its values.
+
+```sh
+cp .env.example .env            # then fill in the values
+lk agent create --secrets-file .env
+```
+
+Every later version is a redeploy, which needs that config file and the
+`Dockerfile` in this directory:
+
+```sh
+lk agent deploy
+```
+
+`create` is the first deploy and refuses to run when a config file of that name
+already exists. `deploy` ships a new version of an agent that already exists and
+takes no region. Running them the wrong way round either refuses or registers a
+second billable agent with dispatch split between versions.
+
+#### Secrets
+
+`--secrets-file .env` sends every name in `.env.example` to the platform, which
+injects them as environment variables. `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
+`LIVEKIT_API_SECRET` are supplied by the platform itself: the CLI drops them
+from the file, they must not be set in the image, and their absence from the
+deployed secret list is correct rather than a mistake.
+
+**Every name in that file must be a valid shell identifier**: letters, digits and
+underscores, never starting with a digit. The platform exports your secrets with a
+shell, so one bad name fails at export and that value is simply missing at
+runtime. The agent then dies later, somewhere unrelated, and the only trace is a
+single line near the top of `lk agent logs`:
+
+```text
+/etc/run/env: line 2: export: `11LABS_API_KEY=...': not a valid identifier
+```
+
+If you see that, rename the variable in `.env` (`ELEVENLABS_API_KEY`, not
+`11LABS_API_KEY`) or delete the line, then run the overwrite command below.
+Merging is not enough: the bad name stays until something replaces the whole set.
+
+Change a value later without a full redeploy:
+
+```sh
+lk agent update-secrets --secrets-file .env              # merges into the existing set
+lk agent update-secrets --secrets-file .env --overwrite  # replaces the whole set
+```
+
+#### Region
+
+No region is declared, so the first deploy asks which one to use. Set
+`deployment_region` on this target in `targets.yaml` to keep the deploy
+unattended. It is fixed at the first deploy and cannot be moved afterwards.
+
+#### Check it, and recover it
+
+```sh
+lk agent status                 # Sleeping is healthy on plans that scale to zero
+lk agent logs
+lk agent config --id CA_xxx     # rebuild a lost config file, then deploy again
+```
+
+`unmute compile` preserves any `livekit*.toml` the platform wrote here, so a
+recompile does not cost you the agent. If a config file belongs to a different
+project than the current default, the deploy fails with that same subdomain
+mismatch: check `lk project list` and set the default that matches the file.
+
+### Option 2: self-hosted worker
+
+The worker connects out to a LiveKit Server you run and needs no inbound ports.
+Build the generated `Dockerfile` into an image, set `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` to your server's values plus the
+provider keys from `.env.example`, then start the worker:
 
 ```sh
 python agent.py start
@@ -77,9 +166,6 @@ python agent.py start
 
 See `docs/DEPLOYMENT.md` in the Unmute repository for the full self-hosted
 setup: server, Redis, firewall ports, sizing, and scaling.
-
-Compatibility note: the project also runs on LiveKit Cloud with the `lk` CLI
-(`lk agent create`), but that is not the supported path.
 
 ## Trace with Langfuse
 
@@ -532,7 +618,6 @@ if __name__ == "__main__":
     "agent.py",
     "compile-report.json",
     "compose.dev.yaml",
-    "livekit.toml",
     "pyproject.toml",
     "tracing.py"
   ],
@@ -698,11 +783,6 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
-=== livekit.toml ===
-# LiveKit Cloud agent config (`lk agent create` fills project/subdomain on
-# first deploy; the id below matches the worker's agent_name).
-[agent]
-  id = "livekit"
 === pyproject.toml ===
 [project]
 name = "unmute-livekit"
