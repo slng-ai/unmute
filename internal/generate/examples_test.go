@@ -166,6 +166,15 @@ func TestDailyRouteWorkDoesNotReachOtherTargets(t *testing.T) {
 		"DailyParams", "pipecat.transports.daily",
 		"_TRANSFER_RESULT", "## Phone calls",
 		"Account prerequisites", "route_prerequisites", "daily_dialout",
+		// The carrier leg's own markers (SCHEMA N37): the emitted helper, the
+		// forward-once guard, and the runbook's opening line. Carrier work must not
+		// leak onto a target that is not the Daily route either.
+		//
+		// The runbook's *heading* would be the obvious third marker and it is the
+		// wrong one: the LiveKit SIP route heads its own runbook "Telephony setup"
+		// too (specs/005), so it names a shape both drivers share rather than
+		// anything this feature added.
+		"telephony_helper.py", "_CALL_FORWARDED", "One piece runs outside the platform",
 	}
 	root := filepath.Join("..", "..", "examples")
 	entries, err := os.ReadDir(root)
@@ -224,7 +233,7 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	want := []string{"human-transfer", "human-transfer-daily", "multi-task", "outbound-reminder", "salon-support", "simple-prompt", "subagents", "task-groups", "telephony-hello"}
+	want := []string{"human-transfer", "human-transfer-daily", "human-transfer-daily-twilio", "multi-task", "outbound-reminder", "salon-support", "simple-prompt", "subagents", "task-groups", "telephony-hello"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}

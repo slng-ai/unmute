@@ -3,6 +3,7 @@ package target
 import (
 	"fmt"
 	"slices"
+	"strings"
 )
 
 type TelephonyKey struct {
@@ -211,6 +212,64 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	// only the application container and a local `livekit-server --dev`. This
 	// bridge is our own open-source implementation of the Media Streams
 	// protocol; LiveKit's hosted connector is Cloud-only.
+	// The Pipecat Daily route with a carrier leg (SCHEMA N37). The carrier owns
+	// the number and forwards the call over SIP into the same per-call Daily room
+	// a Daily-provisioned call joins, so the agent, the room, and the transfer
+	// primitive are the ones the no-carrier form already uses.
+	//
+	// No `source.*` features. The generated bot reads call sources out of a
+	// context table that only the carrier-websocket adapters fill, and this route
+	// emits no adapter, so granting them would let a package validate green and
+	// receive empty values on a live call (research D11/R14, 2026-08-12).
+	dailyCarrier := TelephonyKey{Provider: Pipecat, Transport: "daily-sip", Carrier: "twilio"}
+	add(Pipecat, "daily-sip", "twilio", "https://docs.pipecat.ai/pipecat/telephony/daily-sip",
+		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound,
+		TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup))
+	route = routes[dailyCarrier]
+	for feature, evidence := range route.Features {
+		evidence.Verified = "2026-08-12"
+		// Every feature here is built and offline-proven and none has had a live
+		// call, so all five stay provisional. The note says what is missing rather
+		// than repeating the generic line, because on this route the gap is one
+		// specific thing: nobody has placed a call through a carrier trunk yet.
+		// A row loses provisional only against a dated line in
+		// specs/006-pipecat-carrier-telephony/tasks.md.
+		evidence.Note = "built and offline-proven; no call has been placed through a carrier trunk yet"
+		route.Features[feature] = evidence
+	}
+	route.RequiredEnvironment = []string{"account_sid", "auth_token", "sip_address", "from_number"}
+	// Processes, PublicEndpoints, and Services below describe the *operator-run
+	// helper*, not the deployed agent. Every other route means the application by
+	// these fields and a reader will assume the same here, so: the agent deployed
+	// to Pipecat Cloud still exposes nothing of its own. The helper is an emitted
+	// artifact the operator runs beside the build, and it is truthfully the one
+	// process this route runs (data-model section 1, research D5).
+	route.Processes = []TelephonyProcess{{
+		Name: "telephony-helper", Command: []string{"uv", "run", "telephony_helper.py"},
+		Health: "/healthz", Readiness: "/healthz",
+	}}
+	// The helper answers incoming calls and nothing else. Dialling out is started
+	// against the platform directly, exactly as it is on a Daily-provisioned
+	// number, so there is no endpoint here that spends money and therefore no
+	// token to guard one.
+	route.PublicEndpoints = []TelephonyEndpointRule{
+		{Name: "inbound", Method: "POST", Path: "/call", AnyFeatures: []TelephonyFeature{TelephonyInbound}},
+		{Name: "health", Method: "GET", Path: "/healthz"},
+	}
+	// Only what the *deployed agent* reads. The helper's own names (the platform
+	// public key, the outbound trigger token, the two optional knobs) are a driver
+	// fact and are registered by the emitter, not here.
+	route.RuntimeEnvironment = []TelephonyEnvironmentRule{{Name: "DAILY_API_KEY"}}
+	// No AutoWebhookEndpoint: the CLI never writes a carrier webhook on this
+	// route. Pointing the number at the helper is a dictated carrier action,
+	// because the helper's public URL is the operator's to choose.
+	route.ManualSteps = []string{
+		"select a Voice-capable number in the Twilio Console (or reuse the one the LiveKit setup already uses; a number serves one target at a time)",
+		"set that number's \"A call comes in\" to a webhook, POST, at https://<your helper host>/call",
+		"create or reuse an Elastic SIP Trunk and note its termination address; that value is the sip_address environment name, and the prefix should be one nobody can guess because termination here authenticates by address list rather than by password",
+		"create an IP access control list holding the sip.hosts entries from https://ip-info.daily.co/ips/ip-info.json and attach it to the trunk's termination; the list is dynamic and changes are published in the same file three days ahead",
+	}
+	routes[dailyCarrier] = route
 	connector := TelephonyKey{Provider: LiveKit, Transport: "connector", Carrier: "twilio"}
 	// No transfers on this route: a transfer needs a platform primitive, and
 	// the connector has none — LiveKit's SIP prebuilts need a SIP participant
@@ -297,8 +356,10 @@ var routePrerequisites = []routePrerequisiteRule{{
 	provider: Pipecat, transport: "daily-sip",
 	prereq: RouteAccountPrerequisite{
 		Name: "daily_dialout",
-		Summary: "Ask Daily to enable dial-out on the domain that owns the number: " +
-			"it is a paid feature granted on request, and international dial-out is enabled separately per domain.",
+		Summary: "Ask Daily to enable dial-out on the domain the agent's rooms belong to: " +
+			"it is a paid feature granted on request, per domain, and international dial-out is enabled separately. " +
+			"It covers dialling a SIP URI as well as a PSTN number, so a target that carries its calls " +
+			"through its own carrier trunk needs the same approval and needs no purchased Daily number.",
 		NeededBy: []TelephonyFeature{TelephonyFeature(ColdTransfer), TelephonyOutbound},
 		Docs:     "https://docs.pipecat.ai/pipecat-cloud/guides/telephony/daily-dial-out",
 		Verified: "2026-08-12",
@@ -347,11 +408,25 @@ func ResolveTelephonyFeature(key TelephonyKey, feature TelephonyFeature) Telepho
 		note := fmt.Sprintf("telephony route (%s, %s, %s) does not support %s", key.Provider, key.Transport, key.Carrier, feature)
 		// Transfers ride platform primitives, so the refusal names where they
 		// exist (SPEC C1, V1): the author learns the fix, not just the no.
-		switch feature {
-		case TelephonyFeature(ColdTransfer):
+		switch {
+		case feature == TelephonyFeature(ColdTransfer):
 			note += "; cold transfer compiles on (livekit, sip) trunks and on Pipecat's Daily route (transport daily-sip)"
-		case TelephonyFeature(WarmTransfer):
+		case feature == TelephonyFeature(WarmTransfer):
+			if key.Provider == Pipecat && key.Transport == "daily-sip" {
+				// Daily documents warm on this route and this project has not built
+				// it. Saying the platform cannot do it would send an author looking
+				// for a different platform when what they need is the feature that
+				// emits it (SCHEMA N34's wording rule).
+				note = fmt.Sprintf("telephony route (%s, %s, %s) does not emit warm transfer yet: Daily documents the pattern and this project has not built it",
+					key.Provider, key.Transport, key.Carrier)
+			}
 			note += "; warm transfer compiles on (livekit, sip) trunks today"
+		case strings.HasPrefix(string(feature), TelephonySourcePrefix):
+			// A call source is filled by an emitted adapter reading the carrier's
+			// own payload. The routes that emit one are the routes that grant it,
+			// so the refusal names them: an author who wants the caller's number
+			// has a route to move to, not just a no.
+			note += "; telephony call sources are filled by the emitted carrier adapter, so they compile on Pipecat's carrier-websocket routes and on (livekit, sip) and (livekit, connector) trunks"
 		}
 		return TelephonyEvidence{Feature: feature, Tag: Gated, Note: note}
 	}

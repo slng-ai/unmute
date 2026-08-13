@@ -51,6 +51,10 @@ func emittedTelephonyFeatures(key target.TelephonyKey) map[target.TelephonyFeatu
 		if slices.Contains([]string{"twilio", "telnyx", "plivo"}, key.Carrier) {
 			return pipecatEmittedTelephonyFeatures
 		}
+	case key.Provider == target.Pipecat && key.Transport == "daily-sip":
+		if key.Carrier == "twilio" {
+			return pipecatDailyCarrierEmittedTelephonyFeatures
+		}
 	case key.Provider == target.LiveKit && key.Transport == "sip":
 		if slices.Contains([]string{"twilio", "telnyx", "plivo"}, key.Carrier) {
 			return livekitEmittedTelephonyFeatures

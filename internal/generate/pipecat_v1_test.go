@@ -1793,6 +1793,55 @@ func TestUS2_DailyProjectDeclaresNoServiceOrEndpoint(t *testing.T) {
 	}
 }
 
+// The carrier form of the same route (SCHEMA N37) has a plan, and whose it is
+// matters. Processes, endpoints, and services on this route describe the
+// *operator-run helper*; the deployed agent still declares nothing of its own,
+// which is the shape rule specs/004 set and this feature had to keep.
+func TestUS2_DailyCarrierPlanBelongsToTheHelperNotTheAgent(t *testing.T) {
+	artifact := dailyCarrierArtifact(t, "twilio", true)
+	plan := artifact.Telephony
+	if plan == nil {
+		t.Fatal("the carrier form resolves no telephony plan")
+	}
+	if len(plan.Processes) != 1 || plan.Processes[0].Name != "telephony-helper" {
+		t.Fatalf("processes = %#v, want the one operator-run helper", plan.Processes)
+	}
+	if strings.Join(plan.Processes[0].Command, " ") != "uv run telephony_helper.py" {
+		t.Errorf("the helper's command = %v", plan.Processes[0].Command)
+	}
+	names := make([]string, 0, len(plan.PublicEndpoints))
+	for _, endpoint := range plan.PublicEndpoints {
+		names = append(names, endpoint.Name)
+	}
+	// Two, not three: the helper answers incoming calls and reports its health.
+	// Placing a call is started against the platform, so there is no endpoint here
+	// that spends money and no token guarding one.
+	if strings.Join(names, ",") != "inbound,health" {
+		t.Errorf("endpoints = %v, want the helper's two", names)
+	}
+	if strings.Join(plan.Services, ",") != "application" {
+		t.Errorf("services = %v, want the helper alone: this route keeps no shared control record", plan.Services)
+	}
+	// The deployed agent exposes nothing. Its own manifest and its Dockerfile are
+	// the evidence: no server command, no exposed port.
+	docker := artifactFile(t, artifact, "Dockerfile")
+	if strings.Contains(docker, "uvicorn") {
+		t.Error("the deployed agent's Dockerfile runs a web server; on this route the agent serves nothing")
+	}
+	// And none of the carrier-websocket route's environment or credentials.
+	report := artifactFile(t, artifact, "compile-report.json")
+	for _, forbidden := range []string{"REDIS_URL", "UNMUTE_PUBLIC_URL", "redis"} {
+		if strings.Contains(report, forbidden) {
+			t.Errorf("the carrier build requires %q, which nothing on this route reads", forbidden)
+		}
+	}
+	for _, file := range artifact.Files {
+		if strings.Contains(string(file.Content), "UNMUTE_PUBLIC_URL") {
+			t.Errorf("%s references UNMUTE_PUBLIC_URL; the helper's public URL is the operator's and never compiled in", file.Path)
+		}
+	}
+}
+
 // Invariant 2, a regression guard: this feature must not shrink the route it is
 // not touching.
 func TestUS2_CarrierWebsocketKeepsItsRuntime(t *testing.T) {
@@ -2025,11 +2074,15 @@ func TestUS4_ForwardedRegionIsInTheReport(t *testing.T) {
 // US5: the emitted instructions describe how an outbound call is started and say
 // what identity the recipient sees, given the package cannot choose one.
 //
-// Documentation only, and deliberately so. There is no way to *declare* outbound
-// calling on this route: a telephony channel requires a carrier connection plan,
-// the Daily route has none, and adding a channel here is what FR-002 rules out.
-// Outbound is started by the platform against the deployed agent, so describing
-// it needs no authoring surface, and pretending the package controls it would.
+// Documentation only on the *no-carrier* form, and deliberately so: there Daily
+// owns the number, outbound is started by the platform against the deployed
+// agent, and there is nothing for the package to declare.
+//
+// This comment used to say a phone channel was impossible on the Daily route
+// full stop, which SCHEMA N37 superseded: the carrier form declares one, because
+// naming a carrier gives the route a connection to dial with. That form is
+// covered by TestCarrierOutboundTrigger. The no-carrier form is unchanged, and
+// this test is its half.
 func TestUS5_OutboundInstructionsNameTheIdentityAndThePermission(t *testing.T) {
 	readme := artifactFile(t, dailyArtifact(t), "README.md")
 	for _, want := range []string{

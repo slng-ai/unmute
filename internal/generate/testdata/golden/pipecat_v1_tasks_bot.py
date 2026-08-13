@@ -230,6 +230,12 @@ class BillingAgent(TracedLLMWorker):
                 run_llm=True,
             )
         )
+        # sip_call_transfer, not sip_refer, and the choice is the same on both
+        # Daily forms. REFER would take Daily out of the media path and stop its
+        # billing, but it needs the originating SIP system to honour REFER, which
+        # neither platform documents for a carrier interconnect leg. So Daily
+        # stays anchored after a completed transfer and both legs keep billing
+        # until the call ends; the README states that cost.
         if isinstance(_TRANSPORT, DailyTransport):
             error = await _TRANSPORT.sip_call_transfer({"toEndPoint": "+14155550123"})
         else:

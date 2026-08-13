@@ -108,6 +108,19 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort,
 		return fmt.Errorf("dev %s: %w", root, err)
 	}
 	resolved := targets[0]
+	// Both Daily forms refuse, and the two refusals say different true things.
+	// The carrier form has a plan, so it would otherwise fall through to the
+	// generic "no executable telephony topology" line below, which is false: it has
+	// a topology, it just is not one this command can run for you.
+	if resolved.Provider == ir.ProviderPipecat && resolved.Transport == "daily-sip" && resolved.Carrier != "" {
+		return fmt.Errorf("dev %s: target %q reaches its phone calls through your own carrier (%s) on the Pipecat Daily route, "+
+			"and the piece that answers the carrier is the emitted telephony_helper.py, which you run yourself; "+
+			"this command cannot run it for you because your carrier has to be able to reach it. "+
+			"Run `unmute compile %s` and follow the Telephony setup section of the emitted README, which is the helper "+
+			"beside a tunnel, two commands. To talk to this agent right now with no phone at all, "+
+			"use `unmute dev %s` in the browser or `unmute dev --console %s` in the terminal",
+			root, resolved.Name, resolved.Carrier, root, root, root)
+	}
 	plan := generate.TelephonyRuntimePlanFor(resolved)
 	if plan == nil {
 		// The Daily route is telephony, so the generic message would be false. It

@@ -183,16 +183,21 @@ primitive. The full map with sources and the test walkthroughs is
 | Route | `cold:` | `warm:` |
 |---|---|---|
 | LiveKit SIP with Twilio, Telnyx, or Plivo | `TransferSIPParticipant` (SIP REFER); provisional | `WarmTransferTask`; provisional |
-| Pipecat Daily (`transport: daily-sip`) | `sip_call_transfer`; provisional | Not supported |
+| Pipecat Daily, Daily's number (`transport: daily-sip`) | `sip_call_transfer`; provisional | Not emitted yet |
+| Pipecat Daily, your own number (`transport: daily-sip` + `carrier:`) | `sip_call_transfer`, destination composed at your trunk's termination address; provisional | Not emitted yet |
 | LiveKit Twilio Connector | Not supported | Not supported |
 | Pipecat carrier WebSocket (any carrier) | Not supported | Not supported |
 | Vapi | native | needs the Twilio carrier (stable path) |
 | Deepgram | carrier-conditional | carrier-conditional |
 
-The "not supported" rows are firm, not pending. Those routes carry media
-only, and every transfer design this project once built on them meant owning
-the call's audio path; that work is deleted. Validation refuses a transfer
-there and names the routes that work.
+The two phrasings mean different things, and the difference is the whole point
+(checked 2026-08-13). **"Not supported"** means the platform ships no transfer
+control on that route, so there is nothing to build against; those rows are firm,
+not pending. Every transfer design this project once built on them meant owning the
+call's audio path, and that work is deleted. **"Not emitted yet"** means the
+platform does ship it and this project has not written it: Daily documents a warm
+pattern on both Daily forms and it is deliberate work rather than a default.
+Validation refuses a transfer in either case and names the routes that work.
 
 **Warm compiles on LiveKit SIP only, today.** A Pipecat warm package fails
 validation pointing at `(livekit, sip)`.

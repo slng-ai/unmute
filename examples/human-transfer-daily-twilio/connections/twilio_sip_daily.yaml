@@ -1,0 +1,22 @@
+# Twilio, the account side of the Pipecat Daily route with a carrier leg.
+# Values are environment variable names, never secrets.
+#
+# Four names, and the route mixes two vocabularies on purpose (SCHEMA N37). It
+# genuinely spans both surfaces: the two REST names move the inbound call the
+# carrier just delivered into the per-call room, and the trunk address carries
+# every outbound leg.
+#
+# `sip_address` and `from_number` are the same two names the LiveKit SIP example
+# uses (../human-transfer/connections/twilio_sip.yaml), so an operator holding
+# that `.env` reuses those two lines unchanged.
+#
+# There is no `sip_username` and no `sip_password`, and the route rejects both.
+# Daily's dial-out accepts a SIP URI with no credential field on any documented
+# surface, so termination here authenticates by IP allow-list against Daily's
+# published static addresses instead. The generated README dictates that step.
+kind: telephony
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  sip_address: SIP_TRUNK_HOSTNAME
+  from_number: SIP_FROM_NUMBER

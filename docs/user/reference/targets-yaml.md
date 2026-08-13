@@ -125,11 +125,30 @@ targets:
     transport: sip
     carrier: telnyx
     connection: telnyx_sip
+
+  # Pipecat's Daily route with your own carrier: the carrier forwards the call
+  # over SIP into the Daily room. Three fields, all of them existing ones, and on
+  # this transport they are required together with a `channels.phone` entry
+  # (SCHEMA N37). Leaving one out fails naming the one you left out.
+  pipecat_daily_twilio:
+    provider: pipecat
+    version: "1.5.0"
+    transport: daily-sip
+    carrier: twilio
+    connection: twilio_sip_daily
 ```
 
 Add another target and Connection for every additional supported carrier route.
 There is no package-level route-count setting and no multi-carrier target: one
 target always emits one adapter.
+
+`transport: daily-sip` is the one transport with two shapes. With no `carrier` it
+means a Daily-provisioned number and takes neither a connection nor a phone
+channel. With a carrier it means your own number, and then all three go together.
+Its Connection keys are `account_sid`, `auth_token`, `sip_address`, `from_number`,
+and it **rejects** `sip_username` and `sip_password` with the route named, because
+Daily's outbound SIP carries no credential on any documented surface and your trunk
+authenticates Daily by IP address list instead.
 
 A Connection stores environment variable **names**, never values, and the names
 are yours to choose: the compiler carries whatever you write through verbatim and

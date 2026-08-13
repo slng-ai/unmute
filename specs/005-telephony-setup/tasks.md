@@ -38,8 +38,8 @@ No foundational tasks. The compiler pipeline, the capability table, and the emit
 - [X] T007 [P] [US1] Create `internal/generate/livekit_telephony_setup_test.go`: script emitted for an inbound SIP route, absent for an outbound-only one, and absent for the connector route (which has the inbound feature but no SIP trunk); the connector README carries no `## Telephony setup` section and no SIP runbook; script contains the preflight names, the empty-ID guard, and no `set -x`; the script never contains `source` of the env file, and its only substitution tokens are the from-number env and `UNMUTE_SIP_TRUNK_ID`; `sip-dispatch-rule.json` carries a non-empty `trunk_ids` with the renamed token; README pins per `contracts/runbook.md` (section present, count paragraph, prerequisites line, Twilio block when carrier is twilio, `bash telephony-setup.sh` present, the cold-transfer failure line mapped to the carrier toggles per FR-007, the Agent Console caveat, and the retirement sentence appearing exactly once)
 - [X] T008 [US1] Update stale expectations in `internal/generate/livekit_v1_test.go` and `internal/generate/livekit_inline_trunk_test.go` that pin the old README wording, the envsubst block, or the old placeholder
 - [X] T009 [US1] Regenerate the livekit golden deliberately with the package's own flag, `go test ./internal/generate -run TestLiveKit -update-livekit` (declared at `internal/generate/livekit_v1_test.go:18`; a bare `-update` does not exist in this package), read every changed line of `internal/generate/testdata/golden/livekit_v1_remy.txt` before accepting, then `make fmt && make lint && make test`
-- [ ] T010 [US1] LIVE: quickstart Run 4 against the real LiveKit project (`bash telephony-setup.sh` twice; first run creates, second reports reused; `lk sip inbound list` and `lk sip dispatch list` confirm scope); record date and outcome in the Live Run Record below
-- [ ] T011 [US1] LIVE: quickstart Run 5 flows 1 to 3 after completing the Twilio part of the runbook (inbound answered, warm transfer on a real inbound call, cold transfer completes with the specs/003 log lines); record outcomes below
+- [X] T010 [US1] LIVE: quickstart Run 4 against the real LiveKit project (`bash telephony-setup.sh` twice; first run creates, second reports reused; `lk sip inbound list` and `lk sip dispatch list` confirm scope); record date and outcome in the Live Run Record below
+- [X] T011 [US1] LIVE: quickstart Run 5 flows 1 to 3 after completing the Twilio part of the runbook (inbound answered, warm transfer on a real inbound call, cold transfer completes with the specs/003 log lines); record outcomes below
 
 **Checkpoint**: an operator can set up everything from the README. The retired name still lingers in `.env.example` until US2.
 
@@ -117,18 +117,18 @@ No foundational tasks. The compiler pipeline, the capability table, and the emit
 | Script first run (T010) | 2026-08-12 | **Pass.** Created the inbound trunk and the dispatch rule against slng-atlas from the emitted script |
 | Script idempotence (T010) | 2026-08-12 | **Pass.** Second run created nothing |
 | Inbound answered (T011) | 2026-08-12 | **Pass.** Call to `SIP_FROM_NUMBER` reached the deployed agent `livekit` (`CA_pxm6TiuPibJq`, eu-central) |
-| Warm on inbound call (T011) | | Warm passed from the Agent Console on 2026-08-12 (specs/003 run A1); not yet re-run on a real inbound leg |
+| Warm on inbound call (T011) | 2026-08-12 | **Pass.** Confirmed by the requester on a real inbound call, alongside inbound answering and cold transfer. Recorded here on 2026-08-13 while implementing specs/006, which mirrors this runbook on the Pipecat driver; the row had stayed open after the run. |
 | Cold completes (T011) | 2026-08-12 | **Pass.** Caller asked for billing, was connected onward, agent left the call, three cold log lines clean |
-| Dev flow regression (T021) | | |
+| Dev flow regression (T021) | | **Still open.** The requester's 2026-08-12 confirmation covers inbound, cold, and warm on real calls, which is T010 and T011. It does not cover `unmute dev --telephony` creating or reusing the local records, so this row stays empty rather than borrowing that evidence. |
 | Toggle-off cold probe (T031, optional) | | |
 
 What the live pass needed that the plan had not anticipated, both now documented: the phone number had to be **attached to the trunk** (its `trunkSid` was empty, so origination was never consulted), and one secret name (`11LABS_API_KEY`) was not a valid shell identifier, which LiveKit Cloud reports as a single `/etc/run/env` line at the top of `lk agent logs` and otherwise swallows. The generated README, the example README and `docs/user` all carry both now.
 
-Reference: warm transfer already passed live on 2026-08-12 from the Agent Console (specs/003 run A1); T011 re-proves it on a real inbound leg.
+Reference: warm transfer passed live on 2026-08-12 from the Agent Console (specs/003 run A1), and again on a real inbound leg the same day, which is what T011 needed.
 
 **Verified read-only on 2026-08-12, ahead of the live runs.** The script's two risky halves were exercised against the real LiveKit project with `lk` 2.18.2 without creating anything: `lk sip inbound list --json` returns `{"items":[{"sipTrunkId","name","numbers",...}]}` and the resolver's `jq` filter correctly returned empty for the package's number (no trunk claims it yet, which is the pre-setup state); `lk sip dispatch list --json` returns `{"items":[{"sipDispatchRuleId","trunkIds",...}]}` and the existence check answered correctly for both a present and an absent trunk ID; both `sed` substitutions produced valid JSON with the expected values. What remains for the live runs is the mutating half: the two creates, idempotence on a second run, and the calls.
 
-**Still pending, and why.** T010, T011, T021's live run and T031 need the Twilio console steps done on the trunk, the operator's credentials, and a phone. Everything else is green offline.
+**Still pending, and why.** T021's live run and T031 need the Twilio console steps done on the trunk, the operator's credentials, and a phone. T010 and T011 are done: the runs happened on 2026-08-12 and the record above was completed on 2026-08-13. Everything else is green offline.
 
 ## Dependencies & Execution Order
 
@@ -136,7 +136,7 @@ Reference: warm transfer already passed live on 2026-08-12 from the Agent Consol
 - **US1 → US2 → US4 → US3**: US2 removes names US1's runbook replaced; US4 deletes plumbing that US2's surface removal makes dead; US3 only pins what US1 built and can run any time after Phase 3. The stories share `telephony.go`, `README.md.tmpl`, and the new test file, which is why they are sequenced rather than parallel.
 - Polish (Phase 7) after all stories; T024 to T028 are parallel (different files), then T029, T030, T031 in order.
 - Within US4 the order is fixed: T017 introduces the inbound-feature helper, T018 switches the startup gate onto it, and only then does T019 delete the old field. Deleting the field first would leave the gate uncompilable and invites replacing it with something weaker.
-- LIVE tasks (T010, T011, T021's run, T031) need credentials and a phone; everything else is CI-green offline.
+- LIVE tasks (T021's run, T031) need credentials and a phone; everything else is CI-green offline. T010 and T011 ran on 2026-08-12.
 
 ## Parallel Example: Phase 7
 

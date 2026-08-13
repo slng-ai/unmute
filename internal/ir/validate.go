@@ -1469,9 +1469,14 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 	// Server only (no Redis, no SIP bridge).
 	isLiveKitSIP := plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip"
 	isLiveKitConnector := plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "connector"
+	// The Pipecat Daily carrier route runs the operator's helper and nothing
+	// else: no Redis, because it keeps no shared control record (SCHEMA N37).
+	isPipecatDailyCarrier := plan.Key.Provider == ProviderPipecat && plan.Key.Transport == "daily-sip"
 	allowedServices := map[string]bool{"application": true}
 	requiredServices := []string{"application"}
 	switch {
+	case isPipecatDailyCarrier:
+		// application only, already in both sets.
 	case isLiveKitSIP:
 		allowedServices["redis"] = true
 		allowedServices["livekit_server"] = true
@@ -1528,10 +1533,22 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 		}
 	}
 	if plan.Key.Provider == ProviderPipecat {
-		for _, required := range []string{"admission", "call_correlation", "callback_idempotency"} {
-			if !seenReasons[required] {
-				row.Errors = add(row.Errors, fmt.Sprintf("Pipecat coordination reason %q is required", required))
+		// The two correlation reasons describe Redis-backed records, so they are
+		// required exactly where Redis is: the carrier-websocket routes. The Daily
+		// carrier leg keeps no such record and admits calls through the room
+		// (SCHEMA N37), so requiring them there would demand a reason for a service
+		// the same validation forbids.
+		required := []string{"admission", "call_correlation", "callback_idempotency"}
+		if isPipecatDailyCarrier {
+			required = []string{"admission"}
+		}
+		for _, name := range required {
+			if !seenReasons[name] {
+				row.Errors = add(row.Errors, fmt.Sprintf("Pipecat coordination reason %q is required", name))
 			}
+		}
+		if isPipecatDailyCarrier && len(seenReasons) != 1 {
+			row.Errors = add(row.Errors, "the Pipecat Daily carrier route coordinates only admission")
 		}
 	}
 	if plan.Key.Provider == ProviderLiveKit && plan.Key.Transport == "sip" {

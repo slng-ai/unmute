@@ -30,12 +30,14 @@ import asyncio
 {{end}}{{if .Telephony}}import sys
 {{end}}{{if .Variables}}from dataclasses import dataclass
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
-{{end}}{{if .NeedsHTTPX}}
+{{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}
+import aiohttp
+{{end}}{{end}}{{if .NeedsHTTPX}}
 import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}{{if .Telephony}}import telephony
 {{end}}from dotenv import load_dotenv
-{{if or .Telephony .HasColdTransfer}}from loguru import logger
+{{if or .Telephony .HasColdTransfer .DailyCarrier}}from loguru import logger
 {{end}}
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 {{if not .Inline}}from pipecat.bus import BusBridgeProcessor
@@ -106,7 +108,89 @@ def require_env() -> None:
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
+{{if .DailyCarrier}}
+# --- the carrier leg ---------------------------------------------------------
+# The call arrives through your own carrier and joins this room over SIP. Only
+# the forwarding request below speaks the carrier's own words; everything else
+# here is a Daily room participant like any other.
 
+
+def _carrier_sip(destination: str) -> str:
+    """A destination dialled through your own trunk.
+
+    Every outbound leg on this route leaves through your carrier, so an E.164
+    number becomes a SIP URI at your trunk's termination address. Composed here,
+    at call time, because a destination deferred to an environment variable has
+    no value until now. A destination that is already a SIP URI is dialled as
+    written.
+    """
+    if destination.startswith(("sip:", "sips:")):
+        return destination
+    return f"sip:{destination}@{os.environ[{{pyq .DailyCarrier.SIPAddressEnv}}]}"
+
+
+# What a phone call adds to REQUIRED_ENV above, checked only on a phone call: a
+# browser or console session on this package reads none of these and must not be
+# asked for them. The check runs before the call is answered, so a missing value
+# can never first show up as a failed transfer on a call somebody is paying for.
+CALL_REQUIRED_ENV = [
+{{range .DailyCarrier.CallEnv}}    {{pyq .}},
+{{end}}]
+
+
+def _carrier_session(runner_args: RunnerArguments) -> dict | None:
+    """The call details the helper started this session with, validated.
+
+    Returns None when this session is not a phone call at all: a browser or
+    console session carries no call details and must behave exactly as it does
+    on a package with no carrier. A body that claims to be a call but is missing
+    a field fails here, by field name, rather than half-way through the call.
+    """
+    body = getattr(runner_args, "body", None)
+    if not isinstance(body, dict) or not body.get("direction"):
+        return None
+    missing = [name for name in CALL_REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(f"Missing environment for a phone call: {', '.join(missing)}")
+    direction = body["direction"]
+    if direction == "inbound":
+        # room_url and token are required on an incoming call because the helper
+        # created that room, not the platform, so this is the only place the room
+        # to join is named.
+        required = ("room_url", "token", "call_sid", "sip_uri")
+    elif direction == "outbound":
+        required = ("dialout",)
+    else:
+        raise RuntimeError(f"call body direction must be inbound or outbound, not {direction!r}")
+    missing = [field for field in required if not body.get(field)]
+    if missing:
+        raise RuntimeError(f"call body is missing required fields: {', '.join(missing)}")
+    return body
+{{if .DailyCarrier.HasInbound}}
+# The room's SIP leg can signal ready more than once, so the forward is claimed
+# once and never repeated. Module scope is call scope here: one process serves
+# one call.
+_CALL_FORWARDED = False
+
+{{if eq .DailyCarrier.Carrier "twilio"}}
+async def _forward_carrier_call(call_sid: str, sip_uri: str) -> None:
+    """Point the live call at this room's SIP address.
+
+    This is the one request in the whole project made in the carrier's own words,
+    and it is call control rather than provisioning: the call already exists and
+    the carrier just handed it to us. One HTTPS request, so no carrier SDK.
+    """
+    account_sid = os.environ[{{pyq .DailyCarrier.AccountSIDEnv}}]
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
+    twiml = f"<Response><Dial><Sip>{sip_uri}</Sip></Dial></Response>"
+    auth = aiohttp.BasicAuth(account_sid, os.environ[{{pyq .DailyCarrier.AuthTokenEnv}}])
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, auth=auth, data={"Twiml": twiml}) as response:
+            if response.status >= 400:
+                raise RuntimeError(
+                    f"carrier call update failed with {response.status}: {await response.text()}"
+                )
+{{end}}{{end}}{{end}}
 {{if .Variables}}
 @dataclass
 class State:
@@ -314,6 +398,12 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
                 run_llm=True,
             )
         )
+        # sip_call_transfer, not sip_refer, and the choice is the same on both
+        # Daily forms. REFER would take Daily out of the media path and stop its
+        # billing, but it needs the originating SIP system to honour REFER, which
+        # neither platform documents for a carrier interconnect leg. So Daily
+        # stays anchored after a completed transfer and both legs keep billing
+        # until the call ends; the README states that cost.
         if isinstance(_TRANSPORT, {{$.DailyParams.Transport}}):
             error = await _TRANSPORT.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
         else:
@@ -569,7 +659,10 @@ def build_stt():
 
 {{else}}async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activate_on_start: bool = False) -> None:
     require_env()
-{{if .Tracing}}
+{{if .DailyCarrier}}    # Validated before anything is built: a malformed call body fails by field
+    # name rather than mid-call. None means this is not a phone session.
+    carrier_call = _carrier_session(runner_args)
+{{end}}{{if .Tracing}}
     tracing_enabled = setup_langfuse_tracing()
 {{end}}
 {{if .HasColdTransfer}}    global _TRANSPORT
@@ -632,8 +725,62 @@ def build_stt():
     @transport.event_handler("on_dialout_answered")
     async def on_dialout_answered(transport, data):
         # Cold transfer: the human answered, so the bot leaves the call.
-        await main.queue_frame(EndFrame())
-{{end}}
+{{if .DailyCarrier}}        if _TRANSFER_RESULT is None:
+            # No transfer is under way, so this is the outbound call this session
+            # exists for and the recipient has just picked up. Ending here would
+            # hang up on the person we called.
+            return
+{{end}}        await main.queue_frame(EndFrame())
+{{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}
+    if carrier_call and carrier_call["direction"] == "inbound":
+
+        @transport.event_handler("on_dialin_ready")
+        async def on_dialin_ready(transport, cdata):
+            # The guard is claimed before the request goes out, not after: a
+            # second ready signal arriving while the first forward is still in
+            # flight must not forward the same call twice.
+            global _CALL_FORWARDED
+            if _CALL_FORWARDED:
+                return
+            _CALL_FORWARDED = True
+            try:
+                await _forward_carrier_call(carrier_call["call_sid"], carrier_call["sip_uri"])
+            except Exception as exc:
+                # Named, not swallowed. The caller is still on the helper's hold
+                # audio, and this line is what says why they never got further.
+                logger.error("forwarding carrier call {} failed: {}", carrier_call["call_sid"], exc)
+                return
+            logger.info("carrier call {} forwarded into the room", carrier_call["call_sid"])
+{{end}}{{if .DailyCarrier.HasOutbound}}
+    if carrier_call and carrier_call["direction"] == "outbound":
+
+        @transport.event_handler("on_joined")
+        async def on_joined(transport, data):
+            # Dialled through your own trunk: a SIP URI, and the provider Daily
+            # documents for a carrier interconnect leg.
+            await transport.start_dialout(
+                {
+                    "sipUri": carrier_call["dialout"]["sip_uri"],
+                    "displayName": MAIN_NAME,
+                    "provider": "daily",
+                }
+            )
+
+        @transport.event_handler("on_dialout_connected")
+        async def on_dialout_connected(transport, data):
+            logger.info("dial-out connected: {}", data)
+
+        @transport.event_handler("on_dialout_stopped")
+        async def on_dialout_stopped(transport, data):
+            # A leg the carrier rejected ends here with its cause named, rather
+            # than as a call that simply never rang.
+            logger.warning("dial-out stopped: {}", data)
+            await runner.cancel()
+
+        @transport.event_handler("on_dialout_warning")
+        async def on_dialout_warning(transport, data):
+            logger.warning("dial-out warning: {}", data)
+{{end}}{{end}}
     pipeline_started = asyncio.Event()
     entry_started = False
 
@@ -703,9 +850,26 @@ def build_stt():
 async def bot(runner_args: RunnerArguments) -> None:
 {{if .Telephony}}    require_env()
     telephony.configure_pipecat_env()
-{{end}}
+{{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}    # An incoming carrier call joins a room the helper created, so the platform was
+    # asked to start this agent *without* making one and has no room to hand over.
+    # The body is the only place that room is named, which is why the runner's own
+    # transport factory cannot be used for this one case. Every other session,
+    # outbound included, comes from the runner as usual.
+    _inbound = _carrier_session(runner_args)
+    if _inbound and _inbound["direction"] == "inbound":
+        transport = {{.DailyParams.Transport}}(
+            _inbound["room_url"],
+            _inbound["token"],
+            MAIN_NAME,
+            params=transport_params["daily"](),
+        )
+    else:
+        transport = await create_transport(runner_args, transport_params)
+{{else}}
     transport = await create_transport(runner_args, transport_params)
-    await run_bot(transport, runner_args)
+{{end}}{{else}}
+    transport = await create_transport(runner_args, transport_params)
+{{end}}    await run_bot(transport, runner_args)
 
 
 async def console_main() -> None:

@@ -210,6 +210,8 @@ not the number of targets, is the limit:
 | Pipecat | `carrier-websocket` | Telnyx | Direct carrier adapter and Pipecat Telnyx serializer | Runs; provisional |
 | Pipecat | `carrier-websocket` | Plivo | Direct carrier adapter and Pipecat Plivo serializer | Runs; provisional |
 | Pipecat | `carrier-websocket` | Exotel | No generated adapter | Gated; no adapter |
+| Pipecat | `daily-sip` | (none) | Daily-provisioned number; Daily's own infrastructure delivers the call to the deployed agent | Runs; provisional. Cloud-only |
+| Pipecat | `daily-sip` | Twilio | Your carrier forwards the call over SIP into the same per-call Daily room. Emits `telephony_helper.py`, an operator-run webhook server, plus a carrier block in the bot (SCHEMA N37) | Runs; provisional. Cloud-only |
 | LiveKit | `sip` | Twilio | Self-hosted LiveKit SIP and Twilio trunk inputs | Runs; provisional |
 | LiveKit | `sip` | Telnyx | Self-hosted LiveKit SIP and Telnyx trunk inputs | Runs; provisional |
 | LiveKit | `sip` | Plivo | Self-hosted LiveKit SIP and Plivo trunk inputs | Runs; provisional |
@@ -302,7 +304,8 @@ The initial route adapters use these names:
 | Pipecat with Telnyx | `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_CONNECTION_ID`, `TELNYX_PHONE_NUMBER` | Telnyx Mission Control Portal → API Keys, Public Key, and the Voice API Application details page. The application ID is the Connection ID. |
 | Pipecat with Plivo | `PLIVO_AUTH_ID`, `PLIVO_AUTH_TOKEN`, `PLIVO_PHONE_NUMBER` | Plivo Console dashboard → API Keys and Phone Numbers. The Auth Token validates V3 webhook signatures. |
 | Pipecat with Exotel | `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`, `EXOTEL_ACCOUNT_SID`, `EXOTEL_SUBDOMAIN`, `EXOTEL_PHONE_NUMBER`, `EXOTEL_APP_ID` | Exotel Dashboard → API Settings for the key, token, Account SID, and regional subdomain; use the ExoPhone and call-flow application ID from the Voice dashboard. |
-| All Pipecat telephony routes | `REDIS_URL` | Generated Compose supplies the local value. In production, use the connection URL from the Redis service managed by your infrastructure operator. Store any password in the deployment secret store. |
+| Pipecat carrier-WebSocket routes | `REDIS_URL` | Generated Compose supplies the local value. In production, use the connection URL from the Redis service managed by your infrastructure operator. Store any password in the deployment secret store. The Daily route needs no Redis on either form. |
+| Pipecat `daily-sip` with your own carrier | agent side: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `SIP_TRUNK_HOSTNAME`, `SIP_FROM_NUMBER`, `DAILY_API_KEY`. Helper side: `PIPECAT_CLOUD_API_KEY`, and optionally `UNMUTE_HOLD_AUDIO_URL` and `UNMUTE_DAILY_ROOM_GEO` | Twilio Console → Account dashboard for the REST pair, Elastic SIP Trunking → Termination for the address, Daily dashboard for the API key, Pipecat Cloud dashboard for the public key. **No SIP username or password**: the route rejects both, because Daily's dial-out carries no credential field on any documented surface and termination authenticates Daily by IP allow-list instead (`https://ip-info.daily.co/ips/ip-info.json`, read 2026-08-12). **No `UNMUTE_OUTBOUND_TOKEN`** either: the helper answers incoming calls only, so it has no endpoint that spends money to guard, and outbound is started against the platform. The helper-side names are read where the operator runs the helper and never belong in the platform secret set. |
 | LiveKit Twilio connector | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Local Compose supplies the non-production `devkey`/`secret` pair and a local `livekit-server --dev`; in production point these at your self-hosted LiveKit server. The connector needs no LiveKit Cloud and no Redis, and also needs the Twilio variables above. |
 | Self-hosted LiveKit SIP topology | `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `REDIS_URL` | Create the API key and secret in the LiveKit Server `keys` configuration and use the same pair in LiveKit SIP. Set `LIVEKIT_URL` to that server and `REDIS_URL` to their shared Redis deployment. For inbound calls, point the carrier's origination URI at your public LiveKit SIP endpoint. |
 | LiveKit SIP with Twilio | `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`, `SIP_AUTH_PASSWORD`, `SIP_FROM_NUMBER` | Twilio Console → Elastic SIP Trunking. Use the termination URI, Credential List username and password, and associated number. |
@@ -537,6 +540,61 @@ one made the generated process own the call's audio path and each live test
 found a new lifecycle bug there. Transfers now compile only where the
 platform ships the primitive, which for Pipecat is the Daily route
 (TRANSFERS.md); the deleted designs stay in git history.
+
+### Pipecat Daily route, two forms
+
+`transport: daily-sip` is where Pipecat telephony has a transfer primitive, and
+it has two forms. Both deploy the same agent to Pipecat Cloud and both put the
+call in a Daily room; what differs is who owns the number.
+
+**Daily-provisioned (no carrier).** You buy the number from Daily and point the
+domain's pinless dial-in at the platform's own managed webhook. Nothing of yours
+is in the path: no server, no public port, no local topology. This is the
+zero-infrastructure inbound path and it is unchanged.
+
+**Your own carrier (`carrier:` plus `connection:` plus a `channels.phone` entry,
+SCHEMA N37).** Your carrier owns the number and forwards the call over SIP into a
+per-call Daily room, with `provider="daily"`. The agent sees a room participant
+whichever carrier carried the call, so nothing per-carrier lives in the agent
+except one request.
+
+The carrier form needs one moving part the other does not, because Daily's SIP
+addresses are per room and rooms are created per call: there is no static address a
+carrier can forward to. So the build emits `telephony_helper.py`. It is an
+**operator-run artifact**, not part of the deployment: you run it beside the build,
+your carrier's webhook reaches it, and it creates the room, starts the deployed
+agent on it with `createDailyRoom: false`, and answers the carrier with hold audio
+so the caller is not in silence while the agent boots. The agent then moves the
+live call into the room, exactly once, on the room's SIP-ready signal. **The
+deployed agent still exposes no public endpoint of its own**, which is the shape
+rule the Daily route has always had.
+
+Read the route row's `Processes`, `PublicEndpoints`, and `Services` with that in
+mind: on every other route those fields describe the deployed application, and on
+this one they describe the helper.
+
+The helper answers incoming calls and nothing else. Dialling out is started against
+the platform's own start endpoint, with a room asked for as dial-out enabled and the
+composed SIP address in the body, which is one command and the same shape the
+no-carrier form already uses. So the helper has no endpoint that places a call, and
+therefore no bearer token guarding one: this route is the only Pipecat telephony
+route with no `UNMUTE_OUTBOUND_TOKEN`. An internet-reachable endpoint that could
+dial arbitrary numbers through the operator's trunk would need that guard; not
+having the endpoint is better than guarding it well.
+
+There is no Redis on either form. The carrier form keeps no shared control record:
+one process serves one call, the room correlates the legs, and the transfer's
+at-most-once guard is in-process. Outbound legs and the cold transfer both leave
+through the operator's own trunk, composed as `sip:<number>@<termination address>`,
+which is why the Connection mixes the carrier REST vocabulary with the SIP one and
+carries no SIP credentials at all (Daily's dial-out has no credential field on any
+documented surface; termination authenticates Daily by IP allow-list).
+
+Local `unmute dev --telephony` refuses on both forms, and for different reasons.
+The no-carrier form has no local topology at all. The carrier form has one, the
+helper, but the CLI cannot run it somewhere the operator's carrier can reach, so
+the emitted README dictates the helper plus a tunnel instead. Browser and console
+modes work on both, unchanged.
 
 ### LiveKit routes
 

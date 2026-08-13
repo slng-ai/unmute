@@ -1068,6 +1068,146 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 	if !strings.Contains(joined, "warm transfer compiles on (livekit, sip) trunks") {
 		t.Fatalf("warm on the carrier route must name the supported routes, got:\n%s", joined)
 	}
+
+	// T016b / spec FR-006: the Daily carrier leg changes nothing about warm. The
+	// route grants no warm feature, so the refusal must still arrive, and it must
+	// still say which thing it means.
+	pkg = dailyCarrierPackage(t)
+	human = pkg.Agent.Controls["to_human"]
+	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
+	pkg.Agent.Controls["to_human"] = human
+	phone = pkg.Agent.Channels["phone"]
+	phone.Outbound = &outbound
+	pkg.Agent.Channels["phone"] = phone
+	agent, err = Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, _ = Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
+	joined = strings.Join(report.PerTarget[0].Errors, "\n")
+	if !strings.Contains(joined, "does not emit warm transfer yet") || !strings.Contains(joined, "(livekit, sip)") {
+		t.Fatalf("warm on the Daily carrier leg must still fail naming (livekit, sip), got:\n%s", joined)
+	}
+	if strings.Contains(joined, "no native warm transfer") || strings.Contains(joined, "Pipecat has no warm") {
+		t.Errorf("the refusal states a platform limitation Daily's own docs contradict:\n%s", joined)
+	}
+}
+
+// dailyCarrierPackage is safe_core on (pipecat, daily-sip, twilio): the Daily
+// route with a carrier leg (SCHEMA N37), with the four Connection keys that
+// route accepts and nothing else.
+func dailyCarrierPackage(t *testing.T) *packagespec.Package {
+	t.Helper()
+	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
+	target := pkg.Targets["pipecat"]
+	target.Carrier, target.Connection = "twilio", "twilio_sip_daily"
+	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+	pkg.Connections = map[string]packagespec.Connection{"twilio_sip_daily": {
+		Kind: "telephony", Environment: map[string]string{
+			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
+			"sip_address": "SIP_TRUNK_HOSTNAME", "from_number": "SIP_FROM_NUMBER",
+		},
+	}}
+	return pkg
+}
+
+// T016: the Daily carrier route validates Redis-free, and a plan that declares
+// Redis anyway fails. Both halves matter: the second proves T010 relaxed the
+// right branch, and the carrier-websocket check below proves it did not relax
+// the wrong one.
+func TestValidatePipecatDailyCarrierServiceSet(t *testing.T) {
+	agent, err := Build(dailyCarrierPackage(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["pipecat"]
+	report, _ := Validate(agent, []Target{resolved}, targetcap.Default())
+	if errs := report.PerTarget[0].Errors; len(errs) != 0 {
+		t.Fatalf("the Daily carrier route must validate cleanly, got:\n%s", strings.Join(errs, "\n"))
+	}
+
+	// A fabricated plan declaring redis on this route fails by name.
+	withRedis := resolved
+	plan := *resolved.Telephony
+	plan.Services = []string{"application", "redis"}
+	withRedis.Telephony = &plan
+	report, _ = Validate(agent, []Target{withRedis}, targetcap.Default())
+	joined := strings.Join(report.PerTarget[0].Errors, "\n")
+	if !strings.Contains(joined, `telephony route declares unexpected service "redis"`) {
+		t.Fatalf("a redis service on the Daily carrier route must fail by name, got:\n%s", joined)
+	}
+
+	// The carrier-websocket routes still require it.
+	cwPkg := loadSafeCore(t)
+	enableTelephony(cwPkg)
+	cw := cwPkg.Targets["pipecat"]
+	cw.Transport, cw.Carrier, cw.Connection = "carrier-websocket", "twilio", "primary_phone"
+	cwPkg.Targets = map[string]packagespec.Target{"pipecat": cw}
+	cwAgent, err := Build(cwPkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwTarget := cwAgent.Targets["pipecat"]
+	cwPlan := *cwTarget.Telephony
+	cwPlan.Services = []string{"application"}
+	cwTarget.Telephony = &cwPlan
+	report, _ = Validate(cwAgent, []Target{cwTarget}, targetcap.Default())
+	if joined = strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(joined, "telephony service redis is required") {
+		t.Fatalf("the carrier-websocket routes must still require redis, got:\n%s", joined)
+	}
+}
+
+// T016a / FR-004, research D11: the route grants no telephony call sources,
+// because the code that fills them is the carrier-websocket adapter this route
+// does not emit. The refusal is the feature, and it has to name where the source
+// does work, so an author learns the fix rather than only the no.
+func TestValidatePipecatDailyCarrierRefusesCallSources(t *testing.T) {
+	for _, source := range []VariableSource{
+		VariableSourceFromNumber, VariableSourceToNumber,
+		VariableSourceCallID, VariableSourceDirection,
+	} {
+		t.Run(string(source), func(t *testing.T) {
+			pkg := dailyCarrierPackage(t)
+			pkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(source)}
+			agent, err := Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, _ := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
+			joined := strings.Join(report.PerTarget[0].Errors, "\n")
+			if !strings.Contains(joined, "source."+string(source)) {
+				t.Fatalf("a %s variable must fail by the source's name on this route, got:\n%s", source, joined)
+			}
+			if !strings.Contains(joined, "daily-sip") {
+				t.Errorf("the refusal must name the route, got:\n%s", joined)
+			}
+			if !strings.Contains(joined, "carrier-websocket") {
+				t.Errorf("the refusal must name where the source does work, got:\n%s", joined)
+			}
+
+			// The same declaration passes where the fill path exists.
+			cwPkg := dailyCarrierPackage(t)
+			cwPkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(source)}
+			cw := cwPkg.Targets["pipecat"]
+			cw.Transport, cw.Connection = "carrier-websocket", "primary_phone"
+			cwPkg.Targets = map[string]packagespec.Target{"pipecat": cw}
+			cwPkg.Connections = map[string]packagespec.Connection{"primary_phone": {
+				Kind: "telephony", Environment: map[string]string{
+					"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
+					"from_number": "TWILIO_PHONE_NUMBER",
+				},
+			}}
+			cwAgent, err := Build(cwPkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report, _ = Validate(cwAgent, []Target{cwAgent.Targets["pipecat"]}, targetcap.Default())
+			if joined = strings.Join(report.PerTarget[0].Errors, "\n"); strings.Contains(joined, "source."+string(source)) {
+				t.Fatalf("the carrier-websocket route fills %s, so it must not be refused there:\n%s", source, joined)
+			}
+		})
+	}
 }
 
 // deployment_region takes one region or several (N32). Several is LiveKit only:

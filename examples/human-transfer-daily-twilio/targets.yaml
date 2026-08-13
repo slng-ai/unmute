@@ -1,0 +1,25 @@
+# Pipecat on the Daily route, with a carrier leg: your own Twilio number
+# forwards the call over SIP into the same per-call Daily room a
+# Daily-provisioned number would land in (SCHEMA N37).
+#
+# Three fields select it, all of them fields the vocabulary already had:
+# transport, carrier, connection. The no-carrier form is
+# ../human-transfer-daily, unchanged.
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: daily-sip
+    carrier: twilio
+    connection: twilio_sip_daily
+    # Where Pipecat Cloud runs the deployed agent. Declared so the first deploy
+    # does not stop to ask. This is the platform's region vocabulary, not Daily's
+    # room geography: the two have no documented mapping, so the room's geography
+    # is a separate optional value the helper reads.
+    deployment_region: us-west
+    # The destination is the UPPER_SNAKE name of an env var holding an E.164
+    # number or a sip: URI, read at call time. On a carrier target the number
+    # becomes a SIP URI at your trunk's termination address, composed at call
+    # time, so the transfer dials through your own trunk.
+    destinations:
+      billing_line: BILLING_PHONE_NUMBER

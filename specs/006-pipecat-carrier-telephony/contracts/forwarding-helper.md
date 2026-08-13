@@ -2,6 +2,24 @@
 
 **Feature**: [../spec.md](../spec.md) | **Date**: 2026-08-12
 
+> **Amended 2026-08-13, at the requester's decision: `POST /outbound` is removed
+> from this contract, and with it `UNMUTE_OUTBOUND_TOKEN`.**
+>
+> The reason the helper exists is that an *incoming* call needs a room that does
+> not exist yet: Daily makes one room per call and its SIP address arrives with it,
+> so a carrier has no static address to be pointed at. Dialling out has no such
+> problem. The room only needs dial-out enabled, which the platform's own start
+> endpoint does, so outbound is one command against the platform, exactly as it
+> already is on a Daily-provisioned number.
+>
+> The token existed to guard that endpoint, and the guard was real: the helper is
+> reachable from the internet by necessity, so an unauthenticated call-placing
+> endpoint would let anyone who found the URL dial through the operator's trunk.
+> Removing the endpoint removes the exposure and the value the operator had to
+> invent and keep. The helper now has exactly two endpoints, `POST /call` and
+> `GET /healthz`, neither of which spends money, so it needs no authentication at
+> all. The sections below are superseded where they disagree with this note.
+
 `telephony_helper.py` is an emitted artifact, present in the build exactly when the target declares a carrier. It is the operator-run bridge between the carrier's webhook and the platform's start API. It is carrier-neutral in structure; the only carrier-specific piece in the whole feature is the forwarding action in the bot (research D3), not here.
 
 ## Runtime shape

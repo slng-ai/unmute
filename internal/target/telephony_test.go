@@ -40,6 +40,45 @@ func TestTelephonyAutoWebhookIsATwilioFactOnly(t *testing.T) {
 	}
 }
 
+// The Daily carrier route's row, in full (SCHEMA N37). The key set is the one
+// fact this route adds to the telephony vocabulary, and the two absences are as
+// deliberate as the four presences.
+func TestPipecatDailyCarrierRouteRow(t *testing.T) {
+	key := TelephonyKey{Provider: Pipecat, Transport: "daily-sip", Carrier: "twilio"}
+	route, ok := TelephonyRoutes()[key]
+	if !ok {
+		t.Fatal("the Daily carrier route has no row, so nothing on it can validate")
+	}
+	if got := strings.Join(route.RequiredEnvironment, ","); got != "account_sid,auth_token,sip_address,from_number" {
+		t.Fatalf("required environment = %q, want account_sid,auth_token,sip_address,from_number in that order", got)
+	}
+	// Daily's dial-out carries no SIP credential auth on any documented surface,
+	// so a key here would promise authentication nothing performs (research F3).
+	for _, refused := range []string{"sip_username", "sip_password"} {
+		if slices.Contains(route.RequiredEnvironment, refused) || slices.Contains(route.OptionalEnvironment, refused) {
+			t.Errorf("route accepts %q; carrier termination on this route authenticates by IP allow-list", refused)
+		}
+	}
+	// The CLI never writes a carrier webhook here: the helper's public URL is the
+	// operator's to choose, so pointing the number at it is a dictated step.
+	if route.AutoWebhookEndpoint != "" {
+		t.Errorf("auto-webhook endpoint = %q, want none", route.AutoWebhookEndpoint)
+	}
+	// RuntimeEnvironment is what the *deployed agent* reads. No trunk ID, and no
+	// Redis: this route keeps no shared control record.
+	for _, rule := range route.RuntimeEnvironment {
+		if rule.Name != "DAILY_API_KEY" {
+			t.Errorf("runtime environment carries %q; only the deployed agent's own names belong here", rule.Name)
+		}
+	}
+	if len(route.Processes) != 1 || route.Processes[0].Name != "telephony-helper" {
+		t.Fatalf("processes = %#v, want the one operator-run helper", route.Processes)
+	}
+	if len(route.ManualSteps) == 0 {
+		t.Error("the carrier steps are dictated, so the row must summarise them")
+	}
+}
+
 // No route asks the operator for a trunk ID in either direction (SCHEMA N33 for
 // outbound, N36 for inbound). Dialling out carries the carrier's trunk settings
 // inline with every call. Inbound cannot work that way, because an unsolicited

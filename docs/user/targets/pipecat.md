@@ -144,26 +144,72 @@ uses the local VAD. Semantic endpointing is also advisory.
   gated until authenticated WebSocket ingress is proven. Pipecat does not use
   a SIP trunk for these routes; see the
   [orchestrator comparison](../learn/07-phone-calls.md#configure-telephony-by-orchestrator).
-- **`transport: daily-sip`** takes phone calls over Daily PSTN. This is the one
-  Pipecat route with a transfer primitive, and it is the managed route: Daily
-  carries the call to your agent deployed on Pipecat Cloud, through the
-  platform's own dial-in webhook. It takes **no `carrier` and no `connection`**,
-  and you declare **no phone channel** for it: there is no carrier adapter to
-  configure, so the compiler derives what the route needs from the transport.
+- **`transport: daily-sip`** is the one Pipecat route with a transfer primitive,
+  and it is the managed route: the call arrives in a Daily room and your agent runs
+  on Pipecat Cloud. It comes in **two forms**, and which one you get depends on
+  whose number it is (SCHEMA N37).
 
-  Three things follow from Daily owning the call, and the emitted `README.md`
-  spells all three out:
+  **Daily's number (no `carrier`).** You buy the number from Daily and point it at
+  your deployed agent. It takes **no `carrier` and no `connection`**, and you
+  declare **no phone channel**: there is no carrier to configure, so the compiler
+  derives what the route needs from the transport. Nothing of yours is in the call
+  path: no server, no public port. This is the least infrastructure of any
+  telephony route in this project.
 
-  - **You attach a number to a deployed agent**, from the Pipecat Cloud dashboard
-    or Daily's REST API. You run no webhook server.
+  **Your own number (`carrier:` plus `connection:` plus `channels.phone`).** Your
+  carrier owns the number and forwards the call over SIP into the same Daily room.
+  All three fields are required together, and a partial declaration fails naming
+  the one you left out. Choose this form when you already hold a voice-capable
+  number, or when you cannot provision Daily numbers.
+
+  ```yaml
+  targets:
+    pipecat:
+      provider: pipecat
+      version: "1.5.0"
+      transport: daily-sip
+      carrier: twilio
+      connection: twilio_sip_daily
+  ```
+
+  Four Connection keys: `account_sid`, `auth_token`, `sip_address`, `from_number`.
+  The first two move the inbound call into the room; `sip_address` is your trunk's
+  termination address, and every outbound leg, transfers included, leaves through
+  it. **There is no `sip_username` and no `sip_password`**, and the route rejects
+  both by name. Daily's dial-out accepts a SIP address with no credential field on
+  any documented surface, so a key here would promise authentication nothing
+  performs. Your trunk allows Daily by IP address list instead, and the generated
+  README dictates that step with the address list's URL.
+
+  This form emits one extra file, `telephony_helper.py`, and **you run it**. Daily
+  makes one room per call and its SIP addresses are per room, so your carrier has
+  no static address to forward to. The helper answers your carrier, makes the room,
+  starts your deployed agent on it, and keeps the caller hearing something while
+  the agent boots; the agent then moves the live call into the room. The deployed
+  agent still exposes no endpoint of its own. The generated README's "Telephony
+  setup" section is the whole runbook: four actions at your carrier, two commands
+  here.
+
+  Things that are true of both forms, and that the emitted `README.md` spells out:
+
   - **Dial-out has to be enabled on the Daily domain.** It is a paid feature
     granted on request, and international dial-out is granted separately. Cold
-    transfer needs it, because it dials the destination. `unmute validate` names
-    this before you spend anything, and still exits 0: the package is correct,
-    the account may not be provisioned yet.
-  - **`unmute dev --telephony` refuses on this route**, because there is no local
-    topology to run. Talk to the agent in the browser or with `--console`, and get
-    a real phone call by deploying.
+    transfer needs it, because it dials the destination, and so does outbound. It
+    covers dialling a SIP address as well as a phone number, so the carrier form
+    needs the same approval and needs **no purchased Daily number**. `unmute
+    validate` names this before you spend anything, and still exits 0: the package
+    is correct, the account may not be provisioned yet.
+  - **`unmute dev --telephony` refuses**, on both forms, with a different message
+    for each. On Daily's number there is no local topology at all. On your own
+    number there is one, the helper, but the CLI cannot put it somewhere your
+    carrier can reach; the README's two commands are the local path. Either way,
+    talk to the agent in the browser or with `--console` right now, and get a real
+    phone call by deploying.
+  - **Caller-number variables are refused**, on both forms, by name. A variable
+    sourced from the caller's number, the called number, the call identifier, or
+    the direction has no fill path on this route: the code that puts those values
+    where the agent reads them is part of the carrier-WebSocket adapter, which this
+    route does not emit. The refusal names the routes where they do work.
 
 ### Telephony carrier integrations
 
@@ -238,8 +284,10 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | `max_duration` | ok |
 | `provider: local` for listen and speak | ok |
 | carrier WebSocket telephony | provisional for generated Twilio, Telnyx, and Plivo adapters; Exotel is gated pending authenticated WebSocket ingress |
-| Daily PSTN telephony (`transport: daily-sip`) | provisional until its credentialed run is recorded; needs dial-out enabled on the Daily domain, which `validate` names |
-| cold human transfer (`cold:`) | ok on `transport: daily-sip`; no other Pipecat route has a transfer primitive |
+| Daily telephony, Daily's number (`transport: daily-sip`) | provisional until its credentialed run is recorded; needs dial-out enabled on the Daily domain, which `validate` names |
+| Daily telephony, your own number (`transport: daily-sip` + `carrier:`) | provisional until its credentialed run is recorded (SCHEMA N37); same dial-out approval, no Daily number needed. Twilio only for now: a second carrier is one forwarding action and one block of instruction text, and the structure for it already ships |
+| cold human transfer (`cold:`) | ok on `transport: daily-sip`, on both forms; no other Pipecat route has a transfer primitive |
+| telephony call-source variables (caller number, called number, call id, direction) | ok on the carrier WebSocket routes; **refused by name** on `transport: daily-sip`, because the code that fills them is part of the adapter that route does not emit |
 | warm human transfer (`warm:`) | not emitted yet, on any route. Daily documents the pattern (feature 005); the carrier WebSocket transports have no transfer control at all |
 
 Everything in the [learn pages](../learn/01-one-agent.md), including the guarded handoff, the task, and the task group, runs here. The one hard `fail` is the per-task `model:` override; it sits with the driver gates below.
@@ -265,7 +313,10 @@ Some features are in the schema and Pipecat itself supports them, but this first
   block you would write already exists and will not change when it lands.
   Cold compiles on the Daily route (`transport: daily-sip`), where
   `sip_call_transfer` is the platform's own primitive
-  ([TRANSFERS.md](../../TRANSFERS.md)).
+  ([TRANSFERS.md](../../TRANSFERS.md)), on both of that route's forms. The carrier
+  form will carry warm unchanged when it lands: a carrier call joins the same room
+  a Daily-provisioned one joins, so only the supervisor leg's destination composes
+  differently.
 - **Handoff and task context shaping beyond the defaults:** any `history` other
   than `full`, a subset `context.variables` list rather than `all`, and
   `include_tool_calls: false`. The handoff carries the running context; finer

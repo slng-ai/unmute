@@ -45,35 +45,96 @@ func TestAuthoringSchemaHasNoHostingModelField(t *testing.T) {
 	}
 }
 
-// The Daily route declares a transport and nothing else. No connection, because
-// Daily's own infrastructure delivers the call; no phone channel, because the
-// compiler derives what the route needs from the transport. Both absences are
-// load-time facts, so they are asserted where an author would hit them.
-func TestDailyRouteNeedsNoConnectionOrChannel(t *testing.T) {
-	dir := t.TempDir()
-	files := map[string]string{
+// The Daily route has two forms, and both are load-time facts, so both are
+// asserted where an author would hit them.
+//
+// The no-carrier form declares a transport and nothing else: no connection,
+// because Daily's own infrastructure delivers the call, and no phone channel,
+// because the compiler derives what the route needs from the transport. The
+// carrier form declares all three, which SCHEMA N37 made valid (and which N34's
+// superseded clause used to reject). What has not changed is the thing this file
+// exists to pin: the derived authoring schema grows no property either way,
+// which is what makes the carrier leg a combination of existing fields rather
+// than a new field (spec FR-001).
+func TestDailyRouteFormsNeedNoNewAuthoringField(t *testing.T) {
+	write := func(t *testing.T, files map[string]string) *Package {
+		t.Helper()
+		dir := t.TempDir()
+		for name, content := range files {
+			path := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		pkg, err := Load(dir)
+		if err != nil {
+			t.Fatalf("a Daily target must load: %v", err)
+		}
+		return pkg
+	}
+
+	pkg := write(t, map[string]string{
 		"instructions.md": "Help the caller.\n",
 		"agent.yaml":      "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n",
 		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.5.0\"\n" +
 			"    transport: daily-sip\n",
-	}
-	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	pkg, err := Load(dir)
-	if err != nil {
-		t.Fatalf("a Daily target with only a transport must load: %v", err)
-	}
+	})
 	got := pkg.Targets["pipecat"]
 	if got.Transport != "daily-sip" {
 		t.Fatalf("transport = %q, want daily-sip", got.Transport)
 	}
 	if got.Connection != "" {
-		t.Errorf("connection = %q, want empty: the Daily route has no carrier connection", got.Connection)
+		t.Errorf("connection = %q, want empty: the no-carrier Daily form has no carrier connection", got.Connection)
+	}
+	if got.Carrier != "" {
+		t.Errorf("carrier = %q, want empty", got.Carrier)
 	}
 	if pkg.Agent.Channels != nil {
 		t.Errorf("channels = %+v, want none declared", pkg.Agent.Channels)
+	}
+
+	// The carrier form: the same three existing fields, plus the existing phone
+	// channel and the existing capacity block a telephony channel already forces.
+	carrier := write(t, map[string]string{
+		"instructions.md": "Help the caller.\n",
+		"agent.yaml": "version: 1\nentry_agent: intake\nagents:\n  intake:\n    instructions: instructions.md\n" +
+			"channels:\n  phone:\n    kind: telephony\n    inbound: true\n" +
+			"capacity:\n  peak_sessions: 2\n  max_sessions: 4\n  peak_starts_per_second: 1\n  avg_session_duration: 3m\n",
+		"connections/twilio_sip_daily.yaml": "kind: telephony\nenvironment:\n" +
+			"  account_sid: TWILIO_ACCOUNT_SID\n  auth_token: TWILIO_AUTH_TOKEN\n" +
+			"  sip_address: SIP_TRUNK_HOSTNAME\n  from_number: SIP_FROM_NUMBER\n",
+		"targets.yaml": "targets:\n  pipecat:\n    provider: pipecat\n    version: \"1.5.0\"\n" +
+			"    transport: daily-sip\n    carrier: twilio\n    connection: twilio_sip_daily\n",
+	})
+	built := carrier.Targets["pipecat"]
+	if built.Transport != "daily-sip" || built.Carrier != "twilio" || built.Connection != "twilio_sip_daily" {
+		t.Fatalf("carrier form = %#v, want all three existing fields set", built)
+	}
+	if _, ok := carrier.Agent.Channels["phone"]; !ok {
+		t.Error("carrier form declares no phone channel, so it is not the carrier form")
+	}
+
+	// FR-001: no new authoring field, on either form.
+	schema, err := Schema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"helper", "helper_url", "sip_provider", "interconnect", "termination", "hold_audio", "room_geo",
+	} {
+		if found := searchSchema(decoded, name); found != nil {
+			t.Errorf("derived authoring schema grew a %q property: %v", name, found)
+		}
 	}
 }

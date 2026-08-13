@@ -131,6 +131,10 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	if err != nil {
 		return pipecatData{}, err
 	}
+	data.DailyCarrier, err = buildPipecatDailyCarrier(agent, target, env)
+	if err != nil {
+		return pipecatData{}, err
+	}
 
 	applyConversation(agent.Conversation, &data)
 	data.Notes = append(data.Notes, serviceNotes(data)...)
@@ -167,6 +171,23 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		slices.Sort(data.Deps)
 	}
 	data.RequiredEnv = env.sorted()
+	if data.DailyCarrier != nil {
+		// Whatever the helper reads is not the deployed agent's business, so the
+		// two groups are split here, once, and every surface reads the split
+		// (contracts/environment.md).
+		for _, name := range data.RequiredEnv {
+			if slices.Contains(data.DailyCarrier.HelperEnv, name) {
+				continue
+			}
+			data.DailyCarrier.AgentEnv = append(data.DailyCarrier.AgentEnv, name)
+			// DevEnv is the provider-credential snapshot the process already checks
+			// at startup, so the phone call's own check is the remainder: exactly
+			// what a call adds, listed once.
+			if !slices.Contains(data.DevEnv, name) {
+				data.DailyCarrier.CallEnv = append(data.DailyCarrier.CallEnv, name)
+			}
+		}
+	}
 	data.Secrets, data.ExtraEnv = secretEnvDocs(agent, data.RequiredEnv)
 	// The platform's own naming convention (my-agent-secrets). Keyed on the whole
 	// required-env list, not the declared `secrets:` block: .env.example lists
@@ -211,9 +232,45 @@ func buildPipecatCapture(agent *ir.Agent) *pipecatCapture {
 	return capture
 }
 
+// pipecatConnectionVocabulary checks the Connection's key set against the route
+// row in both directions — a missing required key and an unaccepted key each
+// fail naming the route — and registers every required name so it reaches
+// .env.example, REQUIRED_ENV, and the compile report. One home for the check,
+// shared by the carrier-websocket routes and the Daily carrier leg.
+func pipecatConnectionVocabulary(plan *ir.TelephonyPlan, env *envSet) error {
+	required, optional, ok := targetcap.TelephonyEnvironment(targetcap.TelephonyKey{
+		Provider: targetcap.Pipecat, Transport: plan.Key.Transport, Carrier: plan.Key.Carrier,
+	})
+	if !ok {
+		return fmt.Errorf("pipecat telephony route (%s, %s, %s) has no environment vocabulary", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+	}
+	allowed := make(map[string]bool, len(required)+len(optional))
+	for _, key := range append(required, optional...) {
+		allowed[key] = true
+	}
+	for _, key := range required {
+		name := plan.Environment[key]
+		if name == "" {
+			return fmt.Errorf("pipecat telephony route %s requires connection environment key %q", plan.Key.Carrier, key)
+		}
+		env.add(name)
+	}
+	for _, key := range slices.Sorted(maps.Keys(plan.Environment)) {
+		if !allowed[key] {
+			return fmt.Errorf("pipecat telephony route %s does not accept connection environment key %q", plan.Key.Carrier, key)
+		}
+	}
+	return nil
+}
+
 func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*pipecatTelephony, error) {
 	plan := resolved.Telephony
 	if plan == nil {
+		return nil, nil
+	}
+	if plan.Key.Provider == ir.ProviderPipecat && plan.Key.Transport == "daily-sip" {
+		// The Daily carrier leg is its own data group, so nothing that reads
+		// .Telephony (and means carrier-websocket) can see it.
 		return nil, nil
 	}
 	if plan.Key.Provider != ir.ProviderPipecat || plan.Key.Transport != "carrier-websocket" {
@@ -227,27 +284,8 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 	default:
 		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no emitted adapter", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
 	}
-	required, optional, ok := targetcap.TelephonyEnvironment(targetcap.TelephonyKey{
-		Provider: targetcap.Pipecat, Transport: plan.Key.Transport, Carrier: plan.Key.Carrier,
-	})
-	if !ok {
-		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no environment vocabulary", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
-	}
-	allowed := make(map[string]bool, len(required)+len(optional))
-	for _, key := range append(required, optional...) {
-		allowed[key] = true
-	}
-	for _, key := range required {
-		name := plan.Environment[key]
-		if name == "" {
-			return nil, fmt.Errorf("pipecat telephony route %s requires connection environment key %q", plan.Key.Carrier, key)
-		}
-		env.add(name)
-	}
-	for _, key := range slices.Sorted(maps.Keys(plan.Environment)) {
-		if !allowed[key] {
-			return nil, fmt.Errorf("pipecat telephony route %s does not accept connection environment key %q", plan.Key.Carrier, key)
-		}
+	if err := pipecatConnectionVocabulary(plan, env); err != nil {
+		return nil, err
 	}
 	env.add("UNMUTE_PUBLIC_URL")
 	env.add("REDIS_URL")
@@ -293,6 +331,62 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 	return telephony, nil
 }
 
+// buildPipecatDailyCarrier lowers the (pipecat, daily-sip, <carrier>) route: the
+// operator's own carrier forwards the call over SIP into the same per-call Daily
+// room the no-carrier form uses (SCHEMA N37).
+//
+// Neither REDIS_URL nor UNMUTE_PUBLIC_URL is added. This route keeps no shared
+// control record, and the helper's public URL is the operator's to choose and
+// give to the carrier, so nothing here needs to know it.
+func buildPipecatDailyCarrier(agent *ir.Agent, resolved ir.Target, env *envSet) (*pipecatDailyCarrier, error) {
+	plan := resolved.Telephony
+	if plan == nil || plan.Key.Provider != ir.ProviderPipecat || plan.Key.Transport != "daily-sip" {
+		return nil, nil
+	}
+	if plan.Key.Carrier != "twilio" {
+		// The route row is the real gate; this is the emitter's half of it, so a
+		// carrier whose forwarding action and runbook text nobody has written
+		// cannot compile to a build that looks complete.
+		return nil, fmt.Errorf("pipecat telephony route (%s, %s, %s) has no emitted carrier forwarding action", plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+	}
+	if agent.Capacity == nil || agent.Capacity.PeakStartsPerSecond <= 0 {
+		return nil, fmt.Errorf("pipecat telephony requires positive capacity.peak_starts_per_second")
+	}
+	if err := pipecatConnectionVocabulary(plan, env); err != nil {
+		return nil, err
+	}
+	carrier := &pipecatDailyCarrier{
+		Carrier: plan.Key.Carrier, Connection: plan.Connection,
+		AccountSIDEnv: plan.Environment["account_sid"], AuthTokenEnv: plan.Environment["auth_token"],
+		SIPAddressEnv: plan.Environment["sip_address"], FromNumberEnv: plan.Environment["from_number"],
+	}
+	for _, evidence := range plan.Evidence {
+		switch evidence.Feature {
+		case "inbound":
+			carrier.HasInbound = true
+		case "outbound":
+			carrier.HasOutbound = true
+		}
+	}
+	// The helper's own name, singular. DAILY_API_KEY is agent-side too (the
+	// transfer path already registers it), so it is not listed here.
+	//
+	// No outbound trigger token, because the helper has no endpoint that places a
+	// call: outbound is started against the platform with the same public key,
+	// exactly as it is on a Daily-provisioned number. A token guarding an endpoint
+	// that does not exist would be one more value to invent and keep.
+	carrier.HelperEnv = []string{"PIPECAT_CLOUD_API_KEY"}
+	for _, name := range carrier.HelperEnv {
+		env.add(name)
+	}
+	env.add("DAILY_API_KEY")
+	// Optional, so never required and never in the startup check: hold audio the
+	// operator hosts, and the Daily room geography. Absent means the emitted
+	// default (a spoken hold line) and Daily's own default region.
+	carrier.OptionalEnv = []string{"UNMUTE_DAILY_ROOM_GEO", "UNMUTE_HOLD_AUDIO_URL"}
+	return carrier, nil
+}
+
 // inlineEligible reports whether the bot collapses to the inline single-agent
 // shape (F3): the LLM sits directly in the main pipeline with its tools as
 // module-level direct functions in LLMContext, no bus / BusBridge / LLMWorker /
@@ -304,6 +398,12 @@ func inlineEligible(data *pipecatData) bool {
 	// shape lacks (module-level tools can't reach self.state; the greeting has no
 	// activate_worker to carry a developer message), so they keep the bus path.
 	if len(data.Agents) != 1 || data.Tracing || data.Telephony != nil || data.HasColdTransfer {
+		return false
+	}
+	// The carrier leg registers transport event handlers (the forward-once
+	// dial-in-ready handler, the dial-out observers), which the inline shape has
+	// no place for.
+	if data.DailyCarrier != nil {
 		return false
 	}
 	if len(data.Variables) > 0 || data.GreetingInstruction != "" {
@@ -448,10 +548,13 @@ func setDailyParams(data *pipecatData) {
 		Class:  "DailyParams",
 		Import: "from pipecat.transports.daily.transport import DailyParams",
 	}
-	if data.HasColdTransfer {
-		// The transfer primitive is a Daily transport method, not a BaseTransport
-		// one, so the tool has to narrow before calling it. Both classes come from
-		// the same module, so they ride one import.
+	// Two reasons to need the transport class itself. A transfer primitive is a
+	// Daily transport method rather than a BaseTransport one, so the tool has to
+	// narrow before calling it. And an incoming carrier call joins a room the
+	// helper created, which the runner's own factory cannot know about, so the
+	// carrier form constructs the transport directly. Both classes come from the
+	// same module, so they ride one import.
+	if data.HasColdTransfer || data.DailyCarrier != nil {
 		params.Transport = "DailyTransport"
 		params.Import = "from pipecat.transports.daily.transport import DailyParams, DailyTransport"
 	}
@@ -781,7 +884,13 @@ func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target
 	if !ok {
 		return pipecatTool{}, fmt.Errorf("human transfer %q destination %q missing on target %q", name, c.Destination, target.Name)
 	}
-	if target.Telephony != nil {
+	// The Daily route carries the transfer whether the number is Daily's or the
+	// operator's: a carrier call arrives as a SIP dial-in participant in the same
+	// room, and Daily documents sipCallTransfer as working for dial-in legs with
+	// SIP-to-SIP and SIP-to-PSTN both supported (research F4, 2026-08-12). Every
+	// other Pipecat route still has no primitive at all.
+	carrierLeg := target.Telephony != nil && target.Telephony.Key.Transport == "daily-sip"
+	if target.Telephony != nil && !carrierLeg {
 		return pipecatTool{}, fmt.Errorf("human transfer %q: the (%s, %s) route has no transfer primitive; Pipecat cold transfer rides the Daily route (transport daily-sip)", name, target.Telephony.Key.Transport, target.Telephony.Key.Carrier)
 	}
 	env.add("DAILY_API_KEY")
@@ -794,6 +903,13 @@ func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target
 	case ir.TransferCold:
 		tool.EndsCall = true
 		tool.ColdDestination = pipecatDestinationExpr(destination, env)
+		if carrierLeg {
+			// On a carrier target every outbound leg goes through the operator's own
+			// trunk, so the destination becomes a SIP URI at the trunk's termination
+			// address (research F2). Composed at call time by _carrier_sip, because a
+			// destination deferred to an environment variable has no value here.
+			tool.ColdDestination = "_carrier_sip(" + tool.ColdDestination + ")"
+		}
 		tool.HangupOnUnavailable = c.OnUnavailable == ir.OnUnavailableHangup
 		return tool, nil
 	case ir.TransferWarm:

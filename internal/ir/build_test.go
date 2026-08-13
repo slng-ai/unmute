@@ -231,6 +231,101 @@ func TestBuildRequiresTelephonyConnectionAndRejectsInverse(t *testing.T) {
 	})
 }
 
+// The Daily route's two forms (SCHEMA N37). With a carrier the three keys are
+// mutually required and the plan is Redis-free; with none the target keeps its
+// exact current meaning and carries no plan at all.
+func TestBuildResolvesPipecatDailyCarrierPlan(t *testing.T) {
+	dailyCarrier := func(t *testing.T) *packagespec.Package {
+		t.Helper()
+		pkg := loadSafeCore(t)
+		enableTelephony(pkg)
+		target := pkg.Targets["pipecat"]
+		target.Carrier, target.Connection = "twilio", "twilio_sip_daily"
+		pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+		pkg.Connections = map[string]packagespec.Connection{"twilio_sip_daily": {
+			Kind: "telephony", Environment: map[string]string{
+				"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
+				"sip_address": "SIP_TRUNK_HOSTNAME", "from_number": "SIP_FROM_NUMBER",
+			},
+		}}
+		return pkg
+	}
+
+	agent, err := Build(dailyCarrier(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := agent.Targets["pipecat"].Telephony
+	if plan == nil {
+		t.Fatal("the carrier form resolves no telephony plan, so nothing on the route renders")
+	}
+	if plan.Key.Provider != ProviderPipecat || plan.Key.Transport != "daily-sip" || plan.Key.Carrier != "twilio" {
+		t.Fatalf("route = %#v", plan.Key)
+	}
+	// No redis: this route keeps no shared control record, so a Redis service
+	// would be an idle one.
+	if got := strings.Join(plan.Services, ","); got != "application" {
+		t.Fatalf("services = %q, want application only", got)
+	}
+	if got := coordinationReasonNames(plan.CoordinationReasons); got != "admission" {
+		t.Fatalf("coordination reasons = %q, want admission only", got)
+	}
+	if plan.Coordination != "shared" {
+		t.Fatalf("coordination = %q", plan.Coordination)
+	}
+
+	t.Run("carrier without connection names the connection", func(t *testing.T) {
+		pkg := dailyCarrier(t)
+		target := pkg.Targets["pipecat"]
+		target.Connection = ""
+		pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), "requires connection for telephony") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("connection without carrier names the carrier", func(t *testing.T) {
+		pkg := dailyCarrier(t)
+		target := pkg.Targets["pipecat"]
+		target.Carrier = ""
+		pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), "requires carrier for telephony on transport daily-sip") {
+			t.Fatalf("got %v", err)
+		}
+	})
+	// Found by trying it rather than by reading: before this guard, a daily-sip
+	// target naming a carrier and no connection *compiled*, as a plain
+	// Daily-provisioned build, with the carrier silently ignored and no helper
+	// emitted. Green validation, and the author finds out when a call to their own
+	// number goes nowhere.
+	t.Run("carrier with no channel fails rather than compiling as Daily-provisioned", func(t *testing.T) {
+		pkg := loadSafeCore(t)
+		target := pkg.Targets["pipecat"]
+		target.Carrier = "twilio"
+		pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+		_, err := Build(pkg)
+		if err == nil {
+			t.Fatal("a carrier on daily-sip with no connection and no channel compiled, ignoring the carrier")
+		}
+		for _, want := range []string{"sets carrier", "no telephony channel", "channels.phone"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("the refusal is missing %q: %v", want, err)
+			}
+		}
+	})
+	t.Run("no carrier keeps the Daily-provisioned form", func(t *testing.T) {
+		pkg := loadSafeCore(t)
+		pkg.Targets = map[string]packagespec.Target{"pipecat": pkg.Targets["pipecat"]}
+		agent, err := Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		built := agent.Targets["pipecat"]
+		if built.Telephony != nil || built.Connection != "" || built.Carrier != "" {
+			t.Fatalf("the no-carrier Daily form gained a plan, a connection, or a carrier: %#v", built)
+		}
+	})
+}
+
 func withTelephonyRoute(target packagespec.Target, carrier, connection string) packagespec.Target {
 	target.Carrier, target.Connection = carrier, connection
 	return target

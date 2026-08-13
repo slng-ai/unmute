@@ -791,6 +791,30 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 	if !telephony && raw.Connection != "" {
 		return Target{}, fmt.Errorf("%s: target %q sets connection but has no telephony channel", pkg.Location("targets.yaml", "connection:"), name)
 	}
+	// The Daily route has two forms (SCHEMA N37), and on it `carrier`,
+	// `connection`, and a telephony channel are mutually required. The two guards
+	// above name a missing connection and a missing channel; these two name the
+	// combinations they cannot.
+	//
+	// The second matters more than it looks. Without it a `daily-sip` target that
+	// names a carrier and forgets the connection compiles as a plain
+	// Daily-provisioned build, silently ignoring the carrier: green validation, no
+	// helper emitted, and an author who finds out when a call to their own number
+	// goes nowhere. That is exactly the silent downgrade Principle II forbids, and
+	// this feature is what made the field mean something here.
+	if raw.Provider == string(ProviderPipecat) && raw.Transport == "daily-sip" {
+		if telephony && raw.Carrier == "" {
+			return Target{}, fmt.Errorf("%s: target %q requires carrier for telephony on transport daily-sip; "+
+				"a Daily-provisioned number carries its own calls and needs neither a connection nor a telephony channel",
+				pkg.Location("targets.yaml", name+":"), name)
+		}
+		if raw.Carrier != "" && !telephony {
+			return Target{}, fmt.Errorf("%s: target %q sets carrier %q on transport daily-sip but has no telephony channel; "+
+				"a carrier leg needs carrier, connection, and a channels.phone entry together, "+
+				"and a Daily-provisioned number needs none of the three",
+				pkg.Location("targets.yaml", "carrier:"), name, raw.Carrier)
+		}
+	}
 	built := Target{
 		Name: name, Provider: Provider(raw.Provider), Version: raw.Version, Pins: raw.Pins,
 		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier, Connection: raw.Connection,
@@ -945,7 +969,15 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 	reasons := []TelephonyCoordinationReason{
 		{Name: "admission", Consumers: []string{"application"}},
 	}
-	if resolved.Provider == ProviderPipecat {
+	if resolved.Provider == ProviderPipecat && resolved.Transport == "daily-sip" {
+		// The Daily carrier route keeps no shared control record (specs/004
+		// FR-027): the transfer guard is in-process because one process serves one
+		// call, and the room, not a store, correlates the legs. So no redis, and
+		// none of the Pipecat reasons below, which each describe a Redis-backed
+		// record this route does not keep. Same Redis-free shape the LiveKit
+		// connector route already has.
+		services = []string{"application"}
+	} else if resolved.Provider == ProviderPipecat {
 		reasons = append(reasons,
 			TelephonyCoordinationReason{Name: "call_correlation", Consumers: []string{"application"}},
 			TelephonyCoordinationReason{Name: "callback_idempotency", Consumers: []string{"application"}},

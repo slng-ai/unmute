@@ -22,7 +22,8 @@ means the platform ships and maintains the primitive.
 |---|---|---|---|
 | livekit | `sip` (trunk) | **yes**: `TransferSIPParticipant`, a SIP REFER through the trunk. The caller leaves the room and the session ends. On failure the caller stays with the agent, so `on_unavailable` applies. | **yes**: `WarmTransferTask`, LiveKit's prebuilt. Hold music, the consult call and the merge are the task's. The **persona** that talks to the person is Unmute's since 2026-08-12 (SCHEMA N35), because the prebuilt's own never briefs unprompted; the transcript and your `briefing` text still land in the task's template. Every failure (no answer, decline, voicemail, failed dial) comes back as one error and `on_unavailable` applies. |
 | livekit | `connector` (Twilio websocket) | no | no |
-| pipecat | Daily (`transport: daily-sip`) | **yes**: `transport.sip_call_transfer`. The bot announces, Daily reroutes the leg, the bot drops off. Needs dial-out enabled on the Daily domain. | **not emitted yet.** The platform supports it; this project has not built it. Feature 004. |
+| pipecat | Daily, Daily-provisioned number (`transport: daily-sip`) | **yes**: `transport.sip_call_transfer`. The bot announces, Daily reroutes the leg, the bot drops off. Needs dial-out enabled on the Daily domain. | **not emitted yet.** The platform supports it; this project has not built it. Feature 004. |
+| pipecat | Daily, your own carrier (`transport: daily-sip` + `carrier:`) | **yes, same primitive**: `transport.sip_call_transfer`, with the destination composed as a SIP URI at your trunk's termination address, so the leg leaves through your own carrier (SCHEMA N37, verified against [Daily transfers](https://docs.daily.co/guides/products/dial-in-dial-out/transfers) 2026-08-12: `sipCallTransfer` works for dial-in legs, SIP-to-SIP and SIP-to-PSTN both supported). Same dial-out approval on the Daily domain. **Provisional**: documented by category rather than by this exact interconnect topology, so it stays provisional until its live run is recorded in `specs/006-pipecat-carrier-telephony/tasks.md`. | **not emitted yet**, same reason as the row above, and the carrier leg will carry warm unchanged when it lands: a carrier call joins the same room as a Daily-provisioned one, and only the supervisor leg's destination composes differently. |
 | pipecat | carrier websockets (twilio, telnyx, plivo, exotel) | no: the platform has no transfer control on these transports | no: same reason |
 
 Sources: [LiveKit call forwarding](https://docs.livekit.io/telephony/features/transfers/cold.md),
@@ -262,10 +263,40 @@ targets:
       billing_line: BILLING_PHONE_NUMBER
 ```
 
+```yaml
+# The same, through your own carrier's number and trunk (SCHEMA N37). Three
+# existing fields, no new one. The transfer leg leaves through your trunk.
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: daily-sip
+    carrier: twilio
+    connection: twilio_sip_daily
+    destinations:
+      billing_line: BILLING_PHONE_NUMBER
+```
+
 The complete packages live in
-[examples/human-transfer](../examples/human-transfer) (LiveKit, both shapes)
-and [examples/human-transfer-daily](../examples/human-transfer-daily)
-(Pipecat, cold).
+[examples/human-transfer](../examples/human-transfer) (LiveKit, both shapes),
+[examples/human-transfer-daily](../examples/human-transfer-daily)
+(Pipecat, cold, Daily-provisioned number), and
+[examples/human-transfer-daily-twilio](../examples/human-transfer-daily-twilio)
+(Pipecat, cold, your own carrier).
+
+### Why the carrier leg keeps Daily in the call
+
+`sip_call_transfer` is the primitive on both Daily forms, and `sip_refer` was
+considered and rejected for the carrier form. REFER would take Daily out of the
+media path and stop its billing, which sounds better, but it depends on the
+originating SIP system honouring REFER and neither Daily nor Pipecat documents
+whether a carrier's `<Dial><Sip>` leg does. So this project uses the primitive it
+can stand behind, and states the cost: **after a completed transfer Daily stays in
+the call path and both legs keep billing until the call ends**, and the
+destination leg also bills at your carrier's rate because it left through your
+trunk. Verified against
+[Daily transfers](https://docs.daily.co/guides/products/dial-in-dial-out/transfers),
+2026-08-12.
 
 ## 3. Which secrets you need
 
@@ -292,13 +323,43 @@ On LiveKit Cloud the first two rows are supplied by the platform: `lk` drops the
 from a secrets file and the deployed agent gets its own. Set them for local runs
 and for a self-hosted server; do not try to send them as secrets.
 
-**Pipecat rig** (`examples/human-transfer-daily`):
+**Pipecat rig, Daily-provisioned number** (`examples/human-transfer-daily`):
 
 | Name | What it is |
 |---|---|
 | `DAILY_API_KEY` | The Daily domain's API key. |
 | `OPENAI_API_KEY` / `SLNG_API_KEY` | The package's model providers. |
 | `BILLING_PHONE_NUMBER` | The transfer destination, read at call time. |
+
+**Pipecat rig, your own carrier** (`examples/human-transfer-daily-twilio`). Two
+groups, because two different things read them: the deployed agent reads the
+agent-side names and those are what go in the platform secret set, while the
+operator-run `telephony_helper.py` reads the helper-side names and the agent never
+does.
+
+| Name | Side | What it is |
+|---|---|---|
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | agent | The REST credentials for the one request that moves a live call into the room. |
+| `SIP_TRUNK_HOSTNAME` | agent and helper | The trunk's termination address. Every outbound leg, transfers included, is composed as `sip:<number>@<this>`. |
+| `SIP_FROM_NUMBER` | agent | The number on the trunk. |
+| `DAILY_API_KEY` | agent and helper | The Daily domain's API key: the helper mints the per-call room with it, the transfer primitive needs the domain. |
+| `OPENAI_API_KEY` / `SLNG_API_KEY` | agent | The package's model providers. |
+| `BILLING_PHONE_NUMBER` | agent | The transfer destination, read at call time. |
+| `PIPECAT_CLOUD_API_KEY` | helper | The public key the helper starts agent sessions with. |
+| `UNMUTE_HOLD_AUDIO_URL` / `UNMUTE_DAILY_ROOM_GEO` | helper, optional | Hold audio you host, and the Daily room's geography. Unset is supported on both: the caller hears a spoken line, and Daily picks its own region. |
+
+There is no outbound trigger token on this route, unlike the carrier-WebSocket
+ones. The helper answers incoming calls and nothing else, so it has no endpoint
+that places a call and therefore nothing to guard: outbound is started against the
+platform with the same public key, exactly as it is on a Daily-provisioned number.
+
+There is no `SIP_AUTH_USERNAME` and no `SIP_AUTH_PASSWORD` here, and the route
+rejects both by name. Daily's dial-out accepts a SIP URI with no credential field
+on any documented surface, so carrier termination authenticates Daily by IP
+allow-list against its published static addresses instead
+(`https://ip-info.daily.co/ips/ip-info.json`, read 2026-08-12). An operator coming
+from the LiveKit rig keeps `SIP_TRUNK_HOSTNAME` and `SIP_FROM_NUMBER` unchanged and
+finds their two credential lines unused.
 
 ## 4. How to test it
 
@@ -422,7 +483,8 @@ document before it lands in code.
 |---|---|---|
 | LiveKit SIP cold | provisional | no credentialed run recorded |
 | LiveKit SIP warm | provisional | no credentialed run recorded |
-| Pipecat Daily cold | provisional | no credentialed run recorded. Proven offline against real `pipecat-ai` 1.5.0 on 2026-08-12: the emitted transport accepts a real dial-in payload, the project passes `ruff` and `ty`, and the transfer attempts at most once. None of that is a phone call. |
+| Pipecat Daily cold, Daily-provisioned number | provisional | no credentialed run recorded. Proven offline against real `pipecat-ai` 1.5.0 on 2026-08-12: the emitted transport accepts a real dial-in payload, the project passes `ruff` and `ty`, and the transfer attempts at most once. None of that is a phone call. |
+| Pipecat Daily cold, your own carrier | provisional | no credentialed run recorded. Built and offline-proven 2026-08-13: the route validates Redis-free, the destination composes as a SIP URI at the trunk's termination address, the at-most-one-attempt guard and the caller-stays-connected branches are unchanged from the row above, and the emitted Python passes `ruff`. Daily documents `sipCallTransfer` for dial-in legs by category, never for this exact interconnect topology, so the run in `specs/006-pipecat-carrier-telephony/tasks.md` is what this row is waiting on. |
 
 Nothing here is verified yet. Saying so plainly is the point: three rows sat
 under one sentence promising a run that had not happened, which reads as a record

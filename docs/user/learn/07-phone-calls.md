@@ -473,6 +473,8 @@ credentials and a different `transport` on each orchestrator.
 | LiveKit | Twilio | `connector` | No | Offline-tested; provisional |
 | Pipecat | Twilio, Telnyx, or Plivo | `carrier-websocket` | No | Offline-tested; provisional |
 | Pipecat | Exotel | `carrier-websocket` | No | Gated; no emitted adapter |
+| Pipecat | none, Daily owns the number | `daily-sip` | No | Offline-tested; provisional |
+| Pipecat | Twilio | `daily-sip` | Yes, termination only | Offline-tested; provisional |
 
 <!-- prettier-ignore -->
 > [!IMPORTANT]
@@ -516,6 +518,47 @@ Carrier webhook setup by carrier:
   to the printed endpoints, and assign the phone number to it.
 - For Exotel, wait for an authenticated WebSocket route. Its static Voicebot
   URL does not satisfy Unmute's ingress policy.
+
+### Configure the Pipecat Daily route
+
+Two forms, and the difference is whose number it is.
+
+**Daily's number.** Set `transport: daily-sip` and nothing else: no `carrier`, no
+`connection`, and no phone channel. Buy the number from Daily, point it at your
+deployed agent from the Pipecat Cloud dashboard, and you are done. Nothing of
+yours is in the call path.
+
+**Your own number.** Set all three of `carrier`, `connection`, and a
+`channels.phone` entry. They are required together on this transport; leaving one
+out fails naming it (SCHEMA N37).
+
+| Carrier | Connection keys | Put these values in `.env` |
+|---|---|---|
+| Twilio | `account_sid`, `auth_token`, `sip_address`, `from_number` | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `SIP_TRUNK_HOSTNAME`, `SIP_FROM_NUMBER` |
+
+Your carrier forwards the call over SIP into the same Daily room the other form
+uses, so the agent is identical either way. Two things about this that surprise
+people:
+
+- **There is no SIP username or password here**, and the route rejects both by
+  name. Daily's outbound SIP carries no credential on any documented surface, so
+  your trunk allows Daily by IP address list instead. The generated README dictates
+  that step and names the list's URL.
+- **The build emits `telephony_helper.py`, and you run it.** Daily makes one room
+  per call, and its SIP addresses are per room, so your carrier has no static
+  address to forward to. The helper answers your carrier, makes the room, starts
+  your deployed agent on it, and keeps the caller hearing something meanwhile.
+  Locally, run it and put a tunnel in front of it; the generated README's
+  "Telephony setup" section is two copy-paste commands plus four actions in your
+  carrier's console.
+
+`unmute dev --telephony` refuses on both forms, and its message says which one you
+are on and what to do instead. Browser and `--console` work as always.
+
+If you already set up the LiveKit SIP route with the same carrier, you reuse that
+account, that trunk, and that number: `SIP_TRUNK_HOSTNAME` and `SIP_FROM_NUMBER`
+carry over unchanged, your two credential lines go unused, and moving the number
+between the two targets is one change at the carrier in either direction.
 
 ### Configure LiveKit SIP
 
@@ -841,7 +884,8 @@ work. The map with sources lives in [TRANSFERS.md](../../TRANSFERS.md).
 | Route | `cold:` | `warm:` |
 |---|---|---|
 | LiveKit `sip` + Twilio, Telnyx, or Plivo | yes | yes |
-| Pipecat Daily (`transport: daily-sip`) | yes | not yet |
+| Pipecat Daily (`transport: daily-sip`), Daily's number | yes | not yet |
+| Pipecat Daily (`transport: daily-sip`), your own number | yes | not yet |
 | Pipecat `carrier-websocket` (any carrier) | no | no |
 | LiveKit `connector` + Twilio | no | no |
 

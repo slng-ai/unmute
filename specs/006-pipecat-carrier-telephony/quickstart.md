@@ -41,9 +41,12 @@ Prerequisites: a Pipecat Cloud account with the agent deployed and its secret se
    Expected: refuses first with names when `.env` is incomplete (drill this once on purpose); starts clean when filled. Tunnel it and set the number's webhook per the runbook.
 2. **Inbound (spec US1, SC-001, SC-004).** Call the number. Expected: hold audio within 2 seconds, agent answers and converses. Record the answer delay.
 3. **Forward-once under the real signal.** Confirm from logs that one forward happened even if the ready event fired more than once.
-4. **Outbound (spec US2).**
+4. **Outbound (spec US2).** Amended 2026-08-13: started against the platform, not the helper, because the helper has no call-placing endpoint any more (see [contracts/forwarding-helper.md](contracts/forwarding-helper.md)).
    ```bash
-   curl -X POST https://<helper>/outbound -H "Authorization: Bearer $UNMUTE_OUTBOUND_TOKEN" -d '{"to": "+15551230000"}'
+   curl -X POST https://api.pipecat.daily.co/v1/public/<agent>/start \
+     -H "Authorization: Bearer $PIPECAT_CLOUD_API_KEY" -H 'Content-Type: application/json' \
+     -d "{\"createDailyRoom\": true, \"dailyRoomProperties\": {\"enable_dialout\": true},
+          \"body\": {\"direction\": \"outbound\", \"dialout\": {\"sip_uri\": \"sip:+15551230000@$SIP_TRUNK_HOSTNAME\"}}}"
    ```
    Expected: the target phone rings through the carrier trunk. Record what caller identity the recipient saw; this is the fact research F2 left provisional.
 5. **Cold transfer (spec US3, SC-005).** On an inbound call, ask for the person; expect the spoken handoff, the destination ringing, the agent gone on answer. Then the failure drill: destination declines; expect the caller still connected and told. Repeat to the spec's counts across the session and record attempts.

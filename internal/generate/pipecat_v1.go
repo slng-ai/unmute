@@ -217,6 +217,45 @@ type pipecatTelephony struct {
 	CallStart     []pipecatCallStart
 }
 
+// pipecatDailyCarrier is the (pipecat, daily-sip, twilio) data group: the
+// carrier leg on the Daily route (SCHEMA N37).
+//
+// It is deliberately a *separate* field from pipecatTelephony rather than a
+// widening of it. Twenty-two emitted sites read `.Telephony` as "this is a
+// carrier-websocket route" — nine in README.md.tmpl, eleven in bot.py.tmpl, one
+// each in Dockerfile.tmpl and pyproject.toml.tmpl — plus four in the driver's Go
+// (pipecat_v1.go's artifact branch, pipecat_v1_build.go's carrier deps,
+// buildPipecatTelephony, and inlineEligible). Giving this route a
+// pipecatTelephony would arm every one of them, and a missed narrowing fails
+// quietly: a carrier build would gain the whole carrier-websocket artifact set
+// and lose its deploy manifest. A second field cannot arm any of them, so the
+// trap never exists (research item 1, task T011a).
+type pipecatDailyCarrier struct {
+	Carrier    string
+	Connection string
+	// Connection env names (SCHEMA N37's key set). No sip_username or
+	// sip_password: Daily's dial-out carries no SIP credential auth on any
+	// documented surface, so termination authenticates by IP allow-list.
+	AccountSIDEnv string
+	AuthTokenEnv  string
+	SIPAddressEnv string
+	FromNumberEnv string
+	HasInbound    bool
+	HasOutbound   bool
+	// AgentEnv and HelperEnv split the required environment by who reads it. The
+	// deployed agent reads AgentEnv; the operator-run helper reads HelperEnv and
+	// OptionalEnv where they run it, and none of the helper's own names belongs in
+	// the platform secret set (contracts/environment.md).
+	AgentEnv  []string
+	HelperEnv []string
+	// CallEnv is what a *phone call* adds to the agent's own environment: the
+	// carrier names, and nothing the process already checks at startup. A browser
+	// or console session on this package reads none of them, so asking for them
+	// unconditionally would break the two modes that work with no phone at all.
+	CallEnv     []string
+	OptionalEnv []string
+}
+
 type pipecatSystemSource struct {
 	Variable string
 	Source   string
@@ -284,7 +323,10 @@ type pipecatData struct {
 	DevOptionalEnv []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
 	Notes          []string
 	Tracing        bool
-	Telephony      *pipecatTelephony
+	// Telephony means the carrier-websocket route, and every site that reads it
+	// means that. The Daily carrier leg is DailyCarrier; see its doc comment.
+	Telephony    *pipecatTelephony
+	DailyCarrier *pipecatDailyCarrier
 	// Prerequisites are the route's account features the provider grants on
 	// request, read from the rulebook in internal/target and never restated here.
 	// Present only when this package uses something that needs one.
@@ -376,6 +418,18 @@ var pipecatEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
 	"source.to_number":                           true,
 }
 
+// pipecatDailyCarrierEmittedTelephonyFeatures is the (pipecat, daily-sip,
+// twilio) half of the same agreement. Hand-written, so it holds only what the
+// emitter can keep: no `source.*` entries, because the fill path for those lives
+// in the carrier-websocket adapter this route does not emit (research D11/R14).
+var pipecatDailyCarrierEmittedTelephonyFeatures = map[targetcap.TelephonyFeature]bool{
+	targetcap.TelephonyRouteSelected:                   true,
+	targetcap.TelephonyInbound:                         true,
+	targetcap.TelephonyOutbound:                        true,
+	targetcap.TelephonyFeature(targetcap.ColdTransfer): true,
+	targetcap.TelephonyFeature(targetcap.Hangup):       true,
+}
+
 // GeneratePipecat lowers a validated agent + pipecat target into a project.
 // The socket runs Validate(caps) first (V17), so this reads only agent+target.
 func GeneratePipecat(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedBinding, sizing []ir.Sizing) (Artifact, error) {
@@ -450,6 +504,12 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		outputs = append(outputs, struct{ tmpl, path string }{"compose.telephony.yaml", "compose.telephony.yaml"})
 	} else {
 		outputs = append(outputs, struct{ tmpl, path string }{"pcc-deploy.toml", "pcc-deploy.toml"})
+	}
+	// Both Daily forms deploy to Pipecat Cloud, so both keep the manifest the
+	// branch above just emitted. The carrier form adds the one artifact the
+	// operator runs themselves.
+	if data.DailyCarrier != nil {
+		outputs = append(outputs, struct{ tmpl, path string }{"telephony_helper.py", "telephony_helper.py"})
 	}
 	var files []File
 	for _, o := range outputs {

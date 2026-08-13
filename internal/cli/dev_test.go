@@ -170,6 +170,49 @@ func TestDevTelephonyRefusesOnTheDailyRouteAndNamesWhatWorks(t *testing.T) {
 	}
 }
 
+// The carrier form of the Daily route refuses too, and it has to refuse for a
+// different reason, in different words. It *does* have a local telephony
+// topology: the emitted helper. What it does not have is a way for this command
+// to run that helper somewhere the operator's carrier can reach, which is the
+// whole point of the tunnel the README dictates.
+//
+// The no-carrier message would be false here ("no local telephony topology to
+// run"), and the generic "no executable telephony topology" line would be false
+// too, since this route resolves a plan with a process in it.
+func TestDevTelephonyRefusesOnTheDailyCarrierFormAndNamesTheHelper(t *testing.T) {
+	cmd := newRootCmd()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	root := filepath.Join("..", "..", "examples", "human-transfer-daily-twilio")
+	cmd.SetArgs([]string{"dev", "--telephony", "--target", "pipecat", root})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("--telephony on the Daily carrier form must refuse, got exit 0")
+	} else {
+		message := err.Error()
+		for _, want := range []string{
+			"telephony_helper.py", // names the artifact that does the work
+			"README",              // names where the two commands are written out
+			"tunnel",              // names the local test path rather than denying one
+			"twilio",              // names the carrier the target declared
+			"--console",           // still names a mode that works right now
+		} {
+			if !strings.Contains(message, want) {
+				t.Errorf("refusal missing %q:\n%s", want, message)
+			}
+		}
+		for _, forbidden := range []string{
+			"no local telephony topology",      // false: the helper is one
+			"no executable telephony topology", // false: the plan has a process
+			"not supported", "unsupported",
+		} {
+			if strings.Contains(message, forbidden) {
+				t.Errorf("refusal says %q, which is false for this route:\n%s", forbidden, message)
+			}
+		}
+	}
+}
+
 func TestTelephonyDevPlanUsesExactPublicURLAndResolvedArtifact(t *testing.T) { // telephony V11, V17
 	public, err := parseTelephonyPublicURL("https://voice.example.com/unmute/")
 	if err != nil {

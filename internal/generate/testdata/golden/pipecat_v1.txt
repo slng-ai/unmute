@@ -222,7 +222,7 @@ This project uses features the provider grants on request rather than by
 default. Ask for them before the first live call, because the lead time is
 theirs, not yours.
 
-- **daily_dialout**: Ask Daily to enable dial-out on the domain that owns the number: it is a paid feature granted on request, and international dial-out is enabled separately per domain.
+- **daily_dialout**: Ask Daily to enable dial-out on the domain the agent's rooms belong to: it is a paid feature granted on request, per domain, and international dial-out is enabled separately. It covers dialling a SIP URI as well as a PSTN number, so a target that carries its calls through its own carrier trunk needs the same approval and needs no purchased Daily number.
   Documentation: https://docs.pipecat.ai/pipecat-cloud/guides/telephony/daily-dial-out (checked 2026-08-12)
 
 Nothing here is a problem with this project. It compiles and deploys either way;
@@ -453,6 +453,12 @@ class BillingAgent(LLMWorker):
                 run_llm=True,
             )
         )
+        # sip_call_transfer, not sip_refer, and the choice is the same on both
+        # Daily forms. REFER would take Daily out of the media path and stop its
+        # billing, but it needs the originating SIP system to honour REFER, which
+        # neither platform documents for a carrier interconnect leg. So Daily
+        # stays anchored after a completed transfer and both legs keep billing
+        # until the call ends; the README states that cost.
         if isinstance(_TRANSPORT, DailyTransport):
             error = await _TRANSPORT.sip_call_transfer({"toEndPoint": "+14155550123"})
         else:
@@ -834,7 +840,7 @@ if __name__ == "__main__":
   "route_prerequisites": [
     {
       "name": "daily_dialout",
-      "summary": "Ask Daily to enable dial-out on the domain that owns the number: it is a paid feature granted on request, and international dial-out is enabled separately per domain.",
+      "summary": "Ask Daily to enable dial-out on the domain the agent's rooms belong to: it is a paid feature granted on request, per domain, and international dial-out is enabled separately. It covers dialling a SIP URI as well as a PSTN number, so a target that carries its calls through its own carrier trunk needs the same approval and needs no purchased Daily number.",
       "needed_by": [
         "cold_transfer",
         "outbound"

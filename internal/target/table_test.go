@@ -154,6 +154,26 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if strings.Join(runtime.LocallySuppliedEnvironment, ",") != "REDIS_URL" {
 		t.Fatalf("Pipecat locally supplied environment = %v", runtime.LocallySuppliedEnvironment)
 	}
+	// The Daily carrier leg (SCHEMA N37): five provisional features, no call
+	// sources, and every granted feature carries its docs and its date.
+	dailyCarrier := TelephonyKey{Provider: Pipecat, Transport: "daily-sip", Carrier: "twilio"}
+	for _, feature := range []TelephonyFeature{
+		TelephonyRouteSelected, TelephonyInbound, TelephonyOutbound,
+		TelephonyFeature(ColdTransfer), TelephonyFeature(Hangup),
+	} {
+		got := ResolveTelephonyFeature(dailyCarrier, feature)
+		if got.Tag != Provisional || got.Docs == "" || got.Verified == "" || got.Smoke {
+			t.Fatalf("daily carrier feature %s = %#v, want provisional with docs and a date", feature, got)
+		}
+	}
+	for _, feature := range []TelephonyFeature{
+		TelephonyFeature(WarmTransfer), TelephonyFeature(VoicemailDetection),
+		"source.from_number", "source.to_number", "source.call_id", "source.direction",
+	} {
+		if got := ResolveTelephonyFeature(dailyCarrier, feature); got.Tag != Gated {
+			t.Fatalf("daily carrier feature %s = %#v, want gated", feature, got)
+		}
+	}
 	telnyx := TelephonyKey{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "telnyx"}
 	required, optional, ok = TelephonyEnvironment(telnyx)
 	if !ok || len(optional) != 0 || strings.Join(required, ",") != "api_key,public_key,connection_id,from_number" {
@@ -270,6 +290,12 @@ func TestRouteAccountPrerequisitesAreReachableWithoutAPlan(t *testing.T) {
 	// The other half of the rule: one that always applies is a banner.
 	if got[0].Needs([]TelephonyFeature{TelephonyInbound}) {
 		t.Error("daily_dialout must not apply to an inbound-only package")
+	}
+	// The rule matches any carrier on the transport, so the carrier form inherits
+	// it: dial-out approval is a Daily domain fact, and whose trunk carries the
+	// media does not change it (SCHEMA N37, research F2).
+	if got := RouteAccountPrerequisites(Pipecat, "daily-sip", "twilio"); len(got) != 1 || got[0].Name != "daily_dialout" {
+		t.Fatalf("pipecat daily-sip twilio prerequisites = %+v, want the one daily_dialout row", got)
 	}
 	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
 		if got := RouteAccountPrerequisites(Pipecat, "carrier-websocket", carrier); len(got) != 0 {

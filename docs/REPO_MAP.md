@@ -51,7 +51,20 @@ entry point + version check), and `templates/`:
 | Target | Build | Templates | Notes |
 |---|---|---|---|
 | Pipecat | [pipecat_v1_build.go](internal/generate/pipecat_v1_build.go) | [templates/pipecat_v1/](internal/generate/templates/pipecat_v1/) (`bot.py.tmpl`) | code target |
+| Pipecat telephony | same `build.go`, two data groups | `telephony_{twilio,telnyx,plivo}.py.tmpl` + `telephony_shared.py.tmpl` for the carrier-WebSocket routes; `telephony_helper.py.tmpl` for the Daily route's carrier form | see the note below |
 | LiveKit | [livekit_v1_build.go](internal/generate/livekit_v1_build.go) | [templates/livekit_v1/](internal/generate/templates/livekit_v1/) (`agent.py.tmpl`) | code target |
+
+**Reading Pipecat telephony emission:** the driver's template data carries **two**
+telephony groups, and which one is set decides everything. `pipecatData.Telephony`
+means the carrier-WebSocket routes, and roughly twenty-two emitted sites read it
+that way. `pipecatData.DailyCarrier` means the Daily route's carrier form
+(SCHEMA N37) and is the only thing the helper, the bot's carrier block, and the
+README runbook read. They are separate fields on purpose: one field for both would
+switch all twenty-two sites on for a route that wants none of them, and getting
+that wrong fails quietly. Start at `buildPipecatDailyCarrier` in
+[pipecat_v1_build.go](internal/generate/pipecat_v1_build.go), and at
+`renderPipecatFiles` in [pipecat_v1.go](internal/generate/pipecat_v1.go) for which
+files each form emits.
 
 **Shared codegen glue:** [internal/generate/service_call.go](internal/generate/service_call.go)
 turns `catalogue entry + binding` into a rendered constructor (`ServiceCall`),
@@ -75,6 +88,7 @@ not built yet (they fail loud).
 | [internal/target/catalog_test.go](internal/target/catalog_test.go) | catalogue invariants; `TestSlngEverywhere`; `TestCheckVendor` |
 | [internal/generate/catalog_golden_test.go](internal/generate/catalog_golden_test.go) | every entry's emitted call, pinned in `testdata/golden/catalog_resolution.txt` |
 | [internal/generate/pipecat_v1_test.go](internal/generate/pipecat_v1_test.go), [livekit_v1_test.go](internal/generate/livekit_v1_test.go) | per-driver goldens + provider assertions |
+| [internal/generate/pipecat_carrier_telephony_test.go](internal/generate/pipecat_carrier_telephony_test.go) | the Daily carrier form's three contracts: which files it emits (and which it must not), the agent-side/helper-side environment split, and the README runbook |
 | [internal/generate/pipecat_v1_smoke_test.go](internal/generate/pipecat_v1_smoke_test.go) | L4 smoke (build tag `smoke`): real `uv` install, import, instantiate every service |
 
 Golden outputs live in [internal/generate/testdata/golden/](internal/generate/testdata/golden/).

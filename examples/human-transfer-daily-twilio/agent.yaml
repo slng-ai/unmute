@@ -1,0 +1,70 @@
+# Sage and Stone Salon's phone line on Pipecat over Daily, reached through the
+# salon's own Twilio number, with one way to reach a person: a cold transfer.
+#
+# The same agent as ../human-transfer-daily. What differs is the way in and the
+# way out: a carrier owns the number and the trunk, and the phone channel is
+# declarable here because the target names a connection to dial with.
+version: 1
+entry_agent: front_desk
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.3
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  front_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - send_to_billing
+
+controls:
+  # Cold: the bot announces the handoff, Daily transfers the caller's leg to the
+  # destination, and the bot drops off. On a carrier target the destination is
+  # dialled through your own trunk, so the leg and its cost are yours.
+  send_to_billing:
+    kind: human_transfer
+    when: The caller asks about an invoice, a refund, or a charge they do not recognise.
+    cold:
+      destination: billing_line
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Sage and Stone Salon, this is the front desk. How can I help?"
+  interruption:
+    enabled: true
+
+# The phone channel, which the no-carrier form cannot declare: there the number
+# and the dial-in webhook live on the Daily domain, so there is nothing to dial
+# with. Here the connection names the trunk, so both directions are real.
+channels:
+  phone:
+    kind: telephony
+    inbound: true
+    # Outbound gives the emitted helper its trigger endpoint, which is how you
+    # test a call when you cannot receive the inbound one.
+    outbound: true
+
+capacity:
+  peak_sessions: 4
+  max_sessions: 8
+  peak_starts_per_second: 1
+  avg_session_duration: 3m
