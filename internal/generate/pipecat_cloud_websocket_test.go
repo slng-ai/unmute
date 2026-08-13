@@ -188,7 +188,11 @@ func TestCloudWebsocketBinMarkupIsDictated(t *testing.T) {
 		`<Parameter name="from_number" value="{{From}}"/>`,           // Twilio's own Bin templating
 		`<Parameter name="to_number" value="{{To}}"/>`,               //
 		"pipecat cloud organizations list",                           // where the one value comes from
-		"twilio api core incoming-phone-numbers list",                // read the state, do not listen
+		// Which column, because the command prints two and the wrong one is the
+		// most common way this route fails (2026-08-13, from a live attempt).
+		"the slug under **Name**",
+		"without the `(active)` marker",
+		"twilio api core incoming-phone-numbers list", // read the state, do not listen
 	} {
 		if !strings.Contains(section, want) {
 			t.Errorf("the dictated setup is missing %q", want)
@@ -268,7 +272,7 @@ func TestCloudWebsocketRunbookContract(t *testing.T) {
 	}
 	// Every named cause in the spec's Edge Cases has a row.
 	for _, cause := range []string{
-		"still on a SIP trunk", "misspelled", "cold start", "different region",
+		"still on a SIP trunk", "service host in your markup is wrong", "cold start", "different region",
 	} {
 		if !strings.Contains(section, cause) {
 			t.Errorf("the troubleshooting map does not name %q", cause)
