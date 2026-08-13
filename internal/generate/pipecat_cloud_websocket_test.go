@@ -414,6 +414,37 @@ func callRequiredEnv(t *testing.T, bot string) []string {
 	return names
 }
 
+// The carrier's audio is 8 kHz mono in both directions, and the pipeline should
+// run at that rate on a phone call rather than resampling every frame for nothing
+// (the transport's own guide asks for it). A browser session on the same package
+// keeps pipecat's defaults, because there 8 kHz would throw quality away.
+func TestCloudWebsocketRunsThePipelineAtTheCarriersRate(t *testing.T) {
+	bot := artifactFile(t, cloudWebsocketArtifact(t, cloudWebsocketOptions{inbound: true, transfer: true, connection: true}), "bot.py")
+	if !strings.Contains(bot, "_pipeline_audio_rates()") {
+		t.Error("the pipeline does not take its sample rates from the session")
+	}
+	for _, want := range []string{`"audio_in_sample_rate": 8000`, `"audio_out_sample_rate": 8000`} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("the emitted rates are missing %q", want)
+		}
+	}
+	// Conditional on the session, not unconditional: this is the same file a
+	// browser dev run uses.
+	if !strings.Contains(bot, "if not _PHONE_CALL:\n        return {}") {
+		t.Error("the rates are applied to every session, including browser ones")
+	}
+	// And no other route gains them.
+	for name, other := range map[string]Artifact{
+		"Daily, no carrier":  dailyArtifact(t),
+		"Daily with carrier": dailyCarrierArtifact(t, "twilio", true),
+		"carrier-websocket":  carrierWebsocketArtifact(t, "twilio"),
+	} {
+		if strings.Contains(artifactFile(t, other, "bot.py"), "audio_in_sample_rate") {
+			t.Errorf("the %s build gained a carrier sample rate", name)
+		}
+	}
+}
+
 // TestCloudWebsocketOutboundIsPlacedAtTheCarrier: the call originates at Twilio,
 // because nothing of the operator's exists to originate it (spec FR-006,
 // research D6).

@@ -153,6 +153,23 @@ def _phone_session(runner_args: RunnerArguments) -> dict | None:
     direction = (call.get("body") or {}).get("direction", "inbound")
     logger.info("phone call {} ({})", call.get("call_id"), direction)
     return call
+
+
+def _pipeline_audio_rates() -> dict:
+    """Run the pipeline at the carrier's own sample rate, on a phone call only.
+
+    Twilio Media Streams is 8 kHz mono in both directions. Pipecat's defaults are
+    16 kHz in and 24 kHz out, so without this every inbound frame is upsampled and
+    every outbound frame is downsampled, for the whole call, in exchange for no
+    information at all: there is nothing above 4 kHz in the audio to recover. The
+    transport's own guide asks for these two values for exactly that reason.
+
+    A browser or console session on the same package keeps the defaults, where
+    8 kHz would throw away quality those channels really have.
+    """
+    if not _PHONE_CALL:
+        return {}
+    return {"audio_in_sample_rate": 8000, "audio_out_sample_rate": 8000}
 {{if not .CloudWebsocket.AccountSIDEnv}}
 
 async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
@@ -892,7 +909,7 @@ def build_stt():
         enable_tracing=tracing_enabled,
         additional_span_attributes={"langfuse.trace.name": TRACE_NAME},
 {{end}}
-        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True{{if .CloudWebsocket}}, **_pipeline_audio_rates(){{end}}),
     )
 {{if .Tracing}}
     if tracing_enabled:

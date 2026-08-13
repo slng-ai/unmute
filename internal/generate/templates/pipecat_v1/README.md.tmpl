@@ -755,6 +755,28 @@ day.
 {{end}}
 One log, and only one: `pipecat cloud agent logs {{.Project}}`. There is no
 second place to look on this route, because there is no second thing running.
+
+### If the call feels slow
+
+The platform writes the numbers into that log, so read them before changing
+anything. Two lines answer almost every latency question:
+
+```text
+[pcc-observability] First bot speech | latency=2.297s
+[pcc-observability] Latency breakdown | events: ["...STT: TTFB 17.651s", "...LLM: TTFB 2.215s", ...]
+```
+
+- **First bot speech** counts from inside the process only. If it reads about two
+  seconds and your caller waited much longer, the difference was the container
+  starting: see the cold-start row above and deploy with `--min-agents 1`.
+- **The breakdown** attributes each turn to a service by name. One service far
+  above the others is that provider, not this project and not the platform: take
+  it up with them, or bind a different provider for that role in the source
+  package and recompile.
+- **End-of-turn detection sits between the two.** The pipeline waits to be sure
+  the caller has finished before it answers, which costs a second or two per turn
+  on purpose. It is the difference between an agent that interrupts and one that
+  feels polite.
 {{if .CloudWebsocket.HasInbound}}
 ### One number serves one target at a time
 
@@ -777,7 +799,7 @@ indistinguishable by ear.
 |---|---|
 | A working agent answers, but not this one | The number is still on a SIP trunk or an old webhook, so your markup was never consulted. Read the number's configuration with the command above. |
 | The call connects, the spoken line plays, then silence and a drop | Either the service host in your markup is wrong or this agent is not `ready`. **The tell is that this agent's log is empty**: a connection the platform refuses never reaches it. Check `pipecat cloud agent status {{.Project}}` first. Then re-read the service host: the agent name is `{{.Project}}`, and the organization is the **slug** from `pipecat cloud organizations list`, the one shaped like `three-random-words-12345`, never your display name (carrier action 2). Twilio's own call log names the stream error outright, under Monitor, Logs, Calls. |
-| The spoken line plays, a long silence, then the agent | A cold start. Keep a warm instance with `--min-agents 1` on the deploy, or keep the spoken line. |
+| The spoken line plays, a long silence, then the agent | A **cold start**, and it is the single biggest thing you can fix. With no warm instance the platform has to start a container after the call arrives: schedule it, import pipecat, load the voice-activity and end-of-turn models. That is the silence, and it happens on the first call after every idle period, not just after a deploy. Deploy with `pipecat cloud deploy --min-agents 1` and it goes away. Your agent's own log tells you which half you are looking at: `[pcc-observability] First bot speech | latency=...` measures only the part inside the process, so if that says two seconds and the caller waited twelve, the other ten were the container starting. |
 | Silence or degraded audio, everything else correct | Your markup names a different region than this deployment. The address in this file is the right one; re-paste it. |
 | Nothing in the agent log at all | The call never reached the platform. That is the first row, or the number is not the one you think. |
 {{- if .CloudWebsocket.HasOutbound}}
