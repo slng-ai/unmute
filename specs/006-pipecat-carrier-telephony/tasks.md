@@ -210,6 +210,18 @@ The bot now constructs `DailyTransport` directly from `body["room_url"]` and `bo
 
 This would have failed on the first live inbound call, which is what T032 exists to catch. Worth noting as evidence for why the live runs are not a formality.
 
+### Telling two deployed agents apart, 2026-08-13
+
+Asked while both a LiveKit and a Pipecat agent were deployed: which one answers, and does the LiveKit one have to come down? Neither the runbook nor the docs answered it well enough, and checking turned up two things.
+
+**It is not ambiguous, and nothing has to come down.** A Twilio number's Voice configuration is *either* a webhook *or* a trunk association: Twilio's own SIP Trunking documentation puts the trunk's number association under the number's Voice settings, so they are one field with two alternatives rather than two competing settings (read 2026-08-13). Whichever the number points at is the one that gets the call, both agents can stay deployed, and keeping the other one up is free rollback.
+
+**But the runbook's move-the-number instruction was too vague to be safe.** It said "change its voice configuration from your SIP trunk to the webhook", which reads as one action. It is two, and the order matters: setting the webhook while the number is still attached to the trunk does not move it, and the failure is silent — the trunk keeps answering and the helper's log stays empty. specs/005's own live-run record already carried the same fact from the other direction ("the phone number had to be attached to the trunk; its `trunkSid` was empty, so origination was never consulted"). The runbook now says take it off the trunk first, names both console paths, and gives the one command that reads which of the two a number currently uses.
+
+**And the two shipped examples were indistinguishable by ear.** `human-transfer` and `human-transfer-daily-twilio` had the same greeting line, the same voice, and the same model, so a live call could not tell an operator which target answered. The carrier example's greeting now names its line, with a comment saying why. The troubleshooting map gained a row for "a working agent answers, but not this one", whose tell is the empty helper log.
+
+One structural note: the carrier-specific console paths first went into the section after `### On this side`, and the seam test caught it — everything after that heading has to read correctly for any SIP-capable carrier (US4). Moving a number is carrier work, so the paths and the command now sit in the carrier half and the platform half keeps only the principle.
+
 ### One gap this feature opened, found and closed
 
 Not in the task list, found by trying the combination rather than by reading the code. A `daily-sip` target that named a carrier but no connection and no phone channel **compiled**, as a plain Daily-provisioned build, with the carrier silently ignored and no helper emitted. Validate printed `✓ pipecat` and exit 0.

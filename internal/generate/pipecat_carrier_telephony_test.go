@@ -210,13 +210,13 @@ func TestCarrierRunbookContract(t *testing.T) {
 	for _, want := range []string{
 		"`SIP_TRUNK_HOSTNAME`",
 		"One number serves one target at a time",
-		"from your SIP trunk to the webhook",        // moving a number here
-		"from the webhook to the trunk",             // and moving it back
-		"both legs keep billing",                    // the transfer cost
-		"the recipient sees is governed",            // caller identity, carrier-governed
-		"https://ip-info.daily.co/ips/ip-info.json", // the allow-list source
-		"three days ahead",                          // its change lead
-		"When something does not work",              // the troubleshooting map
+		"Take it off the trunk first, then set the webhook", // moving a number here
+		"put it back on the trunk",                          // and moving it back
+		"both legs keep billing",                            // the transfer cost
+		"the recipient sees is governed",                    // caller identity, carrier-governed
+		"https://ip-info.daily.co/ips/ip-info.json",         // the allow-list source
+		"three days ahead",                                  // its change lead
+		"When something does not work",                      // the troubleshooting map
 		// The end-to-end loop, so nothing has to be pieced together: recompile,
 		// move in, secrets, deploy, then one named test per declared flow.
 		"unmute compile <source-dir>",

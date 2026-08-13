@@ -239,6 +239,22 @@ Do these in the [Twilio Console](https://console.twilio.com), in this order.
    That list changes; Daily publishes changes in the same file three days ahead.
    If termination starts rejecting calls, re-read it.
 {{- end}}
+{{if .DailyCarrier.HasInbound}}
+Two console paths worth knowing, because moving a number between targets uses
+both. A number joins or leaves a trunk on the trunk's **Numbers** tab (Elastic SIP
+Trunking, Manage, Trunks, your trunk). Its webhook lives on **Phone Numbers,
+Manage, Active Numbers**, your number, Configure. To read which of the two a
+number currently uses, without clicking:
+
+```sh
+twilio api core incoming-phone-numbers list \
+  --properties phoneNumber,trunkSid,voiceUrl
+```
+
+A `trunkSid` means the call goes to that trunk. An empty `trunkSid` with a
+`voiceUrl` means it goes to that URL. See **One number serves one target at a
+time** below for why that matters.
+{{end}}
 {{else}}
 ### At your carrier
 
@@ -418,11 +434,22 @@ helper's own terminal for everything before the call reached it.
 
 ### One number serves one target at a time
 
-A phone number has one incoming-call setting, so it points at one thing. To move
-a number from the LiveKit target in this repository to this one, change its voice
-configuration from your SIP trunk to the webhook in action 2. To move it back,
-change it from the webhook to the trunk. Nothing else moves, and both targets can
-stay deployed the whole time.
+A number's Voice configuration is **either** a webhook **or** a SIP trunk, never
+both, so there is never a question of which one answers: whichever the number
+points at is the one that gets the call. Both agents can stay deployed the whole
+time, and taking one down is not how you switch between them.
+
+Moving a number is two changes, and the order matters.
+**Take it off the trunk first, then set the webhook.**
+Setting the webhook while the number is still on a trunk does not move it, and
+that failure is silent: the trunk keeps taking the calls and this project's log
+stays empty. Moving it back is the reverse, so clear the webhook and
+**put it back on the trunk.**
+
+Read where a number points before wondering which agent answered. It is a setting,
+not a mystery, and the carrier part above has the exact command for reading it. If
+two of your agents share a greeting and a voice they are indistinguishable by ear,
+so read the configuration or the logs rather than listening.
 
 ### When something does not work
 
@@ -431,6 +458,7 @@ What the caller hears, and what it means:
 | What happens | Where to look |
 |---|---|
 | Carrier error tone, or a recorded announcement | The webhook URL is wrong, or the helper is not reachable from the internet. Check `/healthz` through the tunnel URL, not through localhost. |
+| A working agent answers, but not this one | The number is still on a SIP trunk, so the trunk took the call and this project never saw it. The helper's log is empty, which is the tell. See **One number serves one target at a time**. If two of your agents share a greeting and a voice, they are indistinguishable by ear, so read the log rather than listening. |
 | The caller hears the hold line and nothing more | The agent never joined, or the forward failed. The helper's log names which: an agent that would not start logs the platform's own error text, and a forward that failed logs `forwarding carrier call ... failed`. |
 | The caller hears the failure line straight away | The helper could not create the room or could not start the agent. Its log names the cause. Usually a missing platform secret or an agent that is not deployed. |
 {{- if .DailyCarrier.HasOutbound}}

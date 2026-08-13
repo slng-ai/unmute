@@ -48,7 +48,11 @@ controls:
 conversation:
   greeting:
     speaks_first: agent
-    text: "Sage and Stone Salon, this is the front desk. How can I help?"
+    # Deliberately not the same line as ../human-transfer, which is the same salon
+    # on the LiveKit target with the same voice and the same model. One Twilio
+    # number can only point at one of the two, but if you are testing both you
+    # want to hear which one answered rather than deduce it from logs.
+    text: "Sage and Stone Salon on the Pipecat line, this is the front desk. How can I help?"
   interruption:
     enabled: true
 
