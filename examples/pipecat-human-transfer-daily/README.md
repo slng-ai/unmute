@@ -1,4 +1,4 @@
-# human-transfer-daily
+# pipecat-human-transfer-daily
 
 A cold transfer on Pipecat over a **Daily-provisioned number**
 (`transport: daily-sip`, no `carrier`), using Daily's own transfer primitive: the
@@ -8,7 +8,7 @@ call.
 
 Nothing of yours is hosted on this route and there is no carrier account to set
 up: the number comes from Daily. If you would rather use a Twilio number you
-already own, that is [human-transfer-cloud-twilio](../human-transfer-cloud-twilio)
+already own, that is [pipecat-human-transfer-twilio](../pipecat-human-transfer-twilio)
 on `transport: cloud-websocket`, which also hosts nothing. The route comparison is
 in [docs/TELEPHONY.md](../../docs/TELEPHONY.md).
 
@@ -17,7 +17,7 @@ file used to state it wrongly. Daily **does** document a warm pattern; this
 project has not built it yet, because the pattern needs the generated bot to own
 the call's audio (a transfer coordinator, a hold-music mixer, a gate per leg).
 That is deliberate work rather than a default, tracked as feature 005. Warm
-compiles on LiveKit SIP today, in [human-transfer](../human-transfer). The
+compiles on LiveKit SIP today, in [livekit-human-transfer](../livekit-human-transfer). The
 capability map with sources is [docs/TRANSFERS.md](../../docs/TRANSFERS.md).
 
 ---
@@ -120,7 +120,7 @@ BILLING_PHONE_NUMBER=+1XXXXXXXXXX
 ```
 
 ```sh
-bin/unmute validate examples/human-transfer-daily
+bin/unmute validate examples/pipecat-human-transfer-daily
 ```
 
 Expect `✓ pipecat`, and on stderr the dial-out prerequisite from step 1, with the
@@ -130,7 +130,7 @@ is provisioned is not something a compiler can know.
 ### 4. Compile
 
 ```sh
-bin/unmute compile examples/human-transfer-daily
+bin/unmute compile examples/pipecat-human-transfer-daily
 ```
 
 That writes `build/pipecat/`. Look at what it did **not** emit: no Redis, no
@@ -146,7 +146,7 @@ The emitted `build/pipecat/README.md` prints the exact commands. **The order
 matters:**
 
 ```sh
-cd examples/human-transfer-daily/build/pipecat
+cd examples/pipecat-human-transfer-daily/build/pipecat
 cp .env.example .env          # then fill in the values, including BILLING_PHONE_NUMBER
 pipecat cloud secrets set <set-name> --file .env
 pipecat cloud deploy
@@ -268,8 +268,8 @@ then; there is no way around that, so note the purchase date somewhere.
 You can talk to this agent right now, with no accounts and no phone:
 
 ```sh
-bin/unmute dev examples/human-transfer-daily              # browser
-bin/unmute dev --console examples/human-transfer-daily    # terminal
+bin/unmute dev examples/pipecat-human-transfer-daily              # browser
+bin/unmute dev --console examples/pipecat-human-transfer-daily    # terminal
 ```
 
 `--telephony` **refuses on this route**, by name, and tells you the same thing:

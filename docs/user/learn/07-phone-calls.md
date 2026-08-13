@@ -543,9 +543,16 @@ The shipped examples are one per use case:
 | Example | Use case | Targets |
 |---|---|---|
 | `examples/telephony-hello` | inbound and outbound, nothing else | Pipecat (`cloud-websocket`) and LiveKit (`connector`), one `.env` |
-| `examples/human-transfer-cloud-twilio` | cold transfer and inbound, hosting nothing | Pipecat (`cloud-websocket`) |
-| `examples/human-transfer` | warm transfer and inbound | LiveKit (`sip`) |
-| `examples/human-transfer-daily` | cold transfer on a Daily-provisioned number | Pipecat (`daily-sip`, no carrier) |
+| `examples/pipecat-human-transfer-twilio` | cold transfer and inbound, hosting nothing | Pipecat (`cloud-websocket`) |
+| `examples/livekit-human-transfer` | warm transfer and inbound | LiveKit (`sip`) |
+| `examples/pipecat-human-transfer-daily` | cold transfer on a Daily-provisioned number | Pipecat (`daily-sip`, no carrier) |
+
+The transfer examples name their provider first because putting a caller through
+to a person is not one feature with two implementations. LiveKit does it over a SIP
+trunk, with a native primitive for cold **and** warm; Pipecat does it over Twilio
+Media Streams, cold only. Those packages are not interchangeable, so the name says
+which platform you are reading about. `telephony-hello` carries a target per
+provider instead, because there the point is that one agent compiles for both.
 
 ### Configure a Pipecat carrier WebSocket
 
@@ -987,9 +994,9 @@ person answers. A failed transfer comes back as a result the tool reads, and
 Every transfer route stays provisional until its recipe in
 [TRANSFERS.md](../../TRANSFERS.md) has been run as written. See
 [controls](../reference/controls.md#kind-human_transfer) for the fields,
-[examples/human-transfer](https://github.com/slng-ai/unmute_cli/tree/main/examples/human-transfer)
+[examples/livekit-human-transfer](https://github.com/slng-ai/unmute_cli/tree/main/examples/livekit-human-transfer)
 for both shapes on LiveKit SIP, and
-[examples/human-transfer-daily](https://github.com/slng-ai/unmute_cli/tree/main/examples/human-transfer-daily)
+[examples/pipecat-human-transfer-daily](https://github.com/slng-ai/unmute_cli/tree/main/examples/pipecat-human-transfer-daily)
 for cold on Pipecat over Daily.
 
 ## Start outbound calls

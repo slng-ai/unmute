@@ -1964,7 +1964,7 @@ func TestUS3_TransferDestinationIsInTheStartupCheck(t *testing.T) {
 	// an env var read at call time, and only the env-name form has a credential to
 	// check. A committed package uses the env form, because any number a
 	// repository ships is a number nobody answers.
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "human-transfer-daily"))
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "pipecat-human-transfer-daily"))
 	if err != nil {
 		t.Fatal(err)
 	}

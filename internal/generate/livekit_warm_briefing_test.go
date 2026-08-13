@@ -22,7 +22,7 @@ import (
 // live call cannot reach has to be pinned offline.
 //
 // Platform shapes here were verified by reading and exercising livekit-agents
-// 1.6.9 inside the image built from a compiled examples/human-transfer on
+// 1.6.9 inside the image built from a compiled examples/livekit-human-transfer on
 // 2026-08-12. That reading is what caught the rename this file's first test
 // guards: 1.6.4 called the instructions hook InstructionParts, 1.6.9 calls it
 // WorkflowInstructions, and there is no alias between them.

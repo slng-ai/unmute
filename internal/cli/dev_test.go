@@ -143,7 +143,7 @@ func TestDevTelephonyRefusesOnTheDailyRouteAndNamesWhatWorks(t *testing.T) {
 	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
-	root := filepath.Join("..", "..", "examples", "human-transfer-daily")
+	root := filepath.Join("..", "..", "examples", "pipecat-human-transfer-daily")
 	cmd.SetArgs([]string{"dev", "--telephony", "--target", "pipecat", root})
 	err := cmd.Execute()
 	if err == nil {
@@ -155,7 +155,7 @@ func TestDevTelephonyRefusesOnTheDailyRouteAndNamesWhatWorks(t *testing.T) {
 		"--console",       // names a mode that does work
 		"browser",         // names the other one
 		"deploy",          // points at how to get a real phone call
-		"human-transfer-", // names the package, so the fix is copy-pasteable
+		"pipecat-human-transfer-daily", // names the package, so the fix is copy-pasteable
 	} {
 		if !strings.Contains(message, want) {
 			t.Errorf("refusal missing %q:\n%s", want, message)

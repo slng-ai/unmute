@@ -105,3 +105,13 @@ declares is refused rather than quietly ignored.
 In production the same three values ride the target's own dispatch payload as
 one flat JSON object; each build's own README prints the exact spelling for its
 driver.
+
+## Deploy it
+
+Both routes here host something of yours, which is what makes deploying them the
+same job twice rather than two different jobs: a process that answers your carrier,
+behind a public HTTPS origin, with the number's voice webhook pointed at it.
+`build/pipecat/README.md` and `build/livekit/README.md` each carry their own
+platform commands, required variables, and carrier steps. If you want a phone route
+with nothing to host, that is a different transport, and
+[docs/TELEPHONY.md](../../docs/TELEPHONY.md) compares them.

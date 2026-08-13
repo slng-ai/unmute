@@ -191,7 +191,7 @@ Streams routes carry media only. For LiveKit that route is `transport: sip`
 `WarmTransferTask`); for Pipecat it is the Daily route (cold only). The map,
 the yaml, the secrets, and the cloud test walkthroughs are in
 [TRANSFERS.md](../../TRANSFERS.md), and
-[`examples/human-transfer`](https://github.com/slng-ai/unmute_cli/tree/main/examples/human-transfer)
+[`examples/livekit-human-transfer`](https://github.com/slng-ai/unmute_cli/tree/main/examples/livekit-human-transfer)
 is the package that does both shapes on LiveKit SIP.
 
 One useful preview needs no phone number at all: deploy the example and open

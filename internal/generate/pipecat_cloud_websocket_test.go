@@ -94,7 +94,7 @@ func cloudWebsocketTarget(t *testing.T, opts cloudWebsocketOptions) (*ir.Agent, 
 // operator actually gets rather than about a shape the fixtures can vary.
 func compileCloudWebsocketExample(t *testing.T) Artifact {
 	t.Helper()
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "human-transfer-cloud-twilio"))
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "pipecat-human-transfer-twilio"))
 	if err != nil {
 		t.Fatal(err)
 	}

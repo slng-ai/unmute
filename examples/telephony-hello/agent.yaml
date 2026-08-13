@@ -1,6 +1,8 @@
-# Minimal inbound-only phone agent for local telephony testing.
-# It only greets and chats, so it asks for no capability the Pipecat Twilio
-# route cannot provide (no outbound, no voicemail, no transfer).
+# Minimal phone agent for telephony testing, both directions.
+# It only greets and chats: no tools, no tasks, no transfer, so nothing here
+# needs a capability that either Twilio route lacks. Both directions are
+# declared under channels.phone, which is what makes this package able to test a
+# call coming in and a call going out with the same agent.
 version: 1
 entry_agent: greeter
 

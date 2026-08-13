@@ -146,7 +146,7 @@ func TestLiveKitReportCarriesRegions(t *testing.T) { // FR-020
 // package declares none, and openai 3.0 replaced its httpx dependency with
 // httpx2. Since `livekit.agents.__init__` imports `inference` eagerly, such a
 // project cannot import the SDK at all. This is the exact shape of
-// examples/human-transfer, which is the package the transfer rig deploys.
+// examples/livekit-human-transfer, which is the package the transfer rig deploys.
 func TestLiveKitDeclaresHTTPXWithoutWebhooksOrTracing(t *testing.T) {
 	agent := loadCompilerAgent(t)
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
@@ -184,7 +184,7 @@ func TestLiveKitDeclaresHTTPXWithoutWebhooksOrTracing(t *testing.T) {
 func TestLiveKitColdTransferSendsAURI(t *testing.T) {
 	emit := func(t *testing.T, destination string, warm bool) string {
 		t.Helper()
-		pkg, err := spec.Load(filepath.Join("..", "..", "examples", "human-transfer"))
+		pkg, err := spec.Load(filepath.Join("..", "..", "examples", "livekit-human-transfer"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -247,7 +247,7 @@ func TestLiveKitColdTransferSendsAURI(t *testing.T) {
 // them beside real keys made a deployed agent look as though it needed a Redis
 // it can never use.
 func TestLiveKitEnvExampleSeparatesPlatformSuppliedNames(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "human-transfer"))
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "livekit-human-transfer"))
 	if err != nil {
 		t.Fatal(err)
 	}

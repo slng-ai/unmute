@@ -240,12 +240,15 @@ func TestPublicExamplePackages(t *testing.T) {
 		}
 	}
 	// One telephony example per use case (spec 007 FR-016): warm+inbound on
-	// LiveKit (human-transfer), cold+inbound on Pipecat over Twilio with nothing
-	// hosted (human-transfer-cloud-twilio), inbound+outbound (telephony-hello).
-	// human-transfer-daily is the no-carrier Daily form and is untouched.
-	// human-transfer-daily-twilio was removed with feature 007; its route keeps its
-	// guards against internal/testdata/daily_carrier instead.
-	want := []string{"human-transfer", "human-transfer-cloud-twilio", "human-transfer-daily", "multi-task", "outbound-reminder", "salon-support", "simple-prompt", "subagents", "task-groups", "telephony-hello"}
+	// LiveKit (livekit-human-transfer), cold+inbound on Pipecat over Twilio with
+	// nothing hosted (pipecat-human-transfer-twilio), inbound+outbound
+	// (telephony-hello). pipecat-human-transfer-daily is the no-carrier Daily form
+	// and is untouched. human-transfer-daily-twilio was removed with feature 007;
+	// its route keeps its guards against internal/testdata/daily_carrier instead.
+	//
+	// A telephony example whose behaviour is one provider's names that provider
+	// first, because the route is the thing a reader is choosing between.
+	want := []string{"livekit-human-transfer", "multi-task", "outbound-reminder", "pipecat-human-transfer-daily", "pipecat-human-transfer-twilio", "salon-support", "simple-prompt", "subagents", "task-groups", "telephony-hello"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -428,8 +431,8 @@ func TestV11_TransfersDocListsEveryRequiredEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	for example, provider := range map[string]ir.Provider{
-		"human-transfer":       ir.ProviderLiveKit,
-		"human-transfer-daily": ir.ProviderPipecat,
+		"livekit-human-transfer":       ir.ProviderLiveKit,
+		"pipecat-human-transfer-daily": ir.ProviderPipecat,
 	} {
 		pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
 		if err != nil {

@@ -1,7 +1,7 @@
 # Sage and Stone Salon's phone line on Pipecat over Daily, with one way to
 # reach a person: a cold transfer. Daily is the route where Pipecat has a
 # native transfer primitive (sip_call_transfer); warm transfer has no Pipecat
-# primitive at all, so it lives in the LiveKit example (../human-transfer).
+# primitive at all, so it lives in the LiveKit example (../livekit-human-transfer).
 version: 1
 entry_agent: front_desk
 

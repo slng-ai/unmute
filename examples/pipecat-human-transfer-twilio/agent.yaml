@@ -1,7 +1,7 @@
 # Sage and Stone Salon's phone line on Pipecat Cloud, reached through the salon's
 # own Twilio number, with one way to reach a person: a cold transfer.
 #
-# The same salon as ../human-transfer-daily. What differs is how the call gets
+# The same salon as ../pipecat-human-transfer-daily. What differs is how the call gets
 # here: Twilio streams the audio straight to Pipecat Cloud, so nothing in this
 # package has to be hosted by anybody (SCHEMA N38).
 version: 1

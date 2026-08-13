@@ -61,7 +61,7 @@ func configuredLiveKitSIPWarmOnly(t *testing.T) (*ir.Agent, ir.Target) {
 // A warm transfer on its own must bring `api` into scope, because the inline
 // trunk configuration is an api.SIPOutboundConfig. Before 2026-08-12 the import
 // was emitted only for an outbound channel or a cold transfer, which was
-// invisible in examples/human-transfer: it has a cold transfer as well as a
+// invisible in examples/livekit-human-transfer: it has a cold transfer as well as a
 // warm one, so it never exercised this shape.
 func TestInlineTrunkWarmOnlyPackageBringsAPIIntoScope(t *testing.T) {
 	agent, resolved := configuredLiveKitSIPWarmOnly(t)

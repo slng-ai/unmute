@@ -1,6 +1,6 @@
-# human-transfer-cloud-twilio
+# pipecat-human-transfer-twilio
 
-The same salon agent as [human-transfer-daily](../human-transfer-daily), reached
+The same salon agent as [pipecat-human-transfer-daily](../pipecat-human-transfer-daily), reached
 through **your own Twilio number**, with **nothing hosted by you**. Inbound calls,
 outbound calls, and a cold transfer to a person.
 
@@ -25,27 +25,91 @@ caller → your Twilio number → a TwiML Bin in the Twilio console
                           and receives the audio directly
 ```
 
-That is the whole diagram. Compare it with
-[human-transfer-daily-twilio's](../../specs/006-pipecat-carrier-telephony/) route,
-which needs a small webhook server running wherever calls should land, forever.
+That is the whole diagram. Compare it with the other Twilio route on Pipecat,
+`transport: carrier-websocket` (it is what [outbound-reminder](../outbound-reminder)
+declares): there, the thing Twilio talks to is a webhook and a media socket of
+**yours**, which has to keep running wherever calls should land, forever.
 
-## The whole runbook
+## What you need
+
+One account and three values, plus one lookup:
+
+| Value | Where it comes from |
+|---|---|
+| `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` | your Twilio account dashboard |
+| `TWILIO_PHONE_NUMBER` | a voice-capable number you own in that account |
+| `BILLING_PHONE_NUMBER` | wherever the transfer should land; your own mobile works for a test |
+| your organization slug | `pipecat cloud organizations list`, pasted into the markup once. It is the hyphenated machine slug (`zonal-bison-orange-168`), not your display name; the CLI's heading for that column has changed between versions |
+
+The same three `TWILIO_*` names [telephony-hello](../telephony-hello) uses, so one
+`.env` drives every Twilio example here. Values never go in this package; the
+package carries environment variable **names** only.
+
+**No Daily key, and no Daily anything.** This route touches no Daily API, so
+`DAILY_API_KEY` is not required and is not asked for. That is the visible
+difference from [pipecat-human-transfer-daily](../pipecat-human-transfer-daily).
+
+## Run it
 
 The generated `build/pipecat/README.md` is the runbook, written to be followed
 with nothing else open. This file is the why; that file is the how.
 
 ```sh
-bin/unmute validate examples/human-transfer-cloud-twilio
-bin/unmute compile examples/human-transfer-cloud-twilio
+bin/unmute validate examples/pipecat-human-transfer-twilio
+bin/unmute compile examples/pipecat-human-transfer-twilio
 ```
-
-Then open `build/pipecat/README.md` and follow **Telephony setup**: four steps,
-three of them in the Twilio console, and nothing to run here.
 
 Look at what compiling did **not** emit: no Redis, no media websocket, no
 `telephony.py`, and no server of any kind. The file list is exactly what a
 Pipecat Cloud build with no telephony emits, and a test asserts that rather than
 trusting it. `build/` is disposable and gitignored.
+
+To hear the agent with no phone in the picture, and no accounts at all:
+
+```sh
+bin/unmute dev examples/pipecat-human-transfer-twilio              # browser
+bin/unmute dev --console examples/pipecat-human-transfer-twilio    # terminal
+```
+
+To take a real call on your own number **before** deploying anything:
+
+```sh
+bin/unmute dev --telephony examples/pipecat-human-transfer-twilio
+```
+
+That runs this agent on your machine behind a cloudflared tunnel and borrows the
+declared number's voice configuration for the length of the session, putting the
+previous one back when you stop it. Your TwiML Bin is never touched, because the
+local runner answers Twilio's webhook itself. One limit worth knowing: the
+transfer's own markup names the **deployed** stream address, so if a dial fails
+during a local session the caller comes back to the deployed agent rather than to
+your laptop.
+
+## Deploy to Pipecat Cloud
+
+Authenticate once with `pipecat cloud auth login`, then four commands, in this
+order. The generated runbook prints them with this package's own names already
+filled in:
+
+```sh
+cd examples/pipecat-human-transfer-twilio/build/pipecat
+cp .env.example .env             # then fill in the values
+pipecat cloud secrets set pipecat-secrets --file .env --region eu-central
+pipecat cloud deploy
+pipecat cloud agent status pipecat
+```
+
+The secret set comes first because the emitted `pcc-deploy.toml` already names it
+and a deploy cannot start without it, and it carries the same `--region` as the
+deployment for the reason under **Regions, in one line** below. `deploy` builds the image in the
+cloud from the emitted `Dockerfile`, which is why the manifest names no image.
+Wait for `status` to report **`ready`**: that, not a successful deploy command, is
+the deploy being usable.
+
+Then the carrier side, which is the whole of what makes this route different: open
+`build/pipecat/README.md` and follow **Telephony setup**. Four steps, three of them
+in the Twilio console, and nothing to run here. You paste one small piece of static
+markup into a TwiML Bin, point your number at it, and the phone path is deployed.
 
 ## Regions, in one line
 
@@ -70,26 +134,7 @@ name. The generated README's **One region, three places** section spells out bot
 Region codes are forwarded exactly as written and never checked here, so a typo
 fails `pipecat cloud deploy` rather than compiling (SCHEMA N32).
 
-## What you need
-
-One account and three values, plus one lookup:
-
-| Value | Where it comes from |
-|---|---|
-| `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` | your Twilio account dashboard |
-| `TWILIO_PHONE_NUMBER` | a voice-capable number you own in that account |
-| `BILLING_PHONE_NUMBER` | wherever the transfer should land; your own mobile works for a test |
-| your organization name | `pipecat cloud organizations list`, pasted into the markup once |
-
-The same three `TWILIO_*` names [telephony-hello](../telephony-hello) uses, so one
-`.env` drives every Twilio example here. Values never go in this package; the
-package carries environment variable **names** only.
-
-**No Daily key, and no Daily anything.** This route touches no Daily API, so
-`DAILY_API_KEY` is not required and is not asked for. That is the visible
-difference from both `human-transfer-daily` examples.
-
-## Why outbound is declared
+## Why outbound is declared, on a package about receiving calls
 
 Because it is how you test a transfer without waiting for somebody to call you.
 Place a call to your own mobile with the one command in the generated runbook,
@@ -102,7 +147,7 @@ an inbound caller takes.
 refusal on this route names what it would take: acting on how the destination's
 leg ended needs a callback endpoint you host, which is the one cost this route
 exists to remove. Warm compiles on LiveKit SIP today, in
-[human-transfer](../human-transfer). The capability map with sources is
+[livekit-human-transfer](../livekit-human-transfer). The capability map with sources is
 [docs/TRANSFERS.md](../../docs/TRANSFERS.md).
 
 **Session survival through a failed transfer.** If the dial does not connect, the

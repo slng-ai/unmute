@@ -4,18 +4,29 @@ A minimal Twilio phone agent for testing real calls. It only greets and chats, s
 it exercises the phone path without any tools, tasks, or transfers. Use it to
 confirm your Twilio setup works before pointing the same flow at a real agent.
 
-It has two targets, both driven by the same `.env`:
+Both directions are declared, `inbound: true` and `outbound: true`, so one package
+tests a call coming in and a call going out. Where an outbound call is placed *from*
+differs per target locally, and **Which target does what locally** below is the
+honest version of that.
 
-- **pipecat** (`transport: cloud-websocket`): Pipecat Cloud terminates the Twilio
-  Media Stream itself. In production nothing is hosted by you: your number points
-  at a small piece of static markup in the Twilio console, and the platform starts
-  the agent.
-- **livekit** (`transport: connector`): the LiveKit Twilio connector, which also
-  uses Twilio Media Streams over a WebSocket and bridges the call into a local
-  LiveKit room where a LiveKit worker handles it. This one you host.
+It has two targets, one per provider, both driven by the same `.env`:
 
-That difference is the point of having both here, and it changes what each can do
-locally. See **Which target does what locally** below.
+| Target | Route | How the call reaches it | Who hosts it |
+|---|---|---|---|
+| **pipecat** | `transport: cloud-websocket`, `carrier: twilio` | your number points at a static TwiML Bin in the console, whose `<Connect><Stream>` streams the audio to Pipecat Cloud | nobody: no server of yours is in the path |
+| **livekit** | `transport: connector`, `carrier: twilio` | your number points at your own bridge's `POST /telephony/inbound`, which answers with the same kind of markup and relays the audio into a LiveKit room | you, both the bridge and the worker |
+
+**Neither target here uses SIP.** Both carry the call as Twilio Media Streams over
+a WebSocket, and on both the Twilio side is TwiML. What differs is who terminates
+that socket, and therefore what the number points at: a static Bin in the console,
+or a webhook of yours. Twilio SIP trunking is a third, separate route
+(`transport: sip`, LiveKit only) and it is what
+[livekit-human-transfer](../livekit-human-transfer) uses, because SIP is where
+LiveKit's transfer primitives live.
+
+That difference in who hosts the socket is the point of having both targets here,
+and it changes what each can do locally. See **Which target does what locally**
+below.
 
 ## What you need
 
@@ -118,6 +129,49 @@ cd examples/telephony-hello/build/pipecat
 If Twilio refuses the call, the reason is printed in Twilio's own words (for
 example geographic permissions for the destination country, or a trial account
 that can only call verified numbers). Fix it in the Twilio Console and run again.
+
+## Deploy it
+
+A local session borrows your number for as long as it runs. Deploying is what
+makes the number answer when you are not at your laptop, and the two targets
+deploy to different places because only one of them hosts anything.
+
+```sh
+bin/unmute compile examples/telephony-hello
+```
+
+**pipecat**, to Pipecat Cloud. Nothing of yours runs anywhere, so the deploy is
+the agent and the secret set, and the carrier side is markup you paste once:
+
+```sh
+cd examples/telephony-hello/build/pipecat
+cp .env.example .env                        # then fill in the values
+pipecat cloud secrets set <set-name> --file .env
+pipecat cloud deploy
+pipecat cloud agent status <agent-name>
+```
+
+The secret set comes first: the emitted `pcc-deploy.toml` already names it and a
+deploy cannot start without it. Wait for `status` to say `ready`. Then follow
+**Telephony setup** in `build/pipecat/README.md`, which dictates the TwiML Bin with
+your own values and tells you where to paste it. If you pin a region, the secret
+set needs the same `--region`; see **Regions** below.
+
+**livekit**, to wherever you run containers. Two processes make up this target,
+and only one of them is the agent:
+
+- `agent.py`, the worker, which connects **out** to a LiveKit Server and needs no
+  inbound ports. `build/livekit/README.md` gives it both paths, LiveKit Cloud
+  (`lk agent create` then `lk agent deploy`) and self-hosted.
+- `telephony_bridge.py`, which **Twilio** has to reach over HTTPS and WSS. The
+  emitted `Dockerfile` starts only the worker, so this one is not carried along by
+  a worker deploy. `compose.telephony.yaml` in the build directory is the graph
+  that runs both together, and it is what `unmute dev --telephony` runs locally.
+
+So deploying this target means running that graph behind a public HTTPS origin,
+setting `UNMUTE_PUBLIC_URL` to it, and pointing the number's voice webhook at
+`POST /telephony/inbound` yourself. That ingress is the whole cost the pipecat
+target does not have.
 
 ## Regions
 

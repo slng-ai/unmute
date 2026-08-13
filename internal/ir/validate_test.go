@@ -988,7 +988,7 @@ func reportFor(report ValidateReport, provider Provider) TargetValidation {
 }
 
 // V12/B5: a warm transfer dials its destination, so a package containing one
-// must declare an outbound phone direction. examples/human-transfer shipped
+// must declare an outbound phone direction. examples/livekit-human-transfer shipped
 // with `outbound: false`, validated green, and then had `--to` refused as if
 // the direction had been removed from the driver (B5).
 func TestV12_WarmTransferRequiresOutboundDirection(t *testing.T) {

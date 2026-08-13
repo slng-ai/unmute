@@ -638,13 +638,19 @@ calls. Take one of the other two for a specific reason:
 One thing is true on all three and worth saying once:
 **no Pipecat route offers warm transfer today.**
 Warm compiles on `(livekit, sip)` trunks, and
-`examples/human-transfer` is the example. Nothing about these routes blocks it;
+`examples/livekit-human-transfer` is the example. Nothing about these routes blocks it;
 this project has not built it.
 
-The shipped examples are one per use case: `examples/human-transfer` (warm
-transfer, LiveKit), `examples/human-transfer-cloud-twilio` (cold transfer on
+The shipped examples are one per use case: `examples/livekit-human-transfer` (warm
+transfer, LiveKit), `examples/pipecat-human-transfer-twilio` (cold transfer on
 `cloud-websocket`), and `examples/telephony-hello` (inbound and outbound, both a
 Pipecat and a LiveKit target off one `.env`).
+
+The transfer examples carry their provider in the name because the transfer is the
+platform's primitive, not ours: a LiveKit SIP REFER and a Twilio TwiML redirect are
+different mechanisms with different capabilities, so those packages cannot be swapped
+for one another. Examples that are about something else, like `telephony-hello` and
+`examples/outbound-reminder`, declare a target per provider instead.
 
 ### Pipecat Cloud native carrier stream (`cloud-websocket`)
 

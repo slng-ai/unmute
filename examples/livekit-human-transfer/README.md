@@ -1,8 +1,20 @@
-# human-transfer
+# livekit-human-transfer
 
 Putting a caller through to a person, both shapes, on LiveKit over a Twilio
 SIP trunk. Transfers ride the platform's native primitives, so this example
 lives on the one route where LiveKit ships both: `transport: sip`.
+
+| | |
+|---|---|
+| provider | LiveKit, deployed on LiveKit Cloud (self-hosting the worker is documented too) |
+| route | `transport: sip`, `carrier: twilio`: a Twilio Elastic SIP Trunk you own |
+| what you host | nothing on LiveKit Cloud; the worker if you self-host |
+| what it does | inbound calls, cold transfer, warm transfer |
+
+**The name says the route because the route is the thing that differs.** The
+Pipecat examples reach a person over Twilio Media Streams and TwiML markup, which
+is a different mechanism with different capabilities. Nothing on this page applies
+to them, and nothing on their pages applies here.
 
 - **`send_to_billing`** is a **cold** transfer: `TransferSIPParticipant`, a
   SIP REFER through the trunk. The agent speaks one line, the caller's leg is
@@ -18,9 +30,9 @@ lives on the one route where LiveKit ships both: `transport: sip`.
   unprompted (SCHEMA N35).
 
 Cold on Pipecat has two examples of its own, and neither hosts anything:
-[human-transfer-daily](../human-transfer-daily) on `transport: daily-sip` with a
+[pipecat-human-transfer-daily](../pipecat-human-transfer-daily) on `transport: daily-sip` with a
 number from Daily, and
-[human-transfer-cloud-twilio](../human-transfer-cloud-twilio) on
+[pipecat-human-transfer-twilio](../pipecat-human-transfer-twilio) on
 `transport: cloud-websocket` with a Twilio number you already own.
 
 **Warm is LiveKit-only, and the reason differs per Pipecat route** rather than
@@ -148,12 +160,11 @@ moved before.
 
 ## Run it
 
-```sh
-bin/unmute validate examples/human-transfer
-```
+Validate and compile from the repository root:
 
 ```sh
-bin/unmute compile examples/human-transfer
+bin/unmute validate examples/livekit-human-transfer
+bin/unmute compile examples/livekit-human-transfer
 ```
 
 That writes `build/livekit/`. Its own `README.md` has a Deploy section printing
@@ -162,7 +173,21 @@ first deploy and every later one are different commands, and the build directory
 ships no `livekit.toml` because the platform writes that itself. Self-hosting the
 worker is documented there too.
 
-### Take it live and prove the cold transfer
+To hear the agent before any carrier account exists, with no phone in the picture:
+
+```sh
+bin/unmute dev examples/livekit-human-transfer              # browser, needs Docker
+bin/unmute dev --console examples/livekit-human-transfer    # terminal, local mic
+```
+
+Neither transfer completes in that kind of session, and the two reasons are
+different. **Cold** refers the caller's existing SIP leg out, so with no SIP leg
+there is nothing to act on: the tool logs `cold transfer skipped: no phone caller
+in the room` and the agent carries on. **Warm** dials the supervisor through
+LiveKit's SIP service, so it is exercised against the deployed project, which is
+the Agent Console path below.
+
+## Deploy to LiveKit Cloud, and prove the cold transfer
 
 This is the sequence that passed on 2026-08-12, run from `build/livekit` with
 `.env` filled in. Steps 1 and 2 are one-time; 3 to 6 are what you repeat.

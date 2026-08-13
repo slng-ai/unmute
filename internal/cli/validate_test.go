@@ -62,7 +62,7 @@ func TestValidateCommandReturnsErrorForGatedTarget(t *testing.T) { // V16
 // Daily account is allowed to do. Failing here would refuse correct packages.
 func TestValidateNamesTheDailyDialOutPrerequisite(t *testing.T) {
 	stdout, stderr, err := runValidateCommand(t, "--target", "pipecat",
-		filepath.Join("..", "..", "examples", "human-transfer-daily"))
+		filepath.Join("..", "..", "examples", "pipecat-human-transfer-daily"))
 	if err != nil {
 		t.Fatalf("a prerequisite must not fail validation: %v\n%s", err, stderr)
 	}
@@ -85,7 +85,7 @@ func TestValidateNamesTheDailyDialOutPrerequisite(t *testing.T) {
 // ignore stderr.
 func TestValidateOmitsPrerequisiteWithoutTheCapabilityThatNeedsIt(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "agent")
-	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "..", "examples", "human-transfer-daily"))); err != nil {
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "..", "examples", "pipecat-human-transfer-daily"))); err != nil {
 		t.Fatal(err)
 	}
 	// Same Daily route, no transfer and no outbound: nothing dials out.
@@ -163,7 +163,7 @@ func TestValidateForwardsAnUnknownRegionCode(t *testing.T) {
 func writeDailyPackage(t *testing.T, region string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "agent")
-	source := filepath.Join("..", "..", "examples", "human-transfer-daily")
+	source := filepath.Join("..", "..", "examples", "pipecat-human-transfer-daily")
 	if err := os.CopyFS(dir, os.DirFS(source)); err != nil {
 		t.Fatal(err)
 	}

@@ -134,7 +134,7 @@ go test ./internal/generate -run TestServiceInfoCoversEveryMappedClass
 go test ./internal/ir -run TestValidatePipecatMaturityGates
 
 # A warm transfer dials its destination, so it cannot be declared on a channel
-# with outbound: false (human-transfer V15 / SCHEMA N30)
+# with outbound: false (livekit-human-transfer V15 / SCHEMA N30)
 go test ./internal/ir -run TestV12_WarmTransferRequiresOutboundDirection
 ```
 

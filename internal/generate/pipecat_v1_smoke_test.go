@@ -1015,7 +1015,7 @@ print("daily inbound params ok")
 // It also covers FR-006, the empty-body path: a session carrying no call details
 // behaves exactly as it did before, which is every browser and console run.
 func TestSmokePipecatV1DailyInboundParamsAcceptCall(t *testing.T) {
-	runPipecatSmokeScript(t, "human-transfer-daily", nil, nil, pipecatDailyInboundSmokeScript)
+	runPipecatSmokeScript(t, "pipecat-human-transfer-daily", nil, nil, pipecatDailyInboundSmokeScript)
 }
 
 // TestSmokePipecatV1ServicesInstantiate proves the safe_core emission end to
@@ -1115,7 +1115,7 @@ func TestSmokeV24PipecatSimplePromptStaticCheck(t *testing.T) {
 // turns a browser-session transfer request from an AttributeError into a named
 // failure the model can act on.
 func TestSmokeV24PipecatDailyTransferStaticCheck(t *testing.T) {
-	runPipecatSmokeScript(t, "human-transfer-daily", nil, nil, pipecatStaticCheckScript)
+	runPipecatSmokeScript(t, "pipecat-human-transfer-daily", nil, nil, pipecatStaticCheckScript)
 }
 
 // TestSmokeV24PipecatExamplesStaticCheck holds raw Pipecat output to the bar

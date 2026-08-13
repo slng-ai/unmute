@@ -279,10 +279,10 @@ targets:
 ```
 
 The complete packages live in
-[examples/human-transfer](../examples/human-transfer) (LiveKit, both shapes),
-[examples/human-transfer-daily](../examples/human-transfer-daily)
+[examples/livekit-human-transfer](../examples/livekit-human-transfer) (LiveKit, both shapes),
+[examples/pipecat-human-transfer-daily](../examples/pipecat-human-transfer-daily)
 (Pipecat, cold, Daily-provisioned number), and
-[examples/human-transfer-cloud-twilio](../examples/human-transfer-cloud-twilio)
+[examples/pipecat-human-transfer-twilio](../examples/pipecat-human-transfer-twilio)
 (Pipecat, cold, your own carrier, nothing hosted by you).
 
 The Daily carrier form has no public example any more. Feature 007 replaced it
@@ -309,7 +309,7 @@ trunk. Verified against
 Exact env names, as the generated `.env.example` lists them. Values are never
 written into a package; a Connection stores env var names only.
 
-**LiveKit rig** (`examples/human-transfer`):
+**LiveKit rig** (`examples/livekit-human-transfer`):
 
 | Name | What it is |
 |---|---|
@@ -329,7 +329,7 @@ On LiveKit Cloud the first two rows are supplied by the platform: `lk` drops the
 from a secrets file and the deployed agent gets its own. Set them for local runs
 and for a self-hosted server; do not try to send them as secrets.
 
-**Pipecat rig, Daily-provisioned number** (`examples/human-transfer-daily`):
+**Pipecat rig, Daily-provisioned number** (`examples/pipecat-human-transfer-daily`):
 
 | Name | What it is |
 |---|---|
@@ -338,7 +338,7 @@ and for a self-hosted server; do not try to send them as secrets.
 | `BILLING_PHONE_NUMBER` | The transfer destination, read at call time. |
 
 **Pipecat rig, your own carrier, nothing hosted**
-(`examples/human-transfer-cloud-twilio`). One group, because one thing reads them:
+(`examples/pipecat-human-transfer-twilio`). One group, because one thing reads them:
 the deployed agent. There is no second side on this route, so every name below
 belongs in the platform secret set.
 
@@ -420,7 +420,7 @@ need two phones to answer as "billing" and "supervisor".
    Verified against [Inline trunk configuration](https://docs.livekit.io/telephony/making-calls/outbound-calls/#inline-trunk)
    and [WarmTransferTask](https://docs.livekit.io/agents/prebuilt/tasks/warm-transfer/)
    on 2026-08-12.
-3. **Deploy**: `unmute compile examples/human-transfer`, then follow the Deploy
+3. **Deploy**: `unmute compile examples/livekit-human-transfer`, then follow the Deploy
    section of the generated `build/livekit/README.md`. It prints the exact
    commands for this package, including its region: the first deploy
    (`lk agent create`, which also writes the `livekit.toml` the build directory
@@ -458,7 +458,7 @@ need two phones to answer as "billing" and "supervisor".
    with a purchased phone number and **dial-out enabled** (required by
    `sip_call_transfer`; ask Daily support if the dashboard does not offer
    it).
-2. **Deploy**: `unmute compile examples/human-transfer-daily`, then follow the
+2. **Deploy**: `unmute compile examples/pipecat-human-transfer-daily`, then follow the
    Deploy section of the generated `build/pipecat/README.md`. The order matters:
    create the secret set from `.env` with `pipecat cloud secrets set` **first**,
    because the emitted `pcc-deploy.toml` already names it, then

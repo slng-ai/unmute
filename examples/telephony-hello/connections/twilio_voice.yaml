@@ -2,7 +2,7 @@
 # Values are environment variable names, never secrets.
 #
 # The same three names on the Pipecat Cloud carrier stream route and on the
-# LiveKit Twilio connector, and the same three ../human-transfer-cloud-twilio
+# LiveKit Twilio connector, and the same three ../pipecat-human-transfer-twilio
 # uses, so one .env drives every Twilio example here.
 #
 # from_number is the caller identity the recipient sees: a voice-capable number
