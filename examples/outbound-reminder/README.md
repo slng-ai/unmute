@@ -5,6 +5,15 @@ runtime-value kind in one small package. It compiles and runs on both shipped
 code targets, Pipecat and LiveKit, from the same source. The design is in
 [SCHEMA.md](../../docs/SCHEMA.md) sections 4.4 (variables) and 4.12 (secrets).
 
+Both targets here are **self-hosted** routes, chosen because this example is about
+runtime values rather than about telephony: Pipecat on `transport:
+carrier-websocket` (the container answers the carrier itself) and LiveKit on
+`transport: connector` (the generated bridge puts the call in a local LiveKit
+room). Its `dialed_number` variable is why: `source: to_number` is filled by the
+carrier adapter, and those are the routes that emit one. The Pipecat routes that
+host nothing refuse that source by name, so a package needing it belongs here. The
+route comparison is in [docs/TELEPHONY.md](../../docs/TELEPHONY.md).
+
 ## The four kinds, and where each shows up
 
 **Input variables** arrive with the dispatch, before the call rings:

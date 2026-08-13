@@ -163,6 +163,20 @@ signaling endpoint and the media itself on the bot port (7860).
 
 ### Phone calls
 
+**Only one of the three Pipecat phone routes is self-hosted, and this section is
+about that one** (`transport: carrier-websocket`). The other two host nothing of
+yours in production and so have nothing on this page to run:
+
+- `transport: cloud-websocket`: Pipecat Cloud terminates the carrier's stream
+  itself. No process, no ingress, no Redis. Its region, its secret set's region,
+  and the stream endpoint in its carrier markup are all derived from one
+  `deployment_region` declaration, and the platform requires them to agree.
+- `transport: daily-sip` with a `carrier`: one small emitted webhook server that
+  you run, and nothing else. The deployed agent still exposes nothing.
+
+Both are described in [TELEPHONY.md](TELEPHONY.md), which also compares the three
+and recommends one for the common case. What follows is the self-hosted route.
+
 The telephony image starts the generated FastAPI application with uvicorn on
 port 7860. Production must provide:
 

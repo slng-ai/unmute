@@ -97,7 +97,7 @@ every provider binding emits.
 
 ## Public examples and internal fixtures
 
-- [examples/README.md](examples/README.md) — runnable LiveKit/Pipecat matrix
+- [examples/README.md](../examples/README.md) — runnable LiveKit/Pipecat matrix
   using one salon workflow across a large prompt, independent tasks, a task
   group, and two-agent handoffs.
 - [internal/testdata/safe_core/](internal/testdata/safe_core/) — internal

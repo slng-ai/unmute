@@ -6,12 +6,13 @@ confirm your Twilio setup works before pointing the same flow at a real agent.
 
 It has two targets, both driven by the same `.env`:
 
-- **pipecat**: Pipecat Cloud terminates the Twilio Media Stream itself. In
-  production nothing is hosted by you: your number points at a small piece of
-  static markup in the Twilio console, and the platform starts the agent.
-- **livekit**: the LiveKit Twilio connector, which also uses Twilio Media Streams
-  over a WebSocket and bridges the call into a local LiveKit room where a LiveKit
-  worker handles it. This one you host.
+- **pipecat** (`transport: cloud-websocket`): Pipecat Cloud terminates the Twilio
+  Media Stream itself. In production nothing is hosted by you: your number points
+  at a small piece of static markup in the Twilio console, and the platform starts
+  the agent.
+- **livekit** (`transport: connector`): the LiveKit Twilio connector, which also
+  uses Twilio Media Streams over a WebSocket and bridges the call into a local
+  LiveKit room where a LiveKit worker handles it. This one you host.
 
 That difference is the point of having both here, and it changes what each can do
 locally. See **Which target does what locally** below.
@@ -117,6 +118,31 @@ cd examples/telephony-hello/build/pipecat
 If Twilio refuses the call, the reason is printed in Twilio's own words (for
 example geographic permissions for the destination country, or a trial account
 that can only call verified numbers). Fix it in the Twilio Console and run again.
+
+## Regions
+
+This package declares **no** `deployment_region`, so the Pipecat target goes to
+your organisation's default region and the generated markup uses the platform's
+default stream endpoint, `wss://api.pipecat.daily.co/ws/twilio`, which routes to
+`us-west`.
+
+To pin a region, add one line to the `pipecat` target in `targets.yaml`:
+
+```yaml
+    deployment_region: eu-central
+```
+
+Recompile, and three things move together, because all three are rendered from
+that one line: the `region` in `pcc-deploy.toml`, the `--region` on the
+`secrets set` command in the generated README, and the `wss://` host in the markup
+you paste into Twilio. They have to agree, because a regional stream endpoint
+routes **only** to agents deployed in that region and an agent can only read a
+secret set from its own region. `pipecat cloud regions list` prints what is
+available to you, and
+[docs/TELEPHONY.md](../../docs/TELEPHONY.md) explains the chain.
+
+The LiveKit target has its own regional story on its own platform; nothing here is
+shared between the two.
 
 ## A note on route maturity
 

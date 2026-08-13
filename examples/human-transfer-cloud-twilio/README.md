@@ -47,6 +47,29 @@ Look at what compiling did **not** emit: no Redis, no media websocket, no
 Pipecat Cloud build with no telephony emits, and a test asserts that rather than
 trusting it. `build/` is disposable and gitignored.
 
+## Regions, in one line
+
+`targets.yaml` declares `deployment_region: eu-central`, and that is the only place
+a region is written. Three things are rendered from it, and the platform requires
+them to agree:
+
+| What | Where it lands |
+|---|---|
+| where the agent runs | `region` in the emitted `pcc-deploy.toml` |
+| where its secrets live | the `--region` on the emitted `secrets set` command |
+| where Twilio streams to | the `wss://eu-central.api.pipecat.daily.co/...` host in the markup you paste, in the outbound command, and in the transfer's reconnect |
+
+A regional stream endpoint routes **only** to agents deployed in that region, and
+an agent can only read a secret set from its own region. So change that one line to
+your own region, recompile, and re-paste the address into your TwiML Bin.
+`pipecat cloud regions list` prints what is available.
+
+Two things bite when moving an agent that already exists: agent names are globally
+unique **across** regions, and a secret set is region-scoped with a globally unique
+name. The generated README's **One region, three places** section spells out both.
+Region codes are forwarded exactly as written and never checked here, so a typo
+fails `pipecat cloud deploy` rather than compiling (SCHEMA N32).
+
 ## What you need
 
 One account and three values, plus one lookup:

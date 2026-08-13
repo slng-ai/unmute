@@ -1,9 +1,16 @@
 # human-transfer-daily
 
-A cold transfer on Pipecat, on the one Pipecat route with a native transfer
-primitive: Daily. The bot announces the handoff, calls
-`transport.sip_call_transfer`, Daily reroutes the caller's leg, and the bot drops
-off. Billing answers knowing nothing about the call.
+A cold transfer on Pipecat over a **Daily-provisioned number**
+(`transport: daily-sip`, no `carrier`), using Daily's own transfer primitive: the
+bot announces the handoff, calls `transport.sip_call_transfer`, Daily reroutes the
+caller's leg, and the bot drops off. Billing answers knowing nothing about the
+call.
+
+Nothing of yours is hosted on this route and there is no carrier account to set
+up: the number comes from Daily. If you would rather use a Twilio number you
+already own, that is [human-transfer-cloud-twilio](../human-transfer-cloud-twilio)
+on `transport: cloud-websocket`, which also hosts nothing. The route comparison is
+in [docs/TELEPHONY.md](../../docs/TELEPHONY.md).
 
 Warm transfer is not here, and the reason is worth stating precisely because this
 file used to state it wrongly. Daily **does** document a warm pattern; this

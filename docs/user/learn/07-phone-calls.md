@@ -504,6 +504,40 @@ separates them: **what do you want to be running?**
 The full comparison, including what each needs from the carrier account, is in
 [TELEPHONY.md](../../TELEPHONY.md).
 
+### One region, declared once
+
+On `transport: cloud-websocket`, `deployment_region` on the target is the only
+place a region is written, and three things are rendered from it:
+
+```yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: cloud-websocket
+    carrier: twilio
+    deployment_region: eu-central     # the only place a region appears
+```
+
+| What it sets | Where you see it |
+|---|---|
+| where the agent deploys | `region` in the generated `pcc-deploy.toml` |
+| where its secrets live | the `--region` on the generated `secrets set` command |
+| where the carrier streams to | the `wss://eu-central.api.pipecat.daily.co/...` host in the call markup the generated README dictates |
+
+The platform requires all three to agree: a regional stream endpoint routes
+**only** to agents deployed in that region, and an agent can only read a secret
+set from its own region. Declaring no region is also fine, and then all three use
+the platform's defaults.
+
+To move region, change that one line, recompile, and re-paste the address into
+your carrier's markup. Two platform rules bite when the agent already exists:
+agent names are globally unique **across** regions, and a secret set is
+region-scoped with a globally unique name, so plan on either deleting the old pair
+or naming the new one differently. Region codes are forwarded exactly as written
+and never checked by the compiler, so a typo fails the platform's own deploy
+command rather than compiling into something unreachable.
+
 The shipped examples are one per use case:
 
 | Example | Use case | Targets |

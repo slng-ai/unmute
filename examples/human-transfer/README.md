@@ -17,10 +17,20 @@ lives on the one route where LiveKit ships both: `transport: sip`.
   rather than the prebuilt's, because the prebuilt's own never briefs
   unprompted (SCHEMA N35).
 
-Cold on Pipecat is its own example: [human-transfer-daily](../human-transfer-daily),
-on the Daily route. Pipecat has no native warm transfer, which is why warm is
-LiveKit-only; the full capability map, with sources, is in
-[docs/TRANSFERS.md](../../docs/TRANSFERS.md).
+Cold on Pipecat has two examples of its own, and neither hosts anything:
+[human-transfer-daily](../human-transfer-daily) on `transport: daily-sip` with a
+number from Daily, and
+[human-transfer-cloud-twilio](../human-transfer-cloud-twilio) on
+`transport: cloud-websocket` with a Twilio number you already own.
+
+**Warm is LiveKit-only, and the reason differs per Pipecat route** rather than
+being one blanket fact: on the Daily routes the platform documents a warm pattern
+and this project has not built it (feature 005); on `cloud-websocket` it would need
+a callback endpoint you host, which is the one cost that route exists to remove;
+on the carrier-websocket transports there is no transfer control at all. Each
+refusal says which it means. The full capability map, with sources, is in
+[docs/TRANSFERS.md](../../docs/TRANSFERS.md), and the route comparison is in
+[docs/TELEPHONY.md](../../docs/TELEPHONY.md).
 
 ## The authoring shape
 

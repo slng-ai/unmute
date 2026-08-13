@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
@@ -451,5 +452,108 @@ func TestV11_TransfersDocListsEveryRequiredEnv(t *testing.T) {
 				t.Errorf("%s requires %s, which docs/TRANSFERS.md does not document (V11)", example, name)
 			}
 		}
+	}
+}
+
+// The generated README is the runbook, and almost nobody reads it before they
+// have already read the example's own page and the docs. So those two have to stay
+// true on their own, and "stay true" is a thing a test can hold rather than a
+// thing a person remembers.
+//
+// These two are deliberately narrow. They do not check prose: a document is free
+// to say that an example was removed, which is history worth keeping. They check
+// the two claims that go stale silently and mislead a reader who acts on them: a
+// link that no longer resolves, and a README describing a route its package no
+// longer declares.
+
+// Every relative link an example page offers must resolve, and any link anywhere
+// in the docs that points into examples/ must resolve too. Deleting or renaming an
+// example fails this until every page that sends a reader there is fixed.
+func TestExampleAndDocLinksIntoExamplesResolve(t *testing.T) {
+	link := regexp.MustCompile(`\[[^\]]*\]\(([^)\s]+)`)
+	check := func(page string, onlyExamples bool) {
+		raw, err := os.ReadFile(page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range link.FindAllStringSubmatch(string(raw), -1) {
+			target, _, _ := strings.Cut(match[1], "#")
+			if target == "" || strings.HasPrefix(target, "http://") ||
+				strings.HasPrefix(target, "https://") || strings.HasPrefix(target, "mailto:") {
+				continue
+			}
+			if onlyExamples && !strings.Contains(target, "examples/") {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(filepath.Dir(page), target)); err != nil {
+				t.Errorf("%s links to %q, which does not exist", page, target)
+			}
+		}
+	}
+	for _, root := range []string{filepath.Join("..", "..", "examples"), filepath.Join("..", "..", "docs")} {
+		onlyExamples := strings.HasSuffix(root, "docs")
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() && entry.Name() == "build" {
+				return fs.SkipDir
+			}
+			if !entry.IsDir() && strings.HasSuffix(path, ".md") {
+				check(path, onlyExamples)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// An example's own README must name every route its targets declare. This is the
+// one that would have caught `telephony-hello` describing a carrier-websocket
+// Pipecat target for the length of the feature that moved it to another route: the
+// generated runbook was right the whole time, and the page a reader opens first
+// was wrong.
+func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
+	root := filepath.Join("..", "..", "examples")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		t.Run(entry.Name(), func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join(root, entry.Name()))
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			var routed []string
+			for name, target := range pkg.Targets {
+				if target.Transport != "" {
+					routed = append(routed, name)
+				}
+			}
+			if len(routed) == 0 {
+				// Nothing declares a route, so there is no route claim to keep true.
+				// The four structural examples live in the index table in
+				// examples/README.md and need no page of their own.
+				return
+			}
+			readme, err := os.ReadFile(filepath.Join(root, entry.Name(), "README.md"))
+			if err != nil {
+				t.Fatalf("this example declares a route (%s) and has no README to describe it: %v", strings.Join(routed, ", "), err)
+			}
+			for name, target := range pkg.Targets {
+				if target.Transport == "" {
+					continue // browser-only targets declare no route to describe
+				}
+				if !strings.Contains(string(readme), target.Transport) {
+					t.Errorf("target %q declares transport %q, which this example's README never mentions", name, target.Transport)
+				}
+			}
+		})
 	}
 }
