@@ -237,6 +237,29 @@ func TestCloudWebsocketRegionPicksTheEndpoint(t *testing.T) {
 			t.Errorf("with no region declared the rendered address is %q, not the default", address)
 		}
 	}
+
+	// One declaration, and every place a region lands agrees with it. The platform
+	// requires that: a regional stream endpoint routes only to agents deployed in
+	// that region, and an agent can only read a secret set from its own region. So
+	// the whole chain is asserted together rather than one artifact at a time.
+	manifest := artifactFile(t, regional, "pcc-deploy.toml")
+	if !strings.Contains(manifest, `region = "eu-central"`) {
+		t.Errorf("the deploy manifest does not name the declared region:\n%s", manifest)
+	}
+	readme := artifactFile(t, regional, "README.md")
+	if !strings.Contains(readme, "--region eu-central") {
+		t.Error("the secret-set command does not carry the declared region, so the agent could not read its own secrets")
+	}
+	if !strings.Contains(artifactFile(t, regional, "bot.py"), `STREAM_URL = "wss://eu-central.api.pipecat.daily.co/ws/twilio"`) {
+		t.Error("the transfer's reconnect markup does not name the regional endpoint")
+	}
+	// And the README says the chain out loud, because an invariant nobody states is
+	// one an operator breaks by hand on the first region change.
+	for _, want := range []string{"One region, three places", "globally unique across regions", "region-scoped"} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("the runbook does not explain the region chain: %q is missing", want)
+		}
+	}
 }
 
 // TestCloudWebsocketRunbookContract covers contracts/runbook.md. The counts are

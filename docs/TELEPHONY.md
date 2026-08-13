@@ -700,6 +700,22 @@ interrupt. The production Bin is never touched. Outbound is the one thing that
 does not run locally, and for a reason worth stating: an outbound call's markup
 names the deployed agent, so the call reaches the platform rather than the laptop.
 
+**One region, three places, one declaration.** `deployment_region` on the target
+is the only place a region is written, and three things are derived from it: the
+`region` in the emitted `pcc-deploy.toml`, the `--region` on the emitted
+`secrets set` command, and the `wss://<region>.api.pipecat.daily.co/...` host in
+all three pieces of markup (the Bin, the outbound command, the transfer's
+reconnect). The platform requires them to agree: a regional stream endpoint
+routes **only** to agents deployed in that region, and an agent can only read a
+secret set from its own region. An agreement test asserts the chain rather than
+trusting it, and the emitted runbook explains it, because the first region change
+is where somebody edits one of the three by hand.
+
+Region codes stay unvalidated here, per SCHEMA N32: they are forwarded exactly as
+written and the platform CLI is the validator. On this route that holds up, because
+a mistyped region fails `pipecat cloud deploy` before any call is placed. What the
+compiler does prevent is the mismatch, by rendering all three from one value.
+
 ### LiveKit routes
 
 LiveKit needs two explicit routes because its provider-neutral production path

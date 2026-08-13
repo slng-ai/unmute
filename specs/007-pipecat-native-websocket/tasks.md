@@ -215,9 +215,9 @@ Fill in as the live tasks complete. A capability row may not lose `provisional` 
 
 | Task | Flow | Date | Outcome | Notes |
 |---|---|---|---|---|
-| T071a | Inbound answered on a Twilio number | | | spoken-line delay and greeting delay against SC-002 |
+| T071a | Inbound answered on a Twilio number | 2026-08-13 | **pass, with a caveat** | Spoken line immediate (the carrier says it). Greeting: `First bot speech latency=2.190s` inside the process, but 10 to 15s wall-clock on a **cold** container, so SC-002's 10s bound holds only with a warm instance. Three findings came out of this run: the organization slug, the pipeline sample rates, and cold start (see Findings) |
 | T071b | Outbound rings through the operator's number | | | what caller identity the recipient saw |
-| T071c | Cold transfer completes, and the decline drill | | | counts against SC-004; the fresh-session limit as documented |
+| T071c | Cold transfer completes, and the decline drill | 2026-08-13 | **completed transfer: pass.** Decline drill: not yet run | `human transfer fired: send_to_billing (cold)`, the carrier update measured at **0.157s** in the platform's own latency breakdown, `{"transferred": true}` returned to the model, and the session wound down as Twilio applied the new document. Counts 1 of 5 against SC-004; the decline drill and the fresh-session limit are still unobserved |
 | T071d | Failure mapping drill | | | which troubleshooting rows the drill corrected |
 | T071e | `dev --telephony` local call and number restore (SC-008) | | | the configuration read back after an interrupt, compared byte for byte to the before state |
 | T071f | `telephony-hello` deployed and confirmed working (FR-016a) | | | the operator's own confirmation, inbound and outbound, on the deployed agent |
@@ -341,6 +341,43 @@ reach the same point: `phone call CA0123456789abcdef (inbound)` from the emitted
 session detection, then the entry agent activating. The only errors after that are
 401s from the deliberately fake model keys. That is the whole inbound chain proven
 offline, minus the carrier leg and minus real credentials.
+
+### The first live calls, 2026-08-13
+
+Recorded as they happened, because three of the four things that went wrong were
+ours and none of them was visible offline.
+
+**1. The Bin named the organization's display name.** `pipecat.nicoferdi` instead
+of `pipecat.zonal-bison-orange-168`. The caller heard the carrier's spoken line and
+then silence, and **the agent's log was empty for the whole call**, because the
+platform refuses the connection before the agent is involved. Two runbook fixes
+came out of it: the value is now described by its shape rather than by a column
+heading (the CLI's headings differ from the platform docs'), and the
+troubleshooting map now says that an empty agent log is itself the diagnosis. Two
+suspects were cleared by checking rather than guessing: the regional endpoint
+resolves and is documented, and `websocket_auth` is a top-level manifest key
+exactly where we emit it.
+
+**2. Ten to fifteen seconds of silence before the greeting was a cold start.** The
+platform's own `First bot speech | latency=2.190s` covers only the part inside the
+process; the rest was the container being scheduled and pipecat being imported,
+because the deployment had scaled to zero. The map now explains that, and says
+`--min-agents 1` ends it, and that the flag has to be passed on every deploy
+because this manifest is regenerated.
+
+**3. The pipeline was resampling every frame for nothing.** Twilio Media Streams
+is 8 kHz mono both ways; pipecat defaults to 16 kHz in and 24 kHz out. Fixed by
+`_pipeline_audio_rates()`, applied per session so a browser run on the same file
+keeps the defaults.
+
+**4. One thing was not ours.** A 17.6s STT time-to-first-byte in the platform's
+latency breakdown, against 2.2s for the LLM and 0.34s for the TTS on the same
+event loop. A later call on the same deployment showed 0.315s, so it was a cold
+gateway session at the provider. The runbook now teaches reading that breakdown
+and which of the three owners each line points at.
+
+**And the cold transfer worked on its first live attempt**, which is the flow that
+had the most new code behind it.
 
 ### What is not done, and why
 

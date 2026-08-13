@@ -163,6 +163,11 @@ uses the local VAD. Semantic endpointing is also advisory.
   `sip_username`, and no `sip_password`**, and the route refuses all three by
   name, naming the accepted set: nothing on this route speaks SIP.
 
+  `deployment_region` is the only place a region is written: the deploy manifest,
+  the secret set's region, and the `wss://` host in every piece of markup are all
+  derived from it, because the platform routes a regional stream endpoint only to
+  agents deployed in that region.
+
   The build emits **no new file**: the file list is exactly a plain Pipecat Cloud
   build's. The generated README dictates the carrier console work in four steps,
   three of them clicks and one a `pipecat cloud organizations list`. Cold transfer
