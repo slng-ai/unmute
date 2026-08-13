@@ -540,6 +540,23 @@ Telnyx, use the SIP connection address, credentials, and assigned number from
 Telnyx Mission Control. For Plivo, use the Zentrunk termination domain,
 outbound credential, and linked number from the Plivo Console.
 
+Three carrier facts decide whether a call works, and none of them is an Unmute
+setting, which is why the generated README dictates them rather than the compiler
+doing them for you.
+
+- **The number has to be attached to the trunk.** Incoming calls enter through the
+  trunk, so a number that is not on it never reaches LiveKit, whatever else is
+  configured.
+- **Origination points at LiveKit, termination points at the phone network.** The
+  names are the carrier's point of view. Termination is your three dial-out values;
+  origination is one address, and on LiveKit Cloud it is built from the **project
+  ID** (`sip:<ID without p_>.sip.livekit.cloud;transport=tcp`), not from
+  `LIVEKIT_URL`, whose subdomain is a different string entirely.
+- **Cold transfer lives or dies on the trunk's transfer settings.** It is a SIP
+  REFER on the caller's existing leg, so Call Transfer and PSTN transfer must both
+  be enabled at the carrier. Nothing on the LiveKit side substitutes for that, and
+  nothing in the package can detect it before the transfer fires.
+
 Compilation emits `sip-inbound-trunk.json` and `sip-dispatch-rule.json` for
 production deployments, for inbound calls only, plus the `telephony-setup.sh`
 that feeds them to `lk`. Run `bash telephony-setup.sh` from the build directory:
@@ -547,10 +564,20 @@ it resolves the inbound trunk by the phone number in your `.env`, creates the
 trunk and the dispatch rule, reuses whatever already exists, and needs no record
 ID copied anywhere, so no environment name carries one (SCHEMA N36,
 2026-08-12). The generated README's `## Telephony setup` section dictates the
-carrier half. There is no outbound trunk input: the agent dials out with the
-carrier's trunk settings passed inline (SCHEMA N33, 2026-08-12). For local
-development none of this is needed: `unmute dev --telephony` creates the same
-records on the local server itself.
+carrier half, and its `### Take it live, in order` list is the sequence that gets a
+package answering calls: carrier, then this script, then deploy the agent, then
+call your own number and read `lk agent logs`. There is no outbound trunk input:
+the agent dials out with the carrier's trunk settings passed inline (SCHEMA N33,
+2026-08-12). For local development none of this is needed: `unmute dev --telephony`
+creates the same records on the local server itself.
+
+One deployment rule that bites here rather than at compile time: every name in the
+`.env` you upload as secrets must be a valid shell identifier, letters, digits and
+underscores, never starting with a digit. LiveKit Cloud exports secrets with a
+shell, so `11LABS_API_KEY` fails at export, the value is missing at runtime, and
+the only evidence is one `not a valid identifier` line at the top of
+`lk agent logs`. Rename it, then re-upload with `--overwrite`, because a merge
+leaves the bad name behind.
 
 Self-hosted SIP runs LiveKit Server and LiveKit SIP against the same Redis.
 Redis is their shared datastore and message bus, so calls, SIP participants,

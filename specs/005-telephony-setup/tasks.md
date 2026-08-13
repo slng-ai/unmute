@@ -114,13 +114,15 @@ No foundational tasks. The compiler pipeline, the capability table, and the emit
 
 | Run | Date | Outcome |
 |---|---|---|
-| Script first run (T010) | | |
-| Script idempotence (T010) | | |
-| Inbound answered (T011) | | |
-| Warm on inbound call (T011) | | |
-| Cold completes (T011) | | |
+| Script first run (T010) | 2026-08-12 | **Pass.** Created the inbound trunk and the dispatch rule against slng-atlas from the emitted script |
+| Script idempotence (T010) | 2026-08-12 | **Pass.** Second run created nothing |
+| Inbound answered (T011) | 2026-08-12 | **Pass.** Call to `SIP_FROM_NUMBER` reached the deployed agent `livekit` (`CA_pxm6TiuPibJq`, eu-central) |
+| Warm on inbound call (T011) | | Warm passed from the Agent Console on 2026-08-12 (specs/003 run A1); not yet re-run on a real inbound leg |
+| Cold completes (T011) | 2026-08-12 | **Pass.** Caller asked for billing, was connected onward, agent left the call, three cold log lines clean |
 | Dev flow regression (T021) | | |
 | Toggle-off cold probe (T031, optional) | | |
+
+What the live pass needed that the plan had not anticipated, both now documented: the phone number had to be **attached to the trunk** (its `trunkSid` was empty, so origination was never consulted), and one secret name (`11LABS_API_KEY`) was not a valid shell identifier, which LiveKit Cloud reports as a single `/etc/run/env` line at the top of `lk agent logs` and otherwise swallows. The generated README, the example README and `docs/user` all carry both now.
 
 Reference: warm transfer already passed live on 2026-08-12 from the Agent Console (specs/003 run A1); T011 re-proves it on a real inbound leg.
 

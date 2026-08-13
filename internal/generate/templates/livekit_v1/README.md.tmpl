@@ -86,6 +86,20 @@ SIP service is managed, so `REDIS_URL` belongs to a self-hosted deployment and i
 never read by the agent. Leave that section blank for a Cloud deploy.
 {{- end}}
 
+**Every name in that file must be a valid shell identifier**: letters, digits and
+underscores, never starting with a digit. The platform exports your secrets with a
+shell, so one bad name fails at export and that value is simply missing at
+runtime. The agent then dies later, somewhere unrelated, and the only trace is a
+single line near the top of `lk agent logs`:
+
+```text
+/etc/run/env: line 2: export: `11LABS_API_KEY=...': not a valid identifier
+```
+
+If you see that, rename the variable in `.env` (`ELEVENLABS_API_KEY`, not
+`11LABS_API_KEY`) or delete the line, then run the overwrite command below.
+Merging is not enough: the bad name stays until something replaces the whole set.
+
 Change a value later without a full redeploy:
 
 ```sh
@@ -401,6 +415,9 @@ read -rsp "SIP password: " SIP_PASSWORD; echo
 NUMBER=$(sed -n 's/^{{.Telephony.FromNumberEnv}}=//p' ./.env | head -1 | tr -d "\r\"'")
 
 # Steps 1 and 2: the trunk, then its SID looked up by the domain you just chose.
+# Already have a trunk? Skip the create and list what you have instead:
+#   twilio api:trunking:v1:trunks:list -o json |
+#     jq -r '.[] | "\(.friendlyName)  \(.domainName)  \(.sid)"'
 twilio api:trunking:v1:trunks:create --friendly-name "{{.Project}}" --domain-name "$TRUNK_DOMAIN"
 TRUNK_SID=$(twilio api:trunking:v1:trunks:list -o json |
   jq -r --arg d "$TRUNK_DOMAIN" '.[] | select(.domainName==$d) | .sid')
@@ -513,6 +530,35 @@ authenticated, which `lk cloud auth` fixes.
 Earlier builds of this project also needed `LIVEKIT_SIP_INBOUND_TRUNK` in the
 environment. That variable is retired and nothing reads it, so delete it from
 `.env` and from your platform secrets.
+{{- end}}
+{{- if .Telephony.HasInbound}}
+
+### Take it live, in order
+
+The two halves above can be done in either order, but a call only works once both
+exist and the agent is running. This is the whole sequence, from a compiled build
+directory:
+
+1. **Carrier**: the steps above. If you already have a trunk, the two that are
+   easy to miss are attaching your number to it and, for a cold transfer, the
+   transfer toggles. A number that is not on the trunk never reaches LiveKit, no
+   matter how right the origination URI is.
+2. **LiveKit records**: `bash telephony-setup.sh`, then run it again and expect
+   every line to say reused.
+3. **The agent**: `lk agent deploy` from this directory (or `lk agent create` the
+   first time, see Deploy above), then `lk agent update-secrets --secrets-file .env
+   --overwrite` if you changed `.env`. Check `lk agent status`.
+4. **Call your number** from a phone. The agent answers.
+{{- if .HasColdTransfer}} Ask for whatever the cold
+   transfer covers; you should be connected onward and the agent should drop out.
+{{- end}}
+5. **Read `lk agent logs`.** The transfer lines are listed under Human transfers
+   below. Check the top of the log too: that is where a bad secret name shows up.
+
+If the call rings and drops with no agent, work backwards: does
+`lk sip inbound list` show a trunk claiming your number, does `lk sip dispatch list`
+show a rule for it naming `{{.AgentName}}`, and does `lk agent status` show the
+agent up. Each of those is one of the three steps above.
 {{- end}}
 {{- if or .HasColdTransfer .HasWarmTransfer}}
 

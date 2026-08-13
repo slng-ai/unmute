@@ -113,6 +113,20 @@ injects them as environment variables. `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
 from the file, they must not be set in the image, and their absence from the
 deployed secret list is correct rather than a mistake.
 
+**Every name in that file must be a valid shell identifier**: letters, digits and
+underscores, never starting with a digit. The platform exports your secrets with a
+shell, so one bad name fails at export and that value is simply missing at
+runtime. The agent then dies later, somewhere unrelated, and the only trace is a
+single line near the top of `lk agent logs`:
+
+```text
+/etc/run/env: line 2: export: `11LABS_API_KEY=...': not a valid identifier
+```
+
+If you see that, rename the variable in `.env` (`ELEVENLABS_API_KEY`, not
+`11LABS_API_KEY`) or delete the line, then run the overwrite command below.
+Merging is not enough: the bad name stays until something replaces the whole set.
+
 Change a value later without a full redeploy:
 
 ```sh

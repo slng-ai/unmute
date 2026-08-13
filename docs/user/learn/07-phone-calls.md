@@ -517,12 +517,33 @@ Carrier webhook setup by carrier:
 - For Exotel, wait for an authenticated WebSocket route. Its static Voicebot
   URL does not satisfy Unmute's ingress policy.
 
-### Configure self-hosted LiveKit SIP
+### Configure LiveKit SIP
 
-LiveKit is the only Unmute orchestrator that uses SIP trunks. The target
-chooses the carrier, the Connection maps four route keys to environment
-variable names, and the generated JSON creates the matching LiveKit inbound
-trunk, outbound trunk, and dispatch rule.
+LiveKit is the only Unmute orchestrator that uses SIP trunks. The target chooses
+the carrier, the Connection maps four route keys to environment variable names,
+and the build carries the two JSON inputs an incoming call needs plus the
+`telephony-setup.sh` that creates them. This works the same on LiveKit Cloud and
+on a self-hosted LiveKit; only the origination target differs, and the generated
+README says which is which.
+
+#### Understand the two directions
+
+Carriers name the two directions from their own point of view, which is the single
+biggest source of confusion here:
+
+- **Termination** is calls leaving the carrier towards the phone network. That is
+  your agent dialling out: an outbound call, or the second leg of a warm transfer.
+  It needs an address and credentials, which are three of your four values.
+- **Origination** is calls that started on the phone network and have to be handed
+  onward to your infrastructure. That is an incoming call. It needs one thing: the
+  address of your LiveKit SIP endpoint.
+
+Two consequences worth knowing before you debug anything. **A number must be
+attached to the trunk**, or incoming calls never enter it and the origination URI
+is never consulted, however correct it is. And **on LiveKit Cloud the origination
+address comes from the project ID, not from `LIVEKIT_URL`**: the project URL
+subdomain and the SIP subdomain are unrelated strings, so the obvious guess gives
+an address that rings nowhere. The generated README prints yours with one command.
 
 #### Understand the two sides of the trunk
 
@@ -595,9 +616,25 @@ Use the
 for the carrier-side fields.
 
 1. Create an Elastic SIP Trunk in the Twilio Console.
-2. For inbound calls, set its origination URI to
-   `sip:<your-livekit-sip-endpoint>;transport=tcp`.
-3. For outbound calls, create a Credential List and attach it to the trunk.
+2. For incoming calls, set its origination URI to your LiveKit SIP endpoint with
+   `;transport=tcp` on the end. On LiveKit Cloud that is
+   `sip:<project ID without the p_ prefix>.sip.livekit.cloud`; self-hosted, it is
+   the public SIP signalling address you deployed.
+3. For outgoing calls, create a Credential List and attach it to the trunk. Its
+   username and password are two of your four values, and the trunk's own domain,
+   ending in `pstn.twilio.com`, is the third. That domain is one value, not two:
+   there is no separate termination address to hunt for.
+4. **Attach your phone number to the trunk.** Without this the other three steps
+   have no effect on incoming calls.
+5. For a **cold** transfer, enable Call Transfer (SIP REFER) and tick Enable PSTN
+   Transfer on the trunk. A cold transfer is a SIP REFER on the caller's existing
+   leg, so the carrier is the only thing that can allow or refuse it: there is no
+   LiveKit-side setting that compensates, and a trunk left at `disable-all` or
+   `sip-only` fails every cold transfer to a phone number.
+
+The generated `build/livekit/README.md` has all of this as console paths **and** as
+a runnable command block for the Twilio CLI, with your own variable names filled
+in, plus three checks that print the states this side fails in.
 4. Associate the Twilio phone number with the trunk.
 5. Put the termination SIP URI, Credential List username and password, and
    phone number in `.env`:
@@ -704,6 +741,13 @@ do. Everything is found by the number, so no record ID is copied between command
 and no environment name holds one (SCHEMA N36, 2026-08-12). It needs `lk`,
 authenticated against the project, and `jq`.
 
+Two things it does on purpose. It **never sources your `.env`**, because that would
+read every secret in the file and would abort on a single line whose name is not a
+shell identifier; it reads the one phone-number assignment as text instead. And it
+**refuses to create the dispatch rule while the trunk ID is empty**, because a rule
+with an empty trunk list matches every trunk in the project, which in a shared
+project would capture other people's calls.
+
 Inbound only, and both records are needed. An unsolicited call arrives with no
 request of yours for configuration to travel with, so the platform has to
 already know which project owns the number (the inbound trunk) and which room
@@ -717,7 +761,24 @@ starting a call, so the settings can ride along with it; nothing has to be
 registered first.
 
 The generated README's `## Telephony setup` section is the authority for this
-package: it dictates the carrier steps too, in the order they have to happen.
+package: it dictates the carrier steps too, in the order they have to happen, and
+ends with the sequence that takes a package live: carrier, then these records, then
+deploy the agent, then call your own number and read `lk agent logs`.
+
+One failure worth knowing before it costs you an evening. Every name in the `.env`
+you upload as secrets must be a valid shell identifier: letters, digits and
+underscores, never starting with a digit. LiveKit Cloud exports your secrets with a
+shell, so a name like `11LABS_API_KEY` fails at export, that value is missing at
+runtime, and the agent dies later somewhere unrelated. The only trace is one line
+at the very top of `lk agent logs`:
+
+```text
+/etc/run/env: line 2: export: `11LABS_API_KEY=...': not a valid identifier
+```
+
+Rename or delete it, then re-upload with
+`lk agent update-secrets --secrets-file .env --overwrite`. A merge leaves the bad
+name in place.
 
 For local development, none of that is needed:
 

@@ -66,14 +66,26 @@ never dial an arbitrary one: it picks a symbolic name, the target resolves it.
 ## Set it up
 
 The trunk side is Twilio Elastic SIP Trunking (by decision; LiveKit Phone
-Numbers are inbound-only and cannot transfer). In the Twilio console under
-**Elastic SIP Trunking > Manage > Trunks**, create a trunk, then:
+Numbers are inbound-only and cannot transfer). Compile the package first, because
+the generated `build/livekit/README.md` dictates the carrier steps with your own
+variable names, the console paths, and a runnable command block for each one. Its
+`## Telephony setup` section is the authority; this page does not copy it.
 
-1. Enable **Call Transfers** and tick **Enable PSTN Transfer**
+In short, on one Elastic SIP trunk:
+
+1. **Termination** gives you the three dial-out values: the trunk's own domain,
+   ending in `pstn.twilio.com`, plus a Credential List username and password.
+   The domain is one value, not two.
+2. **Origination** points at your LiveKit project SIP URI with `;transport=tcp`.
+   That URI comes from the **project ID**, not from `LIVEKIT_URL`: the generated
+   README prints yours with one `lk` command.
+3. **Your number is attached to the trunk.** This is the step people miss. A
+   number that is not on the trunk never reaches LiveKit, however right the
+   origination URI is.
+4. **Call Transfer (SIP REFER) enabled and PSTN Transfer ticked**
    ([Twilio: Call Transfer via SIP REFER](https://www.twilio.com/docs/sip-trunking/call-transfer)).
-   Without it the carrier rejects the cold transfer.
-2. Point the trunk's origination URI at your LiveKit SIP endpoint.
-3. Copy the trunk's SIP domain, username, and password.
+   Without both, the carrier rejects the cold transfer and nothing else here can
+   fix it.
 
 ```sh
 SIP_TRUNK_HOSTNAME=your-trunk.pstn.twilio.com
@@ -83,6 +95,13 @@ SIP_FROM_NUMBER=+1...
 BILLING_PHONE_NUMBER=+1...
 SUPERVISOR_PHONE_NUMBER=+1...
 ```
+
+Every name in `.env` must be a valid shell identifier: letters, digits and
+underscores, never starting with a digit. LiveKit Cloud exports your secrets with
+a shell, so a name like `11LABS_API_KEY` fails at export, that value is missing at
+runtime, and the only trace is one `/etc/run/env: ... not a valid identifier` line
+at the top of `lk agent logs`. Fix the name and re-upload with `--overwrite`;
+merging leaves the bad name in place.
 
 Those four `SIP_*` values are all the warm transfer needs. It dials the
 supervisor by passing them inline with the call, so **no LiveKit outbound trunk
@@ -133,6 +152,75 @@ first deploy and every later one are different commands, and the build directory
 ships no `livekit.toml` because the platform writes that itself. Self-hosting the
 worker is documented there too.
 
+### Take it live and prove the cold transfer
+
+This is the sequence that passed on 2026-08-12, run from `build/livekit` with
+`.env` filled in. Steps 1 and 2 are one-time; 3 to 6 are what you repeat.
+
+**1. Attach your number to the trunk.** The step people miss, and the one that
+makes an inbound call reach LiveKit at all.
+
+```sh
+NUMBER=$(sed -n 's/^SIP_FROM_NUMBER=//p' .env | head -1 | tr -d "\r\"'")
+NUMBER_SID=$(twilio phone-numbers:list -o json |
+  jq -r --arg n "$NUMBER" '.[] | select(.phoneNumber==$n) | .sid')
+twilio api:trunking:v1:trunks:phone-numbers:create \
+  --trunk-sid <your-trunk-sid> --phone-number-sid "$NUMBER_SID"
+
+# expect your trunk SID, not "none"
+twilio phone-numbers:list -o json |
+  jq -r --arg n "$NUMBER" '.[] | select(.phoneNumber==$n) | "trunk: \(.trunkSid // "none")"'
+```
+
+Find the trunk SID with
+`twilio api:trunking:v1:trunks:list -o json | jq -r '.[] | "\(.friendlyName)  \(.domainName)  \(.sid)"'`.
+
+**2. Check the trunk's transfer settings**, because cold transfer has no other
+setting anywhere:
+
+```sh
+twilio api:trunking:v1:trunks:list -o json | jq -r --arg s "<your-trunk-sid>" \
+  '.[] | select(.sid==$s) | "transfers: \(.transferMode), caller id: \(.transferCallerId)"'
+```
+
+Expect `transfers: enable-all`. `disable-all` or `sip-only` is what makes a cold
+transfer to a phone number fail, and no LiveKit-side change can compensate.
+
+**3. Fix any secret name that is not a shell identifier**, before uploading:
+
+```sh
+sed -i '' '/^11LABS_API_KEY=/d' .env    # or rename it to ELEVENLABS_API_KEY
+```
+
+**4. Create the LiveKit records.** Run it twice; the second run must report
+everything reused rather than created.
+
+```sh
+bash telephony-setup.sh
+bash telephony-setup.sh
+lk sip inbound list     # a trunk claiming your number
+lk sip dispatch list    # a rule scoped to it, dispatching this package's agent
+```
+
+**5. Ship this build and its secrets.**
+
+```sh
+lk agent deploy
+lk agent update-secrets --secrets-file .env --overwrite
+lk agent status
+```
+
+**6. Call your number.** Give the agent a name and a complaint, then ask for
+billing. You should be connected to `BILLING_PHONE_NUMBER` and the agent should
+leave the call. Then read the logs:
+
+```sh
+lk agent logs
+```
+
+Expect the three cold lines below. If the call rings and drops with no agent, work
+backwards through steps 1, 4 and 5: number on the trunk, records present, agent up.
+
 Testing is not local: SIP signaling and RTP do not fit a tunnel. The warm
 transfer needs **no phone number at all**: open the LiveKit Agent Console,
 talk to the agent, ask for a manager, and the supervisor's real phone rings.
@@ -141,9 +229,11 @@ talk to the agent, ask for a manager, and the supervisor's real phone rings.
 SIP leg out, and an Agent Console session has no SIP leg, so there is nothing to
 act on: the tool fires, logs `cold transfer skipped: no phone caller in the room`,
 and the agent carries on. Cold needs one real inbound call through the trunk, which
-means the inbound trunk and the dispatch rule from the generated README must exist
-and the rule must name **this** package's agent. The full
-walkthrough, including the failure drills and teardown, is in
+means the inbound trunk and the dispatch rule must exist and the rule must name
+**this** package's agent. That is what the six steps above set up, and it passed
+end to end on 2026-08-12: a call to `SIP_FROM_NUMBER` was answered by the deployed
+agent, the caller asked for billing, and the three cold log lines came back clean.
+The full walkthrough, including the failure drills and teardown, is in
 [docs/TRANSFERS.md](../../docs/TRANSFERS.md).
 
 ## What a working transfer looks and sounds like

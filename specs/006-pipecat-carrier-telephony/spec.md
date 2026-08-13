@@ -14,16 +14,25 @@ Read from the working tree of `feature/warm-cold-human-transfer` and from the Pi
 
 **What already works.** specs/004 shipped. The Daily route `(pipecat, daily-sip)` compiles, deploys to Pipecat Cloud, and answers an inbound call on a Daily-provisioned number. Cold transfer is emitted with the at-most-one-attempt guard and the caller-stays-connected failure paths. The validate report names the Daily dial-out account prerequisite when a package needs it. Region reaches the deploy manifest and the credential-store instructions, and the docs no longer claim a stance the project dropped.
 
+specs/005 shipped too, and it is live-proven: on the LiveKit target, an operator following the generated runbook gets inbound calls answered, cold transfer, and warm transfer all working on real calls (requester confirmation, 2026-08-12). So this feature mirrors a working setup, not a draft. One bookkeeping gap: specs/005's own task file still lists its two live-run tasks as open, so the dated run record there should be filled in.
+
 **What is missing for the requester's goal.** The goal is a Pipecat Cloud telephony surface the requester can actually test: inbound, outbound, cold transfer, and eventually warm. Today that is blocked four ways:
 
 | # | Gap | Why it bites |
 |---|---|---|
-| 1 | **The only phone leg is a Daily-provisioned number.** The requester cannot provision Daily numbers or Daily dial-out yet, and an operator holding a working carrier number should not need to buy a second number from a second vendor to test. | Every live proof from specs/004 stays out of reach. The LiveKit half of this repository is testable with a plain Twilio account; the Pipecat half is not. |
+| 1 | **The only phone leg is a Daily-provisioned number.** The requester cannot provision Daily numbers or Daily dial-out yet, and an operator holding a working carrier number should not need to buy a second number from a second vendor to test. | Every live proof from specs/004 stays out of reach. The LiveKit half of this repository is live-proven with a plain Twilio account (inbound, cold, and warm, specs/005); the Pipecat half cannot be tested at all. |
 | 2 | **Outbound is not declarable on the Daily route.** `channels.phone` on it fails at build time because the route has no connection to dial with (specs/004 T046, verified by trying it). | The outbound flow cannot even be authored, let alone tested. |
-| 3 | **There is no runbook.** specs/005 gives the LiveKit target one ordered telephony setup section with dictated carrier steps and a provisioning script. The Pipecat README has deploy instructions and a number-attachment pointer, not an end-to-end setup an operator can follow with nothing else open. | The zero-friction promise exists on one driver only. |
+| 3 | **There is no runbook.** specs/005 gives the LiveKit target one ordered telephony setup section with dictated carrier steps and a provisioning script, and that runbook is live-proven. The Pipecat README has deploy instructions and a number-attachment pointer, not an end-to-end setup an operator can follow with nothing else open. | The zero-friction promise exists, proven, on one driver only. |
 | 4 | **Warm transfer is not emitted on any Pipecat route.** Daily documents the pattern; this project does not build it yet (specs/004 FR-032, N34). | Warm stays a future feature. This spec must not make it harder. |
 
 **This feature adds a carrier leg to the route that already works.** The agent code, the room, and the transfer machinery from specs/004 stay where they are. What this feature adds is the way in and the way out through the operator's own carrier, and the runbook that makes it settable from the README alone.
+
+## Clarifications
+
+### Session 2026-08-12
+
+- Q: When this feature's design disagrees with a recorded repository stance, like SCHEMA N34's statement that the Daily route takes no phone channel, which side wins? → A: The official Pipecat documentation, and the Daily documentation it links, are the source of truth for platform behavior on this route. A repository stance that disagrees with what the platform documents support is amended, dated, per constitution Principle IV. The N34 supersession follows the platform docs; it is not a preference of this feature.
+- Q: What is the proven state of the LiveKit telephony setup this feature mirrors? → A: specs/005 is shipped and live-proven: on the LiveKit target, inbound calls, cold transfer, and warm transfer all work on real calls (requester confirmation, 2026-08-12). specs/004 is not the only shipped telephony feature.
 
 ## The Choice: SIP Interconnect, Not Carrier Websockets
 
@@ -52,6 +61,7 @@ Proposed on 2026-08-12 from the platform documents the requester supplied. Each 
 4. **The carrier seam is one forwarding action plus instruction text.** Forwarding a live call is the one thing done in the carrier's own words (Twilio updates the call by its identifier). Adding Telnyx or Plivo later means writing that one action and the carrier part of the runbook, and MUST NOT touch the agent, the room shape, or the platform part of the runbook. This is specs/005 story 3, applied to this driver.
 5. **The runbook experience mirrors specs/005.** One ordered "Telephony setup" section in the generated README, a carrier part we dictate because we cannot do it for the operator, a platform part that is copy-paste commands, no identifier ever transcribed between steps, and the step counts stated up front.
 6. **Warm transfer stays its own feature, and this architecture must carry it for free.** The carrier leg joins the same room a Daily-provisioned call joins, so when the warm feature lands it inherits carrier calls without new work. Nothing in this feature may special-case the carrier leg in a way warm would trip over.
+7. **The platform documents are the source of truth for platform behavior.** What this route can do is settled by the official Pipecat documentation and the Daily documentation it links, verified and dated, never by this repository's own recorded stances. Where a repository document disagrees with what the platform documents support, the repository document is the thing that changes, as a dated amendment (constitution Principle IV). Confirmed with the requester on 2026-08-12.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -142,11 +152,12 @@ When Telnyx or Plivo joins later, the agent code, the room shape, the emitted he
 
 - **FR-001**: This feature MUST add no new authoring field. The carrier leg is selected with the existing target fields (`transport`, `carrier`, `connection`) and the existing phone channel, and a package that validates today MUST keep its exact meaning.
 - **FR-002**: The route's Connection keys MUST reuse the existing telephony vocabulary wherever the meaning is identical (the four SIP names of N33, the carrier REST names the websocket routes already use). Any genuinely new key MUST land in the same change as a numbered dated `docs/SCHEMA.md` amendment, with the derived schemas, capability table, agreement tests, scaffold, console, examples, and `docs/user/` updated together, per the constitution.
+- **FR-002a**: Making the carrier fields, the Connection, and the phone channel valid together on this transport **is** a change to the authoring surface, even though it adds no field. It MUST therefore land with everything the constitution's compliance review names, in the same change: the amendment, the derived schemas, the capability table, the agreement tests, the scaffold templates, the interactive console, the in-repository examples and fixtures, and `docs/user/`. Where a surface needs no change, that finding MUST be recorded rather than the surface left unexamined.
 - **FR-003**: `(pipecat, daily-sip)` with no carrier MUST keep meaning Daily-provisioned numbers, byte-identical output for existing packages, no helper emitted.
 
 **Route and capability**
 
-- **FR-004**: `(pipecat, daily-sip, twilio)` MUST become a row in the single capability rulebook supporting inbound, outbound, cold transfer, hangup, and the call sources the Daily route exposes. Each capability stays provisional until its dated live run, and no second copy of these facts may appear anywhere.
+- **FR-004**: `(pipecat, daily-sip, twilio)` MUST become a row in the single capability rulebook granting exactly what this feature emits: route selection, inbound, outbound, cold transfer, and hangup. Each capability stays provisional until its dated live run, and no second copy of these facts may appear anywhere. **A capability MUST NOT be granted before its emitted code path exists**, and each of the five above has one, hangup included: the generated bot ends the call both when a tool declares it does and on the transfer's hangup branch, on any transport (verified in the emitted template, 2026-08-12). In particular the telephony call sources (caller number, called number, call identifier, direction, and their siblings) are **not** granted on this route: the generated bot reads those values from a table that only the carrier-websocket adapters fill, and this route emits no such adapter, so granting them would let a package validate green and receive nothing on a live call. A package declaring one MUST fail by name, and the refusal MUST name where that source does work, so the author learns the fix rather than only the no. Lifting the refusal is a later feature that emits the fill path first.
 - **FR-005**: Declaring `channels.phone.outbound` on the Daily route with a carrier connection MUST validate and compile. Without a connection it MUST keep failing by the connection's name, exactly as today.
 - **FR-006**: Warm transfer MUST stay gated on this route with the message stating that Daily documents the pattern and this project does not emit it yet. Nothing in this feature may special-case the carrier leg in a way that blocks the warm feature from riding it unchanged: the carrier call joins the same room shape a Daily-provisioned call joins.
 
@@ -168,11 +179,11 @@ When Telnyx or Plivo joins later, the agent code, the room shape, the emitted he
 **Documents**
 
 - **FR-016**: The authoring contract gains a numbered dated amendment recording the new route row and any Connection vocabulary this route adds. `docs/TRANSFERS.md`, `docs/TELEPHONY.md`, and the Pipecat target page under `docs/user/` MUST tell the same story as the emitted runbook, and the agreement tests between them MUST stay green.
-- **FR-017**: Every platform behavior claim in emitted text and repository docs MUST carry its source and verification date, and any claim this spec lists as open MUST be verified during planning before code depends on it.
+- **FR-017**: Every platform behavior claim in emitted text and repository docs MUST carry its source and verification date, and any claim this spec lists as open MUST be verified during planning before code depends on it. Decision 7 governs whose word wins.
 
 **Proof**
 
-- **FR-018**: The automated suite MUST prove, without any phone account: the helper and agent artifacts are emitted exactly when a carrier is declared, the forwarding fires once against a double ready signal, the capability row and the emitted project and the docs agree, and every existing example compiles byte-identical.
+- **FR-018**: The automated suite MUST prove, without any phone account: the helper and agent artifacts are emitted exactly when a carrier is declared; the forwarding fires once against a double ready signal; the capability row, the emitted project, and the docs agree; every capability the route grants has an emitted code path; a refused capability fails by name; and the no-carrier Daily route's emitted bytes do not move, which the golden files carry. Byte-identity across the other in-repository examples is proven by one recorded gate in this feature's task file rather than by a test, because a test cannot compare against a baseline that no longer exists once the change lands.
 - **FR-019**: An in-repository example MUST exercise `(pipecat, daily-sip, twilio)` with inbound, outbound, and a cold transfer, and be covered by the example tests.
 - **FR-020**: The live runs (inbound answered, outbound rings, cold transfer completes and fails safe) are recorded with dates in this feature's task file, and the capability rows stop being provisional only on that evidence.
 
@@ -182,7 +193,7 @@ When Telnyx or Plivo joins later, the agent code, the room shape, the emitted he
 - **Call-forwarding helper**: the emitted artifact that turns a carrier webhook into a started agent and a forwarded call. Present only when a carrier is declared; runs where the operator chooses.
 - **Telephony Connection**: the existing YAML object naming carrier environment variables. This feature reuses it; planning settles the exact key set for this route.
 - **Per-call SIP address**: the room-scoped address the platform mints for each call, the reason a static origination pointer cannot work here and the helper exists.
-- **Route row**: `(pipecat, daily-sip, twilio)` in the single capability rulebook, the one home for what this route supports.
+- **Route row**: `(pipecat, daily-sip, twilio)` in the single capability rulebook, the one home for what this route supports. It grants only what has an emitted code path, so the row doubles as the honest inventory of the route (FR-004).
 - **Runbook**: the README's telephony setup section. The carrier part varies by carrier; the platform part never does.
 
 ## Success Criteria *(mandatory)*
@@ -190,7 +201,7 @@ When Telnyx or Plivo joins later, the agent code, the room shape, the emitted he
 ### Measurable Outcomes
 
 - **SC-001**: An operator holding a Twilio account, one number, and a Pipecat Cloud account goes from a clean compile to a live answered call using the generated README and nothing else. The run is recorded with dates in this feature's task file.
-- **SC-002**: An operator who completed the specs/005 LiveKit setup reuses the same carrier account, trunk, and number for this target by changing where the number points and adding at most three new environment values.
+- **SC-002**: An operator who completed the specs/005 LiveKit setup reuses the same carrier account, trunk, and number for this target by changing where the number points, keeping the trunk address and phone number lines of their environment file unchanged, and adding five new values (four when the package declares no outbound): the carrier's two REST credentials, the Daily key, the platform's public key, and the outbound trigger token. Their two SIP credential lines become unused, because this route has nothing to authenticate with them.
 - **SC-003**: The carrier part of the runbook has at most six actions and the platform part at most two commands, both counts stated in the runbook, with zero identifiers transcribed between steps.
 - **SC-004**: A caller never hears more than 2 seconds of silence between dialing and either ringing, hold audio, or the agent, measured on the recorded live runs.
 - **SC-005**: Cold transfer on a carrier call completes on at least 9 of 10 consecutive attempts, and on every failure path the caller is still connected and informed, 10 of 10.
@@ -201,7 +212,7 @@ When Telnyx or Plivo joins later, the agent code, the room shape, the emitted he
 
 ## Platform Facts This Feature Depends On
 
-Constitution principle IV: every claim carries its source and the date we read it. All sources below were supplied by the requester and read on 2026-08-12.
+Constitution principle IV: every claim carries its source and the date we read it. All sources below were supplied by the requester and read on 2026-08-12. These are the documents decision 7 makes authoritative.
 
 | # | Fact | Source | Verified |
 |---|------|--------|----------|
@@ -233,11 +244,12 @@ Constitution principle IV: every claim carries its source and the date we read i
 ## Out Of Scope
 
 - **Emitting warm transfer.** Its own feature, as specs/004 already decided. This feature's obligation is FR-006: the carrier leg must carry it for free when it lands.
+- **Telephony call-source variables on this route.** Caller number, called number, call identifier, direction, and their siblings stay refused here (FR-004), because the fill path they need is part of the carrier-websocket adapter this route does not emit. Granting them is a later feature whose first task is the fill path, not the grant.
 - **Telnyx, Plivo, or Exotel instruction content and forwarding actions.** The structure must be ready (story 4); the words and the one action per carrier come with their connections.
 - **Local `unmute dev --telephony` on this route.** The refusal specs/004 shipped stays, and its message must stay accurate once this route exists. A local flow mirroring the LiveKit zero-step direction is its own feature.
 - **Retiring the self-hosted carrier websocket routes.** Still a separate decision nobody has made.
 - **Regional websocket endpoints and websocket authentication.** Properties of the websocket routes this feature deliberately did not choose; they stay out with them.
-- **Automating carrier configuration.** The CLI never calls the carrier's API at compile or setup time; carrier steps are dictated, not performed. The helper's one forwarding action at call time is the recorded exception, and it acts only on a call the carrier just delivered to it.
+- **Automating carrier configuration.** The CLI never calls the carrier's API at compile or setup time; carrier steps are dictated, not performed. The one carrier request this feature makes is the generated agent moving a live call the carrier just handed it, at call time. That is call control, not provisioning, so it is inside the telephony boundary as written (the boundary forbids buying numbers and creating carrier applications or trunks) and needs no exception. Calling it one would invite a later reading that the boundary is negotiable.
 - **Choosing the outbound caller identity beyond the connection's from-number.** Same boundary as specs/004 drew.
 
 ## Dependencies
@@ -246,4 +258,4 @@ Constitution principle IV: every claim carries its source and the date we read i
 - A Twilio account with a voice-capable number, and whatever trunk pieces planning confirms the outbound leg needs.
 - Two reachable phone numbers for the caller and the transfer destination drills.
 - specs/004's shipped Daily route, whose agent, transfer machinery, and prerequisite reporting this feature extends rather than replaces.
-- specs/005's runbook contract, whose shape this feature mirrors on the second driver.
+- specs/005's runbook contract, whose shape this feature mirrors on the second driver. That runbook is shipped and live-proven on LiveKit: inbound, cold transfer, and warm transfer all work on real calls (requester confirmation, 2026-08-12).
