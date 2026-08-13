@@ -52,6 +52,55 @@ func TestPipecatManifestIsDeployable(t *testing.T) { // FR-012, FR-013, FR-027
 	}
 }
 
+// The image the platform actually starts. Pipecat Cloud begins a session by
+// POSTing /bot to the container, and it gates the deployment on readiness probes
+// it serves itself; both live in the platform's base image. An image built on a
+// plain Python base serves neither, so the deployment never reaches ready and
+// every start is refused with PCC-1001 — while the container's own log shows a
+// healthy boot and says nothing about why no call ever arrives. A real deploy
+// failed exactly that way on 2026-08-13.
+//
+// Verified by building the emitted image and running it that day: GET /readyz
+// answered 200, and POST /bot reached the emitted bot() with the platform's own
+// session arguments.
+func TestPipecatImageMeetsThePlatformContract(t *testing.T) {
+	docker := artifactFile(t, pipecatArtifact(t, nil), "Dockerfile")
+	// Instructions only. The comments in this file name the shapes being avoided,
+	// so a check against the whole text would match the warning against the
+	// mistake and never see the mistake itself.
+	var instructions []string
+	for _, line := range strings.Split(docker, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "#") {
+			instructions = append(instructions, line)
+		}
+	}
+	build := strings.Join(instructions, "\n")
+
+	if !strings.Contains(build, "FROM dailyco/pipecat-base:") {
+		t.Errorf("the image is not built on the platform's base image, so nothing in it answers /bot:\n%s", docker)
+	}
+	// The base image owns /app. Copying the build directory over it replaces the
+	// very server the platform calls.
+	if strings.Contains(build, "COPY . .") {
+		t.Error("the Dockerfile copies the build directory over the base image's own /app")
+	}
+	if !strings.Contains(build, "COPY bot.py ./") {
+		t.Error("the Dockerfile does not copy bot.py, which is the one file the base image looks for")
+	}
+	// A CMD replaces the base image's server with something the platform cannot
+	// call.
+	if strings.Contains(build, "CMD ") {
+		t.Errorf("the Dockerfile overrides the base image's own start command:\n%s", docker)
+	}
+	// Dependencies, not the project: installing this as a distribution would put
+	// one named after the project beside the real pipecat package it imports.
+	for _, forbidden := range []string{"install --system .", "pip install ."} {
+		if strings.Contains(build, forbidden) {
+			t.Errorf("the Dockerfile runs %q, installing the project instead of its dependencies", forbidden)
+		}
+	}
+}
+
 func TestPipecatReadmeDeploySection(t *testing.T) { // FR-003, FR-004, FR-014, FR-018
 	withRegion := artifactFile(t, pipecatArtifact(t, []string{"eu-west"}), "README.md")
 	for _, want := range []string{

@@ -1822,11 +1822,13 @@ func TestUS2_DailyCarrierPlanBelongsToTheHelperNotTheAgent(t *testing.T) {
 	if strings.Join(plan.Services, ",") != "application" {
 		t.Errorf("services = %v, want the helper alone: this route keeps no shared control record", plan.Services)
 	}
-	// The deployed agent exposes nothing. Its own manifest and its Dockerfile are
-	// the evidence: no server command, no exposed port.
+	// Nothing this project wrote serves anything on the agent side. The platform's
+	// base image answers the platform's own calls, which is why the Dockerfile
+	// starts no server of ours: a uvicorn line here would be the carrier-websocket
+	// route's shape on a route that has no carrier websocket.
 	docker := artifactFile(t, artifact, "Dockerfile")
 	if strings.Contains(docker, "uvicorn") {
-		t.Error("the deployed agent's Dockerfile runs a web server; on this route the agent serves nothing")
+		t.Error("the deployed agent's Dockerfile runs a web server of its own; on this route the platform's base image serves the platform")
 	}
 	// And none of the carrier-websocket route's environment or credentials.
 	report := artifactFile(t, artifact, "compile-report.json")

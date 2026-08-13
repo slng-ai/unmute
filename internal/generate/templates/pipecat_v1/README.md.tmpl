@@ -196,10 +196,12 @@ three. You run it, and here is why it has to exist.
 
 Daily creates a new room for each call, and each room has its own SIP address. So
 there is no single fixed address your carrier could be pointed at once and left
-alone. Something has to be there the moment a call arrives, make the room, start
-this agent on it, and keep the caller hearing something while the agent boots.
-That is the whole job. The helper does not answer the caller's questions, does not
-touch your carrier's configuration, and keeps nothing between calls.
+alone. Something has to be there the moment a call arrives, ask the platform to
+start this agent on a fresh room with a SIP address on it, and keep the caller
+hearing something while the agent boots. The agent hands the call over itself,
+once Daily says that address is live. That is the whole job. The helper does not
+make the room, does not answer the caller's questions, does not touch your
+carrier's configuration, and keeps nothing between calls.
 
 It has to be reachable whenever you want calls to land. Hosting it for real
 (a public address, TLS) is yours to arrange; the tunnel below is for testing.
@@ -415,9 +417,11 @@ cloudflared tunnel --url http://localhost:7860
 ```
 
 **{{if .SecretSet}}7{{else}}6{{end}}. Test an incoming call.** Ring your own number from a phone. Expected: you
-hear the hold line within a couple of seconds, then the agent speaks. The helper
-logs one `carrier call ... forwarded into the room` line, exactly one, however
-many times the room signals ready.
+hear the hold line within a couple of seconds, then the agent speaks. Two log
+lines, in two different places: the helper's terminal says
+`inbound call ... started session ...`, and the agent's log says
+`carrier call ... forwarded into the room` exactly once, however many times the
+room signals ready.
 {{end}}{{if .DailyCarrier.HasOutbound}}
 **{{if .DailyCarrier.HasInbound}}{{if .SecretSet}}8{{else}}7{{end}}{{else}}{{if .SecretSet}}6{{else}}5{{end}}{{end}}. Test an outgoing call.** See **Place an outbound call** below. Expected: the number you
 named rings, and the agent speaks when you answer.
@@ -460,7 +464,7 @@ What the caller hears, and what it means:
 | Carrier error tone, or a recorded announcement | The webhook URL is wrong, or the helper is not reachable from the internet. Check `/healthz` through the tunnel URL, not through localhost. |
 | A working agent answers, but not this one | The number is still on a SIP trunk, so the trunk took the call and this project never saw it. The helper's log is empty, which is the tell. See **One number serves one target at a time**. If two of your agents share a greeting and a voice, they are indistinguishable by ear, so read the log rather than listening. |
 | The caller hears the hold line and nothing more | The agent never joined, or the forward failed. The helper's log names which: an agent that would not start logs the platform's own error text, and a forward that failed logs `forwarding carrier call ... failed`. |
-| The caller hears the failure line straight away | The helper could not create the room or could not start the agent. Its log names the cause. Usually a missing platform secret or an agent that is not deployed. |
+| The caller hears the failure line straight away | The agent would not start, and the helper's log carries the platform's own words for why. `PCC-1001` means the deployment is not in a ready state, so check `agent status` before anything else. A missing platform secret and a name that was never deployed both land here too. |
 {{- if .DailyCarrier.HasOutbound}}
 | An outbound call never rings | The allow-list first (carrier action 4), then the termination address. Both fail the same way from the caller's side, and the bot's `dial-out stopped` log line carries the carrier's reason. |
 {{- end}}

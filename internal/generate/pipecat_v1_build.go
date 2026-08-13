@@ -368,8 +368,9 @@ func buildPipecatDailyCarrier(agent *ir.Agent, resolved ir.Target, env *envSet) 
 			carrier.HasOutbound = true
 		}
 	}
-	// The helper's own name, singular. DAILY_API_KEY is agent-side too (the
-	// transfer path already registers it), so it is not listed here.
+	// The helper's own name, singular. DAILY_API_KEY is not one of them: the room
+	// is the platform's to create, so the helper never calls Daily. It stays on
+	// the agent side, where a local `uv run bot.py` mints its own room with it.
 	//
 	// No outbound trigger token, because the helper has no endpoint that places a
 	// call: outbound is started against the platform with the same public key,
@@ -548,13 +549,11 @@ func setDailyParams(data *pipecatData) {
 		Class:  "DailyParams",
 		Import: "from pipecat.transports.daily.transport import DailyParams",
 	}
-	// Two reasons to need the transport class itself. A transfer primitive is a
-	// Daily transport method rather than a BaseTransport one, so the tool has to
-	// narrow before calling it. And an incoming carrier call joins a room the
-	// helper created, which the runner's own factory cannot know about, so the
-	// carrier form constructs the transport directly. Both classes come from the
-	// same module, so they ride one import.
-	if data.HasColdTransfer || data.DailyCarrier != nil {
+	// The transport class itself is needed for one reason: a transfer primitive is
+	// a Daily transport method rather than a BaseTransport one, so the tool has to
+	// narrow before calling it. Both classes come from the same module, so they
+	// ride one import.
+	if data.HasColdTransfer {
 		params.Transport = "DailyTransport"
 		params.Import = "from pipecat.transports.daily.transport import DailyParams, DailyTransport"
 	}

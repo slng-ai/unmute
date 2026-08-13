@@ -29,7 +29,7 @@ everything that belongs to the environment.
 
 | The compiler emits | You provide |
 |---|---|
-| The Python project and a `Dockerfile` (`python:3.12-slim` base) | A place to run containers (VM, Kubernetes, or similar) |
+| The Python project and a `Dockerfile` (`python:3.12-slim` base, or `dailyco/pipecat-base` where the target deploys to Pipecat Cloud) | A place to run containers (VM, Kubernetes, or similar) |
 | An `.env.example` naming every required variable | The secret values, from your secret store |
 | Local Compose files for development | Production networking, TLS, DNS, and ingress |
 | Deployment metadata and a compile report | Redis, scaling policy, and monitoring |

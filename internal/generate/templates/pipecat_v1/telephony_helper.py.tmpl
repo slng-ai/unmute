@@ -8,11 +8,11 @@ carrier could forward to.
 One inbound call, in order:
 
   1. the carrier posts to /call
-  2. this process creates a Daily room with the SIP interconnect enabled and
-     captures the room's SIP endpoint
-  3. it starts the deployed agent, handing it the room and that endpoint
-  4. it answers the carrier so the caller hears something while the agent boots
-  5. the agent forwards the live call to the room's SIP endpoint, exactly once
+  2. this process asks the platform to start the agent on a new room with the SIP
+     interconnect switched on
+  3. it answers the carrier so the caller hears something while the agent boots
+  4. the agent, once that room's SIP address is live, forwards the live call to
+     it, exactly once
 
 Secret values are read from the environment and never written here. Nothing is
 persisted: no state outlives a request.
@@ -28,7 +28,6 @@ import aiohttp
 from dotenv import load_dotenv
 from fastapi import FastAPI, {{if .DailyCarrier.HasInbound}}Form, {{end}}Request{{if .DailyCarrier.HasInbound}}, Response{{end}}
 from loguru import logger
-from pipecat.runner.daily import configure
 
 load_dotenv()
 
@@ -43,8 +42,9 @@ START_URL = f"https://api.pipecat.daily.co/v1/public/{AGENT_NAME}/start"
 PIPECAT_CLOUD_API_KEY_ENV = "PIPECAT_CLOUD_API_KEY"
 
 # Names only. A missing value fails at startup, by name, before the first call.
+# One name, because starting the agent is the only thing this process does: the
+# room is the platform's to create, so no Daily key is read here.
 REQUIRED_ENV = [
-    "DAILY_API_KEY",
     PIPECAT_CLOUD_API_KEY_ENV,
 ]
 
@@ -52,9 +52,6 @@ REQUIRED_ENV = [
 HOLD_AUDIO_URL_ENV = "UNMUTE_HOLD_AUDIO_URL"
 ROOM_GEO_ENV = "UNMUTE_DAILY_ROOM_GEO"
 
-# The room dies on its own if a call never lands, so an abandoned room is not a
-# room you have to clean up. Hours, as the Daily helper takes it.
-ROOM_EXPIRY_HOURS = 0.25
 # Dial-out is requested on the room only when this package can use it. Asking for
 # it otherwise would need a Daily domain permission this package does not need.
 ROOM_ENABLE_DIALOUT = {{if or .DailyCarrier.HasOutbound .HasColdTransfer}}True{{else}}False{{end}}
@@ -114,41 +111,57 @@ def _failure_answer() -> Response:
         ),
         media_type="application/xml",
     )
-{{end}}
 
-async def _create_room(request: Request, *, caller: str):
-    """Mint one room for one incoming call, with the SIP interconnect on.
 
-    The interconnect is requested here rather than through the platform's start
-    endpoint, because that endpoint's response carries no SIP endpoint and the SIP
-    endpoint is the whole point of this flow.
+def _room_properties(caller: str) -> dict:
+    """The room the platform should make for this call: one SIP leg in, no video.
+
+    `provider` is what makes this the carrier interconnect rather than a phone
+    number bought from Daily. The caller's number is only a display name.
     """
-    return await configure(
-        request.app.state.session,
-        room_exp_duration=ROOM_EXPIRY_HOURS,
-        sip_caller_phone=caller,
-        sip_provider="daily",
-        enable_dialout=ROOM_ENABLE_DIALOUT,
-        room_geo=os.getenv(ROOM_GEO_ENV) or None,
-    )
+    properties: dict = {
+        "start_video_off": True,
+        "sip": {
+            "display_name": caller,
+            "video": False,
+            "sip_mode": "dial-in",
+            "num_endpoints": 1,
+            "provider": "daily",
+        },
+    }
+    if ROOM_ENABLE_DIALOUT:
+        properties["enable_dialout"] = True
+    geo = os.getenv(ROOM_GEO_ENV)
+    if geo:
+        properties["geo"] = geo
+    return properties
 
 
-async def _start_agent(request: Request, body: dict) -> dict:
-    """Start the deployed agent on a room this process already created.
+async def _start_agent(request: Request, *, caller: str, call_sid: str) -> dict:
+    """Start the deployed agent on a new room with the SIP interconnect on.
 
-    createDailyRoom is false on purpose: the room exists, and letting the
-    platform mint a second one would start the agent somewhere the caller is not.
+    The room is the platform's to create, not this process's. The platform hands
+    the agent the room it made, and the agent hears from Daily when that room's
+    SIP address is live, which is the moment the call can be forwarded. A room
+    created here instead would be a room the platform never tells the agent
+    about, and the agent would sit in a different one from the caller.
     """
     session: aiohttp.ClientSession = request.app.state.session
     async with session.post(
         START_URL,
         headers={"Authorization": f"Bearer {os.environ[PIPECAT_CLOUD_API_KEY_ENV]}"},
-        json={"createDailyRoom": False, "body": body},
+        json={
+            "createDailyRoom": True,
+            "dailyRoomProperties": _room_properties(caller),
+            # Everything the agent needs to reach back to the carrier. The room is
+            # not in here: the platform passes that to the agent itself.
+            "body": {"direction": "inbound", "call_sid": call_sid},
+        },
     ) as response:
         if response.status >= 400:
             raise RuntimeError(f"agent start failed with {response.status}: {await response.text()}")
         return await response.json()
-{{if .DailyCarrier.HasInbound}}
+
 
 @app.post("/call")
 async def inbound_call(
@@ -161,19 +174,7 @@ async def inbound_call(
         logger.error("inbound webhook carried no call identifier field: CallSid")
         return _failure_answer()
     try:
-        room = await _create_room(request, caller=From or "caller")
-        if not room.sip_endpoint:
-            raise RuntimeError("the room was created without a SIP endpoint")
-        started = await _start_agent(
-            request,
-            {
-                "room_url": room.room_url,
-                "token": room.token,
-                "direction": "inbound",
-                "call_sid": CallSid,
-                "sip_uri": room.sip_endpoint,
-            },
-        )
+        started = await _start_agent(request, caller=From or "caller", call_sid=CallSid)
         logger.info("inbound call {} started session {}", CallSid, started.get("sessionId"))
     except Exception as exc:
         # Named cause in the log, spoken failure to the caller.

@@ -154,10 +154,10 @@ def _carrier_session(runner_args: RunnerArguments) -> dict | None:
         raise RuntimeError(f"Missing environment for a phone call: {', '.join(missing)}")
     direction = body["direction"]
     if direction == "inbound":
-        # room_url and token are required on an incoming call because the helper
-        # created that room, not the platform, so this is the only place the room
-        # to join is named.
-        required = ("room_url", "token", "call_sid", "sip_uri")
+        # The call id and nothing else. The room is the platform's, handed to this
+        # session the ordinary way, and the room's SIP address arrives from Daily
+        # when it goes live, so neither belongs in a body somebody else wrote.
+        required = ("call_sid",)
     elif direction == "outbound":
         required = ("dialout",)
     else:
@@ -735,7 +735,12 @@ def build_stt():
     if carrier_call and carrier_call["direction"] == "inbound":
 
         @transport.event_handler("on_dialin_ready")
-        async def on_dialin_ready(transport, cdata):
+        async def on_dialin_ready(transport, sip_endpoint):
+            # Daily says which address the room is reachable on and that it is
+            # live, both in this one event. Waiting for it is the point: the
+            # address exists from the moment the room does, but a call sent there
+            # before the leg is up is a call that goes nowhere.
+            #
             # The guard is claimed before the request goes out, not after: a
             # second ready signal arriving while the first forward is still in
             # flight must not forward the same call twice.
@@ -744,7 +749,7 @@ def build_stt():
                 return
             _CALL_FORWARDED = True
             try:
-                await _forward_carrier_call(carrier_call["call_sid"], carrier_call["sip_uri"])
+                await _forward_carrier_call(carrier_call["call_sid"], sip_endpoint)
             except Exception as exc:
                 # Named, not swallowed. The caller is still on the helper's hold
                 # audio, and this line is what says why they never got further.
@@ -850,26 +855,9 @@ def build_stt():
 async def bot(runner_args: RunnerArguments) -> None:
 {{if .Telephony}}    require_env()
     telephony.configure_pipecat_env()
-{{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}    # An incoming carrier call joins a room the helper created, so the platform was
-    # asked to start this agent *without* making one and has no room to hand over.
-    # The body is the only place that room is named, which is why the runner's own
-    # transport factory cannot be used for this one case. Every other session,
-    # outbound included, comes from the runner as usual.
-    _inbound = _carrier_session(runner_args)
-    if _inbound and _inbound["direction"] == "inbound":
-        transport = {{.DailyParams.Transport}}(
-            _inbound["room_url"],
-            _inbound["token"],
-            MAIN_NAME,
-            params=transport_params["daily"](),
-        )
-    else:
-        transport = await create_transport(runner_args, transport_params)
-{{else}}
+{{end}}
     transport = await create_transport(runner_args, transport_params)
-{{end}}{{else}}
-    transport = await create_transport(runner_args, transport_params)
-{{end}}    await run_bot(transport, runner_args)
+    await run_bot(transport, runner_args)
 
 
 async def console_main() -> None:

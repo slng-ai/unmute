@@ -562,10 +562,19 @@ The carrier form needs one moving part the other does not, because Daily's SIP
 addresses are per room and rooms are created per call: there is no static address a
 carrier can forward to. So the build emits `telephony_helper.py`. It is an
 **operator-run artifact**, not part of the deployment: you run it beside the build,
-your carrier's webhook reaches it, and it creates the room, starts the deployed
-agent on it with `createDailyRoom: false`, and answers the carrier with hold audio
-so the caller is not in silence while the agent boots. The agent then moves the
-live call into the room, exactly once, on the room's SIP-ready signal. **The
+your carrier's webhook reaches it, and it starts the deployed agent with
+`createDailyRoom: true` and the SIP interconnect asked for in
+`dailyRoomProperties`, then answers the carrier with hold audio so the caller is
+not in silence while the agent boots. The room is the platform's, handed to the
+agent the way every other Pipecat Cloud session gets one, and the agent moves the
+live call into it, exactly once, on the room's SIP-ready signal, using the address
+that signal carries.
+
+The helper deliberately does **not** create the room itself, and this was learned
+the hard way on 2026-08-13: a start request with `createDailyRoom: false` reaches
+the agent as `PipecatSessionArguments`, which carries no room, and pipecat's
+transport factory refuses it by name. A helper-made room is a room the platform
+never tells the agent about. It also means the helper reads no `DAILY_API_KEY`. **The
 deployed agent still exposes no public endpoint of its own**, which is the shape
 rule the Daily route has always had.
 

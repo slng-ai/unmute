@@ -342,7 +342,7 @@ does.
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | agent | The REST credentials for the one request that moves a live call into the room. |
 | `SIP_TRUNK_HOSTNAME` | agent and helper | The trunk's termination address. Every outbound leg, transfers included, is composed as `sip:<number>@<this>`. |
 | `SIP_FROM_NUMBER` | agent | The number on the trunk. |
-| `DAILY_API_KEY` | agent and helper | The Daily domain's API key: the helper mints the per-call room with it, the transfer primitive needs the domain. |
+| `DAILY_API_KEY` | agent | The Daily domain's API key. The helper does not read it: the room is the platform's to create. |
 | `OPENAI_API_KEY` / `SLNG_API_KEY` | agent | The package's model providers. |
 | `BILLING_PHONE_NUMBER` | agent | The transfer destination, read at call time. |
 | `PIPECAT_CLOUD_API_KEY` | helper | The public key the helper starts agent sessions with. |

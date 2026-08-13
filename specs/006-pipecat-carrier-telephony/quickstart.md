@@ -29,11 +29,24 @@ Two halves. The offline half needs no account of any kind and proves the compile
    ```
    Expected: pass (or clean skip where ruff is absent); the helper is inside the linted set.
 5. **Goldens were read.** Every golden diff in the change is enumerated in the PR text; `-update-pipecat` was run once, deliberately, and the no-carrier goldens did not move.
+6. **The image the platform starts.** Added 2026-08-13, because this is where the first live attempt actually failed and no test in the suite could have caught it from the text alone. Needs Docker, so it is not part of `go test ./...`:
+   ```bash
+   docker build --platform linux/arm64 -t unmute-pcc-check .
+   docker run --rm -p 18080:8080 --env-file .env unmute-pcc-check
+   curl -s -o /dev/null -w '%{http_code}\n' localhost:18080/readyz          # 200
+   curl -s -o /dev/null -w '%{http_code}\n' -XPOST localhost:18080/bot -d '{}' -H 'Content-Type: application/json'   # 200, and the log shows bot() ran
+   ```
+   Expected: both 200. A 404 on either means the image is not built on the platform's base image, and no call will ever reach the agent.
 
 ## Live half (recorded, dated)
 
 Prerequisites: a Pipecat Cloud account with the agent deployed and its secret set filled; a Daily domain with dial-out approved; a Twilio account with a voice-capable number; the runbook's carrier part completed; two reachable phones.
 
+0. **The number points at the helper, not at a trunk.** Amended 2026-08-13, after a first attempt failed here: a number still attached to a SIP trunk ignores its webhook silently.
+   ```bash
+   twilio api core incoming-phone-numbers list --properties phoneNumber,trunkSid,voiceUrl
+   ```
+   Expected before calling: an empty `trunkSid` and a `voiceUrl` ending in `/call`.
 1. **Helper up.**
    ```bash
    uv run telephony_helper.py

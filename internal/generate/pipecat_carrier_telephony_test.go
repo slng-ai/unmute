@@ -101,11 +101,17 @@ func TestCarrierHelperIsEmittedExactlyWhenACarrierIsDeclared(t *testing.T) {
 	// The startup check names every required value, so a missing one stops the
 	// process rather than failing on a live call.
 	for _, want := range []string{
-		"REQUIRED_ENV = [", `"DAILY_API_KEY"`, "PIPECAT_CLOUD_API_KEY_ENV", "raise SystemExit(1)",
+		"REQUIRED_ENV = [", "PIPECAT_CLOUD_API_KEY_ENV", "raise SystemExit(1)",
 	} {
 		if !strings.Contains(helper, want) {
 			t.Errorf("the helper's startup check is missing %q", want)
 		}
+	}
+	// And it names nothing else. The Daily key in particular: the room belongs to
+	// the platform, so a helper that read a Daily key would be a helper that could
+	// make a room nobody joins.
+	if strings.Contains(helper, "DAILY_API_KEY") {
+		t.Error("the helper reads DAILY_API_KEY, so it can create rooms the platform never tells the agent about")
 	}
 }
 
@@ -324,34 +330,65 @@ func TestCarrierOutboundIsStartedAgainstThePlatformNotTheHelper(t *testing.T) {
 	}
 }
 
-// The room an incoming carrier call joins was created by the helper, not by the
-// platform, so the platform has no room to hand the agent and the runner's own
-// transport factory cannot find one. The bot has to build the transport from the
-// body. Without this the first live inbound call joins nothing.
-func TestCarrierInboundJoinsTheRoomTheHelperMade(t *testing.T) {
-	bot := artifactFile(t, dailyCarrierArtifact(t, "twilio", true), "bot.py")
-	entry := bot[strings.Index(bot, "async def bot("):]
-	entry = entry[:strings.Index(entry, "async def console_main")]
+// The room an incoming carrier call joins is the platform's, asked for by the
+// helper and handed to the agent the ordinary way. Proven on 2026-08-13 against
+// the platform's own base image: a start with no room reaches the bot as
+// PipecatSessionArguments, which the runner's transport factory refuses by name,
+// so a helper-made room would have left every inbound call joining nothing.
+//
+// The consequence this test guards is that the room is named in exactly one
+// place — the platform's own hand-over — and the room's SIP address in exactly
+// one place: the event that says it is live.
+func TestCarrierInboundJoinsThePlatformsRoom(t *testing.T) {
+	carrier := dailyCarrierArtifact(t, "twilio", true)
+	helper := artifactFile(t, carrier, "telephony_helper.py")
 	for _, want := range []string{
-		`_inbound["direction"] == "inbound"`,
-		"DailyTransport(",
-		`_inbound["room_url"]`,
-		`_inbound["token"]`,
-		"create_transport(runner_args, transport_params)", // every other session
+		`"createDailyRoom": True`,
+		`"dailyRoomProperties": _room_properties(caller)`,
+		`"sip_mode": "dial-in"`,
+		`"provider": "daily"`, // the carrier interconnect, not a Daily-bought number
+		`"body": {"direction": "inbound", "call_sid": call_sid}`,
 	} {
-		if !strings.Contains(entry, want) {
-			t.Errorf("the entry point is missing %q:\n%s", want, entry)
+		if !strings.Contains(helper, want) {
+			t.Errorf("the helper's start request is missing %q", want)
 		}
 	}
-	// Both names are required on an inbound body, so a body without them fails by
-	// field name rather than joining an empty room.
-	if !strings.Contains(bot, `required = ("room_url", "token", "call_sid", "sip_uri")`) {
-		t.Error("an inbound call body does not require the room it must join")
+	// The helper asks for a room; it does not make one. Either of these names
+	// means it went back to minting rooms the platform knows nothing about.
+	for _, forbidden := range []string{"configure(", "sip_endpoint"} {
+		if strings.Contains(helper, forbidden) {
+			t.Errorf("the helper carries %q, so it is creating the room itself again", forbidden)
+		}
 	}
-	// The class has to be imported, which it is not by default without a transfer.
+
+	bot := artifactFile(t, carrier, "bot.py")
+	entry := bot[strings.Index(bot, "async def bot("):]
+	entry = entry[:strings.Index(entry, "async def console_main")]
+	if !strings.Contains(entry, "create_transport(runner_args, transport_params)") {
+		t.Errorf("the entry point does not take its transport from the runner:\n%s", entry)
+	}
+	if strings.Contains(entry, "DailyTransport(") {
+		t.Errorf("the entry point builds a transport by hand, so it is not in the room the platform made:\n%s", entry)
+	}
+	// One field on an inbound body: the call to reach back to. The room and its SIP
+	// address both arrive from elsewhere, so requiring them here would be
+	// requiring the helper to know things it is not told.
+	if !strings.Contains(bot, `required = ("call_sid",)`) {
+		t.Error("an inbound call body requires more than the call it has to reach back to")
+	}
+	// The forward uses the address the ready event carries, not one copied through
+	// the body: the address is only usable once that event says so.
+	if !strings.Contains(bot, "async def on_dialin_ready(transport, sip_endpoint)") {
+		t.Error("the dial-in-ready handler ignores the address the event gives it")
+	}
+	if !strings.Contains(bot, `_forward_carrier_call(carrier_call["call_sid"], sip_endpoint)`) {
+		t.Error("the forward does not use the address the ready event carried")
+	}
+	// Nothing here needs the transport class, so a carrier build without a transfer
+	// must not import it.
 	quiet := artifactFile(t, dailyCarrierArtifactWithoutTransfer(t), "bot.py")
-	if !strings.Contains(quiet, "import DailyParams, DailyTransport") {
-		t.Error("a carrier build with no transfer constructs DailyTransport without importing it")
+	if strings.Contains(quiet, "import DailyParams, DailyTransport") {
+		t.Error("a carrier build with no transfer imports DailyTransport without using it")
 	}
 }
 

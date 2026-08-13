@@ -191,7 +191,7 @@ Fill in as the live tasks complete. A capability row may not lose `provisional` 
 
 | Task | Flow | Date | Outcome | Notes |
 |---|---|---|---|---|
-| T032 | Inbound answered on a Twilio number | | **Not run.** Needs a Twilio account, a deployed agent, a Daily domain with dial-out granted, and a phone. | answer delay against SC-004; forward-once confirmed from logs |
+| T032 | Inbound answered on a Twilio number | 2026-08-13 | **Attempted, failed, two structural bugs found and fixed. Not yet re-run.** The call never reached the helper, and would not have reached the agent if it had. See **The first live attempt** below. | answer delay against SC-004; forward-once confirmed from logs |
 | T038 | Outbound rings through the carrier trunk | | **Not run.** Same accounts, plus a second phone. | what caller identity the recipient saw (research F2) |
 | T044 | Cold transfer completes, and the failure drill | | **Not run.** Needs T032's inbound path live first. | attempt counts against SC-005; second-request guard |
 | T045 | Failure mapping drill | | **Not run.** Needs T032. | which troubleshooting lines the drill corrected |
@@ -221,6 +221,26 @@ Asked while both a LiveKit and a Pipecat agent were deployed: which one answers,
 **And the two shipped examples were indistinguishable by ear.** `human-transfer` and `human-transfer-daily-twilio` had the same greeting line, the same voice, and the same model, so a live call could not tell an operator which target answered. The carrier example's greeting now names its line, with a comment saying why. The troubleshooting map gained a row for "a working agent answers, but not this one", whose tell is the empty helper log.
 
 One structural note: the carrier-specific console paths first went into the section after `### On this side`, and the seam test caught it — everything after that heading has to read correctly for any SIP-capable carrier (US4). Moving a number is carrier work, so the paths and the command now sit in the carrier half and the platform half keeps only the principle.
+
+### The first live attempt, 2026-08-13: three failures, one of them ours twice
+
+The number rang and nothing answered. No session appeared in the platform's logs. Three separate causes, found by reading the accounts rather than the code, and the last two were the compiler's.
+
+**1. The call never left the carrier.** The number was still attached to the Twilio SIP trunk, so Twilio routed it to the trunk's origination address, which pointed at a LiveKit project whose agent had just been deleted: `trunking-originating ... -> sip:...@....sip.livekit.cloud | no-answer`. The number's webhook was never consulted, and it pointed at a dead tunnel from the LiveKit dev flow anyway. This is exactly the silent failure the runbook had just been rewritten to warn about, seen from the inside. The runbook needed no further change; the number did.
+
+**2. The emitted image could not be started by the platform.** Pipecat Cloud begins a session by POSTing `/bot` to the container and gates the deployment on readiness probes it serves itself. Both live in `dailyco/pipecat-base`. The emitted Dockerfile was built on `python:3.12-slim` with `CMD ["python", "bot.py"]`, which starts pipecat's *dev* runner: a server on 7860, bound to localhost, serving none of the routes the platform calls. So the deployment never reached ready, and every start was refused with `PCC-1001: Attempt to start agent when deployment is not in ready state` — while the container's own log showed a clean boot and said nothing about why no call arrived. The operator's log excerpt was, in hindsight, the whole diagnosis: `Uvicorn running on http://localhost:7860`.
+
+This was never carrier-specific. **Every Pipecat Cloud deploy this compiler has ever emitted had it**, including the no-carrier Daily route, which is why the fix lands in the shared Dockerfile template rather than behind the carrier flag. The Pipecat Cloud shape is now built on the base image, installs dependencies rather than the project (a distribution named `pipecat` beside the real one is not a thing to ship), copies named files rather than `COPY . .` because `/app` is the base image's own directory, and declares no `CMD`. The self-hosted carrier-WebSocket shape keeps the plain Python base and its own server command, which is correct for it. Pinned by `TestPipecatImageMeetsThePlatformContract`, whose comment carries the failure and the verification.
+
+Verified by building the emitted image and running it: `GET /readyz` answers 200, `POST /bot` reaches the emitted `bot()`, and an unknown path still 404s.
+
+**3. And with that fixed, the room hand-over was still wrong.** The helper created the room itself and started the agent with `createDailyRoom: false`. Running the real image showed what that produces: a start with no room reaches the bot as `PipecatSessionArguments`, and pipecat's transport factory refuses it by name — `Unsupported runner arguments type`. The previous pass had already spotted half of this and worked around it by constructing `DailyTransport` from the body; that would have worked, but only by bypassing the runner, and it left the helper minting rooms with a Daily key it should not have needed.
+
+The helper now sends `createDailyRoom: true` with the SIP interconnect asked for in `dailyRoomProperties`, which is the shape Pipecat Cloud's own Twilio-SIP guide uses. The platform hands the room to the agent the ordinary way, `create_transport` builds the transport, and the agent learns the room's SIP address from the `on_dialin_ready` event, which is both the address and the signal that it is usable. Three things got smaller: the helper reads one required value instead of two and calls no Daily API, an inbound body carries `direction` and `call_sid` and nothing else, and `bot()` has no special case at all. `TestCarrierInboundJoinsTheRoomTheHelperMade` is replaced by `TestCarrierInboundJoinsThePlatformsRoom`, which guards the inverse.
+
+**Proven end to end without a phone.** With a real SIP-enabled Daily room created out of band, `POST /bot` at the running container with `{"direction": "inbound", "call_sid": ...}` and the platform's own room headers: the bot joined the room, `dial-in ready` fired carrying `sip:...sip-us.daily.co`, the forward went out to Twilio in the carrier's own words, and Twilio refused it with `20404` because the call id was synthetic. Every link in the inbound chain except the live carrier leg is now observed rather than reasoned about.
+
+**Still open for T032:** the number has to be taken off the trunk and pointed at the helper, and the agent has to be redeployed on the corrected image. `BILLING_PHONE_NUMBER` was also absent from the operator's `.env`, which the agent's startup check requires, so it has to be in the platform secret set before a transfer can work.
 
 ### One gap this feature opened, found and closed
 

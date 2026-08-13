@@ -46,7 +46,7 @@ pipeline and its tools are plain functions on the LLM context, so the generated
 |---|---|
 | `bot.py` | The whole agent: the pipeline, every agent worker, every task flow, tools, handoffs. |
 | `pyproject.toml` | Pinned dependencies. Only the services your spec uses are included. |
-| `Dockerfile` | A container image for deployment. |
+| `Dockerfile` | A container image for deployment. On a target that deploys to Pipecat Cloud it is built on `dailyco/pipecat-base`, because the platform starts a session by calling `/bot` on the container and that route is the base image's. A plain Python base serves nothing the platform calls, so the deployment never reaches ready. Telephony targets, which are self-hosted, keep the plain base and their own server command. |
 | `compose.dev.yaml` | The local dev stack `unmute dev` runs: one `application` service built from the `Dockerfile`, no coordination store. |
 | `pcc-deploy.toml` | The manifest `pipecat cloud deploy` reads, for non-telephony targets: the agent name, its region, and the secret set holding its environment. It deliberately names no image, so the platform builds the emitted `Dockerfile` in the cloud. |
 | `compose.telephony.yaml` | The generated application plus version-pinned Redis for telephony targets. |
@@ -183,9 +183,10 @@ uses the local VAD. Semantic endpointing is also advisory.
 
   This form emits one extra file, `telephony_helper.py`, and **you run it**. Daily
   makes one room per call and its SIP addresses are per room, so your carrier has
-  no static address to forward to. The helper answers your carrier, makes the room,
-  starts your deployed agent on it, and keeps the caller hearing something while
-  the agent boots; the agent then moves the live call into the room. The deployed
+  no static address to forward to. The helper answers your carrier, asks the
+  platform to start your agent on a fresh room with a SIP address on it, and keeps
+  the caller hearing something while the agent boots; the agent then moves the live
+  call into the room once Daily says the address is live. The deployed
   agent still exposes no endpoint of its own. The generated README's "Telephony
   setup" section is the whole runbook: four actions at your carrier, two commands
   here.

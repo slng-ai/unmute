@@ -546,8 +546,9 @@ people:
   that step and names the list's URL.
 - **The build emits `telephony_helper.py`, and you run it.** Daily makes one room
   per call, and its SIP addresses are per room, so your carrier has no static
-  address to forward to. The helper answers your carrier, makes the room, starts
-  your deployed agent on it, and keeps the caller hearing something meanwhile.
+  address to forward to. The helper answers your carrier, asks the platform to
+  start your agent on a fresh room with a SIP address, and keeps the caller
+  hearing something meanwhile. The agent hands the call over itself.
   Locally, run it and put a tunnel in front of it; the generated README's
   "Telephony setup" section is two copy-paste commands plus four actions in your
   carrier's console.

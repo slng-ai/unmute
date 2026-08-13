@@ -519,7 +519,10 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 		}
 		files = append(files, File{Path: o.path, Content: content})
 	}
-	files = append(files, File{Path: ".dockerignore", Content: []byte(".env\n")})
+	// Same set as the LiveKit driver's: secrets never reach the image, and a local
+	// `uv run` in this directory leaves a virtualenv behind that would otherwise
+	// be uploaded as build context on every deploy.
+	files = append(files, File{Path: ".dockerignore", Content: []byte(".env\n.env.*\n.venv/\n__pycache__/\n")})
 	// Local tool handlers are copied verbatim from the source package (SCHEMA
 	// §5: code targets host the handler; V13).
 	if len(data.LocalTools) > 0 {
