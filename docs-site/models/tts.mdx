@@ -1,0 +1,88 @@
+---
+title: "Text to speech"
+description: "Which text to speech vendors each target can construct, and the SLNG voice the scaffold binds."
+---
+
+The `speak` role turns the agent's words into audio. You bind it once in
+`agent.yaml`, and this role usually takes a voice as well as a model:
+
+```yaml agent.yaml
+models:
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+```
+
+A scaffolded package binds SLNG here by design, so one `SLNG_API_KEY` covers
+listening and speaking. See [what makes them fast](/models/optimization).
+
+<Info>
+  Model ids and voice ids are forwarded to the vendor exactly as you write them.
+  Unmute keeps no allowlist, so a typo surfaces as a provider error at run time. The
+  compile report says so on every binding: `(forwarded as-is, not validated)`.
+</Info>
+
+## The SLNG models this repository uses
+
+| Where | `model:` | `voice:` |
+|---|---|---|
+| every shipped example, and `unmute init` | `slng/deepgram/aura:2-en` | `aura-2-thalia-en` |
+
+Those are the only exact ids the docs name, because they are the ones the examples
+run. The full SLNG catalog is at
+[docs.slng.ai/models](https://docs.slng.ai/models); any id from there goes in
+`model:` as written, for example `slng/cartesia/sonic-3` with a voice id of its own.
+
+## Pipecat
+
+| Provider | Notes |
+|---|---|
+| `slng` | SLNG hosted text to speech. `SLNG_API_KEY`. |
+| `cartesia` | |
+| `deepgram` | |
+| `elevenlabs` | also accepted as `eleven_labs` |
+| `gradium` | |
+| `inworld` | |
+| `openai` | |
+| `rime` | |
+| `sarvam` | |
+| `soniox` | |
+
+An unlisted provider is legal on Pipecat on one condition: it has to be a
+genuinely OpenAI-compatible endpoint, named with `endpoint_env`.
+
+## LiveKit Agents
+
+| Provider | Notes |
+|---|---|
+| `slng` | SLNG hosted text to speech. `SLNG_API_KEY`. |
+| `cartesia` | |
+| `deepgram` | |
+| `elevenlabs` | also accepted as `eleven_labs` |
+| `gemini` | |
+| `gradium` | |
+| `inworld` | |
+| `rime` | |
+| `sarvam` | |
+| `soniox` | |
+
+This list is closed, and closed harder than Pipecat's: LiveKit's OpenAI plugin
+carries no language slot for speech, so there is no custom-endpoint fallback for
+this role at all.
+
+## The difference between the two
+
+Pipecat has `openai`, LiveKit has `gemini`. Everything else matches.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="The reasoning model" icon="brain" href="/models/llm">
+    The model that decides what to say.
+  </Card>
+  <Card title="What makes them fast" icon="zap" href="/models/optimization">
+    The SLNG Execution Layer behind these models.
+  </Card>
+</Columns>

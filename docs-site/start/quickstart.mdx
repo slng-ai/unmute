@@ -28,6 +28,10 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
     `targets.yaml` picks the runtime, `tools/end_call.yaml` gives it a way to
     hang up, and `.env.example` lists the keys to fill in.
 
+    The scaffold binds **SLNG speech models by design**, for listening and for
+    speaking, which is why one `SLNG_API_KEY` covers both. See
+    [Models](/models/optimization) for what runs behind them.
+
     <Tip>
       Run `unmute init` with no name in a terminal and you get an interactive
       console that asks for the name, the models, and the target instead.
@@ -131,7 +135,7 @@ The first run is slow because Docker builds the image. Later runs reuse it.
   <Card title="How Unmute works" icon="settings" href="/start/how-unmute-works">
     What the compiler did between your files and that container.
   </Card>
-  <Card title="Build the agent" icon="graduation-cap" href="/build/one-agent">
+  <Card title="Build the agent" icon="graduation-cap" href="/build/your-first-agent">
     Grow this into a real agent, one concept at a time.
   </Card>
 </Columns>

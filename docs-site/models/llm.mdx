@@ -1,0 +1,95 @@
+---
+title: "The reasoning model"
+description: "Which LLM vendors each target can construct, and what happens when yours is not listed."
+---
+
+The `think` role is the model that decides what to say and when to call a tool.
+
+```yaml agent.yaml
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+```
+
+SLNG does not serve this role. It provides speech to text and text to speech, so
+the reasoning model is yours to choose.
+
+<Info>
+  Model ids are forwarded to the vendor exactly as you write them. Unmute keeps no
+  allowlist, so a typo surfaces as a provider error at run time. The compile report
+  says so on every binding: `(forwarded as-is, not validated)`.
+</Info>
+
+## Pipecat
+
+| Provider | Notes |
+|---|---|
+| `anthropic` | |
+| `deepseek` | |
+| `google` | |
+| `groq` | |
+| `mistral` | |
+| `openai` | |
+| `openrouter` | |
+| `qwen` | |
+
+## LiveKit Agents
+
+| Provider | Notes |
+|---|---|
+| `anthropic` | |
+| `aws` | credentials come from the AWS SDK environment |
+| `azure` | |
+| `groq` | |
+| `mistralai` | also accepted as `mistral` |
+| `openai` | |
+| `openrouter` | |
+| `sarvam` | |
+
+## The differences that matter
+
+This is the role where the two lists diverge most. LiveKit adds `aws`, `azure`,
+and `sarvam`. Pipecat adds `deepseek`, `google`, and `qwen`. LiveKit spells the
+Mistral integration `mistralai`.
+
+## When your provider is not listed
+
+The two targets answer this differently, and the difference is worth knowing before
+you pick one.
+
+**On Pipecat**, an unlisted provider is legal for any role on one condition: a
+genuinely OpenAI-compatible endpoint, named with `endpoint_env`.
+
+```yaml
+models:
+  think:
+    house_model:
+      provider: my-gateway
+      model: my-model
+      endpoint_env: MY_GATEWAY_URL
+```
+
+Without `endpoint_env` it is refused, and the error lists what the role does take:
+
+```
+pipecat reason binding provider "my-gateway" has no slot; reason providers on pipecat: anthropic, deepseek, google, groq, mistral, openai, openrouter, qwen; an unlisted provider needs endpoint_env (an OpenAI-compatible endpoint)
+```
+
+**On LiveKit**, an unlisted reasoning provider routes through LiveKit Inference:
+managed models billed through LiveKit Cloud, with no provider key of their own.
+That path needs `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`, even in console mode.
+Writing `provider: livekit` passes your model string through verbatim.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Turn detection" icon="mic" href="/models/turn-detection">
+    Knowing when the caller has finished.
+  </Card>
+  <Card title="agent.yaml" icon="file-code" href="/reference/agent-yaml">
+    Every field a model entry takes.
+  </Card>
+</Columns>
