@@ -263,46 +263,60 @@ controls:
 - A package with a warm transfer must declare `channels.phone.outbound: true`
   (warm dials out, whatever the channel says).
 
-And the target side, one per driver:
+Destinations are declared once for the package, as environment variable names.
+Who the agent escalates to is the same desk whichever carrier reaches it:
+
+```yaml
+# agent.yaml
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
+  supervisor_line: SUPERVISOR_PHONE_NUMBER
+```
+
+And the route side, one per driver. The target names a connection; the
+connection declares the route:
 
 ```yaml
 # LiveKit: both shapes, on a SIP trunk.
+# connections/twilio_sip.yaml
+transport: sip
+carrier: twilio
+
+# targets.yaml
 targets:
   livekit:
     provider: livekit
     version: "1.6.4"
     sdk_language: python
-    transport: sip
-    carrier: twilio
     connection: twilio_sip
-    destinations:
-      billing_line: BILLING_PHONE_NUMBER
-      supervisor_line: SUPERVISOR_PHONE_NUMBER
 ```
 
 ```yaml
-# Pipecat: cold only, on Daily.
+# Pipecat: cold only, on a Daily-provisioned number.
+# connections/daily.yaml — one line, because this route has no carrier leg
+transport: daily-sip
+
+# targets.yaml
 targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: daily-sip
-    destinations:
-      billing_line: BILLING_PHONE_NUMBER
+    connection: daily
 ```
 
 ```yaml
-# The same, through your own carrier's number and trunk (SCHEMA N37). Three
-# existing fields, no new one. The transfer leg leaves through your trunk.
+# The same, through your own carrier's number and trunk (SCHEMA N37). The
+# transfer leg leaves through your trunk.
+# connections/twilio_sip_daily.yaml
+transport: daily-sip
+carrier: twilio
+
+# targets.yaml
 targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: daily-sip
-    carrier: twilio
     connection: twilio_sip_daily
-    destinations:
-      billing_line: BILLING_PHONE_NUMBER
 ```
 
 The complete packages live in

@@ -584,8 +584,7 @@ targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: cloud-websocket
-    carrier: twilio
+    connection: twilio_voice          # declares cloud-websocket + twilio
     deployment_region: eu-central     # the only place a region appears
 ```
 
@@ -749,7 +748,8 @@ keys for Twilio, Telnyx, and Plivo:
 
 ```yaml
 # connections/twilio_sip.yaml
-kind: telephony
+transport: sip
+carrier: twilio
 environment:
   sip_address: SIP_TRUNK_HOSTNAME
   sip_username: SIP_AUTH_USERNAME
@@ -757,7 +757,7 @@ environment:
   from_number: SIP_FROM_NUMBER
 ```
 
-Bind the Connection to one exact LiveKit route:
+The target names it:
 
 ```yaml
 # targets.yaml
@@ -766,14 +766,13 @@ targets:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
-    transport: sip
-    carrier: twilio
     connection: twilio_sip
 ```
 
-Change both `carrier` and the Connection for another carrier. Do not reuse a
-Pipecat API Connection: `account_sid`, `api_key`, and `auth_id` are not valid
-keys on a LiveKit SIP route.
+For another carrier, write another connection file with its own `carrier:` and
+point a target at that instead. Do not reuse a Pipecat API connection:
+`account_sid`, `api_key`, and `auth_id` are not valid keys on a LiveKit SIP
+route, and the transport line would be wrong too.
 
 #### Configure the LiveKit SIP deployment
 

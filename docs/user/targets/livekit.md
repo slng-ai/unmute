@@ -461,7 +461,8 @@ carriers; only their environment-variable names and values change.
 
 ```yaml
 # connections/primary_phone.yaml
-kind: telephony
+transport: sip
+carrier: twilio
 environment:
   sip_address: SIP_TRUNK_HOSTNAME
   sip_username: SIP_AUTH_USERNAME
@@ -491,7 +492,9 @@ Follow the
 [SIP trunking guide](../learn/07-phone-calls.md#configure-telephony-by-orchestrator)
 for the complete Twilio, Telnyx, and Plivo setup.
 
-Bind the Connection and symbolic destinations to the exact route.
+The target names that connection and nothing else about the route. Symbolic
+destinations live at the top level of `agent.yaml`, as environment variable
+names:
 
 ```yaml
 # targets.yaml
@@ -500,11 +503,11 @@ targets:
     provider: livekit
     version: "1.6.4"
     sdk_language: python
-    transport: sip
-    carrier: twilio
     connection: primary_phone
-    destinations:
-      support_line: "+14155550123"
+
+# agent.yaml
+destinations:
+  support_line: SUPPORT_PHONE_NUMBER
 ```
 
 Bind a target to the self-hosted `sip` route and one telephony Connection. The
@@ -627,7 +630,8 @@ SIP trunk and no Redis.
 
 ```yaml
 # connections/twilio_connector.yaml
-kind: telephony
+transport: connector
+carrier: twilio
 environment:
   account_sid: TWILIO_ACCOUNT_SID
   auth_token: TWILIO_AUTH_TOKEN
@@ -641,8 +645,6 @@ targets:
     provider: livekit
     version: "1.6.4"
     sdk_language: python
-    transport: connector
-    carrier: twilio
     connection: twilio_connector
 ```
 

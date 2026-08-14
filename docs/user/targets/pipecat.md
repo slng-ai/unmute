@@ -141,19 +141,23 @@ uses the local VAD. Semantic endpointing is also advisory.
 - **`transport: cloud-websocket`** is the one route where **you host nothing**.
   Pipecat Cloud terminates your carrier's media stream itself, on its own
   endpoint; a small piece of static markup in the carrier's console (a TwiML Bin)
-  names your agent, and the platform starts it. It requires `carrier: twilio`.
-  `connection:` is required only when the package **places or redirects** calls:
-  receiving one needs no carrier credentials, because the platform receives it
-  without them.
+  names your agent, and the platform starts it. Its connection declares
+  `carrier: twilio`. The connection's `environment:` block is required only when
+  the package **places or redirects** calls: receiving one needs no carrier
+  credentials, because the platform receives it without them.
 
   ```yaml
+  # connections/twilio_voice.yaml
+  transport: cloud-websocket
+  carrier: twilio
+  # environment: omitted on a receive-only package, which needs no credentials
+
+  # targets.yaml
   targets:
     pipecat:
       provider: pipecat
       version: "1.5.0"
-      transport: cloud-websocket
-      carrier: twilio
-      connection: twilio_voice     # omit on a receive-only package
+      connection: twilio_voice
   ```
 
   Three Connection keys: `account_sid`, `auth_token`, `from_number`. The first two
@@ -188,25 +192,27 @@ uses the local VAD. Semantic endpointing is also advisory.
   whose number it is (SCHEMA N37).
 
   **Daily's number (no `carrier`).** You buy the number from Daily and point it at
-  your deployed agent. It takes **no `carrier` and no `connection`**, and you
-  declare **no phone channel**: there is no carrier to configure, so the compiler
-  derives what the route needs from the transport. Nothing of yours is in the call
-  path: no server, no public port. This is the least infrastructure of any
-  telephony route in this project.
+  your deployed agent. Its connection is one line, `transport: daily-sip`, with
+  **no carrier and no environment**, and you declare **no phone channel**: this
+  form dials out and cannot receive, so there is nothing for a channel to serve.
+  Nothing of yours is in the call path: no server, no public port. This is the
+  least infrastructure of any telephony route in this project.
 
-  **Your own number (`carrier:` plus `connection:` plus `channels.phone`).** Your
-  carrier owns the number and forwards the call over SIP into the same Daily room.
-  All three fields are required together, and a partial declaration fails naming
-  the one you left out. Choose this form when you already hold a voice-capable
-  number, or when you cannot provision Daily numbers.
+  **Your own number (the connection adds `carrier:` and its credentials, plus
+  `channels.phone`).** Your carrier owns the number and forwards the call over
+  SIP into the same Daily room. Choose this form when you already hold a
+  voice-capable number, or when you cannot provision Daily numbers.
 
   ```yaml
+  # connections/twilio_sip_daily.yaml
+  transport: daily-sip
+  carrier: twilio
+
+  # targets.yaml
   targets:
     pipecat:
       provider: pipecat
       version: "1.5.0"
-      transport: daily-sip
-      carrier: twilio
       connection: twilio_sip_daily
   ```
 
