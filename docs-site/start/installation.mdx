@@ -1,0 +1,86 @@
+---
+title: "Installation"
+description: "Build the unmute binary and check the tools you need to run an agent locally."
+---
+
+Unmute is one Go binary. You build it from the repository.
+
+## What you need
+
+| Tool | Needed for | Check |
+|---|---|---|
+| Go 1.24 or newer | building the `unmute` binary | `go version` |
+| Docker with Compose | `unmute dev` in the browser | `docker compose version` |
+| `uv` | `unmute dev --console` in the terminal | `uv --version` |
+
+Docker and `uv` are only needed when you run an agent. You can write, validate,
+and compile a package with Go alone.
+
+## Build the binary
+
+<Steps>
+  <Step title="Clone the repository">
+    ```sh
+    git clone https://github.com/slng-ai/unmute_cli.git
+    cd unmute_cli
+    ```
+  </Step>
+  <Step title="Build">
+    ```sh
+    make build
+    ```
+
+    That writes `bin/unmute`. The direct equivalent is
+    `CGO_ENABLED=0 go build -o bin/unmute .`, and the version string is stamped
+    in at link time.
+  </Step>
+  <Step title="Check it">
+    ```sh
+    bin/unmute --version
+    ```
+
+    ```
+    unmute version ae9f8cc
+    ```
+
+    You will see your own build's version, not this one.
+  </Step>
+</Steps>
+
+## Put it on your PATH
+
+```sh
+make install
+```
+
+That runs `go install`, which puts `unmute` in your Go bin directory (usually
+`~/go/bin`). Add that directory to your PATH and you can run `unmute` from
+anywhere. The rest of these pages write `unmute`; if you skipped this step,
+read that as `bin/unmute` from the repository root.
+
+<Note>
+  There is no `go install github.com/...@latest` one liner yet. The Go module
+  path and the repository URL differ, so the remote install path does not
+  resolve. Build from a clone.
+</Note>
+
+## Shell completion
+
+The binary generates its own completion script:
+
+```sh
+unmute completion zsh
+```
+
+`bash`, `fish`, and `powershell` work the same way. Each subcommand's help
+explains where to put the output on your system:
+
+```sh
+unmute completion zsh --help
+```
+
+## Where to go next
+
+<Card title="Quickstart" icon="rocket" href="/start/quickstart">
+  Scaffold an agent and talk to it in your browser.
+</Card>

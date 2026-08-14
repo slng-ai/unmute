@@ -1,0 +1,109 @@
+---
+title: "Tasks"
+description: "Delegate a step to a focused prompt with its own tools, and get a typed result back."
+---
+
+A task is a step the agent hands off and gets back. The task has its own
+prompt, its own tools, and a declared result. When it finishes, control returns
+to the agent that called it.
+
+This page follows `examples/multi-task`: one agent, two tasks.
+
+## Declare the task
+
+```yaml agent.yaml
+tasks:
+  customer_record:
+    instructions: tasks/customer-record.md
+    tools:
+      - lookup_customer
+      - create_customer
+    result:
+      customer_id: string
+      customer_name: string
+      record_status:
+        enum:
+          - existing
+          - created
+          - failed
+      summary: string
+    context:
+      history: full
+```
+
+`result` is the contract. The task must come back with those fields, and
+`record_status` can only be one of three values. That is what makes a task
+different from a longer prompt: the outcome has a shape.
+
+`context: history: full` gives the task the conversation so far, which is
+usually what you want, because the caller has already said something the task
+needs.
+
+## Delegate to it
+
+```yaml agent.yaml
+controls:
+  check_customer:
+    kind: delegate
+    task: customer_record
+    when: Identify the caller before handling an appointment request.
+    assign:
+      customer_id: result.customer_id
+      customer_name: result.customer_name
+
+agents:
+  appointment_desk:
+    tools:
+      - check_customer
+      - manage_appointment
+```
+
+`assign` copies fields out of the result into package variables, so the rest of
+the call can use them without asking again:
+
+```yaml agent.yaml
+variables:
+  customer_id:
+    type: string
+  customer_name:
+    type: string
+```
+
+## What the agent can do shrinks
+
+Look at the agent's tool list. It holds two controls and none of the five
+domain tools. The agent cannot book anything itself; it can only delegate.
+Each task holds the tools its own step needs:
+
+| Task | Tools |
+|---|---|
+| `customer_record` | `lookup_customer`, `create_customer` |
+| `appointment_request` | `check_availability`, `book_appointment`, `cancel_appointment` |
+
+Booking before identification is not a rule in a prompt here. It is
+unavailable.
+
+## Task or second agent
+
+| | Task | Second agent |
+|---|---|---|
+| control returns | yes | no |
+| result | typed, declared in `result:` | none |
+| prompt | one focused step | a whole role |
+| use it when | a step has a definite answer | two jobs have different rules |
+
+## Try it
+
+```sh
+unmute validate examples/multi-task
+unmute dev examples/multi-task --target pipecat
+```
+
+Ask to book a haircut. The agent delegates to `customer_record` first, and only
+then to the appointment task.
+
+## Where to go next
+
+<Card title="Task groups" icon="list-ordered" href="/build/task-groups">
+  Run several tasks in a fixed order, sharing one context.
+</Card>

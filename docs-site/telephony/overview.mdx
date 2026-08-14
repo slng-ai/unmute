@@ -1,0 +1,145 @@
+---
+title: "Telephony overview"
+description: "How a phone call reaches your agent, which routes exist, and what unmute dev --telephony does for you."
+---
+
+A phone call reaches your agent over a route: a target, a transport, and a
+carrier. Unmute picks the route from what your target declares, generates the
+code for it, and can run the whole thing on your laptop.
+
+## Declare a phone channel
+
+```yaml agent.yaml
+channels:
+  web:
+    kind: realtime_audio
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: true
+```
+
+`inbound` and `outbound` say which directions this agent supports. They are
+separate, because most routes support them differently.
+
+## Declare the route
+
+The route lives on the target:
+
+```yaml targets.yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: cloud-websocket
+    carrier: twilio
+    connection: twilio_voice
+```
+
+And the carrier's account settings live in a connection file, as environment
+variable names, never values:
+
+```yaml connections/twilio_voice.yaml
+kind: telephony
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+One target selects exactly one route and one connection. To use two carriers,
+declare two targets. Each compiles to its own `build/<target>/` directory.
+
+## The routes
+
+| Target | Transport | Carrier | How the call arrives |
+|---|---|---|---|
+| Pipecat | `cloud-websocket` | Twilio | Pipecat Cloud terminates the carrier's media stream itself. Nothing of yours is hosted. |
+| Pipecat | `carrier-websocket` | Twilio, Telnyx, Plivo | a generated adapter of yours terminates the carrier's media stream |
+| Pipecat | `carrier-websocket` | Exotel | no adapter, so this route is refused at validation |
+| Pipecat | `daily-sip` | none | Daily provisions the number and delivers the call to your deployed agent |
+| Pipecat | `daily-sip` | Twilio | your carrier forwards into the same Daily room through a helper you run |
+| LiveKit Agents | `sip` | Twilio, Telnyx, Plivo | a SIP trunk carries the call into LiveKit SIP |
+| LiveKit Agents | `sip` | Exotel | no adapter, so this route is refused at validation |
+| LiveKit Agents | `connector` | Twilio | a generated bridge turns Twilio Media Streams into a LiveKit room |
+
+<Info>
+  Every route above that runs is marked `provisional` in the compile report.
+  That means the route is implemented and compiles, and that no credentialed
+  end to end test runs in CI for it yet. Several routes do have dated live call
+  evidence recorded in the repository. The compile report prints the vendor
+  document and the date it was last checked.
+</Info>
+
+## What the transport decides
+
+The transport is not a detail. It decides what the agent can do on a call.
+
+- **SIP** hands over a call leg with its own signalling, so the leg can be
+  moved. That is why cold transfer, warm transfer, and voicemail detection live
+  on the LiveKit `sip` route.
+- **A media stream over a websocket** hands over audio frames. Call control
+  happens over the carrier's REST API instead, so a transfer is either a
+  different mechanism or not possible at all.
+
+[Transfers](/transfers/overview) covers which route can reach a human, and how.
+
+## Running a route locally
+
+```sh
+unmute dev examples/twilio-telephony-hello --telephony --target pipecat
+```
+
+With `--telephony`, `unmute dev` runs the resolved route instead of the browser
+UI. In order, it:
+
+<Steps>
+  <Step title="Compiles and prints the plan">
+    The route, the endpoints, and any manual carrier steps the adapter cannot do
+    for you.
+  </Step>
+  <Step title="Checks credentials">
+    Only the ones you must supply. Values the command generates itself, such as
+    the outbound token and the public URL under a managed tunnel, are not asked
+    of you.
+  </Step>
+  <Step title="Opens a public tunnel">
+    For routes with carrier callbacks, it starts a `cloudflared` quick tunnel
+    and uses its origin. `--public-url` skips this. See
+    [webhooks and tunnels](/telephony/webhooks-and-tunnels).
+  </Step>
+  <Step title="Starts the stack">
+    Docker Compose brings up the generated services. On LiveKit SIP that is the
+    agent, Redis, LiveKit Server, and LiveKit SIP, and the command creates the
+    local trunk and dispatch records itself.
+  </Step>
+  <Step title="Points your number at this run">
+    Where the carrier supports it, today Twilio, the voice webhook is set for
+    you and the previous value is printed.
+  </Step>
+  <Step title="Prints the call line">
+    `call +1XXXXXXXXXX  ·  ctrl-c to stop`.
+  </Step>
+</Steps>
+
+Ctrl-c undoes the outward changes: the carrier webhook goes back to what it
+was, the tunnel dies, and the Compose stack is stopped. Named data volumes are
+kept.
+
+<Warning>
+  A healthy local stack proves wiring, not reachability. A real call also needs
+  carrier credentials, a voice capable number, and the route's public ingress.
+  For SIP, network address translation on a laptop can block the call even when
+  every health check passes.
+</Warning>
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Your first phone call" icon="phone-incoming" href="/telephony/first-phone-call">
+    A real inbound call, on the route that works from a laptop.
+  </Card>
+  <Card title="Outbound calls" icon="phone-outgoing" href="/telephony/outbound-calls">
+    Make the agent dial out with `--to`.
+  </Card>
+</Columns>

@@ -1,0 +1,125 @@
+---
+title: "targets.yaml"
+description: "Every field of a target, plus the connection files it points at."
+---
+
+`targets.yaml` says where the agent runs. Nothing about the agent's behavior
+belongs here.
+
+```yaml targets.yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
+The map key is the **target instance name**. It is what `--target` takes and
+what names the output directory, `build/<name>/`. Two targets may use the same
+provider with different settings, for example `pipecat_twilio` and
+`pipecat_telnyx`.
+
+## Fields
+
+| Field | What it is |
+|---|---|
+| `provider` | `pipecat` or `livekit` |
+| `version` | the framework version pinned in the generated project |
+| `sdk_language` | `python` |
+| `pins` | extra package pins, name to version constraint |
+| `models` | per target overrides of named `models` entries |
+| `transport` | the phone transport, see below |
+| `carrier` | the phone carrier |
+| `connection` | the connection file this target uses |
+| `deployment_region` | one region as a string, or several as a list |
+| `destinations` | symbolic transfer destinations |
+
+## models overrides
+
+```yaml
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
+Keyed by the entry name from `agent.yaml`, and taking the same fields as an
+entry there. Use it when a target cannot run an entry as defined, or runs its
+own better.
+
+## Telephony fields
+
+| Provider | `transport` values |
+|---|---|
+| `pipecat` | `cloud-websocket`, `carrier-websocket`, `daily-sip` |
+| `livekit` | `sip`, `connector` |
+
+`carrier` is the carrier account behind the route, for example `twilio`,
+`telnyx`, `plivo`. Some routes need no carrier at all: on Pipecat `daily-sip`
+without a carrier, Daily provisions the number.
+
+`connection` names a file in `connections/`. See
+[Telephony](/telephony/overview) for what each route means.
+
+## destinations
+
+```yaml
+    destinations:
+      billing_line: BILLING_PHONE_NUMBER
+      supervisor_line: SUPERVISOR_PHONE_NUMBER
+```
+
+Symbols a `human_transfer` control can name. A value is either a literal, an
+E.164 number or a `sip:` URI, or the UPPER_SNAKE name of an environment
+variable holding one, read at call time.
+
+The model never sees a number, and cannot dial one that is not listed here.
+
+## Connection files
+
+```yaml connections/twilio_voice.yaml
+kind: telephony
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+| Field | What it is |
+|---|---|
+| `kind` | `telephony` |
+| `environment` | a map of the route's setting names to your environment variable names |
+
+Values are environment variable names, never secrets, so a package with
+connections still compiles with no credentials present. The setting names on
+the left are fixed by the route; the names on the right are yours.
+
+A SIP route uses standard SIP names rather than one vendor's:
+
+```yaml connections/twilio_sip.yaml
+kind: telephony
+environment:
+  sip_address: SIP_TRUNK_HOSTNAME
+  sip_username: SIP_AUTH_USERNAME
+  sip_password: SIP_AUTH_PASSWORD
+  from_number: SIP_FROM_NUMBER
+```
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Targets" icon="boxes" href="/targets/overview">
+    What each generated project looks like.
+  </Card>
+  <Card title="Providers" icon="list" href="/reference/providers">
+    Which vendors each target supports, per role.
+  </Card>
+</Columns>

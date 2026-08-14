@@ -1,0 +1,105 @@
+---
+title: "Targets"
+description: "What a target is, what targets.yaml holds, and how one package compiles to two runtimes."
+---
+
+A target is one place your agent can run. Unmute ships two: **Pipecat** and
+**LiveKit Agents**. Both are code targets, which means `unmute compile` writes a
+Python project you own.
+
+## targets.yaml
+
+```yaml targets.yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
+The key (`pipecat`, `livekit`) is the **target instance name**. It is what you
+pass to `--target`, and it becomes the directory name under `build/`. The name
+is yours: a package with two Twilio setups might call them `pipecat_twilio` and
+`pipecat_telnyx`.
+
+| Field | What it does |
+|---|---|
+| `provider` | which runtime: `pipecat` or `livekit` |
+| `version` | the framework version to pin in the generated project |
+| `sdk_language` | the SDK language, `python` |
+| `pins` | extra package pins for the generated project |
+| `models` | per target overrides of named model entries |
+| `transport`, `carrier`, `connection` | the phone route, see [Telephony](/telephony/overview) |
+| `destinations` | symbolic transfer destinations, see [Transfers](/transfers/overview) |
+| `deployment_region` | where the platform deploys the agent, forwarded as written |
+
+## Overrides, not forks
+
+A target that cannot run a model as defined overrides that entry by name:
+
+```yaml
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
+The agent does not change. One entry does. This is the shape of every per
+target difference, and it is why a package can serve both runtimes without a
+second copy of anything.
+
+## One package, two projects
+
+```sh
+unmute compile examples/simple-prompt
+```
+
+```
+generated examples/simple-prompt/build/livekit/agent.py
+generated examples/simple-prompt/build/pipecat/bot.py
+```
+
+Each directory is a complete project: source, pinned dependencies, Dockerfile,
+`.env.example`, and a runbook README written for that platform.
+
+`--target` limits the work:
+
+```sh
+unmute compile examples/simple-prompt --target pipecat
+```
+
+## Choosing between them
+
+Both run the same agent. The differences that usually decide it:
+
+| | Pipecat | LiveKit Agents |
+|---|---|---|
+| generated entry point | `bot.py` | `agent.py` |
+| local run | `uv run bot.py`, or `unmute dev` in Docker | `uv run agent.py dev`, or `unmute dev` in Docker with a local LiveKit server |
+| phone routes | Daily provisioned numbers, your carrier over websockets, Pipecat Cloud carrier streams | SIP trunks, or a generated Twilio bridge |
+| transfers | cold, on two of its routes | cold and warm, on the SIP route |
+| turn detection in the examples | local Silero | LiveKit's own turn model |
+| provider lists | see [providers](/reference/providers) | see [providers](/reference/providers) |
+
+If you need warm transfer today, that is the LiveKit SIP route. If you want a
+phone number with nothing hosted, that is one of the Pipecat routes. For a
+browser agent, either.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="The Pipecat project" icon="boxes" href="/targets/pipecat">
+    What `build/pipecat/` contains.
+  </Card>
+  <Card title="The LiveKit project" icon="boxes" href="/targets/livekit">
+    What `build/livekit/` contains.
+  </Card>
+</Columns>

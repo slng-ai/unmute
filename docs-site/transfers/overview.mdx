@@ -1,0 +1,107 @@
+---
+title: "Transfers overview"
+description: "Handing the caller to a person: cold, warm, and why the route decides which you get."
+---
+
+Sooner or later a caller needs a person. Unmute has one authoring shape for
+that, `kind: human_transfer`, and two forms.
+
+| Form | What the caller experiences |
+|---|---|
+| **cold** | the agent says it is putting them through, the call moves to the person, and the agent drops out |
+| **warm** | the caller waits while the agent rings the person, tells them what the call is about, and only then connects the two |
+
+## How you write it
+
+The shape you write is the shape you get. There is no `mode:` field, so a warm
+only setting cannot be written on a cold transfer:
+
+```yaml agent.yaml
+controls:
+  send_to_billing:
+    kind: human_transfer
+    when: The caller asks about an invoice, a refund, or a charge they do not recognise.
+    cold:
+      destination: billing_line
+
+  escalate_to_supervisor:
+    kind: human_transfer
+    when: The caller is unhappy with how something was handled and asks for a manager.
+    warm:
+      destination: supervisor_line
+      briefing: |
+        Lead with the caller's name and which stylist they saw.
+        Say what they are unhappy about and what you already offered them.
+        Ask whether they can take the call now.
+      ring_timeout: 25s
+      on_unavailable: return_to_caller
+```
+
+The control's name goes in the agent's tool list, like any other control.
+
+## Destinations are symbolic
+
+The model never sees a phone number. `destination` names a symbol, and the
+symbol is resolved on the target:
+
+```yaml targets.yaml
+    destinations:
+      billing_line: BILLING_PHONE_NUMBER
+      supervisor_line: SUPERVISOR_PHONE_NUMBER
+```
+
+A destination is either a literal, an E.164 number or a `sip:` URI, or the
+UPPER_SNAKE name of an environment variable holding one, read at call time. The
+shipped examples all use the environment form, because any number a repository
+could ship is a number nobody answers.
+
+## The route decides what is possible
+
+Transfers ride the platform's own primitive. There are three different
+mechanisms, which is why the answer differs per route:
+
+| Route | Cold | Warm | Mechanism |
+|---|---|---|---|
+| LiveKit `sip` | yes | **yes, the only one** | SIP REFER on the caller's existing leg, and LiveKit's `WarmTransferTask` for the held and briefed shape |
+| Pipecat `daily-sip` | yes | not built yet | Daily moves the caller's leg out of the room and the bot drops off |
+| Pipecat `cloud-websocket` | yes, differently | no, by trade | one request replaces the live call's markup at the carrier |
+| Pipecat `carrier-websocket` | no | no | the transport carries media only, with no transfer control |
+| LiveKit `connector` | no | no | same |
+
+Two of those cells mean different things, and the difference matters:
+
+- **no** means the platform does not ship the primitive.
+- **not built yet** means the platform does ship it and Unmute has not emitted
+  it.
+
+A transfer that a route cannot do is refused at validation, with the target
+named. It never compiles into something that quietly does nothing.
+
+## When the person does not pick up
+
+```yaml
+      ring_timeout: 25s
+      on_unavailable: return_to_caller
+```
+
+On the LiveKit `sip` route, no answer, a decline, voicemail, and a failed dial
+all come back as one failure, and `on_unavailable` decides what happens next.
+
+On the Pipecat `cloud-websocket` route there is one honest limit: when the dial
+ends, however it ends, the caller hears a handback line and returns to a
+**fresh** agent that does not remember the call. Knowing more would need a
+callback endpoint you host, and that route exists to host nothing.
+
+## Where to go next
+
+<Columns cols={3}>
+  <Card title="LiveKit route" icon="phone-forwarded" href="/transfers/livekit">
+    Cold and warm over a SIP trunk.
+  </Card>
+  <Card title="Pipecat on Daily" icon="phone" href="/transfers/pipecat-daily">
+    Cold, with no carrier account at all.
+  </Card>
+  <Card title="Pipecat on Twilio" icon="phone" href="/transfers/pipecat-twilio">
+    Cold, with nothing hosted by you.
+  </Card>
+</Columns>

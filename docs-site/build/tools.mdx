@@ -1,0 +1,170 @@
+---
+title: "Tools"
+description: "Give the agent something to do: a contract the model sees and code that runs."
+---
+
+A tool is two things: a contract the model sees, and something that runs when
+the model calls it. Both live in your package, in `tools/<name>.yaml`.
+
+This page still follows `examples/simple-prompt`, which declares five tools.
+
+## Declare a tool
+
+```yaml tools/check_availability.yaml
+description: >-
+  List Sage and Stone slots for one service and date only after customer
+  identification returned a real, nonempty customer_id.
+
+input:
+  type: object
+  properties:
+    service:
+      type: string
+      enum:
+        - haircut
+        - hair-color
+        - blowout
+    date:
+      type: string
+      description: Preferred date in YYYY-MM-DD form
+  required:
+    - service
+    - date
+
+output:
+  type: object
+  properties:
+    slots:
+      type: array
+      items:
+        type: object
+        properties:
+          slot_id:
+            type: string
+          start_time:
+            type: string
+        required:
+          - slot_id
+          - start_time
+  required:
+    - slots
+
+local:
+  handler: tools/check_availability.py
+
+interruption: provider_default
+effect: returns_data
+```
+
+`description` and `input` are what the model is given. Everything the model
+knows about this tool is those two fields, so write the description as an
+instruction, not as a label. The `enum` here is doing real work: the model
+cannot ask for a service the salon does not offer.
+
+## Write the handler
+
+```python tools/check_availability.py
+_TIMES = ("09:00", "11:30", "15:00")
+
+
+def check_availability(service, date):
+    return {
+        "slots": [
+            {
+                "slot_id": f"{date}_{service}_{time.replace(':', '')}",
+                "start_time": f"{date}T{time}:00-05:00",
+            }
+            for time in _TIMES
+        ]
+    }
+```
+
+An ordinary Python function whose name matches the tool and whose arguments
+match the `input` properties. Unmute copies this file into the generated
+project and wires the call. It imports nothing from Unmute.
+
+## Turn it on
+
+Two lists. The package level list says which tool files to load. The agent
+level list says which of those this agent may call.
+
+```yaml agent.yaml
+agents:
+  appointment_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - check_availability
+      - end_call
+
+tools:
+  - check_availability
+  - end_call
+```
+
+<Tip>
+  The agent list is the useful one. Later, when the package has more than one
+  agent, giving each a different list is how you stop the wrong agent doing the
+  wrong thing.
+</Tip>
+
+## Tools that need no code
+
+Some tools are provided for you. `end_call` is the one the scaffold ships:
+
+```yaml tools/end_call.yaml
+description: "End the call when the caller is finished or says goodbye."
+builtin:
+  id: end_call
+```
+
+No handler, no input schema. The built in registry is closed and small; today
+it holds `end_call`, whose effect is fixed to `ends_conversation`.
+
+## The two behavior fields
+
+```yaml
+interruption: provider_default
+effect: returns_data
+```
+
+| Field | Values | Default | Meaning |
+|---|---|---|---|
+| `interruption` | `provider_default`, `continue`, `cancel` | `provider_default` | what happens to the call if the caller speaks while the tool runs |
+| `effect` | `returns_data`, `ends_conversation` | `returns_data` | whether the conversation continues after the tool |
+
+Both are optional. Leave them out and you get the defaults.
+
+## Where the code can live
+
+`local:` is one of several execution kinds. Exactly one block per tool file,
+and the block you write decides which other fields are legal:
+
+| Block | The tool is |
+|---|---|
+| `local:` | a Python function in your package |
+| `webhook:` | an HTTP call to a URL named by an environment variable |
+| `mcp:` | an MCP server named by an environment variable |
+| `builtin:` | a tool the runtime provides, selected by id |
+
+The full field list for each is in [agent YAML](/reference/agent-yaml).
+Webhook tools are also where secrets enter: the URL and the token are
+environment variable names, never values. See [secrets](/reference/secrets).
+
+## Try it
+
+```sh
+unmute validate examples/simple-prompt
+unmute dev examples/simple-prompt --target pipecat
+```
+
+Ask for a haircut next Tuesday. The model calls `check_availability` and reads
+the returned times back to you.
+
+## Where to go next
+
+<Card title="Variables" icon="braces" href="/build/variables">
+  Personalize the call, and pass values into a tool without showing them to the
+  model.
+</Card>

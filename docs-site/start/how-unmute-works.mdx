@@ -1,0 +1,123 @@
+---
+title: "How Unmute works"
+description: "The four stages between your package and the Python project you deploy."
+---
+
+Unmute is a compiler. It reads your package, resolves it against one target,
+and writes a project. Nothing of Unmute is left in the project it writes.
+
+## The four stages
+
+<Steps>
+  <Step title="Load">
+    Unmute reads `agent.yaml`, `targets.yaml`, your tool files, your
+    connections, your prompts, and your local Python handlers. YAML decoding is
+    strict: an unknown field is an error, not a shrug. Errors carry the file and
+    the line.
+  </Step>
+  <Step title="Build">
+    Names get resolved into one internal description of the agent. Model names
+    point at model definitions, controls point at tasks or agents, per target
+    overrides get applied, and a telephony route is picked from what the target
+    declares. This description knows nothing about Pipecat or LiveKit.
+  </Step>
+  <Step title="Validate">
+    The description is checked against the capability table of each target you
+    selected. Something a target cannot do is an error before anything is
+    written. Something it does differently, while keeping your contract, is a
+    warning.
+  </Step>
+  <Step title="Generate">
+    One driver turns the description into files for one target. `validate` and
+    `compile` run the same first three stages, so a package that validates
+    cannot surprise you at compile time.
+  </Step>
+</Steps>
+
+## What you get
+
+`unmute compile <package>` writes one directory per target under `build/`:
+
+<CodeGroup>
+```text Pipecat
+build/pipecat/
+├── bot.py              # the agent
+├── tools/              # your local handlers, copied
+├── pyproject.toml      # pinned dependencies
+├── Dockerfile
+├── compose.dev.yaml
+├── pcc-deploy.toml
+├── .env.example        # exactly the variables this agent needs
+├── README.md           # the runbook for this build
+└── compile-report.json
+```
+
+```text LiveKit Agents
+build/livekit/
+├── agent.py            # the agent
+├── tools/              # your local handlers, copied
+├── pyproject.toml      # pinned dependencies
+├── Dockerfile
+├── compose.dev.yaml
+├── .env.example        # exactly the variables this agent needs
+├── README.md           # the runbook for this build
+└── compile-report.json
+```
+</CodeGroup>
+
+That project is a normal Python project. You can read it, run it, and deploy
+it. It does not import Unmute.
+
+<Warning>
+  Treat `build/` as output. Edit the package and compile again. Anything you
+  change inside `build/` is overwritten on the next compile.
+</Warning>
+
+## The compile report
+
+`unmute compile` prints what it decided. Three kinds of line matter.
+
+**Model bindings.** Unmute passes your model and voice strings through to the
+provider without checking them:
+
+```
+pipecat: binding listen provider=slng model=slng/deepgram/nova:3-en (forwarded as-is, not validated)
+```
+
+**Sizing.** Unmute turns your `capacity:` block into worker and quota numbers.
+They carry `[unbenchmarked]` and the date of the assumption they came from, so
+you know they are a starting point:
+
+```
+pipecat: sizing workers=20 [unbenchmarked] (2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio)
+```
+
+**Telephony evidence.** Phone routes say how well they are proven, with the
+vendor document and the date it was checked:
+
+```
+pipecat: telephony evidence inbound=provisional docs=https://docs.pipecat.ai/pipecat-cloud/guides/telephony/twilio-websocket verified=2026-08-13 smoke=false
+```
+
+`provisional` means the route is implemented and compiles, and that no
+credentialed end to end test is recorded for it.
+
+## Warnings never fail quietly
+
+Warnings go to standard error and the command still exits 0. Errors exit 1.
+A warning is a real difference worth reading, for example:
+
+```
+warning: livekit: LiveKit turn placement is a preference
+```
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Build the agent" icon="graduation-cap" href="/build/one-agent">
+    Start the guided path with the smallest real agent.
+  </Card>
+  <Card title="Targets" icon="boxes" href="/targets/overview">
+    What a target is, and what each generated project looks like.
+  </Card>
+</Columns>

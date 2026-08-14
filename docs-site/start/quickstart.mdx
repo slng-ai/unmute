@@ -1,0 +1,137 @@
+---
+title: "Quickstart"
+description: "Scaffold an agent, add two keys, and talk to it in your browser."
+---
+
+This page takes you from nothing to an agent you can talk to. It uses only
+`unmute init` and `unmute dev`.
+
+You need the `unmute` binary ([installation](/start/installation)), Docker
+running, and two API keys: one for the model that thinks (`OPENAI_API_KEY`) and
+one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
+
+<Steps>
+  <Step title="Scaffold a package">
+    ```sh
+    unmute init my-agent
+    ```
+
+    ```
+    created my-agent/agent.yaml
+    created my-agent/.env.example
+    created my-agent/instructions.md
+    created my-agent/targets.yaml
+    created my-agent/tools/end_call.yaml
+    ```
+
+    Five files. `agent.yaml` is the agent, `instructions.md` is its prompt,
+    `targets.yaml` picks the runtime, `tools/end_call.yaml` gives it a way to
+    hang up, and `.env.example` lists the keys to fill in.
+
+    <Tip>
+      Run `unmute init` with no name in a terminal and you get an interactive
+      console that asks for the name, the models, and the target instead.
+    </Tip>
+  </Step>
+
+  <Step title="Add your keys">
+    ```sh
+    cp my-agent/.env.example my-agent/.env
+    ```
+
+    Open `my-agent/.env` and fill in `OPENAI_API_KEY` and `SLNG_API_KEY`. The
+    third line, `DAILY_API_KEY`, is only needed if you later run this agent on
+    a phone number; leave it empty for now.
+
+    `unmute dev` reads `.env` from the directory you run it in, then from the
+    package directory, so a package can override a shared key.
+  </Step>
+
+  <Step title="Check the package">
+    ```sh
+    unmute validate my-agent
+    ```
+
+    ```
+    ✓ pipecat (pipecat)
+    ```
+
+    One line per target, and exit code 0. If a field is wrong, this is where you
+    find out, with the file and the line.
+  </Step>
+
+  <Step title="Talk to it">
+    ```sh
+    unmute dev my-agent
+    ```
+
+    ```
+    compiled my-agent/build/pipecat
+    building and starting the container...
+
+      ▸ http://localhost:8765/?agent=pipecat
+        ctrl-c to stop  ·  logs: my-agent/build/pipecat/dev.log
+    ```
+
+    `unmute dev` compiles the package, builds the container the deploy would
+    use, starts it, and serves a small web page against it. Your browser opens
+    at that URL. Allow the microphone, press the button, and say hello. The
+    agent speaks first, because `agent.yaml` says so:
+
+    ```yaml
+    conversation:
+      greeting:
+        speaks_first: agent
+        text: "Hi, thanks for calling. How can I help you today?"
+    ```
+
+    Press ctrl-c when you are done. The container is stopped and removed for
+    you.
+  </Step>
+</Steps>
+
+## What just happened
+
+- `unmute init` wrote a package bound to SLNG speech models and an OpenAI
+  reasoning model.
+- `unmute dev` compiled that package into `my-agent/build/pipecat/`, a normal
+  Python project with a Dockerfile.
+- The container it ran is the same image a deployment would run. Local testing
+  is not a separate code path.
+
+The first run is slow because Docker builds the image. Later runs reuse it.
+
+## If something goes wrong
+
+<AccordionGroup>
+  <Accordion title="docker compose is required to run unmute dev">
+    Docker is not running, or Compose is missing. Start Docker, or talk to the
+    agent in the terminal instead with `unmute dev my-agent --console`, which
+    needs [uv](https://docs.astral.sh/uv/) and no Docker.
+  </Accordion>
+  <Accordion title="Missing required environment variables">
+    The container starts, checks the keys the agent needs, and stops with the
+    names it did not find. Fill them in `my-agent/.env` and run again.
+  </Accordion>
+  <Accordion title="The browser page opens but nothing speaks">
+    Look at `my-agent/build/pipecat/dev.log`. It has the container's whole
+    output. Add `--verbose` to follow the same log in your terminal while it
+    runs.
+  </Accordion>
+  <Accordion title="Port already in use">
+    Another dev run is holding the port. Either stop it, or pass different
+    ports: `--port 8790` for the web page and `--bot-port 7890` for the agent
+    container.
+  </Accordion>
+</AccordionGroup>
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="How Unmute works" icon="settings" href="/start/how-unmute-works">
+    What the compiler did between your files and that container.
+  </Card>
+  <Card title="Build the agent" icon="graduation-cap" href="/build/one-agent">
+    Grow this into a real agent, one concept at a time.
+  </Card>
+</Columns>

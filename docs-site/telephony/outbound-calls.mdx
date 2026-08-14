@@ -1,0 +1,128 @@
+---
+title: "Outbound calls"
+description: "Make the agent dial out, and give it the values it needs before the phone rings."
+---
+
+An outbound agent starts the call. That changes two things: the channel has to
+declare it, and the agent usually needs to know who it is calling before the
+first word.
+
+This page follows `examples/outbound-reminder`, an agent that calls a customer
+about an appointment.
+
+## Declare the direction
+
+```yaml agent.yaml
+channels:
+  phone:
+    kind: telephony
+    outbound: true
+```
+
+Without `outbound: true`, `--to` is refused:
+
+```
+unmute: dev <package>: --to needs an outbound-capable target; "pipecat" has no outbound direction (set channels.phone outbound: true)
+```
+
+## Place a test call
+
+```sh
+unmute dev examples/outbound-reminder --telephony --target pipecat --to +15551234567
+```
+
+`--to` takes one E.164 number. Anything else is refused before Docker or the
+carrier is touched:
+
+```
+unmute: dev: --to must be an E.164 number like +15551234567, got "4155550123"
+```
+
+`--to` needs `--telephony`:
+
+```
+unmute: dev: --to requires --telephony
+```
+
+Once the stack is healthy, the call is placed and the CLI prints the call
+identifier:
+
+```
+  ▸ calling +15551234567  (call CAxxxxxxxx)  ·  ctrl-c to stop
+```
+
+Outbound works on the routes that dial out themselves: the Pipecat
+`carrier-websocket` route, the LiveKit `connector` route, and LiveKit `sip`.
+On the Pipecat `cloud-websocket` route an outbound call is created at the
+carrier with markup naming the deployed agent, so there is nothing for a local
+run to answer, and the command tells you so.
+
+<Note>
+  The CLI mints `UNMUTE_OUTBOUND_TOKEN` for the routes that dial out over HTTP.
+  You never set it.
+</Note>
+
+## Give the call its values
+
+An outbound call usually knows things before it starts: who is being called,
+about what. Declare them as `call_start` variables:
+
+```yaml agent.yaml
+variables:
+  customer_id:
+    type: string
+    source: call_start
+    description: CRM id of the customer this call is about. Used by the booking tools, never spoken.
+  name:
+    type: string
+    source: call_start
+    description: Customer's first name, used in the greeting and the prompt.
+  appointment_time:
+    type: string
+    source: call_start
+    description: Appointment start in spoken form, for example "tomorrow at 3 pm".
+```
+
+Locally, `--var` supplies them:
+
+```sh
+unmute dev examples/outbound-reminder --target pipecat \
+  --var customer_id=cus_1042 \
+  --var name=Ada \
+  --var "appointment_time=tomorrow at 3 pm"
+```
+
+In production the same values ride the target's own dispatch payload, as one
+flat JSON object. Each generated `build/<target>/README.md` prints the exact
+spelling for its platform.
+
+That is the whole relationship: **`--var` is the local stand in for the dispatch
+payload**. Same names, same types, same variables.
+
+Values are checked against the declared type, and an undeclared name is refused
+rather than quietly ignored.
+
+## Values the route supplies
+
+Some variables are filled in by the runtime, not by you:
+
+```yaml
+  dialed_number:
+    type: string
+    source: to_number
+```
+
+System sources include `to_number`, `from_number`, `direction`, `call_id`,
+`stream_id`, `session_id`, `carrier`, and `connection`. Seeding one with
+`--var` is refused, because the runtime owns it.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Webhooks and tunnels" icon="link" href="/telephony/webhooks-and-tunnels">
+    Take control of the public URL, or leave the carrier alone.
+  </Card>
+  <Card title="Variables reference" icon="braces" href="/reference/variables">
+    Types, sources, and where each value can be used.
+  </Card>
+</Columns>

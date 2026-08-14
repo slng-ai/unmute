@@ -1,0 +1,130 @@
+---
+title: "unmute dev"
+description: "Every flag, with defaults, requirements, and what each mode ignores."
+---
+
+```
+$ unmute dev --help
+Compile, run the agent locally, and talk to it in the browser or terminal (--console).
+
+Usage:
+  unmute dev <agent-dir> [flags]
+
+Flags:
+      --bot-port string     host port the container publishes the agent on (Compose UNMUTE_DEV_PORT; with --telephony, UNMUTE_TELEPHONY_PORT) (default "7860")
+      --console             talk to the agent in the terminal over the local mic/speaker (no browser or dev server; --port/--bot-port/--no-open are ignored)
+  -h, --help                help for dev
+      --no-open             do not open the browser automatically
+      --no-webhook          do not touch the carrier number's webhook configuration (requires --telephony; point it at the printed public URL yourself)
+      --port string         port for the local dev UI (default "8765")
+      --public-url string   exact public HTTPS origin for routes with carrier callbacks (requires --telephony)
+      --target string       target instance name (required without a TTY when multiple exist)
+      --telephony           run the selected target's resolved telephony route (no browser UI)
+      --to string           E.164 number to dial for an outbound telephony test (requires --telephony and an outbound-capable target)
+      --var stringArray     seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)
+      --verbose             follow container/agent logs on stderr (default: write to the log file only)
+```
+
+## Three modes
+
+| Mode | Command | What runs |
+|---|---|---|
+| browser | `unmute dev ./agent` | the container, plus a local page you talk through |
+| terminal | `unmute dev ./agent --console` | the generated project's own console runner, no Docker |
+| telephony | `unmute dev ./agent --telephony` | the resolved phone route, no browser UI |
+
+`--console` and `--telephony` cannot be combined.
+
+## Flags in detail
+
+<ResponseField name="--target" type="string">
+  The target instance name, exactly one. Not needed when the package declares a
+  single target. With several targets, a terminal gets a picker and a non
+  terminal gets an error listing the choices. Unlike `validate` and `compile`,
+  this flag is not repeatable.
+</ResponseField>
+
+<ResponseField name="--port" type="string" default="8765">
+  The port of the local page you talk through. Browser mode only.
+</ResponseField>
+
+<ResponseField name="--bot-port" type="string" default="7860">
+  The host port the agent container publishes. Passed to Compose as
+  `UNMUTE_DEV_PORT`, or as `UNMUTE_TELEPHONY_PORT` with `--telephony`.
+</ResponseField>
+
+<ResponseField name="--no-open">
+  Do not open the browser. The URL is still printed.
+</ResponseField>
+
+<ResponseField name="--verbose">
+  Follow the container and agent logs on standard error. Without it, they go
+  only to `build/<target>/dev.log`.
+</ResponseField>
+
+<ResponseField name="--console">
+  Talk in the terminal over the local microphone and speaker. No browser, no dev
+  server, no container. `--port`, `--bot-port`, and `--no-open` are ignored.
+  Needs `uv` on your PATH.
+</ResponseField>
+
+<ResponseField name="--var" type="name=value">
+  Seed an input variable for this session. Repeatable. Only variables declared
+  with `source: call_start` can be seeded; values are parsed against the
+  declared type, and an undeclared name is refused. This is the local stand in
+  for the dispatch payload production sends.
+</ResponseField>
+
+<ResponseField name="--telephony">
+  Run the target's resolved telephony route instead of the browser UI.
+</ResponseField>
+
+<ResponseField name="--public-url" type="string">
+  The exact public HTTPS origin for routes with carrier callbacks. Skips the
+  managed tunnel. Requires `--telephony`. Must be HTTPS, with an optional path
+  and nothing else.
+</ResponseField>
+
+<ResponseField name="--to" type="E.164">
+  Place one outbound test call once the stack is healthy. Requires
+  `--telephony` and a target whose phone channel declares `outbound: true`.
+</ResponseField>
+
+<ResponseField name="--no-webhook">
+  Do not touch the carrier number's webhook configuration. Requires
+  `--telephony`. The run's public URL is printed so you can point the number at
+  it yourself.
+</ResponseField>
+
+## Requirements between flags
+
+```
+unmute: dev: --public-url requires --telephony
+unmute: dev: --to requires --telephony
+unmute: dev: --to must be an E.164 number like +15551234567, got "4155550123"
+unmute: dev examples/simple-prompt: multiple targets declared; pass --target <name>: livekit (livekit), pipecat (pipecat)
+unmute: dev examples/simple-prompt: target instance "nope" is not declared
+```
+
+Each of these is checked before Docker, a tunnel, or a carrier is touched.
+
+## Environment
+
+The run's environment is your shell, then `.env` in the current directory, then
+`.env` in the package directory. Later files win.
+
+## Cleanup
+
+Ctrl-c stops the Compose stack, kills the managed tunnel if there was one, and
+restores the carrier webhook if it was changed. Named data volumes are kept.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="The dev loop" icon="play" href="/dev/overview">
+    The same command, explained rather than listed.
+  </Card>
+  <Card title="Telephony" icon="phone" href="/telephony/overview">
+    What `--telephony` runs.
+  </Card>
+</Columns>

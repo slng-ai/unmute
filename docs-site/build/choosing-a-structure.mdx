@@ -1,0 +1,85 @@
+---
+title: "Choosing a structure"
+description: "Tools, tasks, task groups, or a second agent. Which split to reach for, and when."
+---
+
+You now have four ways to organize an agent. They are not ranked. Each one
+solves a different failure.
+
+The repository ships the same salon workflow in all four shapes, so you can
+read them side by side.
+
+## The four shapes
+
+| Package | Shape | Reach for it when |
+|---|---|---|
+| `examples/simple-prompt` | one agent, one prompt, every tool | the workflow fits in a prompt you can still read |
+| `examples/multi-task` | one agent, two tasks it delegates to | a step has a definite answer you want typed |
+| `examples/task-groups` | one agent, three ordered tasks, shared context | the steps must happen in a fixed order |
+| `examples/subagents` | two agents that hand the caller over | two jobs have different rules and different tools |
+
+## How to tell which one you need
+
+<AccordionGroup>
+  <Accordion title="The prompt keeps growing and starts contradicting itself">
+    Split the prompt. If the parts still serve one caller goal, use tasks. If
+    they are separate roles, use a second agent.
+  </Accordion>
+  <Accordion title="The model does things out of order">
+    A task group. The order is declared, not asked for. A prompt that says
+    "always identify the caller first" is a request; a group is a guarantee.
+  </Accordion>
+  <Accordion title="The model calls a tool it should not have yet">
+    Move the tool. Tool lists are per agent and per task, so a tool the current
+    step does not own cannot be called at all.
+  </Accordion>
+  <Accordion title="You need a value out of a step and want to keep it">
+    A task with `result:` and a `delegate` control with `assign:`. The result is
+    typed and lands in a variable.
+  </Accordion>
+  <Accordion title="The caller needs a person">
+    None of these. That is a human transfer, and it is per route. See
+    [Transfers](/transfers/overview).
+  </Accordion>
+</AccordionGroup>
+
+## Delegate or transfer
+
+Both are controls. The difference is whether control comes back.
+
+```yaml
+controls:
+  check_customer:          # delegate: runs, returns a typed result, agent continues
+    kind: delegate
+    task: customer_record
+    when: Identify the caller before handling an appointment request.
+
+  to_appointment_manager:  # agent_transfer: hands the call over, nothing returns
+    kind: agent_transfer
+    to: appointment_manager
+    when: The caller wants to reschedule or cancel an existing appointment.
+```
+
+| | `delegate` | `agent_transfer` |
+|---|---|---|
+| returns | yes | no |
+| typed result | yes, `result:` | no |
+| targets | a task or a task group | another agent |
+| context control | `context:` on the task | `context:` on the control |
+
+## Start simple
+
+Start with one agent and one prompt. Split when something concrete breaks: a
+prompt you cannot read, a step that runs out of order, a tool that gets called
+too early. Every split costs a little clarity, so make it buy something.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Run it locally" icon="play" href="/dev/overview">
+    The dev loop in depth: ports, logs, and picking a target.
+  </Card>
+  <Card title="Telephony" icon="phone" href="/telephony/overview">
+    Put the agent on a phone number.
+  </Card>
+</Columns>

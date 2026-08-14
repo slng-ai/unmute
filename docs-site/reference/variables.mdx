@@ -1,0 +1,147 @@
+---
+title: "Variables"
+description: "Types, sources, where a variable can be used, and how it reaches a tool."
+---
+
+A variable is a named value that lives for one call.
+
+```yaml agent.yaml
+variables:
+  customer_name:
+    type: string
+    source: call_start
+    default: there
+    description: Caller's first name, used in the greeting and the prompt.
+```
+
+| Field | Required | What it is |
+|---|---|---|
+| `type` | yes | `string`, `number`, `integer`, or `boolean` |
+| `source` | no | where the value comes from |
+| `default` | no | the value to use when nothing supplies one |
+| `description` | no | a note; for `conversation` variables the model reads it |
+
+## Sources
+
+| Source | Who supplies it | When |
+|---|---|---|
+| `call_start` | the dispatch payload, or `--var` locally | before the first word |
+| `conversation` | the model, through the generated `update_variables` tool | during the call |
+| `session_id` | the runtime | at session start |
+| `call_id` | the runtime | on a phone call |
+| `stream_id` | the runtime | on a phone call |
+| `direction` | the runtime | on a phone call |
+| `from_number` | the runtime | on a phone call |
+| `to_number` | the runtime | on a phone call |
+| `carrier` | the runtime | on a phone call |
+| `connection` | the runtime | on a phone call |
+
+The last eight are system sources. You declare them; the runtime fills them in.
+
+## Where a variable can be used
+
+`{{name}}` renders a variable. Two kinds of site, with different timing:
+
+| Site | Renders | Can name |
+|---|---|---|
+| `conversation.greeting.text` | once, at session start | a variable that already has a value |
+| an agent's or task's instructions | once, at session start | a variable that already has a value |
+| a tool's `inject:` value | on every tool call | any declared variable |
+| a webhook tool's `path` | on every tool call | any declared variable, URL encoded |
+
+"Already has a value" means `source: call_start`, a system source, or a
+`default`. Naming anything else in a session start site is an error:
+
+```
+conversation.greeting.text references {{requested_service}}, which has no value when the prompt is built; give it source: call_start, a system source, or a default
+```
+
+An undeclared name is an error too. Neither one is a silent empty string.
+
+## Seeding values locally
+
+```sh
+unmute dev ./agent --var customer_name=Ada --var customer_id=cus_2002
+```
+
+Repeatable. Each value is parsed against the declared type, so an `integer`
+variable receives a number and not a quoted string. `--var` is the local stand
+in for the dispatch payload production sends, so it accepts `call_start`
+variables only:
+
+```
+unmute: dev examples/salon-support: --var requested_service=haircut: "requested_service" has source conversation, so the model saves it mid-call through update_variables, not you
+```
+
+An undeclared name is refused rather than accepted and dropped.
+
+## Letting the model save one
+
+Declaring any `source: conversation` variable creates a tool named
+`update_variables` in the generated project. You do not write it, and you do
+not list it. The model calls it when the caller says something worth keeping.
+
+## Passing a value into a tool
+
+```yaml tools/book_appointment.yaml
+input:
+  type: object
+  properties:
+    slot_id:
+      type: string
+  required:
+    - slot_id
+
+inject:
+  customer_id: "{{customer_id}}"
+  service: "{{requested_service}}"
+```
+
+`inject` values are not part of the model's schema, so the model can neither
+see them nor overwrite them. An `inject` key that also names an `input`
+property is a compile error, for exactly that reason.
+
+`inject` is legal on `webhook` and `local` tools: the two kinds whose request
+Unmute builds itself.
+
+When an injected variable has no value at call time, the tool refuses instead
+of sending a half formed request, and the model is told to ask:
+
+```
+cannot call book_appointment yet: requested_service not set. Ask the caller first.
+```
+
+## Assigning a task result to a variable
+
+```yaml agent.yaml
+controls:
+  check_customer:
+    kind: delegate
+    task: customer_record
+    assign:
+      customer_id: result.customer_id
+```
+
+The task's typed result lands in the variable, and the rest of the call can use
+it.
+
+## Carrying variables through a handoff
+
+```yaml
+    context:
+      history: full
+      variables: all
+```
+
+`variables` takes `all` or a list of names.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Variables, explained" icon="braces" href="/build/variables">
+    The same surface as a walkthrough.
+  </Card>
+  <Card title="Secrets" icon="key" href="/reference/secrets">
+    Why a secret is never a variable.
+  </Card>
+</Columns>

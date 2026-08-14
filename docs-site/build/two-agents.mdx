@@ -1,0 +1,102 @@
+---
+title: "Two agents"
+description: "Split one long prompt into two agents and hand the caller from one to the other."
+---
+
+One prompt can only get so long before it starts contradicting itself. When
+two jobs have different rules and different tools, give them different agents.
+
+This page follows `examples/subagents`: `booking_desk` takes new appointments,
+`appointment_manager` reschedules and cancels.
+
+## Two agents in one package
+
+```yaml agent.yaml
+entry_agent: booking_desk
+
+agents:
+  booking_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - to_appointment_manager
+
+  appointment_manager:
+    instructions: agents/appointment-manager.md
+    model: reasoning
+    voice: voice
+    tools:
+      - to_booking_desk
+```
+
+`entry_agent` decides who answers. Each agent has its own prompt file. They can
+share models, or not.
+
+## The handoff
+
+A handoff is a control. You declare it once and put its name in the tool list
+of the agent that may use it:
+
+```yaml agent.yaml
+controls:
+  to_appointment_manager:
+    kind: agent_transfer
+    to: appointment_manager
+    when: The caller wants to reschedule or cancel an existing appointment.
+    context:
+      history: full
+      variables: all
+
+  to_booking_desk:
+    kind: agent_transfer
+    to: booking_desk
+    when: The caller wants to make a new appointment instead.
+    context:
+      history: full
+      variables: all
+```
+
+`when` is the condition the model reads. Write it as the situation, not as an
+instruction to call a tool.
+
+`context` decides what the new agent knows:
+
+| Field | What it does |
+|---|---|
+| `history: full` | the new agent sees the conversation so far |
+| `variables: all` | the values collected so far travel with the caller |
+
+Without them, the caller gets asked for their phone number twice.
+
+## A handoff does not come back
+
+The second agent owns the call from that point. Nothing returns to the first
+agent, and no result is passed back. That is why the example declares a control
+in each direction.
+
+If you want a step that runs and returns with an answer, that is a task, on the
+[next page](/build/tasks).
+
+## The tool lists are the guardrail
+
+In `examples/subagents`, only `appointment_manager` has `cancel_appointment`.
+A caller cannot talk the booking agent into a cancellation, because the booking
+agent has no way to perform one. Splitting agents is as much about splitting
+capability as it is about splitting prose.
+
+## Try it
+
+```sh
+unmute validate examples/subagents
+unmute dev examples/subagents --target pipecat
+```
+
+Say you want to change an appointment you already have. The voice keeps going,
+but the agent behind it changes.
+
+## Where to go next
+
+<Card title="Tasks" icon="list-checks" href="/build/tasks">
+  Delegate a step, get a typed result back, and carry on.
+</Card>

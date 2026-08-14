@@ -1,0 +1,330 @@
+---
+title: "agent.yaml"
+description: "Every block of the agent file, and the tool files beside it."
+---
+
+`agent.yaml` is the agent. Nothing in it is specific to a runtime; that lives
+in [targets.yaml](/reference/targets-yaml).
+
+YAML decoding is strict. An unknown field is an error with the file and the
+line, not a shrug.
+
+## Top level
+
+| Key | Required | What it is |
+|---|---|---|
+| `version` | yes | the schema version, `1` |
+| `entry_agent` | yes | which agent answers |
+| `models` | yes | the model palette, grouped by kind |
+| `listen` | when `models.listen` has 2 or more entries | which listen entry to use |
+| `turn` | when `models.turn` has 2 or more entries | which turn entry to use |
+| `variables` | no | per call values |
+| `secrets` | no | environment variable names the agent needs |
+| `agents` | yes | one or more agents |
+| `tasks` | no | delegated steps |
+| `task_groups` | no | ordered sequences of tasks |
+| `controls` | no | delegate, agent transfer, human transfer |
+| `tools` | no | which tool files to load |
+| `conversation` | no | greeting, interruption, inactivity, limits |
+| `tracing` | no | tracing provider |
+| `channels` | yes | how people reach the agent |
+| `capacity` | no | your traffic estimate |
+
+## models
+
+Four sections. The section an entry sits in decides its kind: `think` (LLM),
+`speak` (TTS), `listen` (STT), `turn` (turn detection). Entry names share one
+namespace across sections and are yours to choose.
+
+```yaml
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+```
+
+Every entry takes the same fields, and which ones are legal depends on the
+section:
+
+| Field | Meaning |
+|---|---|
+| `provider` | the integration, for example `slng`, `openai`, `livekit`, `local` |
+| `model` | the model id, forwarded to the provider as written |
+| `voice` | the voice id, forwarded as written |
+| `speed` | speaking speed |
+| `language` | the agent language for this integration |
+| `temperature`, `top_p`, `top_k` | generation parameters |
+| `endpoint_env` | environment variable holding a custom endpoint |
+| `placement` | where the model runs |
+| `semantic_endpointing` | turn detection behavior |
+| `params` | extra parameters forwarded verbatim |
+| `fallback` | other entry names to fall back to |
+| `description` | a note for humans |
+
+Entries you do not reference are legal alternates.
+
+## variables
+
+```yaml
+variables:
+  customer_name:
+    type: string
+    source: call_start
+    default: there
+    description: Caller's first name.
+```
+
+| Field | Values |
+|---|---|
+| `type` | `string`, `number`, `integer`, `boolean` |
+| `source` | `call_start`, `conversation`, or a system source |
+| `default` | any value of the declared type |
+| `description` | a note, also read by the model for `conversation` variables |
+
+Full detail on [variables](/reference/variables).
+
+## secrets
+
+```yaml
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+```
+
+A list of UPPER_SNAKE environment variable names. Never values, and never
+usable in a `{{template}}`. See [secrets](/reference/secrets).
+
+## agents
+
+```yaml
+agents:
+  appointment_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - check_availability
+```
+
+| Field | What it is |
+|---|---|
+| `instructions` | path to a Markdown prompt in the package |
+| `model` | a `models.think` entry name |
+| `voice` | a `models.speak` entry name |
+| `tools` | names this agent may call: tool files and controls |
+
+## tasks
+
+```yaml
+tasks:
+  customer_record:
+    instructions: tasks/customer-record.md
+    tools:
+      - lookup_customer
+    result:
+      customer_id: string
+      record_status:
+        enum:
+          - existing
+          - created
+          - failed
+    context:
+      history: full
+```
+
+| Field | What it is |
+|---|---|
+| `instructions` | the task's own prompt file |
+| `tools` | the tools the task may call |
+| `model` | optional override of the thinking model |
+| `result` | the typed result, field name to type or `enum` |
+| `context` | what the task sees, see below |
+
+### context
+
+Used by tasks and by transfer controls.
+
+| Field | Values | Notes |
+|---|---|---|
+| `history` | `full`, `messages`, `last_n`, `summary`, `reset` | required |
+| `max_messages` | a positive number | legal with `last_n` only |
+| `summarizer` | a model entry name | legal with `summary` only |
+| `include_tool_calls` | `true` or `false` | whether tool calls travel too |
+| `variables` | `all` or a list of names | transfer controls only |
+
+## task_groups
+
+```yaml
+task_groups:
+  appointment_flow:
+    steps:
+      - identify_customer
+      - select_appointment
+    context_scope: shared
+    then: return
+    merge: results
+```
+
+| Field | Values |
+|---|---|
+| `steps` | task names, in order, at least one |
+| `context_scope` | `shared` or `isolated` |
+| `then` | `return`, `transfer`, or `end` |
+| `then_target` | an agent name, required with `transfer`, illegal otherwise |
+| `merge` | `results` |
+
+## controls
+
+Everything the model can trigger besides a tool. One `kind` per control.
+
+```yaml
+controls:
+  check_customer:
+    kind: delegate
+    task: customer_record
+    when: Identify the caller first.
+    assign:
+      customer_id: result.customer_id
+```
+
+| Kind | Fields |
+|---|---|
+| `delegate` | `task` or `group`, `when`, `assign`, `requires` |
+| `agent_transfer` | `to`, `when`, `context`, `requires` |
+| `human_transfer` | `when`, and exactly one of `cold:` or `warm:` |
+
+A human transfer names its shape with a block, so a warm only field cannot be
+written on a cold transfer:
+
+| Block | Fields |
+|---|---|
+| `cold` | `destination`, `ring_timeout`, `on_unavailable` |
+| `warm` | `destination`, `briefing`, `ring_timeout`, `on_unavailable` |
+
+`on_unavailable` is `return_to_caller` or `hangup`. `destination` is a symbol
+resolved in [targets.yaml](/reference/targets-yaml).
+
+## tools
+
+```yaml
+tools:
+  - check_availability
+  - end_call
+```
+
+Which `tools/<name>.yaml` files to load. Availability is decided by the `tools`
+list on each agent and task.
+
+### Tool files
+
+One file per tool, in `tools/`. The top level is the contract with the model;
+exactly one execution block says how it runs.
+
+| Field | What it is |
+|---|---|
+| `description` | what the model reads |
+| `input` | JSON Schema of the parameters the model fills |
+| `output` | JSON Schema of the result |
+| `inject` | hidden arguments, values may carry `{{variables}}`; legal on `webhook` and `local` |
+| `interruption` | `provider_default`, `continue`, `cancel` |
+| `effect` | `returns_data`, `ends_conversation` |
+
+| Execution block | Fields |
+|---|---|
+| `local` | `handler`, a Python file in the package |
+| `webhook` | `url_env`, `path`, `auth` |
+| `mcp` | `url_env` |
+| `builtin` | `id`, `instructions` |
+| `client` | none |
+| `provider_hosted` | none |
+
+`webhook.auth`:
+
+| Field | What it is |
+|---|---|
+| `type` | `bearer` or `api_key` |
+| `token_env` | environment variable holding the token |
+| `header` | header name, `api_key` only, defaults to `X-API-Key` |
+
+## conversation
+
+```yaml
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, how can I help?"
+  interruption:
+    enabled: true
+```
+
+| Field | Values |
+|---|---|
+| `greeting.speaks_first` | `agent` or `user` |
+| `greeting.text` | the opening line, requires `speaks_first: agent` |
+| `interruption.enabled` | required when `interruption` is present |
+| `interruption.minimum_words` | how much speech counts as an interruption |
+| `interruption.ignore_phrases` | phrases that do not interrupt |
+| `inactivity.nudge_after`, `inactivity.end_after` | durations |
+| `max_duration` | a duration |
+| `thinking_audio` | audio played while the model works |
+
+## tracing
+
+```yaml
+tracing:
+  provider: langfuse
+```
+
+`langfuse` is the only provider today. It requires `LANGFUSE_BASE_URL`,
+`LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_SECRET_KEY`.
+
+## channels
+
+```yaml
+channels:
+  web:
+    kind: realtime_audio
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: true
+```
+
+| Field | Values |
+|---|---|
+| `kind` | `realtime_audio` or `telephony` |
+| `inbound`, `outbound` | `true` or `false` |
+| `required_controls` | controls this channel requires |
+| `on_voicemail` | `hangup` or `leave_message`, requires `outbound: true` |
+
+## capacity
+
+```yaml
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m
+```
+
+| Field | What it is |
+|---|---|
+| `peak_sessions` | expected concurrent sessions at peak |
+| `max_sessions` | the ceiling you want to support |
+| `peak_starts_per_second` | how fast calls arrive at peak |
+| `avg_session_duration` | a duration, for example `5m` |
+
+The compiler turns these into worker and quota numbers, marked
+`[unbenchmarked]`.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="targets.yaml" icon="file-code" href="/reference/targets-yaml">
+    The runtime half.
+  </Card>
+  <Card title="Providers" icon="list" href="/reference/providers">
+    Which `provider:` values each target accepts.
+  </Card>
+</Columns>

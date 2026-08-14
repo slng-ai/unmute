@@ -1,0 +1,94 @@
+---
+title: "Transfers on Pipecat over Twilio"
+description: "Cold transfer through your own Twilio number, with no server of yours in the call path."
+---
+
+This page follows `examples/pipecat-human-transfer-twilio`. That package
+declares **one target, Pipecat only**, on the `cloud-websocket` transport: your
+own Twilio number, and nothing of yours hosted anywhere.
+
+```yaml targets.yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: cloud-websocket
+    carrier: twilio
+    connection: twilio_voice
+    deployment_region: eu-central
+    destinations:
+      billing_line: BILLING_PHONE_NUMBER
+```
+
+Your number points at a small piece of static markup in the Twilio console,
+which streams the call to Pipecat Cloud. No server of yours is in the path, in
+production or ever.
+
+## The transfer
+
+```yaml agent.yaml
+controls:
+  send_to_billing:
+    kind: human_transfer
+    when: The caller asks about an invoice, a refund, or a charge they do not recognise.
+    cold:
+      destination: billing_line
+```
+
+The mechanism is different from every other route. One request replaces the
+live call's instructions at Twilio, keyed on the call id: speak a line, dial
+the destination, done. The agent's part of the call ends there.
+
+## The trade, stated plainly
+
+**However the transfer ends, the caller comes back to a fresh agent that does
+not remember the call.** That covers both endings: the destination hanging up,
+and a dial that never connected. Knowing which happened would need a callback
+endpoint that you host, and hosting nothing is the entire point of this route.
+
+Warm transfer is not possible here for the same reason. A warm handoff has to
+act on how the other leg ended.
+
+If you need warm, or you need the caller to come back to the same session, use
+the [LiveKit SIP route](/transfers/livekit).
+
+## Testing it without waiting for a call
+
+The package declares both directions:
+
+```yaml agent.yaml
+channels:
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: true
+```
+
+Outbound is there so you can call your own mobile and then ask the agent for
+billing, instead of waiting for someone to ring in.
+
+## Evidence
+
+```sh
+unmute compile examples/pipecat-human-transfer-twilio
+```
+
+```
+pipecat: telephony route provider=pipecat transport=cloud-websocket carrier=twilio coordination=shared admission=generated_runtime
+pipecat: telephony evidence cold_transfer=provisional docs=https://docs.pipecat.ai/pipecat-cloud/guides/telephony/twilio-websocket verified=2026-08-13 smoke=false
+```
+
+`provisional` means implemented and compiling, with no credentialed test in
+CI. The repository records a live inbound call and a live cold transfer on this
+route on 2026-08-13; the decline path has not been exercised.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Transfers overview" icon="phone-forwarded" href="/transfers/overview">
+    Cold and warm, and what each route can do.
+  </Card>
+  <Card title="Going live" icon="rocket" href="/deploy/going-live">
+    Deploy the generated project.
+  </Card>
+</Columns>

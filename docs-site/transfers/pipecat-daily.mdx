@@ -1,0 +1,96 @@
+---
+title: "Transfers on Pipecat over Daily"
+description: "Cold transfer on a Daily provisioned number, with no carrier account to set up."
+---
+
+This page follows `examples/pipecat-human-transfer-daily`. That package
+declares **one target, Pipecat only**, on the `daily-sip` transport. It is the
+Pipecat route with a native transfer primitive.
+
+```yaml targets.yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    transport: daily-sip
+    destinations:
+      billing_line: BILLING_PHONE_NUMBER
+```
+
+No `carrier:` line. On this form Daily provisions the number and Daily's own
+infrastructure delivers the call to your deployed agent, so there is no carrier
+account to configure at all.
+
+## The transfer
+
+```yaml agent.yaml
+controls:
+  send_to_billing:
+    kind: human_transfer
+    when: The caller asks about an invoice, a refund, or a charge they do not recognise.
+    cold:
+      destination: billing_line
+```
+
+Cold only. The bot announces the handoff, Daily reroutes the caller's leg out
+of the room, and the bot drops off. Billing answers knowing nothing about the
+call.
+
+Warm is **not built yet** on this route. Daily documents the pattern, so the
+platform is not the limit; Unmute has not emitted it. That is a different
+statement from "the platform cannot", and the docs keep the two apart.
+
+## Dial-out has to be granted
+
+`unmute validate` prints the prerequisite before you get anywhere near a call:
+
+```sh
+unmute validate examples/pipecat-human-transfer-daily
+```
+
+```
+✓ pipecat (pipecat)
+
+Setup prerequisites:
+  pipecat: daily_dialout: Ask Daily to enable dial-out on the domain the agent's rooms belong to: it is a paid feature granted on request, per domain, and international dial-out is enabled separately.
+    https://docs.pipecat.ai/pipecat-cloud/guides/telephony/daily-dial-out (verified 2026-08-12)
+```
+
+Transfers on this route are dial-out, so without that approval the transfer
+fails on a live call rather than at compile time. Ask first.
+
+## No phone channel
+
+```yaml agent.yaml
+channels:
+  web:
+    kind: realtime_audio
+```
+
+The package declares web audio only. On this route the telephony belongs to
+Daily: the number, the dial-in webhook, and dial-out permission all live on the
+Daily domain, configured through Pipecat Cloud, not in anything Unmute
+generates.
+
+## Running it
+
+`unmute dev --telephony` refuses this route, and says why:
+
+```
+unmute: dev examples/pipecat-human-transfer-daily: target "pipecat" runs on the Pipecat Daily route (transport daily-sip), where Daily carries the phone call to a deployed agent, so there is no local telephony topology to run; talk to this agent now with `unmute dev examples/pipecat-human-transfer-daily` in the browser or `unmute dev --console examples/pipecat-human-transfer-daily` in the terminal, and for a real phone call run `unmute compile examples/pipecat-human-transfer-daily` and follow the Deploy and Phone calls sections of the emitted README
+```
+
+That is the honest answer: this route has nothing local to run. Talk to the
+agent in the browser to work on its behavior, and use the emitted runbook for
+the phone part.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Pipecat on Twilio" icon="phone" href="/transfers/pipecat-twilio">
+    Cold transfer through your own Twilio number, with nothing hosted.
+  </Card>
+  <Card title="Going live" icon="rocket" href="/deploy/going-live">
+    Deploy the generated project.
+  </Card>
+</Columns>

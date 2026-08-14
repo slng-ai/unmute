@@ -1,0 +1,88 @@
+$ unmute --help
+Author-once, portable voice agents.
+
+Usage:
+  unmute [flags]
+  unmute [command]
+
+Available Commands:
+  compile     Compile a v1 agent package to its resolved target artifacts.
+  completion  Generate the autocompletion script for the specified shell
+  dev         Compile, run the agent locally, and talk to it in the browser or terminal (--console).
+  help        Help about any command
+  init        Scaffold a new v1 agent package.
+  validate    Validate a v1 agent package against its targets.
+
+Flags:
+  -h, --help      help for unmute
+  -v, --version   version for unmute
+
+Use "unmute [command] --help" for more information about a command.
+
+$ unmute init --help
+Scaffold a new v1 agent package.
+
+Usage:
+  unmute init [name] [flags]
+
+Flags:
+  -h, --help   help for init
+
+$ unmute validate --help
+Validate a v1 agent package against its targets.
+
+Usage:
+  unmute validate <package-dir> [flags]
+
+Flags:
+  -h, --help             help for validate
+      --target strings   target instance name (repeatable)
+
+$ unmute compile --help
+Compile a v1 agent package to its resolved target artifacts.
+
+Usage:
+  unmute compile <package-dir> [flags]
+
+Flags:
+  -h, --help             help for compile
+      --target strings   target instance name (repeatable; default: all)
+
+$ unmute dev --help
+Compile, run the agent locally, and talk to it in the browser or terminal (--console).
+
+Usage:
+  unmute dev <agent-dir> [flags]
+
+Flags:
+      --bot-port string     host port the container publishes the agent on (Compose UNMUTE_DEV_PORT; with --telephony, UNMUTE_TELEPHONY_PORT) (default "7860")
+      --console             talk to the agent in the terminal over the local mic/speaker (no browser or dev server; --port/--bot-port/--no-open are ignored)
+  -h, --help                help for dev
+      --no-open             do not open the browser automatically
+      --no-webhook          do not touch the carrier number's webhook configuration (requires --telephony; point it at the printed public URL yourself)
+      --port string         port for the local dev UI (default "8765")
+      --public-url string   exact public HTTPS origin for routes with carrier callbacks (requires --telephony)
+      --target string       target instance name (required without a TTY when multiple exist)
+      --telephony           run the selected target's resolved telephony route (no browser UI)
+      --to string           E.164 number to dial for an outbound telephony test (requires --telephony and an outbound-capable target)
+      --var stringArray     seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)
+      --verbose             follow container/agent logs on stderr (default: write to the log file only)
+
+$ unmute completion --help
+Generate the autocompletion script for unmute for the specified shell.
+See each sub-command's help for details on how to use the generated script.
+
+Usage:
+  unmute completion [command]
+
+Available Commands:
+  bash        Generate the autocompletion script for bash
+  fish        Generate the autocompletion script for fish
+  powershell  Generate the autocompletion script for powershell
+  zsh         Generate the autocompletion script for zsh
+
+Flags:
+  -h, --help   help for completion
+
+Use "unmute completion [command] --help" for more information about a command.
+

@@ -1,0 +1,148 @@
+---
+title: "The dev loop"
+description: "What unmute dev actually does, how to pick a target, and where the logs are."
+---
+
+`unmute dev` is the loop you live in while building an agent. One command
+compiles the package, builds the container a deployment would run, starts it,
+and serves a web page you can talk through.
+
+```sh
+unmute dev examples/salon-support --target pipecat
+```
+
+```
+compiled examples/salon-support/build/pipecat
+building and starting the container...
+
+  ▸ http://localhost:8765/?agent=pipecat
+    ctrl-c to stop  ·  logs: examples/salon-support/build/pipecat/dev.log
+```
+
+## What it does, in order
+
+<Steps>
+  <Step title="Compile">
+    The package is generated into `build/<target>/`. You do not run `unmute
+    compile` first.
+  </Step>
+  <Step title="Build and start">
+    `docker compose` builds the image from the generated `Dockerfile` and starts
+    the stack described by the generated `compose.dev.yaml`. On LiveKit that
+    stack also includes a local LiveKit server.
+  </Step>
+  <Step title="Wait for ready">
+    Pipecat is ready as soon as the container is up. LiveKit waits for the
+    worker to register, up to three minutes, so the browser only opens once a
+    call would actually be answered.
+  </Step>
+  <Step title="Serve the page">
+    A small local web server hands your browser a WebRTC session against the
+    running container.
+  </Step>
+  <Step title="Clean up">
+    Ctrl-c stops and removes the stack. Data volumes are kept.
+  </Step>
+</Steps>
+
+Docker is required for this mode. If you do not want Docker, use
+[`--console`](/dev/console).
+
+## Picking a target
+
+A package with one target needs no flag. With more than one:
+
+- In a terminal, `unmute dev` asks which target to run.
+- Without a terminal, for example in a script, it refuses and tells you the
+  choices:
+
+```
+unmute: dev examples/simple-prompt: multiple targets declared; pass --target <name>: livekit (livekit), pipecat (pipecat)
+```
+
+`--target` takes exactly one name here, unlike `validate` and `compile`, which
+take a repeatable list. A name that is not declared is an error:
+
+```
+unmute: dev examples/simple-prompt: target instance "nope" is not declared
+```
+
+## Ports
+
+| Flag | Default | What it is |
+|---|---|---|
+| `--port` | `8765` | the local web page you talk through |
+| `--bot-port` | `7860` | the host port the agent container publishes |
+
+Change both when a port is busy:
+
+```sh
+unmute dev examples/salon-support --target pipecat --port 8790 --bot-port 7890
+```
+
+The web page URL always carries the target name, for example
+`http://localhost:8765/?agent=pipecat`.
+
+## Logs
+
+Everything the container prints goes to `build/<target>/dev.log`. That file is
+the first place to look when the page loads but nothing speaks.
+
+To follow the same output in your terminal while it runs:
+
+```sh
+unmute dev examples/salon-support --target pipecat --verbose
+```
+
+## Not opening the browser
+
+```sh
+unmute dev examples/salon-support --target pipecat --no-open
+```
+
+The URL is still printed. Useful over SSH, and in scripts.
+
+## Environment
+
+`unmute dev` builds the run's environment in this order, with later files
+winning:
+
+1. your shell environment
+2. `.env` in the directory you run the command from
+3. `.env` in the package directory
+
+So a repository wide `.env` can hold shared keys while one package overrides a
+value. The generated `build/<target>/.env.example` lists exactly what this
+agent needs.
+
+## Seeding variables
+
+`--var name=value` stands in for the values a production call would arrive
+with. It is repeatable, and it only accepts variables declared with
+`source: call_start`:
+
+```sh
+unmute dev examples/salon-support --target pipecat \
+  --var customer_name=Ada \
+  --var customer_id=cus_2002
+```
+
+See [variables](/build/variables) for what happens when you try to seed
+something else.
+
+## One run per package at a time
+
+The Compose project name comes from the package path and the target name, so a
+second `unmute dev` on the same package does not run beside the first. It
+recreates the same stack on the new port and takes it over.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Console mode" icon="terminal" href="/dev/console">
+    Talk to the agent in your terminal, with no Docker and no browser.
+  </Card>
+  <Card title="dev reference" icon="book" href="/reference/cli/dev">
+    Every flag, with defaults.
+  </Card>
+</Columns>

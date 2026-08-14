@@ -1,0 +1,167 @@
+---
+title: "Variables"
+description: "Personalize a call, let the model save what it hears, and pass values into a tool without showing them to the model."
+---
+
+A variable is a named value that lives for one call. Use it to greet someone by
+name, to remember what they asked for, and to hand a tool a value the model
+should never see.
+
+This page follows `examples/salon-support`, the smallest package with a full
+`variables:` block.
+
+## Declare them
+
+```yaml agent.yaml
+variables:
+  customer_name:
+    type: string
+    source: call_start
+    default: there
+    description: Caller's first name, used in the greeting and the prompt.
+  customer_id:
+    type: string
+    source: call_start
+    default: cus_1001
+    description: CRM id of the caller. The booking tool receives it directly; never say it out loud.
+  requested_service:
+    type: string
+    source: conversation
+    description: The service the caller wants, for example a haircut or a colour. Save it as soon as they say it.
+```
+
+`type` is one of `string`, `number`, `integer`, `boolean`. `source` says where
+the value comes from, and it changes what you can do with the variable.
+
+| Source | Who sets it | When |
+|---|---|---|
+| `call_start` | whatever starts the call | before the first word |
+| `conversation` | the model, during the call | whenever the caller says it |
+| system sources such as `from_number`, `direction`, `call_id` | the runtime | on a phone call |
+
+## Use one in the greeting
+
+```yaml
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi {{customer_name}}, thanks for calling Sage and Stone Salon. What can I do for you?"
+```
+
+`{{name}}` renders the variable's value. The greeting and the prompt render
+once, at the start of the call, so they can only name a variable that already
+has a value: a `call_start` variable, or one with a `default`.
+
+## Seed a value locally
+
+In production the values arrive with the call. On your machine, `--var` stands
+in for that:
+
+```sh
+unmute dev examples/salon-support --target pipecat \
+  --var customer_name=Ada \
+  --var customer_id=cus_2002
+```
+
+Leave the flags out and the declared defaults are used, so the agent always has
+something to say.
+
+`--var` only seeds `call_start` variables, and it refuses anything else instead
+of accepting it and dropping it:
+
+```
+unmute: dev examples/salon-support: --var requested_service=haircut: "requested_service" has source conversation, so the model saves it mid-call through update_variables, not you
+```
+
+An undeclared name is refused the same way.
+
+## Let the model save one
+
+Declaring a variable with `source: conversation` creates a tool called
+`update_variables` in the generated project. You do not write it. The model
+calls it when the caller says something worth keeping.
+
+Say "I'd like a haircut" to the salon agent and `requested_service` is stored
+for the rest of the call.
+
+## Hand a value to a tool
+
+This is the part worth internalizing. A tool's `input:` schema is everything
+the model sees. `inject:` adds arguments the model never sees:
+
+```yaml tools/book_appointment.yaml
+input:
+  type: object
+  properties:
+    slot_id:
+      type: string
+      description: ID returned by check_availability
+  required:
+    - slot_id
+
+inject:
+  customer_id: "{{customer_id}}"
+  service: "{{requested_service}}"
+```
+
+The model is offered a one parameter function, `book_appointment(slot_id)`.
+Your handler takes all three as ordinary arguments and knows nothing about
+variables:
+
+```python tools/book_appointment.py
+def book_appointment(customer_id, service, slot_id):
+    ...
+```
+
+The generated project renders the `{{tokens}}` from the live call state at the
+moment of the call and passes them by keyword.
+
+<Note>
+  `inject:` renders on every call, not once at the start. That is why
+  `{{requested_service}}` is legal here even though nobody has said it yet when
+  the call begins.
+</Note>
+
+## What happens when the value is missing
+
+An injected variable with no value refuses the call rather than sending a half
+formed request. The model gets told why:
+
+```
+cannot call book_appointment yet: requested_service not set. Ask the caller first.
+```
+
+So the model asks. `customer_id` never trips this, because it declares a
+default.
+
+## Secrets are not variables
+
+`{{...}}` renders variables only. Naming a secret in a template is a compile
+error, not a value that leaks at run time:
+
+```
+unmute: validate examples/salon-support: build: agent.yaml:70: conversation.greeting.text
+references {{OPENAI_API_KEY}}, but secrets never flow through templates; a secret
+reaches a tool through its own *_env field
+```
+
+The file and the line are always there.
+
+A template renders into speech, a prompt, a URL, or a log. That is right for a
+name and wrong for a token. See [secrets](/reference/secrets).
+
+## Try it
+
+```sh
+unmute dev examples/salon-support --target pipecat --var customer_name=Ada
+```
+
+Ask to book something before saying which service you want. The booking tool
+refuses, and the agent asks you what you would like. That refusal is the guard
+working.
+
+## Where to go next
+
+<Card title="Two agents" icon="users" href="/build/two-agents">
+  Add a second agent and hand the caller over.
+</Card>
