@@ -816,7 +816,15 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 	}
 	if raw.Connection != "" {
 		if _, ok := agent.Connections[raw.Connection]; !ok {
-			return Target{}, missing(pkg, "targets.yaml", "connection", raw.Connection)
+			// The defined set rides the message. Without it the author learns the
+			// name is wrong and has to go looking for which names are right, and
+			// the usual cause is a typo they cannot see by staring at it.
+			defined := "This package defines no connections."
+			if names := sortedKeys(agent.Connections); len(names) > 0 {
+				defined = "It defines: " + strings.Join(names, ", ") + "."
+			}
+			return Target{}, fmt.Errorf("%s: target %q names connection %q, which this package does not define. %s",
+				pkg.Location("targets.yaml", raw.Connection), name, raw.Connection, defined)
 		}
 	}
 	// The connection owns the route: the target says which connection, and the

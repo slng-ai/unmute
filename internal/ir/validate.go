@@ -69,6 +69,7 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	global, globalWarnings := validateStructure(agent)
 	global = append(global, validateConfiguredTargets(agent, caps)...)
 	globalWarnings = add(globalWarnings, undeclaredSecretWarning(agent))
+	globalWarnings = add(globalWarnings, unusedConnectionWarning(agent))
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
 	failed := 0
 	for _, resolved := range targets {
@@ -1297,6 +1298,33 @@ func referencedEnvNames(agent *Agent) map[string]string {
 		}
 	}
 	return refs
+}
+
+// unusedConnectionWarning reports connection files no target names.
+//
+// A warning rather than an error, and deliberately: an unused route file costs
+// nothing at runtime, and an author part-way through wiring up a second carrier
+// should not be stopped by the half they have not reached yet. It is checked
+// across **every declared target**, not the `--target` selection, so validating
+// one target never reports a file another target uses (spec FR-015).
+func unusedConnectionWarning(agent *Agent) string {
+	if len(agent.Connections) == 0 {
+		return ""
+	}
+	named := make(map[string]bool, len(agent.Targets))
+	for _, target := range agent.Targets {
+		named[target.Connection] = true
+	}
+	var unused []string
+	for _, name := range slices.Sorted(maps.Keys(agent.Connections)) {
+		if !named[name] {
+			unused = append(unused, fmt.Sprintf("connections/%s.yaml", name))
+		}
+	}
+	if len(unused) == 0 {
+		return ""
+	}
+	return "declares a route no target names, so nothing uses it: " + strings.Join(unused, ", ")
 }
 
 // undeclaredSecretWarning reports env names the package references but never
