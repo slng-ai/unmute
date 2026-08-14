@@ -96,16 +96,40 @@ this feature did on its own.
 
 ## Go live checklist
 
-Nothing deploys without the maintainer running `mint login` and approving.
+Every step here is done by the maintainer in the Mintlify dashboard. A
+deployment is one repository, one content directory, and one branch, so a
+second deployment cannot reach the first one's site.
 
-1. **Create a NEW Mintlify project for this site.** Never connect it to, or
-   push it over, the existing docs.slng.ai deployment.
-2. Give it its own subdomain. Authentication works on a custom domain or a
-   `*.mintlify.site` subdomain, never on a custom subpath.
-3. **Set visibility to Private in the dashboard before sharing any URL.** Use
-   password authentication if the plan is Pro or Enterprise; otherwise use
-   Mintlify private authentication, which every plan has, until a password is
-   possible.
-4. Only then share the link.
+1. **Create a NEW deployment in the existing organization.** Never repoint the
+   docs.slng.ai deployment at this repository, and never save this repository
+   in its Git Settings. On Pro, each deployment carries its own subscription,
+   so check the billing page before creating it.
+2. **Point it at this directory.** Git Settings: repository `slng-ai/unmute_cli`,
+   branch `main`, then turn on **docs.json is in a subdirectory** and enter
+   `/docs-site` with no trailing slash. Saving starts the first build. The
+   Mintlify GitHub App must have `unmute_cli` in its repository access list,
+   otherwise nothing deploys on push.
+3. **Set visibility to Private before sharing any URL.** Authentication page,
+   visibility Private, then either Authenticated (Mintlify organization login,
+   on every plan) or password (Pro and Enterprise). Authentication works on a
+   custom domain or a `*.mintlify.site` subdomain, never on a custom subpath.
+4. **Add the custom domain in this deployment's own Custom domain page.** Add
+   the two verification `TXT` records first and wait for both to show a green
+   check, then switch the `CNAME`. Switching the `CNAME` early breaks HTTPS
+   until the certificate finishes. Use the exact values the dashboard prints,
+   not values copied from a doc page.
+5. Set `seo.metatags.canonical` in `docs.json` to the live domain, so the
+   custom domain and the `*.mintlify.site` URL do not compete in search.
+6. Only then share the link.
+
+If any CLI command is ever run against this site, run
+`mint config set subdomain <unmute-subdomain>` first. The CLI defaults to the
+first subdomain on the account, and `mint add-domain` uses whatever is
+configured, which is how a command meant for this site lands on docs.slng.ai.
+
+After step 2 the site is not gated behind a human any more: a merge into `main`
+that touches `docs-site/` deploys on its own. Pull requests get a Mintlify
+status check and, on Pro, a preview deployment, so a broken `docs.json` shows
+up before the merge rather than on the live site.
 
 Going public later is a deliberate decision, not a default.
