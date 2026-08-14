@@ -1,0 +1,121 @@
+---
+title: "Go live on Pipecat Cloud"
+description: "Take the generated Pipecat project to production with the pipecat CLI, secret set first."
+---
+
+`unmute compile` gives you a normal Pipecat project with a `Dockerfile` and a
+deploy manifest. Pipecat Cloud builds the image from that Dockerfile in the cloud
+and runs it, and the `pipecat` CLI is how you drive it.
+
+<Note>
+  The runbook of record is `build/<target>/README.md` in your own build. It was
+  generated from your package, so it names your region, your agent, your secret
+  set, and your variables. This page is the same path with the reasons attached.
+</Note>
+
+## The manifest the compiler wrote
+
+```toml pcc-deploy.toml
+agent_name = "pipecat"
+region = "eu-central"
+secret_set = "pipecat-secrets"
+```
+
+Three lines that come from your package: the target instance name, the
+`deployment_region` you declared, and the secret set the deploy will read. The
+manifest names **no image**, deliberately: naming one switches cloud builds off.
+
+## Secret set first, then deploy
+
+The manifest already references the secret set, so a deploy cannot start until it
+exists. In order:
+
+```sh
+cd my-agent/build/pipecat
+cp .env.example .env            # then fill in the values
+pipecat cloud auth login
+pipecat cloud secrets set pipecat-secrets --file .env --region eu-central
+pipecat cloud deploy
+pipecat cloud agent status pipecat
+```
+
+`--file .env` uploads every name in the file as one set. Run the same
+`secrets set` command again to change a value.
+
+A secret set is **region-scoped**, and an agent can only read one in its own region.
+That is why the region appears twice above and comes from one line in your package:
+change `deployment_region` and recompile, and both move together.
+
+Secret-set names are globally unique across the platform. If yours is taken, create
+it under another name and pass `--secrets <other-name>` on the deploy, which
+overrides the manifest.
+
+## What `deploy` does, and does not do
+
+One command does the first deploy and every later one. Deploying the same agent
+name again updates the existing agent rather than making a second one. Sessions
+already running finish on the old image, and a deploy that fails leaves the previous
+ready version serving traffic.
+
+`status` reporting `ready` is the deploy actually being usable.
+
+No warm instance is kept unless you ask for one, because the source package declares
+no replica count:
+
+```sh
+pipecat cloud deploy --min-agents 2
+```
+
+## Regions
+
+```sh
+pipecat cloud regions list
+```
+
+A second region is a second agent, because agent names are globally unique across
+regions:
+
+```sh
+pipecat cloud secrets set pipecat-<region>-secrets --file .env --region <region>
+pipecat cloud deploy pipecat-<region> --region <region> --secrets pipecat-<region>-secrets
+```
+
+## Every name in `.env.example` is in the set
+
+On this platform the generated `.env.example` is usually one group, because one thing
+reads it: the deployed agent. If your build has a phone route, the carrier
+credentials and `PIPECAT_CLOUD_ORGANIZATION` are in that same group and belong in
+the same set.
+
+<Warning>
+  Every name must be a valid shell identifier: letters, digits, and underscores,
+  never starting with a digit. Platforms export secrets through a shell, so a bad
+  name fails at export and the value is simply missing at run time.
+</Warning>
+
+## What is verified here, and what is not
+
+The commands above come from the runbook this repository generates, which is
+generated from the same package as the code. `pipecat cloud deploy`,
+`--min-agents`, `agent status`, and `regions list` match Pipecat Cloud's current
+deployment documentation, read 2026-08-14
+([deploy](https://docs.pipecat.ai/pipecat-cloud/fundamentals/deploy)). The
+`secrets set --file .env` form appears in Pipecat Cloud's own guides rather than on
+its secrets reference page, which documents only the key-value form; both were read
+2026-08-14.
+
+Nothing on this page was executed against a real Pipecat Cloud organization during
+writing, because that needs an account and a billable agent. Treat the sequence as
+correct and the output as unseen: your build's README and
+`pipecat cloud agent status` are what tell you the truth for your deployment.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Going live" icon="rocket" href="/deploy/going-live">
+    The checklist both platforms share.
+  </Card>
+  <Card title="LiveKit Cloud" icon="cloud" href="/deploy/livekit-cloud">
+    The same trip on the other platform.
+  </Card>
+</Columns>
