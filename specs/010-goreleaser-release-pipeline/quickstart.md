@@ -64,8 +64,19 @@ deleting the release and the tag.
 
 Also verify the signature from the release page alone (SC-007):
 
+Both files are release assets, so download them first; no local build writes
+them (snapshot mode skips signing). Keyless signatures have no public key, so
+the two `--certificate-*` flags are required, not optional. Verified against
+the real v0.1.0 assets on 2026-08-14.
+
 ```sh
-cosign verify-blob --bundle unmute_0.1.0_checksums.txt.sigstore.json unmute_0.1.0_checksums.txt
+cd "$(mktemp -d)"
+gh release download v0.1.0 --repo slng-ai/unmute --pattern 'unmute_0.1.0_checksums.txt*'
+cosign verify-blob \
+  --bundle unmute_0.1.0_checksums.txt.sigstore.json \
+  --certificate-identity-regexp 'https://github.com/slng-ai/unmute/.*' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  unmute_0.1.0_checksums.txt
 shasum -a 256 -c unmute_0.1.0_checksums.txt --ignore-missing
 ```
 
