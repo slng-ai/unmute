@@ -111,8 +111,9 @@ archive.
 Homebrew is macOS only, because Homebrew on Linux has no casks. On Linux, use
 `go install` or the archive.
 
-While the repository is private, only the archive and a clone work: `brew`,
-`winget` and `go install` all need public downloads.
+`brew`, `go install` and the archive all work today. `winget` does not yet: that
+channel is still closed, so `winget install slng.unmute` will not find the
+package until it opens.
 
 Building from a clone is the contributor path, and needs Go 1.24 or newer:
 

@@ -23,8 +23,9 @@ carries a `checksums.txt`, its signature, and one SBOM per archive, so you can
 check what you downloaded before you run it.
 
 <Note>
-  While the repository is private, only the archive and a clone work. Homebrew,
-  winget and `go install` all fetch over public URLs.
+  Homebrew, `go install` and the archive all work today. winget does not yet:
+  that channel is still closed, so `winget install slng.unmute` will not find
+  the package until it opens.
 </Note>
 
 ## What you need to run an agent
