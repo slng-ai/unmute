@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng/unmute/internal/generate"
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/spec"
 )
 
 // TestSmokeTelephonyComposeTopologies is credential-free: it builds each

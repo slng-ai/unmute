@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	packagespec "github.com/slng/unmute/internal/spec"
+	packagespec "github.com/slng-ai/unmute/internal/spec"
 )
 
 // CaptureToolName is the generated tool the drivers emit when a package declares

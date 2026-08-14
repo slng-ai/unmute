@@ -3,8 +3,8 @@ package generate
 import (
 	"fmt"
 
-	"github.com/slng/unmute/internal/ir"
-	targetcap "github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/ir"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // defaultCatalog is the built-in provider map. It becomes a parameter when

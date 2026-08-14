@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/slng/unmute/internal/ir"
-	targetcap "github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/ir"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // firstRegion is the one region a Pipecat target may declare, or "" for none.

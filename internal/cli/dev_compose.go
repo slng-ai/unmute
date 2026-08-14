@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/slng/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/generate"
 )
 
 var (

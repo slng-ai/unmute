@@ -13,8 +13,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/slng/unmute/internal/generate"
-	"github.com/slng/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/spf13/cobra"
 )
 
@@ -156,7 +156,7 @@ func startLocalCarrierAgent(ctx context.Context, dir, port, proxyHost string, en
 	child.Dir = dir
 	child.Env = env
 	child.Stdout, child.Stderr = sink, sink
-	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // own group, so uv's python is reaped too
+	ownProcessGroup(child) // own group, so uv's python is reaped too
 	if err := child.Start(); err != nil {
 		return nil, fmt.Errorf("start the local agent: %w", err)
 	}

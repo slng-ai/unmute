@@ -104,10 +104,10 @@ second deployment cannot reach the first one's site.
    docs.slng.ai deployment at this repository, and never save this repository
    in its Git Settings. On Pro, each deployment carries its own subscription,
    so check the billing page before creating it.
-2. **Point it at this directory.** Git Settings: repository `slng-ai/unmute_cli`,
+2. **Point it at this directory.** Git Settings: repository `slng-ai/unmute`,
    branch `main`, then turn on **docs.json is in a subdirectory** and enter
    `/docs-site` with no trailing slash. Saving starts the first build. The
-   Mintlify GitHub App must have `unmute_cli` in its repository access list,
+   Mintlify GitHub App must have `unmute` in its repository access list,
    otherwise nothing deploys on push.
 3. **Set visibility to Private before sharing any URL.** Authentication page,
    visibility Private, then either Authenticated (Mintlify organization login,

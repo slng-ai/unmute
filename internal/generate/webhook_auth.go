@@ -3,7 +3,7 @@ package generate
 import (
 	"fmt"
 
-	"github.com/slng/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/ir"
 )
 
 // webhookAuth is one lowered auth scheme, shared by both code drivers: the

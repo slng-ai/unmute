@@ -93,19 +93,45 @@ change.
 
 ## Install
 
-You need Go 1.24 or newer to build the binary. Running an agent also needs Docker
-with Compose for the browser, or [uv](https://docs.astral.sh/uv/) for the
-terminal.
+Unmute is one static binary. Four ways to get it, in order of how little you
+have to know:
 
 ```sh
-git clone https://github.com/slng-ai/unmute_cli.git
-cd unmute_cli
+brew install slng-ai/tap/unmute              # macOS
+winget install slng.unmute                   # Windows
+go install github.com/slng-ai/unmute@latest  # anywhere with Go 1.24+
+```
+
+Or take the archive for your platform from the
+[releases page](https://github.com/slng-ai/unmute/releases): darwin, linux and
+windows, on amd64 and arm64. Each archive holds the binary, the LICENSE and this
+README, and the release also carries a signed `checksums.txt` and one SBOM per
+archive.
+
+Homebrew is macOS only, because Homebrew on Linux has no casks. On Linux, use
+`go install` or the archive.
+
+While the repository is private, only the archive and a clone work: `brew`,
+`winget` and `go install` all need public downloads.
+
+Building from a clone is the contributor path, and needs Go 1.24 or newer:
+
+```sh
+git clone https://github.com/slng-ai/unmute.git
+cd unmute
 make build       # writes bin/unmute
 make install     # puts unmute on your Go bin path
 ```
 
-There is no `go install ...@latest` one liner yet, because the module path and
-the repository URL differ. Build from a clone.
+Either way, the binary says what it is:
+
+```sh
+unmute --version
+# unmute version 1.2.0 (3a9f2c1 2026-08-14T10:11:12Z)
+```
+
+Running an agent also needs Docker with Compose for the browser, or
+[uv](https://docs.astral.sh/uv/) for the terminal.
 
 ## Use it
 

@@ -16,12 +16,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/slng/unmute/internal/generate"
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/scaffold"
-	"github.com/slng/unmute/internal/spec"
-	"github.com/slng/unmute/internal/style"
-	targetcap "github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/scaffold"
+	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/style"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // renderField drives the interactive console model through one field at a fixed

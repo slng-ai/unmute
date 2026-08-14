@@ -15,10 +15,10 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/scaffold"
-	packagespec "github.com/slng/unmute/internal/spec"
-	targetcap "github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/scaffold"
+	packagespec "github.com/slng-ai/unmute/internal/spec"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 type maintainedAgent struct {

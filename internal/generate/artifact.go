@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 type ArtifactKind string

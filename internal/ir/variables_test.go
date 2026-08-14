@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	packagespec "github.com/slng/unmute/internal/spec"
-	targetcap "github.com/slng/unmute/internal/target"
+	packagespec "github.com/slng-ai/unmute/internal/spec"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // The variables-and-secrets surface is checked at Build time, where file:line is

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/slng/unmute/internal/ir"
-	targetcap "github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/ir"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // buildLiveKitData lowers the resolved IR + target into the template model.

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/spec"
-	"github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 // The worked example is the fixture for the whole surface: input, system, and

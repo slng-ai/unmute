@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/web"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/web"
 )
 
 // TestDevSessionHandlerPipecat: the bootstrap contract for pipecat is the

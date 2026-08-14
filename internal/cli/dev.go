@@ -19,10 +19,10 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/slng/unmute/internal/generate"
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/style"
-	"github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/style"
+	"github.com/slng-ai/unmute/internal/target"
 	"github.com/spf13/cobra"
 )
 
@@ -518,11 +518,11 @@ func stopBot(c *exec.Cmd, done <-chan error) {
 	if c.Process == nil {
 		return
 	}
-	_ = syscall.Kill(-c.Process.Pid, syscall.SIGTERM)
+	signalGroup(c, syscall.SIGTERM)
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		_ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
+		signalGroup(c, syscall.SIGKILL)
 	}
 }
 

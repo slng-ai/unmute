@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/slng/unmute/internal/scaffold"
-	"github.com/slng/unmute/internal/tui"
+	"github.com/slng-ai/unmute/internal/scaffold"
+	"github.com/slng-ai/unmute/internal/tui"
 	"github.com/spf13/cobra"
 )
 

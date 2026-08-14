@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode"
 
-	targetcap "github.com/slng/unmute/internal/target"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // envNamePattern is the UPPER_SNAKE shape every env var name in a package

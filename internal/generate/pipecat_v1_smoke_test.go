@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/spec"
-	"github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 const telephonyDeepSmokeScript = `"""Exercise generated carrier ingress, serializer selection, and Redis admission."""

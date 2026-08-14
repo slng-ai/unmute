@@ -12,7 +12,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/slng/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/generate"
 )
 
 // Automatic LiveKit SIP trunk and dispatch records for local development

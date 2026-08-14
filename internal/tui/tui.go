@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/huh"
-	"github.com/slng/unmute/internal/scaffold"
-	targetcap "github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/scaffold"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 const (

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng/unmute/internal/generate"
-	"github.com/slng/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/ir"
 )
 
 // TestWriteArtifactFilesFormatsPython: the write path runs a best-effort

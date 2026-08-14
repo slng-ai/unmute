@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"regexp"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -54,7 +53,7 @@ func startQuickTunnel(ctx context.Context, port string, sink io.Writer) (*manage
 	cmd := tunnelCommand(ctx, path, "tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:"+port)
 	cmd.Stdout = watcher
 	cmd.Stderr = watcher
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // own group so we can kill children
+	ownProcessGroup(cmd) // own group so we can kill children
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start cloudflared: %w", err)
 	}

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 // TestTelephonyRouteEmitterAgreement enforces SPEC V6 over the exact route

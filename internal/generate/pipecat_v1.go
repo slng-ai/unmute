@@ -12,8 +12,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/slng/unmute/internal/ir"
-	targetcap "github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/ir"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // The Pipecat driver lowers the resolved IR into a runnable project via two

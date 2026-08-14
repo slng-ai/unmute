@@ -1,6 +1,6 @@
 # Repo map: the files you actually need
 
-A get-around guide to `unmute_cli`. Not exhaustive — the load-bearing files,
+A get-around guide to `unmute`. Not exhaustive — the load-bearing files,
 grouped by what you're trying to do. For the *why* behind the design, see
 [SCHEMA.md](SCHEMA.md) (the locked spec), [ARCHITECTURE.md](ARCHITECTURE.md)
 (system boundaries and compiler flow), and [CLAUDE.md](CLAUDE.md) (engineering
@@ -108,6 +108,20 @@ every provider binding emits.
   five-target portability fixture; every primary validates.
 - [internal/testdata/remy/](internal/testdata/remy/) — internal legacy handoff
   and task-group fixture for the LiveKit driver golden.
+
+## Releasing
+
+One tag push is the whole release. The three files below are the pipeline;
+[specs/010-goreleaser-release-pipeline/](../specs/010-goreleaser-release-pipeline/)
+holds the contracts, the rollout stages, and each one-line flip that opens a
+package manager.
+
+- [.goreleaser.yaml](../.goreleaser.yaml) — builds, archives, checksums,
+  signing, SBOMs, changelog, Homebrew cask, winget. GoReleaser v2 free tier.
+- [.github/workflows/release.yml](../.github/workflows/release.yml) — the
+  tag-triggered run. The `release-config` job in
+  [ci.yml](../.github/workflows/ci.yml) rehearses the same pipeline on every PR
+  without publishing; `make release-dry` is that command locally.
 
 ## Docs
 

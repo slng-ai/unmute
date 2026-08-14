@@ -1,28 +1,52 @@
 ---
 title: "Installation"
-description: "Build the unmute binary and check the tools you need to run an agent locally."
+description: "Install the unmute binary, or build it from a clone, and check the tools you need to run an agent locally."
 ---
 
-Unmute is one Go binary. You build it from the repository.
+Unmute is one static binary. Install it with your package manager, download it,
+or build it from a clone.
 
-## What you need
+## Pick a way
+
+| How | Command | Works on |
+|---|---|---|
+| Homebrew | `brew install slng-ai/tap/unmute` | macOS only |
+| winget | `winget install slng.unmute` | Windows |
+| Go | `go install github.com/slng-ai/unmute@latest` | anywhere with Go 1.24 or newer |
+| Archive | download from the [releases page](https://github.com/slng-ai/unmute/releases) | macOS, Linux, Windows, on amd64 and arm64 |
+
+Homebrew is macOS only because Homebrew on Linux has no casks. On Linux, use
+`go install` or the archive.
+
+Each archive holds the binary, the LICENSE and the README. Every release also
+carries a `checksums.txt`, its signature, and one SBOM per archive, so you can
+check what you downloaded before you run it.
+
+<Note>
+  While the repository is private, only the archive and a clone work. Homebrew,
+  winget and `go install` all fetch over public URLs.
+</Note>
+
+## What you need to run an agent
 
 | Tool | Needed for | Check |
 |---|---|---|
-| Go 1.24 or newer | building the `unmute` binary | `go version` |
 | Docker with Compose | `unmute dev` in the browser | `docker compose version` |
 | `uv` | `unmute dev --console` in the terminal | `uv --version` |
+| Go 1.24 or newer | `go install`, or building from a clone | `go version` |
 
 Docker and `uv` are only needed when you run an agent. You can write, validate,
-and compile a package with Go alone.
+and compile a package without either.
 
-## Build the binary
+## Build from a clone
+
+The contributor path, and the one to take if you want to change the CLI itself.
 
 <Steps>
   <Step title="Clone the repository">
     ```sh
-    git clone https://github.com/slng-ai/unmute_cli.git
-    cd unmute_cli
+    git clone https://github.com/slng-ai/unmute.git
+    cd unmute
     ```
   </Step>
   <Step title="Build">
@@ -40,10 +64,12 @@ and compile a package with Go alone.
     ```
 
     ```
-    unmute version ae9f8cc
+    unmute version 1.2.0 (3a9f2c1 2026-08-14T10:11:12Z)
     ```
 
-    You will see your own build's version, not this one.
+    The three parts are the version, the commit it was built from, and that
+    commit's date. You will see your own build's values, not these. A plain
+    `go build` with no link-time stamping prints `unmute version dev`.
   </Step>
 </Steps>
 
@@ -58,11 +84,7 @@ That runs `go install`, which puts `unmute` in your Go bin directory (usually
 anywhere. The rest of these pages write `unmute`; if you skipped this step,
 read that as `bin/unmute` from the repository root.
 
-<Note>
-  There is no `go install github.com/...@latest` one liner yet. The Go module
-  path and the repository URL differ, so the remote install path does not
-  resolve. Build from a clone.
-</Note>
+A package manager install is already on your PATH.
 
 ## Shell completion
 

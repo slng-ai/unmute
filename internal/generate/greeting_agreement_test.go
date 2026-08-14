@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/spec"
-	"github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 // safeCoreWithGreeting rebuilds safe_core with one greeting shape so each case

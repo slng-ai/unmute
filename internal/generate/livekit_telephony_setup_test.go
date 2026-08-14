@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/spec"
 )
 
 // Telephony setup is one runbook in the README and one emitted script

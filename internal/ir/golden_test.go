@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	targetcap "github.com/slng/unmute/internal/target"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 var updateCompilerGolden = flag.Bool("update", false, "rewrite compiler golden files")

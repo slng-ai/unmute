@@ -14,7 +14,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
-	"github.com/slng/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/spec"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")

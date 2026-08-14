@@ -18,8 +18,8 @@ import (
 	"text/template"
 
 	"github.com/goccy/go-yaml"
-	"github.com/slng/unmute/internal/spec"
-	targetcap "github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/spec"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 //go:embed templates
