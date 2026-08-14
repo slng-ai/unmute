@@ -1641,7 +1641,12 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 			// status stays in compile-report.json for the team to track and
 			// promote. Only Gated (no adapter exists) is a hard error.
 		case targetcap.Gated:
-			row.Errors = add(row.Errors, fmt.Sprintf("telephony %s: %s", evidence.Feature, evidence.Note))
+			// Name the connection and the transport it declares, not just the
+			// feature. The author's next move is to open a file and change a
+			// line, and until the route moved into the connection this message
+			// could not say which file that was (spec FR-016a).
+			row.Errors = add(row.Errors, fmt.Sprintf("telephony %s: %s. Connection %q declares transport: %s",
+				evidence.Feature, strings.TrimSuffix(evidence.Note, "."), plan.Connection, plan.Key.Transport))
 		default:
 			row.Errors = add(row.Errors, fmt.Sprintf("telephony feature %s has no capability tag", evidence.Feature))
 		}
