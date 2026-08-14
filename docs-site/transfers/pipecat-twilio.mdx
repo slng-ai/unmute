@@ -12,17 +12,32 @@ targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: cloud-websocket
-    carrier: twilio
     connection: twilio_voice
     deployment_region: eu-central
-    destinations:
-      billing_line: BILLING_PHONE_NUMBER
 ```
 
-Your number points at a small piece of static markup in the Twilio console,
-which streams the call to Pipecat Cloud. No server of yours is in the path, in
+```yaml connections/twilio_voice.yaml
+transport: cloud-websocket
+carrier: twilio
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+```yaml agent.yaml
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
+```
+
+Your number points at a small piece of static markup in the Twilio console, which
+streams the call to Pipecat Cloud. No server of yours is in the path, in
 production or ever.
+
+The three names in the connection are here because this package hands calls to a
+person and places test calls, and both of those speak to Twilio's API in your
+name. A package that only answers calls on this route needs no `environment:`
+block at all.
 
 ## The transfer
 
@@ -46,8 +61,17 @@ not remember the call.** That covers both endings: the destination hanging up,
 and a dial that never connected. Knowing which happened would need a callback
 endpoint that you host, and hosting nothing is the entire point of this route.
 
-Warm transfer is not possible here for the same reason. A warm handoff has to
-act on how the other leg ended.
+Warm transfer is not possible here for the same reason. A warm handoff has to act
+on how the other leg ended. Write one and validation refuses it, naming the
+connection and the transport it declares:
+
+```
+pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twilio) does
+  not emit warm transfer: a warm handoff has to act on how the destination's leg ended,
+  which on this route needs a callback endpoint you host, and hosting nothing is what
+  this route is for; warm transfer compiles on (livekit, sip) trunks today. Connection
+  "twilio_voice" declares transport: cloud-websocket
+```
 
 If you need warm, or you need the caller to come back to the same session, use
 the [LiveKit SIP route](/transfers/livekit).

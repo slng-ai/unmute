@@ -12,14 +12,25 @@ targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: daily-sip
-    destinations:
-      billing_line: BILLING_PHONE_NUMBER
+    connection: daily
 ```
 
-No `carrier:` line. On this form Daily provisions the number and Daily's own
-infrastructure delivers the call to your deployed agent, so there is no carrier
-account to configure at all.
+```yaml connections/daily.yaml
+transport: daily-sip
+```
+
+```yaml agent.yaml
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
+```
+
+That one-line connection is the whole route, and it is the shortest a connection
+gets. No `carrier:` line, because on this form Daily provisions the number and
+Daily's own infrastructure delivers the call to your deployed agent, so there is
+no carrier account to configure at all. No `environment:` either, for the same
+reason: the `DAILY_API_KEY` the runtime reads comes from the route, not from your
+package, so it is not in `secrets:` and it is still in the generated
+`.env.example`.
 
 ## The transfer
 
@@ -52,7 +63,7 @@ unmute validate examples/pipecat-human-transfer-daily
 ✓ pipecat (pipecat)
 
 Setup prerequisites:
-  pipecat: daily_dialout: Ask Daily to enable dial-out on the domain the agent's rooms belong to: it is a paid feature granted on request, per domain, and international dial-out is enabled separately.
+  pipecat: daily_dialout: Ask Daily to enable dial-out on the domain the agent's rooms belong to: it is a paid feature granted on request, per domain, and international dial-out is enabled separately. It covers dialling a SIP URI as well as a PSTN number, so a target that carries its calls through its own carrier trunk needs the same approval and needs no purchased Daily number.
     https://docs.pipecat.ai/pipecat-cloud/guides/telephony/daily-dial-out (verified 2026-08-12)
 ```
 

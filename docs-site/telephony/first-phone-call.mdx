@@ -37,7 +37,18 @@ TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TWILIO_AUTH_TOKEN=your_auth_token
 TWILIO_PHONE_NUMBER=+15551234567
 PIPECAT_CLOUD_ORGANIZATION=your-org-slug
+SIP_TRUNK_HOSTNAME=your-trunk.pstn.twilio.com
+SIP_AUTH_USERNAME=your_trunk_username
+SIP_AUTH_PASSWORD=your_trunk_password
+SIP_FROM_NUMBER=+15551234567
 ```
+
+The last four are the trunk settings the `livekit` target's connection names.
+They are in this list because `agent.yaml` declares every name the package
+writes, and the generated agent checks that whole list before it takes a call. If
+you are only testing the `pipecat` target you can put any placeholder there. The
+[connections reference](/reference/connections-yaml) shows where each group of
+names comes from.
 
 You never set `UNMUTE_PUBLIC_URL` or `UNMUTE_OUTBOUND_TOKEN`. The dev command
 supplies those itself.
@@ -45,7 +56,7 @@ supplies those itself.
 <Warning>
   Every environment variable name must be a valid shell identifier: letters,
   digits, and underscores, never starting with a digit. A name like
-  `11LABS_API_KEY` fails when the platform exports it and the value is simply
+  `2FACTOR_API_KEY` fails when the platform exports it and the value is simply
   missing at run time.
 </Warning>
 
@@ -104,7 +115,7 @@ target, and put it back to test the `livekit` one.
   <Card title="Outbound calls" icon="phone-outgoing" href="/telephony/outbound-calls">
     Make the agent dial you.
   </Card>
-  <Card title="Webhooks and tunnels" icon="link" href="/telephony/webhooks-and-tunnels">
+  <Card title="Webhooks and tunnels" icon="link" href="/dev/webhooks-and-tunnels">
     Bring your own public URL, or leave the carrier untouched.
   </Card>
 </Columns>

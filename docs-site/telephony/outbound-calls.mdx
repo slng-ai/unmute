@@ -25,6 +25,36 @@ Without `outbound: true`, `--to` is refused:
 unmute: dev <package>: --to needs an outbound-capable target; "pipecat" has no outbound direction (set channels.phone outbound: true)
 ```
 
+## One route per target
+
+Dialling out is the carrier's job, so each target needs a connection that can
+reach your carrier account. `examples/outbound-reminder` runs on both targets, and
+they ride different mechanisms, so it has two connection files holding the same
+three names:
+
+```yaml connections/twilio_websocket.yaml
+transport: carrier-websocket
+carrier: twilio
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+```yaml connections/twilio_connector.yaml
+transport: connector
+carrier: twilio
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+`from_number` is the caller identity the person you dial sees. The Pipecat target
+names the first file, the LiveKit target names the second, and neither target says
+anything else about the route. See
+[connections/&lt;name&gt;.yaml](/reference/connections-yaml).
+
 ## Place a test call
 
 ```sh
@@ -119,7 +149,7 @@ System sources include `to_number`, `from_number`, `direction`, `call_id`,
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="Webhooks and tunnels" icon="link" href="/telephony/webhooks-and-tunnels">
+  <Card title="Webhooks and tunnels" icon="link" href="/dev/webhooks-and-tunnels">
     Take control of the public URL, or leave the carrier alone.
   </Card>
   <Card title="Variables reference" icon="braces" href="/reference/variables">

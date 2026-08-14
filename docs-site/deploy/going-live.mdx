@@ -48,8 +48,15 @@ repository.
 <Warning>
   Every variable name must be a valid shell identifier: letters, digits, and
   underscores, never starting with a digit. Platforms export secrets through a
-  shell, so a name like `11LABS_API_KEY` fails at export and the value is
-  simply missing at run time.
+  shell, so a name like `2FACTOR_API_KEY` fails at export and the value is simply
+  missing at run time. The compiler refuses one before you get there:
+
+  ```
+  connections/twilio_sip.yaml:6: connection "twilio_sip" environment value
+    "2FACTOR_SIP_PASSWORD" is not a valid environment variable name: use letters, digits,
+    and underscores, and do not start with a digit. A deployment platform exports secrets
+    through a shell, so this name would be missing at runtime with no error of its own
+  ```
 </Warning>
 
 ## Sizing
@@ -104,10 +111,16 @@ unmute compile ./my-agent
 ## Where to go next
 
 <Columns cols={2}>
+  <Card title="LiveKit Cloud" icon="cloud" href="/deploy/livekit-cloud">
+    The `lk` CLI path, in order.
+  </Card>
+  <Card title="Pipecat Cloud" icon="cloud" href="/deploy/pipecat-cloud">
+    The `pipecat` CLI path, in order.
+  </Card>
   <Card title="CLI reference" icon="terminal" href="/reference/cli/overview">
     Every command, flag, and exit code.
   </Card>
-  <Card title="Providers" icon="list" href="/reference/providers">
+  <Card title="Models" icon="list" href="/models/stt">
     Which vendors each target supports, per role.
   </Card>
 </Columns>

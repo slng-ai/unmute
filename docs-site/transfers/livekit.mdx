@@ -13,14 +13,22 @@ targets:
     provider: livekit
     version: "1.6.4"
     sdk_language: python
-    transport: sip
-    carrier: twilio
     connection: twilio_sip
     deployment_region: eu-central
-    destinations:
-      billing_line: BILLING_PHONE_NUMBER
-      supervisor_line: SUPERVISOR_PHONE_NUMBER
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
 ```
+
+```yaml agent.yaml
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
+  supervisor_line: SUPERVISOR_PHONE_NUMBER
+```
+
+The route is `connections/twilio_sip.yaml`, below. The two desks are in
+`agent.yaml`, because the same desk answers whichever target places the call.
 
 ## Two transfers, side by side
 
@@ -79,7 +87,8 @@ Four standard SIP names, not Twilio specific ones, because the same generated
 code dials through any SIP carrier with them:
 
 ```yaml connections/twilio_sip.yaml
-kind: telephony
+transport: sip
+carrier: twilio
 environment:
   sip_address: SIP_TRUNK_HOSTNAME
   sip_username: SIP_AUTH_USERNAME
@@ -87,8 +96,9 @@ environment:
   from_number: SIP_FROM_NUMBER
 ```
 
-They are yours to name. The compiler carries whatever you write through
-verbatim.
+The first two lines are the route: this is the file that says the call arrives
+over SIP and Twilio carries it. The four names below are yours, and the compiler
+carries whatever you write through verbatim.
 
 ## Run it
 

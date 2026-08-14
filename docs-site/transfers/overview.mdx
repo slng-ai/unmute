@@ -41,19 +41,26 @@ The control's name goes in the agent's tool list, like any other control.
 
 ## Destinations are symbolic
 
-The model never sees a phone number. `destination` names a symbol, and the
-symbol is resolved on the target:
+The model never sees a phone number. `destination` names a symbol, and the symbol
+is resolved at the top level of `agent.yaml`:
 
-```yaml targets.yaml
-    destinations:
-      billing_line: BILLING_PHONE_NUMBER
-      supervisor_line: SUPERVISOR_PHONE_NUMBER
+```yaml agent.yaml
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
+  supervisor_line: SUPERVISOR_PHONE_NUMBER
 ```
 
-A destination is either a literal, an E.164 number or a `sip:` URI, or the
-UPPER_SNAKE name of an environment variable holding one, read at call time. The
-shipped examples all use the environment form, because any number a repository
-could ship is a number nobody answers.
+A destination is only the UPPER_SNAKE name of an environment variable holding an
+E.164 number or a `sip:` URI, read at call time. A number written here is refused:
+
+```
+agent.yaml:60: destination "billing_line" is "+14155550123", a literal. agent.yaml is
+  the portable half of a package, so a destination names an environment variable holding
+  the number: billing_line: BILLING_PHONE_NUMBER
+```
+
+Destinations sit in `agent.yaml` rather than on the target because who this agent
+escalates to is the same desk whichever carrier reaches it.
 
 ## The route decides what is possible
 
@@ -74,8 +81,21 @@ Two of those cells mean different things, and the difference matters:
 - **not built yet** means the platform does ship it and Unmute has not emitted
   it.
 
-A transfer that a route cannot do is refused at validation, with the target
-named. It never compiles into something that quietly does nothing.
+The route comes from the connection the target names, so that is what the refusal
+points at. A transfer a route cannot do is refused at validation, naming the
+connection and the transport it declares, and it never compiles into something
+that quietly does nothing:
+
+```
+pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twilio) does
+  not emit warm transfer: a warm handoff has to act on how the destination's leg ended,
+  which on this route needs a callback endpoint you host, and hosting nothing is what
+  this route is for; warm transfer compiles on (livekit, sip) trunks today. Connection
+  "twilio_voice" declares transport: cloud-websocket
+```
+
+That last sentence is the fix: to get a warm transfer here you change the
+connection, not the control.
 
 ## When the person does not pick up
 

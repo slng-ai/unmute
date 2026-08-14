@@ -36,6 +36,11 @@ In a terminal, `unmute init` with no argument opens an interactive console that
 asks for the name, the models, and the target, and can validate and compile the
 result for you.
 
+Pick a phone route there and the scaffold writes one more file,
+`connections/<name>.yaml`, holding the transport, the carrier, and the
+environment variable names that route needs. The target only names it. See
+[connections/&lt;name&gt;.yaml](/reference/connections-yaml).
+
 Outside a terminal, a name is required:
 
 ```

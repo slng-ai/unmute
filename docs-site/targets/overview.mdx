@@ -37,9 +37,14 @@ is yours: a package with two Twilio setups might call them `pipecat_twilio` and
 | `sdk_language` | the SDK language, `python` |
 | `pins` | extra package pins for the generated project |
 | `models` | per target overrides of named model entries |
-| `transport`, `carrier`, `connection` | the phone route, see [Telephony](/telephony/overview) |
-| `destinations` | symbolic transfer destinations, see [Transfers](/transfers/overview) |
+| `connection` | the one connection file that declares this target's phone route |
 | `deployment_region` | where the platform deploys the agent, forwarded as written |
+
+A target says nothing else about telephony. It names one connection, and
+[that file](/reference/connections-yaml) declares the transport, the carrier, and
+the environment names the route needs. The numbers a transfer dials live in
+`agent.yaml` under `destinations:`, because who you escalate to is the same desk
+whichever carrier reaches it.
 
 ## Overrides, not forks
 
@@ -87,7 +92,7 @@ Both run the same agent. The differences that usually decide it:
 | phone routes | Daily provisioned numbers, your carrier over websockets, Pipecat Cloud carrier streams | SIP trunks, or a generated Twilio bridge |
 | transfers | cold, on two of its routes | cold and warm, on the SIP route |
 | turn detection in the examples | local Silero | LiveKit's own turn model |
-| provider lists | see [providers](/reference/providers) | see [providers](/reference/providers) |
+| provider lists | see [Models](/models/stt) | see [Models](/models/stt) |
 
 If you need warm transfer today, that is the LiveKit SIP route. If you want a
 phone number with nothing hosted, that is one of the Pipecat routes. For a
