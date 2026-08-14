@@ -72,8 +72,9 @@ of it.
 `on_unavailable` covers every way the person does not take the call. See
 [controls](../../docs/user/reference/controls.md#kind-human_transfer).
 
-Destinations are symbolic names resolved in `targets.yaml`, and this example
-resolves both to env var names:
+Destinations are symbolic names, resolved once for the whole package at the top
+level of `agent.yaml`. Who the agent escalates to is the same desk whichever
+carrier reaches it, so it is not a per-target fact:
 
 ```yaml
 destinations:
@@ -81,9 +82,12 @@ destinations:
   supervisor_line: SUPERVISOR_PHONE_NUMBER
 ```
 
-The env var form lands in the generated `.env.example` and the required-env
-list, and is read at call time. The model never sees a phone number and can
-never dial an arbitrary one: it picks a symbolic name, the target resolves it.
+A value is the name of an environment variable holding the number, not the
+number: `agent.yaml` is the portable half of a package, and a literal is refused
+at compile time. The name lands in the generated `.env.example` and the
+required-env list, and is read at call time. The model never sees a phone number
+and can never dial an arbitrary one: it picks a symbolic name, and the compiler
+resolves it.
 
 ## Set it up
 

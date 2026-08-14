@@ -263,9 +263,9 @@ validator accepts, and offer the route as one choice.
 ## Phase 8: Polish & cross-cutting
 
 - [X] T070 Rewrite `docs/user/learn/07-phone-calls.md` as the end-to-end path: pick a route, write the connection, declare the names in `secrets:`, set the destinations, learn which transfers the route supports, test in a browser before testing on a phone (FR-024a). It links out to `docs/user/reference/connections.md` rather than repeating it. No sixth page is added.
-- [ ] T071 [P] Re-read every example README end to end against its package. Prose rots and no test holds it; CLAUDE.md requires reading the example page before claiming the work is done.
+- [X] T071 [P] Re-read every example README end to end against its package. Prose rots and no test holds it; CLAUDE.md requires reading the example page before claiming the work is done.
 - [X] T072 [P] Confirm `TestExampleAndDocLinksIntoExamplesResolve` still passes after the new page and the `outbound-reminder` connection rename.
-- [ ] T073 Run the full `quickstart.md` §1–§5 and record the result. §1's "exactly two goldens changed" is the acceptance check for research R5.
+- [X] T073 Run the full `quickstart.md` §1–§5 and record the result. §1's "exactly two goldens changed" is the acceptance check for research R5.
 - [X] T074 [P] Run `make smoke` (needs Python). It should be unaffected, because the resolved IR did not change and no template input moved — which is what makes running it worth the minute.
 - [X] T075 Verify `grep -rn "transport:\|carrier:\|destinations:" examples/*/targets.yaml` and `grep -rn "^kind:" examples/*/connections/*.yaml` both print nothing (SC-003).
 - [X] T076 [P] Grep `internal/spec/` and `internal/ir/` for any path that still reports a bare "unknown field" for a field this feature moved, per Principle II's rule that a moved field must name its new form.

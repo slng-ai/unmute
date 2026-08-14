@@ -80,6 +80,16 @@ Neither shape puts a value in a file, and neither is reachable from `{{...}}`:
 a template renders into the greeting, a prompt, a tool argument, or a URL, and
 all four are spoken, logged, or traced.
 
+## Two connections, one Twilio account
+
+This is the package that shows why a connection file is per **route** rather
+than per account. Both targets use the same Twilio account, but they reach it
+by different mechanisms — Pipecat over `carrier-websocket`, LiveKit over
+`connector` — and a connection declares its own transport. So there are two
+files, `connections/twilio_websocket.yaml` and `connections/twilio_connector.yaml`,
+holding the same three environment names. Each target names one of them and says
+nothing else about telephony.
+
 ## What you set, and what is set for you
 
 The browser is the default way to test, and it needs none of the phone values
