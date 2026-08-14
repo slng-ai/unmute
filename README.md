@@ -2,13 +2,7 @@
   <img src="images/Logo_SLNG.png" alt="SLNG" width="150">
 </p>
 
-<h1 align="center">Unmute</h1>
-
-<p align="center">
-  <b>Write one voice agent spec. Compile it to a Pipecat or LiveKit Agents project you own.</b>
-</p>
-
----
+<h1 align="center">Unmute x SLNG</h1>
 
 Unmute is a command line compiler for voice agents. You write a small package of
 YAML and Markdown that says who the agent is, which models it uses, and which
