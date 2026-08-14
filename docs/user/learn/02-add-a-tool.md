@@ -161,9 +161,13 @@ Not much, on purpose:
 - `output:` is `warn` on the managed target (Vapi), because it cannot enforce it. On Pipecat it is enforced.
 - `interruption: provider_default` and `effect` are `core`.
 
-Keep tools webhook-based and they stay in the safe core. Pipecat also emits
-`local` Python handlers. It doesn't emit `mcp` tools yet; see the
-[Pipecat target page](../targets/pipecat.md).
+Keep tools webhook-based and they stay in the safe core. Both code targets also
+emit `local` Python handlers and `mcp` tool sources, where a remote MCP server
+brings its own tools. The `mcp:` block is written up in
+[tools](../reference/tools.md#mcp) and runnable in
+[`examples/mcp-example`](../../../examples/mcp-example/); on Pipecat such a
+source goes on an agent rather than a task, which the
+[Pipecat target page](../targets/pipecat.md) explains.
 
 ## You already have one: end_call
 

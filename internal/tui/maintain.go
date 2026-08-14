@@ -192,7 +192,8 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			}
 			value.Handler, value.HandlerSource = tool.Local.Handler, pkg.Handlers[handlerPath]
 		case tool.MCP != nil:
-			value.URLEnv = tool.MCP.URLEnv
+			value.URLEnv, value.Auth = tool.MCP.URLEnv, tool.MCP.Auth
+			value.MCPTransport, value.MCPTools = tool.MCP.Transport, tool.MCP.Tools
 		case tool.Builtin != nil:
 			value.Builtin, value.Instructions = tool.Builtin.ID, tool.Builtin.Instructions
 		}

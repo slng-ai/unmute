@@ -215,7 +215,8 @@ type Tool struct {
 
 	// Inject is a flat map of request key to scalar, merged into the call and
 	// never advertised to the model: a value may carry {{variable}} tokens.
-	// Legal on webhook, local, and mcp only (variable_secrets_specs.md V3).
+	// Legal on webhook and local only: an mcp server owns its own call shape,
+	// so there is nothing here to merge into (validate.go, SCHEMA N40).
 	Inject map[string]any `json:"inject,omitempty" yaml:"inject,omitempty"`
 
 	Webhook        *ToolWebhook  `json:"webhook,omitempty" yaml:"webhook,omitempty"`
@@ -244,10 +245,21 @@ type ToolLocal struct {
 	Handler string `json:"handler,omitempty" yaml:"handler,omitempty"`
 }
 
-// ToolMCP is the `mcp:` block: the MCP server address, named by env var. The
-// slot where MCP auth would land later, without a second shape change.
+// ToolMCP is the `mcp:` block: one remote MCP server used as a tool source
+// (SCHEMA N40). The server owns each tool's name, description, and parameters,
+// so the file only says how to reach the server and which of its tools to
+// expose. Every address and secret is an environment variable name, never a
+// value.
 type ToolMCP struct {
 	URLEnv string `json:"url_env" yaml:"url_env"`
+	// Transport is `sse` or `streamable_http`. Empty means the platform's own
+	// default for the URL (a path ending in /mcp is streamable HTTP).
+	Transport string `json:"transport,omitempty" yaml:"transport,omitempty"`
+	// Auth is the same shape webhook auth uses (bearer, api_key).
+	Auth *ToolAuth `json:"auth,omitempty" yaml:"auth,omitempty"`
+	// Tools selects server tool names to expose. Empty means every tool the
+	// server offers.
+	Tools []string `json:"tools,omitempty" yaml:"tools,omitempty"`
 }
 
 // ToolBuiltin is the `builtin:` block: a prebuilt-tool registry id plus its

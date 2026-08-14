@@ -71,9 +71,15 @@ it learns mid-call into the session userdata (variable_secrets_specs.md V6). */ 
 {{- /* prebuilt_list renders execution: builtin tools as SDK helper instances
 spread into the tools= kwarg (docs/spec/prebuilt-tools.md). */ -}}
 {{define "prebuilt_list"}}{{range $i, $p := .}}{{if $i}}, {{end}}{{if eq $p.Builtin "end_call"}}*EndCallTool(extra_description={{pyq $p.Description}}{{if $p.Instructions}}, end_instructions={{pyq $p.Instructions}}{{end}}).tools{{end}}{{end}}{{end -}}
-{{- /* mcp_mounts renders an agent's/task's MCP servers (B3): one server per
-url_env, allowed_tools keeping D8 visibility. */ -}}
-{{define "mcp_mounts"}}mcp_servers=[{{range $i, $s := .}}{{if $i}}, {{end}}mcp.MCPServerHTTP(url=os.environ[{{pyq $s.URLEnv}}], allowed_tools=[{{range $j, $t := $s.Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]){{end}}]{{end -}}
+{{- /* mcp_mounts renders an agent's/task's MCP tool sources (N40): one
+MCPToolset per source, on the tools surface. An absent field emits no argument,
+so the SDK's own default stands: no transport_type means it reads the URL (a
+path ending in /mcp is streamable HTTP), no allowed_tools means every tool the
+server exposes, no headers means no authentication. */ -}}
+{{define "mcp_mounts"}}{{range $i, $s := .}}{{if $i}}, {{end}}mcp.MCPToolset(id={{pyq $s.Name}}, mcp_server=mcp.MCPServerHTTP(url=os.environ[{{pyq $s.URLEnv}}]{{if $s.Transport}}, transport_type={{pyq $s.Transport}}{{end}}{{if $s.Tools}}, allowed_tools=[{{range $j, $t := $s.Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]{{end}}{{if $s.Auth}}, headers={{$s.Auth.Expr}}{{end}})){{end}}{{end -}}
+{{- /* tools_list is the whole tools= surface: prebuilt tools first, then the
+MCP sources, in the order the package lists them. */ -}}
+{{define "tools_list"}}{{template "prebuilt_list" .Prebuilt}}{{if and .Prebuilt .MCPServers}}, {{end}}{{template "mcp_mounts" .MCPServers}}{{end -}}
 {{if .NeedsAsyncio}}import asyncio
 {{end}}{{if .NeedsInspect}}import inspect
 {{end}}{{if or .Outbound .Telephony .CallStartVars}}import json
@@ -295,8 +301,9 @@ not leave the question open: the caller is holding for the whole of this convers
 {{end}}
 {{- if .RequiredSecrets}}
 # --- required environment ----------------------------------------------------
-# Declared secrets (agent.yaml secrets:). A missing one fails the session before
-# the agent answers, rather than at the first tool call.
+# Declared secrets (agent.yaml secrets:), plus every address and token an MCP
+# tool source names. A missing one fails the session before the agent answers,
+# rather than at the first tool call.
 REQUIRED_ENV = [
 {{- range .RequiredSecrets}}
     {{pyq .}},
@@ -512,11 +519,8 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- if .TTS}}
             tts={{template "svc" .TTS.Call}},
 {{- end}}
-{{- if .MCPServers}}
-            {{template "mcp_mounts" .MCPServers}},
-{{- end}}
-{{- if .Prebuilt}}
-            tools=[{{template "prebuilt_list" .Prebuilt}}],
+{{- if or .Prebuilt .MCPServers}}
+            tools=[{{template "tools_list" .}}],
 {{- end}}
         )
 
@@ -831,7 +835,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{range .Tasks}}
 class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
-        super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if .MCPServers}}, {{template "mcp_mounts" .MCPServers}}{{end}}{{if .Prebuilt}}, tools=[{{template "prebuilt_list" .Prebuilt}}]{{end}})
+        super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if or .Prebuilt .MCPServers}}, tools=[{{template "tools_list" .}}]{{end}})
 
     async def on_enter(self) -> None:
 {{- if .PromptExpr}}

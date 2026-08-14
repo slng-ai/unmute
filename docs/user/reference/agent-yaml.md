@@ -85,7 +85,7 @@ number or a `sip:` URI, read at call time. A literal number is refused:
 fact. Each name belongs in [`secrets`](secrets.md) too.
 
 This is package-wide and has no per-target form. Which desk answers is the same
-question whichever carrier reaches it. (Until the 008 amendment `destinations`
+question whichever carrier reaches it. (Until SCHEMA N41 `destinations`
 sat on each target and accepted literals; both are gone.)
 
 Required: when any `human_transfer` control is used. Values: map of

@@ -63,10 +63,10 @@ Exactly one of these blocks says how the tool runs. The block name is the execut
 | `webhook:` | calls an HTTP endpoint you host | all four targets. **The safe choice.** |
 | `local:` | runs a Python handler in your package | code targets only |
 | `builtin:` | picks a provider prebuilt tool by name | LiveKit and Pipecat only (see below) |
-| `mcp:` | mounts an MCP server | fails on Deepgram (no runtime MCP client); on LiveKit needs SDK language `python` |
+| `mcp:` | offers the tools of a remote MCP server | fails on Deepgram (no runtime MCP client); on LiveKit needs SDK language `python`; on Pipecat, agent scope only |
 | `client: {}`, `provider_hosted: {}` | gated per driver | each driver documents what it can host |
 
-On Pipecat, the driver emits the `webhook`, `local`, and `builtin` blocks. `mcp` remains a driver maturity gate.
+On Pipecat, the driver emits the `webhook`, `local`, `builtin`, and `mcp` blocks. The one thing it cannot do is scope an MCP source to a **task**; list it on the agent instead, and validation says so if you do not.
 
 ### webhook:
 
@@ -104,10 +104,46 @@ There is no credential field on the `local:` block and no secret object passed i
 
 ### mcp:
 
+An MCP server is a **tool source**: one file, one server, and the server tells
+the agent what its tools are when the connection opens.
+
 ```yaml
+# tools/web_search.yaml  (the file name is the source name)
 mcp:
-  url_env: BOOKINGS_MCP_URL     # the MCP server address, by env var name
+  url_env: FIRECRAWL_MCP_URL     # required: the server address, by env var name
+  transport: streamable_http     # optional: sse | streamable_http
+  auth:                          # optional: the same shapes webhook auth uses
+    type: bearer
+    token_env: FIRECRAWL_API_KEY
+  tools:                         # optional: leave it out to offer every tool
+    - firecrawl_search
 ```
+
+**The file is the block and nothing else.** No `description`, no `input`, no
+`output`, no `inject`, no `interruption`, no `effect`. The server owns each
+tool's contract, so a contract written here would be a claim nothing reads.
+Writing one fails at load, naming the line to delete (SCHEMA.md N40).
+
+`transport` is optional. Leave it out and both targets use the same rule: a URL
+whose path ends in `/mcp` speaks streamable HTTP, anything else speaks SSE.
+Write it when your server disagrees with that guess.
+
+`tools` is the selection. Without it the agent is offered every tool the server
+exposes, which for a big server is usually too many for a voice call. With it,
+the agent is offered exactly those. The names are not checked at compile time,
+because the server's tool list only exists once the connection is open: a name
+the server does not expose is simply never offered.
+
+`auth` is the [webhook auth](#webhook-auth) shape, `bearer` or `api_key`, with
+the token named by an environment variable. Both the address and the token
+reach `.env.example` and the generated startup check, so a missing value is
+named before the agent dials.
+
+Assign the source like any other tool: put its name in an agent's `tools:` list
+(or a task's, on LiveKit). Two files may name the same `url_env`; they are two
+independent sources with their own selections.
+
+Runnable example: [`examples/mcp-example`](../../../examples/mcp-example/).
 
 ### builtin:
 

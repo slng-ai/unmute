@@ -169,7 +169,7 @@ destinations:
   supervisor_line: SUPERVISOR_PHONE_NUMBER
 ```
 
-The name lands in the generated `.env.example` and the required-env list, is read at call time, and belongs in [`secrets`](secrets.md) too. A literal number or URI is refused: `agent.yaml` is the portable half of a package, a number is a deployment fact, and it is exactly the value that differs between staging and production. (Until SCHEMA N40 the map sat on each target and accepted literals; both are gone.)
+The name lands in the generated `.env.example` and the required-env list, is read at call time, and belongs in [`secrets`](secrets.md) too. A literal number or URI is refused: `agent.yaml` is the portable half of a package, a number is a deployment fact, and it is exactly the value that differs between staging and production. (Until SCHEMA N41 the map sat on each target and accepted literals; both are gone.)
 
 The model never sees a phone number and cannot dial one. It picks the symbolic name and the compiler resolves it.
 

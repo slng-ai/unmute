@@ -69,6 +69,28 @@ right there, then add `--telephony`, which is where the route values below start
 mattering. The browser loop is the shortest one this project has.
 {{- end}}
 
+{{- if .NeedsMCP}}
+
+## MCP tool sources
+
+The bot opens one MCP client per source at startup and registers the server's
+tools on that agent's LLM. Each address and token is read from the environment,
+never written here.
+{{range $a := .Agents}}{{range $a.MCPSources}}
+- `{{.Name}}` on agent `{{$a.Name}}`, address from `{{.URLEnv}}`{{if .Tools}}, offering {{range $i, $t := .Tools}}{{if $i}}, {{end}}`{{$t}}`{{end}}{{else}}, offering every tool the server exposes{{end}}
+{{- end}}{{end}}
+
+Two things to expect at run time:
+
+- **A selected name the server does not expose is never offered.** The server's
+  tool list only exists once the connection is open, so nothing can check those
+  names at compile time. If a tool is never called, check its spelling against
+  the server's own list first.
+- **An unreachable server stops the bot.** The client's `start()` raises during
+  setup, so the process exits with the connection error rather than answering a
+  call without the tools it promised.
+{{- end}}
+
 {{- if .CallStartVars}}
 
 ## Input variables

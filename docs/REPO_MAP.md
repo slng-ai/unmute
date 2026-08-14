@@ -99,7 +99,10 @@ every provider binding emits.
 
 - [examples/README.md](../examples/README.md) — runnable LiveKit/Pipecat matrix
   using one salon workflow across a large prompt, independent tasks, a task
-  group, and two-agent handoffs.
+  group, and two-agent handoffs, plus the telephony and MCP packages.
+- [examples/mcp-example/](../examples/mcp-example/) — the MCP package: one
+  agent whose only tool is a remote MCP server (Firecrawl web search), on both
+  code targets, browser only.
 - [internal/testdata/safe_core/](internal/testdata/safe_core/) — internal
   five-target portability fixture; every primary validates.
 - [internal/testdata/remy/](internal/testdata/remy/) — internal legacy handoff

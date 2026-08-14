@@ -319,6 +319,7 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | webhook tools | ok |
 | webhook `auth` (bearer/api_key) | ok |
 | tool `output` schema, `interruption`, `effect` | ok |
+| `mcp` tool sources (SSE and streamable HTTP, auth, tool selection) | ok on an agent's `tools:`; a task-scoped source fails by name (see below) |
 | task (delegate and return) | ok |
 | per-task `model` | not yet (driver gate) |
 | task group, any `then` (return / transfer / end) | ok |
@@ -338,6 +339,40 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 
 Everything in the [learn pages](../learn/01-one-agent.md), including the guarded handoff, the task, and the task group, runs here. The one hard `fail` is the per-task `model:` override; it sits with the driver gates below.
 
+## MCP tool sources
+
+One tool file declares one remote MCP server, and the server describes its own
+tools when the connection opens (SCHEMA.md N40):
+
+```yaml
+# tools/web_search.yaml
+mcp:
+  url_env: FIRECRAWL_MCP_URL
+  transport: streamable_http       # optional
+  auth:                            # optional
+    type: bearer
+    token_env: FIRECRAWL_API_KEY
+  tools:                           # optional: leave it out to offer them all
+    - firecrawl_search
+```
+
+The driver emits one `MCPClient` per source. It connects during setup, registers
+the server's tools on that agent's LLM, and closes on shutdown, so the tools are
+advertised while that agent is active and not before. The generated project asks
+for `pipecat-ai[mcp,...]`, which is the extra that carries the client.
+
+Two behaviours worth knowing before you run it:
+
+- **An unreachable server stops the bot.** `start()` raises during setup, so the
+  process exits with the connection error rather than answering a call without
+  the tools it promised. LiveKit logs and carries on; this is the honest
+  difference between the platforms, not something the compiler smooths over.
+- **No `transport:` means the bot chooses at startup**, with the same rule
+  LiveKit's SDK uses: a URL path ending in `/mcp` speaks streamable HTTP,
+  anything else speaks SSE.
+
+Runnable example: [`examples/mcp-example`](../../../examples/mcp-example/).
+
 ## What the driver does not emit yet
 
 Some features are in the schema and Pipecat itself supports them, but this first version of the driver does not write them yet. These are **maturity gates on the driver, not limits of Pipecat.** Using one fails the compile today, and the gate lifts when the driver adds it. Right now these are not emitted:
@@ -346,8 +381,10 @@ Some features are in the schema and Pipecat itself supports them, but this first
 - **Per-task `model:`.** Pipecat's mechanism for switching models mid-call stalls the conversation in the current release, so there is nothing safe to emit yet. Drop the override and the task runs on the delegating agent's model.
 - **`thinking_audio`.**
 - **Voicemail detection** (`on_voicemail`) on carrier WebSocket routes.
-- **`mcp` tools.** Use `webhook` or `local` Python-handler tools, which are
-  emitted.
+- **An `mcp` source scoped to a task.** Agent scope is emitted (see below); a
+  task's `tools:` list cannot hold one, because a Pipecat Flows node advertises
+  only the function schemas it lists and the SDK's MCP client exposes no
+  per-tool handler to put in one. List the source on the agent instead.
 - **Warm human transfer** (the `warm:` block), on every route, for two different
   reasons (checked 2026-08-12). On the **carrier WebSocket** routes the platform
   has no transfer control at all, so there is nothing to build against. On the

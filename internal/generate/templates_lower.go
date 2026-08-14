@@ -216,7 +216,7 @@ func requiredSecretEnv(agent *ir.Agent) []string {
 //
 // A phone package must run in the browser with nothing but model keys
 // (spec FR-018). That held for free while connection environment names were
-// exempt from `secrets:`; now that they are declared there (SCHEMA N40) they
+// exempt from `secrets:`; now that they are declared there (SCHEMA N41) they
 // reach the startup check like any other secret, and a package with a secrets
 // block would demand carrier credentials before opening a browser session.
 //

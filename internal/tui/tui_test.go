@@ -1137,17 +1137,18 @@ func TestTUIMatchesCapabilityTable(t *testing.T) { // docs/spec/tui.md V42
 }
 
 func TestV42ExecutionPickerDerivesFromTable(t *testing.T) { // docs/spec/tui.md V42
-	// Gated: mcp on Pipecat surfaces the table row's own note, then Back.
+	// Gated: mcp on Deepgram surfaces the table row's own note, then Back.
+	// (Pipecat emits MCP sources since N40, so its row is no longer a gate.)
 	var output bytes.Buffer
 	tool := scaffold.Tool{Name: "book_table"}
-	back, err := chooseToolExecution(newRunner(strings.NewReader("3\n1\n5\n"), &output, true), string(targetcap.Pipecat), &tool)
+	back, err := chooseToolExecution(newRunner(strings.NewReader("3\n1\n5\n"), &output, true), string(targetcap.Deepgram), &tool)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !back {
 		t.Fatal("gated mcp choice did not permit Back")
 	}
-	note := targetcap.Default().Capability(targetcap.FieldToolMCP, targetcap.Pipecat).Note
+	note := targetcap.Default().Capability(targetcap.FieldToolMCP, targetcap.Deepgram).Note
 	if !strings.Contains(output.String(), note) || !strings.Contains(output.String(), "Identity → Target") {
 		t.Fatalf("gated mcp choice omitted the table note or target guidance:\n%s", output.String())
 	}

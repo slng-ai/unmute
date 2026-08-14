@@ -74,6 +74,7 @@ deepgram (deepgram): FAIL
   warning: Deepgram semantic endpointing depends on the bound listen model
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml
   error: Deepgram has no runtime MCP client
+  error: tool "lookup_customer" mcp execution takes no description, input, or output: the server describes its own tools
   error: tool "lookup_customer" url_env is required for mcp execution (the MCP server address env)
 
 CASE thinking_audio

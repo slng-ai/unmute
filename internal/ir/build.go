@@ -504,6 +504,9 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 		}
 	case raw.MCP != nil:
 		tool.URLEnv = raw.MCP.URLEnv
+		tool.MCPTransport = raw.MCP.Transport
+		tool.MCPTools = raw.MCP.Tools
+		tool.Auth = buildToolAuth(raw.MCP.Auth)
 	case raw.Builtin != nil:
 		tool.Builtin = raw.Builtin.ID
 		tool.Instructions = raw.Builtin.Instructions

@@ -109,13 +109,18 @@ type Tool struct {
 	// rendered into the tool declaration.
 	HandlerSource string
 	URLEnv        string
-	// Auth is the webhook block's auth, carried verbatim so maintenance never
-	// drops a tool's credentials. The console does not edit it.
-	Auth        *spec.ToolAuth
-	Input       string // JSON Schema object
-	Output      string // optional JSON Schema object
-	AttachTo    []string
-	AttachTasks []string
+	// Auth is the webhook or mcp block's auth, carried verbatim so maintenance
+	// never drops a tool's credentials. The console does not edit it.
+	Auth *spec.ToolAuth
+	// MCPTransport and MCPTools are the mcp block's optional fields, carried
+	// through maintenance for the same reason as Auth. The console does not
+	// edit them (SCHEMA N40).
+	MCPTransport string
+	MCPTools     []string
+	Input        string // JSON Schema object
+	Output       string // optional JSON Schema object
+	AttachTo     []string
+	AttachTasks  []string
 }
 
 // DefaultTools are the prebuilt tools every new agent starts with: the
@@ -511,6 +516,9 @@ func (d Data) RequiredEnv() []string {
 	for _, tool := range d.Tools {
 		if tool.URLEnv != "" {
 			set[tool.URLEnv] = true
+		}
+		if tool.Auth != nil && tool.Auth.TokenEnv != "" {
+			set[tool.Auth.TokenEnv] = true
 		}
 	}
 	names := make([]string, 0, len(set))

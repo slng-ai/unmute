@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -21,14 +22,30 @@ var movedToolKeys = map[string]string{
 	"instructions": "move instructions inside the `builtin:` block",
 }
 
+// contractToolKeys are the top-level fields that state one tool's contract with
+// the model, mapped to why an mcp file cannot carry them: the server announces
+// its own tools at run time, so a contract written here is a claim no driver
+// ever reads (SCHEMA N40).
+var contractToolKeys = map[string]string{
+	"description":  "the server describes each of its tools",
+	"input":        "the server owns each tool's parameters",
+	"output":       "the server owns each tool's result",
+	"inject":       "an MCP call has the server's own shape, with nothing to merge into",
+	"interruption": "MCP tools take the platform's default interruption policy",
+	"effect":       "MCP tools return data; ending the call is a `builtin:` tool",
+}
+
 // checkToolShape reports the file's shape errors before decoding, so a wrong
 // shape reads as a migration instruction with a line number rather than a
 // decoder complaint. It returns the one execution block it found, which Load
 // re-checks against the decoded tool: a block written with an empty body decodes
 // to nothing, and that has to name the file and line too.
 func checkToolShape(file string, content []byte) (keyLine, error) {
-	var blocks []keyLine
+	var blocks, contract []keyLine
 	for _, key := range topLevelKeys(content) {
+		if _, isContract := contractToolKeys[key.Key]; isContract {
+			contract = append(contract, key)
+		}
 		if hint, moved := movedToolKeys[key.Key]; moved {
 			return keyLine{}, fmt.Errorf("%s:%d: %q is no longer a top-level field: %s", file, key.Line, key.Key, hint)
 		}
@@ -46,6 +63,9 @@ func checkToolShape(file string, content []byte) (keyLine, error) {
 	}
 	switch len(blocks) {
 	case 1:
+		if blocks[0].Key == "mcp" && len(contract) > 0 {
+			return keyLine{}, mcpContractError(file, contract)
+		}
 		return blocks[0], nil
 	case 0:
 		return keyLine{}, fmt.Errorf("%s: no execution block: add one of %s", file, strings.Join(executionBlocks, ", "))
@@ -53,6 +73,17 @@ func checkToolShape(file string, content []byte) (keyLine, error) {
 		return keyLine{}, fmt.Errorf("%s:%d: two execution blocks (%s and %s): a tool runs exactly one way",
 			file, blocks[1].Line, blocks[0].Key, blocks[1].Key)
 	}
+}
+
+// mcpContractError names every contract field the mcp file declared, each with
+// its own line, so one edit pass removes them all instead of one per re-run.
+func mcpContractError(file string, contract []keyLine) error {
+	lines := make([]string, 0, len(contract))
+	for _, key := range contract {
+		lines = append(lines, fmt.Sprintf("%s:%d: remove `%s`: it is not legal on an `mcp:` tool, %s",
+			file, key.Line, key.Key, contractToolKeys[key.Key]))
+	}
+	return errors.New(strings.Join(lines, "\n"))
 }
 
 // checkToolBlockBody catches the block whose body is empty: `webhook:` with

@@ -128,7 +128,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	// or coordination env.
 	//
 	// The route's own names are removed rather than merely not added, because
-	// `secrets:` now declares them (SCHEMA N40) and the loop above just put them
+	// `secrets:` now declares them (SCHEMA N41) and the loop above just put them
 	// in. Without this, giving a package a `secrets:` block would make its
 	// browser session demand carrier credentials, which is the workflow FR-018
 	// exists to protect.
@@ -519,9 +519,25 @@ func setImportNeeds(data *pipecatData) {
 	if data.Capture != nil {
 		data.NeedsFunctionCalls = true // the generated capture tool is a @tool too
 	}
+	paramsClasses := map[string]bool{}
 	for _, a := range data.Agents {
 		if len(a.Tools)+len(a.Transfers)+len(a.Delegates) > 0 {
 			data.NeedsFunctionCalls = true
+		}
+		for _, source := range a.MCPSources {
+			data.NeedsMCP = true
+			if source.Auth != nil {
+				data.AuthKinds.add(source.Auth.Kind) // the same helper webhook auth uses (V8)
+			}
+			if class := source.ParamsClass(); class != "" {
+				paramsClasses[class] = true
+				continue
+			}
+			// No transport stated: the bot picks between the two at startup, so
+			// it imports both (research R5).
+			data.NeedsMCPChooser = true
+			paramsClasses["SseServerParameters"] = true
+			paramsClasses["StreamableHttpParameters"] = true
 		}
 		for _, t := range a.Tools {
 			if t.ColdDestination != "" {
@@ -602,6 +618,7 @@ func setImportNeeds(data *pipecatData) {
 	}
 	collectLocal(data.FlowTools)
 	sort.Slice(data.LocalTools, func(i, j int) bool { return data.LocalTools[i].Name < data.LocalTools[j].Name })
+	data.MCPParamsImports = sortedKeys(paramsClasses)
 
 	// pipecat.frames.frames names ride one merged import (V2), sorted at the end
 	// so the merged import matches isort whatever order the flags are read in.
@@ -685,6 +702,10 @@ func collectImportsExtras(data pipecatData) (imports, extras, deps []string) {
 		// (research D12/F10).
 		extraSet["websocket"] = true
 	}
+	if data.NeedsMCP {
+		// pipecat.services.mcp_service raises ImportError without it (N40).
+		extraSet["mcp"] = true
+	}
 	note := func(entry targetcap.Entry) {
 		if entry.Import != "" {
 			importSet[entry.Import] = true
@@ -767,6 +788,13 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 
 	for _, ref := range def.Tools {
 		if tool, ok := agent.Tools[ref]; ok {
+			// An mcp source is a server connection, not a @tool method: it must
+			// never reach buildTool, whose fallback would POST to the MCP
+			// address as if it were a webhook (N40).
+			if tool.Execution == ir.ToolMCP {
+				built.MCPSources = append(built.MCPSources, buildMCPSource(ref, tool, env))
+				continue
+			}
 			built.Tools = append(built.Tools, buildTool(ref, tool, agent.Variables, env))
 			continue
 		}
@@ -851,6 +879,12 @@ func buildTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (pipecat
 		if !ok {
 			return pipecatTask{}, fmt.Errorf("task %q references unknown tool %q", name, ref)
 		}
+		// The capability table denies this combination, so a package never gets
+		// here; an IR built in code still must not fall through to the webhook
+		// lowering (N40).
+		if tool.Execution == ir.ToolMCP {
+			return pipecatTask{}, fmt.Errorf("task %q lists the MCP tool source %q: a Flows node advertises only its own function schemas, so list the source on the agent instead", name, ref)
+		}
 		built.Tools = append(built.Tools, buildTool(ref, tool, agent.Variables, env))
 	}
 	return built, nil
@@ -932,6 +966,22 @@ func transferReason(c *ir.AgentTransfer) string {
 // pipecatStateExpr is how emitted Pipecat code reaches the call state: an agent
 // @tool method has it on self, a flows handler receives it as a bound kwarg.
 const pipecatStateExpr = "state"
+
+// buildMCPSource lowers one mcp tool source to its client. Both env names are
+// registered, so the address and the token reach .env.example and the bot's
+// REQUIRED_ENV startup check (FR-009).
+func buildMCPSource(name string, tool ir.Tool, env *envSet) pipecatMCPSource {
+	env.add(tool.URLEnv)
+	source := pipecatMCPSource{
+		Name: name, Var: name + "_mcp", URLEnv: tool.URLEnv,
+		Transport: tool.MCPTransport, Tools: tool.MCPTools, Auth: loweredAuth(tool.Auth),
+	}
+	if tool.Auth != nil {
+		env.add(tool.Auth.TokenEnv)
+		source.AuthEnv = tool.Auth.TokenEnv
+	}
+	return source
+}
 
 func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env *envSet) pipecatTool {
 	if tool.URLEnv != "" {

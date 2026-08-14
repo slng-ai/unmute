@@ -575,7 +575,7 @@ receive, so it never carries a `channels.phone` entry; a package reaches it
 through a control that dials.
 
 **Your own carrier (the connection adds `carrier:` and its credentials, plus a
-`channels.phone` entry, SCHEMA N37 and N40).** Your carrier owns the number and forwards the call over SIP into a
+`channels.phone` entry, SCHEMA N37 and N41).** Your carrier owns the number and forwards the call over SIP into a
 per-call Daily room, with `provider="daily"`. The agent sees a room participant
 whichever carrier carried the call, so nothing per-carrier lives in the agent
 except one request.

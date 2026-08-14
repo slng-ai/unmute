@@ -1,0 +1,18 @@
+# A remote MCP server used as a tool source (SCHEMA N40). The file is the
+# `mcp:` block and nothing else: Firecrawl describes its own tools, so there is
+# no description or input schema to write here.
+mcp:
+  # The address lives in the environment, never in the package. Firecrawl's is
+  # https://mcp.firecrawl.dev/v2/mcp, which the repository root .env.example
+  # already carries.
+  url_env: FIRECRAWL_MCP_URL
+  # Optional: this URL ends in /mcp, so both targets would pick streamable HTTP
+  # anyway. It is written out to show where the choice lives.
+  transport: streamable_http
+  auth:
+    type: bearer
+    token_env: FIRECRAWL_API_KEY
+  # Firecrawl exposes scraping and crawling tools too. One tool is all this
+  # agent should carry into a phone-speed conversation, so it names it.
+  tools:
+    - firecrawl_search

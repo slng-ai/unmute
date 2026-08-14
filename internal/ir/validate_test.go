@@ -504,6 +504,8 @@ func TestValidateWebhookAuthSchemes(t *testing.T) {
 		})
 	}
 
+	// Auth belongs to the two blocks that make a request of their own: webhook
+	// and mcp (N40). A local handler owns its own credential in Python.
 	t.Run("auth on a local tool", func(t *testing.T) {
 		agent := safeAgent(t)
 		tool := agent.Tools["lookup_customer"]
@@ -511,8 +513,8 @@ func TestValidateWebhookAuthSchemes(t *testing.T) {
 		tool.Handler, tool.Auth = "tools/lookup_customer.py", bearerAuth()
 		agent.Tools["lookup_customer"] = tool
 		report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
-		if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "webhook execution only") {
-			t.Fatalf("auth outside a webhook tool must be rejected: err=%v report=%#v", err, report.PerTarget)
+		if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "webhook and mcp execution only") {
+			t.Fatalf("auth outside a webhook or mcp tool must be rejected: err=%v report=%#v", err, report.PerTarget)
 		}
 	})
 
@@ -731,6 +733,75 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 	}
 }
 
+// mcpAgent turns the safe core's lookup_customer into an MCP tool source, so
+// each case below changes exactly the one field it is about (N40).
+func mcpAgent(t *testing.T, mutate func(*Tool)) *Agent {
+	t.Helper()
+	agent := safeAgent(t)
+	tool := Tool{
+		Execution: ToolMCP, URLEnv: "FIRECRAWL_MCP_URL",
+		Interruption: ToolProviderDefault, Effect: ToolReturnsData,
+	}
+	mutate(&tool)
+	agent.Tools["lookup_customer"] = tool
+	agent.Secrets = append(agent.Secrets, "FIRECRAWL_MCP_URL", "FIRECRAWL_API_KEY")
+	return agent
+}
+
+// TestValidateMCPToolSource covers the block's own rules: the transport is one
+// of two names, the selection is a list of distinct non-empty names, and auth
+// is legal here and holds an env name rather than a secret (N40, SC-005).
+func TestValidateMCPToolSource(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Tool)
+		want   string
+	}{
+		{"unknown transport", func(tool *Tool) { tool.MCPTransport = "websocket" },
+			`transport must be sse or streamable_http, not "websocket"`},
+		{"literal token", func(tool *Tool) {
+			tool.Auth = &ToolAuth{Type: ToolAuthBearer, TokenEnv: "fc-live-not-a-real-key"}
+		}, "never a secret value"},
+		{"repeated selection", func(tool *Tool) {
+			tool.MCPTools = []string{"firecrawl_search", "firecrawl_search"}
+		}, `tools names "firecrawl_search" twice`},
+		{"empty selection entry", func(tool *Tool) { tool.MCPTools = []string{"firecrawl_search", " "} },
+			"tools has an empty entry"},
+		{"contract field", func(tool *Tool) { tool.Description = "Search the web." },
+			"takes no description, input, or output"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := mcpAgent(t, tc.mutate)
+			report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+			if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), tc.want) {
+				t.Fatalf("want error containing %q: err=%v report=%#v", tc.want, err, report.PerTarget)
+			}
+		})
+	}
+
+	// The whole block, spelled the way the example spells it, validates and
+	// puts both env names in the report with the site that names them (FR-009).
+	t.Run("full block", func(t *testing.T) {
+		agent := mcpAgent(t, func(tool *Tool) {
+			tool.MCPTransport = MCPTransportStreamableHTTP
+			tool.MCPTools = []string{"firecrawl_search"}
+			tool.Auth = &ToolAuth{Type: ToolAuthBearer, TokenEnv: "FIRECRAWL_API_KEY"}
+		})
+		if _, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default()); err != nil {
+			t.Fatalf("the full mcp block must validate: %v", err)
+		}
+		sites := EnvReferenceSites(agent)
+		for env, want := range map[string]string{
+			"FIRECRAWL_MCP_URL": "tools/lookup_customer.yaml mcp.url_env",
+			"FIRECRAWL_API_KEY": "tools/lookup_customer.yaml mcp.auth.token_env",
+		} {
+			if got := sites[env]; len(got) != 1 || got[0] != want {
+				t.Errorf("reference site for %s = %v, want [%s]", env, got, want)
+			}
+		}
+	})
+}
+
 func TestValidatePipecatMaturityGates(t *testing.T) { // driver-pipecat T1, C9
 	tests := []struct {
 		name   string
@@ -743,12 +814,18 @@ func TestValidatePipecatMaturityGates(t *testing.T) { // driver-pipecat T1, C9
 			a.Models["fast_reasoning"] = profile
 		}, "does not emit generated fallback yet"},
 		{"thinking_audio", func(a *Agent) { a.Conversation.ThinkingAudio = ThinkingSubtle }, "does not emit thinking audio yet"},
-		// local tools lifted 2026-07-17 (driver-pipecat C9/T14) — no longer gated.
-		{"mcp_tool", func(a *Agent) {
-			tool := a.Tools["lookup_customer"]
-			tool.Execution, tool.URLEnv = ToolMCP, ""
-			a.Tools["lookup_customer"] = tool
-		}, "does not emit MCP tools yet"},
+		// local tools lifted 2026-07-17 (driver-pipecat C9/T14), mcp tool
+		// sources 2026-08-14 (N40) — neither is gated. What is still gated is
+		// the scope: an mcp source listed on a task, below.
+		{"mcp_task_scope", func(a *Agent) {
+			a.Tools["lookup_customer"] = Tool{
+				Execution: ToolMCP, URLEnv: "BOOKINGS_MCP_URL",
+				Interruption: ToolProviderDefault, Effect: ToolReturnsData,
+			}
+			// The scope is what the gate is about, so the task holds nothing
+			// else; other errors from the bare task are not what is asserted.
+			a.Tasks["confirm_booking"] = Task{Tools: []string{"lookup_customer"}}
+		}, "cannot scope an MCP tool source to a task"},
 		{"transfer_history", func(a *Agent) {
 			a.Controls["to_billing"].(*AgentTransfer).Context.History = HistoryMessages
 		}, "history: full only"},
