@@ -83,6 +83,11 @@ Each task holds the tools its own step needs:
 Booking before identification is not a rule in a prompt here. It is
 unavailable.
 
+While a task runs, the caller is talking to the task: its prompt, and only its
+tools. The agent's own tools are not offered again until the task returns. That is
+the useful half of delegation, and also the part to plan for, because a task that
+needs something the agent could do has to hold that tool itself.
+
 ## Task or second agent
 
 | | Task | Second agent |
@@ -104,6 +109,6 @@ then to the appointment task.
 
 ## Where to go next
 
-<Card title="Task groups" icon="list-ordered" href="/build/task-groups">
+<Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
   Run several tasks in a fixed order, sharing one context.
 </Card>

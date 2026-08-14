@@ -1,10 +1,13 @@
 ---
-title: "Two agents"
-description: "Split one long prompt into two agents and hand the caller from one to the other."
+title: "Handoffs"
+description: "One agent gives the caller to another, with different rules and different tools."
 ---
 
-One prompt can only get so long before it starts contradicting itself. When
-two jobs have different rules and different tools, give them different agents.
+A handoff moves the caller from one agent to another. The new agent has its own
+prompt, its own tools, and the call for good: nothing comes back.
+
+Reach for it when two jobs have genuinely different rules, not just different
+paragraphs. One prompt can only get so long before it starts contradicting itself.
 
 This page follows `examples/subagents`: `booking_desk` takes new appointments,
 `appointment_manager` reschedules and cancels.
@@ -60,7 +63,7 @@ controls:
 `when` is the condition the model reads. Write it as the situation, not as an
 instruction to call a tool.
 
-`context` decides what the new agent knows:
+`context` decides what the new agent knows. It is the whole of what travels:
 
 | Field | What it does |
 |---|---|
@@ -72,11 +75,12 @@ Without them, the caller gets asked for their phone number twice.
 ## A handoff does not come back
 
 The second agent owns the call from that point. Nothing returns to the first
-agent, and no result is passed back. That is why the example declares a control
-in each direction.
+agent, and no result is passed back. That is the cost of this shape, and it is why
+the example declares a control in each direction: coming back is another handoff,
+not a return.
 
-If you want a step that runs and returns with an answer, that is a task, on the
-[next page](/build/tasks).
+If you want a step that runs and hands control back with an answer, that is a
+[task](/build/orchestration/tasks).
 
 ## The tool lists are the guardrail
 
@@ -97,6 +101,6 @@ but the agent behind it changes.
 
 ## Where to go next
 
-<Card title="Tasks" icon="list-checks" href="/build/tasks">
+<Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
   Delegate a step, get a typed result back, and carry on.
 </Card>

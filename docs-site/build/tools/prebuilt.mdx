@@ -1,0 +1,96 @@
+---
+title: "Prebuilt tools"
+description: "The tools the runtime already has: a closed registry with one entry today."
+---
+
+Some tools need no code from you because both runtimes already have them. You
+select one by id.
+
+```yaml tools/end_call.yaml
+description: "End the call when the caller is finished or says goodbye."
+builtin:
+  id: end_call
+```
+
+That is the file `unmute init` scaffolds, so a new agent can hang up from its first
+run.
+
+## The registry, in full
+
+| id | Effect | Default description |
+|---|---|---|
+| `end_call` | `ends_conversation` | End the call when the caller is finished or says goodbye. |
+
+One row. The registry is **closed**: you cannot add to it from a package, and
+there is no plugin seam. Adding a prebuilt means a row in the compiler plus a
+lowering for each target, which is a change to Unmute, not to your agent.
+
+So read this page as a list of one thing that exists, not as a catalog to browse.
+If what you want is not `end_call`, it is a
+[webhook](/build/tools/webhook), a [Python handler](/build/tools/python), or an
+[MCP server](/build/tools/mcp).
+
+An id the registry does not hold is refused by name:
+
+```
+pipecat: tool "end_call" has unknown builtin "transfer_to_human"
+```
+
+## What the registry decides for you
+
+**The effect.** `end_call` implies `ends_conversation`, and writing anything else
+fails rather than being quietly ignored:
+
+```
+pipecat: tool "end_call" builtin "end_call" fixes effect to ends_conversation, cannot be
+  "returns_data"
+```
+
+**The parameters.** A prebuilt owns its own schema, so the contract fields have
+nowhere to go:
+
+```
+pipecat: tool "end_call" builtin execution takes no input, output, handler, or url_env
+```
+
+**The description, unless you write one.** Leave `description` out and the registry
+default is used. From a real compile of the bare file above:
+
+```python
+async def end_call(params: FunctionCallParams):
+    """End the call when the caller is finished or says goodbye."""
+    await params.result_callback({"ended": True})
+    await params.llm.push_frame(EndFrame())
+```
+
+Write your own `description` when the agent needs a narrower instruction, for
+example telling it to confirm before hanging up. Yours is added on top of the
+default rather than replacing the tool's behavior.
+
+## Turning it on
+
+The same two lists as any other tool:
+
+```yaml agent.yaml
+agents:
+  greeter:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - end_call
+
+tools:
+  - end_call
+```
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Variables" icon="braces" href="/build/variables">
+    Personalize the call the agent just answered.
+  </Card>
+  <Card title="Tools overview" icon="wrench" href="/build/tools/overview">
+    All six execution blocks, side by side.
+  </Card>
+</Columns>
