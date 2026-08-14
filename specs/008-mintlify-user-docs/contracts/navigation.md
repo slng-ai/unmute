@@ -173,3 +173,59 @@ unchanged.
 - Telephony pages come after the narrative; no narrative page mentions phones.
 - Every reference/cli page shows real help output from the built binary.
 - SLNG first in every provider list; only SLNG gets exact model names, linked to https://docs.slng.ai/models (FR-023).
+
+---
+
+## Amendment, 2026-08-14: 35 pages become 49
+
+Recorded after feature `009-mintlify-docs-extension` (planned in
+`specs/009-mintlify-docs-extension/contracts/navigation.md`, verified in this
+directory's `verification-log.md` addendum). Two causes: `origin/pre-release-v1`
+landed MCP tool sources (SCHEMA N40) and moved the phone route into the
+connection file (SCHEMA N41), and the maintainer asked for four things after
+reading the site.
+
+### Groups, in sidebar order
+
+Get started (4), Build the agent (12), Development lifecycle (4), Telephony (4),
+Transfers (4), Targets (3), Models (5), Deployment (3), Reference (10). Nine
+groups, 49 pages. The nesting is the object-in-pages-array form Reference already
+used for CLI.
+
+### Moves, new pages, retirements
+
+| Old path | New path | Why |
+|---|---|---|
+| `build/one-agent` | `build/your-first-agent` | same content, better name |
+| `build/tools` | retired into `build/tools/{overview,webhook}` | one page per way a tool runs |
+| (new) | `build/tools/{overview,webhook,python,mcp,prebuilt}` | one page per execution block the `Tool` struct has; `mcp` is N40, anchored on `examples/mcp-example` |
+| `build/two-agents` | `build/orchestration/handoffs` | reframed as a concept, not a count |
+| `build/tasks`, `build/task-groups`, `build/choosing-a-structure` | `build/orchestration/*` | grouped; the capstone became a decision aid |
+| (new) | `build/orchestration/overview` | names the three shapes, routes onward |
+| (group rename) | "Run it locally" becomes "Development lifecycle" | label only, slugs stay `dev/*` |
+| (new) | `dev/telephony` | the local phone-call run, moved out of `telephony/overview` |
+| `telephony/webhooks-and-tunnels` | `dev/webhooks-and-tunnels` | local dev mechanics belong to the lifecycle group |
+| (new) | `telephony/twilio` | which Twilio console value fills which connection env name, per route |
+| (new) | `models/{stt,tts,llm,turn-detection,optimization}` | catalog-derived role pages plus the SLNG Execution Layer |
+| `reference/providers` | retired into `models/*` | its agreement test retargeted in the same change |
+| (new) | `deploy/livekit-cloud`, `deploy/pipecat-cloud` | per-platform go-live guides from the emitted runbooks |
+| (new) | `reference/connections-yaml` | the connection file as the whole phone route (N41) |
+
+No redirects: the site has never been deployed, and `mint broken-links` holds the
+result after every move.
+
+### Rules this amendment adds
+
+- A tools page exists only if the `Tool` struct has that execution block, held by
+  `internal/spec/tools_docsite_test.go`.
+- The Models role pages carry the catalogue's vendor lists, held by the
+  retargeted `internal/target/providers_docsite_test.go`; `models/turn-detection`
+  carries no vendor list, because the `turn` role has no catalogue entries, and
+  that too is held by a test.
+- Execution-layer facts are SLNG's: attributed, linked, and dated, never asserted
+  as measured here. The Context Router stage is excluded from the site entirely
+  (maintainer decision, 2026-08-14).
+- No provider-branded environment variable name is used as an invalid example
+  (the neutral `2FACTOR_*` names replace `11LABS_API_KEY`).
+- Gate unchanged in form: the count of `.mdx` files under `docs-site/` equals the
+  count of page entries in `docs.json`, now at 49.

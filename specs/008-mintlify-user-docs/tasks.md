@@ -138,6 +138,27 @@
 
 ---
 
+## Phase 8: Extension, 2026-08-14 (feature 009-mintlify-docs-extension)
+
+The site grew from 35 pages to 49 after `origin/pre-release-v1` landed (MCP tool
+sources, SCHEMA N40; the connection owns the phone route, SCHEMA N41) and after
+two rounds of maintainer feedback. The work is planned task by task in
+`specs/009-mintlify-docs-extension/tasks.md` (T001 to T067); one item here
+tracks each of its phases, so this file stays the site's task record.
+
+- [X] T057 Setup: commit the first pass, merge `origin/pre-release-v1`, rebuild and inventory (009 T001 to T003)
+- [X] T058 Foundational: read the landed contracts, re-grep the site, re-validate all eleven examples, check the `kind:` behaviour (009 T004 to T008)
+- [X] T059 The site describes the merged product: twelve page updates, `reference/connections-yaml`, re-captured quickstart transcript, neutral env-name example (009 T009 to T023)
+- [X] T060 MCP tool sources taught on their own page, anchored on `examples/mcp-example` (009 T024 to T027)
+- [X] T061 The Build group teaches concepts: `your-first-agent`, nested Tools and Orchestration, execution-blocks agreement test (009 T028 to T042)
+- [X] T062 Models group from the catalogs plus the SLNG Execution Layer; `reference/providers` retired and its test retargeted (009 T043 to T047)
+- [X] T063 Development lifecycle group: the loop with its log files, the local phone call, tunnels moved in (009 T048 to T052)
+- [X] T064 Go live per platform and the Twilio provider guide (009 T053 to T057)
+- [X] T065 Addenda: this phase, the navigation amendment, the verification-log addendum, the report addendum with D1 to D5 verdicts (009 T058 to T063)
+- [X] T066 Polish: the full gate table, the sweeps, the story read-through, reviewable commits (009 T064 to T067)
+
+---
+
 ## Dependencies & Execution Order
 
 - **Setup (P1..T003)** → **Foundational (T004..T006)** → user stories.
