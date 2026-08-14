@@ -1,0 +1,174 @@
+---
+title: "Webhook tools"
+description: "Call your own API: a URL from the environment, a path that renders per call, and values the model never sees."
+---
+
+The everyday tool. The model decides to call it, Unmute builds the request, and
+your API answers.
+
+```yaml tools/confirm_appointment.yaml
+description: Confirm that the existing appointment stays as booked. Call it when the customer says the time works.
+
+input:
+  type: object
+  properties: {}
+
+inject:
+  customer_id: "{{customer_id}}"
+  dialed_number: "{{dialed_number}}"
+  channel: phone
+
+webhook:
+  url_env: SALON_API_URL
+  path: /customers/{{customer_id}}/appointments/confirm
+  auth:
+    type: bearer
+    token_env: SALON_API_TOKEN
+
+effect: returns_data
+interruption: provider_default
+```
+
+That is a real file from `examples/outbound-reminder`, an agent that calls a
+customer about an appointment. This page follows that package.
+
+## The block
+
+| Field | Required | What it is |
+|---|---|---|
+| `url_env` | yes | the UPPER_SNAKE name of an environment variable holding the base URL |
+| `path` | no | appended to that base URL; may carry `{{variable}}` tokens |
+| `auth` | no | how the request authenticates |
+
+`url_env` holds a **name**, so the base URL is a deployment choice rather than a
+package one: staging and production run the same package against different APIs.
+
+## The path renders per call
+
+```yaml
+  path: /customers/{{customer_id}}/appointments/confirm
+```
+
+`{{customer_id}}` is a [variable](/build/variables), rendered when the tool is
+called, and the rendered value is URL-encoded for you. Because it renders per
+call rather than once at session start, a variable the conversation itself filled
+in is fine here.
+
+If the variable has no value when the model calls the tool, the call is refused
+and the model is told what to ask the caller for, rather than sending a
+half-formed request. A token that names nothing at all fails at compile time:
+
+```
+tools/confirm_appointment.yaml:7: tool "confirm_appointment" webhook.path references
+  {{not_a_variable}}, which is not a declared variable
+```
+
+## Authentication
+
+```yaml
+  auth:
+    type: bearer
+    token_env: SALON_API_TOKEN
+```
+
+| Field | What it is |
+|---|---|
+| `type` | `bearer` or `api_key` |
+| `token_env` | environment variable holding the token |
+| `header` | header name, `api_key` only, defaults to `X-API-Key` |
+
+Again a name, never a value. A token written in place of a name is refused:
+
+```
+livekit: tool "confirm_appointment" auth token_env must be an UPPER_SNAKE environment
+  variable name, never a secret value
+```
+
+So is a field from the other scheme, and the message says why:
+
+```
+livekit: tool "confirm_appointment" auth header is not a bearer field: bearer always sends
+  Authorization
+```
+
+Every name you use here goes in `agent.yaml` under
+[`secrets:`](/reference/secrets), which is what puts it in the generated
+`.env.example` and the startup check.
+
+## What the model fills in, and what it cannot
+
+`input` is the model's half of the request. `inject` is yours.
+
+```yaml
+input:
+  type: object
+  properties: {}
+
+inject:
+  customer_id: "{{customer_id}}"
+  dialed_number: "{{dialed_number}}"
+  channel: phone
+```
+
+Injected values are merged into the call and **never shown to the model**, so it
+can neither see them nor overwrite them. That is the place a customer id, a
+captured slot, or the number the call went out to rides along. A key cannot be in
+both lists, and the refusal explains the reason rather than just the rule:
+
+```
+tools/confirm_appointment.yaml:5: tool "confirm_appointment" injects "customer_id", which
+  is also an input property; an injected value is hidden from the model, so it cannot
+  double as a parameter the model fills in
+```
+
+The tool above takes no parameters at all: everything the API needs is injected.
+The model can call it or not call it, and that is the whole of its authority. It
+cannot invent a customer id.
+
+A value that is exactly one `{{token}}` keeps that variable's declared type, so a
+number stays a number.
+
+## Describing the result
+
+```yaml
+output:
+  type: object
+  properties:
+    slots:
+      type: array
+      items:
+        type: object
+        properties:
+          slot_id:
+            type: string
+          start_time:
+            type: string
+        required:
+          - slot_id
+          - start_time
+  required:
+    - slots
+```
+
+`output` is optional. Declare it when the model should reason about the shape of
+what came back, for example to read slot times out loud. That one is
+`examples/salon-support`'s `check_availability`, and the shape is the same
+whichever execution block the tool uses.
+
+## Try it
+
+```sh
+unmute validate examples/outbound-reminder
+unmute dev examples/outbound-reminder --target pipecat
+```
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Python tools" icon="file-code" href="/build/tools/python">
+    When the request needs code of your own, like a signature.
+  </Card>
+  <Card title="Variables" icon="braces" href="/build/variables">
+    Where `{{customer_id}}` comes from.
+  </Card>
+</Columns>

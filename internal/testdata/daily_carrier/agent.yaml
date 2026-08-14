@@ -42,6 +42,9 @@ controls:
     cold:
       destination: billing_line
 
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
+
 conversation:
   greeting:
     speaks_first: agent

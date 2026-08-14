@@ -31,6 +31,7 @@ services:
       - LIVEKIT_URL=ws://livekit_server:7880
       - LIVEKIT_API_KEY=devkey
       - LIVEKIT_API_SECRET=secret
+      - BILLING_PHONE_NUMBER
       - DEEPGRAM_API_KEY
       - ELEVEN_API_KEY
       - GET_INVOICE_URL

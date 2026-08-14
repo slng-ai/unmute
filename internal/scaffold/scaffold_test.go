@@ -375,11 +375,15 @@ func TestPreflightTelephonyAndHumanTransfer(t *testing.T) {
 			}
 			data.HumanTransfers = []HumanTransfer{{
 				Name: "to_human", Agent: "assistant", When: "The caller requests a person.",
-				Destination: "support_line", Value: "+14155550123", Mode: "cold",
+				Destination: "support_line", Value: "SUPPORT_PHONE_NUMBER", Mode: "cold",
 			}}
 			report, err := Preflight(data)
 			if provider == "pipecat" {
-				if err == nil || !strings.Contains(err.Error(), "requires connection for telephony") {
+				// The scaffold's Pipecat default is the Daily-provisioned route,
+				// which dials out and cannot receive, so a phone channel on it
+				// needs a carrier the wizard has not been given. The refusal
+				// names both ways out.
+				if err == nil || !strings.Contains(err.Error(), "cannot receive them") {
 					t.Fatalf("Preflight() = %v", err)
 				}
 				return
@@ -394,12 +398,22 @@ func TestPreflightTelephonyAndHumanTransfer(t *testing.T) {
 	}
 }
 
-func TestPreflightRejectsCodeTelephonyWithoutConnection(t *testing.T) {
+// A scaffolded package now carries a connection whenever anything in it uses a
+// phone route, so what is missing on the Pipecat default is the carrier rather
+// than the connection: the Daily-provisioned route places calls and cannot
+// receive them (research R10).
+func TestPreflightRejectsCarrierlessRouteOnAPhoneChannel(t *testing.T) {
 	data := Data{Name: "agent"}
 	data.SetTarget("pipecat")
 	data.Channels = []Channel{{Name: "phone", Kind: "telephony", Outbound: true, OnVoicemail: "hangup"}}
-	if _, err := Preflight(data); err == nil || !strings.Contains(err.Error(), "requires connection for telephony") {
-		t.Fatalf("Preflight() error = %v", err)
+	_, err := Preflight(data)
+	if err == nil {
+		t.Fatal("a carrier-less route served a phone channel")
+	}
+	for _, want := range []string{"connections/phone.yaml", "no carrier", "Give the connection a carrier"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal is missing %q: %v", want, err)
+		}
 	}
 }
 
@@ -521,7 +535,8 @@ func TestScaffoldToolManifestsAreBlockStyle(t *testing.T) {
 			Auth: &spec.ToolAuth{Type: "bearer", TokenEnv: "T_TOKEN"}}},
 		{"webhook_api_key", Tool{Execution: "webhook", URLEnv: "T_URL",
 			Auth: &spec.ToolAuth{Type: "api_key", TokenEnv: "T_KEY", Header: "X-Api-Key"}}},
-		{"mcp", Tool{Execution: "mcp", URLEnv: "T_URL"}},
+		// mcp is not in this table: N40 gives it no input or output to style.
+		// TestScaffoldMCPToolIsBlockOnly covers the shape it does write.
 		{"client", Tool{Execution: "client"}},
 		{"provider_hosted", Tool{Execution: "provider_hosted"}},
 	} {
@@ -581,6 +596,49 @@ func TestScaffoldToolManifestsAreBlockStyle(t *testing.T) {
 	}
 }
 
+// TestScaffoldMCPToolIsBlockOnly pins N40 in the one place that regenerates
+// packages: an mcp tool file is the `mcp:` block and nothing else, and every
+// field the console carries through (transport, auth, selection) rides inside
+// it. The file the scaffold writes must load, so this asserts on the text and
+// on the decode.
+func TestScaffoldMCPToolIsBlockOnly(t *testing.T) {
+	data := Data{Name: "agent", Tools: []Tool{{
+		Name: "web_search", Execution: "mcp", URLEnv: "FIRECRAWL_MCP_URL",
+		MCPTransport: "streamable_http", MCPTools: []string{"firecrawl_search"},
+		Auth: &spec.ToolAuth{Type: "bearer", TokenEnv: "FIRECRAWL_API_KEY"},
+	}}}
+	data.SetTarget("pipecat")
+	dir := filepath.Join(t.TempDir(), "agent")
+	if _, err := Write(dir, data); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "tools", "web_search.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := string(raw)
+	for _, illegal := range []string{"description:", "input:", "output:", "interruption:", "effect:"} {
+		if strings.Contains(manifest, illegal) {
+			t.Errorf("an mcp file carries no %s\n%s", illegal, manifest)
+		}
+	}
+	var got struct {
+		MCP *spec.ToolMCP `yaml:"mcp"`
+	}
+	if err := yaml.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("emitted tool file does not parse: %v\n%s", err, manifest)
+	}
+	if got.MCP == nil || got.MCP.URLEnv != "FIRECRAWL_MCP_URL" || got.MCP.Transport != "streamable_http" {
+		t.Fatalf("block did not round-trip:\n%s", manifest)
+	}
+	if got.MCP.Auth == nil || got.MCP.Auth.TokenEnv != "FIRECRAWL_API_KEY" {
+		t.Errorf("auth did not round-trip:\n%s", manifest)
+	}
+	if len(got.MCP.Tools) != 1 || got.MCP.Tools[0] != "firecrawl_search" {
+		t.Errorf("selection did not round-trip:\n%s", manifest)
+	}
+}
+
 // The scaffold writes the shape block with the transfer's settings inside it,
 // `destination` included (SCHEMA N27). Checked by decoding rather than by
 // grepping, so an indentation slip is a failure and not a passing substring.
@@ -591,9 +649,9 @@ func TestWriteHumanTransferPutsDestinationInTheBlock(t *testing.T) {
 	data.Channels = []Channel{{Name: "phone", Kind: "telephony", Inbound: true}}
 	data.HumanTransfers = []HumanTransfer{
 		{Name: "to_human", Agent: "assistant", When: "The caller asks for a person.",
-			Destination: "support_line", Value: "+14155550123", Mode: "cold"},
+			Destination: "support_line", Value: "SUPPORT_PHONE_NUMBER", Mode: "cold"},
 		{Name: "to_manager", Agent: "assistant", When: "The caller asks for a manager.",
-			Destination: "manager_line", Value: "+14155550124", Mode: "warm",
+			Destination: "manager_line", Value: "MANAGER_PHONE_NUMBER", Mode: "warm",
 			Briefing: "Say who is calling.", RingTimeout: "20s", OnUnavailable: "hangup"},
 	}
 	if _, err := Write(dir, data); err != nil {

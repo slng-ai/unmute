@@ -412,23 +412,21 @@ The connection shape stores environment variable names, never secret values:
 
 ```yaml
 # connections/primary_phone.yaml
-kind: telephony
+transport: carrier-websocket
+carrier: twilio
 environment:
   account_sid: TWILIO_ACCOUNT_SID
   auth_token: TWILIO_AUTH_TOKEN
   from_number: TWILIO_PHONE_NUMBER
 ```
 
-The target binds its carrier and connection while preserving the existing
-transport vocabulary:
+The target names that connection and declares nothing else about the route:
 
 ```yaml
 targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: carrier-websocket
-    carrier: twilio
     connection: primary_phone
 ```
 
@@ -568,13 +566,16 @@ platform ships the primitive, which for Pipecat is the Daily route
 it has two forms. Both deploy the same agent to Pipecat Cloud and both put the
 call in a Daily room; what differs is who owns the number.
 
-**Daily-provisioned (no carrier).** You buy the number from Daily and point the
+**Daily-provisioned (no carrier).** The connection declares `transport:
+daily-sip` and nothing else. You buy the number from Daily and point the
 domain's pinless dial-in at the platform's own managed webhook. Nothing of yours
 is in the path: no server, no public port, no local topology. This is the
-zero-infrastructure inbound path and it is unchanged.
+zero-infrastructure inbound path and it is unchanged. It dials out and cannot
+receive, so it never carries a `channels.phone` entry; a package reaches it
+through a control that dials.
 
-**Your own carrier (`carrier:` plus `connection:` plus a `channels.phone` entry,
-SCHEMA N37).** Your carrier owns the number and forwards the call over SIP into a
+**Your own carrier (the connection adds `carrier:` and its credentials, plus a
+`channels.phone` entry, SCHEMA N37 and N41).** Your carrier owns the number and forwards the call over SIP into a
 per-call Daily room, with `provider="daily"`. The agent sees a room participant
 whichever carrier carried the call, so nothing per-carrier lives in the agent
 except one request.

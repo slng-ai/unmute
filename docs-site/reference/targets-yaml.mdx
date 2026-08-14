@@ -1,0 +1,107 @@
+---
+title: "targets.yaml"
+description: "Every field of a target, plus the connection files it points at."
+---
+
+`targets.yaml` says where the agent runs. Nothing about the agent's behavior
+belongs here.
+
+```yaml targets.yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
+The map key is the **target instance name**. It is what `--target` takes and
+what names the output directory, `build/<name>/`. Two targets may use the same
+provider with different settings, for example `pipecat_twilio` and
+`pipecat_telnyx`.
+
+## Fields
+
+| Field | What it is |
+|---|---|
+| `provider` | `pipecat` or `livekit` |
+| `version` | the framework version pinned in the generated project |
+| `pins` | extra package pins, name to version constraint |
+| `sdk_language` | `python` |
+| `connection` | the connection file that declares this target's phone route |
+| `deployment_region` | one region as a string, or several as a list |
+| `models` | per target overrides of named `models` entries |
+
+That is the whole list. A target says where the agent runs and, for a phone
+agent, which one connection carries the call.
+
+## models overrides
+
+```yaml
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
+Keyed by the entry name from `agent.yaml`, and taking the same fields as an
+entry there. Use it when a target cannot run an entry as defined, or runs its
+own better.
+
+## The phone route is not here
+
+A target names one connection and declares nothing else about how a call reaches
+it:
+
+```yaml targets.yaml
+targets:
+  livekit:
+    provider: livekit
+    version: "1.6.4"
+    sdk_language: python
+    connection: twilio_sip
+```
+
+The mechanism, the carrier, and the account credentials live in that one file.
+See [connections/&lt;name&gt;.yaml](/reference/connections-yaml).
+
+Three fields used to sit on the target. Writing any of them here is refused, and
+the refusal names the new home:
+
+```
+targets.yaml:6: target "livekit" declares transport: sip, which now belongs in
+  connections/twilio_sip.yaml. A target names one connection and the connection
+  declares the route
+```
+
+```
+targets.yaml:6: target "livekit" declares carrier: twilio, which now belongs in
+  connections/twilio_sip.yaml alongside its transport
+```
+
+```
+targets.yaml:7: target "livekit" declares destinations, which now belong at the top
+  level of agent.yaml. A destination is who this agent escalates to, which is the same
+  desk whichever carrier reaches it
+```
+
+Where the target names no connection, the first two messages say
+`in the connection file this target should name` instead of a file name.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="connections/<name>.yaml" icon="phone" href="/reference/connections-yaml">
+    The route: transport, carrier, and the names it needs.
+  </Card>
+  <Card title="Targets" icon="boxes" href="/targets/overview">
+    What each generated project looks like.
+  </Card>
+</Columns>

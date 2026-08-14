@@ -1,0 +1,85 @@
+---
+title: "unmute validate"
+description: "Check a package against its targets before you compile or run it."
+---
+
+```
+$ unmute validate --help
+Validate a v1 agent package against its targets.
+
+Usage:
+  unmute validate <package-dir> [flags]
+
+Flags:
+  -h, --help             help for validate
+      --target strings   target instance name (repeatable)
+```
+
+## Usage
+
+```sh
+unmute validate examples/simple-prompt
+```
+
+```
+✓ livekit (livekit)
+✓ pipecat (pipecat)
+
+Warnings:
+  livekit: LiveKit turn placement is a preference
+```
+
+One line per target: the target instance name, then its provider in
+parentheses. With no `--target`, every declared target is checked.
+
+## Choosing targets
+
+`--target` is repeatable, and the results come back in the order you asked for
+them:
+
+```sh
+unmute validate examples/simple-prompt --target pipecat --target livekit
+```
+
+```
+✓ pipecat (pipecat)
+✓ livekit (livekit)
+```
+
+## Warnings and prerequisites
+
+Warnings are printed after the results, on standard error, and the command
+still exits 0. They are real differences worth reading, for example that
+LiveKit places turn detection differently, or that its task group primitive is
+experimental.
+
+Some routes also print a setup prerequisite block, which is work you must do
+outside Unmute before a real call:
+
+```
+Setup prerequisites:
+  pipecat: daily_dialout: Ask Daily to enable dial-out on the domain the agent's rooms belong to ...
+    https://docs.pipecat.ai/pipecat-cloud/guides/telephony/daily-dial-out (verified 2026-08-12)
+```
+
+## Errors
+
+An error names the file and the line:
+
+```
+unmute: validate examples/salon-support: build: agent.yaml:70: conversation.greeting.text references {{OPENAI_API_KEY}}, but secrets never flow through templates; a secret reaches a tool through its own *_env field
+```
+
+The exit code is 1 if any selected target fails.
+
+## What it checks
+
+The same first three compiler stages `compile` runs: load, build, and validate
+against the target capability table. A package that validates cannot surprise
+you at compile time.
+
+## Where to go next
+
+<Card title="unmute compile" icon="package" href="/reference/cli/compile">
+  Write the generated projects.
+</Card>

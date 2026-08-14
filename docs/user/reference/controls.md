@@ -157,20 +157,21 @@ Above the block you say what the tool is (`kind`, `when`). Inside it you say wha
 
 ### destination
 
-A symbolic name, resolved through the target instance's `destinations:` map. Required in both blocks.
+A symbolic name, resolved through the top-level `destinations:` map in `agent.yaml`. Required in both blocks.
 
-The map's value is one of three things, told apart by shape, so there is no extra key to learn:
+The map's value is the `UPPER_SNAKE` name of an environment variable holding an E.164 number or a `sip:` URI:
 
 ```yaml
+# agent.yaml
 destinations:
-  billing_line: "+14155550123"              # an E.164 number
-  overflow_desk: "sip:desk@example.com"     # a SIP URI
-  supervisor_line: SUPERVISOR_PHONE_NUMBER  # an env var holding one of those
+  billing_line: BILLING_PHONE_NUMBER
+  overflow_desk: OVERFLOW_DESK_URI
+  supervisor_line: SUPERVISOR_PHONE_NUMBER
 ```
 
-Use the env var form for a number that differs between staging and production, or one you would rather not commit. It lands in the generated `.env.example` and the required-env list, and is read at call time.
+The name lands in the generated `.env.example` and the required-env list, is read at call time, and belongs in [`secrets`](secrets.md) too. A literal number or URI is refused: `agent.yaml` is the portable half of a package, a number is a deployment fact, and it is exactly the value that differs between staging and production. (Until SCHEMA N41 the map sat on each target and accepted literals; both are gone.)
 
-Either way the model never sees a phone number and cannot dial one. It picks the symbolic name and the target resolves it.
+The model never sees a phone number and cannot dial one. It picks the symbolic name and the compiler resolves it.
 
 Required: yes. Values: a symbolic name. Default: none. Targets: all four, core (resolution). The transport that carries it gates per target; see the route table below.
 

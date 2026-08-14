@@ -57,11 +57,7 @@ func TestBuildSafeCore(t *testing.T) {
 func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
-	target := pkg.Targets["pipecat"]
-	target.Transport = "carrier-websocket"
-	target.Carrier = "twilio"
-	target.Connection = "primary_phone"
-	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
 
 	agent, err := Build(pkg)
 	if err != nil {
@@ -105,9 +101,7 @@ func TestBuildClearsAutoWebhookWithoutInboundEndpoint(t *testing.T) {
 	pkg.Agent.Channels["phone"] = packagespec.Channel{
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound, OnVoicemail: "hangup",
 	}
-	target := pkg.Targets["pipecat"]
-	target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
-	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
 
 	agent, err := Build(pkg)
 	if err != nil {
@@ -122,9 +116,7 @@ func TestBuildClearsAutoWebhookWithoutInboundEndpoint(t *testing.T) {
 func TestBuildLiveKitSIPUsesSharedDispatchPlan(t *testing.T) { // telephony T10, V13, V18
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
-	target := pkg.Targets["livekit"]
-	target.Transport, target.Carrier, target.Connection = "sip", "twilio", "primary_phone"
-	pkg.Targets = map[string]packagespec.Target{"livekit": target}
+	routeTarget(pkg, "livekit", "primary_phone", "sip", "twilio")
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = map[string]string{
 		"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
@@ -169,24 +161,26 @@ func TestBuildSupportsMultipleCarrierTargets(t *testing.T) {
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
 	pipecat, livekit := pkg.Targets["pipecat"], pkg.Targets["livekit"]
-	pipecat.Transport, livekit.Transport = "carrier-websocket", "sip"
 	pkg.Targets = map[string]packagespec.Target{
-		"pipecat_twilio": withTelephonyRoute(pipecat, "twilio", "twilio_api"),
-		"pipecat_telnyx": withTelephonyRoute(pipecat, "telnyx", "telnyx_api"),
-		"livekit_twilio": withTelephonyRoute(livekit, "twilio", "twilio_sip"),
-		"livekit_plivo":  withTelephonyRoute(livekit, "plivo", "plivo_sip"),
+		"pipecat_twilio": withTelephonyRoute(pipecat, "twilio_api"),
+		"pipecat_telnyx": withTelephonyRoute(pipecat, "telnyx_api"),
+		"livekit_twilio": withTelephonyRoute(livekit, "twilio_sip"),
+		"livekit_plivo":  withTelephonyRoute(livekit, "plivo_sip"),
 	}
+	// Four connections, four routes. Two targets each name two of them, which is
+	// what "multiple carrier targets" means now: the carrier travels with the
+	// transport in the connection file, not on the target.
 	pkg.Connections = map[string]packagespec.Connection{
-		"twilio_api": {Kind: "telephony", Environment: map[string]string{
+		"twilio_api": {Transport: "carrier-websocket", Carrier: "twilio", Environment: map[string]string{
 			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN", "from_number": "TWILIO_PHONE_NUMBER",
 		}},
-		"telnyx_api": {Kind: "telephony", Environment: map[string]string{
+		"telnyx_api": {Transport: "carrier-websocket", Carrier: "telnyx", Environment: map[string]string{
 			"api_key": "TELNYX_API_KEY", "public_key": "TELNYX_PUBLIC_KEY", "connection_id": "TELNYX_CONNECTION_ID", "from_number": "TELNYX_PHONE_NUMBER",
 		}},
-		"twilio_sip": {Kind: "telephony", Environment: map[string]string{
+		"twilio_sip": {Transport: "sip", Carrier: "twilio", Environment: map[string]string{
 			"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME", "sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
 		}},
-		"plivo_sip": {Kind: "telephony", Environment: map[string]string{
+		"plivo_sip": {Transport: "sip", Carrier: "plivo", Environment: map[string]string{
 			"sip_address": "PLIVO_SIP_ADDRESS", "sip_username": "PLIVO_SIP_USERNAME", "sip_password": "PLIVO_SIP_PASSWORD", "from_number": "PLIVO_PHONE_NUMBER",
 		}},
 	}
@@ -216,20 +210,71 @@ func TestBuildRequiresTelephonyConnectionAndRejectsInverse(t *testing.T) {
 	t.Run("missing connection", func(t *testing.T) {
 		pkg := loadSafeCore(t)
 		enableTelephony(pkg)
-		pkg.Targets = map[string]packagespec.Target{"pipecat": pkg.Targets["pipecat"]}
-		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), `target "pipecat" requires connection for telephony`) {
+		target := pkg.Targets["pipecat"]
+		target.Connection = ""
+		pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), `has a telephony channel and names no connection`) {
 			t.Fatalf("got %v", err)
 		}
 	})
-	t.Run("connection without channel", func(t *testing.T) {
+	// A connection nothing uses is refused, and the message names both ways to
+	// use one. safe_core dials on a cold transfer, so its own to_human control
+	// has to go before this package stops using a phone route at all (FR-016).
+	t.Run("connection nothing uses", func(t *testing.T) {
 		pkg := loadSafeCore(t)
+		delete(pkg.Agent.Controls, "to_human")
+		billing := pkg.Agent.Agents["billing"]
+		billing.Tools = slices.DeleteFunc(slices.Clone(billing.Tools), func(name string) bool { return name == "to_human" })
+		pkg.Agent.Agents["billing"] = billing
 		target := pkg.Targets["livekit"]
-		target.Connection = "primary_phone"
+		target.Connection = "livekit_trunk"
 		pkg.Targets = map[string]packagespec.Target{"livekit": target}
-		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), `sets connection but has no telephony channel`) {
+		pkg.Connections["livekit_trunk"] = packagespec.Connection{
+			Transport: "sip", Carrier: "twilio", Environment: map[string]string{
+				"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
+				"sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
+			},
+		}
+		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), `nothing in this package uses a phone route`) {
 			t.Fatalf("got %v", err)
 		}
 	})
+}
+
+// The two guards this feature deleted are gone because their inputs cannot be
+// written any more, not because the checks were dropped. Both cases below used
+// to need a target that declares a route and omits half of it; a target now
+// declares no route at all, so the refusal is the moved-field one and it names
+// the connection file (research R2, task T022).
+func TestCollapsedDailyGuardsAreUnrepresentable(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		apply func(target *packagespec.Target)
+		want  string
+	}{
+		{
+			name:  "daily-sip with a telephony channel and no carrier",
+			apply: func(target *packagespec.Target) { target.Transport = "daily-sip" },
+			want:  `declares transport: daily-sip, which now belongs in`,
+		},
+		{
+			name:  "daily-sip with a carrier and no telephony channel",
+			apply: func(target *packagespec.Target) { target.Carrier = "twilio" },
+			want:  `declares carrier: twilio, which now belongs in`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			enableTelephony(pkg)
+			target := pkg.Targets["pipecat"]
+			tc.apply(&target)
+			pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+			_, err := Build(pkg)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v, want a refusal containing %q", err, tc.want)
+			}
+		})
+	}
 }
 
 // The Daily route's two forms (SCHEMA N37). With a carrier the three keys are
@@ -241,10 +286,10 @@ func TestBuildResolvesPipecatDailyCarrierPlan(t *testing.T) {
 		pkg := loadSafeCore(t)
 		enableTelephony(pkg)
 		target := pkg.Targets["pipecat"]
-		target.Carrier, target.Connection = "twilio", "twilio_sip_daily"
+		target.Connection = "twilio_sip_daily"
 		pkg.Targets = map[string]packagespec.Target{"pipecat": target}
 		pkg.Connections = map[string]packagespec.Connection{"twilio_sip_daily": {
-			Kind: "telephony", Environment: map[string]string{
+			Transport: "daily-sip", Carrier: "twilio", Environment: map[string]string{
 				"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
 				"sip_address": "SIP_TRUNK_HOSTNAME", "from_number": "SIP_FROM_NUMBER",
 			},
@@ -275,44 +320,41 @@ func TestBuildResolvesPipecatDailyCarrierPlan(t *testing.T) {
 		t.Fatalf("coordination = %q", plan.Coordination)
 	}
 
-	t.Run("carrier without connection names the connection", func(t *testing.T) {
+	t.Run("no connection names the connection", func(t *testing.T) {
 		pkg := dailyCarrier(t)
 		target := pkg.Targets["pipecat"]
 		target.Connection = ""
 		pkg.Targets = map[string]packagespec.Target{"pipecat": target}
-		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), "requires connection for telephony") {
+		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), "has a telephony channel and names no connection") {
 			t.Fatalf("got %v", err)
 		}
 	})
-	t.Run("connection without carrier names the carrier", func(t *testing.T) {
+	// Dropping the carrier does not half-describe a route any more: it selects
+	// the other Daily form, which dials out and cannot receive. So the refusal
+	// is about the phone channel, and it names both ways out. Without this the
+	// author gets "unsupported telephony route (pipecat, daily-sip, )" from three
+	// separate capability lookups, because the carrier-less form has no row in
+	// the table at all (research R10).
+	t.Run("a carrier-less route cannot serve a phone channel", func(t *testing.T) {
 		pkg := dailyCarrier(t)
-		target := pkg.Targets["pipecat"]
-		target.Carrier = ""
-		pkg.Targets = map[string]packagespec.Target{"pipecat": target}
-		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), "requires carrier for telephony on transport daily-sip") {
-			t.Fatalf("got %v", err)
-		}
-	})
-	// Found by trying it rather than by reading: before this guard, a daily-sip
-	// target naming a carrier and no connection *compiled*, as a plain
-	// Daily-provisioned build, with the carrier silently ignored and no helper
-	// emitted. Green validation, and the author finds out when a call to their own
-	// number goes nowhere.
-	t.Run("carrier with no channel fails rather than compiling as Daily-provisioned", func(t *testing.T) {
-		pkg := loadSafeCore(t)
-		target := pkg.Targets["pipecat"]
-		target.Carrier = "twilio"
-		pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+		conn := pkg.Connections["twilio_sip_daily"]
+		conn.Carrier, conn.Environment = "", nil
+		pkg.Connections["twilio_sip_daily"] = conn
 		_, err := Build(pkg)
 		if err == nil {
-			t.Fatal("a carrier on daily-sip with no connection and no channel compiled, ignoring the carrier")
+			t.Fatal("a route that cannot receive calls served an inbound phone channel")
 		}
-		for _, want := range []string{"sets carrier", "no telephony channel", "channels.phone"} {
+		for _, want := range []string{"cannot receive them", "Give the connection a carrier", "connections/twilio_sip_daily.yaml"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("the refusal is missing %q: %v", want, err)
 			}
 		}
 	})
+	// The Daily-provisioned form receives no calls, so it declares no phone
+	// channel and gets no telephony plan — and it now names a connection like
+	// every other route, because that is where its transport is written. A flat
+	// triple lookup would refuse it: this pairing has no row in the capability
+	// table at all (research R10).
 	t.Run("no carrier keeps the Daily-provisioned form", func(t *testing.T) {
 		pkg := loadSafeCore(t)
 		pkg.Targets = map[string]packagespec.Target{"pipecat": pkg.Targets["pipecat"]}
@@ -321,15 +363,36 @@ func TestBuildResolvesPipecatDailyCarrierPlan(t *testing.T) {
 			t.Fatal(err)
 		}
 		built := agent.Targets["pipecat"]
-		if built.Telephony != nil || built.Connection != "" || built.Carrier != "" {
-			t.Fatalf("the no-carrier Daily form gained a plan, a connection, or a carrier: %#v", built)
+		if built.Telephony != nil || built.Carrier != "" {
+			t.Fatalf("the no-carrier Daily form gained a plan or a carrier: %#v", built)
+		}
+		if built.Transport != "daily-sip" || built.Connection != "daily_provisioned" {
+			t.Fatalf("route = %s via %q, want daily-sip via daily_provisioned", built.Transport, built.Connection)
 		}
 	})
 }
 
-func withTelephonyRoute(target packagespec.Target, carrier, connection string) packagespec.Target {
-	target.Carrier, target.Connection = carrier, connection
+// withTelephonyRoute points a target at a connection. The route itself — the
+// transport and the carrier — is declared in that connection file, so naming it
+// is all a target does about telephony (spec FR-001).
+func withTelephonyRoute(target packagespec.Target, connection string) packagespec.Target {
+	target.Connection = connection
 	return target
+}
+
+// routeTarget points one target at a connection and declares the route there.
+// It replaces the target map, which is what these fixtures did by hand when the
+// route lived on the target.
+func routeTarget(pkg *packagespec.Package, name, connection, transport, carrier string) {
+	target := pkg.Targets[name]
+	target.Connection = connection
+	pkg.Targets = map[string]packagespec.Target{name: target}
+	if pkg.Connections == nil {
+		pkg.Connections = map[string]packagespec.Connection{}
+	}
+	conn := pkg.Connections[connection]
+	conn.Transport, conn.Carrier = transport, carrier
+	pkg.Connections[connection] = conn
 }
 
 func coordinationReasonNames(reasons []TelephonyCoordinationReason) string {
@@ -372,9 +435,7 @@ func TestBuildRejectsUnknownOrInvalidConnection(t *testing.T) { // telephony V1-
 				connection := pkg.Connections["primary_phone"]
 				delete(connection.Environment, "auth_token")
 				pkg.Connections["primary_phone"] = connection
-				target := pkg.Targets["pipecat"]
-				target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
-				pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+				routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
 			},
 			want: `requires environment key "auth_token"`,
 		},
@@ -385,9 +446,7 @@ func TestBuildRejectsUnknownOrInvalidConnection(t *testing.T) { // telephony V1-
 				connection := pkg.Connections["primary_phone"]
 				connection.Environment["api_key"] = "TWILIO_API_KEY"
 				pkg.Connections["primary_phone"] = connection
-				target := pkg.Targets["pipecat"]
-				target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
-				pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+				routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
 			},
 			want: `environment key "api_key" is not accepted`,
 		},
@@ -631,30 +690,35 @@ func TestT16_ListenFallbackResolvesIntoBindings(t *testing.T) {
 	}
 }
 
+// A destination names an environment variable and nothing else. The literal
+// forms SCHEMA N26 accepted are refused, because agent.yaml is the portable
+// half of a package and a number is a deployment fact (spec FR-004d).
 func TestBuildValidatesDestinationValues(t *testing.T) {
 	for _, test := range []struct {
 		value string
 		valid bool
 	}{
-		{"+14155550123", true},
-		{"sip:billing@example.com", true},
-		{"sips:billing@example.com", true},
+		{"BILLING_PHONE_NUMBER", true},
+		{"+14155550123", false},
+		{"sip:billing@example.com", false},
+		{"sips:billing@example.com", false},
 		{"", false},
 		{"billing@example.com", false},
 		{"not-a-phone", false},
 	} {
-		if got := validDestination(test.value); got != test.valid {
-			t.Errorf("validDestination(%q) = %t", test.value, got)
+		if got := envNamePattern.MatchString(test.value); got != test.valid {
+			t.Errorf("destination %q accepted = %t, want %t", test.value, got, test.valid)
 		}
 	}
 
 	pkg := loadSafeCore(t)
-	target := pkg.Targets["livekit"]
-	target.Destinations["billing_line"] = ""
-	pkg.Targets["livekit"] = target
+	pkg.Agent.Destinations["billing_line"] = "+14155550123"
 	_, err := Build(pkg)
-	if err == nil || !strings.Contains(err.Error(), "E.164 phone number or SIP URI") {
+	if err == nil || !strings.Contains(err.Error(), "a literal") {
 		t.Fatalf("got %v", err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "BILLING_PHONE_NUMBER") {
+		t.Errorf("the refusal must show the form that works: %v", err)
 	}
 }
 
@@ -700,31 +764,33 @@ func TestBuildResolvesPipecatCloudWebsocketPlan(t *testing.T) {
 			pkg.Agent.Agents["billing"] = billing
 		}
 		target := pkg.Targets["pipecat"]
-		target.Transport, target.Carrier = "cloud-websocket", "twilio"
+		// Both shapes name a connection, because the connection is where the
+		// route is written. What the receive-only shape drops is the credentials
+		// inside it, which is the distinction this route is about.
+		target.Connection = "twilio_voice"
+		pkg.Connections = map[string]packagespec.Connection{"twilio_voice": {
+			Transport: "cloud-websocket", Carrier: "twilio",
+		}}
 		if connection {
-			target.Connection = "twilio_voice"
-			pkg.Connections = map[string]packagespec.Connection{"twilio_voice": {
-				Kind: "telephony", Environment: map[string]string{
-					"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
-					"from_number": "TWILIO_PHONE_NUMBER",
-				},
-			}}
-		} else {
-			target.Connection = ""
-			pkg.Connections = map[string]packagespec.Connection{}
+			conn := pkg.Connections["twilio_voice"]
+			conn.Environment = map[string]string{
+				"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
+				"from_number": "TWILIO_PHONE_NUMBER",
+			}
+			pkg.Connections["twilio_voice"] = conn
 		}
 		pkg.Targets = map[string]packagespec.Target{"pipecat": target}
 		return pkg
 	}
 
-	t.Run("phone inbound only, no connection: valid", func(t *testing.T) {
+	t.Run("phone inbound only, no credentials: valid", func(t *testing.T) {
 		agent, err := Build(cloudWebsocket(t, false, false, false))
 		if err != nil {
-			t.Fatalf("a receive-only package on this route must compile with no connection: %v", err)
+			t.Fatalf("a receive-only package on this route must compile with no credentials: %v", err)
 		}
 		built := agent.Targets["pipecat"]
-		if built.Connection != "" {
-			t.Errorf("connection = %q, want empty", built.Connection)
+		if built.Connection != "twilio_voice" {
+			t.Errorf("connection = %q, want twilio_voice: the route is written there either way", built.Connection)
 		}
 		plan := built.Telephony
 		if plan == nil {
@@ -748,32 +814,34 @@ func TestBuildResolvesPipecatCloudWebsocketPlan(t *testing.T) {
 		}
 	})
 
-	t.Run("outbound without a connection names the three keys", func(t *testing.T) {
+	t.Run("outbound with no credentials names the missing key", func(t *testing.T) {
 		_, err := Build(cloudWebsocket(t, false, true, false))
 		if err == nil {
 			t.Fatal("a package that places calls compiled with no carrier credentials")
 		}
-		for _, want := range []string{"account_sid", "auth_token", "from_number", "caller identity", "only receives calls"} {
+		for _, want := range []string{"account_sid", "places or redirects calls", "only receives calls"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("the refusal is missing %q: %v", want, err)
 			}
 		}
 	})
 
-	t.Run("a transfer without a connection names the three keys", func(t *testing.T) {
+	t.Run("a transfer with no credentials says why they are needed", func(t *testing.T) {
 		_, err := Build(cloudWebsocket(t, false, false, true))
 		if err == nil {
 			t.Fatal("a package that redirects calls compiled with no carrier credentials")
 		}
 		if !strings.Contains(err.Error(), "places or redirects calls") {
-			t.Errorf("the refusal does not say why a connection is needed: %v", err)
+			t.Errorf("the refusal does not say why the credentials are needed: %v", err)
 		}
 	})
 
-	t.Run("a connection with no phone channel is dead weight", func(t *testing.T) {
+	// safe_core's cold transfer dials, so the phone channel has to go *and* the
+	// transfer with it before nothing in the package uses the route (FR-016).
+	t.Run("a connection nothing uses is dead weight", func(t *testing.T) {
 		pkg := cloudWebsocket(t, true, false, false)
 		delete(pkg.Agent.Channels, "phone")
-		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), "no telephony channel") {
+		if _, err := Build(pkg); err == nil || !strings.Contains(err.Error(), "nothing in this package uses a phone route") {
 			t.Fatalf("got %v", err)
 		}
 	})

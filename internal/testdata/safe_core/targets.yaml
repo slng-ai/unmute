@@ -1,6 +1,6 @@
 # One instance per primary target. The same portable source compiles to all four.
-# Each instance carries infrastructure only (provider, version, transport,
-# destinations) plus a `models:` override map, keyed by model name, for the
+# Each instance carries infrastructure only (provider, version, connection) plus
+# a `models:` override map, keyed by model name, for the
 # entries this target cannot run as defined in agent.yaml (N15). An override
 # replaces the whole entry; overrides are forwarded to the provider as-is and
 # never validated (SCHEMA.md, D10); secrets and URLs are env var names only.
@@ -23,21 +23,16 @@ targets:
       specialist:
         provider: elevenlabs
         voice: EXAVITQu4vr4xnSDxMaL
-    destinations:
-      billing_line: "+14155550123"
 
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat
+    connection: daily_provisioned   # cold_transfer needs Daily SIP on Pipecat
     # no model overrides: the agent.yaml defaults (SLNG + OpenAI + deepgram STT
     # + local silero VAD) run as defined
-    destinations:
-      billing_line: "+14155550123"
 
   vapi:
     provider: vapi
-    carrier: twilio
     models:
       # turn is integrated on Vapi; the vad entry is unused there. Endpointing
       # intent comes from the conversation block, not from a bound model.
@@ -47,14 +42,10 @@ targets:
       specialist:
         provider: elevenlabs
         voice: EXAVITQu4vr4xnSDxMaL
-    destinations:
-      billing_line: "+14155550123"
 
   deepgram:
     provider: deepgram
     version: "1"
-    carrier: twilio             # the generated bridge resolves phone controls
-                                # against the carrier
     models:
       # turn is integrated into listen on Deepgram: turn thresholds ride the
       # transcriber override's params, because that is where Deepgram puts them.
@@ -67,5 +58,3 @@ targets:
         model: aura-2-thalia-en
       specialist:
         model: aura-2-orion-en
-    destinations:
-      billing_line: "+14155550123"

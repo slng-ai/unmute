@@ -1,0 +1,121 @@
+---
+title: "Your first phone call"
+description: "Take a real inbound call on your laptop with one command."
+---
+
+This page follows `examples/twilio-telephony-hello`, a minimal agent that only
+greets and chats. It exists to prove your phone wiring before you point a real
+agent at it.
+
+The package declares two targets, one per platform, on the route each platform
+recommends for Twilio:
+
+| Target | Transport | How the call arrives |
+|---|---|---|
+| `pipecat` | `cloud-websocket` | your number points at a static TwiML Bin whose stream goes to Pipecat Cloud |
+| `livekit` | `sip` | your number is attached to a Twilio Elastic SIP Trunk pointed at LiveKit SIP |
+
+**Use the `pipecat` target for a local inbound call.** Twilio reaches that
+route over HTTPS and WSS, which a tunnel can carry, so a real call can land on
+your laptop. SIP needs the carrier to reach signalling and media at a routable
+address, which a tunnel cannot provide, so inbound on the `livekit` target is
+tested against a deployment.
+
+## What you need
+
+- A Twilio account with a voice capable phone number.
+- `cloudflared` on your PATH for the managed tunnel (`brew install cloudflared`
+  on macOS), or your own tunnel and `--public-url`.
+- Model provider keys.
+
+Put the values in `examples/twilio-telephony-hello/.env`:
+
+```bash
+OPENAI_API_KEY=sk-...
+SLNG_API_KEY=...
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=your_auth_token
+TWILIO_PHONE_NUMBER=+15551234567
+PIPECAT_CLOUD_ORGANIZATION=your-org-slug
+SIP_TRUNK_HOSTNAME=your-trunk.pstn.twilio.com
+SIP_AUTH_USERNAME=your_trunk_username
+SIP_AUTH_PASSWORD=your_trunk_password
+SIP_FROM_NUMBER=+15551234567
+```
+
+The last four are the trunk settings the `livekit` target's connection names.
+They are in this list because `agent.yaml` declares every name the package
+writes, and the generated agent checks that whole list before it takes a call. If
+you are only testing the `pipecat` target you can put any placeholder there. The
+[connections reference](/reference/connections-yaml) shows where each group of
+names comes from.
+
+You never set `UNMUTE_PUBLIC_URL` or `UNMUTE_OUTBOUND_TOKEN`. The dev command
+supplies those itself.
+
+<Warning>
+  Every environment variable name must be a valid shell identifier: letters,
+  digits, and underscores, never starting with a digit. A name like
+  `2FACTOR_API_KEY` fails when the platform exports it and the value is simply
+  missing at run time.
+</Warning>
+
+## Take the call
+
+```sh
+unmute dev examples/twilio-telephony-hello --telephony --target pipecat
+```
+
+Watch for three things in the output:
+
+1. the managed tunnel origin, with a note that quick tunnel URLs rotate on every
+   run,
+2. the line saying your number's Twilio voice webhook was updated, and what it
+   was before,
+3. the call line: `call +1XXXXXXXXXX  ·  ctrl-c to stop`.
+
+Call that number. The agent answers and greets you. Speak, and it replies.
+
+Ctrl-c stops the run and puts your number's previous voice configuration back.
+Your TwiML Bin is never touched, because the local run answers Twilio's webhook
+itself.
+
+## One number, one target at a time
+
+A number attached to a SIP trunk ignores its voice configuration, so it cannot
+also point at a TwiML Bin. Take the number off the trunk to test the `pipecat`
+target, and put it back to test the `livekit` one.
+
+## If the call does not arrive
+
+<AccordionGroup>
+  <Accordion title="cloudflared not found on PATH">
+    Install it, or run your own tunnel and pass its HTTPS origin with
+    `--public-url https://your-tunnel.example`.
+  </Accordion>
+  <Accordion title="phone number was not found on this Twilio account">
+    The number in `TWILIO_PHONE_NUMBER` is not on the account behind
+    `TWILIO_ACCOUNT_SID`, or it is not voice capable. Check it in the Twilio
+    console.
+  </Accordion>
+  <Accordion title="Twilio refuses the call">
+    The reason is printed in Twilio's own words: geographic permissions, or a
+    trial account that can only reach verified numbers. Fix it in the console
+    and run again.
+  </Accordion>
+  <Accordion title="missing telephony credentials">
+    The command lists exactly which names it could not find, before it starts
+    anything.
+  </Accordion>
+</AccordionGroup>
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Outbound calls" icon="phone-outgoing" href="/telephony/outbound-calls">
+    Make the agent dial you.
+  </Card>
+  <Card title="Webhooks and tunnels" icon="link" href="/dev/webhooks-and-tunnels">
+    Bring your own public URL, or leave the carrier untouched.
+  </Card>
+</Columns>

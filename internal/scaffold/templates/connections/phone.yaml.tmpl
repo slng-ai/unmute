@@ -1,0 +1,11 @@
+# This package's phone route: the mechanism that carries the call, the carrier
+# that hands it over, and the environment variable names holding that account's
+# credentials. Values are names, never secrets — the compiler never reads them.
+#
+# The target names this file and declares nothing else about telephony, so this
+# is the one place to look when you want to know how a call reaches the agent.
+transport: [[.Transport]]
+[[if .Carrier]]carrier: [[.Carrier]]
+[[end]][[if .ConnectionEnvironment]]environment:
+[[range .ConnectionEnvironment]]  [[.Key]]: [[.Env]]
+[[end]][[end -]]

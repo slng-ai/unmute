@@ -1,0 +1,144 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Unmute by SLNG//",
+  "colors": {
+    "primary": "#F2DE5C",
+    "light": "#F7E98A",
+    "dark": "#8A7300"
+  },
+  "logo": {
+    "light": "/logo/slng.png",
+    "dark": "/logo/slng.png"
+  },
+  "favicon": "/logo/slng.png",
+  "icons": {
+    "library": "lucide"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get started",
+        "pages": [
+          "index",
+          "start/installation",
+          "start/quickstart",
+          "start/how-unmute-works"
+        ]
+      },
+      {
+        "group": "Build the agent",
+        "pages": [
+          "build/your-first-agent",
+          {
+            "group": "Tools",
+            "pages": [
+              "build/tools/overview",
+              "build/tools/webhook",
+              "build/tools/python",
+              "build/tools/mcp",
+              "build/tools/prebuilt"
+            ]
+          },
+          "build/variables",
+          {
+            "group": "Orchestration",
+            "pages": [
+              "build/orchestration/overview",
+              "build/orchestration/handoffs",
+              "build/orchestration/tasks",
+              "build/orchestration/task-groups",
+              "build/orchestration/choosing-a-structure"
+            ]
+          }
+        ]
+      },
+      {
+        "group": "Development lifecycle",
+        "pages": [
+          "dev/overview",
+          "dev/console",
+          "dev/telephony",
+          "dev/webhooks-and-tunnels"
+        ]
+      },
+      {
+        "group": "Telephony",
+        "pages": [
+          "telephony/overview",
+          "telephony/first-phone-call",
+          "telephony/outbound-calls",
+          "telephony/twilio"
+        ]
+      },
+      {
+        "group": "Transfers",
+        "pages": [
+          "transfers/overview",
+          "transfers/livekit",
+          "transfers/pipecat-daily",
+          "transfers/pipecat-twilio"
+        ]
+      },
+      {
+        "group": "Targets",
+        "pages": [
+          "targets/overview",
+          "targets/pipecat",
+          "targets/livekit"
+        ]
+      },
+      {
+        "group": "Models",
+        "pages": [
+          "models/stt",
+          "models/tts",
+          "models/llm",
+          "models/turn-detection",
+          "models/optimization"
+        ]
+      },
+      {
+        "group": "Deployment",
+        "pages": [
+          "deploy/livekit-cloud",
+          "deploy/pipecat-cloud",
+          "deploy/going-live"
+        ]
+      },
+      {
+        "group": "Reference",
+        "pages": [
+          {
+            "group": "CLI",
+            "pages": [
+              "reference/cli/overview",
+              "reference/cli/init",
+              "reference/cli/validate",
+              "reference/cli/compile",
+              "reference/cli/dev"
+            ]
+          },
+          "reference/agent-yaml",
+          "reference/targets-yaml",
+          "reference/connections-yaml",
+          "reference/variables",
+          "reference/secrets"
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "SLNG models",
+        "href": "https://docs.slng.ai/models"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "website": "https://slng.ai"
+    }
+  }
+}

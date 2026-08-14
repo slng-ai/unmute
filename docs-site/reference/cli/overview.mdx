@@ -1,0 +1,113 @@
+---
+title: "CLI overview"
+description: "The command tree, exit codes, warnings, version, and shell completion."
+---
+
+```
+$ unmute --help
+Author-once, portable voice agents.
+
+Usage:
+  unmute [flags]
+  unmute [command]
+
+Available Commands:
+  compile     Compile a v1 agent package to its resolved target artifacts.
+  completion  Generate the autocompletion script for the specified shell
+  dev         Compile, run the agent locally, and talk to it in the browser or terminal (--console).
+  help        Help about any command
+  init        Scaffold a new v1 agent package.
+  validate    Validate a v1 agent package against its targets.
+
+Flags:
+  -h, --help      help for unmute
+  -v, --version   version for unmute
+
+Use "unmute [command] --help" for more information about a command.
+```
+
+## The four commands
+
+| Command | What it does |
+|---|---|
+| [`init`](/reference/cli/init) | scaffold a new package |
+| [`validate`](/reference/cli/validate) | check a package against its targets |
+| [`compile`](/reference/cli/compile) | write the generated project for each target |
+| [`dev`](/reference/cli/dev) | compile, run locally, and talk to the agent |
+
+`help` and `completion` come from the command framework.
+
+## Running unmute with no arguments
+
+In a terminal, `unmute` with no command opens an interactive console. Outside a
+terminal, for example when the output is piped, it prints the help above.
+
+## Version
+
+```sh
+unmute --version
+```
+
+```
+unmute version ae9f8cc
+```
+
+The version is stamped in at build time. `-v` is the short form.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | the command succeeded |
+| `1` | the command failed |
+
+There are no other exit codes today.
+
+## Warnings
+
+Warnings go to standard error and **do not** change the exit code. A command
+that prints warnings and exits 0 succeeded:
+
+```
+warning: livekit: LiveKit turn placement is a preference
+```
+
+Errors are printed to standard error too, prefixed with `unmute:`, and exit 1:
+
+```
+unmute: dev examples/simple-prompt: target instance "nope" is not declared
+```
+
+## Shell completion
+
+```sh
+unmute completion zsh
+```
+
+```
+$ unmute completion --help
+Generate the autocompletion script for unmute for the specified shell.
+See each sub-command's help for details on how to use the generated script.
+
+Usage:
+  unmute completion [command]
+
+Available Commands:
+  bash        Generate the autocompletion script for bash
+  fish        Generate the autocompletion script for fish
+  powershell  Generate the autocompletion script for powershell
+  zsh         Generate the autocompletion script for zsh
+
+Flags:
+  -h, --help   help for completion
+
+Use "unmute completion [command] --help" for more information about a command.
+```
+
+Each subcommand's own help explains where to install the script on your system.
+
+## Where to go next
+
+<Card title="unmute init" icon="terminal" href="/reference/cli/init">
+  Start with the scaffold.
+</Card>

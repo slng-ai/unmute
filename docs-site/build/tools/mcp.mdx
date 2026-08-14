@@ -1,0 +1,234 @@
+---
+title: "MCP servers"
+description: "Point the agent at a remote MCP server and let it offer that server's tools."
+---
+
+An MCP server already describes its own tools. So instead of writing a tool, you
+name the server, and the agent offers what the server exposes.
+
+The file that does it holds one block and nothing else:
+
+```yaml tools/web_search.yaml
+mcp:
+  url_env: FIRECRAWL_MCP_URL
+  transport: streamable_http
+  auth:
+    type: bearer
+    token_env: FIRECRAWL_API_KEY
+  tools:
+    - firecrawl_search
+```
+
+Then the file name goes in an agent's list, the same way any tool file does:
+
+```yaml agent.yaml
+agents:
+  researcher:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - web_search
+
+tools:
+  - web_search
+```
+
+That is `examples/mcp-example`, which compiles on both targets.
+
+## The block
+
+| Field | Required | What it is |
+|---|---|---|
+| `url_env` | yes | the UPPER_SNAKE name of the environment variable holding the server address |
+| `transport` | no | `sse` or `streamable_http` |
+| `auth` | no | `bearer` with `token_env`, or `api_key` with `token_env` and an optional `header` |
+| `tools` | no | which of the server's tools to offer; absent means all of them |
+
+`url_env` is a name, never an address. Writing the URL there is refused:
+
+```
+livekit: tool "web_search" url_env must be an UPPER_SNAKE environment variable name
+```
+
+`transport` is optional because both platforms already have a rule for guessing
+it: a URL whose path ends in `/mcp` is streamable HTTP, anything else is SSE.
+Write it when you want the choice visible instead of inferred. Any other value is
+refused with both legal ones:
+
+```
+livekit: tool "web_search" transport must be sse or streamable_http, not "websocket"
+```
+
+`auth` is the same shape webhook tools use, so there is nothing new to learn and
+no new code in the generated project.
+
+## The file is the block, and nothing else
+
+Six fields that describe one tool to the model are illegal on an `mcp:` file.
+Each is refused on its own, with the file, the line, and the reason:
+
+```
+tools/web_search.yaml:1: remove `description`: it is not legal on an `mcp:` tool, the
+  server describes each of its tools
+```
+
+```
+tools/web_search.yaml:1: remove `input`: it is not legal on an `mcp:` tool, the server
+  owns each tool's parameters
+```
+
+The other four say the same thing about `output`, `inject`, `interruption`, and
+`effect`. In one place, so you can see the whole rule at once:
+
+| Field | Why not here |
+|---|---|
+| `description` | the server describes each of its tools |
+| `input` | the server owns each tool's parameters |
+| `output` | the server owns each tool's result |
+| `inject` | an MCP call has the server's own shape, with nothing to merge into |
+| `interruption` | MCP tools take the platform's default interruption policy |
+| `effect` | MCP tools return data; ending the call is a `builtin:` tool |
+
+This is the whole point of the shape. One tool file describes one tool the model
+can call. An `mcp:` file is not that: it is a **source** of tools, and how many
+there are, what they take, and what they return is only known once the server is
+running.
+
+## Choosing which tools to offer
+
+```yaml
+  tools:
+    - firecrawl_search
+```
+
+A selection filter, not a contract. Firecrawl also exposes scraping and crawling
+tools; naming one keeps the rest out of a conversation that has to stay fast.
+
+The list is **not checked against the server**, because the server's tool list
+only exists at run time. A name the server does not expose is simply never
+offered, and the package still validates:
+
+```
+✓ livekit (livekit)
+✓ pipecat (pipecat)
+```
+
+Leave `tools` out and the agent gets everything the server exposes.
+
+## Where the source can be listed
+
+| Scope | LiveKit | Pipecat |
+|---|---|---|
+| on an agent | yes | yes |
+| on a task | yes | no |
+
+The Pipecat refusal names the fix:
+
+```
+pipecat: the Pipecat driver cannot scope an MCP tool source to a task: list it on the
+  agent instead
+```
+
+The reason is the framework's: a Pipecat Flows node builds its advertised tool set
+out of its own function schemas, and Pipecat's MCP client offers no per-tool
+handler to put in one. So the source goes on the agent, where it is offered
+whenever that agent is active.
+
+Two files may name the same `url_env`. They are two independent sources, each with
+its own selection and its own assignment, which is how one server can offer a
+narrow set to one agent and a wider set to another.
+
+## What each target needs
+
+**LiveKit needs the Python SDK.** Its Node SDK has no MCP support at all, so the
+gate is a refusal rather than a warning:
+
+```
+livekit: LiveKit MCP tools require sdk_language: python
+```
+
+`examples/mcp-example` pins `version: "1.6.4"` on that target, because the emitted
+arguments are verified against the 1.6 series.
+
+**Pipecat needs nothing extra.** It emits one client per source, started with the
+bot and closed on every shutdown path.
+
+Either way the dependency the project declares picks up the extra for you:
+`livekit-agents[mcp,openai]>=1.6` and `pipecat-ai[mcp,openai,runner,silero,webrtc]==1.5.0`.
+
+## What the compile does with it
+
+Every name the block holds becomes part of the generated project. From a real
+compile of `examples/mcp-example`:
+
+`build/livekit/.env.example`
+
+```
+FIRECRAWL_API_KEY=
+FIRECRAWL_MCP_URL=
+OPENAI_API_KEY=
+SLNG_API_KEY=
+```
+
+`build/livekit/agent.py`, the startup check
+
+```python
+REQUIRED_ENV = [
+    "FIRECRAWL_API_KEY",
+    "FIRECRAWL_MCP_URL",
+    "OPENAI_API_KEY",
+    "SLNG_API_KEY",
+]
+```
+
+`build/livekit/compile-report.json`, which says where each name came from
+
+```json
+{
+  "name": "FIRECRAWL_MCP_URL",
+  "referenced_by": [
+    "tools/web_search.yaml mcp.url_env"
+  ]
+}
+```
+
+And the tool source itself, on the agent that listed it:
+
+```python
+mcp.MCPToolset(
+    id="web_search",
+    mcp_server=mcp.MCPServerHTTP(
+        url=os.environ["FIRECRAWL_MCP_URL"],
+        transport_type="streamable_http",
+        allowed_tools=["firecrawl_search"],
+        headers=_bearer("FIRECRAWL_API_KEY"),
+    ),
+)
+```
+
+Leave a field out of the block and the generated call leaves out its argument,
+rather than passing a guess: no `transport` means no `transport_type`, no `tools`
+means no `allowed_tools`, no `auth` means no `headers`.
+
+## When the server is down
+
+The two platforms behave differently, and the generated README says so for your
+build:
+
+- **LiveKit** logs the toolset that failed and the agent still starts, without
+  those tools.
+- **Pipecat** raises on startup and the bot exits loudly.
+
+Neither one pretends the tools are there.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Prebuilt tools" icon="package" href="/build/tools/prebuilt">
+    The last way a tool can run: the ones the runtime already has.
+  </Card>
+  <Card title="Secrets" icon="key" href="/reference/secrets">
+    Where `url_env` and `token_env` values come from.
+  </Card>
+</Columns>

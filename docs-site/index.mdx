@@ -1,0 +1,141 @@
+---
+title: "Unmute"
+description: "Write one voice agent spec. Compile it to a Pipecat or LiveKit Agents project you own."
+---
+
+Unmute is a command line compiler for voice agents. You write one package of
+YAML and Markdown. Unmute turns it into a real Python project for the
+orchestrator you picked, and that project is yours to run and deploy.
+
+## The problem
+
+A voice agent is a small idea buried in a lot of plumbing. Speech in, a model
+that thinks, speech out, a way to end the call, a way to hand the caller to a
+person. Every orchestrator asks you to write that plumbing again, in its own
+shape.
+
+So teams end up here:
+
+- The prompt, the tools, and the phone number live in the same file as the
+  session setup, the audio pipeline, and the retry logic.
+- Changing the voice means reading orchestrator code.
+- Trying a second orchestrator means rewriting the agent.
+- Nobody can answer "what does this agent actually do" without reading Python.
+
+## What Unmute does
+
+Unmute splits the agent from the runtime.
+
+You describe the agent once: who it is, which models it uses, which tools it
+can call, how it hands work to another agent, what happens on a phone call.
+That description is the package. It has no orchestrator code in it.
+
+Then you pick a target. Unmute compiles the package into a native project for
+that target: a Pipecat bot or a LiveKit Agents worker, with a Dockerfile, a
+`.env.example`, and a runbook. The generated project has no Unmute dependency
+at runtime. Unmute is not in the call path.
+
+<Columns cols={2}>
+  <Card title="One spec" icon="file-code">
+    `agent.yaml`, your prompts, your tool files. Read it and you know what the
+    agent does.
+  </Card>
+  <Card title="Many runtimes" icon="boxes">
+    The same package compiles to Pipecat and to LiveKit Agents. Same prompt,
+    same tools, same behavior.
+  </Card>
+</Columns>
+
+## What a spec looks like
+
+This is a whole agent. It validates for both targets.
+
+```yaml agent.yaml
+version: 1
+entry_agent: assistant
+
+models:
+  think:
+    brain:
+      provider: openai
+      model: gpt-4.1-mini
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    ears:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  assistant:
+    instructions: instructions.md
+    model: brain
+    voice: voice
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, how can I help?"
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 4
+  avg_session_duration: 3m
+```
+
+The prompt is a Markdown file next to it. The models are named once and
+referenced by name. Nothing here mentions Pipecat or LiveKit, because that
+choice lives in `targets.yaml`:
+
+```yaml targets.yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+```
+
+Two targets, one agent. `unmute compile` writes both projects.
+
+## Who it is for
+
+- Teams who ship voice agents and are tired of maintaining orchestrator code.
+- Teams who want to compare Pipecat and LiveKit Agents without writing the
+  agent twice.
+- Anyone who wants the agent's behavior reviewable in a pull request, in files
+  a non-Python reader can follow.
+
+Unmute is not a hosted platform and not a runtime. It compiles ahead of time,
+hands you the project, and gets out of the way.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Install" icon="download" href="/start/installation">
+    Get the `unmute` binary.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/start/quickstart">
+    From nothing to an agent you can talk to in your browser.
+  </Card>
+  <Card title="How Unmute works" icon="settings" href="/start/how-unmute-works">
+    The four stages between your package and the generated project.
+  </Card>
+  <Card title="Build the agent" icon="graduation-cap" href="/build/your-first-agent">
+    The guided path: one agent, then tools, then everything else.
+  </Card>
+</Columns>

@@ -1,0 +1,99 @@
+---
+title: "What makes them fast"
+description: "A scaffolded package binds SLNG speech models by design, and those models run on SLNG's Execution Layer."
+---
+
+`unmute init` binds SLNG for listening and speaking, and every shipped example does
+the same. That is a decision, not a placeholder: SLNG speech models run behind
+SLNG's own **Execution Layer**, which is the part of the stack aimed at the two
+things a voice call is judged on, how fast it answers and what it costs per turn.
+
+Unmute does not measure any of this. Everything on this page is SLNG's published
+description of its own system, linked so you can read the source.
+
+## What the Execution Layer is
+
+Rather than sending every turn through every model, the layer routes each turn to
+the path that can serve it, and avoids the inference calls it does not need. SLNG's
+own framing is that "a 16-turn voice call makes 48 model calls", and that at "1M
+calls per month, that is 48M inference calls".
+
+Two stages of it matter to a package you build here.
+
+<Note>
+  Figures below are SLNG's, published for the Execution Layer as a whole, and are
+  not measurements taken by Unmute or by this repository. Source:
+  [docs.slng.ai/execution-layer](https://docs.slng.ai/execution-layer), read
+  2026-08-14.
+</Note>
+
+| What SLNG reports | Their figure |
+|---|---|
+| end-to-end latency per turn | "39% reduction" |
+| total pipeline cost | "53% reduction" |
+| call completion rate | "Zero dropped, zero downtime" |
+
+## The STT Performance Layer
+
+The first stage, which routes incoming audio to the transcription model best suited
+to it, per turn, based on the caller's context: language, location, environment.
+SLNG lists noise cancellation across audio types, voice activity detection across
+multiple speakers, language routing across models, and diarization for transcription
+metadata.
+
+<Warning>
+  SLNG marks this stage `PRIVATE BETA` and says "The behavior described here is being
+  rolled out gradually." That is their status for their feature, quoted as published
+  on 2026-08-14 at
+  [docs.slng.ai/execution-layer/stt-performance-layer](https://docs.slng.ai/execution-layer/stt-performance-layer).
+  Read it before you plan around this stage.
+</Warning>
+
+## TTS Path Optimization
+
+The other stage, on the way out. Instead of generating audio for every request, it
+"serves from cache when possible and synthesizes only when genuinely new". In SLNG's
+words: "When audio has been produced before for the same request, it is served
+instantly, with no upstream model call and no provider billing. When it has not, it
+is generated, and the result is available for future requests."
+
+SLNG makes no numeric claim for this stage on its own, and describes the saving as
+structural rather than measured: "Cost decreases structurally. As coverage grows,
+fewer turns hit the upstream model." Read as published on 2026-08-14 at
+[docs.slng.ai/execution-layer/tts-path-optimization](https://docs.slng.ai/execution-layer/tts-path-optimization).
+
+Which is worth knowing when you write a greeting: a line every caller hears is the
+kind of output this stage is built for.
+
+## What this means for your package
+
+Nothing you have to write. The layer sits behind the SLNG models you already bound:
+
+```yaml agent.yaml
+models:
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+```
+
+One `SLNG_API_KEY` covers both. If you bind a different vendor for either role, you
+are on that vendor's own path instead, and none of the above applies. The lists of
+what else each target can construct are on
+[speech to text](/models/stt) and [text to speech](/models/tts).
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="SLNG models" icon="list" href="https://docs.slng.ai/models">
+    The full catalog, with languages and regions.
+  </Card>
+  <Card title="Speech to text" icon="mic" href="/models/stt">
+    Every vendor each target can use for listening.
+  </Card>
+</Columns>

@@ -35,10 +35,16 @@ var livekitV1Templates embed.FS
 // InstructionParts / extra_instructions), so warm packages pin the minor
 // series the import was verified against: 1.6.4, checked in the reference
 // checkout on 2026-08-11 (SPEC V10).
+// MCP raises the floor the same way, and for the same reason: every argument
+// the driver emits (transport_type, allowed_tools, headers) and MCPToolset
+// itself are verified in the 1.6.4 checkout, and 1.5.x cannot be claimed from
+// what we hold. The `mcp` extra is what carries the client at all: without it
+// livekit/agents/llm/mcp.py raises ImportError on import (N40, research R2).
 const (
 	livekitVersionMajor      = 1
 	livekitVersionMinMinor   = 5
 	livekitWarmVerifiedMinor = 6
+	livekitMCPVerifiedMinor  = 6
 )
 
 var livekitVersionPattern = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
@@ -271,11 +277,18 @@ type livekitTool struct {
 	EndsConversation bool   // effect: ends_conversation — shutdown after the call
 }
 
-// livekitMCPServer is one MCP server an agent or task mounts (B3): the tools
-// sharing a url_env collapse to one MCPServerHTTP with allowed_tools (D8).
+// livekitMCPServer is one MCP tool source an agent or task mounts (N40): one
+// MCPToolset on the tools surface, identified by the source name. An empty
+// field emits no argument at all, so the SDK's own default stands: no
+// transport_type means it reads the URL, no allowed_tools means every tool the
+// server exposes, no headers means an unauthenticated connection.
 type livekitMCPServer struct {
-	URLEnv string
-	Tools  []string
+	Name      string
+	URLEnv    string
+	Transport string
+	Tools     []string
+	Auth      *webhookAuth
+	AuthEnv   string // the token's env name, for the startup check
 }
 
 // livekitLocalTool is a copied handler file: tools/<name>.py in the project.
@@ -421,7 +434,8 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolOutput:            true, // tool returns response.json()
 	targetcap.FieldToolLocal:             true, // handler copied + wrapped
 	targetcap.FieldToolBuiltin:           true, // prebuilt end_call → beta EndCallTool
-	targetcap.FieldToolMCP:               true, // mcp.MCPServerHTTP mounts (B3)
+	targetcap.FieldToolMCP:               true, // mcp.MCPToolset mounts on the tools surface (N40)
+	targetcap.FieldToolMCPTask:           true, // the same mount on an AgentTask's tools surface
 	targetcap.FieldToolAuth:              true, // _bearer Authorization header off token_env
 	targetcap.FieldToolInterruption:      true, // warn: runs to completion
 	targetcap.FieldOutbound:              true, // SIP dial-out off job metadata

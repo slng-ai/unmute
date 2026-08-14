@@ -1,0 +1,72 @@
+---
+title: "Console mode"
+description: "Talk to the agent in your terminal over the local mic and speaker, with no Docker."
+---
+
+```sh
+unmute dev examples/salon-support --target pipecat --console
+```
+
+Console mode compiles the package and hands your terminal to the generated
+project's own console runner. You talk over your local microphone and speaker.
+There is no browser, no dev web server, and no container.
+
+## What it needs
+
+[`uv`](https://docs.astral.sh/uv/) on your PATH. Nothing else. If `uv` is
+missing:
+
+```
+unmute: dev examples/salon-support: uv not found on PATH; install uv to run the agent locally (https://docs.astral.sh/uv/)
+```
+
+## What it runs
+
+| Target | Command it runs for you |
+|---|---|
+| Pipecat | `uv run --extra console bot.py console` |
+| LiveKit Agents | `uv run agent.py console` |
+
+Both run inside `build/<target>/`. The Pipecat `console` extra installs the
+local audio dependency; LiveKit draws its own full screen terminal UI.
+
+## Flags it ignores
+
+`--port`, `--bot-port`, and `--no-open` do nothing here, because there is no
+web page to serve or open. The help text says so too.
+
+`--console` and `--telephony` cannot be used together.
+
+## LiveKit credentials
+
+Console mode never joins a room, so it usually needs no LiveKit credentials.
+The exception is a package whose model bindings route through LiveKit
+Inference, which is billed through LiveKit Cloud. Then it stops early and says
+what is missing:
+
+```
+console mode needs LIVEKIT_API_KEY and LIVEKIT_API_SECRET: this agent routes through LiveKit Inference
+```
+
+An agent bound to native providers with local turn detection, which is what
+`unmute init` and every shipped example give you, does not hit this.
+
+## When to use it
+
+- Docker is not available or not worth starting.
+- You want the fastest possible loop on a prompt change.
+- You are on a machine where a browser microphone prompt is awkward.
+
+Use the [browser mode](/dev/overview) when you want to run the exact image a
+deployment runs.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="A phone route locally" icon="phone" href="/dev/telephony">
+    The third way to run: a real call to your laptop.
+  </Card>
+  <Card title="dev reference" icon="book" href="/reference/cli/dev">
+    Every flag, with defaults and requirements.
+  </Card>
+</Columns>

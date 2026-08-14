@@ -1,0 +1,132 @@
+---
+title: "Transfers on LiveKit"
+description: "The only route with both cold and warm transfer, over a Twilio SIP trunk."
+---
+
+This page follows `examples/livekit-human-transfer`. That package declares
+**one target, LiveKit only**. Warm transfer compiles on no other route today,
+so the example does not pretend to be portable.
+
+```yaml targets.yaml
+targets:
+  livekit:
+    provider: livekit
+    version: "1.6.4"
+    sdk_language: python
+    connection: twilio_sip
+    deployment_region: eu-central
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
+```yaml agent.yaml
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
+  supervisor_line: SUPERVISOR_PHONE_NUMBER
+```
+
+The route is `connections/twilio_sip.yaml`, below. The two desks are in
+`agent.yaml`, because the same desk answers whichever target places the call.
+
+## Two transfers, side by side
+
+```yaml agent.yaml
+controls:
+  send_to_billing:
+    kind: human_transfer
+    when: The caller asks about an invoice, a refund, or a charge they do not recognise.
+    cold:
+      destination: billing_line
+
+  escalate_to_supervisor:
+    kind: human_transfer
+    when: The caller is unhappy with how something was handled and asks for a manager.
+    warm:
+      destination: supervisor_line
+      briefing: |
+        Lead with the caller's name and which stylist they saw.
+        Say what they are unhappy about and what you already offered them.
+        Ask whether they can take the call now.
+      ring_timeout: 25s
+      on_unavailable: return_to_caller
+```
+
+**Cold** is a SIP REFER. The agent asks the carrier to hand the caller's
+existing leg somewhere else. The caller leaves the room and the session ends.
+If the REFER fails, the caller stays with the agent and `on_unavailable`
+applies.
+
+**Warm** uses LiveKit's own prebuilt warm transfer task. The caller waits on
+hold, the supervisor's line rings, the agent briefs them, and only then are the
+two connected. `briefing` is free text, not a mode: the call transcript is
+passed along on its own, so write what the person needs on top of it. Every
+failure, no answer, decline, voicemail, failed dial, comes back as one error
+and `on_unavailable` decides.
+
+## The trunk has to allow it
+
+Cold transfer is a SIP REFER, so the trunk must permit transfers. On Twilio, in
+the console under **Elastic SIP Trunking > Manage > Trunks > your trunk**,
+enable **Call Transfer (SIP REFER)** and tick **Enable PSTN Transfer**. With
+the Twilio CLI:
+
+```sh
+twilio api trunking v1 trunks update --sid <trunk-sid> \
+  --transfer-mode enable-all --transfer-caller-id from-transferee
+```
+
+Caller ID for the transfer target is that trunk setting, never per call.
+Transfers to emergency numbers are not supported, and the referred leg keeps
+billing per minute trunking charges.
+
+## The connection
+
+Four standard SIP names, not Twilio specific ones, because the same generated
+code dials through any SIP carrier with them:
+
+```yaml connections/twilio_sip.yaml
+transport: sip
+carrier: twilio
+environment:
+  sip_address: SIP_TRUNK_HOSTNAME
+  sip_username: SIP_AUTH_USERNAME
+  sip_password: SIP_AUTH_PASSWORD
+  from_number: SIP_FROM_NUMBER
+```
+
+The first two lines are the route: this is the file that says the call arrives
+over SIP and Twilio carries it. The four names below are yours, and the compiler
+carries whatever you write through verbatim.
+
+## Run it
+
+```sh
+unmute compile examples/livekit-human-transfer
+```
+
+The compile report prints the route, every required environment variable, and
+the evidence line for each capability:
+
+```
+livekit: telephony route provider=livekit transport=sip carrier=twilio coordination=shared admission=livekit_dispatch
+livekit: telephony evidence warm_transfer=provisional docs=https://docs.livekit.io/telephony/start/providers/twilio/ verified=2026-08-12 smoke=false
+```
+
+Locally, `unmute dev --telephony --target livekit --to +1...` places an
+outbound call through the trunk, which is the practical way to reach a transfer
+without waiting for someone to call you. Inbound on this route is tested
+against a deployment: SIP needs the carrier to reach signalling and media at a
+routable address, which a laptop behind a home router usually cannot offer.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Pipecat on Daily" icon="phone" href="/transfers/pipecat-daily">
+    Cold transfer with no carrier account.
+  </Card>
+  <Card title="Going live" icon="rocket" href="/deploy/going-live">
+    Deploy the generated project.
+  </Card>
+</Columns>

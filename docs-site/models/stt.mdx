@@ -1,0 +1,85 @@
+---
+title: "Speech to text"
+description: "Which speech to text vendors each target can construct, and the SLNG models the scaffold binds."
+---
+
+The `listen` role turns the caller's voice into text. You bind it once in
+`agent.yaml`:
+
+```yaml agent.yaml
+models:
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+```
+
+A scaffolded package binds SLNG here by design, so one `SLNG_API_KEY` covers
+listening and speaking. See [what makes them fast](/models/optimization).
+
+<Info>
+  Model ids are forwarded to the vendor exactly as you write them. Unmute keeps no
+  allowlist, so a typo surfaces as a provider error at run time. The compile report
+  says so on every binding: `(forwarded as-is, not validated)`.
+</Info>
+
+## The SLNG models this repository uses
+
+| Where | `model:` |
+|---|---|
+| every shipped example, and `unmute init` | `slng/deepgram/nova:3-en` |
+
+Those are the only exact ids the docs name, because they are the ones the examples
+run. The full SLNG catalog, with languages, regions, and hosting, is at
+[docs.slng.ai/models](https://docs.slng.ai/models); any id from there goes in
+`model:` as written.
+
+## Pipecat
+
+| Provider | Notes |
+|---|---|
+| `slng` | SLNG hosted speech to text. `SLNG_API_KEY`. |
+| `assemblyai` | |
+| `cartesia` | |
+| `deepgram` | |
+| `elevenlabs` | also accepted as `eleven_labs` |
+| `gradium` | |
+| `openai` | |
+| `soniox` | |
+| `speechmatics` | |
+
+An unlisted provider is legal on Pipecat on one condition: it has to be a
+genuinely OpenAI-compatible endpoint, named with `endpoint_env`. Without that it is
+refused, and the message lists what the role does take.
+
+## LiveKit Agents
+
+| Provider | Notes |
+|---|---|
+| `slng` | SLNG hosted speech to text. `SLNG_API_KEY`. |
+| `assemblyai` | |
+| `cartesia` | |
+| `deepgram` | |
+| `elevenlabs` | also accepted as `eleven_labs` |
+| `gradium` | |
+| `sarvam` | |
+| `soniox` | |
+| `speechmatics` | |
+
+This list is closed. LiveKit speech to text has no fallback path, so a provider
+that is not here cannot be bound at all.
+
+## The difference between the two
+
+Pipecat has `openai`, LiveKit has `sarvam`. Everything else matches.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Text to speech" icon="volume-2" href="/models/tts">
+    The voice the caller hears.
+  </Card>
+  <Card title="What makes them fast" icon="zap" href="/models/optimization">
+    The SLNG Execution Layer behind these models.
+  </Card>
+</Columns>

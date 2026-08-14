@@ -88,7 +88,14 @@ controls:
     # The shape is a block, never a `mode:` field, and the block carries every
     # parameter of the transfer (SCHEMA N25, N27).
     cold:
-      destination: billing_line   # resolved per target in targets.yaml
+      destination: billing_line   # resolved by the destinations map below
+
+# Who this agent escalates to. The same desk answers whichever target places the
+# call, so it is declared once here rather than per target. A value is the
+# UPPER_SNAKE name of an environment variable holding the number: agent.yaml is
+# the portable half of a package, and a number is a deployment fact.
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
 
 tools:
   - lookup_customer

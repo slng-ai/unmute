@@ -1,0 +1,105 @@
+---
+title: "The LiveKit project"
+description: "What unmute compile writes for a LiveKit Agents target, and how to run it without Unmute."
+---
+
+```sh
+unmute compile examples/simple-prompt --target livekit
+```
+
+```text
+examples/simple-prompt/build/livekit/
+├── agent.py              # the agent worker
+├── tools/                # your local handlers, copied
+│   ├── __init__.py
+│   └── book_appointment.py
+├── tracing.py            # present when the package sets tracing
+├── pyproject.toml        # pinned dependencies
+├── Dockerfile
+├── .dockerignore
+├── compose.dev.yaml      # what `unmute dev` runs, including a local LiveKit server
+├── .env.example          # exactly the variables this agent needs
+├── README.md             # the runbook for this build
+└── compile-report.json   # what the compiler decided
+```
+
+A telephony target on the SIP route also gets `compose.telephony.yaml`,
+`sip-inbound-trunk.json`, `sip-dispatch-rule.json`, and `telephony-setup.sh`.
+
+## agent.py
+
+One worker file: your prompts, the agent classes, the tasks and task groups if
+you declared any, the tool functions, and the session wiring. The entry agent
+becomes a class, named after your agent, and the generated README says which
+one it is.
+
+It imports LiveKit Agents and your handlers. Nothing from Unmute.
+
+## Run it without Unmute
+
+```sh
+uv sync                       # or: pip install -e .
+cp .env.example .env          # then fill in the selected provider values
+uv run agent.py console       # local terminal session
+uv run agent.py dev           # LiveKit development worker
+```
+
+`console` talks over your microphone with no room and no server.
+`dev` runs the worker against a LiveKit server.
+
+<Note>
+  `unmute dev --target livekit` runs the worker in Docker beside a local
+  `livekit-server` in development mode, and waits for the worker to register
+  before opening the browser. That is why the first LiveKit run takes longer
+  than the first Pipecat one.
+</Note>
+
+## Dependencies are pinned
+
+```toml pyproject.toml
+dependencies = [
+    "httpx",
+    "langfuse>=3",
+    "livekit-agents[openai]>=1.5",
+    "livekit-plugins-silero>=1.6.1",
+    "livekit-plugins-slng>=1.6.1",
+    "opentelemetry-sdk>=1.33,<2",
+    "python-dotenv",
+]
+```
+
+Extras and plugins follow the providers your package binds.
+
+## Deploy
+
+Two paths, both running the project as generated. The generated README carries
+the exact commands. The shape of the LiveKit Cloud path:
+
+```sh
+lk cloud auth                   # once
+lk project set-default "<name>" # once
+cp .env.example .env
+lk agent create --secrets-file .env
+```
+
+The first deploy registers the agent, builds the image from the generated
+`Dockerfile`, and writes the `livekit.toml` that the generated directory
+deliberately does not ship, because the platform assigns both of its values.
+Every later version is `lk agent deploy`.
+
+The other path is a worker you host yourself, from the same `Dockerfile`.
+
+<Warning>
+  Do not edit files in `build/`. Change the source package and compile again.
+</Warning>
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="The Pipecat project" icon="boxes" href="/targets/pipecat">
+    The same agent, the other runtime.
+  </Card>
+  <Card title="Going live" icon="rocket" href="/deploy/going-live">
+    What to do with the project you were handed.
+  </Card>
+</Columns>

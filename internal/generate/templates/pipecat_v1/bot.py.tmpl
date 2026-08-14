@@ -7,6 +7,14 @@ catalogue, internal/target/catalog_pipecat.go). */ -}}
 {{range .SettingsArgs}}            {{.Key}}={{.Value}},
 {{end}}        ),
 {{end}}    ){{end -}}
+{{- /* mcp_client renders one MCP tool source's client (N40). An absent field
+emits no argument: no tools_filter means every tool the server exposes, no
+headers means no authentication. A source with no transport gets the startup
+chooser instead of a parameter class. */ -}}
+{{define "mcp_client"}}MCPClient(
+            server_params={{if .ParamsClass}}{{.ParamsClass}}(url=os.environ[{{pyq .URLEnv}}]{{if .Auth}}, headers={{.Auth.Expr}}{{end}}){{else}}_mcp_params(os.environ[{{pyq .URLEnv}}]{{if .Auth}}, {{.Auth.Expr}}{{end}}){{end}},
+{{if .Tools}}            tools_filter=[{{range $i, $t := .Tools}}{{if $i}}, {{end}}{{pyq $t}}{{end}}],
+{{end}}        ){{end -}}
 """Generated Pipecat agent for {{.Project}}.
 
 Compiled by `unmute`; do not edit by hand. Prompts, model routes, and the agent
@@ -40,6 +48,7 @@ import httpx
 {{end}}{{if .Telephony}}import telephony
 {{end}}from dotenv import load_dotenv
 {{if or .Telephony .HasColdTransfer .DailyCarrier .CloudWebsocket}}from loguru import logger
+{{end}}{{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
 {{end}}
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 {{if not .Inline}}from pipecat.bus import BusBridgeProcessor
@@ -55,6 +64,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 {{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
+{{end}}{{if .NeedsMCP}}from pipecat.services.mcp_service import MCPClient
 {{end}}{{if .NeedsRoleRestore}}from pipecat.services.settings import LLMSettings
 {{end}}{{if .NeedsLanguage}}from pipecat.transcriptions.language import Language
 {{end}}from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -428,7 +438,19 @@ def _bearer(env: str) -> dict[str, str]:
 def _api_key(header: str, env: str) -> dict[str, str]:
     """auth: api_key — the token verbatim in its own header."""
     return {header: os.environ[env]}
-{{end}}{{end}}
+{{end}}{{end}}{{if .NeedsMCPChooser}}
+
+def _mcp_params(url: str, headers: dict[str, str] | None = None):
+    """Pick the transport for a source that did not state one.
+
+    ponytail: this mirrors livekit-agents' own auto-detect instead of adding a
+    knob, so one server URL behaves the same on both targets: a path ending in
+    /mcp is streamable HTTP, anything else is SSE. Write `transport:` in the
+    tool file to decide it yourself.
+    """
+    params_cls = StreamableHttpParameters if url.rstrip("/").endswith("/mcp") else SseServerParameters
+    return params_cls(url=url, headers=headers)
+{{end}}
 # --- prompts ----------------------------------------------------------------
 # Agent system instructions as module constants: one copy each, referenced by
 # the LLM builder and any Flow restore (V2).
@@ -485,7 +507,29 @@ class {{.Class}}({{if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}
 {{end}}
         llm = build_{{.Name}}_llm({{if $.Variables}}state{{end}})
         super().__init__({{pyq .Name}}, llm=llm, pipeline=Pipeline([llm, build_{{.Name}}_tts()]), bridged=())
-{{if $.NeedsStateBind}}
+{{if .MCPSources}}        # MCP tool sources. The clients are built here and connected in
+        # start_mcp() before this worker is ever activated, because the server
+        # names its own tools and build_tools() has to be able to list them.
+        self._mcp_clients = [
+{{range .MCPSources}}            {{template "mcp_client" .}},
+{{end}}        ]
+        self._mcp_tools: list = []
+
+    async def start_mcp(self) -> None:
+        """Connect every source and register its tools on this agent's LLM."""
+        for client in self._mcp_clients:
+            await client.start()
+            self._mcp_tools.extend((await client.register_tools(self.llm)).standard_tools)
+
+    async def close_mcp(self) -> None:
+        for client in self._mcp_clients:
+            await client.close()
+
+    def build_tools(self) -> list:
+        """The @tool methods plus this agent's MCP tools, so the server's tools
+        are advertised only while this agent is active."""
+        return super().build_tools() + self._mcp_tools
+{{end}}{{if $.NeedsStateBind}}
     def _bind_state(self, handler):
         """Give a module-level flows handler this worker's call state, so a task
         tool can read injected variables the same way an agent tool does."""
@@ -794,7 +838,13 @@ def build_stt():
 
     # Single agent, no handoffs: the LLM sits inline in the pipeline (no bus).
     # turn: local — on-device VAD (Silero); the turn binding is advisory.
-    context = LLMContext({{if $agent.Tools}}tools=[{{range $i, $t := $agent.Tools}}{{if $i}}, {{end}}{{$t.MethodName}}{{end}}]{{end}})
+{{if $agent.MCPSources}}    llm = build_{{$agent.Name}}_llm()
+    # MCP tool sources: connect, then register each server's tools on the LLM.
+    # An unreachable server raises here and the bot exits saying so.
+{{range $agent.MCPSources}}    {{.Var}} = {{template "mcp_client" .}}
+    await {{.Var}}.start()
+    {{.Var}}_tools = await {{.Var}}.register_tools(llm)
+{{end}}{{end}}    context = LLMContext({{if $agent.Tools}}tools=[{{range $i, $t := $agent.Tools}}{{if $i}}, {{end}}{{$t.MethodName}}{{end}}]{{range $agent.MCPSources}} + {{.Var}}_tools.standard_tools{{end}}{{else if $agent.MCPSources}}tools={{range $i, $s := $agent.MCPSources}}{{if $i}} + {{end}}{{$s.Var}}_tools.standard_tools{{end}}{{end}})
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -811,7 +861,7 @@ def build_stt():
             transport.input(),
             build_stt(),
             user_aggregator,
-            build_{{$agent.Name}}_llm(),
+            {{if $agent.MCPSources}}llm{{else}}build_{{$agent.Name}}_llm(){{end}},
             build_{{$agent.Name}}_tts(),
             transport.output(),
             assistant_aggregator,
@@ -854,8 +904,12 @@ def build_stt():
             await runner.cancel()
 
     await runner.add_workers(worker)
-    await runner.run()
-
+{{if $agent.MCPSources}}    try:
+        await runner.run()
+    finally:
+{{range $agent.MCPSources}}        await {{.Var}}.close()
+{{end}}{{else}}    await runner.run()
+{{end}}
 
 {{else}}async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activate_on_start: bool = False) -> None:
     require_env()
@@ -882,6 +936,10 @@ def build_stt():
 {{end}}{{if .Variables}}    state = build_state(call_context)
 {{else}}    state = None
 {{end}}    agents = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(state=state, context=context, call_context=call_context){{end}}]
+{{- range $i, $a := .Agents}}{{if $a.MCPSources}}
+    # {{$a.Name}} connects its MCP servers before anything activates it; an
+    # unreachable server raises here and the bot exits saying so.
+    await agents[{{$i}}].start_mcp(){{end}}{{end}}
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -1050,13 +1108,14 @@ def build_stt():
             await runner.cancel()
 
     await runner.add_workers(main, *agents)
-{{if .Tracing}}
+{{if or .Tracing .NeedsMCP}}
     try:
         await runner.run()
     finally:
-        if tracing_enabled:
+{{if .Tracing}}        if tracing_enabled:
             flush_tracing()
-{{else}}
+{{end}}{{range $i, $a := .Agents}}{{if $a.MCPSources}}        await agents[{{$i}}].close_mcp()
+{{end}}{{end}}{{else}}
     await runner.run()
 {{end}}
 {{end}}

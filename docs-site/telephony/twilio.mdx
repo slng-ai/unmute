@@ -1,0 +1,168 @@
+---
+title: "Get your Twilio details"
+description: "Which value in the Twilio console fills which name in your connection file, per route."
+---
+
+A connection file holds environment variable **names**. This page is about the
+values behind them: where each one lives in your Twilio account, and which key it
+belongs to.
+
+<Note>
+  Unmute never buys a number, creates a trunk, or changes anything on your carrier
+  account at compile time. The one exception is deliberate and temporary:
+  [`unmute dev --telephony`](/dev/telephony) points your number's voice webhook at
+  the local run and puts the previous value back when you stop it.
+</Note>
+
+## Which values you need depends on the route
+
+| Target | `transport` | `environment` keys | Where they come from |
+|---|---|---|---|
+| Pipecat | `cloud-websocket` | `account_sid`, `auth_token`, `from_number` | the account dashboard, plus a number you own |
+| Pipecat | `carrier-websocket` | `account_sid`, `auth_token`, `from_number` | the same three |
+| LiveKit Agents | `connector` | `account_sid`, `auth_token`, `from_number` | the same three |
+| LiveKit Agents | `sip` | `sip_address`, `sip_username`, `sip_password`, `from_number` | an Elastic SIP trunk you create |
+
+The two groups are different credentials, not two names for one thing. The account
+trio identifies your account to Twilio's REST API. The four SIP values are one
+trunk's own dial-out settings, and they live in a different part of the console. One
+number can serve both, one target at a time.
+
+## First, a voice-capable number
+
+**Phone Numbers**, **Manage**, **Buy a number**, with the Voice capability. Skip
+this if you already own the number you want the agent to use.
+
+Whatever you buy or already own is the value of `from_number` (or `SIP_FROM_NUMBER`
+on the SIP route). It is also the caller identity the person you dial sees, and
+voice capability is the whole requirement on it.
+
+## The account trio: Pipecat routes and the LiveKit connector
+
+These three routes talk to Twilio's REST API in your name, so they need the account
+credentials.
+
+| Connection key | The value | Where it is |
+|---|---|---|
+| `account_sid` | starts with `AC` | the Twilio Console account dashboard |
+| `auth_token` | the account's auth token | the same dashboard, revealed on request |
+| `from_number` | the number in E.164 form, `+15551234567` | Phone Numbers, Manage |
+
+```yaml connections/twilio_voice.yaml
+transport: cloud-websocket
+carrier: twilio
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+The names on the right are yours to choose. Those three are what every Twilio example
+in the repository uses, so one `.env` drives all of them.
+
+### Pointing the number at the agent
+
+This part differs by route, and it is the part to get right:
+
+- **`cloud-websocket`, in production**: the number points at a static piece of TwiML
+  in the console, which streams the call to Pipecat Cloud. There is no URL of yours
+  to configure, because nothing of yours is hosted. Your build's generated README
+  dictates the exact markup, including the regional stream address, because that
+  address comes from the region in your `targets.yaml`.
+- **`carrier-websocket` and `connector`, in production**: the number's voice webhook
+  points at the public URL of the service you host, as a POST.
+- **All three, locally**: `unmute dev --telephony` sets the voice webhook to its own
+  tunnel on every start and restores the previous value on exit, so you do not touch
+  the console to test.
+
+<Warning>
+  Take the number off any SIP trunk before using it on one of these routes. A number
+  attached to a trunk ignores its voice configuration completely, and does so
+  silently, so the markup or webhook you set would simply never be consulted.
+</Warning>
+
+## The four SIP values: the LiveKit `sip` route
+
+Here the call arrives over a Twilio Elastic SIP trunk, so the credentials are the
+trunk's rather than the account's. In the console: **Elastic SIP Trunking**,
+**Manage**, **Trunks**, then create one trunk that carries everything below.
+
+| Connection key | The value | Where it is |
+|---|---|---|
+| `sip_address` | a domain you choose ending in `pstn.twilio.com`, for example `my-agent.pstn.twilio.com` | the trunk's **Termination** tab, as the Termination SIP URI |
+| `sip_username` | the username in the trunk's credential list | Termination, **Authentication**, Credential Lists |
+| `sip_password` | that credential's password | the same credential list |
+| `from_number` | the number attached to the trunk | the trunk's **Numbers** tab |
+
+```yaml connections/twilio_sip.yaml
+transport: sip
+carrier: twilio
+environment:
+  sip_address: SIP_TRUNK_HOSTNAME
+  sip_username: SIP_AUTH_USERNAME
+  sip_password: SIP_AUTH_PASSWORD
+  from_number: SIP_FROM_NUMBER
+```
+
+The termination domain is the whole address: there is no second value to hunt for.
+The names are plain SIP names rather than Twilio ones, because the same generated
+code dials through any SIP carrier with them.
+
+### Two more trunk settings that are not credentials
+
+**Origination**, which is how calls reach the agent rather than how the agent dials
+out. On the trunk's **Origination** tab, add an Origination URI pointing at your
+LiveKit project's SIP URI with `;transport=tcp` on the end, for example
+`sip:abc123def.sip.livekit.cloud;transport=tcp`. Read that URI from the LiveKit
+Cloud project settings; do **not** build it from `LIVEKIT_URL`, because the project
+URL subdomain and the SIP subdomain are different strings. Your build's generated
+README carries a command that derives it for you.
+
+**Call Transfer**, if the agent hands calls to a person. Under the trunk's
+**Features**: set Call Transfer (SIP REFER) to Enabled and tick Enable PSTN
+Transfer. Caller ID for the transfer target is a trunk setting, never something one
+call chooses.
+
+## Then declare the names
+
+Two files, and neither holds a value:
+
+```yaml agent.yaml
+secrets:
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_PHONE_NUMBER
+```
+
+Every name your connection maps belongs in `secrets:` too, which is what puts it in
+the generated `.env.example` and the startup check. The values go in `.env` locally,
+and in your platform's secret store for a deployment.
+
+## Where this page's facts come from
+
+The key names and which route accepts which are read from this repository's own
+route table, and they match the connection files in
+`examples/twilio-telephony-hello`, `examples/outbound-reminder`,
+`examples/pipecat-human-transfer-twilio`, and `examples/livekit-human-transfer`.
+
+The console paths for Elastic SIP Trunking (Manage, Trunks, Termination SIP URI as
+`{example}.pstn.twilio.com`, Credential Lists, Origination SIP URI, and the Numbers
+tab) were checked against
+[Twilio's SIP Trunking documentation](https://www.twilio.com/docs/sip-trunking) on
+2026-08-14. The account dashboard location of the Account SID and auth token comes
+from this repository's generated runbooks; the Twilio pages read on that date name
+the two values without giving a console path for them.
+
+Your build's `build/<target>/README.md` is the authority for your route, because it
+was generated from your package and names your region and your number.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="connections/<name>.yaml" icon="phone" href="/reference/connections-yaml">
+    The file these values fill.
+  </Card>
+  <Card title="Your first phone call" icon="phone-incoming" href="/telephony/first-phone-call">
+    Take a real call on your laptop.
+  </Card>
+</Columns>

@@ -1,0 +1,233 @@
+---
+title: "connections/<name>.yaml"
+description: "One file, one phone route: the transport, the carrier, and the environment names that route needs."
+---
+
+A connection is one whole phone route. It says how the call is carried, which
+carrier hands it over, and which environment variables hold that account's
+credentials.
+
+```yaml connections/twilio_sip.yaml
+transport: sip
+carrier: twilio
+environment:
+  sip_address: SIP_TRUNK_HOSTNAME
+  sip_username: SIP_AUTH_USERNAME
+  sip_password: SIP_AUTH_PASSWORD
+  from_number: SIP_FROM_NUMBER
+```
+
+The target names the file and says nothing else about telephony:
+
+```yaml targets.yaml
+targets:
+  livekit:
+    provider: livekit
+    version: "1.6.4"
+    sdk_language: python
+    connection: twilio_sip
+```
+
+So when you want to know how a call reaches this agent, you open one file.
+
+## Fields
+
+| Field | Required | What it is |
+|---|---|---|
+| `transport` | yes | the mechanism that carries the call, see [the routes](/telephony/overview) |
+| `carrier` | on every route that has a carrier leg | the carrier account behind the route, for example `twilio`, `telnyx`, `plivo` |
+| `environment` | on every route that needs account values | a map of the route's own setting names to your environment variable names |
+
+The setting names on the left of `environment` are fixed by the route. The
+names on the right are yours, and they are names only. The compiler never reads
+the values, so a package with connections still validates and compiles with no
+credentials present anywhere.
+
+## The three shapes
+
+### Full route
+
+A route with credentials. Most connections look like this.
+
+```yaml connections/twilio_sip.yaml
+transport: sip
+carrier: twilio
+environment:
+  sip_address: SIP_TRUNK_HOSTNAME
+  sip_username: SIP_AUTH_USERNAME
+  sip_password: SIP_AUTH_PASSWORD
+  from_number: SIP_FROM_NUMBER
+```
+
+From `examples/twilio-telephony-hello`, where it is the LiveKit target's route.
+
+### No credentials
+
+Receive only on Pipecat's `cloud-websocket` route. Pipecat Cloud terminates the
+carrier's media stream itself, so a package that only answers calls needs
+nothing from your Twilio account.
+
+```yaml connections/twilio_voice.yaml
+transport: cloud-websocket
+carrier: twilio
+```
+
+The moment the package places a call, or hands one to a person, the same route
+needs `account_sid`, `auth_token`, and `from_number`, because both of those speak
+to Twilio's API in your name. The refusal says which behavior asked for them:
+
+```
+connections/twilio_voice.yaml: connection "twilio_voice" requires environment key
+  "account_sid" for route (pipecat, cloud-websocket, twilio), because this package
+  places or redirects calls. A package that only receives calls on this route needs
+  no connection environment at all
+```
+
+### No carrier
+
+A Daily-provisioned number. Daily's own infrastructure carries the call, so there
+is no carrier leg to name and no carrier credentials to hold.
+
+```yaml connections/daily.yaml
+transport: daily-sip
+```
+
+That is the whole file, and it is `examples/pipecat-human-transfer-daily`'s real
+connection. The `DAILY_API_KEY` the runtime reads comes from the route's own
+environment, not from your package, so it is not in `secrets:` and it is still in
+the generated `.env.example`. What this route also needs is a permission rather
+than a credential: dial-out enabled on the Daily domain. No compile-time check
+can see that, so the generated runbook says it instead.
+
+## Which environment keys a route accepts
+
+| Target | `transport` | `carrier` | `environment` keys |
+|---|---|---|---|
+| Pipecat | `cloud-websocket` | `twilio` | `account_sid`, `auth_token`, `from_number`, and only when the package places or redirects a call |
+| Pipecat | `carrier-websocket` | `twilio` | `account_sid`, `auth_token`, `from_number` |
+| Pipecat | `carrier-websocket` | `telnyx` | `api_key`, `public_key`, `connection_id`, `from_number` |
+| Pipecat | `carrier-websocket` | `plivo` | `auth_id`, `auth_token`, `from_number` |
+| Pipecat | `daily-sip` | none | none |
+| Pipecat | `daily-sip` | `twilio` | `account_sid`, `auth_token`, `sip_address`, `from_number` |
+| LiveKit Agents | `sip` | `twilio`, `telnyx`, `plivo` | `sip_address`, `sip_username`, `sip_password`, `from_number` |
+| LiveKit Agents | `connector` | `twilio` | `account_sid`, `auth_token`, `from_number` |
+
+The SIP route uses standard SIP names rather than one vendor's, because the same
+generated code dials through any SIP carrier with them.
+
+A key from another route is refused, and the refusal carries the accepted set so
+you do not have to go looking for it:
+
+```
+connections/twilio_sip.yaml:4: connection "twilio_sip" environment key "account_sid" is
+  not accepted by route (livekit, sip, twilio); it accepts from_number, sip_address,
+  sip_password, sip_username
+```
+
+## One target, one connection
+
+A target names at most one connection, and a connection declares one transport.
+So two targets on different transports need two files, even when there is one
+carrier account behind both. `examples/outbound-reminder` is that case:
+
+```yaml targets.yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    connection: twilio_websocket
+
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    connection: twilio_connector
+```
+
+```yaml connections/twilio_websocket.yaml
+transport: carrier-websocket
+carrier: twilio
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+```yaml connections/twilio_connector.yaml
+transport: connector
+carrier: twilio
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
+```
+
+Same three names, different mechanism. No naming convention is required: each
+file states its transport on the first line, so the file name does not have to.
+
+## What does not go in a connection
+
+**`kind:` is not written.** Every transport in the catalog is telephony, so the
+first line already said it:
+
+```
+connections/twilio_sip.yaml:1: kind is no longer written in a connection. Every transport
+  in the catalog is telephony, so transport: sip already says it
+```
+
+**The numbers you dial** live in `agent.yaml` under
+[`destinations:`](/reference/agent-yaml), not here. A destination is who this
+agent escalates to, which is the same desk whichever carrier reaches it.
+
+**A route the target's provider does not have** is refused with the routes it
+does have:
+
+```
+connections/twilio_sip.yaml:21: transport "sip" with carrier "twilio" is not a route for
+  provider pipecat. pipecat supports: carrier-websocket with plivo, telnyx, twilio;
+  cloud-websocket with twilio; daily-sip with no carrier (a Daily-provisioned number
+  carries its own calls), twilio.
+```
+
+**A value that is not a shell identifier**, because a deployment platform
+exports secrets through a shell and this failure would otherwise be silent:
+
+```
+connections/twilio_sip.yaml:6: connection "twilio_sip" environment value
+  "2FACTOR_SIP_PASSWORD" is not a valid environment variable name: use letters, digits,
+  and underscores, and do not start with a digit. A deployment platform exports secrets
+  through a shell, so this name would be missing at runtime with no error of its own
+```
+
+## Two more rules worth knowing
+
+**Every name you write here belongs in `secrets:`** too. `secrets:` is the list
+of every environment name the author wrote, so the generated startup check knows
+to demand it. A name missing there compiles green with a warning, and then fails
+on the first phone call:
+
+```
+✓ livekit (livekit)
+
+Warnings:
+  livekit: environment variables referenced but not declared in secrets: SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address)
+```
+
+**A connection nothing names is a warning, not an error.** The build succeeds and
+tells you the file is dead:
+
+```
+Warnings:
+  livekit: declares a route no target names, so nothing uses it: connections/twilio_voice.yaml
+```
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Telephony overview" icon="phone" href="/telephony/overview">
+    What each route means, and what the transport decides.
+  </Card>
+  <Card title="Get your Twilio details" icon="key" href="/telephony/twilio">
+    Which console value fills which name.
+  </Card>
+</Columns>

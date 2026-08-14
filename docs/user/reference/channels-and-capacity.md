@@ -46,7 +46,7 @@ against the exact route; see the
 
 ### required_controls
 
-The telephony capabilities the call needs, resolved against the target's carrier and transport, never the brand alone.
+The telephony capabilities the call needs, resolved against the exact route — the target's provider plus the transport and carrier its [connection](connections.md) declares — never the brand alone.
 
 Required: no. Values: a list from `cold_transfer, warm_transfer, dtmf_send, dtmf_receive, hold, hangup, voicemail_detection, ivr_navigation`. Default: none. Tag: gated (per capability and target).
 

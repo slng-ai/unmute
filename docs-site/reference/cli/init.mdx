@@ -1,0 +1,79 @@
+---
+title: "unmute init"
+description: "Scaffold a new agent package, with a name or interactively."
+---
+
+```
+$ unmute init --help
+Scaffold a new v1 agent package.
+
+Usage:
+  unmute init [name] [flags]
+
+Flags:
+  -h, --help   help for init
+```
+
+## With a name
+
+```sh
+unmute init my-agent
+```
+
+```
+created my-agent/agent.yaml
+created my-agent/.env.example
+created my-agent/instructions.md
+created my-agent/targets.yaml
+created my-agent/tools/end_call.yaml
+```
+
+The name is also the directory. Each created file is printed.
+
+## With no name
+
+In a terminal, `unmute init` with no argument opens an interactive console that
+asks for the name, the models, and the target, and can validate and compile the
+result for you.
+
+Pick a phone route there and the scaffold writes one more file,
+`connections/<name>.yaml`, holding the transport, the carrier, and the
+environment variable names that route needs. The target only names it. See
+[connections/&lt;name&gt;.yaml](/reference/connections-yaml).
+
+Outside a terminal, a name is required:
+
+```
+unmute: agent name required
+```
+
+## It never writes into an occupied directory
+
+```
+unmute: init my-agent: my-agent: directory already exists and is not empty
+```
+
+## What the scaffold contains
+
+| File | What it is |
+|---|---|
+| `agent.yaml` | the agent: models, one agent, greeting, channel, capacity |
+| `instructions.md` | the agent's prompt |
+| `targets.yaml` | one target |
+| `tools/end_call.yaml` | a built in tool so the agent can hang up |
+| `.env.example` | starter keys for the scaffolded target |
+
+The scaffold binds SLNG speech models and an OpenAI reasoning model, so one
+`SLNG_API_KEY` covers speech to text and text to speech.
+
+<Note>
+  The top level `.env.example` is a starter list. After `unmute compile`, the
+  exact list for a target is `build/<target>/.env.example`, derived from your
+  package.
+</Note>
+
+## Where to go next
+
+<Card title="unmute validate" icon="check" href="/reference/cli/validate">
+  Check the package you just made.
+</Card>

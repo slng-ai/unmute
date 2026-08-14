@@ -14,6 +14,7 @@ import (
 	"github.com/slng/unmute/internal/generate"
 	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/scaffold"
+	"github.com/slng/unmute/internal/spec"
 )
 
 func TestParseDotenv(t *testing.T) {
@@ -469,20 +470,7 @@ func TestComposeIgnoresRetiredTrunkNamesAndStillGuardsLocalTopology(t *testing.T
 // requires --telephony.
 func TestDevTelephonyProvisionalRouteDoesNotFailClosed(t *testing.T) {
 	dir := copySafeCore(t)
-	targetsPath := filepath.Join(dir, "targets.yaml")
-	raw, err := os.ReadFile(targetsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configured := mustReplace(t, string(raw),
-		"    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat",
-		"    transport: carrier-websocket\n    carrier: twilio\n    connection: primary_phone")
-	configured = mustReplace(t, configured,
-		"    sdk_language: python\n    models:",
-		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:")
-	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	routeSafeCore(t, dir, "carrier-websocket", "connector")
 	agentPath := filepath.Join(dir, "agent.yaml")
 	agentRaw, err := os.ReadFile(agentPath)
 	if err != nil {
@@ -566,20 +554,7 @@ func TestDevToFlagGuards(t *testing.T) {
 // process, naming the outbound requirement rather than the provisional gate.
 func TestDevToRejectsInboundOnlyTarget(t *testing.T) {
 	dir := copySafeCore(t)
-	targetsPath := filepath.Join(dir, "targets.yaml")
-	raw, err := os.ReadFile(targetsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configured := mustReplace(t, string(raw),
-		"    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat",
-		"    transport: carrier-websocket\n    carrier: twilio\n    connection: primary_phone")
-	configured = mustReplace(t, configured,
-		"    sdk_language: python\n    models:",
-		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:")
-	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	routeSafeCore(t, dir, "carrier-websocket", "connector")
 	agentPath := filepath.Join(dir, "agent.yaml")
 	agentRaw, err := os.ReadFile(agentPath)
 	if err != nil {
@@ -735,25 +710,9 @@ func contains(s []string, want string) bool {
 // "this route cannot be run locally".
 func TestDevTelephonyOnTheCloudWebsocketRouteReachesTheLocalFlow(t *testing.T) {
 	dir := copySafeCore(t)
-	targetsPath := filepath.Join(dir, "targets.yaml")
-	raw, err := os.ReadFile(targetsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configured := mustReplace(t, string(raw),
-		"    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat",
-		"    transport: cloud-websocket\n    carrier: twilio\n    connection: primary_phone")
-	configured = mustReplace(t, configured,
-		"    destinations:\n      billing_line: \"+14155550123\"\n\n  vapi:",
-		"    destinations:\n      billing_line: BILLING_PHONE_NUMBER\n\n  vapi:")
 	// The phone channel below is package-wide, so the LiveKit target needs a route
 	// too or the build refuses before this command's dispatch is ever reached.
-	configured = mustReplace(t, configured,
-		"    sdk_language: python\n    models:",
-		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:")
-	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	routeSafeCore(t, dir, "cloud-websocket", "connector")
 	agentPath := filepath.Join(dir, "agent.yaml")
 	agentRaw, err := os.ReadFile(agentPath)
 	if err != nil {
@@ -786,5 +745,35 @@ func TestDevTelephonyOnTheCloudWebsocketRouteReachesTheLocalFlow(t *testing.T) {
 		if strings.Contains(message, forbidden) {
 			t.Errorf("the route refused instead of running: %q appears in\n%s", forbidden, message)
 		}
+	}
+}
+
+// FR-018a. `channels.web` is not required for the browser path, and the two
+// phone-only examples prove it: neither declares one, and neither has to.
+// Without this, "make the browser path work" could be satisfied by telling
+// every author to add a channel they do not otherwise need.
+func TestBrowserPathNeedsNoWebChannel(t *testing.T) {
+	for _, example := range []string{"livekit-human-transfer", "pipecat-human-transfer-twilio"} {
+		t.Run(example, func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := pkg.Agent.Channels["web"]; ok {
+				t.Fatalf("%s declares channels.web, so it no longer holds this line", example)
+			}
+			var telephony bool
+			for _, channel := range pkg.Agent.Channels {
+				if channel.Kind == "telephony" {
+					telephony = true
+				}
+			}
+			if !telephony {
+				t.Fatalf("%s declares no telephony channel, so it is the wrong fixture", example)
+			}
+			if _, err := ir.Build(pkg); err != nil {
+				t.Fatalf("a phone-only package must build for the browser path: %v", err)
+			}
+		})
 	}
 }

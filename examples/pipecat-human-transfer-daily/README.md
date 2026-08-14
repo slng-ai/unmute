@@ -37,8 +37,19 @@ People lose an afternoon to this, so get it straight first.
 
 | Key | Whose | What it does here |
 |---|---|---|
-| `DAILY_API_KEY` | your Daily developer account | buys and manages phone numbers, and the dial-in handshake the bot performs |
+| `DAILY_API_KEY` | your Daily developer account | buys and manages phone numbers, and the dial-in handshake the bot performs. The route's own runtime supplies it, so it is not in `secrets:` — you still have to set it wherever the agent runs |
 | Pipecat Cloud public key (`pk_...`) | your Pipecat Cloud org | starts agent sessions, which is how outbound calls begin |
+
+And the three you declare, which are the whole `secrets:` block in `agent.yaml`:
+
+| Variable | What it is |
+|---|---|
+| `OPENAI_API_KEY` | the reasoning model |
+| `SLNG_API_KEY` | the listen and speak models |
+| `BILLING_PHONE_NUMBER` | the number the cold transfer dials |
+
+There are no carrier credentials, because `connections/daily.yaml` names none:
+Daily carries its own calls.
 
 Get the Daily key from the Daily dashboard. Get the Pipecat Cloud key from its
 dashboard, or `pipecat cloud organizations keys create`. Authenticate the CLI once

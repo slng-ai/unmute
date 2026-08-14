@@ -1,0 +1,41 @@
+---
+title: "Orchestration overview"
+description: "Three ways to split one agent into parts, and where each is taught."
+---
+
+One agent with a good prompt and a few tools handles more than you would expect.
+When it stops being enough, there are three shapes to reach for.
+
+| Shape | What it is | Where it is taught |
+|---|---|---|
+| **Handoff** | one agent gives the caller to another, and does not get them back | [Handoffs](/build/orchestration/handoffs) |
+| **Task** | a short step the agent delegates, which returns a typed result | [Tasks](/build/orchestration/tasks) |
+| **Task group** | several tasks in a fixed order, sharing what they learn | [Task groups](/build/orchestration/task-groups) |
+
+The difference that matters most is whether control comes back. A task returns. A
+handoff does not.
+
+None of these is how you reach a person: that is a
+[human transfer](/transfers/overview), and what it can do depends on the phone
+route.
+
+## Read them in order, then choose
+
+Each page below is one shape, with the example package that uses it. The last page
+is the one to come back to when you are deciding: it pairs the symptom you have
+with the shape that fixes it, and states what each shape costs.
+
+<Columns cols={2}>
+  <Card title="Handoffs" icon="users" href="/build/orchestration/handoffs">
+    Two agents, two sets of rules.
+  </Card>
+  <Card title="Tasks" icon="list-checks" href="/build/orchestration/tasks">
+    Delegate a step, keep the answer.
+  </Card>
+  <Card title="Task groups" icon="list-ordered" href="/build/orchestration/task-groups">
+    A fixed order, and shared context.
+  </Card>
+  <Card title="Choosing a structure" icon="git-branch" href="/build/orchestration/choosing-a-structure">
+    Which split to reach for, and what it costs.
+  </Card>
+</Columns>

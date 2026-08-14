@@ -1,0 +1,138 @@
+---
+title: "Go live on LiveKit Cloud"
+description: "Take the generated LiveKit project to production with the lk CLI, in the order the commands actually work."
+---
+
+`unmute compile` gives you a normal LiveKit Agents project with a `Dockerfile`.
+LiveKit Cloud builds and runs that project for you, and the `lk` CLI is how you
+drive it.
+
+<Note>
+  The runbook of record is `build/<target>/README.md` in your own build. It was
+  generated from your package, so it names your region, your agent, and your
+  variables. This page is the same path with the reasons attached, and it is not a
+  substitute for reading that file.
+</Note>
+
+## Before the first command
+
+Install the [LiveKit CLI](https://docs.livekit.io/reference/developer-tools/livekit-cli),
+then authenticate once and pick the project this agent belongs to:
+
+```sh
+lk cloud auth
+lk project list
+lk project set-default "<project-name>"
+```
+
+`lk cloud auth` opens a browser to link the project. Setting a default matters more
+than it looks: without one, later commands fail with a subdomain mismatch that does
+not say which side is wrong.
+
+## The first deploy is `create`
+
+```sh
+cd my-agent/build/livekit
+cp .env.example .env            # then fill in the values
+lk agent create --region eu-central --secrets-file .env
+```
+
+That registers the agent, uploads the project, builds the image from the generated
+`Dockerfile` in LiveKit's build service, and writes a `livekit.toml` holding the
+agent id and project. The generated directory deliberately does not ship that file,
+because the platform assigns both of its values.
+
+`unmute compile` preserves any `livekit*.toml` the platform wrote there, so
+recompiling does not cost you the agent.
+
+## Every later deploy is `deploy`
+
+```sh
+lk agent deploy
+```
+
+`create` is the first deploy and refuses to run when a config file of that name
+already exists. `deploy` ships a new version of an agent that already exists, and
+takes no region. Running them the wrong way round either refuses, or registers a
+second billable agent with dispatch split between two versions.
+
+## Secrets
+
+`--secrets-file .env` sends every name in the file to the platform, which injects
+them as environment variables at run time.
+
+Three names are the platform's own and are dropped from your file:
+`LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`. LiveKit Cloud generates
+them for the project and they cannot be set as secrets, so their absence from the
+deployed list is correct rather than a mistake. `REDIS_URL` is in the same
+category on Cloud, where the SIP service is managed: leave that group blank.
+
+Changing a value later does not need a redeploy:
+
+```sh
+lk agent update-secrets --secrets-file .env              # merges into the existing set
+lk agent update-secrets --secrets-file .env --overwrite  # replaces the whole set
+```
+
+<Warning>
+  Every name must be a valid shell identifier: letters, digits, and underscores,
+  never starting with a digit. LiveKit's own rule for secret names is the same
+  ("only letters, numbers, and underscores"). A name that breaks it fails at export,
+  the value is missing at run time, and the agent dies somewhere unrelated with one
+  line near the top of `lk agent logs` as the only clue. Merging does not fix it:
+  the bad name stays until `--overwrite` replaces the whole set.
+</Warning>
+
+## Region is chosen once
+
+Region is set at `create` and is immutable. Moving an agent means creating it in the
+new region and deleting the old one; the platform will not move it in place.
+
+## Check it, and recover it
+
+```sh
+lk agent status                 # Sleeping is healthy on plans that scale to zero
+lk agent logs
+lk agent config --id CA_xxx     # rebuild a lost config file, then deploy again
+```
+
+If a config file belongs to a different project than the current default, the deploy
+fails with that same subdomain mismatch. Check `lk project list` and set the default
+that matches the file.
+
+## Hosting it yourself instead
+
+The generated worker connects out to a LiveKit Server you run and needs no inbound
+ports. Build the `Dockerfile`, set `LIVEKIT_URL` and the API key pair to your
+server's values plus the provider keys from `.env.example`, and start it:
+
+```sh
+python agent.py start
+```
+
+On this path Redis is yours as well, because the managed SIP service is not in the
+picture.
+
+## What is verified here, and what is not
+
+The commands above come from the runbook this repository generates, which is
+generated from the same package as the code. They agree with LiveKit's own
+deployment and secrets documentation, read 2026-08-14
+([deployment](https://docs.livekit.io/deploy/agents/quickstart),
+[secrets](https://docs.livekit.io/deploy/agents/secrets)).
+
+Nothing on this page was executed against a real LiveKit Cloud project during
+writing, because that needs an account and a billable agent. Treat the sequence as
+correct and the output as unseen: your build's README and `lk agent status` are what
+tell you the truth for your deployment.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Going live" icon="rocket" href="/deploy/going-live">
+    The checklist both platforms share.
+  </Card>
+  <Card title="Pipecat Cloud" icon="cloud" href="/deploy/pipecat-cloud">
+    The same trip on the other platform.
+  </Card>
+</Columns>

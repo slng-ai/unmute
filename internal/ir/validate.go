@@ -69,6 +69,7 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	global, globalWarnings := validateStructure(agent)
 	global = append(global, validateConfiguredTargets(agent, caps)...)
 	globalWarnings = add(globalWarnings, undeclaredSecretWarning(agent))
+	globalWarnings = add(globalWarnings, unusedConnectionWarning(agent))
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
 	failed := 0
 	for _, resolved := range targets {
@@ -345,10 +346,10 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 				errors = add(errors, fmt.Sprintf("tool %q instructions is legal for builtin execution only", name))
 			}
 		}
-		// auth lives in the webhook block, so a non-webhook tool can only carry
-		// one if the IR was built in code (tests, future drivers).
-		if tool.Auth != nil && tool.Execution != ToolWebhook {
-			errors = add(errors, fmt.Sprintf("tool %q auth is legal for webhook execution only", name))
+		// auth lives in the webhook or mcp block, so any other tool can only
+		// carry one if the IR was built in code (tests, future drivers).
+		if tool.Auth != nil && tool.Execution != ToolWebhook && tool.Execution != ToolMCP {
+			errors = add(errors, fmt.Sprintf("tool %q auth is legal for webhook and mcp execution only", name))
 		}
 		if tool.Path != "" && tool.Execution != ToolWebhook {
 			errors = add(errors, fmt.Sprintf("tool %q path is legal for webhook execution only", name))
@@ -364,17 +365,25 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			validateBuiltinTool(name, tool, &errors)
 			continue
 		}
-		if tool.Description == "" {
-			errors = add(errors, fmt.Sprintf("tool %q description is required", name))
+		// An mcp file carries no per-tool contract at all: the server announces
+		// each tool at run time (N40). spec.Load rejects the fields with a line
+		// number, so reaching here means the IR was built in code.
+		if tool.Execution != ToolMCP {
+			if tool.Description == "" {
+				errors = add(errors, fmt.Sprintf("tool %q description is required", name))
+			}
+			if tool.Input["type"] != "object" {
+				errors = add(errors, fmt.Sprintf("tool %q input must be a JSON Schema object", name))
+			}
+			validateSchemaKeys(fmt.Sprintf("tool %q", name), "input", tool.Input, &schemas)
+			if tool.Output != nil && tool.Output["type"] != "object" {
+				errors = add(errors, fmt.Sprintf("tool %q output must be a JSON Schema object", name))
+			}
+			validateSchemaKeys(fmt.Sprintf("tool %q", name), "output", tool.Output, &schemas)
 		}
-		if tool.Input["type"] != "object" {
-			errors = add(errors, fmt.Sprintf("tool %q input must be a JSON Schema object", name))
+		if tool.Execution != ToolMCP && (tool.MCPTransport != "" || len(tool.MCPTools) > 0) {
+			errors = add(errors, fmt.Sprintf("tool %q transport and tools are legal for mcp execution only", name))
 		}
-		validateSchemaKeys(fmt.Sprintf("tool %q", name), "input", tool.Input, &schemas)
-		if tool.Output != nil && tool.Output["type"] != "object" {
-			errors = add(errors, fmt.Sprintf("tool %q output must be a JSON Schema object", name))
-		}
-		validateSchemaKeys(fmt.Sprintf("tool %q", name), "output", tool.Output, &schemas)
 		switch tool.Execution {
 		case ToolLocal:
 			if tool.Handler == "" {
@@ -394,6 +403,12 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			}
 			validateToolAuth(name, tool.Auth, &errors)
 		case ToolMCP:
+			// N40: the server owns every tool's contract. spec.Load rejects
+			// these with a line number, so reaching here means the IR was built
+			// in code.
+			if tool.Description != "" || tool.Input != nil || tool.Output != nil {
+				errors = add(errors, fmt.Sprintf("tool %q mcp execution takes no description, input, or output: the server describes its own tools", name))
+			}
 			// B3 (SCHEMA §5, 2026-07-16): url_env names the MCP server address.
 			if tool.URLEnv == "" {
 				errors = add(errors, fmt.Sprintf("tool %q url_env is required for mcp execution (the MCP server address env)", name))
@@ -403,12 +418,40 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			if tool.Handler != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler is legal for local execution only", name))
 			}
+			// N40: the two remote transports, and only when the author states
+			// one. Absent means the platform's own rule for the URL.
+			switch tool.MCPTransport {
+			case "", MCPTransportSSE, MCPTransportStreamableHTTP:
+			default:
+				errors = add(errors, fmt.Sprintf("tool %q transport must be %s or %s, not %q",
+					name, MCPTransportSSE, MCPTransportStreamableHTTP, tool.MCPTransport))
+			}
+			// The server's tool list only exists at run time, so a name is
+			// checked for shape here and for existence never: an empty or
+			// repeated entry is an authoring slip worth naming, a name the
+			// server does not expose is simply never offered.
+			seen := make(map[string]bool, len(tool.MCPTools))
+			for _, selected := range tool.MCPTools {
+				switch {
+				case strings.TrimSpace(selected) == "":
+					errors = add(errors, fmt.Sprintf("tool %q tools has an empty entry: name a tool the server exposes, or drop the list to take them all", name))
+				case seen[selected]:
+					errors = add(errors, fmt.Sprintf("tool %q tools names %q twice", name, selected))
+				}
+				seen[selected] = true
+			}
+			validateToolAuth(name, tool.Auth, &errors)
 		case ToolClient, ToolProviderHosted:
 			if tool.Handler != "" || tool.URLEnv != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler/url_env does not match execution %q", name, tool.Execution))
 			}
 		default:
 			errors = add(errors, fmt.Sprintf("tool %q has invalid execution %q", name, tool.Execution))
+		}
+		// The two conversation scalars are not part of an mcp file either
+		// (N40), so an mcp source is not asked to carry a value for them.
+		if tool.Execution == ToolMCP {
+			continue
 		}
 		switch tool.Interruption {
 		case ToolContinue, ToolCancel, ToolProviderDefault:
@@ -1180,6 +1223,15 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 			applyCapability(caps, targetcap.FieldToolInterruption, provider, row)
 		}
 	}
+	// Scoping an MCP source to a task is its own capability: the source is
+	// legal, the scope is what a driver may not be able to hold (N40).
+	for _, task := range agent.Tasks {
+		for _, ref := range task.Tools {
+			if agent.Tools[ref].Execution == ToolMCP {
+				applyCapability(caps, targetcap.FieldToolMCPTask, provider, row)
+			}
+		}
+	}
 }
 
 // validateVariables gates the two per-target variable features: capturing a
@@ -1238,7 +1290,15 @@ var handlerEnvRead = regexp.MustCompile(`os\.(?:environ\.get\(|getenv\(|environ\
 
 // referencedEnvNames lists every environment variable the package points at,
 // with the site that names it, so an undeclared one can be reported (V10).
-// Connection env names are exempt: they are declared in their own file.
+//
+// Connection environment values and destinations are ordinary members of this
+// set. They used to be exempt, on the grounds that they are declared in their
+// own file; that left no single list of what a package needs to run, so
+// `secrets:` now carries every name the author wrote (spec FR-005a).
+//
+// Names the driver or the platform supplies are still absent, because no author
+// writes them: REDIS_URL, UNMUTE_PUBLIC_URL, LIVEKIT_*, DAILY_API_KEY and the
+// rest reach a package from its runtime, not from its source (FR-005c).
 func referencedEnvNames(agent *Agent) map[string]string {
 	refs := make(map[string]string)
 	note := func(name, site string) {
@@ -1264,7 +1324,11 @@ func referencedEnvNames(agent *Agent) map[string]string {
 			}
 		}
 		if tool.Auth != nil {
-			note(tool.Auth.TokenEnv, fmt.Sprintf("tools/%s.yaml webhook.auth.token_env", name))
+			block := "webhook"
+			if tool.Execution == ToolMCP {
+				block = "mcp"
+			}
+			note(tool.Auth.TokenEnv, fmt.Sprintf("tools/%s.yaml %s.auth.token_env", name, block))
 		}
 	}
 	for _, name := range sortedKeys(agent.Models) {
@@ -1275,7 +1339,47 @@ func referencedEnvNames(agent *Agent) map[string]string {
 			note(name, "tracing.provider: langfuse")
 		}
 	}
+	for _, name := range sortedKeys(agent.Connections) {
+		connection := agent.Connections[name]
+		for _, key := range sortedKeys(connection.Environment) {
+			note(connection.Environment[key], fmt.Sprintf("connections/%s.yaml environment %s", name, key))
+		}
+	}
+	// Destinations are declared once in agent.yaml and resolved onto every
+	// target, so any target carries the whole set (research R1).
+	for _, target := range sortedKeys(agent.Targets) {
+		for _, name := range sortedKeys(agent.Targets[target].Destinations) {
+			note(agent.Targets[target].Destinations[name], fmt.Sprintf("agent.yaml destinations %s", name))
+		}
+	}
 	return refs
+}
+
+// unusedConnectionWarning reports connection files no target names.
+//
+// A warning rather than an error, and deliberately: an unused route file costs
+// nothing at runtime, and an author part-way through wiring up a second carrier
+// should not be stopped by the half they have not reached yet. It is checked
+// across **every declared target**, not the `--target` selection, so validating
+// one target never reports a file another target uses (spec FR-015).
+func unusedConnectionWarning(agent *Agent) string {
+	if len(agent.Connections) == 0 {
+		return ""
+	}
+	named := make(map[string]bool, len(agent.Targets))
+	for _, target := range agent.Targets {
+		named[target.Connection] = true
+	}
+	var unused []string
+	for _, name := range slices.Sorted(maps.Keys(agent.Connections)) {
+		if !named[name] {
+			unused = append(unused, fmt.Sprintf("connections/%s.yaml", name))
+		}
+	}
+	if len(unused) == 0 {
+		return ""
+	}
+	return "declares a route no target names, so nothing uses it: " + strings.Join(unused, ", ")
 }
 
 // undeclaredSecretWarning reports env names the package references but never
@@ -1592,7 +1696,12 @@ func validateTelephonyPlan(plan *TelephonyPlan, row *TargetValidation) {
 			// status stays in compile-report.json for the team to track and
 			// promote. Only Gated (no adapter exists) is a hard error.
 		case targetcap.Gated:
-			row.Errors = add(row.Errors, fmt.Sprintf("telephony %s: %s", evidence.Feature, evidence.Note))
+			// Name the connection and the transport it declares, not just the
+			// feature. The author's next move is to open a file and change a
+			// line, and until the route moved into the connection this message
+			// could not say which file that was (spec FR-016a).
+			row.Errors = add(row.Errors, fmt.Sprintf("telephony %s: %s. Connection %q declares transport: %s",
+				evidence.Feature, strings.TrimSuffix(evidence.Note, "."), plan.Connection, plan.Key.Transport))
 		default:
 			row.Errors = add(row.Errors, fmt.Sprintf("telephony feature %s has no capability tag", evidence.Feature))
 		}

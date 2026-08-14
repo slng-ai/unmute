@@ -38,6 +38,10 @@ secrets:
   - SALON_API_SIGNING_KEY
   - OPENAI_API_KEY
   - SLNG_API_KEY
+  # Both connections name the same three: one Twilio account, reached two ways.
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_PHONE_NUMBER
 
 models:
   think:

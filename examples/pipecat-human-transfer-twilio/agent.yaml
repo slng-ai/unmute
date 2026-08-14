@@ -7,6 +7,18 @@
 version: 1
 entry_agent: front_desk
 
+# Every environment variable this package needs you to set, in one list: model
+# keys, the Twilio credentials connections/twilio_voice.yaml names, and the
+# number the transfer dials. It does not list names the route supplies at
+# runtime, such as PIPECAT_CLOUD_ORGANIZATION.
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_PHONE_NUMBER
+  - BILLING_PHONE_NUMBER
+
 models:
   think:
     reasoning:
@@ -46,6 +58,12 @@ controls:
     when: The caller asks about an invoice, a refund, or a charge they do not recognise.
     cold:
       destination: billing_line
+
+# Who this agent escalates to. A value is the UPPER_SNAKE name of an environment
+# variable holding an E.164 number or a sip: URI, read at call time. No phone
+# number is ever written into this package.
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
 
 conversation:
   greeting:

@@ -1,0 +1,97 @@
+---
+title: "Task groups"
+description: "Run several tasks in a fixed order, sharing one context, and get one merged result."
+---
+
+A task group is an ordered sequence of tasks. The order is a guarantee, not a
+request in a prompt.
+
+This page follows `examples/task-groups`: identify the customer, select the
+appointment, finalize it.
+
+## Declare the group
+
+```yaml agent.yaml
+task_groups:
+  appointment_flow:
+    steps:
+      - identify_customer
+      - select_appointment
+      - finalize_appointment
+    context_scope: shared
+    then: return
+    merge: results
+```
+
+Each name in `steps` is a task you already declared in `tasks:`.
+
+| Field | Values | What it does |
+|---|---|---|
+| `context_scope` | `shared`, `isolated` | whether the steps see one running context or start clean |
+| `then` | `return`, `transfer`, `end` | what happens after the last step |
+| `then_target` | an agent name | required with `transfer`, illegal otherwise |
+| `merge` | `results` | how the steps' results are combined |
+
+## Delegate to the group
+
+Same control kind as a single task, with `group:` instead of `task:`:
+
+```yaml agent.yaml
+controls:
+  manage_appointment:
+    kind: delegate
+    group: appointment_flow
+    when: The caller wants to book, reschedule, or cancel an appointment.
+
+agents:
+  appointment_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - manage_appointment
+```
+
+The agent has one control and no domain tools at all.
+
+## Shared context is the point
+
+With `context_scope: shared`, the service the caller named in step one is still
+there in step two. Nothing is passed by hand. With `isolated`, each step starts
+from its own prompt, which is what you want when a step should not be
+influenced by what came before.
+
+## The LiveKit warning
+
+```sh
+unmute validate examples/task-groups
+```
+
+```
+✓ livekit (livekit)
+✓ pipecat (pipecat)
+
+Warnings:
+  livekit: LiveKit turn placement is a preference
+  livekit: LiveKit TaskGroup is experimental
+```
+
+Read the second one. Task groups lower onto a LiveKit primitive that upstream
+marks experimental. The package validates, compiles, and runs; the warning
+tells you what you are standing on. Warnings go to standard error and the
+command still exits 0.
+
+## Try it
+
+```sh
+unmute dev examples/task-groups --target pipecat
+```
+
+Ask to book an appointment. Watch the three steps run in order, and notice that
+nothing asks you the same question twice.
+
+## Where to go next
+
+<Card title="Choosing a structure" icon="git-branch" href="/build/orchestration/choosing-a-structure">
+  You now have three ways to split work. Which one to reach for.
+</Card>

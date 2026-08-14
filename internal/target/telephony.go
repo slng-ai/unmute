@@ -393,6 +393,24 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	return routes
 }
 
+// SelectableTelephonyRoutes returns the routes an author can actually name in a
+// connection file: those the table marks with the `route` feature.
+//
+// TelephonyRoutes carries rows with a real environment vocabulary and an empty
+// feature map — the two Exotel entries — which ResolveTelephonyFeature refuses.
+// Suggesting one in a "provider supports" list sends the author into a second,
+// different refusal, so every place that offers a route to a human reads this
+// and never re-derives the predicate (research R6).
+func SelectableTelephonyRoutes() map[TelephonyKey]TelephonyRoute {
+	out := make(map[TelephonyKey]TelephonyRoute)
+	for key, route := range TelephonyRoutes() {
+		if _, ok := route.Features[TelephonyRouteSelected]; ok {
+			out[key] = route
+		}
+	}
+	return out
+}
+
 // RouteAccountPrerequisite is a platform feature the provider grants on request
 // rather than by default, which a route cannot work without.
 //

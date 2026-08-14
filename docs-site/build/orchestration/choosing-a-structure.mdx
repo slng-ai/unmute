@@ -1,0 +1,87 @@
+---
+title: "Choosing a structure"
+description: "Tools, tasks, task groups, or a second agent. Which split to reach for, and when."
+---
+
+You now have four ways to organize an agent. They are not ranked. Each one solves
+a different failure, and each one costs something.
+
+The repository ships the same salon workflow in all four shapes, so you can read
+them side by side.
+
+## Start with more tools, not another agent
+
+One agent with a clear prompt and the right tools goes a long way. Before you add
+a second agent, ask whether the problem is really the prompt or just the tool list.
+Every split you add costs clarity somewhere, so make each one buy something you
+can name.
+
+## The symptom decides the shape
+
+| What you are seeing | The shape that fixes it |
+|---|---|
+| the prompt keeps growing and starts contradicting itself | split it: [tasks](/build/orchestration/tasks) if the parts serve one caller goal, a [handoff](/build/orchestration/handoffs) if they are separate roles |
+| the model does things out of order | a [task group](/build/orchestration/task-groups): the order is declared, not requested |
+| the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current step does not hold cannot be called at all |
+| you need a value out of a step and want to keep it | a task with `result:`, delegated with `assign:` |
+| two phases need different tools or different permissions | a [handoff](/build/orchestration/handoffs) |
+| the caller needs a person | none of these: that is a [human transfer](/transfers/overview), and what it can do depends on the phone route |
+
+A prompt that says "always identify the caller first" is a request. A task group is
+a guarantee. That is the difference you are buying.
+
+## What each shape costs
+
+| Shape | Control | Context | Correcting a step | The cost |
+|---|---|---|---|---|
+| one agent and tools | stays with the agent for the whole call | the whole conversation | ask again | the prompt carries everything, and grows |
+| task | returns when the task finishes | what `context:` gives the task | delegate again | one more prompt and one more tool list to keep straight |
+| task group | returns when the group finishes | shared across the steps in the group | steps can be revisited inside the group | an order you have to be sure about |
+| handoff | leaves for good | only what `context:` carries over | another handoff back | nothing returns, so there is no result and no automatic way back |
+
+These are not exclusive. One agent can delegate a task in one phase and hand off in
+another.
+
+## The four shapes, as packages
+
+| Package | Shape | Reach for it when |
+|---|---|---|
+| `examples/simple-prompt` | one agent, one prompt, every tool | the workflow fits in a prompt you can still read |
+| `examples/multi-task` | one agent, two tasks it delegates to | a step has a definite answer you want typed |
+| `examples/task-groups` | one agent, three ordered tasks, shared context | the steps must happen in a fixed order |
+| `examples/subagents` | two agents that hand the caller over | two jobs have different rules and different tools |
+
+## Delegate or transfer
+
+Both are controls. The difference is whether control comes back.
+
+```yaml
+controls:
+  check_customer:          # delegate: runs, returns a typed result, agent continues
+    kind: delegate
+    task: customer_record
+    when: Identify the caller before handling an appointment request.
+
+  to_appointment_manager:  # agent_transfer: hands the call over, nothing returns
+    kind: agent_transfer
+    to: appointment_manager
+    when: The caller wants to reschedule or cancel an existing appointment.
+```
+
+| | `delegate` | `agent_transfer` |
+|---|---|---|
+| returns | yes | no |
+| typed result | yes, `result:` | no |
+| targets | a task or a task group | another agent |
+| context control | `context:` on the task | `context:` on the control |
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Run it locally" icon="play" href="/dev/overview">
+    The dev loop in depth: ports, logs, and picking a target.
+  </Card>
+  <Card title="Telephony" icon="phone" href="/telephony/overview">
+    Put the agent on a phone number.
+  </Card>
+</Columns>

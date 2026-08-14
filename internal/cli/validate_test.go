@@ -101,6 +101,19 @@ func TestValidateOmitsPrerequisiteWithoutTheCapabilityThatNeedsIt(t *testing.T) 
 	if err := os.WriteFile(path, trimmed, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The transfer was the only thing dialling, and on this route dialling is
+	// the only way to use the connection: the Daily-provisioned form receives no
+	// calls, so it carries no phone channel (research R10). Dropping the control
+	// therefore drops the route with it.
+	targetsPath := filepath.Join(dir, "targets.yaml")
+	targets, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets = bytes.Replace(targets, []byte("    connection: daily\n"), nil, 1)
+	if err := os.WriteFile(targetsPath, targets, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	_, stderr, err := runValidateCommand(t, "--target", "pipecat", dir)
 	if err != nil {
 		t.Fatalf("validate: %v\n%s", err, stderr)
@@ -172,12 +185,49 @@ func writeDailyPackage(t *testing.T, region string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content = bytes.Replace(content, []byte("    transport: daily-sip\n"),
-		[]byte("    transport: daily-sip\n    deployment_region: "+region+"\n"), 1)
+	content = bytes.Replace(content, []byte("    connection: daily\n"),
+		[]byte("    connection: daily\n    deployment_region: "+region+"\n"), 1)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+// TestValidateRefusesAPastedMCPSecret is SC-005 at the command: a token pasted
+// into an mcp block instead of named by an environment variable fails
+// validation, before any artifact exists, and the message says what is wrong
+// without repeating the value back.
+func TestValidateRefusesAPastedMCPSecret(t *testing.T) {
+	const pasted = "fc-live-pretend-key"
+	dir := filepath.Join(t.TempDir(), "agent")
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "safe_core"))); err != nil {
+		t.Fatal(err)
+	}
+	tool := "mcp:\n  url_env: FIRECRAWL_MCP_URL\n  transport: streamable_http\n" +
+		"  auth:\n    type: bearer\n    token_env: " + pasted + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "tools", "web_search.yaml"), []byte(tool), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agentPath := filepath.Join(dir, "agent.yaml")
+	content, err := os.ReadFile(agentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content = bytes.Replace(content, []byte("tools:\n  - lookup_customer"), []byte("tools:\n  - web_search\n  - lookup_customer"), 2)
+	if err := os.WriteFile(agentPath, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := runValidateCommand(t, "--target", "livekit", dir)
+	if err == nil {
+		t.Fatalf("a pasted secret must fail validation: stdout=%q stderr=%q", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "token_env must be an UPPER_SNAKE environment variable name") {
+		t.Errorf("the message must say what the field takes:\n%s", stderr)
+	}
+	if strings.Contains(stdout, pasted) || strings.Contains(stderr, pasted) {
+		t.Error("validation must not echo the pasted secret back")
+	}
 }
 
 func runValidateCommand(t *testing.T, args ...string) (string, string, error) {

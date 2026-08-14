@@ -1,0 +1,94 @@
+---
+title: "Turn detection"
+description: "How each target decides the caller has finished speaking, and why it is not a vendor list."
+---
+
+Two different jobs hide behind the phrase "turn detection", and the two targets do
+them differently. Worth keeping apart:
+
+- **Voice activity detection** hears whether anyone is speaking at all. It is
+  cheap, local, and runs on the audio.
+- **End of turn detection** decides whether the caller has finished their thought.
+  That can be the same signal as silence, or a model of its own.
+
+## It is not a catalog role
+
+The `turn` role has **no vendor list**. Unlike listening, speaking, and thinking,
+nothing here is constructed from the integration catalog: the binding is forwarded
+to the runtime as written.
+
+```yaml agent.yaml
+models:
+  turn:
+    detector:
+      provider: local
+      model: silero
+```
+
+That is what every shipped example writes, and on Pipecat it is the whole story.
+
+## Pipecat
+
+The generated bot runs Silero as the transport's voice activity analyzer,
+on-device, with no API call:
+
+```python
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+```
+
+End of turn is that signal. There is no separate turn model on this target, so
+`provider: local` and `model: silero` say what happens.
+
+## LiveKit Agents
+
+LiveKit does both jobs, with two different pieces. It always loads Silero for voice
+activity, and it takes a turn model on top:
+
+```python
+turn_handling=TurnHandlingOptions(
+    turn_detection=inference.TurnDetector(version="v1-mini"),
+    interruption={"enabled": True},
+    preemptive_generation={"enabled": True},
+),
+vad=ctx.proc.userdata["vad"],
+```
+
+The turn model comes from a per-target override, which is how every example that
+runs on LiveKit writes it:
+
+```yaml targets.yaml
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
+Because LiveKit decides for itself where that work runs, `placement:` is only a
+preference there, and validation says so rather than pretending otherwise:
+
+```
+✓ livekit (livekit)
+
+Warnings:
+  livekit: LiveKit turn placement is a preference
+```
+
+That warning appears on every LiveKit target. It is information, not a problem: the
+command still exits 0.
+
+## Semantic endpointing
+
+`semantic_endpointing` is a model setting rather than a target one, and both targets
+warn that its effect depends on the model you bound. Set it if the bound model
+documents support for it, and expect nothing from it otherwise.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="What makes them fast" icon="zap" href="/models/optimization">
+    The SLNG Execution Layer behind the speech models.
+  </Card>
+  <Card title="Targets" icon="boxes" href="/targets/overview">
+    What else differs between the two runtimes.
+  </Card>
+</Columns>

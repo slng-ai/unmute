@@ -63,6 +63,7 @@ MAIN_NAME = "main"
 # keys, the public URL) is required by telephony.py, not here, so a telephony
 # package still runs in the browser with nothing but model keys (V10/B3).
 REQUIRED_ENV = [
+    "BILLING_PHONE_NUMBER",
     "DAILY_API_KEY",
     "DEEPGRAM_API_KEY",
     "GET_INVOICE_URL",
@@ -237,7 +238,7 @@ class BillingAgent(TracedLLMWorker):
         # stays anchored after a completed transfer and both legs keep billing
         # until the call ends; the README states that cost.
         if isinstance(_TRANSPORT, DailyTransport):
-            error = await _TRANSPORT.sip_call_transfer({"toEndPoint": "+14155550123"})
+            error = await _TRANSPORT.sip_call_transfer({"toEndPoint": os.environ["BILLING_PHONE_NUMBER"]})
         else:
             # No phone call, so nothing to hand over: the browser and console
             # transports carry no transfer primitive. Failing here by name beats

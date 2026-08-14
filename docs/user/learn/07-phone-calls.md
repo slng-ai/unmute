@@ -73,13 +73,17 @@ channels:
       - hangup
 ```
 
-## Add a Connection
+## Add a connection
 
-Connection files contain environment-variable **names**, not their values:
+**A target names one connection. The connection is the whole route.** The
+connection file says which mechanism carries the call, which carrier hands it
+over, and which environment variables hold that account's credentials. The
+values are variable **names**, never the secrets themselves:
 
 ```yaml
 # connections/primary_phone.yaml
-kind: telephony
+transport: carrier-websocket
+carrier: twilio
 environment:
   account_sid: TWILIO_ACCOUNT_SID
   auth_token: TWILIO_AUTH_TOKEN
@@ -91,7 +95,8 @@ Telnyx and Plivo:
 
 ```yaml
 # connections/telnyx_api.yaml
-kind: telephony
+transport: carrier-websocket
+carrier: telnyx
 environment:
   api_key: TELNYX_API_KEY
   public_key: TELNYX_PUBLIC_KEY
@@ -101,26 +106,102 @@ environment:
 
 ```yaml
 # connections/plivo_api.yaml
-kind: telephony
+transport: carrier-websocket
+carrier: plivo
 environment:
   auth_id: PLIVO_AUTH_ID
   auth_token: PLIVO_AUTH_TOKEN
   from_number: PLIVO_PHONE_NUMBER
 ```
 
-Bind that Connection to a route in `targets.yaml`:
+The target names it and says nothing else about telephony:
 
 ```yaml
 targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: carrier-websocket
-    carrier: twilio
     connection: primary_phone
-    destinations:
-      billing_line: "+14155550123"
 ```
+
+Two targets that ride different mechanisms need one connection file each, even
+when they share a carrier account: a connection declares its own transport, so
+one file cannot serve both. `examples/outbound-reminder` is that shape, with
+`twilio_websocket.yaml` and `twilio_connector.yaml` holding the same three
+names.
+
+There is no `kind:` line. Every transport in the catalog is telephony, so it
+said nothing the first line does not.
+
+Full field-by-field reference:
+[reference/connections.md](../reference/connections.md).
+
+## Say who the agent escalates to
+
+A transfer dials a person. Which person is a package-wide fact, so it lives at
+the top level of `agent.yaml` rather than on a target: the same desk answers
+whichever carrier reaches it.
+
+```yaml
+# agent.yaml
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
+  supervisor_line: SUPERVISOR_PHONE_NUMBER
+```
+
+A value is the `UPPER_SNAKE` name of an environment variable holding the
+number, read at call time. A literal number or `sip:` URI is refused:
+`agent.yaml` is the portable half of a package, and a number is a deployment
+fact. The model never sees a number and can never dial an arbitrary one.
+
+## Declare every name you set
+
+`secrets:` lists every environment variable **you** supply: model keys, the
+values your connections name, and the numbers your destinations point at.
+
+```yaml
+# agent.yaml
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_PHONE_NUMBER
+  - BILLING_PHONE_NUMBER
+```
+
+A name missing from this list is a warning on stderr, not an error, and the
+build still succeeds. That is the same rule every environment name has always
+had. The cost is real and worth knowing: a package missing a name compiles
+green and fails on its first phone call.
+
+Names the runtime supplies for you are not listed there, because you do not set
+them. Where each value comes from:
+
+| Value | Who supplies it |
+|---|---|
+| Model and tool keys, connection credentials, destination numbers | you, through `secrets:` |
+| `REDIS_URL`, `UNMUTE_PUBLIC_URL`, `UNMUTE_OUTBOUND_TOKEN` | `unmute dev` locally; the operator at deploy time on routes that read them |
+| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | the local Compose graph, or your LiveKit Cloud project |
+| `DAILY_API_KEY`, `PIPECAT_CLOUD_ORGANIZATION` | the route's own runtime environment |
+
+`DAILY_API_KEY` is the one that surprises people. The Daily route reads it at
+runtime and it never belongs in `secrets:`, because the route's environment
+supplies it rather than you.
+
+## Test in a browser before you test on a phone
+
+Telephony is opt-in at run time. `unmute dev` opens a browser session by
+default, on any package, including one that declares only `channels.phone`:
+
+```sh
+unmute dev ./agent --target pipecat
+```
+
+No carrier credentials are needed and none are checked. Talk to the agent,
+get the prompt and the models right, and only then add `--telephony`, which is
+where the route variables start mattering. This is the shortest loop the
+project has, and it is the one to stay in while the agent is still changing.
 
 Pipecat uses one WebSocket per carrier call and delegates media framing to the
 selected Pipecat carrier serializer. The generated `telephony.py` owns signed
@@ -137,7 +218,8 @@ The SIP route uses this Connection vocabulary for Twilio, Telnyx, and Plivo:
 
 ```yaml
 # connections/primary_phone.yaml
-kind: telephony
+transport: sip
+carrier: twilio
 environment:
   sip_address: SIP_TRUNK_HOSTNAME
   sip_username: SIP_AUTH_USERNAME
@@ -228,46 +310,34 @@ targets:
   pipecat_twilio:
     provider: pipecat
     version: "1.5.0"
-    transport: carrier-websocket
-    carrier: twilio
     connection: twilio_api
 
   pipecat_telnyx:
     provider: pipecat
     version: "1.5.0"
-    transport: carrier-websocket
-    carrier: telnyx
     connection: telnyx_api
 
   pipecat_plivo:
     provider: pipecat
     version: "1.5.0"
-    transport: carrier-websocket
-    carrier: plivo
     connection: plivo_api
 
   livekit_twilio:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
-    transport: sip
-    carrier: twilio
     connection: twilio_sip
 
   livekit_telnyx:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
-    transport: sip
-    carrier: telnyx
     connection: telnyx_sip
 
   livekit_plivo:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
-    transport: sip
-    carrier: plivo
     connection: plivo_sip
 ```
 
@@ -514,8 +584,7 @@ targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: cloud-websocket
-    carrier: twilio
+    connection: twilio_voice          # declares cloud-websocket + twilio
     deployment_region: eu-central     # the only place a region appears
 ```
 
@@ -679,7 +748,8 @@ keys for Twilio, Telnyx, and Plivo:
 
 ```yaml
 # connections/twilio_sip.yaml
-kind: telephony
+transport: sip
+carrier: twilio
 environment:
   sip_address: SIP_TRUNK_HOSTNAME
   sip_username: SIP_AUTH_USERNAME
@@ -687,7 +757,7 @@ environment:
   from_number: SIP_FROM_NUMBER
 ```
 
-Bind the Connection to one exact LiveKit route:
+The target names it:
 
 ```yaml
 # targets.yaml
@@ -696,14 +766,13 @@ targets:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
-    transport: sip
-    carrier: twilio
     connection: twilio_sip
 ```
 
-Change both `carrier` and the Connection for another carrier. Do not reuse a
-Pipecat API Connection: `account_sid`, `api_key`, and `auth_id` are not valid
-keys on a LiveKit SIP route.
+For another carrier, write another connection file with its own `carrier:` and
+point a target at that instead. Do not reuse a Pipecat API connection:
+`account_sid`, `api_key`, and `auth_id` are not valid keys on a LiveKit SIP
+route, and the transport line would be wrong too.
 
 #### Configure the LiveKit SIP deployment
 

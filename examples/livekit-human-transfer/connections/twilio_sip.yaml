@@ -13,7 +13,8 @@
 # Cold transfer is a SIP REFER, so the trunk must allow transfers: in the Twilio
 # console, Elastic SIP Trunking > Manage > Trunks > your trunk > Call Transfer
 # (SIP REFER) = Enabled, and Enable PSTN Transfer ticked.
-kind: telephony
+transport: sip
+carrier: twilio
 environment:
   sip_address: SIP_TRUNK_HOSTNAME
   sip_username: SIP_AUTH_USERNAME

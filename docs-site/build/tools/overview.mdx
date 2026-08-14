@@ -1,0 +1,160 @@
+---
+title: "Tools overview"
+description: "What a tool is, the six ways one can run, and how you decide which an agent may call."
+---
+
+A tool is two things: a contract the model sees, and something that runs when the
+model calls it. Both live in one file, `tools/<name>.yaml`.
+
+```yaml tools/check_availability.yaml
+description: >-
+  List Sage and Stone slots for one service and date only after customer
+  identification returned a real, nonempty customer_id.
+
+input:
+  type: object
+  properties:
+    service:
+      type: string
+      enum:
+        - haircut
+        - hair-color
+        - blowout
+    date:
+      type: string
+      description: Preferred date in YYYY-MM-DD form
+  required:
+    - service
+    - date
+
+local:
+  handler: tools/check_availability.py
+```
+
+The top of the file is the contract. `description` and `input` are everything the
+model knows about this tool, so write the description as an instruction rather
+than a label, and let the schema do real work: the `enum` above means the model
+cannot ask for a service the salon does not offer.
+
+The one block near the bottom is the execution: it says how the tool runs. Every
+tool file has exactly one.
+
+## The six execution blocks
+
+| Block | The tool is | Where it is taught |
+|---|---|---|
+| `webhook:` | an HTTP call to a URL named by an environment variable | [Webhook tools](/build/tools/webhook) |
+| `local:` | a Python function in your package | [Python tools](/build/tools/python) |
+| `mcp:` | a remote MCP server that offers its own tools | [MCP servers](/build/tools/mcp) |
+| `builtin:` | a tool the runtime already has, selected by id | [Prebuilt tools](/build/tools/prebuilt) |
+| `client:` | a tool the caller's own application fulfils | gated, see below |
+| `provider_hosted:` | a tool the model provider runs itself | gated, see below |
+
+Exactly one, and the compiler holds you to it. Two blocks:
+
+```
+tools/check_availability.yaml:7: two execution blocks (local and webhook): a tool runs
+  exactly one way
+```
+
+None at all, where the message is also the list:
+
+```
+tools/check_availability.yaml: no execution block: add one of webhook, local, mcp, builtin,
+  client, provider_hosted
+```
+
+### The two gated blocks
+
+`client:` and `provider_hosted:` exist in the schema and no target emits them. The
+capability table denies both on every provider, so writing one fails with the
+target named:
+
+```
+livekit: LiveKit client tools are not proven by its driver
+```
+
+```
+pipecat: Pipecat provider-hosted tools are not proven by its driver
+```
+
+They are listed here so you know the names mean nothing yet, and so a refusal you
+meet reads as a decision rather than a bug.
+
+## Which fields the block allows
+
+The contract fields are shared, with one exception that matters:
+
+| Field | Required | Where it is legal |
+|---|---|---|
+| `description` | yes, except on `builtin:` and `mcp:` | everywhere else |
+| `input` | yes, except on `builtin:` and `mcp:` | everywhere else |
+| `output` | no | everywhere except `mcp:` |
+| `inject` | no | `webhook:` and `local:` only |
+| `interruption` | no | everywhere except `mcp:` |
+| `effect` | no | everywhere except `mcp:` |
+
+An `mcp:` file carries none of them, because the server owns each tool's contract.
+A `builtin:` file needs no `description` or `input`, because the registry supplies
+both, and your `description` is added on top if you write one.
+
+## The two behavior fields
+
+```yaml
+interruption: provider_default
+effect: returns_data
+```
+
+| Field | Values | Default | Meaning |
+|---|---|---|---|
+| `interruption` | `provider_default`, `continue`, `cancel` | `provider_default` | what happens to the call if the caller speaks while the tool runs |
+| `effect` | `returns_data`, `ends_conversation` | `returns_data` | whether the conversation continues after the tool |
+
+Both are optional and both are honored differently per target: Pipecat maps
+`interruption` onto its own cancel-on-interruption setting, while LiveKit runs
+tools to completion, so a non-default value warns there. `effect` is fixed by the
+registry on a `builtin:` tool, and a conflicting value fails.
+
+## Turning a tool on is two lists
+
+```yaml agent.yaml
+agents:
+  appointment_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - check_availability
+      - end_call
+
+tools:
+  - check_availability
+  - end_call
+```
+
+The package level list says which tool files to load. The list on the agent says
+which of those this agent may call. **That second list is the visibility scope**,
+and it is the only thing standing between an agent and a tool it should not touch.
+A [task](/build/orchestration/tasks) carries its own list for the same reason. When a package grows to several agents, giving each a
+different list is how you stop the wrong one doing the wrong thing.
+
+A file in `tools/` that the package level list does not name is not loaded at all,
+and nothing complains. If a tool you wrote never seems to be offered, check that
+list first.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Webhook tools" icon="webhook" href="/build/tools/webhook">
+    The everyday case: call your own API.
+  </Card>
+  <Card title="Python tools" icon="file-code" href="/build/tools/python">
+    When the call needs code of your own.
+  </Card>
+  <Card title="MCP servers" icon="plug" href="/build/tools/mcp">
+    Offer a whole server's tools at once.
+  </Card>
+  <Card title="Prebuilt tools" icon="package" href="/build/tools/prebuilt">
+    The ones the runtime already has.
+  </Card>
+</Columns>

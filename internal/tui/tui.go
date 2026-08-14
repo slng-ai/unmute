@@ -986,6 +986,11 @@ func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool
 			tool.Handler = handler
 			tool.URLEnv = ""
 		}
+		if selected == "mcp" {
+			// The server describes its own tools, so an mcp file is the block
+			// and nothing else: no description, input, or output (N40).
+			tool.Description, tool.Input, tool.Output = "", "", ""
+		}
 		if selected == "builtin" {
 			// The registry has one id today; default it and drop the
 			// webhook/local fields a prebuilt tool never carries.
@@ -1003,7 +1008,8 @@ func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool
 func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) error {
 	for {
 		var options []huh.Option[string]
-		if tool.ExecutionKind() == "builtin" {
+		switch {
+		case tool.ExecutionKind() == "builtin":
 			// A prebuilt tool carries no input/output/url; the registry owns its
 			// schema. Description and the goodbye message are the only knobs.
 			options = []huh.Option[string]{
@@ -1014,13 +1020,22 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 				huh.NewOption("Delete tool", "delete"),
 				huh.NewOption("← Back", actionBack),
 			}
-		} else {
+		case tool.ExecutionKind() == "mcp":
+			// The server announces its own tools, so the file has no
+			// description, input, or output to edit (N40). Transport, auth, and
+			// a tool selection are written by hand and carried through here
+			// untouched.
+			options = []huh.Option[string]{
+				huh.NewOption("Execution  ·  mcp", "execution"),
+				huh.NewOption("MCP server URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url"),
+				huh.NewOption("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
+				huh.NewOption("Delete tool", "delete"),
+				huh.NewOption("← Back", actionBack),
+			}
+		default:
 			executionField := huh.NewOption("Webhook URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url")
-			switch tool.ExecutionKind() {
-			case "local":
+			if tool.ExecutionKind() == "local" {
 				executionField = huh.NewOption("Python handler  ·  "+firstNonempty(tool.Handler, "none"), "handler")
-			case "mcp":
-				executionField = huh.NewOption("MCP server URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url")
 			}
 			options = []huh.Option[string]{
 				huh.NewOption("Description  ·  "+oneLine(tool.Description), "description"),
@@ -2205,7 +2220,7 @@ func editHumanTransfers(runner *fieldRunner, data *scaffold.Data) error {
 		}
 		options = append(options, huh.NewOption("Add human transfer", "add"), huh.NewOption("← Back", actionBack))
 		choice, _, err := runner.selectOne("Human transfers", runner.describe(
-			"Destinations are references in targets.yaml. Unmute does not buy numbers, create trunks, or configure carriers.",
+			"Destinations live in agent.yaml and name environment variables, never numbers. Unmute does not buy numbers, create trunks, or configure carriers.",
 		), options, true)
 		if err != nil || choice == actionBack {
 			return err
@@ -2294,7 +2309,7 @@ func editHumanTransferDetails(runner *fieldRunner, data *scaffold.Data, name str
 				return err
 			}
 		case "value":
-			if _, err := runner.input("Destination value", "E.164 number such as +14155550123, or a SIP URI.", &transfer.Value, validateDestination); err != nil {
+			if _, err := runner.input("Destination variable", "Name of an environment variable holding the number, such as SUPPORT_PHONE_NUMBER. The number itself is never written into the package.", &transfer.Value, validateDestination); err != nil {
 				return err
 			}
 		case "mode":
@@ -2730,11 +2745,14 @@ func hasTelephony(data *scaffold.Data) bool {
 	return false
 }
 
-var destinationPattern = regexp.MustCompile(`^\+[1-9][0-9]{6,14}$|^sips?:[^@\s]+@[^@\s]+$`)
+// A destination names an environment variable holding the number, never the
+// number itself: agent.yaml is the portable half of a package, and a literal is
+// refused at compile time (spec FR-004d).
+var destinationPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
 func validateDestination(value string) error {
 	if !destinationPattern.MatchString(value) {
-		return errors.New("destination must be an E.164 number or SIP URI")
+		return errors.New("destination must be the UPPER_SNAKE name of an environment variable holding the number, such as SUPPORT_PHONE_NUMBER")
 	}
 	return nil
 }

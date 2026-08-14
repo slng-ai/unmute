@@ -45,6 +45,7 @@ Rules that hold across the whole package:
 | `turn` | only when `models.turn` has 2+ entries | name of a turn model | warn |
 | `variables` | no | map | core |
 | `secrets` | no | list of env var names, see [secrets](secrets.md) | core |
+| `destinations` | if any `human_transfer` is used | map of symbolic name to an env var name, see below | core |
 | `agents` | yes, must include `entry_agent` | map | core |
 | `tasks` | no | map | gated (T1) |
 | `task_groups` | no | map | gated (T1) |
@@ -66,6 +67,30 @@ Required: yes. Values: the integer `1`. Default: none. Targets: all four, core.
 The name of the agent that answers first. Must be a key in the `agents` map.
 
 Required: yes. Values: an agent name. Default: none. Targets: all four, core.
+
+### destinations
+
+Who this agent escalates to. A `human_transfer` names one of these symbolic
+names, and the model never sees a phone number:
+
+```yaml
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
+  supervisor_line: SUPERVISOR_PHONE_NUMBER
+```
+
+A value is the `UPPER_SNAKE` name of an environment variable holding an E.164
+number or a `sip:` URI, read at call time. A literal number is refused:
+`agent.yaml` is the portable half of a package, and a number is a deployment
+fact. Each name belongs in [`secrets`](secrets.md) too.
+
+This is package-wide and has no per-target form. Which desk answers is the same
+question whichever carrier reaches it. (Until SCHEMA N41 `destinations`
+sat on each target and accepted literals; both are gone.)
+
+Required: when any `human_transfer` control is used. Values: map of
+`snake_case` name to `UPPER_SNAKE` env var name. Default: none. Targets: all
+four, core.
 
 ### tracing
 

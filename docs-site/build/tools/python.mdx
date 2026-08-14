@@ -1,0 +1,135 @@
+---
+title: "Python tools"
+description: "A handler of your own in the package: what it receives, what it returns, and how it reaches a credential."
+---
+
+Some tools need code rather than a request. Write the function in your package and
+name it from the tool file.
+
+```yaml tools/cancel_appointment.yaml
+description: Cancel the appointment outright. Call it only when the customer says plainly that they want to cancel, never when they want a different time.
+
+input:
+  type: object
+  properties: {}
+
+inject:
+  customer_id: "{{customer_id}}"
+
+output:
+  type: object
+  properties:
+    cancelled:
+      type: boolean
+    reference:
+      type: string
+  required:
+    - cancelled
+
+local:
+  handler: tools/cancel_appointment.py
+```
+
+```python tools/cancel_appointment.py
+import hashlib
+import hmac
+import os
+
+
+def cancel_appointment(customer_id):
+    key = os.environ["SALON_API_SIGNING_KEY"].encode()
+    body = f"cancel:{customer_id}".encode()
+    signature = hmac.new(key, body, hashlib.sha256).hexdigest()
+    return {"cancelled": True, "reference": signature[:12]}
+```
+
+Both files are real, from `examples/outbound-reminder`. It is the one tool in that
+package that is not a webhook, and the reason is the credential: cancelling needs
+a signed request, and webhook `auth` only speaks bearer and API key, so the
+handler signs it itself.
+
+## The rules the function follows
+
+| Rule | Why |
+|---|---|
+| the function name matches the tool name | that is how the generated code finds it |
+| its parameters match the `input` properties plus the `inject` keys | the call is built from both |
+| it returns a dict shaped like `output`, if you declared one | the result goes back to the model |
+| it may be `async def` | the generated code awaits an awaitable result |
+| it imports nothing from Unmute | the generated project does not depend on Unmute at run time |
+
+The handler above takes `customer_id` even though `input.properties` is empty,
+because `customer_id` is injected. The model never sees that value and cannot
+invent one.
+
+## Where it ends up
+
+`unmute compile` copies the file into the generated project, next to the code that
+calls it:
+
+```
+build/pipecat/
+├── bot.py
+└── tools/
+    ├── __init__.py
+    └── cancel_appointment.py
+```
+
+The generated project imports it as a plain module and calls it like a plain
+function:
+
+```python
+result = tools.cancel_appointment.cancel_appointment(
+    customer_id=state.customer_id
+)
+if inspect.isawaitable(result):
+    result = await result
+await params.result_callback(result)
+```
+
+Both targets do the same thing, so the same handler runs unchanged on Pipecat and
+on LiveKit.
+
+## Credentials: `os.environ` is the seam
+
+```python
+key = os.environ["SALON_API_SIGNING_KEY"].encode()
+```
+
+Only the **name** appears in the file. That is exactly what the generated webhook
+code does with `token_env`, and it means your handler can be read, reviewed, and
+committed without a secret in it.
+
+`unmute validate` reads the handler, finds the names it looks up, and warns when
+`agent.yaml` forgot to declare one:
+
+```
+✓ pipecat (pipecat)
+
+Warnings:
+  pipecat: environment variables referenced but not declared in secrets: SALON_API_SIGNING_KEY (tools/cancel_appointment.py os.environ)
+```
+
+So the generated startup check demands it, and the container stops early with the
+name instead of failing on a live call.
+
+## When to reach for this instead of a webhook
+
+- the request needs a signature, a custom header scheme, or a retry rule
+- the work is pure computation, with no service to call
+- you are wrapping an SDK that is easier to call from Python than over HTTP
+
+If the tool is just an authenticated HTTP call, use
+[a webhook tool](/build/tools/webhook) instead. It needs no code from you and no
+code review.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="MCP servers" icon="plug" href="/build/tools/mcp">
+    Offer a whole server's tools at once.
+  </Card>
+  <Card title="Secrets" icon="key" href="/reference/secrets">
+    Every seam a credential travels through.
+  </Card>
+</Columns>

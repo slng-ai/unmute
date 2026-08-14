@@ -6,21 +6,25 @@ deepgram (deepgram): PASS
   warning: Deepgram integrates turn detection into listen; placement is ignored
   warning: Deepgram interruption minimum words is lossy
   warning: Deepgram semantic endpointing depends on the bound listen model
+  warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml
 livekit (livekit): PASS
   warning: LiveKit driver must range-check inactivity durations
   warning: LiveKit driver must verify a max-duration cap
   warning: LiveKit semantic endpointing depends on the bound model
   warning: LiveKit turn placement is a preference
+  warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml
 pipecat (pipecat): PASS
   warning: Pipecat driver must range-check inactivity durations
   warning: Pipecat driver must verify a max-duration cap
   warning: Pipecat semantic endpointing depends on the bound model
+  warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml
 vapi (vapi): PASS
   warning: Vapi cannot enforce tool output schemas
   warning: Vapi driver must range-check inactivity durations
   warning: Vapi driver must verify a max-duration cap
   warning: Vapi integrates turn detection; placement is ignored
   warning: Vapi semantic endpointing is forwarded as a preference
+  warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml
 
 CASE then_return
 vapi (vapi): FAIL
@@ -29,6 +33,7 @@ vapi (vapi): FAIL
   warning: Vapi driver must verify a max-duration cap
   warning: Vapi integrates turn detection; placement is ignored
   warning: Vapi semantic endpointing is forwarded as a preference
+  warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml
   error: Vapi state-preserving Squad return is unverified
 
 CASE history_messages
@@ -36,6 +41,7 @@ pipecat (pipecat): FAIL
   warning: Pipecat driver must range-check inactivity durations
   warning: Pipecat driver must verify a max-duration cap
   warning: Pipecat semantic endpointing depends on the bound model
+  warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml
   error: the Pipecat driver emits history: full only; other values are not shaped yet
 
 CASE local_listen
@@ -45,6 +51,7 @@ vapi (vapi): FAIL
   warning: Vapi driver must verify a max-duration cap
   warning: Vapi integrates turn detection; placement is ignored
   warning: Vapi semantic endpointing is forwarded as a preference
+  warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml
   error: Vapi cannot run a local listen model
 deepgram (deepgram): FAIL
   warning: Deepgram driver must range-check inactivity durations
@@ -53,6 +60,7 @@ deepgram (deepgram): FAIL
   warning: Deepgram integrates turn detection into listen; placement is ignored
   warning: Deepgram interruption minimum words is lossy
   warning: Deepgram semantic endpointing depends on the bound listen model
+  warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml
   error: Deepgram has no slot for an outside STT model
   error: deepgram listen binding provider "local" has no slot; listen providers on deepgram: deepgram
 
@@ -64,7 +72,9 @@ deepgram (deepgram): FAIL
   warning: Deepgram integrates turn detection into listen; placement is ignored
   warning: Deepgram interruption minimum words is lossy
   warning: Deepgram semantic endpointing depends on the bound listen model
+  warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml
   error: Deepgram has no runtime MCP client
+  error: tool "lookup_customer" mcp execution takes no description, input, or output: the server describes its own tools
   error: tool "lookup_customer" url_env is required for mcp execution (the MCP server address env)
 
 CASE thinking_audio
@@ -74,6 +84,7 @@ vapi (vapi): FAIL
   warning: Vapi driver must verify a max-duration cap
   warning: Vapi integrates turn detection; placement is ignored
   warning: Vapi semantic endpointing is forwarded as a preference
+  warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml
   error: Vapi has no faithful thinking-audio lowering
 deepgram (deepgram): FAIL
   warning: Deepgram driver must range-check inactivity durations
@@ -82,4 +93,5 @@ deepgram (deepgram): FAIL
   warning: Deepgram integrates turn detection into listen; placement is ignored
   warning: Deepgram interruption minimum words is lossy
   warning: Deepgram semantic endpointing depends on the bound listen model
+  warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml
   error: Deepgram has no faithful thinking-audio lowering

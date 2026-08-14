@@ -1,0 +1,112 @@
+---
+title: "The Pipecat project"
+description: "What unmute compile writes for a Pipecat target, and how to run it without Unmute."
+---
+
+```sh
+unmute compile examples/simple-prompt --target pipecat
+```
+
+```text
+examples/simple-prompt/build/pipecat/
+├── bot.py                # the agent
+├── tools/                # your local handlers, copied
+│   ├── __init__.py
+│   └── book_appointment.py
+├── tracing.py            # present when the package sets tracing
+├── pyproject.toml        # pinned dependencies
+├── Dockerfile
+├── .dockerignore
+├── compose.dev.yaml      # what `unmute dev` runs
+├── pcc-deploy.toml       # Pipecat Cloud deploy manifest
+├── .env.example          # exactly the variables this agent needs
+├── README.md             # the runbook for this build
+└── compile-report.json   # what the compiler decided
+```
+
+## bot.py
+
+One file holds the agent: the prompts as module constants, the model
+constructors, the tool wiring, and the pipeline. It imports Pipecat and your
+handlers, and nothing from Unmute.
+
+It also carries a startup check built from your `secrets:` list:
+
+```python
+REQUIRED_ENV = [
+    "OPENAI_API_KEY",
+    "SLNG_API_KEY",
+]
+
+
+def require_env() -> None:
+    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(
+            f"Missing required environment variables: {', '.join(missing)}"
+        )
+```
+
+A missing key stops the container at startup and names what is missing, instead
+of failing on the first spoken word.
+
+## Run it without Unmute
+
+The generated README says it:
+
+```sh
+cp .env.example .env                      # then fill in your keys
+
+uv run bot.py                             # web: open the URL it prints
+uv run --extra console bot.py console     # terminal: talk over local mic/speaker
+```
+
+`uv` installs the pinned dependencies on the first run. Console mode needs the
+`console` extra, which pulls in a local audio dependency (`brew install
+portaudio` first on macOS).
+
+## Dependencies are pinned
+
+```toml pyproject.toml
+dependencies = [
+    "pipecat-ai[openai,runner,silero,tracing,webrtc]==1.5.0",
+    "pipecat-slng>=0.4.0",
+    "python-dotenv>=1.0",
+]
+```
+
+The extras are derived from what your package actually uses: the providers you
+bound, the turn detector, tracing if you enabled it. The framework version is
+the `version:` from your target.
+
+## Deploy
+
+The generated README is the authority, with your own values filled in. The
+shape of it:
+
+```sh
+cp .env.example .env
+pipecat cloud secrets set pipecat-secrets --file .env
+pipecat cloud deploy
+pipecat cloud agent status pipecat
+```
+
+The secret set comes first, because the manifest already names it and a deploy
+cannot start without it. `pipecat cloud deploy` builds the image in the cloud
+from the generated `Dockerfile`.
+
+<Warning>
+  Do not edit files in `build/`. Change the source package and compile again.
+  The generated README says the same thing in its first paragraph.
+</Warning>
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="The LiveKit project" icon="boxes" href="/targets/livekit">
+    The same agent, the other runtime.
+  </Card>
+  <Card title="Going live" icon="rocket" href="/deploy/going-live">
+    What to do with the project you were handed.
+  </Card>
+</Columns>

@@ -14,7 +14,38 @@ cp .env.example .env          # then fill in the selected provider values
 uv run agent.py console       # local terminal session
 uv run agent.py dev           # LiveKit development worker
 ```
+{{- if .Telephony}}
 
+**Test in the browser before you test on a phone.** `unmute dev <source-dir>`
+opens a browser session with no carrier credentials set and none checked, even
+though this package declares a phone channel. Get the prompt and the models
+right there, then add `--telephony`, which is where the route values below start
+mattering. The browser loop is the shortest one this project has.
+{{- end}}
+
+{{- if .NeedsMCP}}
+
+## MCP tool sources
+
+The model reaches these servers through the LiveKit SDK's own MCP client. Each
+one is mounted where the package lists it, and its address and any token are
+read from the environment when the session starts.
+{{range $a := .Agents}}{{range $a.MCPServers}}
+- `{{.Name}}` on agent `{{$a.Name}}`, address from `{{.URLEnv}}`{{if .Tools}}, offering {{range $i, $t := .Tools}}{{if $i}}, {{end}}`{{$t}}`{{end}}{{else}}, offering every tool the server exposes{{end}}
+{{- end}}{{end}}{{range $t := .Tasks}}{{range $t.MCPServers}}
+- `{{.Name}}` inside task `{{$t.Name}}`, address from `{{.URLEnv}}`{{if .Tools}}, offering {{range $i, $n := .Tools}}{{if $i}}, {{end}}`{{$n}}`{{end}}{{else}}, offering every tool the server exposes{{end}}
+{{- end}}{{end}}
+
+Two things to expect at run time:
+
+- **A selected name the server does not expose is never offered.** The server's
+  tool list only exists once the connection is open, so nothing can check those
+  names at compile time. If a tool is never called, check its spelling against
+  the server's own list first.
+- **An unreachable server does not stop the agent.** LiveKit logs the toolset
+  that failed to set up and the session still starts, without that server's
+  tools. Read the worker log if a tool has gone missing.
+{{- end}}
 {{- if .CallStartVars}}
 
 ## Input variables

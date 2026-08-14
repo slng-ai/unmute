@@ -1,0 +1,234 @@
+---
+title: "Your first agent"
+description: "The smallest real agent: a prompt, four models, and one file that says who is answering."
+---
+
+Everything else in this section adds to this page. Start here.
+
+An Unmute package is a directory. The agent lives in `agent.yaml`, the prompt
+lives in a Markdown file next to it, and the runtime choice lives in
+`targets.yaml`.
+
+The example this page follows is `examples/simple-prompt` in the repository. It
+declares both targets and runs in the browser.
+
+## The whole agent
+
+```yaml agent.yaml
+version: 1
+entry_agent: appointment_desk
+
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  appointment_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m
+```
+
+Now each block.
+
+## entry_agent
+
+```yaml
+entry_agent: appointment_desk
+```
+
+Which agent answers. A package can hold several agents; exactly one starts the
+call. The name has to be a key in the `agents:` map.
+
+## models
+
+Four kinds of model, grouped by what they do:
+
+| Section | Job | Common name |
+|---|---|---|
+| `think` | decides what to say and which tool to call | LLM |
+| `speak` | turns text into audio | TTS |
+| `listen` | turns audio into text | STT |
+| `turn` | decides when the caller has finished speaking | turn detection or VAD |
+
+Each section holds named entries. The name is yours: `reasoning`, `voice`,
+`transcriber`, `detector` above. An agent then points at the entries it wants
+by name.
+
+```yaml
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.2
+```
+
+`provider` names the integration; `model` and `voice` are passed to that
+provider exactly as you wrote them. Unmute does not keep a list of valid model
+ids, so a typo shows up as a provider error at run time, not at compile time.
+The compile report says so out loud:
+
+```
+pipecat: binding reason.reasoning provider=openai model=gpt-4o-mini (forwarded as-is, not validated)
+```
+
+<Note>
+  You can define more entries than you use. Unused entries are legal
+  alternates, which makes swapping a voice a one line change.
+</Note>
+
+The `listen` and `turn` sections have one entry each here, so nothing needs to
+select them. With two or more entries you add a top level `listen:` or `turn:`
+line naming the one to use.
+
+## agents
+
+```yaml
+agents:
+  appointment_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+```
+
+An agent is a prompt plus the models it speaks and thinks with. `instructions`
+is a path to a Markdown file in the package. Writing the prompt in its own file
+means it reviews like prose, not like YAML.
+
+## secrets
+
+```yaml
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+```
+
+A list of environment variable names. Never values. Unmute writes these into
+the generated `.env.example` and into a startup check inside the generated
+project, so a missing key stops the container with a clear message instead of
+failing on the first spoken word.
+
+<Warning>
+  There is no way to write a secret's value in the package, on purpose. See
+  [secrets](/reference/secrets).
+</Warning>
+
+## conversation
+
+```yaml
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
+  interruption:
+    enabled: true
+```
+
+Who speaks first and what they say, plus whether the caller can talk over the
+agent.
+
+## channels and capacity
+
+```yaml
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  avg_session_duration: 5m
+```
+
+`channels` says how people reach this agent. `web: realtime_audio` is browser
+audio, which is what `unmute dev` serves. Phones come later, in
+[Telephony](/telephony/overview).
+
+`capacity` is your traffic estimate. The compiler turns it into worker counts
+and quota numbers in the generated project, and marks them `[unbenchmarked]`
+because they come from a conservative assumption, not from a measurement of
+your agent.
+
+## The target file
+
+```yaml targets.yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+```
+
+Two targets, both from the same agent. The LiveKit target overrides one model
+entry by name: LiveKit runs its own turn detector instead of local Silero.
+That is the shape of every per target difference. You override the entry, not
+the agent.
+
+## Try it
+
+```sh
+unmute validate examples/simple-prompt
+```
+
+```
+✓ livekit (livekit)
+✓ pipecat (pipecat)
+
+Warnings:
+  livekit: LiveKit turn placement is a preference
+```
+
+```sh
+unmute dev examples/simple-prompt --target pipecat
+```
+
+## Where to go next
+
+<Card title="Tools" icon="wrench" href="/build/tools/overview">
+  Give the agent something to do besides talk.
+</Card>

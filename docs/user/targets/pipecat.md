@@ -141,19 +141,23 @@ uses the local VAD. Semantic endpointing is also advisory.
 - **`transport: cloud-websocket`** is the one route where **you host nothing**.
   Pipecat Cloud terminates your carrier's media stream itself, on its own
   endpoint; a small piece of static markup in the carrier's console (a TwiML Bin)
-  names your agent, and the platform starts it. It requires `carrier: twilio`.
-  `connection:` is required only when the package **places or redirects** calls:
-  receiving one needs no carrier credentials, because the platform receives it
-  without them.
+  names your agent, and the platform starts it. Its connection declares
+  `carrier: twilio`. The connection's `environment:` block is required only when
+  the package **places or redirects** calls: receiving one needs no carrier
+  credentials, because the platform receives it without them.
 
   ```yaml
+  # connections/twilio_voice.yaml
+  transport: cloud-websocket
+  carrier: twilio
+  # environment: omitted on a receive-only package, which needs no credentials
+
+  # targets.yaml
   targets:
     pipecat:
       provider: pipecat
       version: "1.5.0"
-      transport: cloud-websocket
-      carrier: twilio
-      connection: twilio_voice     # omit on a receive-only package
+      connection: twilio_voice
   ```
 
   Three Connection keys: `account_sid`, `auth_token`, `from_number`. The first two
@@ -188,25 +192,27 @@ uses the local VAD. Semantic endpointing is also advisory.
   whose number it is (SCHEMA N37).
 
   **Daily's number (no `carrier`).** You buy the number from Daily and point it at
-  your deployed agent. It takes **no `carrier` and no `connection`**, and you
-  declare **no phone channel**: there is no carrier to configure, so the compiler
-  derives what the route needs from the transport. Nothing of yours is in the call
-  path: no server, no public port. This is the least infrastructure of any
-  telephony route in this project.
+  your deployed agent. Its connection is one line, `transport: daily-sip`, with
+  **no carrier and no environment**, and you declare **no phone channel**: this
+  form dials out and cannot receive, so there is nothing for a channel to serve.
+  Nothing of yours is in the call path: no server, no public port. This is the
+  least infrastructure of any telephony route in this project.
 
-  **Your own number (`carrier:` plus `connection:` plus `channels.phone`).** Your
-  carrier owns the number and forwards the call over SIP into the same Daily room.
-  All three fields are required together, and a partial declaration fails naming
-  the one you left out. Choose this form when you already hold a voice-capable
-  number, or when you cannot provision Daily numbers.
+  **Your own number (the connection adds `carrier:` and its credentials, plus
+  `channels.phone`).** Your carrier owns the number and forwards the call over
+  SIP into the same Daily room. Choose this form when you already hold a
+  voice-capable number, or when you cannot provision Daily numbers.
 
   ```yaml
+  # connections/twilio_sip_daily.yaml
+  transport: daily-sip
+  carrier: twilio
+
+  # targets.yaml
   targets:
     pipecat:
       provider: pipecat
       version: "1.5.0"
-      transport: daily-sip
-      carrier: twilio
       connection: twilio_sip_daily
   ```
 
@@ -313,6 +319,7 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 | webhook tools | ok |
 | webhook `auth` (bearer/api_key) | ok |
 | tool `output` schema, `interruption`, `effect` | ok |
+| `mcp` tool sources (SSE and streamable HTTP, auth, tool selection) | ok on an agent's `tools:`; a task-scoped source fails by name (see below) |
 | task (delegate and return) | ok |
 | per-task `model` | not yet (driver gate) |
 | task group, any `then` (return / transfer / end) | ok |
@@ -332,6 +339,40 @@ This is Pipecat's column from the Unmute schema. `ok` means it works, with no fa
 
 Everything in the [learn pages](../learn/01-one-agent.md), including the guarded handoff, the task, and the task group, runs here. The one hard `fail` is the per-task `model:` override; it sits with the driver gates below.
 
+## MCP tool sources
+
+One tool file declares one remote MCP server, and the server describes its own
+tools when the connection opens (SCHEMA.md N40):
+
+```yaml
+# tools/web_search.yaml
+mcp:
+  url_env: FIRECRAWL_MCP_URL
+  transport: streamable_http       # optional
+  auth:                            # optional
+    type: bearer
+    token_env: FIRECRAWL_API_KEY
+  tools:                           # optional: leave it out to offer them all
+    - firecrawl_search
+```
+
+The driver emits one `MCPClient` per source. It connects during setup, registers
+the server's tools on that agent's LLM, and closes on shutdown, so the tools are
+advertised while that agent is active and not before. The generated project asks
+for `pipecat-ai[mcp,...]`, which is the extra that carries the client.
+
+Two behaviours worth knowing before you run it:
+
+- **An unreachable server stops the bot.** `start()` raises during setup, so the
+  process exits with the connection error rather than answering a call without
+  the tools it promised. LiveKit logs and carries on; this is the honest
+  difference between the platforms, not something the compiler smooths over.
+- **No `transport:` means the bot chooses at startup**, with the same rule
+  LiveKit's SDK uses: a URL path ending in `/mcp` speaks streamable HTTP,
+  anything else speaks SSE.
+
+Runnable example: [`examples/mcp-example`](../../../examples/mcp-example/).
+
 ## What the driver does not emit yet
 
 Some features are in the schema and Pipecat itself supports them, but this first version of the driver does not write them yet. These are **maturity gates on the driver, not limits of Pipecat.** Using one fails the compile today, and the gate lifts when the driver adds it. Right now these are not emitted:
@@ -340,8 +381,10 @@ Some features are in the schema and Pipecat itself supports them, but this first
 - **Per-task `model:`.** Pipecat's mechanism for switching models mid-call stalls the conversation in the current release, so there is nothing safe to emit yet. Drop the override and the task runs on the delegating agent's model.
 - **`thinking_audio`.**
 - **Voicemail detection** (`on_voicemail`) on carrier WebSocket routes.
-- **`mcp` tools.** Use `webhook` or `local` Python-handler tools, which are
-  emitted.
+- **An `mcp` source scoped to a task.** Agent scope is emitted (see below); a
+  task's `tools:` list cannot hold one, because a Pipecat Flows node advertises
+  only the function schemas it lists and the SDK's MCP client exposes no
+  per-tool handler to put in one. List the source on the agent instead.
 - **Warm human transfer** (the `warm:` block), on every route, for two different
   reasons (checked 2026-08-12). On the **carrier WebSocket** routes the platform
   has no transfer control at all, so there is nothing to build against. On the

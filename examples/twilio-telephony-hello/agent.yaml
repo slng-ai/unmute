@@ -6,9 +6,22 @@
 version: 1
 entry_agent: greeter
 
+# Every environment variable this package needs you to set, in one list: model
+# keys, and the carrier credentials the two connections name. It does not list
+# names the runtime supplies for you — REDIS_URL and UNMUTE_PUBLIC_URL come from
+# `unmute dev` locally and from the operator at deploy time.
 secrets:
   - OPENAI_API_KEY
   - SLNG_API_KEY
+  # connections/twilio_voice.yaml — the Twilio REST account, used by pipecat
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_PHONE_NUMBER
+  # connections/twilio_sip.yaml — the Elastic SIP trunk, used by livekit
+  - SIP_TRUNK_HOSTNAME
+  - SIP_AUTH_USERNAME
+  - SIP_AUTH_PASSWORD
+  - SIP_FROM_NUMBER
 
 models:
   think:

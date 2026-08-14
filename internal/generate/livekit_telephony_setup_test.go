@@ -36,7 +36,8 @@ func livekitSIPFixture(t *testing.T, carrier string, inbound, outbound, cold boo
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound, RequiredControls: controls,
 	}
 	configured := pkg.Targets["livekit"]
-	configured.Transport, configured.Carrier, configured.Connection = "sip", carrier, "primary_phone"
+	configured.Connection = "primary_phone"
+	setConnectionRoute(pkg, "primary_phone", "sip", carrier)
 	pkg.Targets = map[string]spec.Target{"livekit": configured}
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = map[string]string{
