@@ -1,0 +1,45 @@
+# The one automated release. A maintainer pushes a v* tag and nothing else
+# happens by hand: this run builds the 6 binaries, packages, checksums, signs,
+# writes SBOMs, publishes the GitHub Release, and (once the rollout phases flip
+# in .goreleaser.yaml) updates the Homebrew cask and opens the winget PR.
+#
+# A failed run for a tag is safe to re-run: --clean wipes dist/ first and the
+# default release mode does not duplicate assets. Runbook: RELEASING.md.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the release and upload its assets
+  id-token: write # the OIDC token cosign signs with, keyless
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The changelog and git describe both need the whole history.
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          # Single source of truth: the version the module already declares.
+          go-version-file: go.mod
+          cache: true
+      # The GoReleaser action installs neither of these by design.
+      - uses: sigstore/cosign-installer@v3
+      - uses: anchore/sbom-action/download-syft@v0
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser # the free build, never Pro
+          version: "~> v2"
+          args: release --clean
+        env:
+          # Creates the release. Cannot reach any other repository.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Writes the tap and the winget fork. Empty until the secret exists,
+          # which is harmless while both publishers say skip_upload: true.
+          GH_PAT: ${{ secrets.GH_PAT }}

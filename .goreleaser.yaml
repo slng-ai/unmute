@@ -1,0 +1,124 @@
+# The whole release, in one file. Pushing a v* tag is the only action a human
+# takes; .github/workflows/release.yml runs `goreleaser release --clean` and
+# everything below happens once. GoReleaser v2 free tier only, no Pro keys.
+#
+# The runbook is RELEASING.md. Comments marked "Rollout Phase N:" are the only
+# lines that change between rollout stages.
+version: 2
+
+project_name: unmute
+
+# Rollout Phase 2: uncomment to build through proxy.golang.org and verify
+# against sum.golang.org (verifiable builds). Needs the module to be publicly
+# fetchable. Tag builds only; snapshots ignore it either way.
+# gomod:
+#   proxy: true
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64] # the default adds 386; we ship these 6 pairs
+    main: .
+    binary: unmute
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}" # no wall clock, so rebuilds match
+    ldflags:
+      - -s -w
+        -X main.version={{.Version}}
+        -X main.commit={{.ShortCommit}}
+        -X main.date={{.CommitDate}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip] # winget needs zip; LICENSE and README ride along by default
+
+checksum: {} # defaults: unmute_<version>_checksums.txt, sha256
+
+sboms:
+  - artifacts: archive # syft writes one <archive>.sbom.json (SPDX) per archive
+
+# Keyless: cosign gets its identity from the workflow's OIDC token, so there is
+# no key to store or rotate. Signing the checksums file covers every archive
+# through the hashes it lists. The bundle holds certificate and signature in one
+# file, which is all `cosign verify-blob --bundle` needs.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args: ["sign-blob", "--bundle=${signature}", "${artifact}", "--yes"]
+    artifacts: checksum
+
+changelog:
+  use: git # works in local, snapshot and tag runs, and needs no token
+  sort: asc
+  filters:
+    exclude: # git lines are "<sha> <subject>", hence the leading ^.*?
+      - '^.*?docs(\([[:word:]]+\))??!?:'
+      - '^.*?style(\([[:word:]]+\))??!?:'
+      - '^.*?test(\([[:word:]]+\))??!?:'
+      - '^.*?chore(\([[:word:]]+\))??!?:'
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: slng-ai
+    name: unmute # spelled out: a local remote may still say unmute_cli
+  prerelease: auto # an rc or beta tag becomes a GitHub prerelease
+
+# macOS only, by design: Homebrew casks are for macOS, so Linux users take the
+# archive or `go install` (FR-011).
+homebrew_casks:
+  - name: unmute
+    skip_upload: true # Rollout Phase 2: change to "auto", which still skips prereleases
+    repository:
+      owner: slng-ai
+      name: homebrew-tap # the cask lands in Casks/, the default
+      # The default Actions token cannot write to another repository, so this
+      # one credential exists. Only the name appears here, never a value.
+      token: "{{ .Env.GH_PAT }}"
+    homepage: https://github.com/slng-ai/unmute
+    description: Compile a declarative voice-agent package to Pipecat or LiveKit
+    # Casks have no license field (FR-017); the archives carry LICENSE instead.
+    hooks:
+      post:
+        # An unsigned binary downloaded by brew is quarantined, and macOS refuses
+        # to run it with a dialog that offers no way out. Stripping the attribute
+        # at install time is what makes `unmute --version` work right after
+        # `brew install`.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/unmute"]
+          end
+
+# Dormant until Rollout Phase 3: winget wants a real, public, stable release and
+# a fork of microsoft/winget-pkgs to open the PR from.
+winget:
+  - publisher: slng
+    package_identifier: slng.unmute
+    short_description: Compile a declarative voice-agent package to Pipecat or LiveKit
+    license: MIT # required by winget, unlike the cask
+    publisher_url: https://slng.ai
+    publisher_support_url: https://github.com/slng-ai/unmute/issues
+    homepage: https://github.com/slng-ai/unmute
+    skip_upload: true # Rollout Phase 3: change to "auto"
+    repository:
+      owner: FORK_OWNER # Rollout Phase 3: the account that owns the winget-pkgs fork
+      name: winget-pkgs
+      token: "{{ .Env.GH_PAT }}"
+      pull_request:
+        enabled: true # the branch defaults to unmute-<version>
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master

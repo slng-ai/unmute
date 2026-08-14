@@ -15,4 +15,10 @@ fmt:     ; gofmt -w . && go vet ./...
 install: ; go install -ldflags "$(LDFLAGS)" .
 docs:    ; cd docs-site && npx --yes mint dev --no-open
 
-.PHONY: build test smoke lint fmt install docs
+# The exact command the release-config CI job runs, so a maintainer rehearses
+# the whole pipeline locally. Publishes nothing; signing needs CI's OIDC token.
+# GH_PAT can stay unset: snapshot mode never publishes, so the publishers'
+# {{ .Env.GH_PAT }} template is never evaluated (verified 2026-08-14).
+release-dry: ; goreleaser release --snapshot --clean --skip=sign
+
+.PHONY: build test smoke lint fmt install docs release-dry
