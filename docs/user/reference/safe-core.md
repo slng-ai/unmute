@@ -53,7 +53,7 @@ all remain provisional until their credentialed route smokes pass.
 | `provider: local` (listen/speak) | ok | ok | fail | fail |
 | webhook tools | ok | ok | ok | ok |
 | webhook `auth` (bearer/api_key) | ok | ok | fail | fail |
-| mcp tools | Python only | gated (driver v1) | ok | fail |
+| mcp tools | Python only | ok (agent scope; a task-scoped source fails) | ok | fail |
 | outbound + `on_voicemail` | provisional on SIP routes | gated (voicemail not emitted) | ok | generated (warn) |
 | tracing `provider: langfuse` | ok | ok | fail | fail |
 

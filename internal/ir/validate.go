@@ -345,10 +345,10 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 				errors = add(errors, fmt.Sprintf("tool %q instructions is legal for builtin execution only", name))
 			}
 		}
-		// auth lives in the webhook block, so a non-webhook tool can only carry
-		// one if the IR was built in code (tests, future drivers).
-		if tool.Auth != nil && tool.Execution != ToolWebhook {
-			errors = add(errors, fmt.Sprintf("tool %q auth is legal for webhook execution only", name))
+		// auth lives in the webhook or mcp block, so any other tool can only
+		// carry one if the IR was built in code (tests, future drivers).
+		if tool.Auth != nil && tool.Execution != ToolWebhook && tool.Execution != ToolMCP {
+			errors = add(errors, fmt.Sprintf("tool %q auth is legal for webhook and mcp execution only", name))
 		}
 		if tool.Path != "" && tool.Execution != ToolWebhook {
 			errors = add(errors, fmt.Sprintf("tool %q path is legal for webhook execution only", name))
@@ -364,17 +364,25 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			validateBuiltinTool(name, tool, &errors)
 			continue
 		}
-		if tool.Description == "" {
-			errors = add(errors, fmt.Sprintf("tool %q description is required", name))
+		// An mcp file carries no per-tool contract at all: the server announces
+		// each tool at run time (N40). spec.Load rejects the fields with a line
+		// number, so reaching here means the IR was built in code.
+		if tool.Execution != ToolMCP {
+			if tool.Description == "" {
+				errors = add(errors, fmt.Sprintf("tool %q description is required", name))
+			}
+			if tool.Input["type"] != "object" {
+				errors = add(errors, fmt.Sprintf("tool %q input must be a JSON Schema object", name))
+			}
+			validateSchemaKeys(fmt.Sprintf("tool %q", name), "input", tool.Input, &schemas)
+			if tool.Output != nil && tool.Output["type"] != "object" {
+				errors = add(errors, fmt.Sprintf("tool %q output must be a JSON Schema object", name))
+			}
+			validateSchemaKeys(fmt.Sprintf("tool %q", name), "output", tool.Output, &schemas)
 		}
-		if tool.Input["type"] != "object" {
-			errors = add(errors, fmt.Sprintf("tool %q input must be a JSON Schema object", name))
+		if tool.Execution != ToolMCP && (tool.MCPTransport != "" || len(tool.MCPTools) > 0) {
+			errors = add(errors, fmt.Sprintf("tool %q transport and tools are legal for mcp execution only", name))
 		}
-		validateSchemaKeys(fmt.Sprintf("tool %q", name), "input", tool.Input, &schemas)
-		if tool.Output != nil && tool.Output["type"] != "object" {
-			errors = add(errors, fmt.Sprintf("tool %q output must be a JSON Schema object", name))
-		}
-		validateSchemaKeys(fmt.Sprintf("tool %q", name), "output", tool.Output, &schemas)
 		switch tool.Execution {
 		case ToolLocal:
 			if tool.Handler == "" {
@@ -394,6 +402,12 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			}
 			validateToolAuth(name, tool.Auth, &errors)
 		case ToolMCP:
+			// N40: the server owns every tool's contract. spec.Load rejects
+			// these with a line number, so reaching here means the IR was built
+			// in code.
+			if tool.Description != "" || tool.Input != nil || tool.Output != nil {
+				errors = add(errors, fmt.Sprintf("tool %q mcp execution takes no description, input, or output: the server describes its own tools", name))
+			}
 			// B3 (SCHEMA §5, 2026-07-16): url_env names the MCP server address.
 			if tool.URLEnv == "" {
 				errors = add(errors, fmt.Sprintf("tool %q url_env is required for mcp execution (the MCP server address env)", name))
@@ -403,12 +417,40 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			if tool.Handler != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler is legal for local execution only", name))
 			}
+			// N40: the two remote transports, and only when the author states
+			// one. Absent means the platform's own rule for the URL.
+			switch tool.MCPTransport {
+			case "", MCPTransportSSE, MCPTransportStreamableHTTP:
+			default:
+				errors = add(errors, fmt.Sprintf("tool %q transport must be %s or %s, not %q",
+					name, MCPTransportSSE, MCPTransportStreamableHTTP, tool.MCPTransport))
+			}
+			// The server's tool list only exists at run time, so a name is
+			// checked for shape here and for existence never: an empty or
+			// repeated entry is an authoring slip worth naming, a name the
+			// server does not expose is simply never offered.
+			seen := make(map[string]bool, len(tool.MCPTools))
+			for _, selected := range tool.MCPTools {
+				switch {
+				case strings.TrimSpace(selected) == "":
+					errors = add(errors, fmt.Sprintf("tool %q tools has an empty entry: name a tool the server exposes, or drop the list to take them all", name))
+				case seen[selected]:
+					errors = add(errors, fmt.Sprintf("tool %q tools names %q twice", name, selected))
+				}
+				seen[selected] = true
+			}
+			validateToolAuth(name, tool.Auth, &errors)
 		case ToolClient, ToolProviderHosted:
 			if tool.Handler != "" || tool.URLEnv != "" {
 				errors = add(errors, fmt.Sprintf("tool %q handler/url_env does not match execution %q", name, tool.Execution))
 			}
 		default:
 			errors = add(errors, fmt.Sprintf("tool %q has invalid execution %q", name, tool.Execution))
+		}
+		// The two conversation scalars are not part of an mcp file either
+		// (N40), so an mcp source is not asked to carry a value for them.
+		if tool.Execution == ToolMCP {
+			continue
 		}
 		switch tool.Interruption {
 		case ToolContinue, ToolCancel, ToolProviderDefault:
@@ -1180,6 +1222,15 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 			applyCapability(caps, targetcap.FieldToolInterruption, provider, row)
 		}
 	}
+	// Scoping an MCP source to a task is its own capability: the source is
+	// legal, the scope is what a driver may not be able to hold (N40).
+	for _, task := range agent.Tasks {
+		for _, ref := range task.Tools {
+			if agent.Tools[ref].Execution == ToolMCP {
+				applyCapability(caps, targetcap.FieldToolMCPTask, provider, row)
+			}
+		}
+	}
 }
 
 // validateVariables gates the two per-target variable features: capturing a
@@ -1264,7 +1315,11 @@ func referencedEnvNames(agent *Agent) map[string]string {
 			}
 		}
 		if tool.Auth != nil {
-			note(tool.Auth.TokenEnv, fmt.Sprintf("tools/%s.yaml webhook.auth.token_env", name))
+			block := "webhook"
+			if tool.Execution == ToolMCP {
+				block = "mcp"
+			}
+			note(tool.Auth.TokenEnv, fmt.Sprintf("tools/%s.yaml %s.auth.token_env", name, block))
 		}
 	}
 	for _, name := range sortedKeys(agent.Models) {

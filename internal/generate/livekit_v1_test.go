@@ -563,6 +563,22 @@ func artifactFile(t *testing.T, artifact Artifact, path string) string {
 	return ""
 }
 
+// requiredEnvBlock returns the emitted REQUIRED_ENV list, so a test asserts on
+// the startup check itself rather than on the name appearing anywhere in the
+// file.
+func requiredEnvBlock(t *testing.T, agentpy string) string {
+	t.Helper()
+	start := strings.Index(agentpy, "REQUIRED_ENV = [")
+	if start < 0 {
+		t.Fatal("agent.py has no REQUIRED_ENV")
+	}
+	end := strings.Index(agentpy[start:], "]")
+	if end < 0 {
+		t.Fatal("agent.py REQUIRED_ENV is unterminated")
+	}
+	return agentpy[start : start+end]
+}
+
 func artifactHasFile(artifact Artifact, path string) bool {
 	for _, file := range artifact.Files {
 		if file.Path == path {
@@ -1780,10 +1796,102 @@ func TestLiveKitV1PinsAndSDKLanguage(t *testing.T) {
 	}
 }
 
+// TestLiveKitV1MCPSelectionTransportAndScope covers the three things a source
+// declares beyond its address (N40): which tools it offers, which transport it
+// speaks, and which scope it belongs to. Two sources share one `url_env` on
+// purpose — that is the case the old collapse-by-env code merged into a single
+// mount and can no longer.
+func TestLiveKitV1MCPSelectionTransportAndScope(t *testing.T) {
+	const secret = "bk-live-pretend-key"
+	t.Setenv("BOOKINGS_MCP_TOKEN", secret)
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tools["book_table"] = ir.Tool{
+		Execution: ir.ToolMCP, URLEnv: "BOOKINGS_MCP_URL", MCPTransport: ir.MCPTransportSSE,
+		MCPTools: []string{"reserve", "cancel"},
+		Auth:     &ir.ToolAuth{Type: ir.ToolAuthBearer, TokenEnv: "BOOKINGS_MCP_TOKEN"},
+	}
+	// Same address, nothing else stated: every tool, platform-chosen transport,
+	// no authentication, and a scope of its own.
+	agent.Tools["browse_tables"] = ir.Tool{Execution: ir.ToolMCP, URLEnv: "BOOKINGS_MCP_URL"}
+	greeter := agent.Agents["greeter"]
+	greeter.Tools = append(greeter.Tools, "book_table")
+	agent.Agents["greeter"] = greeter
+	task := agent.Tasks["find_slot"]
+	task.Tools = append(task.Tools, "browse_tables")
+	agent.Tasks["find_slot"] = task
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	agentpy := artifactFile(t, artifact, "agent.py")
+	greeterBody := pyClassBody(t, agentpy, "class Greeter(")
+	taskBody := pyClassBody(t, agentpy, "class FindSlot(")
+
+	// The stated transport and the selection ride the agent's mount, and only
+	// the agent's: a task-scoped source is offered inside that task alone.
+	if !strings.Contains(greeterBody, `mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="sse", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN")))`) {
+		t.Errorf("the agent's mount is not the source as declared:\n%s", greeterBody)
+	}
+	if strings.Contains(greeterBody, "browse_tables") {
+		t.Errorf("a task-scoped source must not reach the agent:\n%s", greeterBody)
+	}
+	// Nothing stated means nothing emitted: an empty allowed_tools would claim
+	// a selection the author never made (SC-004).
+	if !strings.Contains(taskBody, `mcp.MCPToolset(id="browse_tables", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"]))`) {
+		t.Errorf("the task's mount emits an argument the source never declared:\n%s", taskBody)
+	}
+	if strings.Contains(taskBody, "book_table") {
+		t.Errorf("an agent-scoped source must not reach the task:\n%s", taskBody)
+	}
+	// One helper per scheme in use, however many sources read it (V8).
+	if got := strings.Count(agentpy, "def _bearer("); got != 1 {
+		t.Errorf("_bearer defined %d times, want 1", got)
+	}
+	if strings.Count(agentpy, "def _api_key(") != 0 {
+		t.Error("a scheme no tool declares must not emit its helper")
+	}
+	// Two sources at one address stay two mounts: the selection lives on the
+	// source, so merging them would offer each scope the other's tools.
+	if got := strings.Count(agentpy, "mcp.MCPToolset("); got != 2 {
+		t.Errorf("%d mounts emitted, want one per source", got)
+	}
+	// The compiler never reads a secret's value, so nothing it writes can carry
+	// one (SC-005).
+	for _, file := range artifact.Files {
+		if strings.Contains(string(file.Content), secret) {
+			t.Errorf("%s carries a secret value", file.Path)
+		}
+	}
+}
+
+// pyClassBody returns one emitted class, from its header to the next
+// top-level class, so a test can ask what a single agent or task carries.
+func pyClassBody(t *testing.T, source, header string) string {
+	t.Helper()
+	start := strings.Index(source, header)
+	if start < 0 {
+		t.Fatalf("%q not emitted", header)
+	}
+	rest := source[start+len(header):]
+	if end := strings.Index(rest, "\nclass "); end >= 0 {
+		return source[start : start+len(header)+end]
+	}
+	return source[start:]
+}
+
 // TestLiveKitV1LocalAndMCPTools covers the tool executions beyond webhook:
 // local copies the package handler into tools/<name>.py and wraps it (SCHEMA
-// §5, code targets); mcp mounts MCPServerHTTP off url_env with allowed_tools
-// (B3/D8). The local handler rides spec.Load like instructions do.
+// §5, code targets); mcp mounts one MCPToolset per source on the agent's tools
+// surface, with only the arguments the source actually declares (N40). The
+// local handler rides spec.Load like instructions do.
 func TestLiveKitV1LocalAndMCPTools(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
@@ -1801,9 +1909,9 @@ func TestLiveKitV1LocalAndMCPTools(t *testing.T) {
 		Interruption:  ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
 	}
 	agent.Tools["book_table"] = ir.Tool{
-		Description: "Book the table through the bookings MCP server.",
-		Input:       map[string]any{"type": "object"},
-		Execution:   ir.ToolMCP, URLEnv: "BOOKINGS_MCP_URL",
+		Execution: ir.ToolMCP, URLEnv: "BOOKINGS_MCP_URL",
+		MCPTransport: ir.MCPTransportStreamableHTTP, MCPTools: []string{"reserve", "cancel"},
+		Auth:         &ir.ToolAuth{Type: ir.ToolAuthBearer, TokenEnv: "BOOKINGS_MCP_TOKEN"},
 		Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
 	}
 	def := agent.Agents["greeter"]
@@ -1821,10 +1929,27 @@ func TestLiveKitV1LocalAndMCPTools(t *testing.T) {
 		"async def fetch_notes(self, ctx: RunContext, topic: str) -> dict:",
 		"result = tools.fetch_notes.fetch_notes(topic=topic)",
 		"if inspect.isawaitable(result):",
-		`mcp_servers=[mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], allowed_tools=["book_table"])],`,
+		`tools=[mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="streamable_http", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN")))],`,
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	// The deprecated parameter is gone for good: it logs a warning on every
+	// start since 1.5.11, so a generated project must never emit it (N40).
+	if strings.Contains(botpy, "mcp_servers=") {
+		t.Error("agent.py still emits the deprecated mcp_servers= parameter")
+	}
+	// The extra is what makes the import work at all, and the floor is where
+	// the emitted arguments are verified (research R2).
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !strings.Contains(pyproject, "livekit-agents[mcp,") || !strings.Contains(pyproject, ">=1.6") {
+		t.Errorf("pyproject must carry the mcp extra on a >=1.6 floor:\n%s", pyproject)
+	}
+	// A missing address or token is named before the agent dials (FR-009).
+	for _, want := range []string{`"BOOKINGS_MCP_URL"`, `"BOOKINGS_MCP_TOKEN"`} {
+		if !strings.Contains(requiredEnvBlock(t, botpy), want) {
+			t.Errorf("REQUIRED_ENV missing %s", want)
 		}
 	}
 	if handler := artifactFile(t, artifact, "tools/fetch_notes.py"); !strings.Contains(handler, "def fetch_notes(topic):") {
@@ -1895,8 +2020,16 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 		Execution:   ir.ToolLocal, Handler: "tools/fetch_notes.py", HandlerSource: "def fetch_notes(topic):\n    return {}\n",
 		Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
 	}
+	// Two mcp sources on one server address: agent-scoped, fully specified,
+	// and task-scoped with nothing but the address, so the fixture pins both
+	// the full mount and the one that emits no optional argument at all (N40).
 	agent.Tools["book_table"] = ir.Tool{
-		Description: "Book through the bookings MCP server.", Input: map[string]any{"type": "object"},
+		Execution: ir.ToolMCP, URLEnv: "BOOKINGS_MCP_URL",
+		MCPTransport: ir.MCPTransportStreamableHTTP, MCPTools: []string{"reserve"},
+		Auth:         &ir.ToolAuth{Type: ir.ToolAuthAPIKey, TokenEnv: "BOOKINGS_MCP_TOKEN", Header: ir.DefaultAPIKeyHeader},
+		Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+	}
+	agent.Tools["browse_tables"] = ir.Tool{
 		Execution: ir.ToolMCP, URLEnv: "BOOKINGS_MCP_URL",
 		Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
 	}
@@ -1909,6 +2042,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	task := agent.Tasks["find_slot"]
 	task.Model = "backup"
 	task.Result["details"] = ir.ResultField{Schema: map[string]any{"type": "object"}}
+	task.Tools = append(task.Tools, "browse_tables")
 	agent.Tasks["find_slot"] = task
 	agent.Controls["do_find"] = &ir.Delegate{Kind: ir.ControlDelegate, Task: "find_slot", Assign: map[string]string{"caller_phone": "result.date"}}
 	resDef := agent.Agents["reservations"]

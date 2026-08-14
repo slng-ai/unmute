@@ -56,6 +56,7 @@ const (
 	FieldToolOutput            Field = "tools.output"
 	FieldToolLocal             Field = "tools.execution.local"
 	FieldToolMCP               Field = "tools.execution.mcp"
+	FieldToolMCPTask           Field = "tasks.tools.execution.mcp"
 	FieldToolClient            Field = "tools.execution.client"
 	FieldToolProviderHosted    Field = "tools.execution.provider_hosted"
 	FieldToolBuiltin           Field = "tools.execution.builtin"
@@ -328,8 +329,15 @@ func Default() Table {
 				deny(Vapi, "Vapi cannot host local tool code"),
 			),
 			FieldToolMCP: field(
-				deny(Pipecat, "the Pipecat driver does not emit MCP tools yet"),
 				deny(Deepgram, "Deepgram has no runtime MCP client"),
+			),
+			// Scope, not kind: Pipecat emits MCP sources on an agent, but a
+			// Flows node advertises only the function schemas it lists, and
+			// pipecat's MCPClient exposes no per-tool handler to wrap in one.
+			// So a source listed on a task fails by name instead of quietly
+			// being offered everywhere or nowhere (N40).
+			FieldToolMCPTask: field(
+				deny(Pipecat, "the Pipecat driver cannot scope an MCP tool source to a task: list it on the agent instead"),
 			),
 			FieldToolClient: field(
 				deny(LiveKit, "LiveKit client tools are not proven by its driver"),

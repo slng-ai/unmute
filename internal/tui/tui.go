@@ -986,6 +986,11 @@ func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool
 			tool.Handler = handler
 			tool.URLEnv = ""
 		}
+		if selected == "mcp" {
+			// The server describes its own tools, so an mcp file is the block
+			// and nothing else: no description, input, or output (N40).
+			tool.Description, tool.Input, tool.Output = "", "", ""
+		}
 		if selected == "builtin" {
 			// The registry has one id today; default it and drop the
 			// webhook/local fields a prebuilt tool never carries.
@@ -1003,7 +1008,8 @@ func chooseToolExecution(runner *fieldRunner, target string, tool *scaffold.Tool
 func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) error {
 	for {
 		var options []huh.Option[string]
-		if tool.ExecutionKind() == "builtin" {
+		switch {
+		case tool.ExecutionKind() == "builtin":
 			// A prebuilt tool carries no input/output/url; the registry owns its
 			// schema. Description and the goodbye message are the only knobs.
 			options = []huh.Option[string]{
@@ -1014,13 +1020,22 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 				huh.NewOption("Delete tool", "delete"),
 				huh.NewOption("← Back", actionBack),
 			}
-		} else {
+		case tool.ExecutionKind() == "mcp":
+			// The server announces its own tools, so the file has no
+			// description, input, or output to edit (N40). Transport, auth, and
+			// a tool selection are written by hand and carried through here
+			// untouched.
+			options = []huh.Option[string]{
+				huh.NewOption("Execution  ·  mcp", "execution"),
+				huh.NewOption("MCP server URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url"),
+				huh.NewOption("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
+				huh.NewOption("Delete tool", "delete"),
+				huh.NewOption("← Back", actionBack),
+			}
+		default:
 			executionField := huh.NewOption("Webhook URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url")
-			switch tool.ExecutionKind() {
-			case "local":
+			if tool.ExecutionKind() == "local" {
 				executionField = huh.NewOption("Python handler  ·  "+firstNonempty(tool.Handler, "none"), "handler")
-			case "mcp":
-				executionField = huh.NewOption("MCP server URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url")
 			}
 			options = []huh.Option[string]{
 				huh.NewOption("Description  ·  "+oneLine(tool.Description), "description"),

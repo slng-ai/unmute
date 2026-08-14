@@ -1097,6 +1097,66 @@ func TestSmokePipecatV1LocalToolInstantiates(t *testing.T) {
 	})
 }
 
+// mcpSmokeScript instantiates the emitted agent workers and inspects the MCP
+// clients they built. Constructing them is the point: it runs the emitted
+// MCPClient/params kwargs against the installed SDK, which is the drift
+// py_compile cannot see. Nothing connects, so no server is needed.
+const mcpSmokeScript = `"""Smoke check: the emitted MCP clients construct against the installed SDK."""
+import inspect
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "https://mcp.example/mcp")
+
+import bot  # noqa: E402
+
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+from pipecat.services.mcp_service import MCPClient  # noqa: E402
+from pipecat.workers.llm import LLMWorker  # noqa: E402
+
+workers = sorted(
+    name for name, obj in vars(bot).items()
+    if inspect.isclass(obj) and issubclass(obj, LLMWorker) and obj.__module__ == "bot"
+)
+assert workers, "no agent workers found in bot.py"
+
+clients = []
+for name in workers:
+    worker = getattr(bot, name)(state=None, context=LLMContext(), call_context=None)
+    clients.extend(getattr(worker, "_mcp_clients", []))
+assert clients, "no MCP client was constructed"
+for client in clients:
+    assert isinstance(client, MCPClient)
+    assert callable(client.start) and callable(client.close) and callable(client.register_tools)
+print("smoke ok:", len(clients), "mcp client(s)")
+`
+
+// TestSmokePipecatV1MCPToolSourceInstantiates is the proof gate for N40 on this
+// driver, and for research R3's stale-checkout caveat: the reference checkout
+// is older than the pinned SDK, so the emitted MCPClient shape is only claimed
+// once it constructs against pipecat-ai as pinned, with the `mcp` extra the
+// generated pyproject now asks uv to resolve.
+func TestSmokePipecatV1MCPToolSourceInstantiates(t *testing.T) {
+	runPipecatSmokeScript(t, "safe_core", nil, func(agent *ir.Agent) {
+		agent.Tools["web_search"] = ir.Tool{
+			Execution: ir.ToolMCP, URLEnv: "FIRECRAWL_MCP_URL",
+			MCPTransport: ir.MCPTransportStreamableHTTP, MCPTools: []string{"firecrawl_search"},
+			Auth:         &ir.ToolAuth{Type: ir.ToolAuthBearer, TokenEnv: "FIRECRAWL_API_KEY"},
+			Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+		}
+		// A second source with no transport and no selection, so the startup
+		// chooser and the argument-free client are constructed too.
+		agent.Tools["notes"] = ir.Tool{
+			Execution: ir.ToolMCP, URLEnv: "NOTES_MCP_URL",
+			Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+		}
+		intake := agent.Agents["intake"]
+		intake.Tools = append(intake.Tools, "web_search", "notes")
+		agent.Agents["intake"] = intake
+	}, mcpSmokeScript)
+}
+
 // TestSmokeV17PipecatSpeechTracing proves the generated OTLP setup exports the
 // native STT, LLM, and TTS tree under the named conversation trace (V21).
 func TestSmokeV17PipecatSpeechTracing(t *testing.T) {

@@ -119,7 +119,12 @@ Both shapes are shown side by side, running, in [examples/outbound-reminder](htt
 ### The other two slots
 
 - A **model** endpoint: `endpoint_env` on a model binding, for a self-hosted or proxied provider. It lowers to `base_url=os.environ["ACME_BASE_URL"]` in the service constructor. See [models and voices](models-and-voices.md).
-- An **MCP** server address: `mcp.url_env`, which lowers to `MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], ...)`.
+- An **MCP** server address and its token: `mcp.url_env` and
+  `mcp.auth.token_env`, which lower to the platform's own MCP client
+  (`MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], ...)` on LiveKit,
+  `MCPClient(server_params=...)` on Pipecat) with the token read through the
+  same `_bearer` / `_api_key` helper a webhook tool uses. Both names reach
+  `.env.example` and the startup check. See [tools](tools.md#mcp).
 
 ## Why secrets never go through `{{...}}`
 

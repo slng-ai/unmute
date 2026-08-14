@@ -521,7 +521,8 @@ func TestScaffoldToolManifestsAreBlockStyle(t *testing.T) {
 			Auth: &spec.ToolAuth{Type: "bearer", TokenEnv: "T_TOKEN"}}},
 		{"webhook_api_key", Tool{Execution: "webhook", URLEnv: "T_URL",
 			Auth: &spec.ToolAuth{Type: "api_key", TokenEnv: "T_KEY", Header: "X-Api-Key"}}},
-		{"mcp", Tool{Execution: "mcp", URLEnv: "T_URL"}},
+		// mcp is not in this table: N40 gives it no input or output to style.
+		// TestScaffoldMCPToolIsBlockOnly covers the shape it does write.
 		{"client", Tool{Execution: "client"}},
 		{"provider_hosted", Tool{Execution: "provider_hosted"}},
 	} {
@@ -578,6 +579,49 @@ func TestScaffoldToolManifestsAreBlockStyle(t *testing.T) {
 				t.Errorf("enum = %#v, want %#v", got, want)
 			}
 		})
+	}
+}
+
+// TestScaffoldMCPToolIsBlockOnly pins N40 in the one place that regenerates
+// packages: an mcp tool file is the `mcp:` block and nothing else, and every
+// field the console carries through (transport, auth, selection) rides inside
+// it. The file the scaffold writes must load, so this asserts on the text and
+// on the decode.
+func TestScaffoldMCPToolIsBlockOnly(t *testing.T) {
+	data := Data{Name: "agent", Tools: []Tool{{
+		Name: "web_search", Execution: "mcp", URLEnv: "FIRECRAWL_MCP_URL",
+		MCPTransport: "streamable_http", MCPTools: []string{"firecrawl_search"},
+		Auth: &spec.ToolAuth{Type: "bearer", TokenEnv: "FIRECRAWL_API_KEY"},
+	}}}
+	data.SetTarget("pipecat")
+	dir := filepath.Join(t.TempDir(), "agent")
+	if _, err := Write(dir, data); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "tools", "web_search.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := string(raw)
+	for _, illegal := range []string{"description:", "input:", "output:", "interruption:", "effect:"} {
+		if strings.Contains(manifest, illegal) {
+			t.Errorf("an mcp file carries no %s\n%s", illegal, manifest)
+		}
+	}
+	var got struct {
+		MCP *spec.ToolMCP `yaml:"mcp"`
+	}
+	if err := yaml.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("emitted tool file does not parse: %v\n%s", err, manifest)
+	}
+	if got.MCP == nil || got.MCP.URLEnv != "FIRECRAWL_MCP_URL" || got.MCP.Transport != "streamable_http" {
+		t.Fatalf("block did not round-trip:\n%s", manifest)
+	}
+	if got.MCP.Auth == nil || got.MCP.Auth.TokenEnv != "FIRECRAWL_API_KEY" {
+		t.Errorf("auth did not round-trip:\n%s", manifest)
+	}
+	if len(got.MCP.Tools) != 1 || got.MCP.Tools[0] != "firecrawl_search" {
+		t.Errorf("selection did not round-trip:\n%s", manifest)
 	}
 }
 

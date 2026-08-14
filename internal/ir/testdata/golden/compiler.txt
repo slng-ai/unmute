@@ -65,6 +65,7 @@ deepgram (deepgram): FAIL
   warning: Deepgram interruption minimum words is lossy
   warning: Deepgram semantic endpointing depends on the bound listen model
   error: Deepgram has no runtime MCP client
+  error: tool "lookup_customer" mcp execution takes no description, input, or output: the server describes its own tools
   error: tool "lookup_customer" url_env is required for mcp execution (the MCP server address env)
 
 CASE thinking_audio

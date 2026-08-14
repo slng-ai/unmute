@@ -182,6 +182,13 @@ func TestLoadToolShape(t *testing.T) {
 		{"two blocks", head + "\nwebhook:\n  url_env: PROBE_URL\nlocal:\n  handler: tools/probe.py\n", "two execution blocks"},
 		{"empty webhook block", head + "\nwebhook:\n", "block is empty"},
 		{"bare client block", head + "\nclient:\n", "needs an explicit empty body"},
+		// N40: an mcp file is the block and nothing else. Each contract field
+		// is named with its own line, so one edit pass removes them all.
+		{"mcp with description", "description: Probe.\n\nmcp:\n  url_env: PROBE_MCP_URL\n", "tools/probe.yaml:1: remove `description`"},
+		{"mcp with input", head + "\nmcp:\n  url_env: PROBE_MCP_URL\n", "tools/probe.yaml:2: remove `input`"},
+		{"mcp with effect", "mcp:\n  url_env: PROBE_MCP_URL\neffect: returns_data\n", "tools/probe.yaml:3: remove `effect`"},
+		{"mcp with inject", "mcp:\n  url_env: PROBE_MCP_URL\ninject:\n  caller: \"1\"\n", "tools/probe.yaml:3: remove `inject`"},
+		{"mcp with interruption", "mcp:\n  url_env: PROBE_MCP_URL\ninterruption: cancel\n", "tools/probe.yaml:3: remove `interruption`"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Load(writeToolPackage(t, tc.body))
@@ -203,7 +210,7 @@ func TestLoadToolShape(t *testing.T) {
 		{"quoted block key", head + "\n\"webhook\":\n  url_env: PROBE_URL\n", "webhook"},
 		{"inline builtin block", "description: Probe.\n\nbuiltin: { id: end_call }\n", "builtin"},
 		{"explicit empty client", head + "\nclient: {}\n", "client"},
-		{"mcp", head + "\nmcp:\n  url_env: PROBE_MCP_URL\n", "mcp"},
+		{"mcp", "mcp:\n  url_env: PROBE_MCP_URL\n", "mcp"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pkg, err := Load(writeToolPackage(t, tc.body))
@@ -214,5 +221,42 @@ func TestLoadToolShape(t *testing.T) {
 				t.Errorf("execution kind = %q, want %q", got, tc.kind)
 			}
 		})
+	}
+}
+
+// TestLoadMCPToolSource round-trips the whole `mcp:` block (SCHEMA N40): the
+// address, the transport, the auth block, and the tool selection all survive
+// the strict decode, and no secret value is ever written.
+func TestLoadMCPToolSource(t *testing.T) {
+	body := "mcp:\n" +
+		"  url_env: FIRECRAWL_MCP_URL\n" +
+		"  transport: streamable_http\n" +
+		"  auth:\n    type: bearer\n    token_env: FIRECRAWL_API_KEY\n" +
+		"  tools:\n    - firecrawl_search\n"
+	pkg, err := Load(writeToolPackage(t, body))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	mcp := pkg.Tools["probe"].MCP
+	if mcp == nil {
+		t.Fatal("the mcp block did not decode")
+	}
+	if mcp.URLEnv != "FIRECRAWL_MCP_URL" || mcp.Transport != "streamable_http" {
+		t.Errorf("url_env/transport = %q/%q", mcp.URLEnv, mcp.Transport)
+	}
+	if mcp.Auth == nil || mcp.Auth.Type != "bearer" || mcp.Auth.TokenEnv != "FIRECRAWL_API_KEY" {
+		t.Errorf("auth = %+v", mcp.Auth)
+	}
+	if len(mcp.Tools) != 1 || mcp.Tools[0] != "firecrawl_search" {
+		t.Errorf("tools = %v", mcp.Tools)
+	}
+}
+
+// An unknown field inside the block still fails loud, so a typo in one of the
+// new field names is never silently dropped (FR-008).
+func TestLoadMCPUnknownField(t *testing.T) {
+	_, err := Load(writeToolPackage(t, "mcp:\n  url_env: PROBE_MCP_URL\n  transports: sse\n"))
+	if err == nil || !strings.Contains(err.Error(), "transports") {
+		t.Fatalf("want an unknown-field error naming `transports`, got %v", err)
 	}
 }

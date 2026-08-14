@@ -485,6 +485,28 @@ func TestSmokeLiveKitV1BuiltinEndCall(t *testing.T) {
 	runLiveKitSmokeScript(t, "simple-prompt", nil, addBuiltinEndCall, livekitSmokeScript)
 }
 
+// addMCPSource attaches one fully specified MCP tool source to the entry agent
+// (N40): the shape examples/mcp-example ships.
+func addMCPSource(agent *ir.Agent) {
+	agent.Tools["web_search"] = ir.Tool{
+		Execution: ir.ToolMCP, URLEnv: "FIRECRAWL_MCP_URL",
+		MCPTransport: ir.MCPTransportStreamableHTTP, MCPTools: []string{"firecrawl_search"},
+		Auth:         &ir.ToolAuth{Type: ir.ToolAuthBearer, TokenEnv: "FIRECRAWL_API_KEY"},
+		Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+	}
+	def := agent.Agents[agent.EntryAgent]
+	def.Tools = append(def.Tools, "web_search")
+	agent.Agents[agent.EntryAgent] = def
+}
+
+// TestSmokeLiveKitV1MCPToolSourceInstantiates is the proof gate for N40 on this
+// driver: uv must resolve the `mcp` extra the emitted pyproject now asks for,
+// and the Agent's tools= surface must construct MCPToolset/MCPServerHTTP with
+// exactly the kwargs the template writes. Both are drift py_compile cannot see.
+func TestSmokeLiveKitV1MCPToolSourceInstantiates(t *testing.T) {
+	runLiveKitSmokeScript(t, "simple-prompt", nil, addMCPSource, livekitSmokeScript)
+}
+
 func TestLiveKitSIPGeneratedPythonCompiles(t *testing.T) { // telephony T10, V20
 	python, err := exec.LookPath("python3")
 	if err != nil {

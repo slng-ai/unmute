@@ -1,0 +1,16 @@
+# Both code targets compile the same package. MCP tool sources need the Python
+# LiveKit SDK, and the emitted MCPToolset arguments are verified against
+# livekit-agents 1.6.x, so this target pins that series.
+targets:
+  livekit:
+    provider: livekit
+    version: "1.6.4"
+    sdk_language: python
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"

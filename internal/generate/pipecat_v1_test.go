@@ -62,6 +62,142 @@ func TestPipecatV1BuiltinEndCallTool(t *testing.T) {
 	}
 }
 
+// mcpPipecatAgent puts one mcp tool source on the safe core's entry agent, so
+// each case below changes only the block's own fields (N40).
+func mcpPipecatAgent(t *testing.T, tool ir.Tool) *ir.Agent {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool.Execution = ir.ToolMCP
+	tool.Interruption, tool.Effect = ir.ToolProviderDefault, ir.ToolReturnsData
+	agent.Tools["web_search"] = tool
+	def := agent.Agents[agent.EntryAgent]
+	def.Tools = append(def.Tools, "web_search")
+	agent.Agents[agent.EntryAgent] = def
+	return agent
+}
+
+// TestPipecatV1MCPToolSource is the Pipecat side of N40: one MCPClient per
+// source, connected before the agent is activated, its tools advertised only
+// while that agent is active, and closed on shutdown. The gate this driver
+// carried until now is what made the emission necessary rather than optional.
+func TestPipecatV1MCPToolSource(t *testing.T) {
+	// The compiler never reads a secret's value, so a value in the environment
+	// must reach no emitted byte (SC-005).
+	const secret = "fc-live-pretend-key"
+	t.Setenv("FIRECRAWL_API_KEY", secret)
+	agent := mcpPipecatAgent(t, ir.Tool{
+		URLEnv: "FIRECRAWL_MCP_URL", MCPTransport: ir.MCPTransportStreamableHTTP,
+		MCPTools: []string{"firecrawl_search"},
+		Auth:     &ir.ToolAuth{Type: ir.ToolAuthBearer, TokenEnv: "FIRECRAWL_API_KEY"},
+	})
+	// A second source at the same address with its own selection: two clients,
+	// not one merged mount (the spec's same-address edge case).
+	agent.Tools["web_crawl"] = ir.Tool{
+		Execution: ir.ToolMCP, URLEnv: "FIRECRAWL_MCP_URL",
+		MCPTransport: ir.MCPTransportStreamableHTTP, MCPTools: []string{"firecrawl_scrape"},
+		Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+	}
+	entry := agent.Agents[agent.EntryAgent]
+	entry.Tools = append(entry.Tools, "web_crawl")
+	agent.Agents[agent.EntryAgent] = entry
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"from mcp.client.session_group import StreamableHttpParameters",
+		"from pipecat.services.mcp_service import MCPClient",
+		"self._mcp_clients = [",
+		`server_params=StreamableHttpParameters(url=os.environ["FIRECRAWL_MCP_URL"], headers=_bearer("FIRECRAWL_API_KEY")),`,
+		`tools_filter=["firecrawl_search"],`,
+		"await client.start()",
+		"(await client.register_tools(self.llm)).standard_tools",
+		"return super().build_tools() + self._mcp_tools",
+		"await agents[1].start_mcp()", // intake is the entry agent; billing sorts first
+		"await agents[1].close_mcp()",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing %q:\n%s", want, bot)
+		}
+	}
+	// The gate used to be the only thing keeping an mcp tool out of the webhook
+	// lowering, so the server address may appear in exactly two places: the
+	// client's own parameters and the startup check. Anywhere else means the
+	// address became a request the driver builds itself.
+	for _, line := range strings.Split(bot, "\n") {
+		if !strings.Contains(line, "FIRECRAWL_MCP_URL") {
+			continue
+		}
+		if strings.Contains(line, "server_params=") || strings.TrimSpace(line) == `"FIRECRAWL_MCP_URL",` {
+			continue
+		}
+		t.Errorf("the MCP server address is read outside its client: %q", strings.TrimSpace(line))
+	}
+	// A stated transport wins, so the other parameter class is never imported.
+	if strings.Contains(bot, "SseServerParameters") {
+		t.Error("bot.py imports a parameter class it never constructs")
+	}
+	// The extra is what makes the import work at all (research R4).
+	if pyproject := artifactFile(t, artifact, "pyproject.toml"); !strings.Contains(pyproject, "mcp,") {
+		t.Errorf("pyproject must carry the mcp extra:\n%s", pyproject)
+	}
+	// Both env names are named before anything dials (FR-009).
+	for _, env := range []string{"FIRECRAWL_MCP_URL", "FIRECRAWL_API_KEY"} {
+		for _, file := range []string{".env.example", "bot.py"} {
+			if !strings.Contains(artifactFile(t, artifact, file), env) {
+				t.Errorf("%s missing %s", file, env)
+			}
+		}
+	}
+	for _, file := range artifact.Files {
+		if strings.Contains(string(file.Content), secret) {
+			t.Errorf("%s carries a secret value", file.Path)
+		}
+	}
+	// Two sources, one address: each keeps its own selection.
+	if strings.Count(bot, "MCPClient(") != 2 {
+		t.Errorf("two sources at one address must build two clients:\n%s", bot)
+	}
+	if !strings.Contains(bot, `tools_filter=["firecrawl_scrape"],`) {
+		t.Errorf("the second source lost its own selection:\n%s", bot)
+	}
+}
+
+// TestPipecatV1MCPTransportChooser covers the source that states no transport:
+// the bot picks the parameter class from the URL at startup, with the same rule
+// livekit-agents auto-detects by (research R5).
+func TestPipecatV1MCPTransportChooser(t *testing.T) {
+	agent := mcpPipecatAgent(t, ir.Tool{URLEnv: "NOTES_MCP_URL"})
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"from mcp.client.session_group import SseServerParameters, StreamableHttpParameters",
+		"def _mcp_params(url: str, headers: dict[str, str] | None = None):",
+		`params_cls = StreamableHttpParameters if url.rstrip("/").endswith("/mcp") else SseServerParameters`,
+		`server_params=_mcp_params(os.environ["NOTES_MCP_URL"]),`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing %q:\n%s", want, bot)
+		}
+	}
+	// No selection and no auth means neither argument is written at all: an
+	// empty filter would be a claim the author never made (SC-004).
+	if strings.Contains(bot, "tools_filter") || strings.Contains(bot, "_bearer(") || strings.Contains(bot, "_api_key(") {
+		t.Errorf("an unfiltered, unauthenticated source must emit neither argument:\n%s", bot)
+	}
+}
+
 // TestPipecatV1WebhookAuth covers both schemes (SCHEMA §5.3): the @tool POST
 // reads the right helper and the token env joins .env.example and REQUIRED_ENV
 // by name.
@@ -777,6 +913,57 @@ func TestF3PipecatSingleAgentInline(t *testing.T) {
 		}
 		if out, err := exec.Command("python3", "-m", "py_compile", f).CombinedOutput(); err != nil {
 			t.Fatalf("inline bot.py is not valid Python:\n%s", out)
+		}
+	}
+}
+
+// TestPipecatV1MCPInline is the shape examples/mcp-example compiles to: one
+// agent, no bus, so the source's tools join the LLMContext directly and the
+// client's lifecycle rides run_bot rather than a worker class (N40).
+func TestPipecatV1MCPInline(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tracing = nil // the inline path is scoped to no-tracing
+	agent.Tools["web_search"] = ir.Tool{
+		Execution: ir.ToolMCP, URLEnv: "FIRECRAWL_MCP_URL",
+		MCPTransport: ir.MCPTransportStreamableHTTP, MCPTools: []string{"firecrawl_search"},
+		Auth:         &ir.ToolAuth{Type: ir.ToolAuthBearer, TokenEnv: "FIRECRAWL_API_KEY"},
+		Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+	}
+	def := agent.Agents[agent.EntryAgent]
+	def.Tools = append(def.Tools, "web_search")
+	agent.Agents[agent.EntryAgent] = def
+
+	bot := artifactFile(t, mustGeneratePipecatInline(t, agent), "bot.py")
+	for _, want := range []string{
+		"    llm = build_appointment_desk_llm()",
+		"    web_search_mcp = MCPClient(",
+		"    await web_search_mcp.start()",
+		"    web_search_mcp_tools = await web_search_mcp.register_tools(llm)",
+		"+ web_search_mcp_tools.standard_tools)",
+		"        await web_search_mcp.close()",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("inline bot.py missing %q:\n%s", want, bot)
+		}
+	}
+	// The LLM is built once and used in the pipeline, never built twice.
+	if strings.Contains(bot, "build_appointment_desk_llm(),") {
+		t.Error("the inline pipeline must reuse the llm the MCP client registered on")
+	}
+	if _, err := exec.LookPath("python3"); err == nil {
+		f := filepath.Join(t.TempDir(), "bot.py")
+		if err := os.WriteFile(f, []byte(bot), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("python3", "-m", "py_compile", f).CombinedOutput(); err != nil {
+			t.Fatalf("inline bot.py with an MCP source is not valid Python:\n%s", out)
 		}
 	}
 }

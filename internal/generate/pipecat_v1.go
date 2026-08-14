@@ -78,6 +78,33 @@ type pipecatAgent struct {
 	Tools       []pipecatTool
 	Transfers   []pipecatTransfer
 	Delegates   []pipecatDelegate
+	MCPSources  []pipecatMCPSource
+}
+
+// pipecatMCPSource is one MCP tool source this agent carries (N40): one
+// MCPClient, started before the agent is activated and closed on shutdown. The
+// server names its own tools, so nothing here describes them; Var is the
+// Python name the emitted client and its tools schema share.
+type pipecatMCPSource struct {
+	Name      string
+	Var       string // <name>_mcp
+	URLEnv    string
+	Transport string       // "" = pick the parameter class from the URL at startup
+	Tools     []string     // empty = every tool the server exposes
+	Auth      *webhookAuth // nil = no headers argument
+	AuthEnv   string       // the token's env name, for the startup check
+}
+
+// ParamsClass is the mcp parameter class this source constructs, or "" when the
+// transport is unstated and the bot chooses at startup.
+func (s pipecatMCPSource) ParamsClass() string {
+	switch s.Transport {
+	case ir.MCPTransportSSE:
+		return "SseServerParameters"
+	case ir.MCPTransportStreamableHTTP:
+		return "StreamableHttpParameters"
+	}
+	return ""
 }
 
 // pipecatTask is one guided conversational step lowered to a Flow node (C8, B7):
@@ -389,6 +416,14 @@ type pipecatData struct {
 	NeedsRoleRestore    bool // any non-ending delegate (V28)
 	NeedsLanguage       bool // any emitted service sets a language kwarg (Language enum import, N16)
 	Inline              bool // single agent, no bus: LLM inline in the pipeline (F3)
+	NeedsMCP            bool // any mcp tool source: MCPClient import + lifecycle (N40)
+	// MCPParamsImports are the mcp.client.session_group parameter classes the
+	// emitted bot actually constructs, so the import lists neither less nor
+	// more than the file uses.
+	MCPParamsImports []string
+	// NeedsMCPChooser means at least one source stated no transport, so the bot
+	// picks the parameter class from the URL at startup (research R5).
+	NeedsMCPChooser bool
 }
 
 // Provider → service facts (class, import, extra/dep, key env, constructor
@@ -433,6 +468,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldMaxDuration:          true, // asyncio EndFrame timer
 	targetcap.FieldToolOutput:           true, // tool returns response.json()
 	targetcap.FieldToolLocal:            true, // @tool awaiting tools/<name>.py (T14, V13)
+	targetcap.FieldToolMCP:              true, // one MCPClient per source, started at setup (N40)
 	targetcap.FieldToolBuiltin:          true, // prebuilt end_call → bodyless end tool
 	targetcap.FieldToolAuth:             true, // _bearer Authorization header off token_env
 	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
