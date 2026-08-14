@@ -109,6 +109,18 @@ every provider binding emits.
 - [internal/testdata/remy/](internal/testdata/remy/) — internal legacy handoff
   and task-group fixture for the LiveKit driver golden.
 
+## Releasing
+
+- [RELEASING.md](../RELEASING.md) — the runbook. One tag push is the whole
+  release; this file says who may tag, what a tag produces, and which one-line
+  flip opens each package manager.
+- [.goreleaser.yaml](../.goreleaser.yaml) — builds, archives, checksums,
+  signing, SBOMs, changelog, Homebrew cask, winget. GoReleaser v2 free tier.
+- [.github/workflows/release.yml](../.github/workflows/release.yml) — the
+  tag-triggered run. The `release-config` job in
+  [ci.yml](../.github/workflows/ci.yml) rehearses the same pipeline on every PR
+  without publishing; `make release-dry` is that command locally.
+
 ## Docs
 
 - [docs-site/](../docs-site/README.md) — the public user documentation, as a Mintlify project. `make docs` previews it. Its own README carries the rules it is written under and the tests that hold it.
