@@ -294,11 +294,19 @@ locally.
   three phases and the one-line flips between them, the required secrets and
   where they live, and the known failure modes from the edge cases above.
 
-  **Unmet as of 2026-08-14, by maintainer decision.** `RELEASING.md` was
-  written to satisfy this and then deleted before the feature merged. The
-  facts it held now live only in `contracts/` and in this spec; nothing at the
-  repository root tells a releaser what to do. Reopen this requirement if the
-  runbook is wanted somewhere else, for example a `docs-site` page.
+  **Unmet as of 2026-08-14, by maintainer decision, and expected to stay
+  that way.** `RELEASING.md` was written to satisfy this and deleted before
+  the feature merged. It was rewritten at the root after v0.1.0 shipped and is
+  now gitignored, so it is a local maintainer note rather than a tracked
+  artifact: nothing at the repository root tells a releaser what to do, and no
+  tracked file may link to it. Reopen this requirement if the runbook is wanted
+  somewhere readers can reach, for example a `docs-site` page.
+
+  What that release taught is recorded in the repo regardless, because the
+  runbook is not load-bearing for any of it: the `git fetch --force --tags`
+  step and its reason live in `.github/workflows/release.yml`, and the
+  corrected `cosign verify-blob` invocation lives in
+  [quickstart.md](quickstart.md).
 
 **Prerequisites and hygiene**
 

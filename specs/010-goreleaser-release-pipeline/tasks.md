@@ -243,13 +243,25 @@ load-bearing, not only here.
 - T016's fallback turned out to be unnecessary: a snapshot run succeeds with
   `GH_PAT` completely unset, because snapshot mode never publishes and so never
   evaluates the token template. No `GH_PAT ?=` default in the Makefile.
-- **T017's `RELEASING.md` was deleted by the maintainer before merge.** The task
-  ran and the file existed; the maintainer removed it, so FR-019 ships unmet
-  (noted in spec.md). Every reference to it was cleaned up in the same change:
-  `README.md`, `docs-site/start/installation.mdx`, `docs/REPO_MAP.md`,
-  `.goreleaser.yaml`, `.github/workflows/release.yml`. The verified facts it
-  carried, the rollout flips, the `GH_PAT` scope, the release-notes procedure
-  and the failure modes, survive only in `contracts/` and this folder.
+- **T017's `RELEASING.md` was deleted by the maintainer before merge.** It was
+  rewritten at the root on 2026-08-14 after v0.1.0 shipped and is gitignored,
+  so it stays a local maintainer note and FR-019 stays unmet (noted in
+  spec.md). No tracked file links to it. Cutting that first release did expose
+  two real defects, and both fixes landed in tracked files, not in the runbook:
+  - The verification snippet was unrunnable as written. It named
+    `unmute_<version>_checksums.txt` and its `.sigstore.json` bundle without
+    saying they are release assets, so it was run in a working tree where they
+    cannot exist. A dry run does not produce them either: snapshot mode passes
+    `--skip=sign` and names everything `*-SNAPSHOT-<sha>_*`. It also showed the
+    bare `cosign verify-blob --bundle X Y` form first, which cannot work for a
+    keyless signature. Both flags are now mandatory in the runbook.
+  - `release.header: {{ .TagContents }}` needs an annotated tag *in the
+    runner*. `actions/checkout` fetched the annotated object and then
+    force-updated `refs/tags/v0.1.0` to the bare commit SHA, leaving a
+    lightweight tag; `.TagContents` fell back to the merge commit's subject and
+    that is what v0.1.0's release body opens with. Reproduced by replaying both
+    fetches from the run log. `git fetch --force --tags` after checkout
+    restores the annotation, and is now a step in the release workflow.
 - Release notes needed one config addition that was not in any task:
   `release.header: {{ .TagContents }}`, plus a `^.*?Merge ` changelog filter.
   See assertion 6 in `contracts/goreleaser-config.md` for the four gotchas
