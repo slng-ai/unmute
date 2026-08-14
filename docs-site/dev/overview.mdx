@@ -85,10 +85,30 @@ The web page URL always carries the target name, for example
 
 ## Logs
 
-Everything the container prints goes to `build/<target>/dev.log`. That file is
-the first place to look when the page loads but nothing speaks.
+**Every run writes its log into the build directory**, and prints the path when it
+starts. That file is the first place to look when the page loads but nothing
+speaks, and it is where a failure to start explains itself.
 
-To follow the same output in your terminal while it runs:
+| Mode | Log file |
+|---|---|
+| `unmute dev` in the browser | `build/<target>/dev.log` |
+| `unmute dev --telephony` | `build/<target>/telephony.log` |
+| `unmute dev --console` | none: the agent talks to your terminal, so its output is already there |
+
+The path is printed with the ready line, exactly as you will see it:
+
+```
+  ▸ http://localhost:8765/?agent=pipecat
+    ctrl-c to stop  ·  logs: my-agent/build/pipecat/dev.log
+```
+
+The file holds everything: the image build, the container's stdout, and the reason
+a start failed. It is rewritten on every run, so the file you are looking at is
+always this run.
+
+To follow the same output in your terminal while it runs, add `--verbose`. The flag
+means "follow container/agent logs on stderr", and without it the log goes to the
+file only:
 
 ```sh
 unmute dev examples/salon-support --target pipecat --verbose
@@ -136,13 +156,27 @@ The Compose project name comes from the package path and the target name, so a
 second `unmute dev` on the same package does not run beside the first. It
 recreates the same stack on the new port and takes it over.
 
+## The three ways to run
+
+| Command | You talk through | Needs |
+|---|---|---|
+| `unmute dev <pkg>` | a local web page | Docker |
+| `unmute dev <pkg> --console` | your terminal, over the local mic | `uv`, no Docker |
+| `unmute dev <pkg> --telephony` | a real phone call | Docker for most routes, plus carrier credentials |
+
+`--console` and `--telephony` cannot be combined:
+
+```
+unmute: dev: --console and --telephony cannot be used together
+```
+
 ## Where to go next
 
 <Columns cols={2}>
   <Card title="Console mode" icon="terminal" href="/dev/console">
     Talk to the agent in your terminal, with no Docker and no browser.
   </Card>
-  <Card title="dev reference" icon="book" href="/reference/cli/dev">
-    Every flag, with defaults.
+  <Card title="A phone route locally" icon="phone" href="/dev/telephony">
+    What `--telephony` runs, and what it puts back.
   </Card>
 </Columns>

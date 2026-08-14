@@ -1,6 +1,6 @@
 ---
 title: "Telephony overview"
-description: "How a phone call reaches your agent, which routes exist, and what unmute dev --telephony does for you."
+description: "How a phone call reaches your agent, which routes exist, and what the transport decides."
 ---
 
 A phone call reaches your agent over a route: a target, a transport, and a
@@ -24,31 +24,39 @@ separate, because most routes support them differently.
 
 ## Declare the route
 
-The route lives on the target:
-
-```yaml targets.yaml
-targets:
-  pipecat:
-    provider: pipecat
-    version: "1.5.0"
-    transport: cloud-websocket
-    carrier: twilio
-    connection: twilio_voice
-```
-
-And the carrier's account settings live in a connection file, as environment
-variable names, never values:
+The route lives in a connection file: the mechanism, the carrier, and the
+account settings as environment variable names, never values.
 
 ```yaml connections/twilio_voice.yaml
-kind: telephony
+transport: cloud-websocket
+carrier: twilio
 environment:
   account_sid: TWILIO_ACCOUNT_SID
   auth_token: TWILIO_AUTH_TOKEN
   from_number: TWILIO_PHONE_NUMBER
 ```
 
-One target selects exactly one route and one connection. To use two carriers,
-declare two targets. Each compiles to its own `build/<target>/` directory.
+The target names it and says nothing else about telephony:
+
+```yaml targets.yaml
+targets:
+  pipecat:
+    provider: pipecat
+    version: "1.5.0"
+    connection: twilio_voice
+```
+
+So one file is the whole route, and that is the file you open when you want to
+know how a call reaches this agent.
+
+A connection comes in three shapes: a full route like the one above, a
+receive-only route with no credentials at all, and a carrier-less route where the
+platform provisions the number.
+[connections/&lt;name&gt;.yaml](/reference/connections-yaml) has all three.
+
+One target selects exactly one route and one connection. To use two carriers, or
+two mechanisms, declare two targets with a connection file each. Each compiles to
+its own `build/<target>/` directory.
 
 ## The routes
 
@@ -84,62 +92,33 @@ The transport is not a detail. It decides what the agent can do on a call.
 
 [Transfers](/transfers/overview) covers which route can reach a human, and how.
 
-## Running a route locally
+## Running one of these locally
 
-```sh
-unmute dev examples/twilio-telephony-hello --telephony --target pipecat
-```
-
-With `--telephony`, `unmute dev` runs the resolved route instead of the browser
-UI. In order, it:
-
-<Steps>
-  <Step title="Compiles and prints the plan">
-    The route, the endpoints, and any manual carrier steps the adapter cannot do
-    for you.
-  </Step>
-  <Step title="Checks credentials">
-    Only the ones you must supply. Values the command generates itself, such as
-    the outbound token and the public URL under a managed tunnel, are not asked
-    of you.
-  </Step>
-  <Step title="Opens a public tunnel">
-    For routes with carrier callbacks, it starts a `cloudflared` quick tunnel
-    and uses its origin. `--public-url` skips this. See
-    [webhooks and tunnels](/telephony/webhooks-and-tunnels).
-  </Step>
-  <Step title="Starts the stack">
-    Docker Compose brings up the generated services. On LiveKit SIP that is the
-    agent, Redis, LiveKit Server, and LiveKit SIP, and the command creates the
-    local trunk and dispatch records itself.
-  </Step>
-  <Step title="Points your number at this run">
-    Where the carrier supports it, today Twilio, the voice webhook is set for
-    you and the previous value is printed.
-  </Step>
-  <Step title="Prints the call line">
-    `call +1XXXXXXXXXX  ·  ctrl-c to stop`.
-  </Step>
-</Steps>
-
-Ctrl-c undoes the outward changes: the carrier webhook goes back to what it
-was, the tunnel dies, and the Compose stack is stopped. Named data volumes are
-kept.
+One command runs the route your connection declares, on your laptop, and a real
+call can reach it: `unmute dev --telephony`. What it starts, what it changes on
+your carrier account, and what it puts back when you stop it are all on
+[running a phone route locally](/dev/telephony).
 
 <Warning>
   A healthy local stack proves wiring, not reachability. A real call also needs
-  carrier credentials, a voice capable number, and the route's public ingress.
-  For SIP, network address translation on a laptop can block the call even when
-  every health check passes.
+  carrier credentials, a voice capable number, and the route's public ingress. For
+  SIP, network address translation on a laptop can block the call even when every
+  health check passes.
 </Warning>
 
 ## Where to go next
 
 <Columns cols={2}>
+  <Card title="Run a route locally" icon="play" href="/dev/telephony">
+    What `--telephony` does, step by step.
+  </Card>
   <Card title="Your first phone call" icon="phone-incoming" href="/telephony/first-phone-call">
     A real inbound call, on the route that works from a laptop.
   </Card>
   <Card title="Outbound calls" icon="phone-outgoing" href="/telephony/outbound-calls">
     Make the agent dial out with `--to`.
+  </Card>
+  <Card title="Get your Twilio details" icon="key" href="/telephony/twilio">
+    Which console value fills which name.
   </Card>
 </Columns>
