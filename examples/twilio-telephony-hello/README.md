@@ -10,10 +10,12 @@ tests a call coming in and a call going out.
 
 ## The two routes, which is the point of this package
 
-| Target | Route | How a call gets there | Who hosts it |
-|---|---|---|---|
-| **pipecat** | `transport: cloud-websocket`, `carrier: twilio` | your number points at a **static TwiML Bin**, whose `<Connect><Stream>` streams the audio to Pipecat Cloud | nobody: no server of yours is in the path, in production or ever |
-| **livekit** | `transport: sip`, `carrier: twilio` | your number is attached to a **Twilio Elastic SIP Trunk**, whose origination points at your LiveKit project's SIP URI | the worker; LiveKit Cloud can run it for you |
+Each target names one connection, and that file declares its whole route:
+
+| Target | Connection | Route | How a call gets there | Who hosts it |
+|---|---|---|---|---|
+| **pipecat** | `connections/twilio_voice.yaml` | `transport: cloud-websocket`, `carrier: twilio` | your number points at a **static TwiML Bin**, whose `<Connect><Stream>` streams the audio to Pipecat Cloud | nobody: no server of yours is in the path, in production or ever |
+| **livekit** | `connections/twilio_sip.yaml` | `transport: sip`, `carrier: twilio` | your number is attached to a **Twilio Elastic SIP Trunk**, whose origination points at your LiveKit project's SIP URI | the worker; LiveKit Cloud can run it for you |
 
 These are two genuinely different mechanisms, not two spellings of one thing:
 
@@ -35,6 +37,13 @@ mechanism (it replaces the live call's markup) and cannot do warm at all.
 own Twilio Media Streams bridge. It is easier to test on a laptop and carries no
 transfers, so it taught a route you have to leave as soon as you need one. That
 route still ships and is exercised by [outbound-reminder](../outbound-reminder).
+
+## Test in the browser first
+
+Nothing below is needed to talk to this agent. `bin/unmute dev
+examples/twilio-telephony-hello --target pipecat` opens a browser session with
+no Twilio credentials set and none checked, even though this package is entirely
+about phone routes. Get the agent right there, then come back for a real call.
 
 ## What you need
 

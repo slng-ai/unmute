@@ -97,8 +97,9 @@ func smokePipecatTelephonyArtifact(t *testing.T) generate.Artifact {
 	dropHumanTransfers(pkg)
 	enableSmokeTelephony(pkg, "hangup")
 	target := pkg.Targets["pipecat"]
-	target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
+	target.Connection = "primary_phone"
 	pkg.Targets = map[string]spec.Target{"pipecat": target}
+	smokeConnectionRoute(pkg, "primary_phone", "carrier-websocket", "twilio")
 	agent, err := ir.Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -120,8 +121,9 @@ func smokeLiveKitSIPArtifact(t *testing.T) generate.Artifact {
 	// safe_core's transfer and requires the control.
 	enableSmokeTelephony(pkg, "cold_transfer", "hangup")
 	target := pkg.Targets["livekit"]
-	target.Transport, target.Carrier, target.Connection = "sip", "twilio", "primary_phone"
+	target.Connection = "primary_phone"
 	pkg.Targets = map[string]spec.Target{"livekit": target}
+	smokeConnectionRoute(pkg, "primary_phone", "sip", "twilio")
 	connection := pkg.Connections["primary_phone"]
 	// Carrier-prefixed names on purpose. The shipped example moved to the plain
 	// SIP names on 2026-08-12 (SCHEMA N33), and the compiler knows none of
@@ -145,6 +147,15 @@ func smokeLiveKitSIPArtifact(t *testing.T) generate.Artifact {
 }
 
 // enableSmokeTelephony puts an inbound phone channel on the package. The
+// smokeConnectionRoute declares a route in a connection, which is where a route
+// lives: a target names one connection and says nothing else about how a call
+// reaches it (spec FR-001).
+func smokeConnectionRoute(pkg *spec.Package, connection, transport, carrier string) {
+	conn := pkg.Connections[connection]
+	conn.Transport, conn.Carrier = transport, carrier
+	pkg.Connections[connection] = conn
+}
+
 // required controls are per route, because a route that cannot do one fails the
 // build rather than degrading (SCHEMA N31).
 func enableSmokeTelephony(pkg *spec.Package, requiredControls ...string) {

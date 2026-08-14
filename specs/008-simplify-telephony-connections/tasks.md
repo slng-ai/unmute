@@ -161,7 +161,7 @@ refactor route resolution above it.
 - [X] T032 [P] [US2] Add a test in `internal/cli/dev_test.go` proving `unmute dev` on a package with a telephony channel and a declared connection neither requires nor reports the connection's environment variables.
 - [X] T033 [P] [US2] Add a test in `internal/cli/dev_test.go` proving the browser path does not require a `channels.web` entry, using a package that declares only `channels.phone` (FR-018a).
 - [X] T034 [US2] Add a test proving `unmute dev --telephony` **does** report every missing route variable by name before starting anything (FR-019), so T032 cannot be satisfied by weakening the telephony path.
-- [ ] T035 [P] [US2] State the browser-first rule in the five example READMEs and in `docs/user/learn/07-phone-calls.md`: the browser is the default way to test and the phone route is opt-in (FR-020).
+- [X] T035 [P] [US2] State the browser-first rule in the five example READMEs and in `docs/user/learn/07-phone-calls.md`: the browser is the default way to test and the phone route is opt-in (FR-020).
 
 **Checkpoint**: US2 complete. The most common workflow in the project is held by a
 test.
@@ -266,7 +266,7 @@ validator accepts, and offer the route as one choice.
 - [ ] T071 [P] Re-read every example README end to end against its package. Prose rots and no test holds it; CLAUDE.md requires reading the example page before claiming the work is done.
 - [X] T072 [P] Confirm `TestExampleAndDocLinksIntoExamplesResolve` still passes after the new page and the `outbound-reminder` connection rename.
 - [ ] T073 Run the full `quickstart.md` §1–§5 and record the result. §1's "exactly two goldens changed" is the acceptance check for research R5.
-- [ ] T074 [P] Run `make smoke` (needs Python). It should be unaffected, because the resolved IR did not change and no template input moved — which is what makes running it worth the minute.
+- [X] T074 [P] Run `make smoke` (needs Python). It should be unaffected, because the resolved IR did not change and no template input moved — which is what makes running it worth the minute.
 - [X] T075 Verify `grep -rn "transport:\|carrier:\|destinations:" examples/*/targets.yaml` and `grep -rn "^kind:" examples/*/connections/*.yaml` both print nothing (SC-003).
 - [X] T076 [P] Grep `internal/spec/` and `internal/ir/` for any path that still reports a bare "unknown field" for a field this feature moved, per Principle II's rule that a moved field must name its new form.
 - [ ] T077 Place one live call per route before claiming a route works, per `quickstart.md` §7. This feature changes no route behaviour, so a failure is either pre-existing or a migration mistake, and the second is worth finding before merge. No `provisional` tag moves.
