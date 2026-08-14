@@ -2,8 +2,8 @@
 # takes; .github/workflows/release.yml runs `goreleaser release --clean` and
 # everything below happens once. GoReleaser v2 free tier only, no Pro keys.
 #
-# The runbook is RELEASING.md. Comments marked "Rollout Phase N:" are the only
-# lines that change between rollout stages.
+# Comments marked "Rollout Phase N:" are the only lines that change between
+# rollout stages; specs/010-goreleaser-release-pipeline/ holds the reasoning.
 version: 2
 
 project_name: unmute
@@ -60,6 +60,10 @@ changelog:
       - '^.*?style(\([[:word:]]+\))??!?:'
       - '^.*?test(\([[:word:]]+\))??!?:'
       - '^.*?chore(\([[:word:]]+\))??!?:'
+      # A merge commit is never a user-facing change. Anchoring on the sha
+      # (^[0-9a-f]+ Merge) does not match: filtering sees the subject, not the
+      # rendered "<sha> <subject>" line (verified 2026-08-14).
+      - '^.*?Merge '
   groups:
     - title: Features
       regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
@@ -75,6 +79,13 @@ release:
     owner: slng-ai
     name: unmute # spelled out: a local remote may still carry the old repo name
   prerelease: auto # an rc or beta tag becomes a GitHub prerelease
+  # Hand-written release notes, without a second command or a Pro feature: the
+  # annotated tag's whole message goes above the generated changelog. Write the
+  # notes, `git tag -a --cleanup=verbatim -F notes.md`, push. TagContents, not
+  # TagBody: TagBody drops the first line, which is where a heading lives. An
+  # unannotated tag falls back to the commit's own message, so always annotate.
+  header: |
+    {{ .TagContents }}
 
 # macOS only, by design: Homebrew casks are for macOS, so Linux users take the
 # archive or `go install` (FR-011).

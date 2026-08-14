@@ -2,4 +2,5 @@
 .env.local
 config/secrets.json
 .specify
-.claude
+.claude/settings.local.json
+.claude/skills

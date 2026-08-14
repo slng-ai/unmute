@@ -294,6 +294,12 @@ locally.
   three phases and the one-line flips between them, the required secrets and
   where they live, and the known failure modes from the edge cases above.
 
+  **Unmet as of 2026-08-14, by maintainer decision.** `RELEASING.md` was
+  written to satisfy this and then deleted before the feature merged. The
+  facts it held now live only in `contracts/` and in this spec; nothing at the
+  repository root tells a releaser what to do. Reopen this requirement if the
+  runbook is wanted somewhere else, for example a `docs-site` page.
+
 **Prerequisites and hygiene**
 
 - **FR-020**: The module path MUST change to `github.com/slng-ai/unmute` to
@@ -414,6 +420,13 @@ verified 2026-08-14:
 5. Add a GitHub tag ruleset on `slng-ai/unmute` restricting `v*` tag
    creation to admins or a named maintainer team. **Pending.** Should exist
    before the first real tag; cheap to add now.
+
+   *Correction, 2026-08-14:* "to admins" cannot work here. All 13
+   collaborators hold the admin role, so a ruleset that exempts admins
+   exempts everyone. Restrict to named people or a narrower team, or exempt
+   nobody. The same finding shaped the `main` branch ruleset added that day
+   (**main: pull requests only**, no bypass actors), which is a separate
+   thing from this item: it governs branches, not tags.
 
 ## Verified facts carried into planning
 

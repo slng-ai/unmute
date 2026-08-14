@@ -4,7 +4,7 @@
 # in .goreleaser.yaml) updates the Homebrew cask and opens the winget PR.
 #
 # A failed run for a tag is safe to re-run: --clean wipes dist/ first and the
-# default release mode does not duplicate assets. Runbook: RELEASING.md.
+# default release mode does not duplicate assets.
 name: Release
 
 on:

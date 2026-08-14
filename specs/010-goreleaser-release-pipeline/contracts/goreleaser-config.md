@@ -62,6 +62,7 @@ changelog:
       - '^.*?style(\([[:word:]]+\))??!?:'
       - '^.*?test(\([[:word:]]+\))??!?:'
       - '^.*?chore(\([[:word:]]+\))??!?:'
+      - '^.*?Merge '                  # merge commits are never user-facing
   groups:
     - title: Features
       regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
@@ -77,6 +78,8 @@ release:
     owner: slng-ai
     name: unmute                    # explicit: local remotes may still say unmute_cli
   prerelease: auto                  # rc/beta tags become GitHub prereleases
+  header: |                         # the annotated tag message, above the changelog
+    {{ .TagContents }}
 
 homebrew_casks:                     # since v2.10; hooks since v2.13
   - name: unmute
@@ -129,3 +132,11 @@ winget:
    meaning to the README's first sentence.
 5. Snapshot runs (`--snapshot`) publish nothing (implied
    `--skip=announce,publish,validate`) and ignore `gomod.proxy`.
+6. Release notes are the tag message plus the generated changelog.
+   `release.header` must be `{{ .TagContents }}`, not `{{ .TagBody }}`: TagBody
+   drops the message's first line. Loading a header `from_file` is Pro, so the
+   tag message is the only free carrier for hand-written notes. Tags must be
+   created with `git tag -a --cleanup=verbatim -F <file>`, or git strips every
+   `#` heading from the message. Changelog filters match the commit subject, not
+   the rendered `<sha> <subject>` line, so `^.*?Merge ` excludes merges while
+   `^[0-9a-f]+ Merge ` does not. All four verified 2026-08-14.

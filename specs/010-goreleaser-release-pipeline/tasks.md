@@ -242,5 +242,15 @@ load-bearing, not only here.
   same commit. Both contracts are corrected and carry the dated note.
 - T016's fallback turned out to be unnecessary: a snapshot run succeeds with
   `GH_PAT` completely unset, because snapshot mode never publishes and so never
-  evaluates the token template. No `GH_PAT ?=` default in the Makefile; the
-  behavior is written down in RELEASING.md instead.
+  evaluates the token template. No `GH_PAT ?=` default in the Makefile.
+- **T017's `RELEASING.md` was deleted by the maintainer before merge.** The task
+  ran and the file existed; the maintainer removed it, so FR-019 ships unmet
+  (noted in spec.md). Every reference to it was cleaned up in the same change:
+  `README.md`, `docs-site/start/installation.mdx`, `docs/REPO_MAP.md`,
+  `.goreleaser.yaml`, `.github/workflows/release.yml`. The verified facts it
+  carried, the rollout flips, the `GH_PAT` scope, the release-notes procedure
+  and the failure modes, survive only in `contracts/` and this folder.
+- Release notes needed one config addition that was not in any task:
+  `release.header: {{ .TagContents }}`, plus a `^.*?Merge ` changelog filter.
+  See assertion 6 in `contracts/goreleaser-config.md` for the four gotchas
+  behind it.

@@ -111,9 +111,11 @@ every provider binding emits.
 
 ## Releasing
 
-- [RELEASING.md](../RELEASING.md) — the runbook. One tag push is the whole
-  release; this file says who may tag, what a tag produces, and which one-line
-  flip opens each package manager.
+One tag push is the whole release. The three files below are the pipeline;
+[specs/010-goreleaser-release-pipeline/](../specs/010-goreleaser-release-pipeline/)
+holds the contracts, the rollout stages, and each one-line flip that opens a
+package manager.
+
 - [.goreleaser.yaml](../.goreleaser.yaml) — builds, archives, checksums,
   signing, SBOMs, changelog, Homebrew cask, winget. GoReleaser v2 free tier.
 - [.github/workflows/release.yml](../.github/workflows/release.yml) — the
