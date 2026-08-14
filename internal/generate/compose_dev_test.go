@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/spec"
-	"github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 // devArtifact compiles safe_core to the named provider. safe_core carries both

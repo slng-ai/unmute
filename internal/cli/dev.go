@@ -19,10 +19,10 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/slng/unmute/internal/generate"
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/style"
-	"github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/style"
+	"github.com/slng-ai/unmute/internal/target"
 	"github.com/spf13/cobra"
 )
 

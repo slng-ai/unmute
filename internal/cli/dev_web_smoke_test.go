@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng/unmute/internal/generate"
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/spec"
-	"github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 // requireDocker skips the test unless a working docker daemon is reachable.

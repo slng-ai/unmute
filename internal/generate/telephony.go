@@ -6,7 +6,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/slng/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/ir"
 )
 
 type TelephonyRuntimePlan struct {

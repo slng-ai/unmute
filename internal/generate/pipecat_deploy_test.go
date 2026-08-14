@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 // The Pipecat artifact has to be deployable with `pipecat cloud deploy` as the

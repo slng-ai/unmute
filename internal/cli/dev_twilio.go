@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/slng/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/generate"
 )
 
 // Twilio voice webhook auto-configuration for routes whose carrier

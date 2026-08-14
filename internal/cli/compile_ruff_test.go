@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/generate"
 )
 
 // TestFormatPythonSeparatesBadCodeFromBadEnvironment: `ruff format` exits 2 both

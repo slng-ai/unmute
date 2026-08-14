@@ -1,4 +1,4 @@
-module github.com/slng/unmute
+module github.com/slng-ai/unmute
 
 go 1.24
 

@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/slng/unmute/internal/style"
+	"github.com/slng-ai/unmute/internal/style"
 )
 
 // ui themes CLI output through a per-writer lipgloss renderer, so the same code

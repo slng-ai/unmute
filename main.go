@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/slng/unmute/internal/cli"
+	"github.com/slng-ai/unmute/internal/cli"
 )
 
 // version is stamped at link time (see Makefile LDFLAGS); never hardcoded.

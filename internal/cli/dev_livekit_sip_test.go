@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/slng/unmute/internal/generate"
-	"github.com/slng/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/ir"
 )
 
 // fakeSIPAdmin is an in-memory Twirp livekit.SIP server: List* returns the

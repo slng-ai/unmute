@@ -5,7 +5,7 @@ package generate
 import (
 	"testing"
 
-	"github.com/slng/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/ir"
 )
 
 // L4 smoke for the webhook side of the variables surface. The other smoke test

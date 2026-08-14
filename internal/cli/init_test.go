@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng/unmute/internal/scaffold"
+	"github.com/slng-ai/unmute/internal/scaffold"
 )
 
 // run executes a fresh command tree (rule 1) and returns captured output + err.

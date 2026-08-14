@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/target"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/target"
 )
 
 // deployment_region (SCHEMA N18) is forwarded as declared: Pipecat lowers it to

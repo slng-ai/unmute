@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/slng/unmute/internal/generate"
-	"github.com/slng/unmute/internal/ir"
-	"github.com/slng/unmute/internal/scaffold"
-	"github.com/slng/unmute/internal/spec"
+	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/scaffold"
+	"github.com/slng-ai/unmute/internal/spec"
 )
 
 func TestParseDotenv(t *testing.T) {

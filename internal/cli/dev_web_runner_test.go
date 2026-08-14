@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/slng/unmute/internal/ir"
+	"github.com/slng-ai/unmute/internal/ir"
 )
 
 // fakeDevDocker installs a docker stand-in that traces every call (with a few

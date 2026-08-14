@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/slng/unmute/internal/style"
+	"github.com/slng-ai/unmute/internal/style"
 )
 
 // View composes the four SLNG regions: header (logo badge + breadcrumb +

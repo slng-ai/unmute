@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	packagespec "github.com/slng/unmute/internal/spec"
+	packagespec "github.com/slng-ai/unmute/internal/spec"
 )
 
 func TestBuildBuiltinToolResolvesRegistryDefaults(t *testing.T) {
