@@ -84,7 +84,7 @@ And the same vendor diverging across frameworks, which is why entries are per-(f
 
 ## 5. Extending
 
-User-facing configuration (what to write in targets.yaml per framework, env vars, what gets installed) lives in [docs/user/reference/providers.md](docs/user/reference/providers.md). This section is the implementation side.
+User-facing configuration (what to write in targets.yaml per framework, env vars, what gets installed) lives in the Models pages: [stt](../docs-site/models/stt.mdx), [tts](../docs-site/models/tts.mdx), [llm](../docs-site/models/llm.mdx). This section is the implementation side.
 
 ### 5.1 The in-repo recipe (curated path)
 
@@ -147,7 +147,7 @@ Second pass (validate-time matrix + testing hardening, same day):
 
 ## 8. Next steps
 
-Done in the second pass: validate-time matrix (F9), per-entry resolution golden, import-and-instantiate smoke (F10), and the user-facing providers reference ([docs/user/reference/providers.md](docs/user/reference/providers.md)).
+Done in the second pass: validate-time matrix (F9), per-entry resolution golden, import-and-instantiate smoke (F10), and the user-facing providers reference (now the [Models pages](../docs-site/models/stt.mdx), one per role).
 
 1. `providers.yaml` overlay loader (section 5.2) with the struct-derived schema.
 2. Surface `Vendors()` in `unmute init`'s pickers and a `unmute providers` listing.

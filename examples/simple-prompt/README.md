@@ -101,5 +101,5 @@ the thing that gets fragile. The three examples below are the three ways out.
 | [task-groups](../task-groups/README.md) | Three ordered tasks with shared context. |
 | [subagents](../subagents/README.md) | Two agents that hand the caller back and forth. |
 
-Reference pages: [agent.yaml](../../docs/user/reference/agent-yaml.md),
-[tools](../../docs/user/reference/tools.md).
+Reference pages: [agent.yaml](../../docs-site/reference/agent-yaml.mdx),
+[tools](../../docs-site/build/tools/overview.mdx).

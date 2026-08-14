@@ -27,8 +27,9 @@ so data and templates version together in one repo. A user-supplied
 **To add a provider:** append one entry, run
 `go test ./internal/generate -run TestCatalogResolutionGolden -update-catalog`,
 eyeball the diff. Full recipe in [PROVIDER_CATALOG.md](PROVIDER_CATALOG.md) §5.1.
-The user-facing table of what each provider accepts and emits is
-[docs/user/reference/providers.md](docs/user/reference/providers.md).
+The user-facing tables of what each provider accepts and emits are the Models
+pages, one per role: [stt](../docs-site/models/stt.mdx),
+[tts](../docs-site/models/tts.mdx), [llm](../docs-site/models/llm.mdx).
 
 ## The pipeline (how a spec becomes an artifact)
 
@@ -110,8 +111,10 @@ every provider binding emits.
 
 ## Docs
 
-- [docs/user/](docs/user/README.md) — user-facing reference, one page per `agent.yaml` block + targets + providers + CLI.
+- [docs-site/](../docs-site/README.md) — the public user documentation, as a Mintlify project. `make docs` previews it. Its own README carries the rules it is written under and the tests that hold it.
 - [PROVIDER_CATALOG.md](PROVIDER_CATALOG.md) — the catalogue's design, findings, and how-to-extend recipe.
 - [specs/](../specs/) — per-feature specs, written with [GitHub Spec Kit](https://github.com/github/spec-kit): one `specs/<nnn>-<slug>/` folder per feature holding `spec.md`, `plan.md`, `tasks.md`, and checklists. Feature work starts here; the kept docs above are what a merged feature updates.
 
 Citations in older notes like `compiler V3`, `driver-pipecat T14`, or `tui.md C14` point at the retired `docs/spec/` driver specs. They are history, kept in git only: `git show 959af97:docs/spec/compiler.md`.
+
+`docs/user/` is retired the same way. It was the docsify user site, superseded by [docs-site/](../docs-site/README.md) and deleted on 2026-08-14. Paths like `docs/user/reference/providers.md` or `docs/user/learn/07-phone-calls.md` still appear all over `specs/`, because a completed task records the path as it was when the task ran. They are history, kept in git only: `git show 320d6f8:docs/user/README.md`.

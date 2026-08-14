@@ -438,6 +438,6 @@ repeat:
   without LiveKit Cloud or Pipecat Cloud.
 - [TELEPHONY.md](TELEPHONY.md) for carrier routes, credentials, ports,
   generated services, and verification requirements.
-- [LiveKit target guide](user/targets/livekit.md) and
-  [Pipecat target guide](user/targets/pipecat.md) for user-facing runtime
-  instructions.
+- [LiveKit target guide](../docs-site/targets/livekit.mdx) and
+  [Pipecat target guide](../docs-site/targets/pipecat.mdx) for user-facing
+  runtime instructions.

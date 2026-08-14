@@ -79,5 +79,5 @@ other one. Each is shorter and more specific than the single prompt in
 | [multi-task](../multi-task/README.md) | Delegation with a typed result, and control comes back. |
 | [task-groups](../task-groups/README.md) | An ordered sequence of tasks with shared context. |
 
-Reference pages: [agents](../../docs/user/reference/agents.md),
-[controls](../../docs/user/reference/controls.md).
+Reference pages: [handoffs](../../docs-site/build/orchestration/handoffs.mdx),
+[controls](../../docs-site/reference/agent-yaml.mdx).

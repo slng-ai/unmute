@@ -1186,7 +1186,7 @@ func applyConversation(c *ir.Conversation, data *pipecatData) {
 // applyGreeting lowers greeting activation. With no greeting block the agent
 // opens with a model-written line, the same default livekitGreetingFor picks
 // (SCHEMA N20). Silence is never the default, because on a call it reads as a
-// dead line (docs/user/reference/conversation.md).
+// dead line (docs-site/reference/agent-yaml.mdx).
 func applyGreeting(g *ir.Greeting, data *pipecatData) {
 	if g == nil || (g.SpeaksFirst == ir.SpeaksFirstAgent && g.Text == "") {
 		data.GreetingInstruction = defaultGreetingInstruction

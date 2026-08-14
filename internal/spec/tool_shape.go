@@ -97,7 +97,7 @@ func checkToolBlockBody(file string, block keyLine, tool Tool) error {
 	if block.Key == "client" || block.Key == "provider_hosted" {
 		return fmt.Errorf("%s:%d: `%s:` needs an explicit empty body: write `%s: {}`", file, block.Line, block.Key, block.Key)
 	}
-	return fmt.Errorf("%s:%d: `%s:` block is empty: add its fields (see docs/user/reference/tools.md)", file, block.Line, block.Key)
+	return fmt.Errorf("%s:%d: `%s:` block is empty: add its fields", file, block.Line, block.Key)
 }
 
 // keyLine is one top-level mapping key: its name, 1-based line, and inline

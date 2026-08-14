@@ -260,7 +260,7 @@ Rules that follow, and none of them may be softened to make a doc read better:
   than degrading to a warning or an empty artifact.
 - **Validation is deliberately wider than generation.** All four providers
   validate, because portability has to be checkable before an author commits to
-  a platform. A capability row, a schema tag, or a `docs/user/` table for Vapi
+  a platform. A capability row, a schema tag, or a `docs/` table for Vapi
   or Deepgram is therefore normal and correct, and it MUST NOT be read as a
   claim that the provider compiles.
 - **Any statement of support MUST say which of the two it means.** Writing that
@@ -386,8 +386,8 @@ that compiling an example locally cannot turn the suite red.
 source. Append one catalogue entry with its `Verified` date and `Docs` URL.
 Refresh the resolution golden and read the diff. Run the catalogue invariants.
 Extend a smoke fixture when the entry introduces a new constructor shape.
-Update `docs/user/reference/providers.md`, which a sync test checks in both
-directions. No driver code, no template edits, no validation edits.
+Update the Models pages under `docs-site/models/`, which a sync test checks in
+both directions. No driver code, no template edits, no validation edits.
 
 **Maturity is tracked, not hidden.** A driver may lag the schema: a feature can
 be real on a platform and not yet emitted by its driver. Those gates fail
@@ -420,7 +420,7 @@ guidance. PATCH for clarifications, wording, and non semantic refinement.
 surface MUST, in the same change, amend `docs/SCHEMA.md` with a numbered dated
 amendment and update the derived schemas, the capability table, the agreement
 tests, the scaffold templates, the interactive console, the in repository
-examples and fixtures, and `docs/user/`. Reviewers check that a new field
+examples and fixtures, and `docs-site/`. Reviewers check that a new field
 cannot validate green on a target whose emitter has no code path for it, that a
 new fact does not create a second copy of an existing one, and that any claim
 of provider support says whether it means validation or generation, per Targets

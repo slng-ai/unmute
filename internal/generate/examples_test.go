@@ -467,10 +467,14 @@ func TestV11_TransfersDocListsEveryRequiredEnv(t *testing.T) {
 }
 
 // Every environment variable a telephony example's generated .env.example lists
-// must be accounted for in that example's own README and in the phone-calls
-// page. A reader who sets everything both pages name has a package that runs;
-// one who does not finds out on a live call, which is the failure this check
-// exists to make impossible (spec FR-005f, FR-027a).
+// must be accounted for in that example's own README and on the secrets
+// reference page. A reader who sets everything both pages name has a package
+// that runs; one who does not finds out on a live call, which is the failure
+// this check exists to make impossible (spec FR-005f, FR-027a).
+//
+// The shared page was docs/user/learn/07-phone-calls.md until that site retired
+// on 2026-08-14. Its successor is docs-site/reference/secrets.mdx, which is the
+// public page that answers "which variables does this agent need".
 //
 // DAILY_API_KEY is the case that forced this. It is exempt from `secrets:`
 // because no author writes it — the route's own runtime supplies it — and it is
@@ -482,7 +486,7 @@ func TestV11_TransfersDocListsEveryRequiredEnv(t *testing.T) {
 //
 // The two halves are scoped differently, because they answer different
 // questions. The example's own README must account for **every** name, since it
-// is the page a reader of that example follows. The shared phone-calls page must
+// is the page a reader of that example follows. The shared secrets page must
 // account for every name the package never declares in `secrets:` — the ones the
 // runtime supplies, like DAILY_API_KEY and REDIS_URL. Those are exactly the
 // names nothing in the package mentions, so a shared page is the only place they
@@ -492,7 +496,8 @@ func TestV11_TransfersDocListsEveryRequiredEnv(t *testing.T) {
 // .env.example does not: a page is free to name a variable to say the reader
 // does not set it, or to teach a name that is not a variable at all.
 func TestTelephonyExampleDocsAccountForEveryRequiredEnv(t *testing.T) {
-	phoneCalls, err := os.ReadFile(filepath.Join("..", "..", "docs", "user", "learn", "07-phone-calls.md"))
+	sharedPage := filepath.Join("..", "..", "docs-site", "reference", "secrets.mdx")
+	secretsPage, err := os.ReadFile(sharedPage)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,9 +538,9 @@ func TestTelephonyExampleDocsAccountForEveryRequiredEnv(t *testing.T) {
 					if slices.Contains(agent.Secrets, name) {
 						continue // the package declares it, so the package explains it
 					}
-					if !strings.Contains(string(phoneCalls), name) {
+					if !strings.Contains(string(secretsPage), name) {
 						t.Errorf("%s needs %s, which nothing in the package declares and "+
-							"docs/user/learn/07-phone-calls.md never names", provider, name)
+							"%s never names", provider, name, sharedPage)
 					}
 				}
 			}

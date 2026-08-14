@@ -211,6 +211,7 @@ location that disagree.
 ## Assumptions
 
 - The old draft under `docs/user/` stays untouched by this feature. It serves as a topic checklist only. Retiring or replacing it is a separate decision for the maintainers once the new site is live.
+  - **Decided 2026-08-14.** The maintainers retired it: `docs/user/` was deleted, `make docs` now previews `docs-site/`, and the two Go tests that policed the old pages were removed or repointed. Every path under `docs/user/` in this folder is history from here on. See the closing note in `docs/REPO_MAP.md` for how to read the deleted files.
 - Omitting Vapi and Deepgram from the user docs is a deliberate scope choice by the product owner. The project constitution permits (but does not require) validation-only tables for them; leaving them out makes no false claim, so there is no conflict.
 - The site is English only, unversioned, and single-branded for v1.
 - The ten examples in `examples/` are the complete anchor set for the learning narrative and topical pages; no new examples are written for the docs unless a narrative step has no anchor, in which case the gap goes in the report. Bringing existing anchors up to standard (READMEs, YAML fixes) is in scope per FR-022; product Go code changes are not.

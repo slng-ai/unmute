@@ -101,5 +101,5 @@ task needs.
 | [task-groups](../task-groups/README.md) | The tasks run as one ordered group with shared context. |
 | [subagents](../subagents/README.md) | Two agents that hand the caller over instead of delegating. |
 
-Reference pages: [tasks](../../docs/user/reference/tasks.md),
-[controls](../../docs/user/reference/controls.md).
+Reference pages: [tasks](../../docs-site/build/orchestration/tasks.mdx),
+[controls](../../docs-site/reference/agent-yaml.mdx).

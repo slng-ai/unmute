@@ -70,7 +70,7 @@ passed to the supervisor on its own, so use `briefing` for what matters on top
 of it.
 
 `on_unavailable` covers every way the person does not take the call. See
-[controls](../../docs/user/reference/controls.md#kind-human_transfer).
+[transfers](../../docs-site/transfers/overview.mdx).
 
 Destinations are symbolic names, resolved once for the whole package at the top
 level of `agent.yaml`. Who the agent escalates to is the same desk whichever

@@ -94,5 +94,5 @@ has booking and cancellation.
 | [multi-task](../multi-task/README.md) | Two independent tasks, delegated one at a time. |
 | [subagents](../subagents/README.md) | Two agents that hand the caller over. |
 
-Reference pages: [tasks](../../docs/user/reference/tasks.md),
-[controls](../../docs/user/reference/controls.md).
+Reference pages: [task groups](../../docs-site/build/orchestration/task-groups.mdx),
+[controls](../../docs-site/reference/agent-yaml.mdx).

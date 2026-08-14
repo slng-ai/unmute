@@ -143,6 +143,10 @@ Out of scope, restated: deploying the docs site, deploying any agent from this
 work without credentials on hand, product code fixes, example target changes,
 retiring `docs/user/`, redirects.
 
+Retiring `docs/user/` happened separately on 2026-08-14: the tree was deleted
+and `make docs` now previews `docs-site/`. Paths under `docs/user/` in this
+folder are history.
+
 ## Complexity Tracking
 
 No constitution violations to justify.

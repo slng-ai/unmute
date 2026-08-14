@@ -188,7 +188,7 @@ environment variable instead, through exactly these seams:
 
 For a worked version of the first and the last, running side by side, see
 [examples/outbound-reminder](../outbound-reminder/README.md). The full
-reference is [docs/user/reference/secrets.md](../../docs/user/reference/secrets.md).
+reference is [secrets](../../docs-site/reference/secrets.mdx).
 
 This package deliberately uses none of the seams. Its tools are local fixtures
 that need no credential, so `book_appointment.py` reads no environment at all,
@@ -219,8 +219,8 @@ word.
 | The templated prompt | [instructions.md](instructions.md) |
 | The injected tool | [tools/book_appointment.yaml](tools/book_appointment.yaml) |
 
-The reference pages are [variables](../../docs/user/reference/variables.md) and
-[secrets](../../docs/user/reference/secrets.md); the design is in
+The reference pages are [variables](../../docs-site/reference/variables.mdx) and
+[secrets](../../docs-site/reference/secrets.mdx); the design is in
 [SCHEMA.md](../../docs/SCHEMA.md) sections 4.4 and 4.12.
 For the same surface on a real outbound phone call, see
 [outbound-reminder](../outbound-reminder/), which needs Twilio and a booking API.

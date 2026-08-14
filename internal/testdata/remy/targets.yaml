@@ -2,7 +2,7 @@
 # STT (models.listen) and turn detector (models.turn), are defined once in
 # agent.yaml; this file carries only the infrastructure. Any catalogued
 # provider binds instead with a one-line change in agent.yaml (driver-livekit
-# C8 as amended; docs/user/reference/providers.md). Model names, voices, and
+# C8 as amended; docs-site/models/llm.mdx). Model names, voices, and
 # params are forwarded to the provider as-is (D10); secrets and URLs are env
 # var names only.
 

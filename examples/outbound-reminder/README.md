@@ -43,7 +43,7 @@ and the startup check cover everything the runtime needs.
 ## Both ways a secret reaches a tool
 
 The three tools are here to show the two shapes side by side. Full reference in
-[docs/user/reference/secrets.md](../../docs/user/reference/secrets.md).
+[secrets](../../docs-site/reference/secrets.mdx).
 
 **Named in YAML**, for a webhook tool. `confirm_appointment` and
 `reschedule_appointment` name their base URL and their token, and unmute writes

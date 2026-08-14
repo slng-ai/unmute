@@ -20,7 +20,7 @@ import (
 // If you are here because this test failed, you are adding authoring surface.
 // That is allowed, but the constitution prices it: a numbered dated SCHEMA
 // amendment, the derived schemas, a capability row, the agreement tests, the
-// scaffold templates, the interactive console, the examples, and docs/user/, all
+// scaffold templates, the interactive console, the examples, and docs-site/, all
 // in one commit. Delete a line here only alongside that work.
 
 func TestAuthoringSchemaHasNoHostingModelField(t *testing.T) {
