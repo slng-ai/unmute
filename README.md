@@ -1,8 +1,4 @@
-<p align="center">
-  <img src="images/Logo_SLNG.png" alt="SLNG" width="150">
-</p>
-
-<h1 align="center">Unmute x SLNG</h1>
+<h1 align="center">Unmute x <img src="images/Logo_SLNG.png" alt="SLNG" height="36"></h1>
 
 Unmute is a command line compiler for voice agents. You write a small package of
 YAML and Markdown that says who the agent is, which models it uses, and which
