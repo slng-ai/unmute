@@ -73,7 +73,7 @@ changelog:
 release:
   github:
     owner: slng-ai
-    name: unmute # spelled out: a local remote may still say unmute_cli
+    name: unmute # spelled out: a local remote may still carry the old repo name
   prerelease: auto # an rc or beta tag becomes a GitHub prerelease
 
 # macOS only, by design: Homebrew casks are for macOS, so Linux users take the

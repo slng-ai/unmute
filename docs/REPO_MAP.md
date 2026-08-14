@@ -1,6 +1,6 @@
 # Repo map: the files you actually need
 
-A get-around guide to `unmute_cli`. Not exhaustive — the load-bearing files,
+A get-around guide to `unmute`. Not exhaustive — the load-bearing files,
 grouped by what you're trying to do. For the *why* behind the design, see
 [SCHEMA.md](SCHEMA.md) (the locked spec), [ARCHITECTURE.md](ARCHITECTURE.md)
 (system boundaries and compiler flow), and [CLAUDE.md](CLAUDE.md) (engineering
