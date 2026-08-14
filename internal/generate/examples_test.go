@@ -543,6 +543,66 @@ func TestTelephonyExampleDocsAccountForEveryRequiredEnv(t *testing.T) {
 	}
 }
 
+// US2 / FR-018: a phone package runs in the browser with nothing but model
+// keys. The emitted startup check is where that is decided, so it is where it
+// is asserted: the browser path's REQUIRED_ENV must carry no carrier credential
+// and no route variable, whichever route the package declares.
+//
+// This already worked and nothing wrote it down, which is what made it safe to
+// move route resolution underneath it. It is the most common workflow in the
+// project and it had no test.
+func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
+	routeOnly := []string{
+		"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER",
+		"SIP_TRUNK_HOSTNAME", "SIP_AUTH_USERNAME", "SIP_AUTH_PASSWORD", "SIP_FROM_NUMBER",
+		"UNMUTE_PUBLIC_URL", "UNMUTE_OUTBOUND_TOKEN", "REDIS_URL",
+		"PIPECAT_CLOUD_ORGANIZATION",
+	}
+	for example, providers := range map[string][]ir.Provider{
+		"twilio-telephony-hello":        {ir.ProviderPipecat, ir.ProviderLiveKit},
+		"livekit-human-transfer":        {ir.ProviderLiveKit},
+		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
+		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
+	} {
+		t.Run(example, func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, provider := range providers {
+				resolved := targetByProvider(t, agent, provider)
+				if resolved.Telephony == nil {
+					t.Fatalf("%s declares no route, so it is the wrong fixture", provider)
+				}
+				artifact, err := Generate(agent, resolved, target.Default())
+				if err != nil {
+					t.Fatalf("%s: %v", provider, err)
+				}
+				entry := "bot.py"
+				if provider == ir.ProviderLiveKit {
+					entry = "agent.py"
+				}
+				source := artifactFile(t, artifact, entry)
+				start := strings.Index(source, "REQUIRED_ENV = [")
+				if start < 0 {
+					t.Fatalf("%s: %s has no REQUIRED_ENV startup check", provider, entry)
+				}
+				block := source[start : start+strings.Index(source[start:], "]")]
+				for _, name := range routeOnly {
+					if strings.Contains(block, `"`+name+`"`) {
+						t.Errorf("%s: the browser path's startup check demands %q, so a package "+
+							"that only wants a browser session cannot start:\n%s", provider, name, block)
+					}
+				}
+			}
+		})
+	}
+}
+
 // The generated README is the runbook, and almost nobody reads it before they
 // have already read the example's own page and the docs. So those two have to stay
 // true on their own, and "stay true" is a thing a test can hold rather than a

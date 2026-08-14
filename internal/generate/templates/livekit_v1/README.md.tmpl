@@ -14,6 +14,14 @@ cp .env.example .env          # then fill in the selected provider values
 uv run agent.py console       # local terminal session
 uv run agent.py dev           # LiveKit development worker
 ```
+{{- if .Telephony}}
+
+**Test in the browser before you test on a phone.** `unmute dev <source-dir>`
+opens a browser session with no carrier credentials set and none checked, even
+though this package declares a phone channel. Get the prompt and the models
+right there, then add `--telephony`, which is where the route values below start
+mattering. The browser loop is the shortest one this project has.
+{{- end}}
 
 {{- if .CallStartVars}}
 

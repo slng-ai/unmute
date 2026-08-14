@@ -126,7 +126,13 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	// Snapshot the provider creds before telephony env is added: the web dev
 	// image (compose.dev.yaml) runs bot.py over WebRTC and needs no telephony
 	// or coordination env.
-	data.DevEnv = env.sorted()
+	//
+	// The route's own names are removed rather than merely not added, because
+	// `secrets:` now declares them (SCHEMA N40) and the loop above just put them
+	// in. Without this, giving a package a `secrets:` block would make its
+	// browser session demand carrier credentials, which is the workflow FR-018
+	// exists to protect.
+	data.DevEnv = withoutRouteEnv(env.sorted(), agent, target)
 	data.Telephony, err = buildPipecatTelephony(agent, target, env)
 	if err != nil {
 		return pipecatData{}, err

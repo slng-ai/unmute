@@ -211,6 +211,51 @@ func requiredSecretEnv(agent *ir.Agent) []string {
 	return slices.Clone(agent.Secrets)
 }
 
+// withoutRouteEnv drops the names only a phone call reads, leaving the set a
+// browser session actually needs.
+//
+// A phone package must run in the browser with nothing but model keys
+// (spec FR-018). That held for free while connection environment names were
+// exempt from `secrets:`; now that they are declared there (SCHEMA N40) they
+// reach the startup check like any other secret, and a package with a secrets
+// block would demand carrier credentials before opening a browser session.
+//
+// The route is the authority on which names are its own, and the question is
+// asked of **every** connection in the package rather than only this target's.
+// `secrets:` is package-wide, so a two-target package declares both targets'
+// carrier credentials, and neither target's own plan knows about the other's.
+// A connection environment value is a phone-route name whichever target names
+// the file. Nothing here is re-derived from a name's spelling.
+func withoutRouteEnv(names []string, agent *ir.Agent, target ir.Target) []string {
+	route := map[string]bool{}
+	for _, connection := range agent.Connections {
+		for _, name := range connection.Environment {
+			route[name] = true
+		}
+	}
+	if plan := target.Telephony; plan != nil {
+		for _, name := range plan.Environment {
+			route[name] = true
+		}
+		for _, name := range plan.RequiredEnvironment {
+			route[name] = true
+		}
+		for _, name := range plan.LocalEnvironment {
+			route[name] = true
+		}
+	}
+	if len(route) == 0 {
+		return names
+	}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if !route[name] {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // reportVariable is one variable as the compile report lists it: what it is,
 // where its value comes from, and whether it has a fallback (I.artifacts).
 type reportVariable struct {

@@ -14,6 +14,7 @@ import (
 	"github.com/slng/unmute/internal/generate"
 	"github.com/slng/unmute/internal/ir"
 	"github.com/slng/unmute/internal/scaffold"
+	"github.com/slng/unmute/internal/spec"
 )
 
 func TestParseDotenv(t *testing.T) {
@@ -744,5 +745,35 @@ func TestDevTelephonyOnTheCloudWebsocketRouteReachesTheLocalFlow(t *testing.T) {
 		if strings.Contains(message, forbidden) {
 			t.Errorf("the route refused instead of running: %q appears in\n%s", forbidden, message)
 		}
+	}
+}
+
+// FR-018a. `channels.web` is not required for the browser path, and the two
+// phone-only examples prove it: neither declares one, and neither has to.
+// Without this, "make the browser path work" could be satisfied by telling
+// every author to add a channel they do not otherwise need.
+func TestBrowserPathNeedsNoWebChannel(t *testing.T) {
+	for _, example := range []string{"livekit-human-transfer", "pipecat-human-transfer-twilio"} {
+		t.Run(example, func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := pkg.Agent.Channels["web"]; ok {
+				t.Fatalf("%s declares channels.web, so it no longer holds this line", example)
+			}
+			var telephony bool
+			for _, channel := range pkg.Agent.Channels {
+				if channel.Kind == "telephony" {
+					telephony = true
+				}
+			}
+			if !telephony {
+				t.Fatalf("%s declares no telephony channel, so it is the wrong fixture", example)
+			}
+			if _, err := ir.Build(pkg); err != nil {
+				t.Fatalf("a phone-only package must build for the browser path: %v", err)
+			}
+		})
 	}
 }

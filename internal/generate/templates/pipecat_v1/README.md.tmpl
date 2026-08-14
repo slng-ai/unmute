@@ -60,6 +60,14 @@ at all.
 {{end}}{{end}}
 While iterating on the source spec, `unmute dev <source-dir>` recompiles this
 project and runs it for you behind a dev client.
+{{- if .Telephony}}
+
+**Test in the browser before you test on a phone.** `unmute dev <source-dir>`
+opens a browser session with no carrier credentials set and none checked, even
+though this package declares a phone channel. Get the prompt and the models
+right there, then add `--telephony`, which is where the route values below start
+mattering. The browser loop is the shortest one this project has.
+{{- end}}
 
 {{- if .CallStartVars}}
 

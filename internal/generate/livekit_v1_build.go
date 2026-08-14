@@ -261,10 +261,17 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	if len(data.CallStartVars) > 0 {
 		data.DevOptionalEnv = []string{"UNMUTE_CALL_START"}
 	}
-	data.RequiredSecrets = requiredSecretEnv(agent)
-	for _, name := range data.RequiredSecrets {
+	// Every declared secret reaches the environment, but the *startup check* skips
+	// the route's own names. One file serves every channel on this driver, so a
+	// check that demanded carrier credentials would refuse a browser or console
+	// session on a phone package — the workflow FR-018 protects. This restores
+	// exactly the behaviour these packages had before their telephony names were
+	// declared in `secrets:` (SCHEMA N40); the route's values are still listed in
+	// .env.example, the compile report, and the runbook.
+	for _, name := range requiredSecretEnv(agent) {
 		env.add(name)
 	}
+	data.RequiredSecrets = withoutRouteEnv(requiredSecretEnv(agent), agent, tgt)
 	data.NeedsRender = renderNeeds(agent)
 	if data.Capture != nil {
 		data.NeedsFunctionTools = true // the generated capture tool is a @function_tool too
@@ -306,7 +313,11 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// image (compose.dev.yaml) runs `agent.py dev` against a single-node dev
 	// livekit-server and needs no telephony env. LIVEKIT_URL/KEY/SECRET are in
 	// this set but the template hardcodes their dev values.
-	data.DevEnv = env.sorted()
+	//
+	// The route's own names are removed rather than merely not added: `secrets:`
+	// now declares them (SCHEMA N40), so a package with a secrets block would
+	// otherwise demand carrier credentials for a browser session (FR-018).
+	data.DevEnv = withoutRouteEnv(env.sorted(), agent, tgt)
 	data.Telephony, err = buildLiveKitTelephony(agent, tgt, env)
 	if err != nil {
 		return livekitData{}, err
