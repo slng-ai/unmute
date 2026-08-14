@@ -91,7 +91,9 @@ release:
 # archive or `go install` (FR-011).
 homebrew_casks:
   - name: unmute
-    skip_upload: true # Rollout Phase 2: change to "auto", which still skips prereleases
+    # Rollout Phase 2, opened 2026-08-14. "auto" uploads stable releases and
+    # skips prereleases. Not `false`, which would push an rc to the tap.
+    skip_upload: "auto"
     repository:
       owner: slng-ai
       name: homebrew-tap # the cask lands in Casks/, the default
