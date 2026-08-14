@@ -29,20 +29,37 @@
       {
         "group": "Build the agent",
         "pages": [
-          "build/one-agent",
-          "build/tools",
+          "build/your-first-agent",
+          {
+            "group": "Tools",
+            "pages": [
+              "build/tools/overview",
+              "build/tools/webhook",
+              "build/tools/python",
+              "build/tools/mcp",
+              "build/tools/prebuilt"
+            ]
+          },
           "build/variables",
-          "build/two-agents",
-          "build/tasks",
-          "build/task-groups",
-          "build/choosing-a-structure"
+          {
+            "group": "Orchestration",
+            "pages": [
+              "build/orchestration/overview",
+              "build/orchestration/handoffs",
+              "build/orchestration/tasks",
+              "build/orchestration/task-groups",
+              "build/orchestration/choosing-a-structure"
+            ]
+          }
         ]
       },
       {
-        "group": "Run it locally",
+        "group": "Development lifecycle",
         "pages": [
           "dev/overview",
-          "dev/console"
+          "dev/console",
+          "dev/telephony",
+          "dev/webhooks-and-tunnels"
         ]
       },
       {
@@ -51,7 +68,7 @@
           "telephony/overview",
           "telephony/first-phone-call",
           "telephony/outbound-calls",
-          "telephony/webhooks-and-tunnels"
+          "telephony/twilio"
         ]
       },
       {
@@ -72,8 +89,20 @@
         ]
       },
       {
+        "group": "Models",
+        "pages": [
+          "models/stt",
+          "models/tts",
+          "models/llm",
+          "models/turn-detection",
+          "models/optimization"
+        ]
+      },
+      {
         "group": "Deployment",
         "pages": [
+          "deploy/livekit-cloud",
+          "deploy/pipecat-cloud",
           "deploy/going-live"
         ]
       },
@@ -92,7 +121,7 @@
           },
           "reference/agent-yaml",
           "reference/targets-yaml",
-          "reference/providers",
+          "reference/connections-yaml",
           "reference/variables",
           "reference/secrets"
         ]
