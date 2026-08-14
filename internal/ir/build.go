@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	namePattern        = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
-	e164Pattern        = regexp.MustCompile(`^\+[1-9][0-9]{6,14}$`)
-	sipDestinationPath = regexp.MustCompile(`^sips?:[^@\s]+@[^@\s]+$`)
+	namePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
+	// The E.164 and sip: URI patterns that stood here went with the literal
+	// destination forms they matched (spec FR-004d): a destination now names an
+	// environment variable and nothing else, which envNamePattern covers.
 )
 
 // Build resolves a decoded package into the target-independent IR.
@@ -92,22 +93,34 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	for _, name := range sortedKeys(pkg.Connections) {
 		raw := pkg.Connections[name]
 		path := filepath.Join("connections", name+".yaml")
-		if raw.Kind != "telephony" {
-			return nil, fmt.Errorf("%s: connection %q kind must be telephony", pkg.Location(path, "kind:"), name)
+		if raw.Kind != "" {
+			return nil, fmt.Errorf("%s: kind is no longer written in a connection. Every transport in the catalog "+
+				"is telephony, so transport: %s already says it", pkg.Location(path, "kind:"), orPlaceholder(raw.Transport))
 		}
-		if len(raw.Environment) == 0 {
-			return nil, fmt.Errorf("%s: connection %q environment must not be empty", pkg.Location(path, "environment:"), name)
+		if raw.Transport == "" {
+			return nil, fmt.Errorf("%s: connection %q declares no transport. A connection is a phone route, and the "+
+				"transport is the mechanism that carries the call", pkg.Location(path, "environment:"), name)
 		}
+		// An empty environment is legal: two routes need no account values from
+		// the author at all — the Daily-provisioned number, which carries its own
+		// calls, and receive-only (pipecat, cloud-websocket), where the platform
+		// terminates the carrier's stream itself (spec FR-009a).
 		for _, key := range sortedKeys(raw.Environment) {
 			value := raw.Environment[key]
 			if !namePattern.MatchString(key) {
 				return nil, fmt.Errorf("%s: connection %q environment key %q must be lowercase snake_case", pkg.Location(path, key), name, key)
 			}
 			if !envNamePattern.MatchString(value) {
-				return nil, fmt.Errorf("%s: connection %q environment value for %q must be an environment variable name", pkg.Location(path, value), name, key)
+				return nil, fmt.Errorf("%s: connection %q environment value %q is not a valid environment variable name: "+
+					"use letters, digits, and underscores, and do not start with a digit. A deployment platform exports "+
+					"secrets through a shell, so this name would be missing at runtime with no error of its own",
+					pkg.Location(path, value), name, value)
 			}
 		}
-		out.Connections[name] = Connection{Kind: raw.Kind, Environment: maps.Clone(raw.Environment)}
+		// Kind is a resolved-surface field with no author to read it from: every
+		// connection is telephony, so it is set here rather than deleted, which
+		// keeps the resolved schema and its goldens still (data-model §2).
+		out.Connections[name] = Connection{Kind: "telephony", Environment: maps.Clone(raw.Environment)}
 	}
 	if pkg.Agent.Capacity != nil {
 		out.Capacity = &Capacity{
@@ -773,10 +786,32 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 			return Target{}, fmt.Errorf("%s: target %q overrides %q, which is not a defined model", pkg.Location("targets.yaml", key), name, key)
 		}
 	}
-	for _, destination := range sortedKeys(raw.Destinations) {
-		value := raw.Destinations[destination]
-		if !validDestination(value) {
-			return Target{}, fmt.Errorf("%s: destination %q must be an E.164 phone number or SIP URI", pkg.Location("targets.yaml", destination), destination)
+	// Three fields moved out of a target. Each is refused by name, quoting the
+	// line and saying where it now lives, because a bare "unknown field" leaves
+	// the author to find that out themselves (Principle II). Keyed on the field,
+	// not on the provider: `carrier` is refused on every target, vapi and
+	// deepgram included (spec FR-007).
+	if raw.Transport != "" {
+		return Target{}, fmt.Errorf("%s: target %q declares transport: %s, which now belongs in %s. "+
+			"A target names one connection and the connection declares the route",
+			pkg.Location("targets.yaml", "transport:"), name, raw.Transport, connectionFileFor(raw.Connection))
+	}
+	if raw.Carrier != "" {
+		return Target{}, fmt.Errorf("%s: target %q declares carrier: %s, which now belongs in %s alongside its transport",
+			pkg.Location("targets.yaml", "carrier:"), name, raw.Carrier, connectionFileFor(raw.Connection))
+	}
+	if len(raw.Destinations) > 0 {
+		return Target{}, fmt.Errorf("%s: target %q declares destinations, which now belong at the top level of "+
+			"agent.yaml. A destination is who this agent escalates to, which is the same desk whichever carrier "+
+			"reaches it", pkg.Location("targets.yaml", "destinations:"), name)
+	}
+	destinations := pkg.Agent.Destinations
+	for _, destination := range sortedKeys(destinations) {
+		value := destinations[destination]
+		if !envNamePattern.MatchString(value) {
+			return Target{}, fmt.Errorf("%s: destination %q is %q, a literal. agent.yaml is the portable half of a "+
+				"package, so a destination names an environment variable holding the number: %s: BILLING_PHONE_NUMBER",
+				pkg.Location("agent.yaml", destination), destination, value, destination)
 		}
 	}
 	if raw.Connection != "" {
@@ -784,74 +819,74 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 			return Target{}, missing(pkg, "targets.yaml", "connection", raw.Connection)
 		}
 	}
+	// The connection owns the route: the target says which connection, and the
+	// connection file says everything about how a call reaches it.
+	var transport, carrier string
+	if conn, ok := pkg.Connections[raw.Connection]; ok && raw.Connection != "" {
+		transport, carrier = conn.Transport, conn.Carrier
+		if err := validateRoute(pkg, raw.Connection, raw.Provider, transport, carrier); err != nil {
+			return Target{}, err
+		}
+	}
 	telephony := hasTelephonyChannel(agent)
-	// One route makes the connection conditional, and it is the point of the route:
-	// on (pipecat, cloud-websocket) the platform terminates the carrier's stream
-	// itself, so receiving a call needs no carrier credentials at all. Placing one,
-	// or redirecting one to a human, still does (SCHEMA N38, research D4/F4).
-	cloudWebsocket := raw.Provider == string(ProviderPipecat) && raw.Transport == "cloud-websocket"
-	needsConnection := telephony
-	if cloudWebsocket {
-		needsConnection = telephony && packagePlacesCalls(pkg, agent)
+	cloudWebsocket := raw.Provider == string(ProviderPipecat) && transport == "cloud-websocket"
+	// Every telephony target names a connection now, because the connection is
+	// where the route is written: without one there is no transport to reason
+	// about at all. The carve-out that used to stand here — receive-only on
+	// (pipecat, cloud-websocket) needs no carrier credentials — did not go away,
+	// it moved into the connection file, which is legal with a route and no
+	// `environment:` block (spec FR-009a).
+	if telephony && (raw.Provider == string(ProviderLiveKit) || raw.Provider == string(ProviderPipecat)) && raw.Connection == "" {
+		return Target{}, fmt.Errorf("%s: target %q has a telephony channel and names no connection. "+
+			"Add connection: <name> and a connections/<name>.yaml declaring the route",
+			pkg.Location("targets.yaml", name+":"), name)
 	}
-	if needsConnection && (raw.Provider == string(ProviderLiveKit) || raw.Provider == string(ProviderPipecat)) && raw.Connection == "" {
-		if cloudWebsocket {
-			// Name all three keys and what each is for. A message that says only
-			// "requires connection" sends the author to the schema; this one sends them
-			// to the three lines they have to write.
-			return Target{}, fmt.Errorf("%s: target %q places or redirects calls, so it requires connection: "+
-				"account_sid and auth_token authenticate the request to your carrier, and from_number is the caller "+
-				"identity the recipient sees. A package that only receives calls on this route needs no connection at all",
-				pkg.Location("targets.yaml", name+":"), name)
-		}
-		return Target{}, fmt.Errorf("%s: target %q requires connection for telephony", pkg.Location("targets.yaml", name+":"), name)
+	// A carrier-less route has no carrier leg to receive on: the Daily-provisioned
+	// number carries its own calls and dials out only. It has no row in the
+	// capability table at all (research R10), so without this the author gets
+	// "unsupported telephony route (pipecat, daily-sip, )" from three separate
+	// capability lookups and no idea which line to change.
+	if _, carrierless := carrierlessTransports[transport]; carrierless && carrier == "" && telephony {
+		return Target{}, fmt.Errorf("%s: connection %q declares transport %s with no carrier, which places calls but "+
+			"cannot receive them, so it cannot serve a channels.phone entry. Give the connection a carrier, or drop "+
+			"the phone channel and reach this route through a control that dials",
+			pkg.Location(filepath.Join("connections", raw.Connection+".yaml"), "transport:"), raw.Connection, transport)
 	}
-	if !telephony && raw.Connection != "" {
-		return Target{}, fmt.Errorf("%s: target %q sets connection but has no telephony channel", pkg.Location("targets.yaml", "connection:"), name)
+	// A connection is used by a telephony channel or by a control that dials.
+	// The second half is what the Daily-provisioned route needs: it receives no
+	// calls and so declares no phone channel, but it still dials a person on a
+	// cold transfer, and that leg is the route (spec FR-016).
+	if !telephony && raw.Connection != "" && !packagePlacesCalls(pkg, agent) {
+		return Target{}, fmt.Errorf("%s: target %q names connection %q, but nothing in this package uses a phone "+
+			"route: declare a channels.phone entry, or a control that dials a person",
+			pkg.Location("targets.yaml", "connection:"), name, raw.Connection)
 	}
-	// The Daily route has two forms (SCHEMA N37), and on it `carrier`,
-	// `connection`, and a telephony channel are mutually required. The two guards
-	// above name a missing connection and a missing channel; these two name the
-	// combinations they cannot.
-	//
-	// The second matters more than it looks. Without it a `daily-sip` target that
-	// names a carrier and forgets the connection compiles as a plain
-	// Daily-provisioned build, silently ignoring the carrier: green validation, no
-	// helper emitted, and an author who finds out when a call to their own number
-	// goes nowhere. That is exactly the silent downgrade Principle II forbids, and
-	// this feature is what made the field mean something here.
-	if raw.Provider == string(ProviderPipecat) && raw.Transport == "daily-sip" {
-		if telephony && raw.Carrier == "" {
-			return Target{}, fmt.Errorf("%s: target %q requires carrier for telephony on transport daily-sip; "+
-				"a Daily-provisioned number carries its own calls and needs neither a connection nor a telephony channel",
-				pkg.Location("targets.yaml", name+":"), name)
-		}
-		if raw.Carrier != "" && !telephony {
-			return Target{}, fmt.Errorf("%s: target %q sets carrier %q on transport daily-sip but has no telephony channel; "+
-				"a carrier leg needs carrier, connection, and a channels.phone entry together, "+
-				"and a Daily-provisioned number needs none of the three",
-				pkg.Location("targets.yaml", "carrier:"), name, raw.Carrier)
-		}
-	}
+	// Two guards stood here: `daily-sip` with a telephony channel and no carrier,
+	// and `daily-sip` with a carrier and no telephony channel. Both are now
+	// unrepresentable rather than merely unchecked. A target cannot name a route
+	// and omit its carrier, because the two travel together in one connection
+	// file; and the silent downgrade the second caught — a carrier quietly
+	// ignored because the connection was missing — needs a target that declares a
+	// carrier without a connection, which no longer parses. The invariant
+	// survives by construction, which is the better fix (research R2).
 	built := Target{
 		Name: name, Provider: Provider(raw.Provider), Version: raw.Version, Pins: raw.Pins,
-		SDKLanguage: raw.SDKLanguage, Transport: raw.Transport, Carrier: raw.Carrier, Connection: raw.Connection,
+		SDKLanguage: raw.SDKLanguage, Transport: transport, Carrier: carrier, Connection: raw.Connection,
 		// Declared order, no deduplication, no region invented when none is
 		// declared: validate rejects a duplicate and each README states what
 		// the platform does with an empty list.
 		DeploymentRegions: raw.DeploymentRegion,
 		Models:            resolveBindings(agent, used, raw.Models),
-		Destinations:      raw.Destinations,
+		Destinations:      destinations,
 	}
-	// A pure-inbound cloud-websocket package has no connection and still has a
-	// route: the plan is what tells the emitter to emit the Bin, the transport
-	// entry, and the runbook. Without this it would compile as a package with
-	// telephony declared and no telephony emitted, which is the silent downgrade
-	// Principle II forbids.
+	// The plan is what tells the emitter to emit the Bin, the transport entry,
+	// and the runbook. Without it a package would compile with telephony declared
+	// and no telephony emitted, which is the silent downgrade Principle II
+	// forbids.
 	if telephony && (raw.Connection != "" || cloudWebsocket) {
 		built.Telephony = buildTelephonyPlan(pkg, agent, built)
 		if raw.Connection != "" {
-			if err := validateTelephonyEnvironment(pkg, built.Telephony); err != nil {
+			if err := validateTelephonyEnvironment(pkg, built.Telephony, packagePlacesCalls(pkg, agent)); err != nil {
 				return Target{}, err
 			}
 		}
@@ -881,7 +916,84 @@ func packagePlacesCalls(pkg *packagespec.Package, agent *Agent) bool {
 	return false
 }
 
-func validateTelephonyEnvironment(pkg *packagespec.Package, plan *TelephonyPlan) error {
+// carrierlessTransports are the transports with a documented form that has no
+// carrier leg. Today that is the Daily-provisioned number, which carries its own
+// calls. These have no row in the capability table at all — the only Daily row
+// is the carrier leg, a different thing — so a flat triple lookup would refuse
+// them (research R10).
+var carrierlessTransports = map[string]string{
+	"daily-sip": "a Daily-provisioned number carries its own calls",
+}
+
+// connectionFileFor names the file a moved route field belongs in. A target that
+// names no connection has no file to point at yet, so it gets the instruction
+// instead of a path.
+func connectionFileFor(connection string) string {
+	if connection == "" {
+		return "the connection file this target should name"
+	}
+	return filepath.Join("connections", connection+".yaml")
+}
+
+func orPlaceholder(transport string) string {
+	if transport == "" {
+		return "<transport>"
+	}
+	return transport
+}
+
+// validateRoute checks that a connection declares a route the provider actually
+// has, and refuses with the routes it does have.
+//
+// It is deliberately not a flat triple lookup. A connection with no carrier is
+// valid only where the transport has a carrier-less form, and that form has no
+// row in the capability table; looking it up anyway refuses a working package
+// with a message that reads like a broken example (research R10).
+func validateRoute(pkg *packagespec.Package, connection, provider, transport, carrier string) error {
+	path := filepath.Join("connections", connection+".yaml")
+	if carrier == "" {
+		if _, ok := carrierlessTransports[transport]; ok {
+			return nil
+		}
+		return fmt.Errorf("%s: transport %q declares no carrier, and it has no carrier-less form. %s",
+			pkg.Location(path, "transport:"), transport, supportedRoutes(provider))
+	}
+	key := targetcap.TelephonyKey{Provider: targetcap.Provider(provider), Transport: transport, Carrier: carrier}
+	if _, ok := targetcap.SelectableTelephonyRoutes()[key]; ok {
+		return nil
+	}
+	return fmt.Errorf("%s: transport %q with carrier %q is not a route for provider %s. %s",
+		pkg.Location(path, "transport:"), transport, carrier, provider, supportedRoutes(provider))
+}
+
+// supportedRoutes lists what the provider does support, reading only selectable
+// routes so a suggestion never leads to a second refusal (spec FR-011a).
+func supportedRoutes(provider string) string {
+	byTransport := make(map[string][]string)
+	for key := range targetcap.SelectableTelephonyRoutes() {
+		if string(key.Provider) != provider {
+			continue
+		}
+		byTransport[key.Transport] = append(byTransport[key.Transport], key.Carrier)
+	}
+	for transport, note := range carrierlessTransports {
+		if _, ok := byTransport[transport]; ok {
+			byTransport[transport] = append(byTransport[transport], "no carrier ("+note+")")
+		}
+	}
+	if len(byTransport) == 0 {
+		return fmt.Sprintf("Provider %s has no phone routes.", provider)
+	}
+	parts := make([]string, 0, len(byTransport))
+	for _, transport := range sortedKeys(byTransport) {
+		carriers := byTransport[transport]
+		slices.Sort(carriers)
+		parts = append(parts, fmt.Sprintf("%s with %s", transport, strings.Join(carriers, ", ")))
+	}
+	return fmt.Sprintf("%s supports: %s.", provider, strings.Join(parts, "; "))
+}
+
+func validateTelephonyEnvironment(pkg *packagespec.Package, plan *TelephonyPlan, placesCalls bool) error {
 	key := targetcap.TelephonyKey{Provider: targetcap.Provider(plan.Key.Provider), Transport: plan.Key.Transport, Carrier: plan.Key.Carrier}
 	required, optional, ok := targetcap.TelephonyEnvironment(key)
 	if !ok || len(required)+len(optional) == 0 {
@@ -892,9 +1004,22 @@ func validateTelephonyEnvironment(pkg *packagespec.Package, plan *TelephonyPlan)
 	for _, name := range append(required, optional...) {
 		allowed[name] = true
 	}
+	// On one route the credentials are conditional, and it is the point of the
+	// route: on (pipecat, cloud-websocket) the platform terminates the carrier's
+	// stream itself, so receiving a call needs nothing from your account.
+	// Placing one, or redirecting one to a person, still does (SCHEMA N38).
+	conditional := plan.Key.Provider == ProviderPipecat && plan.Key.Transport == "cloud-websocket"
+	if conditional && !placesCalls && len(plan.Environment) == 0 {
+		return nil
+	}
 	for _, name := range required {
 		if plan.Environment[name] == "" {
-			return fmt.Errorf("%s: connection %q requires environment key %q for route (%s, %s, %s)", pkg.Location(path, "environment:"), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier)
+			because := ""
+			if conditional {
+				because = ", because this package places or redirects calls. A package that only receives calls " +
+					"on this route needs no connection environment at all"
+			}
+			return fmt.Errorf("%s: connection %q requires environment key %q for route (%s, %s, %s)%s", pkg.Location(path, "environment:"), plan.Connection, name, plan.Key.Provider, plan.Key.Transport, plan.Key.Carrier, because)
 		}
 	}
 	accepted := append(slices.Clone(required), optional...)
@@ -1077,15 +1202,11 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 	}
 }
 
-// validDestination accepts the three forms a transfer destination can take
-// (SCHEMA N26): an E.164 literal, a SIP URI, or the UPPER_SNAKE name of an
-// environment variable holding one of those. The three are unambiguous by
-// shape, so no extra key or suffix is needed to tell them apart: a literal
-// starts with `+`, a URI with `sip:`/`sips:`, and neither can be UPPER_SNAKE.
-func validDestination(value string) bool {
-	return e164Pattern.MatchString(value) || sipDestinationPath.MatchString(value) ||
-		envNamePattern.MatchString(value)
-}
+// A destination used to accept three forms (SCHEMA N26): an E.164 literal, a
+// SIP URI, or an environment variable name. It now accepts only the last of the
+// three, checked with envNamePattern where destinations are read. agent.yaml is
+// the portable half of a package, and a phone number is a deployment fact
+// (spec FR-004d).
 
 // DestinationEnv reports the environment variable name a destination defers to,
 // or "" when it carries a literal. Drivers use it to decide between emitting the

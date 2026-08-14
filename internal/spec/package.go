@@ -35,10 +35,15 @@ type AgentFile struct {
 	// Listen/Turn select one entry of the matching models section by name.
 	// Optional when the section has at most one entry (the sole entry selects
 	// itself); required with 2+ entries (N15 palette).
-	Listen       string               `json:"listen,omitempty" yaml:"listen,omitempty"`
-	Turn         string               `json:"turn,omitempty" yaml:"turn,omitempty"`
-	Variables    map[string]Variable  `json:"variables,omitempty" yaml:"variables,omitempty"`
-	Secrets      []string             `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	Listen    string              `json:"listen,omitempty" yaml:"listen,omitempty"`
+	Turn      string              `json:"turn,omitempty" yaml:"turn,omitempty"`
+	Variables map[string]Variable `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Secrets   []string            `json:"secrets,omitempty" yaml:"secrets,omitempty"`
+	// Destinations maps a symbolic name a control escalates to onto the name of
+	// an environment variable holding the number. A destination is who this agent
+	// escalates to, which is the same desk whichever carrier reaches it, so it
+	// lives here rather than on a target.
+	Destinations map[string]string    `json:"destinations,omitempty" yaml:"destinations,omitempty"`
 	Agents       map[string]AgentDef  `json:"agents" yaml:"agents"`
 	Tasks        map[string]Task      `json:"tasks,omitempty" yaml:"tasks,omitempty"`
 	TaskGroups   map[string]TaskGroup `json:"task_groups,omitempty" yaml:"task_groups,omitempty"`
@@ -327,7 +332,15 @@ type Capacity struct {
 	AvgSessionDuration  string  `json:"avg_session_duration" yaml:"avg_session_duration"`
 }
 
+// Connection is one phone route: the mechanism, the carrier that hands over the
+// call, and the environment variable names holding that account's credentials.
+// It is readable on its own — a target names it and declares nothing else about
+// how a call arrives.
 type Connection struct {
+	Transport string `json:"transport,omitempty" yaml:"transport,omitempty"`
+	// Carrier is empty on routes that have no carrier leg, which today is the
+	// Daily-provisioned `daily-sip` form alone.
+	Carrier     string            `json:"carrier,omitempty" yaml:"carrier,omitempty"`
 	Kind        string            `json:"kind" yaml:"kind"`
 	Environment map[string]string `json:"environment" yaml:"environment"`
 }
@@ -341,10 +354,18 @@ type Target struct {
 	Version          string              `json:"version,omitempty" yaml:"version,omitempty"`
 	Pins             map[string]string   `json:"pins,omitempty" yaml:"pins,omitempty"`
 	SDKLanguage      string              `json:"sdk_language,omitempty" yaml:"sdk_language,omitempty"`
-	Transport        string              `json:"transport,omitempty" yaml:"transport,omitempty"`
-	Carrier          string              `json:"carrier,omitempty" yaml:"carrier,omitempty"`
 	Connection       string              `json:"connection,omitempty" yaml:"connection,omitempty"`
 	DeploymentRegion Regions             `json:"deployment_region,omitempty" yaml:"deployment_region,omitempty"` // where the platform deploys the agent: one region or several (N18, widened by N32)
 	Models           map[string]ModelDef `json:"models,omitempty" yaml:"models,omitempty"`                       // per-target overrides (N15), keyed by model name / listen / turn
-	Destinations     map[string]string   `json:"destinations,omitempty" yaml:"destinations,omitempty"`
+
+	// Moved fields, kept on the decode struct so a package written the old way
+	// still parses and can be refused with a message naming the new home rather
+	// than a bare "unknown field" (Principle II). `json:"-"` keeps them out of
+	// the derived authoring schema, which authoring_surface_test.go asserts.
+	//
+	// Transport and Carrier now live in connections/<name>.yaml; Destinations at
+	// the top level of agent.yaml.
+	Transport    string            `json:"-" yaml:"transport,omitempty"`
+	Carrier      string            `json:"-" yaml:"carrier,omitempty"`
+	Destinations map[string]string `json:"-" yaml:"destinations,omitempty"`
 }

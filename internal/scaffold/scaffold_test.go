@@ -375,11 +375,15 @@ func TestPreflightTelephonyAndHumanTransfer(t *testing.T) {
 			}
 			data.HumanTransfers = []HumanTransfer{{
 				Name: "to_human", Agent: "assistant", When: "The caller requests a person.",
-				Destination: "support_line", Value: "+14155550123", Mode: "cold",
+				Destination: "support_line", Value: "SUPPORT_PHONE_NUMBER", Mode: "cold",
 			}}
 			report, err := Preflight(data)
 			if provider == "pipecat" {
-				if err == nil || !strings.Contains(err.Error(), "requires connection for telephony") {
+				// The scaffold's Pipecat default is the Daily-provisioned route,
+				// which dials out and cannot receive, so a phone channel on it
+				// needs a carrier the wizard has not been given. The refusal
+				// names both ways out.
+				if err == nil || !strings.Contains(err.Error(), "cannot receive them") {
 					t.Fatalf("Preflight() = %v", err)
 				}
 				return
@@ -394,12 +398,22 @@ func TestPreflightTelephonyAndHumanTransfer(t *testing.T) {
 	}
 }
 
-func TestPreflightRejectsCodeTelephonyWithoutConnection(t *testing.T) {
+// A scaffolded package now carries a connection whenever anything in it uses a
+// phone route, so what is missing on the Pipecat default is the carrier rather
+// than the connection: the Daily-provisioned route places calls and cannot
+// receive them (research R10).
+func TestPreflightRejectsCarrierlessRouteOnAPhoneChannel(t *testing.T) {
 	data := Data{Name: "agent"}
 	data.SetTarget("pipecat")
 	data.Channels = []Channel{{Name: "phone", Kind: "telephony", Outbound: true, OnVoicemail: "hangup"}}
-	if _, err := Preflight(data); err == nil || !strings.Contains(err.Error(), "requires connection for telephony") {
-		t.Fatalf("Preflight() error = %v", err)
+	_, err := Preflight(data)
+	if err == nil {
+		t.Fatal("a carrier-less route served a phone channel")
+	}
+	for _, want := range []string{"connections/phone.yaml", "no carrier", "Give the connection a carrier"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal is missing %q: %v", want, err)
+		}
 	}
 }
 
@@ -591,9 +605,9 @@ func TestWriteHumanTransferPutsDestinationInTheBlock(t *testing.T) {
 	data.Channels = []Channel{{Name: "phone", Kind: "telephony", Inbound: true}}
 	data.HumanTransfers = []HumanTransfer{
 		{Name: "to_human", Agent: "assistant", When: "The caller asks for a person.",
-			Destination: "support_line", Value: "+14155550123", Mode: "cold"},
+			Destination: "support_line", Value: "SUPPORT_PHONE_NUMBER", Mode: "cold"},
 		{Name: "to_manager", Agent: "assistant", When: "The caller asks for a manager.",
-			Destination: "manager_line", Value: "+14155550124", Mode: "warm",
+			Destination: "manager_line", Value: "MANAGER_PHONE_NUMBER", Mode: "warm",
 			Briefing: "Say who is calling.", RingTimeout: "20s", OnUnavailable: "hangup"},
 	}
 	if _, err := Write(dir, data); err != nil {

@@ -1,0 +1,13 @@
+# The Daily-provisioned route: Daily's own infrastructure carries the call, so
+# there is no carrier leg and no carrier credentials to name.
+#
+# This is the shortest a connection gets. There is no `carrier:` because this
+# route has none, and no `environment:` because the route needs no account
+# values from you — the Daily API key the runtime reads is supplied by the
+# route's own environment, not declared in the package.
+#
+# What it does need is an account permission rather than a credential: dial-out
+# enabled on the Daily domain the agent's rooms belong to. It is granted on
+# request, per domain. The generated runbook says so, because no compile-time
+# check can see it.
+transport: daily-sip

@@ -57,29 +57,31 @@ func cloudWebsocketTarget(t *testing.T, opts cloudWebsocketOptions) (*ir.Agent, 
 		RequiredControls: controls,
 	}
 	configured := pkg.Targets["pipecat"]
-	configured.Transport, configured.Carrier = "cloud-websocket", "twilio"
 	if opts.region != "" {
 		configured.DeploymentRegion = []string{opts.region}
 	}
+	// Both shapes name the connection, because the connection is where the route
+	// is written. What the receive-only shape drops is the `environment:` block:
+	// on this route the platform terminates the carrier's stream itself, so
+	// receiving a call needs no credentials (spec FR-009a).
+	configured.Connection = "twilio_voice"
+	pkg.Connections = map[string]spec.Connection{"twilio_voice": {
+		Transport: "cloud-websocket", Carrier: "twilio",
+	}}
 	if opts.connection {
-		configured.Connection = "twilio_voice"
-		pkg.Connections = map[string]spec.Connection{"twilio_voice": {
-			Kind: "telephony", Environment: map[string]string{
-				"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
-				"from_number": "TWILIO_PHONE_NUMBER",
-			},
-		}}
-	} else {
-		configured.Connection = ""
-		pkg.Connections = map[string]spec.Connection{}
+		conn := pkg.Connections["twilio_voice"]
+		conn.Environment = map[string]string{
+			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
+			"from_number": "TWILIO_PHONE_NUMBER",
+		}
+		pkg.Connections["twilio_voice"] = conn
 	}
 	if opts.transfer {
-		// The env-name destination form, not safe_core's literal: a route that
-		// composes markup out of the destination is exactly where a literal would
-		// show up in emitted output.
-		configured.Destinations = map[string]string{"billing_line": "BILLING_PHONE_NUMBER"}
+		// The env-name destination form: a route that composes markup out of the
+		// destination is exactly where a literal would show up in emitted output.
+		pkg.Agent.Destinations = map[string]string{"billing_line": "BILLING_PHONE_NUMBER"}
 	} else {
-		configured.Destinations = nil
+		pkg.Agent.Destinations = nil
 		dropHumanTransfer(pkg)
 	}
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
@@ -644,11 +646,12 @@ func TestCloudWebsocketRefusesWarmTransferSayingWhatItWouldTake(t *testing.T) {
 		RequiredControls: []string{"warm_transfer"},
 	}
 	configured := pkg.Targets["pipecat"]
-	configured.Transport, configured.Carrier, configured.Connection = "cloud-websocket", "twilio", "twilio_voice"
-	configured.Destinations = map[string]string{"billing_line": "BILLING_PHONE_NUMBER"}
+	configured.Connection = "twilio_voice"
+	setConnectionRoute(pkg, "twilio_voice", "cloud-websocket", "twilio")
+	pkg.Agent.Destinations = map[string]string{"billing_line": "BILLING_PHONE_NUMBER"}
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	pkg.Connections = map[string]spec.Connection{"twilio_voice": {
-		Kind: "telephony", Environment: map[string]string{
+		Transport: "cloud-websocket", Carrier: "twilio", Environment: map[string]string{
 			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
 			"from_number": "TWILIO_PHONE_NUMBER",
 		},

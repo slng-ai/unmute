@@ -2205,7 +2205,7 @@ func editHumanTransfers(runner *fieldRunner, data *scaffold.Data) error {
 		}
 		options = append(options, huh.NewOption("Add human transfer", "add"), huh.NewOption("← Back", actionBack))
 		choice, _, err := runner.selectOne("Human transfers", runner.describe(
-			"Destinations are references in targets.yaml. Unmute does not buy numbers, create trunks, or configure carriers.",
+			"Destinations live in agent.yaml and name environment variables, never numbers. Unmute does not buy numbers, create trunks, or configure carriers.",
 		), options, true)
 		if err != nil || choice == actionBack {
 			return err
@@ -2294,7 +2294,7 @@ func editHumanTransferDetails(runner *fieldRunner, data *scaffold.Data, name str
 				return err
 			}
 		case "value":
-			if _, err := runner.input("Destination value", "E.164 number such as +14155550123, or a SIP URI.", &transfer.Value, validateDestination); err != nil {
+			if _, err := runner.input("Destination variable", "Name of an environment variable holding the number, such as SUPPORT_PHONE_NUMBER. The number itself is never written into the package.", &transfer.Value, validateDestination); err != nil {
 				return err
 			}
 		case "mode":
@@ -2730,11 +2730,14 @@ func hasTelephony(data *scaffold.Data) bool {
 	return false
 }
 
-var destinationPattern = regexp.MustCompile(`^\+[1-9][0-9]{6,14}$|^sips?:[^@\s]+@[^@\s]+$`)
+// A destination names an environment variable holding the number, never the
+// number itself: agent.yaml is the portable half of a package, and a literal is
+// refused at compile time (spec FR-004d).
+var destinationPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 
 func validateDestination(value string) error {
 	if !destinationPattern.MatchString(value) {
-		return errors.New("destination must be an E.164 number or SIP URI")
+		return errors.New("destination must be the UPPER_SNAKE name of an environment variable holding the number, such as SUPPORT_PHONE_NUMBER")
 	}
 	return nil
 }

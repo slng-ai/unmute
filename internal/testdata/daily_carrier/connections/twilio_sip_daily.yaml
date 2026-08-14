@@ -1,5 +1,7 @@
-# The four keys SCHEMA N37 fixed for this route. Names, never values.
-kind: telephony
+# The carrier leg of the Daily route, and the four keys SCHEMA N37 fixed for it.
+# Names, never values.
+transport: daily-sip
+carrier: twilio
 environment:
   account_sid: TWILIO_ACCOUNT_SID
   auth_token: TWILIO_AUTH_TOKEN

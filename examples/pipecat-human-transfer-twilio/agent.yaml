@@ -47,6 +47,12 @@ controls:
     cold:
       destination: billing_line
 
+# Who this agent escalates to. A value is the UPPER_SNAKE name of an environment
+# variable holding an E.164 number or a sip: URI, read at call time. No phone
+# number is ever written into this package.
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
+
 conversation:
   greeting:
     speaks_first: agent

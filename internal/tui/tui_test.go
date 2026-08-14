@@ -991,26 +991,27 @@ func TestRunHumanTransfersRequireTelephony(t *testing.T) {
 
 func TestRunTelephonyCreateGatedOnConnection(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// The create wizard offers only code targets (Pipecat/LiveKit). Telephony on
-	// a code target requires a connection (build.go / scaffold.Preflight), which
-	// the wizard cannot set — telephony connections are targets.yaml config, not
-	// a scaffold field. So adding a telephony channel plus a human transfer builds
-	// the in-memory config, but Create is correctly gated until a connection
-	// exists. (Managed targets like ElevenLabs, which slipped past this gate, no
-	// longer exist — and never had a real telephony route anyway, SCHEMA N17.)
+	// The create wizard offers only code targets (Pipecat/LiveKit), and its
+	// Pipecat default is the Daily-provisioned route, which dials out and cannot
+	// receive. The wizard now writes a connection file, so what it still cannot
+	// supply is the carrier that route would need to serve a phone channel. So
+	// adding a telephony channel plus a human transfer builds the in-memory
+	// config, and Create is correctly gated until someone chooses a carrier.
+	// (Managed targets like ElevenLabs, which slipped past this gate, no longer
+	// exist — and never had a real telephony route anyway, SCHEMA N17.)
 	// Drive: create → add telephony channel → add human transfer → Create (blocked)
 	// → Back out of the repair menu → Back out of the editor → Quit.
 	input := "1\nagent\n" +
 		"4\n2\n1\n2\n5\n" +
-		"4\n3\n1\nto_human\n2\nCaller requests a person.\n3\nsupport_line\n4\n+14155550123\n8\n3\n" +
+		"4\n3\n1\nto_human\n2\nCaller requests a person.\n3\nsupport_line\n4\nSUPPORT_PHONE_NUMBER\n8\n3\n" +
 		"7\n10\n8\n3\n"
 	var output bytes.Buffer
 	got, _ := Run(strings.NewReader(input), &output, true)
 	if got.Confirmed {
-		t.Fatalf("telephony agent must not be created without a connection: %#v", got.Agent.Data)
+		t.Fatalf("telephony agent must not be created on a route that cannot receive calls: %#v", got.Agent.Data)
 	}
-	if !strings.Contains(output.String(), "requires connection for telephony") {
-		t.Fatalf("wizard did not surface the telephony connection gate:\n%s", output.String())
+	if !strings.Contains(output.String(), "cannot receive them") {
+		t.Fatalf("wizard did not surface the telephony route gate:\n%s", output.String())
 	}
 }
 
@@ -1285,7 +1286,7 @@ func TestV25SavedResourcesOfferDelete(t *testing.T) { // docs/spec/tui.md V25
 		data.Tasks = []scaffold.Task{{Name: "collect", Instructions: "Collect", Result: `{"result":"string"}`, History: "full", Agent: "assistant", When: "Collect"}}
 		data.TaskGroups = []scaffold.TaskGroup{{Name: "flow", Steps: []string{"collect"}, ContextScope: "shared", Then: "return", Agent: "assistant", When: "Flow"}}
 		data.Channels = []scaffold.Channel{{Name: "phone", Kind: "telephony", Inbound: true}}
-		data.HumanTransfers = []scaffold.HumanTransfer{{Name: "to_human", Agent: "assistant", When: "Human", Destination: "support", Value: "+14155550123", Mode: "cold"}}
+		data.HumanTransfers = []scaffold.HumanTransfer{{Name: "to_human", Agent: "assistant", When: "Human", Destination: "support", Value: "SUPPORT_PHONE_NUMBER", Mode: "cold"}}
 		data.Fallbacks = []scaffold.ModelFallback{{Name: "backup", Profile: "assistant_model", Binding: data.Reason}}
 		return data
 	}
@@ -1422,13 +1423,19 @@ func TestValidateTaskResult(t *testing.T) {
 	}
 }
 
+// A destination names an environment variable and nothing else. The literal
+// forms the wizard used to accept are refused, because the value it collects
+// lands in agent.yaml, the portable half of a package (spec FR-004d).
 func TestValidateDestination(t *testing.T) {
-	for _, value := range []string{"+14155550123", "sip:agent@example.com", "sips:agent@example.com"} {
+	for _, value := range []string{"SUPPORT_PHONE_NUMBER", "BILLING_LINE", "L2"} {
 		if err := validateDestination(value); err != nil {
 			t.Errorf("validateDestination(%q) = %v", value, err)
 		}
 	}
-	for _, value := range []string{"14155550123", "https://example.com", "sip:no-host"} {
+	for _, value := range []string{
+		"+14155550123", "sip:agent@example.com", "sips:agent@example.com",
+		"14155550123", "https://example.com", "support_line", "2_LINES", "",
+	} {
 		if err := validateDestination(value); err == nil {
 			t.Errorf("validateDestination(%q) accepted", value)
 		}

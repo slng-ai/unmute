@@ -408,7 +408,14 @@ func Default() Table {
 				control(),
 				controlTransport("daily-sip", "Pipecat cold transfer requires Daily SIP transport"),
 				control(),
-				controlNamedCarrier("twilio", "Deepgram transfer requires carrier Twilio in the generated bridge"),
+				// Whoever builds the Deepgram driver: this needs carrier Twilio in
+				// the generated bridge. It is a comment rather than a condition
+				// because Deepgram has no route and no connection, so after the
+				// route moved into the connection file no author can write a
+				// carrier this row could ever see. A condition on a value nobody
+				// can supply only produces a refusal naming an impossible fix,
+				// which Principle II is against (spec FR-001a, research R11).
+				control(),
 			),
 			WarmTransfer: controls(
 				control(),
@@ -417,14 +424,18 @@ func Default() Table {
 				// transports have no transfer control at all. Writing either as the
 				// other is the defect FR-032 exists to stop.
 				controlDeny("this driver does not emit warm transfer yet; Daily documents the pattern but it needs the bot to own the call audio, and Pipecat's websocket transports have no transfer control at all. Warm compiles on (livekit, sip) today (SPEC C1, C4)"),
-				controlNamedCarrier("twilio", "Vapi warm transfer requires carrier Twilio"),
-				controlNamedCarrier("twilio", "Deepgram transfer requires carrier Twilio in the generated bridge"),
+				// Both rows: requires carrier Twilio when the driver is built. See
+				// the ColdTransfer/Deepgram row above for why this is a comment.
+				control(),
+				control(),
 			),
-			DTMFSend:           routedControls("dtmf_send"),
-			DTMFReceive:        routedControls("dtmf_receive"),
-			Hold:               routedControls("hold"),
-			Hangup:             controls(control(), control(), control(), control()),
-			VoicemailDetection: controls(control(), control(), control(), controlNamedCarrier("twilio", "Deepgram voicemail detection requires carrier Twilio AMD in the generated bridge")),
+			DTMFSend:    routedControls("dtmf_send"),
+			DTMFReceive: routedControls("dtmf_receive"),
+			Hold:        routedControls("hold"),
+			Hangup:      controls(control(), control(), control(), control()),
+			// Deepgram voicemail detection requires carrier Twilio AMD in the
+			// generated bridge; a comment for the same reason as ColdTransfer.
+			VoicemailDetection: controls(control(), control(), control(), control()),
 			IVRNavigation:      routedControls("ivr_navigation"),
 		},
 		Conditions: map[Field]map[Provider]ValueCondition{
@@ -467,9 +478,13 @@ func controlDeny(note string) ControlCapability {
 	return ControlCapability{Capability: Capability{Tag: Gated, Note: note}}
 }
 
-func controlNamedCarrier(carrier, note string) ControlCapability {
-	return ControlCapability{Capability: Capability{Tag: Core}, Carrier: carrier, ConditionNote: note}
-}
+// controlNamedCarrier stood here: a control gated on the target's carrier
+// alone. Its four users were the Vapi and Deepgram transfer rows, and they lost
+// the condition when `carrier` left the target — after that no author could
+// write a value those rows would see, so the condition could only ever produce
+// a refusal naming an impossible fix (spec FR-001a, research R11). The Carrier
+// field it set is still read by routedControls below, which pairs it with a
+// transport.
 
 func routedControls(name string) map[Provider]ControlCapability {
 	note := "required control " + name + " is proven only for the exact carrier Twilio and transport Daily SIP route"

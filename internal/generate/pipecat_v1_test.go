@@ -969,9 +969,8 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	enablePackageTelephony(pkg)
 	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
-	configured.Transport = "carrier-websocket"
-	configured.Carrier = "twilio"
 	configured.Connection = "primary_phone"
+	setConnectionRoute(pkg, "primary_phone", "carrier-websocket", "twilio")
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	outbound := true
 	phone := pkg.Agent.Channels["phone"]
@@ -1187,9 +1186,8 @@ func TestPipecatTelnyxTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	enablePackageTelephony(pkg)
 	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
-	configured.Transport = "carrier-websocket"
-	configured.Carrier = "telnyx"
 	configured.Connection = "primary_phone"
+	setConnectionRoute(pkg, "primary_phone", "carrier-websocket", "telnyx")
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = map[string]string{
@@ -1282,9 +1280,8 @@ func TestPipecatPlivoTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.T
 	enablePackageTelephony(pkg)
 	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
-	configured.Transport = "carrier-websocket"
-	configured.Carrier = "plivo"
 	configured.Connection = "primary_phone"
+	setConnectionRoute(pkg, "primary_phone", "carrier-websocket", "plivo")
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = map[string]string{
@@ -1626,9 +1623,8 @@ func TestUS1_NonDailyRouteKeepsGenericTransportParams(t *testing.T) {
 	enablePackageTelephony(pkg)
 	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
-	configured.Transport = "carrier-websocket"
-	configured.Carrier = "twilio"
 	configured.Connection = "primary_phone"
+	setConnectionRoute(pkg, "primary_phone", "carrier-websocket", "twilio")
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	agent, err := ir.Build(pkg)
 	if err != nil {
@@ -1661,9 +1657,8 @@ func carrierWebsocketArtifact(t *testing.T, carrier string) Artifact {
 	enablePackageTelephony(pkg)
 	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
-	configured.Transport = "carrier-websocket"
-	configured.Carrier = carrier
 	configured.Connection = "primary_phone"
+	setConnectionRoute(pkg, "primary_phone", "carrier-websocket", carrier)
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	// Each carrier names its own credentials; the fixture ships Twilio's.
 	if env := carrierEnvironment[carrier]; env != nil {
@@ -1937,7 +1932,16 @@ func TestUS3_NoPrerequisiteWithoutTheCapability(t *testing.T) {
 	billing := pkg.Agent.Agents["billing"]
 	billing.Tools = slices.DeleteFunc(slices.Clone(billing.Tools), func(name string) bool { return name == "to_human" })
 	pkg.Agent.Agents["billing"] = billing
-	pkg.Targets = map[string]spec.Target{"pipecat": pkg.Targets["pipecat"]}
+	// The transfer was the only thing using the phone route, so the connection
+	// goes with it. On the Daily-provisioned route those two are now the same
+	// question: the route has no carrier row in the capability table, so it
+	// never carries a telephony channel (research R10), which leaves a dialing
+	// control as the only way to use it. Dropping the control therefore drops
+	// the route, and what remains under test is that a project with no dial-out
+	// carries no prerequisite text anywhere.
+	configured := pkg.Targets["pipecat"]
+	configured.Connection = ""
+	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	agent, err := ir.Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -2127,6 +2131,22 @@ func targetByProvider(t *testing.T, agent *ir.Agent, provider ir.Provider) ir.Ta
 	return ir.Target{}
 }
 
+// setConnectionRoute declares a route in a connection, which is where a route
+// lives: a target names one connection and says nothing else about how a call
+// reaches it (spec FR-001). Tests that used to set target.Transport and
+// target.Carrier call this instead, and keep setting target.Connection.
+//
+// The connection need not already exist. A connection with a route and no
+// `environment:` block is legal, for the routes that need no credentials.
+func setConnectionRoute(pkg *spec.Package, connection, transport, carrier string) {
+	if pkg.Connections == nil {
+		pkg.Connections = map[string]spec.Connection{}
+	}
+	conn := pkg.Connections[connection]
+	conn.Transport, conn.Carrier = transport, carrier
+	pkg.Connections[connection] = conn
+}
+
 func enablePackageTelephony(pkg *spec.Package) {
 	inbound, outbound := true, false
 	pkg.Agent.Channels["phone"] = spec.Channel{
@@ -2212,9 +2232,8 @@ func TestPipecatCarrierWebsocketGreetsOnClientConnected(t *testing.T) {
 	enablePackageTelephony(pkg)
 	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
-	configured.Transport = "carrier-websocket"
-	configured.Carrier = "twilio"
 	configured.Connection = "primary_phone"
+	setConnectionRoute(pkg, "primary_phone", "carrier-websocket", "twilio")
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 
 	agent, err := ir.Build(pkg)
@@ -2246,7 +2265,8 @@ func TestV8_OutboundEmptyCallStartRendersSet(t *testing.T) {
 	enablePackageTelephony(pkg)
 	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
-	configured.Transport, configured.Carrier, configured.Connection = "carrier-websocket", "twilio", "primary_phone"
+	configured.Connection = "primary_phone"
+	setConnectionRoute(pkg, "primary_phone", "carrier-websocket", "twilio")
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	outbound := true
 	phone := pkg.Agent.Channels["phone"]

@@ -440,10 +440,13 @@ func buildPipecatCloudWebsocket(agent *ir.Agent, resolved ir.Target, env *envSet
 		Carrier:   plan.Key.Carrier,
 		StreamURL: pipecatCloudStreamURL(plan.Key.Carrier, firstRegion(resolved.DeploymentRegions)),
 	}
-	// A pure-inbound package declares no connection, so there is no vocabulary to
-	// check and no name to register. Skipping the round trip is not a shortcut: a
-	// connection is what carries the key set, and this shape has none.
-	if plan.Connection != "" {
+	// A pure-inbound package names a connection like every other telephony
+	// target — that is where the route is written — but declares no environment
+	// in it, because receiving a call on this route needs nothing from your
+	// account. So the test is whether there is a key set to check, not whether
+	// there is a connection. Whether an empty set is *allowed* was already
+	// decided in ir.validateTelephonyEnvironment, against the same table.
+	if len(plan.Environment) > 0 {
 		if err := pipecatConnectionVocabulary(plan, env); err != nil {
 			return nil, err
 		}

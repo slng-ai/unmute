@@ -1177,7 +1177,10 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 		// A REFER destination is a URI, not a bare number: this asserted
 		// `transfer_to="+14155550123"` until 2026-08-12, which is a shape no
 		// LiveKit example uses and which Plivo's Refer-To rules forbid outright.
-		`transfer_to="tel:+14155550123",`,
+		// The number itself now arrives from the environment, because a
+		// destination in agent.yaml names a variable rather than a number
+		// (spec FR-004d); _refer_uri adds the scheme at call time.
+		`transfer_to=_refer_uri(os.environ["BILLING_PHONE_NUMBER"]),`,
 		"await job_ctx.api.sip.transfer_sip_participant(request)",
 	} {
 		if !strings.Contains(botpy, want) {
@@ -1211,7 +1214,7 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	botpy = artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		"from livekit.agents.beta.workflows import WarmTransferTask, WorkflowInstructions",
-		`sip_call_to="+14155550123"`,
+		`sip_call_to=os.environ["BILLING_PHONE_NUMBER"]`,
 		// The conversation is read into one local and that local is what is
 		// handed over, so the count logged beside it cannot describe something
 		// else (003 contract C4).
@@ -1428,7 +1431,7 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		`_hydrate_call_start(session.userdata, call_start)`,
 		`await _livekit_entry_greeting(session)`,
 		"result = await WarmTransferTask(",
-		`sip_call_to="+14155550123",`,
+		`sip_call_to=os.environ["BILLING_PHONE_NUMBER"],`,
 	} {
 		if !strings.Contains(agentPy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -1588,7 +1591,8 @@ func configuredLiveKitSIP(t *testing.T) (*ir.Agent, ir.Target) {
 	}
 	enablePackageTelephony(pkg)
 	configured := pkg.Targets["livekit"]
-	configured.Transport, configured.Carrier, configured.Connection = "sip", "twilio", "primary_phone"
+	configured.Connection = "primary_phone"
+	setConnectionRoute(pkg, "primary_phone", "sip", "twilio")
 	pkg.Targets = map[string]spec.Target{"livekit": configured}
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = map[string]string{
@@ -1640,7 +1644,8 @@ func configuredLiveKitConnector(t *testing.T) (*ir.Agent, ir.Target) {
 	pkg.Agent.Variables["provider_call_id"] = spec.Variable{Type: "string", Source: "call_id"}
 	pkg.Agent.Variables["call_direction"] = spec.Variable{Type: "string", Source: "direction"}
 	configured := pkg.Targets["livekit"]
-	configured.Transport, configured.Carrier, configured.Connection = "connector", "twilio", "primary_phone"
+	configured.Connection = "primary_phone"
+	setConnectionRoute(pkg, "primary_phone", "connector", "twilio")
 	pkg.Targets = map[string]spec.Target{"livekit": configured}
 	agent, err := ir.Build(pkg)
 	if err != nil {

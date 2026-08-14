@@ -469,20 +469,7 @@ func TestComposeIgnoresRetiredTrunkNamesAndStillGuardsLocalTopology(t *testing.T
 // requires --telephony.
 func TestDevTelephonyProvisionalRouteDoesNotFailClosed(t *testing.T) {
 	dir := copySafeCore(t)
-	targetsPath := filepath.Join(dir, "targets.yaml")
-	raw, err := os.ReadFile(targetsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configured := mustReplace(t, string(raw),
-		"    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat",
-		"    transport: carrier-websocket\n    carrier: twilio\n    connection: primary_phone")
-	configured = mustReplace(t, configured,
-		"    sdk_language: python\n    models:",
-		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:")
-	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	routeSafeCore(t, dir, "carrier-websocket", "connector")
 	agentPath := filepath.Join(dir, "agent.yaml")
 	agentRaw, err := os.ReadFile(agentPath)
 	if err != nil {
@@ -566,20 +553,7 @@ func TestDevToFlagGuards(t *testing.T) {
 // process, naming the outbound requirement rather than the provisional gate.
 func TestDevToRejectsInboundOnlyTarget(t *testing.T) {
 	dir := copySafeCore(t)
-	targetsPath := filepath.Join(dir, "targets.yaml")
-	raw, err := os.ReadFile(targetsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configured := mustReplace(t, string(raw),
-		"    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat",
-		"    transport: carrier-websocket\n    carrier: twilio\n    connection: primary_phone")
-	configured = mustReplace(t, configured,
-		"    sdk_language: python\n    models:",
-		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:")
-	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	routeSafeCore(t, dir, "carrier-websocket", "connector")
 	agentPath := filepath.Join(dir, "agent.yaml")
 	agentRaw, err := os.ReadFile(agentPath)
 	if err != nil {
@@ -735,25 +709,9 @@ func contains(s []string, want string) bool {
 // "this route cannot be run locally".
 func TestDevTelephonyOnTheCloudWebsocketRouteReachesTheLocalFlow(t *testing.T) {
 	dir := copySafeCore(t)
-	targetsPath := filepath.Join(dir, "targets.yaml")
-	raw, err := os.ReadFile(targetsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configured := mustReplace(t, string(raw),
-		"    transport: daily-sip        # cold_transfer needs Daily SIP on Pipecat",
-		"    transport: cloud-websocket\n    carrier: twilio\n    connection: primary_phone")
-	configured = mustReplace(t, configured,
-		"    destinations:\n      billing_line: \"+14155550123\"\n\n  vapi:",
-		"    destinations:\n      billing_line: BILLING_PHONE_NUMBER\n\n  vapi:")
 	// The phone channel below is package-wide, so the LiveKit target needs a route
 	// too or the build refuses before this command's dispatch is ever reached.
-	configured = mustReplace(t, configured,
-		"    sdk_language: python\n    models:",
-		"    sdk_language: python\n    transport: connector\n    carrier: twilio\n    connection: primary_phone\n    models:")
-	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	routeSafeCore(t, dir, "cloud-websocket", "connector")
 	agentPath := filepath.Join(dir, "agent.yaml")
 	agentRaw, err := os.ReadFile(agentPath)
 	if err != nil {

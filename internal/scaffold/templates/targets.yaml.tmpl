@@ -12,8 +12,7 @@ targets:
 [[end]][[if .DeploymentRegions]]    deployment_region:[[if eq (len .DeploymentRegions) 1]] [[yaml (index .DeploymentRegions 0)]][[else]][[range .DeploymentRegions]]
       - [[yaml .]][[end]][[end]]
 [[end]][[if .Pins]]    pins:[[yamlBlock 6 .Pins]]
-[[end]][[if .Transport]]    transport: [[.Transport]]
-[[end]][[if .Carrier]]    carrier: [[.Carrier]]
-[[end]][[if .HumanTransfers]]    destinations:
-[[range .Destinations]]      [[.Destination]]: [[quote .Value]]
-[[end]][[end -]]
+[[end]][[if .Connection]]    # The whole route lives in connections/[[.Connection]].yaml: the transport,
+    # the carrier, and the credentials it needs.
+    connection: [[.Connection]]
+[[end -]]

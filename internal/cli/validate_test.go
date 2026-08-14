@@ -101,6 +101,19 @@ func TestValidateOmitsPrerequisiteWithoutTheCapabilityThatNeedsIt(t *testing.T) 
 	if err := os.WriteFile(path, trimmed, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// The transfer was the only thing dialling, and on this route dialling is
+	// the only way to use the connection: the Daily-provisioned form receives no
+	// calls, so it carries no phone channel (research R10). Dropping the control
+	// therefore drops the route with it.
+	targetsPath := filepath.Join(dir, "targets.yaml")
+	targets, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets = bytes.Replace(targets, []byte("    connection: daily\n"), nil, 1)
+	if err := os.WriteFile(targetsPath, targets, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	_, stderr, err := runValidateCommand(t, "--target", "pipecat", dir)
 	if err != nil {
 		t.Fatalf("validate: %v\n%s", err, stderr)
@@ -172,8 +185,8 @@ func writeDailyPackage(t *testing.T, region string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content = bytes.Replace(content, []byte("    transport: daily-sip\n"),
-		[]byte("    transport: daily-sip\n    deployment_region: "+region+"\n"), 1)
+	content = bytes.Replace(content, []byte("    connection: daily\n"),
+		[]byte("    connection: daily\n    deployment_region: "+region+"\n"), 1)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}

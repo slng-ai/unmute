@@ -33,14 +33,14 @@ func dailyCarrierArtifact(t *testing.T, carrier string, outbound bool) Artifact 
 		RequiredControls: []string{"cold_transfer", "hangup"},
 	}
 	configured := pkg.Targets["pipecat"]
-	configured.Carrier, configured.Connection = carrier, "twilio_sip_daily"
+	configured.Connection = "twilio_sip_daily"
 	// The env-name destination form, as the shipped example uses: it is the one
 	// that makes the runtime composition observable, and a committed fixture
 	// should not carry a dialable literal anyway.
-	configured.Destinations = map[string]string{"billing_line": "BILLING_PHONE_NUMBER"}
+	pkg.Agent.Destinations = map[string]string{"billing_line": "BILLING_PHONE_NUMBER"}
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	pkg.Connections = map[string]spec.Connection{"twilio_sip_daily": {
-		Kind: "telephony", Environment: map[string]string{
+		Transport: "daily-sip", Carrier: carrier, Environment: map[string]string{
 			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
 			"sip_address": "SIP_TRUNK_HOSTNAME", "from_number": "SIP_FROM_NUMBER",
 		},
@@ -444,10 +444,10 @@ func dailyCarrierArtifactWithoutTransfer(t *testing.T) Artifact {
 	phone.Inbound, phone.Outbound = &inbound, &outbound
 	pkg.Agent.Channels["phone"] = phone
 	configured := pkg.Targets["pipecat"]
-	configured.Carrier, configured.Connection = "twilio", "twilio_sip_daily"
+	configured.Connection = "twilio_sip_daily"
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	pkg.Connections = map[string]spec.Connection{"twilio_sip_daily": {
-		Kind: "telephony", Environment: map[string]string{
+		Transport: "daily-sip", Carrier: "twilio", Environment: map[string]string{
 			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
 			"sip_address": "SIP_TRUNK_HOSTNAME", "from_number": "SIP_FROM_NUMBER",
 		},
@@ -606,10 +606,10 @@ func carrierRenderData(t *testing.T) pipecatData {
 		RequiredControls: []string{"cold_transfer", "hangup"},
 	}
 	configured := pkg.Targets["pipecat"]
-	configured.Carrier, configured.Connection = "twilio", "twilio_sip_daily"
+	configured.Connection = "twilio_sip_daily"
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	pkg.Connections = map[string]spec.Connection{"twilio_sip_daily": {
-		Kind: "telephony", Environment: map[string]string{
+		Transport: "daily-sip", Carrier: "twilio", Environment: map[string]string{
 			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
 			"sip_address": "SIP_TRUNK_HOSTNAME", "from_number": "SIP_FROM_NUMBER",
 		},

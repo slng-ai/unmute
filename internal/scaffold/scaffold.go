@@ -38,13 +38,17 @@ const (
 
 // Data is the v1 agent configuration rendered by the scaffold templates.
 type Data struct {
-	Name              string
-	Target            string
-	Channel           string
-	Channels          []Channel
-	EntryAgent        string
+	Name       string
+	Target     string
+	Channel    string
+	Channels   []Channel
+	EntryAgent string
+	// Transport and Carrier describe the route. They are written into
+	// connections/<Connection>.yaml, never onto the target: a target names one
+	// connection and says nothing else about how a call reaches it (FR-001).
 	Transport         string
 	Carrier           string
+	Connection        string
 	TargetVersion     string
 	SDKLanguage       string
 	DeploymentRegions []string
@@ -221,7 +225,10 @@ type HumanTransfer struct {
 	Agent       string
 	When        string
 	Destination string
-	Value       string
+	// Value is the UPPER_SNAKE name of an environment variable holding the
+	// number, never the number itself: agent.yaml is the portable half of a
+	// package and a literal is refused at compile time (spec FR-004d).
+	Value string
 	// Mode is the shape block's name, `cold` or `warm` (SCHEMA N25). It is not
 	// written as a `mode:` field; it names the block the other values sit in.
 	Mode          string
@@ -304,7 +311,47 @@ func (d Data) withDefaults() Data {
 	if d.Capacity.AvgSessionDuration == "" {
 		d.Capacity.AvgSessionDuration = "5m"
 	}
+	if d.Connection == "" && d.UsesPhoneRoute() {
+		d.Connection = "phone"
+	}
 	return d
+}
+
+// UsesPhoneRoute reports whether anything in the package needs a connection: a
+// telephony channel, or a control that dials a person. Both are ways of using a
+// phone route, and a connection nothing uses is refused (spec FR-016).
+func (d Data) UsesPhoneRoute() bool {
+	for _, channel := range d.AllChannels() {
+		if channel.Kind == "telephony" {
+			return true
+		}
+	}
+	return len(d.HumanTransfers) > 0
+}
+
+// ConnectionEnvironment returns the environment keys the scaffolded route needs,
+// read from the capability table so the scaffold never carries its own copy of
+// the vocabulary (Principle III). Ordered for deterministic output.
+func (d Data) ConnectionEnvironment() []ConnectionKey {
+	required, _, ok := targetcap.TelephonyEnvironment(targetcap.TelephonyKey{
+		Provider: targetcap.Provider(d.Target), Transport: d.Transport, Carrier: d.Carrier,
+	})
+	if !ok {
+		return nil
+	}
+	keys := make([]ConnectionKey, 0, len(required))
+	for _, name := range required {
+		keys = append(keys, ConnectionKey{Key: name, Env: strings.ToUpper(name)})
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].Key < keys[j].Key })
+	return keys
+}
+
+// ConnectionKey is one line of a scaffolded connection's environment block: the
+// role the route gives the value, and the variable name holding it.
+type ConnectionKey struct {
+	Key string
+	Env string
 }
 
 // AllAgents returns the original assistant plus additional wizard agents in
@@ -496,6 +543,12 @@ func Write(dir string, d Data) ([]string, error) {
 		}
 		if rel == "env.example" {
 			rel = ".env.example" // dotfiles can't be embedded templates
+		}
+		if rel == "connections/phone.yaml" {
+			if d.Connection == "" {
+				return nil // nothing in this package uses a phone route
+			}
+			rel = filepath.Join("connections", d.Connection+".yaml")
 		}
 		out := filepath.Join(dir, rel)
 
