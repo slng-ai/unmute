@@ -5,6 +5,16 @@
 version: 1
 entry_agent: front_desk
 
+# Every environment variable this package needs you to set, in one list: model
+# keys and the number the transfer dials. There are no carrier credentials
+# because connections/daily.yaml names none — Daily carries its own calls. The
+# route still reads DAILY_API_KEY at runtime, and it is not listed here because
+# the route's own environment supplies it rather than you (SCHEMA §4.12).
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+  - BILLING_PHONE_NUMBER
+
 models:
   think:
     reasoning:

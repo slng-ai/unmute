@@ -1238,7 +1238,15 @@ var handlerEnvRead = regexp.MustCompile(`os\.(?:environ\.get\(|getenv\(|environ\
 
 // referencedEnvNames lists every environment variable the package points at,
 // with the site that names it, so an undeclared one can be reported (V10).
-// Connection env names are exempt: they are declared in their own file.
+//
+// Connection environment values and destinations are ordinary members of this
+// set. They used to be exempt, on the grounds that they are declared in their
+// own file; that left no single list of what a package needs to run, so
+// `secrets:` now carries every name the author wrote (spec FR-005a).
+//
+// Names the driver or the platform supplies are still absent, because no author
+// writes them: REDIS_URL, UNMUTE_PUBLIC_URL, LIVEKIT_*, DAILY_API_KEY and the
+// rest reach a package from its runtime, not from its source (FR-005c).
 func referencedEnvNames(agent *Agent) map[string]string {
 	refs := make(map[string]string)
 	note := func(name, site string) {
@@ -1273,6 +1281,19 @@ func referencedEnvNames(agent *Agent) map[string]string {
 	if agent.Tracing != nil {
 		for _, name := range []string{"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"} {
 			note(name, "tracing.provider: langfuse")
+		}
+	}
+	for _, name := range sortedKeys(agent.Connections) {
+		connection := agent.Connections[name]
+		for _, key := range sortedKeys(connection.Environment) {
+			note(connection.Environment[key], fmt.Sprintf("connections/%s.yaml environment %s", name, key))
+		}
+	}
+	// Destinations are declared once in agent.yaml and resolved onto every
+	// target, so any target carries the whole set (research R1).
+	for _, target := range sortedKeys(agent.Targets) {
+		for _, name := range sortedKeys(agent.Targets[target].Destinations) {
+			note(agent.Targets[target].Destinations[name], fmt.Sprintf("agent.yaml destinations %s", name))
 		}
 	}
 	return refs

@@ -343,8 +343,12 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	data.PluginModules = collectLiveKitPlugins(data)
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
-	data.Secrets, data.ExtraEnv = secretEnvDocs(agent, data.RequiredEnv)
 	data.PlatformEnv, data.OperatorEnv = splitPlatformEnv(data.RequiredEnv, tgt.Telephony)
+	// The undeclared-name list is built from the operator's half, not from every
+	// required name. A platform-supplied name belongs in exactly one section: it
+	// has its own, which explains that you do not set it. Listing it in both
+	// tells the reader to set a value and then not to.
+	data.Secrets, data.ExtraEnv = secretEnvDocs(agent, data.OperatorEnv)
 	return data, nil
 }
 
