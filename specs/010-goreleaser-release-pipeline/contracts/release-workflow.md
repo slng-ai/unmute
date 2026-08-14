@@ -16,7 +16,14 @@ GoReleaser CI docs ([research.md](../research.md), R12).
 | Env | `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` (release), `GH_PAT: ${{ secrets.GH_PAT }}` (tap and winget fork; empty until the secret exists, harmless while `skip_upload: true`) |
 
 Failure semantics: a failed run for a tag is safe to re-run; `--clean` wipes
-`dist/` first and release mode `keep-existing` (default) does not duplicate.
+`dist/` first and `release.replace_existing_artifacts: true` overwrites
+whatever the failed run already uploaded. This contract originally credited
+the default `keep-existing` mode with that safety, and it was wrong: mode
+only governs the release body, not assets, and v0.1.2's re-run on 2026-08-14
+failed every upload with `422 already_exists` before reaching the publishers.
+`replace_existing_artifacts` was added the same day. It rides the tagged
+commit's config, so tags at or before v0.1.2 stay unsafe to re-run once
+published; for those, delete the GitHub release (keep the tag) and re-run.
 A missing or expired `GH_PAT` fails the cask publish step loudly once
 Phase 2 flips (spec edge case). A failed winget PR logs but does not fail
 the run (documented GoReleaser behavior, accepted by the spec).

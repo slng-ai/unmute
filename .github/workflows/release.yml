@@ -3,8 +3,11 @@
 # writes SBOMs, publishes the GitHub Release, and (once the rollout phases flip
 # in .goreleaser.yaml) updates the Homebrew cask and opens the winget PR.
 #
-# A failed run for a tag is safe to re-run: --clean wipes dist/ first and the
-# default release mode does not duplicate assets.
+# A failed run for a tag is safe to re-run: --clean wipes dist/ first and
+# release.replace_existing_artifacts lets the re-run overwrite assets the
+# failed run already uploaded. Caveat: the run checks out the tag, so a tag
+# whose .goreleaser.yaml predates that key (v0.1.2 and earlier) re-runs into
+# `422 already_exists`; delete the GitHub release first, keep the tag, re-run.
 name: Release
 
 on:
