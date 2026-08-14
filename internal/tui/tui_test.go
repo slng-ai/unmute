@@ -991,26 +991,27 @@ func TestRunHumanTransfersRequireTelephony(t *testing.T) {
 
 func TestRunTelephonyCreateGatedOnConnection(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// The create wizard offers only code targets (Pipecat/LiveKit). Telephony on
-	// a code target requires a connection (build.go / scaffold.Preflight), which
-	// the wizard cannot set — telephony connections are targets.yaml config, not
-	// a scaffold field. So adding a telephony channel plus a human transfer builds
-	// the in-memory config, but Create is correctly gated until a connection
-	// exists. (Managed targets like ElevenLabs, which slipped past this gate, no
-	// longer exist — and never had a real telephony route anyway, SCHEMA N17.)
+	// The create wizard offers only code targets (Pipecat/LiveKit), and its
+	// Pipecat default is the Daily-provisioned route, which dials out and cannot
+	// receive. The wizard now writes a connection file, so what it still cannot
+	// supply is the carrier that route would need to serve a phone channel. So
+	// adding a telephony channel plus a human transfer builds the in-memory
+	// config, and Create is correctly gated until someone chooses a carrier.
+	// (Managed targets like ElevenLabs, which slipped past this gate, no longer
+	// exist — and never had a real telephony route anyway, SCHEMA N17.)
 	// Drive: create → add telephony channel → add human transfer → Create (blocked)
 	// → Back out of the repair menu → Back out of the editor → Quit.
 	input := "1\nagent\n" +
 		"4\n2\n1\n2\n5\n" +
-		"4\n3\n1\nto_human\n2\nCaller requests a person.\n3\nsupport_line\n4\n+14155550123\n8\n3\n" +
+		"4\n3\n1\nto_human\n2\nCaller requests a person.\n3\nsupport_line\n4\nSUPPORT_PHONE_NUMBER\n8\n3\n" +
 		"7\n10\n8\n3\n"
 	var output bytes.Buffer
 	got, _ := Run(strings.NewReader(input), &output, true)
 	if got.Confirmed {
-		t.Fatalf("telephony agent must not be created without a connection: %#v", got.Agent.Data)
+		t.Fatalf("telephony agent must not be created on a route that cannot receive calls: %#v", got.Agent.Data)
 	}
-	if !strings.Contains(output.String(), "requires connection for telephony") {
-		t.Fatalf("wizard did not surface the telephony connection gate:\n%s", output.String())
+	if !strings.Contains(output.String(), "cannot receive them") {
+		t.Fatalf("wizard did not surface the telephony route gate:\n%s", output.String())
 	}
 }
 
@@ -1136,17 +1137,18 @@ func TestTUIMatchesCapabilityTable(t *testing.T) { // docs/spec/tui.md V42
 }
 
 func TestV42ExecutionPickerDerivesFromTable(t *testing.T) { // docs/spec/tui.md V42
-	// Gated: mcp on Pipecat surfaces the table row's own note, then Back.
+	// Gated: mcp on Deepgram surfaces the table row's own note, then Back.
+	// (Pipecat emits MCP sources since N40, so its row is no longer a gate.)
 	var output bytes.Buffer
 	tool := scaffold.Tool{Name: "book_table"}
-	back, err := chooseToolExecution(newRunner(strings.NewReader("3\n1\n5\n"), &output, true), string(targetcap.Pipecat), &tool)
+	back, err := chooseToolExecution(newRunner(strings.NewReader("3\n1\n5\n"), &output, true), string(targetcap.Deepgram), &tool)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !back {
 		t.Fatal("gated mcp choice did not permit Back")
 	}
-	note := targetcap.Default().Capability(targetcap.FieldToolMCP, targetcap.Pipecat).Note
+	note := targetcap.Default().Capability(targetcap.FieldToolMCP, targetcap.Deepgram).Note
 	if !strings.Contains(output.String(), note) || !strings.Contains(output.String(), "Identity → Target") {
 		t.Fatalf("gated mcp choice omitted the table note or target guidance:\n%s", output.String())
 	}
@@ -1285,7 +1287,7 @@ func TestV25SavedResourcesOfferDelete(t *testing.T) { // docs/spec/tui.md V25
 		data.Tasks = []scaffold.Task{{Name: "collect", Instructions: "Collect", Result: `{"result":"string"}`, History: "full", Agent: "assistant", When: "Collect"}}
 		data.TaskGroups = []scaffold.TaskGroup{{Name: "flow", Steps: []string{"collect"}, ContextScope: "shared", Then: "return", Agent: "assistant", When: "Flow"}}
 		data.Channels = []scaffold.Channel{{Name: "phone", Kind: "telephony", Inbound: true}}
-		data.HumanTransfers = []scaffold.HumanTransfer{{Name: "to_human", Agent: "assistant", When: "Human", Destination: "support", Value: "+14155550123", Mode: "cold"}}
+		data.HumanTransfers = []scaffold.HumanTransfer{{Name: "to_human", Agent: "assistant", When: "Human", Destination: "support", Value: "SUPPORT_PHONE_NUMBER", Mode: "cold"}}
 		data.Fallbacks = []scaffold.ModelFallback{{Name: "backup", Profile: "assistant_model", Binding: data.Reason}}
 		return data
 	}
@@ -1422,13 +1424,19 @@ func TestValidateTaskResult(t *testing.T) {
 	}
 }
 
+// A destination names an environment variable and nothing else. The literal
+// forms the wizard used to accept are refused, because the value it collects
+// lands in agent.yaml, the portable half of a package (spec FR-004d).
 func TestValidateDestination(t *testing.T) {
-	for _, value := range []string{"+14155550123", "sip:agent@example.com", "sips:agent@example.com"} {
+	for _, value := range []string{"SUPPORT_PHONE_NUMBER", "BILLING_LINE", "L2"} {
 		if err := validateDestination(value); err != nil {
 			t.Errorf("validateDestination(%q) = %v", value, err)
 		}
 	}
-	for _, value := range []string{"14155550123", "https://example.com", "sip:no-host"} {
+	for _, value := range []string{
+		"+14155550123", "sip:agent@example.com", "sips:agent@example.com",
+		"14155550123", "https://example.com", "support_line", "2_LINES", "",
+	} {
 		if err := validateDestination(value); err == nil {
 			t.Errorf("validateDestination(%q) accepted", value)
 		}

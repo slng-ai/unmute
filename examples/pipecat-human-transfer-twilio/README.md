@@ -36,10 +36,12 @@ One account and three values, plus one lookup:
 
 | Value | Where it comes from |
 |---|---|
+| `OPENAI_API_KEY` | the reasoning model |
+| `SLNG_API_KEY` | the listen and speak models |
 | `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` | your Twilio account dashboard |
 | `TWILIO_PHONE_NUMBER` | a voice-capable number you own in that account |
 | `BILLING_PHONE_NUMBER` | wherever the transfer should land; your own mobile works for a test |
-| your organization slug | `pipecat cloud organizations list`, pasted into the markup once. It is the hyphenated machine slug (`zonal-bison-orange-168`), not your display name; the CLI's heading for that column has changed between versions |
+| `PIPECAT_CLOUD_ORGANIZATION` | `pipecat cloud organizations list`, pasted into the markup once. It is the hyphenated machine slug (`zonal-bison-orange-168`), not your display name; the CLI's heading for that column has changed between versions. The route supplies it at runtime, so it is not in `secrets:` |
 
 The same three `TWILIO_*` names
 [twilio-telephony-hello](../twilio-telephony-hello)'s Pipecat target uses, so one

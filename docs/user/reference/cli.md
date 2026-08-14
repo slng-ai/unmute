@@ -31,7 +31,7 @@ Scaffolds a new v1 package. The noninteractive default is exactly `agent.yaml`, 
 - A failed preflight opens a dedicated repair menu instead of printing above the creation menu. From there you can open the relevant saved-resource screens to edit or delete the failing configuration, then retry creation.
 - Tools are execution-neutral in the menu. Webhook is available in shipped starters; Local Python remains visible with the selected driver's exact support limitation when that driver cannot emit a handler.
 - Task results start as `{"result":"string"}`. Each key is one returned field whose value is a primitive type (`string`, `number`, `boolean`, or `integer`) or an enum; result-to-variable assignment uses pickers rather than handwritten JSON.
-- Handoffs stay unavailable until two agents exist. Task groups stay unavailable until a task exists. Telephony declares required behavior and target transport/carrier only—it does not provision a phone number, SIP trunk, room, or carrier account.
+- Handoffs stay unavailable until two agents exist. Task groups stay unavailable until a task exists. Telephony declares required behavior and writes a connection file with the route only—it does not provision a phone number, SIP trunk, room, or carrier account.
 - Before the review screen, the candidate is rendered in a temporary directory
   and sent through the real load, build, and selected-target generator. The
   review shows target warnings, required environment names, and forwarded

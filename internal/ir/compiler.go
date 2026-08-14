@@ -269,8 +269,13 @@ type Tool struct {
 	Path string `json:"path,omitempty" yaml:"path,omitempty"`
 	// Inject holds hidden request values, merged into the call and never shown to
 	// the model. String values may hold {{variable}} tokens.
-	Inject       map[string]any   `json:"inject,omitempty" yaml:"inject,omitempty"`
-	Auth         *ToolAuth        `json:"auth,omitempty" yaml:"auth,omitempty"` // webhook auth; nil = unauthenticated
+	Inject map[string]any `json:"inject,omitempty" yaml:"inject,omitempty"`
+	Auth   *ToolAuth      `json:"auth,omitempty" yaml:"auth,omitempty"` // webhook or mcp auth; nil = unauthenticated
+	// MCPTransport is "", "sse", or "streamable_http" (mcp only). Empty leaves
+	// the choice to the platform's own rule for the URL (SCHEMA N40).
+	MCPTransport string `json:"mcp_transport,omitempty" yaml:"mcp_transport,omitempty"`
+	// MCPTools selects server tool names to expose (mcp only); empty = all.
+	MCPTools     []string         `json:"mcp_tools,omitempty" yaml:"mcp_tools,omitempty"`
 	Interruption ToolInterruption `json:"interruption,omitempty" yaml:"interruption,omitempty"`
 	Effect       ToolEffect       `json:"effect,omitempty" yaml:"effect,omitempty"`
 }
@@ -305,6 +310,13 @@ const (
 // DefaultAPIKeyHeader is the api_key header name applied in Build when the
 // block omits one.
 const DefaultAPIKeyHeader = "X-API-Key"
+
+// The two remote MCP transports (SCHEMA N40). Local stdio servers are out of
+// scope, so a transport is always one of these or absent.
+const (
+	MCPTransportSSE            = "sse"
+	MCPTransportStreamableHTTP = "streamable_http"
+)
 
 type ToolInterruption string
 

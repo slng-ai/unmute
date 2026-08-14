@@ -167,6 +167,24 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
   **Why the connector left that package.** `connector` is documented in `docs/TELEPHONY.md` as the optional Twilio-only route, with `sip` as the default multi-carrier LiveKit route, and the example set had it the other way round: the "hello" package taught the optional route, which a reader then has to abandon as soon as they need a transfer. The cost is real and is written on the example's page rather than discovered: an inbound SIP call cannot reach a laptop, because SIP needs carrier-reachable signalling and RTP and no HTTPS tunnel supplies them. What the package gains is that each target can be exercised in one direction locally, inbound on Pipecat and outbound on LiveKit, and both directions are covered between them. The `connector` route itself is untouched, still ships, and keeps its coverage through `examples/outbound-reminder`.
   **Nothing to migrate.** Every renamed package compiles byte-identically at its new path, and the retargeted one compiles what `transport: sip` has always compiled. A package of your own that names `connector` is unaffected.
 
+- **N40 (2026-08-14).** **An MCP server is a tool source, and an `mcp:` file is the block and nothing else.** The block grows from one field to four: `url_env` (required), `transport` (optional, `sse` or `streamable_http`), `auth` (optional, the same `bearer`/`api_key` shape webhook auth uses, section 5.3), and `tools` (optional list of server tool names). At the same time every top-level field that states one tool's contract with the model becomes **illegal** on an `mcp` file: `description`, `input`, `output`, `inject`, `interruption`, and `effect`. Both shipped drivers emit the block: LiveKit as one `mcp.MCPToolset` per source on the agent's or task's `tools` surface (the deprecated `mcp_servers=` parameter is gone), Pipecat as one `MCPClient` per source, started at setup and closed on shutdown. The Pipecat maturity gate is lifted with them.
+  **Why the contract has to go.** The server announces each tool's name, description, and parameters when the connection opens, and no driver has ever read the `description` or `input` written in an `mcp` file. A declared contract nobody reads is a silent lie: it looks like the thing the model sees, and it is not. Removing it also removes the old undocumented convention it existed to serve, where one file per server-side tool had to be named exactly like that tool, and the LiveKit driver collapsed every file sharing a `url_env` into one server mount with `allowed_tools=[<file names>]`. One file is now one server, and `tools:` says which of its tools to expose, by their real names.
+  **Selection and transport.** No `tools:` list means every tool the server exposes; a list means exactly those, enforced by each platform's own filter (`allowed_tools` on LiveKit, `tools_filter` on Pipecat). A name the server does not expose is never offered and cannot be checked at compile time, because the tool list only exists at run time; the emitted runbook says so. No `transport:` means the platform's own rule for the URL, which is the same sentence on both targets: a path ending in `/mcp` is streamable HTTP, anything else is SSE. A stated transport always wins.
+  **What breaks.** An existing `mcp` tool file written the old way, with a top-level `description` and `input`, now **fails at load**, with the file, the line of each illegal field, and what to remove. That is deliberate: the fields were inert, and the file's name no longer has to match a server-side tool. Nothing else migrates. Two files may name the same `url_env`; they are two independent sources with their own selections and their own assignments.
+  **Reach.** Every environment variable the block names, the address and the token alike, reaches the generated `.env.example`, the project's startup check, and the compile report's reference sites (`tools/<name>.yaml mcp.url_env`, `tools/<name>.yaml mcp.auth.token_env`), so a missing value is named before anything dials. Secrets stay environment variable names in the package, never values. Verified against livekit-agents 1.6.4 and pipecat-ai 1.5.0 on 2026-08-14; `examples/mcp-example` is the runnable proof.
+
+- **N41 (2026-08-14).** **The connection owns the phone route.** A target names one connection and declares nothing else about how a call reaches it. The connection file declares `transport`, `carrier`, and the account environment names, so a route is one file to read rather than three lines in one file plus a second file.
+  **Supersedes four clauses.** §6.1's `transport` and `carrier` target-field rows: both fields are removed from a target and belong in `connections/<name>.yaml`. §6.1's `destinations` row: it moves to the top level of `agent.yaml` and narrows to environment-variable names only. §6.3's connection example: `kind:` is removed, and `transport`/`carrier` are added. §4.12's exemption of connection environment names from the `secrets:` cross-check: removed. **N16's** "Connections ... never repeat `carrier`; the target owns that choice" is reversed — the connection owns it, and no target has one. The superseded text stays above as history.
+  **What a target keeps:** `provider`, `version`, `pins`, `sdk_language`, `connection`, `deployment_region`, `models`. Nothing else.
+  **A connection has three valid shapes**: transport + carrier + environment; transport + carrier with no environment, for receive-only on `(pipecat, cloud-websocket, twilio)`, where the platform terminates the carrier's stream itself; and transport alone, for the Daily-provisioned `daily-sip` form, which carries its own calls. The carrier-less form dials out and cannot receive, so it never serves a `channels.phone` entry, and it has no row in the capability table at all — the only Daily row is the carrier leg, a different thing.
+  **`destinations` moves and narrows.** It sits at the top level of `agent.yaml`, and a value must be the `UPPER_SNAKE` name of an environment variable. The literal E.164 and `sip:` forms N26 accepted are refused: `agent.yaml` is the portable half of a package and a number is a deployment fact. **The per-target destination override is removed with nothing replacing it.** That is a removed capability, not tidying: a package that pointed one target at a different desk now cannot. It was never used by any shipped example, and who a transfer reaches is the same question whichever carrier reaches them.
+  **`secrets:` covers telephony names.** Connection environment values and destination values are ordinary members of the §4.12 cross-check. A missing name is a warning on stderr, exit 0, which is the severity §4.12 already sets for every environment name. Raising it for telephony names alone would give an author two behaviours with no principle between them; raising it for all names is deferred.
+  **A knock-on in the capability table.** Four control rows conditioned on the target's `carrier` for `vapi` and `deepgram`: Deepgram cold transfer, Vapi warm transfer, Deepgram warm transfer, Deepgram voicemail detection. Those providers have no route and no connection, so after this change no author can write a carrier those rows could see, and the condition could only produce a refusal naming a fix nobody can perform. All four lose the condition and keep their Twilio requirement as a comment for whoever builds those drivers. **The visible consequence:** `unmute validate` now reports those four controls as supported on `vapi` and `deepgram` without qualification. Measured before deciding: stripping `carrier` from `internal/testdata/safe_core` broke exactly one of the four.
+  **No deprecation path.** The repository is pre-release with no external packages: one shape loads, one shape is tested, one shape is documented. Each moved field is refused by name, quoting the line and naming its new home, never as a bare "unknown field".
+
+- **N42 (2026-08-14).** **Recorded exception: one environment name is written in two files.** A connection's `environment` maps a role to a variable name, and §4.12 now also requires that name in `secrets:`. The two lines answer different questions — the connection says which *role* the value plays on the route, which `secrets:` cannot express; `secrets:` says the runtime requires it, which the connection cannot express for names no author writes — but the fact is stated twice, and the only agreement between them is the §4.12 cross-check, which **warns** rather than fails.
+  **The cost, stated rather than hidden:** a package that names a variable in a connection and forgets it in `secrets:` compiles green and fails on its first phone call. Deriving `secrets:` from every site was considered and rejected as far larger than the change that raised it. This is the same shape of exception as N22's tool `output`: a deliberate duplication, recorded here so the next reader finds it where the rule lives rather than in a feature's planning notes.
+
 - **N28 (2026-08-11).** Human transfer works on the **LiveKit Twilio connector** route, lowered by our own bridge rather than LiveKit's SIP machinery. `transfer_sip_participant` and `WarmTransferTask` both act on a SIP participant reached through an outbound trunk, and the connector has neither: its caller is audio the generated `telephony_bridge.py` published into a room. What the bridge does have is the Twilio call itself, which is the same thing the Pipecat carrier-WebSocket route builds its transfers out of, so the two routes make the identical carrier moves: cold redirects the caller's call over the REST API, warm creates a second streamed call whose media socket lands on the same bridge. An agreement test pins that sameness, because one Twilio product behaving two ways would be a bug.
   The agent and the bridge talk over **LiveKit RPC**: the bridge is already a participant in the agent's room, so there is no Redis on this route (there never was) and no side channel. Privacy on a warm transfer is a property of the topology, as on Pipecat: each phone leg has its own WebSocket and its own downlink, a held leg is sent a synthesized hold loop instead of room audio, and no leg is ever forwarded its own audio.
   What this changes for authors: nothing in `agent.yaml`. The same `cold:` and `warm:` blocks now compile on a route that runs on a laptop with three Twilio credentials, which the SIP route cannot do at all (a carrier opens SIP signalling to a public `sip:` URI and sends RTP over UDP; no HTTPS tunnel carries either). The two LiveKit routes are a trade-off, not a hierarchy: SIP buys LiveKit-maintained machinery, RTP media, cheaper minutes and any carrier; the connector buys a laptop.
@@ -195,8 +213,8 @@ tools/
   lookup_customer.yaml  # contract: input, output, execution, interruption, effect
   lookup_customer.py    # handler, code targets only
 connections/
-  primary_phone.yaml    # external telephony account, env names only
-targets.yaml          # named target instances: provider, pins, destinations, model overrides
+  primary_phone.yaml    # one phone route: transport, carrier, env names only
+targets.yaml          # named target instances: provider, pins, connection, model overrides
 ```
 
 Rules:
@@ -224,6 +242,7 @@ Named maps instead of lists, so every item has a stable identity and diffs stay 
 | `turn` | only when `models.turn` has 2+ entries | name of a turn model, see 4.2 | warn |
 | `variables` | no | map, see 4.4 | core |
 | `secrets` | no | list of env var names, see 4.12 | core |
+| `destinations` | if any `human_transfer` is used | map of symbolic name to an env var name (N41) | core |
 | `agents` | yes, must include `entry_agent` | map, see 4.5 | core |
 | `tasks` | no | map, see 4.6 | gated (T1) |
 | `task_groups` | no | map, see 4.6 | gated (T1) |
@@ -409,7 +428,7 @@ Fields inside either block:
 
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
-| `destination` | yes | symbolic name | core | Resolves through the target instance's `destinations:` map to a number or SIP URI. |
+| `destination` | yes | symbolic name | core | Resolves through `agent.yaml`'s top-level `destinations:` map to the name of an environment variable holding a number or SIP URI (N41). |
 | `ring_timeout` | no | duration | gated | How long to wait for the person to pick up. Omitted from the emitted call when unset, so the platform default applies (LiveKit: 30s; the Pipecat Twilio route: Twilio's own 60s dial timeout). |
 | `on_unavailable` | no, default `return_to_caller` | `return_to_caller \| hangup` | gated | One concept covering every way the person does not take the call: no answer, declined, voicemail, dial failure. LiveKit surfaces all four as one `ToolError`, so the lowering is one branch, not four. |
 
@@ -533,6 +552,16 @@ on its first tool call. The scan is a text match, not a Python parse, so a name
 in a comment counts: the check over-reports rather than under-reports, since a
 spurious line costs one extra declaration and a miss costs a live call.
 
+Connection `environment` values and `agent.yaml` `destinations` values are part
+of the cross-check (amended 2026-08-14, N41). They were exempt on the grounds
+that a connection declares them in its own file; that left no single list of
+what a package needs to run. Names **no author writes** stay out, because
+nothing in the package declares them: `REDIS_URL`, `UNMUTE_PUBLIC_URL`, and
+`UNMUTE_OUTBOUND_TOKEN` come from `unmute dev` or the operator; `LIVEKIT_URL`
+and its key pair from the Compose graph or LiveKit Cloud; `DAILY_API_KEY` and
+`PIPECAT_CLOUD_ORGANIZATION` from the route's own runtime. The duplication this
+creates is recorded as an exception in N42.
+
 ---
 
 ## 5. tools/*.yaml
@@ -570,13 +599,13 @@ interruption: provider_default
 
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
-| `description` | yes, except `builtin` | text | core | What the LLM reads. Optional for a `builtin` tool, where the prebuilt registry supplies a default and this text is added on top. |
-| `input` | yes, except `builtin` | JSON Schema object | core | The parameters the model fills in; lowers natively everywhere (N10). A `builtin` tool has no `input`: the prebuilt owns its schema. |
-| `output` | no | JSON Schema object | warn | Declared and carried into the compile report, but **not enforced anywhere yet** (N22): no driver reads it. Only Vapi warns, and the tag is `warn` on that basis alone. Not legal on a `builtin` tool. |
+| `description` | yes, except `builtin` and `mcp` | text | core | What the LLM reads. Optional for a `builtin` tool, where the prebuilt registry supplies a default and this text is added on top. **Not legal on an `mcp` tool** (N40): the server describes each of its own tools. |
+| `input` | yes, except `builtin` and `mcp` | JSON Schema object | core | The parameters the model fills in; lowers natively everywhere (N10). A `builtin` tool has no `input`: the prebuilt owns its schema. **Not legal on an `mcp` tool** (N40): the server owns each tool's parameters. |
+| `output` | no | JSON Schema object | warn | Declared and carried into the compile report, but **not enforced anywhere yet** (N22): no driver reads it. Only Vapi warns, and the tag is `warn` on that basis alone. Not legal on a `builtin` or `mcp` tool. |
 | one execution block | yes, exactly one | `webhook \| local \| mcp \| builtin \| client \| provider_hosted` | see 5.2 | Zero blocks and two-or-more blocks both fail at load with file:line. |
 | `inject` | no | flat map of request key to scalar | gated (N23) | Values merged into the call and **never shown to the model**, so it can neither see nor overwrite them: the place a user id or a captured slot rides along. A string value may hold `{{variable}}` tokens; a value that is exactly one token keeps the variable's declared type. A key here may not also appear in `input.properties`. Legal on `webhook` and `local` only — the two kinds whose request unmute builds itself. Fails on Vapi and Deepgram. |
-| `interruption` | no, default `provider_default` | `continue \| cancel \| provider_default` | warn | Honored on Pipecat (`cancel_on_interruption`); LiveKit runs tools to completion, so non-default values warn there (2026-07-16). On managed targets only `provider_default` means anything; other values warn. |
-| `effect` | no, default `returns_data` | `returns_data \| ends_conversation` | core | Fixed by the registry for a `builtin` tool (`end_call` implies `ends_conversation`); a conflicting value fails. |
+| `interruption` | no, default `provider_default` | `continue \| cancel \| provider_default` | warn | Honored on Pipecat (`cancel_on_interruption`); LiveKit runs tools to completion, so non-default values warn there (2026-07-16). On managed targets only `provider_default` means anything; other values warn. Not legal on an `mcp` tool (N40). |
+| `effect` | no, default `returns_data` | `returns_data \| ends_conversation` | core | Fixed by the registry for a `builtin` tool (`end_call` implies `ends_conversation`); a conflicting value fails. Not legal on an `mcp` tool (N40). |
 
 ### 5.2 Execution blocks
 
@@ -584,7 +613,7 @@ interruption: provider_default
 |---|---|---|
 | `webhook:` | `url_env` (required), `path` (optional), `auth` (optional, 5.3) | works everywhere. **The safe choice.** `path` is appended to the env base URL, must start with `/`, may hold `{{variable}}` tokens whose rendered values are URL-encoded, and fails on Vapi and Deepgram (N23). |
 | `local:` | `handler` (path, default `tools/<name>.py`) | code targets only |
-| `mcp:` | `url_env` (the MCP server address) | **fails on Deepgram** (no runtime MCP client); on LiveKit needs `sdk_language: python` (driver-livekit B3, 2026-07-16). The block where MCP auth would land later. |
+| `mcp:` | `url_env` (required, the MCP server address), `transport` (optional, `sse \| streamable_http`), `auth` (optional, 5.3), `tools` (optional list of server tool names) | **fails on Deepgram** (no runtime MCP client); on LiveKit needs `sdk_language: python` (driver-livekit B3, 2026-07-16). The file is the block and nothing else: no `description`, `input`, `output`, `inject`, `interruption`, or `effect`, because the server owns each tool's contract (N40). An absent `transport` takes the platform's own rule for the URL (a path ending in `/mcp` is streamable HTTP, otherwise SSE); an absent `tools` list offers every tool the server exposes. A listed name the server does not expose is simply never offered: the server's tool list only exists at run time, so the compiler cannot check it. |
 | `builtin:` | `id` (prebuilt registry id, v1 `end_call`), `instructions` (optional closing line) | LiveKit and Pipecat host the registry; **fails on Vapi and Deepgram**. LiveKit lowers `end_call` to the beta `EndCallTool`, Pipecat to a bodyless end tool. Unknown id fails with file:line. |
 | `client: {}` / `provider_hosted: {}` | none | gated per driver; not part of the safe core |
 
@@ -592,11 +621,14 @@ interruption: provider_default
 name is `UPPER_SNAKE`, so a pasted URL or secret fails validation rather than
 landing in the spec.
 
-The Pipecat driver v1 emits the `webhook`, `local`, and `builtin` blocks
+The Pipecat driver v1 emits the `webhook`, `local`, `builtin`, and `mcp` blocks
 (amended 2026-07-17, driver-pipecat T14: `local` lowers to the same `@tool`
 method, body awaiting the user handler from `tools/<name>.py`; `builtin` added
-2026-07-22, prebuilt-tools T6); `mcp` stays maturity-gated there until the
-driver emits it.
+2026-07-22, prebuilt-tools T6; `mcp` added 2026-08-14, N40). One scope is still
+out of reach there: an `mcp` source listed on a **task** fails by name, because
+a Pipecat Flows node advertises only the function schemas it lists and the
+SDK's MCP client exposes no per-tool handler to put in one. List the source on
+the agent instead. LiveKit holds both scopes.
 
 ### 5.3 Webhook auth (added 2026-08-10, compiler T23; hmac removed 2026-08-10)
 
@@ -641,11 +673,12 @@ Named target instances: which orchestrator runs the package, and the infrastruct
 | `provider` | yes | `livekit \| pipecat \| vapi \| deepgram` for now (N17). |
 | `version` | code targets | Framework pin. The driver checks it against the range its templates support. A codegen check, not model validation. |
 | `pins` | no | Independently versioned packages (LiveKit plugins) get their own entries. Pipecat Flows no longer qualifies: it ships inside `pipecat-ai` core since 1.5.0; never pin the deprecated standalone `pipecat-ai-flows`. |
-| `sdk_language` | no | LiveKit: warm transfer and MCP need `python`. |
-| `transport`, `carrier`, `connection` | required for LiveKit or Pipecat telephony | Driver route vocabulary and a Connection name. Telephony features resolve against the exact tuple, never the orchestrator or carrier alone. |
+| `sdk_language` | no | LiveKit: warm transfer and MCP tool sources need `python`. The Node SDK has no `MCPToolset`, so an `mcp:` tool on a Node target fails by name (N40). |
+| `connection` | required for LiveKit or Pipecat telephony | The name of one `connections/<name>.yaml`, which declares the whole route. Telephony features still resolve against the exact `(provider, transport, carrier)` tuple, never the orchestrator or carrier alone; the target contributes the provider and the connection contributes the other two. |
+| ~~`transport`, `carrier`~~ | — | **Superseded by N41 (2026-08-14).** Both moved into the connection file. Writing either on a target is refused, naming the file it belongs in. |
 | `deployment_region` | no | Where the target platform runs the deployed agent: one region, or a list of them (N18, widened by N32). Provider vocabulary, forwarded as declared, never validated or derived. Pipecat: the `region` key in the emitted `pcc-deploy.toml`, exactly one; a list of more than one is a gated error, and a second region is a differently named agent. LiveKit: the `--region` flag on the `lk agent create` command in the generated README, one deployment per declared region (create-time, immutable). A model's own service region rides its `params`/`endpoint_env` instead. Replaces the retired `region`/`edition` fields (N17). |
 | `models` | no | Per-target overrides, see 6.2. |
-| `destinations` | if any `human_transfer` is used | Map of symbolic name to an E.164 number, a `sip:`/`sips:` URI, or the UPPER_SNAKE name of an environment variable holding one of those (N24). The three are told apart by shape. A named variable rides into `.env.example` and the required-env list; the model still only ever picks the symbolic name. |
+| ~~`destinations`~~ | — | **Superseded by N41 (2026-08-14).** Moved to the top level of `agent.yaml` and narrowed to the UPPER_SNAKE name of an environment variable; the literal E.164 and `sip:` forms N24 accepted are refused. The per-target override is removed with nothing replacing it. Writing it on a target is refused, naming `agent.yaml`. |
 
 ### 6.2 Overrides (amended 2026-07-19, N15)
 
@@ -674,29 +707,36 @@ Why never validated: provider model lists change faster than any shipped catalog
 
 ### 6.3 Telephony connections and routes
 
-Telephony Connections keep account-specific environment names outside the
-portable Agent and outside target route selection:
+A telephony Connection is one phone route: the mechanism, the carrier, and the
+account-specific environment names, all outside the portable Agent (amended
+2026-08-14, N41 — the route fields moved here from the target, and `kind:` was
+removed):
 
 ```yaml
 # connections/primary_phone.yaml
-kind: telephony
+transport: carrier-websocket
+carrier: twilio
 environment:
   account_sid: TWILIO_ACCOUNT_SID
   auth_token: TWILIO_AUTH_TOKEN
   from_number: TWILIO_PHONE_NUMBER
 ```
 
-The target binds that Connection to an exact route:
+The target names it and declares nothing else about telephony:
 
 ```yaml
 targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: carrier-websocket
-    carrier: twilio
     connection: primary_phone
 ```
+
+`carrier` is omitted only where the route has no carrier leg, which today is
+the Daily-provisioned `daily-sip` form alone. `environment` is omitted where the
+route needs no account values: that form, and receive-only on
+`(pipecat, cloud-websocket, twilio)`. `transport` is always required — a
+connection with no transport declares no route.
 
 A package may add more named targets and Connections for every supported
 carrier route it needs. There is no package-level route-count field. The
@@ -776,7 +816,7 @@ Feature by feature:
 | `webhook.path` | ok | ok | fail | fail |
 | `source: conversation` (+ generated `update_variables`) | ok | ok | fail | fail |
 | `secrets:` block (`.env.example`, startup check) | ok | ok | n/a | n/a |
-| mcp tools | Python only | gated (v1) | ok | fail |
+| mcp tools | Python only | ok (agent scope; a task-scoped source fails) | ok | fail |
 | outbound + `on_voicemail` | ok | gated (v1) | ok | generated (warn) |
 | tracing `provider: langfuse` | ok | ok | fail | fail |
 
@@ -829,4 +869,4 @@ Still open:
 
 | Driver | Gated until emitted | Where |
 |---|---|---|
-| Pipecat v1 | `models.fallback`, `thinking_audio`, `outbound` + `on_voicemail`, `mcp` tools, warm transfer on every route (Daily documents it, this project has not built it, a planned follow-up feature; the carrier-WebSocket routes have no transfer control at all) and cold transfer off the Daily route ([TRANSFERS.md](TRANSFERS.md), N34); transfer/task context shaping beyond the safe-core defaults — `history` other than `full`, `context.variables` subset, `include_tool_calls: false` (the workers handoff carries the running context; fine-grained shaping is not emitted yet). (`local` tools lifted 2026-07-17.) | [internal/generate/pipecat_v1.go](../internal/generate/pipecat_v1.go). Emitted: single agent, `agent_transfer` (+ `requires` guard), `tasks`, `task_groups` with `context_scope` (shared/isolated), `then` return/transfer/end, `local` tools (2026-07-17). |
+| Pipecat v1 | `models.fallback`, `thinking_audio`, `outbound` + `on_voicemail`, an `mcp` source listed on a **task** (agent scope is emitted; a Flows node advertises only its own function schemas), warm transfer on every route (Daily documents it, this project has not built it, a planned follow-up feature; the carrier-WebSocket routes have no transfer control at all) and cold transfer off the Daily route ([TRANSFERS.md](TRANSFERS.md), N34); transfer/task context shaping beyond the safe-core defaults — `history` other than `full`, `context.variables` subset, `include_tool_calls: false` (the workers handoff carries the running context; fine-grained shaping is not emitted yet). (`local` tools lifted 2026-07-17, `mcp` tool sources 2026-08-14.) | [internal/generate/pipecat_v1.go](../internal/generate/pipecat_v1.go). Emitted: single agent, `agent_transfer` (+ `requires` guard), `tasks`, `task_groups` with `context_scope` (shared/isolated), `then` return/transfer/end, `local` tools (2026-07-17), `mcp` tool sources on an agent (2026-08-14, N40). |

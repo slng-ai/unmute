@@ -2,7 +2,16 @@
 [[end]]builtin:
   id: [[.Builtin]]
 [[if .Instructions]]  instructions: [[quote .Instructions]]
-[[end]][[else]]description: [[quote .Description]]
+[[end]][[else if eq .ExecutionKind "mcp"]]mcp:
+  url_env: [[.URLEnv]]
+[[if .MCPTransport]]  transport: [[.MCPTransport]]
+[[end]][[if .Auth]]  auth:
+    type: [[.Auth.Type]]
+    token_env: [[.Auth.TokenEnv]]
+[[if .Auth.Header]]    header: [[.Auth.Header]]
+[[end]][[end]][[if .MCPTools]]  tools:
+[[range .MCPTools]]    - [[.]]
+[[end]][[end]][[else]]description: [[quote .Description]]
 input:[[yamlBlock 2 .Input]]
 [[if .Output]]output:[[yamlBlock 2 .Output]]
 [[end]]

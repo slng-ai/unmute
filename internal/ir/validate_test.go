@@ -234,10 +234,37 @@ func TestValidateOutboundRequiresSatisfiableVariablesAndWarnsOnDeepgram(t *testi
 	if err != nil || !strings.Contains(strings.Join(report.PerTarget[0].Warnings, "\n"), "carrier-conditional") {
 		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
 	}
-	target.Carrier = ""
-	report, err = Validate(agent, []Target{target}, targetcap.Default())
-	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "carrier Twilio AMD") {
-		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+}
+
+// The four capability rows that used to gate Vapi and Deepgram on their target's
+// carrier lost that condition when `carrier` left the target, because no author
+// can write one where those rows would see it and a refusal naming an impossible
+// fix is worse than no condition at all (spec FR-001a, research R11).
+//
+// safe_core only ever reached the Deepgram cold-transfer row. The other three
+// are unreachable from any shipped package, so without this they would change
+// untested. The Twilio requirement each row records survives as a comment in
+// internal/target/table.go for whoever builds those drivers.
+func TestDriverlessProvidersResolveTransfersWithNoCarrier(t *testing.T) {
+	agent := safeAgent(t)
+	phone := testTelephonyChannel()
+	outbound := true
+	phone.Outbound = &outbound
+	agent.Channels["phone"] = phone
+
+	for _, provider := range []Provider{ProviderVapi, ProviderDeepgram} {
+		target := targetFor(agent, provider)
+		if target.Carrier != "" {
+			t.Fatalf("%s carries a carrier %q; this feature removed the field from every target", provider, target.Carrier)
+		}
+		for _, control := range []targetcap.TelephonyControl{
+			targetcap.ColdTransfer, targetcap.WarmTransfer, targetcap.VoicemailDetection,
+		} {
+			resolved := targetcap.Default().Control(control, targetcap.Provider(provider), target.Transport, target.Carrier)
+			if resolved.Tag == targetcap.Gated && strings.Contains(resolved.Note, "carrier") {
+				t.Errorf("%s %s is gated on a carrier no author can write: %s", provider, control, resolved.Note)
+			}
+		}
 	}
 }
 
@@ -288,11 +315,7 @@ func TestValidateTelephonyProvisionalRouteIsUsableAndQuiet(t *testing.T) {
 	phone := pkg.Agent.Channels["phone"]
 	phone.RequiredControls = []string{"hangup"}
 	pkg.Agent.Channels["phone"] = phone
-	target := pkg.Targets["pipecat"]
-	target.Transport = "carrier-websocket"
-	target.Carrier = "twilio"
-	target.Connection = "primary_phone"
-	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -318,9 +341,7 @@ func TestValidateOutboundWithoutVoicemailRaisesNoVoicemailError(t *testing.T) {
 	outbound := true
 	phone.Outbound = &outbound
 	pkg.Agent.Channels["phone"] = phone
-	target := pkg.Targets["pipecat"]
-	target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
-	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -342,9 +363,7 @@ func TestValidatePipecatOnVoicemailStillErrors(t *testing.T) {
 	phone.Outbound = &outbound
 	phone.OnVoicemail = "hangup"
 	pkg.Agent.Channels["phone"] = phone
-	target := pkg.Targets["pipecat"]
-	target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
-	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -359,9 +378,7 @@ func TestValidatePipecatOnVoicemailStillErrors(t *testing.T) {
 func TestValidateTelephonyPlanRejectsOrphanRedisAndUnknownConsumers(t *testing.T) { // telephony V13, V23
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
-	target := pkg.Targets["pipecat"]
-	target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
-	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
 	agent, err := Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -383,14 +400,15 @@ func TestValidateTelephonyPlanRejectsOrphanRedisAndUnknownConsumers(t *testing.T
 	}
 }
 
+// Exotel still fails closed, and now it fails one stage earlier and says more.
+// Its two rows carry a real environment vocabulary and an empty feature map, so
+// they are in the catalog but not selectable; naming one in a connection is
+// refused at build with the routes the provider does support, and that list
+// never suggests Exotel back (spec FR-011a, research R6).
 func TestValidateExotelTelephonyFailsClosedWithoutAuthenticatedWebSocket(t *testing.T) { // telephony T9, V4-V6
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
-	target := pkg.Targets["pipecat"]
-	target.Transport = "carrier-websocket"
-	target.Carrier = "exotel"
-	target.Connection = "primary_phone"
-	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "exotel")
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = map[string]string{
 		"api_key": "EXOTEL_API_KEY", "api_token": "EXOTEL_API_TOKEN",
@@ -398,15 +416,17 @@ func TestValidateExotelTelephonyFailsClosedWithoutAuthenticatedWebSocket(t *test
 		"from_number": "EXOTEL_PHONE_NUMBER", "app_id": "EXOTEL_APP_ID",
 	}
 	pkg.Connections["primary_phone"] = connection
-	agent, err := Build(pkg)
-	if err != nil {
-		t.Fatal(err)
+	_, err := Build(pkg)
+	if err == nil {
+		t.Fatal("an Exotel connection compiled; the route has no feature the emitter can honour")
 	}
-	resolved := agent.Targets["pipecat"]
-	report, err := Validate(agent, []Target{resolved}, targetcap.Default())
-	errors := strings.Join(report.PerTarget[0].Errors, "\n")
-	if err == nil || !strings.Contains(errors, "does not support route") {
-		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	for _, want := range []string{`carrier "exotel" is not a route`, "pipecat supports:"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal is missing %q: %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), "with exotel") {
+		t.Errorf("the refusal suggests exotel, which is the refusal the author just hit: %v", err)
 	}
 }
 
@@ -484,6 +504,8 @@ func TestValidateWebhookAuthSchemes(t *testing.T) {
 		})
 	}
 
+	// Auth belongs to the two blocks that make a request of their own: webhook
+	// and mcp (N40). A local handler owns its own credential in Python.
 	t.Run("auth on a local tool", func(t *testing.T) {
 		agent := safeAgent(t)
 		tool := agent.Tools["lookup_customer"]
@@ -491,8 +513,8 @@ func TestValidateWebhookAuthSchemes(t *testing.T) {
 		tool.Handler, tool.Auth = "tools/lookup_customer.py", bearerAuth()
 		agent.Tools["lookup_customer"] = tool
 		report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
-		if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "webhook execution only") {
-			t.Fatalf("auth outside a webhook tool must be rejected: err=%v report=%#v", err, report.PerTarget)
+		if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "webhook and mcp execution only") {
+			t.Fatalf("auth outside a webhook or mcp tool must be rejected: err=%v report=%#v", err, report.PerTarget)
 		}
 	})
 
@@ -711,6 +733,75 @@ func TestValidateReportsForwardedBindingsAndUnbenchmarkedSizing(t *testing.T) { 
 	}
 }
 
+// mcpAgent turns the safe core's lookup_customer into an MCP tool source, so
+// each case below changes exactly the one field it is about (N40).
+func mcpAgent(t *testing.T, mutate func(*Tool)) *Agent {
+	t.Helper()
+	agent := safeAgent(t)
+	tool := Tool{
+		Execution: ToolMCP, URLEnv: "FIRECRAWL_MCP_URL",
+		Interruption: ToolProviderDefault, Effect: ToolReturnsData,
+	}
+	mutate(&tool)
+	agent.Tools["lookup_customer"] = tool
+	agent.Secrets = append(agent.Secrets, "FIRECRAWL_MCP_URL", "FIRECRAWL_API_KEY")
+	return agent
+}
+
+// TestValidateMCPToolSource covers the block's own rules: the transport is one
+// of two names, the selection is a list of distinct non-empty names, and auth
+// is legal here and holds an env name rather than a secret (N40, SC-005).
+func TestValidateMCPToolSource(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Tool)
+		want   string
+	}{
+		{"unknown transport", func(tool *Tool) { tool.MCPTransport = "websocket" },
+			`transport must be sse or streamable_http, not "websocket"`},
+		{"literal token", func(tool *Tool) {
+			tool.Auth = &ToolAuth{Type: ToolAuthBearer, TokenEnv: "fc-live-not-a-real-key"}
+		}, "never a secret value"},
+		{"repeated selection", func(tool *Tool) {
+			tool.MCPTools = []string{"firecrawl_search", "firecrawl_search"}
+		}, `tools names "firecrawl_search" twice`},
+		{"empty selection entry", func(tool *Tool) { tool.MCPTools = []string{"firecrawl_search", " "} },
+			"tools has an empty entry"},
+		{"contract field", func(tool *Tool) { tool.Description = "Search the web." },
+			"takes no description, input, or output"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := mcpAgent(t, tc.mutate)
+			report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+			if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), tc.want) {
+				t.Fatalf("want error containing %q: err=%v report=%#v", tc.want, err, report.PerTarget)
+			}
+		})
+	}
+
+	// The whole block, spelled the way the example spells it, validates and
+	// puts both env names in the report with the site that names them (FR-009).
+	t.Run("full block", func(t *testing.T) {
+		agent := mcpAgent(t, func(tool *Tool) {
+			tool.MCPTransport = MCPTransportStreamableHTTP
+			tool.MCPTools = []string{"firecrawl_search"}
+			tool.Auth = &ToolAuth{Type: ToolAuthBearer, TokenEnv: "FIRECRAWL_API_KEY"}
+		})
+		if _, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default()); err != nil {
+			t.Fatalf("the full mcp block must validate: %v", err)
+		}
+		sites := EnvReferenceSites(agent)
+		for env, want := range map[string]string{
+			"FIRECRAWL_MCP_URL": "tools/lookup_customer.yaml mcp.url_env",
+			"FIRECRAWL_API_KEY": "tools/lookup_customer.yaml mcp.auth.token_env",
+		} {
+			if got := sites[env]; len(got) != 1 || got[0] != want {
+				t.Errorf("reference site for %s = %v, want [%s]", env, got, want)
+			}
+		}
+	})
+}
+
 func TestValidatePipecatMaturityGates(t *testing.T) { // driver-pipecat T1, C9
 	tests := []struct {
 		name   string
@@ -723,12 +814,18 @@ func TestValidatePipecatMaturityGates(t *testing.T) { // driver-pipecat T1, C9
 			a.Models["fast_reasoning"] = profile
 		}, "does not emit generated fallback yet"},
 		{"thinking_audio", func(a *Agent) { a.Conversation.ThinkingAudio = ThinkingSubtle }, "does not emit thinking audio yet"},
-		// local tools lifted 2026-07-17 (driver-pipecat C9/T14) — no longer gated.
-		{"mcp_tool", func(a *Agent) {
-			tool := a.Tools["lookup_customer"]
-			tool.Execution, tool.URLEnv = ToolMCP, ""
-			a.Tools["lookup_customer"] = tool
-		}, "does not emit MCP tools yet"},
+		// local tools lifted 2026-07-17 (driver-pipecat C9/T14), mcp tool
+		// sources 2026-08-14 (N40) — neither is gated. What is still gated is
+		// the scope: an mcp source listed on a task, below.
+		{"mcp_task_scope", func(a *Agent) {
+			a.Tools["lookup_customer"] = Tool{
+				Execution: ToolMCP, URLEnv: "BOOKINGS_MCP_URL",
+				Interruption: ToolProviderDefault, Effect: ToolReturnsData,
+			}
+			// The scope is what the gate is about, so the task holds nothing
+			// else; other errors from the bare task are not what is asserted.
+			a.Tasks["confirm_booking"] = Task{Tools: []string{"lookup_customer"}}
+		}, "cannot scope an MCP tool source to a task"},
 		{"transfer_history", func(a *Agent) {
 			a.Controls["to_billing"].(*AgentTransfer).Context.History = HistoryMessages
 		}, "history: full only"},
@@ -1003,9 +1100,7 @@ func TestV12_WarmTransferRequiresOutboundDirection(t *testing.T) {
 		human := pkg.Agent.Controls["to_human"]
 		human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
 		pkg.Agent.Controls["to_human"] = human
-		target := pkg.Targets["pipecat"]
-		target.Transport, target.Carrier, target.Connection = "carrier-websocket", "twilio", "primary_phone"
-		pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+		routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
 		agent, err := Build(pkg)
 		if err != nil {
 			t.Fatal(err)
@@ -1056,9 +1151,7 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 	human = pkg.Agent.Controls["to_human"]
 	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
 	pkg.Agent.Controls["to_human"] = human
-	carrier := pkg.Targets["pipecat"]
-	carrier.Transport, carrier.Carrier, carrier.Connection = "carrier-websocket", "twilio", "primary_phone"
-	pkg.Targets = map[string]packagespec.Target{"pipecat": carrier}
+	routeTarget(pkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
 	agent, err = Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -1101,10 +1194,10 @@ func dailyCarrierPackage(t *testing.T) *packagespec.Package {
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
 	target := pkg.Targets["pipecat"]
-	target.Carrier, target.Connection = "twilio", "twilio_sip_daily"
+	target.Connection = "twilio_sip_daily"
 	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
 	pkg.Connections = map[string]packagespec.Connection{"twilio_sip_daily": {
-		Kind: "telephony", Environment: map[string]string{
+		Transport: "daily-sip", Carrier: "twilio", Environment: map[string]string{
 			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
 			"sip_address": "SIP_TRUNK_HOSTNAME", "from_number": "SIP_FROM_NUMBER",
 		},
@@ -1141,9 +1234,7 @@ func TestValidatePipecatDailyCarrierServiceSet(t *testing.T) {
 	// The carrier-websocket routes still require it.
 	cwPkg := loadSafeCore(t)
 	enableTelephony(cwPkg)
-	cw := cwPkg.Targets["pipecat"]
-	cw.Transport, cw.Carrier, cw.Connection = "carrier-websocket", "twilio", "primary_phone"
-	cwPkg.Targets = map[string]packagespec.Target{"pipecat": cw}
+	routeTarget(cwPkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
 	cwAgent, err := Build(cwPkg)
 	if err != nil {
 		t.Fatal(err)
@@ -1190,10 +1281,10 @@ func TestValidatePipecatDailyCarrierRefusesCallSources(t *testing.T) {
 			cwPkg := dailyCarrierPackage(t)
 			cwPkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(source)}
 			cw := cwPkg.Targets["pipecat"]
-			cw.Transport, cw.Connection = "carrier-websocket", "primary_phone"
+			cw.Connection = "primary_phone"
 			cwPkg.Targets = map[string]packagespec.Target{"pipecat": cw}
 			cwPkg.Connections = map[string]packagespec.Connection{"primary_phone": {
-				Kind: "telephony", Environment: map[string]string{
+				Transport: "carrier-websocket", Carrier: "twilio", Environment: map[string]string{
 					"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
 					"from_number": "TWILIO_PHONE_NUMBER",
 				},
@@ -1313,9 +1404,7 @@ func TestSIPRouteRequiresEveryConnectionValue(t *testing.T) {
 		human := pkg.Agent.Controls["to_human"]
 		human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
 		pkg.Agent.Controls["to_human"] = human
-		configured := pkg.Targets["livekit"]
-		configured.Transport, configured.Carrier, configured.Connection = "sip", "twilio", "primary_phone"
-		pkg.Targets = map[string]packagespec.Target{"livekit": configured}
+		routeTarget(pkg, "livekit", "primary_phone", "sip", "twilio")
 		connection := pkg.Connections["primary_phone"]
 		connection.Environment = map[string]string{
 			"sip_address": "SIP_TRUNK_HOSTNAME", "sip_username": "SIP_AUTH_USERNAME",
@@ -1348,10 +1437,10 @@ func cloudWebsocketPackage(t *testing.T) *packagespec.Package {
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
 	target := pkg.Targets["pipecat"]
-	target.Transport, target.Carrier, target.Connection = "cloud-websocket", "twilio", "twilio_voice"
+	target.Connection = "twilio_voice"
 	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
 	pkg.Connections = map[string]packagespec.Connection{"twilio_voice": {
-		Kind: "telephony", Environment: map[string]string{
+		Transport: "cloud-websocket", Carrier: "twilio", Environment: map[string]string{
 			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
 			"from_number": "TWILIO_PHONE_NUMBER",
 		},
@@ -1421,9 +1510,7 @@ func TestValidatePipecatCloudWebsocketHostsNothing(t *testing.T) {
 	// keyed on this route, not on Pipecat.
 	cwPkg := loadSafeCore(t)
 	enableTelephony(cwPkg)
-	cw := cwPkg.Targets["pipecat"]
-	cw.Transport, cw.Carrier, cw.Connection = "carrier-websocket", "twilio", "primary_phone"
-	cwPkg.Targets = map[string]packagespec.Target{"pipecat": cw}
+	routeTarget(cwPkg, "pipecat", "primary_phone", "carrier-websocket", "twilio")
 	cwAgent, err := Build(cwPkg)
 	if err != nil {
 		t.Fatal(err)

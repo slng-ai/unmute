@@ -72,8 +72,9 @@ of it.
 `on_unavailable` covers every way the person does not take the call. See
 [controls](../../docs/user/reference/controls.md#kind-human_transfer).
 
-Destinations are symbolic names resolved in `targets.yaml`, and this example
-resolves both to env var names:
+Destinations are symbolic names, resolved once for the whole package at the top
+level of `agent.yaml`. Who the agent escalates to is the same desk whichever
+carrier reaches it, so it is not a per-target fact:
 
 ```yaml
 destinations:
@@ -81,9 +82,12 @@ destinations:
   supervisor_line: SUPERVISOR_PHONE_NUMBER
 ```
 
-The env var form lands in the generated `.env.example` and the required-env
-list, and is read at call time. The model never sees a phone number and can
-never dial an arbitrary one: it picks a symbolic name, the target resolves it.
+A value is the name of an environment variable holding the number, not the
+number: `agent.yaml` is the portable half of a package, and a literal is refused
+at compile time. The name lands in the generated `.env.example` and the
+required-env list, and is read at call time. The model never sees a phone number
+and can never dial an arbitrary one: it picks a symbolic name, and the compiler
+resolves it.
 
 ## Set it up
 
@@ -110,6 +114,8 @@ In short, on one Elastic SIP trunk:
    fix it.
 
 ```sh
+OPENAI_API_KEY=sk-...                # the reasoning model
+SLNG_API_KEY=...                     # listen and speak
 SIP_TRUNK_HOSTNAME=your-trunk.pstn.twilio.com
 SIP_AUTH_USERNAME=...
 SIP_AUTH_PASSWORD=...
@@ -117,6 +123,13 @@ SIP_FROM_NUMBER=+1...
 BILLING_PHONE_NUMBER=+1...
 SUPERVISOR_PHONE_NUMBER=+1...
 ```
+
+Those eight are the whole `secrets:` block in `agent.yaml`, which is the list of
+everything you supply. The generated `.env.example` ends with four more under a
+"supplied for you, not by you" heading — `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
+`LIVEKIT_API_SECRET`, and `REDIS_URL`. Set those only for a local run or a
+self-hosted deployment; on LiveKit Cloud the platform injects the LIVEKIT_*
+trio and its managed SIP service owns Redis.
 
 Every name in `.env` must be a valid shell identifier: letters, digits and
 underscores, never starting with a digit. LiveKit Cloud exports your secrets with

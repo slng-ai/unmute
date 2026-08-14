@@ -135,10 +135,12 @@ generation path:
 
 ## Telephony
 
-Telephony compilation targets LiveKit and Pipecat. A target binds one
-`connections/<name>.yaml` file to an exact transport and carrier route. The
-Connection stores environment variable names only; credential values stay in
-an ignored `.env` file or your deployment secret store.
+Telephony compilation targets LiveKit and Pipecat. A target names one
+`connections/<name>.yaml` file and says nothing else about how a call reaches
+it; that file declares the transport, the carrier, and the environment variable
+names holding the account's credentials. The connection stores names only;
+credential values stay in an ignored `.env` file or your deployment secret
+store.
 
 A package may declare any number of supported carrier routes. Give each one a
 named target, such as `pipecat_twilio`, `pipecat_telnyx`, or `livekit_plivo`,
@@ -148,7 +150,8 @@ SDKs or route-specific limits inside one generated runtime.
 
 ```yaml
 # connections/primary_phone.yaml
-kind: telephony
+transport: carrier-websocket
+carrier: twilio
 environment:
   account_sid: TWILIO_ACCOUNT_SID
   auth_token: TWILIO_AUTH_TOKEN
@@ -185,7 +188,8 @@ same `livekit/sip/<carrier>` plan. Their Connection vocabulary is:
 
 ```yaml
 # connections/primary_phone.yaml
-kind: telephony
+transport: sip
+carrier: twilio
 environment:
   sip_address: SIP_TRUNK_HOSTNAME
   sip_username: SIP_AUTH_USERNAME
@@ -193,8 +197,8 @@ environment:
   from_number: SIP_FROM_NUMBER
 ```
 
-Set the target's `provider: livekit`, `transport: sip`, `carrier`, and
-`connection`. The generated project includes inbound-trunk, outbound-trunk,
+Set the target's `provider: livekit` and point its `connection` at that file.
+The generated project includes inbound-trunk, outbound-trunk,
 and dispatch-rule JSON inputs for the directions you request. Self-hosted SIP
 also requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and
 `REDIS_URL` in deployment, with the carrier's origination URI pointed at your

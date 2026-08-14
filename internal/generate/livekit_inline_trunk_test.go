@@ -38,7 +38,8 @@ func configuredLiveKitSIPWarmOnly(t *testing.T) (*ir.Agent, ir.Target) {
 		RequiredControls: []string{"hangup"},
 	}
 	configured := pkg.Targets["livekit"]
-	configured.Transport, configured.Carrier, configured.Connection = "sip", "twilio", "primary_phone"
+	configured.Connection = "primary_phone"
+	setConnectionRoute(pkg, "primary_phone", "sip", "twilio")
 	pkg.Targets = map[string]spec.Target{"livekit": configured}
 	connection := pkg.Connections["primary_phone"]
 	connection.Environment = map[string]string{

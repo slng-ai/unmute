@@ -131,8 +131,11 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		TargetVersion:     tgt.Version,
 		SDKLanguage:       tgt.SDKLanguage,
 		DeploymentRegions: tgt.DeploymentRegion,
-		Transport:         tgt.Transport,
-		Carrier:           tgt.Carrier,
+		// The route is read from the connection the target names, because that
+		// is where a route is declared (spec FR-001).
+		Connection: tgt.Connection,
+		Transport:  pkg.Connections[tgt.Connection].Transport,
+		Carrier:    pkg.Connections[tgt.Connection].Carrier,
 	}
 	data.Pins = jsonText(tgt.Pins)
 	if def, ok := effectiveModelDef(pkg, tgt, "listen"); ok {
@@ -189,7 +192,8 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			}
 			value.Handler, value.HandlerSource = tool.Local.Handler, pkg.Handlers[handlerPath]
 		case tool.MCP != nil:
-			value.URLEnv = tool.MCP.URLEnv
+			value.URLEnv, value.Auth = tool.MCP.URLEnv, tool.MCP.Auth
+			value.MCPTransport, value.MCPTools = tool.MCP.Transport, tool.MCP.Tools
 		case tool.Builtin != nil:
 			value.Builtin, value.Instructions = tool.Builtin.ID, tool.Builtin.Instructions
 		}
@@ -260,7 +264,8 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			value := scaffold.HumanTransfer{Name: name, Agent: firstNonempty(owners[name], "assistant"), When: control.When}
 			if destination := control.TransferDestination(); destination != "" {
 				value.Destination = destination
-				value.Value = tgt.Destinations[destination]
+				// Destinations are declared once for the package, in agent.yaml.
+				value.Value = pkg.Agent.Destinations[destination]
 			}
 			value.Mode = control.TransferShape()
 			switch {

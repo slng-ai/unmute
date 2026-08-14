@@ -86,7 +86,8 @@ reference pages when you need one exact YAML field:
 - [Targets YAML](reference/targets-yaml.md) and
   [providers](reference/providers.md) cover model routing, plugin pins, and
   provider choices.
-- [Tools YAML](reference/tools.md) covers webhook, local, and MCP tools.
+- [Tools YAML](reference/tools.md) covers webhook, local, prebuilt, and MCP
+  tools, including declaring a whole MCP server as a tool source.
 - [Tasks](reference/tasks.md) and [controls](reference/controls.md) cover
   delegates, task models, task groups, handoffs, and human transfers.
 - [Conversation](reference/conversation.md) covers interruption, inactivity,

@@ -220,3 +220,37 @@ func TestPipecatCloudWebsocketRefusesWarmTransferByNamingTheCost(t *testing.T) {
 		t.Errorf("call-source refusal = %q (%s), want gated and naming where sources work", source.Note, source.Tag)
 	}
 }
+
+// SelectableTelephonyRoutes is the single home for "which routes can an author
+// actually pick" (research R6). The two Exotel rows are the reason it exists:
+// they carry a real environment vocabulary and an empty feature map, so
+// ResolveTelephonyFeature refuses them. Offering one in a "did you mean" list
+// or a TUI picker walks the author into a second, different refusal.
+func TestSelectableTelephonyRoutesExcludesPlaceholderRows(t *testing.T) {
+	selectable := SelectableTelephonyRoutes()
+
+	for _, key := range []TelephonyKey{
+		{Provider: Pipecat, Transport: "carrier-websocket", Carrier: "exotel"},
+		{Provider: LiveKit, Transport: "sip", Carrier: "exotel"},
+	} {
+		if _, ok := selectable[key]; ok {
+			t.Errorf("%+v has no route feature and must not be selectable", key)
+		}
+		if _, ok := TelephonyRoutes()[key]; !ok {
+			t.Errorf("%+v left the catalog; this test guards the wrong rows now", key)
+		}
+	}
+
+	// The other direction: every row the table marks selectable is offered.
+	for key, route := range TelephonyRoutes() {
+		_, declared := route.Features[TelephonyRouteSelected]
+		_, offered := selectable[key]
+		if declared != offered {
+			t.Errorf("%+v: route feature %v but selectable %v", key, declared, offered)
+		}
+	}
+
+	if len(selectable) == 0 {
+		t.Fatal("no selectable routes: the predicate is inverted")
+	}
+}

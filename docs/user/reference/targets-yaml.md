@@ -1,12 +1,17 @@
 # Reference: targets.yaml
 
 `targets.yaml` holds named **target instances**. Each carries the infrastructure
-that only makes sense per target—the platform, version pins, transport, and
-destinations—plus an optional `models:` **override** map for entries a target
-cannot run as [defined in agent.yaml](models-and-voices.md). Model definitions
-live in `agent.yaml`; this file only overrides them. The same `agent.yaml`
-compiles to every instance. See
+that only makes sense per target—the platform, version pins, the deployment
+region, and the connection its calls arrive on—plus an optional `models:`
+**override** map for entries a target cannot run as
+[defined in agent.yaml](models-and-voices.md). Model definitions live in
+`agent.yaml`; this file only overrides them. The same `agent.yaml` compiles to
+every instance. See
 [models and overrides](../concepts/profiles-and-bindings.md).
+
+A target says nothing about **how** a call reaches it. It names one connection,
+and [that file](connections.md) declares the transport, the carrier, and the
+credentials.
 
 Name a simple instance after its provider, not with a `-dev` suffix: what you
 test is what you deploy. When one framework has several real routes or accounts,
@@ -18,13 +23,8 @@ targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: carrier-websocket
-    carrier: twilio
     connection: primary_phone
     # no model overrides: everything runs as defined in agent.yaml
-    destinations:
-      billing_line: "+14155550123"        # a literal, or name an env var:
-      supervisor_line: SUPERVISOR_NUMBER
 
   deepgram:
     provider: deepgram
@@ -46,11 +46,15 @@ targets:
 | `version` | code targets | framework pin; the driver checks it against the range its templates support |
 | `pins` | no | independently versioned packages (for example LiveKit plugins) get their own entries |
 | `sdk_language` | no | the LiveKit driver currently accepts `python` only |
-| `transport`, `carrier` | no | driver vocabulary; telephony controls resolve against these, never the brand alone |
-| `connection` | telephony routes | name of one `connections/<name>.yaml`; all telephony channels on this v1 target share it. On a LiveKit SIP route its four SIP values reach the deployed agent's dial-out path directly: the agent passes them inline with each call, so no platform-side outbound trunk is registered (N33) |
+| `connection` | telephony routes | name of one [`connections/<name>.yaml`](connections.md), which declares the transport, the carrier, and the credentials. All telephony channels on this v1 target share it. On a LiveKit SIP route its four SIP values reach the deployed agent's dial-out path directly: the agent passes them inline with each call, so no platform-side outbound trunk is registered (N33) |
 | `deployment_region` | no | where the platform deploys the agent: one region, or a list of them (N32). Forwarded as declared, never validated. See below. |
 | `models` | no | per-target overrides, keyed by model name, below |
-| `destinations` | if any `human_transfer` is used | map of symbolic name to an E.164 number, a `sip:` URI, or the UPPER_SNAKE name of an env var holding one (told apart by shape). See [controls](controls.md#destination) |
+
+`transport`, `carrier`, and `destinations` were target fields and are not any
+more. The first two live in the connection; `destinations` lives at the top
+level of [`agent.yaml`](agent-yaml.md), because who the agent escalates to is
+the same desk whichever carrier reaches it. Writing any of the three on a target
+fails with a message naming its new home.
 
 Pipecat and LiveKit have drivers today; Vapi and Deepgram instances error on `compile` until their driver ships. `validate` still checks any provider against the schema. See the [target pages](../targets/pipecat.md).
 
@@ -114,37 +118,32 @@ targets:
   pipecat_twilio:
     provider: pipecat
     version: "1.5.0"
-    transport: carrier-websocket
-    carrier: twilio
-    connection: twilio_api
+    connection: twilio_api          # transport: carrier-websocket, carrier: twilio
 
   livekit_telnyx:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
-    transport: sip
-    carrier: telnyx
-    connection: telnyx_sip
+    connection: telnyx_sip          # transport: sip, carrier: telnyx
 
   # Pipecat's Daily route with your own carrier: the carrier forwards the call
-  # over SIP into the Daily room. Three fields, all of them existing ones, and on
-  # this transport they are required together with a `channels.phone` entry
-  # (SCHEMA N37). Leaving one out fails naming the one you left out.
+  # over SIP into the Daily room. The connection declares both halves, and this
+  # route also needs a `channels.phone` entry (SCHEMA N37).
   pipecat_daily_twilio:
     provider: pipecat
     version: "1.5.0"
-    transport: daily-sip
-    carrier: twilio
-    connection: twilio_sip_daily
+    connection: twilio_sip_daily    # transport: daily-sip, carrier: twilio
 ```
 
 Add another target and Connection for every additional supported carrier route.
 There is no package-level route-count setting and no multi-carrier target: one
-target always emits one adapter.
+target always emits one adapter. Two targets on different transports need one
+connection file each, even when they share a carrier account.
 
 `transport: daily-sip` is the one transport with two shapes. With no `carrier` it
-means a Daily-provisioned number and takes neither a connection nor a phone
-channel. With a carrier it means your own number, and then all three go together.
+means a Daily-provisioned number, which carries its own calls, dials out only,
+and so takes no phone channel. With a carrier it means your own number, and then
+the channel goes with it.
 Its Connection keys are `account_sid`, `auth_token`, `sip_address`, `from_number`,
 and it **rejects** `sip_username` and `sip_password` with the route named, because
 Daily's outbound SIP carries no credential on any documented surface and your trunk

@@ -14,7 +14,12 @@
 #
 # All four reach the deployed agent directly. It dials out by passing them inline
 # with the call, so no LiveKit outbound trunk has to be registered first.
-kind: telephony
+#
+# A Twilio Elastic SIP Trunk carries the call into LiveKit SIP: the default
+# multi-carrier LiveKit route, and the only one with transfer and voicemail
+# primitives (docs/TELEPHONY.md).
+transport: sip
+carrier: twilio
 environment:
   sip_address: SIP_TRUNK_HOSTNAME
   sip_username: SIP_AUTH_USERNAME

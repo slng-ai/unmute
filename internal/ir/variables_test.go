@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -231,6 +232,73 @@ flag = os.getenv("debug")
 	}
 	if strings.Contains(warning, "SALON_API_URL") {
 		t.Fatalf("a declared secret must not be reported, got %q", warning)
+	}
+}
+
+// FR-005c: a package is never asked to declare a name it does not write. The
+// driver and the platform supply these, and requiring them would put the same
+// block of boilerplate at the top of every phone package — which is how a
+// warning stops being read.
+//
+// Without this the boundary has nothing holding it: the cross-check reports
+// whatever referencedEnvNames collects, and that function is the one this
+// feature widened.
+func TestSecretsCrossCheckNeverAsksForDriverSuppliedNames(t *testing.T) {
+	pkg := loadSafeCore(t)
+	enableTelephony(pkg)
+	routeTarget(pkg, "livekit", "primary_phone", "sip", "twilio")
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment = map[string]string{
+		"sip_address": "SIP_TRUNK_HOSTNAME", "sip_username": "SIP_AUTH_USERNAME",
+		"sip_password": "SIP_AUTH_PASSWORD", "from_number": "SIP_FROM_NUMBER",
+	}
+	pkg.Connections["primary_phone"] = connection
+	pkg.Agent.Secrets = []string{"OPENAI_API_KEY"}
+
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warning := undeclaredSecretWarning(agent)
+	for _, supplied := range []string{
+		"REDIS_URL", "UNMUTE_PUBLIC_URL", "UNMUTE_OUTBOUND_TOKEN",
+		"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
+		"DAILY_API_KEY", "PIPECAT_CLOUD_ORGANIZATION",
+	} {
+		if strings.Contains(warning, supplied) {
+			t.Errorf("the cross-check asks for %q, which no author writes:\n%s", supplied, warning)
+		}
+	}
+	// The other half: what the author *did* write is still reported, so this
+	// test cannot pass by the check having stopped working.
+	if !strings.Contains(warning, "SIP_TRUNK_HOSTNAME") {
+		t.Errorf("a name the author wrote in a connection is not reported:\n%s", warning)
+	}
+}
+
+// SC-008, asserted directly. The underlying check only warns, and a warning is
+// easy to stop reading, so the shipped examples are held to zero.
+func TestTelephonyExamplesDeclareEveryNameTheyWrite(t *testing.T) {
+	for _, example := range []string{
+		"twilio-telephony-hello", "livekit-human-transfer",
+		"pipecat-human-transfer-twilio", "pipecat-human-transfer-daily", "outbound-reminder",
+	} {
+		t.Run(example, func(t *testing.T) {
+			pkg, err := packagespec.Load(filepath.Join("..", "..", "examples", example))
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(agent.Secrets) == 0 {
+				t.Fatal("this example declares no secrets, so the check below is vacuous")
+			}
+			if warning := undeclaredSecretWarning(agent); warning != "" {
+				t.Errorf("an author-written name is missing from secrets: %s", warning)
+			}
+		})
 	}
 }
 

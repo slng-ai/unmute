@@ -248,7 +248,7 @@ func TestPublicExamplePackages(t *testing.T) {
 	//
 	// A telephony example whose behaviour is one provider's names that provider
 	// first, because the route is the thing a reader is choosing between.
-	want := []string{"livekit-human-transfer", "multi-task", "outbound-reminder", "pipecat-human-transfer-daily", "pipecat-human-transfer-twilio", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
+	want := []string{"livekit-human-transfer", "mcp-example", "multi-task", "outbound-reminder", "pipecat-human-transfer-daily", "pipecat-human-transfer-twilio", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -466,6 +466,143 @@ func TestV11_TransfersDocListsEveryRequiredEnv(t *testing.T) {
 	}
 }
 
+// Every environment variable a telephony example's generated .env.example lists
+// must be accounted for in that example's own README and in the phone-calls
+// page. A reader who sets everything both pages name has a package that runs;
+// one who does not finds out on a live call, which is the failure this check
+// exists to make impossible (spec FR-005f, FR-027a).
+//
+// DAILY_API_KEY is the case that forced this. It is exempt from `secrets:`
+// because no author writes it — the route's own runtime supplies it — and it is
+// still required at runtime, so the only place it can be explained is prose.
+//
+// Scoped to the five telephony examples on purpose (FR-005f0): four of the
+// other examples ship no README at all, so widening this is a separate change
+// with its own writing to do, not a flag to flip here.
+//
+// The two halves are scoped differently, because they answer different
+// questions. The example's own README must account for **every** name, since it
+// is the page a reader of that example follows. The shared phone-calls page must
+// account for every name the package never declares in `secrets:` — the ones the
+// runtime supplies, like DAILY_API_KEY and REDIS_URL. Those are exactly the
+// names nothing in the package mentions, so a shared page is the only place they
+// can be explained. A tool's own webhook credentials are the README's job.
+//
+// One direction only. It never fails on a name a page mentions and
+// .env.example does not: a page is free to name a variable to say the reader
+// does not set it, or to teach a name that is not a variable at all.
+func TestTelephonyExampleDocsAccountForEveryRequiredEnv(t *testing.T) {
+	phoneCalls, err := os.ReadFile(filepath.Join("..", "..", "docs", "user", "learn", "07-phone-calls.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for example, providers := range map[string][]ir.Provider{
+		"twilio-telephony-hello":        {ir.ProviderPipecat, ir.ProviderLiveKit},
+		"livekit-human-transfer":        {ir.ProviderLiveKit},
+		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
+		"pipecat-human-transfer-daily":  {ir.ProviderPipecat},
+		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
+	} {
+		t.Run(example, func(t *testing.T) {
+			readme, err := os.ReadFile(filepath.Join("..", "..", "examples", example, "README.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, provider := range providers {
+				artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
+				if err != nil {
+					t.Fatalf("%s: %v", provider, err)
+				}
+				for _, line := range strings.Split(artifactFile(t, artifact, ".env.example"), "\n") {
+					name, _, found := strings.Cut(line, "=")
+					name = strings.TrimSpace(name)
+					if !found || name == "" || strings.HasPrefix(name, "#") {
+						continue
+					}
+					if !strings.Contains(string(readme), name) {
+						t.Errorf("%s needs %s, which this example's README never names", provider, name)
+					}
+					if slices.Contains(agent.Secrets, name) {
+						continue // the package declares it, so the package explains it
+					}
+					if !strings.Contains(string(phoneCalls), name) {
+						t.Errorf("%s needs %s, which nothing in the package declares and "+
+							"docs/user/learn/07-phone-calls.md never names", provider, name)
+					}
+				}
+			}
+		})
+	}
+}
+
+// US2 / FR-018: a phone package runs in the browser with nothing but model
+// keys. The emitted startup check is where that is decided, so it is where it
+// is asserted: the browser path's REQUIRED_ENV must carry no carrier credential
+// and no route variable, whichever route the package declares.
+//
+// This already worked and nothing wrote it down, which is what made it safe to
+// move route resolution underneath it. It is the most common workflow in the
+// project and it had no test.
+func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
+	routeOnly := []string{
+		"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER",
+		"SIP_TRUNK_HOSTNAME", "SIP_AUTH_USERNAME", "SIP_AUTH_PASSWORD", "SIP_FROM_NUMBER",
+		"UNMUTE_PUBLIC_URL", "UNMUTE_OUTBOUND_TOKEN", "REDIS_URL",
+		"PIPECAT_CLOUD_ORGANIZATION",
+	}
+	for example, providers := range map[string][]ir.Provider{
+		"twilio-telephony-hello":        {ir.ProviderPipecat, ir.ProviderLiveKit},
+		"livekit-human-transfer":        {ir.ProviderLiveKit},
+		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
+		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
+	} {
+		t.Run(example, func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, provider := range providers {
+				resolved := targetByProvider(t, agent, provider)
+				if resolved.Telephony == nil {
+					t.Fatalf("%s declares no route, so it is the wrong fixture", provider)
+				}
+				artifact, err := Generate(agent, resolved, target.Default())
+				if err != nil {
+					t.Fatalf("%s: %v", provider, err)
+				}
+				entry := "bot.py"
+				if provider == ir.ProviderLiveKit {
+					entry = "agent.py"
+				}
+				source := artifactFile(t, artifact, entry)
+				start := strings.Index(source, "REQUIRED_ENV = [")
+				if start < 0 {
+					t.Fatalf("%s: %s has no REQUIRED_ENV startup check", provider, entry)
+				}
+				block := source[start : start+strings.Index(source[start:], "]")]
+				for _, name := range routeOnly {
+					if strings.Contains(block, `"`+name+`"`) {
+						t.Errorf("%s: the browser path's startup check demands %q, so a package "+
+							"that only wants a browser session cannot start:\n%s", provider, name, block)
+					}
+				}
+			}
+		})
+	}
+}
+
 // The generated README is the runbook, and almost nobody reads it before they
 // have already read the example's own page and the docs. So those two have to stay
 // true on their own, and "stay true" is a thing a test can hold rather than a
@@ -541,9 +678,13 @@ func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load: %v", err)
 			}
+			// Read the route from the connections, which is where it is declared.
+			// Reading it off the targets here, as this test did before feature
+			// 008, would now find nothing on every example and pass without
+			// checking anything (spec FR-027).
 			var routed []string
-			for name, target := range pkg.Targets {
-				if target.Transport != "" {
+			for name, connection := range pkg.Connections {
+				if connection.Transport != "" {
 					routed = append(routed, name)
 				}
 			}
@@ -557,12 +698,12 @@ func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
 			if err != nil {
 				t.Fatalf("this example declares a route (%s) and has no README to describe it: %v", strings.Join(routed, ", "), err)
 			}
-			for name, target := range pkg.Targets {
-				if target.Transport == "" {
-					continue // browser-only targets declare no route to describe
+			for name, connection := range pkg.Connections {
+				if connection.Transport == "" {
+					continue
 				}
-				if !strings.Contains(string(readme), target.Transport) {
-					t.Errorf("target %q declares transport %q, which this example's README never mentions", name, target.Transport)
+				if !strings.Contains(string(readme), connection.Transport) {
+					t.Errorf("connection %q declares transport %q, which this example's README never mentions", name, connection.Transport)
 				}
 			}
 		})

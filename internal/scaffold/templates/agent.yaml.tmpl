@@ -131,7 +131,13 @@ models:
 [[end]][[if .EndAfter]]    end_after: [[.EndAfter]]
 [[end]][[end]][[if .MaxDuration]]  max_duration: [[.MaxDuration]]
 [[end]][[if .ThinkingAudio]]  thinking_audio: [[.ThinkingAudio]]
-[[end]]
+[[end]][[if .HumanTransfers]]
+# Who this agent escalates to. A value is the UPPER_SNAKE name of an environment
+# variable holding the number, read at call time: agent.yaml is the portable
+# half of a package, so a phone number does not belong in it.
+destinations:
+[[range .Destinations]]  [[.Destination]]: [[.Value]]
+[[end]][[end]]
 channels:
 [[range .AllChannels]][[if eq .Kind "realtime_audio"]]  [[.Name]]:
     kind: realtime_audio

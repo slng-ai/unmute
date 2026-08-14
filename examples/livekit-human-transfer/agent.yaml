@@ -7,6 +7,21 @@
 version: 1
 entry_agent: front_desk
 
+# Every environment variable this package needs you to set, in one list: model
+# keys, the trunk credentials connections/twilio_sip.yaml names, and the two
+# numbers a transfer dials. It does not list names the runtime supplies —
+# LIVEKIT_URL and its key pair come from the Compose graph or your LiveKit Cloud
+# project, not from this package.
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+  - SIP_TRUNK_HOSTNAME
+  - SIP_AUTH_USERNAME
+  - SIP_AUTH_PASSWORD
+  - SIP_FROM_NUMBER
+  - BILLING_PHONE_NUMBER
+  - SUPERVISOR_PHONE_NUMBER
+
 models:
   think:
     reasoning:
@@ -62,6 +77,15 @@ controls:
       # If nobody picks up, declines, or the line goes to voicemail, the agent
       # comes back to the caller instead of dropping them.
       on_unavailable: return_to_caller
+
+# Who this agent escalates to, resolved here so the model never sees a phone
+# number and can never dial an arbitrary one. A value is the UPPER_SNAKE name of
+# an environment variable holding the number, read at call time: agent.yaml is
+# the portable half of a package, so a literal number does not belong in it.
+# The names land in the generated .env.example and the required-env list.
+destinations:
+  billing_line: BILLING_PHONE_NUMBER
+  supervisor_line: SUPERVISOR_PHONE_NUMBER
 
 conversation:
   greeting:

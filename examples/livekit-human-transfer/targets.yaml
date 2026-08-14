@@ -14,8 +14,8 @@ targets:
     provider: livekit
     version: "1.6.4"
     sdk_language: python
-    transport: sip
-    carrier: twilio
+    # The whole route lives in connections/twilio_sip.yaml: transport sip,
+    # carrier twilio, and the four trunk credentials it needs.
     connection: twilio_sip
     # Where LiveKit Cloud runs the deployed agent. Declared so the first deploy
     # does not stop to ask, which is what the transfer test rig needs. Forwarded
@@ -27,14 +27,5 @@ targets:
       detector:
         provider: livekit
         model: turn-detector-mini
-    # Symbolic names, resolved here so the model never sees a phone number and
-    # can never dial an arbitrary one. A destination is either a literal (E.164
-    # or a sip: URI, e.g. billing_line: "+14155550123") or the UPPER_SNAKE name
-    # of an environment variable holding one. An env var name lands in the
-    # generated .env.example and the required-env list, and is read at call
-    # time. This example uses the env form for both, because any literal a
-    # repository could ship is a number nobody answers, and a transfer to it
-    # fails on a live call exactly when you are trying the example out.
-    destinations:
-      billing_line: BILLING_PHONE_NUMBER
-      supervisor_line: SUPERVISOR_PHONE_NUMBER
+    # Destinations are declared once in agent.yaml: the same desk answers
+    # whichever target places the call.

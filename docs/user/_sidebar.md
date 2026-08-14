@@ -36,6 +36,7 @@
   - [models](reference/models-and-voices.md)
   - [listen, turn, and placement](reference/pipeline.md)
   - [channels and capacity](reference/channels-and-capacity.md)
+  - [connections/*.yaml](reference/connections.md)
   - [variables](reference/variables.md)
   - [secrets](reference/secrets.md)
   - [providers](reference/providers.md)

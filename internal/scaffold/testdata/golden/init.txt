@@ -72,5 +72,4 @@ targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: daily-sip
 

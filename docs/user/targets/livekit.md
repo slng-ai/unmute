@@ -197,29 +197,35 @@ interruption: provider_default
 effect: returns_data
 ```
 
-### Use an MCP tool
+### Use an MCP tool source
 
-An MCP tool names the environment variable that contains the MCP server
-address. LiveKit exposes only the tool names assigned to the current agent.
+One file declares one remote MCP server: where it is, how to reach it, and
+which of its tools this agent may use. The server describes its own tools when
+the connection opens, so the file carries no `description` or `input`
+(SCHEMA.md N40).
 
 ```yaml
 # tools/search_knowledge.yaml
-description: Search the support knowledge base.
-
-input:
-  type: object
-  properties:
-    query:
-      type: string
-  required:
-    - query
-
 mcp:
-  url_env: SUPPORT_MCP_URL
-
-interruption: provider_default
-effect: returns_data
+  url_env: SUPPORT_MCP_URL         # required: the address, by env var name
+  transport: streamable_http       # optional: sse | streamable_http
+  auth:                            # optional
+    type: bearer
+    token_env: SUPPORT_MCP_TOKEN
+  tools:                           # optional: leave it out to offer them all
+    - search_articles
 ```
+
+The driver emits one `mcp.MCPToolset` per source on the owning agent's or
+task's `tools` surface, so a source is offered in exactly the scope that lists
+it. Only the fields you wrote are emitted: no `transport` means the SDK reads
+the URL, no `tools` means no `allowed_tools` argument, no `auth` means no
+headers. The generated project asks for `livekit-agents[mcp,...]>=1.6`, which
+is where those arguments are verified.
+
+MCP needs `sdk_language: python`; the Node SDK has no `MCPToolset`. If a server
+is unreachable at startup, LiveKit logs the toolset that failed and the session
+still starts without those tools.
 
 Attach the declared tools in `agent.yaml`.
 
@@ -461,7 +467,8 @@ carriers; only their environment-variable names and values change.
 
 ```yaml
 # connections/primary_phone.yaml
-kind: telephony
+transport: sip
+carrier: twilio
 environment:
   sip_address: SIP_TRUNK_HOSTNAME
   sip_username: SIP_AUTH_USERNAME
@@ -491,7 +498,9 @@ Follow the
 [SIP trunking guide](../learn/07-phone-calls.md#configure-telephony-by-orchestrator)
 for the complete Twilio, Telnyx, and Plivo setup.
 
-Bind the Connection and symbolic destinations to the exact route.
+The target names that connection and nothing else about the route. Symbolic
+destinations live at the top level of `agent.yaml`, as environment variable
+names:
 
 ```yaml
 # targets.yaml
@@ -500,11 +509,11 @@ targets:
     provider: livekit
     version: "1.6.4"
     sdk_language: python
-    transport: sip
-    carrier: twilio
     connection: primary_phone
-    destinations:
-      support_line: "+14155550123"
+
+# agent.yaml
+destinations:
+  support_line: SUPPORT_PHONE_NUMBER
 ```
 
 Bind a target to the self-hosted `sip` route and one telephony Connection. The
@@ -627,7 +636,8 @@ SIP trunk and no Redis.
 
 ```yaml
 # connections/twilio_connector.yaml
-kind: telephony
+transport: connector
+carrier: twilio
 environment:
   account_sid: TWILIO_ACCOUNT_SID
   auth_token: TWILIO_AUTH_TOKEN
@@ -641,8 +651,6 @@ targets:
     provider: livekit
     version: "1.6.4"
     sdk_language: python
-    transport: connector
-    carrier: twilio
     connection: twilio_connector
 ```
 
@@ -718,7 +726,7 @@ remaining boundaries are explicit YAML choices, not silent omissions.
 | `context_scope: shared` or `isolated` | Both supported |
 | All five handoff history modes | Supported |
 | Handoff `requires` and variable subsets | Supported |
-| Webhook, local, and MCP tools | Supported |
+| Webhook, local, and MCP tools | Supported; MCP needs `sdk_language: python` and works on agents and tasks alike |
 | Non-default tool `interruption` | Warns; tools run to completion |
 | Conversation shaping block | Supported |
 | New `sip` telephony route | Provisional pending credentialed route smokes |

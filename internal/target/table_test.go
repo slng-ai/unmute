@@ -72,13 +72,23 @@ func TestTelephonyControlsResolveCarrierAndTransport(t *testing.T) {
 	}{
 		{"pipecat cold missing Daily", ColdTransfer, Pipecat, "twilio", "", Gated},
 		{"pipecat cold Daily", ColdTransfer, Pipecat, "daily-sip", "", Core},
-		{"vapi warm wrong carrier", WarmTransfer, Vapi, "", "telnyx", Gated},
-		{"vapi warm Twilio", WarmTransfer, Vapi, "", "twilio", Core},
+		// Vapi and Deepgram have no route and no connection, so after the route
+		// moved into the connection file no author can write a carrier these
+		// rows would see. The four rows that conditioned on one lost the
+		// condition rather than becoming impossible to satisfy; each keeps its
+		// Twilio requirement as a comment in table.go for whoever builds the
+		// driver (spec FR-001a, research R11).
+		{"vapi warm with no carrier", WarmTransfer, Vapi, "", "", Core},
+		{"deepgram warm with no carrier", WarmTransfer, Deepgram, "", "", Core},
+		{"deepgram cold with no carrier", ColdTransfer, Deepgram, "", "", Core},
+		{"deepgram voicemail with no carrier", VoicemailDetection, Deepgram, "", "", Core},
+		// The routed controls still gate, and on both halves of the route. A
+		// driverless target has no transport either, so removing carrier from
+		// targets changed nothing here (task T015c).
 		{"DTMF missing route", DTMFSend, LiveKit, "", "", Gated},
 		{"DTMF carrier only", DTMFSend, LiveKit, "", "twilio", Gated},
 		{"DTMF exact route", DTMFSend, LiveKit, "daily-sip", "twilio", Core},
 		{"DTMF unknown carrier", DTMFSend, LiveKit, "", "made-up", Gated},
-		{"Deepgram voicemail missing carrier", VoicemailDetection, Deepgram, "", "", Gated},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

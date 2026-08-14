@@ -169,6 +169,11 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	seenLocal := map[string]bool{}
 	collectTools := func(tools []livekitTool, servers []livekitMCPServer) {
 		data.NeedsMCP = data.NeedsMCP || len(servers) > 0
+		for _, server := range servers {
+			if server.Auth != nil {
+				data.AuthKinds.add(server.Auth.Kind) // the same helper webhook auth uses (V8)
+			}
+		}
 		for _, tool := range tools {
 			if tool.URLEnv != "" {
 				data.NeedsHTTPX = true // webhook tool POSTs with httpx (agents + tasks own them)
@@ -261,10 +266,23 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	if len(data.CallStartVars) > 0 {
 		data.DevOptionalEnv = []string{"UNMUTE_CALL_START"}
 	}
-	data.RequiredSecrets = requiredSecretEnv(agent)
-	for _, name := range data.RequiredSecrets {
+	// Every mcp source's env names join the startup check as well. Declared
+	// secrets cover most packages, but the address and token a tool source
+	// names are required whether or not the package also declared them, and a
+	// missing one has to be named before anything dials (FR-009/N40).
+	required := appendMCPEnv(requiredSecretEnv(agent), data.Agents, data.Tasks)
+	for _, name := range required {
 		env.add(name)
 	}
+	// All of them reach the environment, but the *startup check* skips the
+	// route's own names. One file serves every channel on this driver, so a
+	// check that demanded carrier credentials would refuse a browser or console
+	// session on a phone package — the workflow FR-018 protects. This restores
+	// exactly the behaviour these packages had before their telephony names were
+	// declared in `secrets:` (SCHEMA N41); the route's values are still listed in
+	// .env.example, the compile report, and the runbook. An mcp source's names
+	// are not route names, so they stay in the check.
+	data.RequiredSecrets = withoutRouteEnv(required, agent, tgt)
 	data.NeedsRender = renderNeeds(agent)
 	if data.Capture != nil {
 		data.NeedsFunctionTools = true // the generated capture tool is a @function_tool too
@@ -306,7 +324,11 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// image (compose.dev.yaml) runs `agent.py dev` against a single-node dev
 	// livekit-server and needs no telephony env. LIVEKIT_URL/KEY/SECRET are in
 	// this set but the template hardcodes their dev values.
-	data.DevEnv = env.sorted()
+	//
+	// The route's own names are removed rather than merely not added: `secrets:`
+	// now declares them (SCHEMA N41), so a package with a secrets block would
+	// otherwise demand carrier credentials for a browser session (FR-018).
+	data.DevEnv = withoutRouteEnv(env.sorted(), agent, tgt)
 	data.Telephony, err = buildLiveKitTelephony(agent, tgt, env)
 	if err != nil {
 		return livekitData{}, err
@@ -343,8 +365,12 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	data.PluginModules = collectLiveKitPlugins(data)
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
-	data.Secrets, data.ExtraEnv = secretEnvDocs(agent, data.RequiredEnv)
 	data.PlatformEnv, data.OperatorEnv = splitPlatformEnv(data.RequiredEnv, tgt.Telephony)
+	// The undeclared-name list is built from the operator's half, not from every
+	// required name. A platform-supplied name belongs in exactly one section: it
+	// has its own, which explains that you do not set it. Listing it in both
+	// tells the reader to set a value and then not to.
+	data.Secrets, data.ExtraEnv = secretEnvDocs(agent, data.OperatorEnv)
 	return data, nil
 }
 
@@ -710,12 +736,10 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 	if built.IsEntry {
 		built.Greeting = livekitGreetingFor(agent.Conversation)
 	}
-	mcpByEnv := map[string][]string{}
 	for _, ref := range def.Tools {
 		if tool, ok := agent.Tools[ref]; ok {
 			if tool.Execution == ir.ToolMCP {
-				env.add(tool.URLEnv)
-				mcpByEnv[tool.URLEnv] = append(mcpByEnv[tool.URLEnv], ref)
+				built.MCPServers = append(built.MCPServers, livekitMCPSource(ref, tool, env))
 				continue
 			}
 			lowered, err := buildLiveKitTool(ref, tool, agent.Variables, env)
@@ -797,24 +821,47 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 			built.Delegates = append(built.Delegates, delegate)
 		}
 	}
-	built.MCPServers = livekitMCPServers(mcpByEnv)
 	return built, nil
 }
 
-// livekitMCPServers collapses mcp tools by server env into sorted mounts.
-func livekitMCPServers(byEnv map[string][]string) []livekitMCPServer {
-	envs := make([]string, 0, len(byEnv))
-	for e := range byEnv {
-		envs = append(envs, e)
+// appendMCPEnv adds the env names every mcp mount reads, in mount order,
+// skipping the ones already required. Order is the author's, so the emitted
+// list reads like the package.
+func appendMCPEnv(required []string, agents []livekitAgent, tasks []livekitTask) []string {
+	add := func(name string) {
+		if name != "" && !slices.Contains(required, name) {
+			required = append(required, name)
+		}
 	}
-	sort.Strings(envs)
-	servers := make([]livekitMCPServer, 0, len(envs))
-	for _, e := range envs {
-		tools := byEnv[e]
-		sort.Strings(tools)
-		servers = append(servers, livekitMCPServer{URLEnv: e, Tools: tools})
+	mounts := func(servers []livekitMCPServer) {
+		for _, server := range servers {
+			add(server.URLEnv)
+			add(server.AuthEnv)
+		}
 	}
-	return servers
+	for _, a := range agents {
+		mounts(a.MCPServers)
+	}
+	for _, t := range tasks {
+		mounts(t.MCPServers)
+	}
+	return required
+}
+
+// livekitMCPSource lowers one mcp tool source to its mount, in the order the
+// author listed it. Two sources naming the same url_env are two mounts: the
+// selection lives on the source now, not on a file-name convention (N40).
+func livekitMCPSource(name string, tool ir.Tool, env *envSet) livekitMCPServer {
+	env.add(tool.URLEnv)
+	source := livekitMCPServer{
+		Name: name, URLEnv: tool.URLEnv, Transport: tool.MCPTransport,
+		Tools: tool.MCPTools, Auth: loweredAuth(tool.Auth),
+	}
+	if tool.Auth != nil {
+		env.add(tool.Auth.TokenEnv)
+		source.AuthEnv = tool.Auth.TokenEnv
+	}
+	return source
 }
 
 func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, env *envSet) (livekitDelegate, error) {
@@ -902,15 +949,13 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 			Anno: pyAnno(base, rf.Enum, ""),
 		})
 	}
-	mcpByEnv := map[string][]string{}
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
 		if !ok {
 			return livekitTask{}, fmt.Errorf("task %q references unknown tool %q", name, ref)
 		}
 		if tool.Execution == ir.ToolMCP {
-			env.add(tool.URLEnv)
-			mcpByEnv[tool.URLEnv] = append(mcpByEnv[tool.URLEnv], ref)
+			built.MCPServers = append(built.MCPServers, livekitMCPSource(ref, tool, env))
 			continue
 		}
 		lowered, err := buildLiveKitTool(ref, tool, agent.Variables, env)
@@ -923,7 +968,6 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 			built.Tools = append(built.Tools, lowered)
 		}
 	}
-	built.MCPServers = livekitMCPServers(mcpByEnv)
 	return built, nil
 }
 
@@ -1309,6 +1353,13 @@ func livekitDeps(data livekitData) []string {
 	// instructions type once). So a warm package pins the minor series the
 	// import was verified against instead of floating to <2.0 (SPEC V10, C3).
 	constraint := fmt.Sprintf(">=%d.%d", livekitVersionMajor, livekitVersionMinMinor)
+	// An MCP source raises the floor to where the emitted arguments are
+	// verified; a warm transfer's pinned series already sits at or above it, so
+	// the two compose by leaving the narrower one alone (N40).
+	if data.NeedsMCP {
+		constraint = fmt.Sprintf(">=%d.%d", livekitVersionMajor, livekitMCPVerifiedMinor)
+		extras["mcp"] = true // without the extra the emitted import fails
+	}
 	if data.HasWarmTransfer {
 		constraint = fmt.Sprintf(">=%d.%d,<%d.%d", livekitVersionMajor, livekitWarmVerifiedMinor,
 			livekitVersionMajor, livekitWarmVerifiedMinor+1)

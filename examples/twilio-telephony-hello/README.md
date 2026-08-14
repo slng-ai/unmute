@@ -10,10 +10,12 @@ tests a call coming in and a call going out.
 
 ## The two routes, which is the point of this package
 
-| Target | Route | How a call gets there | Who hosts it |
-|---|---|---|---|
-| **pipecat** | `transport: cloud-websocket`, `carrier: twilio` | your number points at a **static TwiML Bin**, whose `<Connect><Stream>` streams the audio to Pipecat Cloud | nobody: no server of yours is in the path, in production or ever |
-| **livekit** | `transport: sip`, `carrier: twilio` | your number is attached to a **Twilio Elastic SIP Trunk**, whose origination points at your LiveKit project's SIP URI | the worker; LiveKit Cloud can run it for you |
+Each target names one connection, and that file declares its whole route:
+
+| Target | Connection | Route | How a call gets there | Who hosts it |
+|---|---|---|---|---|
+| **pipecat** | `connections/twilio_voice.yaml` | `transport: cloud-websocket`, `carrier: twilio` | your number points at a **static TwiML Bin**, whose `<Connect><Stream>` streams the audio to Pipecat Cloud | nobody: no server of yours is in the path, in production or ever |
+| **livekit** | `connections/twilio_sip.yaml` | `transport: sip`, `carrier: twilio` | your number is attached to a **Twilio Elastic SIP Trunk**, whose origination points at your LiveKit project's SIP URI | the worker; LiveKit Cloud can run it for you |
 
 These are two genuinely different mechanisms, not two spellings of one thing:
 
@@ -35,6 +37,13 @@ mechanism (it replaces the live call's markup) and cannot do warm at all.
 own Twilio Media Streams bridge. It is easier to test on a laptop and carries no
 transfers, so it taught a route you have to leave as soon as you need one. That
 route still ships and is exercised by [outbound-reminder](../outbound-reminder).
+
+## Test in the browser first
+
+Nothing below is needed to talk to this agent. `bin/unmute dev
+examples/twilio-telephony-hello --target pipecat` opens a browser session with
+no Twilio credentials set and none checked, even though this package is entirely
+about phone routes. Get the agent right there, then come back for a real call.
 
 ## What you need
 
@@ -91,9 +100,18 @@ column has changed between versions. It is needed because the markup a call arri
 on has to name the deployed agent, and the compiler knows the agent name but not
 your organization.
 
-You do not set `UNMUTE_OUTBOUND_TOKEN`, `UNMUTE_PUBLIC_URL`, `REDIS_URL`, or any
-LiveKit trunk ID. The dev command supplies what it needs, and neither of these two
-routes reads any of them.
+The livekit build's `.env.example` ends with four more names under a "supplied
+for you, not by you" heading:
+
+| Variable | Who supplies it |
+|---|---|
+| `LIVEKIT_URL` | LiveKit Cloud injects it into the deployed agent; the local Compose graph sets it for a local run |
+| `LIVEKIT_API_KEY` | the same, as a pair with the secret |
+| `LIVEKIT_API_SECRET` | the same |
+| `REDIS_URL` | LiveKit Cloud's managed SIP service owns it; the generated Compose graph ships Valkey locally |
+
+Set those four only for a local run or a self-hosted deployment. On LiveKit
+Cloud the platform provides all four and drops them from any secrets file.
 
 Every name here must be a valid shell identifier: letters, digits, underscores,
 never starting with a digit. LiveKit Cloud exports secrets through a shell, so a

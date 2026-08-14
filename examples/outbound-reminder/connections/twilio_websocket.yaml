@@ -1,0 +1,13 @@
+# Twilio account for the Pipecat carrier WebSocket route. Values are
+# environment variable names, never secrets.
+#
+# The same three names as ./twilio_connector.yaml, and deliberately so: one
+# Twilio account, reached two ways. A connection declares its own transport, so
+# the two targets in this package cannot share one file even though they share
+# an account.
+transport: carrier-websocket
+carrier: twilio
+environment:
+  account_sid: TWILIO_ACCOUNT_SID
+  auth_token: TWILIO_AUTH_TOKEN
+  from_number: TWILIO_PHONE_NUMBER
