@@ -170,7 +170,9 @@ If you find yourself wanting a secret in a template, what you actually want is o
 
   It is a warning, not an error, so adopting the block is never a breaking change, and a package with no `secrets:` block at all stays silent. The handler scan is a text match rather than a Python parse, so a name inside a comment counts too. It over-reports rather than under-reports on purpose: the cost of a spurious line is that you declare one more name, and the cost of a miss is a credential that fails mid-call.
 
-  Connection env names are exempt. They are declared in their own `connections/<name>.yaml` file.
+  Connection environment values and `destinations` values are part of this check. They used to be exempt, on the grounds that they are declared in their own file; that left no single list of what a package needs to run. The cost of including them is that the name appears twice — once in the connection, where it says which *role* the value plays on the route, and once here, where it says the runtime needs it. Two lines, two different questions.
+
+  Names you never write are still absent, because nothing in the package declares them: `REDIS_URL` and `UNMUTE_PUBLIC_URL` come from `unmute dev` or the operator, `LIVEKIT_*` from the Compose graph or LiveKit Cloud, and `DAILY_API_KEY` and `PIPECAT_CLOUD_ORGANIZATION` from the route's own runtime. They still have to be set wherever the agent runs; the generated `.env.example` groups them under their own heading. See [connections](connections.md#where-each-value-goes).
 
 ## Where the values go
 

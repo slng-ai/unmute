@@ -80,6 +80,35 @@ Neither shape puts a value in a file, and neither is reachable from `{{...}}`:
 a template renders into the greeting, a prompt, a tool argument, or a URL, and
 all four are spoken, logged, or traced.
 
+## What you set, and what is set for you
+
+The browser is the default way to test, and it needs none of the phone values
+below: `bin/unmute dev examples/outbound-reminder --target pipecat` opens a
+session with nothing but the model keys set. Add `--telephony` only when you
+want a real call.
+
+You set these:
+
+| Variable | What it is |
+|---|---|
+| `OPENAI_API_KEY` | reasoning model |
+| `SLNG_API_KEY` | listen and speak models |
+| `SALON_API_URL` | the booking service the tools call |
+| `SALON_API_TOKEN` | bearer token for that service |
+| `SALON_API_SIGNING_KEY` | signs the webhook payloads |
+| `TWILIO_ACCOUNT_SID` | Twilio REST account, named by both connections |
+| `TWILIO_AUTH_TOKEN` | Twilio REST auth token |
+| `TWILIO_PHONE_NUMBER` | the caller identity the recipient sees |
+
+These reach the build without you:
+
+| Variable | Who supplies it |
+|---|---|
+| `UNMUTE_PUBLIC_URL` | `unmute dev --telephony` sets it from the tunnel; the operator sets it at deploy time |
+| `UNMUTE_OUTBOUND_TOKEN` | the outbound trigger token, generated for a local run |
+| `REDIS_URL` | the generated Compose graph, which ships Valkey |
+| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | the local Compose graph, or your LiveKit Cloud project (livekit target only) |
+
 ## Run it
 
 Compile both targets, then copy either generated env template and fill it in.

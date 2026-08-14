@@ -110,6 +110,8 @@ In short, on one Elastic SIP trunk:
    fix it.
 
 ```sh
+OPENAI_API_KEY=sk-...                # the reasoning model
+SLNG_API_KEY=...                     # listen and speak
 SIP_TRUNK_HOSTNAME=your-trunk.pstn.twilio.com
 SIP_AUTH_USERNAME=...
 SIP_AUTH_PASSWORD=...
@@ -117,6 +119,13 @@ SIP_FROM_NUMBER=+1...
 BILLING_PHONE_NUMBER=+1...
 SUPERVISOR_PHONE_NUMBER=+1...
 ```
+
+Those eight are the whole `secrets:` block in `agent.yaml`, which is the list of
+everything you supply. The generated `.env.example` ends with four more under a
+"supplied for you, not by you" heading — `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
+`LIVEKIT_API_SECRET`, and `REDIS_URL`. Set those only for a local run or a
+self-hosted deployment; on LiveKit Cloud the platform injects the LIVEKIT_*
+trio and its managed SIP service owns Redis.
 
 Every name in `.env` must be a valid shell identifier: letters, digits and
 underscores, never starting with a digit. LiveKit Cloud exports your secrets with

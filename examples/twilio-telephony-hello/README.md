@@ -91,9 +91,18 @@ column has changed between versions. It is needed because the markup a call arri
 on has to name the deployed agent, and the compiler knows the agent name but not
 your organization.
 
-You do not set `UNMUTE_OUTBOUND_TOKEN`, `UNMUTE_PUBLIC_URL`, `REDIS_URL`, or any
-LiveKit trunk ID. The dev command supplies what it needs, and neither of these two
-routes reads any of them.
+The livekit build's `.env.example` ends with four more names under a "supplied
+for you, not by you" heading:
+
+| Variable | Who supplies it |
+|---|---|
+| `LIVEKIT_URL` | LiveKit Cloud injects it into the deployed agent; the local Compose graph sets it for a local run |
+| `LIVEKIT_API_KEY` | the same, as a pair with the secret |
+| `LIVEKIT_API_SECRET` | the same |
+| `REDIS_URL` | LiveKit Cloud's managed SIP service owns it; the generated Compose graph ships Valkey locally |
+
+Set those four only for a local run or a self-hosted deployment. On LiveKit
+Cloud the platform provides all four and drops them from any secrets file.
 
 Every name here must be a valid shell identifier: letters, digits, underscores,
 never starting with a digit. LiveKit Cloud exports secrets through a shell, so a

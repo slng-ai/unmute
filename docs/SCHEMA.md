@@ -167,6 +167,18 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
   **Why the connector left that package.** `connector` is documented in `docs/TELEPHONY.md` as the optional Twilio-only route, with `sip` as the default multi-carrier LiveKit route, and the example set had it the other way round: the "hello" package taught the optional route, which a reader then has to abandon as soon as they need a transfer. The cost is real and is written on the example's page rather than discovered: an inbound SIP call cannot reach a laptop, because SIP needs carrier-reachable signalling and RTP and no HTTPS tunnel supplies them. What the package gains is that each target can be exercised in one direction locally, inbound on Pipecat and outbound on LiveKit, and both directions are covered between them. The `connector` route itself is untouched, still ships, and keeps its coverage through `examples/outbound-reminder`.
   **Nothing to migrate.** Every renamed package compiles byte-identically at its new path, and the retargeted one compiles what `transport: sip` has always compiled. A package of your own that names `connector` is unaffected.
 
+- **N40 (2026-08-14).** **The connection owns the phone route.** A target names one connection and declares nothing else about how a call reaches it. The connection file declares `transport`, `carrier`, and the account environment names, so a route is one file to read rather than three lines in one file plus a second file.
+  **Supersedes four clauses.** §6.1's `transport` and `carrier` target-field rows: both fields are removed from a target and belong in `connections/<name>.yaml`. §6.1's `destinations` row: it moves to the top level of `agent.yaml` and narrows to environment-variable names only. §6.3's connection example: `kind:` is removed, and `transport`/`carrier` are added. §4.12's exemption of connection environment names from the `secrets:` cross-check: removed. **N16's** "Connections ... never repeat `carrier`; the target owns that choice" is reversed — the connection owns it, and no target has one. The superseded text stays above as history.
+  **What a target keeps:** `provider`, `version`, `pins`, `sdk_language`, `connection`, `deployment_region`, `models`. Nothing else.
+  **A connection has three valid shapes**: transport + carrier + environment; transport + carrier with no environment, for receive-only on `(pipecat, cloud-websocket, twilio)`, where the platform terminates the carrier's stream itself; and transport alone, for the Daily-provisioned `daily-sip` form, which carries its own calls. The carrier-less form dials out and cannot receive, so it never serves a `channels.phone` entry, and it has no row in the capability table at all — the only Daily row is the carrier leg, a different thing.
+  **`destinations` moves and narrows.** It sits at the top level of `agent.yaml`, and a value must be the `UPPER_SNAKE` name of an environment variable. The literal E.164 and `sip:` forms N26 accepted are refused: `agent.yaml` is the portable half of a package and a number is a deployment fact. **The per-target destination override is removed with nothing replacing it.** That is a removed capability, not tidying: a package that pointed one target at a different desk now cannot. It was never used by any shipped example, and who a transfer reaches is the same question whichever carrier reaches them.
+  **`secrets:` covers telephony names.** Connection environment values and destination values are ordinary members of the §4.12 cross-check. A missing name is a warning on stderr, exit 0, which is the severity §4.12 already sets for every environment name. Raising it for telephony names alone would give an author two behaviours with no principle between them; raising it for all names is deferred.
+  **A knock-on in the capability table.** Four control rows conditioned on the target's `carrier` for `vapi` and `deepgram`: Deepgram cold transfer, Vapi warm transfer, Deepgram warm transfer, Deepgram voicemail detection. Those providers have no route and no connection, so after this change no author can write a carrier those rows could see, and the condition could only produce a refusal naming a fix nobody can perform. All four lose the condition and keep their Twilio requirement as a comment for whoever builds those drivers. **The visible consequence:** `unmute validate` now reports those four controls as supported on `vapi` and `deepgram` without qualification. Measured before deciding: stripping `carrier` from `internal/testdata/safe_core` broke exactly one of the four.
+  **No deprecation path.** The repository is pre-release with no external packages: one shape loads, one shape is tested, one shape is documented. Each moved field is refused by name, quoting the line and naming its new home, never as a bare "unknown field".
+
+- **N41 (2026-08-14).** **Recorded exception: one environment name is written in two files.** A connection's `environment` maps a role to a variable name, and §4.12 now also requires that name in `secrets:`. The two lines answer different questions — the connection says which *role* the value plays on the route, which `secrets:` cannot express; `secrets:` says the runtime requires it, which the connection cannot express for names no author writes — but the fact is stated twice, and the only agreement between them is the §4.12 cross-check, which **warns** rather than fails.
+  **The cost, stated rather than hidden:** a package that names a variable in a connection and forgets it in `secrets:` compiles green and fails on its first phone call. Deriving `secrets:` from every site was considered and rejected as far larger than the change that raised it. This is the same shape of exception as N22's tool `output`: a deliberate duplication, recorded here so the next reader finds it where the rule lives rather than in a feature's planning notes.
+
 - **N28 (2026-08-11).** Human transfer works on the **LiveKit Twilio connector** route, lowered by our own bridge rather than LiveKit's SIP machinery. `transfer_sip_participant` and `WarmTransferTask` both act on a SIP participant reached through an outbound trunk, and the connector has neither: its caller is audio the generated `telephony_bridge.py` published into a room. What the bridge does have is the Twilio call itself, which is the same thing the Pipecat carrier-WebSocket route builds its transfers out of, so the two routes make the identical carrier moves: cold redirects the caller's call over the REST API, warm creates a second streamed call whose media socket lands on the same bridge. An agreement test pins that sameness, because one Twilio product behaving two ways would be a bug.
   The agent and the bridge talk over **LiveKit RPC**: the bridge is already a participant in the agent's room, so there is no Redis on this route (there never was) and no side channel. Privacy on a warm transfer is a property of the topology, as on Pipecat: each phone leg has its own WebSocket and its own downlink, a held leg is sent a synthesized hold loop instead of room audio, and no leg is ever forwarded its own audio.
   What this changes for authors: nothing in `agent.yaml`. The same `cold:` and `warm:` blocks now compile on a route that runs on a laptop with three Twilio credentials, which the SIP route cannot do at all (a carrier opens SIP signalling to a public `sip:` URI and sends RTP over UDP; no HTTPS tunnel carries either). The two LiveKit routes are a trade-off, not a hierarchy: SIP buys LiveKit-maintained machinery, RTP media, cheaper minutes and any carrier; the connector buys a laptop.
@@ -195,8 +207,8 @@ tools/
   lookup_customer.yaml  # contract: input, output, execution, interruption, effect
   lookup_customer.py    # handler, code targets only
 connections/
-  primary_phone.yaml    # external telephony account, env names only
-targets.yaml          # named target instances: provider, pins, destinations, model overrides
+  primary_phone.yaml    # one phone route: transport, carrier, env names only
+targets.yaml          # named target instances: provider, pins, connection, model overrides
 ```
 
 Rules:
@@ -224,6 +236,7 @@ Named maps instead of lists, so every item has a stable identity and diffs stay 
 | `turn` | only when `models.turn` has 2+ entries | name of a turn model, see 4.2 | warn |
 | `variables` | no | map, see 4.4 | core |
 | `secrets` | no | list of env var names, see 4.12 | core |
+| `destinations` | if any `human_transfer` is used | map of symbolic name to an env var name (N40) | core |
 | `agents` | yes, must include `entry_agent` | map, see 4.5 | core |
 | `tasks` | no | map, see 4.6 | gated (T1) |
 | `task_groups` | no | map, see 4.6 | gated (T1) |
@@ -409,7 +422,7 @@ Fields inside either block:
 
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
-| `destination` | yes | symbolic name | core | Resolves through the target instance's `destinations:` map to a number or SIP URI. |
+| `destination` | yes | symbolic name | core | Resolves through `agent.yaml`'s top-level `destinations:` map to the name of an environment variable holding a number or SIP URI (N40). |
 | `ring_timeout` | no | duration | gated | How long to wait for the person to pick up. Omitted from the emitted call when unset, so the platform default applies (LiveKit: 30s; the Pipecat Twilio route: Twilio's own 60s dial timeout). |
 | `on_unavailable` | no, default `return_to_caller` | `return_to_caller \| hangup` | gated | One concept covering every way the person does not take the call: no answer, declined, voicemail, dial failure. LiveKit surfaces all four as one `ToolError`, so the lowering is one branch, not four. |
 
@@ -533,6 +546,16 @@ on its first tool call. The scan is a text match, not a Python parse, so a name
 in a comment counts: the check over-reports rather than under-reports, since a
 spurious line costs one extra declaration and a miss costs a live call.
 
+Connection `environment` values and `agent.yaml` `destinations` values are part
+of the cross-check (amended 2026-08-14, N40). They were exempt on the grounds
+that a connection declares them in its own file; that left no single list of
+what a package needs to run. Names **no author writes** stay out, because
+nothing in the package declares them: `REDIS_URL`, `UNMUTE_PUBLIC_URL`, and
+`UNMUTE_OUTBOUND_TOKEN` come from `unmute dev` or the operator; `LIVEKIT_URL`
+and its key pair from the Compose graph or LiveKit Cloud; `DAILY_API_KEY` and
+`PIPECAT_CLOUD_ORGANIZATION` from the route's own runtime. The duplication this
+creates is recorded as an exception in N41.
+
 ---
 
 ## 5. tools/*.yaml
@@ -642,10 +665,11 @@ Named target instances: which orchestrator runs the package, and the infrastruct
 | `version` | code targets | Framework pin. The driver checks it against the range its templates support. A codegen check, not model validation. |
 | `pins` | no | Independently versioned packages (LiveKit plugins) get their own entries. Pipecat Flows no longer qualifies: it ships inside `pipecat-ai` core since 1.5.0; never pin the deprecated standalone `pipecat-ai-flows`. |
 | `sdk_language` | no | LiveKit: warm transfer and MCP need `python`. |
-| `transport`, `carrier`, `connection` | required for LiveKit or Pipecat telephony | Driver route vocabulary and a Connection name. Telephony features resolve against the exact tuple, never the orchestrator or carrier alone. |
+| `connection` | required for LiveKit or Pipecat telephony | The name of one `connections/<name>.yaml`, which declares the whole route. Telephony features still resolve against the exact `(provider, transport, carrier)` tuple, never the orchestrator or carrier alone; the target contributes the provider and the connection contributes the other two. |
+| ~~`transport`, `carrier`~~ | — | **Superseded by N40 (2026-08-14).** Both moved into the connection file. Writing either on a target is refused, naming the file it belongs in. |
 | `deployment_region` | no | Where the target platform runs the deployed agent: one region, or a list of them (N18, widened by N32). Provider vocabulary, forwarded as declared, never validated or derived. Pipecat: the `region` key in the emitted `pcc-deploy.toml`, exactly one; a list of more than one is a gated error, and a second region is a differently named agent. LiveKit: the `--region` flag on the `lk agent create` command in the generated README, one deployment per declared region (create-time, immutable). A model's own service region rides its `params`/`endpoint_env` instead. Replaces the retired `region`/`edition` fields (N17). |
 | `models` | no | Per-target overrides, see 6.2. |
-| `destinations` | if any `human_transfer` is used | Map of symbolic name to an E.164 number, a `sip:`/`sips:` URI, or the UPPER_SNAKE name of an environment variable holding one of those (N24). The three are told apart by shape. A named variable rides into `.env.example` and the required-env list; the model still only ever picks the symbolic name. |
+| ~~`destinations`~~ | — | **Superseded by N40 (2026-08-14).** Moved to the top level of `agent.yaml` and narrowed to the UPPER_SNAKE name of an environment variable; the literal E.164 and `sip:` forms N24 accepted are refused. The per-target override is removed with nothing replacing it. Writing it on a target is refused, naming `agent.yaml`. |
 
 ### 6.2 Overrides (amended 2026-07-19, N15)
 
@@ -674,29 +698,36 @@ Why never validated: provider model lists change faster than any shipped catalog
 
 ### 6.3 Telephony connections and routes
 
-Telephony Connections keep account-specific environment names outside the
-portable Agent and outside target route selection:
+A telephony Connection is one phone route: the mechanism, the carrier, and the
+account-specific environment names, all outside the portable Agent (amended
+2026-08-14, N40 — the route fields moved here from the target, and `kind:` was
+removed):
 
 ```yaml
 # connections/primary_phone.yaml
-kind: telephony
+transport: carrier-websocket
+carrier: twilio
 environment:
   account_sid: TWILIO_ACCOUNT_SID
   auth_token: TWILIO_AUTH_TOKEN
   from_number: TWILIO_PHONE_NUMBER
 ```
 
-The target binds that Connection to an exact route:
+The target names it and declares nothing else about telephony:
 
 ```yaml
 targets:
   pipecat:
     provider: pipecat
     version: "1.5.0"
-    transport: carrier-websocket
-    carrier: twilio
     connection: primary_phone
 ```
+
+`carrier` is omitted only where the route has no carrier leg, which today is
+the Daily-provisioned `daily-sip` form alone. `environment` is omitted where the
+route needs no account values: that form, and receive-only on
+`(pipecat, cloud-websocket, twilio)`. `transport` is always required — a
+connection with no transport declares no route.
 
 A package may add more named targets and Connections for every supported
 carrier route it needs. There is no package-level route-count field. The
