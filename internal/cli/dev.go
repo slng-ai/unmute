@@ -518,11 +518,11 @@ func stopBot(c *exec.Cmd, done <-chan error) {
 	if c.Process == nil {
 		return
 	}
-	_ = syscall.Kill(-c.Process.Pid, syscall.SIGTERM)
+	signalGroup(c, syscall.SIGTERM)
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		_ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
+		signalGroup(c, syscall.SIGKILL)
 	}
 }
 

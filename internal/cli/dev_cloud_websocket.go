@@ -156,7 +156,7 @@ func startLocalCarrierAgent(ctx context.Context, dir, port, proxyHost string, en
 	child.Dir = dir
 	child.Env = env
 	child.Stdout, child.Stderr = sink, sink
-	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // own group, so uv's python is reaped too
+	ownProcessGroup(child) // own group, so uv's python is reaped too
 	if err := child.Start(); err != nil {
 		return nil, fmt.Errorf("start the local agent: %w", err)
 	}
