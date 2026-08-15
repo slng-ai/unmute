@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"cmp"
 	"fmt"
 
 	"github.com/slng-ai/unmute/internal/ir"
@@ -50,8 +51,8 @@ func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap
 	nested := flat
 	if spec.Params == targetcap.ParamsSettings {
 		nested = func(kv pyKV) { call.SettingsArgs = append(call.SettingsArgs, kv) }
-		call.SettingsArg = firstNonEmpty(spec.SettingsArg, "settings")
-		call.SettingsClass = firstNonEmpty(spec.SettingsClass, spec.Class+".Settings")
+		call.SettingsArg = cmp.Or(spec.SettingsArg, "settings")
+		call.SettingsClass = cmp.Or(spec.SettingsClass, spec.Class+".Settings")
 	}
 
 	if spec.APIKeyArg != "" {
@@ -69,7 +70,7 @@ func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap
 		env.add(binding.EndpointEnv)
 		flat(pyKV{Key: spec.Endpoint.Arg, Value: envRef(binding.EndpointEnv)})
 	}
-	voice := firstNonEmpty(binding.Voice, binding.VoiceID)
+	voice := cmp.Or(binding.Voice, binding.VoiceID)
 	if voice != "" {
 		if spec.Voice.Arg == "" {
 			return ServiceCall{}, entry, fmt.Errorf("%s %s binding provider %q: voice has no slot here", fw, role, vendor)

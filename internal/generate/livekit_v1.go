@@ -542,7 +542,9 @@ func checkLiveKitPins(pins map[string]string) error {
 			return fmt.Errorf("livekit pin %s: %q is not a semantic version", name, pins[name])
 		}
 		min, ok := parseLiveKitVersion(strings.TrimPrefix(floor, ">="))
-		if ok && lessLiveKitVersion(pinned, min) {
+		// Lexicographic over major/minor/patch, which is exactly semver order
+		// for a parsed triple.
+		if ok && slices.Compare(pinned[:], min[:]) < 0 {
 			return fmt.Errorf("livekit pin %s %q is below the catalogue floor %s", name, pins[name], floor)
 		}
 	}
@@ -559,15 +561,6 @@ func parseLiveKitVersion(v string) ([3]int, bool) {
 		out[i], _ = strconv.Atoi(part)
 	}
 	return out, true
-}
-
-func lessLiveKitVersion(a, b [3]int) bool {
-	for i := range a {
-		if a[i] != b[i] {
-			return a[i] < b[i]
-		}
-	}
-	return false
 }
 
 // checkLiveKitVersion rejects a framework version outside the templates' range.

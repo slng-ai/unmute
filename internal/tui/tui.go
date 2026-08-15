@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -447,7 +448,7 @@ func summary(result Result, review scaffold.PreflightReport) string {
 		if binding.Binding.Model != "" {
 			identity += "/" + binding.Binding.Model
 		}
-		if voice := firstNonempty(binding.Binding.Voice, binding.Binding.VoiceID); voice != "" {
+		if voice := cmp.Or(binding.Binding.Voice, binding.Binding.VoiceID); voice != "" {
 			identity += " voice=" + voice
 		}
 		fmt.Fprintf(&text, "\n- %s%s: %s", binding.Role, profile, identity)
@@ -460,19 +461,10 @@ func summary(result Result, review scaffold.PreflightReport) string {
 	}
 	if hasTelephony(&result.Agent.Data) {
 		fmt.Fprintf(&text, "\nExternal phone setup required: transport=%s carrier=%s; provision numbers/trunks outside Unmute.",
-			firstNonempty(result.Agent.Data.Transport, "provider default"), firstNonempty(result.Agent.Data.Carrier, "provider default"))
+			cmp.Or(result.Agent.Data.Transport, "provider default"), cmp.Or(result.Agent.Data.Carrier, "provider default"))
 	}
 	fmt.Fprintf(&text, "\nCompile: %s", compile)
 	return text.String()
-}
-
-func firstNonempty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func targetLabel(provider string) string {
@@ -595,19 +587,19 @@ func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, bin
 
 		options := []huh.Option[string]{huh.NewOption("Provider  ·  "+brand, "provider")}
 		if len(distributors) > 1 {
-			options = append(options, huh.NewOption("Distributor  ·  "+firstNonempty(binding.Provider, distributors[0]), "distributor"))
+			options = append(options, huh.NewOption("Distributor  ·  "+cmp.Or(binding.Provider, distributors[0]), "distributor"))
 		}
 		if modelApplicable {
-			options = append(options, huh.NewOption("Model  ·  "+firstNonempty(binding.Model, "not set"), "model"))
+			options = append(options, huh.NewOption("Model  ·  "+cmp.Or(binding.Model, "not set"), "model"))
 		}
 		if voiceApplicable {
-			options = append(options, huh.NewOption("Voice  ·  "+firstNonempty(binding.Voice, "not set"), "voice"))
+			options = append(options, huh.NewOption("Voice  ·  "+cmp.Or(binding.Voice, "not set"), "voice"))
 		}
 		if languageApplicable {
-			options = append(options, huh.NewOption("Language  ·  "+firstNonempty(binding.Language, "provider default"), "language"))
+			options = append(options, huh.NewOption("Language  ·  "+cmp.Or(binding.Language, "provider default"), "language"))
 		}
 		options = append(options,
-			huh.NewOption("Additional config  ·  "+firstNonempty(binding.Params, "none"), "params"),
+			huh.NewOption("Additional config  ·  "+cmp.Or(binding.Params, "none"), "params"),
 			huh.NewOption("← Back", actionBack),
 		)
 		choice, _, err := runner.selectOne(strings.ToUpper(string(role)[:1])+string(role)[1:], runner.describe(entryHint), options, true)
@@ -763,7 +755,7 @@ func editVariables(runner *fieldRunner, data *scaffold.Data) error {
 }
 
 func variableLabel(variable scaffold.Variable) string {
-	source := firstNonempty(variable.Source, "session state")
+	source := cmp.Or(variable.Source, "session state")
 	return fmt.Sprintf("%s  ·  %s  ·  %s", variable.Name, variable.Type, strings.ReplaceAll(source, "_", " "))
 }
 
@@ -779,10 +771,10 @@ func editVariable(runner *fieldRunner, data *scaffold.Data, name string) error {
 		if variable == nil {
 			return nil
 		}
-		source := firstNonempty(variable.Source, "session state")
+		source := cmp.Or(variable.Source, "session state")
 		choice, _, err := runner.selectOne(variable.Name, "Edit this saved variable. Its name stays stable so existing references do not break.", []huh.Option[string]{
 			huh.NewOption("Type  ·  "+variable.Type, "type"),
-			huh.NewOption("Default  ·  "+firstNonempty(variable.Default, "none"), "default"),
+			huh.NewOption("Default  ·  "+cmp.Or(variable.Default, "none"), "default"),
 			huh.NewOption("Source  ·  "+strings.ReplaceAll(source, "_", " "), "source"),
 			huh.NewOption("Delete variable", "delete"),
 			huh.NewOption("← Back", actionBack),
@@ -879,7 +871,7 @@ func editTools(runner *fieldRunner, data *scaffold.Data) error {
 		if err != nil || back {
 			continue
 		}
-		tool.AttachTo = []string{firstNonempty(data.EntryAgent, "assistant")}
+		tool.AttachTo = []string{cmp.Or(data.EntryAgent, "assistant")}
 		data.Tools = append(data.Tools, tool)
 		if err := editTool(runner, data, &data.Tools[len(data.Tools)-1]); err != nil {
 			return err
@@ -1009,8 +1001,8 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 			// schema. Description and the goodbye message are the only knobs.
 			options = []huh.Option[string]{
 				huh.NewOption("Description  ·  "+oneLine(tool.Description), "description"),
-				huh.NewOption("Prebuilt  ·  "+firstNonempty(tool.Builtin, "end_call"), "execution"),
-				huh.NewOption("Goodbye message  ·  "+firstNonempty(oneLine(tool.Instructions), "provider default"), "instructions"),
+				huh.NewOption("Prebuilt  ·  "+cmp.Or(tool.Builtin, "end_call"), "execution"),
+				huh.NewOption("Goodbye message  ·  "+cmp.Or(oneLine(tool.Instructions), "provider default"), "instructions"),
 				huh.NewOption("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
 				huh.NewOption("Delete tool", "delete"),
 				huh.NewOption("← Back", actionBack),
@@ -1022,22 +1014,22 @@ func editTool(runner *fieldRunner, data *scaffold.Data, tool *scaffold.Tool) err
 			// untouched.
 			options = []huh.Option[string]{
 				huh.NewOption("Execution  ·  mcp", "execution"),
-				huh.NewOption("MCP server URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url"),
+				huh.NewOption("MCP server URL env  ·  "+cmp.Or(tool.URLEnv, "none"), "url"),
 				huh.NewOption("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
 				huh.NewOption("Delete tool", "delete"),
 				huh.NewOption("← Back", actionBack),
 			}
 		default:
-			executionField := huh.NewOption("Webhook URL env  ·  "+firstNonempty(tool.URLEnv, "none"), "url")
+			executionField := huh.NewOption("Webhook URL env  ·  "+cmp.Or(tool.URLEnv, "none"), "url")
 			if tool.ExecutionKind() == "local" {
-				executionField = huh.NewOption("Python handler  ·  "+firstNonempty(tool.Handler, "none"), "handler")
+				executionField = huh.NewOption("Python handler  ·  "+cmp.Or(tool.Handler, "none"), "handler")
 			}
 			options = []huh.Option[string]{
 				huh.NewOption("Description  ·  "+oneLine(tool.Description), "description"),
 				huh.NewOption("Execution  ·  "+tool.ExecutionKind(), "execution"),
 				executionField,
 				huh.NewOption("Input schema  ·  "+oneLine(tool.Input), "input"),
-				huh.NewOption("Output schema  ·  "+firstNonempty(oneLine(tool.Output), "unconstrained"), "output"),
+				huh.NewOption("Output schema  ·  "+cmp.Or(oneLine(tool.Output), "unconstrained"), "output"),
 				huh.NewOption("Attached to  ·  "+toolAttachmentLabel(data, *tool), "attach"),
 				huh.NewOption("Delete tool", "delete"),
 				huh.NewOption("← Back", actionBack),
@@ -1128,7 +1120,7 @@ func toolAttachmentChoices(data *scaffold.Data, tool scaffold.Tool) ([]string, [
 		selected = append(selected, "Agent · "+name)
 	}
 	if tool.AttachTo == nil {
-		selected = append(selected, "Agent · "+firstNonempty(data.EntryAgent, "assistant"))
+		selected = append(selected, "Agent · "+cmp.Or(data.EntryAgent, "assistant"))
 	}
 	for _, name := range tool.AttachTasks {
 		selected = append(selected, "Task · "+name)
@@ -1138,7 +1130,7 @@ func toolAttachmentChoices(data *scaffold.Data, tool scaffold.Tool) ([]string, [
 
 func toolAttachmentLabel(data *scaffold.Data, tool scaffold.Tool) string {
 	_, selected := toolAttachmentChoices(data, tool)
-	return firstNonempty(strings.Join(selected, ", "), "not attached")
+	return cmp.Or(strings.Join(selected, ", "), "not attached")
 }
 
 func editAgents(runner *fieldRunner, data *scaffold.Data) error {
@@ -1149,7 +1141,7 @@ func editAgents(runner *fieldRunner, data *scaffold.Data) error {
 		}
 		options = append(options,
 			huh.NewOption("Add agent", "add"),
-			huh.NewOption("Choose entry agent  ·  "+firstNonempty(data.EntryAgent, "assistant"), "entry"),
+			huh.NewOption("Choose entry agent  ·  "+cmp.Or(data.EntryAgent, "assistant"), "entry"),
 			huh.NewOption("← Back", actionBack),
 		)
 		choice, _, err := runner.selectOne("Agents", "Select any agent to edit its prompt, LLM, TTS, and tools from one screen.", options, true)
@@ -1203,7 +1195,7 @@ func editAgents(runner *fieldRunner, data *scaffold.Data) error {
 
 func agentLabel(data *scaffold.Data, agent scaffold.Agent) string {
 	entry := ""
-	if agent.Name == firstNonempty(data.EntryAgent, "assistant") {
+	if agent.Name == cmp.Or(data.EntryAgent, "assistant") {
 		entry = "  ·  entry"
 	}
 	return fmt.Sprintf("%s  ·  %s  ·  %s  ·  %d tools%s",
@@ -1211,7 +1203,7 @@ func agentLabel(data *scaffold.Data, agent scaffold.Agent) string {
 }
 
 func bindingLabel(binding scaffold.Binding) string {
-	identity := firstNonempty(binding.Provider, "integrated")
+	identity := cmp.Or(binding.Provider, "integrated")
 	if binding.Model != "" {
 		identity += "/" + binding.Model
 	}
@@ -1232,8 +1224,8 @@ func editAgentDetails(runner *fieldRunner, data *scaffold.Data, name string) err
 			huh.NewOption("Prompt  ·  "+oneLine(agent.Instructions), "prompt"),
 			huh.NewOption("LLM model  ·  "+bindingLabel(agent.Reason), "reason"),
 			huh.NewOption("TTS voice  ·  "+bindingLabel(agent.Speak), "speak"),
-			huh.NewOption("Tools  ·  "+firstNonempty(strings.Join(agentToolNames(data, name), ", "), "none"), "tools"),
-			huh.NewOption("Entry agent  ·  "+yesNo(name == firstNonempty(data.EntryAgent, "assistant")), "entry"),
+			huh.NewOption("Tools  ·  "+cmp.Or(strings.Join(agentToolNames(data, name), ", "), "none"), "tools"),
+			huh.NewOption("Entry agent  ·  "+yesNo(name == cmp.Or(data.EntryAgent, "assistant")), "entry"),
 			lifecycle,
 			huh.NewOption("← Back", actionBack),
 		}, true)
@@ -1361,7 +1353,7 @@ func agentToolNames(data *scaffold.Data, name string) []string {
 		if attach == nil {
 			attach = []string{"assistant"}
 		}
-		if containsName(attach, name) {
+		if slices.Contains(attach, name) {
 			names = append(names, tool.Name)
 		}
 	}
@@ -1374,8 +1366,8 @@ func setAgentTools(data *scaffold.Data, name string, selected []string) {
 		if data.Tools[i].AttachTo == nil {
 			attach = []string{"assistant"}
 		}
-		attach = removeName(attach, name)
-		if containsName(selected, data.Tools[i].Name) {
+		attach = slices.DeleteFunc(attach, func(n string) bool { return n == name })
+		if slices.Contains(selected, data.Tools[i].Name) {
 			attach = append(attach, name)
 		}
 		data.Tools[i].AttachTo = append([]string{}, attach...)
@@ -1442,7 +1434,7 @@ func handoffVariablesLabel(handoff scaffold.Handoff) string {
 	if handoff.AllVariables {
 		return "all"
 	}
-	return firstNonempty(strings.Join(handoff.Variables, ", "), "none")
+	return cmp.Or(strings.Join(handoff.Variables, ", "), "none")
 }
 
 func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) error {
@@ -1461,8 +1453,8 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 			huh.NewOption("Source agent  ·  "+handoff.Source, "source"),
 			huh.NewOption("Target agent  ·  "+handoff.To, "target"),
 			huh.NewOption("Trigger  ·  "+oneLine(handoff.When), "trigger"),
-			huh.NewOption("Required variables  ·  "+firstNonempty(strings.Join(handoff.Requires, ", "), "none"), "requires"),
-			huh.NewOption("Context  ·  "+firstNonempty(handoff.History, "full")+" · variables "+handoffVariablesLabel(*handoff), "context"),
+			huh.NewOption("Required variables  ·  "+cmp.Or(strings.Join(handoff.Requires, ", "), "none"), "requires"),
+			huh.NewOption("Context  ·  "+cmp.Or(handoff.History, "full")+" · variables "+handoffVariablesLabel(*handoff), "context"),
 			huh.NewOption("Delete handoff", "delete"),
 			huh.NewOption("← Back", actionBack),
 		}, true)
@@ -1520,7 +1512,7 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 
 func editHandoffContextDetails(runner *fieldRunner, data *scaffold.Data, handoff *scaffold.Handoff) error {
 	for {
-		history := firstNonempty(handoff.History, "full")
+		history := cmp.Or(handoff.History, "full")
 		tools := "provider default"
 		if handoff.IncludeToolCalls != nil {
 			tools = map[bool]string{true: "include", false: "exclude"}[*handoff.IncludeToolCalls]
@@ -1536,7 +1528,7 @@ func editHandoffContextDetails(runner *fieldRunner, data *scaffold.Data, handoff
 			options = append(options, huh.NewOption(fmt.Sprintf("Maximum messages  ·  %d", handoff.MaxMessages), "maximum"))
 		}
 		if history == "summary" {
-			options = append(options, huh.NewOption("Summarizer model  ·  "+firstNonempty(handoff.Summarizer, data.AllAgents()[0].ModelProfile()), "summarizer"))
+			options = append(options, huh.NewOption("Summarizer model  ·  "+cmp.Or(handoff.Summarizer, data.AllAgents()[0].ModelProfile()), "summarizer"))
 		}
 		options = append(options, huh.NewOption("Tool calls  ·  "+tools, "tools"))
 		if len(data.Variables) > 0 {
@@ -1653,7 +1645,7 @@ func editTasks(runner *fieldRunner, data *scaffold.Data) error {
 			Instructions: "Complete this focused task and return only the structured result.",
 			Result:       `{"result":"string"}`,
 			History:      "full",
-			Agent:        firstNonempty(data.EntryAgent, "assistant"),
+			Agent:        cmp.Or(data.EntryAgent, "assistant"),
 		}
 		back, err := runner.input("Task name", "Lowercase snake_case; its delegate is named run_<task>.", &task.Name, func(value string) error {
 			if err := validateIdentifier(value); err != nil {
@@ -1677,7 +1669,7 @@ func editTasks(runner *fieldRunner, data *scaffold.Data) error {
 }
 
 func taskLabel(task scaffold.Task) string {
-	return fmt.Sprintf("%s  ·  %s  ·  %s", task.Name, firstNonempty(task.Agent, "entry agent"), task.Result)
+	return fmt.Sprintf("%s  ·  %s  ·  %s", task.Name, cmp.Or(task.Agent, "entry agent"), task.Result)
 }
 
 func editTaskDetails(runner *fieldRunner, data *scaffold.Data, name string) error {
@@ -1694,13 +1686,13 @@ func editTaskDetails(runner *fieldRunner, data *scaffold.Data, name string) erro
 		}
 		choice, _, err := runner.selectOne(name, "Edit this saved task or remove it.", []huh.Option[string]{
 			huh.NewOption("Prompt  ·  "+oneLine(task.Instructions), "prompt"),
-			huh.NewOption("Tools  ·  "+firstNonempty(strings.Join(task.Tools, ", "), "none"), "tools"),
-			huh.NewOption("Model  ·  "+firstNonempty(task.Model, "entry agent model"), "model"),
+			huh.NewOption("Tools  ·  "+cmp.Or(strings.Join(task.Tools, ", "), "none"), "tools"),
+			huh.NewOption("Model  ·  "+cmp.Or(task.Model, "entry agent model"), "model"),
 			huh.NewOption("Typed result  ·  "+task.Result, "result"),
-			huh.NewOption("Context  ·  "+firstNonempty(task.History, "full"), "context"),
-			huh.NewOption("Delegating agent  ·  "+firstNonempty(task.Agent, "assistant"), "agent"),
+			huh.NewOption("Context  ·  "+cmp.Or(task.History, "full"), "context"),
+			huh.NewOption("Delegating agent  ·  "+cmp.Or(task.Agent, "assistant"), "agent"),
 			huh.NewOption("Trigger  ·  "+oneLine(task.When), "trigger"),
-			huh.NewOption("Result assignments  ·  "+firstNonempty(strings.Join(assignmentVariables(task.Assign), ", "), "none"), "assign"),
+			huh.NewOption("Result assignments  ·  "+cmp.Or(strings.Join(assignmentVariables(task.Assign), ", "), "none"), "assign"),
 			huh.NewOption("Delete task", "delete"),
 			huh.NewOption("← Back", actionBack),
 		}, true)
@@ -1782,7 +1774,7 @@ func editTaskDetails(runner *fieldRunner, data *scaffold.Data, name string) erro
 
 func editTaskContext(runner *fieldRunner, data *scaffold.Data, task *scaffold.Task) (bool, error) {
 	for {
-		history := firstNonempty(task.History, "full")
+		history := cmp.Or(task.History, "full")
 		tools := "provider default"
 		if task.IncludeToolCalls != nil {
 			tools = map[bool]string{true: "include", false: "exclude"}[*task.IncludeToolCalls]
@@ -1792,7 +1784,7 @@ func editTaskContext(runner *fieldRunner, data *scaffold.Data, task *scaffold.Ta
 			options = append(options, huh.NewOption(fmt.Sprintf("Maximum messages  ·  %d", task.MaxMessages), "maximum"))
 		}
 		if history == "summary" {
-			options = append(options, huh.NewOption("Summarizer model  ·  "+firstNonempty(task.Summarizer, data.AllAgents()[0].ModelProfile()), "summarizer"))
+			options = append(options, huh.NewOption("Summarizer model  ·  "+cmp.Or(task.Summarizer, data.AllAgents()[0].ModelProfile()), "summarizer"))
 		}
 		options = append(options, huh.NewOption("Tool calls  ·  "+tools, "tools"), huh.NewOption("← Back", actionBack))
 		choice, _, err := runner.selectOne("Task context", "Edit one field, then return here.", options, true)
@@ -1874,7 +1866,7 @@ func editTaskAssignments(runner *fieldRunner, data *scaffold.Data, task *scaffol
 	assignments := make(map[string]string, len(selected))
 	for _, variable := range selected {
 		field := assignmentField(task.Assign, variable)
-		if !containsName(fields, field) {
+		if !slices.Contains(fields, field) {
 			field = fields[0]
 		}
 		assignments[variable] = "result." + field
@@ -1917,7 +1909,7 @@ func editTaskAssignments(runner *fieldRunner, data *scaffold.Data, task *scaffol
 		if !back {
 			if field == "remove" {
 				delete(assignments, choice)
-				selected = removeName(selected, choice)
+				selected = slices.DeleteFunc(selected, func(n string) bool { return n == choice })
 				continue
 			}
 			assignments[choice] = "result." + field
@@ -1979,7 +1971,7 @@ func editTaskGroups(runner *fieldRunner, data *scaffold.Data) error {
 			}
 			continue
 		}
-		group := scaffold.TaskGroup{ContextScope: "shared", Then: "return", Agent: firstNonempty(data.EntryAgent, "assistant")}
+		group := scaffold.TaskGroup{ContextScope: "shared", Then: "return", Agent: cmp.Or(data.EntryAgent, "assistant")}
 		back, err := runner.input("Task group name", "Lowercase snake_case; its delegate is named run_<group>.", &group.Name, func(value string) error {
 			if err := validateIdentifier(value); err != nil {
 				return err
@@ -2022,7 +2014,7 @@ func editTaskGroupDetails(runner *fieldRunner, data *scaffold.Data, name string)
 			huh.NewOption("Ordered steps  ·  "+strings.Join(group.Steps, " → "), "steps"),
 			huh.NewOption("Context between steps  ·  "+group.ContextScope, "context"),
 			huh.NewOption("Completion  ·  "+completion, "completion"),
-			huh.NewOption("Transfer target  ·  "+firstNonempty(group.ThenTarget, "not applicable"), "target"),
+			huh.NewOption("Transfer target  ·  "+cmp.Or(group.ThenTarget, "not applicable"), "target"),
 			huh.NewOption("Delegating agent  ·  "+group.Agent, "agent"),
 			huh.NewOption("Trigger  ·  "+oneLine(group.When), "trigger"),
 			huh.NewOption("Delete task group", "delete"),
@@ -2129,13 +2121,13 @@ func editChannels(runner *fieldRunner, data *scaffold.Data) error {
 		}
 		options := []huh.Option[string]{huh.NewOption("Channels  ·  "+strings.ReplaceAll(mode, "_", " "), "mode")}
 		if mode != "web" {
-			options = append(options, huh.NewOption("Required phone controls  ·  "+firstNonempty(strings.Join(phone.RequiredControls, ", "), "none"), "controls"))
+			options = append(options, huh.NewOption("Required phone controls  ·  "+cmp.Or(strings.Join(phone.RequiredControls, ", "), "none"), "controls"))
 			if phone.Outbound {
-				options = append(options, huh.NewOption("When voicemail answers  ·  "+firstNonempty(phone.OnVoicemail, "hangup"), "voicemail"))
+				options = append(options, huh.NewOption("When voicemail answers  ·  "+cmp.Or(phone.OnVoicemail, "hangup"), "voicemail"))
 			}
 			options = append(options,
-				huh.NewOption("Target transport  ·  "+firstNonempty(data.Transport, "not set"), "transport"),
-				huh.NewOption("Carrier  ·  "+firstNonempty(data.Carrier, "not set"), "carrier"),
+				huh.NewOption("Target transport  ·  "+cmp.Or(data.Transport, "not set"), "transport"),
+				huh.NewOption("Carrier  ·  "+cmp.Or(data.Carrier, "not set"), "carrier"),
 			)
 		}
 		options = append(options, huh.NewOption("← Back", actionBack))
@@ -2166,7 +2158,7 @@ func editChannels(runner *fieldRunner, data *scaffold.Data) error {
 			phone.Inbound = strings.Contains(selected, "inbound") || selected == "web_phone_both"
 			phone.Outbound = strings.Contains(selected, "outbound") || selected == "web_phone_both"
 			if phone.Outbound {
-				phone.OnVoicemail = firstNonempty(phone.OnVoicemail, "hangup")
+				phone.OnVoicemail = cmp.Or(phone.OnVoicemail, "hangup")
 			} else {
 				phone.OnVoicemail = ""
 			}
@@ -2232,7 +2224,7 @@ func editHumanTransfers(runner *fieldRunner, data *scaffold.Data) error {
 			}
 			continue
 		}
-		transfer := scaffold.HumanTransfer{Agent: firstNonempty(data.EntryAgent, "assistant"), Mode: "cold"}
+		transfer := scaffold.HumanTransfer{Agent: cmp.Or(data.EntryAgent, "assistant"), Mode: "cold"}
 		back, err := runner.input("Control name", "Lowercase snake_case; controls and tools share one namespace.", &transfer.Name, func(value string) error {
 			if err := validateIdentifier(value); err != nil {
 				return err
@@ -2267,7 +2259,7 @@ func editHumanTransferDetails(runner *fieldRunner, data *scaffold.Data, name str
 			huh.NewOption("Destination  ·  "+transfer.Destination, "destination"),
 			huh.NewOption("Destination value  ·  "+transfer.Value, "value"),
 			huh.NewOption("Mode  ·  "+transfer.Mode, "mode"),
-			huh.NewOption("Briefing  ·  "+firstNonempty(transfer.Briefing, "none"), "briefing"),
+			huh.NewOption("Briefing  ·  "+cmp.Or(transfer.Briefing, "none"), "briefing"),
 			huh.NewOption("Delete human transfer", "delete"),
 			huh.NewOption("← Back", actionBack),
 		}, true)
@@ -2385,7 +2377,7 @@ func editCustomize(runner *fieldRunner, data *scaffold.Data) error {
 
 func editConversation(runner *fieldRunner, data *scaffold.Data) error {
 	for {
-		speaksFirst := firstNonempty(data.SpeaksFirst, "agent")
+		speaksFirst := cmp.Or(data.SpeaksFirst, "agent")
 		opening := "fixed"
 		if data.ModelGreeting {
 			opening = "model-written"
@@ -2399,16 +2391,16 @@ func editConversation(runner *fieldRunner, data *scaffold.Data) error {
 			huh.NewOption("Opening mode  ·  "+opening, "opening"),
 		}
 		if !data.ModelGreeting {
-			options = append(options, huh.NewOption("Fixed greeting  ·  "+oneLine(firstNonempty(data.Greeting, scaffold.DefaultGreeting)), "greeting"))
+			options = append(options, huh.NewOption("Fixed greeting  ·  "+oneLine(cmp.Or(data.Greeting, scaffold.DefaultGreeting)), "greeting"))
 		}
 		options = append(options,
 			huh.NewOption("Interruption  ·  "+interruption, "interruption"),
 			huh.NewOption(fmt.Sprintf("Minimum interruption words  ·  %d", data.MinimumWords), "minimum"),
-			huh.NewOption("Ignored interruption phrases  ·  "+firstNonempty(strings.Join(data.IgnorePhrases, ", "), "none"), "phrases"),
-			huh.NewOption("Inactivity nudge after  ·  "+firstNonempty(data.NudgeAfter, "not set"), "nudge"),
-			huh.NewOption("Inactivity end after  ·  "+firstNonempty(data.EndAfter, "not set"), "end"),
-			huh.NewOption("Maximum call duration  ·  "+firstNonempty(data.MaxDuration, "not set"), "duration"),
-			huh.NewOption("Thinking audio  ·  "+firstNonempty(data.ThinkingAudio, "none"), "thinking"),
+			huh.NewOption("Ignored interruption phrases  ·  "+cmp.Or(strings.Join(data.IgnorePhrases, ", "), "none"), "phrases"),
+			huh.NewOption("Inactivity nudge after  ·  "+cmp.Or(data.NudgeAfter, "not set"), "nudge"),
+			huh.NewOption("Inactivity end after  ·  "+cmp.Or(data.EndAfter, "not set"), "end"),
+			huh.NewOption("Maximum call duration  ·  "+cmp.Or(data.MaxDuration, "not set"), "duration"),
+			huh.NewOption("Thinking audio  ·  "+cmp.Or(data.ThinkingAudio, "none"), "thinking"),
 			huh.NewOption("← Back", actionBack),
 		)
 		choice, _, err := runner.selectOne("Conversation behavior", "Edit one field, then return here.", options, true)
@@ -2434,7 +2426,7 @@ func editConversation(runner *fieldRunner, data *scaffold.Data) error {
 				if data.ModelGreeting {
 					data.Greeting = ""
 				} else {
-					data.Greeting = firstNonempty(data.Greeting, scaffold.DefaultGreeting)
+					data.Greeting = cmp.Or(data.Greeting, scaffold.DefaultGreeting)
 				}
 			}
 		case "greeting":
@@ -2677,7 +2669,7 @@ func editAdvancedTarget(runner *fieldRunner, data *scaffold.Data) error {
 		}
 		options := make([]huh.Option[string], 0, len(fields)+1)
 		for i, field := range fields {
-			options = append(options, huh.NewOption(field.title+"  ·  "+firstNonempty(*field.value, "not set"), strconv.Itoa(i)))
+			options = append(options, huh.NewOption(field.title+"  ·  "+cmp.Or(*field.value, "not set"), strconv.Itoa(i)))
 		}
 		options = append(options, huh.NewOption("← Back", actionBack))
 		choice, _, err := runner.selectOne("Advanced target settings", "Edit one field, then return here.", options, true)
@@ -2853,7 +2845,7 @@ func pickReferences(runner *fieldRunner, title, description string, available, c
 		options := make([]huh.Option[string], 0, len(available)+2)
 		for _, name := range available {
 			mark := "[ ]"
-			if containsName(selected, name) {
+			if slices.Contains(selected, name) {
 				mark = "[x]"
 			}
 			options = append(options, huh.NewOption(mark+" "+name, "toggle:"+name))
@@ -2876,31 +2868,12 @@ func pickReferences(runner *fieldRunner, title, description string, available, c
 			return selected, false, nil
 		}
 		name := strings.TrimPrefix(choice, "toggle:")
-		if containsName(selected, name) {
-			selected = removeName(selected, name)
+		if slices.Contains(selected, name) {
+			selected = slices.DeleteFunc(selected, func(n string) bool { return n == name })
 		} else {
 			selected = append(selected, name)
 		}
 	}
-}
-
-func containsName(names []string, want string) bool {
-	for _, name := range names {
-		if name == want {
-			return true
-		}
-	}
-	return false
-}
-
-func removeName(names []string, remove string) []string {
-	kept := names[:0]
-	for _, name := range names {
-		if name != remove {
-			kept = append(kept, name)
-		}
-	}
-	return kept
 }
 
 func confirmDelete(runner *fieldRunner, kind, name string) (bool, error) {
@@ -2926,8 +2899,8 @@ func deleteResource(data *scaffold.Data, kind, name string) error {
 	case "variable":
 		data.Variables = slices.DeleteFunc(data.Variables, func(item scaffold.Variable) bool { return item.Name == name })
 		for i := range data.Handoffs {
-			data.Handoffs[i].Requires = removeName(data.Handoffs[i].Requires, name)
-			data.Handoffs[i].Variables = removeName(data.Handoffs[i].Variables, name)
+			data.Handoffs[i].Requires = slices.DeleteFunc(data.Handoffs[i].Requires, func(n string) bool { return n == name })
+			data.Handoffs[i].Variables = slices.DeleteFunc(data.Handoffs[i].Variables, func(n string) bool { return n == name })
 		}
 		for i := range data.Tasks {
 			removeAssignment(&data.Tasks[i], name)
@@ -2935,7 +2908,7 @@ func deleteResource(data *scaffold.Data, kind, name string) error {
 	case "tool":
 		data.Tools = slices.DeleteFunc(data.Tools, func(item scaffold.Tool) bool { return item.Name == name })
 		for i := range data.Tasks {
-			data.Tasks[i].Tools = removeName(data.Tasks[i].Tools, name)
+			data.Tasks[i].Tools = slices.DeleteFunc(data.Tasks[i].Tools, func(n string) bool { return n == name })
 		}
 	case "agent":
 		if name == "assistant" {
@@ -2951,9 +2924,9 @@ func deleteResource(data *scaffold.Data, kind, name string) error {
 		profile := name + "_model"
 		data.Fallbacks = slices.DeleteFunc(data.Fallbacks, func(item scaffold.ModelFallback) bool { return item.Profile == profile })
 		for i := range data.Tools {
-			if containsName(data.Tools[i].AttachTo, name) {
-				data.Tools[i].AttachTo = removeName(data.Tools[i].AttachTo, name)
-				if !containsName(data.Tools[i].AttachTo, "assistant") {
+			if slices.Contains(data.Tools[i].AttachTo, name) {
+				data.Tools[i].AttachTo = slices.DeleteFunc(data.Tools[i].AttachTo, func(n string) bool { return n == name })
+				if !slices.Contains(data.Tools[i].AttachTo, "assistant") {
 					data.Tools[i].AttachTo = append(data.Tools[i].AttachTo, "assistant")
 				}
 			}
@@ -2994,10 +2967,10 @@ func deleteResource(data *scaffold.Data, kind, name string) error {
 	case "task":
 		data.Tasks = slices.DeleteFunc(data.Tasks, func(item scaffold.Task) bool { return item.Name == name })
 		for i := range data.Tools {
-			data.Tools[i].AttachTasks = removeName(data.Tools[i].AttachTasks, name)
+			data.Tools[i].AttachTasks = slices.DeleteFunc(data.Tools[i].AttachTasks, func(n string) bool { return n == name })
 		}
 		for i := range data.TaskGroups {
-			data.TaskGroups[i].Steps = removeName(data.TaskGroups[i].Steps, name)
+			data.TaskGroups[i].Steps = slices.DeleteFunc(data.TaskGroups[i].Steps, func(n string) bool { return n == name })
 		}
 		data.TaskGroups = slices.DeleteFunc(data.TaskGroups, func(item scaffold.TaskGroup) bool { return len(item.Steps) == 0 })
 	case "group":

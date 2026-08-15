@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"sort"
@@ -1019,7 +1020,7 @@ func resolveLiveKitService(role targetcap.Role, binding ir.Binding, env *envSet)
 	if err != nil {
 		return livekitService{}, err
 	}
-	return livekitService{Call: call, Entry: entry, Vendor: firstNonEmpty(binding.Provider, "openai")}, nil
+	return livekitService{Call: call, Entry: entry, Vendor: cmp.Or(binding.Provider, "openai")}, nil
 }
 
 func livekitSTTService(binding *ir.Binding, env *envSet) (livekitService, error) {

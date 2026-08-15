@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"slices"
@@ -1225,11 +1226,11 @@ func resolvePipecatService(role targetcap.Role, binding ir.Binding, env *envSet,
 		}
 	}
 	svc := pipecatService{Call: call, Entry: entry, Model: binding.Model, BaseURL: binding.EndpointEnv,
-		Vendor: firstNonEmpty(binding.Provider, "openai")}
+		Vendor: cmp.Or(binding.Provider, "openai")}
 	if spec := entry.Call; spec.APIKeyArg != "" {
 		svc.APIKeyEnv = spec.APIKeyEnv
 		if svc.APIKeyEnv == "" {
-			svc.APIKeyEnv = apiKeyEnv(firstNonEmpty(binding.Provider, "openai"))
+			svc.APIKeyEnv = apiKeyEnv(cmp.Or(binding.Provider, "openai"))
 		}
 	}
 	return svc, nil
@@ -1326,15 +1327,6 @@ func pyLiteral(v any) string {
 	default:
 		return strconv.Quote(fmt.Sprintf("%v", value))
 	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func sortedAgentNames(agent *ir.Agent) []string {
