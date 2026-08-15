@@ -21,7 +21,7 @@ var helpCapture = filepath.Join("..", "..", "specs", "008-mintlify-user-docs", "
 
 // helpCommands are the command paths the docs document, in the order the
 // capture file lists them.
-var helpCommands = [][]string{{}, {"init"}, {"validate"}, {"compile"}, {"dev"}, {"completion"}}
+var helpCommands = [][]string{{}, {"init"}, {"validate"}, {"compile"}, {"dev"}, {"skill"}, {"skill", "install"}, {"completion"}}
 
 func renderHelp(t *testing.T) string {
 	t.Helper()
@@ -75,12 +75,14 @@ func TestHelpCaptureMatchesBinary(t *testing.T) {
 // appear on the page that documents that command.
 func TestDocsSiteCLIPagesQuoteHelp(t *testing.T) {
 	pages := map[string]string{
-		"":           "overview",
-		"init":       "init",
-		"validate":   "validate",
-		"compile":    "compile",
-		"dev":        "dev",
-		"completion": "overview",
+		"":              "overview",
+		"init":          "init",
+		"validate":      "validate",
+		"compile":       "compile",
+		"dev":           "dev",
+		"skill":         "skill",
+		"skill install": "skill",
+		"completion":    "overview",
 	}
 	for _, path := range helpCommands {
 		name := strings.Join(path, " ")

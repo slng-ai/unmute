@@ -1,0 +1,159 @@
+---
+title: "unmute skill"
+description: "Install the Unmute skill so your coding assistant can build voice agents."
+---
+
+```
+$ unmute skill --help
+Install the coding-agent skill into a project.
+
+Usage:
+  unmute skill [flags]
+  unmute skill [command]
+
+Available Commands:
+  install     Write the Unmute skill so your coding assistant can build agents.
+
+Flags:
+  -h, --help   help for skill
+
+Use "unmute skill [command] --help" for more information about a command.
+```
+
+## unmute skill install
+
+```
+$ unmute skill install --help
+Write the Unmute skill into this project, so a coding assistant knows how to
+author an Unmute package. The files travel with the repository, so a team
+shares one skill. Nothing is downloaded: the skill ships inside this binary.
+
+Usage:
+  unmute skill install [flags]
+
+Flags:
+      --agent strings   Assistants to install for: all, claude, codex, copilot, cursor (default all)
+      --dir string      Project directory to install into (default ".")
+      --force           Overwrite files that changed after they were installed
+  -h, --help            help for install
+```
+
+## Usage
+
+```sh
+unmute skill install
+```
+
+```
+  .agents/skills/unmute/
+    SKILL.md                         written
+    references/package.md            written
+    references/tools.md              written
+  .claude/skills/unmute/
+    SKILL.md                         written
+
+Installed the Unmute skill for claude, codex, copilot, cursor.
+Commit these files so your team's assistants get them too.
+Next: ask your assistant to build a voice agent, in a sentence.
+```
+
+Every file is printed with what happened to it, so a run that changed nothing
+reads differently from one that changed everything.
+
+## Where the files go
+
+No single directory serves every assistant, so the install writes two.
+
+| Assistant | Reads |
+|---|---|
+| Claude Code | `.claude/skills/unmute/` |
+| Codex | `.agents/skills/unmute/` |
+| Cursor | `.agents/skills/unmute/` |
+| GitHub Copilot | `.agents/skills/unmute/` |
+
+The instructions live once, in `.agents/skills/unmute/`. The file in
+`.claude/skills/unmute/` is a short pointer at them, so two assistants in one
+project read the same text rather than two copies that can drift.
+
+Nothing else in your project is created or edited. The command does not write
+`AGENTS.md`, `.github/`, or `.cursor/`.
+
+## Choosing assistants
+
+`--agent` is repeatable and takes a comma-separated list:
+
+```sh
+unmute skill install --agent claude
+unmute skill install --agent codex --agent cursor
+```
+
+Names that share a directory write it once. An unknown name fails and lists
+what is supported, rather than falling back to all:
+
+```
+unmute: skill install: unknown assistant "emacs": supported names are all, claude, codex, copilot, cursor
+```
+
+## Installing somewhere else
+
+```sh
+unmute skill install --dir ../my-project
+```
+
+The command never reads or validates a package, so the directory does not have
+to hold one.
+
+## Running it again
+
+A second run reports what it found and changes nothing:
+
+```
+  .agents/skills/unmute/
+    SKILL.md                         left alone
+```
+
+After you upgrade the CLI, the same command writes the new files and says what
+it upgraded from:
+
+```
+  .agents/skills/unmute/  (upgraded from 0.1.2)
+```
+
+## Files you changed
+
+If you edit an installed file, the next install refuses rather than losing your
+work, and names every file at once:
+
+```
+unmute: skill install: these files changed after they were installed:
+  .agents/skills/unmute/SKILL.md
+run `unmute skill install --force` to overwrite them
+```
+
+`--force` overwrites them. It never merges.
+
+## Uninstalling
+
+Delete the two directories. There is no subcommand for that.
+
+```sh
+rm -r .agents/skills/unmute .claude/skills/unmute
+```
+
+## No network
+
+The skill is embedded in the binary, so the install works on a machine that has
+never been online, and the skill can never disagree with the CLI that wrote it.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | every requested directory is current, whether it was written or already matched |
+| `1` | an unknown assistant, an unwritable directory, or a refusal on files you changed |
+
+## Where to go next
+
+<Card title="Build your first agent" icon="microphone" href="/build/your-first-agent">
+  What the skill will be writing for you.
+</Card>

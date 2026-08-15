@@ -55,7 +55,7 @@ mint broken-links       # every internal link resolves
 
 ## The structure
 
-Nine groups, 49 pages: Get started, Build the agent (nested Tools and
+Nine groups, 51 pages: Get started, Build the agent (nested Tools and
 Orchestration), Development lifecycle, Telephony, Transfers, Targets, Models,
 Deployment, Reference (nested CLI). A nested group is the object-in-pages-array
 form. The count of `.mdx` files under `docs-site/` must equal the count of page

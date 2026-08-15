@@ -29,8 +29,15 @@ Go structs are the schema source for their own surface: `internal/spec` derives 
 - L1 unit (pure logic, table-driven) · L2 in-process command tests (real tree, capture output) · L3 golden files (`-update` to regenerate).
 - L4 smoke (`make smoke`, build tag `smoke`) proves emitted Python is valid — opt-in, needs Python, never in the default suite or PR gate.
 
-## Three places document a change, not one
-The generated `build/<target>/README.md` is the runbook, and almost nobody reads it before they have already read the example's page and `docs/`. So **any change to emitted behaviour updates all three in the same commit**: the emitted README template, the source example's own `README.md` under `examples/`, and the relevant page in `docs/`. A fact that is only true in generated output is a fact the reader never sees. Two tests hold the parts that can be held (`internal/generate/examples_test.go`): every example README must name every `transport` its targets declare, and every link into `examples/` from `examples/` or `docs/` must resolve. Prose can still rot, so read the example page before you claim you are done.
+## Five places document a change, not one
+The generated `build/<target>/README.md` is the runbook, and almost nobody reads it before they have already read the example's page and `docs/`. So **any change to emitted behaviour updates all five in the same commit**:
+1. the emitted README template,
+2. the source example's own `README.md` under `examples/`,
+3. the relevant page in `docs/`,
+4. the relevant page in `docs-site/`, which is the public answer a reader lands on,
+5. **the skill** in `internal/skill/assets/`, which is what a coding assistant reads before it writes a package.
+
+A fact that is only true in generated output is a fact the reader never sees, and a feature the skill does not know about is a feature no coding agent will use. Tests hold the parts that can be held: `internal/generate/examples_test.go` (every example README names every `transport` its targets declare, and every link into `examples/` resolves), `internal/skill/agreement_test.go` (the skill's tool kinds, vendors, providers, and documentation pointers all match the code), and `internal/cli/skill_bundle_test.go` (every command and flag the skill names exists). Prose can still rot, so read the example page before you claim you are done.
 
 ## Layout
 `internal/` not `pkg/`. One file per command in `internal/cli/`. Hand-write cobra commands — **no `cobra-cli` generator**.
