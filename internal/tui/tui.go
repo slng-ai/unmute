@@ -533,7 +533,7 @@ func editModels(runner *fieldRunner, data *scaffold.Data) error {
 			return nil
 		}
 		if choice == "reset" {
-			confirmed, err := confirmAction(runner, "Reset default models?", "Reset models")
+			confirmed, err := confirmChoice(runner, "Reset default models?", "Reset models")
 			if err != nil {
 				return err
 			}
@@ -1271,7 +1271,7 @@ func editAgentDetails(runner *fieldRunner, data *scaffold.Data, name string) err
 		case "entry":
 			data.EntryAgent = name
 		case "reset":
-			confirmed, err := confirmAction(runner, "Reset starter agent?", "Reset agent")
+			confirmed, err := confirmChoice(runner, "Reset starter agent?", "Reset agent")
 			if err != nil {
 				return err
 			}
@@ -2877,11 +2877,7 @@ func pickReferences(runner *fieldRunner, title, description string, available, c
 }
 
 func confirmDelete(runner *fieldRunner, kind, name string) (bool, error) {
-	return confirmAction(runner, "Delete "+kind+" "+name+"?", "Delete")
-}
-
-func confirmAction(runner *fieldRunner, title, action string) (bool, error) {
-	return confirmChoice(runner, title, action)
+	return confirmChoice(runner, "Delete "+kind+" "+name+"?", "Delete")
 }
 
 func confirmChoice(runner *fieldRunner, title, action string) (bool, error) {

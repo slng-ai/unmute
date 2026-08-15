@@ -1214,7 +1214,7 @@ func apiKeyEnv(provider string) string {
 // extraSettings are nested Settings args the driver injects (the agents'
 // system_instruction); the task job-workers use the raw identity fields.
 func resolvePipecatService(role targetcap.Role, binding ir.Binding, env *envSet, extraSettings ...pyKV) (pipecatService, error) {
-	call, entry, err := resolveService(defaultCatalog, targetcap.Pipecat, role, binding, envRef, env, extraSettings...)
+	call, entry, err := resolveService(targetcap.Pipecat, role, binding, env, extraSettings...)
 	if err != nil {
 		return pipecatService{}, err
 	}

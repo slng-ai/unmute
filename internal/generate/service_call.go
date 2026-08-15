@@ -8,8 +8,7 @@ import (
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
-// defaultCatalog is the built-in provider map. It becomes a parameter when
-// the providers.yaml overlay loader lands (PROVIDER_CATALOG.md, step 6).
+// defaultCatalog is the built-in provider map, and the only one there is.
 var defaultCatalog = targetcap.DefaultCatalog()
 
 // ServiceCall is a resolved constructor, ready for a template: the class and
@@ -25,11 +24,11 @@ type ServiceCall struct {
 }
 
 // resolveService looks a binding's vendor up in the catalogue and builds its
-// call. envRef renders the driver's environment-lookup idiom; extraSettings
-// are driver-supplied nested args (the workers-model system_instruction),
-// inserted after model/voice. Every env var the call reads registers on env.
-func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap.Role,
-	binding ir.Binding, envRef func(string) string, env *envSet, extraSettings ...pyKV) (ServiceCall, targetcap.Entry, error) {
+// call. extraSettings are driver-supplied nested args (the workers-model
+// system_instruction), inserted after model/voice. Every env var the call reads
+// registers on env.
+func resolveService(fw targetcap.Provider, role targetcap.Role,
+	binding ir.Binding, env *envSet, extraSettings ...pyKV) (ServiceCall, targetcap.Entry, error) {
 
 	vendor := binding.Provider
 	if vendor == "" {
@@ -37,10 +36,10 @@ func resolveService(cat targetcap.Catalog, fw targetcap.Provider, role targetcap
 	}
 	// Same rulebook as ir.Validate (Catalog.CheckVendor): vendor known,
 	// wildcard-needs-endpoint, endpoint-has-a-slot.
-	if err := cat.CheckVendor(fw, role, vendor, binding.EndpointEnv != ""); err != nil {
+	if err := defaultCatalog.CheckVendor(fw, role, vendor, binding.EndpointEnv != ""); err != nil {
 		return ServiceCall{}, targetcap.Entry{}, err
 	}
-	entry, ok := cat.Lookup(fw, role, vendor)
+	entry, ok := defaultCatalog.Lookup(fw, role, vendor)
 	if !ok {
 		return ServiceCall{}, entry, fmt.Errorf("%s %s binding provider %q has no slot; no providers are catalogued for this role", fw, role, vendor)
 	}

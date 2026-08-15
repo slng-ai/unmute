@@ -1016,7 +1016,7 @@ func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variabl
 // provider/model).
 
 func resolveLiveKitService(role targetcap.Role, binding ir.Binding, env *envSet) (livekitService, error) {
-	call, entry, err := resolveService(defaultCatalog, targetcap.LiveKit, role, binding, envRef, env)
+	call, entry, err := resolveService(targetcap.LiveKit, role, binding, env)
 	if err != nil {
 		return livekitService{}, err
 	}
