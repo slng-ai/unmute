@@ -2,8 +2,16 @@
 
 **Date**: 2026-08-15 | **Plan**: [plan.md](./plan.md)
 
-How to prove this feature did what it promised: removed roughly 310 lines of Go
-plus a 64-line script, and changed nothing. Run from the repository root.
+How to prove this feature did what it promised: removed duplication and changed
+nothing. Run from the repository root.
+
+**Read [results.md](./results.md) first.** It records what the implementation
+actually delivered, including the two places it did not match this guide: the
+line reduction is 84, not 310 (the audit counted removals without their
+replacements), and User Story 5 was dropped after being measured. It also
+documents a **pre-existing bug the first sweep found** — emitted Pipecat images
+never copy `tools/`, so five of thirteen sessions fail at the baseline commit and
+at every commit since, unchanged.
 
 ---
 
@@ -44,12 +52,25 @@ first edit proves nothing.
 Then take a **baseline sweep**, before any cleanup:
 
 ```text
-go test -tags sweep ./internal/cli/... -run TestExampleSweep -timeout 90m
+UNMUTE_SWEEP_BASELINE=<scratch>/baseline \
+UNMUTE_SWEEP_REPORT_DIR=<scratch>/reports \
+UNMUTE_SWEEP_STORY=baseline \
+UNMUTE_SWEEP_PLAYWRIGHT=<scratch>/pw/node_modules/playwright \
+go test -tags sweep ./internal/cli/ -run TestExampleSweep -timeout 90m -v
 ```
 
-This must be Green. A failure here is a pre-existing problem, and finding it now
-is the difference between a known-bad starting point and a day spent blaming the
-refactor for it.
+`UNMUTE_SWEEP_BASELINE` is required — with no baseline there is nothing to
+compare against. `UNMUTE_SWEEP_PLAYWRIGHT` points the probe at a Playwright
+install outside the repository, so `go.mod` and the tree stay clean; without it
+the probe falls back to a plain `require("playwright")`. `UNMUTE_SWEEP_ONLY`
+takes a comma-separated example list for triage.
+
+A failure here is a pre-existing problem, and finding it now is the difference
+between a known-bad starting point and a day spent blaming the refactor for it.
+**This is exactly what happened**: the baseline sweep is 8 passed / 5 failed, and
+results.md explains the bug behind the five.
+
+A whole sweep takes about five minutes once the images are cached.
 
 ---
 
@@ -150,10 +171,10 @@ story that introduced it, with no bisecting.
 
 ## Definition of done
 
-- [ ] Five Green sweeps, one per story, sixty-five sessions passed
-- [ ] Byte diff clean on every comparison; zero goldens regenerated
-- [ ] Reachability reports zero unreachable functions
-- [ ] Non-test Go down at least 300 lines with User Story 5, or 150 without it
-- [ ] One story reverted alone and the gate stayed green, proving independence
-- [ ] `docs/`, `docs-site/`, `examples/` untouched; `go.mod` unchanged
-- [ ] One manual spoken conversation, by a person, once
+- [X] Five sweeps, one baseline plus one per story, every one identical to the baseline
+- [X] Byte diff clean on every comparison; zero goldens regenerated; `make smoke` green
+- [X] Reachability reports zero unreachable functions
+- [ ] **Non-test Go down at least 150 lines — not met, 84.** results.md explains why
+- [X] One story reverted alone and the gate stayed green, proving independence
+- [X] `docs/`, `docs-site/`, `examples/` untouched; `go.mod` unchanged
+- [ ] **One manual spoken conversation, by a person, once — outstanding**

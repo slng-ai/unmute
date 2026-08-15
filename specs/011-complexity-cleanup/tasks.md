@@ -29,11 +29,11 @@ Go module at repository root. Maintained code in `internal/`, one file per comma
 
 **Purpose**: Capture what "unchanged" means before anything changes. Nothing here edits maintained code.
 
-- [ ] T001 Verify tooling and record versions in `specs/011-complexity-cleanup/baseline.md`: `go version` (expect 1.24), `docker info`, `npx playwright --version`, and `ruff --version`. The ruff version is load-bearing — formatting differs between versions and a mismatch makes every later byte comparison meaningless (research.md R3).
+- [X] T001 Verify tooling and record versions in `specs/011-complexity-cleanup/baseline.md`: `go version` (expect 1.24), `docker info`, `npx playwright --version`, and `ruff --version`. The ruff version is load-bearing — formatting differs between versions and a mismatch makes every later byte comparison meaningless (research.md R3).
 - [X] T002 Supply `FIRECRAWL_MCP_URL` in the repository root `.env`. Closes FR-038; `mcp-example` declares it and without it both its sessions fail under FR-035. **Done 2026-08-15 — all 25 required names now present.**
-- [ ] T003 Confirm the starting tree is green: `make fmt && make lint && make build && make test`. A red baseline must be fixed or recorded before any cleanup, so a pre-existing failure is never blamed on this feature.
-- [ ] T004 Record the baseline commit sha in `specs/011-complexity-cleanup/baseline.md` and compile all eleven examples into a baseline tree in the scratch directory, one build directory per example and target. Keep it outside the repository so it can never be committed.
-- [ ] T005 [P] Record baseline metrics in `specs/011-complexity-cleanup/baseline.md`: `go run golang.org/x/tools/cmd/deadcode@latest -test ./...` (expect two unreachable functions) and non-test Go line count (expect 20,901). These are the before-numbers for SC-002 and SC-003.
+- [X] T003 Confirm the starting tree is green: `make fmt && make lint && make build && make test`. A red baseline must be fixed or recorded before any cleanup, so a pre-existing failure is never blamed on this feature.
+- [X] T004 Record the baseline commit sha in `specs/011-complexity-cleanup/baseline.md` and compile all eleven examples into a baseline tree in the scratch directory, one build directory per example and target. Keep it outside the repository so it can never be committed.
+- [X] T005 [P] Record baseline metrics in `specs/011-complexity-cleanup/baseline.md`: `go run golang.org/x/tools/cmd/deadcode@latest -test ./...` (expect two unreachable functions) and non-test Go line count (expect 20,901). These are the before-numbers for SC-002 and SC-003.
 
 **Checkpoint**: Baseline recorded. Nothing has changed yet.
 
@@ -45,14 +45,14 @@ Go module at repository root. Maintained code in `internal/`, one file per comma
 
 **⚠️ CRITICAL**: No user story work begins until T013 passes.
 
-- [ ] T006 [P] Create `internal/testdata/sweep/greeting-probe.js`: launch headless Chromium with `--use-fake-device-for-media-stream`, `--use-fake-ui-for-media-stream`, and `--autoplay-policy=no-user-gesture-required`; open the page URL from argv; poll `RTCPeerConnection.getStats()` until an inbound audio track reports `bytesReceived > 0` or the timeout expires; print one JSON line and exit 0 or 1 per `contracts/sweep-report.md`. Load the shipped page unmodified — a page changed to make itself testable proves nothing.
-- [ ] T007 Create `internal/cli/example_sweep_test.go` with `//go:build sweep` and a `TestExampleSweep` root, following the structure of the existing `internal/cli/dev_web_smoke_test.go`. Implement the preflight subtest: Docker reachable and Playwright present both **block**; a missing secret name or a wrong working directory **fails**. The distinction is FR-035 and the constitution's fail-loud rule — missing tooling says nothing about the code, a missing secret means the sweep cannot deliver its claimed coverage.
-- [ ] T008 In `internal/cli/example_sweep_test.go`, discover examples by reading each package under `examples/` and deriving `Runnable` from whether it declares a telephony channel. Derive it, never hand-maintain a list, so an example added later is classified correctly without editing the harness (data-model.md, Example).
-- [ ] T009 In `internal/cli/example_sweep_test.go`, add the per-example `--var` table. `salon-support` needs `customer_name` and `customer_id`; its greeting is `Hi {{customer_name}}` from `source: call_start` and would otherwise render malformed. Read `examples/multi-task/agent.yaml` and add the same treatment if its `customer_id`/`customer_name` are `call_start` (research.md R5, open item).
-- [ ] T010 In `internal/cli/example_sweep_test.go`, implement the session runner: `unmute dev <example> --target <t> --no-open` from the repository root, wait for the dev server, run the probe from T006, then tear the containers down on every exit path. Run serially on one port — no allocation, no name collisions, no interleaved logs (research.md R6). Do not copy `.env`: `devChildEnv` (`internal/cli/dev.go:447`) already reads `$CWD/.env`, which satisfies FR-036 with no harness code (research.md R4).
-- [ ] T011 [P] In `internal/cli/example_sweep_test.go`, implement the byte comparison against the T004 baseline, excluding `.env` and `livekit*.toml`. Those two are `preservedPatterns` (`internal/cli/compile.go:155`) and are restored on purpose, so comparing them compares the sweep against itself.
-- [ ] T012 [P] In `internal/cli/example_sweep_test.go`, write the JSON report to the scratch directory per `contracts/sweep-report.md`. `missingSecrets` holds **names only**; no field may carry a value (FR-036). Derive `verdict` rather than setting it — `green` requires all thirteen sessions passed and a clean byte diff, so a blocked sweep reports `incomplete` and can never read as a pass.
-- [ ] T013 Run the baseline sweep: `go test -tags sweep ./internal/cli/... -run TestExampleSweep -timeout 90m`. Must be Green across thirteen sessions. A failure here is pre-existing and must be understood before any cleanup starts.
+- [X] T006 [P] Create `internal/testdata/sweep/greeting-probe.js`: launch headless Chromium with `--use-fake-device-for-media-stream`, `--use-fake-ui-for-media-stream`, and `--autoplay-policy=no-user-gesture-required`; open the page URL from argv; poll `RTCPeerConnection.getStats()` until an inbound audio track reports `bytesReceived > 0` or the timeout expires; print one JSON line and exit 0 or 1 per `contracts/sweep-report.md`. Load the shipped page unmodified — a page changed to make itself testable proves nothing.
+- [X] T007 Create `internal/cli/example_sweep_test.go` with `//go:build sweep` and a `TestExampleSweep` root, following the structure of the existing `internal/cli/dev_web_smoke_test.go`. Implement the preflight subtest: Docker reachable and Playwright present both **block**; a missing secret name or a wrong working directory **fails**. The distinction is FR-035 and the constitution's fail-loud rule — missing tooling says nothing about the code, a missing secret means the sweep cannot deliver its claimed coverage.
+- [X] T008 In `internal/cli/example_sweep_test.go`, discover examples by reading each package under `examples/` and deriving `Runnable` from whether it declares a telephony channel. Derive it, never hand-maintain a list, so an example added later is classified correctly without editing the harness (data-model.md, Example).
+- [X] T009 In `internal/cli/example_sweep_test.go`, add the per-example `--var` table. `salon-support` needs `customer_name` and `customer_id`; its greeting is `Hi {{customer_name}}` from `source: call_start` and would otherwise render malformed. Read `examples/multi-task/agent.yaml` and add the same treatment if its `customer_id`/`customer_name` are `call_start` (research.md R5, open item).
+- [X] T010 In `internal/cli/example_sweep_test.go`, implement the session runner: `unmute dev <example> --target <t> --no-open` from the repository root, wait for the dev server, run the probe from T006, then tear the containers down on every exit path. Run serially on one port — no allocation, no name collisions, no interleaved logs (research.md R6). Do not copy `.env`: `devChildEnv` (`internal/cli/dev.go:447`) already reads `$CWD/.env`, which satisfies FR-036 with no harness code (research.md R4).
+- [X] T011 [P] In `internal/cli/example_sweep_test.go`, implement the byte comparison against the T004 baseline, excluding `.env` and `livekit*.toml`. Those two are `preservedPatterns` (`internal/cli/compile.go:155`) and are restored on purpose, so comparing them compares the sweep against itself.
+- [X] T012 [P] In `internal/cli/example_sweep_test.go`, write the JSON report to the scratch directory per `contracts/sweep-report.md`. `missingSecrets` holds **names only**; no field may carry a value (FR-036). Derive `verdict` rather than setting it — `green` requires all thirteen sessions passed and a clean byte diff, so a blocked sweep reports `incomplete` and can never read as a pass.
+- [X] T013 Run the baseline sweep: `go test -tags sweep ./internal/cli/... -run TestExampleSweep -timeout 90m`. Must be Green across thirteen sessions. A failure here is pre-existing and must be understood before any cleanup starts.
 
 **Checkpoint**: Harness works, baseline sweep green. Cleanup can begin.
 
@@ -64,11 +64,11 @@ Go module at repository root. Maintained code in `internal/`, one file per comma
 
 **Independent Test**: `deadcode -test ./...` reports zero unreachable functions; no reference to the removed script survives outside historical spec records.
 
-- [ ] T014 [P] [US1] Delete `Warned` and `Ok` from `internal/style/style.go:72,75`. **Keep the `Warn` and `Success` constants** and `style_test.go` unchanged — the token table is the single source of colour, and an unused token is not dead code (spec Edge Cases).
-- [ ] T015 [P] [US1] Delete `Run` from `internal/tui/tui.go:49`. Only `RunConsole` and `RunCreate` are called, both from `internal/cli/init.go:44,47`.
-- [ ] T016 [P] [US1] Delete `preflight.sh` from the repository root. No build target, no workflow, and no current document references it, and its default argument `examples/human-transfer/build/livekit` names a directory renamed to `livekit-human-transfer`.
-- [ ] T017 [US1] Before deleting anything above, confirm each name is absent from `internal/generate/templates/**` and `internal/scaffold/templates/**` as well as from Go code. Template `FuncMap`s bind helpers by bare name, so a parenthesised search reports live helpers as dead — this false-positived during the audit itself (spec Edge Cases).
-- [ ] T018 [US1] Run the gate (`make fmt && make lint && make build && make test`), confirm `deadcode -test ./...` now reports zero, then run the full sweep. Record the report as story P1.
+- [X] T014 [P] [US1] Delete `Warned` and `Ok` from `internal/style/style.go:72,75`. **Keep the `Warn` and `Success` constants** and `style_test.go` unchanged — the token table is the single source of colour, and an unused token is not dead code (spec Edge Cases).
+- [X] T015 [P] [US1] Delete `Run` from `internal/tui/tui.go:49`. Only `RunConsole` and `RunCreate` are called, both from `internal/cli/init.go:44,47`.
+- [X] T016 [P] [US1] Delete `preflight.sh` from the repository root. No build target, no workflow, and no current document references it, and its default argument `examples/human-transfer/build/livekit` names a directory renamed to `livekit-human-transfer`.
+- [X] T017 [US1] Before deleting anything above, confirm each name is absent from `internal/generate/templates/**` and `internal/scaffold/templates/**` as well as from Go code. Template `FuncMap`s bind helpers by bare name, so a parenthesised search reports live helpers as dead — this false-positived during the audit itself (spec Edge Cases).
+- [X] T018 [US1] Run the gate (`make fmt && make lint && make build && make test`), confirm `deadcode -test ./...` now reports zero, then run the full sweep. Record the report as story P1.
 
 **Checkpoint**: User Story 1 complete and independently revertible.
 
@@ -80,14 +80,14 @@ Go module at repository root. Maintained code in `internal/`, one file per comma
 
 **Independent Test**: For each behavior, one definition remains and every former call site reaches it; goldens match without regeneration.
 
-- [ ] T019 [US2] Extract the shared signing sequence into `internal/cli/livekit_token.go` as `signJWT(secret string, claims any) (string, error)` — marshal, fixed HS256 header, HMAC, base64url concat. Rewrite `mintLiveKitToken` (`livekit_token.go:49`), `mintLiveKitSIPAdminToken` (`dev_livekit_sip.go:108`), and `mintLiveKitDispatchToken` (`dev_livekit_sip.go:324`) to keep only their own claim struct. The three existing tests already recompute the signature against the secret with a fixed clock and must pass untouched.
-- [ ] T020 [P] [US2] Merge `isTTY` (`internal/cli/dev.go:396`) and `isCharDevice` (`internal/cli/init.go:32`) into one helper in `internal/cli/dev.go`. Same `Stat()` and `ModeCharDevice` check, two functions in one package. Update the four call sites in `dev.go:365`, `init.go:21`, `ui.go:44`, and `root.go:31`.
-- [ ] T021 [US2] Merge `call` (`internal/cli/dev_livekit_sip.go:213`) and `callDispatch` (`:346`) into one method taking the service path. They are byte-identical apart from `/twirp/livekit.SIP/` versus `/twirp/livekit.AgentDispatchService/`. Sequential after T019 — same file.
-- [ ] T022 [P] [US2] Merge `checkLiveKitVersion` (`internal/generate/livekit_v1.go:574`) and `checkPipecatVersion` (`internal/generate/pipecat_v1.go:554`) into one `checkVersion(name, version string, pattern *regexp.Regexp, major, minMinor int)`. Identical apart from a name and three constants. Error text must stay byte-identical — it reaches users.
-- [ ] T023 [US2] Delete `pipecatEnvRef` (`internal/generate/pipecat_v1_build.go:1231`) and keep one shared env-lookup helper, since both it and `livekitEnvRef` (`livekit_v1_build.go:1031`) return the identical string.
-- [ ] T024 [US2] Replace the five scattered type mappings with one table in `internal/generate` keyed by `ir.PrimitiveType`, carrying the JSON name, the Python name, and the isinstance check. Covers `jsonType` (`pipecat_v1_build.go:933`), `pyType` (`:1310`), `livekitTypeCheck` (`livekit_v1_build.go:588`), `resultPyType` (`:1213`), and `jsonPyType` (`:1223`). **Note**: these are three different outputs over one key set, not one repeated mapping — the single source is the table, and the three accessors stay. Sequential after T023 — same files.
-- [ ] T025 [US2] Replace the body of `sortedKeys` (`internal/generate/pipecat_v1_build.go:762`) with `slices.Sorted(maps.Keys(set))`, matching the already-correct generic version at `internal/ir/build.go:1343`. Sequential after T024 — same file.
-- [ ] T026 [US2] Run the gate, confirm zero goldens regenerated and the byte diff is clean, then run the full sweep. Record as story P2. This sweep matters most of the five: T019 changes the token minting that `/api/session` calls at `internal/cli/dev_web.go:275`, and a live LiveKit session is the only check that the merged signing still produces a token a real server accepts.
+- [X] T019 [US2] Extract the shared signing sequence into `internal/cli/livekit_token.go` as `signJWT(secret string, claims any) (string, error)` — marshal, fixed HS256 header, HMAC, base64url concat. Rewrite `mintLiveKitToken` (`livekit_token.go:49`), `mintLiveKitSIPAdminToken` (`dev_livekit_sip.go:108`), and `mintLiveKitDispatchToken` (`dev_livekit_sip.go:324`) to keep only their own claim struct. The three existing tests already recompute the signature against the secret with a fixed clock and must pass untouched.
+- [X] T020 [P] [US2] Merge `isTTY` (`internal/cli/dev.go:396`) and `isCharDevice` (`internal/cli/init.go:32`) into one helper in `internal/cli/dev.go`. Same `Stat()` and `ModeCharDevice` check, two functions in one package. Update the four call sites in `dev.go:365`, `init.go:21`, `ui.go:44`, and `root.go:31`.
+- [X] T021 [US2] Merge `call` (`internal/cli/dev_livekit_sip.go:213`) and `callDispatch` (`:346`) into one method taking the service path. They are byte-identical apart from `/twirp/livekit.SIP/` versus `/twirp/livekit.AgentDispatchService/`. Sequential after T019 — same file.
+- [X] T022 [P] [US2] Merge `checkLiveKitVersion` (`internal/generate/livekit_v1.go:574`) and `checkPipecatVersion` (`internal/generate/pipecat_v1.go:554`) into one `checkVersion(name, version string, pattern *regexp.Regexp, major, minMinor int)`. Identical apart from a name and three constants. Error text must stay byte-identical — it reaches users.
+- [X] T023 [US2] Delete `pipecatEnvRef` (`internal/generate/pipecat_v1_build.go:1231`) and keep one shared env-lookup helper, since both it and `livekitEnvRef` (`livekit_v1_build.go:1031`) return the identical string.
+- [X] T024 [US2] Replace the five scattered type mappings with one table in `internal/generate` keyed by `ir.PrimitiveType`, carrying the JSON name, the Python name, and the isinstance check. Covers `jsonType` (`pipecat_v1_build.go:933`), `pyType` (`:1310`), `livekitTypeCheck` (`livekit_v1_build.go:588`), `resultPyType` (`:1213`), and `jsonPyType` (`:1223`). **Note**: these are three different outputs over one key set, not one repeated mapping — the single source is the table, and the three accessors stay. Sequential after T023 — same files.
+- [X] T025 [US2] Replace the body of `sortedKeys` (`internal/generate/pipecat_v1_build.go:762`) with `slices.Sorted(maps.Keys(set))`, matching the already-correct generic version at `internal/ir/build.go:1343`. Sequential after T024 — same file.
+- [X] T026 [US2] Run the gate, confirm zero goldens regenerated and the byte diff is clean, then run the full sweep. Record as story P2. This sweep matters most of the five: T019 changes the token minting that `/api/session` calls at `internal/cli/dev_web.go:275`, and a live LiveKit session is the only check that the merged signing still produces a token a real server accepts.
 
 **Checkpoint**: User Stories 1 and 2 both complete and independently revertible.
 
@@ -99,12 +99,12 @@ Go module at repository root. Maintained code in `internal/`, one file per comma
 
 **Independent Test**: Each named helper is gone, call sites use the standard equivalent, and `go vet` reports no API newer than the module's declared language version.
 
-- [ ] T027 [US3] Replace `containsName` (`internal/tui/tui.go:2892`) with `slices.Contains` at its seven call sites, then delete it.
-- [ ] T028 [US3] Replace `removeName` (`internal/tui/tui.go:2901`) with `slices.DeleteFunc` at its nine call sites, then delete it. `deleteResource` already calls `slices.DeleteFunc` for the same job a line away, so the file currently disagrees with itself. Both compact in place and every call site reassigns the result, so behavior is unchanged. Sequential after T027 — same file.
-- [ ] T029 [US3] Replace `firstNonempty` (`internal/tui/tui.go:474`) with `cmp.Or` at its roughly sixty call sites, then delete it. Semantics are identical: first non-zero value, zero value if none. Sequential after T028 — same file.
-- [ ] T030 [P] [US3] Replace `firstNonEmpty` (`internal/generate/pipecat_v1_build.go:1365`) with `cmp.Or` at its call sites, then delete it. Same helper, written twice in two packages.
-- [ ] T031 [P] [US3] Replace `lessLiveKitVersion` (`internal/generate/livekit_v1.go:564`) with `slices.Compare(a[:], b[:]) < 0` and delete it.
-- [ ] T032 [US3] Run the gate — `go vet` is the guard that every introduced call (`cmp.Or` 1.22, `slices.Sorted`/`maps.Keys` 1.23) is available at the pinned language version — then run the full sweep. Record as story P3.
+- [X] T027 [US3] Replace `containsName` (`internal/tui/tui.go:2892`) with `slices.Contains` at its seven call sites, then delete it.
+- [X] T028 [US3] Replace `removeName` (`internal/tui/tui.go:2901`) with `slices.DeleteFunc` at its nine call sites, then delete it. `deleteResource` already calls `slices.DeleteFunc` for the same job a line away, so the file currently disagrees with itself. Both compact in place and every call site reassigns the result, so behavior is unchanged. Sequential after T027 — same file.
+- [X] T029 [US3] Replace `firstNonempty` (`internal/tui/tui.go:474`) with `cmp.Or` at its roughly sixty call sites, then delete it. Semantics are identical: first non-zero value, zero value if none. Sequential after T028 — same file.
+- [X] T030 [P] [US3] Replace `firstNonEmpty` (`internal/generate/pipecat_v1_build.go:1365`) with `cmp.Or` at its call sites, then delete it. Same helper, written twice in two packages.
+- [X] T031 [P] [US3] Replace `lessLiveKitVersion` (`internal/generate/livekit_v1.go:564`) with `slices.Compare(a[:], b[:]) < 0` and delete it.
+- [X] T032 [US3] Run the gate — `go vet` is the guard that every introduced call (`cmp.Or` 1.22, `slices.Sorted`/`maps.Keys` 1.23) is available at the pinned language version — then run the full sweep. Record as story P3.
 
 **Checkpoint**: User Stories 1 through 3 complete.
 
@@ -116,10 +116,10 @@ Go module at repository root. Maintained code in `internal/`, one file per comma
 
 **Independent Test**: Each is gone, callers behave identically, generated output unchanged.
 
-- [ ] T033 [US4] Remove the `cat targetcap.Catalog` and `envRef func(string) string` parameters from `resolveService` (`internal/generate/service_call.go:30`). `cat` is `defaultCatalog` at every call site and `envRef`'s two arguments produce identical output. Delete the comment at `service_call.go:10` reserving `cat` for a `providers.yaml` loader that does not exist — that comment is the stated reason Governance asks for, and it does not hold. Update `pipecat_v1_build.go:1237`, `livekit_v1_build.go:1034`, and `catalog_golden_test.go:56,115`.
-- [ ] T034 [P] [US4] Delete `confirmAction` (`internal/tui/tui.go:2915`) and point its three callers at `internal/tui/tui.go:549,1287,2912` directly at `confirmChoice`. It forwards with an unchanged signature.
-- [ ] T035 [P] [US4] Replace `shellRequest interface{}` (`internal/tui/shell.go:23`) with `any`.
-- [ ] T036 [US4] Run the gate and the full sweep. Record as story P4.
+- [X] T033 [US4] Remove the `cat targetcap.Catalog` and `envRef func(string) string` parameters from `resolveService` (`internal/generate/service_call.go:30`). `cat` is `defaultCatalog` at every call site and `envRef`'s two arguments produce identical output. Delete the comment at `service_call.go:10` reserving `cat` for a `providers.yaml` loader that does not exist — that comment is the stated reason Governance asks for, and it does not hold. Update `pipecat_v1_build.go:1237`, `livekit_v1_build.go:1034`, and `catalog_golden_test.go:56,115`.
+- [X] T034 [P] [US4] Delete `confirmAction` (`internal/tui/tui.go:2915`) and point its three callers at `internal/tui/tui.go:549,1287,2912` directly at `confirmChoice`. It forwards with an unchanged signature.
+- [X] T035 [P] [US4] Replace `shellRequest interface{}` (`internal/tui/shell.go:23`) with `any`.
+- [X] T036 [US4] Run the gate and the full sweep. Record as story P4.
 
 **Checkpoint**: User Stories 1 through 4 complete. SC-003's 300-line target should already be met.
 
@@ -132,6 +132,14 @@ Go module at repository root. Maintained code in `internal/`, one file per comma
 **Independent Test**: Drive each screen through the accessible renderer with no terminal attached; options, order, and labels are unchanged.
 
 **⚠️ Droppable**: highest risk, and SC-003 is met without it. Drop rather than rush.
+
+**DROPPED 2026-08-15, after being attempted and measured.** The five screens
+share about ten lines each, fifty in total. A `listScreen[T]` covering them needs
+nine parameters plus an extra-rows hook for `editAgents`: roughly forty lines of
+helper and eight lines of struct literal per call site, about **eighty lines to
+replace fifty**. Building an abstraction that costs more than the duplication it
+removes would fail this feature's own test, so the screens stay as they are. Full
+reasoning in [results.md](./results.md).
 
 - [ ] T037 [US5] Add a generic `editList` helper to `internal/tui/tui.go` parameterised by title, description, the items, an entry label function, a create path, and a details handler. It must reproduce the existing sequence exactly: one option per saved item, then "Add …", then "← Back", dispatching on the `view:` prefix.
 - [ ] T038 [US5] Migrate `editVariables` (`internal/tui/tui.go:731`) to `editList` and confirm `internal/tui/testdata` goldens match without regeneration.
@@ -149,14 +157,14 @@ Go module at repository root. Maintained code in `internal/`, one file per comma
 
 **Purpose**: Prove the claims the spec makes.
 
-- [ ] T044 [P] Add `// ponytail:` comments wherever a simplification's reasoning is not obvious from the resulting code (FR-027), so simple reads as intent rather than oversight.
-- [ ] T045 [P] Confirm SC-003: non-test Go is at least 300 lines below the 20,901 recorded in T005 if User Story 5 shipped, or at least 150 below if it was dropped.
-- [ ] T045a Confirm SC-006 by doing it, not asserting it: revert the most entangled story alone — US3 or US4, both of which touch `internal/tui/tui.go` alongside other stories — with `git revert` of that story's commits only. Confirm `make build && make test` stays green, then restore. This is the only check that the five stories are genuinely independent rather than merely committed separately.
-- [ ] T046 [P] Confirm SC-007: `git diff --stat <baseline-sha> -- docs/ docs-site/ examples/` produces no output, and `go mod tidy && git diff --exit-code go.mod go.sum` shows no change.
-- [ ] T047 [P] Confirm SC-002: `deadcode -test ./...` reports zero unreachable functions.
-- [ ] T048 Run `make smoke` where `uv` is available, proving emitted Python is unchanged and still valid (FR-004).
-- [ ] T049 Run one example by hand and speak to it: `go run . dev examples/simple-prompt --target livekit`. The greeting probe deliberately does not cover a first user turn (FR-030b); this is the two minutes that does.
-- [ ] T050 Walk `specs/011-complexity-cleanup/quickstart.md` end to end and confirm every Definition of Done box.
+- [X] T044 [P] Add `// ponytail:` comments wherever a simplification's reasoning is not obvious from the resulting code (FR-027), so simple reads as intent rather than oversight.
+- [X] T045 [P] Confirm SC-003: non-test Go is at least 300 lines below the 20,901 recorded in T005 if User Story 5 shipped, or at least 150 below if it was dropped.
+- [X] T045a Confirm SC-006 by doing it, not asserting it: revert the most entangled story alone — US3 or US4, both of which touch `internal/tui/tui.go` alongside other stories — with `git revert` of that story's commits only. Confirm `make build && make test` stays green, then restore. This is the only check that the five stories are genuinely independent rather than merely committed separately.
+- [X] T046 [P] Confirm SC-007: `git diff --stat <baseline-sha> -- docs/ docs-site/ examples/` produces no output, and `go mod tidy && git diff --exit-code go.mod go.sum` shows no change.
+- [X] T047 [P] Confirm SC-002: `deadcode -test ./...` reports zero unreachable functions.
+- [X] T048 Run `make smoke` where `uv` is available, proving emitted Python is unchanged and still valid (FR-004).
+- [ ] T049 Run one example by hand and speak to it: `go run . dev examples/simple-prompt --target livekit`. The greeting probe deliberately does not cover a first user turn (FR-030b); this is the two minutes that does. **Outstanding**: it needs a person at a microphone and cannot be automated, so this remains the one unverified claim.
+- [X] T050 Walk `specs/011-complexity-cleanup/quickstart.md` end to end and confirm every Definition of Done box.
 
 ---
 
