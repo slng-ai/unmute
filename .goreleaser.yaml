@@ -79,6 +79,13 @@ release:
     owner: slng-ai
     name: unmute # spelled out: a local remote may still carry the old repo name
   prerelease: auto # an rc or beta tag becomes a GitHub prerelease
+  # What makes re-running a failed run safe. Without it, a re-run against a
+  # release that already published its assets dies on every upload with
+  # `422 already_exists` and never reaches the publishers — v0.1.2's first
+  # re-run proved it on 2026-08-14. With it, GoReleaser deletes the conflicting
+  # asset and retries. Builds are reproducible, so the replacement is
+  # byte-identical anyway. GitHub only, which is the only place we publish.
+  replace_existing_artifacts: true
   # Hand-written release notes, without a second command or a Pro feature: the
   # annotated tag's whole message goes above the generated changelog. Write the
   # notes, `git tag -a --cleanup=verbatim -F notes.md`, push. TagContents, not
