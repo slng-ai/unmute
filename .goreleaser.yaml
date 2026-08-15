@@ -121,8 +121,31 @@ homebrew_casks:
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/unmute"]
           end
 
-# Dormant until Rollout Phase 3: winget wants a real, public, stable release and
-# a fork of microsoft/winget-pkgs to open the PR from.
+# The Windows channel that works the moment this run finishes: nobody reviews a
+# Scoop manifest. Direct push rather than a pull request, because only release
+# runs ever write to the bucket, and in PR mode a publish error is only logged
+# instead of failing the run. Everything not set here is a default that already
+# fits: the manifest is built from the Windows zips above, for both
+# architectures, pointing at this release's assets.
+scoops:
+  - name: unmute
+    # Same meaning as the cask: stable releases publish, prereleases skip.
+    skip_upload: "auto"
+    repository:
+      owner: slng-ai
+      # The manifest has to land in the repository root; in a subdirectory
+      # `scoop bucket list` reports the bucket as empty.
+      name: scoop-bucket
+      token: "{{ .Env.GH_PAT }}"
+    homepage: https://github.com/slng-ai/unmute
+    description: Compile a declarative voice-agent package to Pipecat or LiveKit
+    license: MIT # unlike a cask, a Scoop manifest carries the license itself
+
+# Open since 2026-08-15. Every stable tag pushes a manifest branch to the org's
+# fork of microsoft/winget-pkgs and opens the PR from it. Microsoft reviews every
+# manifest, so `winget install slng.unmute` works only after they merge; Scoop
+# above is the channel that is live the moment this run finishes. This publisher
+# logs its errors instead of failing the run, so read the log after every tag.
 winget:
   - publisher: slng
     package_identifier: slng.unmute
@@ -131,11 +154,14 @@ winget:
     publisher_url: https://slng.ai
     publisher_support_url: https://github.com/slng-ai/unmute/issues
     homepage: https://github.com/slng-ai/unmute
-    skip_upload: true # Rollout Phase 3: change to "auto"
+    skip_upload: "auto" # same meaning as the cask: stable publishes, rc skips
     repository:
-      owner: FORK_OWNER # Rollout Phase 3: the account that owns the winget-pkgs fork
+      owner: slng-ai # the org owns the fork, and the maintainer is admin on it
       name: winget-pkgs
-      token: "{{ .Env.GH_PAT }}"
+      # Its own credential, not GH_PAT: the PR is opened on
+      # microsoft/winget-pkgs, and a fine-grained token only ever reaches
+      # repositories its owner owns. This one is classic, scoped to public_repo.
+      token: "{{ .Env.GH_PAT_WINGET }}"
       pull_request:
         enabled: true # the branch defaults to unmute-<version>
         base:

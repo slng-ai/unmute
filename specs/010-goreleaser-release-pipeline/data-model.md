@@ -52,7 +52,7 @@ Validation rules:
 |---|---|---|
 | 1 (now, private) | tag ruleset | none: ships with `skip_upload: true` on both publishers, `gomod.proxy` commented out |
 | 2 (public) | repo public, `GH_PAT` secret set | cask `skip_upload` → `"auto"`; uncomment `gomod: {proxy: true}`; delete the installation.mdx module-path note |
-| 3 (stable public release) | winget fork exists, PAT covers it | winget `skip_upload` → `"auto"`; fill `repository.owner` with the fork owner |
+| 3 (stable public release) | org fork `slng-ai/winget-pkgs` exists, `GH_PAT_WINGET` set and pre-flighted | winget `skip_upload` → `"auto"`; `repository.owner` → `slng-ai`; winget token → `{{ .Env.GH_PAT_WINGET }}` |
 
 ## Identities and secrets
 
@@ -63,4 +63,5 @@ Validation rules:
 | winget identity | publisher `slng`, identifier `slng.unmute` | license `MIT` (required field) |
 | Publisher URLs | `https://slng.ai`, support: repo issues page | winget optional fields, set explicitly |
 | `GITHUB_TOKEN` | default Actions token | creates the release only; cannot reach other repos |
-| `GH_PAT` | fine-grained PAT, maintainer's account | contents-write on tap + fork; the only added credential; referenced only as `{{ .Env.GH_PAT }}` |
+| `GH_PAT` | fine-grained PAT, maintainer's account | contents-write on the tap and the Scoop bucket; referenced only as `{{ .Env.GH_PAT }}` |
+| `GH_PAT_WINGET` | classic PAT, `public_repo` only, maintainer's account | pushes the manifest branch to the org's winget fork and opens the PR on `microsoft/winget-pkgs`, which no fine-grained token can reach; referenced only as `{{ .Env.GH_PAT_WINGET }}` (added by feature 011) |

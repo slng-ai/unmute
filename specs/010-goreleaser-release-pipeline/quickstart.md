@@ -93,7 +93,7 @@ Order matters on release day: tag the first public release, verify brew,
 then announce; the install docs describe Phase 2 reality and go live with
 the flip.
 
-## 6. Phase 3 checks (after: fork, winget flip, FORK_OWNER filled)
+## 6. Phase 3 checks (after: org fork `slng-ai/winget-pkgs`, `GH_PAT_WINGET` set and pre-flighted, winget flip with `owner: slng-ai`)
 
 Tag a stable release, then:
 

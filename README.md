@@ -98,8 +98,15 @@ have to know:
 
 ```sh
 brew install slng-ai/tap/unmute              # macOS
-winget install slng.unmute                   # Windows
 go install github.com/slng-ai/unmute@latest  # anywhere with Go 1.24+
+```
+
+On Windows, Scoop is the way that works today. Add the bucket once, then
+install:
+
+```powershell
+scoop bucket add slng-ai https://github.com/slng-ai/scoop-bucket
+scoop install slng-ai/unmute
 ```
 
 Or take the archive for your platform from the
@@ -111,9 +118,10 @@ archive.
 Homebrew is macOS only, because Homebrew on Linux has no casks. On Linux, use
 `go install` or the archive.
 
-`brew`, `go install` and the archive all work today. `winget` does not yet: that
-channel is still closed, so `winget install slng.unmute` will not find the
-package until it opens.
+`brew`, Scoop, `go install` and the archive all work today. `winget` is coming
+soon: every release submits its manifest to Microsoft's package repository, and
+`winget install slng.unmute` starts finding the package once Microsoft merges
+the first submission. Until then, Windows users take Scoop.
 
 Building from a clone is the contributor path, and needs Go 1.24 or newer:
 

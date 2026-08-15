@@ -13,7 +13,7 @@ GoReleaser CI docs ([research.md](../research.md), R12).
 | Go | `actions/setup-go` with `go-version-file: go.mod` (single source of truth, same as ci.yml) |
 | Tool installs | `sigstore/cosign-installer@v3` and `anchore/sbom-action/download-syft@v0`; the GoReleaser action installs neither by design |
 | Release step | `goreleaser/goreleaser-action@v7`, `distribution: goreleaser`, `version: "~> v2"`, `args: release --clean` |
-| Env | `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` (release), `GH_PAT: ${{ secrets.GH_PAT }}` (tap and winget fork; empty until the secret exists, harmless while `skip_upload: true`) |
+| Env | `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` (release), `GH_PAT: ${{ secrets.GH_PAT }}` (Homebrew tap and Scoop bucket), `GH_PAT_WINGET: ${{ secrets.GH_PAT_WINGET }}` (winget fork and the PR it opens upstream). Corrected by feature 011: one token cannot cover the tap and winget, because a fine-grained token never reaches a repository its owner does not own. |
 
 Failure semantics: a failed run for a tag is safe to re-run; `--clean` wipes
 `dist/` first and `release.replace_existing_artifacts: true` overwrites
@@ -69,8 +69,9 @@ except `LDFLAGS` (see [version-output.md](version-output.md)).
    [goreleaser-config.md](goreleaser-config.md) assertion 3), with each
    phase's external preconditions.
 4. Secrets: `GH_PAT` fine-grained, maintainer-owned, contents-write on
-   `slng-ai/homebrew-tap` and the winget fork; where it is stored; that the
-   default token cannot cross repos.
+   `slng-ai/homebrew-tap` and `slng-ai/scoop-bucket`; `GH_PAT_WINGET`
+   classic, `public_repo` only, for the winget fork and the upstream PR;
+   where they are stored; that the default token cannot cross repos.
 5. Known failure modes and responses: re-running a tag, missing PAT,
    winget PR rejected or flagged by Microsoft validation (non-fatal,
    manual follow-up), antivirus false positives, module proxy lag after

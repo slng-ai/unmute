@@ -117,7 +117,8 @@ holds the contracts, the rollout stages, and each one-line flip that opens a
 package manager.
 
 - [.goreleaser.yaml](../.goreleaser.yaml) — builds, archives, checksums,
-  signing, SBOMs, changelog, Homebrew cask, winget. GoReleaser v2 free tier.
+  signing, SBOMs, changelog, Homebrew cask, Scoop manifest, winget. GoReleaser
+  v2 free tier.
 - [.github/workflows/release.yml](../.github/workflows/release.yml) — the
   tag-triggered run. The `release-config` job in
   [ci.yml](../.github/workflows/ci.yml) rehearses the same pipeline on every PR

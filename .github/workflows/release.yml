@@ -1,7 +1,7 @@
 # The one automated release. A maintainer pushes a v* tag and nothing else
 # happens by hand: this run builds the 6 binaries, packages, checksums, signs,
-# writes SBOMs, publishes the GitHub Release, and (once the rollout phases flip
-# in .goreleaser.yaml) updates the Homebrew cask and opens the winget PR.
+# writes SBOMs, publishes the GitHub Release, updates the Homebrew cask, writes
+# the Scoop manifest, and opens the winget PR.
 #
 # A failed run for a tag is safe to re-run: --clean wipes dist/ first and
 # release.replace_existing_artifacts lets the re-run overwrite assets the
@@ -50,6 +50,10 @@ jobs:
         env:
           # Creates the release. Cannot reach any other repository.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Writes the tap and the winget fork. Empty until the secret exists,
-          # which is harmless while both publishers say skip_upload: true.
+          # Writes the Homebrew tap and the Scoop bucket. Fine-grained, so it
+          # reaches those two org repositories and nothing else.
           GH_PAT: ${{ secrets.GH_PAT }}
+          # The winget fork and the PR it opens on microsoft/winget-pkgs. A
+          # separate, classic token, because no fine-grained token of ours can
+          # reach a repository the org does not own.
+          GH_PAT_WINGET: ${{ secrets.GH_PAT_WINGET }}
