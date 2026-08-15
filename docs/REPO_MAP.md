@@ -38,11 +38,33 @@ The flow is `spec.Load → ir.Build → ir.Validate → generate.Generate`:
 | Stage | File | Role |
 |---|---|---|
 | entry | [main.go](main.go) | `os.Exit(cli.Execute(version))`, nothing else |
-| commands | [internal/cli/root.go](internal/cli/root.go) | builds the cobra tree; `init`, `validate`, `compile`, `dev` |
+| commands | [internal/cli/root.go](internal/cli/root.go) | builds the cobra tree; `init`, `validate`, `compile`, `dev`, `skill` |
 | load | [internal/spec/load.go](internal/spec/load.go), [schema.go](internal/spec/schema.go) | read the package dir → unresolved authoring structs |
 | build | [internal/ir/build.go](internal/ir/build.go), [compiler.go](internal/ir/compiler.go) | resolve into the IR (`ir.Agent`, `ir.Target`, `ir.Binding`) |
 | validate | [internal/ir/validate.go](internal/ir/validate.go) | check spec against the capability table + provider catalogue |
 | generate | [internal/generate/artifact.go](internal/generate/artifact.go) | `Generate` validates once, then dispatches to one driver |
+
+**Off the pipeline:** [internal/skill/](internal/skill/) holds the coding-agent
+skill bundle, embedded with `//go:embed assets`, and the logic
+`unmute skill install` uses to write it into a project. It touches no package
+and makes no network call. The prose lives in
+[internal/skill/assets/](internal/skill/assets/): `SKILL.md` routes, and one
+file per area under `references/`. Agreement tests hold its factual lists
+against the code:
+[internal/skill/agreement_test.go](internal/skill/agreement_test.go) for the
+tool blocks, the catalogue, the provider set, and what the bundle may name,
+[internal/cli/skill_bundle_test.go](internal/cli/skill_bundle_test.go) for the
+command tree, and
+[internal/skill/coding_agents_docsite_test.go](internal/skill/coding_agents_docsite_test.go)
+for the assistants the `start/coding-agents` page shows. Adding a feature means
+adding it there too, per CLAUDE.md's five-places rule.
+
+The bundle names no page on the documentation site. That site is not published,
+so a pointer into it resolved to nothing for a reader outside this repository,
+and an assistant meeting a dead pointer could not tell a missing page from its
+own mistake. `unmute validate` is the authority the skill defers to instead.
+`TestBundleNamesNoSitePage` keeps the pointers out, and its comment says how to
+turn it around when the site goes public.
 
 ## The drivers (IR → runnable output)
 

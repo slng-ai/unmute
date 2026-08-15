@@ -17,6 +17,7 @@ Available Commands:
   dev         Compile, run the agent locally, and talk to it in the browser or terminal (--console).
   help        Help about any command
   init        Scaffold a new v1 agent package.
+  skill       Install the coding-agent skill into a project.
   validate    Validate a v1 agent package against its targets.
 
 Flags:
@@ -34,6 +35,17 @@ Use "unmute [command] --help" for more information about a command.
 | [`validate`](/reference/cli/validate) | check a package against its targets |
 | [`compile`](/reference/cli/compile) | write the generated project for each target |
 | [`dev`](/reference/cli/dev) | compile, run locally, and talk to the agent |
+
+Together they take you from nothing to a voice you can talk to.
+
+## One command off that path
+
+| Command | What it does |
+|---|---|
+| [`skill`](/reference/cli/skill) | install the Unmute skill so a coding assistant can build agents for you |
+
+`skill` touches no package and makes no network call. You never have to run it,
+and skipping it costs you nothing.
 
 `help` and `completion` come from the command framework.
 

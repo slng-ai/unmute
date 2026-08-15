@@ -1,0 +1,16 @@
+.agents/skills/unmute/.unmute-manifest.json
+.agents/skills/unmute/SKILL.md
+.agents/skills/unmute/references/conversation.md
+.agents/skills/unmute/references/deploy.md
+.agents/skills/unmute/references/examples.md
+.agents/skills/unmute/references/models.md
+.agents/skills/unmute/references/orchestration.md
+.agents/skills/unmute/references/package.md
+.agents/skills/unmute/references/prompting.md
+.agents/skills/unmute/references/telephony.md
+.agents/skills/unmute/references/tools.md
+.agents/skills/unmute/references/transfers.md
+.agents/skills/unmute/references/variables.md
+.agents/skills/unmute/references/workflow.md
+.claude/skills/unmute/.unmute-manifest.json
+.claude/skills/unmute/SKILL.md

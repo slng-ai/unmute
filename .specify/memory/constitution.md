@@ -1,6 +1,28 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 2.0.0 -> 2.1.0
+Bump rationale: MINOR. Principle V's opening sentence fixed the command surface
+at four commands. It now says four commands take an author from nothing to a
+voice, and names `skill` as a command that sits outside that path. Nothing was
+removed and no existing rule changed meaning, so a contributor holding 2.0.0 is
+not wrong about anything, only missing one command.
+
+Modified in 2.1.0:
+- Principle V: opening sentence reworded; one bullet added for `unmute skill`,
+  stating what it must not do.
+
+Reason for the amendment: feature 011 ships an Agent Skills bundle inside the
+binary and needs a way to put it in a user's project. The alternatives were
+weighed in specs/011-coding-agent-skill/plan.md Complexity Tracking: a
+documented copy-paste breaks the offline, version-matched guarantee; a package
+registry adds a release surface and a network dependency; folding it into
+`unmute init` welds one-time setup onto package scaffolding and leaves no way
+to update later. What Principle V's sentence protects is that the path from
+nothing to a spoken agent is short and complete, and `skill` is not on that
+path.
+
+--- 2.0.0 ---
 Version change: 1.1.0 -> 2.0.0
 Bump rationale: MAJOR. Requirements were removed from a principle, so a
 contributor holding v1.1.0 would be wrong about what this document mandates.
@@ -195,8 +217,8 @@ domain where four vendors ship breaking changes on their own schedule.
 
 ### V. Whatever Compiles Can Be Spoken To
 
-The command surface is four commands, and together they MUST take an author
-from nothing to a voice they can talk to.
+Four commands MUST take an author from nothing to a voice they can talk to.
+Any other command MUST stay off that path and MUST NOT be needed to reach it.
 
 - `unmute init` scaffolds a v1 package. It MUST refuse to write into a
   directory that already exists and is non-empty. Interactively it opens the
@@ -216,6 +238,11 @@ from nothing to a voice they can talk to.
   deploys), in the terminal (`--console`, uv, no Docker), or over a real phone
   (`--telephony`, the generated Compose graph). It reaches exactly the
   providers `compile` reaches.
+- `unmute skill` is off that path. It writes the coding-agent skill bundle into
+  a project and does nothing else. It MUST NOT read, write, or validate a
+  package, MUST NOT make a network call, and MUST NOT be a step anyone has to
+  take before `init`, `validate`, `compile`, or `dev`. An author who never runs
+  it loses nothing.
 - What you test MUST be what you ship. A scaffolded instance is named after its
   provider with no environment suffix, and web dev mode runs the deployable
   image rather than a separate host path.
@@ -437,4 +464,4 @@ names the ceiling and the upgrade path.
 `docs/REPO_MAP.md` points at the load bearing files. Both are subordinate to
 this document and to the documents in Principle IV.
 
-**Version**: 2.0.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-12
+**Version**: 2.1.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-15

@@ -22,6 +22,7 @@
         "pages": [
           "index",
           "start/installation",
+          "start/coding-agents",
           "start/quickstart",
           "start/how-unmute-works"
         ]
@@ -116,7 +117,8 @@
               "reference/cli/init",
               "reference/cli/validate",
               "reference/cli/compile",
-              "reference/cli/dev"
+              "reference/cli/dev",
+              "reference/cli/skill"
             ]
           },
           "reference/agent-yaml",

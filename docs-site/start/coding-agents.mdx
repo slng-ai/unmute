@@ -1,0 +1,256 @@
+---
+title: "Coding agents"
+description: "Install the Unmute skill, then build a voice agent by asking your coding assistant for one."
+---
+
+Unmute ships a skill that teaches a coding assistant how to write an Unmute
+package: the schema, the model catalog, the tool kinds, how to shape a prompt
+for speech, and what each target refuses. Install it once, then describe the
+agent you want in a sentence and check what comes back. Setup takes about a
+minute. Getting to a voice you can talk to takes about fifteen.
+
+An assistant is not required. If you would rather write the YAML yourself, the
+[quickstart](/start/quickstart) is the same journey by hand, and it is the
+better page if you want to understand every field as you go. If your assistant
+is not one of the four below, you can still use Unmute: you just do not get the
+skill, and the rest of this site is written for you.
+
+## Set it up
+
+You need the `unmute` binary. See [installation](/start/installation).
+
+From the root of your project:
+
+```sh
+unmute skill install
+```
+
+```
+  .agents/skills/unmute/
+    SKILL.md                         written
+    references/conversation.md       written
+    references/deploy.md             written
+    references/examples.md           written
+    references/models.md             written
+    references/orchestration.md      written
+    references/package.md            written
+    references/prompting.md          written
+    references/telephony.md          written
+    references/tools.md              written
+    references/transfers.md          written
+    references/variables.md          written
+    references/workflow.md           written
+  .claude/skills/unmute/
+    SKILL.md                         written
+
+Installed the Unmute skill for claude, codex, copilot, cursor.
+Commit these files so your team's assistants get them too.
+Next: ask your assistant to build a voice agent, in a sentence.
+```
+
+One command covers every assistant, because they read different directories
+but the same instructions. Commit both directories. Then anyone who clones the
+repository has an assistant that knows Unmute, with nothing to install.
+
+| Assistant | Reads |
+|---|---|
+| Claude Code | `.claude/skills/unmute/` |
+| Codex | `.agents/skills/unmute/` |
+| Cursor | `.agents/skills/unmute/` |
+| GitHub Copilot | `.agents/skills/unmute/` |
+
+`.claude/skills/unmute/SKILL.md` is a pointer at the full bundle, so the
+instructions exist once no matter how many assistants you set up. Two
+assistants in the same project is fine and normal.
+
+<Tip>
+  The skill ships inside the binary. Installing it downloads nothing and works
+  offline. It writes only the two directories above, so if your assistant
+  cannot run shell commands, run the command yourself in a terminal and the
+  result is exactly the same.
+</Tip>
+
+Re-run it whenever you upgrade the CLI. It reports what it changed, and it
+refuses to overwrite a file you edited by hand unless you pass `--force`. Full
+flags are on the [skill command](/reference/cli/skill) page.
+
+## Check it took
+
+A skill that silently did not load looks exactly like an assistant that is bad
+at Unmute, so prove it before you build anything. Ask:
+
+```
+In Unmute, what are the four ways a tool can run?
+```
+
+A correct answer names all four: an HTTP `webhook:`, a `local:` Python handler
+in the package, a remote `mcp:` server, and `builtin:`, whose registry holds
+exactly one id, `end_call`. A very good answer also mentions the two blocks
+that exist in the schema but no target emits.
+
+This question is the check because it cannot be guessed. It is a closed list
+out of this project's own schema, so a model that has not read the skill either
+hedges or invents kinds that sound right. If you get a vague paragraph about
+function calling, the skill did not load.
+
+When it fails: run `unmute skill install` again, confirm the directory for your
+assistant from the table above exists, and start a new session so the
+assistant picks it up.
+
+## Build the salon agent
+
+This is one build, start to finish. It is the shape of
+`examples/salon-support` in the repository, which the test suite validates and
+compiles, so it cannot quietly stop working.
+
+<Steps>
+  <Step title="Ask in a sentence">
+    ```
+    Build me a voice agent for a hair salon. It answers in the browser, greets
+    the caller by name, and can check appointment slots and book one.
+    ```
+
+    You do not need to name files, fields, or models. The skill carries the
+    schema. What you supply is the job.
+
+    **Check:** before writing anything, the assistant should tell you what it
+    is about to do. Which target, which models by vendor and role, and which
+    channel. If it starts writing files without saying any of that, stop it and
+    ask, because a silent choice here is one you will find out about later.
+  </Step>
+
+  <Step title="Read what it wrote">
+    ```
+    salon/
+    ├── agent.yaml
+    ├── instructions.md
+    ├── targets.yaml
+    └── tools/
+        ├── check_availability.yaml
+        ├── check_availability.py
+        ├── book_appointment.yaml
+        └── book_appointment.py
+    ```
+
+    **Check three things, in this order.** They take a minute and they catch
+    most of what goes wrong.
+
+    `agent.yaml`: is `channels:` what you asked for? A browser agent is
+    `web: realtime_audio` and needs no phone route.
+
+    `instructions.md`: read it out loud. It should sound like something a
+    person says, with no bullet lists to read out, no markdown, and no raw
+    URLs. It should also tell the model how to speak times and names. If it
+    reads like documentation, the agent will sound like documentation.
+
+    `tools/*.yaml`: each tool file has exactly one execution block, and the
+    `description` reads as an instruction about when to call it, not as a
+    label. Local Python handlers are fixtures until you wire them up, and the
+    assistant should have said so.
+  </Step>
+
+  <Step title="Add your keys">
+    Create `salon/.env` with `OPENAI_API_KEY` for the model that thinks and
+    `SLNG_API_KEY` for the speech models. `unmute dev` reads `.env` from the
+    directory you run it in, then from the package directory.
+
+    Which names a package needs is not something to guess at. Every compile
+    writes `salon/build/<target>/.env.example` listing them, so compile once
+    and read that file.
+
+    **Check:** no key, token, or phone number appears in any package file. A
+    package carries environment variable names only, in `UPPER_SNAKE`, and the
+    `secrets:` block in `agent.yaml` is where they are declared. If you find a
+    literal value in the YAML, tell the assistant, because the compiler refuses
+    them and it should not have written one.
+  </Step>
+
+  <Step title="Let it check its own work">
+    ```sh
+    unmute validate salon
+    ```
+
+    ```
+    ✓ pipecat (pipecat)
+    ```
+
+    Ask the assistant to run this itself and fix what it finds. Reading a
+    refusal is the fastest path it has, and the messages name the file and the
+    line.
+
+    **Check:** warnings are not errors, and they are not noise either. If
+    validate prints one, the assistant should read it to you rather than move
+    past it.
+  </Step>
+
+  <Step title="Talk to it">
+    ```sh
+    unmute dev salon
+    ```
+
+    ```
+    compiled salon/build/pipecat
+    building and starting the container...
+
+      ▸ http://localhost:8765/?agent=pipecat
+        ctrl-c to stop  ·  logs: salon/build/pipecat/dev.log
+    ```
+
+    Open the link and speak. Docker has to be running, and this step is the
+    only one that needs a network.
+
+    **Check:** this is the check no test can do for you. Does it interrupt
+    well? Does it say times like a person? Does it call the tool at the right
+    moment? A green validate means the package is legal. It does not mean the
+    agent is good, and the difference is only audible.
+  </Step>
+</Steps>
+
+## Ask for more
+
+The build above is one agent with two tools. Everything after it is a
+conversation with your assistant. What you get back depends on what your
+request carries.
+
+| You want | Say | It should tell you |
+|---|---|---|
+| a tool | what it does, where the data comes from, and whether there is an HTTP endpoint already | which of the four kinds it chose, and why |
+| a second agent | what each one owns, and when control moves between them | what context crosses the handoff, and whether the handoff comes back |
+| a phone number | inbound, outbound, or both, and which carrier you have | which route, and what that route cannot do |
+
+Ask what it decided, every time. The skill tells it to state the target, the
+models, the context across every handoff, and what it actually checked. If any
+of those is missing from the answer, ask, because a decision nobody named is a
+default nobody chose.
+
+Expect it to refuse things. Unmute does not support every vendor for every role
+on every target, and some shapes are gated on some targets. A good answer says
+plainly that something is not available and names what is. If your assistant
+invents a provider name instead, that is the failure to watch for, and it shows
+up as a validation error with the target named.
+
+## Habits
+
+Six things that separate a good session from a frustrating one.
+
+1. **Let it run `unmute validate` and read the error.** Guessing at a schema
+   costs more turns than checking.
+2. **Never edit anything under `build/`.** The next compile overwrites it.
+   Change the package and compile again.
+3. **Name the target, or one gets picked for you.** Pipecat and LiveKit both
+   generate and run, and they refuse different things.
+4. **Trust the references over what the assistant remembers, and `unmute
+   validate` over both.** Model memory of a fast moving schema is the single
+   biggest source of confident wrong answers.
+5. **Ask what it decided.** Target, models, and the context across a handoff.
+   A silent default is the bug you find a week later.
+6. **Listen to the agent before you ship it.** A green check is not a good
+   call.
+
+## Where next
+
+- [Orchestration](/build/orchestration/overview) for when one agent and a
+  growing prompt stop being enough.
+- [Tools](/build/tools/overview) for the four kinds in full.
+- [Telephony](/telephony/overview) for putting it on a real phone number.
+- [Deployment](/deploy/going-live) for getting it off your laptop.

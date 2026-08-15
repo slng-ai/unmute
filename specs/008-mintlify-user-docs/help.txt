@@ -11,6 +11,7 @@ Available Commands:
   dev         Compile, run the agent locally, and talk to it in the browser or terminal (--console).
   help        Help about any command
   init        Scaffold a new v1 agent package.
+  skill       Install the coding-agent skill into a project.
   validate    Validate a v1 agent package against its targets.
 
 Flags:
@@ -67,6 +68,35 @@ Flags:
       --to string           E.164 number to dial for an outbound telephony test (requires --telephony and an outbound-capable target)
       --var stringArray     seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)
       --verbose             follow container/agent logs on stderr (default: write to the log file only)
+
+$ unmute skill --help
+Install the coding-agent skill into a project.
+
+Usage:
+  unmute skill [flags]
+  unmute skill [command]
+
+Available Commands:
+  install     Write the Unmute skill so your coding assistant can build agents.
+
+Flags:
+  -h, --help   help for skill
+
+Use "unmute skill [command] --help" for more information about a command.
+
+$ unmute skill install --help
+Write the Unmute skill into this project, so a coding assistant knows how to
+author an Unmute package. The files travel with the repository, so a team
+shares one skill. Nothing is downloaded: the skill ships inside this binary.
+
+Usage:
+  unmute skill install [flags]
+
+Flags:
+      --agent strings   Assistants to install for: all, claude, codex, copilot, cursor (default all)
+      --dir string      Project directory to install into (default ".")
+      --force           Overwrite files that changed after they were installed
+  -h, --help            help for install
 
 $ unmute completion --help
 Generate the autocompletion script for unmute for the specified shell.
