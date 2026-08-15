@@ -456,7 +456,8 @@ func runSession(t *testing.T, binary string, ex sweepExample, target string) str
 
 	if reason := waitForDevServer(done); reason != "" {
 		t.Errorf("%s/%s: %s\n"+
-			"        stage:    dev-start\n%s", ex.Name, target, reason, failureContext(output, logPath))
+			"        stage:    dev-start\n%s%s", ex.Name, target, reason,
+			failureContext(output, logPath), containerDiagnosis(ex, target))
 		return "failed"
 	}
 
@@ -540,6 +541,32 @@ func failureContext(output *lockedBuffer, logPath string) string {
 		context += "\n        logs:    " + indent(tail(string(raw), 40))
 	}
 	return context
+}
+
+// containerDiagnosis recovers what `docker compose up --wait` throws away. When
+// the application container dies during startup, compose rolls the stack back
+// and removes it, so its stdout — the traceback that says *why* — is gone by
+// the time anyone reads the failure. Running the image once more prints it.
+// Best effort: this is diagnosis, not a check, so it never fails a test.
+func containerDiagnosis(ex sweepExample, target string) string {
+	dir := filepath.Join(ex.Dir, "build", target)
+	if _, err := os.Stat(filepath.Join(dir, "compose.dev.yaml")); err != nil {
+		return ""
+	}
+	run := exec.Command("docker", "compose", "-f", "compose.dev.yaml",
+		"-p", "unmute-sweep-diagnosis", "run", "--rm", "--no-deps", "application")
+	run.Dir = dir
+	out, _ := run.CombinedOutput()
+	defer func() {
+		down := exec.Command("docker", "compose", "-f", "compose.dev.yaml",
+			"-p", "unmute-sweep-diagnosis", "down", "--remove-orphans")
+		down.Dir = dir
+		_ = down.Run()
+	}()
+	if len(out) == 0 {
+		return ""
+	}
+	return "\n        why:     " + indent(tail(string(out), 20))
 }
 
 func tail(s string, n int) string {
