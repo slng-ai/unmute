@@ -215,6 +215,11 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 	if err := checkTemplates(pkg, out); err != nil {
 		return nil, err
 	}
+	// Last, so a name that does not resolve is reported as unresolved rather than
+	// as unreachable.
+	if err := checkReachability(pkg); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -1206,7 +1211,12 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		Environment: maps.Clone(connection.Environment), Destinations: maps.Clone(resolved.Destinations),
 		SystemSources: sources, Evidence: evidence,
 		Processes: processes, PublicEndpoints: endpoints, RequiredEnvironment: requiredEnvironment,
-		LocalEnvironment:    slices.Clone(route.LocallySuppliedEnvironment),
+		// Scoped to what this package's route actually requires. The route
+		// declares its locally-supplied names statically, but some of them are
+		// feature-gated — UNMUTE_OUTBOUND_TOKEN only exists on a package that
+		// dials out — and a plan naming a supplied value the runtime never asks
+		// for is the disagreement validateTelephonyPlan refuses.
+		LocalEnvironment:    intersect(route.LocallySuppliedEnvironment, requiredEnvironment),
 		AutoWebhookEndpoint: autoWebhook, ManualSteps: slices.Clone(route.ManualSteps),
 		Services: services, Coordination: coordination,
 		CoordinationReasons: reasons, AdmissionOwner: admissionOwner,
@@ -1336,10 +1346,163 @@ func checkToolRefs(pkg *packagespec.Package, names []string) error {
 	return nil
 }
 
+// checkReachability walks the package forwards from the entry agent and refuses
+// anything declared the walk never arrives at.
+//
+// checkToolRefs above proves every name an agent lists resolves. This is its
+// mirror image, and it is the half that was missing: a control nobody attached
+// was not filtered out of the generated project, it was simply never visited,
+// so it compiled at exit 0 and vanished. An unreferenced destination was worse
+// than dead — its environment name still reached .env.example and the generated
+// startup check, so the agent refused to start over a phantom secret nothing
+// would ever read.
+//
+// It runs here rather than in ir.Validate because reachability is a property of
+// the package graph alone: no target can change the answer, so it fires once for
+// the package rather than once per target, and this is the only stage that can
+// carry the file and line (research D1, D7).
+//
+// One carve-out, and it is the models map: docs/SCHEMA.md:287 calls it "a
+// palette: entries that nothing currently references are legal". That wording is
+// scoped to models: and to nothing else.
+func checkReachability(pkg *packagespec.Package) error {
+	agents, controls, tools := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	tasks, groups, destinations := map[string]bool{}, map[string]bool{}, map[string]bool{}
+
+	var visitAgent, visitControl, visitTask, visitGroup func(string)
+	// An agent, a task, and a task group all attach the same way: by name, to a
+	// tool or a control. Anything the name does not resolve to is checkToolRefs'
+	// error to report, not this walk's.
+	attach := func(names []string) {
+		for _, name := range names {
+			if _, ok := pkg.Tools[name]; ok {
+				tools[name] = true
+				continue
+			}
+			if _, ok := pkg.Agent.Controls[name]; ok {
+				visitControl(name)
+			}
+		}
+	}
+	visitAgent = func(name string) {
+		if agents[name] {
+			return
+		}
+		agents[name] = true
+		attach(pkg.Agent.Agents[name].Tools)
+	}
+	visitControl = func(name string) {
+		if controls[name] {
+			return
+		}
+		controls[name] = true
+		raw := pkg.Agent.Controls[name]
+		switch ControlKind(raw.Kind) {
+		case ControlDelegate:
+			if task := stringValue(raw.Task); task != "" {
+				visitTask(task)
+			}
+			if group := stringValue(raw.Group); group != "" {
+				visitGroup(group)
+			}
+		case ControlAgentTransfer:
+			visitAgent(stringValue(raw.To))
+		case ControlHumanTransfer:
+			destinations[raw.TransferDestination()] = true
+		}
+	}
+	visitTask = func(name string) {
+		if tasks[name] {
+			return
+		}
+		tasks[name] = true
+		attach(pkg.Agent.Tasks[name].Tools)
+	}
+	visitGroup = func(name string) {
+		if groups[name] {
+			return
+		}
+		groups[name] = true
+		raw := pkg.Agent.TaskGroups[name]
+		for _, step := range raw.Steps {
+			visitTask(step)
+		}
+		if raw.ThenTarget != "" {
+			visitAgent(raw.ThenTarget)
+		}
+	}
+	visitAgent(pkg.Agent.EntryAgent)
+
+	// The fix rides the message, and never suggests an impossible one: with no
+	// reachable agent to attach to, the hint is omitted rather than invented.
+	attachable := func() string {
+		var names []string
+		if agents[pkg.Agent.EntryAgent] {
+			names = append(names, pkg.Agent.EntryAgent)
+		}
+		for _, name := range sortedKeys(pkg.Agent.Agents) {
+			if agents[name] && name != pkg.Agent.EntryAgent {
+				names = append(names, name)
+			}
+		}
+		if len(names) == 0 {
+			return ""
+		}
+		return "; add it to the tools: of one of these agents: " + strings.Join(names, ", ")
+	}
+
+	// Reported in graph order, nearest declaration first: an unattached delegate
+	// makes its task unreachable too, and naming the delegate is the one edit that
+	// fixes both.
+	for _, name := range sortedKeys(pkg.Agent.Controls) {
+		if !controls[name] {
+			return fmt.Errorf("%s: control %q is declared but no agent reaches it%s", pkg.Location("agent.yaml", name), name, attachable())
+		}
+	}
+	for _, name := range sortedKeys(pkg.Agent.Destinations) {
+		if !destinations[name] {
+			return fmt.Errorf("%s: destination %q is declared but no control resolves to it", pkg.Location("agent.yaml", name), name)
+		}
+	}
+	for _, name := range sortedKeys(pkg.Tools) {
+		if !tools[name] {
+			return fmt.Errorf("%s: tool %q is declared but no agent reaches it%s", pkg.Location("agent.yaml", name), name, attachable())
+		}
+	}
+	for _, name := range sortedKeys(pkg.Agent.TaskGroups) {
+		if !groups[name] {
+			return fmt.Errorf("%s: task group %q is declared but nothing reaches it; add a delegate control with group: %s and attach it to an agent", pkg.Location("agent.yaml", name), name, name)
+		}
+	}
+	for _, name := range sortedKeys(pkg.Agent.Tasks) {
+		if !tasks[name] {
+			return fmt.Errorf("%s: task %q is declared but nothing reaches it; add a delegate control with task: %s and attach it to an agent, or list it in the steps: of a task group that is reached", pkg.Location("agent.yaml", name), name, name)
+		}
+	}
+	for _, name := range sortedKeys(pkg.Agent.Agents) {
+		if !agents[name] {
+			return fmt.Errorf("%s: agent %q is declared but the entry agent %q cannot reach it, directly or through an agent_transfer", pkg.Location("agent.yaml", name), name, pkg.Agent.EntryAgent)
+		}
+	}
+	return nil
+}
+
 func missing(pkg *packagespec.Package, file, kind, name string) error {
 	return fmt.Errorf("%s: %s %q does not resolve", pkg.Location(file, name), kind, name)
 }
 
 func sortedKeys[V any](values map[string]V) []string {
 	return slices.Sorted(maps.Keys(values))
+}
+
+// intersect keeps the members of names that also appear in keep, in names' own
+// order.
+func intersect(names, keep []string) []string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if slices.Contains(keep, name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }

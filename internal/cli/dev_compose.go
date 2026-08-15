@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -76,6 +77,11 @@ func rejectLocalTopologyConflicts(plan *generate.TelephonyRuntimePlan, env []str
 		}
 	}
 	for _, name := range plan.LocalEnvironment {
+		// The names this command mints are locally supplied too, and it simply
+		// overwrites them: only the generated topology's own values conflict.
+		if slices.Contains(devMintedEnvironment, name) {
+			continue
+		}
 		if values[name] != "" {
 			return fmt.Errorf("%s conflicts with the generated local LiveKit SIP topology; unset it for `unmute dev --telephony`", name)
 		}

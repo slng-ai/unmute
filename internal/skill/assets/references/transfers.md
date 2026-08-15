@@ -138,35 +138,38 @@ pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twi
 That last sentence is the fix. To get a warm transfer, change the connection,
 not the control.
 
-### A transfer needs a phone call, and a browser package will not tell you
+### A transfer needs a route, and the compiler refuses one without
 
-**Check this yourself before promising a transfer.** A transfer moves a real
-phone leg. A browser session has no leg to move, so there is nothing to transfer
-and no route to do it.
+A transfer moves a real phone leg. A cold transfer hands the caller's own leg to
+the destination, so a target that names no route has nothing to hand over.
+`unmute validate` refuses it:
 
-On a package whose only channel is `web: realtime_audio`, with a LiveKit target
-and no connection, a `human_transfer` control **validates clean, compiles clean,
-and is then absent from the generated project.** Verified 2026-08-15: exit 0
-from both commands, no error, no warning, and no trace of the control in
-`agent.py` or the compile report.
+```
+livekit: cold transfer needs a telephony Connection: it hands the caller's own
+phone leg to the destination, and a session that did not arrive by phone has no
+leg to hand over
+```
 
-So the rule is yours to enforce, because the compiler will not:
-
-| The package has | A transfer to a person |
-|---|---|
-| a `telephony` channel and a connection | possible, subject to the route table above |
-| `web: realtime_audio` only | **not possible.** Say so plainly |
-
-When a user asks a browser agent to reach a person, tell them a transfer needs a
-phone route, and offer what actually works instead: a tool that books a callback,
-raises a ticket, or emails a desk. Do not write a `human_transfer` control into a
-browser package. It will look like it worked, and it will do nothing.
-
-Pipecat is the honest one here. It refuses at validation:
+Pipecat refuses the same package in its own words, and only its own:
 
 ```
 pipecat: Pipecat cold transfer requires Daily SIP transport
 ```
+
+| The target names | A transfer to a person |
+|---|---|
+| a connection | possible, subject to the route table above |
+| no connection | **refused at validate**, before anything is written |
+
+A route is not the same as a phone channel. `examples/pipecat-human-transfer-daily`
+has only `web: realtime_audio` and transfers fine, because Daily's dial-out
+brings the person into the room the browser session is already in. What it does
+have is a connection.
+
+So when a user asks a browser agent with no route to reach a person, offer what
+actually works instead: a tool that books a callback, raises a ticket, or emails
+a desk. You will not have to guess, because writing the control anyway fails at
+validate rather than compiling into nothing.
 
 ## So: a user asks for a warm transfer
 

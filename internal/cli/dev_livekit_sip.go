@@ -42,7 +42,7 @@ const (
 
 // liveKitSIPAdminBase is a seam: tests point it at an httptest server.
 var liveKitSIPAdminBase = func(env []string) string {
-	port := envValue(env, "UNMUTE_LIVEKIT_PORT")
+	port := envValue(env, "LIVEKIT_HOST_PORT")
 	if port == "" {
 		port = "7880"
 	}

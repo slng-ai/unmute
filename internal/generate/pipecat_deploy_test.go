@@ -13,9 +13,26 @@ import (
 // generated README prints it. Contract:
 // specs/001-livekit-cloud-deploy/contracts/artifacts.md.
 
+// pipecatArtifact carries one local tool, and that is the point. The fixture
+// used to have none, so TestPipecatImageMeetsThePlatformContract asserted the
+// spelling of the COPY lines that existed and never noticed the one that was
+// missing: the image could not import its own emitted tools (reproduction.md D).
 func pipecatArtifact(t *testing.T, regions []string) Artifact {
 	t.Helper()
 	agent := loadCompilerAgent(t)
+	agent.Tools["fetch_notes"] = ir.Tool{
+		Description:   "Fetch the caller's saved notes.",
+		Input:         map[string]any{"type": "object", "properties": map[string]any{"topic": map[string]any{"type": "string"}}, "required": []any{"topic"}},
+		Execution:     ir.ToolLocal,
+		Handler:       "tools/fetch_notes.py",
+		HandlerSource: "def fetch_notes(topic):\n    return {\"notes\": []}\n",
+		Interruption:  ir.ToolProviderDefault,
+		Effect:        ir.ToolReturnsData,
+	}
+	intake := agent.Agents[agent.EntryAgent]
+	intake.Tools = append(intake.Tools, "fetch_notes")
+	agent.Agents[agent.EntryAgent] = intake
+
 	tgt := targetByProvider(t, agent, ir.ProviderPipecat)
 	tgt.DeploymentRegions = regions
 	artifact, err := Generate(agent, tgt, target.Default())
@@ -64,7 +81,8 @@ func TestPipecatManifestIsDeployable(t *testing.T) { // FR-012, FR-013, FR-027
 // answered 200, and POST /bot reached the emitted bot() with the platform's own
 // session arguments.
 func TestPipecatImageMeetsThePlatformContract(t *testing.T) {
-	docker := artifactFile(t, pipecatArtifact(t, nil), "Dockerfile")
+	artifact := pipecatArtifact(t, nil)
+	docker := artifactFile(t, artifact, "Dockerfile")
 	// Instructions only. The comments in this file name the shapes being avoided,
 	// so a check against the whole text would match the warning against the
 	// mistake and never see the mistake itself.
@@ -87,6 +105,11 @@ func TestPipecatImageMeetsThePlatformContract(t *testing.T) {
 	if !strings.Contains(build, "COPY bot.py ./") {
 		t.Error("the Dockerfile does not copy bot.py, which is the one file the base image looks for")
 	}
+	// The invariant, not the spelling: every module the entrypoint imports has to
+	// be reachable inside the image. Asserting one COPY line's wording is what let
+	// `import tools.<name>` ship against an image with no tools/ directory, and
+	// `compose.dev.yaml` has no bind mount, so `unmute dev` runs the same image.
+	assertImportsAreCopied(t, artifact, build)
 	// A CMD replaces the base image's server with something the platform cannot
 	// call.
 	if strings.Contains(build, "CMD ") {
@@ -97,6 +120,36 @@ func TestPipecatImageMeetsThePlatformContract(t *testing.T) {
 	for _, forbidden := range []string{"install --system .", "pip install ."} {
 		if strings.Contains(build, forbidden) {
 			t.Errorf("the Dockerfile runs %q, installing the project instead of its dependencies", forbidden)
+		}
+	}
+}
+
+// assertImportsAreCopied reads the entrypoint's own top-level imports and
+// requires every one that names an emitted file to be reachable in the image.
+// It reads the Dockerfile rather than a list of names, so a new emitted module
+// is covered the day it is emitted.
+func assertImportsAreCopied(t *testing.T, artifact Artifact, build string) {
+	t.Helper()
+	emitted := make(map[string]string, len(artifact.Files))
+	for _, file := range artifact.Files {
+		emitted[file.Path] = string(file.Content)
+	}
+	for _, line := range strings.Split(emitted["bot.py"], "\n") {
+		module, ok := strings.CutPrefix(strings.TrimSpace(line), "import ")
+		if !ok {
+			continue
+		}
+		module, _, _ = strings.Cut(module, " ") // `import x as y`
+		path := strings.ReplaceAll(module, ".", "/") + ".py"
+		if _, self := emitted[path]; !self {
+			continue // a dependency from the image's own site-packages
+		}
+		// A package directory is copied whole; a single module by name.
+		dir, _, nested := strings.Cut(module, ".")
+		copied := strings.Contains(build, "COPY "+path) ||
+			nested && (strings.Contains(build, "COPY "+dir+"/ ") || strings.Contains(build, "COPY "+dir+" "))
+		if !copied {
+			t.Errorf("bot.py runs %q and the image never receives %s, so the container cannot start:\n%s", strings.TrimSpace(line), path, build)
 		}
 	}
 }

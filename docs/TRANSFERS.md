@@ -410,7 +410,7 @@ helper-side names and the agent never does.
 | `OPENAI_API_KEY` / `SLNG_API_KEY` | agent | The package's model providers. |
 | `BILLING_PHONE_NUMBER` | agent | The transfer destination, read at call time. |
 | `PIPECAT_CLOUD_API_KEY` | helper | The public key the helper starts agent sessions with. |
-| `UNMUTE_HOLD_AUDIO_URL` / `UNMUTE_DAILY_ROOM_GEO` | helper, optional | Hold audio you host, and the Daily room's geography. Unset is supported on both: the caller hears a spoken line, and Daily picks its own region. |
+| `DAILY_HOLD_AUDIO_URL` / `DAILY_ROOM_GEO` | helper, optional | Hold audio you host, and the Daily room's geography. Unset is supported on both: the caller hears a spoken line, and Daily picks its own region. |
 
 There is no outbound trigger token on this route, unlike the carrier-WebSocket
 ones. The helper answers incoming calls and nothing else, so it has no endpoint

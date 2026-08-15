@@ -2115,10 +2115,7 @@ func TestUS3_NoPrerequisiteWithoutTheCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delete(pkg.Agent.Controls, "to_human")
-	billing := pkg.Agent.Agents["billing"]
-	billing.Tools = slices.DeleteFunc(slices.Clone(billing.Tools), func(name string) bool { return name == "to_human" })
-	pkg.Agent.Agents["billing"] = billing
+	dropHumanTransferControl(pkg)
 	// The transfer was the only thing using the phone route, so the connection
 	// goes with it. On the Daily-provisioned route those two are now the same
 	// question: the route has no carrier row in the capability table, so it
@@ -2346,13 +2343,23 @@ func enablePackageTelephony(pkg *spec.Package) {
 // the channel's cold_transfer requirement, for fixtures on routes that carry
 // no transfer primitive (SPEC C1, V1): the carrier-websocket routes.
 func dropHumanTransfer(pkg *spec.Package) {
-	delete(pkg.Agent.Controls, "to_human")
-	billing := pkg.Agent.Agents["billing"]
-	billing.Tools = slices.DeleteFunc(slices.Clone(billing.Tools), func(name string) bool { return name == "to_human" })
-	pkg.Agent.Agents["billing"] = billing
+	dropHumanTransferControl(pkg)
 	phone := pkg.Agent.Channels["phone"]
 	phone.RequiredControls = []string{"hangup"}
 	pkg.Agent.Channels["phone"] = phone
+}
+
+// dropHumanTransferControl removes the transfer completely: the control, its
+// attachment, and the destination it resolved to. The destination has to go with
+// it — a destination no control resolves to still put its environment name into
+// .env.example and the generated startup check, so the agent refused to start
+// over a phantom secret. That is now an error at build time (FR-002).
+func dropHumanTransferControl(pkg *spec.Package) {
+	delete(pkg.Agent.Controls, "to_human")
+	delete(pkg.Agent.Destinations, "billing_line")
+	billing := pkg.Agent.Agents["billing"]
+	billing.Tools = slices.DeleteFunc(slices.Clone(billing.Tools), func(name string) bool { return name == "to_human" })
+	pkg.Agent.Agents["billing"] = billing
 }
 
 // TestV14_ActivationGatedOnPipelineStart (driver-pipecat V14, B8): the entry

@@ -15,6 +15,18 @@ func IsCode(provider Provider) bool {
 	return provider == LiveKit || provider == Pipecat || provider == Deepgram
 }
 
+// EmitsProject reports whether a provider's driver writes a runnable project
+// today. Every provider validates — Principle V makes validate deliberately
+// wider than generation, so portability is checkable before an author commits to
+// a platform — but a rule about what the *emitted* agent can do has nothing to
+// apply to where nothing is emitted.
+//
+// The set used to be a switch in internal/generate/artifact.go and a hand-copied
+// map in internal/skill's agreement test. It is here so both read one list.
+func EmitsProject(provider Provider) bool {
+	return provider == LiveKit || provider == Pipecat
+}
+
 type Tag string
 
 const (

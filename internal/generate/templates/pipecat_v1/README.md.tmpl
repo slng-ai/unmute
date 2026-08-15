@@ -130,7 +130,7 @@ Helper side, optional:
 
 {{range .DailyCarrier.OptionalEnv}}- `{{.}}`
 {{end}}{{else}}
-{{range .RequiredEnv}}- `{{.}}`
+{{range .AuthorEnv}}- `{{.}}`
 {{end}}{{if .CloudWebsocket}}{{if .CloudWebsocket.CallEnv}}
 One group, because one thing reads them: the deployed agent. There is no second
 side on this route, so every name above belongs in the platform secret set.

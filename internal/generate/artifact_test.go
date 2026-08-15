@@ -25,10 +25,15 @@ func assertComposeLocalEnvironment(t *testing.T, compose string, plan *Telephony
 		seen["REDIS_URL"] = true
 	}
 	got := slices.Sorted(maps.Keys(seen))
-	want := slices.Clone(plan.LocalEnvironment)
-	slices.Sort(want)
-	if !slices.Equal(got, want) {
-		t.Fatalf("Compose injected environment %v drifts from telephony plan %v", got, want)
+	// Every name the Compose graph injects must be one the route says is
+	// supplied rather than authored, or the generated file is quietly setting
+	// something .env.example told the reader to set. The reverse is not required:
+	// `unmute dev` mints the public URL and the outbound token itself, so they
+	// are supplied without appearing here.
+	for _, name := range got {
+		if !slices.Contains(plan.LocalEnvironment, name) {
+			t.Fatalf("Compose injects %q, which the telephony plan does not list as supplied: %v", name, plan.LocalEnvironment)
+		}
 	}
 }
 

@@ -211,6 +211,36 @@ func requiredSecretEnv(agent *ir.Agent) []string {
 	return slices.Clone(agent.Secrets)
 }
 
+// authorEnv is the half of a target's required environment the author actually
+// supplies. The route already declares the other half
+// (LocallySuppliedEnvironment): `unmute dev` sets those locally, LiveKit Cloud
+// injects its own connection values into a deployed agent, and its managed SIP
+// service owns the Redis no emitted Python on that driver reads.
+//
+// Both drivers read this one function, which is the fix rather than a new
+// concept: the classification already existed, the LiveKit template labelled it
+// instead of excluding it, and the Pipecat template ignored it entirely, so the
+// same REDIS_URL was explained on one target and silently demanded on the other
+// from one piece of data (research D11).
+//
+// `.env.example` is a to-do list and every line of it is a to-do, so a name
+// nobody sets is absent rather than relabelled. It survives in
+// compile-report.json's required_env, in the Compose interpolation defaults, and
+// in the emitted README's carrier setup, which says where each value comes from
+// rather than only naming it.
+func authorEnv(required []string, plan *ir.TelephonyPlan) []string {
+	if plan == nil {
+		return slices.Clone(required)
+	}
+	out := make([]string, 0, len(required))
+	for _, name := range required {
+		if !slices.Contains(plan.LocalEnvironment, name) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // withoutRouteEnv drops the names only a phone call reads, leaving the set a
 // browser session actually needs.
 //

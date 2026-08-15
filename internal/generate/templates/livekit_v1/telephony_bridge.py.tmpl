@@ -48,10 +48,27 @@ E164 = re.compile(r"\+[1-9][0-9]{7,14}")
 PENDING: dict[str, dict] = {}
 
 
+# Names something other than you supplies: `unmute dev` sets them for a local
+# run, and your platform or operator sets them at deploy time. They are
+# deliberately absent from .env.example, which lists only what you fill in, so
+# the failure below has to say where the value comes from.
+SUPPLIED_FOR_YOU = {{"{"}}{{range $i, $name := .SuppliedForYou}}{{if $i}}, {{end}}{{pyq $name}}{{end}}{{"}"}}
+
+
+def _missing_env(name: str) -> str:
+    message = f"Missing required environment variable: {name}"
+    if name in SUPPLIED_FOR_YOU:
+        message += (
+            "\nThis one is supplied for you: `unmute dev` sets it locally, and your "
+            'platform or operator sets it at deploy time. See "Carrier setup" in README.md.'
+        )
+    return message
+
+
 def _env(name: str) -> str:
     value = os.getenv(name)
     if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
+        raise RuntimeError(_missing_env(name))
     return value
 
 

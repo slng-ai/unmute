@@ -129,9 +129,12 @@ func TestSystemVariableDoesNotGateToolCall(t *testing.T) {
 	}
 }
 
-// Declared secrets drive .env.example, one bare name per line, with
-// referenced-but-undeclared names labeled (V11). A secret has no description to
-// carry: the name is the whole declaration.
+// .env.example is one sorted list of bare names, and every one of them is the
+// reader's to fill in (V11, FR-018). A secret has no description to carry: the
+// name is the whole declaration.
+//
+// The "required by the target or a connection" section this used to assert is
+// gone with the names that were in it: they were the route's, not the author's.
 func TestEnvExampleDocumentsSecrets(t *testing.T) {
 	agent := loadOutboundReminder(t)
 	for _, name := range []string{"pipecat", "livekit"} {
@@ -142,7 +145,6 @@ func TestEnvExampleDocumentsSecrets(t *testing.T) {
 		env := artifactFile(t, artifact, ".env.example")
 		for _, want := range []string{
 			"SALON_API_TOKEN=\nSALON_API_URL=",
-			"# required by the target or a connection\n",
 			"TWILIO_ACCOUNT_SID=",
 		} {
 			if !strings.Contains(env, want) {

@@ -14,7 +14,7 @@ services:
     # config-sample.yaml and the server CLI on 2026-07-22.
     command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1", "--udp-port", "7882"]
     ports:
-      - "${UNMUTE_LIVEKIT_PORT:-7880}:7880"
+      - "${LIVEKIT_HOST_PORT:-7880}:7880"
       - "7881:7881"
       - "7882:7882/udp"
     healthcheck:

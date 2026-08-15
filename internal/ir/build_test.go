@@ -79,7 +79,10 @@ func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 	if len(plan.Processes) != 1 || len(plan.PublicEndpoints) != 3 || len(plan.ManualSteps) == 0 {
 		t.Fatalf("runtime facts = %#v", plan)
 	}
-	if got := strings.Join(plan.LocalEnvironment, ","); got != "REDIS_URL" {
+	// Inbound only, so the outbound token is not required and the plan drops it
+	// from the supplied set even though the route declares it. Every other
+	// runtime name on this route is supplied rather than authored.
+	if got := strings.Join(plan.LocalEnvironment, ","); got != "REDIS_URL,UNMUTE_PUBLIC_URL" {
 		t.Fatalf("locally supplied environment = %s", got)
 	}
 	if got := strings.Join(plan.RequiredEnvironment, ","); got != "REDIS_URL,TWILIO_ACCOUNT_SID,TWILIO_AUTH_TOKEN,TWILIO_PHONE_NUMBER,UNMUTE_PUBLIC_URL" {
@@ -722,6 +725,148 @@ func TestBuildValidatesDestinationValues(t *testing.T) {
 	}
 }
 
+// TestUnreachableControlIsRefused walks every row of the reachability table in
+// specs/013-first-five-minutes/data-model.md. A package declares things and
+// attaches things; anything declared and never attached is an error, with one
+// carve-out. Before this check, every row below compiled at exit 0 and the
+// declaration simply never reached the generated project (reproduction.md A).
+func TestUnreachableControlIsRefused(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*packagespec.Package)
+		want   string // "" means the package must still build
+	}{
+		{
+			name:   "unattached human_transfer, cold",
+			mutate: func(pkg *packagespec.Package) { detachTool(pkg, "billing", "to_human") },
+			want:   `control "to_human" is declared but no agent reaches it`,
+		},
+		{
+			name: "unattached human_transfer, warm",
+			mutate: func(pkg *packagespec.Package) {
+				control := pkg.Agent.Controls["to_human"]
+				control.Cold, control.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
+				pkg.Agent.Controls["to_human"] = control
+				detachTool(pkg, "billing", "to_human")
+			},
+			want: `control "to_human" is declared but no agent reaches it`,
+		},
+		{
+			name:   "unattached agent_transfer",
+			mutate: func(pkg *packagespec.Package) { detachTool(pkg, "intake", "to_billing") },
+			want:   `control "to_billing" is declared but no agent reaches it`,
+		},
+		{
+			name: "unattached delegate",
+			mutate: func(pkg *packagespec.Package) {
+				addTask(pkg, "check_balance")
+				task := "check_balance"
+				pkg.Agent.Controls["run_check"] = packagespec.Control{Kind: "delegate", Task: &task}
+			},
+			want: `control "run_check" is declared but no agent reaches it`,
+		},
+		{
+			name: "unreferenced destination",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Destinations["front_desk_line"] = "FRONT_DESK_PHONE_NUMBER"
+			},
+			want: `destination "front_desk_line" is declared but no control resolves to it`,
+		},
+		{
+			name:   "unreferenced top-level tool",
+			mutate: func(pkg *packagespec.Package) { detachTool(pkg, "billing", "get_invoice") },
+			want:   `tool "get_invoice" is declared but no agent reaches it`,
+		},
+		{
+			name:   "unreachable task",
+			mutate: func(pkg *packagespec.Package) { addTask(pkg, "check_balance") },
+			want:   `task "check_balance" is declared but nothing reaches it`,
+		},
+		{
+			name: "unreachable task group",
+			mutate: func(pkg *packagespec.Package) {
+				addTask(pkg, "check_balance")
+				pkg.Agent.TaskGroups = map[string]packagespec.TaskGroup{}
+				pkg.Agent.TaskGroups["closing"] = packagespec.TaskGroup{
+					Steps: []string{"check_balance"}, ContextScope: "shared", Then: "return",
+				}
+			},
+			want: `task group "closing" is declared but nothing reaches it`,
+		},
+		{
+			name: "unreachable agent",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Agents["specialist"] = packagespec.AgentDef{
+					Instructions: "instructions.md", Model: "careful_reasoning", Voice: "specialist",
+				}
+			},
+			want: `agent "specialist" is declared but the entry agent "intake" cannot reach it`,
+		},
+		{
+			// docs/SCHEMA.md:287 calls the models map "a palette: entries that
+			// nothing currently references are legal". That wording is scoped to
+			// models: and to nothing else, so the fix must not widen it.
+			name: "unreferenced models entry stays legal",
+			mutate: func(pkg *packagespec.Package) {
+				pkg.Agent.Models.Think["spare_reasoning"] = packagespec.ModelDef{
+					Description: "an unreferenced palette alternate", Provider: "openai", Model: "gpt-4o",
+				}
+			},
+			want: "",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			test.mutate(pkg)
+			_, err := Build(pkg)
+			if test.want == "" {
+				if err != nil {
+					t.Fatalf("must still build: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("built at exit 0: the declaration is dropped with no diagnostic, want %q", test.want)
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want it to contain %q", err, test.want)
+			}
+			if !strings.HasPrefix(err.Error(), "agent.yaml:") {
+				t.Errorf("error = %v, want a file and line: this is a tier 1 refusal (research D7)", err)
+			}
+		})
+	}
+}
+
+// removeHumanTransfer takes the transfer out of a fixture completely: the
+// control, its attachment, and the destination it resolved to. Leaving the
+// destination behind is now an error, and rightly — its environment name reached
+// .env.example and the generated startup check for a control nothing could call.
+func removeHumanTransfer(pkg *packagespec.Package) {
+	delete(pkg.Agent.Controls, "to_human")
+	delete(pkg.Agent.Destinations, "billing_line")
+	detachTool(pkg, "billing", "to_human")
+}
+
+// detachTool removes one name from an agent's tools: list, leaving whatever it
+// named still declared. That is the whole shape of defect A.
+func detachTool(pkg *packagespec.Package, agent, tool string) {
+	def := pkg.Agent.Agents[agent]
+	def.Tools = slices.DeleteFunc(slices.Clone(def.Tools), func(name string) bool { return name == tool })
+	pkg.Agent.Agents[agent] = def
+}
+
+func addTask(pkg *packagespec.Package, name string) {
+	if pkg.Agent.Tasks == nil {
+		pkg.Agent.Tasks = map[string]packagespec.Task{}
+	}
+	pkg.Agent.Tasks[name] = packagespec.Task{
+		Instructions: "instructions.md",
+		Result:       map[string]any{"balance": "string"},
+		Context:      packagespec.TaskContext{History: "full"},
+	}
+}
+
 func loadSafeCore(t *testing.T) *packagespec.Package {
 	t.Helper()
 	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "safe_core"))
@@ -758,10 +903,7 @@ func TestBuildResolvesPipecatCloudWebsocketPlan(t *testing.T) {
 			RequiredControls: controls,
 		}
 		if !transfer {
-			delete(pkg.Agent.Controls, "to_human")
-			billing := pkg.Agent.Agents["billing"]
-			billing.Tools = slices.DeleteFunc(slices.Clone(billing.Tools), func(name string) bool { return name == "to_human" })
-			pkg.Agent.Agents["billing"] = billing
+			removeHumanTransfer(pkg)
 		}
 		target := pkg.Targets["pipecat"]
 		// Both shapes name a connection, because the connection is where the

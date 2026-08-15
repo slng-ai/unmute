@@ -213,7 +213,10 @@ func TestValidateRefusesAPastedMCPSecret(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content = bytes.Replace(content, []byte("tools:\n  - lookup_customer"), []byte("tools:\n  - web_search\n  - lookup_customer"), 2)
+	// Declared at the top level and attached to the entry agent. Declaring it
+	// without attaching it is now its own refusal, and it would fire first.
+	content = bytes.Replace(content, []byte("tools:\n  - lookup_customer"), []byte("tools:\n  - web_search\n  - lookup_customer"), 1)
+	content = bytes.Replace(content, []byte("      - lookup_customer"), []byte("      - web_search\n      - lookup_customer"), 1)
 	if err := os.WriteFile(agentPath, content, 0o600); err != nil {
 		t.Fatal(err)
 	}

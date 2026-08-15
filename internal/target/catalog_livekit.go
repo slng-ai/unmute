@@ -1,5 +1,11 @@
 package target
 
+import (
+	"fmt"
+	"maps"
+	"slices"
+)
+
 // LiveKit entries. Contract: the livekit_v1 driver templates, livekit-agents
 // >=1.5 <2.0, Python. Per-vendor plugins install as livekit-agents extras
 // (each wraps a livekit-plugins-<name> package); the SLNG plugin is pinned as
@@ -387,3 +393,41 @@ var livekitCatalog = []Entry{
 		Notes: []string{"LiveKit Inference: managed models, billed through LiveKit Cloud, no provider key — needs LIVEKIT_API_KEY/LIVEKIT_API_SECRET even in console mode; provider: livekit passes the model verbatim (V19)"},
 	},
 }
+
+// liveKitTurnModels maps each turn detector identity LiveKit recognises onto
+// the inference.TurnDetector version the driver emits. turn-detector-mini runs
+// fully local (no LiveKit Cloud credentials); turn-detector is Cloud.
+//
+// This set is the one field on which LiveKit does **not** forward a model
+// identity to the provider unchecked, which is why docs/SCHEMA.md needed a
+// dated amendment rather than a quiet code change: 4.3 says identities are
+// "forwarded to the provider as-is and never validated", and :317 offers
+// `silero` as the example value, which is a VAD rather than a turn detector and
+// fails here. Pipecat still forwards the value unchecked, so the same agent.yaml
+// is legal on one target and not the other, and the refusal names the target.
+//
+// It lives in the catalogue rather than in the driver because ir.Validate asks
+// the same question: the check used to run only at generate time, so `silero`
+// validated green and then failed compile (reproduction.md section E, D5).
+var liveKitTurnModels = map[string]string{
+	"turn-detector-mini": "v1-mini",
+	"turn-detector":      "v1",
+}
+
+// LiveKitTurnVersion resolves a turn detector identity to its emitted version
+// kwarg. An empty identity is legal and emits none, so the SDK auto-selects and
+// falls back to the mini model with a warning instead of raising.
+func LiveKitTurnVersion(model string) (string, error) {
+	if model == "" {
+		return "", nil
+	}
+	version, ok := liveKitTurnModels[model]
+	if !ok {
+		return "", fmt.Errorf("livekit turn model %q is not recognized; use turn-detector-mini (local) or turn-detector (LiveKit Cloud)", model)
+	}
+	return version, nil
+}
+
+// LiveKitTurnModels lists the recognised identities, sorted, for a document or
+// an error that has to name them.
+func LiveKitTurnModels() []string { return slices.Sorted(maps.Keys(liveKitTurnModels)) }

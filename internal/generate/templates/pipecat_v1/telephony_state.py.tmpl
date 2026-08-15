@@ -33,7 +33,15 @@ class TelephonyState:
 
     def _client(self) -> Redis:
         if self._redis is None:
-            raise RuntimeError("Missing required environment variable: REDIS_URL")
+            # REDIS_URL is supplied on every route that reaches this file, so the
+            # note is unconditional here rather than a lookup: .env.example does
+            # not list it, and an operator told only that it is missing has
+            # nowhere to go (research D14).
+            raise RuntimeError(
+                "Missing required environment variable: REDIS_URL\n"
+                "This one is supplied for you: `unmute dev` sets it locally, and your "
+                'platform or operator sets it at deploy time. See "Carrier setup" in README.md.'
+            )
         return self._redis
 
     def _key(self, kind: str, identity: str | None = None) -> str:

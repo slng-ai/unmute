@@ -11,6 +11,7 @@ targets:
     provider: livekit
     version: "1.5.2"            # framework pin; the driver checks its range (>=1.5, <2.0)
     sdk_language: python
+    connection: twilio_sip      # cold_transfer needs SIP on LiveKit (SCHEMA N31)
     models:
       # override the vad entry: LiveKit runs its own turn model, not Silero
       vad:

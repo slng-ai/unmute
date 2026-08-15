@@ -224,14 +224,20 @@ func printDevCloudWebsocketSession(out io.Writer, targetName string, plan *gener
 	}
 }
 
+// devMintedEnvironment is the values `unmute dev` mints itself, rather than
+// reading them from the generated Compose graph or from the host. Both are in
+// the route's locally-supplied set — which is why neither appears in
+// .env.example — but they are supplied by this command, so a host that exports
+// one is overridden rather than refused.
+var devMintedEnvironment = []string{"UNMUTE_PUBLIC_URL", "UNMUTE_OUTBOUND_TOKEN"}
+
 // trimEmptyAndDevSupplied drops blank names and the values `unmute dev` supplies
 // itself, so the missing-environment check never asks for something it is about
 // to inject.
 func trimEmptyAndDevSupplied(names []string) []string {
-	devSupplied := map[string]bool{"UNMUTE_PUBLIC_URL": true, "UNMUTE_OUTBOUND_TOKEN": true}
 	var out []string
 	for _, name := range names {
-		if name == "" || devSupplied[name] {
+		if name == "" || slices.Contains(devMintedEnvironment, name) {
 			continue
 		}
 		if !slices.Contains(out, name) {

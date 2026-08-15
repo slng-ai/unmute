@@ -43,9 +43,9 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
     cp my-agent/.env.example my-agent/.env
     ```
 
-    Open `my-agent/.env` and fill in `OPENAI_API_KEY` and `SLNG_API_KEY`. The
-    third line, `DAILY_API_KEY`, is only needed if you later run this agent on
-    a phone number; leave it empty for now.
+    Open `my-agent/.env` and fill in `OPENAI_API_KEY` and `SLNG_API_KEY`. Those
+    are the only two, and they are the same two `agent.yaml` lists under
+    `secrets:`.
 
     `unmute dev` reads `.env` from the directory you run it in, then from the
     package directory, so a package can override a shared key.
@@ -86,7 +86,7 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
     conversation:
       greeting:
         speaks_first: agent
-        text: "Hi, thanks for calling. How can I help you today?"
+        text: "Hi there, I'm listening. What can I help you with?"
     ```
 
     Press ctrl-c when you are done. The container is stopped and removed for

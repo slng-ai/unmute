@@ -3,8 +3,6 @@ package generate
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/slng-ai/unmute/internal/ir"
@@ -134,24 +132,9 @@ func artifactKind(provider ir.Provider) ArtifactKind {
 
 // --- facts both code drivers share -----------------------------------------
 
-// checkVersion rejects a framework version outside a driver's template-compatible
-// range. Both code drivers ask the same question in the same words, so they ask
-// it here; only the driver name and its two bounds differ.
-func checkVersion(driver, version string, pattern *regexp.Regexp, major, minMinor int) error {
-	if version == "" {
-		return fmt.Errorf("%s target requires a framework version", driver)
-	}
-	match := pattern.FindStringSubmatch(version)
-	if match == nil {
-		return fmt.Errorf("%s version %q is not a semantic version", driver, version)
-	}
-	gotMajor, _ := strconv.Atoi(match[1])
-	gotMinor, _ := strconv.Atoi(match[2])
-	if gotMajor != major || gotMinor < minMinor {
-		return fmt.Errorf("%s version %q is outside the driver's template-compatible range (>=%d.%d, <%d.0)", driver, version, major, minMinor, major+1)
-	}
-	return nil
-}
+// The framework version check both code drivers ask moved to
+// internal/target.CheckVersion, because ir.Validate asks it too and a version
+// outside the range used to validate green and fail compile.
 
 // envRef renders the environment-lookup idiom the emitted Python uses. Both
 // drivers emit the same expression, so there is one of it.

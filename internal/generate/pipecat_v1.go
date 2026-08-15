@@ -5,7 +5,6 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -28,13 +27,8 @@ var pipecatV1Templates embed.FS
 
 // The driver's templates target the Pipecat workers model (LLMWorker /
 // activate_worker) + Flows-in-core, which landed in 1.5.0 — the first
-// 1.x release (versions jump 0.0.108 → 1.5.0). Range: >=1.5.0, <2.0.0.
-const (
-	pipecatVersionMajor    = 1
-	pipecatVersionMinMinor = 5
-)
-
-var pipecatVersionPattern = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
+// 1.x release (versions jump 0.0.108 → 1.5.0). Range: >=1.5.0, <2.0.0, held in
+// internal/target/driver.go so ir.Validate reads the same window.
 
 // pyName turns a snake/kebab identifier into a safe Python class-name stem.
 func pyName(name string) string {
@@ -376,12 +370,21 @@ type pipecatData struct {
 	// DailyParams is the parameter object the "daily" transport key constructs on
 	// the Daily route, where the generic one cannot work. Nil everywhere else, so
 	// no other route churns and no package carries a Daily import it never uses.
-	DailyParams    *pipecatTransportParams
-	FrameImports   []string // pipecat.frames.frames names, merged into one import (V2)
-	Imports        []string
-	Extras         []string
-	Deps           []string // standalone pip deps for plugin services (e.g. pipecat-slng)
-	RequiredEnv    []string
+	DailyParams  *pipecatTransportParams
+	FrameImports []string // pipecat.frames.frames names, merged into one import (V2)
+	Imports      []string
+	Extras       []string
+	Deps         []string // standalone pip deps for plugin services (e.g. pipecat-slng)
+	RequiredEnv  []string
+	// AuthorEnv is the half of RequiredEnv the author supplies; see the LiveKit
+	// driver's field of the same name.
+	AuthorEnv []string
+	// SuppliedForYou is the route's locally-supplied set: names `unmute dev`
+	// sets locally and the platform or operator sets at deploy time. They are
+	// absent from .env.example (FR-018), so a startup check that hits one has to
+	// say where the value comes from rather than only that it is missing, or the
+	// operator is told to set a variable no file ever mentioned (research D14).
+	SuppliedForYou []string
 	DevEnv         []string // provider creds the web dev image needs, without telephony/coordination env (compose.dev.yaml)
 	DevOptionalEnv []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
 	Notes          []string
@@ -552,7 +555,7 @@ func GeneratePipecat(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedB
 
 // checkPipecatVersion rejects a target version outside the templates' range (V8).
 func checkPipecatVersion(version string) error {
-	return checkVersion("pipecat", version, pipecatVersionPattern, pipecatVersionMajor, pipecatVersionMinMinor)
+	return targetcap.CheckVersion(targetcap.Pipecat, version)
 }
 
 func renderPipecatFiles(data pipecatData) ([]File, error) {

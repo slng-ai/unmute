@@ -35,8 +35,9 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-4.1-mini
-      temperature: 0.2
+      model: gpt-5.6-luna
+      params:
+        reasoning_effort: minimal
   speak:
     voice:
       provider: slng
@@ -165,25 +166,26 @@ never starting with a digit. A platform exports secrets through a shell, so a
 name starting with a digit would go missing at run time with no error of its
 own. The compiler refuses it first.
 
-**Nothing checks that the list is complete.** Verified 2026-08-15: deleting the
-whole `secrets:` block from a package that genuinely uses `OPENAI_API_KEY` and
-`SLNG_API_KEY` still validates clean, exit 0, with no warning. `unmute init`
-does not scaffold a `secrets:` block at all. So writing this list is on you, and
-an incomplete one fails much later, when the deployed container cannot find a
-key. Write it as you go: every time you add an `*_env` field, a connection
-`environment:` name, or a `destinations:` entry, add the name here in the same
-edit.
+**`unmute validate` checks that the list is complete**, and warns at exit 0
+naming every environment name the package references and this block does not
+declare, with the file and field that named it. It warns whether or not the
+block exists, so deleting it does not buy silence — a package that declares
+nothing and references eight names is the case most worth reporting.
 
-Two more things `unmute init` leaves you to fix, so check them rather than
-trusting the scaffold:
+The generated agent's own startup check is derived the same way: from what the
+compiler knows the package requires, not from what you remembered to declare. So
+an undeclared name still stops the container rather than failing on the first
+call.
 
-- The scaffolded `instructions.md` says "This is a phone call" while the
-  scaffolded `agent.yaml` declares only `web: realtime_audio`. Rewrite the
-  prompt to match the channel the package actually has.
-- The scaffolded root `.env.example` names `DAILY_API_KEY`, which a browser
-  package never uses, and it does not update when you add secrets. It is a
-  one-time snapshot. The list that stays true is
-  `build/<target>/.env.example`, regenerated on every compile.
+Write the list as you go anyway: every time you add an `*_env` field, a
+connection `environment:` name, or a `destinations:` entry, add the name here in
+the same edit. `unmute init` scaffolds the block for you with the model provider
+keys already in it.
+
+The package-root `.env.example` is a one-time snapshot from `unmute init`; it
+does not update when you add a secret. The list that stays true is
+`build/<target>/.env.example`, regenerated on every compile, and it names only
+what you fill in.
 
 ## channels
 

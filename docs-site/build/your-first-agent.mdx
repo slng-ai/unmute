@@ -26,8 +26,9 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-4o-mini
-      temperature: 0.2
+      model: gpt-5.6-luna
+      params:
+        reasoning_effort: minimal
   speak:
     voice:
       provider: slng
@@ -96,8 +97,9 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-4o-mini
-      temperature: 0.2
+      model: gpt-5.6-luna
+      params:
+        reasoning_effort: minimal
 ```
 
 `provider` names the integration; `model` and `voice` are passed to that
@@ -106,7 +108,7 @@ ids, so a typo shows up as a provider error at run time, not at compile time.
 The compile report says so out loud:
 
 ```
-pipecat: binding reason.reasoning provider=openai model=gpt-4o-mini (forwarded as-is, not validated)
+pipecat: binding reason.reasoning provider=openai model=gpt-5.6-luna (forwarded as-is, not validated)
 ```
 
 <Note>

@@ -182,6 +182,10 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		slices.Sort(data.Deps)
 	}
 	data.RequiredEnv = env.sorted()
+	data.AuthorEnv = authorEnv(data.RequiredEnv, target.Telephony)
+	if target.Telephony != nil {
+		data.SuppliedForYou = slices.Clone(target.Telephony.LocalEnvironment)
+	}
 	if data.DailyCarrier != nil {
 		// Whatever the helper reads is not the deployed agent's business, so the
 		// two groups are split here, once, and every surface reads the split
@@ -406,7 +410,7 @@ func buildPipecatDailyCarrier(agent *ir.Agent, resolved ir.Target, env *envSet) 
 	// Optional, so never required and never in the startup check: hold audio the
 	// operator hosts, and the Daily room geography. Absent means the emitted
 	// default (a spoken hold line) and Daily's own default region.
-	carrier.OptionalEnv = []string{"UNMUTE_DAILY_ROOM_GEO", "UNMUTE_HOLD_AUDIO_URL"}
+	carrier.OptionalEnv = []string{"DAILY_ROOM_GEO", "DAILY_HOLD_AUDIO_URL"}
 	return carrier, nil
 }
 
