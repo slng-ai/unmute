@@ -173,7 +173,33 @@ contract is the two properties a test can hold:
 - the package-root `.env.example` and `build/<target>/.env.example` name exactly
   the same set.
 
-And one string that is simply wrong today, in
+### The think model, exactly
+
+One shape, everywhere: the scaffold, all eleven examples, every `docs/` and
+`docs-site/` page, the root `README.md`, and the skill bundle.
+
+```yaml
+models:
+  think:
+    assistant_model:
+      description: default reasoning model
+      provider: openai
+      model: gpt-5.6-luna
+      params:
+        reasoning_effort: minimal
+```
+
+Three things a test must reject:
+
+| Rejected | Why |
+|---|---|
+| `model: gpt-4o-mini` or `model: gpt-4.1-mini` | stale, and the whole point is one identifier |
+| `model: openai/gpt-5.6-luna` | `docs/SCHEMA.md` N15 forbids folding the provider into the model string; the value is forwarded to the SDK verbatim and would fail there |
+| `temperature:` on a think model | OpenAI does not state that this model accepts it, and an unverified parameter fails on a live call |
+
+### The scaffold's own env instruction
+
+One string that is simply wrong today, in
 `internal/scaffold/templates/env.example.tmpl:2`:
 
 ```

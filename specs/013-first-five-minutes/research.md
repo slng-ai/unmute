@@ -324,16 +324,64 @@ at the package root, so a new author needs something to copy there.
 
 ---
 
-## D10. `gpt-4.1-mini`, against the raw count
+## D10. `gpt-5.6-luna`, set by the author, and what follows from it being a reasoning model
 
-**Decision.** One identifier, `gpt-4.1-mini`, with one Go home and one test.
+**Decision.** One identifier, `gpt-5.6-luna`, with one Go home and one test.
+Authored as two fields. `reasoning_effort: minimal` in `params:`. No
+`temperature`.
 
-Both identifiers are live and undeprecated on the OpenAI Chat Completions
-endpoint, verified against OpenAI's own API documentation on 2026-08-15. This is
-a consistency decision, not a currency one.
+**Superseded.** This decision originally read "`gpt-4.1-mini`, against the raw
+count", chosen on document rank because every front door already said it. The
+author set `gpt-5.6-luna` in the 2026-08-15 clarification session, which makes
+the front-door argument moot: neither incumbent survives. The census below is
+kept because it is what sizes the sweep, not because it still decides anything.
 
-The brief's premise — "the scaffold is the outlier, not the docs" — does not
-survive the census. The split is by **surface type**:
+**Verified 2026-08-15 against OpenAI's own API documentation.** `gpt-5.6-luna`
+is in the Chat Completions supported-model list. The family has three tiers:
+`gpt-5.6-sol` for frontier capability, `gpt-5.6-terra` for a balance of
+intelligence and cost, `gpt-5.6-luna` for "efficient, high-volume workloads",
+described elsewhere as "optimized for faster, more cost-effective responses"
+with "lower cost and reduced latency". The bare `gpt-5.6` alias defaults to
+`sol`, so the tier is named explicitly everywhere.
+
+**Two fields, never one string.** `docs/SCHEMA.md` N15 rejected folding the
+provider into the model string by name, because "the forwarded model identity is
+not uniform across vendors (OpenAI wants `gpt-4.1-mini`, SLNG wants
+`slng/deepgram/nova:3-en`), so a parse would mangle what reaches the SDK". A
+`model:` of `openai/gpt-5.6-luna` is forwarded verbatim and fails at the
+provider. The agreement test catches the combined form as well as a stale
+identifier.
+
+**`reasoning_effort: minimal`.** This is a reasoning family, and OpenAI's own
+migration guidance is to hold the reasoning effort and then "evaluate success
+metrics including latency". A voice turn that pauses to think before speaking is
+the thing this feature exists to avoid shipping. `reasoning_effort` is a
+documented Chat Completions parameter taking
+`none | minimal | low | medium | high | xhigh | max`, and Unmute already
+forwards a think model's `params:` verbatim, so no schema change is needed.
+`minimal` rather than `none` keeps some of the accuracy that motivated moving to
+this family, particularly for the five-tool structural examples. It is confirmed
+by ear in SC-003; if it sounds slow, `none` is the recorded fallback.
+
+**No `temperature`.** OpenAI's reference states that "parameter support varies
+by model, with specific constraints applying to newer reasoning models", and
+does not say whether this model accepts `temperature`. Three documentation
+fetches did not resolve it. `docs/SCHEMA.md:307` has the field as optional, so
+removing it costs nothing and deletes a line from twelve files; keeping it would
+put an unverified parameter on a live call, which is the defect class this
+feature exists to remove. CLAUDE.md and Principle IV both say an unverified
+provider claim stays gated. Re-adding it later, if verified, is a deliberate
+separate change.
+
+**The sweep is both incumbents, not one.** Measured on the branch: 80
+occurrences across 42 tracked files, of which 24 are author-facing and get
+changed. The other 18 stay put: test fixtures and goldens under
+`internal/testdata/` and `internal/generate/testdata/`, a comment in
+`internal/target/catalog_livekit.go`, `specs/011-coding-agent-skill/tasks.md`
+which records the drift as history, and this feature's own spec files, which
+quote both identifiers for the same reason. Sweeping both incumbents at once
+removes the risk a partial migration leaves a third identifier in the tree. The
+split that used to decide this was by **surface type**:
 
 | Says `gpt-4.1-mini` | Says `gpt-4o-mini` |
 |---|---|
@@ -348,11 +396,9 @@ contradicts itself between its homepage and its "your first agent" page, and
 `references/models.md` contradicts itself inside one file, teaching one
 identifier in two blocks and printing the other in its sample output.
 
-Raw counts favour the other choice: `gpt-4o-mini` 38 occurrences in 28 files,
-`gpt-4.1-mini` 15 in 11. **Document rank and first-contact order decide it
-instead.** A new reader and a coding assistant both meet the front doors first,
-and the front doors already agree with the code. The count is recorded here so
-the decision can be reversed with one constant and one `sed`.
+Raw counts: `gpt-4o-mini` 38 occurrences in 28 files, `gpt-4.1-mini` 15 in 11.
+Both go. The counts are recorded so the sweep can be verified as complete rather
+than assumed complete, and so a later bump is one constant and one `sed`.
 
 **Not extending the existing agreement test.**
 `TestModelsReferenceMatchesCatalog` (`internal/skill/agreement_test.go:103-159`)

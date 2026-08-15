@@ -66,6 +66,50 @@ out. Site URLs MUST NOT be reintroduced into the bundle, and where this
 specification says "the docs", it means the local `docs-site/` and `docs/`
 trees.
 
+## Clarifications
+
+### Session 2026-08-15
+
+- Q: Which single model identifier should every surface use? → A: `gpt-5.6-luna`, authored as `provider: openai` plus `model: gpt-5.6-luna`
+- Q: What reasoning effort should the scaffold and examples set on a reasoning-family model used for speech? → A: `minimal`, via the existing `params:` pass-through
+- Q: `gpt-5.6-luna`'s support for `temperature` is not stated in OpenAI's documentation. What happens to the `temperature: 0.2` the examples carry? → A: drop it from the scaffold and all eleven examples
+
+**Verification, 2026-08-15, against OpenAI's own API documentation.**
+`gpt-5.6-luna` appears in the Chat Completions supported-model list. The family
+is three tiers: `gpt-5.6-sol` for frontier capability, `gpt-5.6-terra` for a
+balance of intelligence and cost, and `gpt-5.6-luna` for "efficient,
+high-volume workloads", described elsewhere as "optimized for faster, more
+cost-effective responses" and offering "lower cost and reduced latency". The
+bare `gpt-5.6` alias defaults to `sol`, so the tier must be named explicitly.
+
+**On the authored shape.** The identifier is written as two fields, not one
+string. `docs/SCHEMA.md` N15 rejected folding the provider into the model
+string by name: "the forwarded model identity is not uniform across vendors
+(OpenAI wants `gpt-4.1-mini`, SLNG wants `slng/deepgram/nova:3-en`), so a parse
+would mangle what reaches the SDK". A `model:` value of `openai/gpt-5.6-luna`
+would be forwarded verbatim to the SDK and fail. Every surface writes
+`provider: openai` and `model: gpt-5.6-luna`.
+
+**On reasoning effort.** GPT-5.6 is a reasoning family, and OpenAI's migration
+guidance is to "maintain the existing workload role and reasoning effort
+initially, then evaluate success metrics including latency". A voice turn that
+pauses to think before speaking is the difference between a good agent and a
+broken-sounding one, and this feature's whole goal is a spoken exchange that
+works. `reasoning_effort` is a documented Chat Completions parameter taking
+`none | minimal | low | medium | high | xhigh | max`, and Unmute already
+forwards `params:` verbatim on a think model, so `minimal` needs no schema
+change. It is confirmed by ear in SC-003, not by assumption.
+
+**On temperature.** OpenAI's reference states that "parameter support varies by
+model, with specific constraints applying to newer reasoning models", and does
+not say whether this model accepts `temperature`. `docs/SCHEMA.md:307` has
+`temperature` as optional, so dropping it costs nothing and removes a line from
+twelve files. Keeping an unverified parameter would put the failure on a live
+call, which is the exact defect class this feature exists to remove, and
+CLAUDE.md requires provider claims to be verified against official
+documentation rather than assumed. Under Principle IV an unverified claim stays
+gated.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Nothing compiles green while silently dropping what the author declared (Priority: P1)
@@ -355,6 +399,16 @@ owns the field the error names.
 - **A model identifier a provider later retires.** One home plus one agreement
   test makes the bump a one-line change; this feature does not attempt to track
   provider retirements.
+- **The new model rejects `reasoning_effort` or the value `minimal` on a target
+  the examples declare.** The parameter is forwarded verbatim through `params:`,
+  so a rejection surfaces at runtime rather than at compile. SC-003's spoken
+  exchange is where this is caught, and the fallback is to drop the parameter
+  and record the latency that results.
+- **The new model turns out to reject something else the examples forward.**
+  `temperature` is removed under FR-012c for exactly this reason, but `top_p`,
+  `max_tokens` in `params:`, and per-example generation settings carry the same
+  unverified risk. Any that survive the sweep are listed in the results file
+  rather than assumed safe.
 - **An `UNMUTE_*` name embedded in generated Python or in a golden.** Renaming
   it is not free. Where the rename is not cheap, the name stays and the reason
   is recorded, but it still may not appear on a beginner path.
@@ -504,6 +558,26 @@ owns the field the error names.
   model identifier at all, so extending it would mean a new regex over fenced
   code blocks and a new import edge; a separate test is the right shape, and the
   spec records that as a deliberate choice rather than a duplicate.
+- **FR-012a**: The identifier MUST be authored as two fields, `provider: openai`
+  and `model: gpt-5.6-luna`. No surface may write `openai/gpt-5.6-luna` as a
+  single `model:` string: `docs/SCHEMA.md` N15 rejected folding the provider into
+  the model string by name, and the value is forwarded to the SDK verbatim, so a
+  combined string fails at the provider. The test from FR-012 MUST catch a
+  combined form, not only a stale identifier.
+- **FR-012b**: The scaffold and every example MUST set
+  `params: {reasoning_effort: minimal}` on the think model. `gpt-5.6-luna` is a
+  reasoning-family model, and an unbounded reasoning budget before each spoken
+  turn is a bad voice agent regardless of how good the answer eventually is.
+  `reasoning_effort` is a documented Chat Completions parameter and `params:` is
+  already forwarded verbatim, so this needs no schema change. The value MUST be
+  confirmed by ear under SC-003, not assumed.
+- **FR-012c**: `temperature` MUST be removed from the scaffold and all eleven
+  examples. OpenAI's reference states that parameter support varies by model
+  with specific constraints on newer reasoning models, and does not say whether
+  this model accepts it. `docs/SCHEMA.md:307` has the field as optional, so
+  removing it costs nothing, while keeping an unverified parameter would put the
+  failure on a live call. If a later verification proves the model accepts it,
+  re-adding it is a separate, deliberate change.
 - **FR-013**: The scaffolded `instructions.md` MUST be a small, genuinely good
   voice prompt: who the agent is; a voice contract covering plain text only, one
   or two sentences per turn, one question at a time, no stalling, and numbers
@@ -699,8 +773,13 @@ owns the field the error names.
 - **SC-007**: All eleven examples validate and compile cleanly for every target
   they declare, and every browser-only one reaches a greeting. Reported as a
   count out of eleven.
-- **SC-008**: Exactly one model identifier appears across the scaffold, the
-  examples, `docs/`, `docs-site/`, the root `README.md`, and the skill bundle.
+- **SC-008**: Exactly one model identifier, `gpt-5.6-luna`, appears across the
+  scaffold, the examples, `docs/`, `docs-site/`, the root `README.md`, and the
+  skill bundle. Zero occurrences of `gpt-4o-mini` or `gpt-4.1-mini` remain on
+  any author-facing surface, zero surfaces write the combined
+  `openai/gpt-5.6-luna` form, and zero write `temperature` on a think model.
+  Baseline measured on the branch: 80 occurrences of the two outgoing
+  identifiers across 42 tracked files, 24 of them author-facing.
 - **SC-009**: `make fmt`, `make lint` at zero issues, `make build`, and
   `make test` are green on every commit.
 - **SC-010**: `make smoke` is green. If it is not, the blocking cause is named
@@ -741,27 +820,34 @@ Raw counts are reported. A 7 is not rounded to an 8.
   package has a legitimate reason to declare a control nothing reaches. If Wave
   A finds one, the severity drops to a warning with identical wording and the
   reason is recorded in the results file.
-- **The single model identifier is `gpt-4.1-mini`.** Both `gpt-4o-mini` and
-  `gpt-4.1-mini` are live and undeprecated on the OpenAI Chat Completions
-  endpoint, verified against OpenAI's own API documentation on 2026-08-15, so
-  this is a consistency decision rather than a currency one.
+- **The single model identifier is `gpt-5.6-luna`**, set by the author in the
+  2026-08-15 clarification session and verified against OpenAI's own API
+  documentation the same day. See the Clarifications section for the
+  verification, the two-field authored shape, and the reasoning-effort and
+  temperature decisions that follow from it being a reasoning-family model.
 
-  The brief's premise — "the scaffold is the outlier, not the docs" — does not
-  survive the census. The repository is split by **surface type**, not by
-  code-versus-docs: every front door says `gpt-4.1-mini` (the scaffold, the root
-  `README.md`, `docs-site/index.mdx`, `docs/SCHEMA.md` in four places, and the
-  skill bundle's `models.md` and `package.md`), while all eleven examples and
-  the deeper `docs-site/build/` and reference pages say `gpt-4o-mini`. The doc
-  site contradicts itself: its homepage and its "your first agent" page
-  disagree. So does one bundle file: `references/models.md` teaches
-  `gpt-4.1-mini` in two blocks and prints `gpt-4o-mini` in its sample output.
+  This makes the brief's premise moot rather than merely wrong, but the census
+  is recorded because it is what makes the change safe to sweep. The repository
+  is split by **surface type**, not by code-versus-docs: every front door says
+  `gpt-4.1-mini` (the scaffold, the root `README.md`, `docs-site/index.mdx`,
+  `docs/SCHEMA.md` in four places, and the skill bundle's `models.md` and
+  `package.md`), while all eleven examples and the deeper `docs-site/build/` and
+  reference pages say `gpt-4o-mini`. The doc site contradicts itself: its
+  homepage and its "your first agent" page disagree. So does one bundle file:
+  `references/models.md` teaches one identifier in two blocks and prints the
+  other in its sample output. Raw counts across tracked files: `gpt-4o-mini` 38
+  occurrences in 28 files, `gpt-4.1-mini` 15 in 11.
 
-  `gpt-4.1-mini` wins because it is what every surface a new reader or a coding
-  assistant meets first already says, and because it is the newer model. Raw
-  counts across tracked files: `gpt-4o-mini` 38 occurrences in 28 files,
-  `gpt-4.1-mini` 15 in 11. The count favours the other id; document rank and
-  first-contact order do not, and FR-012's test makes a later bump a one-line
-  change either way.
+  So the sweep is **both** sets, not one of them. Neither incumbent survives,
+  which removes the risk of a partial migration leaving a third identifier in
+  the tree. Measured on the branch: 80 occurrences across 42 tracked files, of
+  which **24 files are author-facing** and are what this feature changes.
+  The other 18 stay: test fixtures and goldens under `internal/testdata/` and
+  `internal/generate/testdata/`, a comment in `internal/target/catalog_livekit.go`,
+  `specs/011-coding-agent-skill/tasks.md` which records the drift as history,
+  and this feature's own spec files, which quote both identifiers for the same
+  reason. FR-012's test scopes itself to the author-facing set. It is what makes
+  the next bump a one-line change.
 - **The starting example is `salon-support`.** The table already marks it "Start
   here", it is the only structural example that needs no carrier and no
   third-party account, and it runs in a browser. `docs-site/build/your-first-agent.mdx`

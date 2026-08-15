@@ -117,8 +117,22 @@ Read every file as a first-time user. Check by hand:
   channel is `web`.
 - `.env.example` names exactly `OPENAI_API_KEY` and `SLNG_API_KEY`.
 - `agent.yaml` has a `secrets:` block listing those two.
+- The think model reads `provider: openai` and `model: gpt-5.6-luna` as two
+  fields, never one combined string, carries
+  `params: {reasoning_effort: minimal}`, and carries no `temperature`.
 - Every comment describes something the file contains.
 - The command in `.env.example` line 2 works when run from where you are.
+
+Then check the sweep is complete, across the whole tree:
+
+```sh
+git grep -n "gpt-4o-mini\|gpt-4\.1-mini" -- examples docs docs-site README.md .env.example internal/scaffold internal/skill
+git grep -n "openai/gpt-5\.6-luna"
+```
+
+Both empty. The only surviving hits anywhere are test fixtures, goldens, a
+comment in `internal/target/catalog_livekit.go`, and the two `specs/` trees that
+record the drift as history.
 
 Then compile and compare:
 
@@ -138,6 +152,12 @@ bin/unmute dev .
 
 Open the URL, allow the microphone, hear the greeting, and **have one real
 spoken exchange after it**. A probe reaching a socket is not this step.
+
+This is also where `reasoning_effort: minimal` is judged. `gpt-5.6-luna` is a
+reasoning-family model, so listen for a pause before each reply. If it stalls,
+drop to `none` and record the change. If the provider rejects the parameter
+outright it fails here rather than at compile, because `params:` is forwarded
+verbatim.
 
 ---
 
