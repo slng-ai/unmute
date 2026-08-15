@@ -39,15 +39,15 @@ environment names.
 
 Two consequences bind this feature:
 
-1. **The bundle is a documentation surface, and this feature makes it the
-   fourth.** CLAUDE.md's rule is "three places document a change, not one": the
-   emitted `build/<target>/README.md` template, the source example's own
-   `README.md`, and the page in `docs/` and `docs-site/`. For every change in
-   this feature that touches emitted behaviour, validation behaviour, the
-   scaffold, or an environment name, **`internal/skill/assets/` is a fourth
-   place that must move in the same commit.** A change that turns an agreement
-   test red is a change that would otherwise have left the bundle teaching
-   something untrue.
+1. **The bundle is the fifth documentation surface, and CLAUDE.md already
+   says so.** Since PR #80 landed, CLAUDE.md's rule is "five places document a
+   change, not one": the emitted `build/<target>/README.md` template, the
+   source example's own `README.md`, the page in `docs/`, the page in
+   `docs-site/`, and the skill under `internal/skill/assets/`. For every
+   change in this feature that touches emitted behaviour, validation
+   behaviour, the scaffold, or an environment name, **all five move in the
+   same commit.** A change that turns an agreement test red is a change that
+   would otherwise have left the bundle teaching something untrue.
 
 2. **One bundle section exists only because of a defect this feature fixes.**
    `internal/skill/assets/references/transfers.md`, the section headed *"A
@@ -374,7 +374,7 @@ way.
    **Then** `compile-report.json` still carries `required_env`, so hiding a
    name from the author-facing files does not make it unrecoverable.
 
-3. **Given** the site index, everything under `docs-site/start/` including the
+6. **Given** the site index, everything under `docs-site/start/` including the
    coding-agents page, everything under `docs-site/build/`, the root
    `README.md`, everything `unmute init` writes, and everything under
    `internal/skill/assets/`,
@@ -546,8 +546,15 @@ owns the field the error names.
   so the cold refusal should read as its sibling, not as a new invention. The
   defect is precisely that on one target, one control kind, the warm shape
   refuses and the cold shape compiles a dead tool.
-- **FR-004**: FR-001 through FR-003 MUST be enforced in `ir.Validate`, so each
-  fires once for every target rather than once per driver.
+- **FR-004**: FR-001 through FR-003 MUST fire before any artifact is written,
+  at the earliest stage that can express each check. The reachability checks
+  (FR-001, FR-002) are properties of the package graph alone, so they land in
+  `ir.Build`, the only stage that carries the file and line FR-001 requires,
+  and fire once for the package rather than once per target. The
+  browser-transfer refusal (FR-003) is a property of the resolved target, so
+  it lands in `ir.Validate`. This requirement first named `ir.Validate` for
+  all three, which would have lost the position for no gain; research D1
+  records the correction.
 - **FR-005**: The `secrets:` completeness cross-check MUST run whether or not
   the package declares a `secrets:` block. Its severity MUST stay as documented
   in `docs/SCHEMA.md` N24: a warning on stderr with exit 0.
@@ -718,10 +725,18 @@ owns the field the error names.
   expected browser greeting, and explains `DAILY_API_KEY` away as "only needed
   if you later run this agent on a phone number", which is not true of a
   package whose own generated build omits the name.
-- **FR-016e**: `OPENAI_MODEL` in the repository-root `.env.example` MUST be
-  removed. Nothing reads it — model identifiers come from `agent.yaml`, never
-  the environment — and it hands a new contributor a dead variable set to the
-  identifier half the repository disagrees with.
+- **FR-016e**: The repository-root `.env.example` MUST be true. Today it fails
+  three ways: `OPENAI_MODEL` is dead (nothing reads it; model identifiers come
+  from `agent.yaml`, never the environment, and it is set to the identifier
+  half the repository disagrees with), the header claims it holds "env vars
+  for agent to run" when no package lives at the repository root, and its
+  Langfuse comment says the keys are needed "for the examples" when FR-024
+  reduces that to exactly one example. The dead variable is removed, the
+  header states what the file is for (names to copy into an example's own
+  `.env`), and the Langfuse comment points at the `examples/README.md` row
+  that names the one tracing example. If the rewrite shows the file duplicates
+  the per-example env files entirely, deleting it is an acceptable outcome,
+  recorded with the reason.
 
 **Environment names (User Story 3)**
 
@@ -858,10 +873,10 @@ owns the field the error names.
 **Cross-cutting**
 
 - **FR-031**: Every change to emitted behaviour, validation behaviour, the
-  scaffold, or an environment name MUST update **four** surfaces in the same
-  commit: the emitted `build/<target>/README.md` template, the source example's
-  own `README.md`, the page in `docs/` and `docs-site/`, and the affected file
-  under `internal/skill/assets/`.
+  scaffold, or an environment name MUST update all **five** surfaces in the
+  same commit, per CLAUDE.md: the emitted `build/<target>/README.md` template,
+  the source example's own `README.md`, the page in `docs/`, the page in
+  `docs-site/`, and the affected file under `internal/skill/assets/`.
 - **FR-032**: The section of `internal/skill/assets/references/transfers.md`
   that teaches assistants to enforce the browser-transfer rule themselves MUST
   be rewritten to state that the product refuses it and to quote the refusal.
@@ -886,9 +901,9 @@ owns the field the error names.
   task, a task group, a secret name, a local Python tool, a model identifier.
   The invariant of this feature is that every declared thing either arrives or
   is named in a refusal.
-- **Documentation surface**: one of the four places a fact about emitted
-  behaviour must be true — the emitted README template, the example README, the
-  `docs/` and `docs-site/` page, and the skill bundle under
+- **Documentation surface**: one of the five places a fact about emitted
+  behaviour must be true: the emitted README template, the example README, the
+  page in `docs/`, the page in `docs-site/`, and the skill bundle under
   `internal/skill/assets/`.
 - **Beginner path**: the set of files a first-time reader walks before they have
   a working agent — the site index, `docs-site/start/`, `docs-site/build/`, the

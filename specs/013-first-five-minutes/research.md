@@ -29,7 +29,7 @@ same argument and on one more:
 
 **Alternatives rejected.**
 
-- *`ir.Validate`, as FR-004 said.* Loses the file and line for no gain, and
+- *`ir.Validate`, as FR-004 first said; the spec has since been amended to record this split.* Loses the file and line for no gain, and
   re-answers a target-independent question once per target.
 - *A per-driver check in each generator.* This is what produces the defect: the
   generators are where the control is silently skipped. Two copies of one rule

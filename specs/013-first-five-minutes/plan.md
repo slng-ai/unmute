@@ -51,7 +51,7 @@ in Docker.
 
 **Constraints**: every commit green on `make fmt && make lint && make build &&
 make test`. Warnings to stderr with exit 0; errors are errors. Emitted behaviour
-changes update four documentation surfaces in the same commit.
+changes update five documentation surfaces in the same commit, per CLAUDE.md.
 
 **Scale/Scope**: seven reproduced defect groups (A to G in reproduction.md),
 eleven examples, five documentation surfaces, seventeen agents across three
@@ -76,9 +76,12 @@ declaration shapes, group E covers eight generator-only value checks.
 
 Re-checked. One design decision needed recording rather than justifying: the
 unattached-declaration check moves to `ir.Build` rather than `ir.Validate` as
-FR-004 proposed. That is *more* constitutional, not less — it fires once for the
-package instead of once per target, and it is the only stage that can carry the
-file and line FR-001 requires. Recorded in [research.md](./research.md) as D1.
+FR-004 first proposed. That is *more* constitutional, not less — it fires once
+for the package instead of once per target, and it is the only stage that can
+carry the file and line FR-001 requires. Recorded in
+[research.md](./research.md) as D1, and FR-004 in the spec has since been
+amended to state the split, so no artifact still says `ir.Validate` for all
+three.
 
 ## Project Structure
 
@@ -166,7 +169,7 @@ listed as 0a and 0b because they are complete and carry no tasks.
 | 8 | Wave B and Wave C verification | Raw counts recorded in `results.md` |
 | 9 | Polish: `make smoke`, ponytail comments, close the 011 defects | Final gate green, zero lint issues |
 
-The four-surface rule applies inside every phase, not at the end: the skill
+The five-surface rule applies inside every phase, not at the end: the skill
 bundle moves in the same commit as the behaviour it describes.
 
 ## Complexity Tracking

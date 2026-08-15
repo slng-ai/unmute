@@ -64,6 +64,45 @@ the Wave A method, because static enumeration alone found thirteen unreachable
 sites), FR-007c's `docs-site/` half had no task (now T032a), the success criteria
 were out of order, and the plan's phase numbers did not line up with the tasks'.
 
+## Cross-artifact analysis, round 2, 2026-08-15
+
+A second `/speckit-analyze` pass, focused on the repository-root files, the
+subagent verification, the `unmute init` path, and CLAUDE.md alignment, found
+five issues. Zero constitutional violations, and all five were remediated.
+
+- **The spec quoted a CLAUDE.md that no longer exists.** It said the rule was
+  "three places document a change" and called the bundle a fourth place, while
+  CLAUDE.md on this branch's own base (commit cb4ff13, PR #80, same day the
+  spec was written) says "five places document a change, not one" and already
+  lists the skill as the fifth. Every "four surfaces" count across spec, plan,
+  and tasks now says five, with `docs/` and `docs-site/` counted separately.
+  The substance was never at risk, since FR-031 named both trees all along;
+  only the count and the quote were wrong.
+- **FR-004 contradicted research D1, T016, and the message contracts.** It
+  still demanded `ir.Validate` for checks whose messages carry the file and
+  line only `ir.Build` can provide, a contradiction with the spec's own
+  FR-007b tier table. The plan's gate re-check had recorded the deviation, but
+  the spec was never amended. FR-004 now states the tier split and names D1 as
+  the record of the correction.
+- **The repository-root `.env.example` had no owner for two claims this
+  feature falsifies**: its Langfuse comment ("needed for the examples") stops
+  being true when T067 leaves tracing in exactly one example, and its header
+  names an agent that does not exist at the repository root. Both are now
+  inside FR-016e and T047, with T068 confirming the cross-reference after the
+  tracing example is named.
+- **T077 cited SC-002 for the ten-agent authoring re-run**, which is SC-005's
+  bar; SC-002 belongs to T078's adversarial agents. Corrected, so Wave B and C
+  verifiers measure against the right criterion.
+- **User Story 3 had two acceptance scenarios numbered 3.** Renumbered to 6.
+
+Coverage after remediation is unchanged: 66 of 66 functional requirements and
+15 of 15 success criteria carry tasks, and no task is unmapped. One loose end
+lives outside the tracked tree and is recorded here so it is not lost: the
+private `.env` files carried a key named `11LABS_API_KEY`, which no shell can
+export and the CLI never reads (it wants `ELEVENLABS_API_KEY`). Both copies
+were renamed on 2026-08-15; rotating the key value itself stays with the
+author, on the ElevenLabs dashboard.
+
 ## Notes
 
 **On "no implementation details".** This is a defect-fixing feature, so the

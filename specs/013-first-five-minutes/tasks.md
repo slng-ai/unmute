@@ -27,8 +27,8 @@ here and they come first within each story.
 Go code in `internal/`, never `pkg/`. One file per command in `internal/cli/`.
 Generated Python lives only in `internal/generate/templates/`. Documentation
 lives in `docs/` and `docs-site/`; the shipped coding-agent bundle lives in
-`internal/skill/assets/` and is the fourth documentation surface for this
-feature.
+`internal/skill/assets/` and is the fifth documentation surface, per
+CLAUDE.md's five-places rule.
 
 ## Story order deviates from priority order once, on purpose
 
@@ -111,7 +111,7 @@ in a refusal.
 - [ ] T032a [P] [US1] State the legal turn detector identifiers in `docs-site/` too, on the page that owns the `turn:` block, per FR-007c. `turn-detector-mini` and `turn-detector` appear on no `docs-site/` page today; they exist only in four examples' `targets.yaml` override blocks and in one Go error string
 - [ ] T033 [P] [US1] Update `internal/skill/assets/references/transfers.md`: rewrite the section headed "A transfer needs a phone call, and a browser package will not tell you" to say the compiler refuses it and quote the refusal, and correct its claim that the control is "absent from the generated project", which described the unattached-control defect and not the browser-only one
 - [ ] T034 [P] [US1] Update `internal/skill/assets/references/package.md:168-186`, which documents three of these defects as known, and any other bundle file that teaches a workaround for something now fixed
-- [ ] T035 [P] [US1] Update `docs-site/transfers/*` and the emitted `README.md` templates for both drivers wherever they describe the dead-end behaviour, so all four documentation surfaces move in this story's commits
+- [ ] T035 [P] [US1] Update `docs-site/transfers/*` and the emitted `README.md` templates for both drivers wherever they describe the dead-end behaviour, so all five documentation surfaces move in this story's commits
 
 **Checkpoint**: eight red tests green, the constitution's Principle II restored,
 gate green.
@@ -140,11 +140,11 @@ real spoken exchange heard by a person.
 - [ ] T044 [US2] Confirm T014 is green, and fix `internal/skill/assets/references/models.md:103`, which claims only SLNG identifiers appear in this repository's documentation three lines from two OpenAI ones
 - [ ] T045 [US2] Change `TestWrite_golden` in `internal/scaffold/scaffold_test.go` to pass `scaffold.DefaultTools()` as `internal/cli/init.go:27` does, so the golden covers the two `tools:` blocks and `tools/end_call.yaml` that every real `unmute init` writes and nothing currently tests
 - [ ] T046 [US2] Regenerate `internal/scaffold/testdata/golden/init.txt` with `-update` and review the diff line by line
-- [ ] T047 [US2] Remove the dead `OPENAI_MODEL` from the repository-root `.env.example`, read by nothing. **Not parallel with T043**, which already edits both that file and the root `README.md` for the identifier sweep; this task only removes the dead variable
+- [ ] T047 [US2] Rewrite the repository-root `.env.example` so every line in it is true, per FR-016e: remove the dead `OPENAI_MODEL`, read by nothing; fix the header, which says "env vars for agent to run" at a root that holds no package, to say what the file is for (names to copy into an example's own `.env`); reword the Langfuse comment, which claims the keys are needed "for the examples" when T067 reduces that to one, to point at the `examples/README.md` row T068 writes; and fix the "Twillio" spelling. If the rewrite shows the file duplicates the per-example env files entirely, delete it and record the reason in results.md. **Not parallel with T043**, which already edits both that file and the root `README.md` for the identifier sweep
 - [ ] T048 [P] [US2] Fix `docs-site/start/quickstart.mdx`, which prints "Hi, thanks for calling." as the expected browser greeting and explains `DAILY_API_KEY` away as needed later for a phone number
 - [ ] T049 [US2] Confirm T011 and T012 are green
 - [ ] T050 [US2] Run `unmute init` then `unmute dev` with only `OPENAI_API_KEY` and `SLNG_API_KEY` set, reach a spoken greeting, and complete one real spoken exchange after it. A probe reaching a socket does not close this task. This is also where `reasoning_effort: minimal` is confirmed by ear: if the agent pauses noticeably before each reply, drop to `none` and record the change and the reason. And if the provider rejects `reasoning_effort` outright, that surfaces here rather than at compile, because `params:` is forwarded verbatim
-- [ ] T051 [P] [US2] Update `docs-site/build/` pages and any bundle reference that shows scaffold output, so all four surfaces move with the behaviour
+- [ ] T051 [P] [US2] Update `docs-site/build/` pages and any bundle reference that shows scaffold output, so all five surfaces move with the behaviour
 
 **Checkpoint**: the first five minutes work, and nothing in them contradicts
 itself.
@@ -190,7 +190,7 @@ no behaviour and the examples work depends on the behaviour being final.
 - [ ] T061 [US5] Check whether `docs/` and `docs-site/` received the fix PR #80 applied only to the skill bundle, and fold both rules into `docs/` too
 - [ ] T062 [US5] Extract every error string `ir.Validate` can produce, using the method Wave A proved on the generator side: enumerate every error-returning site in `internal/ir/validate.go` statically, then confirm reachability by mutating a package per candidate and observing the output. Static enumeration alone is not enough, because reproduction.md section E found thirteen generator sites that were already gated earlier and could not fire
 - [ ] T063 [US5] Document the ones that are enforced and undocumented, or list them in results.md with a reason each
-- [ ] T064 [P] [US5] Mirror both rules into `internal/skill/assets/` wherever the bundle describes the same fields, keeping the fourth surface true
+- [ ] T064 [P] [US5] Mirror both rules into `internal/skill/assets/` wherever the bundle describes the same fields, keeping the fifth surface true
 
 **Checkpoint**: the two causes of PR #80's three telephony failures are
 documented on the site, not only in the bundle.
@@ -207,7 +207,7 @@ says they teach.
 - [ ] T065 [US4] Validate and compile all eleven examples for every target each declares, and record the raw count
 - [ ] T066 [US4] Start every browser-only example with `unmute dev` and reach a greeting; build and import the container for every telephony example. The five examples reproduction.md section D found broken on Pipecat are the ones to check first
 - [ ] T067 [US4] Remove `tracing:` from every example that is not the tracing example, so no first-run example needs a Langfuse account, per research D12
-- [ ] T068 [US4] Name the one tracing example in the `examples/README.md` table and correct the paragraph claiming all three `LANGFUSE_*` secrets are required because the public examples configure Langfuse
+- [ ] T068 [US4] Name the one tracing example in the `examples/README.md` table and correct the paragraph claiming all three `LANGFUSE_*` secrets are required because the public examples configure Langfuse. Confirm the repository-root `.env.example` comment T047 rewrote now points at a row that exists
 - [ ] T069 [US4] Make `examples/README.md`, `docs-site/build/your-first-agent.mdx`, and `internal/skill/assets/references/examples.md` all name `salon-support` as the starting example, per research D13
 - [ ] T070 [US4] Fix `docs-site/build/your-first-agent.mdx`, which shows a trimmed `agent.yaml` and claims it is the real file: show the real file or say plainly it is reduced and what was removed
 - [ ] T071 [US4] Read every example `README.md` and correct anything the fixes made untrue; confirm each names every `transport` its targets declare and that every link out resolves, and that the two tests in `internal/generate/examples_test.go` still hold
@@ -226,7 +226,7 @@ Every agent gets its own scratch directory named after the agent.
 - [ ] T074 Wave B: one agent per fix, each given the fix commit and nothing else, re-running its Wave A reproduction. An agent that wrote a fix does not verify it
 - [ ] T075 Wave B: one agent whose only job is the six bundle agreement tests plus the bundle golden, reporting which this feature turned red and whether the bundle or the code was the thing that was wrong. Name `TestBundleNamesNoSitePage` explicitly in the report, since it is the only thing holding FR-034 and this feature adds no task of its own for it
 - [ ] T076 [P] Wave C: five first-run agents, each `unmute init` to a working greeting using only the CLI and the local `docs-site/` tree, never a published URL. Bar is 5 of 5 with no file edited outside the scaffold
-- [ ] T077 [P] Wave C: ten authoring agents on the same ten briefs PR #80 used — salon, hotel, vet, gym, bank, restaurant, utility, dental, pizza, helpdesk — each installing the bundle with `unmute skill install`. Bar is 8 of 10 validating clean on first attempt. This is the SC-002 re-run PR #80 did not do
+- [ ] T077 [P] Wave C: ten authoring agents on the same ten briefs PR #80 used — salon, hotel, vet, gym, bank, restaurant, utility, dental, pizza, helpdesk — each installing the bundle with `unmute skill install`. Bar is 8 of 10 validating clean on first attempt. This is the SC-005 re-run PR #80 did not do
 - [ ] T078 [P] Wave C: two adversarial agents, each trying to produce a package that compiles green and does nothing. Every one they find is a User Story 1 defect that got missed and must be fixed
 - [ ] T079 Write `specs/013-first-five-minutes/results.md` with the raw counts, a per-brief table for T077 with a stated cause for every failure, and no rounding
 
@@ -259,7 +259,7 @@ Every agent gets its own scratch directory named after the agent.
 
 ### Within each story
 
-Tests first and failing, then the fix, then the confirmation task, then the four
+Tests first and failing, then the fix, then the confirmation task, then the five
 documentation surfaces in the same commit.
 
 ### Parallel opportunities
@@ -312,6 +312,6 @@ shippable on its own and is the whole reason this feature exists.
 ### Notes
 
 - One commit per defect in Phase 3, so Wave B can be given a single commit.
-- The four-surface rule applies inside every commit, not at the end.
+- The five-surface rule applies inside every commit, not at the end.
 - The gate is green on every commit, not only the last.
 - A bar that is missed is reported as the number it is. A 7 is a 7.
