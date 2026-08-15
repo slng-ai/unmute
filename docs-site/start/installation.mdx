@@ -13,7 +13,7 @@ or build it from a clone.
 | Homebrew | `brew install slng-ai/tap/unmute` | macOS only |
 | Scoop | `scoop install slng-ai/unmute`, after adding the bucket below | Windows |
 | winget | `winget install slng.unmute`, coming soon | Windows |
-| Go | `go install github.com/slng-ai/unmute@latest` | anywhere with Go 1.24 or newer |
+| Go | `go install github.com/slng-ai/unmute@latest` | anywhere with Go 1.26 or newer |
 | Archive | download from the [releases page](https://github.com/slng-ai/unmute/releases) | macOS, Linux, Windows, on amd64 and arm64 |
 
 Homebrew is macOS only because Homebrew on Linux has no casks. On Linux, use
@@ -44,7 +44,7 @@ check what you downloaded before you run it.
 |---|---|---|
 | Docker with Compose | `unmute dev` in the browser | `docker compose version` |
 | `uv` | `unmute dev --console` in the terminal | `uv --version` |
-| Go 1.24 or newer | `go install`, or building from a clone | `go version` |
+| Go 1.26 or newer | `go install`, or building from a clone | `go version` |
 
 Docker and `uv` are only needed when you run an agent. You can write, validate,
 and compile a package without either.

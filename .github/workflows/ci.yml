@@ -4,6 +4,12 @@
 # `make smoke` is deliberately absent. It needs Docker, network, and provider
 # credentials, it takes several minutes, and CLAUDE.md scopes it as opt-in and
 # never part of the PR gate. Run it locally before promoting a driver.
+#
+# Every job carries `check-latest: true`. go.mod says `go 1.26`, which setup-go
+# reads as a spec, not a pin, and without the flag it hands back whatever 1.26.x
+# the runner happens to have cached. That was go1.26.5 on 2026-08-15, five CVEs
+# behind, and the `vuln` job below only means anything if every job builds the
+# same Go it scanned. release.yml carries the flag for the same reason.
 name: CI
 
 on:
@@ -29,6 +35,7 @@ jobs:
         with:
           # Single source of truth: the version the module already declares.
           go-version-file: go.mod
+          check-latest: true
           cache: true
       - run: make test
 
@@ -39,6 +46,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          check-latest: true
           cache: true
       # Installed from the module proxy rather than via golangci-lint-action, so
       # the version is pinned in one obvious place and CI runs the same `make
@@ -63,6 +71,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          check-latest: true
           cache: true
       # A snapshot writes SBOMs too, so syft has to be here.
       - uses: anchore/sbom-action/download-syft@v0
@@ -111,6 +120,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          check-latest: true
           cache: true
       - name: gofmt
         run: |
@@ -121,3 +131,45 @@ jobs:
             exit 1
           fi
       - run: go vet ./...
+      # The other check that would rewrite files: a dependency added or dropped
+      # without tidying leaves go.mod and go.sum describing a module nobody
+      # builds. Run it, then require that it changed nothing.
+      - name: go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+  # Checked-in Python: the tool scripts under examples/ and the golden files the
+  # generator is compared against. `ruff check` is the whole gate, on purpose.
+  # `ty check` is not here. Every one of its findings today is an unresolved
+  # import for pipecat or livekit, which needs the provider SDKs installed, and
+  # installing those is `make smoke`'s job. CLAUDE.md keeps smoke off the PR gate.
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Pinned in one obvious place and bumped deliberately, like golangci-lint.
+      - run: pip install ruff==0.15.14
+      # ruff honours .gitignore, so `.` is the tracked Python and nothing else.
+      - run: ruff check .
+
+  # Known vulnerabilities, both in what we import and in the standard library we
+  # link into every released binary. Same go.mod version as every other job, so
+  # what this scans is what ships. That is also why go.mod tracks a supported Go
+  # line: on go1.24.13 this scan found 17 reachable stdlib vulnerabilities, all
+  # of them unfixable, because 1.24 had fallen outside Go's two-release security
+  # window. A red build here means a patched Go exists, so go and get it.
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+      - run: govulncheck ./...

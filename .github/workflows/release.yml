@@ -38,6 +38,7 @@ jobs:
         with:
           # Single source of truth: the version the module already declares.
           go-version-file: go.mod
+          check-latest: true
           cache: true
       # The GoReleaser action installs neither of these by design.
       - uses: sigstore/cosign-installer@v3

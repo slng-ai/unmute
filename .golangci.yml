@@ -10,6 +10,9 @@ linters:
     - staticcheck
     - ineffassign
     - unused
+    # The two below turn rules CLAUDE.md already states into things that fail.
+    - errorlint
+    - forbidigo
   settings:
     errcheck:
       # Writes to a terminal/buffer/log carry no error worth acting on; the
@@ -19,3 +22,22 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+    forbidigo:
+      forbid:
+        # A stray Print goes to the process stream, so an in-process command
+        # test never sees it. That makes it a bug, not a style preference.
+        - pattern: ^fmt\.Print.*$
+          msg: write to cmd.OutOrStdout() / cmd.ErrOrStderr() instead
+        - pattern: ^print(ln)?$
+          msg: write to cmd.OutOrStdout() / cmd.ErrOrStderr() instead
+        # A command that exits mid-run cannot be tested in-process and skips the
+        # deferred cleanup a dev/telephony run depends on. Return the error and
+        # let main.go turn it into an exit code.
+        - pattern: ^os\.Exit$
+          msg: return an error instead, os.Exit lives only in main.go
+        - pattern: ^log\.(Fatal|Panic).*$
+          msg: return an error instead, main.go owns the exit code
+      # The one legitimate os.Exit carries a `//nolint:forbidigo` at the call
+      # site in main.go. A path exclusion was tried first and is not reliable:
+      # golangci resolves the module root through the case-insensitive macOS
+      # path, so `^main\.go$` silently stops matching on some checkouts.
