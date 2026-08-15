@@ -248,6 +248,19 @@ Two things the table does not cover, because they trip people up:
 - **A control is not a tool file.** Names under `controls:` go in an agent's or
   a task's `tools:` list, but never in the package-level `tools:` list, which
   loads files from `tools/`.
+- **Declaring a control without attaching it is a build error**, not dead
+  config. Write both halves in the same edit. The refusal names the file, the
+  line, and the agents you could attach it to:
+
+  ```
+  agent.yaml:73: control "to_front_desk" is declared but no agent reaches it; add it to the
+    tools: of one of these agents: front_desk, disputes_specialist
+  ```
+
+  The same check covers a task or task group nothing delegates to, an agent no
+  `agent_transfer` reaches, a `destinations:` entry no control resolves to, and
+  a `tools:` entry no agent lists. An unreferenced `models:` entry is the one
+  exception: that map is a palette and unused entries are legal.
 - **A second agent's instructions cannot read a `conversation` variable.** An
   instructions file renders once, at session start, so it can only name a value
   that already exists. With `history: full` the new agent can see what was said,

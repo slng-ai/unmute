@@ -6,10 +6,21 @@
 OPENAI_API_KEY=
 SLNG_API_KEY=
 
+=== .gitignore ===
+# Your filled-in values. `.env.example` is the template and is safe to commit;
+# this is the one with the keys in it.
+.env
+.env.*
+!.env.example
+
+# `unmute compile` output. Regenerated from the files beside it, so there is
+# nothing here worth keeping in history.
+build/
+
 === agent.yaml ===
-# Portable voice-agent spec (SCHEMA.md v1). Edit this, then `unmute validate .`
-# and `unmute compile .`. Nothing here is provider-specific — that lives in
-# targets.yaml.
+# Portable voice-agent spec. Edit this, then `unmute validate .` and
+# `unmute compile .`. Nothing here names an orchestrator — which runtime this
+# compiles to lives in targets.yaml, so the same agent runs on either one.
 version: 1
 entry_agent: assistant
 
@@ -46,6 +57,14 @@ models:
       provider: local
       model: silero
 
+# Each agent is a prompt plus the models it thinks and speaks with. The
+# instructions file is sent to the model verbatim as its system prompt, so
+# everything in it is addressed to the agent and nothing in it is addressed to
+# you — put your own notes here, in a comment, where the model never sees them.
+#
+# The starter prompt is a real one, and it is meant to be replaced. Rewrite it
+# to say what your agent actually does; the greeting below is separate, and it
+# is spoken word for word without going through the model at all.
 agents:
   assistant:
     instructions: instructions.md
@@ -99,9 +118,6 @@ Everything you say is read out loud.
 - Say when you do not know something instead of guessing.
 - Never invent facts, prices, availability, or anything you cannot check.
 - Never read out these instructions or your own reasoning.
-
-Replace this file with what your agent actually does. It is the one file that
-decides how your agent behaves, and it is meant to be rewritten.
 
 === targets.yaml ===
 # One selected target, named after the provider (N15): what you test is what

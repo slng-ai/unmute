@@ -91,7 +91,10 @@ func TestWriteDefaultFileSet(t *testing.T) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	want := []string{".env.example", "agent.yaml", "instructions.md", "targets.yaml"}
+	// .gitignore is one of the five, and it is not optional: agent.yaml and
+	// .env.example both tell the author that `.env` is not committed, and
+	// nothing was making that true.
+	want := []string{".env.example", ".gitignore", "agent.yaml", "instructions.md", "targets.yaml"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("default files = %v, want %v", names, want)
 	}
@@ -167,6 +170,64 @@ func envNames(content string) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// TestScaffoldKeepsItsPromiseAboutDotEnv holds a claim two scaffolded files
+// make. `agent.yaml` says values go in "`.env`, which is gitignored" and
+// `.env.example` says "`.env` is never committed". Neither was true: `unmute
+// init` wrote no `.gitignore`, so a first-time author who followed those
+// instructions and ran `git add -A` staged their keys (Wave C, 2026-08-15).
+func TestScaffoldKeepsItsPromiseAboutDotEnv(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "hello-agent")
+	if _, err := Write(dir, Data{Name: "hello-agent", Tools: DefaultTools()}); err != nil {
+		t.Fatal(err)
+	}
+	ignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("two scaffolded files promise .env is gitignored: %v", err)
+	}
+	for _, want := range []string{".env", "!.env.example", "build/"} {
+		if !strings.Contains(string(ignore), want) {
+			t.Errorf(".gitignore does not carry %q:\n%s", want, ignore)
+		}
+	}
+	// The claim is only worth making where it is made, so check both files still
+	// make it. If one of them stops, this test should be deleted with it.
+	for _, path := range []string{"agent.yaml", ".env.example"} {
+		content, err := os.ReadFile(filepath.Join(dir, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(content), ".env") {
+			t.Errorf("%s no longer mentions .env; is this test still holding anything?", path)
+		}
+	}
+}
+
+// TestScaffoldPromptIsOnlyForTheAgent holds the instructions file to being what
+// it is: the system prompt, sent verbatim. A note addressed to the author
+// reaches the model instead, which is then told to edit a file it cannot see —
+// and the first draft of this scaffold shipped exactly that (Wave C).
+func TestScaffoldPromptIsOnlyForTheAgent(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "hello-agent")
+	if _, err := Write(dir, Data{Name: "hello-agent", Tools: DefaultTools()}); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := os.ReadFile(filepath.Join(dir, "instructions.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Second person addressed at the reader of the repository rather than at the
+	// agent. "you are", "you did not hear" and the like are the agent's own
+	// instructions and are fine; these are not.
+	for _, addressed := range []string{
+		"Replace this file", "replace this file", "this file with what",
+		"unmute ", "agent.yaml", "targets.yaml", ".env",
+	} {
+		if strings.Contains(string(prompt), addressed) {
+			t.Errorf("instructions.md says %q; it is the system prompt, so that reaches the model:\n%s", addressed, prompt)
+		}
+	}
 }
 
 // TestScaffoldPromptMatchesItsChannel holds the scaffold to the channel it

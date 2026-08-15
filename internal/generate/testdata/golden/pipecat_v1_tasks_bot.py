@@ -97,6 +97,22 @@ def require_env() -> None:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
 
+# Checked at import, which is what makes the container refuse to start rather
+# than start and go quiet.
+#
+# It used to be checked only inside run_bot, once per session. The container
+# then reported healthy, the platform marked the deployment ready, the browser
+# got a valid answer to its offer — and the failure happened in a background
+# task where only the log saw it. A caller heard silence. That is the exact
+# trade Principle II calls the worst one available, and two documentation pages
+# already promised the opposite: "the container starts, checks the keys the
+# agent needs, and stops with the names it did not find" (Wave C, 2026-08-15).
+#
+# run_bot still calls it, because a session that somehow starts without them
+# should fail before the caller hears anything either.
+require_env()
+
+
 
 @dataclass
 class State:
@@ -536,6 +552,27 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
                 run_llm=True,
             )
         )
+
+    # inactivity.end_after: the nudge above is the first half, and this is the
+    # second. Without it an idle call is nudged forever and never hung up, which
+    # on a phone line is a billed open call. The clock starts at the first idle
+    # turn and is cancelled by the caller speaking again.
+    _idle_end: asyncio.Task | None = None
+
+    @user_aggregator.event_handler("on_user_turn_idle")
+    async def on_user_turn_idle_end(aggregator):
+        nonlocal _idle_end
+        if _idle_end is None or _idle_end.done():
+            _idle_end = asyncio.create_task(
+                _end_after(main, 45 - 15)
+            )
+
+    @user_aggregator.event_handler("on_user_turn_resumed")
+    async def on_user_turn_resumed(aggregator):
+        nonlocal _idle_end
+        if _idle_end is not None and not _idle_end.done():
+            _idle_end.cancel()
+            _idle_end = None
 
     @transport.event_handler("on_dialout_answered")
     async def on_dialout_answered(transport, data):

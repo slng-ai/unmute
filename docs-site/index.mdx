@@ -108,9 +108,26 @@ targets:
     provider: livekit
     version: "1.5.2"
     sdk_language: python
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
 ```
 
 Two targets, one agent. `unmute compile` writes both projects.
+
+The three lines under `models:` are the one thing a second target usually needs.
+Silero is a voice-activity detector and LiveKit runs its own turn detector
+instead, so the LiveKit instance overrides that entry by name — the only model
+identity Unmute checks rather than forwards. Without it, validation refuses the
+LiveKit target:
+
+```
+livekit: turn model "silero" is not recognized; use turn-detector-mini (local) or turn-detector (LiveKit Cloud)
+```
+
+That is what a per-target override is for, and it is why the agent file says
+nothing about either runtime. See [turn detection](/models/turn-detection).
 
 ## Who it is for
 

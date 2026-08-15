@@ -272,7 +272,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// secrets cover most packages, but the address and token a tool source
 	// names are required whether or not the package also declared them, and a
 	// missing one has to be named before anything dials (FR-009/N40).
-	for _, name := range appendMCPEnv(requiredSecretEnv(agent), data.Agents, data.Tasks) {
+	for _, name := range appendMCPEnv(requiredSecretEnv(agent, tgt, env), data.Agents, data.Tasks) {
 		env.add(name)
 	}
 	data.NeedsRender = renderNeeds(agent)
@@ -320,7 +320,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// The route's own names are removed rather than merely not added: `secrets:`
 	// now declares them (SCHEMA N41), so a package with a secrets block would
 	// otherwise demand carrier credentials for a browser session (FR-018).
-	data.DevEnv = withoutRouteEnv(env.sorted(), agent, tgt)
+	data.DevEnv = withoutRouteEnv(env.sorted(), agent, tgt, env)
 	data.Telephony, err = buildLiveKitTelephony(agent, tgt, env)
 	if err != nil {
 		return livekitData{}, err
@@ -371,7 +371,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// compile report, and the runbook. An mcp source's names are not route names,
 	// so they stay in the check. This is the same derivation the Pipecat driver
 	// already used for DevEnv.
-	data.RequiredSecrets = withoutRouteEnv(data.RequiredEnv, agent, tgt)
+	data.RequiredSecrets = withoutRouteEnv(data.RequiredEnv, agent, tgt, env)
 	data.AuthorEnv = authorEnv(data.RequiredEnv, tgt.Telephony)
 	if tgt.Telephony != nil {
 		data.SuppliedForYou = slices.Clone(tgt.Telephony.LocalEnvironment)
@@ -822,13 +822,13 @@ func appendMCPEnv(required []string, agents []livekitAgent, tasks []livekitTask)
 // author listed it. Two sources naming the same url_env are two mounts: the
 // selection lives on the source now, not on a file-name convention (N40).
 func livekitMCPSource(name string, tool ir.Tool, env *envSet) livekitMCPServer {
-	env.add(tool.URLEnv)
+	env.addRead(tool.URLEnv)
 	source := livekitMCPServer{
 		Name: name, URLEnv: tool.URLEnv, Transport: tool.MCPTransport,
 		Tools: tool.MCPTools, Auth: loweredAuth(tool.Auth),
 	}
 	if tool.Auth != nil {
-		env.add(tool.Auth.TokenEnv)
+		env.addRead(tool.Auth.TokenEnv)
 		source.AuthEnv = tool.Auth.TokenEnv
 	}
 	return source
@@ -957,10 +957,10 @@ func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variabl
 	}
 	switch tool.Execution {
 	case ir.ToolWebhook:
-		env.add(tool.URLEnv)
+		env.addRead(tool.URLEnv)
 		// The token rides its own env var, never the spec (SCHEMA §5.3).
 		if tool.Auth != nil {
-			env.add(tool.Auth.TokenEnv)
+			env.addRead(tool.Auth.TokenEnv)
 		}
 		return livekitTool{
 			Method: name, Description: tool.Description, URLEnv: tool.URLEnv,
@@ -1088,17 +1088,11 @@ func promptConst(name string) string {
 }
 
 func transferWhen(c *ir.AgentTransfer) string {
-	if c.When != "" {
-		return c.When
-	}
-	return "Transfer the caller to the " + c.To + "."
+	return orDefault(c.When, "Transfer the caller to the "+c.To+".")
 }
 
 func humanTransferWhen(c *ir.HumanTransfer) string {
-	if c.When != "" {
-		return c.When
-	}
-	return "Transfer the caller to a human agent."
+	return orDefault(c.When, "Transfer the caller to a human agent.")
 }
 
 // destinationExpr renders a resolved destination as Python: a quoted literal,
@@ -1158,10 +1152,7 @@ func ringTimeoutSeconds(value ir.Duration) string {
 }
 
 func delegateWhen(c *ir.Delegate) string {
-	if c.When != "" {
-		return c.When
-	}
-	return "Run this flow."
+	return orDefault(c.When, "Run this flow.")
 }
 
 // delegateReturnFinality is appended to a then:return delegate docstring so the

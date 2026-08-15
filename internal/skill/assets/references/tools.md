@@ -56,7 +56,7 @@ also the list of what you could have written.
 |---|---|---|
 | `description` | yes, except on `builtin:` and `mcp:` | everywhere else |
 | `input` | yes, except on `builtin:` and `mcp:` | everywhere else |
-| `output` | no | everywhere except `mcp:` |
+| `output` | no | everywhere except `mcp:` — but see below |
 | `inject` | no | `webhook:` and `local:` only |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` |
@@ -64,6 +64,12 @@ also the list of what you could have written.
 An `mcp:` file is the block and nothing else, because the server owns each
 tool's contract. A `builtin:` file needs no `description` or `input`, because
 the registry supplies both.
+
+**`output:` is a contract with the model, and nothing checks it.** Neither code
+driver emits it: the generated wrapper returns whatever the endpoint or the
+handler returned, unshaped. Declaring it documents your intent and costs
+nothing; relying on it to reshape a result does not work. A handler that returns
+the wrong shape compiles clean.
 
 ### The two gated blocks
 
@@ -110,6 +116,11 @@ interruption: provider_default
 `url_env` holds a **name**, never a URL. Writing the address there is refused.
 That is what lets staging and production run the same package against different
 APIs.
+
+Both names — the `url_env` and any `auth.token_env` — also go in the package's
+top-level `secrets:` list. That is a separate file from this one, and forgetting
+it is a warning at exit 0 rather than an error, so it is easy to miss. See
+`package.md`.
 
 `path` renders per call and the rendered value is URL encoded for you. Because
 it renders per call rather than at session start, a variable the conversation
@@ -213,6 +224,13 @@ The rules the function follows:
 | it returns a dict shaped like `output`, if you declared one | the result goes back to the model |
 | it may be `async def` | the generated code awaits an awaitable result |
 | it imports nothing from Unmute | the generated project does not depend on Unmute at run time |
+
+**An optional `input` property is always passed, as an empty string.** The
+generated call is by keyword every time, so a Python default in your handler is
+dead code — it receives `""`, not `None` and not your default. Write
+`def check(date, part_of_day="")` and treat `""` as "not given". A handler that
+tests `if part_of_day is None:` compiles clean and misbehaves on the first call,
+and neither `validate` nor `compile` will say a word about it.
 
 A handler reaches a credential through `os.environ`, and the variable name goes
 in `secrets:` like any other. That is the third and last route a secret takes

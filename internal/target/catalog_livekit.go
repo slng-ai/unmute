@@ -423,7 +423,10 @@ func LiveKitTurnVersion(model string) (string, error) {
 	}
 	version, ok := liveKitTurnModels[model]
 	if !ok {
-		return "", fmt.Errorf("livekit turn model %q is not recognized; use turn-detector-mini (local) or turn-detector (LiveKit Cloud)", model)
+		// No leading "livekit": ir.Validate prefixes every row error with the
+		// target name, so the old wording printed it twice. The check used to run
+		// only in the generator, where nothing prefixed it (Wave C, 2026-08-15).
+		return "", fmt.Errorf("turn model %q is not recognized; use turn-detector-mini (local) or turn-detector (LiveKit Cloud)", model)
 	}
 	return version, nil
 }

@@ -123,3 +123,120 @@ func TestEnvExampleListsOnlyAuthorNames(t *testing.T) {
 		}
 	})
 }
+
+// TestDeclaredFieldsReachTheGeneratedProject holds the class of defect this
+// whole feature exists to remove, on the five instances Wave C's adversarial
+// agents found after the first fixes had landed: a field the author declares,
+// both commands at exit 0, and nothing in the generated project that carries it.
+//
+// Each row is a package shape and the string the emitted Python must contain.
+// A row that fails means an author is being told their declaration took effect
+// when it did not.
+func TestDeclaredFieldsReachTheGeneratedProject(t *testing.T) {
+	off := false
+	for _, test := range []struct {
+		name     string
+		mutate   func(*ir.Agent)
+		provider ir.Provider
+		file     string
+		want     string
+	}{
+		{
+			// The author says the caller cannot talk over the agent. Pipecat
+			// computed the field and rendered it nowhere, so the emitted agent
+			// was fully interruptible while the LiveKit build honoured it.
+			name:     "interruption disabled reaches pipecat",
+			mutate:   func(a *ir.Agent) { a.Conversation.Interruption = &ir.Interruption{Enabled: &off} },
+			provider: ir.ProviderPipecat,
+			file:     "bot.py",
+			want:     "AlwaysUserMuteStrategy()",
+		},
+		{
+			// The nudge was emitted and the hangup was not, so an idle call was
+			// prompted forever. On a phone line that is a billed open call.
+			name: "inactivity end_after reaches pipecat",
+			mutate: func(a *ir.Agent) {
+				a.Conversation.Inactivity = &ir.Inactivity{NudgeAfter: "15s", EndAfter: "45s"}
+			},
+			provider: ir.ProviderPipecat,
+			file:     "bot.py",
+			want:     "_end_after(",
+		},
+		{
+			// The docstring is the only thing the model reads when it decides
+			// whether to call the tool, so an empty one is a dead control.
+			name:     "a transfer with no when: still describes itself on pipecat",
+			mutate:   func(a *ir.Agent) { setTransferWhen(a, "to_billing", "") },
+			provider: ir.ProviderPipecat,
+			file:     "bot.py",
+			want:     "Transfer the caller to the billing agent.",
+		},
+		{
+			// Whitespace was strictly worse than nothing, on both drivers.
+			name:     "a whitespace when: does not defeat the default",
+			mutate:   func(a *ir.Agent) { setTransferWhen(a, "to_billing", "   ") },
+			provider: ir.ProviderLiveKit,
+			file:     "agent.py",
+			want:     "Transfer the caller to the billing.",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			agent := loadCompilerAgent(t)
+			test.mutate(agent)
+			artifact, err := Generate(agent, targetByProvider(t, agent, test.provider), target.Default())
+			if err != nil {
+				t.Fatalf("the package must still compile: %v", err)
+			}
+			if got := artifactFile(t, artifact, test.file); !strings.Contains(got, test.want) {
+				t.Errorf("%s does not carry %q, so the declaration compiled green and did nothing", test.file, test.want)
+			}
+		})
+	}
+}
+
+// TestRingTimeoutIsNotHardcoded holds one more of the same class, separately
+// because it needs a telephony route. Writing `ring_timeout: 7s` used to emit
+// `timeout="25"` and produce output byte-identical to a package that declared
+// nothing at all.
+func TestRingTimeoutIsNotHardcoded(t *testing.T) {
+	build := func(t *testing.T, ring ir.Duration) string {
+		t.Helper()
+		pkg, err := spec.Load(filepath.Join("..", "..", "examples", "pipecat-human-transfer-twilio"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent, err := ir.Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, control := range agent.Controls {
+			if transfer, ok := control.(*ir.HumanTransfer); ok {
+				transfer.RingTimeout = ring
+				agent.Controls[name] = transfer
+			}
+		}
+		artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return artifactFile(t, artifact, "bot.py")
+	}
+	if got := build(t, "7s"); !strings.Contains(got, ", 7)") {
+		t.Errorf("bot.py does not carry the declared 7s ring_timeout")
+	}
+	if got := build(t, ""); !strings.Contains(got, ", 25)") {
+		t.Errorf("bot.py lost the 25s default when nothing was declared")
+	}
+}
+
+// setTransferWhen rewrites one agent_transfer's `when:` in place, keeping every
+// other field the fixture set. Replacing the whole control would drop its
+// context, which is required and is not what these rows are about.
+func setTransferWhen(agent *ir.Agent, name, when string) {
+	transfer, ok := agent.Controls[name].(*ir.AgentTransfer)
+	if !ok {
+		return
+	}
+	transfer.When = when
+	agent.Controls[name] = transfer
+}

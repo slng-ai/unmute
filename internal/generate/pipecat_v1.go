@@ -160,6 +160,9 @@ type pipecatTool struct {
 	EndsCall        bool
 	Interruption    string // "cancel" | "continue" | "" (provider default)
 	ColdDestination string // set for a cold human_transfer: the resolved number/SIP URI (Daily SIP only)
+	// RingTimeoutSecs is the cold block's ring_timeout in seconds, or the route
+	// default. It reaches the carrier document, so a declared value is honoured.
+	RingTimeoutSecs int
 	// HangupOnUnavailable is the cold block's on_unavailable: hangup — a failed
 	// transfer says a goodbye and ends the call instead of returning the model
 	// a failure string (T5).
@@ -365,8 +368,14 @@ type pipecatData struct {
 	Interrupt           *pipecatInterrupt
 	Inactivity          *pipecatInactivity
 	MaxDurationSecs     int
-	HasColdTransfer     bool
-	Transport           string
+	// NeedsEndAfter emits the _end_after helper, which the max-duration cap and
+	// the inactivity hangup share.
+	NeedsEndAfter bool
+	// NeedsUserMute emits the always-mute strategy for interruption.enabled:
+	// false, which is how Pipecat 1.5 expresses "the caller cannot barge in".
+	NeedsUserMute   bool
+	HasColdTransfer bool
+	Transport       string
 	// DailyParams is the parameter object the "daily" transport key constructs on
 	// the Daily route, where the generic one cannot work. Nil everywhere else, so
 	// no other route churns and no package carries a Daily import it never uses.

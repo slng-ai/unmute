@@ -868,7 +868,7 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 				override.Model = "silero"
 				pkg.Targets["livekit"].Models["vad"] = override
 			},
-			want: `livekit turn model "silero" is not recognized; use turn-detector-mini (local) or turn-detector (LiveKit Cloud)`,
+			want: `turn model "silero" is not recognized; use turn-detector-mini (local) or turn-detector (LiveKit Cloud)`,
 		},
 		{
 			name:     "sdk_language",

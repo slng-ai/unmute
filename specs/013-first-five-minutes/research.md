@@ -333,8 +333,8 @@ at the package root, so a new author needs something to copy there.
 ## D10. `gpt-5.6-luna`, set by the author, and what follows from it being a reasoning model
 
 **Decision.** One identifier, `gpt-5.6-luna`, with one Go home and one test.
-Authored as two fields. `reasoning_effort: minimal` in `params:`. No
-`temperature`.
+Authored as two fields. **No generation parameters at all**: no `temperature`,
+and no `reasoning_effort` either.
 
 **Superseded.** This decision originally read "`gpt-4.1-mini`, against the raw
 count", chosen on document rank because every front door already said it. The
@@ -358,16 +358,45 @@ not uniform across vendors (OpenAI wants `gpt-4.1-mini`, SLNG wants
 provider. The agreement test catches the combined form as well as a stale
 identifier.
 
-**`reasoning_effort: minimal`.** This is a reasoning family, and OpenAI's own
-migration guidance is to hold the reasoning effort and then "evaluate success
-metrics including latency". A voice turn that pauses to think before speaking is
-the thing this feature exists to avoid shipping. `reasoning_effort` is a
-documented Chat Completions parameter taking
-`none | minimal | low | medium | high | xhigh | max`, and Unmute already
-forwards a think model's `params:` verbatim, so no schema change is needed.
-`minimal` rather than `none` keeps some of the accuracy that motivated moving to
-this family, particularly for the five-tool structural examples. It is confirmed
-by ear in SC-003; if it sounds slow, `none` is the recorded fallback.
+**`reasoning_effort: minimal`, and why it is not there. Superseded 2026-08-15 by
+`make smoke`.**
+
+The reasoning was sound and the premise was wrong. This is a reasoning family,
+OpenAI's own migration guidance is to hold the reasoning effort and then
+"evaluate success metrics including latency", and a voice turn that pauses to
+think before speaking is the thing this feature exists not to ship.
+`reasoning_effort` is a documented Chat Completions parameter taking
+`none | minimal | low | medium | high | xhigh | max`, and Unmute forwards a think
+model's `params:` verbatim, so no schema change was needed. `minimal` rather than
+`none` kept some of the accuracy that motivated the family.
+
+All of that is about **OpenAI**. The failure is in the **driver**, one layer
+earlier. The Pipecat reason row lowers `params:` into
+`OpenAILLMService.Settings(...)`, which is a fixed field set, so Pipecat 1.5
+raises before the bot can answer:
+
+```
+TypeError: OpenAILLMSettings.__init__() got an unexpected keyword argument 'reasoning_effort'
+```
+
+`ty` refuses the emitted file for the same reason. Nine smoke tests failed on it.
+It shipped for exactly one commit, and `make smoke` — which is opt-in and not in
+the PR gate — is the only thing that would ever have caught it, because the
+default suite compiles the string and never runs it.
+
+It works on LiveKit, whose reason row is the Inference wildcard with
+`ParamsExtraKwargs`. That is not enough for a scaffold whose default target is
+Pipecat, or for eleven examples that mostly compile for both.
+
+**So there is no reasoning-effort setting anywhere in this repository**, and the
+latency this was meant to prevent is now unmitigated and unmeasured. SC-003's
+listening test decides whether that matters. If it does, the fix is a driver
+change — teach the Pipecat reason row to forward unknown params outside
+`Settings(...)` — and that is a separate piece of work, not a config line.
+
+**The lesson worth keeping:** "the value is forwarded verbatim" was true of the
+schema and false of the driver. A parameter is verified when a container has run
+it, not when a provider's documentation lists it.
 
 **No `temperature`.** OpenAI's reference states that "parameter support varies
 by model, with specific constraints applying to newer reasoning models", and
