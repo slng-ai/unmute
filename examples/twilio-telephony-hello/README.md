@@ -100,8 +100,8 @@ column has changed between versions. It is needed because the markup a call arri
 on has to name the deployed agent, and the compiler knows the agent name but not
 your organization.
 
-The livekit build's `.env.example` ends with four more names under a "supplied
-for you, not by you" heading:
+The livekit build needs four more names that its `.env.example` does not list,
+because they are not yours to fill in:
 
 | Variable | Who supplies it |
 |---|---|
@@ -110,8 +110,9 @@ for you, not by you" heading:
 | `LIVEKIT_API_SECRET` | the same |
 | `REDIS_URL` | LiveKit Cloud's managed SIP service owns it; the generated Compose graph ships Valkey locally |
 
-Set those four only for a local run or a self-hosted deployment. On LiveKit
-Cloud the platform provides all four and drops them from any secrets file.
+A self-hosted deployment is the one case where you supply them yourself, and the
+emitted `README.md` carries the instructions for it. `compile-report.json` lists
+every name the project needs, these included, under `required_env`.
 
 Every name here must be a valid shell identifier: letters, digits, underscores,
 never starting with a digit. LiveKit Cloud exports secrets through a shell, so a

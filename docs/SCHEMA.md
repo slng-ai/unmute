@@ -4,6 +4,8 @@ Status: locked, v1. Post-lock adversarial review (context7 + live provider docs)
 Amended 2026-07-19 (N15): the `pipeline` and `voices` blocks are removed; models are defined once, concretely, in `agent.yaml`'s central `models:` map, grouped by kind (`think`/`speak`/`listen`/`turn`, each entry carrying `provider` + `model` as the old target bindings did), referenced by agents and by the top-level `listen`/`turn` selectors, with unreferenced entries kept as swappable alternates; `targets.yaml` shrinks to infrastructure plus optional per-target model overrides; `placement` is derived from `provider`; scaffold drops the `-dev` instance suffix. This one does change the authoring shape; old files fail strict decode loudly. (`reason` survives only as an internal role identifier — the `reason:` binding block is gone, so it is no longer user-facing; the think/speak vocabulary is the authoring surface.)
 Amended 2026-07-20 (N16, N17, N18): the top-level `language` field is removed — language is per-model only, and no language kwarg is emitted when a model does not set one (N16); ElevenLabs is removed from the target set — the managed group is Vapi alone, and the `region`/`edition` instance fields plus the `unmute apply` command go with it, while ElevenLabs the model vendor stays in the Pipecat/LiveKit catalogues (N17); `deployment_region` is added to target instances (N18). N16 and N17 change the authoring shape; old files fail strict decode loudly. Dated pre-removal verification notes naming ElevenLabs are kept as history.
 Amended 2026-08-10 (N23, N24): variables gain a `description` and a third origin, `source: conversation`, saved mid-call by a generated `update_variables` tool; `{{variable}}` substitution becomes real in four named places; and a new top-level `secrets:` block declares runtime environment values by name, driving each build's `.env.example` and a startup check. Both are additive — every existing package keeps loading and compiling unchanged. Detail in sections 4.4 (variables) and 4.12 (secrets).
+Amended 2026-08-15 (N43): the LiveKit turn detector identity is the one model id that is checked rather than forwarded — it must be `turn-detector-mini` or `turn-detector`, the §4.2 example value `silero` is corrected, and Pipecat still forwards the field unchecked. A value check, not a shape change: no existing package fails decode.
+
 Amended 2026-08-12 (N32): `deployment_region` accepts one region or a list of them — the scalar form stays valid, a list of more than one is LiveKit only and gated elsewhere with each platform's own reason, and every declared region reaches the compile report. Additive: no existing package fails decode.
 Date: 2026-07-15.
 Source: [ORCHESTRATOR_SHARED_CONFIGURATION.md](./ORCHESTRATOR_SHARED_CONFIGURATION.md). That file holds the research and the reasons. This file holds the decisions. If the two disagree, this file wins, and the other file should be fixed.
@@ -200,6 +202,35 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
   feature, never with carrier-wide booleans. See
   [TELEPHONY.md](./TELEPHONY.md).
 
+- **N43 (2026-08-15).** **One model identity is checked, and it is the LiveKit
+  turn detector.** §4.3 says model identities are "forwarded to the provider
+  as-is and never validated (D10)", and §4.2's field table offered `silero` as
+  the example value of `models.turn.<name>.model`. Both were wrong about this
+  one field: the LiveKit driver loads a turn detector **by name** rather than
+  sending the string to a provider, so it accepts `turn-detector-mini` (local)
+  and `turn-detector` (LiveKit Cloud) and nothing else. `silero` is a VAD, not
+  a turn detector on that platform, and the schema's own example failed.
+
+  The example is corrected in §4.2. The check now runs in `ir.Validate`, so a
+  package fails before any artifact is written rather than at compile, and the
+  refusal names the target:
+
+  ```
+  livekit: turn model "silero" is not recognized; use turn-detector-mini (local) or turn-detector (LiveKit Cloud)
+  ```
+
+  **Pipecat still forwards the value unchecked**, because there a turn model
+  is a provider identity like any other. So one `agent.yaml` is legal on one
+  target and not on the other, which is what the target prefix on the refusal
+  is for. `provider: local` + `model: silero` remains the correct Pipecat turn
+  entry, and the four examples that declare a LiveKit target already override
+  it in `targets.yaml`.
+
+  **No existing package fails strict decode.** This is a value check, not a
+  shape change: the field, its name, and its type are unchanged. A package that
+  compiled before compiles now; a package that failed at compile before now
+  fails at validate, with the same words.
+
 ---
 
 ## 3. Package layout
@@ -314,7 +345,7 @@ Listen model fields: `provider` (yes), `model` (yes; Deepgram models only on the
 
 Listen `fallback` (added 2026-07-19, T16): the chain stays within the listen section, is cycle-checked, and every entry must share the primary's placement. LiveKit: native `stt.FallbackAdapter` (verified in the livekit-agents source 2026-07-19; the driver emits it). Pipecat: gated, the driver does not emit listen fallback yet. Vapi: gated, no documented transcriber fallback slot. Deepgram: gated, `agent.listen` takes a single provider (unlike think's ordered array). Verify rows in section 9.
 
-Turn model fields: `provider` (no), `model` (no, for example `silero`), `semantic_endpointing` (no: `required | preferred | off`, warn — forwarded as a preference; whether it applies depends on the listen model at runtime), `params` (no), `description` (no).
+Turn model fields: `provider` (no), `model` (no, for example `silero` on Pipecat; on LiveKit it must be `turn-detector-mini` or `turn-detector`, the one identity that is checked rather than forwarded — N43), `semantic_endpointing` (no: `required | preferred | off`, warn — forwarded as a preference; whether it applies depends on the listen model at runtime), `params` (no), `description` (no).
 
 There is no `tier` field on models. Nothing would use it; Unmute never picks a model for you. `fallback` lives on think and listen models today (T16); speak stays fallback-free until a slot is verified somewhere beyond LiveKit's native TTS adapter — the sectioned shape takes it later with no new syntax.
 

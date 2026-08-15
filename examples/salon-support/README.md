@@ -10,10 +10,11 @@ fixtures the other salon examples use, so there is no API to stand up.
 
 ## Run it
 
-You need Docker running and five values in `.env`: `OPENAI_API_KEY` and
-`SLNG_API_KEY` for the models, plus `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`
-and `LANGFUSE_SECRET_KEY`, because this package sets `tracing: langfuse`. The
-generated `.env.example` lists all five.
+You need Docker running and two values in `.env`: `OPENAI_API_KEY` and
+`SLNG_API_KEY`. That is the whole list, and the generated `.env.example` says
+so. There is no tracing provider here and no third account to open; tracing
+lives in [`simple-prompt`](../simple-prompt/), which is the one example that
+configures it.
 
 ```sh
 bin/unmute validate examples/salon-support
@@ -192,15 +193,13 @@ reference is [secrets](../../docs-site/reference/secrets.mdx).
 
 This package deliberately uses none of the seams. Its tools are local fixtures
 that need no credential, so `book_appointment.py` reads no environment at all,
-and its five secrets are consumed by the runtime itself: two model keys and three
-Langfuse values for tracing. Declaring them by name still buys you the startup
-check, generated into `bot.py`:
+and its two secrets are consumed by the runtime itself: the model keys. Declaring
+them by name is not what buys you the startup check — the compiler derives that
+from what it knows the package requires — but it is what `unmute validate`
+compares against, so a name you use and forget to list is reported at exit 0:
 
 ```python
 REQUIRED_ENV = [
-    "LANGFUSE_BASE_URL",
-    "LANGFUSE_PUBLIC_KEY",
-    "LANGFUSE_SECRET_KEY",
     "OPENAI_API_KEY",
     "SLNG_API_KEY",
 ]

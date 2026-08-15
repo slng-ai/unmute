@@ -5,9 +5,6 @@ entry_agent: appointment_desk
 secrets:
   - OPENAI_API_KEY
   - SLNG_API_KEY
-  - LANGFUSE_BASE_URL
-  - LANGFUSE_PUBLIC_KEY
-  - LANGFUSE_SECRET_KEY
 
 models:
   think:
@@ -104,9 +101,6 @@ conversation:
     text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
   interruption:
     enabled: true
-
-tracing:
-  provider: langfuse
 
 channels:
   web:

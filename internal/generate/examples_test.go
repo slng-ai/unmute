@@ -17,14 +17,20 @@ import (
 )
 
 func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
+	// tracing is on exactly one example. It used to be on all four, which made
+	// the first package in the table impossible to run without a Langfuse
+	// account: three third-party values before a first-time reader hears a word
+	// (research D12). Which one keeps it is a table row in examples/README.md,
+	// and this is the test that holds the count at one.
 	cases := []struct {
 		name                  string
 		agents, tasks, groups int
+		tracing               bool
 	}{
-		{"simple-prompt", 1, 0, 0},
-		{"multi-task", 1, 2, 0},
-		{"task-groups", 1, 3, 1},
-		{"subagents", 2, 0, 0},
+		{"simple-prompt", 1, 0, 0, true},
+		{"multi-task", 1, 2, 0, false},
+		{"task-groups", 1, 3, 1, false},
+		{"subagents", 2, 0, 0, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,8 +45,8 @@ func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 			if len(agent.Agents) != tc.agents || len(agent.Tasks) != tc.tasks || len(agent.TaskGroups) != tc.groups {
 				t.Fatalf("got agents/tasks/groups %d/%d/%d, want %d/%d/%d", len(agent.Agents), len(agent.Tasks), len(agent.TaskGroups), tc.agents, tc.tasks, tc.groups)
 			}
-			if agent.Tracing == nil || agent.Tracing.Provider != "langfuse" {
-				t.Fatalf("tracing = %#v, want langfuse", agent.Tracing)
+			if tracing := agent.Tracing != nil && agent.Tracing.Provider == "langfuse"; tracing != tc.tracing {
+				t.Fatalf("tracing = %t, want %t: exactly one example configures it, and examples/README.md says which", tracing, tc.tracing)
 			}
 			if len(agent.Tools) != 5 {
 				t.Fatalf("got %d tools, want 5", len(agent.Tools))

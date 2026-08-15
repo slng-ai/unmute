@@ -12,7 +12,22 @@ lives in a Markdown file next to it, and the runtime choice lives in
 The example this page follows is `examples/simple-prompt` in the repository. It
 declares both targets and runs in the browser.
 
-## The whole agent
+<Tip>
+  **If you want to run something before reading, start with
+  `examples/salon-support`.** It is the smallest package that does something:
+  web audio, local tools, no phone number, no third-party account, two keys. The
+  package below is the one that teaches the file, and `salon-support` is the one
+  that gets you talking in a minute.
+</Tip>
+
+## The agent, reduced
+
+This is `examples/simple-prompt/agent.yaml` with three things taken out, so the
+blocks this page explains are the only ones on screen: the five `tools:` and the
+agent's tool list, which [Tools](/build/tools/overview) covers; the `tracing:`
+block and its three `LANGFUSE_*` secrets, which are about traces rather than
+about the agent. Everything below is otherwise the file as it is on disk. Open
+the real one alongside if you want the whole thing.
 
 ```yaml agent.yaml
 version: 1

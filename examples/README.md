@@ -28,7 +28,7 @@ neither, because it is about variables and secrets and happens to compile for bo
 
 | Package | Structure | Responsibility split |
 |---|---|---|
-| [`simple-prompt`](simple-prompt/) | One agent and one large prompt | One agent owns every workflow and tool. |
+| [`simple-prompt`](simple-prompt/) | One agent and one large prompt | One agent owns every workflow and tool. **The tracing example**: the only package that sets `tracing.provider: langfuse`, so it is the only one that needs the three `LANGFUSE_*` values. |
 | [`multi-task`](multi-task/) | One agent and two independent tasks | One task owns customer records; another owns appointments. |
 | [`task-groups`](task-groups/) | One agent and three ordered tasks | Shared context moves through customer identification, slot selection, and finalization. |
 | [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |
@@ -63,9 +63,11 @@ bin/unmute dev examples/simple-prompt --target pipecat
 ```
 
 Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_BASE_URL`
-together; all three are required because the public examples configure
-`tracing.provider: langfuse`. The example also needs the model-provider keys
-listed in its generated `.env.example`.
+together; all three are required, and only by `simple-prompt`, which is the one
+package that configures `tracing.provider: langfuse`. Every other example runs
+on the model-provider keys alone, so no example you meet first asks you to sign
+up for a third service. Add `tracing:` to any package that wants traces; the
+block is two lines and the section below explains what you get.
 
 LiveKit creates one trace for the room and uses the room name as the Langfuse
 session ID. Pipecat creates one trace for the full conversation.

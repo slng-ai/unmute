@@ -124,12 +124,17 @@ BILLING_PHONE_NUMBER=+1...
 SUPERVISOR_PHONE_NUMBER=+1...
 ```
 
-Those eight are the whole `secrets:` block in `agent.yaml`, which is the list of
-everything you supply. The generated `.env.example` ends with four more under a
-"supplied for you, not by you" heading — `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
-`LIVEKIT_API_SECRET`, and `REDIS_URL`. Set those only for a local run or a
-self-hosted deployment; on LiveKit Cloud the platform injects the LIVEKIT_*
-trio and its managed SIP service owns Redis.
+Those eight are the whole `secrets:` block in `agent.yaml`, and they are the
+whole generated `.env.example` too: it lists what you supply and nothing else.
+
+Four more names reach the running project without appearing there —
+`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and `REDIS_URL`. They
+are not yours to fill in: `unmute dev` supplies them for a local run, LiveKit
+Cloud injects the trio into a deployed agent, and its managed SIP service owns
+the Redis this agent never reads. The emitted `README.md` says where each one
+comes from, and `compile-report.json` lists every name the project needs under
+`required_env`, including those. A self-hosted deployment is where you supply
+them yourself, and that is the section of the emitted runbook to read.
 
 Every name in `.env` must be a valid shell identifier: letters, digits and
 underscores, never starting with a digit. LiveKit Cloud exports your secrets with

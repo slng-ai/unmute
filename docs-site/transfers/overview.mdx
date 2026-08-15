@@ -97,6 +97,43 @@ pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twi
 That last sentence is the fix: to get a warm transfer here you change the
 connection, not the control.
 
+### A target with no route at all
+
+The table above is about which route does what. A target that names **no**
+connection is a separate case, and it is now refused too:
+
+```
+livekit: cold transfer needs a telephony Connection: it hands the caller's own phone leg to
+  the destination, and a session that did not arrive by phone has no leg to hand over
+```
+
+This used to compile. LiveKit emitted the transfer tool, and the generated code
+carried a branch explaining, in a comment, that the usual cause of failure is "a
+session that never arrived by phone: an Agent Console run, a browser session".
+The compiler knew and shipped it anyway.
+
+A route is not the same as a phone channel, and the distinction is worth
+holding on to: `examples/pipecat-human-transfer-daily` declares only
+`web: realtime_audio` and transfers fine, because Daily's dial-out brings the
+person into the room the browser session is already in. What it has is a
+connection.
+
+### The control has to be attached
+
+Declaring a control under `controls:` is half the job. Until some agent lists
+its name in `tools:`, no agent can reach it, and that is refused at build with
+the file, the line, and the agents you could attach it to:
+
+```
+agent.yaml:47: control "send_to_billing" is declared but no agent reaches it; add it to the
+  tools: of one of these agents: front_desk, billing
+```
+
+Before, it compiled at exit 0 and the control was simply absent from the
+generated project — while its destination's environment name still reached
+`.env.example` and the generated startup check, so the agent refused to start
+over a secret nothing would ever read.
+
 ## When the person does not pick up
 
 ```yaml

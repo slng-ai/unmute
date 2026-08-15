@@ -22,6 +22,27 @@ channels:
 `inbound` and `outbound` say which directions this agent supports. They are
 separate, because most routes support them differently.
 
+Two rules arrive with that block, and validation enforces both:
+
+- **A warm transfer needs `outbound: true` on the channel.** A warm transfer
+  dials the destination itself, so the agent places a call even on a line
+  people only ring in on. Without it: `channel "phone" needs outbound: true; a
+  warm transfer places a call to its destination`. Cold transfer does not need
+  it, because it hands over the caller's existing leg rather than making a
+  second one.
+- **`capacity.peak_starts_per_second` becomes required, and must be positive.**
+  It is optional on a browser-only package and required the moment any channel
+  is `telephony`, because calls arrive in bursts and each one starts a session.
+  Without it: `capacity.peak_starts_per_second must be positive for telephony`.
+
+```yaml agent.yaml
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  peak_starts_per_second: 1
+  avg_session_duration: 5m
+```
+
 ## Declare the route
 
 The route lives in a connection file: the mechanism, the carrier, and the
