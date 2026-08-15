@@ -215,9 +215,12 @@ func runTelephonyCompose(ctx context.Context, run telephonyComposeRun) error {
 
 	select {
 	case <-ctx.Done():
-		fmt.Fprintln(stderr, "\nstopping...")
+		// Print only once the log stream is gone: `compose logs --follow` copies
+		// into the same writer from its own goroutine, so printing first is an
+		// unsynchronised concurrent write (caught by `go test -race`).
 		cancelLogs()
 		<-logsDone
+		fmt.Fprintln(stderr, "\nstopping...")
 		return nil
 	case err := <-logsDone:
 		if composeWasInterrupted(ctx, err) {

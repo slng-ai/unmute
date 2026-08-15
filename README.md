@@ -98,7 +98,7 @@ have to know:
 
 ```sh
 brew install slng-ai/tap/unmute              # macOS
-go install github.com/slng-ai/unmute@latest  # anywhere with Go 1.24+
+go install github.com/slng-ai/unmute@latest  # anywhere with Go 1.26+
 ```
 
 On Windows, Scoop is the way that works today. Add the bucket once, then
@@ -123,7 +123,7 @@ soon: every release submits its manifest to Microsoft's package repository, and
 `winget install slng.unmute` starts finding the package once Microsoft merges
 the first submission. Until then, Windows users take Scoop.
 
-Building from a clone is the contributor path, and needs Go 1.24 or newer:
+Building from a clone is the contributor path, and needs Go 1.26 or newer:
 
 ```sh
 git clone https://github.com/slng-ai/unmute.git
@@ -198,7 +198,7 @@ call.
 ## Develop
 
 ```sh
-make test     # go test ./... , pure Go, no Python needed
+make test     # go test -race ./... , pure Go, no Python needed
 make lint
 make fmt
 ```

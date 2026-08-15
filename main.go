@@ -20,5 +20,7 @@ func main() {
 	if commit != "" {
 		v = version + " (" + commit + " " + date + ")"
 	}
-	os.Exit(cli.Execute(v))
+	// The only os.Exit in the tree. Execute() has already printed the error and
+	// every defer inside it has run, so there is nothing left to unwind.
+	os.Exit(cli.Execute(v)) //nolint:forbidigo
 }
