@@ -7,15 +7,16 @@ counts. A bar that was missed is reported as the number it is.
 
 ## What shipped
 
-Two commits on `013-first-five-minutes`, both green on
-`make fmt && make lint && make build && make test`:
+Four commits on `013-first-five-minutes`, each green on
+`make fmt && make lint && make build && make test`, and the last two also green
+on `make smoke`:
 
 | Commit | Content |
 |---|---|
 | `1f4a6d5` | User Stories 1, 2, and 3: the silent drops, the scaffold, the environment names |
 | `9763f61` | User Story 5 and User Story 4: the rules stated in `docs/` and `docs-site/`, tracing off the first-run path, the examples |
 | `126e996` | What Wave B and `make smoke` found, acted on |
-| the last one | What Wave C's seventeen agents found, acted on |
+| `b4c5657` | What Wave C's seventeen agents found, acted on |
 
 ### One deviation from the task plan, and why
 
