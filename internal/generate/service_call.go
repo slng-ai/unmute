@@ -11,6 +11,18 @@ import (
 // defaultCatalog is the built-in provider map, and the only one there is.
 var defaultCatalog = targetcap.DefaultCatalog()
 
+// mcpTimeoutSeconds is how long an MCP tool call may take on either target.
+// Both drivers write it out rather than letting each SDK pick: LiveKit's
+// MCPServerHTTP defaults to 5 seconds, which no web search answers inside, and
+// Pipecat's MCP client defaults to 30, so the same package would wait six times
+// longer on one target than the other. 30 is Pipecat's existing default, so
+// closing the gap changes one target's behaviour and invents no new number.
+//
+// ponytail: one constant, no knob. A tool that needs longer wants `timeout:` on
+// the mcp block, which is a schema change (SCHEMA.md N40) and waits for a real
+// second user.
+const mcpTimeoutSeconds = 30
+
 // ServiceCall is a resolved constructor, ready for a template: the class and
 // its ordered kwargs, each value already a Python expression. SettingsArgs is
 // non-empty only for ParamsSettings entries; SettingsArg/SettingsClass name
@@ -106,11 +118,44 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 			flat(pyKV{Key: "extra_kwargs", Value: pyLiteral(binding.Params)})
 		}
 	default: // kwargs and settings: one kwarg per param, sorted
-		for _, kv := range forwardParams(binding.Params) {
+		fields, overflow := splitParams(binding.Params, spec.SettingsOverflow)
+		for _, kv := range forwardParams(fields) {
 			nested(kv)
+		}
+		if len(overflow) > 0 {
+			nested(pyKV{Key: spec.SettingsOverflow, Value: pyLiteral(overflow)})
 		}
 	}
 	return call, entry, nil
+}
+
+// foldedFields are the param names unmute writes itself, from the typed model
+// fields in ir/build.go foldParams. They name real Settings fields on every
+// entry that has them, so they stay where they are. Anything else under
+// `params:` is the author's provider-specific passthrough, which is what an
+// overflow field is for.
+var foldedFields = map[string]bool{"temperature": true, "top_p": true, "top_k": true, "speed": true}
+
+// splitParams separates the params that stay constructor/Settings arguments
+// from the ones that ride the entry's overflow field. With no overflow field
+// declared every param stays where it was, which is every entry but Pipecat's
+// two OpenAI reason rows.
+func splitParams(params map[string]any, overflowArg string) (fields, overflow map[string]any) {
+	if overflowArg == "" || len(params) == 0 {
+		return params, nil
+	}
+	fields = make(map[string]any, len(params))
+	for k, v := range params {
+		if foldedFields[k] {
+			fields[k] = v
+			continue
+		}
+		if overflow == nil {
+			overflow = make(map[string]any, len(params))
+		}
+		overflow[k] = v
+	}
+	return fields, overflow
 }
 
 // formModel applies the entry's named model transform.

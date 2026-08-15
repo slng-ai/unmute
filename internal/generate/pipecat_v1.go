@@ -109,6 +109,7 @@ type pipecatTask struct {
 	FinishName     string // LLM-visible "finish_<delegate>_<task>" — unique so a sticky handler registration can never run a stale step (V1)
 	NextName       string // next step's node in this delegate's chain; "" on the last step
 	Prompt         string
+	PromptExpr     string // the node's role_message: the quoted prompt, or a render call when it names a variable
 	Tools          []pipecatTool
 	ResultProps    string // Python literal: JSON-schema properties for finish args
 	ResultRequired string // Python literal: list of required finish arg names
@@ -630,7 +631,7 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
 	}
-	tmpl, err := template.New(name).Funcs(template.FuncMap{"pyq": pyQuote, "pytriple": pyTriple, "join": strings.Join}).Parse(string(raw))
+	tmpl, err := template.New(name).Funcs(template.FuncMap{"pyq": pyQuote, "pytriple": pyTriple, "join": strings.Join, "mcpTimeout": func() int { return mcpTimeoutSeconds }}).Parse(string(raw))
 	if err != nil {
 		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
 	}

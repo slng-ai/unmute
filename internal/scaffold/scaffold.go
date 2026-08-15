@@ -328,24 +328,23 @@ func (d *Data) SetTarget(provider string) {
 	}
 	// Pipecat and LiveKit share the safe SLNG/OpenAI starter.
 	d.Listen = Binding{Provider: "slng", Model: "slng/deepgram/nova:3-en"}
-	// No generation parameters at all, and both absences were measured rather
-	// than assumed.
+	// One generation parameter, and it is not a preference: a fresh package has
+	// tools, and OpenAI rejects function tools on /v1/chat/completions for a
+	// reasoning model unless the request says `reasoning_effort: "none"`. Sending
+	// nothing is what fails — the server applies its own default. Measured
+	// against the live API on 2026-08-15: no value at all and `minimal` both
+	// return 400, `none` returns the tool call. `minimal` is not even a legal
+	// value for this model (`none`, `low`, `medium`, `high`, `xhigh` are).
 	//
-	// `temperature` is out because OpenAI's reference does not state that this
-	// model family accepts it, and an unverified parameter fails on a live call
+	// It reaches both targets from this one line because the catalogue knows the
+	// two shapes: LiveKit's row forwards params as kwargs, and Pipecat's OpenAI
+	// row declares `SettingsOverflow: "extra"`, so a param its Settings dataclass
+	// has no field for rides `extra={...}` instead of raising TypeError.
+	//
+	// `temperature` stays out: OpenAI's reference does not state that this model
+	// family accepts it, and an unverified parameter fails on a live call
 	// (research D10).
-	//
-	// `reasoning_effort: minimal` was in, for one commit, to keep a reasoning
-	// model from pausing before it speaks. `make smoke` disproved it: the Pipecat
-	// driver lowers a think model's params into `OpenAILLMService.Settings(...)`,
-	// a fixed field set, and Pipecat 1.5 raises
-	// `TypeError: OpenAILLMSettings.__init__() got an unexpected keyword argument
-	// 'reasoning_effort'` before the bot can answer. `ty` refuses the file too.
-	// Pipecat is this scaffold's default target, so the parameter cannot ship
-	// here until the driver forwards unknown params outside Settings. It works on
-	// LiveKit, whose row forwards params as extra kwargs; that is not enough to
-	// put it in a package that compiles for both.
-	d.Reason = Binding{Provider: "openai", Model: DefaultReasonModel}
+	d.Reason = Binding{Provider: "openai", Model: DefaultReasonModel, Params: `reasoning_effort: "none"`}
 	d.Speak = Binding{Provider: "slng", Model: "slng/deepgram/aura:2-en", Voice: "aura-2-thalia-en"}
 }
 

@@ -379,7 +379,11 @@ func TestNoVendorVariableWearsTheUnmutePrefix(t *testing.T) {
 	unmuteEnv := regexp.MustCompile(`\bUNMUTE_[A-Z0-9_]+\b`)
 
 	root := filepath.Join("..", "..")
-	skip := map[string]bool{".git": true, "specs": true, "bin": true, "build": true, "node_modules": true}
+	// `.claude` holds git worktrees, which are whole other checkouts of this
+	// same repository. Walking them scans a stale copy of every file this walk
+	// already covers, so a worktree on disk fails the run for reasons that have
+	// nothing to do with the tree under test.
+	skip := map[string]bool{".git": true, ".claude": true, "specs": true, "bin": true, "build": true, "node_modules": true}
 	seen := 0
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {

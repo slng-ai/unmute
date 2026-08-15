@@ -871,6 +871,11 @@ func buildTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (pipecat
 	}
 	built := pipecatTask{
 		Name: name, Prompt: task.Instructions,
+		// The node is built when the step is entered, not at session start, so a
+		// prompt naming a variable an earlier task assigned renders with that
+		// value. Left as a literal, the model would read "{{customer_id}}" and
+		// have nothing to book with (B: multi-task, 2026-08-15).
+		PromptExpr:     promptExpr(pyQuote(task.Instructions), task.Instructions, "self.state"),
 		ResultProps:    pyLiteral(resultProperties(task.Result)),
 		ResultRequired: pyLiteral(anyStrings(sortedResultNames(task.Result))),
 	}

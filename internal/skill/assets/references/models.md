@@ -19,6 +19,8 @@ models:
     reasoning:
       provider: openai
       model: gpt-5.6-luna
+      params:
+        reasoning_effort: "none"
   speak:
     voice:
       provider: slng
@@ -62,6 +64,37 @@ targets:
 
 If the user names their own vendor, use it. Check the table below first, and
 say what you bound.
+
+## The think model needs `reasoning_effort`
+
+Write it on the think entry of every package you create, and keep it on one you
+edit:
+
+```yaml
+      params:
+        reasoning_effort: "none"
+```
+
+`gpt-5.6-luna` is a reasoning model, and OpenAI rejects a chat completions
+request that carries function tools unless the request also sets
+`reasoning_effort`. Leaving it out is not the same as leaving it alone: the
+server applies its own default and every turn comes back as HTTP 400. Nearly
+every agent has tools, so treat the line as part of the block rather than as
+tuning somebody asked for.
+
+This model takes `none`, `low`, `medium`, `high`, and `xhigh`. It rejects
+`minimal`. Use `none` unless the user asks for more thinking.
+
+You write the same line for both targets. On LiveKit it becomes a constructor
+argument to `openai.LLM`. On Pipecat the settings class has no field for it, so
+the compiler puts it in the service's `extra` field, which Pipecat merges into
+the request body as written. That is the general rule for `params:`: a name the
+target's settings object has no field for rides the target's overflow field
+instead of being dropped.
+
+On LiveKit there is a second reason to be explicit. `livekit-plugins-openai`
+1.6.10 injects `reasoning_effort="minimal"` by itself for several older ids in
+the same GPT-5 family, and that is the same 400 once the agent has tools.
 
 ## The vendors, per target per role
 

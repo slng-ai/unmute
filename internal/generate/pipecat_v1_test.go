@@ -116,7 +116,7 @@ func TestPipecatV1MCPToolSource(t *testing.T) {
 		"from mcp.client.session_group import StreamableHttpParameters",
 		"from pipecat.services.mcp_service import MCPClient",
 		"self._mcp_clients = [",
-		`server_params=StreamableHttpParameters(url=os.environ["FIRECRAWL_MCP_URL"], headers=_bearer("FIRECRAWL_API_KEY")),`,
+		`server_params=StreamableHttpParameters(url=os.environ["FIRECRAWL_MCP_URL"], headers=_bearer("FIRECRAWL_API_KEY"), timeout=30),`,
 		`tools_filter=["firecrawl_search"],`,
 		"await client.start()",
 		"(await client.register_tools(self.llm)).standard_tools",

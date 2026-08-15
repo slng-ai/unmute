@@ -21,7 +21,10 @@ models:
       description: [[.ModelDescription]]
 [[if .Reason.Provider]]      provider: [[.Reason.Provider]]
 [[end]][[if .Reason.Model]]      model: [[quote .Reason.Model]]
-[[end]][[if .Reason.Params]]      params:[[yamlBlock 8 .Reason.Params]]
+[[end]][[if .Reason.Params]]      # Forwarded to the provider as written. A reasoning model answering with
+      # function tools on chat completions needs this exact value, or OpenAI
+      # returns 400 on every turn.
+      params:[[yamlBlock 8 .Reason.Params]]
 [[end]][[$fallbacks := $.FallbacksFor .ModelProfile]][[if $fallbacks]]      fallback:
 [[range $fallbacks]]        - [[.]]
 [[end]][[end]][[end]][[range .Fallbacks]]    [[.Name]]:

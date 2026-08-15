@@ -43,6 +43,8 @@ models:
     reasoning:
       provider: openai
       model: gpt-5.6-luna
+      params:
+        reasoning_effort: "none"
 ```
 
 Every entry takes the same fields, and which ones are legal depends on the
@@ -64,6 +66,12 @@ section:
 | `description` | a note for humans |
 
 Entries you do not reference are legal alternates.
+
+`params` is passthrough. Nothing in it is checked, and a name the target's
+settings object has no field for is not dropped: it rides that target's overflow
+field and reaches the provider anyway. The `reasoning_effort` line above is the
+one every package needs, because a reasoning model refuses a request that
+carries function tools without it. [The reasoning model](/models/llm) says why.
 
 ## variables
 

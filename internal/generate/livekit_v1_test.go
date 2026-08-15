@@ -683,10 +683,25 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 		// V1/B1: the single-task delegate docstring carries the finality guidance
 		// so the owner LLM does not re-run the finished flow.
 		"Do not run this flow again for the same request.",
+		// N13: an awaited AgentTask merges its own turns into the owner on
+		// return, so the owner's context is snapshotted before and restored
+		// after. Without it the owner's next prompt ends on the task's last
+		// assistant line with no tool record of the work, reads as unfinished,
+		// and the model runs the whole flow a second time. The docstring above
+		// asks for that; only these two lines enforce it.
+		"owner_ctx = self.chat_ctx.copy()",
+		"await self.update_chat_ctx(owner_ctx)",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
 		}
+	}
+	// The restore must land between the task and the assignment, or the owner
+	// keeps the merged turns.
+	restore := strings.Index(botpy, "await self.update_chat_ctx(owner_ctx)")
+	assign := strings.Index(botpy, `ctx.userdata.caller_phone = result["date"]`)
+	if restore < 0 || assign < 0 || restore > assign {
+		t.Errorf("the owner context is restored at %d, after the assignment at %d", restore, assign)
 	}
 }
 
@@ -1847,7 +1862,7 @@ func TestLiveKitV1MCPSelectionTransportAndScope(t *testing.T) {
 
 	// The stated transport and the selection ride the agent's mount, and only
 	// the agent's: a task-scoped source is offered inside that task alone.
-	if !strings.Contains(greeterBody, `mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="sse", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN")))`) {
+	if !strings.Contains(greeterBody, `mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="sse", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN"), timeout=30, client_session_timeout_seconds=30))`) {
 		t.Errorf("the agent's mount is not the source as declared:\n%s", greeterBody)
 	}
 	if strings.Contains(greeterBody, "browse_tables") {
@@ -1855,7 +1870,7 @@ func TestLiveKitV1MCPSelectionTransportAndScope(t *testing.T) {
 	}
 	// Nothing stated means nothing emitted: an empty allowed_tools would claim
 	// a selection the author never made (SC-004).
-	if !strings.Contains(taskBody, `mcp.MCPToolset(id="browse_tables", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"]))`) {
+	if !strings.Contains(taskBody, `mcp.MCPToolset(id="browse_tables", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], timeout=30, client_session_timeout_seconds=30))`) {
 		t.Errorf("the task's mount emits an argument the source never declared:\n%s", taskBody)
 	}
 	if strings.Contains(taskBody, "book_table") {
@@ -1939,7 +1954,7 @@ func TestLiveKitV1LocalAndMCPTools(t *testing.T) {
 		"async def fetch_notes(self, ctx: RunContext, topic: str) -> dict:",
 		"result = tools.fetch_notes.fetch_notes(topic=topic)",
 		"if inspect.isawaitable(result):",
-		`tools=[mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="streamable_http", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN")))],`,
+		`tools=[mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="streamable_http", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN"), timeout=30, client_session_timeout_seconds=30))],`,
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)

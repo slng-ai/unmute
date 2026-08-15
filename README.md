@@ -27,6 +27,10 @@ models:
     brain:
       provider: openai
       model: gpt-5.6-luna
+      params:
+        # A reasoning model answering with function tools on chat completions
+        # needs this exact value, or OpenAI returns 400 on every turn.
+        reasoning_effort: "none"
   speak:
     voice:
       provider: slng

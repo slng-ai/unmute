@@ -11,6 +11,8 @@ models:
     reasoning:
       provider: openai
       model: gpt-5.6-luna
+      params:
+        reasoning_effort: "none"
 ```
 
 SLNG does not serve this role. It provides speech to text and text to speech, so
@@ -21,6 +23,31 @@ the reasoning model is yours to choose.
   allowlist, so a typo surfaces as a provider error at run time. The compile report
   says so on every binding: `(forwarded as-is, not validated)`.
 </Info>
+
+## Why `reasoning_effort` is there
+
+`gpt-5.6-luna` is a reasoning model, and OpenAI rejects a chat completions
+request that carries function tools unless the request also sets
+`reasoning_effort`. Leaving the line out is not the same as leaving the value
+alone: the server applies its own default, and every turn comes back as HTTP
+400. This model takes `none`, `low`, `medium`, `high`, and `xhigh`. It rejects
+`minimal`.
+
+Every example in the repository writes `none`, and so does `unmute init`. Keep
+the line whenever the agent has tools.
+
+<Note>
+  On LiveKit the line matters for a second reason. `livekit-plugins-openai`
+  1.6.10 injects `reasoning_effort="minimal"` by itself for several older ids in
+  the same GPT-5 family, which is the same 400 once the agent has tools. Setting
+  the param yourself is what avoids it.
+</Note>
+
+One authoring line lowers correctly to both targets. LiveKit passes it as a
+constructor argument, `openai.LLM(..., reasoning_effort="none")`. Pipecat's
+settings class has no field for it, so it rides the service's `extra` field,
+`OpenAILLMService.Settings(..., extra={"reasoning_effort": "none"})`, which
+Pipecat merges into the request body as written.
 
 ## Pipecat
 

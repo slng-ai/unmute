@@ -690,9 +690,10 @@ func renderLiveKitV1(name string, data livekitData) ([]byte, error) {
 		return nil, fmt.Errorf("livekit template %s: %w", name, err)
 	}
 	tmpl, err := template.New(name).Funcs(template.FuncMap{
-		"pyq":    pyQuote,
-		"join":   strings.Join,
-		"triple": pyTriple,
+		"pyq":        pyQuote,
+		"join":       strings.Join,
+		"triple":     pyTriple,
+		"mcpTimeout": func() int { return mcpTimeoutSeconds },
 	}).Parse(string(raw))
 	if err != nil {
 		return nil, fmt.Errorf("livekit template %s: %w", name, err)

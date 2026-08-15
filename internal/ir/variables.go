@@ -68,10 +68,20 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 			return err
 		}
 	}
+	// A task prompt is not a session-start site. Both drivers render it when the
+	// task is entered, which is mid-call and after any earlier task has written
+	// its result into the variables (livekit_v1_build.go promptExpr on the task,
+	// pipecat's per-worker render). So a task may name a variable a task assigns:
+	// that is the whole point of `assign:`, and forbidding it left the mapping
+	// with no reader anywhere in the package. A variable still unset at that
+	// moment renders empty, never the word "None", so the prompt can say what
+	// empty means (B: multi-task booked nothing because the appointment task
+	// could not see the customer id, 2026-08-15).
+	assigned := assignedVariables(agent)
 	for _, name := range sortedKeys(pkg.Agent.Tasks) {
 		raw := pkg.Agent.Tasks[name]
 		site := fmt.Sprintf("task %q instructions", name)
-		if err := checkTemplateSite(pkg, agent, raw.Instructions, "", site, pkg.Markdown[raw.Instructions], true); err != nil {
+		if err := checkTemplateSite(pkg, agent, raw.Instructions, "", site, pkg.Markdown[raw.Instructions], true, assigned...); err != nil {
 			return err
 		}
 	}
@@ -98,9 +108,27 @@ func checkTemplates(pkg *packagespec.Package, agent *Agent) error {
 	return nil
 }
 
+// assignedVariables lists every variable a delegate control writes from a task
+// result. They hold no value at session start and a value later in the call.
+func assignedVariables(agent *Agent) []string {
+	var names []string
+	for _, control := range agent.Controls {
+		delegate, ok := control.(*Delegate)
+		if !ok {
+			continue
+		}
+		for variable := range delegate.Assign {
+			names = append(names, variable)
+		}
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
+}
+
 // checkTemplateSite resolves one site's tokens. sessionStart marks a site
-// rendered once before the call begins.
-func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site, value string, sessionStart bool) error {
+// rendered once before the call begins; alsoAllowed names variables that are
+// legal at this site even though they hold no value at session start.
+func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site, value string, sessionStart bool, alsoAllowed ...string) error {
 	for _, ref := range TemplateRefs(value) {
 		where := pkg.Location(file, firstNonBlank(token, "{{"))
 		variable, ok := agent.Variables[ref]
@@ -110,7 +138,7 @@ func checkTemplateSite(pkg *packagespec.Package, agent *Agent, file, token, site
 			}
 			return fmt.Errorf("%s: %s references {{%s}}, which is not a declared variable", where, site, ref)
 		}
-		if sessionStart && !hasSessionStartValue(variable) {
+		if sessionStart && !hasSessionStartValue(variable) && !slices.Contains(alsoAllowed, ref) {
 			return fmt.Errorf("%s: %s references {{%s}}, which has no value when the prompt is built; give it source: call_start, a system source, or a default", where, site, ref)
 		}
 	}

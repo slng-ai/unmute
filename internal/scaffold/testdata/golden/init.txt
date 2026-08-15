@@ -42,6 +42,11 @@ models:
       description: default reasoning model
       provider: openai
       model: "gpt-5.6-luna"
+      # Forwarded to the provider as written. A reasoning model answering with
+      # function tools on chat completions needs this exact value, or OpenAI
+      # returns 400 on every turn.
+      params:
+        reasoning_effort: none
   speak:
     assistant_voice:
       description: default voice

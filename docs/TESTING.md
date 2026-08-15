@@ -14,15 +14,28 @@ make test     # L1–L3, zero Python
 make smoke    # L4, needs uv (opt-in)
 ```
 
+Green here means the compiler is correct on paper. To hear it, run an example
+against the binary you just built: see
+[Run an example from the local build](#run-an-example-from-the-local-build).
+
 If all five are clean, the tree is green. `make test` is the required gate;
 `make smoke` is opt-in (needs Python via `uv`).
 
 ## Prerequisites
 
-- Go 1.24 (pinned in `go.mod`).
+- Go 1.26 (pinned in `go.mod`).
 - `golangci-lint` for `make lint`.
-- `uv` for `make smoke` and any manual `py_compile` / `unmute dev` run
+- `uv` for `make smoke`, any manual `py_compile`, and `unmute dev --console`
   (https://docs.astral.sh/uv/). The default `make test` gate needs no Python.
+
+Only needed when you run an example for real (see
+[Run an example from the local build](#run-an-example-from-the-local-build)):
+
+- Docker with the Compose plugin, for `unmute dev` in the browser and for
+  `unmute dev --telephony`.
+- `cloudflared`, for `unmute dev --telephony` only. macOS: `brew install
+  cloudflared`.
+- Node 20 or newer, for the docs site preview (`make docs`).
 
 ## Build
 
@@ -228,6 +241,221 @@ Compile a single target when a package declares several:
 bin/unmute compile "$agent" --target pipecat-dev
 ```
 
+## Run an example from the local build
+
+Every directory under `examples/` is a real package. Running one against the
+binary you just built is how a compiler change becomes visible in a live call
+instead of only in a golden file. The loop is: build, pick an example, give it
+keys, validate, compile, talk to it.
+
+### 1. Build and pick an example
+
+```sh
+make build
+UNMUTE="$PWD/bin/unmute"        # absolute path, so it still works after `cd`
+EXAMPLE=salon-support           # any directory under examples/
+cd "examples/$EXAMPLE"
+```
+
+`bin/unmute` is a relative path, so it stops resolving the moment you `cd` into
+the example. Capture it as an absolute path first, or stay at the repository
+root and pass `examples/$EXAMPLE` as the argument to every command instead.
+
+Start with `salon-support`: browser audio, local Python tools, no carrier and no
+third service, so two model keys is the whole setup. `examples/README.md` says
+what each of the other packages teaches.
+
+### 2. Give the example its keys
+
+`unmute dev` reads `.env` from the current directory first, then the package
+root, and later files win. Working inside the example directory makes those the
+same file, so one copy is enough:
+
+```sh
+cp ../../.env .env              # or ../../.env.example, then fill it in
+```
+
+The repository-root `.env.example` is a menu of names for every example. The
+exact list for one target is written by compile to
+`build/<target>/.env.example`. `.env` is gitignored at every level, so a
+filled-in copy is never committed.
+
+Validate and compile need no keys at all: a package stores environment variable
+names, never values. Only `dev` reads real credentials.
+
+### 3. Validate and compile
+
+```sh
+"$UNMUTE" validate .
+"$UNMUTE" compile .
+find build -type f | sort
+```
+
+`validate` prints one line per declared target and exits 0. Warnings go to
+stderr and stay exit 0; a gated feature fails and exits 1. `compile` writes
+`build/<target>/` for every target, one directory each, plus the deterministic
+`build/<target>/compile-report.json`.
+
+Compiling here is safe for git: `examples/*/build/` is gitignored, and the
+hygiene test that forbids committed build output under `examples/` asks
+`git ls-files`, not the filesystem.
+
+Pick one target when the package declares several:
+
+```sh
+"$UNMUTE" compile . --target pipecat
+```
+
+### 4. Talk to it: web, console, telephony
+
+Three ways to run, one flag apart. All three compile first, so there is no need
+to run `compile` before `dev`. Every one of them takes `--target <name>`, which
+is required when the package declares more than one target and you have no TTY
+to pick from.
+
+**Web (the default).** Needs Docker.
+
+```sh
+"$UNMUTE" dev . --target pipecat
+```
+
+It builds and starts the deployable container, serves one WebRTC page on
+`http://localhost:8765`, and opens the browser. Both providers use the same
+page. Useful flags:
+
+```sh
+"$UNMUTE" dev . --target pipecat --port 8900 --bot-port 7900
+"$UNMUTE" dev . --target pipecat --no-open      # print the URL, open nothing
+"$UNMUTE" dev . --target pipecat --verbose      # follow container logs on stderr
+```
+
+Without `--verbose` the container and agent logs go to the log file only, and
+the run prints where it is.
+
+**Console.** Needs `uv`. No Docker, no browser, no dev server.
+
+```sh
+"$UNMUTE" dev . --console --target pipecat
+"$UNMUTE" dev . --console --target livekit
+```
+
+The agent takes the terminal and uses the local microphone and speaker.
+`--port`, `--bot-port` and `--no-open` are ignored in this mode. If any model
+binding routes through LiveKit Inference, console still needs
+`LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` in `.env`, because Inference is
+billed through LiveKit Cloud even though console never joins a room. Bind
+native providers plus local turn detection to run console with no LiveKit
+credentials.
+
+**Telephony.** Needs Docker, `cloudflared`, and real carrier credentials. Only
+packages with a phone channel and a resolvable local route can run it.
+
+```sh
+# inbound: the CLI opens a tunnel, points the number's webhook at it, and
+# prints `call +1...`. ctrl-c restores the number's previous configuration.
+"$UNMUTE" dev . --telephony --target pipecat
+
+# outbound: the agent dials you
+"$UNMUTE" dev . --telephony --target livekit --to +15551234567
+
+# supply the public origin yourself instead of the managed tunnel
+"$UNMUTE" dev . --telephony --target pipecat --public-url https://your.host
+
+# leave the carrier's webhook configuration untouched and point it yourself
+"$UNMUTE" dev . --telephony --target pipecat --no-webhook
+```
+
+`--public-url`, `--to` and `--no-webhook` all require `--telephony`, and
+`--console` and `--telephony` cannot be combined. Each of those is rejected
+before any tunnel, Docker or carrier call happens.
+
+Which example runs which telephony route:
+
+| Example | Target | Route | Local `dev --telephony` |
+|---|---|---|---|
+| `twilio-telephony-hello` | `pipecat` | `cloud-websocket`, Twilio | inbound, yes. Outbound runs against the deployed agent, so `--to` refuses |
+| `twilio-telephony-hello` | `livekit` | `sip`, Twilio | outbound with `--to`, yes. Inbound is a deploy exercise |
+| `pipecat-human-transfer-twilio` | `pipecat` | `cloud-websocket`, Twilio | yes |
+| `livekit-human-transfer` | `livekit` | `sip`, Twilio | yes |
+| `outbound-reminder` | `pipecat` / `livekit` | `carrier-websocket` / `connector`, Twilio | yes |
+| `pipecat-human-transfer-daily` | `pipecat` | `daily-sip` | no. Daily carries the call to a deployed agent, so the command refuses by name and points you at web, console, or the emitted README |
+| everything else | any | no phone channel | no. The command says the target has no resolved telephony route |
+
+Every other example runs in web and console mode. Per-package detail, including
+what to expect on a real call, is in each example's own `README.md`.
+
+**Seed input variables** for a package that reads a dispatch payload, such as
+`outbound-reminder`:
+
+```sh
+"$UNMUTE" dev . --target pipecat --var customer_id=cus_1042 --var name=Ada
+```
+
+`--var` is repeatable and is the local stand-in for the dispatch payload. It
+works in all three modes.
+
+### 5. Sweep every example
+
+Validate and compile the whole set before claiming a compiler change is safe.
+From the repository root:
+
+```sh
+make build
+for d in examples/*/; do
+  echo "== $d"
+  bin/unmute validate "$d" || echo "FAILED: $d"
+done
+for d in examples/*/; do bin/unmute compile "$d" >/dev/null || echo "FAILED: $d"; done
+```
+
+There is also an automated version of this, one layer past the smoke tests.
+`TestExampleSweep` (L5) compiles every example, compares the result against a
+baseline tree byte for byte, then drives each browser-runnable example through
+`unmute dev` until the agent's voice actually arrives. Like L4 it is opt-in,
+behind its own build tag, and out of the PR gate:
+
+```sh
+go test -tags sweep ./internal/cli/... -run TestExampleSweep -timeout 90m
+```
+
+It needs `ruff`, a baseline tree in `UNMUTE_SWEEP_BASELINE`, and real keys; it
+blocks rather than fails when its tooling is absent. Telephony examples are
+compile-only there, so a carrier route is still tested by hand with the
+`--telephony` commands above. Contract:
+`specs/011-complexity-cleanup/contracts/sweep-report.md`.
+
+## Preview the docs site
+
+The public documentation in `docs-site/` is a Mintlify project. Preview it with
+Node 20 or newer:
+
+```sh
+make docs        # == cd docs-site && npx --yes mint dev --no-open
+```
+
+It serves http://localhost:3000. The CLI is named `mint` now; `mintlify dev`
+still works as an alias on older installs, but `mint` is what the Makefile and
+`docs-site/README.md` use.
+
+Run the two checks before committing a docs change:
+
+```sh
+cd docs-site
+npx --yes mint validate        # configuration and page checks
+npx --yes mint broken-links    # every internal link resolves
+```
+
+Install it once if you would rather not go through `npx` each time:
+
+```sh
+npm i -g mint
+cd docs-site && mint dev
+```
+
+Pages are `.mdx` files; the sidebar order is `navigation.groups` in
+`docs-site/docs.json`, and a new page ships only when it is listed there. The
+rules the site is written under are in `docs-site/README.md`.
+
 ## Current command surface
 
 Implemented: `init`, `validate`, `compile`, `dev`.
@@ -247,3 +475,7 @@ Implemented: `init`, `validate`, `compile`, `dev`.
 | Unit + golden | `make test` | all packages `ok` |
 | Python validity | `make smoke` | `ok` (or skipped if no `uv`) |
 | End-to-end | init → validate → compile → py_compile | `bot.py: valid Python` |
+| Example, web | `bin/unmute dev examples/salon-support --target pipecat` | the page at `:8765` connects and the agent answers |
+| Example, console | `bin/unmute dev --console examples/salon-support --target pipecat` | the terminal takes the mic and the agent answers |
+| Example, telephony | `bin/unmute dev --telephony examples/twilio-telephony-hello --target pipecat` | the printed number rings and the agent greets you |
+| Docs site | `make docs` | http://localhost:3000 serves; `mint broken-links` is clean |
