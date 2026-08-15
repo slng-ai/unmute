@@ -108,7 +108,7 @@ even opens.
 **Purpose**: land the PR, tag, and verify each channel per quickstart.md.
 Merge and tag are maintainer actions.
 
-- [ ] T016 Commit and open the PR: `git add -A && git commit -m "feat(release): open the Scoop and winget channels"`, push, `gh pr create --fill`, then `gh pr checks --watch` (the release-config job green re-proves FR-007 in CI)
+- [X] T016 Commit and open the PR: `git add -A && git commit -m "feat(release): open the Scoop and winget channels"`, push, `gh pr create --fill`, then `gh pr checks --watch` (the release-config job green re-proves FR-007 in CI)
 - [ ] T017 Maintainer merges: `gh pr merge --squash --delete-branch`, then `git checkout main && git pull`
 - [ ] T018 Prove the flips are on origin/main with the three greps in quickstart.md step 3 (scoops `"auto"`, winget `"auto"`/`slng-ai`/`GH_PAT_WINGET`, workflow env line)
 - [ ] T019 Maintainer tags and pushes v0.1.3 per quickstart.md step 4 (annotated, `--cleanup=verbatim`, read back before pushing), then watches the run
