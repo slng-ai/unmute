@@ -45,11 +45,6 @@ type Result struct {
 // ActionHandler runs an existing CLI action and writes its report.
 type ActionHandler func(action, path string, out io.Writer) error
 
-// Run displays the console without writing files.
-func Run(in io.Reader, out io.Writer, accessible bool) (Result, error) {
-	return RunConsole(in, out, accessible, nil)
-}
-
 // RunConsole displays Home with optional in-process maintenance actions.
 func RunConsole(in io.Reader, out io.Writer, accessible bool, actions ActionHandler) (Result, error) {
 	return runWithStart(in, out, accessible, false, actions)

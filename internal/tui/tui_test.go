@@ -39,7 +39,7 @@ func TestRunCreateDefaults(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
 	// 1=create, name=agent, 7=Create agent, ""=confirm default (yes).
-	got, err := Run(strings.NewReader("1\nagent\n7\n\n"), &output, true)
+	got, err := RunConsole(strings.NewReader("1\nagent\n7\n\n"), &output, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestRunCreateDefaults(t *testing.T) {
 }
 
 func TestRunQuit(t *testing.T) {
-	got, err := Run(strings.NewReader("3\n"), &bytes.Buffer{}, true)
+	got, err := RunConsole(strings.NewReader("3\n"), &bytes.Buffer{}, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestV49AccessibleModeDrivesEveryScreen(t *testing.T) { // docs/spec/tui.md 
 	t.Chdir(t.TempDir())
 	// Home -> create -> name -> Create agent -> confirm, all by numbered input,
 	// zero TTY and zero Python.
-	got, err := Run(strings.NewReader("1\nagent\n7\n\n"), &bytes.Buffer{}, true)
+	got, err := RunConsole(strings.NewReader("1\nagent\n7\n\n"), &bytes.Buffer{}, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +516,7 @@ func TestV24DistributorRowAppearsOnlyForMultipleRoutes(t *testing.T) { // docs/s
 func TestRunCompileToggle(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// 1=create, name, 6=toggle compile on, 7=Create agent, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n6\n7\n\n"), &bytes.Buffer{}, true)
+	got, err := RunConsole(strings.NewReader("1\nagent\n6\n7\n\n"), &bytes.Buffer{}, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +529,7 @@ func TestRunSelectTarget(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
 	// Create, name, Target, LiveKit, Create agent, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n1\n1\n2\n7\n\n"), &output, true)
+	got, err := RunConsole(strings.NewReader("1\nagent\n1\n1\n2\n7\n\n"), &output, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +544,7 @@ func TestRunSelectTarget(t *testing.T) {
 func TestRunEditModels(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// Create, name, Models, Speak, edit model/voice/config rows, Back, Create, confirm.
-	got, err := Run(strings.NewReader("1\nagent\n2\n3\n1\n1\n2\n1\n3\nsonic-3\n4\nvoice-id\n6\n{\"speed\":1}\n7\n5\n7\n\n"), &bytes.Buffer{}, true)
+	got, err := RunConsole(strings.NewReader("1\nagent\n2\n3\n1\n1\n2\n1\n3\nsonic-3\n4\nvoice-id\n6\n{\"speed\":1}\n7\n5\n7\n\n"), &bytes.Buffer{}, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +593,7 @@ func TestRunAddVariableAndTool(t *testing.T) {
 		"4\n1\n2\nlookup_customer\n1\nLook up the caller\n3\nLOOKUP_URL\n8\n4\n" +
 		"7\n\n"
 	var output bytes.Buffer
-	got, err := Run(strings.NewReader(input), &output, true)
+	got, err := RunConsole(strings.NewReader(input), &output, true, nil)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, output.String())
 	}
@@ -921,7 +921,7 @@ func TestV21PreflightFailureUsesDedicatedScreen(t *testing.T) { // docs/spec/tui
 func TestRunHandoffsRequireTwoAgents(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
-	got, err := Run(strings.NewReader("1\nagent\n5\n2\n1\n7\n\n"), &output, true)
+	got, err := RunConsole(strings.NewReader("1\nagent\n5\n2\n1\n7\n\n"), &output, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -937,7 +937,7 @@ func TestRunAddAgentAndHandoff(t *testing.T) {
 		"5\n2\n1\nto_billing\n3\nCaller asks about billing.\n7\n3\n" +
 		"7\n\n"
 	var output bytes.Buffer
-	got, err := Run(strings.NewReader(input), &output, true)
+	got, err := RunConsole(strings.NewReader(input), &output, true, nil)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, output.String())
 	}
@@ -952,7 +952,7 @@ func TestRunAddAgentAndHandoff(t *testing.T) {
 func TestRunTaskGroupsRequireTasks(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
-	if _, err := Run(strings.NewReader("1\nagent\n5\n4\n1\n7\n\n"), &output, true); err != nil {
+	if _, err := RunConsole(strings.NewReader("1\nagent\n5\n4\n1\n7\n\n"), &output, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "Create at least one task first") {
@@ -966,7 +966,7 @@ func TestRunAddTaskAndOrderedGroup(t *testing.T) {
 		"5\n3\n1\ncollect\n7\nClassify the caller.\n10\n3\n" +
 		"5\n4\n1\ntriage\n6\nRun triage.\n8\n3\n" +
 		"7\n\n"
-	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
+	got, err := RunConsole(strings.NewReader(input), &bytes.Buffer{}, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -981,7 +981,7 @@ func TestRunAddTaskAndOrderedGroup(t *testing.T) {
 func TestRunHumanTransfersRequireTelephony(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
-	if _, err := Run(strings.NewReader("1\nagent\n4\n3\n1\n7\n\n"), &output, true); err != nil {
+	if _, err := RunConsole(strings.NewReader("1\nagent\n4\n3\n1\n7\n\n"), &output, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "Add a telephony caller channel first") {
@@ -1006,7 +1006,7 @@ func TestRunTelephonyCreateGatedOnConnection(t *testing.T) {
 		"4\n3\n1\nto_human\n2\nCaller requests a person.\n3\nsupport_line\n4\nSUPPORT_PHONE_NUMBER\n8\n3\n" +
 		"7\n10\n8\n3\n"
 	var output bytes.Buffer
-	got, _ := Run(strings.NewReader(input), &output, true)
+	got, _ := RunConsole(strings.NewReader(input), &output, true, nil)
 	if got.Confirmed {
 		t.Fatalf("telephony agent must not be created on a route that cannot receive calls: %#v", got.Agent.Data)
 	}
@@ -1018,7 +1018,7 @@ func TestRunTelephonyCreateGatedOnConnection(t *testing.T) {
 func TestRunCustomizeCapacity(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n3\n4\n3\n2\n10\n1\n5\n3\n4m\n4\n5\n7\n\n"
-	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
+	got, err := RunConsole(strings.NewReader(input), &bytes.Buffer{}, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1032,7 +1032,7 @@ func TestV20BackPreservesPriorEdits(t *testing.T) { // docs/spec/tui.md V20
 	// Edit greeting (Behavior), then open Instructions and Back out unchanged;
 	// the greeting edit must survive.
 	input := "1\nagent\n3\n2\nEdited greeting\n3\n1\n:back\n7\n\n"
-	got, err := Run(strings.NewReader(input), &bytes.Buffer{}, true)
+	got, err := RunConsole(strings.NewReader(input), &bytes.Buffer{}, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1458,7 +1458,7 @@ func TestValidateDuration(t *testing.T) {
 
 func TestRunEOFAborts(t *testing.T) {
 	t.Chdir(t.TempDir())
-	_, err := Run(strings.NewReader("1\nagent\n"), &bytes.Buffer{}, true)
+	_, err := RunConsole(strings.NewReader("1\nagent\n"), &bytes.Buffer{}, true, nil)
 	if !errors.Is(err, huh.ErrUserAborted) {
 		t.Fatalf("Run() error = %v, want ErrUserAborted", err)
 	}
