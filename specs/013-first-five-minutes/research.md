@@ -305,6 +305,12 @@ Its only observable effect anywhere is the `DAILY_API_KEY` line in the root
 **Decision.** Keep both files, keep both templates, and add one test that
 compiles the scaffolded package and asserts the two agree.
 
+FR-011 originally forbade this, requiring the root file to "derive from the same
+source" and calling two hand-synchronised files unacceptable. That reading was
+too narrow: the objection is to **drift**, not to two templates, and a test that
+fails on drift removes the drift without the refactor. FR-011 now names all
+three acceptable resolutions and points here for which one was taken.
+
 They share no code today: the root file renders
 `internal/scaffold/templates/env.example.tmpl` from `scaffold.Data.RequiredEnv()`
 (pre-spec, wizard struct); the generated one renders the per-driver template
@@ -539,6 +545,53 @@ presented correctly as commented-out optional lines. The only fictional name is
 `UNMUTE_TELEPHONY_BRIDGE_PORT` and `UNMUTE_AGENT_HEALTH_PORT`, one template line
 each, named by no Go code, no document, no test, no golden. They get a line each
 in the emitted README beside the other port knobs.
+
+---
+
+## D14. A hidden name still fails loud, and the failure says where the value comes from
+
+**Decision.** The generated `REQUIRED_ENV` startup check keeps every name it
+needs, including the ones FR-018 hides from `.env.example`. What changes is the
+**message**: a missing locally-supplied name says where the value comes from,
+not only that it is absent.
+
+**The contradiction this resolves.** FR-018 removes `UNMUTE_PUBLIC_URL`,
+`UNMUTE_OUTBOUND_TOKEN`, `REDIS_URL`, and the three `LIVEKIT_*` values from
+`build/<target>/.env.example`, while FR-005b derives `REQUIRED_ENV` from the
+names the compiler knows it requires, which includes all of them. So an operator
+who copies `.env.example` to `.env` and starts the container without
+`unmute dev` gets a refusal naming a variable that file never mentioned.
+
+Pipecat makes it sharpest, because there the agent genuinely reads the value:
+`templates/pipecat_v1/telephony_state.py.tmpl:36` raises
+`RuntimeError("Missing required environment variable: REDIS_URL")`. The Compose
+graph supplies it at `compose.telephony.yaml.tmpl:8`; a hand deploy does not.
+
+**Why the other two answers are worse.**
+
+- *Drop the locally-supplied names from `REQUIRED_ENV`.* The agent then starts
+  and fails later, at the moment a call arrives, on a live phone line. That is
+  the exact trade Principle II names as the worst one: "a loud failure at
+  validate for a quiet one in production".
+- *Put them back in `.env.example`.* Rejected twice by the author, and rightly:
+  a to-do list whose entries are not the reader's to do is not a to-do list.
+
+**So the failure stays loud and stops being unhelpful.** The generated check
+already knows which names are in `LocalEnvironment`, because that is the same
+set FR-018 uses to exclude them. A name in that set gets a message naming its
+source:
+
+```
+Missing required environment variable: REDIS_URL
+This one is supplied for you: `unmute dev` sets it locally, and your platform
+or operator sets it at deploy time. See "Carrier setup" in README.md.
+```
+
+Names the author does supply keep the message they have today, because for those
+the current wording is already right.
+
+This is a message change, not a mechanism change. One template, one branch on a
+set the generator already carries.
 
 ---
 

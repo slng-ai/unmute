@@ -53,8 +53,10 @@ in Docker.
 make test`. Warnings to stderr with exit 0; errors are errors. Emitted behaviour
 changes update four documentation surfaces in the same commit.
 
-**Scale/Scope**: eight defects, eleven examples, five documentation surfaces,
-seventeen agents across three verification waves.
+**Scale/Scope**: seven reproduced defect groups (A to G in reproduction.md),
+eleven examples, five documentation surfaces, seventeen agents across three
+verification waves. The groups are not one defect each: group A covers eight
+declaration shapes, group E covers eight generator-only value checks.
 
 ## Constitution Check
 
@@ -146,17 +148,23 @@ The order is forced by two facts: Parts 1 to 3 change generated output, so
 Part 4 has to follow them; and no fix starts before its reproduction is red,
 which Wave A has already delivered.
 
+Phase numbers below are the same numbers `tasks.md` uses, so a task ID and a
+phase row always agree. The two planning phases that produced this document are
+listed as 0a and 0b because they are complete and carry no tasks.
+
 | Phase | Content | Gate to leave it |
 |---|---|---|
-| 0 | Research and decisions | Every open question in the spec answered or recorded as deferred |
-| 1 | Design artifacts: the message contracts, the reachability model, the quickstart | The exact strings exist to write tests against |
-| 2 | **Red tests** for all eight defects, from Wave A's evidence | Eight tests failing for the right reason |
-| 3 | Part 1 fixes, one commit per defect | Eight tests green; gate green on each commit |
-| 4 | Part 2, the scaffold | `init` then `dev` reaches a greeting on two variables |
-| 5 | Part 3, environment names | Guard test green; generated files stop contradicting `secrets.mdx` |
-| 6 | Part 5, documentation of enforced rules | Every validator error string findable, or listed |
-| 7 | Part 4, every example | Eleven validate, compile, and run |
+| 0a | Research and decisions (`research.md`) | Every open question answered or recorded as deferred. **Complete** |
+| 0b | Design artifacts: message contracts, the reachability model, the quickstart | The exact strings exist to write tests against. **Complete** |
+| 1 | Setup: land on the right base, prove the gate is green | `make fmt lint build test` green at `16289f4`. **Complete** |
+| 2 | **Red tests**, from Wave A's evidence | Sixteen test tasks producing eleven new or changed test functions, every one failing for the reason its name claims |
+| 3 | User Story 1 fixes, one commit per defect group | Groups A to E green; gate green on each commit |
+| 4 | User Story 2, the scaffold | `init` then `dev` reaches a greeting on two variables |
+| 5 | User Story 3, environment names | Guard tests green; generated files stop contradicting `secrets.mdx` |
+| 6 | User Story 5, documentation of enforced rules | Every validator error string findable, or listed |
+| 7 | User Story 4, every example | Eleven validate, compile, and run |
 | 8 | Wave B and Wave C verification | Raw counts recorded in `results.md` |
+| 9 | Polish: `make smoke`, ponytail comments, close the 011 defects | Final gate green, zero lint issues |
 
 The four-surface rule applies inside every phase, not at the end: the skill
 bundle moves in the same commit as the behaviour it describes.

@@ -565,6 +565,17 @@ owns the field the error names.
   is absent, and when a name is left undeclared it drops out of the startup
   check too. Either the check is generated from the names the compiler knows it
   requires, or the documentation is amended to say the startup check is opt-in.
+- **FR-005c**: `REQUIRED_ENV` MUST keep every name the runtime needs, including
+  the ones FR-018 hides from `build/<target>/.env.example`. Dropping them would
+  move the failure from container start to the moment a call arrives, which is
+  the trade Principle II names as the worst one. Instead, the **message**
+  changes: a missing name that is in `LocalEnvironment` MUST say where the value
+  comes from, not only that it is absent, so a reader who never saw it in the
+  env file is not left guessing. Names the author does supply keep their current
+  wording. Without this, FR-018 and FR-005b contradict each other, and Pipecat
+  proves it: `templates/pipecat_v1/telephony_state.py.tmpl:36` raises on a
+  missing `REDIS_URL` that the Compose graph supplies and a hand deploy does
+  not.
 - **FR-006**: A generated Pipecat container MUST include the local tool modules
   the generated `bot.py` imports, in every branch of the container definition
   that can carry local tools, and MUST NOT include them when the package has
@@ -637,10 +648,15 @@ owns the field the error names.
   do not need, and MUST NOT list a credential the package's own generated build
   does not require. The scaffolded package MUST compile and run with no
   credential beyond `OPENAI_API_KEY` and `SLNG_API_KEY`.
-- **FR-011**: The package-root `.env.example`, if it survives, MUST derive from
-  the same source as `build/<target>/.env.example` rather than being kept in
-  sync by hand. Deleting it is an acceptable resolution; keeping two
-  hand-synchronised files is not.
+- **FR-011**: The package-root `.env.example` MUST NOT be kept in sync with
+  `build/<target>/.env.example` by hand. Three resolutions are acceptable:
+  derive it from the same source, delete it, or **hold the two equal with a
+  test that fails on drift**. The third is what research D9 chooses, because the
+  two files have no shared code today and unifying them means either running the
+  full load-build-generate path at `init` time or emitting into the package
+  root, which are real refactors for a three-line file. Once FR-010 removes the
+  phantom transport the two sets are identical by construction, and the test is
+  the shortest thing that fails if that stops being true.
 - **FR-012**: Exactly one model identifier MUST appear across the scaffold, all
   eleven examples, `docs/`, `docs-site/`, the root `README.md`, and
   `internal/skill/assets/`. A test MUST fail when any surface drifts. The
@@ -821,8 +837,11 @@ owns the field the error names.
   real file or state plainly that it is reduced and what was removed.
 - **FR-027**: Every example's `README.md` MUST be true after this feature's
   fixes, MUST name every `transport` its targets declare, and every link out of
-  it MUST resolve. An example that teaches nothing MUST be deleted rather than
-  maintained, and the deletion recorded with its reason.
+  it MUST resolve. An example whose row in `examples/README.md` makes no claim
+  another row does not already make MUST be deleted rather than maintained, and
+  the deletion recorded with its reason. That row-uniqueness test is the bar,
+  because it is the one a reader actually applies when choosing an example, and
+  it is checkable without judgement.
 
 **Documented rules (User Story 5)**
 
@@ -880,9 +899,14 @@ owns the field the error names.
 
 ### Measurable Outcomes
 
-- **SC-001**: Each of the eight defects has one test that fails on the commit
-  before its fix and passes on the commit after. Reported as 8 of 8, or the
-  number actually achieved.
+- **SC-001**: Each of the **seven reproduced defect groups**, lettered A to G in
+  [reproduction.md](./reproduction.md), has at least one test that fails on the
+  commit before its fix and passes on the commit after. Reported as 7 of 7, or
+  the number actually achieved. The groups are not one defect each: group A
+  covers eight declaration shapes and group E covers eight generator-only value
+  checks, which is why Phase 2 carries sixteen test tasks producing eleven new
+  or changed test functions. Counting tests rather than groups is the honest
+  measure, so both numbers are reported.
 - **SC-002**: Zero packages exist that exit 0 from both `validate` and `compile`
   while a declared control, destination, tool, task, or task group is absent
   from the generated project. Measured by two adversarial agents whose only job
@@ -916,13 +940,17 @@ owns the field the error names.
   On the Pipecat side `REDIS_URL` leaves an eight-name list, and on outbound
   routes `UNMUTE_PUBLIC_URL` and `UNMUTE_OUTBOUND_TOKEN` leave too.
   `required_env` in `compile-report.json` still names every one of them.
+- **SC-006b**: Zero variables that configure a vendor's own component carry an
+  `UNMUTE_` prefix. Measured as five renames: two Daily knobs and three LiveKit
+  host-port mappings.
 - **SC-006c**: Zero names appear in one target's env file that the equivalent
   package's other target treats differently. Today `REDIS_URL` is labelled
   "supplied for you" on LiveKit and rendered as a bare fill-in on Pipecat, from
   the same `LocallySuppliedEnvironment` data.
-- **SC-006b**: Zero variables that configure a vendor's own component carry an
-  `UNMUTE_` prefix. Measured as five renames: two Daily knobs and three LiveKit
-  host-port mappings.
+- **SC-006d**: A container started from a hand-written `.env` copied out of
+  `build/<target>/.env.example` either runs, or refuses with a message naming
+  where the missing value comes from. It never refuses naming a variable the env
+  file did not mention and the message does not explain.
 - **SC-007**: All eleven examples validate and compile cleanly for every target
   they declare, and every browser-only one reaches a greeting. Reported as a
   count out of eleven.

@@ -29,6 +29,41 @@
 - [x] Feature meets measurable outcomes defined in Success Criteria
 - [x] No implementation details leak into specification
 
+## Cross-artifact analysis, 2026-08-15
+
+A `/speckit-analyze` pass over spec, plan, and tasks found twelve issues, zero
+of them constitutional violations, and all twelve were remediated. The two that
+mattered:
+
+**A real design contradiction between two accepted clarifications.** FR-018
+hides names from `build/<target>/.env.example` while FR-005b derives
+`REQUIRED_ENV` from the names the runtime requires, which includes them. An
+operator copying the env file and starting the container without `unmute dev`
+would get a refusal naming a variable the file never mentioned. Pipecat made it
+sharpest, because there the agent genuinely reads `REDIS_URL` and raises on it.
+Resolved by research D14 and FR-005c: the check keeps every name, and the
+message changes so a locally-supplied name says where the value comes from.
+Dropping the names from `REQUIRED_ENV` was rejected because it would move the
+failure to the moment a call arrives, which Principle II names as the worst
+trade available.
+
+**Eight parallel-marker collisions.** Twelve tasks carried `[P]` while sharing a
+file with another `[P]` task, including a Parallel Opportunities line that
+asserted "T043, T047, T048, and T051 touch different trees" which T043's own
+description contradicted. The recurring shape was "add a case to the same test"
+tasks marked parallel with the task that creates that test. All corrected, and
+the remaining eight `[P]` tasks in Phase 2 are in eight distinct files.
+
+The other ten were smaller: FR-011 forbade the resolution research D9 had
+already chosen (now permits all three, and D9 records why the narrow reading was
+wrong), three artifacts disagreed on the defect count (now seven reproduced
+groups, eleven test functions, sixteen test tasks, each stated where it belongs),
+FR-027's "teaches nothing" bar was unmeasurable (now row-uniqueness in
+`examples/README.md`), T062 gave no method for enumerating validator errors (now
+the Wave A method, because static enumeration alone found thirteen unreachable
+sites), FR-007c's `docs-site/` half had no task (now T032a), the success criteria
+were out of order, and the plan's phase numbers did not line up with the tasks'.
+
 ## Notes
 
 **On "no implementation details".** This is a defect-fixing feature, so the

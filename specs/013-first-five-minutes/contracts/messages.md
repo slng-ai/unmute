@@ -204,6 +204,33 @@ That is `route.ManualSteps` in `internal/target/telephony.go`, already emitted
 today. `required_env` in `compile-report.json` stays complete as the
 machine-readable form. Hiding is not deleting.
 
+### The startup check, when the missing name was never shown
+
+Hiding a name from `.env.example` does not remove it from `REQUIRED_ENV`, so the
+message has to carry what the file no longer does. Two shapes, chosen by whether
+the name is in `LocalEnvironment`.
+
+Author-set name, unchanged from today:
+
+```
+Missing required environment variable: OPENAI_API_KEY
+```
+
+Locally-supplied name, new:
+
+```
+Missing required environment variable: REDIS_URL
+This one is supplied for you: `unmute dev` sets it locally, and your platform
+or operator sets it at deploy time. See "Carrier setup" in README.md.
+```
+
+Pipecat is the case that forces this. `templates/pipecat_v1/telephony_state.py.tmpl:36`
+already raises `RuntimeError("Missing required environment variable: REDIS_URL")`,
+the Compose graph supplies the value at `compose.telephony.yaml.tmpl:8`, and a
+hand-written `.env` copied from `.env.example` does not. Dropping the name from
+`REQUIRED_ENV` instead would move the failure from container start to the moment
+a call arrives, which Principle II names as the worst trade available.
+
 ### The classification is already in the code
 
 `internal/target/telephony.go` carries `LocallySuppliedEnvironment` per route,
