@@ -3,8 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -115,14 +113,7 @@ func mintLiveKitSIPAdminToken(apiKey, apiSecret string, now time.Time) (string, 
 		} `json:"sip"`
 	}{Iss: apiKey, Nbf: now.Unix(), Exp: now.Add(10 * time.Minute).Unix()}
 	claims.SIP.Admin = true
-	payload, err := json.Marshal(claims)
-	if err != nil {
-		return "", err
-	}
-	signingInput := b64url([]byte(`{"alg":"HS256","typ":"JWT"}`)) + "." + b64url(payload)
-	mac := hmac.New(sha256.New, []byte(apiSecret))
-	mac.Write([]byte(signingInput))
-	return signingInput + "." + b64url(mac.Sum(nil)), nil
+	return signJWT(apiSecret, claims)
 }
 
 type sipAdminClient struct {
@@ -210,12 +201,20 @@ func (c *sipAdminClient) ensureRecord(ctx context.Context, listMethod, createMet
 	return createdID, false, nil
 }
 
+// call posts to the SIP service, the only one most of this file talks to.
 func (c *sipAdminClient) call(ctx context.Context, method string, payload, result any) error {
+	return c.callService(ctx, "livekit.SIP", method, payload, result)
+}
+
+// callService is one Twirp request: JSON body, bearer token, JSON reply. The
+// service name is the only thing that ever varies between the two endpoints
+// this package uses.
+func (c *sipAdminClient) callService(ctx context.Context, service, method string, payload, result any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/twirp/livekit.SIP/"+method, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/twirp/"+service+"/"+method, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -331,30 +330,13 @@ func mintLiveKitDispatchToken(apiKey, apiSecret string, now time.Time) (string, 
 		} `json:"video"`
 	}{Iss: apiKey, Nbf: now.Unix(), Exp: now.Add(10 * time.Minute).Unix()}
 	claims.Video.RoomAdmin = true
-	payload, err := json.Marshal(claims)
-	if err != nil {
-		return "", err
-	}
-	signingInput := b64url([]byte(`{"alg":"HS256","typ":"JWT"}`)) + "." + b64url(payload)
-	mac := hmac.New(sha256.New, []byte(apiSecret))
-	mac.Write([]byte(signingInput))
-	return signingInput + "." + b64url(mac.Sum(nil)), nil
+	return signJWT(apiSecret, claims)
 }
 
-// callDispatch posts to the AgentDispatchService Twirp endpoint. Separate from
-// call() because that one is hardwired to the livekit.SIP service path.
+// callDispatch posts to the AgentDispatchService, which is the same request
+// against a different service name.
 func (c *sipAdminClient) callDispatch(ctx context.Context, method string, payload, result any) error {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/twirp/livekit.AgentDispatchService/"+method, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Authorization", "Bearer "+c.token)
-	request.Header.Set("Content-Type", "application/json")
-	return doTelephonyJSON(request, result)
+	return c.callService(ctx, "livekit.AgentDispatchService", method, payload, result)
 }
 
 // telephonyInfraServices is the Compose graph minus the application: the

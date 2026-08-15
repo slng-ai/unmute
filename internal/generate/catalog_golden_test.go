@@ -42,10 +42,6 @@ func TestCatalogResolutionGolden(t *testing.T) {
 			continue
 		}
 		binding, vendorLabel := sampleBinding(entry)
-		envRef := pipecatEnvRef
-		if entry.Framework == targetcap.LiveKit {
-			envRef = livekitEnvRef
-		}
 		env := newEnvSet()
 		// Language is per-model (N16) and gated where the entry has no slot;
 		// exercise it only on entries that expose one.
@@ -53,7 +49,7 @@ func TestCatalogResolutionGolden(t *testing.T) {
 			entry.Call != nil && entry.Call.Language.Arg != "" && !entry.Call.NoLanguage {
 			binding.Language = "es-MX"
 		}
-		call, resolved, err := resolveService(defaultCatalog, entry.Framework, entry.Role, binding, envRef, env)
+		call, resolved, err := resolveService(entry.Framework, entry.Role, binding, env)
 		if err != nil {
 			t.Errorf("%s %s %s: resolve: %v", entry.Framework, entry.Role, entry.Vendor, err)
 			continue
@@ -106,13 +102,9 @@ func TestLanguageLoweringUsesCataloguedSlot(t *testing.T) {
 		{"target override", targetcap.Pipecat, targetcap.Listen, ir.Binding{Provider: "deepgram", Model: "nova-3", Params: map[string]any{"language": "multi"}}, "es-MX", `"multi"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			envRef := pipecatEnvRef
-			if tc.framework == targetcap.LiveKit {
-				envRef = livekitEnvRef
-			}
 			binding := tc.binding
 			binding.Language = tc.agentLang // per-model language (N16)
-			call, _, err := resolveService(defaultCatalog, tc.framework, tc.role, binding, envRef, newEnvSet())
+			call, _, err := resolveService(tc.framework, tc.role, binding, newEnvSet())
 			if err != nil {
 				t.Fatal(err)
 			}

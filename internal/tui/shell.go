@@ -20,7 +20,10 @@ import (
 
 // ---- flow <-> model protocol ----
 
-type shellRequest interface{}
+// ponytail: an alias, not a defined type. It was `interface{}`, which is the
+// hand-spelled `any`; the name is kept because `chan shellRequest` reads better
+// at its six use sites than `chan any` does.
+type shellRequest = any
 
 type requestMsg struct {
 	request shellRequest

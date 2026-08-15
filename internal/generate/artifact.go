@@ -3,6 +3,8 @@ package generate
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/slng-ai/unmute/internal/ir"
@@ -129,3 +131,75 @@ func artifactKind(provider ir.Provider) ArtifactKind {
 		return ""
 	}
 }
+
+// --- facts both code drivers share -----------------------------------------
+
+// checkVersion rejects a framework version outside a driver's template-compatible
+// range. Both code drivers ask the same question in the same words, so they ask
+// it here; only the driver name and its two bounds differ.
+func checkVersion(driver, version string, pattern *regexp.Regexp, major, minMinor int) error {
+	if version == "" {
+		return fmt.Errorf("%s target requires a framework version", driver)
+	}
+	match := pattern.FindStringSubmatch(version)
+	if match == nil {
+		return fmt.Errorf("%s version %q is not a semantic version", driver, version)
+	}
+	gotMajor, _ := strconv.Atoi(match[1])
+	gotMinor, _ := strconv.Atoi(match[2])
+	if gotMajor != major || gotMinor < minMinor {
+		return fmt.Errorf("%s version %q is outside the driver's template-compatible range (>=%d.%d, <%d.0)", driver, version, major, minMinor, major+1)
+	}
+	return nil
+}
+
+// envRef renders the environment-lookup idiom the emitted Python uses. Both
+// drivers emit the same expression, so there is one of it.
+func envRef(name string) string { return "os.environ[" + pyQuote(name) + "]" }
+
+// primitiveTypes is the one place a schema primitive is named. Three different
+// outputs are needed from it — the JSON Schema name, the Python annotation, and
+// the runtime isinstance check — so the table carries three columns and the
+// accessors below stay separate. Merging the outputs themselves would be wrong;
+// what was wrong was writing the key set out five times.
+var primitiveTypes = map[ir.PrimitiveType]struct {
+	json  string
+	py    string
+	check string
+}{
+	ir.PrimitiveBoolean: {"boolean", "bool", "isinstance(value, bool)"},
+	ir.PrimitiveInteger: {"integer", "int", "isinstance(value, int) and not isinstance(value, bool)"},
+	ir.PrimitiveNumber:  {"number", "float", "isinstance(value, (int, float)) and not isinstance(value, bool)"},
+	ir.PrimitiveString:  {"string", "str", "isinstance(value, str)"},
+}
+
+// primitiveString is the fallback row: anything unrecognised is a string, which
+// is what all five original switches did in their default arm.
+var primitiveString = primitiveTypes[ir.PrimitiveString]
+
+func primitiveRow(t ir.PrimitiveType) struct{ json, py, check string } {
+	if row, ok := primitiveTypes[t]; ok {
+		return row
+	}
+	return primitiveString
+}
+
+// jsonType is a primitive's JSON Schema name.
+func jsonType(t ir.PrimitiveType) string { return primitiveRow(t).json }
+
+// pyType is a primitive's Python annotation.
+func pyType(t ir.PrimitiveType) string { return primitiveRow(t).py }
+
+// pyTypeForJSON maps a JSON Schema name back to its Python annotation, for the
+// places that only ever saw the JSON spelling.
+func pyTypeForJSON(name string) string {
+	for _, row := range primitiveTypes {
+		if row.json == name {
+			return row.py
+		}
+	}
+	return primitiveString.py
+}
+
+// livekitTypeCheck is a primitive's runtime isinstance expression.
+func livekitTypeCheck(t ir.PrimitiveType) string { return primitiveRow(t).check }

@@ -393,16 +393,16 @@ func (s *spinner) Stop() {
 	<-s.done
 }
 
-func isTTY(w io.Writer) bool {
-	f, ok := w.(*os.File)
+// isTTY reports whether a stream is a terminal. It takes `any` because callers
+// hand it both writers (spinner, banner) and readers (prompt gating), and the
+// question is about the file underneath either one.
+func isTTY(value any) bool {
+	file, ok := value.(*os.File)
 	if !ok {
 		return false
 	}
-	st, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return st.Mode()&os.ModeCharDevice != 0
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 // selectDevTarget chooses by exact instance name. A single target needs no
@@ -422,7 +422,7 @@ func selectDevTarget(cmd *cobra.Command, root, requested string) (string, error)
 	if requested != "" || len(targets) == 1 {
 		return targets[0].Name, nil
 	}
-	if !isCharDevice(cmd.InOrStdin()) || !isCharDevice(cmd.OutOrStdout()) {
+	if !isTTY(cmd.InOrStdin()) || !isTTY(cmd.OutOrStdout()) {
 		choices := make([]string, 0, len(targets))
 		for _, candidate := range targets {
 			choices = append(choices, fmt.Sprintf("%s (%s)", candidate.Name, candidate.Provider))

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -222,7 +223,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		}
 		if control, ok := pkg.Agent.Controls["run_"+name]; ok {
 			value.When, value.Assign = control.When, jsonText(control.Assign)
-			value.Agent = firstNonempty(owners["run_"+name], "assistant")
+			value.Agent = cmp.Or(owners["run_"+name], "assistant")
 		}
 		data.Tasks = append(data.Tasks, value)
 	}
@@ -231,7 +232,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		value := scaffold.TaskGroup{Name: name, Steps: append([]string(nil), group.Steps...), ContextScope: group.ContextScope, Then: group.Then, ThenTarget: group.ThenTarget, Agent: "assistant"}
 		if control, ok := pkg.Agent.Controls["run_"+name]; ok {
 			value.When = control.When
-			value.Agent = firstNonempty(owners["run_"+name], "assistant")
+			value.Agent = cmp.Or(owners["run_"+name], "assistant")
 		}
 		data.TaskGroups = append(data.TaskGroups, value)
 	}
@@ -240,7 +241,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		control := pkg.Agent.Controls[name]
 		switch control.Kind {
 		case "agent_transfer":
-			value := scaffold.Handoff{Name: name, Source: firstNonempty(owners[name], "assistant"), When: control.When}
+			value := scaffold.Handoff{Name: name, Source: cmp.Or(owners[name], "assistant"), When: control.When}
 			if control.To != nil {
 				value.To = *control.To
 			}
@@ -261,7 +262,7 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 			}
 			data.Handoffs = append(data.Handoffs, value)
 		case "human_transfer":
-			value := scaffold.HumanTransfer{Name: name, Agent: firstNonempty(owners[name], "assistant"), When: control.When}
+			value := scaffold.HumanTransfer{Name: name, Agent: cmp.Or(owners[name], "assistant"), When: control.When}
 			if destination := control.TransferDestination(); destination != "" {
 				value.Destination = destination
 				// Destinations are declared once for the package, in agent.yaml.
