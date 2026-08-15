@@ -12,7 +12,24 @@ lives in a Markdown file next to it, and the runtime choice lives in
 The example this page follows is `examples/simple-prompt` in the repository. It
 declares both targets and runs in the browser.
 
-## The whole agent
+<Tip>
+  **If you want to run something before reading, start with
+  `examples/salon-support`.** It is the smallest package that does something:
+  web audio, local tools, no phone number, no third-party account, two keys. The
+  package below is the one that teaches the file, and `salon-support` is the one
+  that gets you talking in a minute.
+</Tip>
+
+## The agent, reduced
+
+This is `examples/simple-prompt/agent.yaml` reduced, so the blocks this page
+explains are the only ones on screen. Taken out: the five `tools:` and the
+agent's tool list, which [Tools](/build/tools/overview) covers; the `tracing:`
+block and its three `LANGFUSE_*` secrets, which are about traces rather than
+about the agent; and the file's own opening comment. The `targets.yaml` below is
+reduced the same way and its two targets are shown in the order this page
+explains them. Everything else is the file as it is on disk — open the real one
+alongside if you want the whole thing.
 
 ```yaml agent.yaml
 version: 1
@@ -26,8 +43,7 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-4o-mini
-      temperature: 0.2
+      model: gpt-5.6-luna
   speak:
     voice:
       provider: slng
@@ -96,8 +112,7 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-4o-mini
-      temperature: 0.2
+      model: gpt-5.6-luna
 ```
 
 `provider` names the integration; `model` and `voice` are passed to that
@@ -106,7 +121,7 @@ ids, so a typo shows up as a provider error at run time, not at compile time.
 The compile report says so out loud:
 
 ```
-pipecat: binding reason.reasoning provider=openai model=gpt-4o-mini (forwarded as-is, not validated)
+pipecat: binding reason.reasoning provider=openai model=gpt-5.6-luna (forwarded as-is, not validated)
 ```
 
 <Note>

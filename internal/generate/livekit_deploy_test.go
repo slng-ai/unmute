@@ -243,10 +243,14 @@ func TestLiveKitColdTransferSendsAURI(t *testing.T) {
 
 // REDIS_URL and the LIVEKIT_* trio are not the operator's to supply on LiveKit
 // Cloud: the platform injects the trio and drops it from any secrets file, and
-// its managed SIP service owns Redis, which no emitted Python reads. Listing
-// them beside real keys made a deployed agent look as though it needed a Redis
-// it can never use.
-func TestLiveKitEnvExampleSeparatesPlatformSuppliedNames(t *testing.T) {
+// its managed SIP service owns Redis, which no emitted Python reads.
+//
+// They used to be listed under a "Supplied for you, not by you" heading. That
+// was better than listing them beside real keys, and still wrong: `.env.example`
+// is a to-do list, and an entry that is not the reader's to do does not belong
+// on it in any form (FR-018). This test now holds the absence, and the two
+// places the information survives.
+func TestLiveKitEnvExampleOmitsPlatformSuppliedNames(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "livekit-human-transfer"))
 	if err != nil {
 		t.Fatal(err)
@@ -260,22 +264,22 @@ func TestLiveKitEnvExampleSeparatesPlatformSuppliedNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := artifactFile(t, artifact, ".env.example")
-	label := strings.Index(env, "Supplied for you, not by you")
-	if label < 0 {
-		t.Fatal(".env.example does not separate platform-supplied names")
-	}
-	operator, platform := env[:label], env[label:]
 	for _, name := range []string{"REDIS_URL", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"} {
-		if !strings.Contains(platform, name+"=") {
-			t.Errorf("%s is not in the platform-supplied section", name)
-		}
-		if strings.Contains(operator, name+"=") {
-			t.Errorf("%s is still listed as the operator's to set", name)
+		if strings.Contains(env, name) {
+			t.Errorf("%s is still in .env.example, in some form; it is not the reader's to set:\n%s", name, env)
 		}
 	}
 	for _, name := range []string{"BILLING_PHONE_NUMBER", "SUPERVISOR_PHONE_NUMBER", "OPENAI_API_KEY", "SIP_TRUNK_HOSTNAME"} {
-		if !strings.Contains(operator, name+"=") {
+		if !strings.Contains(env, name+"=") {
 			t.Errorf("%s must stay the operator's to set", name)
+		}
+	}
+	// Where the hidden names go instead: prose that says where each value comes
+	// from, which is more useful than a blank line ever was.
+	readme := artifactFile(t, artifact, "README.md")
+	for _, want := range []string{"LIVEKIT_URL", "REDIS_URL"} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README.md does not say where %s comes from", want)
 		}
 	}
 	// The stored outbound trunk is gone from the emitted project entirely

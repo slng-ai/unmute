@@ -1653,7 +1653,13 @@ func TestOpenReportsUnrepresentableFieldPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content = bytes.Replace(content, []byte(`model: "gpt-4.1-mini"`), []byte(`model: "gpt-4.1-mini"`+"\n      endpoint_env: CUSTOM_LLM_URL"), 1)
+	// Anchored on the constant rather than a literal, so a model bump is one edit
+	// in internal/scaffold and this test follows it.
+	anchor := []byte(`model: "` + scaffold.DefaultReasonModel + `"`)
+	if !bytes.Contains(content, anchor) {
+		t.Fatalf("fixture anchor %q not found; the scaffold moved under this test", anchor)
+	}
+	content = bytes.Replace(content, anchor, append(anchor, "\n      endpoint_env: CUSTOM_LLM_URL"...), 1)
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		t.Fatal(err)
 	}

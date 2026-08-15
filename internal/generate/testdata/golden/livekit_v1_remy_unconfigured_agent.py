@@ -113,6 +113,34 @@ When you have all three, record them and finish. Do not quote prices, menus, or 
 
 When this step is complete, call `finish` with: date, headcount, occasion."""
 
+# --- required environment ----------------------------------------------------
+# Everything this agent needs to run: the model providers' keys, the connection
+# to the orchestrator, every address and token a tool or MCP source names, and
+# anything else the package declared. Derived from what the compiler knows it
+# requires rather than from the author's `secrets:` block, so a package that
+# declares nothing still refuses to start without them. A missing one fails the
+# session before the agent answers, rather than at the first tool call.
+#
+# The phone route's own credentials are deliberately absent: one file serves
+# every channel, and demanding carrier credentials would refuse a browser
+# session on a phone package. They are listed in .env.example and the runbook.
+REQUIRED_ENV = [
+    "CHECK_AVAILABILITY_URL",
+    "LIVEKIT_API_KEY",
+    "LIVEKIT_API_SECRET",
+    "LIVEKIT_URL",
+    "OPENAI_API_KEY",
+    "SEND_CONFIRMATION_URL",
+    "SLNG_API_KEY",
+]
+
+
+def require_env() -> None:
+    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
+
+
 # --- shared state ------------------------------------------------------------
 # Typed session state (SCHEMA 4.4): tasks assign into it, transfers read it.
 @dataclass
@@ -352,6 +380,7 @@ server.setup_fnc = prewarm
 
 @server.rtc_session(agent_name="livekit")
 async def entrypoint(ctx: JobContext) -> None:
+    require_env()
     session = AgentSession[Userdata](
         userdata=Userdata(),
         stt=slng.STT(api_key=os.environ["SLNG_API_KEY"], model="slng/deepgram/nova:3-en"),

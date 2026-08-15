@@ -5,16 +5,12 @@ entry_agent: booking_desk
 secrets:
   - OPENAI_API_KEY
   - SLNG_API_KEY
-  - LANGFUSE_BASE_URL
-  - LANGFUSE_PUBLIC_KEY
-  - LANGFUSE_SECRET_KEY
 
 models:
   think:
     reasoning:
       provider: openai
-      model: gpt-4o-mini
-      temperature: 0.2
+      model: gpt-5.6-luna
   speak:
     voice:
       provider: slng
@@ -83,9 +79,6 @@ conversation:
     text: "Hi, this is Sage and Stone Salon. Are you booking or changing an appointment?"
   interruption:
     enabled: true
-
-tracing:
-  provider: langfuse
 
 channels:
   web:

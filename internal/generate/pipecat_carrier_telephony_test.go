@@ -126,7 +126,7 @@ func TestCarrierEnvironmentSplitsAgentSideFromHelperSide(t *testing.T) {
 	// One helper-side name, not two. There is no outbound trigger token because
 	// there is no endpoint here that places a call.
 	helperOnly := []string{"PIPECAT_CLOUD_API_KEY"}
-	optional := []string{"UNMUTE_HOLD_AUDIO_URL", "UNMUTE_DAILY_ROOM_GEO"}
+	optional := []string{"DAILY_HOLD_AUDIO_URL", "DAILY_ROOM_GEO"}
 	agentSide := []string{"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "SIP_TRUNK_HOSTNAME", "DAILY_API_KEY"}
 
 	for _, name := range append(append(slices.Clone(helperOnly), optional...), agentSide...) {

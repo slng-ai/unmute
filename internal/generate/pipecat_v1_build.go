@@ -121,7 +121,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	}
 	// Declared secrets join the startup check; a required one missing fails the
 	// bot before it answers a call (V12).
-	for _, name := range requiredSecretEnv(agent) {
+	for _, name := range requiredSecretEnv(agent, target, env) {
 		env.add(name)
 	}
 	// Snapshot the provider creds before telephony env is added: the web dev
@@ -133,7 +133,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	// in. Without this, giving a package a `secrets:` block would make its
 	// browser session demand carrier credentials, which is the workflow FR-018
 	// exists to protect.
-	data.DevEnv = withoutRouteEnv(env.sorted(), agent, target)
+	data.DevEnv = withoutRouteEnv(env.sorted(), agent, target, env)
 	data.Telephony, err = buildPipecatTelephony(agent, target, env)
 	if err != nil {
 		return pipecatData{}, err
@@ -182,6 +182,10 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		slices.Sort(data.Deps)
 	}
 	data.RequiredEnv = env.sorted()
+	data.AuthorEnv = authorEnv(data.RequiredEnv, target.Telephony)
+	if target.Telephony != nil {
+		data.SuppliedForYou = slices.Clone(target.Telephony.LocalEnvironment)
+	}
 	if data.DailyCarrier != nil {
 		// Whatever the helper reads is not the deployed agent's business, so the
 		// two groups are split here, once, and every surface reads the split
@@ -406,7 +410,7 @@ func buildPipecatDailyCarrier(agent *ir.Agent, resolved ir.Target, env *envSet) 
 	// Optional, so never required and never in the startup check: hold audio the
 	// operator hosts, and the Daily room geography. Absent means the emitted
 	// default (a spoken hold line) and Daily's own default region.
-	carrier.OptionalEnv = []string{"UNMUTE_DAILY_ROOM_GEO", "UNMUTE_HOLD_AUDIO_URL"}
+	carrier.OptionalEnv = []string{"DAILY_ROOM_GEO", "DAILY_HOLD_AUDIO_URL"}
 	return carrier, nil
 }
 
@@ -516,7 +520,7 @@ func setImportNeeds(data *pipecatData) {
 	// asyncio.Event (B8/V14), so it is not an import-need flag anymore.
 	data.NeedsTurnStrategies = data.Interrupt != nil && data.Interrupt.MinWords > 0
 	data.NeedsAppendFrame = data.Inactivity != nil
-	data.NeedsEndFrame = data.MaxDurationSecs > 0
+	data.NeedsEndFrame = data.NeedsEndAfter
 	if data.Capture != nil {
 		data.NeedsFunctionCalls = true // the generated capture tool is a @tool too
 	}
@@ -803,7 +807,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 			// The method name is the control name (tools/controls share one
 			// namespace, D8), so the LLM invokes the tool by its spec name.
 			built.Transfers = append(built.Transfers, pipecatTransfer{
-				MethodName: ref, To: c.To, When: c.When,
+				MethodName: ref, To: c.To, When: transferReason(c),
 				Reason: transferReason(c), Requires: c.Requires,
 			})
 		case *ir.HumanTransfer:
@@ -827,7 +831,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 // (C8): a single task is a one-node flow, a group a linear chain. Each step is
 // resolved here so the template emits its node inline.
 func buildDelegate(agent *ir.Agent, ref string, c *ir.Delegate, env *envSet) (pipecatDelegate, error) {
-	delegate := pipecatDelegate{MethodName: ref, When: c.When}
+	delegate := pipecatDelegate{MethodName: ref, When: delegateReason(c)}
 	steps := []string{c.Task}
 	if c.Task != "" {
 		delegate.Task = c.Task
@@ -940,10 +944,17 @@ func interruptionValue(i ir.ToolInterruption) string {
 }
 
 func transferReason(c *ir.AgentTransfer) string {
-	if c.When != "" {
-		return c.When
-	}
-	return "Transfer the caller to the " + c.To + " agent."
+	return orDefault(c.When, "Transfer the caller to the "+c.To+" agent.")
+}
+
+// delegateReason is the delegate's equivalent, and it exists for the same reason
+// transferReason does: the docstring is the only thing the model reads when it
+// decides whether to call the tool, so it can never be empty. It used to render
+// straight from `when:`, which is optional, so every Pipecat delegate written
+// without one emitted `""""""` — a control present in the file and unreachable
+// at run time (Wave C, 2026-08-15).
+func delegateReason(c *ir.Delegate) string {
+	return orDefault(c.When, "Run this flow. It returns its result to you when it finishes.")
 }
 
 // pipecatStateExpr is how emitted Pipecat code reaches the call state: an agent
@@ -954,13 +965,13 @@ const pipecatStateExpr = "state"
 // registered, so the address and the token reach .env.example and the bot's
 // REQUIRED_ENV startup check (FR-009).
 func buildMCPSource(name string, tool ir.Tool, env *envSet) pipecatMCPSource {
-	env.add(tool.URLEnv)
+	env.addRead(tool.URLEnv)
 	source := pipecatMCPSource{
 		Name: name, Var: name + "_mcp", URLEnv: tool.URLEnv,
 		Transport: tool.MCPTransport, Tools: tool.MCPTools, Auth: loweredAuth(tool.Auth),
 	}
 	if tool.Auth != nil {
-		env.add(tool.Auth.TokenEnv)
+		env.addRead(tool.Auth.TokenEnv)
 		source.AuthEnv = tool.Auth.TokenEnv
 	}
 	return source
@@ -968,11 +979,11 @@ func buildMCPSource(name string, tool ir.Tool, env *envSet) pipecatMCPSource {
 
 func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env *envSet) pipecatTool {
 	if tool.URLEnv != "" {
-		env.add(tool.URLEnv)
+		env.addRead(tool.URLEnv)
 	}
 	// The token rides its own env var, never the spec (SCHEMA §5.3).
 	if tool.Auth != nil {
-		env.add(tool.Auth.TokenEnv)
+		env.addRead(tool.Auth.TokenEnv)
 	}
 	inject, needed := loweredInject(tool, variables, pipecatStateExpr)
 	built := pipecatTool{
@@ -1043,11 +1054,19 @@ func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target
 		// would make a working package fail its startup check on a value nothing reads.
 		env.add("DAILY_API_KEY")
 	}
-	desc := c.When
-	if desc == "" {
-		desc = "Transfer the caller to a human."
+	tool := pipecatTool{
+		Name: name, MethodName: name,
+		Description: orDefault(c.When, "Transfer the caller to a human."),
+		// The author's ring_timeout, or the 25 seconds this template used to
+		// hardcode. It was hardcoded past a declared value: writing
+		// `ring_timeout: 7s` compiled green, emitted `timeout="25"`, and produced
+		// output byte-identical to a package that declared nothing at all
+		// (Wave C, 2026-08-15).
+		RingTimeoutSecs: 25,
 	}
-	tool := pipecatTool{Name: name, MethodName: name, Description: desc}
+	if secs := durationSecs(c.RingTimeout); secs > 0 {
+		tool.RingTimeoutSecs = secs
+	}
 	switch c.Mode {
 	case ir.TransferCold:
 		tool.EndsCall = true
@@ -1156,6 +1175,14 @@ func applyConversation(c *ir.Conversation, data *pipecatData) {
 			interrupt.Enabled = *c.Interruption.Enabled
 		}
 		data.Interrupt = interrupt
+		// interruption.enabled: false lowers to the aggregator's always-mute
+		// strategy, which is Pipecat 1.5's mechanism for it (verified in the
+		// built image: AlwaysUserMuteStrategy, "always mutes the user while the
+		// bot is speaking"). The field used to be computed here and never
+		// rendered, so an author who declared "the caller cannot barge in" got a
+		// fully interruptible Pipecat agent while the LiveKit build from the same
+		// source honoured it (Wave C, 2026-08-15).
+		data.NeedsUserMute = !interrupt.Enabled
 		if len(interrupt.IgnorePhrase) > 0 {
 			data.Notes = append(data.Notes, "interruption ignore_phrases emitted as IGNORE_PHRASES; short phrases are also suppressed by the min-words turn-start strategy")
 		}
@@ -1164,6 +1191,11 @@ func applyConversation(c *ir.Conversation, data *pipecatData) {
 		data.Inactivity = &pipecatInactivity{NudgeSecs: durationSecs(c.Inactivity.NudgeAfter), EndSecs: durationSecs(c.Inactivity.EndAfter)}
 	}
 	data.MaxDurationSecs = durationSecs(c.MaxDuration)
+	// _end_after is shared by the max-duration cap and the inactivity hangup, so
+	// it is emitted when either asks for it. It used to be emitted for the cap
+	// alone, and `inactivity.end_after` was computed and never rendered at all:
+	// an idle call was nudged forever and never hung up (Wave C, 2026-08-15).
+	data.NeedsEndAfter = data.MaxDurationSecs > 0 || (data.Inactivity != nil && data.Inactivity.EndSecs > 0)
 }
 
 // applyGreeting lowers greeting activation. With no greeting block the agent
@@ -1347,15 +1379,46 @@ func sortedVarNames(agent *ir.Agent) []string {
 	return names
 }
 
-type envSet struct{ seen map[string]bool }
+// envSet collects the environment names a generated project needs, and records
+// which of them the emitted code reads on **every** session.
+//
+// The distinction exists because a name can be two things at once. A connection
+// maps `auth_token` onto a variable; a webhook tool's `auth.token_env` may name
+// the same variable, because one gateway token really does serve both. Deciding
+// what a browser session needs by matching names against the connection then
+// strips a credential the browser session genuinely reads, and the emitted code
+// raises KeyError on the first tool call — after a startup check that passed
+// (Wave C, 2026-08-15).
+//
+// So provenance is recorded rather than re-derived: `read` holds the names a
+// model binding or a tool registered, and those are never treated as route
+// names however a connection happens to map them.
+type envSet struct {
+	seen map[string]bool
+	read map[string]bool
+}
 
-func newEnvSet() *envSet { return &envSet{seen: map[string]bool{}} }
+func newEnvSet() *envSet {
+	return &envSet{seen: map[string]bool{}, read: map[string]bool{}}
+}
 
 func (e *envSet) add(name string) {
 	if name != "" {
 		e.seen[name] = true
 	}
 }
+
+// addRead registers a name the emitted code reads directly, whatever channel the
+// session arrived on.
+func (e *envSet) addRead(name string) {
+	if name != "" {
+		e.seen[name] = true
+		e.read[name] = true
+	}
+}
+
+// alwaysRead reports whether the emitted code reads this name on every session.
+func (e *envSet) alwaysRead(name string) bool { return e.read[name] }
 
 func (e *envSet) sorted() []string {
 	names := make([]string, 0, len(e.seen))

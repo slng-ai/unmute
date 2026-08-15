@@ -1,6 +1,10 @@
 package target
 
 import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -161,7 +165,14 @@ func TestTelephonyRouteEvidenceIsExactAndProvisionalWithoutSmoke(t *testing.T) {
 	if len(runtime.Processes) != 1 || len(runtime.PublicEndpoints) != 4 || len(runtime.ManualSteps) == 0 {
 		t.Fatalf("Pipecat route runtime facts = %#v", runtime)
 	}
-	if strings.Join(runtime.LocallySuppliedEnvironment, ",") != "REDIS_URL" {
+	// Every runtime name on this route is supplied rather than authored: the
+	// Compose graph starts the Redis, and `unmute dev` mints the public URL and
+	// the outbound token. The last two were missing from this list while the dev
+	// command already minted them, so .env.example asked the author to fill in
+	// blanks nobody fills in (FR-018c). ir.Build scopes the list to what a given
+	// package's route actually requires, so an inbound-only package drops the
+	// outbound token.
+	if strings.Join(runtime.LocallySuppliedEnvironment, ",") != "REDIS_URL,UNMUTE_OUTBOUND_TOKEN,UNMUTE_PUBLIC_URL" {
 		t.Fatalf("Pipecat locally supplied environment = %v", runtime.LocallySuppliedEnvironment)
 	}
 	// The Daily carrier leg (SCHEMA N37): five provisional features, no call
@@ -347,5 +358,62 @@ func TestRouteAccountPrerequisitesAreEvidenced(t *testing.T) {
 					p.Name, feature, rule.provider, rule.transport, got.Note)
 			}
 		}
+	}
+}
+
+// TestNoVendorVariableWearsTheUnmutePrefix is the naming rule as a grep. A
+// variable that configures a vendor's service is named after that vendor, and a
+// name carrying both the Unmute prefix and a vendor token claims two owners in
+// one string. (No such name is spelled out here: this test greps itself too.)
+//
+// The argument is Principle I, not tidiness: a generated project must run with
+// Unmute absent, so an UNMUTE_ prefix on a knob that configures Daily or LiveKit
+// is the dependency-shaped thing that principle forbids, whether or not any
+// reader mistakes it for a credential (research D11).
+//
+// Variables the generated agent itself owns, belonging to no vendor, keep
+// UNMUTE_. Those names are hidden from every author-facing file by FR-018, so
+// the prefix stops being something a reader meets.
+func TestNoVendorVariableWearsTheUnmutePrefix(t *testing.T) {
+	vendors := []string{"DAILY", "LIVEKIT", "TWILIO", "TELNYX", "PLIVO", "OPENAI", "SLNG"}
+	unmuteEnv := regexp.MustCompile(`\bUNMUTE_[A-Z0-9_]+\b`)
+
+	root := filepath.Join("..", "..")
+	skip := map[string]bool{".git": true, "specs": true, "bin": true, "build": true, "node_modules": true}
+	seen := 0
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if skip[entry.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		switch filepath.Ext(path) {
+		case ".go", ".md", ".mdx", ".yaml", ".yml", ".tmpl", ".py", ".txt", ".json":
+		default:
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, name := range unmuteEnv.FindAllString(string(content), -1) {
+			seen++
+			for _, vendor := range vendors {
+				if strings.Contains(strings.TrimPrefix(name, "UNMUTE_"), vendor) {
+					t.Errorf("%s: %s configures %s, so %s owns the name", filepath.ToSlash(path), name, vendor, vendor)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen == 0 {
+		t.Fatal("found no UNMUTE_ names anywhere, so this test would pass for the wrong reason")
 	}
 }

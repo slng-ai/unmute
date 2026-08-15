@@ -307,11 +307,9 @@ func TestValidateTelephonyProvisionalRouteIsUsableAndQuiet(t *testing.T) {
 	enableTelephony(pkg)
 	// The carrier-websocket routes carry no transfers (SPEC C1, V1), so the
 	// provisional-route fixture must not declare one: drop the control, its
-	// tool reference, and the channel's cold_transfer requirement.
-	delete(pkg.Agent.Controls, "to_human")
-	billing := pkg.Agent.Agents["billing"]
-	billing.Tools = slices.DeleteFunc(slices.Clone(billing.Tools), func(name string) bool { return name == "to_human" })
-	pkg.Agent.Agents["billing"] = billing
+	// tool reference, its destination, and the channel's cold_transfer
+	// requirement.
+	removeHumanTransfer(pkg)
 	phone := pkg.Agent.Channels["phone"]
 	phone.RequiredControls = []string{"hangup"}
 	pkg.Agent.Channels["phone"] = phone
@@ -849,6 +847,128 @@ func TestValidatePipecatMaturityGates(t *testing.T) { // driver-pipecat T1, C9
 	}
 }
 
+// TestValueChecksFailAtValidate walks all eight generator-only value checks
+// enumerated in specs/013-first-five-minutes/reproduction.md section E. Each one
+// let a package exit 0 from validate and 1 from compile, with a bare message
+// carrying no target prefix and no position, after validate had already said the
+// package was fine. The generators keep their own errors as a backstop; what
+// moves is the fact each one checks against (research D5).
+func TestValueChecksFailAtValidate(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		provider string
+		mutate   func(*packagespec.Package)
+		want     string
+	}{
+		{
+			name:     "turn detector model",
+			provider: "livekit",
+			mutate: func(pkg *packagespec.Package) {
+				override := pkg.Targets["livekit"].Models["vad"]
+				override.Model = "silero"
+				pkg.Targets["livekit"].Models["vad"] = override
+			},
+			want: `turn model "silero" is not recognized; use turn-detector-mini (local) or turn-detector (LiveKit Cloud)`,
+		},
+		{
+			name:     "sdk_language",
+			provider: "livekit",
+			mutate: func(pkg *packagespec.Package) {
+				setTargetField(pkg, "livekit", func(t *packagespec.Target) { t.SDKLanguage = "node" })
+			},
+			want: `livekit driver emits python projects only; sdk_language "node" has no templates yet`,
+		},
+		{
+			name:     "pin key",
+			provider: "livekit",
+			mutate: func(pkg *packagespec.Package) {
+				setTargetField(pkg, "livekit", func(t *packagespec.Target) {
+					t.Pins = map[string]string{"livekit-plugins-banana": "1.6.1"}
+				})
+			},
+			want: `livekit pin "livekit-plugins-banana" is not a pinnable package; known: `,
+		},
+		{
+			name:     "pin value is not a version",
+			provider: "livekit",
+			mutate: func(pkg *packagespec.Package) {
+				setTargetField(pkg, "livekit", func(t *packagespec.Target) {
+					t.Pins = map[string]string{"livekit-plugins-silero": "banana"}
+				})
+			},
+			want: `livekit pin livekit-plugins-silero: "banana" is not a semantic version`,
+		},
+		{
+			name:     "pin value is below the floor",
+			provider: "livekit",
+			mutate: func(pkg *packagespec.Package) {
+				setTargetField(pkg, "livekit", func(t *packagespec.Target) {
+					t.Pins = map[string]string{"livekit-plugins-silero": "0.0.1"}
+				})
+			},
+			want: `livekit pin livekit-plugins-silero "0.0.1" is below the catalogue floor >=1.6.1`,
+		},
+		{
+			name:     "version is not a version, livekit",
+			provider: "livekit",
+			mutate: func(pkg *packagespec.Package) {
+				setTargetField(pkg, "livekit", func(t *packagespec.Target) { t.Version = "banana" })
+			},
+			want: `livekit version "banana" is not a semantic version`,
+		},
+		{
+			name:     "version is out of range, pipecat",
+			provider: "pipecat",
+			mutate: func(pkg *packagespec.Package) {
+				setTargetField(pkg, "pipecat", func(t *packagespec.Target) { t.Version = "9.9.9" })
+			},
+			want: `pipecat version "9.9.9" is outside the driver's template-compatible range (>=1.5, <2.0)`,
+		},
+		{
+			// The sharpest of the eight: docs/SCHEMA.md 4.3 lists `voice` as
+			// required on every speak entry, so authoring a deepgram speak model
+			// necessarily produced a package that validated green and could not
+			// compile.
+			name:     "speak voice with no slot",
+			provider: "livekit",
+			mutate: func(pkg *packagespec.Package) {
+				override := pkg.Targets["livekit"].Models["front_desk"]
+				override.Provider, override.Model, override.Voice = "deepgram", "aura-2-thalia-en", "aura-2-thalia-en"
+				pkg.Targets["livekit"].Models["front_desk"] = override
+			},
+			want: `livekit speak binding provider "deepgram": voice has no slot here`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			only := pkg.Targets[test.provider]
+			pkg.Targets = map[string]packagespec.Target{test.provider: only}
+			test.mutate(pkg)
+			agent, err := Build(pkg)
+			if err != nil {
+				t.Fatalf("this is a value check, not a shape check: Build must still succeed: %v", err)
+			}
+			report, verr := Validate(agent, []Target{agent.Targets[test.provider]}, targetcap.Default())
+			if verr == nil {
+				t.Fatalf("validate exited 0; compile then fails on %q, after validate said the package was fine", test.want)
+			}
+			joined := strings.Join(report.PerTarget[0].Errors, "\n")
+			if !strings.Contains(joined, test.want) {
+				t.Fatalf("errors =\n%s\nwant one containing %q", joined, test.want)
+			}
+		})
+	}
+}
+
+// setTargetField edits one target in place. packagespec.Target is a value in a
+// map, so a field write needs the read-modify-write these cases would otherwise
+// each repeat.
+func setTargetField(pkg *packagespec.Package, name string, set func(*packagespec.Target)) {
+	target := pkg.Targets[name]
+	set(&target)
+	pkg.Targets[name] = target
+}
+
 func safeAgent(t *testing.T) *Agent {
 	t.Helper()
 	agent, err := Build(loadSafeCore(t))
@@ -1376,21 +1496,60 @@ func TestWarmTransferWithoutAConnectionIsGated(t *testing.T) {
 	}
 }
 
-// The same fixture with a cold transfer still validates, on the same
-// non-telephony target. Cold needs no trunk of either kind, so gating warm must
-// not have caught it.
-func TestColdTransferWithoutAConnectionStillValidates(t *testing.T) {
-	pkg := loadSafeCore(t)
-	livekitTarget := pkg.Targets["livekit"]
-	pkg.Targets = map[string]packagespec.Target{"livekit": livekitTarget}
-	agent, err := Build(pkg)
-	if err != nil {
-		t.Fatal(err)
+// TestColdTransferNeedsARoute is the cold sibling of the warm gate above, and
+// it replaces a test that asserted the opposite. Cold does not dial, so it needs
+// no SIP credentials — but it does need a **leg**, and a session that never
+// arrived by phone has none. LiveKit used to compile the transfer anyway and
+// then explain in a generated comment why it could not work (reproduction.md B).
+//
+// Pipecat already refused, in its own vocabulary. That must not change, and the
+// generic message must never append on top of it: one error, one voice.
+func TestColdTransferNeedsARoute(t *testing.T) {
+	browserOnly := func(t *testing.T, provider string) (*Agent, Target) {
+		t.Helper()
+		pkg := loadSafeCore(t)
+		only := pkg.Targets[provider]
+		only.Connection = "" // browser only: no route of any kind
+		pkg.Targets = map[string]packagespec.Target{provider: only}
+		agent, err := Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return agent, agent.Targets[provider]
 	}
-	report, verr := Validate(agent, []Target{agent.Targets["livekit"]}, targetcap.Default())
-	if verr != nil {
-		t.Fatalf("cold transfer on a non-telephony LiveKit target must still validate: %v\n%v", verr, report.PerTarget[0].Errors)
-	}
+
+	t.Run("livekit refuses as the sibling of the warm message", func(t *testing.T) {
+		agent, resolved := browserOnly(t, "livekit")
+		report, verr := Validate(agent, []Target{resolved}, targetcap.Default())
+		if verr == nil {
+			t.Fatal("a browser-only package must not compile a transfer that hands over a phone leg it never had")
+		}
+		joined := strings.Join(report.PerTarget[0].Errors, "\n")
+		for _, want := range []string{
+			"cold transfer needs a telephony Connection",
+			"it hands the caller's own phone leg to the destination",
+			"has no leg to hand over",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("error must say %q, got:\n%s", want, joined)
+			}
+		}
+	})
+
+	t.Run("pipecat keeps its own words, alone", func(t *testing.T) {
+		agent, resolved := browserOnly(t, "pipecat")
+		report, verr := Validate(agent, []Target{resolved}, targetcap.Default())
+		if verr == nil {
+			t.Fatal("pipecat already refused this package; it must keep refusing")
+		}
+		errs := report.PerTarget[0].Errors
+		if len(errs) != 1 {
+			t.Fatalf("want exactly one error in the provider's own vocabulary, got %d:\n%s", len(errs), strings.Join(errs, "\n"))
+		}
+		if !strings.Contains(errs[0], "Pipecat cold transfer requires Daily SIP transport") {
+			t.Errorf("error = %q, want Pipecat's own wording", errs[0])
+		}
+	})
 }
 
 // FR-006 and SC-008: the four SIP values are required by the route itself, so a

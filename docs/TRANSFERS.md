@@ -261,7 +261,31 @@ controls:
 - `on_unavailable` is `return_to_caller` (default) or `hangup`, and covers
   every way the person does not take the call, including a failed dial.
 - A package with a warm transfer must declare `channels.phone.outbound: true`
-  (warm dials out, whatever the channel says).
+  (warm dials out, whatever the channel says). The refusal quotes the channel:
+
+  ```
+  livekit: channel "phone" needs outbound: true; a warm transfer places a call to its destination
+  ```
+
+- **A target with a transfer must name a connection.** Cold hands the caller's
+  own leg to the destination and warm dials it, so a target that names no route
+  can do neither:
+
+  ```
+  livekit: cold transfer needs a telephony Connection: it hands the caller's own phone leg to the destination, and a session that did not arrive by phone has no leg to hand over
+  ```
+
+  A route is not the same as a phone channel. `examples/pipecat-human-transfer-daily`
+  declares only `web: realtime_audio` and transfers fine, because Daily's
+  dial-out brings the person into the room the browser session is already in.
+  What it has is a connection.
+
+- **Every control has to be attached.** Declaring one under `controls:` without
+  listing it in some agent's `tools:` is refused at build, with the file and the
+  line, and the refusal names the agents you could attach it to. It used to
+  compile at exit 0 and leave the control out of the generated project, while
+  its destination's environment name still reached `.env.example` and the
+  startup check.
 
 Destinations are declared once for the package, as environment variable names.
 Who the agent escalates to is the same desk whichever carrier reaches it:
@@ -410,7 +434,7 @@ helper-side names and the agent never does.
 | `OPENAI_API_KEY` / `SLNG_API_KEY` | agent | The package's model providers. |
 | `BILLING_PHONE_NUMBER` | agent | The transfer destination, read at call time. |
 | `PIPECAT_CLOUD_API_KEY` | helper | The public key the helper starts agent sessions with. |
-| `UNMUTE_HOLD_AUDIO_URL` / `UNMUTE_DAILY_ROOM_GEO` | helper, optional | Hold audio you host, and the Daily room's geography. Unset is supported on both: the caller hears a spoken line, and Daily picks its own region. |
+| `DAILY_HOLD_AUDIO_URL` / `DAILY_ROOM_GEO` | helper, optional | Hold audio you host, and the Daily room's geography. Unset is supported on both: the caller hears a spoken line, and Daily picks its own region. |
 
 There is no outbound trigger token on this route, unlike the carrier-WebSocket
 ones. The helper answers incoming calls and nothing else, so it has no endpoint

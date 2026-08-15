@@ -18,8 +18,7 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-4.1-mini
-      temperature: 0.2
+      model: gpt-5.6-luna
   speak:
     voice:
       provider: slng
@@ -35,7 +34,19 @@ models:
       model: silero
 ```
 
-On a LiveKit target, override the turn entry rather than changing the agent:
+On a LiveKit target, override the turn entry rather than changing the agent.
+
+**The override is keyed on the entry name in your own package, not on the name
+below.** Entry names are yours to choose, and `unmute init` chooses different
+ones from this file: it writes `assistant_model`, `assistant_voice`,
+`transcriber`, and `vad`. Copying this block onto a scaffolded package without
+changing `detector` to `vad` fails, cleanly but needlessly:
+
+```
+targets.yaml:11: target "livekit" overrides "detector", which is not a defined model
+```
+
+Read the `models:` block you actually have before you write the override.
 
 ```yaml targets.yaml
 targets:
@@ -86,22 +97,26 @@ named, so inventing one only moves the failure later.
 
 ```yaml
       provider: openai
-      model: gpt-4.1-mini
+      model: gpt-5.6-luna
 ```
 
-Unmute keeps no allowlist of model ids. `model:`, `voice:`, and `params:` go to
-the provider exactly as written. A typo becomes a provider error on the first
-call, not a compile error, and the compile report says so:
+Unmute keeps no allowlist of model ids, with exactly one exception: a LiveKit
+`turn` model must be `turn-detector-mini` or `turn-detector`, because those are
+loaded by name rather than sent to a provider. Everywhere else `model:`,
+`voice:`, and `params:` go to the provider exactly as written. A typo becomes a
+provider error on the first call, not a compile error, and the compile report
+says so:
 
 ```
-pipecat: binding reason.reasoning provider=openai model=gpt-4o-mini (forwarded as-is, not validated)
+pipecat: binding reason.reasoning provider=openai model=gpt-5.6-luna (forwarded as-is, not validated)
 ```
 
 So when you pick a model id, pick one the user named or one from that vendor's
 own documentation. Do not invent an id that looks plausible.
 
-Only SLNG model ids appear in this repository's own documentation, because those
-are the ones proven here.
+Two families appear in this repository's own documentation, and only two: the
+SLNG listen and speak ids, and `gpt-5.6-luna` for think. They are the ones
+proven here. Any other id is the user's to name.
 
 ## Alternates and fallbacks
 

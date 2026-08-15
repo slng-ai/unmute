@@ -110,7 +110,9 @@ You set these:
 | `TWILIO_AUTH_TOKEN` | Twilio REST auth token |
 | `TWILIO_PHONE_NUMBER` | the caller identity the recipient sees |
 
-These reach the build without you:
+These reach the build without you, and the generated `.env.example` does not
+list them for exactly that reason. `compile-report.json` does, under
+`required_env`, and the emitted `README.md` says where each one comes from:
 
 | Variable | Who supplies it |
 |---|---|
@@ -122,8 +124,8 @@ These reach the build without you:
 ## Run it
 
 Compile both targets, then copy either generated env template and fill it in.
-The template lists every declared secret, then the names the target and the
-connection need, grouped under one label:
+The template lists exactly the names above that you supply, so every line in it
+is a line to fill in:
 
 ```sh
 bin/unmute compile examples/outbound-reminder

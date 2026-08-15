@@ -417,13 +417,13 @@ targets:
       reason:
         fast_reasoning:
           provider: openai
-          model: gpt-4o-mini
+          model: gpt-5.6-luna
           params:   # forwarded verbatim
             temperature: 0.4
             top_p: 0.9
         careful_reasoning:
           provider: openai
-          model: gpt-4o
+          model: gpt-5.6-luna
     destinations:
       billing_line: "+14155550123"
 

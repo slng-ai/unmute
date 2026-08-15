@@ -5,10 +5,8 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"text/template"
 
@@ -46,8 +44,6 @@ const (
 	livekitWarmVerifiedMinor = 6
 	livekitMCPVerifiedMinor  = 6
 )
-
-var livekitVersionPattern = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
 
 // livekitService is one resolved binding: the rendered constructor plus its
 // catalogue entry (imports/deps) and vendor (report labeling).
@@ -355,11 +351,18 @@ type livekitData struct {
 	PluginModules     []string // merged `from livekit.plugins import ...` names
 	Deps              []string
 	RequiredEnv       []string
-	// PlatformEnv is the required-env names something other than the operator
-	// supplies, and OperatorEnv is the rest. Both are subsets of RequiredEnv,
-	// which stays the complete list.
-	PlatformEnv    []string
-	OperatorEnv    []string
+	// AuthorEnv is the half of RequiredEnv the author supplies. Everything else
+	// — the route's own values, which `unmute dev` sets locally and a platform
+	// or operator sets at deploy time — is absent from every author-facing file
+	// (FR-018). RequiredEnv stays the complete list, and the compile report
+	// keeps it, so hiding is not deleting.
+	AuthorEnv []string
+	// SuppliedForYou is the route's locally-supplied set: names `unmute dev`
+	// sets locally and the platform or operator sets at deploy time. They are
+	// absent from .env.example (FR-018), so a startup check that hits one has to
+	// say where the value comes from rather than only that it is missing, or the
+	// operator is told to set a variable no file ever mentioned (research D14).
+	SuppliedForYou []string
 	DevEnv         []string // provider creds the web dev image needs (LIVEKIT_* are hardcoded in compose.dev.yaml)
 	DevOptionalEnv []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
 	Notes          []string
@@ -515,57 +518,18 @@ func GenerateLiveKit(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedB
 	}, nil
 }
 
-// checkLiveKitPins validates plugin pins (C6): a pin key must be a catalogued
-// standalone package or the silero VAD plugin, its value must be a semantic
-// version at or above the catalogue floor. The pin then raises the dep floor
-// in livekitDeps. Unknown keys fail loud — a typo must not silently drop.
+// checkLiveKitPins validates plugin pins (C6). The pinnable set, the floors, and
+// the comparison all live in internal/target now, because ir.Validate asks the
+// same three questions and used to ask none of them: a bad pin validated green
+// and failed compile. This stays as the driver's backstop, and the pin still
+// raises the dep floor in livekitDeps.
 func checkLiveKitPins(pins map[string]string) error {
-	floors := defaultCatalog.Packages(targetcap.LiveKit)
-	floors["livekit-plugins-silero"] = ">=1.6.1" // always emitted (session VAD)
-	names := make([]string, 0, len(pins))
-	for name := range pins {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		floor, ok := floors[name]
-		if !ok {
-			known := make([]string, 0, len(floors))
-			for k := range floors {
-				known = append(known, k)
-			}
-			sort.Strings(known)
-			return fmt.Errorf("livekit pin %q is not a pinnable package; known: %s", name, strings.Join(known, ", "))
-		}
-		pinned, ok := parseLiveKitVersion(pins[name])
-		if !ok {
-			return fmt.Errorf("livekit pin %s: %q is not a semantic version", name, pins[name])
-		}
-		min, ok := parseLiveKitVersion(strings.TrimPrefix(floor, ">="))
-		// Lexicographic over major/minor/patch, which is exactly semver order
-		// for a parsed triple.
-		if ok && slices.Compare(pinned[:], min[:]) < 0 {
-			return fmt.Errorf("livekit pin %s %q is below the catalogue floor %s", name, pins[name], floor)
-		}
-	}
-	return nil
-}
-
-func parseLiveKitVersion(v string) ([3]int, bool) {
-	match := livekitVersionPattern.FindStringSubmatch(v)
-	if match == nil {
-		return [3]int{}, false
-	}
-	var out [3]int
-	for i, part := range match[1:] {
-		out[i], _ = strconv.Atoi(part)
-	}
-	return out, true
+	return targetcap.CheckPins(targetcap.LiveKit, pins)
 }
 
 // checkLiveKitVersion rejects a framework version outside the templates' range.
 func checkLiveKitVersion(version string) error {
-	return checkVersion("livekit", version, livekitVersionPattern, livekitVersionMajor, livekitVersionMinMinor)
+	return targetcap.CheckVersion(targetcap.LiveKit, version)
 }
 
 // livekitDeploys turns declared regions into the README's deploy rows. No region

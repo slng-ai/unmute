@@ -51,9 +51,9 @@ Both code targets are declared, browser audio only.
 
 ## Run it
 
-Same as every structural example. Docker running, the keys from the generated
-`.env.example` (`OPENAI_API_KEY`, `SLNG_API_KEY`, and the three Langfuse
-values, because this package sets `tracing: langfuse`).
+Same as every structural example. Docker running and the two keys from the
+generated `.env.example`: `OPENAI_API_KEY` and `SLNG_API_KEY`. Tracing lives in
+[`simple-prompt`](../simple-prompt/), the one example that configures it.
 
 ```sh
 bin/unmute validate examples/multi-task

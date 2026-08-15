@@ -543,12 +543,16 @@ func TestCloudWebsocketTransferUpdatesTheLiveCall(t *testing.T) {
 	}), "bot.py")
 	for _, want := range []string{
 		`<Say>Connecting you to a colleague now.</Say>`, // the announcement, first
-		`<Dial answerOnBridge="true" timeout="25">`,     // ringback rather than dead air
-		`os.environ["BILLING_PHONE_NUMBER"]`,            // an env name, never a literal
-		`/Calls/{call_id}.json`,                         // keyed on the live call
-		`data={"Twiml": twiml}`,                         // TwiML update, the platform's own mechanism
-		`_PHONE_CALL["call_id"]`,                        // the id from the parsed handshake
-		"_TRANSFER_RESULT",                              // one attempt per call
+		// Ringback rather than dead air, and the timeout renders from the
+		// control's ring_timeout rather than a hardcoded literal, so a declared
+		// value is honoured (Wave C, 2026-08-15). 25 is the default this fixture
+		// does not override.
+		`<Dial answerOnBridge="true" timeout="{ring_timeout}">`,
+		`os.environ["BILLING_PHONE_NUMBER"]`, // an env name, never a literal
+		`/Calls/{call_id}.json`,              // keyed on the live call
+		`data={"Twiml": twiml}`,              // TwiML update, the platform's own mechanism
+		`_PHONE_CALL["call_id"]`,             // the id from the parsed handshake
+		"_TRANSFER_RESULT",                   // one attempt per call
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("the emitted transfer is missing %q", want)

@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"regexp"
@@ -521,6 +522,39 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 	return errors, schemas.notes
 }
 
+// validateDriverValues asks the value questions a driver used to ask alone.
+//
+// Each of these let a package exit 0 from `unmute validate` and 1 from
+// `unmute compile`, on a value the author wrote, with a bare message carrying no
+// target prefix and no position — after validate had already said the package
+// was fine. Eight were measured (reproduction.md section E) and the constitution
+// does not license the gap: Principle V's "validate is wider than generation" is
+// about the **provider set**, not about depth, and the repository had already
+// made this exact decision for a sibling field at the language-slot check above.
+//
+// Moving a check from generate to validate buys "before any artifact is
+// written". It does not buy a file and line: only spec.Load and ir.Build carry a
+// position (research D7). The generators keep their own errors as a backstop.
+func validateDriverValues(resolved Target, provider targetcap.Provider, row *TargetValidation) {
+	if err := targetcap.CheckSDKLanguage(provider, resolved.SDKLanguage); err != nil {
+		row.Errors = add(row.Errors, err.Error())
+	}
+	if err := targetcap.CheckPins(provider, resolved.Pins); err != nil {
+		row.Errors = add(row.Errors, err.Error())
+	}
+	// An absent version is already reported above, with its own wording.
+	if resolved.Version != "" {
+		if err := targetcap.CheckVersion(provider, resolved.Version); err != nil {
+			row.Errors = add(row.Errors, err.Error())
+		}
+	}
+	if provider == targetcap.LiveKit && resolved.Models.Turn != nil {
+		if _, err := targetcap.LiveKitTurnVersion(resolved.Models.Turn.Model); err != nil {
+			row.Errors = add(row.Errors, err.Error())
+		}
+	}
+}
+
 func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *TargetValidation) {
 	provider := targetcap.Provider(resolved.Provider)
 	if !slices.Contains(targetcap.Providers, provider) {
@@ -530,6 +564,7 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 	if targetcap.IsCode(provider) && resolved.Version == "" {
 		row.Errors = add(row.Errors, fmt.Sprintf("%s code target requires version", resolved.Provider))
 	}
+	validateDriverValues(resolved, provider, row)
 	if agent.Tracing != nil {
 		applyCapability(caps, targetcap.FieldTracingLangfuse, provider, row)
 	}
@@ -1018,7 +1053,15 @@ func checkSpeakRequiredFields(catalog targetcap.Catalog, provider targetcap.Prov
 	if !ok {
 		return
 	}
-	if entry.VoiceRequired() && binding.Voice == "" && binding.VoiceID == "" {
+	voice := cmp.Or(binding.Voice, binding.VoiceID)
+	// The sharpest of the eight generator-only checks: docs/SCHEMA.md §4.3 lists
+	// `voice` as required on every speak entry, so authoring a deepgram speak
+	// model necessarily produced a package that validated green and could not
+	// compile. On such an entry the voice rides the model id instead.
+	if voice != "" && entry.Call != nil && entry.Call.Voice.Arg == "" {
+		row.Errors = add(row.Errors, fmt.Sprintf("%s speak binding provider %q: voice has no slot here", provider, binding.Provider))
+	}
+	if entry.VoiceRequired() && voice == "" {
 		row.Errors = add(row.Errors, fmt.Sprintf("%s speak.%s binding provider %q is missing a voice", provider, profile, binding.Provider))
 	}
 	if entry.ModelRequired() && binding.Model == "" {
@@ -1161,17 +1204,41 @@ func validateHumanTransfer(control *HumanTransfer, resolved Target, provider tar
 	}
 	before := len(row.Errors)
 	applyResolvedCapability(caps.Control(required, provider, resolved.Transport, resolved.Carrier), required, provider, row)
-	// A warm transfer dials the person itself, so it needs carrier SIP
-	// credentials, and those only exist on a target that binds a telephony
-	// Connection. Gated since 2026-08-12 (SCHEMA N33): the emitted agent passes
-	// the carrier's trunk settings inline, so a target with no Connection has
-	// nothing to dial with. It used to compile and then read a LiveKit trunk ID
-	// the package never mentioned, which is the defect this feature removed.
-	// Only when the provider itself allows warm, so a provider that denies it
-	// keeps failing in its own words (principle II). Cold is unaffected: it acts
-	// on the caller's existing leg and dials nobody.
-	if control.Mode == TransferWarm && len(row.Errors) == before {
+	// Both modes need a Connection, for different reasons, and the difference is
+	// why cold was missed.
+	//
+	// Warm dials the person itself, so it needs the carrier's SIP credentials.
+	// The emitted agent passes the trunk settings inline (SCHEMA N33), so a
+	// target with no telephony Connection has nothing to dial with, whatever
+	// route it names.
+	//
+	// Cold dials nobody, and this guard's comment used to conclude from that
+	// "cold is unaffected". It reasoned about credentials and missed the leg:
+	// cold hands the caller's own call to the destination, so it needs a route
+	// that can bridge one. A package that names a route has one — Daily's
+	// dial-out reaches a PSTN number from a browser session, which is what
+	// examples/pipecat-human-transfer-daily does. A package that names **no
+	// route at all** has nothing, and the capability table cannot say so because
+	// it describes route support, not route existence (research D2). That is the
+	// browser-only case LiveKit used to compile, then explain away in a generated
+	// `caller is None` comment (reproduction.md B).
+	//
+	// Only when the provider itself has not already refused, so one that denies
+	// it keeps failing in its own words (Principle II). Pipecat's table row has
+	// already added "Pipecat cold transfer requires Daily SIP transport", so this
+	// generic message never appends on top of it.
+	if len(row.Errors) != before {
+		return
+	}
+	if control.Mode == TransferWarm {
 		row.Errors = add(row.Errors, "warm transfer needs a telephony Connection: it dials the destination itself, using the connection's sip_address, sip_username, sip_password and from_number")
+		return
+	}
+	// Only where a project is actually emitted. On a managed provider the
+	// platform owns the call leg and configures the transfer on its own side, so
+	// there is no route for the package to name and nothing for this to check.
+	if resolved.Connection == "" && targetcap.EmitsProject(provider) {
+		row.Errors = add(row.Errors, "cold transfer needs a telephony Connection: it hands the caller's own phone leg to the destination, and a session that did not arrive by phone has no leg to hand over")
 	}
 }
 
@@ -1302,9 +1369,15 @@ var handlerEnvRead = regexp.MustCompile(`os\.(?:environ\.get\(|getenv\(|environ\
 func referencedEnvNames(agent *Agent) map[string]string {
 	refs := make(map[string]string)
 	note := func(name, site string) {
-		if name != "" && refs[name] == "" {
-			refs[name] = site
+		// Only names. A value in a name's slot — a pasted token, a URL — has its
+		// own refusal that says what the field takes, and repeating it here would
+		// print the secret back at the author in a warning (SC-005). This guard
+		// used to be unreachable because the whole check returned early on an
+		// empty secrets: block.
+		if name == "" || !envNamePattern.MatchString(name) || refs[name] != "" {
+			return
 		}
+		refs[name] = site
 	}
 	for _, name := range sortedKeys(agent.Tools) {
 		tool := agent.Tools[name]
@@ -1352,7 +1425,59 @@ func referencedEnvNames(agent *Agent) map[string]string {
 			note(agent.Targets[target].Destinations[name], fmt.Sprintf("agent.yaml destinations %s", name))
 		}
 	}
+	for _, name := range sortedKeys(agent.Targets) {
+		for _, key := range providerKeyEnvNames(agent, agent.Targets[name]) {
+			note(key.name, key.site)
+		}
+	}
 	return refs
+}
+
+// providerKeyEnvNames lists the API key each of a target's resolved model
+// bindings reads, with the models entry that chose it.
+//
+// Without these the check is vacuous exactly where it matters most: a fresh
+// `unmute init` package references no *_env field, no connection, and no
+// destination, so its reference set was **empty** and removing the guard alone
+// would have changed nothing there (FR-005a). The name has one home already —
+// the catalogue Entry's key-env field — so it is read from there rather than
+// listed a second time.
+func providerKeyEnvNames(agent *Agent, resolved Target) []struct{ name, site string } {
+	catalog := targetcap.DefaultCatalog()
+	provider := targetcap.Provider(resolved.Provider)
+	var out []struct{ name, site string }
+	add := func(role targetcap.Role, section, profile string, binding *Binding) {
+		if binding == nil || binding.Provider == "" {
+			return
+		}
+		entry, ok := catalog.Lookup(provider, role, binding.Provider)
+		if !ok || entry.Call == nil || entry.Call.APIKeyArg == "" {
+			return // a managed target holds the key itself, or the call takes none
+		}
+		name := entry.Call.APIKeyEnv
+		if name == "" {
+			// The wildcard-row convention, the same one the drivers apply.
+			name = strings.ToUpper(strings.ReplaceAll(binding.Provider, "-", "_")) + "_API_KEY"
+		}
+		out = append(out, struct{ name, site string }{name, fmt.Sprintf("agent.yaml models %s %s", section, profile)})
+	}
+	add(targetcap.Listen, "listen", agent.Listen, resolved.Models.Listen)
+	for _, fallback := range resolved.Models.ListenFallbacks {
+		binding := fallback.Binding
+		add(targetcap.Listen, "listen", fallback.Name, &binding)
+	}
+	add(targetcap.Turn, "turn", agent.Turn, resolved.Models.Turn)
+	for _, name := range sortedKeys(resolved.Models.Speak) {
+		binding := resolved.Models.Speak[name]
+		add(targetcap.Speak, "speak", name, &binding)
+	}
+	// `reason` is the internal role identifier; `think` is the authoring word,
+	// and the site has to name the section the author can actually find (N15).
+	for _, name := range sortedKeys(resolved.Models.Reason) {
+		binding := resolved.Models.Reason[name]
+		add(targetcap.Reason, "think", name, &binding)
+	}
+	return out
 }
 
 // unusedConnectionWarning reports connection files no target names.
@@ -1385,10 +1510,16 @@ func unusedConnectionWarning(agent *Agent) string {
 // undeclaredSecretWarning reports env names the package references but never
 // declares. A warning, never an error: declaring secrets is opt-in, and a
 // package written before the block existed still compiles (C7, V10).
+//
+// It used to return early on an empty `secrets:` block, which tested the
+// **declaration** list: the package with the most to report — declares nothing,
+// references eight names — took the same early return as the package with
+// nothing to report, and lost the generated startup check as well. "Opt-in" in
+// docs/SCHEMA.md N24 is the reason the severity is a warning, not a reason to
+// skip the check, and under Principle IV the document wins. Its sibling
+// unusedConnectionWarning guards on the **subject** set, which is the correct
+// shape and was already in this file.
 func undeclaredSecretWarning(agent *Agent) string {
-	if len(agent.Secrets) == 0 {
-		return ""
-	}
 	refs := referencedEnvNames(agent)
 	var missing []string
 	for _, name := range slices.Sorted(maps.Keys(refs)) {

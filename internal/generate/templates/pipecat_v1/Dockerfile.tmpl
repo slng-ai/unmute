@@ -55,8 +55,16 @@ RUN mkdir -p "$NLTK_DATA" && \
 
 # Named files, never `COPY . .`: /app is the base image's own directory, and
 # copying over it replaces the server that answers /bot.
+#
+# tools/ is a directory rather than a file, and it is named the same way. bot.py
+# does `import tools.<name>` for every local tool, so leaving it out builds an
+# image that cannot import its own emitted code: the container starts, raises
+# ModuleNotFoundError, and the deployment never reaches ready. That shipped in
+# v0.1.0 through v0.1.2 and broke five of the eleven examples, `unmute dev`
+# included, because compose.dev.yaml runs this same image with no bind mount.
 COPY bot.py ./
 {{if .Tracing}}COPY tracing.py ./
+{{end}}{{if .LocalTools}}COPY tools/ ./tools/
 {{end}}
 # No CMD: the base image imports bot.py and calls its bot() itself. A local
 # browser run overrides the command instead (see compose.dev.yaml).

@@ -52,8 +52,15 @@ robot opening would be wrong.
 
 A greeting renders `{{variables}}` **once, at session start**, so it can only
 name a variable that already has a value: `source: call_start`, a system source,
-or a `default`. A greeting naming a `conversation` variable is refused, not
+or a `default`. A greeting naming a variable with none of those is refused, not
 silently blanked.
+
+What decides it is the value, not the source. A `source: conversation` variable
+**with a `default`** is legal in a greeting and renders that default — which is
+usually not what you want, because the greeting is built before the model has
+learned anything, and it does not re-render when the model saves a value later.
+A conversation variable earns its keep at the per-call sites: `inject:` on a
+tool, and a webhook `path`.
 
 Write the greeting the way it will sound. It is spoken text, so the rules in
 `prompting.md` apply to it more than to anything else in the package.
@@ -136,11 +143,16 @@ targets:
         model: turn-detector-mini
 ```
 
-`placement` on a turn entry is a preference on LiveKit, and validate says so:
+Every LiveKit target with a turn entry gets this warning, whether or not you
+wrote a `placement:` field. LiveKit decides for itself where turn detection
+runs, so the field is a preference there:
 
 ```
   livekit: LiveKit turn placement is a preference
 ```
+
+It is information, not a problem, and the command still exits 0. Do not go
+looking for a `placement:` line to remove; there usually is not one.
 
 `semantic_endpointing` warns on both code targets, because what it does depends
 on the model bound underneath it. Read the warning to the user rather than

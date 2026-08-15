@@ -2,6 +2,7 @@ package ir
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,6 +17,10 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 		name  string
 		mutet func(*packagespec.Package)
 		want  string
+		// redacts, when set, is text the refusal must NOT contain. A slot that
+		// takes an environment variable name gets a pasted credential when it is
+		// wrong, and repeating it puts the value in a terminal and a CI log.
+		redacts string
 	}{
 		{
 			name: "unknown token in the greeting",
@@ -86,11 +91,15 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			want: "webhook.path must start with /",
 		},
 		{
+			// The refusal does not quote the offending text back. What lands in
+			// this slot when it is wrong is usually a pasted credential, and a
+			// message that repeats it puts the value in a terminal and a CI log.
 			name: "a secret key is an environment variable name",
 			mutet: func(pkg *packagespec.Package) {
-				pkg.Agent.Secrets = []string{"salon_token"}
+				pkg.Agent.Secrets = []string{"sk-live-pretend-key-value"}
 			},
-			want: "must be an UPPER_SNAKE environment variable name",
+			want:    "not an UPPER_SNAKE environment variable name",
+			redacts: "sk-live-pretend-key-value",
 		},
 		{
 			name: "the capture tool name is reserved",
@@ -123,6 +132,9 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 				t.Fatalf("Build succeeded, want error containing %q", tc.want)
 			case !strings.Contains(err.Error(), tc.want):
 				t.Fatalf("Build error = %v, want it to contain %q", err, tc.want)
+			}
+			if tc.redacts != "" && err != nil && strings.Contains(err.Error(), tc.redacts) {
+				t.Errorf("the refusal repeats %q back; a field that takes a name must never print what was written there instead:\n%v", tc.redacts, err)
 			}
 		})
 	}
@@ -300,6 +312,85 @@ func TestTelephonyExamplesDeclareEveryNameTheyWrite(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSecretsCheckRunsWithNoBlock walks the three shapes in
+// specs/013-first-five-minutes/reproduction.md section C. The guard tested the
+// **declaration** list, so the package with the most to report — declares
+// nothing, references eight names — took the same early return as the package
+// with nothing to report. Its sibling, unusedConnectionWarning, guards on the
+// subject set and is correct; the shape to copy was already in the file.
+//
+// Severity stays a warning at exit 0, exactly as docs/SCHEMA.md N24 fixes it.
+func TestSecretsCheckRunsWithNoBlock(t *testing.T) {
+	load := func(t *testing.T, mutate func(*packagespec.Package)) *Agent {
+		t.Helper()
+		pkg, err := packagespec.Load(filepath.Join("..", "..", "examples", "livekit-human-transfer"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		mutate(pkg)
+		agent, err := Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return agent
+	}
+
+	t.Run("a: every name declared, nothing to report", func(t *testing.T) {
+		if warning := undeclaredSecretWarning(load(t, func(*packagespec.Package) {})); warning != "" {
+			t.Errorf("warning = %q, want none", warning)
+		}
+	})
+
+	dropped := []string{"BILLING_PHONE_NUMBER", "SIP_AUTH_USERNAME", "SIP_TRUNK_HOSTNAME"}
+	t.Run("b: three names missing, all three reported with their site", func(t *testing.T) {
+		agent := load(t, func(pkg *packagespec.Package) {
+			pkg.Agent.Secrets = slices.DeleteFunc(slices.Clone(pkg.Agent.Secrets), func(name string) bool {
+				return slices.Contains(dropped, name)
+			})
+		})
+		warning := undeclaredSecretWarning(agent)
+		for _, want := range append(slices.Clone(dropped), "agent.yaml destinations", "connections/") {
+			if !strings.Contains(warning, want) {
+				t.Errorf("warning must name %q, got %q", want, warning)
+			}
+		}
+	})
+
+	t.Run("c: no block at all, the case most worth reporting", func(t *testing.T) {
+		agent := load(t, func(pkg *packagespec.Package) { pkg.Agent.Secrets = nil })
+		warning := undeclaredSecretWarning(agent)
+		if warning == "" {
+			t.Fatal("a package that declares nothing and references eight names must not be the silent case")
+		}
+		for _, want := range dropped {
+			if !strings.Contains(warning, want) {
+				t.Errorf("warning must name %q, got %q", want, warning)
+			}
+		}
+	})
+
+	// Removing the guard alone leaves the check vacuous where it matters most: a
+	// fresh scaffold references only its model provider keys, and those were in
+	// no *_env field, so referencedEnvNames never saw them (FR-005a).
+	t.Run("provider key names are in the reference set", func(t *testing.T) {
+		agent := load(t, func(pkg *packagespec.Package) { pkg.Agent.Secrets = nil })
+		refs := referencedEnvNames(agent)
+		// The site is the first models entry that chose the key, whichever
+		// section that is: one key often serves several roles, and naming the
+		// first one the author can go and look at is the point.
+		for _, name := range []string{"OPENAI_API_KEY", "SLNG_API_KEY"} {
+			site, ok := refs[name]
+			if !ok {
+				t.Errorf("%s is not in the reference set, so the check is vacuous for a scaffolded package", name)
+				continue
+			}
+			if !strings.HasPrefix(site, "agent.yaml models ") {
+				t.Errorf("%s site = %q, want it to name the models entry that chose it", name, site)
+			}
+		}
+	})
 }
 
 func TestTemplateParsing(t *testing.T) {

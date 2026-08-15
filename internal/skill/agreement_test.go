@@ -2,12 +2,15 @@ package skill
 
 import (
 	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/slng-ai/unmute/internal/scaffold"
 	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
 )
@@ -164,12 +167,6 @@ func TestModelsReferenceMatchesCatalog(t *testing.T) {
 func TestProvidersReferenceMatchesTargetSet(t *testing.T) {
 	raw := bundleFile(t, "references/package.md")
 
-	// Which providers have a shipped driver is a switch in
-	// internal/generate/artifact.go rather than an exported list, so it is
-	// named here. A third driver makes this test fail, which is the moment to
-	// update the bundle anyway.
-	generates := map[target.Provider]bool{target.Pipecat: true, target.LiveKit: true}
-
 	row := regexp.MustCompile("^\\| `([a-z]+)` \\| (yes|no) \\| (yes|no) \\|$")
 	documented := map[target.Provider][2]string{}
 	for _, line := range strings.Split(raw, "\n") {
@@ -195,8 +192,10 @@ func TestProvidersReferenceMatchesTargetSet(t *testing.T) {
 		if cells[0] != "yes" {
 			t.Errorf("references/package.md says %q does not validate; every provider validates", provider)
 		}
+		// Which providers have a shipped driver is target.EmitsProject, which is
+		// the one list; ir.Validate reads the same one.
 		want := "no"
-		if generates[provider] {
+		if target.EmitsProject(provider) {
 			want = "yes"
 		}
 		if cells[1] != want {
@@ -410,6 +409,181 @@ func TestNoSecretsInTheBundle(t *testing.T) {
 			t.Errorf("%s carries the phone number %q outside a refusal example; a destination names an environment variable", name, hit)
 		}
 	}
+}
+
+// beginnerPath is every surface a first-time author meets before they have
+// decided anything: the site's front door, the two sections that get them to a
+// running agent, the repository README, everything `unmute init` writes, and the
+// whole bundle a coding assistant reads. Modelled on TestNoSecretsInTheBundle,
+// which is the same shape of prohibition over a whole tree.
+func beginnerPath(t *testing.T) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	site := filepath.Join("..", "..", "docs-site")
+	for _, root := range []string{filepath.Join(site, "index.mdx"), filepath.Join(site, "start"), filepath.Join(site, "build")} {
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() {
+				return err
+			}
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			out[filepath.ToSlash(path)] = string(content)
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out["README.md"] = string(readme)
+
+	dir := filepath.Join(t.TempDir(), "hello-agent")
+	created, err := scaffold.Write(dir, scaffold.Data{Name: "hello-agent", Tools: scaffold.DefaultTools()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range created {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out["unmute init/"+filepath.ToSlash(rel)] = string(content)
+	}
+
+	for _, form := range []Destination{Canonical, Pointer} {
+		files, err := New("test").Files(form)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, content := range files {
+			out["bundle/"+name] = string(content)
+		}
+	}
+	if len(out) < 10 {
+		t.Fatalf("collected %d beginner-path files, so this test would pass for the wrong reason", len(out))
+	}
+	return out
+}
+
+// TestNoUnmuteEnvOnTheBeginnerPath locks a state that already held when it was
+// written, and that is the point: an audit found zero hits across all of these
+// surfaces, and nothing was holding them there. A generated project must carry
+// no Unmute dependency (Principle I), and a variable named UNMUTE_ inside a
+// project Unmute is not part of is exactly that shape.
+func TestNoUnmuteEnvOnTheBeginnerPath(t *testing.T) {
+	unmuteEnv := regexp.MustCompile(`\bUNMUTE_[A-Z0-9_]+\b`)
+	for name, content := range beginnerPath(t) {
+		if hit := unmuteEnv.FindString(content); hit != "" {
+			t.Errorf("%s names %s; nothing a beginner reads may ask them for an Unmute-branded variable", name, hit)
+		}
+	}
+}
+
+// TestOneModelIdEverywhere holds every author-facing surface to the single model
+// identifier internal/scaffold owns. It fails on three things, not one: a stale
+// identifier, the combined provider/model form docs/SCHEMA.md N15 forbids, and a
+// temperature on a think model, which OpenAI's reference does not state this
+// model family accepts (research D10).
+func TestOneModelIdEverywhere(t *testing.T) {
+	want := scaffold.DefaultReasonModel
+	if want == "" {
+		t.Fatal("internal/scaffold owns the identifier; an empty constant makes every check below vacuous")
+	}
+	// Every OpenAI chat identifier shape, so a stale one is caught by shape and
+	// not by a list somebody has to remember to extend.
+	identifier := regexp.MustCompile(`\bgpt-[0-9][A-Za-z0-9.-]*\b`)
+	combined := regexp.MustCompile(`\b(?:openai|slng)/gpt-[A-Za-z0-9.-]+\b`)
+
+	for name, content := range authorFacingModelSurfaces(t) {
+		for _, hit := range identifier.FindAllString(content, -1) {
+			if hit != want {
+				t.Errorf("%s names the model %q; the one identifier is %q", name, hit, want)
+			}
+		}
+		if hit := combined.FindString(content); hit != "" {
+			t.Errorf("%s writes %q; provider and model are two fields, and a folded string reaches the SDK verbatim (SCHEMA N15)", name, hit)
+		}
+		for _, block := range thinkBlocks(content) {
+			if strings.Contains(block, "temperature:") {
+				t.Errorf("%s sets temperature on a think model; OpenAI does not state this family accepts it, so it stays off until it is verified", name)
+			}
+		}
+	}
+}
+
+// authorFacingModelSurfaces is the 24-file set research D10 measured: everything
+// an author reads or copies. Test fixtures, goldens, and the specs that record
+// the drift as history are deliberately absent.
+func authorFacingModelSurfaces(t *testing.T) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	read := func(path string) {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[filepath.ToSlash(path)] = string(content)
+	}
+	repo := func(parts ...string) string {
+		return filepath.Join(append([]string{"..", ".."}, parts...)...)
+	}
+	walk := func(root string, ext ...string) {
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() || !slices.Contains(ext, filepath.Ext(path)) {
+				return err
+			}
+			read(path)
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	walk(repo("examples"), ".yaml", ".md")
+	walk(repo("docs-site"), ".mdx")
+	walk(repo("docs"), ".md")
+	read(repo("README.md"))
+	read(repo("internal", "scaffold", "scaffold.go"))
+	for _, name := range []string{"references/models.md", "references/package.md"} {
+		out["bundle/"+name] = bundleFile(t, name)
+	}
+	return out
+}
+
+// thinkBlocks slices out each `think:` section of a YAML or fenced document, so
+// a temperature on a speak entry is not mistaken for one on a reasoning model.
+func thinkBlocks(content string) []string {
+	var blocks []string
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "think:" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+		var block []string
+		for _, next := range lines[i+1:] {
+			if strings.TrimSpace(next) == "" {
+				block = append(block, next)
+				continue
+			}
+			if len(next)-len(strings.TrimLeft(next, " ")) <= indent {
+				break
+			}
+			block = append(block, next)
+		}
+		blocks = append(blocks, strings.Join(block, "\n"))
+	}
+	return blocks
 }
 
 func containsString(list []string, want string) bool {

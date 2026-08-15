@@ -133,7 +133,11 @@ func routeSafeCore(t *testing.T, dir, pipecatTransport, livekitTransport string)
 		"from_number": "TWILIO_PHONE_NUMBER",
 	}
 	write("primary_phone", pipecatTransport, twilioAPI)
-	write("livekit_trunk", livekitTransport, twilioAPI)
+	// The LiveKit instance already names twilio_sip, because cold transfer needs
+	// a route there (SCHEMA N31). Rewriting that file rather than adding a second
+	// one keeps the fixture free of a connection no target names, which is its
+	// own warning.
+	write("twilio_sip", livekitTransport, twilioAPI)
 
 	path := filepath.Join(dir, "targets.yaml")
 	raw, err := os.ReadFile(path)
@@ -143,9 +147,6 @@ func routeSafeCore(t *testing.T, dir, pipecatTransport, livekitTransport string)
 	configured := mustReplace(t, string(raw),
 		"    connection: daily_provisioned   # cold_transfer needs Daily SIP on Pipecat",
 		"    connection: primary_phone")
-	configured = mustReplace(t, configured,
-		"    sdk_language: python\n    models:",
-		"    sdk_language: python\n    connection: livekit_trunk\n    models:")
 	if err := os.WriteFile(path, []byte(configured), 0o600); err != nil {
 		t.Fatal(err)
 	}

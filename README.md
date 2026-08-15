@@ -26,7 +26,7 @@ models:
   think:
     brain:
       provider: openai
-      model: gpt-4.1-mini
+      model: gpt-5.6-luna
   speak:
     voice:
       provider: slng

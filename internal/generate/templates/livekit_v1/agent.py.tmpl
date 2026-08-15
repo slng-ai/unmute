@@ -301,9 +301,16 @@ not leave the question open: the caller is holding for the whole of this convers
 {{end}}
 {{- if .RequiredSecrets}}
 # --- required environment ----------------------------------------------------
-# Declared secrets (agent.yaml secrets:), plus every address and token an MCP
-# tool source names. A missing one fails the session before the agent answers,
-# rather than at the first tool call.
+# Everything this agent needs to run: the model providers' keys, the connection
+# to the orchestrator, every address and token a tool or MCP source names, and
+# anything else the package declared. Derived from what the compiler knows it
+# requires rather than from the author's `secrets:` block, so a package that
+# declares nothing still refuses to start without them. A missing one fails the
+# session before the agent answers, rather than at the first tool call.
+#
+# The phone route's own credentials are deliberately absent: one file serves
+# every channel, and demanding carrier credentials would refuse a browser
+# session on a phone package. They are listed in .env.example and the runbook.
 REQUIRED_ENV = [
 {{- range .RequiredSecrets}}
     {{pyq .}},

@@ -59,14 +59,14 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 		if keyEnv == "" {
 			keyEnv = apiKeyEnv(vendor)
 		}
-		env.add(keyEnv)
+		env.addRead(keyEnv)
 		flat(pyKV{Key: spec.APIKeyArg, Value: envRef(keyEnv)})
 	}
 	for _, name := range spec.ExtraEnvs {
-		env.add(name) // read implicitly by the constructor (AWS SDK creds)
+		env.addRead(name) // read implicitly by the constructor (AWS SDK creds)
 	}
 	if binding.EndpointEnv != "" { // slotting already checked by CheckVendor
-		env.add(binding.EndpointEnv)
+		env.addRead(binding.EndpointEnv)
 		flat(pyKV{Key: spec.Endpoint.Arg, Value: envRef(binding.EndpointEnv)})
 	}
 	voice := cmp.Or(binding.Voice, binding.VoiceID)

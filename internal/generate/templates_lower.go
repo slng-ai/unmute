@@ -207,8 +207,95 @@ func captureDescription(agent *ir.Agent, names []string) string {
 
 // requiredSecretEnv lists the declared secrets a generated runtime refuses to
 // start without, in name order (V12). Every declared secret is required.
-func requiredSecretEnv(agent *ir.Agent) []string {
-	return slices.Clone(agent.Secrets)
+// requiredSecretEnv is the declared list, minus the names that belong to a
+// connection **this** target does not name.
+//
+// `secrets:` is package-wide by design (SCHEMA N42), so a two-target package
+// declares both routes' carrier credentials. Feeding the whole list into one
+// target's startup check made the Pipecat build refuse phone calls until the
+// operator supplied four Elastic SIP trunk values that only the LiveKit build
+// has any use for — names its own emitted code never reads once (Wave C,
+// 2026-08-15). They reached `CALL_REQUIRED_ENV`, `.env.example`, the README, and
+// the compile report, and they survived `--target`.
+//
+// A name that also does something else here — a model key, a tool credential —
+// stays, because the exclusion is about the other route's names and not about
+// the other route's file.
+func requiredSecretEnv(agent *ir.Agent, target ir.Target, env *envSet) []string {
+	foreign := map[string]bool{}
+	for name, connection := range agent.Connections {
+		if name == target.Connection {
+			continue
+		}
+		for _, value := range connection.Environment {
+			foreign[value] = true
+		}
+	}
+	if len(foreign) == 0 {
+		return slices.Clone(agent.Secrets)
+	}
+	// Anything this target's own route needs is not foreign, whatever another
+	// connection also maps.
+	if plan := target.Telephony; plan != nil {
+		for _, name := range plan.Environment {
+			delete(foreign, name)
+		}
+		for _, name := range slices.Concat(plan.RequiredEnvironment, plan.LocalEnvironment) {
+			delete(foreign, name)
+		}
+	}
+	out := make([]string, 0, len(agent.Secrets))
+	for _, name := range agent.Secrets {
+		if foreign[name] && !env.alwaysRead(name) {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// orDefault returns text, or fallback when text is blank.
+//
+// Blank means empty **or whitespace**, and the difference is not academic: a
+// control's `when:` becomes the docstring of the tool the model decides from, so
+// `when: "   "` used to emit `""" """` and leave the model nothing to go on,
+// while omitting the field entirely got the sensible default. Writing spaces was
+// strictly worse than writing nothing, and nothing said so (Wave C, 2026-08-15).
+func orDefault(text, fallback string) string {
+	if strings.TrimSpace(text) == "" {
+		return fallback
+	}
+	return text
+}
+
+// authorEnv is the half of a target's required environment the author actually
+// supplies. The route already declares the other half
+// (LocallySuppliedEnvironment): `unmute dev` sets those locally, LiveKit Cloud
+// injects its own connection values into a deployed agent, and its managed SIP
+// service owns the Redis no emitted Python on that driver reads.
+//
+// Both drivers read this one function, which is the fix rather than a new
+// concept: the classification already existed, the LiveKit template labelled it
+// instead of excluding it, and the Pipecat template ignored it entirely, so the
+// same REDIS_URL was explained on one target and silently demanded on the other
+// from one piece of data (research D11).
+//
+// `.env.example` is a to-do list and every line of it is a to-do, so a name
+// nobody sets is absent rather than relabelled. It survives in
+// compile-report.json's required_env, in the Compose interpolation defaults, and
+// in the emitted README's carrier setup, which says where each value comes from
+// rather than only naming it.
+func authorEnv(required []string, plan *ir.TelephonyPlan) []string {
+	if plan == nil {
+		return slices.Clone(required)
+	}
+	out := make([]string, 0, len(required))
+	for _, name := range required {
+		if !slices.Contains(plan.LocalEnvironment, name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // withoutRouteEnv drops the names only a phone call reads, leaving the set a
@@ -226,11 +313,25 @@ func requiredSecretEnv(agent *ir.Agent) []string {
 // carrier credentials, and neither target's own plan knows about the other's.
 // A connection environment value is a phone-route name whichever target names
 // the file. Nothing here is re-derived from a name's spelling.
-func withoutRouteEnv(names []string, agent *ir.Agent, target ir.Target) []string {
+//
+// **One name can be two things**, and matching by name alone got that wrong in
+// both directions (Wave C, 2026-08-15). A connection maps `auth_token` onto a
+// variable; a webhook tool's `auth.token_env` may name the same variable,
+// because one gateway token really does serve both. Stripping it left the
+// emitted code raising KeyError on the first tool call, after a startup check
+// that passed and a README that said the key was covered. So the env set records
+// which names the code reads on every session, and those are never stripped
+// however a connection happens to map them.
+func withoutRouteEnv(names []string, agent *ir.Agent, target ir.Target, env *envSet) []string {
 	route := map[string]bool{}
 	for _, connection := range agent.Connections {
 		for _, name := range connection.Environment {
 			route[name] = true
+		}
+	}
+	for name := range route {
+		if env.alwaysRead(name) {
+			delete(route, name)
 		}
 	}
 	if plan := target.Telephony; plan != nil {

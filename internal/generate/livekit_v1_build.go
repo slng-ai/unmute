@@ -19,9 +19,10 @@ import (
 // LiveKit Inference wildcard row (C8/V19).
 func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// The driver's templates are Python; a node project would be silently
-	// wrong, so fail loud until node templates exist (C1).
-	if tgt.SDKLanguage != "" && tgt.SDKLanguage != "python" {
-		return livekitData{}, fmt.Errorf("livekit driver emits python projects only; sdk_language %q has no templates yet", tgt.SDKLanguage)
+	// wrong, so fail loud until node templates exist (C1). ir.Validate asks the
+	// same question now, so this is the backstop rather than the only guard.
+	if err := targetcap.CheckSDKLanguage(targetcap.LiveKit, tgt.SDKLanguage); err != nil {
+		return livekitData{}, err
 	}
 	if err := checkLiveKitPins(tgt.Pins); err != nil {
 		return livekitData{}, err
@@ -271,19 +272,9 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// secrets cover most packages, but the address and token a tool source
 	// names are required whether or not the package also declared them, and a
 	// missing one has to be named before anything dials (FR-009/N40).
-	required := appendMCPEnv(requiredSecretEnv(agent), data.Agents, data.Tasks)
-	for _, name := range required {
+	for _, name := range appendMCPEnv(requiredSecretEnv(agent, tgt, env), data.Agents, data.Tasks) {
 		env.add(name)
 	}
-	// All of them reach the environment, but the *startup check* skips the
-	// route's own names. One file serves every channel on this driver, so a
-	// check that demanded carrier credentials would refuse a browser or console
-	// session on a phone package — the workflow FR-018 protects. This restores
-	// exactly the behaviour these packages had before their telephony names were
-	// declared in `secrets:` (SCHEMA N41); the route's values are still listed in
-	// .env.example, the compile report, and the runbook. An mcp source's names
-	// are not route names, so they stay in the check.
-	data.RequiredSecrets = withoutRouteEnv(required, agent, tgt)
 	data.NeedsRender = renderNeeds(agent)
 	if data.Capture != nil {
 		data.NeedsFunctionTools = true // the generated capture tool is a @function_tool too
@@ -329,7 +320,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// The route's own names are removed rather than merely not added: `secrets:`
 	// now declares them (SCHEMA N41), so a package with a secrets block would
 	// otherwise demand carrier credentials for a browser session (FR-018).
-	data.DevEnv = withoutRouteEnv(env.sorted(), agent, tgt)
+	data.DevEnv = withoutRouteEnv(env.sorted(), agent, tgt, env)
 	data.Telephony, err = buildLiveKitTelephony(agent, tgt, env)
 	if err != nil {
 		return livekitData{}, err
@@ -366,35 +357,26 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	data.PluginModules = collectLiveKitPlugins(data)
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
-	data.PlatformEnv, data.OperatorEnv = splitPlatformEnv(data.RequiredEnv, tgt.Telephony)
-	// The undeclared-name list is built from the operator's half, not from every
-	// required name. A platform-supplied name belongs in exactly one section: it
-	// has its own, which explains that you do not set it. Listing it in both
-	// tells the reader to set a value and then not to.
-	data.Secrets, data.ExtraEnv = secretEnvDocs(agent, data.OperatorEnv)
+	// The startup check is derived from what the compiler knows it requires, not
+	// from what the author remembered to declare. It used to read `secrets:`
+	// alone, so a package with no block emitted no REQUIRED_ENV and no
+	// require_env() at all, and a name left undeclared dropped out of the very
+	// check meant to catch it — while docs-site/reference/secrets.mdx promised
+	// "the generated agent refuses to start without them" (research D3).
+	//
+	// All of them reach the environment, but the check skips the route's own
+	// names. One file serves every channel on this driver, so a check that
+	// demanded carrier credentials would refuse a browser or console session on a
+	// phone package. The route's values are still listed in .env.example, the
+	// compile report, and the runbook. An mcp source's names are not route names,
+	// so they stay in the check. This is the same derivation the Pipecat driver
+	// already used for DevEnv.
+	data.RequiredSecrets = withoutRouteEnv(data.RequiredEnv, agent, tgt, env)
+	data.AuthorEnv = authorEnv(data.RequiredEnv, tgt.Telephony)
+	if tgt.Telephony != nil {
+		data.SuppliedForYou = slices.Clone(tgt.Telephony.LocalEnvironment)
+	}
 	return data, nil
-}
-
-// splitPlatformEnv separates the names the operator must supply from the names
-// something else supplies. The route already declares the second set
-// (LocallySuppliedEnvironment): on LiveKit Cloud the platform injects
-// LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET into a deployed agent and
-// drops them from any secrets file, and its managed SIP service owns Redis,
-// which no emitted Python reads on this driver. Listing those beside the
-// operator's own keys made a deployed agent look as though it needed a Redis it
-// can never use, so the emitted env file labels them instead.
-func splitPlatformEnv(required []string, plan *ir.TelephonyPlan) (platform, operator []string) {
-	if plan == nil {
-		return nil, required
-	}
-	for _, name := range required {
-		if slices.Contains(plan.LocalEnvironment, name) {
-			platform = append(platform, name)
-			continue
-		}
-		operator = append(operator, name)
-	}
-	return platform, operator
 }
 
 // buildLiveKitCapture builds the generated update_variables tool: one optional
@@ -840,13 +822,13 @@ func appendMCPEnv(required []string, agents []livekitAgent, tasks []livekitTask)
 // author listed it. Two sources naming the same url_env are two mounts: the
 // selection lives on the source now, not on a file-name convention (N40).
 func livekitMCPSource(name string, tool ir.Tool, env *envSet) livekitMCPServer {
-	env.add(tool.URLEnv)
+	env.addRead(tool.URLEnv)
 	source := livekitMCPServer{
 		Name: name, URLEnv: tool.URLEnv, Transport: tool.MCPTransport,
 		Tools: tool.MCPTools, Auth: loweredAuth(tool.Auth),
 	}
 	if tool.Auth != nil {
-		env.add(tool.Auth.TokenEnv)
+		env.addRead(tool.Auth.TokenEnv)
 		source.AuthEnv = tool.Auth.TokenEnv
 	}
 	return source
@@ -975,10 +957,10 @@ func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variabl
 	}
 	switch tool.Execution {
 	case ir.ToolWebhook:
-		env.add(tool.URLEnv)
+		env.addRead(tool.URLEnv)
 		// The token rides its own env var, never the spec (SCHEMA §5.3).
 		if tool.Auth != nil {
-			env.add(tool.Auth.TokenEnv)
+			env.addRead(tool.Auth.TokenEnv)
 		}
 		return livekitTool{
 			Method: name, Description: tool.Description, URLEnv: tool.URLEnv,
@@ -1044,17 +1026,13 @@ func livekitChainService(binding ir.Binding, env *envSet) (livekitService, error
 // so the SDK auto-selects and falls back to the mini model with a warning
 // instead of raising (C5).
 func livekitTurnVersion(binding *ir.Binding) (string, error) {
-	if binding == nil || binding.Model == "" {
+	if binding == nil {
 		return "", nil
 	}
-	switch binding.Model {
-	case "turn-detector-mini":
-		return "v1-mini", nil
-	case "turn-detector":
-		return "v1", nil
-	default:
-		return "", fmt.Errorf("livekit turn model %q is not recognized; use turn-detector-mini (local) or turn-detector (LiveKit Cloud)", binding.Model)
-	}
+	// The recognised set lives in internal/target, because ir.Validate asks the
+	// same question and one fact gets one home (D5). This stays as a backstop:
+	// the driver still refuses rather than emitting an unrecognised version.
+	return targetcap.LiveKitTurnVersion(binding.Model)
 }
 
 // livekitReasonLLM resolves a reason profile plus its fallback chain (V4).
@@ -1110,17 +1088,11 @@ func promptConst(name string) string {
 }
 
 func transferWhen(c *ir.AgentTransfer) string {
-	if c.When != "" {
-		return c.When
-	}
-	return "Transfer the caller to the " + c.To + "."
+	return orDefault(c.When, "Transfer the caller to the "+c.To+".")
 }
 
 func humanTransferWhen(c *ir.HumanTransfer) string {
-	if c.When != "" {
-		return c.When
-	}
-	return "Transfer the caller to a human agent."
+	return orDefault(c.When, "Transfer the caller to a human agent.")
 }
 
 // destinationExpr renders a resolved destination as Python: a quoted literal,
@@ -1180,10 +1152,7 @@ func ringTimeoutSeconds(value ir.Duration) string {
 }
 
 func delegateWhen(c *ir.Delegate) string {
-	if c.When != "" {
-		return c.When
-	}
-	return "Run this flow."
+	return orDefault(c.When, "Run this flow.")
 }
 
 // delegateReturnFinality is appended to a then:return delegate docstring so the

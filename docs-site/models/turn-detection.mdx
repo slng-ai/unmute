@@ -63,6 +63,33 @@ runs on LiveKit writes it:
         model: turn-detector-mini
 ```
 
+### The two identities LiveKit accepts
+
+This is the one model id Unmute checks. Everywhere else `model:` is forwarded to
+the provider exactly as written, because the provider is the only thing that
+knows its own catalogue. A LiveKit turn detector is different: the driver loads
+it **by name**, so only two names exist.
+
+| `model:` | Runs | Needs |
+|---|---|---|
+| `turn-detector-mini` | on your machine | nothing |
+| `turn-detector` | LiveKit Cloud | your LiveKit credentials |
+
+Anything else fails validation, before any file is written:
+
+```
+✗ livekit (livekit)
+
+Errors:
+  livekit: turn model "silero" is not recognized; use turn-detector-mini (local) or turn-detector (LiveKit Cloud)
+```
+
+`silero` is the value most likely to end up here, because it is the right answer
+on Pipecat, where it is a VAD rather than a turn detector. That is why every
+example that runs on both targets overrides the entry per target. Pipecat
+forwards the field unchecked, so the same `agent.yaml` is legal there and not
+here, which is what the target prefix on the refusal is telling you.
+
 Because LiveKit decides for itself where that work runs, `placement:` is only a
 preference there, and validation says so rather than pretending otherwise:
 

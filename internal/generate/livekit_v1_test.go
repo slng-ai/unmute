@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -1468,11 +1467,18 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	// carries whatever a Connection declares, so a package written before the
 	// shipped example moved to the plain SIP names keeps working unchanged.
 	for _, name := range []string{
-		"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "REDIS_URL",
 		"TWILIO_SIP_ADDRESS", "TWILIO_SIP_USERNAME", "TWILIO_SIP_PASSWORD", "TWILIO_PHONE_NUMBER",
 	} {
 		if !strings.Contains(env, name+"=") {
 			t.Errorf(".env.example missing %s", name)
+		}
+	}
+	// The route's own values are absent: LiveKit Cloud injects its connection
+	// trio into a deployed agent, and its managed SIP service owns the Redis this
+	// agent never reads (FR-018).
+	for _, name := range []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "REDIS_URL"} {
+		if strings.Contains(env, name) {
+			t.Errorf(".env.example still asks for %s, which is not the reader's to set", name)
 		}
 	}
 	// Dialling out registers nothing on the platform, so the stored outbound
@@ -1484,7 +1490,7 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	for _, want := range []string{
 		"## Telephony setup", "SIP trunking console", "twilio provider guide", "REDIS_URL", "not an audio hop",
 		"no LiveKit outbound trunk is registered",
-		"UNMUTE_LIVEKIT_SIP_PORT", "UNMUTE_LIVEKIT_RTP_PORT_RANGE", "UNMUTE_LIVEKIT_PORT",
+		"LIVEKIT_SIP_HOST_PORT", "LIVEKIT_RTP_HOST_PORT_RANGE", "LIVEKIT_HOST_PORT",
 	} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("README.md missing %q", want)
@@ -1505,10 +1511,10 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	for _, want := range []string{
 		"image: valkey/valkey:9.1.1-alpine", "image: livekit/livekit-server:v1.13.4", "image: livekit/sip:v1.7.0",
 		"LIVEKIT_API_SECRET=secret", "address: redis:6379",
-		`stop_grace_period: "1200s"`, `"${UNMUTE_LIVEKIT_PORT:-7880}:7880"`,
-		`"${UNMUTE_LIVEKIT_SIP_PORT:-5060}:5060/udp"`,
-		`rtp_port: ${UNMUTE_LIVEKIT_RTP_PORT_RANGE:-10000-10100}`,
-		`"${UNMUTE_LIVEKIT_RTP_PORT_RANGE:-10000-10100}:${UNMUTE_LIVEKIT_RTP_PORT_RANGE:-10000-10100}/udp"`,
+		`stop_grace_period: "1200s"`, `"${LIVEKIT_HOST_PORT:-7880}:7880"`,
+		`"${LIVEKIT_SIP_HOST_PORT:-5060}:5060/udp"`,
+		`rtp_port: ${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}`,
+		`"${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}:${LIVEKIT_RTP_HOST_PORT_RANGE:-10000-10100}/udp"`,
 		"condition: service_healthy", "redis_data:/data",
 	} {
 		if !strings.Contains(compose, want) {
@@ -1642,13 +1648,10 @@ func configuredLiveKitConnector(t *testing.T) (*ir.Agent, ir.Target) {
 		t.Fatal(err)
 	}
 	// The connector supports no transfers yet, so drop the human transfer
-	// control and every reference to it. primary_phone already carries the
-	// Twilio account trio (account_sid, auth_token, from_number).
-	delete(pkg.Agent.Controls, "to_human")
-	for name, a := range pkg.Agent.Agents {
-		a.Tools = slices.DeleteFunc(a.Tools, func(s string) bool { return s == "to_human" })
-		pkg.Agent.Agents[name] = a
-	}
+	// control, every reference to it, and the destination it resolved to.
+	// primary_phone already carries the Twilio account trio (account_sid,
+	// auth_token, from_number).
+	dropHumanTransferControl(pkg)
 	inbound, outbound := true, true
 	pkg.Agent.Channels["phone"] = spec.Channel{
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
@@ -1733,12 +1736,14 @@ func TestLiveKitConnectorGeneratesBridgeWithoutCloudOrSIP(t *testing.T) {
 	}
 
 	env := artifactFile(t, artifact, ".env.example")
-	for _, want := range []string{"TWILIO_ACCOUNT_SID=", "TWILIO_AUTH_TOKEN=", "TWILIO_PHONE_NUMBER=", "UNMUTE_PUBLIC_URL=", "UNMUTE_OUTBOUND_TOKEN="} {
+	for _, want := range []string{"TWILIO_ACCOUNT_SID=", "TWILIO_AUTH_TOKEN=", "TWILIO_PHONE_NUMBER="} {
 		if !strings.Contains(env, want) {
 			t.Errorf(".env.example missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"TWILIO_SIP_", "LIVEKIT_SIP_INBOUND_TRUNK", "REDIS_URL"} {
+	// `unmute dev` mints both of these and a deployment's platform supplies
+	// them, so they are not the reader's to fill in (FR-018c).
+	for _, forbidden := range []string{"UNMUTE_PUBLIC_URL", "UNMUTE_OUTBOUND_TOKEN", "TWILIO_SIP_", "LIVEKIT_SIP_INBOUND_TRUNK", "REDIS_URL"} {
 		if strings.Contains(env, forbidden) {
 			t.Errorf(".env.example contains SIP-only %q", forbidden)
 		}
@@ -2011,12 +2016,16 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
 	back.Context.History = ir.HistorySummary
 	back.Context.Summarizer = "backup"
-	// Cold, not warm. A warm transfer dials the destination itself and needs a
-	// telephony Connection for the carrier credentials (SCHEMA N33,
-	// 2026-08-12), which this non-telephony fixture does not have. Warm's
-	// lowering is covered on a SIP target by
+	// Cold, not warm. A warm transfer dials the destination itself and needs the
+	// carrier credentials a telephony Connection carries (SCHEMA N33,
+	// 2026-08-12). Warm's lowering is covered on a SIP target by
 	// TestLiveKitV1HumanTransferColdAndWarm and
 	// TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting.
+	//
+	// Cold needs a route too, since 2026-08-15: it hands over the caller's own
+	// leg, and a target that names no route has none (FR-003). The fixture names
+	// one below rather than dropping the transfer, because a parity fixture whose
+	// job is "every livekit-ok feature at once" has to keep the feature.
 	agent.Controls["to_human"] = &ir.HumanTransfer{Kind: ir.ControlHumanTransfer, Destination: "line", Mode: ir.TransferCold, OnUnavailable: ir.OnUnavailableReturn}
 	agent.Controls["to_human_cold"] = &ir.HumanTransfer{Kind: ir.ControlHumanTransfer, Destination: "line", Mode: ir.TransferCold, RingTimeout: "20s", OnUnavailable: ir.OnUnavailableHangup}
 	agent.Tools["fetch_notes"] = ir.Tool{
@@ -2055,6 +2064,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	agent.Agents["reservations"] = resDef
 
 	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+	tgt.Connection = "twilio_sip"
 	tgt.Models.Reason["backup"] = ir.Binding{Model: "openai/gpt-4o"}
 	tgt.Destinations = map[string]string{"line": "+14155550123"}
 	tgt.Pins = map[string]string{"livekit-plugins-slng": "1.7.0"}

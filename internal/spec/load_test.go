@@ -83,6 +83,39 @@ func TestLoadRejectsUnknownFieldWithPosition(t *testing.T) { // V3
 	}
 }
 
+// TestLoadNeverPrintsAValueBack holds the repository's hardest rule at the one
+// place that used to break it. The decoder's source excerpt is genuinely the
+// best error in the tool — line, neighbours, and a caret under the column — and
+// it printed the author's file back at them verbatim.
+//
+// The mistake that produces a YAML error is very often exactly the mistake of
+// writing a value where a name belongs: `secrets:` as a map is the natural
+// beginner shape, and it dumped every key in the block to stderr (Wave C,
+// 2026-08-15).
+func TestLoadNeverPrintsAValueBack(t *testing.T) {
+	const pasted = "sk-live-pretendkey123456"
+	dir := t.TempDir()
+	// A map where a sequence belongs, with a credential-shaped value.
+	body := "version: 1\nentry_agent: intake\n\nsecrets:\n  OPENAI_API_KEY: " + pasted + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("a map where a sequence belongs must be refused")
+	}
+	if strings.Contains(err.Error(), pasted) {
+		t.Errorf("the refusal prints the value back, into a terminal and a CI log:\n%v", err)
+	}
+	// The excerpt still has to be worth having: the position, the key, and the
+	// structure are what a shape error is about.
+	for _, want := range []string{"agent.yaml", "secrets:", "OPENAI_API_KEY"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal lost %q, so redaction cost more than it bought:\n%v", want, err)
+		}
+	}
+}
+
 func TestLoadRejectsUnknownTracingField(t *testing.T) { // V25
 	dir := t.TempDir()
 	yaml := "version: 1\nentry_agent: intake\ntracing:\n  provider: langfuse\n  sample_rate: 1\n"

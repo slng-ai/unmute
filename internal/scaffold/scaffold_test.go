@@ -14,7 +14,10 @@ import (
 
 	"github.com/goccy/go-yaml"
 
+	"github.com/slng-ai/unmute/internal/generate"
+	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/spec"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -41,9 +44,14 @@ func manifest(t *testing.T, dir string, created []string) []byte {
 	return b.Bytes()
 }
 
+// TestWrite_golden covers what `unmute init` actually writes, tools included.
+// It used to call Write with no tools while internal/cli/init.go passes
+// DefaultTools(), so the two `tools:` blocks and tools/end_call.yaml that every
+// real init writes had no golden coverage at all: a change to the default tool
+// template was invisible to `go test ./...`.
 func TestWrite_golden(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "support-bot")
-	created, err := Write(dir, Data{Name: "support-bot"})
+	created, err := Write(dir, Data{Name: "support-bot", Tools: DefaultTools()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +91,10 @@ func TestWriteDefaultFileSet(t *testing.T) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	want := []string{".env.example", "agent.yaml", "instructions.md", "targets.yaml"}
+	// .gitignore is one of the five, and it is not optional: agent.yaml and
+	// .env.example both tell the author that `.env` is not committed, and
+	// nothing was making that true.
+	want := []string{".env.example", ".gitignore", "agent.yaml", "instructions.md", "targets.yaml"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("default files = %v, want %v", names, want)
 	}
@@ -94,6 +105,162 @@ func TestWriteDefaultFileSet(t *testing.T) {
 		}
 		if strings.Contains(string(content), forbidden) {
 			t.Errorf("%s contains opt-in tracing token %q", path, forbidden)
+		}
+	}
+}
+
+// TestScaffoldAgreesWithItsOwnBuild compiles what `unmute init` wrote and holds
+// the two `.env.example` files to the same set of names.
+//
+// They share no code and they cannot be unified cheaply: the package-root file
+// renders from the wizard struct, the generated one from the resolved IR, and
+// the root file reads a Transport the IR never sees because the scaffold never
+// writes it to disk. That is structurally why they can disagree — the root file
+// asked for DAILY_API_KEY and the build did not (reproduction.md F). A test is
+// the shortest thing that fails if the drift comes back (research D9).
+func TestScaffoldAgreesWithItsOwnBuild(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "hello-agent")
+	if _, err := Write(dir, Data{Name: "hello-agent", Tools: DefaultTools()}); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := spec.Load(dir)
+	if err != nil {
+		t.Fatalf("the scaffold wrote a package the compiler cannot load: %v", err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatalf("the scaffold wrote a package the compiler cannot build: %v", err)
+	}
+	name := DefaultTarget
+	artifact, err := generate.Generate(agent, agent.Targets[name], targetcap.Default())
+	if err != nil {
+		t.Fatalf("the scaffold wrote a package the compiler cannot generate: %v", err)
+	}
+
+	root, err := os.ReadFile(filepath.Join(dir, ".env.example"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var built []byte
+	for _, file := range artifact.Files {
+		if file.Path == ".env.example" {
+			built = file.Content
+		}
+	}
+	if built == nil {
+		t.Fatal("the build has no .env.example to agree with")
+	}
+	if got, want := envNames(string(root)), envNames(string(built)); !slices.Equal(got, want) {
+		t.Errorf("the package root asks for %v and build/%s asks for %v; one of them is lying to the author", got, name, want)
+	}
+}
+
+// envNames pulls the UPPER_SNAKE names out of an env file, ignoring comments and
+// blanks. A commented-out name is not asked for, so it does not count.
+func envNames(content string) []string {
+	var names []string
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if name, _, ok := strings.Cut(line, "="); ok {
+			names = append(names, strings.TrimSpace(name))
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// TestScaffoldKeepsItsPromiseAboutDotEnv holds a claim two scaffolded files
+// make. `agent.yaml` says values go in "`.env`, which is gitignored" and
+// `.env.example` says "`.env` is never committed". Neither was true: `unmute
+// init` wrote no `.gitignore`, so a first-time author who followed those
+// instructions and ran `git add -A` staged their keys (Wave C, 2026-08-15).
+func TestScaffoldKeepsItsPromiseAboutDotEnv(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "hello-agent")
+	if _, err := Write(dir, Data{Name: "hello-agent", Tools: DefaultTools()}); err != nil {
+		t.Fatal(err)
+	}
+	ignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("two scaffolded files promise .env is gitignored: %v", err)
+	}
+	for _, want := range []string{".env", "!.env.example", "build/"} {
+		if !strings.Contains(string(ignore), want) {
+			t.Errorf(".gitignore does not carry %q:\n%s", want, ignore)
+		}
+	}
+	// The claim is only worth making where it is made, so check both files still
+	// make it. If one of them stops, this test should be deleted with it.
+	for _, path := range []string{"agent.yaml", ".env.example"} {
+		content, err := os.ReadFile(filepath.Join(dir, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(content), ".env") {
+			t.Errorf("%s no longer mentions .env; is this test still holding anything?", path)
+		}
+	}
+}
+
+// TestScaffoldPromptIsOnlyForTheAgent holds the instructions file to being what
+// it is: the system prompt, sent verbatim. A note addressed to the author
+// reaches the model instead, which is then told to edit a file it cannot see —
+// and the first draft of this scaffold shipped exactly that (Wave C).
+func TestScaffoldPromptIsOnlyForTheAgent(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "hello-agent")
+	if _, err := Write(dir, Data{Name: "hello-agent", Tools: DefaultTools()}); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := os.ReadFile(filepath.Join(dir, "instructions.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Second person addressed at the reader of the repository rather than at the
+	// agent. "you are", "you did not hear" and the like are the agent's own
+	// instructions and are fine; these are not.
+	for _, addressed := range []string{
+		"Replace this file", "replace this file", "this file with what",
+		"unmute ", "agent.yaml", "targets.yaml", ".env",
+	} {
+		if strings.Contains(string(prompt), addressed) {
+			t.Errorf("instructions.md says %q; it is the system prompt, so that reaches the model:\n%s", addressed, prompt)
+		}
+	}
+}
+
+// TestScaffoldPromptMatchesItsChannel holds the scaffold to the channel it
+// actually writes. `AllChannels()` hardcodes one web realtime_audio channel and
+// there is no scaffold path that emits telephony, so a prompt about a phone call
+// describes something the package cannot do. The mechanism was worse than it
+// looked: withDefaults set Instructions before it set Channel, so the channel was
+// not merely ignored, it was unreadable at the point the prompt was chosen.
+func TestScaffoldPromptMatchesItsChannel(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "hello-agent")
+	if _, err := Write(dir, Data{Name: "hello-agent", Tools: DefaultTools()}); err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := spec.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, channel := range pkg.Agent.Channels {
+		if channel.Kind == "telephony" {
+			t.Fatalf("channel %q is telephony, so this test is checking the wrong thing", name)
+		}
+	}
+	instructions, err := os.ReadFile(filepath.Join(dir, "instructions.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	phone := regexp.MustCompile(`(?i)\b(call|calling|caller|phone)\b`)
+	for _, surface := range []struct{ what, text string }{
+		{"the greeting", pkg.Agent.Conversation.Greeting.Text},
+		{"instructions.md", string(instructions)},
+	} {
+		if got := phone.FindString(surface.text); got != "" {
+			t.Errorf("%s says %q, and the only channel this package has is a browser: %q", surface.what, got, surface.text)
 		}
 	}
 }

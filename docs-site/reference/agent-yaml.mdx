@@ -42,8 +42,7 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-4o-mini
-      temperature: 0.2
+      model: gpt-5.6-luna
 ```
 
 Every entry takes the same fields, and which ones are legal depends on the
@@ -124,7 +123,7 @@ call time. A number written here is refused, because `agent.yaml` is the portabl
 half of a package:
 
 ```
-agent.yaml:60: destination "billing_line" is "+14155550123", a literal. agent.yaml is
+agent.yaml:60: destination "billing_line" is a literal. agent.yaml is
   the portable half of a package, so a destination names an environment variable holding
   the number: billing_line: BILLING_PHONE_NUMBER
 ```
@@ -348,6 +347,32 @@ channels:
 | `required_controls` | controls this channel requires |
 | `on_voicemail` | `hangup` or `leave_message`, requires `outbound: true` |
 
+### Two rules a telephony channel brings with it
+
+Both are enforced, both fail validation, and both are easier to read here than
+to meet by trial and error.
+
+**A warm transfer needs `outbound: true`.** A warm transfer dials the
+destination itself, so the agent places a call, and a channel that only receives
+them cannot:
+
+```
+channel "phone" needs outbound: true; a warm transfer places a call to its destination
+```
+
+Write `outbound: true` even on a line people only ring in on. It describes what
+the agent does, not what the number is for.
+
+**`capacity.peak_starts_per_second` becomes required.** The moment any channel
+is `telephony`, the field stops being optional and must be positive:
+
+```
+capacity.peak_starts_per_second must be positive for telephony
+```
+
+Calls arrive in bursts and each one starts a session, so a rate is the number
+the compiler sizes workers from. One is a fine answer for a first line.
+
 ## capacity
 
 ```yaml
@@ -361,7 +386,7 @@ capacity:
 |---|---|
 | `peak_sessions` | expected concurrent sessions at peak |
 | `max_sessions` | the ceiling you want to support |
-| `peak_starts_per_second` | how fast calls arrive at peak |
+| `peak_starts_per_second` | how fast calls arrive at peak. **Required and positive** as soon as any channel is `telephony`; optional otherwise |
 | `avg_session_duration` | a duration, for example `5m` |
 
 The compiler turns these into worker and quota numbers, marked

@@ -119,7 +119,14 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		route.Processes = slices.Clone(pipecatProcess)
 		route.PublicEndpoints = append(slices.Clone(pipecatEndpoints), extra...)
 		route.RuntimeEnvironment = slices.Clone(pipecatEnvironment)
-		route.LocallySuppliedEnvironment = []string{"REDIS_URL"}
+		// Every name in pipecatEnvironment is supplied rather than authored:
+		// `unmute dev` mints the public URL and the outbound token at
+		// internal/cli/dev_telephony.go and starts the Redis the Compose graph
+		// declares, and a deployment's platform or operator supplies all three.
+		// The two UNMUTE_* names were missing from this list even though the dev
+		// command already minted them, which is why they rendered as blanks in
+		// .env.example for the author to fill in (FR-018c).
+		route.LocallySuppliedEnvironment = []string{"REDIS_URL", "UNMUTE_OUTBOUND_TOKEN", "UNMUTE_PUBLIC_URL"}
 		route.ManualSteps = steps
 		routes[key] = route
 	}
@@ -381,8 +388,13 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	}
 	// The local Compose supplies the LiveKit key pair and URL (the documented
 	// --dev pair); UNMUTE_PUBLIC_URL and UNMUTE_OUTBOUND_TOKEN are dev-supplied
-	// by `unmute dev` itself, exactly like the Pipecat route.
-	route.LocallySuppliedEnvironment = []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL"}
+	// by `unmute dev` itself, exactly like the Pipecat route. The comment said so
+	// while the list left the last two out, which is why they rendered as blanks
+	// in .env.example for the author to fill in (FR-018c).
+	route.LocallySuppliedEnvironment = []string{
+		"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL",
+		"UNMUTE_OUTBOUND_TOKEN", "UNMUTE_PUBLIC_URL",
+	}
 	route.AutoWebhookEndpoint = "inbound"
 	route.ManualSteps = []string{
 		"get the Account SID and Auth Token from the Twilio Console account dashboard and select a Voice-capable number",

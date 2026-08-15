@@ -58,21 +58,41 @@ The other checks passed:
 These are not skill defects. They are recorded here because the skill had to be
 changed to stop asserting things the code does not do.
 
+**All five are closed by feature 013** (`specs/013-first-five-minutes/`), which
+exists because of them. Each is marked with what closed it.
+
 1. **A `human_transfer` on a browser-only LiveKit package validates clean,
    compiles clean, and is then absent from the generated project.** No error, no
    warning, no trace in `agent.py` or the compile report. This contradicts
    `docs-site/transfers/overview.mdx` ("it never compiles into something that
    quietly does nothing") and constitution Principle II.
+   **Closed** by 013 in two halves, because it was two defects wearing one
+   sentence: an unattached control is now refused in `ir.Build` with the file and
+   the line, and a cold transfer on a target that names no connection is refused
+   in `ir.Validate`. Commit `1f4a6d5`.
 2. **The `secrets:` completeness rule is documented but unenforced.** Deleting
    the whole block from a package that uses `OPENAI_API_KEY` and `SLNG_API_KEY`
    still validates clean. `unmute init` scaffolds no `secrets:` block at all.
+   **Closed** by 013: the warning no longer guards on the declaration list,
+   model provider keys joined the reference set so the check is not vacuous on a
+   scaffolded package, and `unmute init` writes the block. Commit `1f4a6d5`.
 3. **`unmute init` writes a prompt that contradicts its own package.**
    `instructions.md` says "This is a phone call"; `agent.yaml` declares only
    `web: realtime_audio`.
+   **Closed** by 013: the scaffold writes a real voice prompt for a browser
+   session, `Channel` is set before the prompt is chosen (it used to be set
+   after, so the channel was unreadable at that point), and a test refuses
+   "call", "calling", "caller", or "phone" in either surface. Commit `1f4a6d5`.
 4. **`unmute init` scaffolds `DAILY_API_KEY`** into a root `.env.example` that
    nothing keeps in sync with `secrets:`.
+   **Closed** by 013: the phantom `daily-sip` transport is gone from the browser
+   path, so the name is gone with it, and a test compiles the scaffolded package
+   and holds the two `.env.example` files to the same set. Commit `1f4a6d5`.
 5. **`build/your-first-agent.mdx` is stale on the default model.** It shows
    `gpt-4o-mini`; the scaffold writes `gpt-4.1-mini`.
+   **Closed** by 013, and wider than reported: both identifiers are retired for
+   `gpt-5.6-luna`, which has one Go home and one test that greps every
+   author-facing surface. Commit `1f4a6d5`.
 
 ## Status
 
