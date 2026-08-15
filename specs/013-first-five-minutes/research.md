@@ -412,9 +412,66 @@ test reading one exported constant is smaller and says what it means.
 
 ---
 
-## D11. No `UNMUTE_*` renames, and the guard test locks a state that already holds
+## D11. Vendor names take the vendor's prefix, and non-author names are hidden entirely
 
-**Decision.** Fix the presentation, skip the renames, and say so.
+**Decision.** Two rules, both set by the author on 2026-08-15.
+
+1. **Naming.** A variable that configures a service is named after that service:
+   `TWILIO_*`, `OPENAI_*`, `SLNG_*`, `DAILY_*`, `LIVEKIT_*`. Five names take a
+   vendor prefix they should always have had. Variables belonging to the
+   generated agent itself, owned by no vendor, keep `UNMUTE_*`.
+2. **Visibility.** `build/<target>/.env.example` and the emitted README's
+   set-these list contain **only names the author supplies**. Everything else is
+   absent, not relabelled.
+
+**Superseded.** This decision originally read "No `UNMUTE_*` renames, and the
+guard test locks a state that already holds", on the argument that renames are
+cosmetic once presentation is fixed. That was wrong on the vendor-owned names.
+`UNMUTE_DAILY_ROOM_GEO` configures a Daily room and claims two owners in one
+name; `UNMUTE_HOLD_AUDIO_URL` is its sibling; the three `UNMUTE_LIVEKIT_*` host
+mappings exist only because a LiveKit container is running. Those are not
+cosmetic, and the audit had already priced all five as cheap.
+
+**The stronger argument, which the first pass missed.** Principle I says a
+generated project "MUST carry no Unmute dependency" and "MUST be readable,
+runnable, and deployable with Unmute absent". A variable named `UNMUTE_` inside
+a project Unmute is not part of is the dependency-shaped thing that principle
+forbids, whether or not any reader mistakes it for a secret. That is what makes
+the vendor renames a MUST rather than a SHOULD.
+
+**Collision check, done rather than assumed.** The repository has no existing
+bare `LIVEKIT_PORT`, `LIVEKIT_SIP_PORT`, `LIVEKIT_RTP_PORT_RANGE`, or
+`DAILY_ROOM_GEO`; a grep appears to find them only because they are substrings
+of the `UNMUTE_*` names being replaced. The three LiveKit renames keep `HOST` in
+them (`LIVEKIT_HOST_PORT`, `LIVEKIT_SIP_HOST_PORT`,
+`LIVEKIT_RTP_HOST_PORT_RANGE`) because they are Docker Compose host-side
+mappings, not configuration the LiveKit server reads inside its container, and
+the name should not suggest otherwise.
+
+**Why the vendor-less group keeps `UNMUTE_`.** Once FR-018 removes them from
+every author-facing file, the prefix stops being something a reader meets. The
+renames those would need are the expensive half of the audit's table, roughly 44
+to 53 sites each for `UNMUTE_PUBLIC_URL` and `UNMUTE_OUTBOUND_TOKEN`, and 23
+golden lines across five goldens for `UNMUTE_CALL_START`. Paying that to change
+a string nobody sees is the kind of work this project's ceiling comment exists
+to refuse.
+
+**The cost of hiding, named rather than hidden.** The strictest visibility
+option removes the one document that told a self-hosted operator what to supply.
+That information is not lost: `compile-report.json` already carries a complete
+`required_env`, and the Compose file keeps its interpolation defaults. So the
+deploy story moves from prose to the compile report, which is a developer
+artifact rather than an author one, and that is the right place for it. The
+author's own rule carries the exemption that keeps this honest: a genuinely
+useful developer note, such as what to do when host port 5060 is taken, stays,
+in a troubleshooting section rather than a to-do list.
+
+**One name is not an environment variable at all.** `UNMUTE_SIP_TRUNK_ID` is a
+`sed` substitution token inside one generated JSON file, and `specs/005` says so
+in two places. It must stop being shaped like an environment variable so that
+nobody tries to set it.
+
+### The audit facts these rules were applied to
 
 The audit moved this part's target. The beginner path is **already clean**: zero
 hits across the site index, all of `docs-site/start/` and `docs-site/build/`, the
@@ -439,13 +496,6 @@ outbound endpoint only from the Daily-carrier helper.
 `UNMUTE_HOLD_AUDIO_URL` and `UNMUTE_DAILY_ROOM_GEO` are live and already
 presented correctly as commented-out optional lines. The only fictional name is
 `UNMUTE_ICE_SERVERS`, one line of speculative prose, which is deleted.
-
-**Renames are skipped.** FR-021 is a SHOULD. Renaming does not fix the one name
-that actually reads as a credential — `UNMUTE_OUTBOUND_TOKEN` genuinely is a
-bearer token, so any name reads that way, and presentation is the defect. The
-eleven cheap renames move goldens and generated Python for a cosmetic gain, and
-`UNMUTE_CALL_START` alone touches 23 golden lines across five goldens. The
-priced table is kept in the spec so a later decision is cheap.
 
 **Two live names are undocumented anywhere**:
 `UNMUTE_TELEPHONY_BRIDGE_PORT` and `UNMUTE_AGENT_HEALTH_PORT`, one template line

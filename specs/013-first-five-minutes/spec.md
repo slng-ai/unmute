@@ -73,6 +73,38 @@ trees.
 - Q: Which single model identifier should every surface use? → A: `gpt-5.6-luna`, authored as `provider: openai` plus `model: gpt-5.6-luna`
 - Q: What reasoning effort should the scaffold and examples set on a reasoning-family model used for speech? → A: `minimal`, via the existing `params:` pass-through
 - Q: `gpt-5.6-luna`'s support for `temperature` is not stated in OpenAI's documentation. What happens to the `temperature: 0.2` the examples carry? → A: drop it from the scaffold and all eleven examples
+- Q: An environment variable that configures a vendor's own component should carry that vendor's prefix, not Unmute's. What about the ones no vendor owns? → A: vendor-owned names take the vendor prefix; the generated agent's own runtime names keep `UNMUTE_*`
+- Q: What is the bar for showing an environment variable at all, so a test can enforce it? → A: only author-set names are shown; everything else is hidden
+
+**The naming rule, stated once.** If a variable configures a service, it is
+named after that service. `TWILIO_*`, `OPENAI_*`, `SLNG_*`, `DAILY_*`,
+`LIVEKIT_*`. Unmute is not a service the generated project talks to, so an
+`UNMUTE_` prefix is only correct where the variable belongs to the generated
+agent itself and to no vendor.
+
+`UNMUTE_DAILY_ROOM_GEO` is the clearest case for the rule: it is a Daily room
+setting whose name claims Daily and Unmute at once. `UNMUTE_HOLD_AUDIO_URL` is
+the same knob's sibling. The three LiveKit host-port mappings are the same
+mistake in the other direction, an `UNMUTE_` prefix on ports that exist only
+because a LiveKit container is running.
+
+**The visibility rule, stated once.** `build/<target>/.env.example` and the
+emitted README's set-these list contain **only names the author supplies**. Not
+a labelled block of things they do not set, not a commented-out section: absent.
+Everything else stays discoverable where a developer would look for it —
+`compile-report.json` already carries `required_env`, and the Compose file
+carries its own interpolation defaults — and is documented in prose only where
+it is genuinely useful, which the author's own rule allows ("unless something is
+necessary or helpful for developers"). A port-conflict escape hatch qualifies. A
+list of variables `unmute dev` sets for you does not.
+
+**Why this is stronger than "it reads like a credential".** Principle I says a
+generated project "MUST carry no Unmute dependency" and "MUST be readable,
+runnable, and deployable with Unmute absent". A variable named `UNMUTE_` inside
+a project Unmute is not part of is the dependency-shaped thing that principle
+forbids, independent of whether a reader mistakes it for a secret. That makes
+the vendor renames a MUST rather than the SHOULD this spec first drafted, and it
+is why the earlier decision to skip the renames entirely was wrong.
 
 **Verification, 2026-08-15, against OpenAI's own API documentation.**
 `gpt-5.6-luna` appears in the Chat Completions supported-model list. The family
@@ -262,25 +294,45 @@ these before running", alongside real credentials like `TWILIO_AUTH_TOKEN`. And
 a cryptographically secure password generator" for a token `unmute dev` already
 mints.
 
+**And two names claim a vendor's territory while wearing Unmute's prefix.**
+`UNMUTE_DAILY_ROOM_GEO` and `UNMUTE_HOLD_AUDIO_URL` configure a Daily room. The
+three `UNMUTE_LIVEKIT_*` port mappings exist only because a LiveKit container is
+running. Under the naming rule in the Clarifications section, those five take
+their vendor's prefix.
+
 **Independent Test**: Compile an example with outbound telephony and read the
-generated `.env.example` and README as an author. No `UNMUTE_*` name appears as
-a blank to fill. Then grep the beginner path and the bundle: still zero, and a
-test now keeps it that way.
+generated `.env.example` and README as an author. The env file lists only names
+the author supplies, and the README's set-these list matches it exactly. Then
+grep the beginner path and the bundle: still zero, and a test now keeps it that
+way.
 
 **Acceptance Scenarios**:
 
 1. **Given** an outbound telephony package,
-   **When** the author reads `build/<target>/.env.example` and the emitted
-   README,
-   **Then** `UNMUTE_PUBLIC_URL` and `UNMUTE_OUTBOUND_TOKEN` appear only in a
-   labelled block that says the dev command supplies them, in the shape the
-   LiveKit platform-env section already uses — not among the names the author
-   fills in.
+   **When** the author reads `build/<target>/.env.example`,
+   **Then** it contains only names the author supplies. `UNMUTE_PUBLIC_URL` and
+   `UNMUTE_OUTBOUND_TOKEN` do not appear at all, in any form, including
+   commented out.
 
-2. **Given** `docs/TELEPHONY.md`,
-   **When** it describes `UNMUTE_OUTBOUND_TOKEN`,
+2. **Given** the same package,
+   **When** the author reads the emitted README's "set these before running"
+   list,
+   **Then** it names exactly the same set as the env file and nothing more.
+
+3. **Given** `docs/TELEPHONY.md`,
+   **When** it describes the outbound token,
    **Then** it does not instruct the reader to generate a secret that
    `unmute dev` mints for them.
+
+4. **Given** a variable that configures a vendor's own component,
+   **When** it is named,
+   **Then** it carries that vendor's prefix. Only variables belonging to the
+   generated agent itself, owned by no vendor, keep `UNMUTE_*`.
+
+5. **Given** an operator deploying the generated project by hand,
+   **When** they need the full set of names the runtime requires,
+   **Then** `compile-report.json` still carries `required_env`, so hiding a
+   name from the author-facing files does not make it unrecoverable.
 
 3. **Given** the site index, everything under `docs-site/start/` including the
    coding-agents page, everything under `docs-site/build/`, the root
@@ -625,41 +677,67 @@ owns the field the error names.
   endpoint only from the Daily-carrier helper, and the Pipecat
   carrier-websocket and LiveKit connector routes still serve it and still read
   the token.
-- **FR-018**: `UNMUTE_PUBLIC_URL` and `UNMUTE_OUTBOUND_TOKEN` MUST NOT appear as
-  bare fill-in blanks in any generated `build/<target>/.env.example` or in the
-  emitted README's "set these before running" list. They MUST move into a
-  labelled block stating that `unmute dev` supplies them locally and the
-  operator supplies them at deploy time — the shape the LiveKit platform-env
-  section of the same template already uses, and the shape
-  `docs-site/reference/secrets.mdx` already documents correctly. The generated
-  files are the surface that contradicts the page, not the other way round.
-- **FR-018a**: `docs/TELEPHONY.md` MUST stop instructing the reader to
+- **FR-018**: `build/<target>/.env.example` MUST contain **only names the author
+  supplies**. A name the author does not set MUST NOT appear in it at all, in
+  any form, including commented out or inside a labelled block. Today
+  `UNMUTE_PUBLIC_URL=` and `UNMUTE_OUTBOUND_TOKEN=` appear as bare blanks under
+  "required by the target or a connection", beside real credentials like
+  `TWILIO_AUTH_TOKEN`. `REDIS_URL` is in the same position and is subject to the
+  same rule.
+- **FR-018a**: The emitted README's "set these before running" list MUST name
+  exactly the same set as `build/<target>/.env.example` and nothing more. The
+  two are two views of one fact, so a test SHOULD hold them equal rather than
+  each being maintained by hand.
+- **FR-018b**: Hiding a name MUST NOT make it unrecoverable. `required_env` in
+  `compile-report.json` stays complete, and the Compose file keeps its own
+  interpolation defaults, so an operator deploying by hand can still find every
+  name the runtime needs.
+- **FR-018c**: Prose documentation of a non-author name is allowed only where it
+  is genuinely useful to a developer, which is the exemption the naming rule
+  itself carries. A port-conflict escape hatch qualifies and stays, in a
+  troubleshooting section rather than a to-do list.
+  `UNMUTE_TELEPHONY_BRIDGE_PORT` and `UNMUTE_AGENT_HEALTH_PORT`, each read by
+  exactly one generated template line and named by no Go code, document, test,
+  or golden, are documented there or deleted.
+- **FR-018d**: `docs/TELEPHONY.md` MUST stop instructing the reader to
   "generate this secret yourself with a cryptographically secure password
-  generator" for `UNMUTE_OUTBOUND_TOKEN`, which `unmute dev` already mints.
-- **FR-018b**: `UNMUTE_TELEPHONY_BRIDGE_PORT` and `UNMUTE_AGENT_HEALTH_PORT`
-  are each read by exactly one generated template line and named by no Go code,
-  no document, no test, and no golden. Each MUST be documented alongside the
-  other port knobs in the emitted README, or deleted.
+  generator" for the outbound token, which `unmute dev` already mints.
 - **FR-019**: Zero `UNMUTE_*` occurrences MUST remain in: the site index,
   everything under `docs-site/start/`, everything under `docs-site/build/`, the
   root `README.md`, everything `unmute init` writes, and everything under
   `internal/skill/assets/`.
 - **FR-020**: A test MUST enforce FR-019 and fail on the first reintroduction.
-- **FR-021**: A surviving name SHOULD be renamed to read as infrastructure
-  rather than a credential where the rename is cheap. The audit priced each one:
+- **FR-021**: A variable that configures a vendor's own component MUST carry
+  that vendor's prefix. Five names claim Unmute's prefix for something a vendor
+  owns, and all five are cheap: no Go, no golden, or a single literal.
 
-  | Cost | Names |
-  |---|---|
-  | Cheap: no Go, no golden, or one literal | `UNMUTE_AGENT_HEALTH_PORT`, `UNMUTE_TELEPHONY_BRIDGE_PORT`, `UNMUTE_LOG_LEVEL`, `UNMUTE_HOLD_AUDIO_URL`, `UNMUTE_DAILY_ROOM_GEO`, `UNMUTE_SIP_TRUNK_ID`, `UNMUTE_LIVEKIT_SIP_PORT`, `UNMUTE_LIVEKIT_RTP_PORT_RANGE`, `UNMUTE_LIVEKIT_PORT`, `UNMUTE_DEV_PORT`, `UNMUTE_TELEPHONY_PORT` |
-  | Medium: ~44 to ~53 sites across Go, templates, docs, and emitted Python | `UNMUTE_PUBLIC_URL`, `UNMUTE_OUTBOUND_TOKEN` |
-  | Expensive: 23 golden lines across five goldens | `UNMUTE_CALL_START` |
+  | Today | Becomes | Why |
+  |---|---|---|
+  | `UNMUTE_DAILY_ROOM_GEO` | `DAILY_ROOM_GEO` | a Daily room setting whose name already says Daily |
+  | `UNMUTE_HOLD_AUDIO_URL` | `DAILY_HOLD_AUDIO_URL` | the same knob's sibling on the Daily helper |
+  | `UNMUTE_LIVEKIT_PORT` | `LIVEKIT_HOST_PORT` | a host mapping that exists only because a LiveKit container runs |
+  | `UNMUTE_LIVEKIT_SIP_PORT` | `LIVEKIT_SIP_HOST_PORT` | as above |
+  | `UNMUTE_LIVEKIT_RTP_PORT_RANGE` | `LIVEKIT_RTP_HOST_PORT_RANGE` | as above |
 
-  `UNMUTE_DEV_PORT` is the highest-value cheap rename, because it is the only
-  one the default beginner journey surfaces at all.
-- **FR-021a**: Renaming `UNMUTE_OUTBOUND_TOKEN` does **not** fix it. It
-  genuinely is a bearer token, so any name reads as a credential; the defect is
-  presentation, which FR-018 owns. The rename is optional; FR-018 is not.
-- **FR-021b**: The twelve test-harness names (`UNMUTE_SWEEP_*`, `UNMUTE_TEST_*`,
+  The three LiveKit names keep `HOST` in them so they cannot be confused with
+  anything the LiveKit server or SDK reads inside the container. The repository
+  has no existing bare `LIVEKIT_PORT`, `LIVEKIT_SIP_PORT`, or
+  `LIVEKIT_RTP_PORT_RANGE`; the apparent hits are substrings of the `UNMUTE_*`
+  names being replaced.
+- **FR-021a**: Variables belonging to the generated agent itself, owned by no
+  vendor, **keep `UNMUTE_*`**: `UNMUTE_PUBLIC_URL`, `UNMUTE_OUTBOUND_TOKEN`,
+  `UNMUTE_LOG_LEVEL`, `UNMUTE_AGENT_HEALTH_PORT`,
+  `UNMUTE_TELEPHONY_BRIDGE_PORT`, `UNMUTE_DEV_PORT`, `UNMUTE_TELEPHONY_PORT`,
+  `UNMUTE_CALL_START`. FR-018 hides all of them from author-facing output, so
+  the prefix stops being something a reader meets, and the wide renames those
+  would need — roughly 44 to 53 sites each for the two medium ones, and 23
+  golden lines across five goldens for `UNMUTE_CALL_START` — buy nothing once
+  nobody sees them.
+- **FR-021b**: `UNMUTE_SIP_TRUNK_ID` is **not an environment variable**. It is a
+  substitution token inside one generated JSON file, replaced by `sed` in the
+  setup script, and `specs/005` says so explicitly. It MUST stop being shaped
+  like an environment variable so no reader tries to set it.
+- **FR-021c**: The twelve test-harness names (`UNMUTE_SWEEP_*`, `UNMUTE_TEST_*`,
   `UNMUTE_SMOKE_*`) never leave the test binaries and never reach an author.
   They are out of scope.
 
@@ -767,9 +845,15 @@ owns the field the error names.
   test that locks it, not a cleanup. Reported as such rather than as a fix.
   The measurable change is SC-006a.
 - **SC-006a**: Compiling an outbound telephony example produces a
-  `build/<target>/.env.example` and an emitted README in which no `UNMUTE_*`
-  name appears among the values the author is told to fill in. Today two do,
-  next to `TWILIO_AUTH_TOKEN`.
+  `build/<target>/.env.example` containing **only** names the author supplies,
+  and an emitted README whose set-these list names exactly the same set. Today
+  the env file carries `UNMUTE_PUBLIC_URL=`, `UNMUTE_OUTBOUND_TOKEN=`, and
+  `REDIS_URL=` next to `TWILIO_AUTH_TOKEN`, so the measured change is three
+  names leaving one file and one list. `required_env` in `compile-report.json`
+  still names all of them.
+- **SC-006b**: Zero variables that configure a vendor's own component carry an
+  `UNMUTE_` prefix. Measured as five renames: two Daily knobs and three LiveKit
+  host-port mappings.
 - **SC-007**: All eleven examples validate and compile cleanly for every target
   they declare, and every browser-only one reaches a greeting. Reported as a
   count out of eleven.

@@ -68,6 +68,26 @@ follows the evidence:
   of `gpt-5.6-luna` retires both incumbents, so the census now sizes the sweep
   rather than deciding it.
 
+**One drafted decision was reversed by the author and the spec says so.**
+Research D11 first concluded "no `UNMUTE_*` renames", on the argument that
+renames are cosmetic once presentation is fixed. That held for the names the
+generated agent owns and failed for the five a vendor owns:
+`UNMUTE_DAILY_ROOM_GEO` configures a Daily room and claims two owners in one
+name, and the three `UNMUTE_LIVEKIT_*` mappings exist only because a LiveKit
+container runs. The stronger argument the first pass missed is Principle I: a
+generated project must run with Unmute absent, so an `UNMUTE_` prefix inside it
+is dependency-shaped regardless of whether anyone mistakes it for a secret. The
+superseded reasoning is kept in D11 rather than deleted.
+
+**One consequence of the strictest visibility choice is recorded, not hidden.**
+Removing every non-author name from the emitted files removes the one document
+that told a self-hosted operator what to supply. That information survives in
+`compile-report.json`'s `required_env` and in the Compose file's interpolation
+defaults, and FR-018b holds it there with a test. The author's own rule carries
+the exemption that keeps a genuine developer note, such as what to do when host
+port 5060 is taken, which FR-018c places in a troubleshooting section rather
+than a to-do list.
+
 **One new risk was opened by the model choice and is tracked rather than
 assumed away.** `gpt-5.6-luna` is a reasoning-family model, so latency before
 each spoken turn is a real failure mode for a voice agent, and OpenAI's own

@@ -168,8 +168,27 @@ bin/unmute compile examples/outbound-reminder
 grep -n UNMUTE_ examples/outbound-reminder/build/*/.env.example
 ```
 
-Every hit is inside the commented "supplied for you" block, none in the fill-in
-list. The emitted README's "set these before running" list names none of them.
+**Zero hits.** The file lists only names the author supplies. Nothing is
+relabelled or commented out; the non-author names are absent. The emitted
+README's "set these before running" list names exactly the same set.
+
+Then confirm hiding did not delete:
+
+```sh
+grep -o '"required_env".*' examples/outbound-reminder/build/livekit/compile-report.json
+```
+
+Still names every hidden variable, so an operator deploying by hand can recover
+them.
+
+Then the naming rule, as a grep:
+
+```sh
+git grep -oh "UNMUTE_[A-Z_]*" -- internal | sort -u | grep -E "DAILY|LIVEKIT|TWILIO|TELNYX|PLIVO|OPENAI|SLNG"
+```
+
+Empty. No variable that configures a vendor's component wears Unmute's prefix.
+`UNMUTE_DAILY_ROOM_GEO` and the three `UNMUTE_LIVEKIT_*` mappings are gone.
 
 ```sh
 grep -rn "UNMUTE_" docs-site/index.mdx docs-site/start docs-site/build README.md internal/skill/assets internal/scaffold

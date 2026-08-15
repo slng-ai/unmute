@@ -69,6 +69,10 @@ reason. Every defect gets one before any fix is written.
 - [ ] T011 [P] Add `TestScaffoldAgreesWithItsOwnBuild` to `internal/scaffold/scaffold_test.go`: compile the scaffolded package and assert the package-root and generated `.env.example` name the same set
 - [ ] T012 [P] Add `TestScaffoldPromptMatchesItsChannel` to `internal/scaffold/scaffold_test.go`: with only a `web` channel, neither the greeting nor `instructions.md` may contain "call", "calling", "caller", or "phone"
 - [ ] T013 [P] Add `TestNoUnmuteEnvOnTheBeginnerPath` to `internal/skill/agreement_test.go`, modelled on `TestNoSecretsInTheBundle` at line 367 and reusing `sitePages` and `Bundle.Files`, covering the site index, `docs-site/start/`, `docs-site/build/`, root `README.md`, the scaffold output, and the whole bundle
+- [ ] T013a [P] Add `TestEnvExampleListsOnlyAuthorNames` to `internal/generate/env_test.go`: compile a package with outbound telephony and assert `build/<target>/.env.example` contains only names the author supplies, with no non-author name present in any form including commented out
+- [ ] T013b [P] Add a case to the same test asserting the emitted README's "set these before running" list names exactly the same set as the env file, since the two are two views of one fact
+- [ ] T013c [P] Add a case asserting `required_env` in `compile-report.json` still names every hidden variable, so FR-018b's recoverability is held rather than assumed
+- [ ] T013d [P] Add `TestNoVendorVariableWearsTheUnmutePrefix` to `internal/target` or beside the capability tests: no `UNMUTE_*` name may contain a vendor token (`DAILY`, `LIVEKIT`, `TWILIO`, `TELNYX`, `PLIVO`, `OPENAI`, `SLNG`), which is the naming rule as a grep
 - [ ] T014 [P] Add `TestOneModelIdEverywhere` to `internal/skill/agreement_test.go`, reading one exported constant and grepping the scaffold, the eleven examples, `docs/`, `docs-site/`, root `README.md`, and the bundle. It must fail on three things, not one: a stale identifier, the combined `openai/gpt-5.6-luna` form that `docs/SCHEMA.md` N15 forbids, and a `temperature` on any think model
 - [ ] T015 Run `go test ./...` and confirm each new test fails, and fails for the reason its name claims rather than a compile error or a typo
 
@@ -150,13 +154,18 @@ right.
 
 **Independent Test**: [quickstart.md](./quickstart.md) section 3.
 
-- [ ] T052 [US3] Move `UNMUTE_PUBLIC_URL` and `UNMUTE_OUTBOUND_TOKEN` out of the fill-in list and into a labelled supplied-for-you block in `internal/generate/templates/pipecat_v1/env.example.tmpl` and `internal/generate/templates/livekit_v1/env.example.tmpl`, in the shape the LiveKit platform-env section already uses
-- [ ] T053 [US3] Drop both names from the emitted README templates' "set these before running" list for both drivers
+- [ ] T052 [US3] Change `internal/generate/templates/pipecat_v1/env.example.tmpl` and `internal/generate/templates/livekit_v1/env.example.tmpl` so the file lists only names the author supplies. Non-author names are absent, not relabelled and not commented out: today the file carries `UNMUTE_PUBLIC_URL=`, `UNMUTE_OUTBOUND_TOKEN=`, and `REDIS_URL=` under "required by the target or a connection"
+- [ ] T052a [US3] Change the source that feeds those templates so author-set and runtime-supplied names are two distinct sets rather than one list, in `internal/generate/pipecat_v1_build.go` and `internal/generate/livekit_v1_build.go`. Keep `required_env` in `compile-report.json` complete, per FR-018b
+- [ ] T053 [US3] Make the emitted README's "set these before running" list render from the same set as the env file for both drivers, so the two cannot drift
+- [ ] T053a [P] [US3] Rename the two Daily knobs: `UNMUTE_DAILY_ROOM_GEO` becomes `DAILY_ROOM_GEO` and `UNMUTE_HOLD_AUDIO_URL` becomes `DAILY_HOLD_AUDIO_URL`. One literal each in `internal/generate/pipecat_v1_build.go:409` plus `templates/pipecat_v1/telephony_helper.py.tmpl:52-53`, no golden
+- [ ] T053b [P] [US3] Rename the three LiveKit host-port mappings: `UNMUTE_LIVEKIT_PORT` becomes `LIVEKIT_HOST_PORT`, `UNMUTE_LIVEKIT_SIP_PORT` becomes `LIVEKIT_SIP_HOST_PORT`, `UNMUTE_LIVEKIT_RTP_PORT_RANGE` becomes `LIVEKIT_RTP_HOST_PORT_RANGE`. One Go read at `internal/cli/dev_livekit_sip.go:45`, three templates, and three goldens that regenerate with `-update`. Keep `HOST` in each name so none can be mistaken for configuration the LiveKit server reads inside its container
+- [ ] T053c [US3] Confirm no bare `LIVEKIT_HOST_PORT`, `LIVEKIT_SIP_HOST_PORT`, `LIVEKIT_RTP_HOST_PORT_RANGE`, `DAILY_ROOM_GEO`, or `DAILY_HOLD_AUDIO_URL` already exists and that nothing collides with a name the vendor's own SDK reads
 - [ ] T054 [P] [US3] Correct `docs/TELEPHONY.md:338`, which tells the reader to generate a secret that `unmute dev` mints at `internal/cli/dev_telephony.go:87-92`
 - [ ] T055 [P] [US3] Delete or reword the speculative `UNMUTE_ICE_SERVERS` line at `docs/PRODUCTION_ROADMAP.md:192`, the only fictional name in the repository
-- [ ] T056 [P] [US3] Document `UNMUTE_TELEPHONY_BRIDGE_PORT` and `UNMUTE_AGENT_HEALTH_PORT` beside the other port knobs in the emitted LiveKit README, or delete them; each is one template line named by no Go code, no document, no test, and no golden
-- [ ] T057 [US3] Confirm T013 is green, and record in results.md that it locks a state which already held at baseline rather than fixing a violation
-- [ ] T058 [US3] Record in results.md that no `UNMUTE_*` rename was made, with the priced table and the reason from research D11
+- [ ] T055a [US3] Reshape `UNMUTE_SIP_TRUNK_ID` so it stops looking like an environment variable. It is a `sed` substitution token inside one generated JSON file, replaced by `templates/livekit_v1/telephony-setup.sh.tmpl:65`, and `specs/005` says so in two places
+- [ ] T056 [P] [US3] Move `UNMUTE_TELEPHONY_BRIDGE_PORT` and `UNMUTE_AGENT_HEALTH_PORT`, and the LiveKit port knobs after T053b, into a troubleshooting section of the emitted README rather than a to-do list, per FR-018c. A port-conflict escape hatch is the exemption the naming rule carries; a list of variables `unmute dev` sets for you is not
+- [ ] T057 [US3] Confirm T013, T013a, T013b, T013c, and T013d are green
+- [ ] T058 [US3] Record in results.md that the beginner-path guard locks a state which already held at baseline, and that the vendor-less names keep `UNMUTE_*` deliberately because FR-018 hides them, with the priced table from research D11 explaining what that avoided
 
 **Checkpoint**: an author reading a generated `.env.example` is never told to
 obtain an Unmute credential.
