@@ -17,6 +17,10 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 		name  string
 		mutet func(*packagespec.Package)
 		want  string
+		// redacts, when set, is text the refusal must NOT contain. A slot that
+		// takes an environment variable name gets a pasted credential when it is
+		// wrong, and repeating it puts the value in a terminal and a CI log.
+		redacts string
 	}{
 		{
 			name: "unknown token in the greeting",
@@ -87,11 +91,15 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 			want: "webhook.path must start with /",
 		},
 		{
+			// The refusal does not quote the offending text back. What lands in
+			// this slot when it is wrong is usually a pasted credential, and a
+			// message that repeats it puts the value in a terminal and a CI log.
 			name: "a secret key is an environment variable name",
 			mutet: func(pkg *packagespec.Package) {
-				pkg.Agent.Secrets = []string{"salon_token"}
+				pkg.Agent.Secrets = []string{"sk-live-pretend-key-value"}
 			},
-			want: "must be an UPPER_SNAKE environment variable name",
+			want:    "not an UPPER_SNAKE environment variable name",
+			redacts: "sk-live-pretend-key-value",
 		},
 		{
 			name: "the capture tool name is reserved",
@@ -124,6 +132,9 @@ func TestBuildRejectsBadTemplatesAndSecrets(t *testing.T) {
 				t.Fatalf("Build succeeded, want error containing %q", tc.want)
 			case !strings.Contains(err.Error(), tc.want):
 				t.Fatalf("Build error = %v, want it to contain %q", err, tc.want)
+			}
+			if tc.redacts != "" && err != nil && strings.Contains(err.Error(), tc.redacts) {
+				t.Errorf("the refusal repeats %q back; a field that takes a name must never print what was written there instead:\n%v", tc.redacts, err)
 			}
 		})
 	}

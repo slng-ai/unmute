@@ -44,8 +44,29 @@ controls:
 | `cold` | `destination`, `ring_timeout`, `on_unavailable` |
 | `warm` | `destination`, `briefing`, `ring_timeout`, `on_unavailable` |
 
-`on_unavailable` is `return_to_caller` or `hangup`. The control's name goes in
-the agent's tool list, like any other control.
+`on_unavailable` is `return_to_caller` or `hangup`.
+
+### The control's name goes in an agent's tool list, and that half is enforced
+
+Declaring a control is half the job. Until some agent, task, or task group lists
+its name in `tools:`, no agent can reach it, and the build refuses with the file,
+the line, and the agents you could attach it to:
+
+```
+agent.yaml:47: control "send_to_billing" is declared but no agent reaches it; add it to the
+  tools: of one of these agents: front_desk, billing
+```
+
+The same refusal covers anything else the entry agent cannot reach: a
+`destinations:` entry no control resolves to, a top-level `tools:` entry no agent
+lists, a task or task group nothing delegates to, an agent no `agent_transfer`
+points at. An unreferenced `models:` entry is the one exception and stays legal,
+because that map is a palette.
+
+Write the declaration and the attachment in the same edit. Before this was
+enforced, a forgotten attachment compiled at exit 0 and left the control out of
+the generated project, while its destination's environment name still reached
+`.env.example` and the startup check.
 
 ### A warm transfer needs `outbound: true`, even on an inbound-only line
 

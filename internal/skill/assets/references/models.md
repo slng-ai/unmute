@@ -19,8 +19,6 @@ models:
     reasoning:
       provider: openai
       model: gpt-5.6-luna
-      params:
-        reasoning_effort: minimal
   speak:
     voice:
       provider: slng
@@ -88,8 +86,6 @@ named, so inventing one only moves the failure later.
 ```yaml
       provider: openai
       model: gpt-5.6-luna
-      params:
-        reasoning_effort: minimal
 ```
 
 Unmute keeps no allowlist of model ids, with exactly one exception: a LiveKit

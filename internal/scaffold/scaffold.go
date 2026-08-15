@@ -324,13 +324,24 @@ func (d *Data) SetTarget(provider string) {
 	}
 	// Pipecat and LiveKit share the safe SLNG/OpenAI starter.
 	d.Listen = Binding{Provider: "slng", Model: "slng/deepgram/nova:3-en"}
-	// reasoning_effort rides the existing params pass-through, so no schema change
-	// is needed. This is a reasoning-family model, and a voice turn that pauses to
-	// think before speaking is the thing this scaffold exists not to ship;
-	// `minimal` rather than `none` keeps the accuracy that motivated the family.
-	// No temperature: OpenAI's reference does not state that this model accepts
-	// it, and an unverified parameter fails on a live call (research D10).
-	d.Reason = Binding{Provider: "openai", Model: DefaultReasonModel, Params: `{"reasoning_effort": "minimal"}`}
+	// No generation parameters at all, and both absences were measured rather
+	// than assumed.
+	//
+	// `temperature` is out because OpenAI's reference does not state that this
+	// model family accepts it, and an unverified parameter fails on a live call
+	// (research D10).
+	//
+	// `reasoning_effort: minimal` was in, for one commit, to keep a reasoning
+	// model from pausing before it speaks. `make smoke` disproved it: the Pipecat
+	// driver lowers a think model's params into `OpenAILLMService.Settings(...)`,
+	// a fixed field set, and Pipecat 1.5 raises
+	// `TypeError: OpenAILLMSettings.__init__() got an unexpected keyword argument
+	// 'reasoning_effort'` before the bot can answer. `ty` refuses the file too.
+	// Pipecat is this scaffold's default target, so the parameter cannot ship
+	// here until the driver forwards unknown params outside Settings. It works on
+	// LiveKit, whose row forwards params as extra kwargs; that is not enough to
+	// put it in a package that compiles for both.
+	d.Reason = Binding{Provider: "openai", Model: DefaultReasonModel}
 	d.Speak = Binding{Provider: "slng", Model: "slng/deepgram/aura:2-en", Voice: "aura-2-thalia-en"}
 }
 

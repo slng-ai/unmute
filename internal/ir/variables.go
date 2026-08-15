@@ -35,7 +35,12 @@ func checkSecrets(pkg *packagespec.Package) error {
 	seen := make(map[string]bool, len(pkg.Agent.Secrets))
 	for _, name := range pkg.Agent.Secrets {
 		if !envNamePattern.MatchString(name) {
-			return fmt.Errorf("%s: secret %q must be an UPPER_SNAKE environment variable name", pkg.Location("agent.yaml", name), name)
+			// The offending text is never repeated back. What lands in this slot
+			// when it is wrong is usually a pasted credential, and a refusal that
+			// quotes it puts the value in a terminal, a CI log, and a bug report.
+			// The location is enough to find the line (Wave B, 2026-08-15).
+			return fmt.Errorf("%s: this secret is not an UPPER_SNAKE environment variable name. A secret is a name, never a value: "+
+				"put the value in .env and list only the name here", pkg.Location("agent.yaml", name))
 		}
 		if seen[name] {
 			return fmt.Errorf("%s: secret %q is declared twice", pkg.Location("agent.yaml", name), name)

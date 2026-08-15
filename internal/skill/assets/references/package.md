@@ -36,8 +36,6 @@ models:
     reasoning:
       provider: openai
       model: gpt-5.6-luna
-      params:
-        reasoning_effort: minimal
   speak:
     voice:
       provider: slng

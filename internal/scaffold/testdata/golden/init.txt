@@ -31,8 +31,6 @@ models:
       description: default reasoning model
       provider: openai
       model: "gpt-5.6-luna"
-      params:
-        reasoning_effort: minimal
   speak:
     assistant_voice:
       description: default voice

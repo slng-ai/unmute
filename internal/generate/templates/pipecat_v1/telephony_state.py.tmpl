@@ -33,10 +33,13 @@ class TelephonyState:
 
     def _client(self) -> Redis:
         if self._redis is None:
-            # REDIS_URL is supplied on every route that reaches this file, so the
-            # note is unconditional here rather than a lookup: .env.example does
-            # not list it, and an operator told only that it is missing has
-            # nowhere to go (research D14).
+            # ponytail: the note is unconditional here rather than a lookup
+            # against the supplied set, because REDIS_URL is supplied on every
+            # route that reaches this file. This module is imported by
+            # telephony_shared, so it cannot import that module's set back
+            # without a cycle. Give it the set if a second name ever lands here.
+            # .env.example does not list it, and an operator told only that it
+            # is missing has nowhere to go (research D14).
             raise RuntimeError(
                 "Missing required environment variable: REDIS_URL\n"
                 "This one is supplied for you: `unmute dev` sets it locally, and your "

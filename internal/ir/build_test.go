@@ -723,6 +723,33 @@ func TestBuildValidatesDestinationValues(t *testing.T) {
 	if err != nil && !strings.Contains(err.Error(), "BILLING_PHONE_NUMBER") {
 		t.Errorf("the refusal must show the form that works: %v", err)
 	}
+	// And never the number itself. A destination that is not a name is a phone
+	// number, and the repository's hardest rule is that no output carries one.
+	if err != nil && strings.Contains(err.Error(), "+14155550123") {
+		t.Errorf("the refusal prints the number back, into a terminal and a CI log: %v", err)
+	}
+}
+
+// A connection's environment maps a role onto a variable NAME. What lands there
+// when it is wrong is a pasted credential, so the refusal locates it without
+// printing it (Wave B, 2026-08-15).
+func TestBuildDoesNotEchoAPastedConnectionValue(t *testing.T) {
+	const pasted = "sk-live-pretend-key-value"
+	pkg := loadSafeCore(t)
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment["auth_token"] = pasted
+	pkg.Connections["primary_phone"] = connection
+
+	_, err := Build(pkg)
+	if err == nil {
+		t.Fatal("a value where a name belongs must be refused")
+	}
+	if !strings.Contains(err.Error(), "auth_token") {
+		t.Errorf("the refusal must name the key so the author can find it: %v", err)
+	}
+	if strings.Contains(err.Error(), pasted) {
+		t.Errorf("the refusal repeats the pasted value back: %v", err)
+	}
 }
 
 // TestUnreachableControlIsRefused walks every row of the reachability table in

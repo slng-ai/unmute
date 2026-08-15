@@ -111,10 +111,16 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 				return nil, fmt.Errorf("%s: connection %q environment key %q must be lowercase snake_case", pkg.Location(path, key), name, key)
 			}
 			if !envNamePattern.MatchString(value) {
-				return nil, fmt.Errorf("%s: connection %q environment value %q is not a valid environment variable name: "+
-					"use letters, digits, and underscores, and do not start with a digit. A deployment platform exports "+
-					"secrets through a shell, so this name would be missing at runtime with no error of its own",
-					pkg.Location(path, value), name, value)
+				// The offending text is never repeated back: what lands here when
+				// it is wrong is usually a pasted credential, and a refusal that
+				// quotes it puts the value in a terminal, a CI log, and a bug
+				// report. The file, the line, and the key name locate it without
+				// printing it (Wave B, 2026-08-15).
+				return nil, fmt.Errorf("%s: connection %q environment %s is not a valid environment variable name: "+
+					"use upper case letters, digits, and underscores, and do not start with a digit. This field takes a "+
+					"name and never a value. A deployment platform exports secrets through a shell, so a bad name would "+
+					"be missing at runtime with no error of its own",
+					pkg.Location(path, value), name, key)
 			}
 		}
 		// Kind is a resolved-surface field with no author to read it from: every
@@ -817,9 +823,12 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 	for _, destination := range sortedKeys(destinations) {
 		value := destinations[destination]
 		if !envNamePattern.MatchString(value) {
-			return Target{}, fmt.Errorf("%s: destination %q is %q, a literal. agent.yaml is the portable half of a "+
+			// The value is not repeated back. A destination that is not a name is
+			// a phone number, and the bundle's hardest rule is that no phone
+			// number appears in any output (Wave B, 2026-08-15).
+			return Target{}, fmt.Errorf("%s: destination %q is a literal. agent.yaml is the portable half of a "+
 				"package, so a destination names an environment variable holding the number: %s: BILLING_PHONE_NUMBER",
-				pkg.Location("agent.yaml", destination), destination, value, destination)
+				pkg.Location("agent.yaml", destination), destination, destination)
 		}
 	}
 	if raw.Connection != "" {
@@ -1454,6 +1463,12 @@ func checkReachability(pkg *packagespec.Package) error {
 	// Reported in graph order, nearest declaration first: an unattached delegate
 	// makes its task unreachable too, and naming the delegate is the one edit that
 	// fixes both.
+	//
+	// ponytail: the first one, not all of them. Build returns a single error and
+	// every other check in this file does the same, so a package with three
+	// unreachable declarations takes three runs to clear. Collect them into one
+	// message when somebody hits that in practice; the graph order above is what
+	// makes the single error the useful one.
 	for _, name := range sortedKeys(pkg.Agent.Controls) {
 		if !controls[name] {
 			return fmt.Errorf("%s: control %q is declared but no agent reaches it%s", pkg.Location("agent.yaml", name), name, attachable())

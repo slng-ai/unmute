@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,7 +45,7 @@ func TestSmokeTelephonyComposeTopologies(t *testing.T) { // telephony V26
 			}
 			composeFile := filepath.Join(outDir, "compose.telephony.yaml")
 			project := composeProjectName(outDir, tc.name)
-			env := placeholderArtifactEnvironment(os.Environ(), artifactFileContent(t, artifact, ".env.example"))
+			env := placeholderArtifactEnvironment(os.Environ(), artifact.Telephony, artifactFileContent(t, artifact, ".env.example"))
 			env = setChildEnv(env, "UNMUTE_TELEPHONY_PORT", "0")
 			run := func(args ...string) ([]byte, error) {
 				cmd := exec.Command(docker, composeArgs(composeFile, project, args...)...)
@@ -108,6 +109,9 @@ func smokePipecatTelephonyArtifact(t *testing.T) generate.Artifact {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// generate.Generate attaches this; the driver entry point does not, and the
+	// test needs it to know which names the route supplies rather than the author.
+	artifact.Telephony = generate.TelephonyRuntimePlanFor(agent.Targets["pipecat"])
 	return artifact
 }
 
@@ -143,6 +147,7 @@ func smokeLiveKitSIPArtifact(t *testing.T) generate.Artifact {
 	if err != nil {
 		t.Fatal(err)
 	}
+	artifact.Telephony = generate.TelephonyRuntimePlanFor(agent.Targets["livekit"])
 	return artifact
 }
 
@@ -167,14 +172,18 @@ func enableSmokeTelephony(pkg *spec.Package, requiredControls ...string) {
 }
 
 // dropHumanTransfers removes safe_core's cold transfer, for a route that has no
-// transfer primitive. The control is attached to an agent's tool list, so both
-// sides go, otherwise the reference dangles.
+// transfer primitive. It removes the transfer completely: the control, every
+// attachment, and the destination it resolved to. All three have to go — a
+// dangling reference was always an error, and a destination nothing resolves to
+// is one now, because its environment name still reached .env.example and the
+// generated startup check for a control nothing could call.
 func dropHumanTransfers(pkg *spec.Package) {
 	for name, control := range pkg.Agent.Controls {
 		if control.Kind != "human_transfer" {
 			continue
 		}
 		delete(pkg.Agent.Controls, name)
+		delete(pkg.Agent.Destinations, control.TransferDestination())
 		for agentName, agent := range pkg.Agent.Agents {
 			agent.Tools = slices.DeleteFunc(agent.Tools, func(tool string) bool { return tool == name })
 			pkg.Agent.Agents[agentName] = agent
@@ -212,15 +221,39 @@ func smokeEnvValue(name string) string {
 // topology ready: the healthcheck spends its thirty retries on 503s and every
 // subtest fails with an opaque "container is unhealthy". Presence is what the
 // readiness contract asks for, and presence is what this supplies.
-func placeholderArtifactEnvironment(env []string, example string) []string {
+// placeholderArtifactEnvironment gives every name the project requires a
+// placeholder value.
+//
+// It reads the **telephony plan's** required environment rather than
+// `.env.example`. Those are two different lists on purpose: `.env.example` holds
+// the names the author supplies, and the route's own values are deliberately
+// absent from it (FR-018), because a to-do list whose entries are not the
+// reader's to do is not a to-do list. `unmute dev` supplies them at run time;
+// this test has to stand in for that, so it reads the complete list — the same
+// one `compile-report.json` carries under `required_env`.
+//
+// Reading the env file here was what broke when the two lists diverged: the
+// container started, `/readyz` demanded `UNMUTE_PUBLIC_URL`, and nothing had
+// set it. That is the failure mode research D14 predicted for a human operator,
+// arriving first in a test, which is where it should arrive.
+func placeholderArtifactEnvironment(env []string, plan *generate.TelephonyRuntimePlan, example string) []string {
+	names := map[string]bool{}
+	if plan != nil {
+		for _, name := range plan.RequiredEnv {
+			names[name] = true
+		}
+	}
 	for _, line := range strings.Split(example, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "#") {
 			continue
 		}
 		if name, _, ok := strings.Cut(line, "="); ok && name != "" {
-			env = setChildEnv(env, name, smokeEnvValue(name))
+			names[name] = true
 		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(names)) {
+		env = setChildEnv(env, name, smokeEnvValue(name))
 	}
 	return env
 }

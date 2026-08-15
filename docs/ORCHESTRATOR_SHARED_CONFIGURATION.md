@@ -418,16 +418,12 @@ targets:
         fast_reasoning:
           provider: openai
           model: gpt-5.6-luna
-          params:
-            reasoning_effort: minimal
           params:   # forwarded verbatim
             temperature: 0.4
             top_p: 0.9
         careful_reasoning:
           provider: openai
           model: gpt-5.6-luna
-          params:
-            reasoning_effort: minimal
     destinations:
       billing_line: "+14155550123"
 
