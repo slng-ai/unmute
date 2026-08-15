@@ -552,19 +552,7 @@ func GeneratePipecat(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedB
 
 // checkPipecatVersion rejects a target version outside the templates' range (V8).
 func checkPipecatVersion(version string) error {
-	if version == "" {
-		return fmt.Errorf("pipecat target requires a framework version")
-	}
-	match := pipecatVersionPattern.FindStringSubmatch(version)
-	if match == nil {
-		return fmt.Errorf("pipecat version %q is not a semantic version", version)
-	}
-	major, _ := strconv.Atoi(match[1])
-	minor, _ := strconv.Atoi(match[2])
-	if major != pipecatVersionMajor || minor < pipecatVersionMinMinor {
-		return fmt.Errorf("pipecat version %q is outside the driver's template-compatible range (>=%d.%d, <%d.0)", version, pipecatVersionMajor, pipecatVersionMinMinor, pipecatVersionMajor+1)
-	}
-	return nil
+	return checkVersion("pipecat", version, pipecatVersionPattern, pipecatVersionMajor, pipecatVersionMinMinor)
 }
 
 func renderPipecatFiles(data pipecatData) ([]File, error) {

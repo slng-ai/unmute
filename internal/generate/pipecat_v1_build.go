@@ -759,14 +759,9 @@ func installLabel(entry targetcap.Entry) string {
 	}
 }
 
-func sortedKeys(set map[string]bool) []string {
-	out := make([]string, 0, len(set))
-	for k := range set {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
+// sortedKeys is the stdlib one-liner. internal/ir already writes it this way;
+// this file used to disagree with it.
+func sortedKeys(set map[string]bool) []string { return slices.Sorted(maps.Keys(set)) }
 
 func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.AgentDef, env *envSet) (pipecatAgent, error) {
 	promptConst := promptConstName(name)
@@ -928,19 +923,6 @@ func sortedResultNames(result map[string]ir.ResultField) []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-func jsonType(t ir.PrimitiveType) string {
-	switch t {
-	case ir.PrimitiveBoolean:
-		return "boolean"
-	case ir.PrimitiveInteger:
-		return "integer"
-	case ir.PrimitiveNumber:
-		return "number"
-	default:
-		return "string"
-	}
 }
 
 // interruptionValue maps a tool's interruption policy to the @tool argument;
@@ -1227,14 +1209,11 @@ func apiKeyEnv(provider string) string {
 	return strings.ToUpper(strings.ReplaceAll(provider, "-", "_")) + "_API_KEY"
 }
 
-// pipecatEnvRef renders the driver's environment-lookup idiom.
-func pipecatEnvRef(name string) string { return "os.environ[" + pyQuote(name) + "]" }
-
 // resolvePipecatService resolves one binding through the catalogue.
 // extraSettings are nested Settings args the driver injects (the agents'
 // system_instruction); the task job-workers use the raw identity fields.
 func resolvePipecatService(role targetcap.Role, binding ir.Binding, env *envSet, extraSettings ...pyKV) (pipecatService, error) {
-	call, entry, err := resolveService(defaultCatalog, targetcap.Pipecat, role, binding, pipecatEnvRef, env, extraSettings...)
+	call, entry, err := resolveService(defaultCatalog, targetcap.Pipecat, role, binding, envRef, env, extraSettings...)
 	if err != nil {
 		return pipecatService{}, err
 	}
@@ -1306,19 +1285,6 @@ func forwardParams(params map[string]any) []pyKV {
 }
 
 // --- small helpers ---------------------------------------------------------
-
-func pyType(t ir.PrimitiveType) string {
-	switch t {
-	case ir.PrimitiveBoolean:
-		return "bool"
-	case ir.PrimitiveInteger:
-		return "int"
-	case ir.PrimitiveNumber:
-		return "float"
-	default:
-		return "str"
-	}
-}
 
 // pyLiteral renders a decoded YAML value as a Python literal.
 func pyLiteral(v any) string {

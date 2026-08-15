@@ -18,7 +18,7 @@ func newInitCmd() *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				if cmd.InOrStdin() == os.Stdin && (!isCharDevice(os.Stdin) || !isCharDevice(cmd.OutOrStdout())) {
+				if cmd.InOrStdin() == os.Stdin && (!isTTY(os.Stdin) || !isTTY(cmd.OutOrStdout())) {
 					return fmt.Errorf("agent name required")
 				}
 				return runConsole(cmd, true)
@@ -27,15 +27,6 @@ func newInitCmd() *cobra.Command {
 			return writeScaffold(cmd, dir, scaffold.Data{Name: filepath.Base(dir), Tools: scaffold.DefaultTools()})
 		},
 	}
-}
-
-func isCharDevice(value any) bool {
-	file, ok := value.(*os.File)
-	if !ok {
-		return false
-	}
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func runConsole(cmd *cobra.Command, createOnly bool) error {

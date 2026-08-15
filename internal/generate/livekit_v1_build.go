@@ -585,19 +585,6 @@ func buildLiveKitSIPTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*liv
 	return telephony, nil
 }
 
-func livekitTypeCheck(t ir.PrimitiveType) string {
-	switch t {
-	case ir.PrimitiveBoolean:
-		return "isinstance(value, bool)"
-	case ir.PrimitiveInteger:
-		return "isinstance(value, int) and not isinstance(value, bool)"
-	case ir.PrimitiveNumber:
-		return "isinstance(value, (int, float)) and not isinstance(value, bool)"
-	default:
-		return "isinstance(value, str)"
-	}
-}
-
 // livekitInferenceUses lists the bindings that route through LiveKit Inference,
 // which needs LIVEKIT_API_KEY/SECRET even in credless console mode (C2/C7): any
 // resolved service on the `inference.*` classes (the reason wildcard, provider:
@@ -1027,11 +1014,8 @@ func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variabl
 // named form (the SLNG plugin strips the slng/ prefix, Inference joins
 // provider/model).
 
-// livekitEnvRef renders the driver's environment-lookup idiom.
-func livekitEnvRef(name string) string { return "os.environ[" + pyQuote(name) + "]" }
-
 func resolveLiveKitService(role targetcap.Role, binding ir.Binding, env *envSet) (livekitService, error) {
-	call, entry, err := resolveService(defaultCatalog, targetcap.LiveKit, role, binding, livekitEnvRef, env)
+	call, entry, err := resolveService(defaultCatalog, targetcap.LiveKit, role, binding, envRef, env)
 	if err != nil {
 		return livekitService{}, err
 	}
@@ -1144,7 +1128,7 @@ func humanTransferWhen(c *ir.HumanTransfer) string {
 func destinationExpr(destination string, env *envSet) string {
 	if name := ir.DestinationEnv(destination); name != "" {
 		env.add(name)
-		return livekitEnvRef(name)
+		return envRef(name)
 	}
 	return pyQuote(destination)
 }
@@ -1163,7 +1147,7 @@ func destinationExpr(destination string, env *envSet) string {
 func referURIExpr(destination string, env *envSet) string {
 	if name := ir.DestinationEnv(destination); name != "" {
 		env.add(name)
-		return "_refer_uri(" + livekitEnvRef(name) + ")"
+		return "_refer_uri(" + envRef(name) + ")"
 	}
 	return pyQuote(referURI(destination))
 }
@@ -1220,19 +1204,6 @@ func resultPyType(field ir.ResultField) string {
 	return pyType(field.Type)
 }
 
-func jsonPyType(t string) string {
-	switch t {
-	case "integer":
-		return "int"
-	case "number":
-		return "float"
-	case "boolean":
-		return "bool"
-	default:
-		return "str"
-	}
-}
-
 func livekitToolArgs(input map[string]any) []livekitArg {
 	props, _ := input["properties"].(map[string]any)
 	requiredList, _ := input["required"].([]any)
@@ -1254,7 +1225,7 @@ func livekitToolArgs(input map[string]any) []livekitArg {
 		var desc string
 		if prop, ok := props[n].(map[string]any); ok {
 			if t, ok := prop["type"].(string); ok {
-				pt = jsonPyType(t)
+				pt = pyTypeForJSON(t)
 			}
 			// V2: carry the declared enum and per-property description across so
 			// the LLM sees the schema the tool YAML wrote (C4). Non-string enum

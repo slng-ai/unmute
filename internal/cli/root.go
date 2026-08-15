@@ -28,7 +28,7 @@ func newRootCmd() *cobra.Command {
 }
 
 func shouldRunConsole(in, out any) bool {
-	return isCharDevice(in) && isCharDevice(out)
+	return isTTY(in) && isTTY(out)
 }
 
 // Execute builds the root, runs it, prints any error once to stderr, and

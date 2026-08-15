@@ -61,11 +61,19 @@ func mintLiveKitToken(apiKey, apiSecret, room, identity, agentName string, now t
 		},
 		RoomConfig: lkRoomConfig{Agents: []lkAgentDispatch{{AgentName: agentName}}},
 	}
+	return signJWT(apiSecret, claims)
+}
+
+// signJWT is the whole of the hand-rolled JWT: marshal, fixed HS256 header,
+// HMAC, base64url concat. Three tokens are minted in this package — participant,
+// SIP admin, agent dispatch — and they differ only in their claims, so the
+// signing lives here once. Key order in the header is irrelevant to
+// verification.
+func signJWT(apiSecret string, claims any) (string, error) {
 	payload, err := json.Marshal(claims)
 	if err != nil {
 		return "", err
 	}
-	// Fixed HS256 header; key order in the header is irrelevant to verification.
 	signingInput := b64url([]byte(`{"alg":"HS256","typ":"JWT"}`)) + "." + b64url(payload)
 	mac := hmac.New(sha256.New, []byte(apiSecret))
 	mac.Write([]byte(signingInput))
