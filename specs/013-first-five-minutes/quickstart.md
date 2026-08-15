@@ -164,13 +164,28 @@ verbatim.
 ## 3. No Unmute name looks like a credential
 
 ```sh
+bin/unmute compile examples/livekit-human-transfer
+cat examples/livekit-human-transfer/build/livekit/.env.example
+```
+
+**Eight names, no comment block.** Before this feature it is twelve, with a
+four-line "supplied for you, not by you" block holding `LIVEKIT_API_KEY`,
+`LIVEKIT_API_SECRET`, `LIVEKIT_URL`, and `REDIS_URL`. After, those four are
+absent, not relabelled. The eight that remain are the ones the author actually
+goes and gets: two model provider keys, four connection values from their
+carrier, and two phone numbers they declared as destinations.
+
+Compile the same package for Pipecat and confirm `REDIS_URL` is gone from that
+file too. Before this feature the two targets disagree about the same variable
+from the same data.
+
+```sh
 bin/unmute compile examples/outbound-reminder
 grep -n UNMUTE_ examples/outbound-reminder/build/*/.env.example
 ```
 
-**Zero hits.** The file lists only names the author supplies. Nothing is
-relabelled or commented out; the non-author names are absent. The emitted
-README's "set these before running" list names exactly the same set.
+**Zero hits.** The emitted README's "set these before running" list names
+exactly the same set as the env file.
 
 Then confirm hiding did not delete:
 

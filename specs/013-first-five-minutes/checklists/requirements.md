@@ -80,13 +80,25 @@ is dependency-shaped regardless of whether anyone mistakes it for a secret. The
 superseded reasoning is kept in D11 rather than deleted.
 
 **One consequence of the strictest visibility choice is recorded, not hidden.**
-Removing every non-author name from the emitted files removes the one document
-that told a self-hosted operator what to supply. That information survives in
-`compile-report.json`'s `required_env` and in the Compose file's interpolation
-defaults, and FR-018b holds it there with a test. The author's own rule carries
-the exemption that keeps a genuine developer note, such as what to do when host
-port 5060 is taken, which FR-018c places in a troubleshooting section rather
-than a to-do list.
+Removing every non-author name from the emitted files removes the block that
+told a self-hosted operator what to supply. That information survives in a
+better form: `route.ManualSteps` already emits "get `LIVEKIT_URL` and the API
+key pair from the LiveKit Cloud project settings, or from a self-hosted LiveKit
+Server configuration", which names the source rather than only the variable, and
+`compile-report.json` keeps the machine-readable list. FR-018e holds both. The
+author's own rule carries the exemption that keeps a genuine developer note,
+such as what to do when host port 5060 is taken, which FR-018f places in a
+troubleshooting section rather than a to-do list.
+
+**An adversarial pass over the compiled files found the classification already
+exists.** `internal/target/telephony.go` carries `LocallySuppliedEnvironment`
+per route, already correct about four names, and three things ignore it: the
+Pipecat env template does not read it at all, the LiveKit one labels instead of
+excluding, and `UNMUTE_PUBLIC_URL` and `UNMUTE_OUTBOUND_TOKEN` are missing from
+it despite `unmute dev` minting both. So the requirements name a data fix and
+two template fixes, not a new abstraction. The sharpest single finding is that
+LiveKit's generated file asks for `REDIS_URL` under a comment that ends "which
+this agent never reads", and the comment is right.
 
 **One new risk was opened by the model choice and is tracked rather than
 assumed away.** `gpt-5.6-luna` is a reasoning-family model, so latency before

@@ -75,6 +75,46 @@ trees.
 - Q: `gpt-5.6-luna`'s support for `temperature` is not stated in OpenAI's documentation. What happens to the `temperature: 0.2` the examples carry? → A: drop it from the scaffold and all eleven examples
 - Q: An environment variable that configures a vendor's own component should carry that vendor's prefix, not Unmute's. What about the ones no vendor owns? → A: vendor-owned names take the vendor prefix; the generated agent's own runtime names keep `UNMUTE_*`
 - Q: What is the bar for showing an environment variable at all, so a test can enforce it? → A: only author-set names are shown; everything else is hidden
+- Q: Once `.env.example` holds only the names the author supplies, where does a person deploying for real find the platform connection values? → A: in the emitted README's carrier setup steps, which already say where to get each one; no env file lists them
+
+**The classification already exists in the code.** An adversarial pass over the
+real generated files found that `internal/target/telephony.go` already carries
+`LocallySuppliedEnvironment` per route, cloned into the IR as
+`LocalEnvironment`. It correctly marks `REDIS_URL` on the Pipecat carrier route,
+and `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`, `REDIS_URL` on the
+LiveKit SIP route. So this feature adds no new concept. It fixes three things
+that ignore the one that is there.
+
+**Three findings, each verified against a compiled example.**
+
+1. **One fact, two implementations.** The LiveKit env template reads
+   `LocalEnvironment` and prints a labelled "supplied for you, not by you"
+   block. The Pipecat template ignores it, so `REDIS_URL` lands alphabetically
+   in the fill-in list between `OPENAI_API_KEY` and `SLNG_API_KEY`, with no
+   label at all, on a route where `telephony.go:122` has already marked it
+   locally supplied. Principle III forbids exactly this.
+2. **Two names are missing from the field.** `UNMUTE_PUBLIC_URL` and
+   `UNMUTE_OUTBOUND_TOKEN` sit in `RuntimeEnvironment` but not in
+   `LocallySuppliedEnvironment`, even though `unmute dev` mints both at
+   `internal/cli/dev_telephony.go:87-92` and `:153`. That omission is why they
+   render as blanks the author is told to fill.
+3. **LiveKit asks for a variable its own comment says nothing reads.** The
+   generated file prints `REDIS_URL=` under a comment ending "which this agent
+   never reads". Confirmed: the only Python that reads it is
+   `templates/pipecat_v1/telephony_shared.py.tmpl:35`, and
+   `templates/livekit_v1/compose.telephony.yaml.tmpl:14` explicitly excludes it
+   from the agent service. On LiveKit it is consumed by the local Compose
+   graph's own containers, which `unmute dev` runs. This is the Part 2.2 defect,
+   "asks for a key the build does not use", surviving on the telephony path.
+
+**The author-set set has one definition, and it is already computed.** Verified
+against the compiled LiveKit example, the eight names the author genuinely
+supplies come from exactly five sources: model provider key names, connection
+`environment:` values, `destinations:` values, tool `url_env` and `token_env`,
+and handler `os.environ` reads. That is `referencedEnvNames` in
+`internal/ir/validate.go:1301` plus the provider keys FR-005a adds. **The same
+set that drives the secrets completeness warning drives the env file and the
+README list.** One definition, three consumers, no new abstraction.
 
 **The naming rule, stated once.** If a variable configures a service, it is
 named after that service. `TWILIO_*`, `OPENAI_*`, `SLNG_*`, `DAILY_*`,
@@ -679,27 +719,50 @@ owns the field the error names.
   the token.
 - **FR-018**: `build/<target>/.env.example` MUST contain **only names the author
   supplies**. A name the author does not set MUST NOT appear in it at all, in
-  any form, including commented out or inside a labelled block. Today
-  `UNMUTE_PUBLIC_URL=` and `UNMUTE_OUTBOUND_TOKEN=` appear as bare blanks under
-  "required by the target or a connection", beside real credentials like
-  `TWILIO_AUTH_TOKEN`. `REDIS_URL` is in the same position and is subject to the
-  same rule.
-- **FR-018a**: The emitted README's "set these before running" list MUST name
-  exactly the same set as `build/<target>/.env.example` and nothing more. The
-  two are two views of one fact, so a test SHOULD hold them equal rather than
-  each being maintained by hand.
-- **FR-018b**: Hiding a name MUST NOT make it unrecoverable. `required_env` in
-  `compile-report.json` stays complete, and the Compose file keeps its own
-  interpolation defaults, so an operator deploying by hand can still find every
-  name the runtime needs.
-- **FR-018c**: Prose documentation of a non-author name is allowed only where it
+  any form, including commented out or inside a labelled block. Measured on a
+  compiled example, that means four names leave the LiveKit file
+  (`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`, `REDIS_URL`) and one
+  leaves the Pipecat file (`REDIS_URL`), plus `UNMUTE_PUBLIC_URL` and
+  `UNMUTE_OUTBOUND_TOKEN` on outbound routes.
+- **FR-018a**: The author-set set MUST have **one** definition, the one that
+  already drives the secrets completeness check: model provider key names,
+  connection `environment:` values, `destinations:` values, tool `url_env` and
+  `token_env`, and handler `os.environ` reads. `build/<target>/.env.example`,
+  the emitted README's set-these list, and the secrets warning are three
+  consumers of that one set. A second list of "what the author fills in" is
+  forbidden.
+- **FR-018b**: The two env templates MUST agree. Today the LiveKit template
+  reads `LocalEnvironment` and renders a labelled block while the Pipecat
+  template ignores it entirely, so the same locally-supplied `REDIS_URL` is
+  labelled on one target and rendered as a bare fill-in on the other. After this
+  change both simply exclude that set.
+- **FR-018c**: `UNMUTE_PUBLIC_URL` and `UNMUTE_OUTBOUND_TOKEN` MUST be added to
+  `LocallySuppliedEnvironment` in `internal/target/telephony.go`. `unmute dev`
+  mints both at `internal/cli/dev_telephony.go:87-92` and `:153`, so their
+  absence from that field is a data error, and it is the reason they render as
+  blanks today.
+- **FR-018d**: `REDIS_URL` MUST NOT be presented to a LiveKit author at all. The
+  generated comment already says "which this agent never reads", and that is
+  true: the only Python reading it is
+  `templates/pipecat_v1/telephony_shared.py.tmpl:35`, and
+  `templates/livekit_v1/compose.telephony.yaml.tmpl:14` excludes it from the
+  agent service. On LiveKit it belongs to the local Compose graph's own
+  containers.
+- **FR-018e**: Hiding a name MUST NOT make it unrecoverable. The platform
+  connection values MUST stay findable in the emitted README's carrier setup
+  steps, which already say where each comes from rather than only naming it:
+  "get `LIVEKIT_URL` and the API key pair from the LiveKit Cloud project
+  settings, or from a self-hosted LiveKit Server configuration". `required_env`
+  in `compile-report.json` stays complete as the machine-readable form. No
+  second generated env file is created.
+- **FR-018f**: Prose documentation of a non-author name is allowed only where it
   is genuinely useful to a developer, which is the exemption the naming rule
   itself carries. A port-conflict escape hatch qualifies and stays, in a
   troubleshooting section rather than a to-do list.
   `UNMUTE_TELEPHONY_BRIDGE_PORT` and `UNMUTE_AGENT_HEALTH_PORT`, each read by
   exactly one generated template line and named by no Go code, document, test,
   or golden, are documented there or deleted.
-- **FR-018d**: `docs/TELEPHONY.md` MUST stop instructing the reader to
+- **FR-018g**: `docs/TELEPHONY.md` MUST stop instructing the reader to
   "generate this secret yourself with a cryptographically secure password
   generator" for the outbound token, which `unmute dev` already mints.
 - **FR-019**: Zero `UNMUTE_*` occurrences MUST remain in: the site index,
@@ -844,13 +907,19 @@ owns the field the error names.
   across all six surfaces before any change — so the deliverable here is the
   test that locks it, not a cleanup. Reported as such rather than as a fix.
   The measurable change is SC-006a.
-- **SC-006a**: Compiling an outbound telephony example produces a
+- **SC-006a**: Compiling a telephony example produces a
   `build/<target>/.env.example` containing **only** names the author supplies,
-  and an emitted README whose set-these list names exactly the same set. Today
-  the env file carries `UNMUTE_PUBLIC_URL=`, `UNMUTE_OUTBOUND_TOKEN=`, and
-  `REDIS_URL=` next to `TWILIO_AUTH_TOKEN`, so the measured change is three
-  names leaving one file and one list. `required_env` in `compile-report.json`
-  still names all of them.
+  and an emitted README whose set-these list names exactly the same set.
+  Measured on `examples/livekit-human-transfer`: the file goes from twelve names
+  to **eight**, losing `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`,
+  and `REDIS_URL`, and losing the four-line comment block that explained them.
+  On the Pipecat side `REDIS_URL` leaves an eight-name list, and on outbound
+  routes `UNMUTE_PUBLIC_URL` and `UNMUTE_OUTBOUND_TOKEN` leave too.
+  `required_env` in `compile-report.json` still names every one of them.
+- **SC-006c**: Zero names appear in one target's env file that the equivalent
+  package's other target treats differently. Today `REDIS_URL` is labelled
+  "supplied for you" on LiveKit and rendered as a bare fill-in on Pipecat, from
+  the same `LocallySuppliedEnvironment` data.
 - **SC-006b**: Zero variables that configure a vendor's own component carry an
   `UNMUTE_` prefix. Measured as five renames: two Daily knobs and three LiveKit
   host-port mappings.

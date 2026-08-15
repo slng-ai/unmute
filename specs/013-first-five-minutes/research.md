@@ -424,6 +424,44 @@ test reading one exported constant is smaller and says what it means.
    set-these list contain **only names the author supplies**. Everything else is
    absent, not relabelled.
 
+**This adds no new concept.** An adversarial pass over the real compiled files
+found that `internal/target/telephony.go` already carries
+`LocallySuppliedEnvironment` per route, cloned into the IR as
+`LocalEnvironment`, and it is already right about four names. The work is
+fixing three things that ignore it, not inventing a classification:
+
+- The LiveKit env template reads it and renders a labelled block; the Pipecat
+  template ignores it entirely. So the same locally-supplied `REDIS_URL` is
+  explained on one target and silently demanded on the other, from one piece of
+  data. Principle III.
+- `UNMUTE_PUBLIC_URL` and `UNMUTE_OUTBOUND_TOKEN` are in `RuntimeEnvironment`
+  but missing from `LocallySuppliedEnvironment`, though `unmute dev` mints both.
+  Three lines of data, and it is why they render as blanks.
+- LiveKit's file prints `REDIS_URL=` under a comment that ends "which this agent
+  never reads", and the comment is correct: the only Python reading it is
+  `templates/pipecat_v1/telephony_shared.py.tmpl:35`, and
+  `templates/livekit_v1/compose.telephony.yaml.tmpl:14` excludes it from the
+  agent service. This is Part 2.2's "asks for a key the build does not use",
+  alive on the telephony path.
+
+**The author-set set is already computed too.** Verified against the compiled
+LiveKit example, the eight genuine names come from five sources: model provider
+keys, connection `environment:` values, `destinations:`, tool `url_env` and
+`token_env`, and handler `os.environ`. That is `referencedEnvNames`
+(`internal/ir/validate.go:1301`) plus the provider keys D3 adds. So one
+definition serves three consumers: the secrets warning, the env file, and the
+README list. A second list of "what the author fills in" would be the duplicate
+this repository has been burned by before.
+
+**Where the hidden names go.** Nowhere in an env file, and no second generated
+file. `route.ManualSteps` already carries better text than a blank line, because
+it names the source rather than the variable: "get `LIVEKIT_URL` and the API key
+pair from the LiveKit Cloud project settings, or from a self-hosted LiveKit
+Server configuration". `required_env` in `compile-report.json` stays complete as
+the machine-readable form. A `deploy.env.example` was considered and rejected:
+a second generated file to keep true, for information the README already carries
+in prose that is strictly more useful.
+
 **Superseded.** This decision originally read "No `UNMUTE_*` renames, and the
 guard test locks a state that already holds", on the argument that renames are
 cosmetic once presentation is fixed. That was wrong on the vendor-owned names.
