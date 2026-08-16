@@ -298,10 +298,13 @@ func placeLiveKitDispatch(ctx context.Context, out io.Writer, targetName, to str
 	}
 	client := &sipAdminClient{base: liveKitSIPAdminBase(env), token: token}
 	// The worker reads phone_number, direction, and call_start from job metadata
-	// (agent.py connector/SIP branch). call_start stays empty here; drive it from
-	// your own application when the agent declares required call_start variables.
+	// (agent.py connector/SIP branch).
+	callStart, err := callStartFromEnv(env)
+	if err != nil {
+		return err
+	}
 	metadata, err := json.Marshal(map[string]any{
-		"direction": "outbound", "phone_number": to, "call_start": map[string]any{},
+		"direction": "outbound", "phone_number": to, "call_start": callStart,
 	})
 	if err != nil {
 		return err

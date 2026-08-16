@@ -306,7 +306,8 @@ func TestMintLiveKitSIPAdminTokenCarriesSIPAdminGrant(t *testing.T) {
 func TestPlaceLiveKitDispatchOutbound(t *testing.T) {
 	fake, _ := newFakeSIPAdmin(t)
 	var out strings.Builder
-	if err := placeLiveKitDispatch(context.Background(), &out, "phone", "+15557778888", sipTestEnv()); err != nil {
+	env := append(sipTestEnv(), `UNMUTE_CALL_START={"name":"Ada","attempts":2}`)
+	if err := placeLiveKitDispatch(context.Background(), &out, "phone", "+15557778888", env); err != nil {
 		t.Fatal(err)
 	}
 	if len(fake.dispatches) != 1 {
@@ -321,7 +322,7 @@ func TestPlaceLiveKitDispatchOutbound(t *testing.T) {
 		t.Errorf("room = %q, want a fresh call- room", room)
 	}
 	metadata, _ := got["metadata"].(string)
-	for _, want := range []string{`"direction":"outbound"`, `"phone_number":"+15557778888"`, `"call_start":{}`} {
+	for _, want := range []string{`"direction":"outbound"`, `"phone_number":"+15557778888"`, `"call_start":{"attempts":2,"name":"Ada"}`} {
 		if !strings.Contains(metadata, want) {
 			t.Errorf("metadata missing %q: %s", want, metadata)
 		}
