@@ -34,7 +34,7 @@ An id the registry does not hold is refused by name. Every line below is
 prefixed with the target instance that refused it, so a fresh scaffold, which
 has one `livekit` instance, reads like this:
 
-```
+```text
 livekit: tool "end_call" has unknown builtin "transfer_to_human"
 ```
 
@@ -43,7 +43,7 @@ livekit: tool "end_call" has unknown builtin "transfer_to_human"
 **The effect.** `end_call` implies `ends_conversation`, and writing anything else
 fails rather than being quietly ignored:
 
-```
+```text
 livekit: tool "end_call" builtin "end_call" fixes effect to ends_conversation, cannot be
   "returns_data"
 ```
@@ -51,7 +51,7 @@ livekit: tool "end_call" builtin "end_call" fixes effect to ends_conversation, c
 **The parameters.** A prebuilt owns its own schema, so the contract fields have
 nowhere to go:
 
-```
+```text
 livekit: tool "end_call" builtin execution takes no input, output, handler, or url_env
 ```
 

@@ -58,7 +58,7 @@ If the variable has no value when the model calls the tool, the call is refused
 and the model is told what to ask the caller for, rather than sending a
 half-formed request. A token that names nothing at all fails at compile time:
 
-```
+```text
 tools/confirm_appointment.yaml:7: tool "confirm_appointment" webhook.path references
   {{not_a_variable}}, which is not a declared variable
 ```
@@ -79,14 +79,14 @@ tools/confirm_appointment.yaml:7: tool "confirm_appointment" webhook.path refere
 
 Again a name, never a value. A token written in place of a name is refused:
 
-```
+```text
 livekit: tool "confirm_appointment" auth token_env must be an UPPER_SNAKE environment
   variable name, never a secret value
 ```
 
 So is a field from the other scheme, and the message says why:
 
-```
+```text
 livekit: tool "confirm_appointment" auth header is not a bearer field: bearer always sends
   Authorization
 ```
@@ -115,7 +115,7 @@ can neither see them nor overwrite them. That is the place a customer id, a
 captured slot, or the number the call went out to rides along. A key cannot be in
 both lists, and the refusal explains the reason rather than just the rule:
 
-```
+```text
 tools/confirm_appointment.yaml:5: tool "confirm_appointment" injects "customer_id", which
   is also an input property; an injected value is hidden from the model, so it cannot
   double as a parameter the model fills in

@@ -69,7 +69,7 @@ something to say.
 `--var` only seeds `call_start` variables, and it refuses anything else instead
 of accepting it and dropping it:
 
-```
+```text
 unmute: dev examples/salon-support: --var requested_service=haircut: "requested_service" has source conversation, so the model saves it mid-call through update_variables, not you
 ```
 
@@ -127,7 +127,7 @@ moment of the call and passes them by keyword.
 An injected variable with no value refuses the call rather than sending a half
 formed request. The model gets told why:
 
-```
+```text
 cannot call book_appointment yet: requested_service not set. Ask the caller first.
 ```
 
@@ -139,7 +139,7 @@ default.
 `{{...}}` renders variables only. Naming a secret in a template is a compile
 error, not a value that leaks at run time:
 
-```
+```text
 unmute: validate examples/salon-support: build: agent.yaml:70: conversation.greeting.text
 references {{OPENAI_API_KEY}}, but secrets never flow through templates; a secret
 reaches a tool through its own *_env field

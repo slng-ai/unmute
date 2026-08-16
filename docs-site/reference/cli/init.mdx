@@ -3,7 +3,7 @@ title: "unmute init"
 description: "Scaffold a new agent package, with a name or interactively."
 ---
 
-```
+```text
 $ unmute init --help
 Scaffold a new v1 agent package.
 
@@ -20,7 +20,7 @@ Flags:
 unmute init my-agent
 ```
 
-```
+```text
 created my-agent/agent.yaml
 created my-agent/.env.example
 created my-agent/.gitignore
@@ -45,13 +45,13 @@ environment variable names that route needs. The target only names it. See
 
 Outside a terminal, a name is required:
 
-```
+```text
 unmute: agent name required
 ```
 
 ## It never writes into an occupied directory
 
-```
+```text
 unmute: init my-agent: my-agent: directory already exists and is not empty
 ```
 
@@ -87,7 +87,7 @@ targets:
 
 That target is why `.env.example` lists five names, not two:
 
-```
+```text
 LIVEKIT_API_KEY=
 LIVEKIT_API_SECRET=
 LIVEKIT_URL=

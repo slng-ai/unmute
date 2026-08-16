@@ -10,9 +10,11 @@ what ships, and this file is not in it.
 
 ```sh
 cd docs-site
-mint dev --no-open      # serves http://localhost:3000
-mint validate           # configuration and page checks
-mint broken-links       # every internal link resolves
+mint dev --no-open                                      # serves http://localhost:3000
+mint validate                                           # configuration and page checks
+mint broken-links --check-anchors --check-redirects    # internal links and redirects
+mint broken-links --check-external                     # external links, then verify fetch failures
+mint a11y                                               # contrast and media alternatives
 ```
 
 `mint` needs Node 20 or newer. Pages live as `.mdx` files; the sidebar order is
@@ -54,11 +56,16 @@ mint broken-links       # every internal link resolves
 
 ## The structure
 
-Nine groups, 50 pages: Get started, Build the agent (nested Tools and
-Orchestration), Development lifecycle, Telephony, Transfers, Targets, Models,
-Deployment, Reference (nested CLI). A nested group is the object-in-pages-array
-form. The count of `.mdx` files under `docs-site/` must equal the count of page
-entries in `docs.json`.
+Seven top-level groups, 50 pages: Get started, Build the agent, Develop and
+test, Phone calls, Runtimes and models, Deploy, and Reference. Build the agent
+nests Tools and Orchestration; Phone calls nests Transfers; Runtimes and models
+nests Runtimes and Models; Reference nests CLI.
+
+Existing overview pages are clickable group roots for Get started, Tools,
+Orchestration, Develop and test, Phone calls, Transfers, Runtimes, and CLI. The
+site does not add automatic directory listings because those roots already have
+useful hand-written cards or tables. Every `.mdx` file must appear exactly once
+as either a page entry or a group root in `docs.json`.
 
 ## Tests hold the parts that can be held
 

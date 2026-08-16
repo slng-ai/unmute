@@ -3,7 +3,7 @@ title: "unmute dev"
 description: "Every flag, with defaults, requirements, and what each mode ignores."
 ---
 
-```
+```text
 $ unmute dev --help
 Compile, run the agent locally, and talk to it in the browser.
 
@@ -30,10 +30,12 @@ Flags:
 
 | Mode | Command | What runs |
 |---|---|---|
-| browser | `unmute dev ./agent` | the container, plus a local page you talk through |
-| telephony | `unmute dev ./agent --telephony` | the resolved phone route, no browser UI |
+| browser | `unmute dev ./agent` | a Docker Compose stack, plus a local page you talk through |
+| telephony | `unmute dev ./agent --telephony` | the route's local topology, with no browser UI |
 
-Both run in Docker Compose, so local development needs Docker.
+Browser mode always needs Docker. Telephony mode depends on the route: most
+local topologies use Docker Compose, the Pipecat cloud-websocket route starts
+the generated agent with `uv`, and Pipecat Daily has no local phone topology.
 
 ## Flags in detail
 
@@ -49,8 +51,9 @@ Both run in Docker Compose, so local development needs Docker.
 </ResponseField>
 
 <ResponseField name="--bot-port" type="string" default="7860">
-  The host port the agent container publishes. Passed to Compose as
-  `UNMUTE_DEV_PORT`, or as `UNMUTE_TELEPHONY_PORT` with `--telephony`.
+  The host port the agent uses. Passed to Compose as `UNMUTE_DEV_PORT`, or as
+  `UNMUTE_TELEPHONY_PORT` with a Compose phone route. The direct Pipecat route
+  uses it for the local `uv` process.
 </ResponseField>
 
 <ResponseField name="--no-open">
@@ -59,7 +62,8 @@ Both run in Docker Compose, so local development needs Docker.
 
 <ResponseField name="--verbose">
   Follow the container and agent logs on standard error. Without it, they go
-  only to `build/<target>/dev.log`.
+  only to `build/<target>/dev.log` in browser mode or
+  `build/<target>/telephony.log` in phone mode.
 </ResponseField>
 
 <ResponseField name="--var" type="name=value">
@@ -80,8 +84,10 @@ Both run in Docker Compose, so local development needs Docker.
 </ResponseField>
 
 <ResponseField name="--to" type="E.164">
-  Place one outbound test call once the stack is healthy. Requires
+  Request one outbound test call once the route is healthy. Requires
   `--telephony` and a target whose phone channel declares `outbound: true`.
+  The Pipecat cloud-websocket route cannot place that call locally, so it
+  prints the emitted deployment command instead.
 </ResponseField>
 
 <ResponseField name="--no-webhook">
@@ -92,7 +98,7 @@ Both run in Docker Compose, so local development needs Docker.
 
 ## Requirements between flags
 
-```
+```text
 unmute: dev: --public-url requires --telephony
 unmute: dev: --to requires --telephony
 unmute: dev: --to must be an E.164 number like +15551234567, got "4155550123"
@@ -100,7 +106,8 @@ unmute: dev examples/simple-prompt: multiple targets declared; pass --target <na
 unmute: dev examples/simple-prompt: target instance "nope" is not declared
 ```
 
-Each of these is checked before Docker, a tunnel, or a carrier is touched.
+Each of these is checked before a local process, Docker, a tunnel, or a carrier
+is touched.
 
 ## Environment
 
@@ -109,8 +116,9 @@ The run's environment is your shell, then `.env` in the current directory, then
 
 ## Cleanup
 
-Ctrl-c stops the Compose stack, kills the managed tunnel if there was one, and
-restores the carrier webhook if it was changed. Named data volumes are kept.
+Ctrl-c stops the Compose stack or direct `uv` process, kills the managed tunnel
+if there was one, and restores the carrier webhook if it was changed. Named
+data volumes are kept.
 
 ## Where to go next
 

@@ -47,7 +47,7 @@ That is `examples/mcp-example`, which compiles on both targets.
 
 `url_env` is a name, never an address. Writing the URL there is refused:
 
-```
+```text
 livekit: tool "web_search" url_env must be an UPPER_SNAKE environment variable name
 ```
 
@@ -56,7 +56,7 @@ it: a URL whose path ends in `/mcp` is streamable HTTP, anything else is SSE.
 Write it when you want the choice visible instead of inferred. Any other value is
 refused with both legal ones:
 
-```
+```text
 livekit: tool "web_search" transport must be sse or streamable_http, not "websocket"
 ```
 
@@ -68,12 +68,12 @@ no new code in the generated project.
 Six fields that describe one tool to the model are illegal on an `mcp:` file.
 Each is refused on its own, with the file, the line, and the reason:
 
-```
+```text
 tools/web_search.yaml:1: remove `description`: it is not legal on an `mcp:` tool, the
   server describes each of its tools
 ```
 
-```
+```text
 tools/web_search.yaml:1: remove `input`: it is not legal on an `mcp:` tool, the server
   owns each tool's parameters
 ```
@@ -109,7 +109,7 @@ The list is **not checked against the server**, because the server's tool list
 only exists at run time. A name the server does not expose is simply never
 offered, and the package still validates:
 
-```
+```text
 ✓ livekit (livekit)
 ✓ pipecat (pipecat)
 ```
@@ -125,7 +125,7 @@ Leave `tools` out and the agent gets everything the server exposes.
 
 The Pipecat refusal names the fix:
 
-```
+```text
 pipecat: the Pipecat driver cannot scope an MCP tool source to a task: list it on the
   agent instead
 ```
@@ -144,7 +144,7 @@ narrow set to one agent and a wider set to another.
 **LiveKit needs the Python SDK.** Its Node SDK has no MCP support at all, so the
 gate is a refusal rather than a warning:
 
-```
+```text
 livekit: LiveKit MCP tools require sdk_language: python
 ```
 
@@ -152,7 +152,7 @@ An MCP source needs `livekit-agents` 1.6.0 or newer, because that is where the
 emitted arguments are verified. A target that declares an older version fails
 validation by name, rather than having its version quietly raised:
 
-```
+```text
 livekit: livekit version "1.5.2" is too old for an MCP tool source, which needs livekit-agents >=1.6.0
 ```
 
@@ -169,7 +169,7 @@ compile of `examples/mcp-example`:
 
 `build/livekit/.env.example`
 
-```
+```text
 FIRECRAWL_API_KEY=
 FIRECRAWL_MCP_URL=
 OPENAI_API_KEY=

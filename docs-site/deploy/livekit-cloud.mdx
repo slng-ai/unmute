@@ -76,11 +76,9 @@ lk agent update-secrets --secrets-file .env --overwrite  # replaces the whole se
 
 <Warning>
   Every name must be a valid shell identifier: letters, digits, and underscores,
-  never starting with a digit. LiveKit's own rule for secret names is the same
-  ("only letters, numbers, and underscores"). A name that breaks it fails at export,
-  the value is missing at run time, and the agent dies somewhere unrelated with one
-  line near the top of `lk agent logs` as the only clue. Merging does not fix it:
-  the bad name stays until `--overwrite` replaces the whole set.
+  never starting with a digit. Unmute refuses a bad name before it generates the
+  project. LiveKit applies the same rule to any names added outside the package;
+  those names must use only letters, numbers, and underscores too.
 </Warning>
 
 ## Region is chosen once

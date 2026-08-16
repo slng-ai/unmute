@@ -3,7 +3,7 @@ title: "unmute validate"
 description: "Check a package against its targets before you compile or run it."
 ---
 
-```
+```text
 $ unmute validate --help
 Validate a v1 agent package against its targets.
 
@@ -23,7 +23,7 @@ Flags:
 unmute validate examples/simple-prompt
 ```
 
-```
+```text
 ✓ livekit (livekit)
 ✓ pipecat (pipecat)
 
@@ -43,7 +43,7 @@ them:
 unmute validate examples/simple-prompt --target pipecat --target livekit
 ```
 
-```
+```text
 ✓ pipecat (pipecat)
 ✓ livekit (livekit)
 ```
@@ -58,7 +58,7 @@ experimental.
 Some routes also print a setup prerequisite block, which is work you must do
 outside Unmute before a real call:
 
-```
+```text
 Setup prerequisites:
   pipecat: daily_dialout: Ask Daily to enable dial-out on the domain the agent's rooms belong to ...
     https://docs.pipecat.ai/pipecat-cloud/guides/telephony/daily-dial-out (verified 2026-08-12)
@@ -68,7 +68,7 @@ Setup prerequisites:
 
 An error names the file and the line:
 
-```
+```text
 unmute: validate examples/salon-support: build: agent.yaml:70: conversation.greeting.text references {{OPENAI_API_KEY}}, but secrets never flow through templates; a secret reaches a tool through its own *_env field
 ```
 

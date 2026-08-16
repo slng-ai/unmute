@@ -25,7 +25,7 @@ From the root of your project:
 unmute skill install
 ```
 
-```
+```text
   .agents/skills/unmute/
     SKILL.md                         written
     references/conversation.md       written
@@ -79,7 +79,7 @@ flags are on the [skill command](/reference/cli/skill) page.
 A skill that silently did not load looks exactly like an assistant that is bad
 at Unmute, so prove it before you build anything. Ask:
 
-```
+```text
 In Unmute, what are the four ways a tool can run?
 ```
 
@@ -105,7 +105,7 @@ compiles, so it cannot quietly stop working.
 
 <Steps>
   <Step title="Ask in a sentence">
-    ```
+    ```text
     Build me a voice agent for a hair salon. It answers in the browser, greets
     the caller by name, and can check appointment slots and book one.
     ```
@@ -120,7 +120,7 @@ compiles, so it cannot quietly stop working.
   </Step>
 
   <Step title="Read what it wrote">
-    ```
+    ```text
     salon/
     ├── agent.yaml
     ├── instructions.md
@@ -170,7 +170,7 @@ compiles, so it cannot quietly stop working.
     unmute validate salon
     ```
 
-    ```
+    ```text
     ✓ livekit (livekit)
 
     Warnings:
@@ -196,7 +196,7 @@ compiles, so it cannot quietly stop working.
     unmute dev salon
     ```
 
-    ```
+    ```text
     compiled salon/build/livekit
     building and starting the container...
 

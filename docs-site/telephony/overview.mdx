@@ -5,7 +5,7 @@ description: "How a phone call reaches your agent, which routes exist, and what 
 
 A phone call reaches your agent over a route: a target, a transport, and a
 carrier. Unmute picks the route from what your target declares, generates the
-code for it, and can run the whole thing on your laptop.
+code for it, and runs it locally when that route has a local topology.
 
 ## Declare a phone channel
 
@@ -115,10 +115,12 @@ The transport is not a detail. It decides what the agent can do on a call.
 
 ## Running one of these locally
 
-One command runs the route your connection declares, on your laptop, and a real
-call can reach it: `unmute dev --telephony`. What it starts, what it changes on
-your carrier account, and what it puts back when you stop it are all on
-[running a phone route locally](/dev/telephony).
+For routes with a local topology, one command runs the route your connection
+declares: `unmute dev --telephony`. Pipecat Daily has no local phone topology,
+and LiveKit SIP still needs reachable SIP and media ingress for an inbound
+call. What the command starts, what it changes on your carrier account, and
+what it puts back when you stop it are all on [running a phone route
+locally](/dev/telephony).
 
 <Warning>
   A healthy local stack proves wiring, not reachability. A real call also needs

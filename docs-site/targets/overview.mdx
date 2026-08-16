@@ -41,8 +41,8 @@ is yours: a package with two Twilio setups might call them `pipecat_twilio` and
 | `deployment_region` | where the platform deploys the agent, forwarded as written |
 
 A target says nothing else about telephony. It names one connection, and
-[that file](/reference/connections-yaml) declares the transport, the carrier, and
-the environment names the route needs. The numbers a transfer dials live in
+[the connection file](/reference/connections-yaml) declares the transport, the
+carrier, and the environment names the route needs. The numbers a transfer dials live in
 `agent.yaml` under `destinations:`, because who you escalate to is the same desk
 whichever carrier reaches it.
 
@@ -91,7 +91,7 @@ models:
 Point a Pipecat package at LiveKit and leave `silero` behind, and validate
 refuses before a file is written:
 
-```
+```text
 ✗ livekit (livekit)
 
 Warnings:
@@ -117,7 +117,7 @@ every shipped example does.
 unmute compile examples/simple-prompt
 ```
 
-```
+```text
 generated examples/simple-prompt/build/livekit/agent.py
 generated examples/simple-prompt/build/pipecat/bot.py
 ```

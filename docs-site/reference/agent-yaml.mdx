@@ -31,7 +31,7 @@ Durations use Go duration syntax, for example `90s`, `15m`, or `1h30m`.
 | `conversation` | no | greeting, interruption, inactivity, limits |
 | `tracing` | no | tracing provider |
 | `channels` | yes | how people reach the agent |
-| `capacity` | no | your traffic estimate |
+| `capacity` | for telephony or code targets | your traffic estimate |
 
 ## models
 
@@ -72,7 +72,7 @@ Entries you do not reference are legal alternates.
 `params` is passthrough. Nothing in it is checked, and a name the target's
 settings object has no field for is not dropped: it rides that target's overflow
 field and reaches the provider anyway. The `reasoning_effort` line above is the
-one every package needs, because a reasoning model refuses a request that
+case to know: a reasoning model such as `gpt-5.6-luna` refuses a request that
 carries function tools without it. [The reasoning model](/models/llm) says why.
 
 ## variables
@@ -132,7 +132,7 @@ name of an environment variable holding an E.164 number or a `sip:` URI, read at
 call time. A number written here is refused, because `agent.yaml` is the portable
 half of a package:
 
-```
+```text
 agent.yaml:60: destination "billing_line" is a literal. agent.yaml is
   the portable half of a package, so a destination names an environment variable holding
   the number: billing_line: BILLING_PHONE_NUMBER
@@ -260,7 +260,7 @@ written on a cold transfer:
 Whether a route can carry the shape you asked for is decided by the connection.
 A warm transfer on a route with no leg to move is refused by name:
 
-```
+```text
 pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twilio) does
   not emit warm transfer: a warm handoff has to act on how the destination's leg ended,
   which on this route needs a callback endpoint you host, and hosting nothing is what
@@ -373,7 +373,7 @@ to meet by trial and error.
 destination itself, so the agent places a call, and a channel that only receives
 them cannot:
 
-```
+```text
 channel "phone" needs outbound: true; a warm transfer places a call to its destination
 ```
 
@@ -383,7 +383,7 @@ the agent does, not what the number is for.
 **`capacity.peak_starts_per_second` becomes required.** The moment any channel
 is `telephony`, the field stops being optional and must be positive:
 
-```
+```text
 capacity.peak_starts_per_second must be positive for telephony
 ```
 
@@ -391,6 +391,9 @@ Calls arrive in bursts and each one starts a session, so a rate is the number
 the compiler sizes workers from. One is a fine answer for a first line.
 
 ## capacity
+
+Capacity is required for every code target, including both targets documented
+on this site. A telephony channel also makes `peak_starts_per_second` required.
 
 ```yaml
 capacity:

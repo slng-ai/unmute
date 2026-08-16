@@ -82,7 +82,7 @@ it. It does not import Unmute.
 **Model bindings.** Unmute passes your model and voice strings through to the
 provider without checking them:
 
-```
+```text
 pipecat: binding listen provider=slng model=slng/deepgram/nova:3-en (forwarded as-is, not validated)
 ```
 
@@ -90,14 +90,14 @@ pipecat: binding listen provider=slng model=slng/deepgram/nova:3-en (forwarded a
 They carry `[unbenchmarked]` and the date of the assumption they came from, so
 you know they are a starting point:
 
-```
+```text
 pipecat: sizing workers=20 [unbenchmarked] (2026-07-15 conservative 1 session per worker/GPU; channels=realtime_audio)
 ```
 
 **Telephony evidence.** Phone routes say how well they are proven, with the
 vendor document and the date it was checked:
 
-```
+```text
 pipecat: telephony evidence inbound=provisional docs=https://docs.pipecat.ai/pipecat-cloud/guides/telephony/twilio-websocket verified=2026-08-13 smoke=false
 ```
 
@@ -109,7 +109,7 @@ credentialed end to end test is recorded for it.
 Warnings go to standard error and the command still exits 0. Errors exit 1.
 A warning is a real difference worth reading, for example:
 
-```
+```text
 warning: livekit: LiveKit turn placement is a preference
 ```
 

@@ -59,14 +59,14 @@ tool file has exactly one.
 
 Exactly one, and the compiler holds you to it. Two blocks:
 
-```
+```text
 tools/check_availability.yaml:7: two execution blocks (local and webhook): a tool runs
   exactly one way
 ```
 
 None at all, where the message is also the list:
 
-```
+```text
 tools/check_availability.yaml: no execution block: add one of webhook, local, mcp, builtin,
   client, provider_hosted
 ```
@@ -77,11 +77,11 @@ tools/check_availability.yaml: no execution block: add one of webhook, local, mc
 capability table denies both on every provider, so writing one fails with the
 target named:
 
-```
+```text
 livekit: LiveKit client tools are not proven by its driver
 ```
 
-```
+```text
 pipecat: Pipecat provider-hosted tools are not proven by its driver
 ```
 
