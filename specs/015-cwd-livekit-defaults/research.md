@@ -281,15 +281,31 @@ independent audit caught it and the correction below is verified in code.
 2. **`Transport = "sip"` would not have fixed it.** `SetTarget` resets
    `Carrier = ""` (`scaffold.go:315`), so the key would be
    `(livekit, sip, "")`, which still misses.
-3. **It would actively degrade the error.** `internal/ir/build.go:881` fires a
-   helpful, specific message before the capability lookup, but only for
-   transports on the carrier-less list, and that list
-   (`internal/ir/build.go:956-958`) contains exactly one entry: `daily-sip`.
-   So Pipecat gets "give the connection a carrier, or drop the phone channel",
-   while `sip` would fall through to the bare
-   `unsupported telephony route (livekit, sip, )`. The comment at
-   `build.go:875-879` exists precisely to prevent that class of unhelpful
-   error.
+3. ~~**It would actively degrade the error.**~~ **WRONG, retracted 2026-08-16
+   (fourth pass, measured).** This claim said `sip` with no carrier would fall
+   through to a bare `unsupported telephony route (livekit, sip, )`. It does
+   not. `validateRoute` (`internal/ir/build.go:984-991`) guards the
+   carrier-less case *before* any capability lookup, and for a transport with
+   no carrier-less form it emits:
+
+   ```
+   connections/twilio_sip.yaml:16: transport "sip" declares no carrier, and it
+   has no carrier-less form. livekit supports: connector with twilio;
+   sip with plivo, telnyx, twilio.
+   ```
+
+   That names the file, the line, the missing field, **and every supported
+   carrier**. It is arguably better than the current "declares no transport"
+   message, not worse. Verified by removing `carrier:` from
+   `examples/livekit-human-transfer/connections/twilio_sip.yaml` and running
+   validate.
+
+   The decision below still stands, but on the surviving reason only: point 2.
+   Adding a `sip` arm does not make the wizard produce a *working* phone
+   package, because the wizard still cannot supply a carrier. Both paths stay
+   gated and both give a good error. Which of the two errors is better is a
+   real question, and it is now recorded as a follow-up rather than settled
+   here by a false premise.
 
 **MEASURED 2026-08-16, third pass.** Reasoning about this area produced a wrong
 answer twice, so it was finally run. In an isolated export with only
@@ -308,7 +324,21 @@ Two things this settles, both contrary to earlier drafts:
 - **The author never sees `unsupported telephony route (livekit, , )`.** An
   earlier guard fires first (`internal/ir/build.go:101`), because with no
   transport at all the code stops before any capability lookup. So the second
-  correction, which promised that bare note, was also wrong.
+  correction, which promised that bare note, was also wrong. Nor would they see
+  it with a `sip` arm: a *third* guard (`build.go:984-991`) catches
+  transport-without-carrier and lists the supported carriers. The bare
+  unsupported-route note is far harder to reach than three drafts of this
+  document assumed.
+
+- **Nothing about LiveKit SIP telephony changed or was removed.** The routes
+  `(livekit, sip, twilio|telnyx|plivo)` and `(livekit, connector, twilio)` are
+  registered exactly as before (`internal/target/telephony.go:181, 218, 227,
+  360`), and this branch touches no file under `internal/target/`,
+  `internal/ir/`, or `internal/generate/`. `examples/livekit-human-transfer`
+  still validates clean and still compiles its route:
+  `telephony route provider=livekit transport=sip carrier=twilio`. The only
+  thing ever under discussion was one optional line in the *interactive
+  wizard*, and that line was never present to begin with.
 - **LiveKit's message is already good.** It names the file, the connection, and
   the missing field, and explains what a transport is. There is no guidance to
   improve, so no guidance work is owed.
