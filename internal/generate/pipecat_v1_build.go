@@ -474,8 +474,8 @@ func buildPipecatCloudWebsocket(agent *ir.Agent, resolved ir.Target, env *envSet
 			carrier.HasOutbound = true
 		}
 	}
-	// The organization is needed exactly when this package composes TwiML that has
-	// to name the service host: an outbound call, or a transfer's reconnect. The
+	// The organization is needed exactly when outbound TwiML has to name the
+	// service host. The
 	// plan already resolved that condition against the route row, so read it there
 	// rather than re-deriving it (Principle III).
 	if slices.Contains(plan.RequiredEnvironment, "PIPECAT_CLOUD_ORGANIZATION") {

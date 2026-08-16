@@ -35,6 +35,14 @@ the model receives one corrective result naming the allowed fields. If a
 handler fails before returning, the full exception stays in the log and the
 model receives one safe failure result. It must not claim success from either.
 {{- end}}
+{{- if .HasFlows}}
+
+## Task returns
+
+When a task returns, its internal turns stay out of the owner's conversation.
+The completed delegate call stays in that conversation with the typed result,
+so the same caller request does not start the task again.
+{{- end}}
 {{if .Telephony}}
 This project uses the
 `pipecat/carrier-websocket/{{.Telephony.Carrier}}` route and contains only that
@@ -757,26 +765,19 @@ can still refuse a call live on the **account**:
 
 When the agent hands the caller to a person, one request replaces the live call's
 markup at your carrier: a spoken line, then the destination dialled with ringback
-audible, then a second spoken line and the caller put back with a fresh agent.
-The destination is read from the environment at call time, so no phone number is
+audible, then a final hangup that ends the original call after that destination
+leg finishes. The
+destination is read from the environment at call time, so no phone number is
 written into this project.
 
-Two limits, and they are limits of having nothing hosted rather than accidents:
+This is deliberately a cold transfer. If the person hangs up first, the original
+call ends. If the destination declines or never answers, the original call also
+ends after the dial timeout. No fresh agent starts with an empty conversation.
 
-- **The caller comes back to a fresh agent that does not remember the call, and
-  that happens however the dial ended.** Your carrier runs the verbs after the
-  dial when the person hangs up exactly as it does when the line was busy or
-  nobody answered, and telling those apart needs a callback endpoint you host,
-  which is the cost this route exists to remove. So the second spoken line says
-  only what is true either way (`Putting you back to the assistant.`) and never
-  claims nobody answered. Do not reword it into a failure line: a completed
-  transfer would then apologise to every caller the person helped.
-- **A completed transfer therefore ends with the agent greeting them again.** The
-  caller can simply hang up. Only the caller hanging up first stops the document
-  before that line.
-
-If you need the same agent to survive a failed transfer, use the Daily carrier route.
-See the telephony and transfer overviews in the Unmute documentation site.
+**Warm transfer is not supported on any Pipecat target in Unmute.** Use the
+LiveKit SIP route when the agent must brief the person before connecting the
+caller. See the telephony and transfer overviews in the Unmute documentation
+site.
 {{end}}
 ### Security, in one paragraph
 
@@ -836,11 +837,10 @@ within a couple of seconds, then this agent.
 **{{if .CloudWebsocket.HasOutbound}}{{if .CloudWebsocket.HasInbound}}{{if .SecretSet}}8{{else}}7{{end}}{{else}}{{if .SecretSet}}6{{else}}5{{end}}{{end}}{{else}}{{if .SecretSet}}7{{else}}6{{end}}{{end}}. Test a transfer, both ways.** On a call, ask for the person this agent can
 hand you to. Expected: the spoken line, the destination ringing, and the agent
 gone once it answers. Then let the person **hang up first**: expected is the
-handback line and a fresh agent greeting the caller, never silence and never a
-drop. Then run it a third time with the destination **declining or not
-answering**: expected is the same handback line and the same fresh agent, because
-the markup cannot tell the two endings apart. Those last two runs are the ones
-worth doing; they are what a caller meets on an ordinary day and on a bad one.
+original call ending, with no new agent greeting. Then run it a third time with
+the destination **declining or not answering**: expected is the original call
+ending after the dial finishes. Those last two runs cover the ordinary and
+failure paths.
 {{end}}
 One log, and only one: `pipecat cloud agent logs {{.Project}}`. There is no
 second place to look on this route, because there is no second thing running.
@@ -896,7 +896,6 @@ indistinguishable by ear.
 {{- end}}
 {{- if .HasColdTransfer}}
 | The transfer never rings the destination | The per-call check refuses a missing destination by name at session start, so if the session started, read the agent log for the update request's response. |
-| The transfer works, then the handback line plays and the call **drops** instead of the agent coming back | Same cause as the second row, in the one place the value is not something you pasted: `{{.CloudWebsocket.OrganizationEnv}}` in your deployed secret set has to be the organization **slug** (`three-random-words-12345`), not your display name. Your hand-typed Bin can be right while that value is wrong, which is why incoming calls work and only the handback fails. **The tell is a second session that never appears in this agent's log**, plus Twilio error `31921` on the call under Monitor, Logs, Calls. Fix `.env`, re-run the `secrets set` command, and redeploy. |
 {{- end}}
 | An `ERROR` line reading `BusBridge Trying to process LLMServiceMetadataFrame ... but StartFrame not received yet` | Harmless, and nothing of yours caused it. Both pipelines start at once; the transport pipeline's start waits on the transcriber's WebSocket, so the agent's LLM announces itself a moment before the bridge is ready and that announcement is dropped. It carries one flag, `is_realtime_service`, which is false for every model this project binds, and the processor that would read it ignores a false one. It appears when a provider connects slowly and not otherwise. |
 {{end}}{{if and (eq .Transport "daily-sip") (not .DailyCarrier)}}

@@ -28,10 +28,9 @@ read two side by side and see only the difference that matters.
 | two jobs with different rules and tools | `examples/subagents` | two agents that hand the caller over, with a control in each direction |
 | a real phone number, inbound and outbound | `examples/twilio-telephony-hello` | one carrier reaching each platform two different ways, so you can hear both call directions from a laptop |
 | a cold transfer with nothing hosted | `examples/pipecat-human-transfer-twilio` | Pipecat Cloud reached through a Twilio number, no server of yours in the path |
-| a cold transfer with no carrier account | `examples/pipecat-human-transfer-daily` | Daily provisions the number |
 | a warm transfer | `examples/livekit-human-transfer` | LiveKit over a Twilio SIP trunk. Warm transfer compiles on no other route today |
 | a remote MCP server | `examples/mcp-example` | one tool file declares the server, its transport, its bearer token, and the one tool the agent may use |
-| variables and secrets, every route | `examples/outbound-reminder` | input variables from the dispatch, a system variable from the route, a conversation variable the model saves, and both ways a secret reaches a tool |
+| an outbound workflow with runtime values | `examples/outbound-reminder` | input variables from the dispatch, a system variable from the route, a conversation variable the model saves, and local Python appointment fixtures |
 
 ## How to use one, when you have them
 

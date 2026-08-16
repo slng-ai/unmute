@@ -134,10 +134,11 @@ This is the honest table, and the asymmetry is the transport's, not the CLI's.
 **Why local inbound differs.** Twilio reaches the pipecat route over HTTPS and WSS,
 which a tunnel carries, so the dev command borrows your number's voice
 configuration and a real call lands on your laptop. SIP is not HTTP: an inbound call
-needs the carrier to reach SIP signalling and an RTP media range at a routable
-address, and an HTTPS tunnel is neither required nor sufficient for that. Everything
-in the local SIP graph can be healthy and the call still never arrives. So inbound
-on the livekit target is tested against the deploy.
+needs the carrier to reach a LiveKit Server and LiveKit SIP service over public SIP
+signalling and RTP. An HTTPS tunnel is neither required nor sufficient. Use a
+LiveKit Cloud project, or self-host both services at public addresses; the agent
+worker itself may still run locally. Everything in the laptop SIP graph can be
+healthy while NAT or a firewall keeps it unreachable.
 
 **Why local outbound differs.** On the pipecat route an outbound call is created at
 Twilio with markup naming the **deployed** agent, so the call reaches Pipecat Cloud
@@ -162,7 +163,9 @@ number. The agent answers and greets you; speak and it replies. `ctrl-c` stops
 everything and puts the number's previous voice configuration back. Your TwiML Bin
 is never touched: the local runner answers Twilio's webhook itself.
 
-On **livekit**, inbound is a deploy exercise. See **Deploy it**.
+On **livekit**, inbound needs a reachable telephony deployment: a LiveKit Cloud
+project, or a public self-hosted LiveKit Server and SIP service. The worker may run
+locally against either one. See **Deploy it**.
 
 ## Test an outbound call
 

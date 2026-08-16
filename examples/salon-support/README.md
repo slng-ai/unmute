@@ -187,9 +187,7 @@ environment variable instead, through exactly these seams:
 | a model's `endpoint_env` | pointing a model at your own gateway |
 | `os.environ` inside a `local:` handler | a handler that builds its own request |
 
-For a worked version of the first and the last, running side by side, see
-[examples/outbound-reminder](../outbound-reminder/README.md). The full
-reference is [secrets](../../docs-site/reference/secrets.mdx).
+The full reference is [secrets](../../docs-site/reference/secrets.mdx).
 
 This package deliberately uses none of the seams. Its tools are local fixtures
 that need no credential, so `book_appointment.py` reads no environment at all,
@@ -221,4 +219,5 @@ word.
 The reference pages are [variables](../../docs-site/reference/variables.mdx) and
 [secrets](../../docs-site/reference/secrets.mdx).
 For the same surface on a real outbound phone call, see
-[outbound-reminder](../outbound-reminder/), which needs Twilio and a booking API.
+[outbound-reminder](../outbound-reminder/), which needs Twilio but uses local
+appointment fixtures instead of a booking API.

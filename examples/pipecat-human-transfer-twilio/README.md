@@ -1,8 +1,7 @@
 # pipecat-human-transfer-twilio
 
-The same salon agent as [pipecat-human-transfer-daily](../pipecat-human-transfer-daily), reached
-through **your own Twilio number**, with **nothing hosted by you**. Inbound calls,
-outbound calls, and a cold transfer to a person.
+A salon agent reached through **your own Twilio number**, with **nothing hosted
+by you**. Inbound calls, outbound calls, and a cold transfer to a person.
 
 Twilio streams the call's audio straight to Pipecat Cloud, which starts the
 deployed agent. There is no server of yours in the path, in production or ever:
@@ -50,9 +49,8 @@ The same three `TWILIO_*` names
 REST credentials.) Values never go in this package; the package carries environment
 variable **names** only.
 
-**No Daily key, and no Daily anything.** This route touches no Daily API, so
-`DAILY_API_KEY` is not required and is not asked for. That is the visible
-difference from [pipecat-human-transfer-daily](../pipecat-human-transfer-daily).
+**No Daily key, and no Daily account.** This route touches no Daily API, so
+`DAILY_API_KEY` is not required and is not asked for.
 
 ## Run it
 
@@ -84,12 +82,9 @@ bin/unmute dev --telephony examples/pipecat-human-transfer-twilio
 That runs this agent on your machine behind a cloudflared tunnel and borrows the
 declared number's voice configuration for the length of the session, putting the
 previous one back when you stop it. Your TwiML Bin is never touched, because the
-local runner answers Twilio's webhook itself. One limit worth knowing: the
-transfer's own markup names the **deployed** stream address, so a transfer during
-a local session hands the caller back to the deployed agent rather than to your
-laptop. `PIPECAT_CLOUD_ORGANIZATION` therefore has to be the organization
-**slug** even for a local run, or that handback reaches nothing and the call
-simply drops.
+local runner answers Twilio's webhook itself. The transfer stays at Twilio:
+after the destination leg ends, Twilio ends the original call. It does not need
+a deployed copy of the agent for a handback.
 
 ## Deploy to Pipecat Cloud
 
@@ -127,7 +122,7 @@ them to agree:
 |---|---|
 | where the agent runs | `region` in the emitted `pcc-deploy.toml` |
 | where its secrets live | the `--region` on the emitted `secrets set` command |
-| where Twilio streams to | the `wss://eu-central.api.pipecat.daily.co/...` host in the markup you paste, in the outbound command, and in the transfer's reconnect |
+| where Twilio streams to | the `wss://eu-central.api.pipecat.daily.co/...` host in the markup you paste and in the outbound command |
 
 A regional stream endpoint routes **only** to agents deployed in that region, and
 an agent can only read a secret set from its own region. So change that one line to
@@ -149,22 +144,19 @@ an inbound caller takes.
 
 ## What is not here
 
-**Warm transfer.** No Pipecat route offers it today, on any transport. The
-refusal on this route names what it would take: acting on how the destination's
-leg ended needs a callback endpoint you host, which is the one cost this route
-exists to remove. Warm compiles on LiveKit SIP today, in
+**Warm transfer. Unmute does not support it on any Pipecat target.** The refusal
+on this route names what it would take: acting on the destination leg while the
+caller waits needs call control this route does not have. Warm compiles on
+LiveKit SIP today, in
 [livekit-human-transfer](../livekit-human-transfer). The
 [transfer overview](../../docs-site/transfers/overview.mdx) has the capability
 map and sources.
 
-**Session survival through a transfer.** However the dial ends, the caller hears
-one spoken line and meets a **fresh** agent that does not remember the call. That
-is both endings: a dial that never connected, and a completed transfer the person
-ended by hanging up first. Nothing in the markup can tell them apart without a
-callback endpoint, so the line names neither ("Putting you back to the
-assistant."). Both endings are written into the generated runbook, and the Daily
-carrier route is the one that keeps the session. The
-[telephony overview](../../docs-site/telephony/overview.mdx) compares the routes.
+**Session survival through a transfer.** There is no handback. When the person
+hangs up, or when the destination declines or never answers, Twilio ends the
+original call. This avoids starting a fresh agent with no conversation context.
+The [telephony overview](../../docs-site/telephony/overview.mdx) compares the
+routes.
 
 **Caller-number variables.** A variable sourced from the caller's number, the
 called number, the call identifier, or the direction is refused on this route, by

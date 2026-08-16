@@ -567,7 +567,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- range .Tools}}{{template "method_tool" .}}{{end}}
 {{- if $.Capture}}{{template "capture_tool" $.Capture}}{{end}}
 {{range .Transfers}}
-    @function_tool
+    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)
     async def {{.Method}}(self, ctx: RunContext):
         {{triple .When}}
 {{- if .Requires}}

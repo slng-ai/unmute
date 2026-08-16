@@ -208,8 +208,8 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		routes[key] = route
 	}
 	// Twilio is the one SIP carrier anybody has called through. Both transfer shapes
-	// were run on a real trunk and a deployed agent on 2026-08-12, with dated
-	// evidence in examples/E2E_HARNESS.md, and each run found a defect no offline test had
+	// were run on a real trunk and a deployed agent on 2026-08-12, and each run
+	// found a defect no offline test had
 	// (SCHEMA N33 and N35). The tag still says provisional because that tracks a
 	// credentialed smoke in CI, which no route here has; the note is what tracks
 	// whether a human made a call, and leaving the generic line on this row would
@@ -219,8 +219,8 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	route = routes[sipTwilio]
 	for feature, evidence := range route.Features {
 		evidence.Verified = "2026-08-12"
-		evidence.Note = "live inbound, cold transfer and warm transfer run 2026-08-12 " +
-			"(examples/E2E_HARNESS.md); no credentialed smoke runs in CI on any route"
+		evidence.Note = "live inbound, cold transfer and warm transfer run 2026-08-12; " +
+			"no credentialed smoke runs in CI on any route"
 		route.Features[feature] = evidence
 	}
 	routes[sipTwilio] = route
@@ -323,11 +323,11 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		// is a CI change rather than a phone call.
 		//
 		// The **note** tracks what anybody actually did. Live inbound and a live
-		// cold transfer were run on a deployed agent on 2026-08-13 (dated evidence
-		// in examples/E2E_HARNESS.md), so the previous note, "no call has been placed
+		// cold transfer were run on a deployed agent on 2026-08-13, so the previous
+		// note, "no call has been placed
 		// through this endpoint yet", became false and is the kind of stale line a
 		// reader is right to trust. What is genuinely unrun is the decline path.
-		evidence.Note = "live inbound and cold transfer run 2026-08-13 (examples/E2E_HARNESS.md); " +
+		evidence.Note = "live inbound and cold transfer run 2026-08-13; " +
 			"the transfer's decline path is emitted and offline-proven but has not been run; " +
 			"no credentialed smoke runs in CI on any route"
 		route.Features[feature] = evidence
@@ -337,12 +337,12 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	// and the emitted bot never speaks to the carrier's API (research F4, D4).
 	// ir.Build carries that conditionality; the row states the vocabulary.
 	route.RequiredEnvironment = []string{"account_sid", "auth_token", "from_number"}
-	// The organization name completes the service host the outbound command and the
-	// transfer markup have to name. The compiler knows the agent name and cannot
-	// know this, so it is read by name at call time (research D5).
+	// The organization name completes the service host in outbound markup. The
+	// compiler knows the agent name and cannot know this, so it is read by name
+	// when the operator places the call.
 	route.RuntimeEnvironment = []TelephonyEnvironmentRule{{
 		Name:        "PIPECAT_CLOUD_ORGANIZATION",
-		AnyFeatures: []TelephonyFeature{TelephonyOutbound, TelephonyFeature(ColdTransfer)},
+		AnyFeatures: []TelephonyFeature{TelephonyOutbound},
 	}}
 	// No AutoWebhookEndpoint: in production the number points at a TwiML Bin, which
 	// is a console object rather than a URL, so there is nothing for the CLI to

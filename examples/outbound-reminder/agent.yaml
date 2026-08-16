@@ -1,12 +1,10 @@
-# Outbound appointment reminder showing every runtime-value kind in one place:
+# Outbound appointment reminder showing every runtime-variable source in one place
 #   input variables        customer_id, name, appointment_time (from the dispatch)
 #   system variable        dialed_number (runtime owned, source: to_number)
 #   conversation variable  reschedule_to (the model saves it mid call)
-#   secrets                env names only, values never appear in any file
 #
-# The three tools also show both ways a secret reaches a call: the two webhook
-# tools name theirs in YAML (url_env, auth.token_env), and cancel_appointment
-# reads its signing key with os.environ inside its own Python handler.
+# All three business tools are deterministic local fixtures. The example tests
+# outbound calling and runtime values without requiring a separate booking API.
 version: 1
 entry_agent: reminder
 
@@ -32,9 +30,6 @@ variables:
     description: New slot the customer asks for, in spoken form. Save it as soon as the customer names one.
 
 secrets:
-  - SALON_API_URL
-  - SALON_API_TOKEN
-  - SALON_API_SIGNING_KEY
   - OPENAI_API_KEY
   - SLNG_API_KEY
   # Both connections name the same three: one Twilio account, reached two ways.

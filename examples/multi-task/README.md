@@ -6,7 +6,8 @@ appointment request pulled out into focused steps the agent delegates to.
 
 A task is delegate and return: the agent hands the conversation to the task,
 the task runs its own prompt with its own tools, and control comes back with a
-typed result.
+typed result. The task's internal turns stay out of the agent's context, while
+the completed delegate call stays there so the same request does not run twice.
 
 ```yaml
 tasks:

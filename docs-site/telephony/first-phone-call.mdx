@@ -17,9 +17,16 @@ recommends for Twilio:
 
 **Use the `pipecat` target for a local inbound call.** Twilio reaches that
 route over HTTPS and WSS, which a tunnel can carry, so a real call can land on
-your laptop. SIP needs the carrier to reach signalling and media at a routable
-address, which a tunnel cannot provide, so inbound on the `livekit` target is
-tested against a deployment.
+your laptop. SIP needs the carrier to reach a LiveKit Server and LiveKit SIP
+service over public signalling and media addresses, which an HTTPS tunnel cannot
+provide. For `livekit`, use a LiveKit Cloud project or self-host both services at
+public addresses. The agent worker may still run on your laptop.
+
+<Note>
+  LiveKit Cloud is optional; a reachable LiveKit telephony deployment is not.
+  Starting the generated local Compose graph proves its wiring, but laptop NAT or
+  firewall rules can still block the carrier's RTP media.
+</Note>
 
 ## What you need
 

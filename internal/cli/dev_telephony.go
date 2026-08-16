@@ -211,7 +211,7 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 					if err := placeLiveKitDispatch(ctx, cmd.OutOrStdout(), targetName, opts.to, childEnv); err != nil {
 						return err
 					}
-				} else if err := placeOutboundCall(ctx, cmd.OutOrStdout(), targetName, opts.botPort, outboundToken, opts.to); err != nil {
+				} else if err := placeOutboundCall(ctx, cmd.OutOrStdout(), targetName, opts.botPort, outboundToken, opts.to, childEnv); err != nil {
 					return err
 				}
 			} else {
@@ -227,8 +227,12 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 // (SPEC I.trigger): the CLI, not the tunnel, reaches the published bot port,
 // and the returned call id is printed. The Bearer token is the dev secret from
 // randomOutboundToken; it is sent, never printed.
-func placeOutboundCall(ctx context.Context, out io.Writer, targetName, botPort, token, to string) error {
-	body, err := json.Marshal(map[string]string{"to": to})
+func placeOutboundCall(ctx context.Context, out io.Writer, targetName, botPort, token, to string, env []string) error {
+	callStart, err := callStartFromEnv(env)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(map[string]any{"to": to, "call_start": callStart})
 	if err != nil {
 		return err
 	}

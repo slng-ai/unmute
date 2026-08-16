@@ -430,7 +430,7 @@ func TestExecDevTelephonySIPInjectsNoOutboundToken(t *testing.T) {
 // T4/V5: with --to, the CLI POSTs the Bearer-authed dial-out trigger to the
 // container's published bot port over loopback once the graph is healthy, and
 // prints the returned call id.
-func TestExecDevTelephonyPlacesOutboundCallAfterReady(t *testing.T) {
+func TestV4_ExecDevTelephonyPlacesOutboundCallWithCallStartAfterReady(t *testing.T) {
 	var gotAuth, gotBody, gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -445,7 +445,7 @@ func TestExecDevTelephonyPlacesOutboundCallAfterReady(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\n")
+	root, _ := fakeTelephonyRoot(t, "TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\nUNMUTE_CALL_START={\"name\":\"Ada\",\"attempts\":2}\n")
 	fakeDocker(t, root)
 	cloudflared := filepath.Join(root, "cloudflared")
 	if err := os.WriteFile(cloudflared, []byte("#!/bin/sh\necho 'INF |  https://fake-zero.trycloudflare.com  |'\nsleep 60\n"), 0o755); err != nil {
@@ -468,6 +468,9 @@ func TestExecDevTelephonyPlacesOutboundCallAfterReady(t *testing.T) {
 	}
 	if !strings.Contains(gotBody, `"to":"+15559998888"`) {
 		t.Fatalf("dial-out body = %q", gotBody)
+	}
+	if !strings.Contains(gotBody, `"call_start":{"attempts":2,"name":"Ada"}`) {
+		t.Fatalf("dial-out trigger dropped typed call_start: %q", gotBody)
 	}
 	if !strings.Contains(out.String(), "CA-test") {
 		t.Fatalf("call id not printed:\n%s", out.String())

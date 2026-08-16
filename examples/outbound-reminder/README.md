@@ -1,21 +1,18 @@
 # outbound-reminder
 
 An outbound reminder call for the Sage and Stone Salon, built to show every
-runtime-value kind in one small package. It compiles and runs on both shipped
-code targets, Pipecat and LiveKit, from the same source. See the
-[variables](../../docs-site/reference/variables.mdx) and
-[secrets](../../docs-site/reference/secrets.mdx) references.
+runtime-variable source in one small package. It compiles and runs on both shipped
+code targets, Pipecat and LiveKit, from the same source. Its three appointment
+tools are deterministic local Python fixtures, so the call needs no booking API.
+See the [variables reference](../../docs-site/reference/variables.mdx).
 
-Both targets here are **self-hosted** routes, chosen because this example is about
-runtime values rather than about telephony: Pipecat on `transport:
-carrier-websocket` (the container answers the carrier itself) and LiveKit on
-`transport: connector` (the generated bridge puts the call in a local LiveKit
-room). Its `dialed_number` variable is why: `source: to_number` is filled by the
-carrier adapter, and those are the routes that emit one. The Pipecat routes that
-host nothing refuse that source by name, so a package needing it belongs here. The
-[telephony overview](../../docs-site/telephony/overview.mdx) compares the routes.
+Both targets here are **self-hosted** routes that can place the outbound call
+locally: Pipecat on `transport: carrier-websocket` and LiveKit on `transport:
+connector`. Their carrier adapters also fill the `dialed_number` system
+variable. The [telephony overview](../../docs-site/telephony/overview.mdx)
+compares the routes.
 
-## The four kinds, and where each shows up
+## The three value sources
 
 **Input variables** arrive with the dispatch, before the call rings:
 `customer_id`, `name`, and `appointment_time` in `agent.yaml` carry
@@ -33,53 +30,29 @@ one generated tool, `update_variables`, whose schema is built from the
 variable's type and description. The prompt tells the model to save the slot
 the customer names, and `reschedule_appointment` injects the saved value as
 `new_time`. If the model calls that tool before saving a slot, the call is
-refused with a message telling it to ask the caller first, and nothing is sent.
+refused with a message telling it to ask the caller first, and the handler is
+not called.
 
-**Secrets** are env names declared in the `secrets:` block, values never appear
-in any file. `SALON_API_URL` is the webhook base URL, `SALON_API_TOKEN` rides
-the bearer auth of the two webhook tools, `SALON_API_SIGNING_KEY` is read by the
-one local handler, and the model keys are listed so the generated `.env.example`
-and the startup check cover everything the runtime needs.
+## Local appointment fixtures
 
-## Both ways a secret reaches a tool
+`confirm_appointment`, `reschedule_appointment`, and `cancel_appointment` are
+plain Python functions copied into both generated projects. They return a
+successful deterministic result and make no network request. This keeps the
+live acceptance test on its subject: placing one outbound call and carrying
+dispatch, route, and conversation values through it.
 
-The three tools are here to show the two shapes side by side. Full reference in
-[secrets](../../docs-site/reference/secrets.mdx).
-
-**Named in YAML**, for a webhook tool. `confirm_appointment` and
-`reschedule_appointment` name their base URL and their token, and unmute writes
-the request:
+The hidden `inject:` values still exercise the same compiler path. For example,
+the reschedule fixture receives the dispatched customer id and the slot saved
+mid-call, while the model sees neither as a tool argument:
 
 ```yaml
-webhook:
-  url_env: SALON_API_URL
-  path: /customers/{{customer_id}}/appointments/confirm
-  auth:
-    type: bearer
-    token_env: SALON_API_TOKEN
+inject:
+  customer_id: "{{customer_id}}"
+  new_time: "{{reschedule_to}}"
+
+local:
+  handler: tools/reschedule_appointment.py
 ```
-
-**Read in Python**, for a local handler. `cancel_appointment` needs a signed
-request, and `webhook.auth` only speaks bearer and api_key, so the handler
-builds the signature itself and reads the key the ordinary way:
-
-```python
-key = os.environ["SALON_API_SIGNING_KEY"].encode()
-```
-
-There is no credential field on the `local:` block and nothing is passed into
-the function. `unmute validate` reads the handler, finds the name, and warns if
-`agent.yaml` never declared it:
-
-```
-Warnings:
-  pipecat: environment variables referenced but not declared in secrets:
-    SALON_API_SIGNING_KEY (tools/cancel_appointment.py os.environ)
-```
-
-Neither shape puts a value in a file, and neither is reachable from `{{...}}`:
-a template renders into the greeting, a prompt, a tool argument, or a URL, and
-all four are spoken, logged, or traced.
 
 ## Two connections, one Twilio account
 
@@ -104,14 +77,11 @@ You set these:
 |---|---|
 | `OPENAI_API_KEY` | reasoning model |
 | `SLNG_API_KEY` | listen and speak models |
-| `SALON_API_URL` | the booking service the tools call |
-| `SALON_API_TOKEN` | bearer token for that service |
-| `SALON_API_SIGNING_KEY` | signs the webhook payloads |
 | `TWILIO_ACCOUNT_SID` | Twilio REST account, named by both connections |
 | `TWILIO_AUTH_TOKEN` | Twilio REST auth token |
 | `TWILIO_PHONE_NUMBER` | the caller identity the recipient sees |
 
-These reach the build without you, and the generated `.env.example` does not
+The following values reach the build without you, and the generated `.env.example` does not
 list them for exactly that reason. `compile-report.json` does, under
 `required_env`, and the emitted `README.md` says where each one comes from:
 
@@ -124,9 +94,9 @@ list them for exactly that reason. `compile-report.json` does, under
 
 ## Run it
 
-Compile both targets, then copy either generated env template and fill it in.
-The template lists exactly the names above that you supply, so every line in it
-is a line to fill in:
+Compile both targets, then copy either generated env template. Browser testing
+needs the two model keys; a real outbound call also needs the three Twilio
+values:
 
 ```sh
 bin/unmute compile examples/outbound-reminder
@@ -139,6 +109,13 @@ driver:
 
 ```sh
 bin/unmute dev examples/outbound-reminder --target pipecat --var customer_id=cus_1042 --var name=Ada --var "appointment_time=tomorrow at 3 pm"
+```
+
+The real acceptance is an outbound phone call. Add the destination and run one
+target at a time:
+
+```sh
+bin/unmute dev examples/outbound-reminder --telephony --target pipecat --to +15551234567 --var customer_id=cus_1042 --var name=Ada --var "appointment_time=tomorrow at 3 pm"
 ```
 
 Values are checked against their declared type, and a name the package never

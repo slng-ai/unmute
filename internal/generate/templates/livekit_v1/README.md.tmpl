@@ -23,7 +23,9 @@ the active agent. LiveKit finishes it before it activates the receiving agent. T
 happening. Without `announce`, the handoff stays silent.
 
 The opening greeting belongs to call start only. A later handoff back to the
-entry agent continues from the carried context and never repeats it.
+entry agent continues from the carried context and never repeats it. Transfer
+tools become available after that entry turn, so carried history cannot send
+the call straight back before the caller speaks again.
 {{- end}}
 {{- if .Telephony}}
 

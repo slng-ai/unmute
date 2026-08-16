@@ -65,6 +65,11 @@ handoff. A handoff back to
 `booking_desk` continues the conversation and never repeats the call-start
 greeting.
 
+On LiveKit, the receiving agent's first automatic turn cannot call another
+agent transfer. Its normal booking tools still work, and transfers become
+available again after the caller's next turn. This prevents two reciprocal
+controls from bouncing on older carried intent.
+
 **The tool lists differ on purpose.** `appointment_manager` is the only agent
 with `cancel_appointment`. A caller cannot be talked into a cancellation by the
 booking agent, because that agent has no way to perform one.

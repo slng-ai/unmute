@@ -28,7 +28,7 @@ Go structs are the schema source for their own surface: `internal/spec` derives 
 `make test` (`go test -race ./...`) runs L1–L3 and needs **zero Python**:
 - L1 unit (pure logic, table-driven) · L2 in-process command tests (real tree, capture output) · L3 golden files (`-update` to regenerate).
 - L4 smoke (`make smoke`, build tag `smoke`) proves emitted Python is valid — opt-in, needs Python, never in the default suite or PR gate.
-- [`examples/E2E_HARNESS.md`](examples/E2E_HARNESS.md) is the manual harness for real end-to-end conversations across the examples.
+- [`docs/HARNESS_TEST.md`](docs/HARNESS_TEST.md) is the reusable prompt for real end-to-end conversations across the examples.
 
 ## A rule with no gate is a wish
 Standards here are not taste, they are things CI or a test can fail on. Writing a new rule into this file means wiring its check in the same PR, or tagging it `(advisory)` so it reads as guidance instead of law.

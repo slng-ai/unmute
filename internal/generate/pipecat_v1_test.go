@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"os"
@@ -731,8 +732,8 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	if got := strings.Count(bot, "await self.queue_frame(LLMUpdateSettingsFrame("); got != 2 {
 		t.Errorf("bot.py restores the owner role %d times, want 2", got)
 	}
-	if got := strings.Count(bot, "await self.flush_pipeline()"); got != 2 {
-		t.Errorf("bot.py drains the owner role update %d times, want 2", got)
+	if got := strings.Count(bot, "await self.flush_pipeline()"); got != 4 {
+		t.Errorf("bot.py drains delegate results and owner role updates %d times, want 4", got)
 	}
 
 	path := filepath.Join("testdata", "golden", "pipecat_v1_tasks_bot.py")
@@ -810,6 +811,32 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	}
 	if !strings.Contains(endFinishBody, "self._run_triage_end_node()") {
 		t.Error("then: end finish handler must return the terminal end node")
+	}
+}
+
+func TestV2_PipecatDelegateSnapshotsCompletedOwnerCall(t *testing.T) {
+	bot, err := os.ReadFile(filepath.Join("testdata", "golden", "pipecat_v1_tasks_bot.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"run_collect", "run_triage"} {
+		start := bytes.Index(bot, []byte("    async def "+name+"(self, params: FunctionCallParams):"))
+		if start < 0 {
+			t.Fatalf("missing generated delegate %q", name)
+		}
+		end := bytes.Index(bot[start:], []byte("\n    def _"+name+"_node_"))
+		if end < 0 {
+			t.Fatalf("missing first node after generated delegate %q", name)
+		}
+		body := bot[start : start+end]
+		callback := bytes.Index(body, []byte("await params.result_callback("))
+		flush := bytes.Index(body, []byte("await self.flush_pipeline()"))
+		snapshot := bytes.Index(body, []byte("_snapshot ="))
+		initialize := bytes.Index(body, []byte("await flow.initialize("))
+		if callback < 0 || flush < callback || snapshot < flush || initialize < snapshot {
+			t.Errorf("delegate %q must resolve, drain, snapshot, then initialize: callback=%d flush=%d snapshot=%d initialize=%d", name, callback, flush, snapshot, initialize)
+		}
 	}
 }
 
@@ -2290,11 +2317,9 @@ func TestUS3_NoPrerequisiteWithoutTheCapability(t *testing.T) {
 // joins the startup check, so a missing value fails the bot by name at boot
 // instead of arriving as a call nobody answers.
 func TestUS3_TransferDestinationIsInTheStartupCheck(t *testing.T) {
-	// The example, not the fixture: a destination may be a literal or the name of
-	// an env var read at call time, and only the env-name form has a credential to
-	// check. A committed package uses the env form, because any number a
-	// repository ships is a number nobody answers.
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "pipecat-human-transfer-daily"))
+	// The fixture uses an environment name because a committed phone number would
+	// be a number nobody answers.
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}

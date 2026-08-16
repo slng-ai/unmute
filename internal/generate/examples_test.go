@@ -16,6 +16,28 @@ import (
 	"github.com/slng-ai/unmute/internal/target"
 )
 
+func TestV3_OutboundReminderBusinessToolsAreSelfContained(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "outbound-reminder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range agent.Secrets {
+		if strings.HasPrefix(secret, "SALON_API_") {
+			t.Errorf("outbound live example depends on unrelated salon API secret %q", secret)
+		}
+	}
+	for _, name := range []string{"confirm_appointment", "reschedule_appointment", "cancel_appointment"} {
+		tool := agent.Tools[name]
+		if tool.Execution != ir.ToolLocal || tool.HandlerSource == "" || tool.URLEnv != "" {
+			t.Errorf("tool %q execution/handler/url = %q/%t/%q, want local/nonempty/empty", name, tool.Execution, tool.HandlerSource != "", tool.URLEnv)
+		}
+	}
+}
+
 func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 	// tracing is on exactly one example. It used to be on all four, which made
 	// the first package in the table impossible to run without a Langfuse
@@ -121,6 +143,9 @@ func TestPublicExamplesValidateAndGenerate(t *testing.T) {
 		if !entry.IsDir() {
 			continue
 		}
+		if _, err := os.Stat(filepath.Join(root, entry.Name(), "agent.yaml")); err != nil {
+			continue
+		}
 		t.Run(entry.Name(), func(t *testing.T) {
 			pkg, err := spec.Load(filepath.Join(root, entry.Name()))
 			if err != nil {
@@ -185,7 +210,8 @@ func TestDailyRouteWorkDoesNotReachOtherTargets(t *testing.T) {
 	// _TRANSFER_RESULT used to be on that list and is not any more. It is the
 	// one-attempt-per-call guard shared by both Pipecat transfer routes, so it now
 	// marks "a route that emits a cold transfer" rather than "the Daily route".
-	// The Daily-only markers above are what still scopes this test.
+	// The Daily-only markers above are what still scopes this test. Public
+	// examples prove they do not leak; an internal fixture proves they still emit.
 	root := filepath.Join("..", "..", "examples")
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -194,6 +220,9 @@ func TestDailyRouteWorkDoesNotReachOtherTargets(t *testing.T) {
 	checkedDaily := false
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, entry.Name(), "agent.yaml")); err != nil {
 			continue
 		}
 		pkg, err := spec.Load(filepath.Join(root, entry.Name()))
@@ -225,6 +254,23 @@ func TestDailyRouteWorkDoesNotReachOtherTargets(t *testing.T) {
 			}
 		}
 	}
+	dailyPkg, err := spec.Load(filepath.Join("..", "testdata", "daily_carrier"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dailyAgent, err := ir.Build(dailyPkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dailyArtifact, err := Generate(dailyAgent, dailyAgent.Targets["pipecat"], target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range dailyArtifact.Files {
+		for _, marker := range markers {
+			checkedDaily = checkedDaily || strings.Contains(string(file.Content), marker)
+		}
+	}
 	// A test that finds the markers nowhere would pass while proving nothing.
 	if !checkedDaily {
 		t.Error("no example exercises the Daily route, so this test cannot tell scoped from absent")
@@ -240,19 +286,21 @@ func TestPublicExamplePackages(t *testing.T) {
 	var directories []string
 	for _, entry := range entries {
 		if entry.IsDir() {
+			if _, err := os.Stat(filepath.Join(root, entry.Name(), "agent.yaml")); err != nil {
+				continue
+			}
 			directories = append(directories, entry.Name())
 		}
 	}
 	// One telephony example per use case (spec 007 FR-016): warm+inbound on
 	// LiveKit (livekit-human-transfer), cold+inbound on Pipecat over Twilio with
 	// nothing hosted (pipecat-human-transfer-twilio), inbound+outbound
-	// (twilio-telephony-hello). pipecat-human-transfer-daily is the no-carrier Daily form
-	// and is untouched. human-transfer-daily-twilio was removed with feature 007;
-	// its route keeps its guards against internal/testdata/daily_carrier instead.
+	// (twilio-telephony-hello). Daily route guards remain against internal test
+	// fixtures instead of a public example.
 	//
 	// A telephony example whose behaviour is one provider's names that provider
 	// first, because the route is the thing a reader is choosing between.
-	want := []string{"livekit-human-transfer", "mcp-example", "multi-task", "outbound-reminder", "pipecat-human-transfer-daily", "pipecat-human-transfer-twilio", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
+	want := []string{"livekit-human-transfer", "mcp-example", "multi-task", "outbound-reminder", "pipecat-human-transfer-twilio", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -276,8 +324,9 @@ func TestRepositoryKeepsSpecsPrivateAndDocsFocused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tracked specs and docs: %v", err)
 	}
-	if got, want := strings.TrimSpace(string(tracked)), "docs/ARCHITECTURE.md"; got != want {
-		t.Errorf("tracked specs and docs = %q, want only %q", got, want)
+	want := "docs/ARCHITECTURE.md\ndocs/HARNESS_TEST.md"
+	if got := strings.TrimSpace(string(tracked)); got != want {
+		t.Errorf("tracked specs and docs = %q, want the focused allow-list %q", got, want)
 	}
 	if err := exec.Command("git", "-C", repo, "check-ignore", "-q", "--", "specs/.unmute-ignore-probe/spec.md").Run(); err != nil {
 		t.Errorf("specs/ is not ignored: %v", err)
@@ -433,6 +482,9 @@ func TestV16_ExampleDestinationsAreEnvironmentNames(t *testing.T) {
 		if !entry.IsDir() {
 			continue
 		}
+		if _, err := os.Stat(filepath.Join(root, entry.Name(), "agent.yaml")); err != nil {
+			continue
+		}
 		pkg, err := spec.Load(filepath.Join(root, entry.Name()))
 		if err != nil {
 			t.Fatalf("load %s: %v", entry.Name(), err)
@@ -485,7 +537,6 @@ func TestTelephonyExampleDocsAccountForEveryRequiredEnv(t *testing.T) {
 		"twilio-telephony-hello":        {ir.ProviderPipecat, ir.ProviderLiveKit},
 		"livekit-human-transfer":        {ir.ProviderLiveKit},
 		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
-		"pipecat-human-transfer-daily":  {ir.ProviderPipecat},
 		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
 	} {
 		t.Run(example, func(t *testing.T) {
@@ -663,6 +714,9 @@ func TestExampleReadmesNameTheirDeclaredTransports(t *testing.T) {
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, entry.Name(), "agent.yaml")); err != nil {
 			continue
 		}
 		t.Run(entry.Name(), func(t *testing.T) {

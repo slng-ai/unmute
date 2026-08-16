@@ -1101,6 +1101,38 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 	}
 }
 
+// TestV3LiveKitAgentTransfersIgnoreOnEnter covers the B3/V3 loop guard:
+// transfer tools are hidden from a receiving agent's automatic on_enter turn,
+// while ordinary tools stay available there.
+func TestV3LiveKitAgentTransfersIgnoreOnEnter(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	greeter := agent.Agents["greeter"]
+	greeter.Tools = append(greeter.Tools, "check_availability")
+	agent.Agents["greeter"] = greeter
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, method := range []string{"to_reservations", "to_events", "back_to_greeter"} {
+		want := "    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)\n    async def " + method + "("
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent transfer %q must be hidden during on_enter", method)
+		}
+	}
+	if !strings.Contains(botpy, "    @function_tool\n    async def check_availability(") {
+		t.Error("ordinary tools must remain available during on_enter")
+	}
+}
+
 // TestLiveKitV1BuiltinEndCallTool covers the prebuilt end_call lowering:
 // the beta EndCallTool import, its construction with the mapped params in the
 // agent's super().__init__(tools=...), and that it is NOT a @function_tool

@@ -79,6 +79,11 @@ model does not paraphrase it. Leave it out for a silent handoff. A failed
 
 Without them, the caller gets asked for their phone number twice.
 
+On LiveKit, transfer tools are hidden only during the receiving agent's first
+automatic turn. Normal tools remain available, and transfers return on the
+next caller turn. Reciprocal controls therefore cannot bounce on older carried
+intent before the caller says anything new.
+
 ## A handoff does not come back
 
 The second agent owns the call from that point. Nothing returns to the first

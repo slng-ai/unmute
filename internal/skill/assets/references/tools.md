@@ -177,8 +177,7 @@ may need to change their endpoint to match.
 
 Those two schemes are the whole list in this version. If the user's API needs a
 signed request, an OAuth exchange, or mutual TLS, a webhook tool cannot do it.
-Say so and write a Python handler instead, which is exactly why
-`examples/outbound-reminder` has one.
+Say so and write a Python handler instead.
 
 ## Python tools
 
@@ -199,27 +198,23 @@ output:
   properties:
     cancelled:
       type: boolean
-    reference:
+    customer_id:
       type: string
   required:
     - cancelled
+    - customer_id
 
 local:
   handler: tools/cancel_appointment.py
 ```
 
 ```python tools/cancel_appointment.py
-import hashlib
-import hmac
-import os
-
-
 def cancel_appointment(customer_id):
-    key = os.environ["SALON_API_SIGNING_KEY"].encode()
-    body = f"cancel:{customer_id}".encode()
-    signature = hmac.new(key, body, hashlib.sha256).hexdigest()
-    return {"cancelled": True, "reference": signature[:12]}
+    return {"cancelled": True, "customer_id": customer_id}
 ```
+
+This is the self-contained fixture from `examples/outbound-reminder`; its live
+test exercises outbound calling without requiring a booking API.
 
 The rules the function follows:
 

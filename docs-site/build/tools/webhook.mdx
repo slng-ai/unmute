@@ -29,8 +29,8 @@ effect: returns_data
 interruption: provider_default
 ```
 
-That is a real file from `examples/outbound-reminder`, an agent that calls a
-customer about an appointment. This page follows that package.
+This is a standalone webhook example. The shipped outbound live example uses
+local Python fixtures so it can run without an operator-specific API.
 
 ## The block
 
@@ -154,13 +154,6 @@ output:
 what came back, for example to read slot times out loud. That one is
 `examples/salon-support`'s `check_availability`, and the shape is the same
 whichever execution block the tool uses.
-
-## Try it
-
-```sh
-unmute validate examples/outbound-reminder
-unmute dev examples/outbound-reminder --target pipecat
-```
 
 ## Where to go next
 

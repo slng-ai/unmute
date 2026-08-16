@@ -39,6 +39,9 @@ func TestPublicExamplesEmitLintCleanPython(t *testing.T) {
 		if !entry.IsDir() {
 			continue
 		}
+		if _, err := os.Stat(filepath.Join(root, entry.Name(), "agent.yaml")); err != nil {
+			continue
+		}
 		t.Run(entry.Name(), func(t *testing.T) {
 			pkg, err := spec.Load(filepath.Join(root, entry.Name()))
 			if err != nil {

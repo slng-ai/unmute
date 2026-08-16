@@ -92,8 +92,7 @@ is no carrier leg to name and no carrier credentials to hold.
 transport: daily-sip
 ```
 
-That is the whole file, and it is `examples/pipecat-human-transfer-daily`'s real
-connection. The `DAILY_API_KEY` the runtime reads comes from the route's own
+That is the whole connection. The `DAILY_API_KEY` the runtime reads comes from the route's own
 environment, not from your package, so it is not in `secrets:` and it is still in
 the generated `.env.example`. What this route also needs is a permission rather
 than a credential: dial-out enabled on the Daily domain. No compile-time check

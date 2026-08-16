@@ -301,19 +301,17 @@ type pipecatCloudWebsocket struct {
 	AccountSIDEnv string
 	AuthTokenEnv  string
 	FromNumberEnv string
-	// OrganizationEnv completes the service host. Set only when this package
-	// composes TwiML of its own (outbound or a transfer); the compiler knows the
-	// agent name and cannot know the organization (research D5).
+	// OrganizationEnv completes the service host for outbound markup; the compiler
+	// knows the agent name and cannot know the organization (research D5).
 	OrganizationEnv string
 	HasInbound      bool
 	HasOutbound     bool
 	// StreamURL is the platform's carrier endpoint, regional when the target
-	// declares a region. Computed once, in one place, and read by the Bin, the
-	// outbound command, and the transfer markup, so the three cannot disagree
-	// about where the audio goes (data-model section 3).
+	// declares a region. Computed once, in one place, and read by the Bin and the
+	// outbound command, so the two cannot disagree about where the audio goes.
 	StreamURL string
 	// CallEnv is what a *phone call* adds to the process environment: nothing on a
-	// pure-inbound package, the carrier names and the organization otherwise. A
+	// pure-inbound package, the carrier names and any outbound organization otherwise. A
 	// browser or console session on the same package reads none of them.
 	CallEnv []string
 }

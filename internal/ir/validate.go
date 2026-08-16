@@ -1226,8 +1226,7 @@ func validateHumanTransfer(control *HumanTransfer, resolved Target, provider tar
 	// "cold is unaffected". It reasoned about credentials and missed the leg:
 	// cold hands the caller's own call to the destination, so it needs a route
 	// that can bridge one. A package that names a route has one — Daily's
-	// dial-out reaches a PSTN number from a browser session, which is what
-	// examples/pipecat-human-transfer-daily does. A package that names **no
+	// dial-out reaches a PSTN number from a browser session. A package that names **no
 	// route at all** has nothing, and the capability table cannot say so because
 	// it describes route support, not route existence (research D2). That is the
 	// browser-only case LiveKit used to compile, then explain away in a generated

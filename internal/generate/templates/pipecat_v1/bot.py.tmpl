@@ -298,40 +298,19 @@ async def _carrier_transport(runner_args: RunnerArguments) -> BaseTransport:
     return FastAPIWebsocketTransport(websocket=runner_args.websocket, params=params)
 {{end}}
 {{if .HasColdTransfer}}
-STREAM_URL = {{pyq .CloudWebsocket.StreamURL}}
-
-
-def _service_host() -> str:
-    """The string that names this agent to the platform.
-
-    The same value your TwiML Bin carries: the compiled agent name plus your
-    organization, which the compiler cannot know. Read here because the transfer
-    below composes markup of its own, and that markup has to point the caller
-    back at this agent if the transfer fails.
-    """
-    return "{{.Project}}." + os.environ[{{pyq .CloudWebsocket.OrganizationEnv}}]
-
-
-def _transfer_twiml(destination: str, caller: str, ring_timeout: int) -> str:
+def _transfer_twiml(destination: str, ring_timeout: int) -> str:
     """The whole transfer, as one document your carrier will run in order.
 
-    Announce, dial, then hand the caller back to a fresh agent. What follows the
-    dial runs however the dial *ended*, not only when it failed: your carrier
-    moves to the next verb when the destination hangs up exactly as it does when
-    the destination was busy or never answered, and telling those apart needs a
-    callback endpoint of yours, which is the cost this route exists to remove.
-    So the line before the reconnect says only what is true either way and never
-    claims nobody answered. Only the caller hanging up stops the document.
+    Announce, dial, then end the original call when the destination leg ends.
+    Twilio moves to the next verb after a completed, declined, or unanswered
+    dial, so the same final hangup covers every outcome without starting a new
+    agent that has none of this call's context.
     """
     return (
         "<Response>"
         "<Say>Connecting you to a colleague now.</Say>"
         f'<Dial answerOnBridge="true" timeout="{ring_timeout}">{destination}</Dial>'
-        "<Say>Putting you back to the assistant.</Say>"
-        f'<Connect><Stream url="{STREAM_URL}">'
-        f'<Parameter name="_pipecatCloudServiceHost" value="{_service_host()}"/>'
-        f'<Parameter name="from_number" value="{caller}"/>'
-        "</Stream></Connect>"
+        "<Hangup/>"
         "</Response>"
     )
 
@@ -710,7 +689,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         try:
             await _update_carrier_call(
                 _PHONE_CALL["call_id"],
-                _transfer_twiml({{.ColdDestination}}, (_PHONE_CALL.get("body") or {}).get("from_number", ""), {{.RingTimeoutSecs}}),
+                _transfer_twiml({{.ColdDestination}}, {{.RingTimeoutSecs}}),
             )
         except Exception as exc:
             # The request failed, so the call is untouched and the caller is still
@@ -817,9 +796,6 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
     async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
         self._{{$d.MethodName}}_results = {}
-        # Snapshot the owner's context; the flow rewrites it per node and the
-        # final step restores it (merge: results, N13).
-        self._{{$d.MethodName}}_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
         flow = FlowManager(
             llm=self.llm,
             context_aggregator=LLMContextAggregatorPair(self.context),
@@ -833,6 +809,10 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             {"status": "running the {{if $d.Task}}{{$d.Task}} task{{else}}{{$d.Group}} flow{{end}}"},
             properties=FunctionCallResultProperties(run_llm=False),
         )
+        # V2/B2: drain the resolved owner call before snapshotting. Otherwise
+        # restoration erases that call and the unchanged request delegates again.
+        await self.flush_pipeline()
+        self._{{$d.MethodName}}_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
         await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
 {{range $t := $d.StepTasks}}
     def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:

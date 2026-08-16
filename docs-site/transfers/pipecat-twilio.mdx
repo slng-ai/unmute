@@ -54,16 +54,14 @@ The mechanism is different from every other route. One request replaces the
 live call's instructions at Twilio, keyed on the call id: speak a line, dial
 the destination, done. The agent's part of the call ends there.
 
-## The trade, stated plainly
+## The transfer ends the call
 
-**However the transfer ends, the caller comes back to a fresh agent that does
-not remember the call.** That covers both endings: the destination hanging up,
-and a dial that never connected. Knowing which happened would need a callback
-endpoint that you host, and hosting nothing is the entire point of this route.
+After the destination leg ends, Twilio ends the original call. The same happens
+after a decline or no answer. Unmute does not reconnect the caller to a fresh
+agent, because that agent would have none of the conversation context.
 
-Warm transfer is not possible here for the same reason. A warm handoff has to act
-on how the other leg ended. Write one and validation refuses it, naming the
-connection and the transport it declares:
+**Unmute does not support warm transfer on any Pipecat target.** Write one and
+validation refuses it, naming the connection and the transport it declares:
 
 ```text
 pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twilio) does
@@ -73,8 +71,7 @@ pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twi
   "twilio_voice" declares transport: cloud-websocket
 ```
 
-If you need warm, or you need the caller to come back to the same session, use
-the [LiveKit SIP route](/transfers/livekit).
+If you need warm transfer, use the [LiveKit SIP route](/transfers/livekit).
 
 ## Testing it without waiting for a call
 

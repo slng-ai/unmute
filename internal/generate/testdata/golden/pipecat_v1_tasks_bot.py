@@ -403,9 +403,6 @@ class IntakeAgent(TracedLLMWorker):
     async def run_collect(self, params: FunctionCallParams):
         """Collect the caller's account details."""
         self._run_collect_results = {}
-        # Snapshot the owner's context; the flow rewrites it per node and the
-        # final step restores it (merge: results, N13).
-        self._run_collect_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
         flow = FlowManager(
             llm=self.llm,
             context_aggregator=LLMContextAggregatorPair(self.context),
@@ -419,6 +416,10 @@ class IntakeAgent(TracedLLMWorker):
             {"status": "running the collect task"},
             properties=FunctionCallResultProperties(run_llm=False),
         )
+        # V2/B2: drain the resolved owner call before snapshotting. Otherwise
+        # restoration erases that call and the unchanged request delegates again.
+        await self.flush_pipeline()
+        self._run_collect_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
         await flow.initialize(self._run_collect_node_collect())
 
     def _run_collect_node_collect(self) -> NodeConfig:
@@ -465,9 +466,6 @@ class IntakeAgent(TracedLLMWorker):
     async def run_triage(self, params: FunctionCallParams):
         """Run the triage group."""
         self._run_triage_results = {}
-        # Snapshot the owner's context; the flow rewrites it per node and the
-        # final step restores it (merge: results, N13).
-        self._run_triage_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
         flow = FlowManager(
             llm=self.llm,
             context_aggregator=LLMContextAggregatorPair(self.context),
@@ -481,6 +479,10 @@ class IntakeAgent(TracedLLMWorker):
             {"status": "running the triage flow"},
             properties=FunctionCallResultProperties(run_llm=False),
         )
+        # V2/B2: drain the resolved owner call before snapshotting. Otherwise
+        # restoration erases that call and the unchanged request delegates again.
+        await self.flush_pipeline()
+        self._run_triage_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
         await flow.initialize(self._run_triage_node_collect())
 
     def _run_triage_node_collect(self) -> NodeConfig:

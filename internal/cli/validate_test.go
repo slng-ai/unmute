@@ -62,7 +62,7 @@ func TestValidateCommandReturnsErrorForGatedTarget(t *testing.T) { // V16
 // Daily account is allowed to do. Failing here would refuse correct packages.
 func TestValidateNamesTheDailyDialOutPrerequisite(t *testing.T) {
 	stdout, stderr, err := runValidateCommand(t, "--target", "pipecat",
-		filepath.Join("..", "..", "examples", "pipecat-human-transfer-daily"))
+		filepath.Join("..", "testdata", "daily_carrier"))
 	if err != nil {
 		t.Fatalf("a prerequisite must not fail validation: %v\n%s", err, stderr)
 	}
@@ -85,7 +85,7 @@ func TestValidateNamesTheDailyDialOutPrerequisite(t *testing.T) {
 // ignore stderr.
 func TestValidateOmitsPrerequisiteWithoutTheCapabilityThatNeedsIt(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "agent")
-	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "..", "examples", "pipecat-human-transfer-daily"))); err != nil {
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "testdata", "daily_carrier"))); err != nil {
 		t.Fatal(err)
 	}
 	// Same Daily route, no transfer and no outbound: nothing dials out.
@@ -98,22 +98,11 @@ func TestValidateOmitsPrerequisiteWithoutTheCapabilityThatNeedsIt(t *testing.T) 
 	trimmed = append(trimmed, content[bytes.Index(content, []byte("conversation:")):]...)
 	trimmed = bytes.Replace(trimmed, []byte("      - send_to_billing\n"), nil, 1)
 	trimmed = bytes.Replace(trimmed, []byte("    tools:\n"), nil, 1)
+	trimmed = bytes.Replace(trimmed, []byte("    outbound: true\n"), []byte("    outbound: false\n"), 1)
 	if err := os.WriteFile(path, trimmed, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// The transfer was the only thing dialling, and on this route dialling is
-	// the only way to use the connection: the Daily-provisioned form receives no
-	// calls, so it carries no phone channel (research R10). Dropping the control
-	// therefore drops the route with it.
-	targetsPath := filepath.Join(dir, "targets.yaml")
-	targets, err := os.ReadFile(targetsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	targets = bytes.Replace(targets, []byte("    connection: daily\n"), nil, 1)
-	if err := os.WriteFile(targetsPath, targets, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	// The carrier route remains inbound, but nothing in the package dials out.
 	_, stderr, err := runValidateCommand(t, "--target", "pipecat", dir)
 	if err != nil {
 		t.Fatalf("validate: %v\n%s", err, stderr)
@@ -172,11 +161,11 @@ func TestValidateForwardsAnUnknownRegionCode(t *testing.T) {
 	}
 }
 
-// writeDailyPackage copies the Daily example and rewrites its declared region.
+// writeDailyPackage copies the internal Daily fixture and rewrites its region.
 func writeDailyPackage(t *testing.T, region string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "agent")
-	source := filepath.Join("..", "..", "examples", "pipecat-human-transfer-daily")
+	source := filepath.Join("..", "testdata", "daily_carrier")
 	if err := os.CopyFS(dir, os.DirFS(source)); err != nil {
 		t.Fatal(err)
 	}
@@ -185,8 +174,8 @@ func writeDailyPackage(t *testing.T, region string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content = bytes.Replace(content, []byte("    connection: daily\n"),
-		[]byte("    connection: daily\n    deployment_region: "+region+"\n"), 1)
+	content = bytes.Replace(content, []byte("    deployment_region: us-west\n"),
+		[]byte("    deployment_region: "+region+"\n"), 1)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}

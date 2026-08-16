@@ -10,9 +10,8 @@ import (
 	"github.com/slng-ai/unmute/internal/target"
 )
 
-// The worked example is the fixture for the whole surface: input, system, and
-// conversation variables plus declared secrets, on both shipped drivers
-// (variable_secrets_specs.md T6, T7).
+// The worked example is the fixture for input, system, and conversation
+// variables on both shipped drivers (variable_secrets_specs.md T6, T7).
 func loadOutboundReminder(t *testing.T) *ir.Agent {
 	t.Helper()
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "outbound-reminder"))
@@ -41,16 +40,15 @@ func TestVariablesLowerOnBothDrivers(t *testing.T) {
 				`async def update_variables(`,
 				`self.state.reschedule_to = reschedule_to`,
 				// A whole-token value keeps its declared type (V14).
-				`"customer_id": state.customer_id`,
-				`"new_time": state.reschedule_to`,
+				`customer_id=state.customer_id`,
+				`new_time=state.reschedule_to`,
 				// A literal inject value rides through untouched.
-				`"channel": "phone"`,
-				// The path renders with its values URL-encoded (V14).
-				`os.environ["SALON_API_URL"].rstrip("/")`,
-				`quote_values=True`,
-				// The refusal precedes the request (V4).
+				`channel="phone"`,
+				// The refusal precedes the local call (V4).
 				`refusal = _refusal(`,
 				`{"refused": refusal}`,
+				`tools.confirm_appointment.confirm_appointment(`,
+				`tools.reschedule_appointment.reschedule_appointment(`,
 				// The prompt and greeting render from the call state (V15).
 				`system_instruction=_render(REMINDER_PROMPT, state)`,
 				`_dispatched_call_start(call_context)`,
@@ -62,18 +60,18 @@ func TestVariablesLowerOnBothDrivers(t *testing.T) {
 			want: []string{
 				`async def update_variables(`,
 				`ctx.userdata.reschedule_to = reschedule_to`,
-				`"customer_id": ctx.userdata.customer_id`,
-				`"new_time": ctx.userdata.reschedule_to`,
-				`"channel": "phone"`,
-				`os.environ["SALON_API_URL"].rstrip("/")`,
-				`quote_values=True`,
+				`customer_id=ctx.userdata.customer_id`,
+				`new_time=ctx.userdata.reschedule_to`,
+				`channel="phone"`,
 				`refusal = _refusal(`,
 				`return {"refused": refusal}`,
+				`tools.confirm_appointment.confirm_appointment(`,
+				`tools.reschedule_appointment.reschedule_appointment(`,
 				`await self.update_instructions(_render(REMINDER_PROMPT, self.session.userdata))`,
 				`_hydrate_call_start(session.userdata`,
 				// A required secret stops the session before it answers (V12).
 				`require_env()`,
-				`"SALON_API_TOKEN",`,
+				`"OPENAI_API_KEY",`,
 			},
 		},
 	}
@@ -143,10 +141,7 @@ func TestEnvExampleDocumentsSecrets(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := artifactFile(t, artifact, ".env.example")
-		for _, want := range []string{
-			"SALON_API_TOKEN=\nSALON_API_URL=",
-			"TWILIO_ACCOUNT_SID=",
-		} {
+		for _, want := range []string{"OPENAI_API_KEY=\nSLNG_API_KEY=", "TWILIO_ACCOUNT_SID="} {
 			if !strings.Contains(env, want) {
 				t.Errorf("%s .env.example missing %q", name, want)
 			}

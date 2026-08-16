@@ -5,7 +5,9 @@ description: "Delegate a step to a focused prompt with its own tools, and get a 
 
 A task is a step the agent hands off and gets back. The task has its own
 prompt, its own tools, and a declared result. When it finishes, control returns
-to the agent that called it.
+to the agent that called it. Its internal turns stay out of the agent's context,
+while the completed delegate call stays there so the same request does not run
+twice.
 
 This page follows `examples/multi-task`: one agent, two tasks.
 
