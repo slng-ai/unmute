@@ -6,15 +6,20 @@ lives on the one route where LiveKit ships both: `transport: sip`.
 
 | | |
 |---|---|
-| provider | LiveKit, deployed on LiveKit Cloud (self-hosting the worker is documented too) |
+| provider | LiveKit Cloud, or a public self-hosted LiveKit Server and SIP service |
 | route | `transport: sip`, `carrier: twilio`: a Twilio Elastic SIP Trunk you own |
-| what you host | nothing on LiveKit Cloud; the worker if you self-host |
+| what you host | the worker if Cloud only provides SIP; all three services when fully self-hosted |
 | what it does | inbound calls, cold transfer, warm transfer |
 
 **The name says the route because the route is the thing that differs.** The
 Pipecat examples reach a person over Twilio Media Streams and TwiML markup, which
 is a different mechanism with different capabilities. Nothing on this page applies
 to them, and nothing on their pages applies here.
+
+A real transfer needs LiveKit's SIP service. A LiveKit Cloud project is the simplest
+path, but it is not mandatory: you can self-host both LiveKit Server and LiveKit SIP
+at public addresses. Running only the agent worker on your laptop is not a third
+path; that worker must connect to one of those two reachable telephony deployments.
 
 - **`send_to_billing`** is a **cold** transfer: `TransferSIPParticipant`, a
   SIP REFER through the trunk. The agent speaks one line, the caller's leg is

@@ -170,6 +170,10 @@ Two things worth telling the user in advance:
   uses their own origin.
 - **The LiveKit SIP route needs no tunnel**, because SIP does not call back over
   HTTP.
+- **A real LiveKit SIP call still needs a reachable telephony deployment**:
+  either a LiveKit Cloud project, or a public self-hosted LiveKit Server and SIP
+  service. The agent worker may run locally against either one. Starting the
+  laptop Compose graph alone does not make its SIP and RTP ports public.
 
 Every outward change the run makes is undone when it exits, including on
 `ctrl-c`.

@@ -109,32 +109,40 @@ plus its three `--var` flags, answer the call, stop that target, then repeat on
 the other target. Its appointment tools are local fixtures, so it needs no
 salon API values.
 
-`twilio-telephony-hello` needs two different real-call directions. Run them one
-at a time because one Twilio number cannot point at both routes at once:
+`twilio-telephony-hello` needs inbound and outbound calls on both targets. Run
+them one at a time because one Twilio number cannot point at both routes at once:
 
 ```sh
 # Pipecat: temporarily installs a TwiML WebSocket webhook. Call the Twilio number.
 bin/unmute dev examples/twilio-telephony-hello \
   --telephony --target pipecat --no-open
 
-# LiveKit: creates a SIP dispatch and calls the destination.
+# LiveKit outbound: creates a SIP dispatch and calls the destination.
 bin/unmute dev examples/twilio-telephony-hello \
   --telephony --target livekit --to <E.164> --no-open
 ```
 
-Stopping the Pipecat command restores the number's previous webhook. Local
-LiveKit SIP also needs UDP `10000-10100` to reach this machine through its
-firewall and router. A call can ring and play outbound audio while all caller
-audio is still blocked; `packets: 0` followed by `media-timeout` is not a pass.
-When that UDP path is unavailable, keep the test ephemeral by running the
-generated worker locally against an authenticated LiveKit Cloud project with
-`lk agent dev --project <project> agent.py`, then create one room dispatch and
-one SIP participant there. Managed LiveKit SIP carries the media, and stopping
-the local worker leaves no deployed agent or stored outbound trunk behind. The
-generated `CreateSIPParticipant` request uses inline `trunk: {hostname,
-auth_username, auth_password}` settings plus `sip_number` and `sip_call_to`;
-current `lk` versions reject the old top-level `address`, `username`, and
-`password` shape before dialing.
+Stopping the Pipecat command restores the number's previous webhook. Follow
+`build/pipecat/README.md` to make its outbound call against the deployed agent.
+
+A real LiveKit inbound or outbound call needs a reachable LiveKit Server plus
+LiveKit SIP. A LiveKit Cloud project is the simplest choice, but not a hard
+requirement: both services can instead be self-hosted at public SIP and RTP
+addresses. Running the worker locally does not remove that requirement. For an
+ephemeral Cloud test, run the generated worker locally with `lk agent dev
+--project <project> --no-reload agent.py`, run `telephony-setup.sh` against that
+project, and attach the Twilio number to the trunk only for the test. Inbound is
+then a normal call to that number. Stop the worker and detach the number when the
+test ends; no agent deployment is left behind.
+
+The fully local LiveKit SIP graph needs UDP `10000-10100` to reach the machine
+through its firewall and router. A call can ring and play outbound audio while
+all caller audio is still blocked; `packets: 0` followed by `media-timeout` is
+not a pass. Managed LiveKit SIP avoids that laptop RTP boundary. The generated
+`CreateSIPParticipant` request uses inline `trunk: {hostname, auth_username,
+auth_password}` settings plus `sip_number` and `sip_call_to`; current `lk`
+versions reject the old top-level `address`, `username`, and `password` shape
+before dialing.
 
 ### 3. Watch both logs
 
@@ -318,7 +326,7 @@ treat them as a starting point and correct them as you go.
 | `subagents` | livekit, pipecat | `agent_transfer` in both directions between `booking_desk` and `appointment_manager`, sharing one tool set. | "I want to change an appointment I already have." Give `+1 555 010 101`. Then say, "Actually, leave my existing appointment unchanged. I want a separate new haircut appointment for August eighteenth, twenty twenty-six." Choose the returned 3 p.m. slot. | A spoken cue finishes before each transfer. `lookup_customer` runs once, the handoff back does not repeat the greeting or phone question, then `check_availability` and `book_appointment` use the exact returned customer and slot IDs. Zero errors or invented results. |
 | `task-groups` | livekit, pipecat | One delegate running an ordered group of three tasks with shared context: `identify_customer`, `select_appointment`, `finalize_appointment`. | Derived, unverified. "I'd like to book an appointment." Give name and phone, pick a service and a time. | `manage_appointment` opens the group, then the three steps run in order, each finishing before the next starts, and the booking carries the id from step one. It uses `context_scope: shared`, the one branch that always snapshotted and restored the owner context, so it never carried the `multi-task` delegation bug. The `isolated` branch beside it did, and has been fixed the same way. Expect this one to pass with no new work. |
 | `outbound-reminder` | pipecat, livekit | A real outbound call carrying input variables from the dispatch, a system variable from the route, and a conversation variable, with three deterministic local Python outcomes. | Derived, unverified. Start each target with `--telephony --to <E.164>` and `--var customer_id=cus_1042 --var name=Ada --var appointment_time="tomorrow at 3pm"`, answer the call, then say "no, can we move it to Friday?" | The phone rings from each target, the greeting already says the name and time, `update_variables` saves `reschedule_to`, and the local `reschedule_appointment` receives `cus_1042` plus the saved Friday value. Zero provider or runtime errors. |
-| `twilio-telephony-hello` | pipecat, livekit | The smallest telephony package. No tools at all, so it is the one example the reasoning bug could not break. | Run Pipecat inbound and LiveKit outbound as shown above. Say "Hi, how are you?" then one short follow-up. | A greeting and at least one coherent turn on each real carrier call. In the browser it proves the build only. |
+| `twilio-telephony-hello` | pipecat, livekit | The smallest telephony package. No tools at all, so it is the one example the reasoning bug could not break. | Run inbound and outbound on both targets as shown above and in each generated README. Say "Hi, how are you?" then one short follow-up. | A greeting and at least one coherent turn on all four real carrier calls. In the browser it proves the build only. LiveKit requires either a Cloud project or a publicly reachable self-hosted LiveKit Server and SIP service; the worker may remain local. |
 | `livekit-human-transfer` | livekit | Cold and warm transfer to a person over SIP, with `destinations:` read from environment names. | Derived, unverified. "Can you put me through to billing?" then on a second call, "I need to speak to a supervisor." | `send_to_billing` runs a cold transfer, `escalate_to_supervisor` runs a warm one with a briefing. Needs real numbers and a trunk. |
 | `pipecat-human-transfer-daily` | pipecat | Cold transfer over Daily, the one route where Pipecat has a native transfer primitive. | Derived, unverified. "Can you put me through to billing?" | `send_to_billing` fires. `dev --telephony` refuses this package by name, so run it in the browser and test the carrier path from the deployed agent. |
 | `pipecat-human-transfer-twilio` | pipecat | The same salon reached through Twilio streaming straight to Pipecat Cloud. | Derived, unverified. "Can you put me through to billing?" | `send_to_billing` fires. Runs `--telephony` locally with Twilio credentials. |
@@ -386,8 +394,8 @@ count for this sweep; they are kept below as history.
 | `subagents` | verified | verified | Pipecat completed the fresh booking-desk → appointment-manager → booking-desk flow with carried context and no duplicate transfer. The first LiveKit run exposed B3: reciprocal transfer tools were available during automatic entry inference, so the two exact announcements alternated four times without another caller turn. V3 now hides only `agent_transfer` tools during that inference through LiveKit's native `IGNORE_ON_ENTER` flag. A direct generated-context probe proved the booking desk receives the phone message plus the successful `lookup_customer` call and `cus_1001` result; an exact three-turn LiveKit text simulation then handed back and asked for the haircut time, not the phone. The final human retest confirmed one cue per transfer, no repeated phone question or greeting, continued booking, and zero runtime/provider errors. |
 | `task-groups` | verified | verified | Fresh human bookings passed on both targets. Pipecat ran `manage_appointment` and every group step and business tool exactly once. Identification returned `cus_e0aad0a9`; selection returned `2026-08-17_haircut_0900`; booking received those exact values and returned `apt_c42f1701eb`; and the owner received all three typed task results. LiveKit completed the same three-step booking with no application error. LiveKit 1.6.10 INFO logs hide tool payloads, but its runtime copies the shared group context into each task and merges each completed task context, including tool results, before starting the next one. Pipecat logged its known harmless `LLMServiceMetadataFrame` ordering line before `StartFrame` reached the pipeline; there were no errors after startup. This example has no Langfuse tracing configured. |
 | `outbound-reminder` | verified | verified | LiveKit completed the fresh human outbound call (`CAc4bb7ae5d1413642a1dd966b05ab9169`) with the seeded name, customer ID, and appointment time; the caller heard the reminder flow and the carrier reported completion. The first Pipecat attempt exposed B4: `--var` reached the worker environment but the HTTP trigger omitted `call_start`, so admission refused the call with 422 before dialing. V4 now carries the exact typed object in every HTTP or SIP outbound trigger. The one-time tracing-enabled Pipecat call (`CAb52a04d1995f77d2897387f018de97c5`) passed in Langfuse trace `dd4b27292a94a05182028f7db7365180`: the prompt and greeting contained Ada, `cus_1042`, and tomorrow at 3pm; `update_variables` saved `reschedule_to: Friday` once; `reschedule_appointment` ran once and returned `customer_id: cus_1042`, `new_time: Friday`; and the final TTS confirmed the move to Friday. All 13 observations completed at the default level. The runtime logged only the known metadata-before-StartFrame startup lines and no error after the pipeline started. Tracing was removed again after this approved call, so future calls keep the package's opt-in privacy default. |
-| `twilio-telephony-hello` | verified | verified | Both browser targets passed. The real Pipecat inbound call passed: Twilio posted the webhook, opened `/ws`, the caller heard the exact greeting, STT captured "hey i'm good thanks about you", and the agent answered once with no runtime/provider error. The CLI then restored the previous TwiML Bin webhook. LiveKit first exposed B5: its dispatch token omitted the room and `CreateDispatch` failed with 401 before dialing. V5 now scopes the token. A local retry proved signaling but exposed router drift: Twilio call `CA0a14f711dcd055e4fb5d1be0e849a1ec` established while UDP 10076 received zero RTP and timed out. The final ephemeral managed-SIP retry passed without deploying an agent or storing a trunk: dispatch `AD_NQ6vNmUHimGw` and SIP call `SCL_bEQqXHaYbTRf` delivered the exact greeting, captured the caller turns "I'm great, thanks, what about you?" and "How can you help me?", and completed two coherent LLM/TTS replies. The caller heard the exchange, hung up normally, the session closed with no error, and the worker was stopped. |
-| `livekit-human-transfer` | ready; awaiting destination | n/a | LiveKit only. Fresh validate and compile pass. The SIP trunk values are present, but `BILLING_PHONE_NUMBER` and `SUPERVISOR_PHONE_NUMBER` are not set. One separate E.164 destination can serve both roles in two calls, but somebody must be able to answer it while the caller remains on the original leg. |
+| `twilio-telephony-hello` | verified | verified | Both browser targets and both real inbound paths passed. Pipecat inbound call `CA376449a94678279e3d94d72bbd550034` posted the webhook, opened `/ws`, played the exact greeting, captured "I'm good and you" and "can you help me", and completed coherent replies before a normal hangup. The CLI restored the previous TwiML Bin webhook. LiveKit first exposed B5: its dispatch token omitted the room and `CreateDispatch` failed with 401 before dialing. V5 now scopes the token. A fully local retry then exposed router drift: the call established while RTP received zero packets and timed out. The fresh managed-SIP inbound call passed with a local ephemeral worker: job `AJ_RctiRLTDAAqf`, dispatch `AD_gHyxrPHquzBU`, and Twilio call `CA8359a4f2f8ab37052dfdccb254cea7da` delivered the exact greeting, captured both caller turns, completed the reply, and closed without an error. The number was detached from the SIP trunk afterward, its original TwiML URL remained intact, and the worker stopped cleanly. Earlier fresh outbound calls on both targets passed. |
+| `livekit-human-transfer` | verified | n/a | LiveKit only. Both fresh inbound transfers passed through a local ephemeral worker on managed LiveKit SIP. Cold job `AJ_X2oqFD4U3EwE` ran `send_to_billing` exactly once, finished "Putting you through now, one moment" before SIP REFER, logged `cold transfer completed after 4s`, and produced completed Twilio transfer leg `CAeb104d6b3f75ef1b7ffe027062d8d216`. Warm job `AJ_L77ncWtoZQyx` collected Nicola, stylist Enrico, and the uneven haircut; ran `escalate_to_supervisor` exactly once; handed 11 conversation messages into the private room; briefed the receiver with all three details; heard "yes sure"; ran `connect_to_caller`; moved `human-agent-sip` into the caller room; and logged `warm transfer merged after 35s`. Its Twilio receiver leg `CA4cebfb8dfb87dc3ca9498862d03d7511` completed. Both agent sessions closed with `error: null`. The Twilio number was then detached from the SIP trunk, its original TwiML URL remained intact, and the worker stopped cleanly. |
 | `pipecat-human-transfer-daily` | n/a | not run | Pipecat only. A full pass needs a deployed agent and Daily phone number. |
 | `pipecat-human-transfer-twilio` | n/a | not run | Pipecat only. A full pass needs Twilio credentials and a telephony call. |
 
