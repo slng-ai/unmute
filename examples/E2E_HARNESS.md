@@ -43,8 +43,9 @@ git check-ignore -v examples/mcp-example/.env
 Some examples need more than the two model keys. `mcp-example` needs
 `FIRECRAWL_MCP_URL` and `FIRECRAWL_API_KEY`, `simple-prompt` needs the three
 `LANGFUSE_*` names, and the telephony examples need carrier credentials. The
-root `.env.example` is the full menu, and each compiled target writes the exact
-list it needs to `build/<target>/.env.example`.
+root `.env.example` is a common starter menu, not an exhaustive telephony list.
+Each compiled target writes the exact names it needs to
+`build/<target>/.env.example`.
 
 **One trap worth knowing.** A variable name that starts with a digit is not a
 valid shell identifier, so `export` fails on it and every later name in the file
@@ -108,6 +109,24 @@ plus its three `--var` flags, answer the call, stop that target, then repeat on
 the other target. Its appointment tools are local fixtures, so it needs no
 salon API values.
 
+`twilio-telephony-hello` needs two different real-call directions. Run them one
+at a time because one Twilio number cannot point at both routes at once:
+
+```sh
+# Pipecat: temporarily installs a TwiML WebSocket webhook. Call the Twilio number.
+bin/unmute dev examples/twilio-telephony-hello \
+  --telephony --target pipecat --no-open
+
+# LiveKit: creates a SIP dispatch and calls the destination.
+bin/unmute dev examples/twilio-telephony-hello \
+  --telephony --target livekit --to <E.164> --no-open
+```
+
+Stopping the Pipecat command restores the number's previous webhook. Local
+LiveKit SIP also needs UDP `10000-10100` to reach this machine through its
+firewall and router. A call can ring and play outbound audio while all caller
+audio is still blocked; `packets: 0` followed by `media-timeout` is not a pass.
+
 ### 3. Watch both logs
 
 LiveKit's log carries the self hosted media server's own debug output, which is
@@ -132,6 +151,78 @@ arguments to the model: injection is deliberately applied inside the generated
 handler after the model supplies only its public arguments. Use a deterministic
 tool result or inspect that handler when the injected value itself is under
 test.
+
+### 3a. Optionally verify the exact flow in Langfuse
+
+Langfuse is an extra check, not part of Unmute's default runtime. A package
+exports nothing unless its `agent.yaml` explicitly contains:
+
+```yaml
+tracing:
+  provider: langfuse
+```
+
+The operator must also supply `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, and
+`LANGFUSE_SECRET_KEY` for a project they own. Credentials choose the destination;
+the repository does not ship a shared project or working keys. Real `.env` files
+are ignored by Git, and `.env.example` contains names only. Never copy a
+maintainer's credentials into an example or commit them.
+
+A trace can contain the transcript, rendered prompts, and tool inputs and
+outputs. Get the caller's approval before enabling it for a real phone call.
+Use the caller's own project and retention policy, and mask sensitive data
+before export when the test does not need the raw value. See Langfuse's
+[SDK setup](https://langfuse.com/docs/observability/sdk/overview),
+[Observations API](https://langfuse.com/docs/api-and-data-platform/features/observations-api),
+and [data-masking guidance](https://langfuse.com/self-hosting/security/data-masking).
+
+`simple-prompt` already opts in. To trace one acceptance call for another
+example, temporarily add the block above and these three names to its existing
+`secrets:` list, compile it, and run the call with that example's own `.env`:
+
+```yaml
+secrets:
+  - LANGFUSE_BASE_URL
+  - LANGFUSE_PUBLIC_KEY
+  - LANGFUSE_SECRET_KEY
+```
+
+Record the call's UTC start and end times. Query only that window through the
+current observations endpoint:
+
+```sh
+set -a
+source "examples/$EXAMPLE/.env"
+set +a
+
+npx --yes langfuse-cli api observations list \
+  --from-start-time "$FROM_UTC" \
+  --to-start-time "$TO_UTC" \
+  --fields core,basic,time,trace_context \
+  --limit 100 --json \
+  | jq '.body.data[] | {traceId,startTime,type,name,level,statusMessage}'
+```
+
+Copy the one `traceId` for the call, then inspect its exact flow:
+
+```sh
+TRACE_ID=<trace-id>
+npx --yes langfuse-cli api observations list \
+  --trace-id "$TRACE_ID" \
+  --fields core,basic,time,io,metadata,model,usage,trace_context \
+  --limit 100 --json \
+  | jq '.body.data[] | {startTime,type,name,level,statusMessage,input,output}'
+```
+
+A trace passes when the initial prompt and greeting contain the expected
+call-start values, every expected tool appears once and in order, injected
+values appear in the tool result, the final spoken output matches the result,
+and no observation has `level: ERROR` or a failure status. A trace complements
+the human call and runtime logs; it does not replace either one.
+
+For a one-call opt-in, remove the tracing block and three secret names afterward
+and recompile. Do not leave future transcript export enabled unless that package
+is deliberately designed and documented as traced.
 
 ### 4. Ask a human to make the call
 
@@ -187,6 +278,8 @@ These are failure signatures met in real runs, not invented ones.
 | `TypeError: OpenAILLMSettings.__init__() got an unexpected keyword argument '<name>'` | A forwarded param landed as a Settings field on a Pipecat service whose dataclass has no such field. | The catalogue row needs `SettingsOverflow`, so the param rides `extra={...}` instead. See `internal/target/catalog_pipecat.go`. |
 | A task calls `finish` with `status: "failed"` and never calls its own tools | The task did not receive a value an earlier step assigned. It is obeying its own prompt, which usually says to give up when a prerequisite is missing. `assign:` writes a variable, and the only thing that reads one back is a `{{variable}}` reference in a prompt. Write the mapping and never reference it and the value goes nowhere. | Reference the variable in the task prompt that needs it. An unset variable renders as empty, never as the word `None`, so the prompt should say what empty means rather than leave the model to guess. |
 | The same delegate runs twice with no user speech in between | The owner lost the record that the first delegation completed, so the unchanged caller request looks unfinished. This has two observed causes. LiveKit can merge task turns over the owner's tool record. Pipecat 1.7.0 can restore a snapshot taken inside the delegate handler before the asynchronous owner tool call and result reach the context aggregator. The second run may fail or may repeat the caller questions and overwrite the first result. | Preserve the owner's completed tool call and result across the task boundary. LiveKit snapshots before the task and restores after it. On Pipecat, resolve the delegate with `run_llm=False`, drain that result into the owner context, and only then snapshot before the Flow rewrites the context. |
+| LiveKit `CreateDispatch` returns `401 ... permissions denied` | The dispatch JWT has `video.roomAdmin` but its `video.room` is empty or differs from the requested room. LiveKit rejects the request before creating the agent job or SIP leg. | Mint the token after choosing the room, and scope its `video.room` to that exact request room. V5 holds this at the HTTP boundary. |
+| A LiveKit SIP call is established, but closes with `packets: 0` and `reason: media-timeout` | SIP signaling and the carrier route worked, but no RTP reached the local UDP listener. The agent may still have sent its greeting in the other direction. | Forward UDP `10000-10100` through the host firewall and router to the machine running Docker, then retry. Do not mark the agent verified from ringing or one-way audio. |
 
 Noise that is not a bug, and that a run should not stop for:
 
@@ -216,7 +309,7 @@ treat them as a starting point and correct them as you go.
 | `subagents` | livekit, pipecat | `agent_transfer` in both directions between `booking_desk` and `appointment_manager`, sharing one tool set. | "I want to change an appointment I already have." Give `+1 555 010 101`. Then say, "Actually, leave my existing appointment unchanged. I want a separate new haircut appointment for August eighteenth, twenty twenty-six." Choose the returned 3 p.m. slot. | A spoken cue finishes before each transfer. `lookup_customer` runs once, the handoff back does not repeat the greeting or phone question, then `check_availability` and `book_appointment` use the exact returned customer and slot IDs. Zero errors or invented results. |
 | `task-groups` | livekit, pipecat | One delegate running an ordered group of three tasks with shared context: `identify_customer`, `select_appointment`, `finalize_appointment`. | Derived, unverified. "I'd like to book an appointment." Give name and phone, pick a service and a time. | `manage_appointment` opens the group, then the three steps run in order, each finishing before the next starts, and the booking carries the id from step one. It uses `context_scope: shared`, the one branch that always snapshotted and restored the owner context, so it never carried the `multi-task` delegation bug. The `isolated` branch beside it did, and has been fixed the same way. Expect this one to pass with no new work. |
 | `outbound-reminder` | pipecat, livekit | A real outbound call carrying input variables from the dispatch, a system variable from the route, and a conversation variable, with three deterministic local Python outcomes. | Derived, unverified. Start each target with `--telephony --to <E.164>` and `--var customer_id=cus_1042 --var name=Ada --var appointment_time="tomorrow at 3pm"`, answer the call, then say "no, can we move it to Friday?" | The phone rings from each target, the greeting already says the name and time, `update_variables` saves `reschedule_to`, and the local `reschedule_appointment` receives `cus_1042` plus the saved Friday value. Zero provider or runtime errors. |
-| `twilio-telephony-hello` | pipecat, livekit | The smallest telephony package. No tools at all, so it is the one example the reasoning bug could not break. | Derived, unverified. "Hi, how are you?" then a short exchange. | A greeting and two or three coherent turns. In the browser it proves the build; the real test is `--telephony`. |
+| `twilio-telephony-hello` | pipecat, livekit | The smallest telephony package. No tools at all, so it is the one example the reasoning bug could not break. | Run Pipecat inbound and LiveKit outbound as shown above. Say "Hi, how are you?" then one short follow-up. | A greeting and at least one coherent turn on each real carrier call. In the browser it proves the build only. |
 | `livekit-human-transfer` | livekit | Cold and warm transfer to a person over SIP, with `destinations:` read from environment names. | Derived, unverified. "Can you put me through to billing?" then on a second call, "I need to speak to a supervisor." | `send_to_billing` runs a cold transfer, `escalate_to_supervisor` runs a warm one with a briefing. Needs real numbers and a trunk. |
 | `pipecat-human-transfer-daily` | pipecat | Cold transfer over Daily, the one route where Pipecat has a native transfer primitive. | Derived, unverified. "Can you put me through to billing?" | `send_to_billing` fires. `dev --telephony` refuses this package by name, so run it in the browser and test the carrier path from the deployed agent. |
 | `pipecat-human-transfer-twilio` | pipecat | The same salon reached through Twilio streaming straight to Pipecat Cloud. | Derived, unverified. "Can you put me through to billing?" | `send_to_billing` fires. Runs `--telephony` locally with Twilio credentials. |
@@ -284,7 +377,7 @@ count for this sweep; they are kept below as history.
 | `subagents` | verified | verified | Pipecat completed the fresh booking-desk → appointment-manager → booking-desk flow with carried context and no duplicate transfer. The first LiveKit run exposed B3: reciprocal transfer tools were available during automatic entry inference, so the two exact announcements alternated four times without another caller turn. V3 now hides only `agent_transfer` tools during that inference through LiveKit's native `IGNORE_ON_ENTER` flag. A direct generated-context probe proved the booking desk receives the phone message plus the successful `lookup_customer` call and `cus_1001` result; an exact three-turn LiveKit text simulation then handed back and asked for the haircut time, not the phone. The final human retest confirmed one cue per transfer, no repeated phone question or greeting, continued booking, and zero runtime/provider errors. |
 | `task-groups` | verified | verified | Fresh human bookings passed on both targets. Pipecat ran `manage_appointment` and every group step and business tool exactly once. Identification returned `cus_e0aad0a9`; selection returned `2026-08-17_haircut_0900`; booking received those exact values and returned `apt_c42f1701eb`; and the owner received all three typed task results. LiveKit completed the same three-step booking with no application error. LiveKit 1.6.10 INFO logs hide tool payloads, but its runtime copies the shared group context into each task and merges each completed task context, including tool results, before starting the next one. Pipecat logged its known harmless `LLMServiceMetadataFrame` ordering line before `StartFrame` reached the pipeline; there were no errors after startup. This example has no Langfuse tracing configured. |
 | `outbound-reminder` | verified | verified | LiveKit completed the fresh human outbound call (`CAc4bb7ae5d1413642a1dd966b05ab9169`) with the seeded name, customer ID, and appointment time; the caller heard the reminder flow and the carrier reported completion. The first Pipecat attempt exposed B4: `--var` reached the worker environment but the HTTP trigger omitted `call_start`, so admission refused the call with 422 before dialing. V4 now carries the exact typed object in every HTTP or SIP outbound trigger. The one-time tracing-enabled Pipecat call (`CAb52a04d1995f77d2897387f018de97c5`) passed in Langfuse trace `dd4b27292a94a05182028f7db7365180`: the prompt and greeting contained Ada, `cus_1042`, and tomorrow at 3pm; `update_variables` saved `reschedule_to: Friday` once; `reschedule_appointment` ran once and returned `customer_id: cus_1042`, `new_time: Friday`; and the final TTS confirmed the move to Friday. All 13 observations completed at the default level. The runtime logged only the known metadata-before-StartFrame startup lines and no error after the pipeline started. Tracing was removed again after this approved call, so future calls keep the package's opt-in privacy default. |
-| `twilio-telephony-hello` | not run | not run | Browser calls prove the agent flow; the full pass also needs a telephony call. |
+| `twilio-telephony-hello` | not verified: RTP blocked | verified | Both browser targets passed. The real Pipecat inbound call passed: Twilio posted the webhook, opened `/ws`, the caller heard the exact greeting, STT captured "hey i'm good thanks about you", and the agent answered once with no runtime/provider error. The CLI then restored the previous TwiML Bin webhook. LiveKit first exposed B5: its dispatch token omitted the room and `CreateDispatch` failed with 401 before dialing. V5 now scopes the token; the retry created dispatch `AD_88UURWRmDaDe`, established Twilio call `CA0a14f711dcd055e4fb5d1be0e849a1ec`, joined the SIP participant and agent, and generated the greeting. It is not verified because the local listener on UDP 10076 received zero RTP packets and the leg closed after 30 seconds with `media-timeout`. Forwarding UDP `10000-10100` through the router/firewall is the remaining setup step. |
 | `livekit-human-transfer` | not run | n/a | LiveKit only. A full pass needs a real SIP trunk and transfer destinations. |
 | `pipecat-human-transfer-daily` | n/a | not run | Pipecat only. A full pass needs a deployed agent and Daily phone number. |
 | `pipecat-human-transfer-twilio` | n/a | not run | Pipecat only. A full pass needs Twilio credentials and a telephony call. |
