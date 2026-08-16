@@ -5,7 +5,7 @@ description: "Every flag, with defaults, requirements, and what each mode ignore
 
 ```
 $ unmute dev --help
-Compile, run the agent locally, and talk to it in the browser or terminal (--console).
+Compile, run the agent locally, and talk to it in the browser.
 
 With no agent-dir, the package is the current directory, so you can cd into an agent and run this with no arguments.
 
@@ -14,7 +14,6 @@ Usage:
 
 Flags:
       --bot-port string     host port the container publishes the agent on (Compose UNMUTE_DEV_PORT; with --telephony, UNMUTE_TELEPHONY_PORT) (default "7860")
-      --console             talk to the agent in the terminal over the local mic/speaker (no browser or dev server; --port/--bot-port/--no-open are ignored)
   -h, --help                help for dev
       --no-open             do not open the browser automatically
       --no-webhook          do not touch the carrier number's webhook configuration (requires --telephony; point it at the printed public URL yourself)
@@ -27,15 +26,14 @@ Flags:
       --verbose             follow container/agent logs on stderr (default: write to the log file only)
 ```
 
-## Three modes
+## Two modes
 
 | Mode | Command | What runs |
 |---|---|---|
 | browser | `unmute dev ./agent` | the container, plus a local page you talk through |
-| terminal | `unmute dev ./agent --console` | the generated project's own console runner, no Docker |
 | telephony | `unmute dev ./agent --telephony` | the resolved phone route, no browser UI |
 
-`--console` and `--telephony` cannot be combined.
+Both run in Docker Compose, so local development needs Docker.
 
 ## Flags in detail
 
@@ -62,12 +60,6 @@ Flags:
 <ResponseField name="--verbose">
   Follow the container and agent logs on standard error. Without it, they go
   only to `build/<target>/dev.log`.
-</ResponseField>
-
-<ResponseField name="--console">
-  Talk in the terminal over the local microphone and speaker. No browser, no dev
-  server, no container. `--port`, `--bot-port`, and `--no-open` are ignored.
-  Needs `uv` on your PATH.
 </ResponseField>
 
 <ResponseField name="--var" type="name=value">

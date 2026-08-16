@@ -72,8 +72,7 @@ trusting it. `build/` is disposable and gitignored.
 To hear the agent with no phone in the picture, and no accounts at all:
 
 ```sh
-bin/unmute dev examples/pipecat-human-transfer-twilio              # browser
-bin/unmute dev --console examples/pipecat-human-transfer-twilio    # terminal
+bin/unmute dev examples/pipecat-human-transfer-twilio              # browser, needs Docker
 ```
 
 To take a real call on your own number **before** deploying anything:

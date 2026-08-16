@@ -1,6 +1,28 @@
 <!--
 Sync Impact Report
 ==================
+Version change: 2.1.0 -> 3.0.0
+Bump rationale: MAJOR. A capability Principle V names is removed. `unmute dev
+--console` no longer exists, so a contributor holding 2.1.0 would be wrong
+about what the dev command offers and wrong about how an author without Docker
+hears their agent. Nothing was added.
+
+Modified in 3.0.0:
+- Principle V: the `unmute dev` bullet loses the terminal mode. Docker is now
+  required for every local run, and the bullet says so.
+
+Reason for the amendment: feature 015 removes `--console`. Two facts drove it.
+Upstream, livekit-agents deprecated its terminal mode, and the replacement is
+not a local-microphone session at all, so the LiveKit half of the flag was
+going to rot whatever we did. Locally, the uv path ran something production
+never runs, against the same principle's own rule that what you test is what
+you ship. The cost is real and is not hidden: an author with no Docker can no
+longer hear their agent at all. It was weighed against keeping a Pipecat-only
+terminal mode, which would have left two local paths with different runtimes
+and different failure modes, and rejected on that basis. See
+specs/015-upgrade-target-runtimes/plan.md Complexity Tracking.
+
+--- 2.1.0 ---
 Version change: 2.0.0 -> 2.1.0
 Bump rationale: MINOR. Principle V's opening sentence fixed the command surface
 at four commands. It now says four commands take an author from nothing to a
@@ -234,9 +256,10 @@ Any other command MUST stay off that path and MUST NOT be needed to reach it.
   for telephony, exactly one carrier route. Generation reaches only the
   providers with a shipped driver; the rest MUST fail by name.
 - `unmute dev` compiles and then runs the result so the author can speak to it:
-  in the browser (the default, Docker, running the same image production
-  deploys), in the terminal (`--console`, uv, no Docker), or over a real phone
-  (`--telephony`, the generated Compose graph). It reaches exactly the
+  in the browser (the default, running the same image production deploys) or
+  over a real phone (`--telephony`, the generated Compose graph). Both run
+  through Docker and Compose, so Docker is required to hear an agent locally,
+  and no local path runs anything production does not. It reaches exactly the
   providers `compile` reaches.
 - `unmute skill` is off that path. It writes the coding-agent skill bundle into
   a project and does nothing else. It MUST NOT read, write, or validate a
@@ -464,4 +487,4 @@ names the ceiling and the upgrade path.
 `docs/REPO_MAP.md` points at the load bearing files. Both are subordinate to
 this document and to the documents in Principle IV.
 
-**Version**: 2.1.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-15
+**Version**: 3.0.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-16

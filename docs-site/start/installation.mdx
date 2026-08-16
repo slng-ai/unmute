@@ -42,8 +42,8 @@ check what you downloaded before you run it.
 
 | Tool | Needed for | Check |
 |---|---|---|
-| Docker with Compose | `unmute dev` in the browser | `docker compose version` |
-| `uv` | `unmute dev --console` in the terminal | `uv --version` |
+| Docker with Compose | `unmute dev` in the browser, and `unmute dev --telephony` | `docker compose version` |
+| `uv` | `unmute dev --telephony` on the Pipecat `cloud-websocket` route, which runs the agent under `uv` instead of Docker | `uv --version` |
 | Go 1.26 or newer | `go install`, or building from a clone | `go version` |
 
 Docker and `uv` are only needed when you run an agent. You can write, validate,

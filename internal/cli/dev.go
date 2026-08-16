@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -33,8 +32,8 @@ func newDevCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "dev [agent-dir]",
-		Short: "Compile, run the agent locally, and talk to it in the browser or terminal (--console).",
-		Long: "Compile, run the agent locally, and talk to it in the browser or terminal (--console).\n\n" +
+		Short: "Compile, run the agent locally, and talk to it in the browser.",
+		Long: "Compile, run the agent locally, and talk to it in the browser.\n\n" +
 			"With no agent-dir, the package is the current directory, so you can " +
 			"cd into an agent and run this with no arguments.",
 		Args: cobra.MaximumNArgs(1),
@@ -77,10 +76,8 @@ func newDevCmd() *cobra.Command {
 				return err
 			}
 			if console {
-				if telephony {
-					return errors.New("dev: --console and --telephony cannot be used together")
-				}
-				return runDevConsole(cmd, root, selected)
+				return errors.New("dev: --console was removed; local development runs in Docker. " +
+					"Run `unmute dev " + root + "` to talk to the agent in your browser")
 			}
 			if telephony {
 				return runDevTelephony(cmd, root, selected, publicURL, botPort, to, noWebhook, verbose)
@@ -97,7 +94,12 @@ func newDevCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&vars, "var", nil, "seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open the browser automatically")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "follow container/agent logs on stderr (default: write to the log file only)")
-	cmd.Flags().BoolVar(&console, "console", false, "talk to the agent in the terminal over the local mic/speaker (no browser or dev server; --port/--bot-port/--no-open are ignored)")
+	// Registered, hidden, and rejected on use. The flag is gone, but it is in
+	// shell history and in older documentation, and cobra's bare "unknown flag"
+	// would leave an author guessing whether they misremembered the name or the
+	// mode itself went away.
+	cmd.Flags().BoolVar(&console, "console", false, "removed: local development runs in Docker")
+	_ = cmd.Flags().MarkHidden("console")
 	cmd.Flags().BoolVar(&telephony, "telephony", false, "run the selected target's resolved telephony route (no browser UI)")
 	cmd.Flags().StringVar(&publicURL, "public-url", "", "exact public HTTPS origin for routes with carrier callbacks (requires --telephony)")
 	cmd.Flags().StringVar(&to, "to", "", "E.164 number to dial for an outbound telephony test (requires --telephony and an outbound-capable target)")
@@ -124,8 +126,8 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort,
 			"this command cannot run it for you because your carrier has to be able to reach it. "+
 			"Run `unmute compile %s` and follow the Telephony setup section of the emitted README, which is the helper "+
 			"beside a tunnel, two commands. To talk to this agent right now with no phone at all, "+
-			"use `unmute dev %s` in the browser or `unmute dev --console %s` in the terminal",
-			root, resolved.Name, resolved.Carrier, root, root, root)
+			"use `unmute dev %s` in the browser",
+			root, resolved.Name, resolved.Carrier, root, root)
 	}
 	// The platform-terminated carrier route runs the phone path locally with one
 	// command. It gets its own orchestration rather than the Compose graph below,
@@ -159,10 +161,10 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort,
 		if resolved.Transport == "daily-sip" {
 			return fmt.Errorf("dev %s: target %q runs on the Pipecat Daily route (transport daily-sip), "+
 				"where Daily carries the phone call to a deployed agent, so there is no local telephony "+
-				"topology to run; talk to this agent now with `unmute dev %s` in the browser or "+
-				"`unmute dev --console %s` in the terminal, and for a real phone call run "+
+				"topology to run; talk to this agent now with `unmute dev %s` in the browser, "+
+				"and for a real phone call run "+
 				"`unmute compile %s` and follow the Deploy and Phone calls sections of the emitted README",
-				root, resolved.Name, root, root, root)
+				root, resolved.Name, root, root)
 		}
 		return fmt.Errorf("dev %s: target %q has no resolved telephony route", root, resolved.Name)
 	}
@@ -250,112 +252,6 @@ func missingEnvironment(names, env []string) []string {
 		}
 	}
 	return missing
-}
-
-// runDevConsole compiles the selected target and hands the terminal to its
-// native console mode: pipecat's LocalAudioTransport (via the `console` extra) or
-// livekit's `agent.py console`. Talk over the local mic/speaker — no dev
-// server, no browser, no log file (C6). livekit console needs LiveKit creds
-// only when a binding routes through Inference (C2/C7); the artifact carries
-// that fact, so this never re-derives it.
-func runDevConsole(cmd *cobra.Command, root, targetName string) error {
-	agent, targets, err := loadPackage(root, []string{targetName})
-	if err != nil {
-		return fmt.Errorf("dev %s: %w", root, err)
-	}
-	resolved := targets[0]
-	uvArgs, err := consolePlan(resolved.Provider)
-	if err != nil {
-		return fmt.Errorf("dev %s: target %q %w", root, resolved.Name, err)
-	}
-
-	artifact, err := generate.Generate(agent, resolved, target.Default())
-	if err != nil {
-		return fmt.Errorf("dev %s: %w", root, err)
-	}
-	for _, warning := range artifact.Notes.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
-	}
-	outDir := filepath.Join(root, "build", resolved.Name)
-	if err := writeArtifactFiles(cmd.ErrOrStderr(), outDir, artifact.Files); err != nil {
-		return fmt.Errorf("dev %s: %w", root, err)
-	}
-	fmt.Fprintf(cmd.OutOrStdout(), "compiled %s\n", outDir)
-
-	if len(artifact.LiveKitInference) > 0 {
-		if err := requireInferenceCreds(root, artifact.LiveKitInference); err != nil {
-			return fmt.Errorf("dev %s: %w", root, err)
-		}
-	}
-	if _, err := exec.LookPath("uv"); err != nil {
-		return fmt.Errorf("dev %s: uv not found on PATH; install uv to run the agent locally (https://docs.astral.sh/uv/)", root)
-	}
-	return execConsole(outDir, uvArgs, devChildEnv(root, cmd.ErrOrStderr()))
-}
-
-// consolePlan is the `uv` invocation for a target's console mode. Pure and
-// exhaustive so the dispatch is unit-tested without running uv (V7). Managed
-// and unimplemented targets refuse with their next command.
-func consolePlan(p ir.Provider) ([]string, error) {
-	switch p {
-	case ir.ProviderPipecat:
-		// The `console` extra installs pyaudio (LocalAudioTransport); the
-		// `console` argv selects console_main() in bot.py (T1).
-		return []string{"run", "--extra", "console", "bot.py", "console"}, nil
-	case ir.ProviderLiveKit:
-		return []string{"run", "agent.py", "console"}, nil
-	default:
-		return nil, fmt.Errorf("uses %s; console mode is not implemented", p)
-	}
-}
-
-// requireInferenceCreds fails before launching the console TUI when a binding
-// routes through LiveKit Inference but the LiveKit creds are absent (C2/C7):
-// console never connects to a room, but Inference is billed through LiveKit
-// Cloud. A scaffold-default agent (native providers + local turn) hits neither
-// key, so this never fires for it.
-func requireInferenceCreds(root string, uses []string) error {
-	env := devChildEnv(root, io.Discard)
-	has := func(key string) bool {
-		for _, kv := range env {
-			if strings.HasPrefix(kv, key+"=") && len(kv) > len(key)+1 {
-				return true
-			}
-		}
-		return false
-	}
-	var missing []string
-	for _, key := range []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"} {
-		if !has(key) {
-			missing = append(missing, key)
-		}
-	}
-	if len(missing) == 0 {
-		return nil
-	}
-	return fmt.Errorf("console mode needs %s: this agent routes through LiveKit Inference (%s); set them in .env, or bind native providers + local turn to run console with no LiveKit credentials",
-		strings.Join(missing, " and "), strings.Join(uses, ", "))
-}
-
-// execConsole hands the terminal to the console child and blocks until it
-// exits. Real stdio is inherited so the child owns the TTY (livekit draws a
-// full-screen UI); the child stays in our process group so terminal Ctrl-C
-// reaches it directly, and we suppress SIGINT in the parent so we wait for the
-// child's graceful shutdown instead of dying first (C6).
-func execConsole(dir string, uvArgs, env []string) error {
-	child := exec.Command("uv", uvArgs...)
-	child.Dir = dir
-	child.Env = env
-	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt)
-	defer signal.Stop(sigCh)
-
-	if err := child.Run(); err != nil {
-		return fmt.Errorf("console: %w", err)
-	}
-	return nil
 }
 
 // spinner draws a single-line braille spinner on a TTY and is a no-op printer

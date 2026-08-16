@@ -106,7 +106,8 @@ pipecat reason binding provider "my-gateway" has no slot; reason providers on pi
 
 **On LiveKit**, an unlisted reasoning provider routes through LiveKit Inference:
 managed models billed through LiveKit Cloud, with no provider key of their own.
-That path needs `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`, even in console mode.
+That path needs `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET`, in local development
+as well as in production.
 Writing `provider: livekit` passes your model string through verbatim.
 
 ## Where to go next

@@ -27,7 +27,7 @@ not the supported path.
 
 One route is cloud-only by construction: Pipecat's Daily route. Daily carries the
 call to a deployed agent, so `unmute dev --telephony` has nothing to run there and
-refuses by name, pointing at the browser and console modes and at the deploy path
+refuses by name, pointing at the browser mode and at the deploy path
 ([TRANSFERS.md](TRANSFERS.md)).
 
 <!-- prettier-ignore -->
@@ -426,7 +426,7 @@ The target names that connection and declares nothing else about the route:
 targets:
   pipecat:
     provider: pipecat
-    version: "1.5.0"
+    version: "1.7.0"
     connection: primary_phone
 ```
 
@@ -641,8 +641,8 @@ documented surface; termination authenticates Daily by IP allow-list).
 Local `unmute dev --telephony` refuses on both forms, and for different reasons.
 The no-carrier form has no local topology at all. The carrier form has one, the
 helper, but the CLI cannot run it somewhere the operator's carrier can reach, so
-the emitted README dictates the helper plus a tunnel instead. Browser and console
-modes work on both, unchanged.
+the emitted README dictates the helper plus a tunnel instead. Browser mode works
+on both, unchanged.
 
 ### Which Twilio route on Pipecat, and why
 

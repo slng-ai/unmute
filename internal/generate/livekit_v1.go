@@ -26,24 +26,19 @@ import (
 //go:embed templates/livekit_v1/*.tmpl
 var livekitV1Templates embed.FS
 
-// beta.workflows (TaskGroup), AgentTask, and inference (LLM/TurnDetector) are all
-// present from livekit-agents 1.5.x. Range: >=1.5, <2.0 (verified against the
-// reference venv's 1.5.x, driver-livekit C7). The warm-transfer prebuilt is
-// beta and its surface moved inside the 1.x line (WorkflowInstructions became
-// InstructionParts / extra_instructions), so warm packages pin the minor
-// series the import was verified against: 1.6.4, checked in the reference
-// checkout on 2026-08-11 (SPEC V10).
-// MCP raises the floor the same way, and for the same reason: every argument
-// the driver emits (transport_type, allowed_tools, headers) and MCPToolset
-// itself are verified in the 1.6.4 checkout, and 1.5.x cannot be claimed from
-// what we hold. The `mcp` extra is what carries the client at all: without it
+// beta.workflows (TaskGroup), AgentTask, and inference (LLM/TurnDetector) are
+// all present from livekit-agents 1.5.x (driver-livekit C7), which is why the
+// supported range starts there. That range, and the version each feature needs,
+// live in internal/target: the window in target.Window(LiveKit), the warm
+// transfer and MCP floors in target.CheckFeatureFloors. This driver holds no
+// copy of either, and emits the author's declared version as an exact pin.
+//
+// The floors exist because both surfaces are beta and moved inside the 1.x
+// line: the warm-transfer prebuilt renamed its instructions type
+// (InstructionParts became WorkflowInstructions), and the MCP arguments the
+// driver emits (transport_type, allowed_tools, headers) were verified at 1.6.x.
+// The `mcp` extra is separate from the version and still added here: without it
 // livekit/agents/llm/mcp.py raises ImportError on import (N40, research R2).
-const (
-	livekitVersionMajor      = 1
-	livekitVersionMinMinor   = 5
-	livekitWarmVerifiedMinor = 6
-	livekitMCPVerifiedMinor  = 6
-)
 
 // livekitService is one resolved binding: the rendered constructor plus its
 // catalogue entry (imports/deps) and vendor (report labeling).
@@ -367,7 +362,6 @@ type livekitData struct {
 	DevEnv         []string // provider creds the web dev image needs (LIVEKIT_* are hardcoded in compose.dev.yaml)
 	DevOptionalEnv []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
 	Notes          []string
-	InferenceUses  []string // bindings routed through LiveKit Inference (console needs cloud creds, C2/C7)
 	Tracing        bool
 
 	NeedsTasks         bool        // AgentTask import
@@ -513,10 +507,9 @@ func GenerateLiveKit(agent *ir.Agent, target ir.Target, bindings []ir.ForwardedB
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 
 	return Artifact{
-		Kind:             CodeTarget,
-		Files:            files,
-		Notes:            GenerateReport{Notes: data.Notes},
-		LiveKitInference: data.InferenceUses,
+		Kind:  CodeTarget,
+		Files: files,
+		Notes: GenerateReport{Notes: data.Notes},
 	}, nil
 }
 
@@ -719,6 +712,7 @@ type livekitReportJSON struct {
 	Target      string                `json:"target"`
 	Provider    string                `json:"provider"`
 	Version     string                `json:"version"`
+	Supported   *reportSupported      `json:"supported,omitempty"`
 	EntryAgent  string                `json:"entry_agent"`
 	Agents      []string              `json:"agents"`
 	Tasks       []string              `json:"tasks,omitempty"`
@@ -748,7 +742,8 @@ func livekitReport(agent *ir.Agent, data livekitData, files []File, bindings []i
 		tasks = append(tasks, t.Name)
 	}
 	out, err := json.MarshalIndent(livekitReportJSON{
-		Target: data.Project, Provider: "livekit", Version: data.Version, EntryAgent: data.EntryClass,
+		Target: data.Project, Provider: "livekit", Version: data.Version,
+		Supported: supportedRange(targetcap.LiveKit), EntryAgent: data.EntryClass,
 		Agents: agents, Tasks: tasks, Files: generated,
 		// Forwarded without checking, so it must be readable back (constitution).
 		Regions: data.DeploymentRegions, RequiredEnv: data.RequiredEnv,

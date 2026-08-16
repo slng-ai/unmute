@@ -107,7 +107,7 @@ ports. Build the `Dockerfile`, set `LIVEKIT_URL` and the API key pair to your
 server's values plus the provider keys from `.env.example`, and start it:
 
 ```sh
-python agent.py start
+python -m livekit.agents start agent.py
 ```
 
 On this path Redis is yours as well, because the managed SIP service is not in the

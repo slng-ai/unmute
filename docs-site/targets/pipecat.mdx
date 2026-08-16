@@ -58,18 +58,15 @@ The generated README says it:
 cp .env.example .env                      # then fill in your keys
 
 uv run bot.py                             # web: open the URL it prints
-uv run --extra console bot.py console     # terminal: talk over local mic/speaker
 ```
 
-`uv` installs the pinned dependencies on the first run. Console mode needs the
-`console` extra, which pulls in a local audio dependency (`brew install
-portaudio` first on macOS).
+`uv` installs the pinned dependencies on the first run.
 
 ## Dependencies are pinned
 
 ```toml pyproject.toml
 dependencies = [
-    "pipecat-ai[openai,runner,silero,tracing,webrtc]==1.5.0",
+    "pipecat-ai[openai,runner,silero,tracing,webrtc]==1.7.0",
     "pipecat-slng>=0.4.0",
     "python-dotenv>=1.0",
 ]

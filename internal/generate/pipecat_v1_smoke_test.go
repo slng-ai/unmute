@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -366,74 +365,6 @@ func examplePackagePath(name string) string {
 		return filepath.Join("..", "testdata", name)
 	}
 	return filepath.Join("..", "..", "examples", name)
-}
-
-// consoleCheckScript proves the console extra (T8, V8): after `uv run --extra
-// console`, pyaudio is installed (importing the local-audio transport runs its
-// `import pyaudio` guard), bot.py imports, and console_main is present. It does
-// not construct the transport — that opens the audio subsystem, which a headless
-// runner has no device for; resolve + import is what V8 asks.
-const consoleCheckScript = `"""Smoke check: the console extra resolves and bot.py imports with it."""
-import json
-import os
-
-for name in json.load(open("compile-report.json"))["required_env"]:
-    os.environ.setdefault(name, "smoke-placeholder")
-
-import bot  # noqa: E402
-from pipecat.transports.local.audio import LocalAudioTransport  # noqa: E402,F401  (imports pyaudio)
-
-assert callable(bot.console_main), "console_main missing from bot.py"
-print("console extra ok")
-`
-
-// TestSmokePipecatV1ConsoleExtraResolves (T8, V8): `uv run --extra console`
-// resolves the emitted pyproject including pipecat-ai[local] (pyaudio) and the
-// bot imports with the local-audio transport. Skips cleanly when portaudio is
-// absent (pyaudio can't build) — the console prerequisite, not a driver bug.
-func TestSmokePipecatV1ConsoleExtraResolves(t *testing.T) {
-	if _, err := exec.LookPath("uv"); err != nil {
-		t.Skip("uv not available")
-	}
-	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	for _, file := range artifact.Files {
-		out := filepath.Join(dir, file.Path)
-		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(out, file.Content, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(dir, "console_check.py"), []byte(consoleCheckScript), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cmd := exec.Command("uv", "run", "--extra", "console", "python", "console_check.py")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		lower := strings.ToLower(string(out))
-		if strings.Contains(lower, "portaudio") || strings.Contains(lower, "pyaudio") {
-			t.Skipf("console extra needs portaudio (pyaudio could not build); skipping:\n%s", out)
-		}
-		t.Fatalf("console extra smoke failed:\n%s", out)
-	}
-	if !bytes.Contains(out, []byte("console extra ok")) {
-		t.Fatalf("unexpected console smoke output:\n%s", out)
-	}
 }
 
 func TestSmokePipecatTwilioTemplatesCompileWithoutCredentials(t *testing.T) { // telephony V20

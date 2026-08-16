@@ -49,8 +49,8 @@ directory you are standing in, and every path it prints is relative to there.
   </Step>
 </Steps>
 
-Docker is required for this mode. If you do not want Docker, use
-[`--console`](/dev/console).
+Docker is required. This mode runs the same container a deployment runs, and
+every local run goes through Docker Compose, so local development needs Docker.
 
 ## Picking a target
 
@@ -97,7 +97,6 @@ speaks, and it is where a failure to start explains itself.
 |---|---|
 | `unmute dev` in the browser | `build/<target>/dev.log` |
 | `unmute dev --telephony` | `build/<target>/telephony.log` |
-| `unmute dev --console` | none: the agent talks to your terminal, so its output is already there |
 
 The path is printed with the ready line, exactly as you will see it. From
 inside a scaffolded package, run with no argument, that reads:
@@ -161,30 +160,23 @@ The Compose project name comes from the package path and the target name, so a
 second `unmute dev` on the same package does not run beside the first. It
 recreates the same stack on the new port and takes it over.
 
-## The three ways to run
+## The two ways to run
 
 Shown from inside the package. Anywhere else, name it first, as in
-`unmute dev my-agent --console`.
+`unmute dev my-agent --telephony`.
 
 | Command | You talk through | Needs |
 |---|---|---|
 | `unmute dev` | a local web page | Docker |
-| `unmute dev --console` | your terminal, over the local mic | `uv`, no Docker |
 | `unmute dev --telephony` | a real phone call | Docker for most routes, plus carrier credentials |
-
-`--console` and `--telephony` cannot be combined:
-
-```
-unmute: dev: --console and --telephony cannot be used together
-```
 
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="Console mode" icon="terminal" href="/dev/console">
-    Talk to the agent in your terminal, with no Docker and no browser.
-  </Card>
   <Card title="A phone route locally" icon="phone" href="/dev/telephony">
     What `--telephony` runs, and what it puts back.
+  </Card>
+  <Card title="dev reference" icon="book" href="/reference/cli/dev">
+    Every flag, with defaults and requirements.
   </Card>
 </Columns>

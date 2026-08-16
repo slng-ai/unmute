@@ -42,8 +42,10 @@ RUN useradd --home-dir /app --shell /usr/sbin/nologin appuser \
 COPY --chown=appuser:appuser . .
 USER appuser
 
-# LiveKit Cloud / the worker runner start agent.py; `python agent.py dev` for local runs.
-CMD ["python", "agent.py", "start"]
+# LiveKit Cloud and the worker runner both start this image. The module CLI
+# (`python -m livekit.agents`) is the supported entry point; the older
+# per-script form goes through a CLI upstream has deprecated.
+CMD ["python", "-m", "livekit.agents", "start", "agent.py"]
 === README.md ===
 # livekit — generated LiveKit Agents project
 
@@ -58,8 +60,7 @@ the LiveKit development worker.
 ```sh
 uv sync                       # or: pip install -e .
 cp .env.example .env          # then fill in the selected provider values
-uv run agent.py console       # local terminal session
-uv run agent.py dev           # LiveKit development worker
+uv run python -m livekit.agents start agent.py   # run the worker
 ```
 
 ## Agent handoffs
@@ -181,7 +182,7 @@ Build the generated `Dockerfile` into an image, set `LIVEKIT_URL`,
 provider keys from `.env.example`, then start the worker:
 
 ```sh
-python agent.py start
+python -m livekit.agents start agent.py
 ```
 
 See `docs/DEPLOYMENT.md` in the Unmute repository for the full self-hosted
@@ -221,7 +222,6 @@ from livekit.agents import (
     NotGivenOr,
     RunContext,
     TurnHandlingOptions,
-    cli,
     function_tool,
     inference,
     llm,
@@ -648,13 +648,20 @@ async def entrypoint(ctx: JobContext) -> None:
     asyncio.create_task(_max_duration())
 
 
-if __name__ == "__main__":
-    cli.run_app(server)
+# No __main__ block: this module is started through livekit-agents' supported
+# CLI, `python -m livekit.agents start agent.py`, which imports it and finds the
+# `server` above. The older per-script entry point goes through a CLI upstream
+# has deprecated and will remove.
 === compile-report.json ===
 {
   "target": "livekit",
   "provider": "livekit",
-  "version": "1.5.2",
+  "version": "1.6.10",
+  "supported": {
+    "floor": "1.5.0",
+    "ceiling": "1.6.10",
+    "verified": "2026-08-16"
+  },
   "entry_agent": "Greeter",
   "agents": [
     "events",
@@ -817,7 +824,10 @@ services:
   application:
     build:
       context: .
-    command: ["python", "agent.py", "dev"]
+    # The worker runs through livekit-agents' supported module CLI. The older
+    # per-script run modes are deprecated upstream and print a warning on every
+    # run; the colored format is for a human watching `unmute dev`.
+    command: ["python", "-m", "livekit.agents", "start", "agent.py", "--log-format", "colored"]
     environment:
       - LIVEKIT_URL=ws://livekit_server:7880
       - LIVEKIT_API_KEY=devkey
@@ -848,7 +858,7 @@ requires-python = ">=3.10"
 dependencies = [
     "httpx",
     "langfuse>=3",
-    "livekit-agents[openai]>=1.5",
+    "livekit-agents[openai]==1.6.10",
     "livekit-plugins-silero>=1.6.1",
     "livekit-plugins-slng>=1.6.1",
     "opentelemetry-sdk>=1.33,<2",

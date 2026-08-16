@@ -565,6 +565,13 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		row.Errors = add(row.Errors, fmt.Sprintf("%s code target requires version", resolved.Provider))
 	}
 	validateDriverValues(resolved, provider, row)
+	// A feature whose emitted code needs a newer framework than the target
+	// declares. This used to be applied by quietly raising the emitted
+	// constraint, so the package installed a version it never named; now the
+	// declared version is the pin and the mismatch is a gated error instead.
+	if err := targetcap.CheckFeatureFloors(provider, resolved.Version, UsedFrameworkFeatures(agent)); err != nil {
+		row.Errors = add(row.Errors, err.Error())
+	}
 	if agent.Tracing != nil {
 		applyCapability(caps, targetcap.FieldTracingLangfuse, provider, row)
 	}

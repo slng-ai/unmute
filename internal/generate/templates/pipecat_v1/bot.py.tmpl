@@ -30,8 +30,8 @@ the typed results.{{end}}
 
 from __future__ import annotations
 
-import asyncio
-{{if .NeedsFunctionCalls}}import functools
+{{if or (not .Inline) .NeedsEndAfter .Inactivity}}import asyncio
+{{end}}{{if .NeedsFunctionCalls}}import functools
 {{end}}{{if or .NeedsInspect .NeedsFunctionCalls}}import inspect
 {{end}}{{if or .HasFlows .CallStartVars}}import json
 {{end}}import os
@@ -942,7 +942,7 @@ def build_stt():
     return {{template "svc" .STT.Call}}
 
 
-{{if .Inline}}{{$agent := index .Agents 0}}async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activate_on_start: bool = False) -> None:
+{{if .Inline}}{{$agent := index .Agents 0}}async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     require_env()
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
@@ -1020,21 +1020,13 @@ def build_stt():
 {{end}}{{if gt .MaxDurationSecs 0}}        asyncio.create_task(_end_after(worker, {{.MaxDurationSecs}}))
 {{end}}{{if and (not .GreetingText) (le .MaxDurationSecs 0)}}        pass
 {{end}}
-    @worker.event_handler("on_pipeline_started")
-    async def on_pipeline_started(w, frame):
-        # Console starts the session at pipeline start; web waits for client-ready.
-        if activate_on_start:
-            await start_session()
+    @worker.rtvi.event_handler("on_client_ready")
+    async def on_client_ready(rtvi):
+        await start_session()
 
-    if not activate_on_start:
-
-        @worker.rtvi.event_handler("on_client_ready")
-        async def on_client_ready(rtvi):
-            await start_session()
-
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            await runner.cancel()
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        await runner.cancel()
 
     await runner.add_workers(worker)
 {{if $agent.MCPSources}}    try:
@@ -1044,7 +1036,7 @@ def build_stt():
 {{end}}{{else}}    await runner.run()
 {{end}}
 
-{{else}}async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activate_on_start: bool = False) -> None:
+{{else}}async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     require_env()
 {{if .DailyCarrier}}    # Validated before anything is built: a malformed call body fails by field
     # name rather than mid-call. None means this is not a phone session.
@@ -1230,38 +1222,30 @@ def build_stt():
     @main.event_handler("on_pipeline_started")
     async def on_pipeline_started(worker, frame):
         pipeline_started.set()
-        if activate_on_start:
-            # Local audio (console) has no client-connect event, so the
-            # pipeline start is the session start. This fires after main's
-            # StartFrame, so the B8/V14 activation gate is already satisfied.
-            await activate_entry()
-
-    if not activate_on_start:
 {{if or (eq .Transport "daily-sip") (eq .Transport "carrier-websocket") (eq .Transport "cloud-websocket")}}
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            # Telephony transports (carrier WebSocket, Daily SIP) have no RTVI
-            # client-ready handshake: the carrier opens a raw media WebSocket and
-            # the bot initiates once that connection is open and main's StartFrame
-            # has traversed (Pipecat Twilio dial-in flow; SPEC V2).
-{{if .CloudWebsocket}}            #
-            # This is also all an outbound call needs. Your carrier opens the stream
-            # when the person answers, so the greeting below meets a human rather
-            # than ringback, and there is no ringing state to handle.
-{{end}}            await pipeline_started.wait()
-            await activate_entry()
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        # Telephony transports (carrier WebSocket, Daily SIP) have no RTVI
+        # client-ready handshake: the carrier opens a raw media WebSocket and
+        # the bot initiates once that connection is open and main's StartFrame
+        # has traversed (Pipecat Twilio dial-in flow; SPEC V2).
+{{if .CloudWebsocket}}        #
+        # This is also all an outbound call needs. Your carrier opens the stream
+        # when the person answers, so the greeting below meets a human rather
+        # than ringback, and there is no ringing state to handle.
+{{end}}        await pipeline_started.wait()
+        await activate_entry()
 {{else}}
-        @main.rtvi.event_handler("on_client_ready")
-        async def on_client_ready(rtvi):
-            # Wait for both client media readiness and main's StartFrame before
-            # activating tools or emitting the greeting (SPEC V2).
-            await pipeline_started.wait()
-            await activate_entry()
+    @main.rtvi.event_handler("on_client_ready")
+    async def on_client_ready(rtvi):
+        # Wait for both client media readiness and main's StartFrame before
+        # activating tools or emitting the greeting (SPEC V2).
+        await pipeline_started.wait()
+        await activate_entry()
 {{end}}
-
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            await runner.cancel()
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        await runner.cancel()
 
     await runner.add_workers(main, *agents)
 {{if or .Tracing .NeedsMCP}}
@@ -1291,30 +1275,7 @@ async def bot(runner_args: RunnerArguments) -> None:
 {{end}}    await run_bot(transport, runner_args)
 
 
-async def console_main() -> None:
-    # Talk to the agent in the terminal over the local mic and speaker. The dev
-    # runner has no local transport, so build one here. The import is lazy so a
-    # default web run (`uv sync`) never needs pyaudio/portaudio (the `local`
-    # extra installs them: `uv run --extra console bot.py console`).
-    from pipecat.transports.local.audio import (
-        LocalAudioTransport,
-        LocalAudioTransportParams,
-    )
-
-    runner_args = RunnerArguments()
-    runner_args.handle_sigint = True  # ctrl-c ends the session cleanly
-    transport = LocalAudioTransport(
-        LocalAudioTransportParams(audio_in_enabled=True, audio_out_enabled=True)
-    )
-    await run_bot(transport, runner_args, activate_on_start=True)
-
-
 if __name__ == "__main__":
-    import sys
+    from pipecat.runner.run import main
 
-    if "console" in sys.argv[1:]:
-        asyncio.run(console_main())
-    else:
-        from pipecat.runner.run import main
-
-        main()
+    main()

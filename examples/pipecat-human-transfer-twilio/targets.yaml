@@ -9,7 +9,7 @@
 targets:
   pipecat:
     provider: pipecat
-    version: "1.5.0"
+    version: "1.7.0"
     # The connection is here because this package places calls and hands calls to
     # a person; both speak to Twilio's API in your name. A package that only
     # receives calls on this route needs no connection at all.

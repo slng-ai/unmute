@@ -96,7 +96,8 @@ container. Metrics are available by setting `prometheus_port` in the config.
 
 ### Agent worker
 
-The emitted image starts `python agent.py start`. Deploying the worker is much
+The emitted image starts `python -m livekit.agents start agent.py`. Deploying
+the worker is much
 simpler than the server:
 
 - **No inbound ports.** The worker dials out to LiveKit Server over WebSocket

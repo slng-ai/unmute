@@ -328,6 +328,18 @@ func DefaultTransport(target string) string {
 	return ""
 }
 
+// ceilingFor is the framework version a fresh package pins: the newest release
+// this unmute has verified end to end, read from the one recorded home rather
+// than repeated here. Starting an author on an older version would hand them an
+// upgrade on day one.
+func ceilingFor(provider targetcap.Provider) string {
+	win, ok := targetcap.Window(provider)
+	if !ok {
+		return ""
+	}
+	return win.Ceiling
+}
+
 // SetTarget selects an orchestrator and resets its target-dependent defaults.
 func (d *Data) SetTarget(provider string) {
 	d.Target = provider
@@ -342,9 +354,9 @@ func (d *Data) SetTarget(provider string) {
 		// No Transport here: withDefaults fills the default route in when the
 		// package actually uses one. Set unconditionally, it reached the
 		// package-root .env.example and nothing else.
-		d.TargetVersion = "1.5.0"
+		d.TargetVersion = ceilingFor(targetcap.Pipecat)
 	case "livekit":
-		d.TargetVersion = "1.5.2"
+		d.TargetVersion = ceilingFor(targetcap.LiveKit)
 		d.SDKLanguage = "python"
 	}
 	// Pipecat and LiveKit share the safe SLNG/OpenAI starter.

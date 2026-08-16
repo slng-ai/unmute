@@ -25,14 +25,14 @@ If all five are clean, the tree is green. `make test` is the required gate;
 
 - Go 1.26 (pinned in `go.mod`).
 - `golangci-lint` for `make lint`.
-- `uv` for `make smoke`, any manual `py_compile`, and `unmute dev --console`
+- `uv` for `make smoke` and any manual `py_compile`
   (https://docs.astral.sh/uv/). The default `make test` gate needs no Python.
 
 Only needed when you run an example for real (see
 [Run an example from the local build](#run-an-example-from-the-local-build)):
 
-- Docker with the Compose plugin, for `unmute dev` in the browser and for
-  `unmute dev --telephony`.
+- Docker with the Compose plugin. Local development runs in Docker Compose,
+  both for `unmute dev` in the browser and for `unmute dev --telephony`.
 - `cloudflared`, for `unmute dev --telephony` only. macOS: `brew install
   cloudflared`.
 - Node 20 or newer, for the docs site preview (`make docs`).
@@ -314,12 +314,12 @@ Pick one target when the package declares several:
 "$UNMUTE" compile . --target pipecat
 ```
 
-### 4. Talk to it: web, console, telephony
+### 4. Talk to it: web, telephony
 
-Three ways to run, one flag apart. All three compile first, so there is no need
-to run `compile` before `dev`. Every one of them takes `--target <name>`, which
-is required when the package declares more than one target and you have no TTY
-to pick from.
+Two ways to run, one flag apart. Both compile first, so there is no need to run
+`compile` before `dev`, and both need Docker. Both take `--target <name>`,
+which is required when the package declares more than one target and you have
+no TTY to pick from.
 
 **Web (the default).** Needs Docker.
 
@@ -340,21 +340,6 @@ page. Useful flags:
 Without `--verbose` the container and agent logs go to the log file only, and
 the run prints where it is.
 
-**Console.** Needs `uv`. No Docker, no browser, no dev server.
-
-```sh
-"$UNMUTE" dev . --console --target pipecat
-"$UNMUTE" dev . --console --target livekit
-```
-
-The agent takes the terminal and uses the local microphone and speaker.
-`--port`, `--bot-port` and `--no-open` are ignored in this mode. If any model
-binding routes through LiveKit Inference, console still needs
-`LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` in `.env`, because Inference is
-billed through LiveKit Cloud even though console never joins a room. Bind
-native providers plus local turn detection to run console with no LiveKit
-credentials.
-
 **Telephony.** Needs Docker, `cloudflared`, and real carrier credentials. Only
 packages with a phone channel and a resolvable local route can run it.
 
@@ -373,9 +358,8 @@ packages with a phone channel and a resolvable local route can run it.
 "$UNMUTE" dev . --telephony --target pipecat --no-webhook
 ```
 
-`--public-url`, `--to` and `--no-webhook` all require `--telephony`, and
-`--console` and `--telephony` cannot be combined. Each of those is rejected
-before any tunnel, Docker or carrier call happens.
+`--public-url`, `--to` and `--no-webhook` all require `--telephony`. Each of
+those is rejected before any tunnel, Docker or carrier call happens.
 
 Which example runs which telephony route:
 
@@ -386,10 +370,10 @@ Which example runs which telephony route:
 | `pipecat-human-transfer-twilio` | `pipecat` | `cloud-websocket`, Twilio | yes |
 | `livekit-human-transfer` | `livekit` | `sip`, Twilio | yes |
 | `outbound-reminder` | `pipecat` / `livekit` | `carrier-websocket` / `connector`, Twilio | yes |
-| `pipecat-human-transfer-daily` | `pipecat` | `daily-sip` | no. Daily carries the call to a deployed agent, so the command refuses by name and points you at web, console, or the emitted README |
+| `pipecat-human-transfer-daily` | `pipecat` | `daily-sip` | no. Daily carries the call to a deployed agent, so the command refuses by name and points you at the browser mode or the emitted README |
 | everything else | any | no phone channel | no. The command says the target has no resolved telephony route |
 
-Every other example runs in web and console mode. Per-package detail, including
+Every other example runs in web mode. Per-package detail, including
 what to expect on a real call, is in each example's own `README.md`.
 
 **Seed input variables** for a package that reads a dispatch payload, such as
@@ -489,6 +473,5 @@ is what every command run from the repository root against `examples/` uses.
 | Python validity | `make smoke` | `ok` (or skipped if no `uv`) |
 | End-to-end | init → validate → compile → py_compile | `agent.py: valid Python` |
 | Example, web | `bin/unmute dev examples/salon-support --target pipecat` | the page at `:8765` connects and the agent answers |
-| Example, console | `bin/unmute dev --console examples/salon-support --target pipecat` | the terminal takes the mic and the agent answers |
 | Example, telephony | `bin/unmute dev --telephony examples/twilio-telephony-hello --target pipecat` | the printed number rings and the agent greets you |
 | Docs site | `make docs` | http://localhost:3000 serves; `mint broken-links` is clean |

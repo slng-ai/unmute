@@ -558,7 +558,7 @@ def build_stt():
     )
 
 
-async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activate_on_start: bool = False) -> None:
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     require_env()
 
     tracing_enabled = setup_langfuse_tracing()
@@ -665,27 +665,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments, activa
     @main.event_handler("on_pipeline_started")
     async def on_pipeline_started(worker, frame):
         pipeline_started.set()
-        if activate_on_start:
-            # Local audio (console) has no client-connect event, so the
-            # pipeline start is the session start. This fires after main's
-            # StartFrame, so the B8/V14 activation gate is already satisfied.
-            await activate_entry()
 
-    if not activate_on_start:
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        # Telephony transports (carrier WebSocket, Daily SIP) have no RTVI
+        # client-ready handshake: the carrier opens a raw media WebSocket and
+        # the bot initiates once that connection is open and main's StartFrame
+        # has traversed (Pipecat Twilio dial-in flow; SPEC V2).
+        await pipeline_started.wait()
+        await activate_entry()
 
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            # Telephony transports (carrier WebSocket, Daily SIP) have no RTVI
-            # client-ready handshake: the carrier opens a raw media WebSocket and
-            # the bot initiates once that connection is open and main's StartFrame
-            # has traversed (Pipecat Twilio dial-in flow; SPEC V2).
-            await pipeline_started.wait()
-            await activate_entry()
-
-
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            await runner.cancel()
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        await runner.cancel()
 
     await runner.add_workers(main, *agents)
 
@@ -703,30 +695,7 @@ async def bot(runner_args: RunnerArguments) -> None:
     await run_bot(transport, runner_args)
 
 
-async def console_main() -> None:
-    # Talk to the agent in the terminal over the local mic and speaker. The dev
-    # runner has no local transport, so build one here. The import is lazy so a
-    # default web run (`uv sync`) never needs pyaudio/portaudio (the `local`
-    # extra installs them: `uv run --extra console bot.py console`).
-    from pipecat.transports.local.audio import (
-        LocalAudioTransport,
-        LocalAudioTransportParams,
-    )
-
-    runner_args = RunnerArguments()
-    runner_args.handle_sigint = True  # ctrl-c ends the session cleanly
-    transport = LocalAudioTransport(
-        LocalAudioTransportParams(audio_in_enabled=True, audio_out_enabled=True)
-    )
-    await run_bot(transport, runner_args, activate_on_start=True)
-
-
 if __name__ == "__main__":
-    import sys
+    from pipecat.runner.run import main
 
-    if "console" in sys.argv[1:]:
-        asyncio.run(console_main())
-    else:
-        from pipecat.runner.run import main
-
-        main()
+    main()

@@ -40,12 +40,12 @@ It imports LiveKit Agents and your handlers. Nothing from Unmute.
 ```sh
 uv sync                       # or: pip install -e .
 cp .env.example .env          # then fill in the selected provider values
-uv run agent.py console       # local terminal session
-uv run agent.py dev           # LiveKit development worker
+uv run python -m livekit.agents start agent.py    # the worker
 ```
 
-`console` talks over your microphone with no room and no server.
-`dev` runs the worker against a LiveKit server.
+`start` runs the worker against a LiveKit server. Add `--log-format colored`
+for readable logs while developing, which is what the generated development
+Compose file does.
 
 <Note>
   `unmute dev --target livekit` runs the worker in Docker beside a local
@@ -60,7 +60,7 @@ uv run agent.py dev           # LiveKit development worker
 dependencies = [
     "httpx",
     "langfuse>=3",
-    "livekit-agents[openai]>=1.5",
+    "livekit-agents[openai]==1.6.10",
     "livekit-plugins-silero>=1.6.1",
     "livekit-plugins-slng>=1.6.1",
     "opentelemetry-sdk>=1.33,<2",

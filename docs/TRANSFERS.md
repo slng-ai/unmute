@@ -209,9 +209,10 @@ human transfer fired: send_to_billing (cold)
 cold transfer skipped: no phone caller in the room
 ```
 
-**Cold cannot be tested from the Agent Console.** It refers the caller's *existing*
-SIP leg, and a console session has no SIP leg, so there is nothing to act on. Warm
-works from the console because it dials out and needs no inbound leg. This is why
+**Cold cannot be tested from a browser session**, including LiveKit's own Agent
+Console. It refers the caller's *existing* SIP leg, and a browser session has no
+SIP leg, so there is nothing to act on. Warm works from a browser session because
+it dials out and needs no inbound leg. This is why
 the two have different test rigs above, and it is what this line says when you mix
 them up. The other cause is a dispatch rule pointing at a different agent name, so
 the call never reaches this worker: check `lk sip dispatch list` against the
@@ -310,7 +311,7 @@ carrier: twilio
 targets:
   livekit:
     provider: livekit
-    version: "1.6.4"
+    version: "1.6.10"
     sdk_language: python
     connection: twilio_sip
 ```
@@ -324,7 +325,7 @@ transport: daily-sip
 targets:
   pipecat:
     provider: pipecat
-    version: "1.5.0"
+    version: "1.7.0"
     connection: daily
 ```
 
@@ -339,7 +340,7 @@ carrier: twilio
 targets:
   pipecat:
     provider: pipecat
-    version: "1.5.0"
+    version: "1.7.0"
     connection: twilio_sip_daily
 ```
 

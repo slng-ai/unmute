@@ -279,8 +279,7 @@ then; there is no way around that, so note the purchase date somewhere.
 You can talk to this agent right now, with no accounts and no phone:
 
 ```sh
-bin/unmute dev examples/pipecat-human-transfer-daily              # browser
-bin/unmute dev --console examples/pipecat-human-transfer-daily    # terminal
+bin/unmute dev examples/pipecat-human-transfer-daily              # browser, needs Docker
 ```
 
 `--telephony` **refuses on this route**, by name, and tells you the same thing:

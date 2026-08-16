@@ -136,12 +136,12 @@ the honest behaviour, not a bug.
 unmute dev
 ```
 
-Opens the browser and runs the same image production would deploy. Other modes:
+Opens the browser and runs the same image production would deploy. Local
+development runs in Docker, so Docker is required. Other flags:
 
 | Flag | What it does |
 |---|---|
 | none | browser audio, Docker, the deployable image |
-| `--console` | terminal, `uv`, no Docker |
 | `--telephony` | the generated Compose graph, so a real phone call can reach it |
 | `--var name=value` | seed a `call_start` variable, repeatable |
 

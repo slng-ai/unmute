@@ -363,7 +363,6 @@ func TestCarrierInboundJoinsThePlatformsRoom(t *testing.T) {
 
 	bot := artifactFile(t, carrier, "bot.py")
 	entry := bot[strings.Index(bot, "async def bot("):]
-	entry = entry[:strings.Index(entry, "async def console_main")]
 	if !strings.Contains(entry, "create_transport(runner_args, transport_params)") {
 		t.Errorf("the entry point does not take its transport from the runner:\n%s", entry)
 	}

@@ -104,7 +104,7 @@ func TestLiveKitDevComposeGolden(t *testing.T) {
 		`command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1", "--udp-port", "7882"]`,
 		"7881:7881",
 		"7882:7882/udp",
-		`command: ["python", "agent.py", "dev"]`,
+		`command: ["python", "-m", "livekit.agents", "start", "agent.py", "--log-format", "colored"]`,
 		"LIVEKIT_URL=ws://livekit_server:7880",
 		"LIVEKIT_API_SECRET=secret",
 		"condition: service_healthy",
@@ -119,5 +119,39 @@ func TestLiveKitDevComposeGolden(t *testing.T) {
 		if strings.Contains(compose, forbidden) {
 			t.Errorf("livekit compose.dev.yaml contains %q:\n%s", forbidden, compose)
 		}
+	}
+}
+
+// No emitted file may name a run mode livekit-agents deprecated. `agent.py dev`
+// and `agent.py console` print a warning on every run at 1.6.10, and
+// `cli.run_app` is the deprecated CLI they both go through, slated for removal.
+// A generated project that used any of them would break the day it goes.
+func TestNoDeprecatedLiveKitRunModesAreEmitted(t *testing.T) {
+	artifact := devArtifact(t, ir.ProviderLiveKit)
+	forbidden := []string{"agent.py dev", "agent.py console", "cli.run_app", `"dev"]`}
+	var checked int
+	for _, file := range artifact.Files {
+		content := string(file.Content)
+		for _, bad := range forbidden {
+			if strings.Contains(content, bad) {
+				t.Errorf("%s names the deprecated run mode %q", file.Path, bad)
+			}
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("no files inspected; this check would pass vacuously")
+	}
+	// And the supported entry point is actually there, so the check above is not
+	// passing merely because nothing runs the worker at all.
+	var found bool
+	for _, file := range artifact.Files {
+		if strings.Contains(string(file.Content), "livekit.agents") && strings.Contains(string(file.Content), "start") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("no emitted file starts the worker through `python -m livekit.agents start`")
 	}
 }

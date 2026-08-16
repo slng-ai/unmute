@@ -128,7 +128,6 @@ import os
     RunContext,
 {{- end}}
     TurnHandlingOptions,
-    cli,
 {{- if .NeedsFunctionTools}}
     function_tool,
 {{- end}}
@@ -1143,5 +1142,7 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- end}}
 
 
-if __name__ == "__main__":
-    cli.run_app(server)
+# No __main__ block: this module is started through livekit-agents' supported
+# CLI, `python -m livekit.agents start agent.py`, which imports it and finds the
+# `server` above. The older per-script entry point goes through a CLI upstream
+# has deprecated and will remove.

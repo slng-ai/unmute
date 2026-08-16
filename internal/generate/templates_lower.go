@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/slng-ai/unmute/internal/ir"
+	targetcap "github.com/slng-ai/unmute/internal/target"
 )
 
 // This file lowers the variable-template surface for both code drivers
@@ -355,6 +356,26 @@ func withoutRouteEnv(names []string, agent *ir.Agent, target ir.Target, env *env
 		}
 	}
 	return out
+}
+
+// reportSupported is the framework range this unmute supports, recorded next to
+// the version the target declared. The report already has to show what was sent
+// (constitution, Principle II); showing what was possible is what lets a reader
+// tell a deliberate older pin from a stale one, without opening a document.
+type reportSupported struct {
+	Floor    string `json:"floor"`
+	Ceiling  string `json:"ceiling"`
+	Verified string `json:"verified"`
+}
+
+// supportedRange reads the window from its one home. A provider with no shipped
+// driver has none, and the field is omitted rather than invented.
+func supportedRange(provider targetcap.Provider) *reportSupported {
+	win, ok := targetcap.Window(provider)
+	if !ok {
+		return nil
+	}
+	return &reportSupported{Floor: win.Floor, Ceiling: win.Ceiling, Verified: win.Verified}
 }
 
 // reportVariable is one variable as the compile report lists it: what it is,

@@ -120,7 +120,7 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
 
   **New in the report, not in the authoring surface.** A route may now carry **account prerequisites**: platform features the provider grants on request rather than by default, which the route cannot work without. The Daily route has one, `daily_dialout`, needed by cold transfer and by outbound calling, because both dial a destination. It is deliberately **not** a capability and carries none of the four tags: unmute compiles the package correctly, and whether an author's Daily account has the feature is unknowable at compile time. Gating it would refuse correct packages; warning would print on every Daily compile forever. So `validate` reports it at exit 0, the emitted README carries it, and `compile-report.json` records it as `route_prerequisites`. The facts live in `internal/target` only (verified against [Daily dial-out](https://docs.pipecat.ai/pipecat-cloud/guides/telephony/daily-dial-out), 2026-08-12: dial-out is a paid Daily feature granted on request, and international dial-out is enabled separately per domain).
 
-  **`unmute dev --telephony` refuses on this route**, by name, and points at the browser and console modes that do work plus the deploy path for a real phone call. Daily delivers calls to a deployed agent, so there is no local topology to run. A silent no-op would be a flag that does nothing, and a message saying telephony is unsupported here would be false: this is the only Pipecat telephony route there is.
+  **`unmute dev --telephony` refuses on this route**, by name, and points at the browser mode that does work plus the deploy path for a real phone call. Daily delivers calls to a deployed agent, so there is no local topology to run. A silent no-op would be a flag that does nothing, and a message saying telephony is unsupported here would be false: this is the only Pipecat telephony route there is.
 
   **Independent of N33**, which lands in the same release and covers LiveKit outbound dialling. The two touch nothing in common: N33 is about how a LiveKit project reaches a SIP carrier, this is about the one Pipecat route that carries a call at all. Both were numbered N33 in parallel branches; this one renumbered.
 
@@ -239,7 +239,7 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
   document should not have to infer them from the code.
 
   **The scaffold default.** `unmute init <name>` now writes a `targets.yaml`
-  whose single instance is `livekit` (`provider: livekit`, `version: "1.5.2"`,
+  whose single instance is `livekit` (`provider: livekit`, `version: "1.6.10"`,
   `sdk_language: python`) and an `agent.yaml` whose turn block is
   `detector: {provider: livekit, model: turn-detector-mini}` rather than
   `vad: {provider: local, model: silero}`. The scaffolded `.env.example`
@@ -286,6 +286,14 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
   **The authoring change is additive.** No existing package fails strict decode
   and no existing silent handoff gains speech. A package starts speaking only
   after its author adds `announce:`.
+
+- **N46 (2026-08-16).** **A declared `version:` is the version that installs, on both code targets.** It always was on Pipecat, which emitted `pipecat-ai==<version>`. On LiveKit it was not: the driver validated the field and then discarded it, emitting a derived floor of `>=1.5` on `livekit-agents` that a warm transfer narrowed to `>=1.6,<1.7` and an MCP source raised to `>=1.6`. A LiveKit project therefore installed whatever the newest 1.x release happened to be on the day someone ran `uv sync`, which is why this repository's own records disagreed with each other: the examples declared `1.6.4` while the tests recorded verification against `1.6.9`. Both targets now emit `==<version>`.
+  **The two feature floors move from emission to validation.** Raising a constraint silently is exactly the downgrade Principle II forbids, and under an exact pin it cannot work at all: a package declaring `1.5.2` with a warm transfer would install `1.5.2`, which has no `WarmTransferTask`, and fail at import. So a warm transfer and an MCP tool source each declare a minimum (`1.6.0`, both LiveKit), and a package below it is a **gated error** that names the feature, the floor, and the declared version: ``livekit version "1.5.2" is too old for a warm transfer, which needs livekit-agents >=1.6.0``. **This is the one change that can fail a package that used to compile**, and it fails it for a real reason: what that package installed was never what it declared. No shipped example was affected. The `<1.7` upper bound is dropped with nothing replacing it per feature; a verified ceiling per framework now carries that meaning for every feature at once.
+  **Supported versions are a property of the release, recorded once.** Each unmute release carries a floor, a verified ceiling, and the date a human verified that ceiling by talking to every example on a live call. This release supports `pipecat-ai` 1.5.0-1.7.0 and `livekit-agents` 1.5.0-1.6.10, verified 2026-08-16. A version above the ceiling is refused and says so in a way an author can act on: ``is newer than this unmute supports (>=1.5.0, <=1.6.10); a newer unmute may support it``. Unverified is unsupported, deliberately: the alternative is a range we cannot stand behind. The window is printed by `unmute --version` and recorded per target in `compile-report.json`, so the range never has to be looked up in a document.
+  **A version must name all three parts.** `1.6` and `1.6.11rc1` are refused. The field is an exact install pin now, and half a pin resolved on the author's behalf is a value nobody wrote. **The authoring shape does not change**: the field keeps its name and place, and every package already declaring a three-part version inside the range loads, validates, and compiles unchanged.
+- **N47 (2026-08-16).** **Local development runs in Docker, and generated projects use no deprecated run mode.** `unmute dev --console` is removed for every target. It ran through `uv` on the host, which is the one local path that ran something production never runs, against Principle V's own rule that what you test is what you ship. The browser default and `--telephony` both stay, both run the deployable image through Compose, and **Docker is now required to hear an agent locally**. That cost is real: an author with no Docker has no local voice path at all. Passing the removed flag is an error that names browser dev mode rather than cobra's bare unknown-flag line, because the flag is in shell history and in older documentation.
+  **Generated LiveKit projects leave the deprecated Python CLI.** At livekit-agents 1.6.10 the deprecation is wider than its release note implies: not only do `dev` and `console` print a warning on every run, but `cli.run_app` itself is documented as the deprecated rich CLI and is slated for removal. Emitted projects therefore start the worker with `python -m livekit.agents start agent.py`, the supported module CLI, which discovers the module-level `AgentServer` the templates already emit. The `__main__` block and its `cli` import are gone from `agent.py`, the Dockerfile `CMD` and both Compose commands follow, and the dev Compose adds `--log-format colored` because a human is watching that output. **What a reader must do differently:** run `python -m livekit.agents start agent.py` where they used to run `python agent.py start`. Verified by installing livekit-agents 1.6.10 and running both forms on 2026-08-16.
+  **Emitted Pipecat projects lose their console scaffolding**: the `console` optional-dependency group, `console_main()`, and the `activate_on_start` parameter, which nothing set once console mode was gone. No behavior changes for a browser or telephony run; a dead branch leaves the generated code a reader has to understand.
 
 ---
 
@@ -768,7 +776,7 @@ Named target instances: which orchestrator runs the package, and the infrastruct
 | Field | Required | Notes |
 |---|---|---|
 | `provider` | yes | `livekit \| pipecat \| vapi \| deepgram` for now (N17). |
-| `version` | code targets | Framework pin. The driver checks it against the range its templates support. A codegen check, not model validation. |
+| `version` | code targets | Framework pin, written as three numbers (`1.7.0`). The generated project installs **exactly** this version. Checked against the range this unmute release supports, and against the floor of every feature the package uses (N46). A codegen check, not model validation. |
 | `pins` | no | Independently versioned packages (LiveKit plugins) get their own entries. Pipecat Flows no longer qualifies: it ships inside `pipecat-ai` core since 1.5.0; never pin the deprecated standalone `pipecat-ai-flows`. |
 | `sdk_language` | no | LiveKit: warm transfer and MCP tool sources need `python`. The Node SDK has no `MCPToolset`, so an `mcp:` tool on a Node target fails by name (N40). |
 | `connection` | required for LiveKit or Pipecat telephony | The name of one `connections/<name>.yaml`, which declares the whole route. Telephony features still resolve against the exact `(provider, transport, carrier)` tuple, never the orchestrator or carrier alone; the target contributes the provider and the connection contributes the other two. |
@@ -825,7 +833,7 @@ The target names it and declares nothing else about telephony:
 targets:
   pipecat:
     provider: pipecat
-    version: "1.5.0"
+    version: "1.7.0"
     connection: primary_phone
 ```
 

@@ -58,7 +58,6 @@
         "group": "Development lifecycle",
         "pages": [
           "dev/overview",
-          "dev/console",
           "dev/telephony",
           "dev/webhooks-and-tunnels"
         ]
