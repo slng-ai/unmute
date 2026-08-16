@@ -9,7 +9,7 @@
 #
 # The names are plain SIP names rather than Twilio ones, because these four are
 # standard SIP trunk settings and the same emitted code dials through any SIP
-# carrier with them (SCHEMA N33). They are yours to choose: the compiler carries
+# carrier with them. They are yours to choose: the compiler carries
 # whatever you write here through verbatim.
 #
 # All four reach the deployed agent directly. It dials out by passing them inline
@@ -17,7 +17,7 @@
 #
 # A Twilio Elastic SIP Trunk carries the call into LiveKit SIP: the default
 # multi-carrier LiveKit route, and the only one with transfer and voicemail
-# primitives (docs/TELEPHONY.md).
+# primitives.
 transport: sip
 carrier: twilio
 environment:

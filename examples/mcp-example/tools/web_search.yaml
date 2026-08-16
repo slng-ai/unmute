@@ -1,4 +1,4 @@
-# A remote MCP server used as a tool source (SCHEMA N40). The file is the
+# A remote MCP server used as a tool source. The file is the
 # `mcp:` block and nothing else: Firecrawl describes its own tools, so there is
 # no description or input schema to write here.
 mcp:

@@ -59,8 +59,7 @@ jobs:
   # The release pipeline is config, so it can only rot silently. This job runs
   # the whole thing on every PR without publishing anything: the config must be
   # valid (and not merely deprecated), the 6 platforms must build, and the
-  # binaries must still carry their version stamps. See
-  # specs/010-goreleaser-release-pipeline/contracts/release-workflow.md.
+  # binaries must still carry their version stamps.
   release-config:
     runs-on: ubuntu-latest
     steps:

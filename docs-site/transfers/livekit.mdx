@@ -65,6 +65,16 @@ passed along on its own, so write what the person needs on top of it. Every
 failure, no answer, decline, voicemail, failed dial, comes back as one error
 and `on_unavailable` decides.
 
+The person who answers hears the handover in the first sentence: who is on
+hold, what they want, what was tried, then one question they can answer. If the
+conversation has too little detail, the agent says that plainly instead of
+inventing a briefing.
+
+`ring_timeout` covers ringing only. Once the person answers, LiveKit has no
+post-answer timeout and the caller stays on hold until the consultation ends.
+The agent asks again when the person does not decide, but that prompt is a
+mitigation rather than a hard time limit.
+
 ## The trunk has to allow it
 
 Cold transfer is a SIP REFER, so the trunk must permit transfers. On Twilio, in
@@ -80,6 +90,9 @@ twilio api trunking v1 trunks update --sid <trunk-sid> \
 Caller ID for the transfer target is that trunk setting, never per call.
 Transfers to emergency numbers are not supported, and the referred leg keeps
 billing per minute trunking charges.
+
+LiveKit Phone Numbers cannot transfer. Use a SIP trunk whose provider supports
+REFER; this example uses Twilio Elastic SIP Trunking.
 
 ## The connection
 
@@ -119,6 +132,17 @@ outbound call through the trunk, which is the practical way to reach a transfer
 without waiting for someone to call you. Inbound on this route is tested
 against a deployment: SIP needs the carrier to reach signalling and media at a
 routable address, which a laptop behind a home router usually cannot offer.
+
+Cold transfer needs an existing SIP caller leg, so it cannot be tested from a
+browser session or the LiveKit Agent Console. Warm transfer can start there,
+because it dials the person itself.
+
+Keep `lk agent logs` open. A warm transfer prints the control, the conversation
+message count handed to the briefing, and then either `warm transfer merged`
+or `warm transfer unavailable`. A cold transfer prints either
+`cold transfer completed`, `cold transfer failed`, or
+`cold transfer skipped: no phone caller in the room`. A dial line with no final
+warm line means the consultation is still running.
 
 ## Where to go next
 

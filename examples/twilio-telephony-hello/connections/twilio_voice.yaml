@@ -11,7 +11,7 @@
 # receives calls, which is why one value serves both directions.
 #
 # Twilio streams the call's audio straight to Pipecat Cloud, named by a static
-# TwiML Bin. Nothing of yours is hosted, in production or ever (SCHEMA N38).
+# TwiML Bin. Nothing of yours is hosted, in production or ever.
 transport: cloud-websocket
 carrier: twilio
 environment:

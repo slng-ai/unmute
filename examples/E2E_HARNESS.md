@@ -1,32 +1,13 @@
-# Live example harness
+# End-to-end example harness
 
-A runbook for taking every package under `examples/` and proving it can hold a
-real conversation, one example at a time, on both targets, with a human on the
-microphone. Paste this file into a fresh session and start at the first example
-that is not yet marked verified in [Results](#results).
+Use this runbook to prove each package under `examples/` can hold a real
+conversation on every declared target. Start with the first package not marked
+verified in [Results](#results). Run it after changes to emitted code, model
+bindings, provider catalogue rows, or an example, and before a release.
 
-[docs/TESTING.md](TESTING.md) is the companion: it covers the gates that run
-without a call, `make fmt lint build test smoke`, and the mechanics of
-`unmute dev`. This file covers the part those gates cannot reach.
-
-## What this is, and when to use it
-
-This is a live end to end harness. It is not a substitute for `make test`, and
-it never replaces the PR gate. It exists because green unit tests say nothing
-about whether an example can answer a question out loud.
-
-The case that created it: PR #82 swapped the reason model in all eleven examples
-to `gpt-5.6-luna`. That model rejects function tools on chat completions unless
-the request sets `reasoning_effort` to `"none"`, and sending no value at all is
-what fails, because the server applies its own default. Ten of the eleven
-examples declare tools. Every one of them returned HTTP 400 on every single
-turn. Speech to text worked, text to speech connected, the agent heard you and
-said nothing useful. `make test`, `make lint` and `make smoke` all stayed green
-the whole time, because nothing in them makes a request to a provider.
-
-Use this harness after any change to the compiler, the drivers, a model
-binding, a provider catalogue row, or an example's own spec. Use it before a
-release.
+This harness complements the automated checks: only a live provider request and
+a human conversation can prove that the agent hears, reasons, calls tools, and
+speaks a useful answer.
 
 ## Prerequisites
 
@@ -214,9 +195,8 @@ treat them as a starting point and correct them as you go.
 | `pipecat-human-transfer-daily` | pipecat | Cold transfer over Daily, the one route where Pipecat has a native transfer primitive. | Derived, unverified. "Can you put me through to billing?" | `send_to_billing` fires. `dev --telephony` refuses this package by name, so run it in the browser and test the carrier path from the deployed agent. |
 | `pipecat-human-transfer-twilio` | pipecat | The same salon reached through Twilio streaming straight to Pipecat Cloud. | Derived, unverified. "Can you put me through to billing?" | `send_to_billing` fires. Runs `--telephony` locally with Twilio credentials. |
 
-Which telephony examples can run `dev --telephony` on your machine is a table in
-[docs/TESTING.md](TESTING.md#4-talk-to-it-web-telephony). Everything else runs
-in the browser.
+The [local telephony guide](../docs-site/dev/telephony.mdx) shows which examples
+can run with `dev --telephony`. Everything else runs in the browser.
 
 ## The fixing rules
 
@@ -257,12 +237,7 @@ When an example fails, this is the loop that worked.
    fix, watch the test go red, restore it. A test nobody has seen fail is a
    test that proves nothing.
 
-7. **Update all five documentation surfaces** named in `CLAUDE.md`: the emitted
-   README template, the example's own `README.md`, the page in `docs/`, the page
-   in `docs-site/`, and the skill under `internal/skill/assets/`. A fact that is
-   only true in generated output is a fact the reader never sees.
-
-8. **Re-run the gates**: `make test`, `make lint`, and `make smoke`. Then
+7. **Re-run the gates**: `make test`, `make lint`, and `make smoke`. Then
    recompile the example, restart both targets, and have the human make the
    same call again.
 

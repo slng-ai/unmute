@@ -78,7 +78,7 @@ func TestRunQuit(t *testing.T) {
 	}
 }
 
-func TestV23HomeHeroShowsWordmark(t *testing.T) { // docs/spec/tui.md V23
+func TestV23HomeHeroShowsWordmark(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	view := renderField(t, 90, 24, fieldReq{kind: kindSelect, ctx: viewCtx{hero: true}, choices: []choice{{"Create a new agent", actionCreate}, {"Quit", actionQuit}}})
 	if !strings.Contains(view, "SLNG//") {
@@ -86,14 +86,14 @@ func TestV23HomeHeroShowsWordmark(t *testing.T) { // docs/spec/tui.md V23
 	}
 }
 
-func TestV23HeaderBadgeShownOnEditorScreens(t *testing.T) { // docs/spec/tui.md V23
+func TestV23HeaderBadgeShownOnEditorScreens(t *testing.T) {
 	view := renderField(t, 90, 24, fieldReq{kind: kindSelect, title: "Models", backable: true, ctx: viewCtx{breadcrumb: "Create › Models"}, choices: []choice{{"Listen", "listen"}, {"← Back", actionBack}}})
 	if !strings.Contains(view, "SLNG//") {
 		t.Fatalf("editor header omits SLNG badge:\n%s", view)
 	}
 }
 
-func TestV26LogoRendersInsideProgram(t *testing.T) { // docs/spec/tui.md V26
+func TestV26LogoRendersInsideProgram(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	screens := map[string]string{
 		"home":   renderField(t, 90, 24, fieldReq{kind: kindSelect, ctx: viewCtx{hero: true}, choices: []choice{{"Quit", actionQuit}}}),
@@ -106,7 +106,7 @@ func TestV26LogoRendersInsideProgram(t *testing.T) { // docs/spec/tui.md V26
 	}
 }
 
-func TestV27RedrawsInPlaceNoScrollback(t *testing.T) { // docs/spec/tui.md V27
+func TestV27RedrawsInPlaceNoScrollback(t *testing.T) {
 	var output bytes.Buffer
 	runner := newRunner(strings.NewReader(""), &output, false)
 	if _, err := runner.runProgram(func() (Result, error) { return Result{}, nil }); err != nil {
@@ -119,7 +119,7 @@ func TestV27RedrawsInPlaceNoScrollback(t *testing.T) { // docs/spec/tui.md V27
 	}
 }
 
-func TestInteractivePathImportsNoHuh(t *testing.T) { // docs/spec/tui.md C4, T28
+func TestInteractivePathImportsNoHuh(t *testing.T) {
 	for _, file := range []string{"shell.go", "view.go"} {
 		fset := token.NewFileSet()
 		parsed, err := parser.ParseFile(fset, file, nil, parser.ImportsOnly)
@@ -134,7 +134,7 @@ func TestInteractivePathImportsNoHuh(t *testing.T) { // docs/spec/tui.md C4, T28
 	}
 }
 
-func TestV33NoticeRendersScrollableOutput(t *testing.T) { // docs/spec/tui.md V33, V21
+func TestV33NoticeRendersScrollableOutput(t *testing.T) {
 	m := newConsole(nil)
 	sized, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	shown, _ := sized.(console).Update(requestMsg{ok: true, request: noticeRequest{
@@ -151,7 +151,7 @@ func TestV33NoticeRendersScrollableOutput(t *testing.T) { // docs/spec/tui.md V3
 	}
 }
 
-func TestV35InteractiveMenuDefaultsToFirstRow(t *testing.T) { // docs/spec/tui.md V35, V38
+func TestV35InteractiveMenuDefaultsToFirstRow(t *testing.T) {
 	req := fieldReq{
 		kind: kindSelect, title: "Variables", backable: true, initial: "type",
 		choices: []choice{{"Type  ·  string", "type"}, {"Default  ·  —", "default"}, {"← Back", actionBack}},
@@ -168,7 +168,7 @@ func TestV35InteractiveMenuDefaultsToFirstRow(t *testing.T) { // docs/spec/tui.m
 	}
 }
 
-func TestV49AccessibleModeDrivesEveryScreen(t *testing.T) { // docs/spec/tui.md V49, C5
+func TestV49AccessibleModeDrivesEveryScreen(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// Home -> create -> name -> Create agent -> confirm, all by numbered input,
 	// zero TTY and zero Python.
@@ -181,7 +181,7 @@ func TestV49AccessibleModeDrivesEveryScreen(t *testing.T) { // docs/spec/tui.md 
 	}
 }
 
-func TestV45PaletteOpensAndFuzzyFilters(t *testing.T) { // docs/spec/tui.md V45
+func TestV45PaletteOpensAndFuzzyFilters(t *testing.T) {
 	m := newConsole(nil)
 	sized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	withReq, _ := sized.(console).Update(requestMsg{ok: true, request: fieldReq{
@@ -206,7 +206,7 @@ func TestV45PaletteOpensAndFuzzyFilters(t *testing.T) { // docs/spec/tui.md V45
 	}
 }
 
-func TestV45EveryActionIsInPalette(t *testing.T) { // docs/spec/tui.md V45
+func TestV45EveryActionIsInPalette(t *testing.T) {
 	m := newConsole(nil)
 	sized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	withReq, _ := sized.(console).Update(requestMsg{ok: true, request: fieldReq{
@@ -222,7 +222,7 @@ func TestV45EveryActionIsInPalette(t *testing.T) { // docs/spec/tui.md V45
 	}
 }
 
-func TestV46BreakpointsPickLayout(t *testing.T) { // docs/spec/tui.md V46
+func TestV46BreakpointsPickLayout(t *testing.T) {
 	req := fieldReq{
 		kind: kindSelect, title: "Models", backable: true,
 		ctx:     viewCtx{sidebar: []sideItem{{label: "Identity", active: true}}},
@@ -236,14 +236,14 @@ func TestV46BreakpointsPickLayout(t *testing.T) { // docs/spec/tui.md V46
 	}
 }
 
-func TestV46TooSmallShowsMessage(t *testing.T) { // docs/spec/tui.md V46
+func TestV46TooSmallShowsMessage(t *testing.T) {
 	view := renderField(t, 40, 12, fieldReq{kind: kindSelect, title: "X", choices: []choice{{"a", "a"}}})
 	if !strings.Contains(strings.ToLower(view), "too small") {
 		t.Fatalf("a tiny terminal should show the too-small message:\n%s", view)
 	}
 }
 
-func TestV46ResizeRelayouts(t *testing.T) { // docs/spec/tui.md V46
+func TestV46ResizeRelayouts(t *testing.T) {
 	m := newConsole(nil)
 	req := requestMsg{ok: true, request: fieldReq{
 		kind: kindSelect, title: "Models", backable: true,
@@ -261,7 +261,7 @@ func TestV46ResizeRelayouts(t *testing.T) { // docs/spec/tui.md V46
 	}
 }
 
-func TestV44LayoutHasHeaderSidebarEditorFooter(t *testing.T) { // docs/spec/tui.md V44
+func TestV44LayoutHasHeaderSidebarEditorFooter(t *testing.T) {
 	req := fieldReq{
 		kind: kindSelect, title: "Models", backable: true,
 		ctx: viewCtx{
@@ -278,7 +278,7 @@ func TestV44LayoutHasHeaderSidebarEditorFooter(t *testing.T) { // docs/spec/tui.
 	}
 }
 
-func TestV44OnlyFocusedPanelHasAccentBorder(t *testing.T) { // docs/spec/tui.md V44
+func TestV44OnlyFocusedPanelHasAccentBorder(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	if got := panel(20, 10, true).GetBorderTopForeground(); got != lipgloss.Color(style.Accent) {
 		t.Errorf("focused panel border = %v, want accent %s", got, style.Accent)
@@ -288,7 +288,7 @@ func TestV44OnlyFocusedPanelHasAccentBorder(t *testing.T) { // docs/spec/tui.md 
 	}
 }
 
-func TestV44SidebarShowsActiveSection(t *testing.T) { // docs/spec/tui.md V44
+func TestV44SidebarShowsActiveSection(t *testing.T) {
 	req := fieldReq{
 		kind: kindSelect, title: "Models", backable: true,
 		ctx:     viewCtx{sidebar: []sideItem{{label: "Identity"}, {label: "Models", active: true}, {label: "Listen", child: true}}},
@@ -303,7 +303,7 @@ func TestV44SidebarShowsActiveSection(t *testing.T) { // docs/spec/tui.md V44
 	}
 }
 
-func TestV35MenusDefaultToFirstActionAndBackLast(t *testing.T) { // docs/spec/tui.md V35
+func TestV35MenusDefaultToFirstActionAndBackLast(t *testing.T) {
 	runner := newRunner(strings.NewReader("\n"), &bytes.Buffer{}, true)
 	choice, back, err := runner.selectOne("Actions", "", []huh.Option[string]{
 		huh.NewOption("First action", "first"),
@@ -323,7 +323,7 @@ func TestV35MenusDefaultToFirstActionAndBackLast(t *testing.T) { // docs/spec/tu
 	}
 }
 
-func TestV34EditorSectionsStayGrouped(t *testing.T) { // docs/spec/tui.md V34
+func TestV34EditorSectionsStayGrouped(t *testing.T) {
 	data := scaffold.Data{}
 	data.SetTarget(scaffold.DefaultTarget)
 	options := editorSectionOptions(data)
@@ -346,7 +346,7 @@ func TestV34EditorSectionsStayGrouped(t *testing.T) { // docs/spec/tui.md V34
 	}
 }
 
-func TestV36SectionsHaveNoPassThroughMenus(t *testing.T) { // docs/spec/tui.md V36
+func TestV36SectionsHaveNoPassThroughMenus(t *testing.T) {
 	data := scaffold.Data{}
 	data.SetTarget(scaffold.DefaultTarget)
 	var output bytes.Buffer
@@ -363,7 +363,7 @@ func TestV36SectionsHaveNoPassThroughMenus(t *testing.T) { // docs/spec/tui.md V
 	}
 }
 
-func TestV37EveryScreenShowsBackAffordance(t *testing.T) { // docs/spec/tui.md V37
+func TestV37EveryScreenShowsBackAffordance(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		req  fieldReq
@@ -435,7 +435,7 @@ func TestV37EveryScreenShowsBackAffordance(t *testing.T) { // docs/spec/tui.md V
 	}
 }
 
-func TestV37ConstrainedMenuPinsBackInFooter(t *testing.T) { // docs/spec/tui.md V37
+func TestV37ConstrainedMenuPinsBackInFooter(t *testing.T) {
 	req := fieldReq{
 		kind:  kindSelect,
 		title: "user_verified",
@@ -454,7 +454,7 @@ func TestV37ConstrainedMenuPinsBackInFooter(t *testing.T) { // docs/spec/tui.md 
 	}
 }
 
-func TestV38MultiFieldFlowsUseOverviewMenus(t *testing.T) { // docs/spec/tui.md V38
+func TestV38MultiFieldFlowsUseOverviewMenus(t *testing.T) {
 	data := scaffold.Data{}
 	var output bytes.Buffer
 	err := editVariables(newRunner(strings.NewReader("1\ncustomer_id\n"), &output, true), &data)
@@ -468,7 +468,7 @@ func TestV38MultiFieldFlowsUseOverviewMenus(t *testing.T) { // docs/spec/tui.md 
 	}
 }
 
-func TestV38BindingOverviewShowsAllFieldsAndReturns(t *testing.T) { // docs/spec/tui.md V38
+func TestV38BindingOverviewShowsAllFieldsAndReturns(t *testing.T) {
 	data := scaffold.Data{}
 	data.SetTarget("pipecat")
 	var output bytes.Buffer
@@ -486,7 +486,7 @@ func TestV38BindingOverviewShowsAllFieldsAndReturns(t *testing.T) { // docs/spec
 	}
 }
 
-func TestV24DistributorRowAppearsOnlyForMultipleRoutes(t *testing.T) { // docs/spec/tui.md V24
+func TestV24DistributorRowAppearsOnlyForMultipleRoutes(t *testing.T) {
 	catalog := targetcap.DefaultCatalog()
 	framework, role := targetcap.Pipecat, targetcap.Speak
 	for _, wantMultiple := range []bool{false, true} {
@@ -618,7 +618,7 @@ func TestRunAddVariableAndTool(t *testing.T) {
 	}
 }
 
-func TestV18VariablesMenuShowsSavedItems(t *testing.T) { // docs/spec/tui.md V18
+func TestV18VariablesMenuShowsSavedItems(t *testing.T) {
 	data := scaffold.Data{Variables: []scaffold.Variable{{Name: "customer_id", Type: "string", Source: "call_start"}}}
 	var output bytes.Buffer
 	err := editVariables(newRunner(strings.NewReader(""), &output, true), &data)
@@ -630,7 +630,7 @@ func TestV18VariablesMenuShowsSavedItems(t *testing.T) { // docs/spec/tui.md V18
 	}
 }
 
-func TestV18ToolsMenuUsesNeutralNameAndShowsExecution(t *testing.T) { // docs/spec/tui.md V18
+func TestV18ToolsMenuUsesNeutralNameAndShowsExecution(t *testing.T) {
 	data := scaffold.Data{Target: "pipecat"}
 	var output bytes.Buffer
 	err := editTools(newRunner(strings.NewReader("1\nlookup_customer\n2\n"), &output, true), &data)
@@ -644,7 +644,7 @@ func TestV18ToolsMenuUsesNeutralNameAndShowsExecution(t *testing.T) { // docs/sp
 	}
 }
 
-func TestV41NewToolDefaultsToEntryAgent(t *testing.T) { // docs/spec/tui.md V41
+func TestV41NewToolDefaultsToEntryAgent(t *testing.T) {
 	data := scaffold.Data{Name: "agent", EntryAgent: "billing", Instructions: scaffold.DefaultInstructions}
 	data.SetTarget(string(targetcap.LiveKit))
 	data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Handle billing.", Reason: data.Reason, Speak: data.Speak}}
@@ -660,7 +660,7 @@ func TestV41NewToolDefaultsToEntryAgent(t *testing.T) { // docs/spec/tui.md V41
 	}
 }
 
-func TestV41ToolAttachmentsAreTargetIndependent(t *testing.T) { // docs/spec/tui.md V41
+func TestV41ToolAttachmentsAreTargetIndependent(t *testing.T) {
 	data := scaffold.Data{Name: "agent", Instructions: scaffold.DefaultInstructions}
 	data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Handle billing.", Reason: data.Reason, Speak: data.Speak}}
 	data.Tasks = []scaffold.Task{{Name: "collect"}}
@@ -688,7 +688,7 @@ func TestV41ToolAttachmentsAreTargetIndependent(t *testing.T) { // docs/spec/tui
 	}
 }
 
-func TestV41LiveKitAgentEditorAttachesTool(t *testing.T) { // docs/spec/tui.md V41
+func TestV41LiveKitAgentEditorAttachesTool(t *testing.T) {
 	data := scaffold.Data{Name: "agent", Instructions: scaffold.DefaultInstructions}
 	data.SetTarget(string(targetcap.LiveKit))
 	data.Tools = []scaffold.Tool{{Name: "lookup_customer", AttachTo: []string{}}}
@@ -701,7 +701,7 @@ func TestV41LiveKitAgentEditorAttachesTool(t *testing.T) { // docs/spec/tui.md V
 	}
 }
 
-func TestV41LiveKitInitWebhookCompilesOnAgent(t *testing.T) { // docs/spec/tui.md V41
+func TestV41LiveKitInitWebhookCompilesOnAgent(t *testing.T) {
 	data := scaffold.Data{
 		Name: "agent", Instructions: scaffold.DefaultInstructions,
 		Tools: []scaffold.Tool{{
@@ -739,7 +739,7 @@ func TestV41LiveKitInitWebhookCompilesOnAgent(t *testing.T) { // docs/spec/tui.m
 	t.Fatal("generated agent.py omitted the entry agent's @function_tool method")
 }
 
-func TestV42LiveKitInitMCPCompilesOnAgent(t *testing.T) { // docs/spec/tui.md V42
+func TestV42LiveKitInitMCPCompilesOnAgent(t *testing.T) {
 	data := scaffold.Data{
 		Name: "agent", Instructions: scaffold.DefaultInstructions,
 		Tools: []scaffold.Tool{{
@@ -777,7 +777,7 @@ func TestV42LiveKitInitMCPCompilesOnAgent(t *testing.T) { // docs/spec/tui.md V4
 	t.Fatal("generated agent.py omitted the MCP server mount")
 }
 
-func TestV18AgentMenuShowsAndEditsSavedAgent(t *testing.T) { // docs/spec/tui.md V18
+func TestV18AgentMenuShowsAndEditsSavedAgent(t *testing.T) {
 	data := scaffold.Data{Instructions: scaffold.DefaultInstructions}
 	data.SetTarget("pipecat")
 	data.Agents = []scaffold.Agent{{
@@ -800,7 +800,7 @@ func TestV18AgentMenuShowsAndEditsSavedAgent(t *testing.T) { // docs/spec/tui.md
 	}
 }
 
-func TestV19HandoffShowsExistingVariablesAsChoices(t *testing.T) { // docs/spec/tui.md V19
+func TestV19HandoffShowsExistingVariablesAsChoices(t *testing.T) {
 	data := scaffold.Data{Instructions: scaffold.DefaultInstructions, Variables: []scaffold.Variable{{Name: "customer_id", Type: "string"}}}
 	data.SetTarget("pipecat")
 	data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Handle billing.", Reason: data.Reason, Speak: data.Speak}}
@@ -816,7 +816,7 @@ func TestV19HandoffShowsExistingVariablesAsChoices(t *testing.T) { // docs/spec/
 	}
 }
 
-func TestV19TaskShowsExistingToolsAsChoices(t *testing.T) { // docs/spec/tui.md V19
+func TestV19TaskShowsExistingToolsAsChoices(t *testing.T) {
 	data := scaffold.Data{Tools: []scaffold.Tool{{Name: "lookup_customer"}}}
 	data.SetTarget("pipecat")
 	var output bytes.Buffer
@@ -829,7 +829,7 @@ func TestV19TaskShowsExistingToolsAsChoices(t *testing.T) { // docs/spec/tui.md 
 	}
 }
 
-func TestV22TaskResultExplainsPrefilledShape(t *testing.T) { // docs/spec/tui.md V22
+func TestV22TaskResultExplainsPrefilledShape(t *testing.T) {
 	data := scaffold.Data{}
 	data.SetTarget("pipecat")
 	var output bytes.Buffer
@@ -844,7 +844,7 @@ func TestV22TaskResultExplainsPrefilledShape(t *testing.T) { // docs/spec/tui.md
 	}
 }
 
-func TestV19TaskAssignmentPicksSavedVariableAndResultField(t *testing.T) { // docs/spec/tui.md V19
+func TestV19TaskAssignmentPicksSavedVariableAndResultField(t *testing.T) {
 	data := scaffold.Data{Variables: []scaffold.Variable{{Name: "verified", Type: "boolean"}, {Name: "tier", Type: "string"}}}
 	task := scaffold.Task{Result: `{"verified":"boolean","tier":{"enum":["free","pro"]}}`}
 	var output bytes.Buffer
@@ -865,7 +865,7 @@ func TestV19TaskAssignmentPicksSavedVariableAndResultField(t *testing.T) { // do
 	}
 }
 
-func TestV39TaskResultAssignmentCanBeRemoved(t *testing.T) { // docs/spec/tui.md V39
+func TestV39TaskResultAssignmentCanBeRemoved(t *testing.T) {
 	for _, test := range []struct {
 		name, result, assign, input, want string
 		variables                         []scaffold.Variable
@@ -903,7 +903,7 @@ func TestV39TaskResultAssignmentCanBeRemoved(t *testing.T) { // docs/spec/tui.md
 	}
 }
 
-func TestV21PreflightFailureUsesDedicatedScreen(t *testing.T) { // docs/spec/tui.md V21
+func TestV21PreflightFailureUsesDedicatedScreen(t *testing.T) {
 	// Pipecat still gates fallback (driver-pipecat C9/B7); livekit emits it
 	// natively since driver-livekit T5, so the failure fixture lives here.
 	data := scaffold.Data{Name: "agent", Channel: "web"}
@@ -1067,7 +1067,7 @@ func TestRunCustomizeCapacity(t *testing.T) {
 	}
 }
 
-func TestV20BackPreservesPriorEdits(t *testing.T) { // docs/spec/tui.md V20
+func TestV20BackPreservesPriorEdits(t *testing.T) {
 	t.Chdir(t.TempDir())
 	// Edit greeting (Behavior), then open Instructions and Back out unchanged;
 	// the greeting edit must survive.
@@ -1146,7 +1146,7 @@ func TestV29UnavailableChoiceNamesGateAndOffersBack(t *testing.T) {
 	}
 }
 
-func TestTUIMatchesCapabilityTable(t *testing.T) { // docs/spec/tui.md V42
+func TestTUIMatchesCapabilityTable(t *testing.T) {
 	table := targetcap.Default()
 	providers := []targetcap.Provider{targetcap.LiveKit, targetcap.Pipecat, targetcap.Deepgram, targetcap.Vapi}
 	kindFields := map[targetcap.Field]bool{}
@@ -1176,7 +1176,7 @@ func TestTUIMatchesCapabilityTable(t *testing.T) { // docs/spec/tui.md V42
 	}
 }
 
-func TestV42ExecutionPickerDerivesFromTable(t *testing.T) { // docs/spec/tui.md V42
+func TestV42ExecutionPickerDerivesFromTable(t *testing.T) {
 	// Gated: mcp on Deepgram surfaces the table row's own note, then Back.
 	// (Pipecat emits MCP sources since N40, so its row is no longer a gate.)
 	var output bytes.Buffer
@@ -1208,7 +1208,7 @@ func TestV42ExecutionPickerDerivesFromTable(t *testing.T) { // docs/spec/tui.md 
 	}
 }
 
-func TestV40LocalPythonSelectionScaffoldsHandler(t *testing.T) { // docs/spec/tui.md V40
+func TestV40LocalPythonSelectionScaffoldsHandler(t *testing.T) {
 	tool := scaffold.Tool{Name: "lookup_customer", Execution: "webhook", URLEnv: "LOOKUP_URL", Input: `{"type":"object"}`}
 	var output bytes.Buffer
 	back, err := chooseToolExecution(newRunner(strings.NewReader("2\n"), &output, true), string(targetcap.LiveKit), &tool)
@@ -1240,7 +1240,7 @@ func TestV40LocalPythonSelectionScaffoldsHandler(t *testing.T) { // docs/spec/tu
 	}
 }
 
-func TestV40MaintainPreservesLocalHandler(t *testing.T) { // docs/spec/tui.md V40
+func TestV40MaintainPreservesLocalHandler(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "agent")
 	data := scaffold.Data{Name: "agent", Tools: []scaffold.Tool{{
 		Name: "lookup_customer", Description: "Look up the customer.", Execution: "local",
@@ -1272,7 +1272,7 @@ func TestV40MaintainPreservesLocalHandler(t *testing.T) { // docs/spec/tui.md V4
 	}
 }
 
-func TestV24ModelsLabelDeduplicatesProviderBrands(t *testing.T) { // docs/spec/tui.md V24
+func TestV24ModelsLabelDeduplicatesProviderBrands(t *testing.T) {
 	data := scaffold.Data{}
 	data.SetTarget("livekit")
 	if got := modelsLabel(data); got != "deepgram / openai" {
@@ -1280,7 +1280,7 @@ func TestV24ModelsLabelDeduplicatesProviderBrands(t *testing.T) { // docs/spec/t
 	}
 }
 
-func TestV24ProviderThenDistributorFlow(t *testing.T) { // docs/spec/tui.md V24
+func TestV24ProviderThenDistributorFlow(t *testing.T) {
 	binding := scaffold.Binding{}
 	input := "1\n1\n2\n2\n3\nslng/cartesia/sonic-3\n4\nvoice-id\n7\n"
 	if err := editBindingFor(newRunner(strings.NewReader(input), &bytes.Buffer{}, true), "pipecat", targetcap.Speak, &binding); err != nil {
@@ -1292,7 +1292,7 @@ func TestV24ProviderThenDistributorFlow(t *testing.T) { // docs/spec/tui.md V24
 	}
 }
 
-func TestV24ProviderBrandsAreUniqueAndExposeDistributors(t *testing.T) { // docs/spec/tui.md V24
+func TestV24ProviderBrandsAreUniqueAndExposeDistributors(t *testing.T) {
 	type pair struct {
 		framework targetcap.Provider
 		role      targetcap.Role
@@ -1316,7 +1316,7 @@ func TestV24ProviderBrandsAreUniqueAndExposeDistributors(t *testing.T) { // docs
 	}
 }
 
-func TestV25SavedResourcesOfferDelete(t *testing.T) { // docs/spec/tui.md V25
+func TestV25SavedResourcesOfferDelete(t *testing.T) {
 	base := func() scaffold.Data {
 		data := scaffold.Data{Name: "agent", Instructions: scaffold.DefaultInstructions}
 		data.SetTarget("pipecat")
@@ -1361,7 +1361,7 @@ func TestV25SavedResourcesOfferDelete(t *testing.T) { // docs/spec/tui.md V25
 	}
 }
 
-func TestV25DeleteResourceCleansReferences(t *testing.T) { // docs/spec/tui.md V25
+func TestV25DeleteResourceCleansReferences(t *testing.T) {
 	data := scaffold.Data{EntryAgent: "billing"}
 	data.Agents = []scaffold.Agent{{Name: "billing"}}
 	data.Variables = []scaffold.Variable{{Name: "customer_id", Type: "string"}}
@@ -1385,7 +1385,7 @@ func TestV25DeleteResourceCleansReferences(t *testing.T) { // docs/spec/tui.md V
 	}
 }
 
-func TestV25InvalidSavedResourcesRemainAvailableForRepair(t *testing.T) { // docs/spec/tui.md V25
+func TestV25InvalidSavedResourcesRemainAvailableForRepair(t *testing.T) {
 	tests := []struct {
 		name string
 		data scaffold.Data
@@ -1606,7 +1606,7 @@ func TestV32DestructiveSaveNamesFilesAndConfirms(t *testing.T) {
 	}
 }
 
-func TestV20MaintainBackPreservesPriorEdits(t *testing.T) { // docs/spec/tui.md V20
+func TestV20MaintainBackPreservesPriorEdits(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "agent")
 	data := scaffold.Data{Name: "agent"}
 	data.SetTarget(scaffold.DefaultTarget)

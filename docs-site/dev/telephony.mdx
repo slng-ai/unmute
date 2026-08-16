@@ -103,7 +103,7 @@ fails, you get a warning naming the number, not silence.
 |---|---|---|---|
 | Pipecat `cloud-websocket` + Twilio | the compiled agent under `uv`, no Docker | yes | sets the number's voice webhook for this run |
 | Pipecat `carrier-websocket` + Twilio | Compose: agent, Redis | yes | sets the number's voice webhook for this run |
-| LiveKit `connector` + Twilio | Compose: agent, Redis, LiveKit Server | yes | sets the number's voice webhook for this run |
+| LiveKit `connector` + Twilio | Compose: agent, LiveKit Server; no Redis | yes | sets the number's voice webhook for this run |
 | LiveKit `sip` + Twilio | Compose: agent, Redis, LiveKit Server, LiveKit SIP | no | nothing; the trunk records it creates are on the local server |
 | Pipecat `daily-sip` | refused, see below | | |
 
@@ -154,6 +154,12 @@ Error response from daemon: failed to set up container networking: driver failed
 ```
 
 That one means another dev stack is still up. Stop it, or run the other package.
+
+Use `--bot-port` to move the agent. On LiveKit SIP, set
+`LIVEKIT_HOST_PORT`, `LIVEKIT_SIP_HOST_PORT`, and
+`LIVEKIT_RTP_HOST_PORT_RANGE` before the run when those host ports are busy.
+The local RTP range defaults to `10000-10100`; every occupied port and range
+must differ when two stacks run at once.
 
 ## What a healthy local run proves
 

@@ -33,14 +33,13 @@ mint broken-links       # every internal link resolves
 5. **No page presents a route as more proven than the compile report says.**
    Telephony routes are `provisional`: implemented and compiling, with no
    credentialed test in CI.
-6. **When code and an internal doc disagree**, the disagreement goes to the
-   maintainers rather than being settled in passing. The disagreements found
-   while writing this site are listed in
-   `specs/008-mintlify-user-docs/report.md`.
+6. **This is the only public documentation tree.** `docs/ARCHITECTURE.md`
+   explains system boundaries for contributors; it is not a second user guide.
+   Public package, target, telephony, transfer, deployment, and CLI guidance
+   belongs here.
 7. **A page ships only if the code has the concept.** A tools page exists because
    the `Tool` struct has that execution block; the Models role pages exist because
-   the catalog has those roles. When the code lacks something the plan assumed, the
-   page is dropped and the reason goes in the report.
+   the catalog has those roles. If the code lacks a concept, do not document it.
 8. **A model or vendor claim comes from the catalog, and an outside claim is
    attributed.** SLNG leads every vendor list it appears in, and only SLNG model
    ids are printed, because those are the ones proven in this repository. Facts
@@ -55,19 +54,19 @@ mint broken-links       # every internal link resolves
 
 ## The structure
 
-Nine groups, 51 pages: Get started, Build the agent (nested Tools and
+Nine groups, 50 pages: Get started, Build the agent (nested Tools and
 Orchestration), Development lifecycle, Telephony, Transfers, Targets, Models,
 Deployment, Reference (nested CLI). A nested group is the object-in-pages-array
 form. The count of `.mdx` files under `docs-site/` must equal the count of page
 entries in `docs.json`.
 
-## Five tests hold the parts that can be held
+## Tests hold the parts that can be held
 
 Prose rots. These facts cannot:
 
 | Test | What it holds |
 |---|---|
-| `internal/cli/help_capture_test.go` | `specs/008-mintlify-user-docs/help.txt` still matches the cobra tree, and every flag in it appears on the CLI page that documents that command (two tests) |
+| `internal/cli/help_capture_test.go` | `internal/cli/testdata/help.txt` still matches the cobra tree, and every flag in it appears on the CLI page that documents that command (two tests) |
 | `internal/target/providers_docsite_test.go` | `models/{stt,tts,llm}.mdx` list exactly the catalog's vendors per target per role, with SLNG first; and `models/turn-detection.mdx` carries no vendor list, because the `turn` role has no catalog entries (two tests) |
 | `internal/spec/tools_docsite_test.go` | `build/tools/overview.mdx` names exactly the execution blocks the `Tool` struct has |
 
@@ -83,16 +82,11 @@ go test ./internal/cli -run TestHelpCaptureMatchesBinary -update
 
 Then update the pages that quote it, or the mapping test fails.
 
-## This site is a fourth place to update
+## This site is one of four maintained product surfaces
 
-`CLAUDE.md` says a change to emitted behaviour updates three places in the same
-commit: the emitted README template, the source example's own `README.md`, and
-the relevant page in `docs/`. Once this site is live, it is a fourth. A reader
-who lands here is reading the public answer, and it going stale is the same
-failure as the other three going stale.
-
-Proposing that amendment to `CLAUDE.md` is a maintainer decision, not something
-this feature did on its own.
+A change to emitted behaviour updates the generated README template, the source
+example's `README.md`, the relevant page here, and the shipped coding-agent
+skill. Do not copy the same guidance into `docs/`.
 
 ## Go live checklist
 

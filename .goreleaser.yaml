@@ -3,7 +3,7 @@
 # everything below happens once. GoReleaser v2 free tier only, no Pro keys.
 #
 # Comments marked "Rollout Phase N:" are the only lines that change between
-# rollout stages; specs/010-goreleaser-release-pipeline/ holds the reasoning.
+# rollout stages.
 version: 2
 
 project_name: unmute

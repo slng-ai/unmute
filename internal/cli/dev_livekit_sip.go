@@ -54,8 +54,8 @@ var liveKitSIPAdminBase = func(env []string) string {
 // record is reused, because the Redis volume persists across restarts (V4).
 //
 // Nothing is injected into the child environment. The records are platform state
-// the local LiveKit SIP service reads for itself, and no emitted Python ever
-// looked up their IDs (specs/003 R8, SCHEMA N36).
+// the local LiveKit SIP service reads for itself, and no emitted Python looks up
+// their IDs.
 func ensureLiveKitSIPRecords(ctx context.Context, out io.Writer, targetName string, plan *generate.TelephonyRuntimePlan, env []string) error {
 	base := liveKitSIPAdminBase(env)
 	token, err := mintLiveKitSIPAdminToken(liveKitSIPComposeKey, liveKitSIPComposeSecret, time.Now())

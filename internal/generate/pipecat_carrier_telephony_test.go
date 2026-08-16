@@ -391,8 +391,7 @@ func TestCarrierInboundJoinsThePlatformsRoom(t *testing.T) {
 	}
 }
 
-// T034 / US2 scenario 1 and the anti-banner rule specs/004 set: the carrier form
-// inherits the dial-out prerequisite when it needs one, and carries no
+// The carrier form inherits the dial-out prerequisite when it needs one and carries no
 // prerequisite text at all when it does not.
 func TestCarrierReportsTheDialOutPrerequisiteOnlyWhenNeeded(t *testing.T) {
 	needs := dailyCarrierArtifact(t, "twilio", true)
@@ -482,7 +481,7 @@ func TestCarrierColdTransferDialsThroughTheOperatorTrunk(t *testing.T) {
 	if strings.Contains(daily, "_carrier_sip") {
 		t.Error("the Daily-only transfer changed shape; it dials E.164 through Daily exactly as before")
 	}
-	// specs/004 already proved these two, so this only pins that they did not move.
+	// Pin the existing Daily transfer shape while adding the carrier form.
 	for _, want := range []string{
 		"_TRANSFER_RESULT",
 		`_TRANSFER_RESULT = {"transferred": True}`,
@@ -501,8 +500,8 @@ func TestCarrierColdTransferDialsThroughTheOperatorTrunk(t *testing.T) {
 	}
 }
 
-// T040 / specs/004 FR-011: everything the transfer path reads is in the startup
-// check, so a missing value fails by name rather than as a failed transfer on a
+// Everything the transfer path reads is in the startup check, so a missing
+// value fails by name rather than as a failed transfer on a
 // call somebody is paying for.
 func TestCarrierTransferValuesAreInTheStartupCheck(t *testing.T) {
 	bot := artifactFile(t, dailyCarrierArtifact(t, "twilio", true), "bot.py")

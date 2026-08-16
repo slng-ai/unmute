@@ -32,7 +32,7 @@ provider with different settings, for example `pipecat_twilio` and
 | Field | What it is |
 |---|---|
 | `provider` | `pipecat` or `livekit` |
-| `version` | the framework version pinned in the generated project |
+| `version` | the exact framework version pinned in the generated project, written as three numbers |
 | `pins` | extra package pins, name to version constraint |
 | `sdk_language` | `python` |
 | `connection` | the connection file that declares this target's phone route |
@@ -41,6 +41,27 @@ provider with different settings, for example `pipecat_twilio` and
 
 That is the whole list. A target says where the agent runs and, for a phone
 agent, which one connection carries the call.
+
+## Framework versions are exact
+
+Write all three numbers, such as `1.7.0`. Unmute installs exactly what the
+target declares. It never widens the pin or silently upgrades it for a feature.
+
+This Unmute release supports `livekit-agents` 1.5.0 through 1.6.10 and
+`pipecat-ai` 1.5.0 through 1.7.0. A newer version asks you to upgrade Unmute;
+an older version is refused. LiveKit warm transfers and MCP tool sources also
+need `livekit-agents` 1.6.0 or newer.
+
+## Deployment regions
+
+`deployment_region` accepts one region or a list. Pipecat accepts exactly one;
+deploying there again means another target and agent name. LiveKit emits one
+`lk agent create --region` command per declared region. A LiveKit region is
+chosen when the agent is created and cannot be changed in place.
+
+Region names use the platform's vocabulary and are forwarded as written. A
+model endpoint's region is separate and stays in that model's `params` or
+`endpoint_env`.
 
 ## models overrides
 

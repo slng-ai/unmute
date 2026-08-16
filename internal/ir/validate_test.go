@@ -863,8 +863,7 @@ func TestValidatePipecatMaturityGates(t *testing.T) { // driver-pipecat T1, C9
 	}
 }
 
-// TestValueChecksFailAtValidate walks all eight generator-only value checks
-// enumerated in specs/013-first-five-minutes/reproduction.md section E. Each one
+// TestValueChecksFailAtValidate walks all eight former generator-only value checks. Each one
 // let a package exit 0 from validate and 1 from compile, with a bare message
 // carrying no target prefix and no position, after validate had already said the
 // package was fine. The generators keep their own errors as a backstop; what
@@ -957,8 +956,8 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 			want: `livekit version "1.6" must be three numbers, for example "1.6.10"`,
 		},
 		{
-			// The sharpest of the eight: docs/SCHEMA.md 4.3 lists `voice` as
-			// required on every speak entry, so authoring a deepgram speak model
+			// The sharpest of the eight: `voice` is required on every speak entry,
+			// so authoring a deepgram speak model
 			// necessarily produced a package that validated green and could not
 			// compile.
 			name:     "speak voice with no slot",

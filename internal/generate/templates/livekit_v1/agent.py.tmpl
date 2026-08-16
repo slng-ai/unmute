@@ -69,7 +69,7 @@ it learns mid-call into the session userdata (variable_secrets_specs.md V6). */ 
         return "Saved: " + ", ".join(saved) if saved else "Nothing new to save."
 {{end -}}
 {{- /* prebuilt_list renders execution: builtin tools as SDK helper instances
-spread into the tools= kwarg (docs/spec/prebuilt-tools.md). */ -}}
+spread into the tools= kwarg. */ -}}
 {{define "prebuilt_list"}}{{range $i, $p := .}}{{if $i}}, {{end}}{{if eq $p.Builtin "end_call"}}*EndCallTool(extra_description={{pyq $p.Description}}{{if $p.Instructions}}, end_instructions={{pyq $p.Instructions}}{{end}}).tools{{end}}{{end}}{{end -}}
 {{- /* mcp_mounts renders an agent's/task's MCP tool sources (N40): one
 MCPToolset per source, on the tools surface. An absent field emits no argument,

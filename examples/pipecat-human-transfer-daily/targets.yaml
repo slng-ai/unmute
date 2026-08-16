@@ -1,6 +1,5 @@
-# Pipecat on the Daily route: the one Pipecat transport with a native
-# transfer primitive (docs/TRANSFERS.md). Cold transfer needs dial-out
-# enabled on the Daily domain.
+# Pipecat on the Daily route: the one Pipecat transport with a native transfer
+# primitive. Cold transfer needs dial-out enabled on the Daily domain.
 targets:
   pipecat:
     provider: pipecat

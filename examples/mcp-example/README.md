@@ -28,9 +28,10 @@ Four things worth noticing:
 
 - **The file is the block and nothing else.** No `description`, no `input`.
   The server describes its own tools when the connection opens, so writing a
-  contract here would be a claim nobody reads. This is
-  [SCHEMA.md](../../docs/SCHEMA.md) amendment N40, and an old-shape MCP file
-  now fails at load saying which lines to delete.
+  contract here would be a claim nobody reads. The
+  [MCP tools reference](../../docs-site/build/tools/mcp.mdx) describes this
+  contract, and an old-shape MCP file now fails at load saying which lines to
+  delete.
 - **The address and the token are environment variable names.** Never values.
   Both reach the generated `.env.example` and the generated startup check, so a
   missing one is named before the agent dials.

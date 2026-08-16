@@ -11,11 +11,14 @@ The tools use no network or durable storage; they are fixtures for local LiveKit
 and Pipecat runs. `salon-support`, `outbound-reminder`, and the telephony
 packages carry their own smaller tool sets.
 
+Use the [end-to-end example harness](E2E_HARNESS.md) when a change needs a real
+provider request and a human conversation, not only the automated checks.
+
 The telephony examples are **one per use case**: `twilio-telephony-hello` for inbound and
 outbound, `pipecat-human-transfer-twilio` for a cold transfer with nothing hosted,
 `livekit-human-transfer` for a warm transfer, and `pipecat-human-transfer-daily` for a
-Daily-provisioned number. Which Twilio route to pick is answered in
-[docs/TELEPHONY.md](../docs/TELEPHONY.md).
+Daily-provisioned number. The [telephony overview](../docs-site/telephony/overview.mdx)
+explains which Twilio route to pick.
 
 **Where a name starts with a provider, the provider is the point.** Putting a
 caller through to a person works differently on each platform (LiveKit does it over
@@ -37,8 +40,8 @@ neither, because it is about variables and secrets and happens to compile for bo
 | [`livekit-human-transfer`](livekit-human-transfer/) | One phone agent, two ways to reach a person | Cold transfer hands the caller off and the agent drops out; warm transfer holds the caller, briefs a supervisor, then bridges the two. **LiveKit only**, over a Twilio SIP trunk: warm transfer compiles on no other route today. |
 | [`pipecat-human-transfer-twilio`](pipecat-human-transfer-twilio/) | Cold transfer and inbound, with nothing hosted | The same salon on Pipecat Cloud, reached through your own Twilio number. Your number points at a small piece of static markup in the Twilio console; no server of yours is in the path. However the transfer ends, the caller comes back to a fresh agent, which is the trade for hosting nothing. |
 | [`pipecat-human-transfer-daily`](pipecat-human-transfer-daily/) | Cold transfer on a Daily-provisioned number | The same salon on Pipecat over Daily's own number, so there is no carrier account to set up at all. |
-| [`mcp-example`](mcp-example/) | One agent, one remote MCP server | **The MCP example.** A single tool file declares Firecrawl's MCP server, its transport, its bearer token, and the one tool of its own the agent may use; ask a question that needs current information and the agent searches the web. Browser only, both code targets, no telephony. Design in [SCHEMA.md](../docs/SCHEMA.md) N40. |
-| [`outbound-reminder`](outbound-reminder/) | One outbound agent using variables and secrets | **The secrets example.** Input variables from the dispatch, a system variable from the route, a conversation variable the model saves mid call, and both ways a secret reaches a tool: `url_env`/`token_env` on two webhook tools, and `os.environ` inside one local handler. Design in [SCHEMA.md](../docs/SCHEMA.md) sections 4.4 and 4.12. |
+| [`mcp-example`](mcp-example/) | One agent, one remote MCP server | **The MCP example.** A single tool file declares Firecrawl's MCP server, its transport, its bearer token, and the one tool of its own the agent may use; ask a question that needs current information and the agent searches the web. Browser only, both code targets, no telephony. See [MCP servers](../docs-site/build/tools/mcp.mdx). |
+| [`outbound-reminder`](outbound-reminder/) | One outbound agent using variables and secrets | **The secrets example.** Input variables from the dispatch, a system variable from the route, a conversation variable the model saves mid call, and both ways a secret reaches a tool: `url_env`/`token_env` on two webhook tools, and `os.environ` inside one local handler. See [variables](../docs-site/reference/variables.mdx) and [secrets](../docs-site/reference/secrets.mdx). |
 
 ## Compile an example
 

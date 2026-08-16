@@ -1064,8 +1064,8 @@ func checkSpeakRequiredFields(catalog targetcap.Catalog, provider targetcap.Prov
 		return
 	}
 	voice := cmp.Or(binding.Voice, binding.VoiceID)
-	// The sharpest of the eight generator-only checks: docs/SCHEMA.md §4.3 lists
-	// `voice` as required on every speak entry, so authoring a deepgram speak
+	// The sharpest of the eight former generator-only checks: `voice` is required
+	// on every speak entry, so authoring a deepgram speak
 	// model necessarily produced a package that validated green and could not
 	// compile. On such an entry the voice rides the model id instead.
 	if voice != "" && entry.Call != nil && entry.Call.Voice.Arg == "" {
@@ -1524,9 +1524,8 @@ func unusedConnectionWarning(agent *Agent) string {
 // It used to return early on an empty `secrets:` block, which tested the
 // **declaration** list: the package with the most to report — declares nothing,
 // references eight names — took the same early return as the package with
-// nothing to report, and lost the generated startup check as well. "Opt-in" in
-// docs/SCHEMA.md N24 is the reason the severity is a warning, not a reason to
-// skip the check, and under Principle IV the document wins. Its sibling
+// nothing to report, and lost the generated startup check as well. Opt-in
+// controls the warning severity, not whether the check runs. Its sibling
 // unusedConnectionWarning guards on the **subject** set, which is the correct
 // shape and was already in this file.
 func undeclaredSecretWarning(agent *Agent) string {

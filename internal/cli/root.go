@@ -74,9 +74,8 @@ func supportedFrameworks() string {
 func Execute(version string) int {
 	root := newRootCmd()
 	root.Version = version
-	// The first line's shape is pinned by
-	// specs/010-goreleaser-release-pipeline/contracts/version-output.md, so the
-	// frameworks line is appended after it rather than folded into it.
+	// The first line is a public CLI contract, so the frameworks line is appended
+	// after it rather than folded into it.
 	if line := supportedFrameworks(); line != "" {
 		root.SetVersionTemplate("{{.Name}} version {{.Version}}\n" + line + "\n")
 	}

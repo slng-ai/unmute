@@ -1,490 +1,162 @@
 <!--
 Sync Impact Report
 ==================
-Version change: 2.1.0 -> 3.0.0
-Bump rationale: MAJOR. A capability Principle V names is removed. `unmute dev
---console` no longer exists, so a contributor holding 2.1.0 would be wrong
-about what the dev command offers and wrong about how an author without Docker
-hears their agent. Nothing was added.
+Version change: 3.0.0 -> 4.0.0
+Bump rationale: MAJOR. Principle IV no longer makes a hand-written schema
+document the highest authority. Feature specs become ignored local work and
+the public documentation site becomes the only user-doc tree.
 
-Modified in 3.0.0:
-- Principle V: the `unmute dev` bullet loses the terminal mode. Docker is now
-  required for every local run, and the bullet says so.
+Modified in 4.0.0:
+- Principle III defines one owner for code facts, architecture, public usage,
+  contributor rules, and local planning.
+- Principle IV changes from "the document wins" to "the owner wins".
+- Workflow makes Spec Kit artifacts local and reduces the maintained emitted
+  behavior surfaces from five to four.
 
-Reason for the amendment: feature 015 removes `--console`. Two facts drove it.
-Upstream, livekit-agents deprecated its terminal mode, and the replacement is
-not a local-microphone session at all, so the LiveKit half of the flag was
-going to rot whatever we did. Locally, the uv path ran something production
-never runs, against the same principle's own rule that what you test is what
-you ship. The cost is real and is not hidden: an author with no Docker can no
-longer hear their agent at all. It was weighed against keeping a Pipecat-only
-terminal mode, which would have left two local paths with different runtimes
-and different failure modes, and rejected on that basis. See
-specs/015-upgrade-target-runtimes/plan.md Complexity Tracking.
-
---- 2.1.0 ---
-Version change: 2.0.0 -> 2.1.0
-Bump rationale: MINOR. Principle V's opening sentence fixed the command surface
-at four commands. It now says four commands take an author from nothing to a
-voice, and names `skill` as a command that sits outside that path. Nothing was
-removed and no existing rule changed meaning, so a contributor holding 2.0.0 is
-not wrong about anything, only missing one command.
-
-Modified in 2.1.0:
-- Principle V: opening sentence reworded; one bullet added for `unmute skill`,
-  stating what it must not do.
-
-Reason for the amendment: feature 011 ships an Agent Skills bundle inside the
-binary and needs a way to put it in a user's project. The alternatives were
-weighed in specs/011-coding-agent-skill/plan.md Complexity Tracking: a
-documented copy-paste breaks the offline, version-matched guarantee; a package
-registry adds a release surface and a network dependency; folding it into
-`unmute init` welds one-time setup onto package scaffolding and leaves no way
-to update later. What Principle V's sentence protects is that the path from
-nothing to a spoken agent is short and complete, and `skill` is not on that
-path.
-
---- 2.0.0 ---
-Version change: 1.1.0 -> 2.0.0
-Bump rationale: MAJOR. Requirements were removed from a principle, so a
-contributor holding v1.1.0 would be wrong about what this document mandates.
-Principle IV loses three bullets and Development Workflow loses one paragraph;
-that whole area is now deliberately out of scope of this document and governed
-elsewhere. Nothing was added, and no remaining rule changed meaning.
-
-Modified in 2.0.0:
-- Principle IV: three bullets removed. The document-ranking, amendment, and
-  verification rules are unchanged.
-- Development Workflow And Quality Gates: one paragraph removed; the wording of
-  the maturity paragraph adjusted to drop a dependent reference.
-
---- 1.1.0 ---
-Version change: 1.0.0 -> 1.1.0
-Bump rationale: MINOR. Adds the "Targets and providers" section to Technology
-And Boundary Constraints, fixing the implemented set in normative terms
-(pipecat and livekit ship; vapi and deepgram validate only; elevenlabs is not a
-target; slng never was; model vendors are catalogue entries under the two
-shipped drivers). No principle was removed or redefined.
-
-Modified in 1.1.0:
-- Principle III: added the vendor-is-not-a-target bullet.
-- Principle V: `validate` reach vs `compile`/`dev` reach made explicit.
-- Technology And Boundary Constraints: new "Targets and providers" subsection.
-- Governance, compliance review: reviewers check that a support claim states
-  validation or generation.
-
---- 1.0.0 (initial ratification) ---
-Version change: none (template placeholders) -> 1.0.0
-Bump rationale: initial ratification. The prior file was the unfilled core
-scaffold, so this is the first real adoption, not an amendment.
-
-Principles defined (all new):
-- I. Compile Ahead Of Time, Never Interpret At Runtime
-- II. Fail Loud, Never Average
-- III. One Source Of Truth Per Surface, Derived Not Copied
-- IV. The Document Wins
-- V. Whatever Compiles Can Be Spoken To
-
-Sections added:
-- Technology And Boundary Constraints (was [SECTION_2_NAME])
-- Development Workflow And Quality Gates (was [SECTION_3_NAME])
-- Governance (filled in)
-
-Sections removed: none.
-
-Sources read to derive this document: CLAUDE.md, docs/ARCHITECTURE.md,
-docs/SCHEMA.md, docs/TESTING.md, docs/REPO_MAP.md, docs/PROVIDER_CATALOG.md,
-docs/ORCHESTRATOR_SHARED_CONFIGURATION.md, docs/TELEPHONY.md,
-docs/DEPLOYMENT.md, docs/PRODUCTION_ROADMAP.md, all of docs/user/,
-Makefile, go.mod, .golangci.yml.
-
-Follow-up TODOs: none. No placeholder tokens remain.
+Reason: the old hierarchy required every behavior change to update both
+`docs/` and `docs-site/`. Those copies drifted. The repository now derives
+machine contracts from Go, keeps one architecture document, and writes public
+guidance once.
 -->
 
 # Unmute Constitution
 
-Unmute is a Go command line tool that compiles one declarative voice agent
-package into artifacts that a chosen voice orchestrator runs natively. The
-author writes what the agent should do, once. Unmute writes the LiveKit or
-Pipecat Python project that does it, then gets out of the way. This document
-holds the rules that decision creates, and they bind every change to this
-repository.
+Unmute is a Go compiler. It reads one voice-agent package and writes a native
+LiveKit or Pipecat project. These principles bind every change. Day-to-day
+commands and detailed gates live in `CLAUDE.md`.
 
 ## Core Principles
 
-### I. Compile Ahead Of Time, Never Interpret At Runtime
+### I. Compile Ahead of Time
 
-Unmute is a compiler, not a runtime layer. It MUST NOT sit between a generated
-agent and its platform at call time.
+Unmute MUST NOT sit in the generated agent's production call path.
 
-- Maintained runtime code in this repository MUST be Go. Python exists only as
-  `text/template` files under `internal/generate/templates`, as local tool
-  handlers copied from a package, and as generated output. This repository
-  MUST NOT gain a maintained Python package.
-- Every command that touches a package MUST run the same four stages in the
-  same order: `spec.Load` then `ir.Build` then `ir.Validate` then
-  `generate.Generate`. Validation is a gate, never a skippable warning, and
-  `Generate` MUST refuse to emit when any gated error is present.
-- A generated project MUST carry no Unmute dependency. It MUST be readable,
-  runnable, and deployable with Unmute absent.
-- `build/<target>/` is disposable and rewritten from scratch on every compile.
-  Authors change the source package and recompile; they never edit generated
-  files. Nothing in the repository may depend on a hand edit surviving there.
-- Portable behavior lives in the source package. Target mechanics live in one
-  driver each. A driver MUST NOT leak its vocabulary into `internal/spec` or
-  `internal/ir`.
-- Media, transcripts, prompts, model context, task state, and agent handoff
-  state MUST stay in the process running the call. Redis, where a route needs
-  it, holds only bounded, expiring control records.
+- Maintained runtime code in this repository is Go.
+- Python exists only in templates, copied local handlers, examples, and
+  generated output.
+- Package commands use the same flow: `spec.Load` -> `ir.Build` ->
+  `ir.Validate` -> `generate.Generate`.
+- Generated projects carry no Unmute runtime dependency.
+- `build/<target>/` is disposable. Authors edit the package and compile again.
+- Portable behavior belongs in the package. Target mechanics belong in one
+  driver per target.
+- Redis, where a route needs it, holds bounded control records only. Media,
+  transcripts, prompts, model context, task state, and handoff state stay in
+  the active process.
 
-Rationale: a runtime translation layer could only pass along what a platform
-already exposes, and it would ship Unmute into production forever. Owning the
-generated project is what lets a driver write a handoff guard, a typed task, or
-a transfer bridge around a framework's native primitives. It is also what makes
-the artifact the user's, not ours.
+### II. Fail Loud
 
-### II. Fail Loud, Never Average
+Unsupported behavior MUST fail before generation. Unmute MUST NOT silently
+drop it or replace it with a weaker behavior.
 
-When a target cannot honor something the package asked for, Unmute stops and
-says so, in that platform's own words. It MUST NOT drop the feature, and it
-MUST NOT substitute a weaker version to make things fit.
+- Strict decoding rejects unknown fields with file, line, and column.
+- A gated error names the failing target and uses that target's vocabulary.
+- Warnings go to stderr, keep exit 0, and never hide a downgrade.
+- Values forwarded without validation appear in the compile report.
+- A route with no real adapter fails closed.
+- Non-trivial behavior leaves one runnable check behind.
 
-- Every field carries one of four tags, and the tag decides the behavior:
-  `core` never fails; `warn` prints to stderr and exits 0 with the artifact
-  still valid; `gated` is a hard error before any artifact is written or any
-  request is sent; `provisional` fails on every target until a driver proves
-  it.
-- A gated error MUST name the failing target and quote that provider's own
-  vocabulary. With several resolved targets, validation fails if any one of
-  them rejects.
-- A field MUST NEVER silently do nothing. A warning is never a silent
-  downgrade, and a warning MUST NOT be promoted to a pass by hiding it.
-- Strict decoding is part of this rule. An unknown or misspelled field is an
-  error with file, line, and column. A field the schema moved MUST report the
-  new form and quote the offending line, never a bare "unknown field".
-- Values Unmute forwards without checking (model identities, `params`, a
-  `deployment_region`) MUST all appear in the compile report, so what was sent
-  is always inspectable.
-- Any known exception to this principle MUST be recorded in `docs/SCHEMA.md`
-  as a dated, numbered amendment that states the cost, rather than being left
-  implicit in the code. Tool `output` is the current recorded exception (N22).
+### III. One Owner per Surface
 
-Rationale: what passes validation has to be real, or the tool is worse than no
-tool. Averaging removes a feature everywhere so the agent is uniformly worse.
-Silent downgrade keeps the feature on paper and breaks it exactly where nobody
-is looking. Both trade a loud failure at `validate` for a quiet one in
-production, on a live phone call.
+Every repeated fact has one owner. Where a fact cannot be derived, an
+agreement test MUST fail on drift.
 
-### III. One Source Of Truth Per Surface, Derived Not Copied
+- `internal/spec` Go structs own the authoring schema.
+- `internal/ir` Go structs own the resolved and debug schema.
+- `internal/target` owns capabilities, route support, provider catalogue
+  entries, verification dates, and documentation URLs.
+- `internal/cli` owns commands, flags, usage, and exit behavior.
+- `docs/ARCHITECTURE.md` owns system boundaries, compiler flow, runtime
+  topology, and repository orientation.
+- `docs-site/` is the only public user-documentation tree.
+- `CLAUDE.md` owns contributor rules and required change surfaces.
+- `internal/skill/assets/` is a shipped offline product surface for coding
+  assistants building Unmute packages. Its agreement tests stay green.
+- `specs/` holds ignored local work in progress. A local spec can guide a
+  change, but it never outranks shipped code or tracked documentation.
 
-Every fact that two places need MUST have one home and be derived from it.
-Where derivation is impossible, an agreement test MUST fail on drift.
+Hand-authored JSON schemas and second capability tables are forbidden. All
+terminal color lives in `internal/style`.
 
-- Go structs are the schema source for their own surface. `internal/spec`
-  decode structs derive the unresolved authoring schema; `internal/ir` structs
-  derive the resolved and debug schema, both by reflection through
-  `google/jsonschema-go`. Hand authoring a `.json` schema file is forbidden.
-- `internal/target` is the single capability rulebook. Validation and every
-  generator MUST read it and MUST NOT keep a second description of what a
-  target supports. Telephony support resolves against the exact
-  `(orchestrator, transport, carrier)` route and feature, never against an
-  orchestrator or carrier brand alone. A second telephony capability table is
-  forbidden.
-- Provider integrations are typed Go `Entry` literals in
-  `internal/target/catalog_*.go`, one per `(framework, role, vendor)`. An entry
-  is a code slot, not an allowlist: it carries the class, import, install path,
-  argument shape, key env, a `Verified` date, and a `Docs` URL. It MUST NOT
-  carry model names, voice ids, or param schemas.
-- A catalogue vendor is a model provider, never a target. A vendor name is only
-  ever a `provider:` on a model entry, and adding one MUST NOT be read or
-  described as adding a target. The two words are kept apart on purpose, and
-  the current state of each is fixed below in Targets And Providers.
-- All color lives in `internal/style`. No color literal may appear anywhere
-  else, in the TUI or in the plain CLI output.
-- Wherever one fact is stated twice, an agreement test is mandatory. The
-  existing ones MUST stay green and MUST NOT be weakened: emitter against
-  capability table, TUI pickers against capability table, provider reference
-  docs against the catalogue, and the per-entry resolution golden.
+### IV. The Owner Wins
 
-Rationale: this repository has already been burned by duplication. Two merged
-pull requests of provider breadth were silently reverted by a refactor because
-nothing tied user visible options to `Catalog.Lookup`. A field can validate
-green while no emitter has a code path for it. Every one of those bugs is a
-second copy of a fact, and the fix is always the same shape: one home, or one
-test that fails.
+When two surfaces disagree, fix the surface that does not own the fact.
 
-### IV. The Document Wins
+- Code and derived checks win on package fields, validation, capabilities,
+  providers, commands, and emitted behavior.
+- The architecture document wins on system boundaries and compiler flow.
+- The documentation site wins on how users install, author, run, and deploy.
+- `CLAUDE.md` wins on repository workflow and quality gates.
+- Provider and framework claims use current official docs or upstream source
+  and carry a verification date when the repository records them.
 
-The design documents are normative, not descriptive. When code and a doc
-disagree, the doc wins: fix the code, or amend the doc deliberately.
-
-- `docs/SCHEMA.md` is the locked v1 authoring contract and outranks every
-  other document on what a field means and where it works. `docs/ARCHITECTURE.md`
-  owns system boundaries and the compiler flow.
-  `docs/ORCHESTRATOR_SHARED_CONFIGURATION.md` and `docs/PROVIDER_CATALOG.md`
-  hold research and reasons and yield to `SCHEMA.md`.
-- A change to the authoring surface MUST land as a numbered, dated amendment in
-  `docs/SCHEMA.md` that states whether the authoring shape changed and whether
-  existing packages fail strict decode. Amendments are appended, never
-  rewritten in place, and superseded ones stay as history.
-- Provider and framework claims MUST be verified against official
-  documentation or upstream source, never from model memory, and MUST carry the
-  verification date. An unverified claim stays gated.
-
-Rationale: the schema is a promise made to every package already written
-against it. Treating the document as the authority is what makes a promise
-auditable: a reader can see when a rule changed, why, and what it broke. Dated
-verification is the same discipline applied to facts we do not own, in a
-domain where four vendors ship breaking changes on their own schedule.
+This hierarchy replaces amendment ledgers in a hand-written schema file. Git
+history and local feature specs keep design history without making it a second
+active contract.
 
 ### V. Whatever Compiles Can Be Spoken To
 
-Four commands MUST take an author from nothing to a voice they can talk to.
-Any other command MUST stay off that path and MUST NOT be needed to reach it.
+Four commands take an author from nothing to a voice they can talk to:
+`init`, `validate`, `compile`, and `dev`.
 
-- `unmute init` scaffolds a v1 package. It MUST refuse to write into a
-  directory that already exists and is non-empty. Interactively it opens the
-  console, previews the candidate through the real load, build, and generate
-  path, and writes nothing until the author confirms.
-- `unmute validate` runs load, build, and validate and stops. It MUST work for
-  every declared provider whether or not that provider's driver ships, because
-  it reads the capability table and the catalogue rather than a driver. It
-  prints one result line per target and exits 1 if any target fails. This is
-  the only command whose reach is all four providers.
-- `unmute compile` runs validate then generates, writing each code target to
-  `build/<target>/`. One target instance produces one artifact directory and,
-  for telephony, exactly one carrier route. Generation reaches only the
-  providers with a shipped driver; the rest MUST fail by name.
-- `unmute dev` compiles and then runs the result so the author can speak to it:
-  in the browser (the default, running the same image production deploys) or
-  over a real phone (`--telephony`, the generated Compose graph). Both run
-  through Docker and Compose, so Docker is required to hear an agent locally,
-  and no local path runs anything production does not. It reaches exactly the
-  providers `compile` reaches.
-- `unmute skill` is off that path. It writes the coding-agent skill bundle into
-  a project and does nothing else. It MUST NOT read, write, or validate a
-  package, MUST NOT make a network call, and MUST NOT be a step anyone has to
-  take before `init`, `validate`, `compile`, or `dev`. An author who never runs
-  it loses nothing.
-- What you test MUST be what you ship. A scaffolded instance is named after its
-  provider with no environment suffix, and web dev mode runs the deployable
-  image rather than a separate host path.
-- Local input MUST stand in for production input rather than diverging from it.
-  `--var name=value` seeds exactly the `source: call_start` variables that
-  dispatch metadata carries in production, and every flag is checked against
-  the declared name and type before anything compiles or starts.
-- Local development MUST leave borrowed external state as it found it. Every
-  outward facing change a dev run makes has an undo that runs on every exit
-  path, `ctrl-c` included, and an opt out flag for state the run must not
-  touch.
+- `init` refuses to overwrite a non-empty directory.
+- `validate` loads, builds, and validates without writing an artifact.
+- `compile` validates before writing one artifact directory per target.
+- `dev` runs the generated project in Docker for browser or telephony use.
+- `skill` is outside this path. It installs the offline coding-agent bundle
+  and MUST NOT read, write, or validate an agent package.
+- Local input stands in for production input instead of creating another
+  behavior path.
+- Local development restores borrowed external state on every exit path.
 
-Rationale: a compiler for voice agents that cannot be heard is unfinished. The
-gap this closes is the usual one between a green build and a working call, and
-it closes only if the local path runs the real artifact with real input. The
-undo rule exists because a dev run that rewrites a live phone number's webhook
-and walks away breaks a real phone line, and the failure never reaches the logs
-of the person who caused it.
+## Technology and Boundaries
 
-## Technology And Boundary Constraints
+- Go is pinned in `go.mod`; binaries are static with version data stamped at
+  link time.
+- Direct dependencies stay limited to the modules listed in `CLAUDE.md`.
+  Standard library code wins when it is enough.
+- Cobra commands use a fresh `newRootCmd()`, `RunE`, command output writers,
+  wrapped errors, and no process exit outside `main.go`.
+- `internal/`, not `pkg/`; one file per command under `internal/cli/`.
+- Go structs derive schemas. Do not hand-write schema JSON.
+- Secret values appear in no package, generated file, or report.
+- Targets and model vendors are different concepts. Pipecat and LiveKit have
+  shipped drivers; validation may cover more targets than generation.
+- Unmute does not buy phone numbers or provision carrier-side applications or
+  SIP trunks.
 
-**Targets and providers.** A **target** is an orchestrator a package can compile
-to, named by `provider:` in `targets.yaml`. A **provider** on a model entry is a
-**vendor**, a code slot in the catalogue. These are different things with an
-overlapping word, and no document, error message, or commit may blur them.
+## Development Workflow and Gates
 
-There are exactly four target providers, and `ir.Provider` MUST hold exactly
-these four values. Two of them have a driver:
+- Feature work uses the Spec Kit flow: specify, plan, tasks, implement.
+- Feature artifacts live under ignored `specs/`. Codex-managed worktrees copy
+  the local snapshot through `.worktreeinclude`; worktrees do not synchronize
+  it afterward.
+- The required gate is `make test` (`go test -race ./...`) with zero Python.
+- Also run `make fmt`, `make lint`, and `make build`. Run `make smoke` when the
+  change touches emitted Python or pinned provider SDK behavior.
+- Repository hygiene checks inspect `git ls-files`, not untracked build output.
+- Golden files change only after an intentional output change and their diffs
+  are read before completion.
+- Checked-in Python passes `ruff check .`; run `ty check` when provider SDKs
+  are installed.
 
-| Target provider | Kind | State |
-|---|---|---|
-| `pipecat` | code target | Shipped. `bot.py` project, generated and runnable. |
-| `livekit` | code target | Shipped. `agent.py` project, generated and runnable. |
-| `vapi` | managed target | Validates only. No driver. |
-| `deepgram` | code target (session bridge) | Validates only. No driver. |
+A user-visible emitted behavior change updates the surfaces it reaches:
 
-Rules that follow, and none of them may be softened to make a doc read better:
+1. the generated README or emitted runbook;
+2. the relevant example README;
+3. the relevant `docs-site/` page;
+4. the shipped coding-agent skill.
 
-- **Only Pipecat and LiveKit are implemented.** They are the only providers that
-  `compile` and `dev` can serve. Vapi and Deepgram MUST fail with
-  `<provider> driver is not implemented`, and that failure MUST stay loud rather
-  than degrading to a warning or an empty artifact.
-- **Validation is deliberately wider than generation.** All four providers
-  validate, because portability has to be checkable before an author commits to
-  a platform. A capability row, a schema tag, or a `docs/` table for Vapi
-  or Deepgram is therefore normal and correct, and it MUST NOT be read as a
-  claim that the provider compiles.
-- **Any statement of support MUST say which of the two it means.** Writing that
-  a feature "works on Deepgram" without saying it means validation only is a
-  defect in the document, not a shorthand.
-- **ElevenLabs is not a target.** It was removed from the target set on
-  2026-07-20 (SCHEMA N17), along with its driver, its target catalogue, the
-  `region` and `edition` instance fields, and the `unmute apply` command. A
-  `targets.yaml` naming it MUST fail loudly. It survives only as a model vendor,
-  below. Reintroducing it as a target requires a schema amendment, not a patch.
-- **SLNG is not a target either.** It has never been a `Provider` value in v1.
-  It is the model vendor the `unmute init` scaffold binds by default, through
-  `pipecat-slng` and `livekit-plugins-slng`, which is a starting point and never
-  a constraint.
-- **Model vendors are catalogue entries only, and they are Pipecat and LiveKit
-  only.** `slng`, `elevenlabs`, `deepgram`, `cartesia`, `openai`, and the rest
-  live as `Entry` literals in `catalog_pipecat.go` and `catalog_livekit.go`.
-  Their breadth belongs to the two shipped drivers. `catalog_deepgram.go` holds
-  call-less allowlist rows that feed validation and emit no code, which is what
-  a catalogue for a driverless target looks like. `deepgram` and `elevenlabs`
-  each appear on both sides of the target-versus-vendor line, and that is not a
-  contradiction: the vendor entry is a shipped code slot, the target is not
-  shipped at all.
-- **`apply` does not exist.** The managed-target apply path retired with
-  ElevenLabs and returns with the next managed driver. Nothing may document,
-  print, or reference it as an available command until then.
-- **A driver landing is what changes this table**, and it changes it in one
-  commit that includes the driver, its capability rows, its emitter agreement
-  test, its goldens, its target page, and this section.
-
-**Language and build.** Go 1.24, pinned in `go.mod`. Binaries are
-`CGO_ENABLED=0` static builds with the version stamped at link time through
-`-ldflags`, never hardcoded. Maintained Go code MUST use only standard library
-APIs available at the module's `go` directive; the `go vet ./...` gate runs the
-`stdversion` analyzer and fails on a newer API before merge.
-
-**Dependencies.** Direct dependencies are `spf13/cobra`, `goccy/go-yaml` (for
-line and column on parse errors), `google/jsonschema-go` (pin the exact v0.x
-and bump deliberately), and the Charm stack: `bubbletea`, `bubbles`, and
-`lipgloss` for the interactive console, with `charmbracelet/huh` scoped to the
-accessible and headless renderer only. The interactive path MUST import no
-`huh`. Everything else is standard library. No new dependency for what a few
-lines of stdlib do, and any addition MUST be justified in the pull request. No
-`viper` until a real global config file exists.
-
-**Command rules.** These are what make commands testable, not style
-preferences. Build the tree with a `newRootCmd()` constructor and no
-package level `rootCmd`, so each call gets flag isolation. Use `RunE`, never
-`Run`. Write through `cmd.OutOrStdout()` and `cmd.ErrOrStderr()`; a stray
-`fmt.Println` is invisible to tests and is a bug. No `os.Exit` or `log.Fatal`
-inside a command: return errors wrapped with `%w`. `os.Exit` lives only in
-`main.go`. The root sets `SilenceUsage` and `SilenceErrors`. Exit codes are 0
-for success and 1 for error; add another only when a consumer actually reads
-it. Warnings go to stderr and still exit 0.
-
-**Layout.** `internal/`, not `pkg/`. One file per command in `internal/cli/`.
-Cobra commands are hand written; the `cobra-cli` generator is not used.
-`internal/target` stays a leaf package so both `ir` and `generate` can import
-it without a cycle.
-
-**Secrets.** No secret value appears in any package file, any generated file,
-or any report. Packages carry environment variable names only, in
-`UPPER_SNAKE`, so a pasted URL or token fails validation instead of becoming a
-lookup that fails at call time. A declared `secrets:` block drives each build's
-`.env.example` and a startup check that names a missing value. Secrets MUST NOT
-flow through `{{...}}` templates: every template site renders into something
-spoken, prompted, traced, or logged. They reach a call only through `*_env`
-slots, the generated auth helpers, and `os.environ` in a local handler. The
-loader never reads a named environment value.
-
-**Naming and types.** All names are lowercase `snake_case`; a leading
-underscore is reserved by providers and rejected. Tools and controls share one
-namespace. Durations use Go syntax (`90s`, `15m`, `1h30m`). Variables and task
-result fields are the four primitives plus enums, because that is the real
-cross provider common ground.
-
-**Derived, never declared.** Machine sizes, replica counts, and GPU counts
-appear in no package file. They are derived from declared `capacity` and
-printed in the report, marked `unbenchmarked` until a dated coefficient exists.
-
-**Generated Python.** Emitted Python is checked with `ruff` where available and
-proven valid by the opt in smoke layer. Any Python written or edited by hand in
-this repository, including examples and snippets, MUST be checked with `ty` and
-`ruff`.
-
-**Telephony boundary.** Unmute never provisions carrier side resources: it does
-not buy numbers and does not create carrier applications or carrier SIP trunks.
-It automates only Unmute owned local development state, restorably. A route
-ships only with a real generated adapter; a route with no adapter fails closed
-before an artifact exists. Public ingress, TLS, Redis, scaling, and secret
-storage stay with the operator.
-
-**Voice.** Documents and replies use plain, simple wording.
-
-## Development Workflow And Quality Gates
-
-**The gate.** Five targets, in this order: `make fmt`, `make lint`,
-`make build`, `make test`, `make smoke`. `make test` is the required gate and
-MUST pass with zero Python. `make smoke` is opt in, needs `uv`, and MUST NOT
-enter the default suite or the pull request gate; it skips rather than fails
-when `uv` is absent. Credentialed carrier smokes are opt in and never enter the
-pull request gate either.
-
-**The four test layers.** L1 unit tests are pure, table driven logic. L2 runs
-commands in process against the real cobra tree with output captured, and is
-the seam that makes the interactive console testable through its accessible
-renderer with no TTY. L3 pins generated bytes in golden files. L4 smoke proves
-emitted Python against pinned upstream packages by installing, importing, and
-instantiating it, which is the only layer that catches constructor drift in a
-vendor SDK.
-
-**Golden files.** Regenerate only after an intentional output change, then read
-the diff before committing. Update flags are per package and deliberate
-(`-update`, `-update-pipecat`, `-update-catalog`). A golden that iterates the
-catalogue means a new entry cannot dodge coverage.
-
-**Checks that must exist.** Non trivial logic leaves one runnable check behind:
-the smallest thing that fails if the logic breaks. A repository hygiene rule
-about what is committed MUST be written against `git`, not the working tree, so
-that compiling an example locally cannot turn the suite red.
-
-**Adding a provider.** Verify the upstream surface against current docs or
-source. Append one catalogue entry with its `Verified` date and `Docs` URL.
-Refresh the resolution golden and read the diff. Run the catalogue invariants.
-Extend a smoke fixture when the entry introduces a new constructor shape.
-Update the Models pages under `docs-site/models/`, which a sync test checks in
-both directions. No driver code, no template edits, no validation edits.
-
-**Maturity is tracked, not hidden.** A driver may lag the schema: a feature can
-be real on a platform and not yet emitted by its driver. Those gates fail
-validation by name and lift when the driver emits it. A telephony route
-that runs but has no automated credentialed smoke is `provisional`, which is
-internal maturity tracking recorded in `compile-report.json` and never printed
-as a runtime warning. Neither state may be presented as more proven than it is.
+Update architecture only for a real boundary, compiler-stage, or runtime-
+topology change.
 
 ## Governance
 
-This constitution governs how work is done in this repository and supersedes
-habit and precedent. It does not outrank the design documents on design facts:
-where this document and a document named in Principle IV disagree about what a
-field means or where it works, that document wins for that fact, and this
-constitution wins on process.
+- Amendments state what changes, why, and what contributors must do
+  differently.
+- MAJOR removes or redefines a principle; MINOR adds one; PATCH clarifies.
+- A new dependency, abstraction, interface with one implementation, or config
+  knob needs a concrete reason. Without one, do less.
+- Rules added to `CLAUDE.md` need a failing gate or the label `(advisory)`.
 
-**Amendment procedure.** An amendment is a pull request that states what
-changes, why, and what existing packages or contributors must do differently.
-It MUST update the version line and prepend the Sync Impact Report at the top
-of this file. An amendment that changes a principle MUST also name the
-documents, tests, or commands that now have to change with it.
-
-**Versioning policy.** This document is versioned MAJOR.MINOR.PATCH.
-MAJOR for removing or redefining a principle in a way that invalidates
-existing practice. MINOR for adding a principle or materially expanding
-guidance. PATCH for clarifications, wording, and non semantic refinement.
-
-**Compliance review.** Every pull request MUST pass `make fmt`, `make lint`,
-`make build`, and `make test`. A pull request that changes the authoring
-surface MUST, in the same change, amend `docs/SCHEMA.md` with a numbered dated
-amendment and update the derived schemas, the capability table, the agreement
-tests, the scaffold templates, the interactive console, the in repository
-examples and fixtures, and `docs-site/`. Reviewers check that a new field
-cannot validate green on a target whose emitter has no code path for it, that a
-new fact does not create a second copy of an existing one, and that any claim
-of provider support says whether it means validation or generation, per Targets
-And Providers.
-
-**Complexity must be justified.** A new dependency, a new abstraction, an
-interface with one implementation, or a config knob for a value that never
-changes each need a stated reason in the pull request. Absent that reason, the
-answer is no. Deliberate simplifications are marked in code so that simple
-reads as intent rather than oversight, and a shortcut with a known ceiling
-names the ceiling and the upgrade path.
-
-**Runtime guidance.** `CLAUDE.md` holds the day to day engineering rules and
-`docs/REPO_MAP.md` points at the load bearing files. Both are subordinate to
-this document and to the documents in Principle IV.
-
-**Version**: 3.0.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-16
+**Version**: 4.0.0 | **Ratified**: 2026-08-12 | **Last Amended**: 2026-08-16

@@ -1104,7 +1104,7 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 // TestLiveKitV1BuiltinEndCallTool covers the prebuilt end_call lowering:
 // the beta EndCallTool import, its construction with the mapped params in the
 // agent's super().__init__(tools=...), and that it is NOT a @function_tool
-// method (docs/spec/prebuilt-tools.md V7).
+// method.
 func TestLiveKitV1BuiltinEndCallTool(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestV43ColorsComeFromTokenTable(t *testing.T) { // docs/spec/tui.md V43
+func TestV43ColorsComeFromTokenTable(t *testing.T) {
 	if Accent != "#FBE566" {
 		t.Fatalf("accent = %q, want #FBE566", Accent)
 	}
@@ -14,13 +14,13 @@ func TestV43ColorsComeFromTokenTable(t *testing.T) { // docs/spec/tui.md V43
 	}
 }
 
-func TestV43WarnIsNotBrandYellow(t *testing.T) { // docs/spec/tui.md V43
+func TestV43WarnIsNotBrandYellow(t *testing.T) {
 	if Warn == Accent {
 		t.Fatalf("warn %q must differ from brand accent %q", Warn, Accent)
 	}
 }
 
-func TestV43NoColorEmitsNoEscapes(t *testing.T) { // docs/spec/tui.md V43
+func TestV43NoColorEmitsNoEscapes(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	for _, s := range []string{Badge("SLNG//"), Accented("hero"), Dim("meta")} {
 		if strings.ContainsRune(s, '\x1b') {

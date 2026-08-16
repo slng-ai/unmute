@@ -1,7 +1,7 @@
 # The (pipecat, daily-sip, twilio) carrier form, as a fixture.
 #
-# This package exists because feature 007 removed the public example that used to
-# carry this route (specs/007-pipecat-native-websocket FR-016): the route keeps
+# This package preserves coverage for a route that should not be a public
+# recommendation: the route keeps
 # its code, its capability rows, and its guards, and stops shipping an example
 # that would recommend it over the route with nothing to host. Everything the
 # route's tests need is here.

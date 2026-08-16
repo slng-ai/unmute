@@ -1,6 +1,6 @@
 # Unmute CLI
 
-Go CLI that compiles a declarative voice-agent spec into orchestrator-native artifacts. Full design in `docs/ARCHITECTURE.md`; the locked authoring contract in `docs/SCHEMA.md`; per-feature specs in `specs/<nnn>-<slug>/` (GitHub Spec Kit); a get-around guide in `docs/REPO_MAP.md`. **When code and a doc disagree, the doc wins — fix the code or open an issue.**
+Go CLI that compiles a declarative voice-agent spec into orchestrator-native artifacts. `docs/ARCHITECTURE.md` explains the design and points at the load-bearing code. Go structs and `internal/target` own machine behavior; `docs-site/` is the public user guide. Local feature work lives in ignored `specs/<nnn>-<slug>/` directories.
 
 ## Voice contracts
 While writing documents or speaking with the user, always use a simple language and simple wording. 
@@ -28,6 +28,7 @@ Go structs are the schema source for their own surface: `internal/spec` derives 
 `make test` (`go test -race ./...`) runs L1–L3 and needs **zero Python**:
 - L1 unit (pure logic, table-driven) · L2 in-process command tests (real tree, capture output) · L3 golden files (`-update` to regenerate).
 - L4 smoke (`make smoke`, build tag `smoke`) proves emitted Python is valid — opt-in, needs Python, never in the default suite or PR gate.
+- [`examples/E2E_HARNESS.md`](examples/E2E_HARNESS.md) is the manual harness for real end-to-end conversations across the examples.
 
 ## A rule with no gate is a wish
 Standards here are not taste, they are things CI or a test can fail on. Writing a new rule into this file means wiring its check in the same PR, or tagging it `(advisory)` so it reads as guidance instead of law.
@@ -52,15 +53,14 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 
 Ratchet only: a gate that starts failing gets the **code** fixed, not the gate loosened. A disabled check carries its reason inline, the way `.golangci.yml` explains every `errcheck` exclusion and every `forbidigo` pattern, and the single `//nolint` in the tree explains itself at the call site in `main.go`. One rule is still advisory: `ty check` over the examples, because every finding it has today is an unresolved `pipecat`/`livekit` import, and installing those SDKs is `make smoke`'s job.
 
-## Five places document a change, not one
-The generated `build/<target>/README.md` is the runbook, and almost nobody reads it before they have already read the example's page and `docs/`. So **any change to emitted behaviour updates all five in the same commit**:
+## Four places document emitted behaviour
+The generated `build/<target>/README.md` is the runbook, and almost nobody reads it before they have already read the example's page or the public docs. So **a change to emitted behaviour updates every surface it reaches in the same commit**:
 1. the emitted README template,
 2. the source example's own `README.md` under `examples/`,
-3. the relevant page in `docs/`,
-4. the relevant page in `docs-site/`, which is the public answer a reader lands on,
-5. **the skill** in `internal/skill/assets/`, which is what a coding assistant reads before it writes a package.
+3. the relevant page in `docs-site/`, which is the public answer a reader lands on,
+4. **the skill** in `internal/skill/assets/`, which is what a coding assistant reads before it writes a package.
 
-A fact that is only true in generated output is a fact the reader never sees, and a feature the skill does not know about is a feature no coding agent will use. Tests hold the parts that can be held: `internal/generate/examples_test.go` (every example README names every `transport` its targets declare, and every link into `examples/` resolves), `internal/skill/agreement_test.go` (the skill's tool kinds, vendors, providers, and documentation pointers all match the code), and `internal/cli/skill_bundle_test.go` (every command and flag the skill names exists). Prose can still rot, so read the example page before you claim you are done.
+A fact that is only true in generated output is a fact the reader never sees, and a feature the skill does not know about is a feature no coding agent will use. `docs/ARCHITECTURE.md` changes only when a system boundary, compiler stage, or runtime topology changes. Tests hold the parts that can be held: `internal/generate/examples_test.go` (example routes and links), `internal/skill/agreement_test.go` (the skill's factual lists), and `internal/cli/skill_bundle_test.go` (the commands and flags the skill names). Prose can still rot, so read the example page before you claim you are done.
 
 ## Layout
 `internal/` not `pkg/`. One file per command in `internal/cli/`. Hand-write cobra commands — **no `cobra-cli` generator**.
@@ -79,5 +79,5 @@ For complex or long-running tasks, use subagents by default when the work can be
 
 ## Skills
 - Ponytail for writing great code
-- GitHub Spec Kit for SDD (spec driven development) on any feature work: `/speckit-specify` → `specs/<nnn>-<slug>/spec.md`, then `/speckit-plan`, `/speckit-tasks`, `/speckit-implement`. Specs live in `specs/`, never in `docs/`.
+- GitHub Spec Kit for SDD (spec driven development) on any feature work: `/speckit-specify` → local `specs/<nnn>-<slug>/spec.md`, then `/speckit-plan`, `/speckit-tasks`, `/speckit-implement`. `specs/` is ignored. `.worktreeinclude` copies the local snapshot into new Codex-managed worktrees; copies do not synchronize afterward.
 - find-docs skill to use context7 cli for searching docs

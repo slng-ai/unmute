@@ -827,8 +827,8 @@ func TestBuildDoesNotEchoAPastedConnectionValue(t *testing.T) {
 	}
 }
 
-// TestUnreachableControlIsRefused walks every row of the reachability table in
-// specs/013-first-five-minutes/data-model.md. A package declares things and
+// TestUnreachableControlIsRefused walks every row of the control reachability
+// table. A package declares things and
 // attaches things; anything declared and never attached is an error, with one
 // carve-out. Before this check, every row below compiled at exit 0 and the
 // declaration simply never reached the generated project (reproduction.md A).
@@ -905,8 +905,8 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 			want: `agent "specialist" is declared but the entry agent "intake" cannot reach it`,
 		},
 		{
-			// docs/SCHEMA.md:287 calls the models map "a palette: entries that
-			// nothing currently references are legal". That wording is scoped to
+			// The models map is a palette: entries that nothing currently references
+			// are legal. That rule is scoped to
 			// models: and to nothing else, so the fix must not widen it.
 			name: "unreferenced models entry stays legal",
 			mutate: func(pkg *packagespec.Package) {
@@ -986,8 +986,8 @@ func enableTelephony(pkg *packagespec.Package) {
 	}
 }
 
-// TestBuildResolvesPipecatCloudWebsocketPlan walks every row of the guard table
-// in specs/007-pipecat-native-websocket/data-model.md section 2, plus the SIP-key
+// TestBuildResolvesPipecatCloudWebsocketPlan walks every row of the route guard
+// table, plus the SIP-key
 // refusal. The row that matters most is the first: on this route a package that
 // only *receives* calls needs no connection at all, because the platform receives
 // the call without credentials (SCHEMA N38).

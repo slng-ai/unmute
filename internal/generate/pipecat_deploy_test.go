@@ -10,8 +10,7 @@ import (
 )
 
 // The Pipecat artifact has to be deployable with `pipecat cloud deploy` as the
-// generated README prints it. Contract:
-// specs/001-livekit-cloud-deploy/contracts/artifacts.md.
+// generated README prints it.
 
 // pipecatArtifact carries one local tool, and that is the point. The fixture
 // used to have none, so TestPipecatImageMeetsThePlatformContract asserted the

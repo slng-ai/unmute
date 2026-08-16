@@ -10,8 +10,8 @@ import (
 )
 
 // ui themes CLI output through a per-writer lipgloss renderer, so the same code
-// is colored on a terminal and plain on a pipe or a test buffer (docs/spec/tui.md
-// C18, V48). Color also drops under NO_COLOR. All color comes from internal/style.
+// is colored on a terminal and plain on a pipe or a test buffer. Color also
+// drops under NO_COLOR. All color comes from internal/style.
 type ui struct{ r *lipgloss.Renderer }
 
 func newUI(w io.Writer) ui { return ui{r: lipgloss.NewRenderer(w)} }

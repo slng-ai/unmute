@@ -11,7 +11,7 @@ var updateGolden = flag.Bool("update", false, "update golden frame files")
 
 // TestV49ConsoleFrameGolden pins the composed console frame at 80x24 under a
 // NO_COLOR profile, so the whole layout (header badge, sidebar tree, editor,
-// footer) is a deterministic snapshot (docs/spec/tui.md V44, V49).
+// footer) is a deterministic snapshot.
 func TestV49ConsoleFrameGolden(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	req := fieldReq{

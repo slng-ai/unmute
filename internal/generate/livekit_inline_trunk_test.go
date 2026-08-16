@@ -13,9 +13,8 @@ import (
 )
 
 // A generated LiveKit project dials out with the carrier's own trunk settings,
-// passed inline with every call, and uses no stored LiveKit outbound trunk
-// (SCHEMA N33, 2026-08-12). These assertions are the contract in
-// specs/002-inline-sip-trunk/contracts/, held here because the failure they
+// passed inline with every call, and uses no stored LiveKit outbound trunk.
+// These assertions stay here because the failure they
 // prevent only shows up on a live call: on 2026-08-12 a deployed agent held a
 // full conversation and then raised, from inside the prebuilt's constructor,
 // "`LIVEKIT_SIP_OUTBOUND_TRUNK` environment variable, `sip_trunk_id`, or

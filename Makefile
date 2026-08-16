@@ -1,6 +1,5 @@
 # The same three variables .goreleaser.yaml stamps, so `make build` and a real
-# release print the same shape. See specs/010-goreleaser-release-pipeline/
-# contracts/version-output.md. Nothing here reads the wall clock: `date` is the
+# release print the same shape. Nothing here reads the wall clock: `date` is the
 # commit date, which keeps repeat builds byte-identical.
 VERSION = $(shell git describe --tags --always 2>/dev/null || echo dev)
 COMMIT  = $(shell git rev-parse --short HEAD 2>/dev/null)

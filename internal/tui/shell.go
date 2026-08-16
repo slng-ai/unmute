@@ -12,8 +12,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// The interactive console is a custom Bubble Tea MVU program (docs/spec/tui.md
-// C4). The screen flow runs as ordinary blocking Go code in a goroutine
+// The interactive console is a custom Bubble Tea MVU program. The screen flow
+// runs as ordinary blocking Go code in a goroutine
 // (fieldRunner); it hands the model one field at a time over a channel and waits
 // for the answer. The model owns the alt-screen, the SLNG chrome, and the field
 // components. huh renders only the accessible/headless path (run, in tui.go).
