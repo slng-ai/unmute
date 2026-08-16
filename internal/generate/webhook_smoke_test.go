@@ -8,13 +8,10 @@ import (
 	"github.com/slng-ai/unmute/internal/ir"
 )
 
-// L4 smoke for the webhook side of the variables surface. The other smoke test
-// exercises the helpers; this one proves the whole request: it stands up a real
-// HTTP server in-process, points the tool's url_env at it, calls the emitted
-// tool, and asserts on what the server actually received — the rendered and
-// URL-encoded path, the injected body values, and the bearer header read from
-// token_env. It also proves the refusal keeps a request off the wire entirely,
-// by counting requests across a refused call and an allowed one.
+// L4 smoke for the webhook side of the variables surface. The public outbound
+// example uses self-contained Python tools, so these tests rewrite its resolved
+// tools to webhooks in memory. They then prove the full request against a real
+// in-process HTTP server without making the live example depend on an API.
 //
 // Nothing external is contacted: the server is a stdlib handler on 127.0.0.1.
 
@@ -121,7 +118,7 @@ print("pipecat webhook ok:", captured["path"], captured["body"], captured["auth"
 `
 
 func TestSmokePipecatWebhookSendsInjectedBodyPathAndToken(t *testing.T) {
-	runPipecatSmokeScript(t, "outbound-reminder", nil, nil, pipecatWebhookSmokeScript)
+	runPipecatSmokeScript(t, "outbound-reminder", nil, useWebhookTools, pipecatWebhookSmokeScript)
 }
 
 const livekitWebhookSmokeScript = echoServerPreamble + `
@@ -171,7 +168,7 @@ print("livekit webhook ok:", captured["path"], captured["body"], captured["auth"
 `
 
 func TestSmokeLiveKitWebhookSendsInjectedBodyPathAndToken(t *testing.T) {
-	runLiveKitSmokeScript(t, "outbound-reminder", nil, nil, livekitWebhookSmokeScript)
+	runLiveKitSmokeScript(t, "outbound-reminder", nil, useWebhookTools, livekitWebhookSmokeScript)
 }
 
 // The api_key scheme is the other half of SCHEMA §5.3 and no example uses it, so
@@ -253,16 +250,30 @@ func TestSmokeLiveKitAPIKeySchemeAndStartupCheck(t *testing.T) {
 	runLiveKitSmokeScript(t, "outbound-reminder", nil, useAPIKeyAuth, livekitAPIKeySmokeScript)
 }
 
-// useAPIKeyAuth switches the fixture's webhook auth to the api_key scheme, the
-// one no shipped example declares.
+// useWebhookTools keeps webhook generation covered without making a public
+// example depend on a private service.
+func useWebhookTools(agent *ir.Agent) {
+	for name, path := range map[string]string{
+		"confirm_appointment":    "/customers/{{customer_id}}/appointments/confirm",
+		"reschedule_appointment": "/customers/{{customer_id}}/appointments",
+	} {
+		tool := agent.Tools[name]
+		tool.Execution = ir.ToolWebhook
+		tool.Handler, tool.HandlerSource = "", ""
+		tool.URLEnv, tool.Path = "SALON_API_URL", path
+		tool.Auth = &ir.ToolAuth{Type: ir.ToolAuthBearer, TokenEnv: "SALON_API_TOKEN"}
+		agent.Tools[name] = tool
+	}
+	agent.Secrets = append(agent.Secrets, "SALON_API_URL", "SALON_API_TOKEN")
+}
+
+// useAPIKeyAuth switches the synthetic webhook fixture to the other supported
+// auth scheme.
 func useAPIKeyAuth(agent *ir.Agent) {
-	for name, tool := range agent.Tools {
-		if tool.Auth == nil {
-			continue
-		}
-		tool.Auth = &ir.ToolAuth{
-			Type: ir.ToolAuthAPIKey, TokenEnv: tool.Auth.TokenEnv, Header: ir.DefaultAPIKeyHeader,
-		}
+	useWebhookTools(agent)
+	for _, name := range []string{"confirm_appointment", "reschedule_appointment"} {
+		tool := agent.Tools[name]
+		tool.Auth = &ir.ToolAuth{Type: ir.ToolAuthAPIKey, TokenEnv: "SALON_API_TOKEN", Header: ir.DefaultAPIKeyHeader}
 		agent.Tools[name] = tool
 	}
 }

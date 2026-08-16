@@ -1,6 +1,6 @@
 ---
 title: "Python tools"
-description: "A handler of your own in the package: what it receives, what it returns, and how it reaches a credential."
+description: "A handler of your own in the package: what it receives, what it returns, and where it is copied."
 ---
 
 Some tools need code rather than a request. Write the function in your package and
@@ -21,32 +21,24 @@ output:
   properties:
     cancelled:
       type: boolean
-    reference:
+    customer_id:
       type: string
   required:
     - cancelled
+    - customer_id
 
 local:
   handler: tools/cancel_appointment.py
 ```
 
 ```python tools/cancel_appointment.py
-import hashlib
-import hmac
-import os
-
-
 def cancel_appointment(customer_id):
-    key = os.environ["SALON_API_SIGNING_KEY"].encode()
-    body = f"cancel:{customer_id}".encode()
-    signature = hmac.new(key, body, hashlib.sha256).hexdigest()
-    return {"cancelled": True, "reference": signature[:12]}
+    return {"cancelled": True, "customer_id": customer_id}
 ```
 
-Both files are real, from `examples/outbound-reminder`. It is the one tool in that
-package that is not a webhook, and the reason is the credential: cancelling needs
-a signed request, and webhook `auth` only speaks bearer and API key, so the
-handler signs it itself.
+Both files are real, from `examples/outbound-reminder`. All three appointment
+outcomes in that package are local fixtures so its live test can focus on the
+outbound phone call without a separate booking service.
 
 ## The rules the function follows
 
@@ -90,15 +82,14 @@ await params.result_callback(result)
 Both targets do the same thing, so the same handler runs unchanged on Pipecat and
 on LiveKit.
 
-## Credentials: `os.environ` is the seam
+## Credentials, when a real handler needs one
 
 ```python
-key = os.environ["SALON_API_SIGNING_KEY"].encode()
+token = os.environ["CRM_API_TOKEN"]
 ```
 
-Only the **name** appears in the file. That is exactly what the generated webhook
-code does with `token_env`, and it means your handler can be read, reviewed, and
-committed without a secret in it.
+Only the **name** belongs in the file. Put that name in `agent.yaml` under
+`secrets:`; keep the value in your environment or secret store.
 
 `unmute validate` reads the handler, finds the names it looks up, and warns when
 `agent.yaml` forgot to declare one:
@@ -107,7 +98,7 @@ committed without a secret in it.
 ✓ pipecat (pipecat)
 
 Warnings:
-  pipecat: environment variables referenced but not declared in secrets: SALON_API_SIGNING_KEY (tools/cancel_appointment.py os.environ)
+  pipecat: environment variables referenced but not declared in secrets: CRM_API_TOKEN (tools/sync_customer.py os.environ)
 ```
 
 So the generated startup check demands it, and the container stops early with the

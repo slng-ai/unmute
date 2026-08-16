@@ -1,6 +1,6 @@
 # new_time is injected from the conversation variable reschedule_to. If the
 # model calls this before saving a slot with update_variables, the call is
-# refused with a message telling it to ask the caller first; nothing is sent.
+# refused with a message telling it to ask the caller first.
 description: Move the appointment to the slot the customer asked for. Save the slot with update_variables first; this tool reads it on its own.
 
 input:
@@ -11,12 +11,22 @@ inject:
   customer_id: "{{customer_id}}"
   new_time: "{{reschedule_to}}"
 
-webhook:
-  url_env: SALON_API_URL
-  path: /customers/{{customer_id}}/appointments
-  auth:
-    type: bearer
-    token_env: SALON_API_TOKEN
+output:
+  type: object
+  properties:
+    rescheduled:
+      type: boolean
+    customer_id:
+      type: string
+    new_time:
+      type: string
+  required:
+    - rescheduled
+    - customer_id
+    - new_time
+
+local:
+  handler: tools/reschedule_appointment.py
 
 effect: returns_data
 interruption: provider_default

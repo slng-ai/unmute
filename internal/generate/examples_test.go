@@ -16,6 +16,28 @@ import (
 	"github.com/slng-ai/unmute/internal/target"
 )
 
+func TestV3_OutboundReminderBusinessToolsAreSelfContained(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "outbound-reminder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range agent.Secrets {
+		if strings.HasPrefix(secret, "SALON_API_") {
+			t.Errorf("outbound live example depends on unrelated salon API secret %q", secret)
+		}
+	}
+	for _, name := range []string{"confirm_appointment", "reschedule_appointment", "cancel_appointment"} {
+		tool := agent.Tools[name]
+		if tool.Execution != ir.ToolLocal || tool.HandlerSource == "" || tool.URLEnv != "" {
+			t.Errorf("tool %q execution/handler/url = %q/%t/%q, want local/nonempty/empty", name, tool.Execution, tool.HandlerSource != "", tool.URLEnv)
+		}
+	}
+}
+
 func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 	// tracing is on exactly one example. It used to be on all four, which made
 	// the first package in the table impossible to run without a Langfuse

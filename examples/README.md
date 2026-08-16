@@ -27,7 +27,7 @@ Twilio Media Streams, cold only), so those packages are not interchangeable and
 their names say which one you are reading. `twilio-telephony-hello` is named after
 its **carrier** instead, because it carries one target per provider and the point is
 comparing how one carrier reaches each platform. `outbound-reminder` is named after
-neither, because it is about variables and secrets and happens to compile for both.
+neither, because it is about an outbound workflow and runtime values on both.
 
 | Package | Structure | Responsibility split |
 |---|---|---|
@@ -41,7 +41,7 @@ neither, because it is about variables and secrets and happens to compile for bo
 | [`pipecat-human-transfer-twilio`](pipecat-human-transfer-twilio/) | Cold transfer and inbound, with nothing hosted | The same salon on Pipecat Cloud, reached through your own Twilio number. Your number points at a small piece of static markup in the Twilio console; no server of yours is in the path. However the transfer ends, the caller comes back to a fresh agent, which is the trade for hosting nothing. |
 | [`pipecat-human-transfer-daily`](pipecat-human-transfer-daily/) | Cold transfer on a Daily-provisioned number | The same salon on Pipecat over Daily's own number, so there is no carrier account to set up at all. |
 | [`mcp-example`](mcp-example/) | One agent, one remote MCP server | **The MCP example.** A single tool file declares Firecrawl's MCP server, its transport, its bearer token, and the one tool of its own the agent may use; ask a question that needs current information and the agent searches the web. Browser only, both code targets, no telephony. See [MCP servers](../docs-site/build/tools/mcp.mdx). |
-| [`outbound-reminder`](outbound-reminder/) | One outbound agent using variables and secrets | **The secrets example.** Input variables from the dispatch, a system variable from the route, a conversation variable the model saves mid call, and both ways a secret reaches a tool: `url_env`/`token_env` on two webhook tools, and `os.environ` inside one local handler. See [variables](../docs-site/reference/variables.mdx) and [secrets](../docs-site/reference/secrets.mdx). |
+| [`outbound-reminder`](outbound-reminder/) | One outbound agent using runtime values | Input variables from the dispatch, a system variable from the route, and a conversation variable the model saves mid call. All three appointment outcomes use local Python fixtures, so only the model and outbound carrier services are external. See [variables](../docs-site/reference/variables.mdx). |
 
 ## Compile an example
 

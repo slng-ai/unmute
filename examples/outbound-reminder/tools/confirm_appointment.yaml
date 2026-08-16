@@ -1,5 +1,5 @@
-# The model calls this with no arguments. Everything the API needs is injected
-# from variables and secrets, so the model can never invent a customer id.
+# The model calls this with no arguments. Runtime values are injected into the
+# local fixture, so the model can never invent a customer id or route value.
 description: Confirm that the existing appointment stays as booked. Call it when the customer says the time works.
 
 input:
@@ -11,12 +11,25 @@ inject:
   dialed_number: "{{dialed_number}}"
   channel: phone
 
-webhook:
-  url_env: SALON_API_URL
-  path: /customers/{{customer_id}}/appointments/confirm
-  auth:
-    type: bearer
-    token_env: SALON_API_TOKEN
+output:
+  type: object
+  properties:
+    confirmed:
+      type: boolean
+    customer_id:
+      type: string
+    dialed_number:
+      type: string
+    channel:
+      type: string
+  required:
+    - confirmed
+    - customer_id
+    - dialed_number
+    - channel
+
+local:
+  handler: tools/confirm_appointment.py
 
 effect: returns_data
 interruption: provider_default
