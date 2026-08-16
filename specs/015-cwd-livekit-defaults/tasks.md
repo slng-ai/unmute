@@ -195,7 +195,7 @@ mechanically strip arguments.
 - [x] T047 Walk [quickstart.md](quickstart.md) end to end against a freshly built `bin/unmute`, including the original reproduction (`init` → `cd` → `validate`) and the LiveKit scaffold checks
 - [x] T048 Confirm no unintended drift: `git diff --stat` shows only `internal/scaffold/testdata/golden/init.txt` and `specs/008-mintlify-user-docs/help.txt` among golden files
 - [x] T049 File a short dated amendment in `docs/SCHEMA.md` recording that the scaffold's default target is `livekit` from 2026-08-16, that no authoring shape changes, and that no existing package fails strict decode. Strictly optional under Principle IV, since the authoring surface is unchanged — but SCHEMA.md's four most recent amendments (N20, N33, N43, N44) all record no-shape-change behaviour changes, and N43 (2026-08-15) is about the LiveKit turn detector this default now selects for every new package. Cheap, and in step with how the document has been kept
-- [ ] T050 Open the pull request to `main` from `feat/unmute-cli-workdir-livekit-53d1c2`, describing both behaviour changes, the two new gates, and the corrected telephony finding. State the SCHEMA position as a judgment call with its reasoning, not as settled fact
+- [x] T050 Open the pull request to `main` from `feat/unmute-cli-workdir-livekit-53d1c2`, describing both behaviour changes, the two new gates, and the corrected telephony finding. State the SCHEMA position as a judgment call with its reasoning, not as settled fact
 
 ---
 
