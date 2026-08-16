@@ -59,7 +59,11 @@ anything else about the route. See
 ## Place a test call
 
 ```sh
-unmute dev examples/outbound-reminder --telephony --target pipecat --to +15551234567
+unmute dev examples/outbound-reminder --telephony --target pipecat \
+  --to +15551234567 \
+  --var customer_id=cus_1042 \
+  --var name=Ada \
+  --var "appointment_time=tomorrow at 3 pm"
 ```
 
 `--to` takes one E.164 number. Anything else is refused before Docker or the
