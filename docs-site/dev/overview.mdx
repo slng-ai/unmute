@@ -11,7 +11,7 @@ and serves a web page you can talk through.
 unmute dev examples/salon-support --target pipecat
 ```
 
-```
+```text
 compiled examples/salon-support/build/pipecat
 building and starting the container...
 
@@ -60,14 +60,14 @@ A package with one target needs no flag. With more than one:
 - Without a terminal, for example in a script, it refuses and tells you the
   choices:
 
-```
+```text
 unmute: dev examples/simple-prompt: multiple targets declared; pass --target <name>: livekit (livekit), pipecat (pipecat)
 ```
 
 `--target` takes exactly one name here, unlike `validate` and `compile`, which
 take a repeatable list. A name that is not declared is an error:
 
-```
+```text
 unmute: dev examples/simple-prompt: target instance "nope" is not declared
 ```
 
@@ -101,7 +101,7 @@ speaks, and it is where a failure to start explains itself.
 The path is printed with the ready line, exactly as you will see it. From
 inside a scaffolded package, run with no argument, that reads:
 
-```
+```text
   ▸ http://localhost:8765/?agent=livekit
     ctrl-c to stop  ·  logs: build/livekit/dev.log
 ```

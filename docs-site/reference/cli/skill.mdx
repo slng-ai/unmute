@@ -3,7 +3,7 @@ title: "unmute skill"
 description: "Install the Unmute skill so your coding assistant can build voice agents."
 ---
 
-```
+```text
 $ unmute skill --help
 Install the coding-agent skill into a project.
 
@@ -22,7 +22,7 @@ Use "unmute skill [command] --help" for more information about a command.
 
 ## unmute skill install
 
-```
+```text
 $ unmute skill install --help
 Write the Unmute skill into this project, so a coding assistant knows how to
 author an Unmute package. The files travel with the repository, so a team
@@ -44,7 +44,7 @@ Flags:
 unmute skill install
 ```
 
-```
+```text
   .agents/skills/unmute/
     SKILL.md                         written
     references/package.md            written
@@ -90,7 +90,7 @@ unmute skill install --agent codex --agent cursor
 Names that share a directory write it once. An unknown name fails and lists
 what is supported, rather than falling back to all:
 
-```
+```text
 unmute: skill install: unknown assistant "emacs": supported names are all, claude, codex, copilot, cursor
 ```
 
@@ -107,7 +107,7 @@ to hold one.
 
 A second run reports what it found and changes nothing:
 
-```
+```text
   .agents/skills/unmute/
     SKILL.md                         left alone
 ```
@@ -115,7 +115,7 @@ A second run reports what it found and changes nothing:
 After you upgrade the CLI, the same command writes the new files and says what
 it upgraded from:
 
-```
+```text
   .agents/skills/unmute/  (upgraded from 0.1.2)
 ```
 
@@ -124,7 +124,7 @@ it upgraded from:
 If you edit an installed file, the next install refuses rather than losing your
 work, and names every file at once:
 
-```
+```text
 unmute: skill install: these files changed after they were installed:
   .agents/skills/unmute/SKILL.md
 run `unmute skill install --force` to overwrite them

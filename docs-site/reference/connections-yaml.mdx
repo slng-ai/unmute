@@ -76,7 +76,7 @@ The moment the package places a call, or hands one to a person, the same route
 needs `account_sid`, `auth_token`, and `from_number`, because both of those speak
 to Twilio's API in your name. The refusal says which behavior asked for them:
 
-```
+```text
 connections/twilio_voice.yaml: connection "twilio_voice" requires environment key
   "account_sid" for route (pipecat, cloud-websocket, twilio), because this package
   places or redirects calls. A package that only receives calls on this route needs
@@ -118,7 +118,7 @@ generated code dials through any SIP carrier with them.
 A key from another route is refused, and the refusal carries the accepted set so
 you do not have to go looking for it:
 
-```
+```text
 connections/twilio_sip.yaml:4: connection "twilio_sip" environment key "account_sid" is
   not accepted by route (livekit, sip, twilio); it accepts from_number, sip_address,
   sip_password, sip_username
@@ -170,7 +170,7 @@ file states its transport on the first line, so the file name does not have to.
 **`kind:` is not written.** Every transport in the catalog is telephony, so the
 first line already said it:
 
-```
+```text
 connections/twilio_sip.yaml:1: kind is no longer written in a connection. Every transport
   in the catalog is telephony, so transport: sip already says it
 ```
@@ -182,7 +182,7 @@ agent escalates to, which is the same desk whichever carrier reaches it.
 **A route the target's provider does not have** is refused with the routes it
 does have:
 
-```
+```text
 connections/twilio_sip.yaml:21: transport "sip" with carrier "twilio" is not a route for
   provider pipecat. pipecat supports: carrier-websocket with plivo, telnyx, twilio;
   cloud-websocket with twilio; daily-sip with no carrier (a Daily-provisioned number
@@ -192,7 +192,7 @@ connections/twilio_sip.yaml:21: transport "sip" with carrier "twilio" is not a r
 **A value that is not a shell identifier**, because a deployment platform
 exports secrets through a shell and this failure would otherwise be silent:
 
-```
+```text
 connections/twilio_sip.yaml:6: connection "twilio_sip" environment value
   "2FACTOR_SIP_PASSWORD" is not a valid environment variable name: use letters, digits,
   and underscores, and do not start with a digit. A deployment platform exports secrets
@@ -206,7 +206,7 @@ of every environment name the author wrote, so the generated startup check knows
 to demand it. A name missing there compiles green with a warning, and then fails
 on the first phone call:
 
-```
+```text
 ✓ livekit (livekit)
 
 Warnings:
@@ -216,7 +216,7 @@ Warnings:
 **A connection nothing names is a warning, not an error.** The build succeeds and
 tells you the file is dead:
 
-```
+```text
 Warnings:
   livekit: declares a route no target names, so nothing uses it: connections/twilio_voice.yaml
 ```

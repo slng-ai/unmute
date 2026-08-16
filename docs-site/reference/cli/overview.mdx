@@ -3,7 +3,7 @@ title: "CLI overview"
 description: "The command tree, exit codes, warnings, version, and shell completion."
 ---
 
-```
+```text
 $ unmute --help
 Author-once, portable voice agents.
 
@@ -78,7 +78,7 @@ unmute validate my-agent
 The current directory must hold `agent.yaml` itself. No parent directory is
 searched, so a run from inside `build/` cannot rewrite the package above it:
 
-```
+```text
 unmute: validate: no agent.yaml in /Users/you/projects
   run `unmute validate` from inside an agent package, or name one: `unmute validate <package-dir>`
 ```
@@ -92,7 +92,7 @@ with no name in a terminal it opens the interactive console instead.
 unmute --version
 ```
 
-```
+```text
 unmute version ae9f8cc
 ```
 
@@ -112,13 +112,13 @@ There are no other exit codes today.
 Warnings go to standard error and **do not** change the exit code. A command
 that prints warnings and exits 0 succeeded:
 
-```
+```text
 warning: livekit: LiveKit turn placement is a preference
 ```
 
 Errors are printed to standard error too, prefixed with `unmute:`, and exit 1:
 
-```
+```text
 unmute: dev examples/simple-prompt: target instance "nope" is not declared
 ```
 
@@ -128,7 +128,7 @@ unmute: dev examples/simple-prompt: target instance "nope" is not declared
 unmute completion zsh
 ```
 
-```
+```text
 $ unmute completion --help
 Generate the autocompletion script for unmute for the specified shell.
 See each sub-command's help for details on how to use the generated script.

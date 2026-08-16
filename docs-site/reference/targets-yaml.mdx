@@ -36,7 +36,7 @@ provider with different settings, for example `pipecat_twilio` and
 | `pins` | extra package pins, name to version constraint |
 | `sdk_language` | `python` |
 | `connection` | the connection file that declares this target's phone route |
-| `deployment_region` | one region as a string, or several as a list |
+| `deployment_region` | one region as a string, or several as a list. More than one is LiveKit only |
 | `models` | per target overrides of named `models` entries |
 
 That is the whole list. A target says where the agent runs and, for a phone
@@ -96,18 +96,18 @@ See [connections/&lt;name&gt;.yaml](/reference/connections-yaml).
 Three fields used to sit on the target. Writing any of them here is refused, and
 the refusal names the new home:
 
-```
+```text
 targets.yaml:6: target "livekit" declares transport: sip, which now belongs in
   connections/twilio_sip.yaml. A target names one connection and the connection
   declares the route
 ```
 
-```
+```text
 targets.yaml:6: target "livekit" declares carrier: twilio, which now belongs in
   connections/twilio_sip.yaml alongside its transport
 ```
 
-```
+```text
 targets.yaml:7: target "livekit" declares destinations, which now belong at the top
   level of agent.yaml. A destination is who this agent escalates to, which is the same
   desk whichever carrier reaches it

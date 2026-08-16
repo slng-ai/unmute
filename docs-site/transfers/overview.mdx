@@ -55,7 +55,7 @@ destinations:
 A destination is only the UPPER_SNAKE name of an environment variable holding an
 E.164 number or a `sip:` URI, read at call time. A number written here is refused:
 
-```
+```text
 agent.yaml:60: destination "billing_line" is a literal. agent.yaml is
   the portable half of a package, so a destination names an environment variable holding
   the number: billing_line: BILLING_PHONE_NUMBER
@@ -88,7 +88,7 @@ points at. A transfer a route cannot do is refused at validation, naming the
 connection and the transport it declares, and it never compiles into something
 that quietly does nothing:
 
-```
+```text
 pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twilio) does
   not emit warm transfer: a warm handoff has to act on how the destination's leg ended,
   which on this route needs a callback endpoint you host, and hosting nothing is what
@@ -104,7 +104,7 @@ connection, not the control.
 The table above is about which route does what. A target that names **no**
 connection is a separate case, and it is now refused too:
 
-```
+```text
 livekit: cold transfer needs a telephony Connection: it hands the caller's own phone leg to
   the destination, and a session that did not arrive by phone has no leg to hand over
 ```
@@ -126,7 +126,7 @@ Declaring a control under `controls:` is half the job. Until some agent lists
 its name in `tools:`, no agent can reach it, and that is refused at build with
 the file, the line, and the agents you could attach it to:
 
-```
+```text
 agent.yaml:47: control "send_to_billing" is declared but no agent reaches it; add it to the
   tools: of one of these agents: front_desk, billing
 ```

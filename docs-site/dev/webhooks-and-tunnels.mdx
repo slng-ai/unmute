@@ -14,7 +14,7 @@ a quick tunnel against the local application port, reads the assigned origin
 from the tunnel's output, and hands that origin to the generated app as
 `UNMUTE_PUBLIC_URL`.
 
-```
+```text
 pipecat: managed tunnel https://random-words-here.trycloudflare.com (quick tunnel URLs rotate on every run)
 ```
 
@@ -22,7 +22,7 @@ Rotating is why the carrier webhook is reconfigured on every start.
 
 If `cloudflared` is missing:
 
-```
+```text
 cloudflared not found on PATH; the managed tunnel for carrier webhook routes needs it. Install it (macOS: `brew install cloudflared`; Linux: distribution package or a binary from https://github.com/cloudflare/cloudflared/releases) or pass --public-url to bring your own tunnel (ngrok included)
 ```
 
@@ -46,13 +46,13 @@ unmute dev ./agent --telephony --public-url https://your-tunnel.example
 `--public-url` skips tunnel management entirely. It must be an HTTPS origin,
 with an optional path, and nothing else:
 
-```
+```text
 unmute: dev examples/twilio-telephony-hello: --public-url must be an HTTPS origin with an optional path, got "http://x.example"
 ```
 
 A trailing slash is trimmed for you. `--public-url` requires `--telephony`:
 
-```
+```text
 unmute: dev: --public-url requires --telephony
 ```
 
@@ -65,13 +65,13 @@ trigger, and the status callback.
 By default, on carriers that support it, the CLI sets the number's voice
 webhook to this run's URL and prints the previous value:
 
-```
+```text
 pipecat: Twilio voice webhook for +15551234567 set to https://random-words-here.trycloudflare.com/telephony/voice (was: https://example.com/old)
 ```
 
 On exit it puts the old value back:
 
-```
+```text
 pipecat: Twilio voice webhook for +15551234567 restored to https://example.com/old
 ```
 
@@ -84,7 +84,7 @@ To keep the CLI away from your carrier settings:
 unmute dev ./agent --telephony --no-webhook
 ```
 
-```
+```text
 pipecat: --no-webhook, carrier number left untouched; this run is reachable at https://random-words-here.trycloudflare.com
 ```
 

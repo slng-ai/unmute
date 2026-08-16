@@ -21,7 +21,7 @@ channels:
 
 Without `outbound: true`, `--to` is refused:
 
-```
+```text
 unmute: dev <package>: --to needs an outbound-capable target; "pipecat" has no outbound direction (set channels.phone outbound: true)
 ```
 
@@ -64,20 +64,20 @@ unmute dev examples/outbound-reminder --telephony --target pipecat --to +1555123
 `--to` takes one E.164 number. Anything else is refused before Docker or the
 carrier is touched:
 
-```
+```text
 unmute: dev: --to must be an E.164 number like +15551234567, got "4155550123"
 ```
 
 `--to` needs `--telephony`:
 
-```
+```text
 unmute: dev: --to requires --telephony
 ```
 
 Once the stack is healthy, the call is placed and the CLI prints the call
 identifier:
 
-```
+```text
   ▸ calling +15551234567  (call CAxxxxxxxx)  ·  ctrl-c to stop
 ```
 

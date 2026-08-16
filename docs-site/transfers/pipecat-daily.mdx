@@ -66,7 +66,7 @@ Daily dial-out permission. Its connection keys are listed in
 unmute validate examples/pipecat-human-transfer-daily
 ```
 
-```
+```text
 ✓ pipecat (pipecat)
 
 Setup prerequisites:
@@ -94,7 +94,7 @@ generates.
 
 `unmute dev --telephony` refuses this route, and says why:
 
-```
+```text
 unmute: dev examples/pipecat-human-transfer-daily: target "pipecat" runs on the Pipecat Daily route (transport daily-sip), where Daily carries the phone call to a deployed agent, so there is no local telephony topology to run; talk to this agent now with `unmute dev examples/pipecat-human-transfer-daily` in the browser, and for a real phone call run `unmute compile examples/pipecat-human-transfer-daily` and follow the Deploy and Phone calls sections of the emitted README
 ```
 

@@ -3,7 +3,7 @@
   "theme": "mint",
   "name": "Unmute by SLNG//",
   "colors": {
-    "primary": "#F2DE5C",
+    "primary": "#8A7300",
     "light": "#F7E98A",
     "dark": "#8A7300"
   },
@@ -15,26 +15,69 @@
   "icons": {
     "library": "lucide"
   },
+  "styling": {
+    "eyebrows": "breadcrumbs"
+  },
+  "redirects": [
+    {
+      "source": "/build/choosing-a-structure",
+      "destination": "/build/orchestration/choosing-a-structure"
+    },
+    {
+      "source": "/build/two-agents",
+      "destination": "/build/orchestration/handoffs"
+    },
+    {
+      "source": "/build/task-groups",
+      "destination": "/build/orchestration/task-groups"
+    },
+    {
+      "source": "/build/tasks",
+      "destination": "/build/orchestration/tasks"
+    },
+    {
+      "source": "/build/one-agent",
+      "destination": "/build/your-first-agent"
+    },
+    {
+      "source": "/telephony/webhooks-and-tunnels",
+      "destination": "/dev/webhooks-and-tunnels"
+    },
+    {
+      "source": "/build/tools",
+      "destination": "/build/tools/overview"
+    },
+    {
+      "source": "/reference/providers",
+      "destination": "/models/stt"
+    },
+    {
+      "source": "/dev/console",
+      "destination": "/dev/overview"
+    }
+  ],
   "navigation": {
     "groups": [
       {
         "group": "Get started",
+        "icon": "rocket",
+        "root": "index",
         "pages": [
-          "index",
           "start/installation",
-          "start/coding-agents",
           "start/quickstart",
+          "start/coding-agents",
           "start/how-unmute-works"
         ]
       },
       {
         "group": "Build the agent",
+        "icon": "bot",
         "pages": [
           "build/your-first-agent",
           {
             "group": "Tools",
+            "root": "build/tools/overview",
             "pages": [
-              "build/tools/overview",
               "build/tools/webhook",
               "build/tools/python",
               "build/tools/mcp",
@@ -44,8 +87,8 @@
           "build/variables",
           {
             "group": "Orchestration",
+            "root": "build/orchestration/overview",
             "pages": [
-              "build/orchestration/overview",
               "build/orchestration/handoffs",
               "build/orchestration/tasks",
               "build/orchestration/task-groups",
@@ -55,64 +98,74 @@
         ]
       },
       {
-        "group": "Development lifecycle",
+        "group": "Develop and test",
+        "icon": "terminal",
+        "root": "dev/overview",
         "pages": [
-          "dev/overview",
           "dev/telephony",
           "dev/webhooks-and-tunnels"
         ]
       },
       {
-        "group": "Telephony",
+        "group": "Phone calls",
+        "icon": "phone",
+        "root": "telephony/overview",
         "pages": [
-          "telephony/overview",
           "telephony/first-phone-call",
           "telephony/outbound-calls",
-          "telephony/twilio"
+          "telephony/twilio",
+          {
+            "group": "Transfers",
+            "root": "transfers/overview",
+            "pages": [
+              "transfers/livekit",
+              "transfers/pipecat-daily",
+              "transfers/pipecat-twilio"
+            ]
+          }
         ]
       },
       {
-        "group": "Transfers",
+        "group": "Runtimes and models",
+        "icon": "boxes",
         "pages": [
-          "transfers/overview",
-          "transfers/livekit",
-          "transfers/pipecat-daily",
-          "transfers/pipecat-twilio"
+          {
+            "group": "Runtimes",
+            "root": "targets/overview",
+            "pages": [
+              "targets/pipecat",
+              "targets/livekit"
+            ]
+          },
+          {
+            "group": "Models",
+            "pages": [
+              "models/stt",
+              "models/tts",
+              "models/llm",
+              "models/turn-detection",
+              "models/optimization"
+            ]
+          }
         ]
       },
       {
-        "group": "Targets",
+        "group": "Deploy",
+        "icon": "cloud-upload",
         "pages": [
-          "targets/overview",
-          "targets/pipecat",
-          "targets/livekit"
-        ]
-      },
-      {
-        "group": "Models",
-        "pages": [
-          "models/stt",
-          "models/tts",
-          "models/llm",
-          "models/turn-detection",
-          "models/optimization"
-        ]
-      },
-      {
-        "group": "Deployment",
-        "pages": [
+          "deploy/going-live",
           "deploy/livekit-cloud",
-          "deploy/pipecat-cloud",
-          "deploy/going-live"
+          "deploy/pipecat-cloud"
         ]
       },
       {
         "group": "Reference",
+        "icon": "book-open",
         "pages": [
           {
             "group": "CLI",
+            "root": "reference/cli/overview",
             "pages": [
-              "reference/cli/overview",
               "reference/cli/init",
               "reference/cli/validate",
               "reference/cli/compile",

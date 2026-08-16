@@ -24,6 +24,8 @@ tested against a deployment.
 ## What you need
 
 - A Twilio account with a voice capable phone number.
+- [`uv`](https://docs.astral.sh/uv/getting-started/installation/) on your PATH.
+  This route starts the generated Pipecat agent with `uv run`.
 - `cloudflared` on your PATH for the managed tunnel (`brew install cloudflared`
   on macOS), or your own tunnel and `--public-url`.
 - Model provider keys.
@@ -56,8 +58,8 @@ supplies those itself.
 <Warning>
   Every environment variable name must be a valid shell identifier: letters,
   digits, and underscores, never starting with a digit. A name like
-  `2FACTOR_API_KEY` fails when the platform exports it and the value is simply
-  missing at run time.
+  `2FACTOR_API_KEY` would fail when a platform exports it, so Unmute refuses the
+  name during validation, before it starts a tunnel or a local agent.
 </Warning>
 
 ## Take the call

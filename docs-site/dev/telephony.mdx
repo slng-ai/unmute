@@ -23,7 +23,7 @@ is on [Telephony](/telephony/overview).
     printed: the transport, the carrier, the local services it needs, and the
     carrier steps no command can do for you.
 
-    ```
+    ```text
     livekit: telephony route provider=livekit transport=sip carrier=twilio coordination=shared
     livekit: setup: get the selected carrier SIP address, username, password, and phone number from its SIP trunking console; these four reach the deployed agent's dial-out path directly, so no outbound trunk is registered
     livekit: local services: application, livekit_server, livekit_sip, redis
@@ -40,7 +40,7 @@ is on [Telephony](/telephony/overview).
     A route with carrier callbacks needs a public HTTPS origin. The command starts a
     `cloudflared` quick tunnel to the agent's port and uses its origin:
 
-    ```
+    ```text
     pipecat: managed tunnel https://<random>.trycloudflare.com (quick tunnel URLs rotate on every run)
     ```
 
@@ -63,7 +63,7 @@ is on [Telephony](/telephony/overview).
     Where the carrier has an API for it, today Twilio, the number's voice webhook is
     set to this run's public URL and the previous value is printed:
 
-    ```
+    ```text
     pipecat: Twilio voice webhook for +15551234567 set to https://<random>.trycloudflare.com/telephony/inbound (was: unset)
     ```
 
@@ -71,7 +71,7 @@ is on [Telephony](/telephony/overview).
     in your name, which is why the previous value is printed rather than assumed.
   </Step>
   <Step title="Print the call line">
-    ```
+    ```text
     call +1XXXXXXXXXX  ·  ctrl-c to stop
     ```
 
@@ -86,7 +86,7 @@ Ctrl-c undoes the outward changes:
 
 - the carrier webhook is set back to what it was, and the restore is printed:
 
-  ```
+  ```text
   pipecat: Twilio voice webhook for +15551234567 restored to unset
   ```
 
@@ -109,7 +109,7 @@ fails, you get a warning naming the number, not silence.
 
 The Daily route has nothing local to run, and says so instead of pretending:
 
-```
+```text
 unmute: dev examples/pipecat-human-transfer-daily: target "pipecat" runs on the Pipecat Daily route (transport daily-sip), where Daily carries the phone call to a deployed agent, so there is no local telephony topology to run; talk to this agent now with `unmute dev examples/pipecat-human-transfer-daily` in the browser, and for a real phone call run `unmute compile examples/pipecat-human-transfer-daily` and follow the Deploy and Phone calls sections of the emitted README
 ```
 
@@ -126,13 +126,13 @@ unmute: dev examples/pipecat-human-transfer-daily: target "pipecat" runs on the 
 
 `--public-url` and `--to` both require `--telephony`, and say so:
 
-```
+```text
 unmute: dev: --to requires --telephony
 ```
 
 `--to` takes one E.164 number and checks it before anything starts:
 
-```
+```text
 unmute: dev: --to must be an E.164 number like +15551234567, got "4155550123"
 ```
 
@@ -142,14 +142,14 @@ Everything the stack prints goes to `build/<target>/telephony.log`, and the path
 printed with the ready line. It is also printed when the stack fails to start,
 which is where the reason lives:
 
-```
+```text
 telephony Compose failed to start. logs: pkg/build/livekit/telephony.log
 unmute: dev pkg: start Docker Compose topology: exit status 1
 ```
 
 A verified example of what you find in there: a port another run is already holding.
 
-```
+```text
 Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint unmute-pkg-livekit-e7f5b2b6-livekit_server-1: Bind for 0.0.0.0:7880 failed: port is already allocated
 ```
 
