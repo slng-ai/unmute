@@ -21,11 +21,18 @@ import (
 func newCompileCmd() *cobra.Command {
 	var names []string
 	cmd := &cobra.Command{
-		Use:   "compile <package-dir>",
+		Use:   "compile [package-dir]",
 		Short: "Compile a v1 agent package to its resolved target artifacts.",
-		Args:  cobra.ExactArgs(1),
+		Long: "Compile a v1 agent package to its resolved target artifacts.\n\n" +
+			"With no package-dir, the package is the current directory, so you can " +
+			"cd into an agent and run this with no arguments.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCompile(cmd, args[0], names)
+			dir, err := packageDir(cmd, args)
+			if err != nil {
+				return err
+			}
+			return runCompile(cmd, dir, names)
 		},
 	}
 	cmd.Flags().StringSliceVar(&names, "target", nil, "target instance name (repeatable; default: all)")
@@ -40,7 +47,7 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 	if len(targets) == 0 {
 		return fmt.Errorf("compile %s: no targets selected", dir)
 	}
-	printHeader(cmd.OutOrStdout(), "compile "+dir)
+	printHeader(cmd.OutOrStdout(), "compile "+displayDir(dir))
 	caps := target.Default()
 	for _, resolved := range targets {
 		artifact, err := generate.Generate(agent, resolved, caps)

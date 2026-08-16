@@ -552,11 +552,7 @@ func editMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 }
 
 func editTarget(runner *fieldRunner, data *scaffold.Data) error {
-	selected, back, err := runner.selectOne("Target / orchestrator", "", []huh.Option[string]{
-		huh.NewOption("Pipecat", string(targetcap.Pipecat)),
-		huh.NewOption("LiveKit", string(targetcap.LiveKit)),
-		huh.NewOption("← Back", actionBack),
-	}, true)
+	selected, back, err := runner.selectOne("Target / orchestrator", "", maintainTargetOptions(data.Target), true)
 	if err == nil && !back && selected != actionBack && selected != data.Target {
 		data.SetTarget(selected)
 	}

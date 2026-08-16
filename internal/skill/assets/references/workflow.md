@@ -7,10 +7,15 @@ Write, validate, read the error, fix, repeat. Then run it and listen.
 | Command | What it does |
 |---|---|
 | `unmute init <name>` | scaffold a new package |
-| `unmute validate <dir>` | load, build, and check against every declared target |
-| `unmute compile <dir>` | validate, then write `build/<target>/` for each code target |
-| `unmute dev <dir>` | compile, run locally, and let you talk to the agent |
+| `unmute validate [dir]` | load, build, and check against every declared target |
+| `unmute compile [dir]` | validate, then write `build/<target>/` for each code target |
+| `unmute dev [dir]` | compile, run locally, and let you talk to the agent |
 | `unmute skill install` | write this skill into a project |
+
+`[dir]` is optional on those three. With no directory they use the current one,
+so you can `cd` into a package and run them with no argument. Passing a
+directory still works and still wins, and it is the right form when you are not
+inside the package.
 
 Four commands take an author from nothing to a voice. `skill` is off that path:
 it writes this bundle into a project and does nothing else.
@@ -30,32 +35,45 @@ installed, which is what the command otherwise refuses to do.
 
 ```sh
 unmute init my-agent
+cd my-agent
 ```
 
 It writes a working package: `agent.yaml`, `instructions.md`, `targets.yaml`,
 and a `tools/end_call.yaml` so the agent can hang up from its first run. Edit
 what it wrote rather than starting from an empty directory.
 
+The scaffold declares **one** target, `livekit`, named after its provider. One
+target means what you test is what you deploy, and it means you do not pass
+`--target` on a scaffolded package: there is nothing to choose between. Add a
+second target later, by hand, when the package needs one.
+
 `unmute init` refuses to write into a directory that already exists and is not
 empty. That is deliberate, not a bug to route around.
 
 ## Validate, every time
 
+From inside the package, with no argument:
+
 ```sh
-unmute validate ./my-agent
+unmute validate
 ```
 
 ```
 ✓ livekit (livekit)
-✓ pipecat (pipecat)
 
 Warnings:
   livekit: LiveKit turn placement is a preference
 ```
 
-One line per target: the target instance name, then its provider in brackets.
+One line per target: the target instance name, then its provider in brackets. A
+scaffolded package prints one line, and a package that declares two prints two.
 With no `--target`, every declared target is checked. `--target` is repeatable
-and results come back in the order asked for.
+and results come back in the order asked for. Naming a target the package does
+not declare is refused:
+
+```
+target instance "pipecat" is not declared
+```
 
 Exit code 1 if any selected target fails.
 
@@ -98,10 +116,10 @@ turns the check off. There is no such flag.
 ## Compile, then run
 
 ```sh
-unmute compile ./my-agent
+unmute compile
 ```
 
-Writes one directory per code target: `build/pipecat/`, `build/livekit/`. Each
+Writes one directory per code target: `build/livekit/`, `build/pipecat/`. Each
 holds a Python project, a `Dockerfile`, an `.env.example`, Compose files, a
 deploy manifest, a compile report, and a `README.md` runbook written for that
 build.
@@ -115,7 +133,7 @@ the honest behaviour, not a bug.
 ## Talk to it
 
 ```sh
-unmute dev ./my-agent --target pipecat
+unmute dev
 ```
 
 Opens the browser and runs the same image production would deploy. Other modes:
@@ -144,9 +162,10 @@ Say what you actually did, in this order:
    answer, and a better one than silence.
 4. The decisions you made that the user did not ask for.
 
-A package that validates has not been heard. Say "validate is clean on both
-targets" if that is what happened, and do not say "it works" until someone has
-talked to it.
+A package that validates has not been heard. Say "validate is clean on every
+declared target" if that is what happened, and name the targets, because a
+scaffolded package has one. Do not say "it works" until someone has talked to
+it.
 
 ## If you cannot run commands
 
@@ -154,8 +173,9 @@ Write the package, then hand the user the exact commands and ask for the output:
 
 ```sh
 unmute validate ./my-agent
-unmute dev ./my-agent --target pipecat
+unmute dev ./my-agent
 ```
 
+Write the path, because you do not know which directory they are sitting in.
 Read what they paste back the same way you would read your own output. The
 error message is the same message.

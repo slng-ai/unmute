@@ -32,8 +32,10 @@ Flags:
 $ unmute validate --help
 Validate a v1 agent package against its targets.
 
+With no package-dir, the package is the current directory, so you can cd into an agent and run this with no arguments.
+
 Usage:
-  unmute validate <package-dir> [flags]
+  unmute validate [package-dir] [flags]
 
 Flags:
   -h, --help             help for validate
@@ -42,8 +44,10 @@ Flags:
 $ unmute compile --help
 Compile a v1 agent package to its resolved target artifacts.
 
+With no package-dir, the package is the current directory, so you can cd into an agent and run this with no arguments.
+
 Usage:
-  unmute compile <package-dir> [flags]
+  unmute compile [package-dir] [flags]
 
 Flags:
   -h, --help             help for compile
@@ -52,8 +56,10 @@ Flags:
 $ unmute dev --help
 Compile, run the agent locally, and talk to it in the browser or terminal (--console).
 
+With no agent-dir, the package is the current directory, so you can cd into an agent and run this with no arguments.
+
 Usage:
-  unmute dev <agent-dir> [flags]
+  unmute dev [agent-dir] [flags]
 
 Flags:
       --bot-port string     host port the container publishes the agent on (Compose UNMUTE_DEV_PORT; with --telephony, UNMUTE_TELEPHONY_PORT) (default "7860")

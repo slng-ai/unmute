@@ -30,10 +30,12 @@ If what you want is not `end_call`, it is a
 [webhook](/build/tools/webhook), a [Python handler](/build/tools/python), or an
 [MCP server](/build/tools/mcp).
 
-An id the registry does not hold is refused by name:
+An id the registry does not hold is refused by name. Every line below is
+prefixed with the target instance that refused it, so a fresh scaffold, which
+has one `livekit` instance, reads like this:
 
 ```
-pipecat: tool "end_call" has unknown builtin "transfer_to_human"
+livekit: tool "end_call" has unknown builtin "transfer_to_human"
 ```
 
 ## What the registry decides for you
@@ -42,7 +44,7 @@ pipecat: tool "end_call" has unknown builtin "transfer_to_human"
 fails rather than being quietly ignored:
 
 ```
-pipecat: tool "end_call" builtin "end_call" fixes effect to ends_conversation, cannot be
+livekit: tool "end_call" builtin "end_call" fixes effect to ends_conversation, cannot be
   "returns_data"
 ```
 
@@ -50,18 +52,31 @@ pipecat: tool "end_call" builtin "end_call" fixes effect to ends_conversation, c
 nowhere to go:
 
 ```
-pipecat: tool "end_call" builtin execution takes no input, output, handler, or url_env
+livekit: tool "end_call" builtin execution takes no input, output, handler, or url_env
 ```
 
 **The description, unless you write one.** Leave `description` out and the registry
-default is used. From a real compile of the bare file above:
+default is used. From a real compile of the bare file above, on each target:
 
-```python
+<CodeGroup>
+```python LiveKit Agents
+tools=[
+    *EndCallTool(
+        extra_description="End the call when the caller is finished or says goodbye."
+    ).tools
+],
+```
+
+```python Pipecat
 async def end_call(params: FunctionCallParams):
     """End the call when the caller is finished or says goodbye."""
     await params.result_callback({"ended": True})
     await params.llm.push_frame(EndFrame())
 ```
+</CodeGroup>
+
+Same tool, same description, two lowerings. `unmute init` scaffolds the LiveKit
+one; the shipped examples that declare a Pipecat target get the other.
 
 Write your own `description` when the agent needs a narrower instruction, for
 example telling it to confirm before hanging up. Yours is added on top of the

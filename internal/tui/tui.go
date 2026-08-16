@@ -228,11 +228,7 @@ func editAgent(runner *fieldRunner, agent Agent) (Result, bool, error) {
 		}
 		switch choice {
 		case "target":
-			selected, back, err := runner.selectOne("Target / orchestrator", runner.describe("Vapi and Deepgram are unavailable: their generators are not implemented yet."), []huh.Option[string]{
-				huh.NewOption("Pipecat  ·  generated code project", string(targetcap.Pipecat)),
-				huh.NewOption("LiveKit  ·  generated code project", string(targetcap.LiveKit)),
-				huh.NewOption("← Back", actionBack),
-			}, true)
+			selected, back, err := runner.selectOne("Target / orchestrator", runner.describe("Vapi and Deepgram are unavailable: their generators are not implemented yet."), createTargetOptions(), true)
 			if err != nil {
 				return Result{}, false, err
 			}
@@ -465,6 +461,48 @@ func summary(result Result, review scaffold.PreflightReport) string {
 	}
 	fmt.Fprintf(&text, "\nCompile: %s", compile)
 	return text.String()
+}
+
+// orderTargets lists the two shipped code targets with `first` at the head.
+// selectOne preselects options[0] positionally and never reads the current
+// value, so head position *is* the preselect. One home for that ordering rule:
+// the create flow passes the scaffold default, the maintain flow passes the
+// package's own target, and neither restates the other's choice.
+func orderTargets(first string) []string {
+	if first == string(targetcap.LiveKit) {
+		return []string{string(targetcap.LiveKit), string(targetcap.Pipecat)}
+	}
+	return []string{string(targetcap.Pipecat), string(targetcap.LiveKit)}
+}
+
+// createTargetOptions is the new-package menu: a fresh package should start on
+// whatever the scaffold writes by default.
+func createTargetOptions() []huh.Option[string] {
+	labels := map[string]string{
+		string(targetcap.Pipecat): "Pipecat  ·  generated code project",
+		string(targetcap.LiveKit): "LiveKit  ·  generated code project",
+	}
+	options := make([]huh.Option[string], 0, 3)
+	for _, value := range orderTargets(scaffold.DefaultTarget) {
+		options = append(options, huh.NewOption(labels[value], value))
+	}
+	return append(options, huh.NewOption("← Back", actionBack))
+}
+
+// maintainTargetOptions is the existing-package menu. It leads with the
+// package's own target, never the scaffold default: the author already chose,
+// and offering to switch them by default is how you silently rewrite a
+// Pipecat package into a LiveKit one.
+func maintainTargetOptions(current string) []huh.Option[string] {
+	labels := map[string]string{
+		string(targetcap.Pipecat): "Pipecat",
+		string(targetcap.LiveKit): "LiveKit",
+	}
+	options := make([]huh.Option[string], 0, 3)
+	for _, value := range orderTargets(current) {
+		options = append(options, huh.NewOption(labels[value], value))
+	}
+	return append(options, huh.NewOption("← Back", actionBack))
 }
 
 func targetLabel(provider string) string {

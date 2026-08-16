@@ -23,12 +23,14 @@ unmute init my-agent
 ```
 created my-agent/agent.yaml
 created my-agent/.env.example
+created my-agent/.gitignore
 created my-agent/instructions.md
 created my-agent/targets.yaml
 created my-agent/tools/end_call.yaml
 ```
 
-The name is also the directory. Each created file is printed.
+The name is also the directory. Each created file is printed. `cd` into it and
+`validate`, `compile`, and `dev` all run with no argument.
 
 ## With no name
 
@@ -62,9 +64,42 @@ unmute: init my-agent: my-agent: directory already exists and is not empty
 | `targets.yaml` | one target |
 | `tools/end_call.yaml` | a built in tool so the agent can hang up |
 | `.env.example` | starter keys for the scaffolded target |
+| `.gitignore` | keeps `.env` and `build/` out of git |
 
 The scaffold binds SLNG speech models and an OpenAI reasoning model, so one
 `SLNG_API_KEY` covers speech to text and text to speech.
+
+## The scaffolded target
+
+The target is **LiveKit Agents**, so `targets.yaml` holds one instance named
+`livekit`, `agent.yaml` carries a matching LiveKit turn detector, and
+`unmute compile` writes `build/livekit/`. Pipecat is equally supported; pick it
+in the interactive console, or edit the package by hand as
+[Targets](/targets/overview) describes.
+
+```yaml targets.yaml
+targets:
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
+```
+
+That target is why `.env.example` lists five names, not two:
+
+```
+LIVEKIT_API_KEY=
+LIVEKIT_API_SECRET=
+LIVEKIT_URL=
+OPENAI_API_KEY=
+SLNG_API_KEY=
+```
+
+`OPENAI_API_KEY` and `SLNG_API_KEY` are the agent's own keys, the two
+`agent.yaml` declares under `secrets:`, and the two you fill in to run locally.
+The three `LIVEKIT_*` names are the connection to a LiveKit server, which is not
+the agent's to declare: `unmute dev` runs a local server and supplies them, and
+your platform supplies them at deploy time.
 
 <Note>
   The top level `.env.example` is a starter list. After `unmute compile`, the

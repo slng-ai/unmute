@@ -54,6 +54,38 @@ and skipping it costs you nothing.
 In a terminal, `unmute` with no command opens an interactive console. Outside a
 terminal, for example when the output is piped, it prints the help above.
 
+That is the root command on its own. The commands below it have their own
+no-argument behaviour, and it is a different thing.
+
+## Running a command with no package
+
+`validate`, `compile`, and `dev` take the package directory as an **optional**
+argument. Leave it out and the package is the current directory, so you can `cd`
+into an agent and work there:
+
+```sh
+cd my-agent
+unmute validate
+unmute dev
+```
+
+Naming a directory still works, and still wins:
+
+```sh
+unmute validate my-agent
+```
+
+The current directory must hold `agent.yaml` itself. No parent directory is
+searched, so a run from inside `build/` cannot rewrite the package above it:
+
+```
+unmute: validate: no agent.yaml in /Users/you/projects
+  run `unmute validate` from inside an agent package, or name one: `unmute validate <package-dir>`
+```
+
+`init` is the exception: its argument is the name of the package to create, and
+with no name in a terminal it opens the interactive console instead.
+
 ## Version
 
 ```sh

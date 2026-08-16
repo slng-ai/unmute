@@ -32,11 +32,17 @@ func newDevCmd() *cobra.Command {
 	var vars []string
 
 	cmd := &cobra.Command{
-		Use:   "dev <agent-dir>",
+		Use:   "dev [agent-dir]",
 		Short: "Compile, run the agent locally, and talk to it in the browser or terminal (--console).",
-		Args:  cobra.ExactArgs(1),
+		Long: "Compile, run the agent locally, and talk to it in the browser or terminal (--console).\n\n" +
+			"With no agent-dir, the package is the current directory, so you can " +
+			"cd into an agent and run this with no arguments.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			root := args[0]
+			root, err := packageDir(cmd, args)
+			if err != nil {
+				return err
+			}
 			if !telephony && publicURL != "" {
 				return errors.New("dev: --public-url requires --telephony")
 			}

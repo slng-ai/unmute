@@ -61,6 +61,56 @@ The agent does not change. One entry does. This is the shape of every per
 target difference, and it is why a package can serve both runtimes without a
 second copy of anything.
 
+## Switching a package to another target
+
+`unmute init` scaffolds a **LiveKit** package: `targets.yaml` holds one
+`livekit` instance, and `agent.yaml` carries the turn detector that goes with
+it. Moving that package to Pipecat, or a Pipecat package to LiveKit, is **two
+edits, not one**. The target and the turn model travel together.
+
+This is the `turn:` block in `agent.yaml`, written for each one:
+
+<CodeGroup>
+```yaml LiveKit Agents
+models:
+  turn:
+    detector:
+      provider: livekit
+      model: turn-detector-mini
+```
+
+```yaml Pipecat
+models:
+  turn:
+    detector:
+      provider: local
+      model: silero
+```
+</CodeGroup>
+
+Point a Pipecat package at LiveKit and leave `silero` behind, and validate
+refuses before a file is written:
+
+```
+✗ livekit (livekit)
+
+Warnings:
+  livekit: LiveKit turn placement is a preference
+
+Errors:
+  livekit: turn model "silero" is not recognized; use turn-detector-mini (local) or turn-detector (LiveKit Cloud)
+```
+
+The other direction does not refuse. Pipecat forwards the turn binding as
+written and runs Silero either way, so a LiveKit turn model left in a Pipecat
+package is not an error, just a line of YAML that says something the generated
+project does not do. Fix it anyway.
+
+If you want to keep both targets rather than swap one for the other, do not
+edit `agent.yaml` at all. Leave the Pipecat binding in place and give the
+LiveKit instance the per target `models:` override shown above, which is what
+every shipped example does.
+
 ## One package, two projects
 
 ```sh

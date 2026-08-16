@@ -26,6 +26,8 @@ models:
 ```
 
 That is what every shipped example writes, and on Pipecat it is the whole story.
+A package scaffolded by `unmute init` targets LiveKit, so it writes the LiveKit
+binding below in this spot instead.
 
 ## Pipecat
 
@@ -62,6 +64,11 @@ runs on LiveKit writes it:
         provider: livekit
         model: turn-detector-mini
 ```
+
+A package with only a LiveKit target, which is what `unmute init` scaffolds,
+needs no override: the same two lines go straight into `agent.yaml` under
+`models:` / `turn:`. The override is for packages that keep both targets and
+need a different answer on each.
 
 ### The two identities LiveKit accepts
 

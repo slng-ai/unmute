@@ -40,7 +40,7 @@ its origin.
 ## Bring your own URL
 
 ```sh
-unmute dev ./agent --telephony --target pipecat --public-url https://your-tunnel.example
+unmute dev ./agent --telephony --public-url https://your-tunnel.example
 ```
 
 `--public-url` skips tunnel management entirely. It must be an HTTPS origin,
@@ -81,7 +81,7 @@ phone line would aim that line at a dead tunnel.
 To keep the CLI away from your carrier settings:
 
 ```sh
-unmute dev ./agent --telephony --target pipecat --no-webhook
+unmute dev ./agent --telephony --no-webhook
 ```
 
 ```

@@ -19,6 +19,10 @@ building and starting the container...
     ctrl-c to stop  ·  logs: examples/salon-support/build/pipecat/dev.log
 ```
 
+That names a package sitting somewhere else, which is why it carries a path.
+The argument is optional: inside a package, `unmute dev` on its own runs the
+directory you are standing in, and every path it prints is relative to there.
+
 ## What it does, in order
 
 <Steps>
@@ -95,11 +99,12 @@ speaks, and it is where a failure to start explains itself.
 | `unmute dev --telephony` | `build/<target>/telephony.log` |
 | `unmute dev --console` | none: the agent talks to your terminal, so its output is already there |
 
-The path is printed with the ready line, exactly as you will see it:
+The path is printed with the ready line, exactly as you will see it. From
+inside a scaffolded package, run with no argument, that reads:
 
 ```
-  ▸ http://localhost:8765/?agent=pipecat
-    ctrl-c to stop  ·  logs: my-agent/build/pipecat/dev.log
+  ▸ http://localhost:8765/?agent=livekit
+    ctrl-c to stop  ·  logs: build/livekit/dev.log
 ```
 
 The file holds everything: the image build, the container's stdout, and the reason
@@ -158,11 +163,14 @@ recreates the same stack on the new port and takes it over.
 
 ## The three ways to run
 
+Shown from inside the package. Anywhere else, name it first, as in
+`unmute dev my-agent --console`.
+
 | Command | You talk through | Needs |
 |---|---|---|
-| `unmute dev <pkg>` | a local web page | Docker |
-| `unmute dev <pkg> --console` | your terminal, over the local mic | `uv`, no Docker |
-| `unmute dev <pkg> --telephony` | a real phone call | Docker for most routes, plus carrier credentials |
+| `unmute dev` | a local web page | Docker |
+| `unmute dev --console` | your terminal, over the local mic | `uv`, no Docker |
+| `unmute dev --telephony` | a real phone call | Docker for most routes, plus carrier credentials |
 
 `--console` and `--telephony` cannot be combined:
 

@@ -777,3 +777,39 @@ func TestBrowserPathNeedsNoWebChannel(t *testing.T) {
 		})
 	}
 }
+
+// dev takes the same optional package directory as validate and compile
+// (contracts C7 and C8). These prove the resolution without starting Docker:
+// both assertions land on checks that run immediately after the directory is
+// resolved, so reaching them at all means the zero-argument form worked.
+
+func TestDevWithNoArgumentResolvesTheCurrentDirectory(t *testing.T) {
+	t.Chdir(copyPackage(t, "remy"))
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	// --public-url without --telephony is rejected just after the directory is
+	// resolved, so this error means dev accepted the zero-argument form.
+	cmd.SetArgs([]string{"dev", "--public-url", "https://example.test"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--public-url requires --telephony") {
+		t.Fatalf("dev with no directory did not reach its flag checks: %v", err)
+	}
+}
+
+func TestDevWithNoArgumentOutsideAPackageExplainsItself(t *testing.T) {
+	t.Chdir(t.TempDir())
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"dev"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("dev outside a package must fail")
+	}
+	if !strings.Contains(err.Error(), "agent.yaml") || strings.Contains(err.Error(), "accepts 1 arg") {
+		t.Fatalf("dev must explain itself, not print the cobra arity error: %v", err)
+	}
+}

@@ -19,18 +19,28 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
     ```
     created my-agent/agent.yaml
     created my-agent/.env.example
+    created my-agent/.gitignore
     created my-agent/instructions.md
     created my-agent/targets.yaml
     created my-agent/tools/end_call.yaml
     ```
 
-    Five files. `agent.yaml` is the agent, `instructions.md` is its prompt,
+    Six files. `agent.yaml` is the agent, `instructions.md` is its prompt,
     `targets.yaml` picks the runtime, `tools/end_call.yaml` gives it a way to
-    hang up, and `.env.example` lists the keys to fill in.
+    hang up, `.env.example` lists the keys to fill in, and `.gitignore` keeps
+    your filled-in `.env` and the `build/` output out of git.
 
     The scaffold binds **SLNG speech models by design**, for listening and for
     speaking, which is why one `SLNG_API_KEY` covers both. See
-    [Models](/models/optimization) for what runs behind them.
+    [Models](/models/optimization) for what runs behind them. It picks
+    **LiveKit Agents** as the runtime, which is what `targets.yaml` says and
+    what you will see named in the output below.
+
+    Now move into the package, because everything after this runs inside it:
+
+    ```sh
+    cd my-agent
+    ```
 
     <Tip>
       Run `unmute init` with no name in a terminal and you get an interactive
@@ -40,12 +50,18 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
 
   <Step title="Add your keys">
     ```sh
-    cp my-agent/.env.example my-agent/.env
+    cp .env.example .env
     ```
 
-    Open `my-agent/.env` and fill in `OPENAI_API_KEY` and `SLNG_API_KEY`. Those
-    are the only two, and they are the same two `agent.yaml` lists under
+    Open `.env` and fill in `OPENAI_API_KEY` and `SLNG_API_KEY`. Those two are
+    the ones you supply, and they are the same two `agent.yaml` lists under
     `secrets:`.
+
+    The file lists three more names, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`,
+    and `LIVEKIT_URL`. They point at a LiveKit server. `unmute dev` runs one
+    for you locally and fills them in itself, so leave them empty until you
+    deploy. That split is deliberate: `secrets:` is what your agent needs, and
+    the LiveKit connection belongs to wherever the agent happens to run.
 
     `unmute dev` reads `.env` from the directory you run it in, then from the
     package directory, so a package can override a shared key.
@@ -53,28 +69,38 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
 
   <Step title="Check the package">
     ```sh
-    unmute validate my-agent
+    unmute validate
     ```
 
     ```
-    ✓ pipecat (pipecat)
+    ✓ livekit (livekit)
+
+    Warnings:
+      livekit: LiveKit turn placement is a preference
     ```
 
-    One line per target, and exit code 0. If a field is wrong, this is where you
-    find out, with the file and the line.
+    No argument, because you are standing in the package. `validate`,
+    `compile`, and `dev` all take the package directory as an optional
+    argument: leave it out and they use the current directory, name one and
+    that wins. So `unmute validate my-agent` from the parent directory prints
+    the same thing.
+
+    One line per target, and exit code 0. The warning is a real difference
+    worth reading, not a failure. If a field is wrong, this is where you find
+    out, with the file and the line.
   </Step>
 
   <Step title="Talk to it">
     ```sh
-    unmute dev my-agent
+    unmute dev
     ```
 
     ```
-    compiled my-agent/build/pipecat
+    compiled build/livekit
     building and starting the container...
 
-      ▸ http://localhost:8765/?agent=pipecat
-        ctrl-c to stop  ·  logs: my-agent/build/pipecat/dev.log
+      ▸ http://localhost:8765/?agent=livekit
+        ctrl-c to stop  ·  logs: build/livekit/dev.log
     ```
 
     `unmute dev` compiles the package, builds the container the deploy would
@@ -97,9 +123,9 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
 ## What just happened
 
 - `unmute init` wrote a package bound to SLNG speech models and an OpenAI
-  reasoning model.
-- `unmute dev` compiled that package into `my-agent/build/pipecat/`, a normal
-  Python project with a Dockerfile.
+  reasoning model, targeting LiveKit Agents.
+- `unmute dev` compiled that package into `build/livekit/`, a normal Python
+  project with a Dockerfile.
 - The container it ran is the same image a deployment would run. Local testing
   is not a separate code path.
 
@@ -110,17 +136,16 @@ The first run is slow because Docker builds the image. Later runs reuse it.
 <AccordionGroup>
   <Accordion title="docker compose is required to run unmute dev">
     Docker is not running, or Compose is missing. Start Docker, or talk to the
-    agent in the terminal instead with `unmute dev my-agent --console`, which
-    needs [uv](https://docs.astral.sh/uv/) and no Docker.
+    agent in the terminal instead with `unmute dev --console`, which needs
+    [uv](https://docs.astral.sh/uv/) and no Docker.
   </Accordion>
   <Accordion title="Missing required environment variables">
     The container starts, checks the keys the agent needs, and stops with the
-    names it did not find. Fill them in `my-agent/.env` and run again.
+    names it did not find. Fill them in `.env` and run again.
   </Accordion>
   <Accordion title="The browser page opens but nothing speaks">
-    Look at `my-agent/build/pipecat/dev.log`. It has the container's whole
-    output. Add `--verbose` to follow the same log in your terminal while it
-    runs.
+    Look at `build/livekit/dev.log`. It has the container's whole output. Add
+    `--verbose` to follow the same log in your terminal while it runs.
   </Accordion>
   <Accordion title="Port already in use">
     Another dev run is holding the port. Either stop it, or pass different

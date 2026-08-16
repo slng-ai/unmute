@@ -7,8 +7,10 @@ description: "Write the generated project for each target, and read the report i
 $ unmute compile --help
 Compile a v1 agent package to its resolved target artifacts.
 
+With no package-dir, the package is the current directory, so you can cd into an agent and run this with no arguments.
+
 Usage:
-  unmute compile <package-dir> [flags]
+  unmute compile [package-dir] [flags]
 
 Flags:
   -h, --help             help for compile

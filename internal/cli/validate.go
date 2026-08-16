@@ -14,11 +14,18 @@ import (
 func newValidateCmd() *cobra.Command {
 	var names []string
 	cmd := &cobra.Command{
-		Use:   "validate <package-dir>",
+		Use:   "validate [package-dir]",
 		Short: "Validate a v1 agent package against its targets.",
-		Args:  cobra.ExactArgs(1),
+		Long: "Validate a v1 agent package against its targets.\n\n" +
+			"With no package-dir, the package is the current directory, so you can " +
+			"cd into an agent and run this with no arguments.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runValidate(cmd, args[0], names)
+			dir, err := packageDir(cmd, args)
+			if err != nil {
+				return err
+			}
+			return runValidate(cmd, dir, names)
 		},
 	}
 	cmd.Flags().StringSliceVar(&names, "target", nil, "target instance name (repeatable)")
@@ -40,7 +47,7 @@ func runValidate(cmd *cobra.Command, dir string, names []string) error {
 	}
 	report, validateErr := ir.Validate(agent, targets, target.Default())
 	out := cmd.OutOrStdout()
-	printHeader(out, "validate "+dir)
+	printHeader(out, "validate "+displayDir(dir))
 	u := newUI(out)
 	for _, row := range report.PerTarget {
 		status := u.ok("✓")

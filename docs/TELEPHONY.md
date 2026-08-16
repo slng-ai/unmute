@@ -912,18 +912,22 @@ exactly the declared number of concurrent sessions, including a limit of one.
 The interface is:
 
 ```text
-unmute dev ./agent --target pipecat --telephony
-unmute dev ./agent --target livekit --telephony
+unmute dev ./agent --telephony
+unmute dev ./agent --target <name> --telephony
 unmute dev ./agent --target <name> --telephony --to +15551234567
 ```
 
-Both commands run the selected route end to end. A route with a real adapter
+The package directory is optional, so `unmute dev --telephony` from inside the
+package works too. `--target` is needed only when the package declares several
+targets; a scaffolded package declares one.
+
+Every form runs the selected route end to end. A route with a real adapter
 validates, generates, and starts; only a gated route (Exotel) stops at
 validation.
 
-Docker Compose is the local executor for both orchestrators. The Pipecat
-command builds and starts the generated Pipecat application with Redis, plus a
-managed cloudflared quick tunnel. The LiveKit command depends on the route. The
+Docker Compose is the local executor for both orchestrators. On Pipecat, dev
+builds and starts the generated Pipecat application with Redis, plus a managed
+cloudflared quick tunnel. On LiveKit it depends on the route. The
 Twilio connector builds and starts the application, which runs the bridge and
 the worker together, with a local `livekit-server --dev` and no Redis, behind
 the same managed tunnel. The SIP route builds and starts the generated LiveKit

@@ -7,8 +7,10 @@ description: "Every flag, with defaults, requirements, and what each mode ignore
 $ unmute dev --help
 Compile, run the agent locally, and talk to it in the browser or terminal (--console).
 
+With no agent-dir, the package is the current directory, so you can cd into an agent and run this with no arguments.
+
 Usage:
-  unmute dev <agent-dir> [flags]
+  unmute dev [agent-dir] [flags]
 
 Flags:
       --bot-port string     host port the container publishes the agent on (Compose UNMUTE_DEV_PORT; with --telephony, UNMUTE_TELEPHONY_PORT) (default "7860")

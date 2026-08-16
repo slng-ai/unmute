@@ -43,13 +43,15 @@ Every change goes through the same four steps. Do not skip step two.
 
 1. **Write the package.** `agent.yaml`, the prompt file, `targets.yaml`, and any
    tool files.
-2. **Run `unmute validate <dir>`.** It prints one line per target and exits 1 if
-   any fails. An error names the file, the line, and often the column.
+2. **Run `unmute validate`.** From inside the package the directory argument is
+   optional, so `cd my-agent` once and run it bare. It prints one line per
+   target and exits 1 if any fails. An error names the file, the line, and often
+   the column.
 3. **Read the error and fix the package.** The message says what is wrong and
    usually what to write instead. Do not guess, and do not work around a
    refusal: a refusal is a decision, and the message names the fix.
-4. **Run `unmute dev <dir> --target pipecat`** and talk to it. A package that
-   validates is not yet an agent that sounds right.
+4. **Run `unmute dev`** and talk to it. A package that validates is not yet an
+   agent that sounds right.
 
 Repeat two and three until validate is clean. Never claim a package works when
 you have only written it.
@@ -61,9 +63,10 @@ the user the exact commands:
 
 ```sh
 unmute validate ./my-agent
-unmute dev ./my-agent --target pipecat
+unmute dev ./my-agent
 ```
 
+Write the path here, because you do not know which directory they are in.
 Then ask them to paste the output back. Do not claim the package validates when
 nothing has validated it.
 
@@ -72,9 +75,9 @@ run `unmute validate` and `unmute compile` yourself and you should. You cannot
 do step four, because it needs ears. Do not skip it silently and do not pretend
 it passed. Finish with the exact command and what to listen for:
 
-> Validate is clean on both targets and compile succeeded. I have not heard it.
-> Run `unmute dev ./my-agent --target pipecat` and listen for the greeting, the
-> pause before the first reply, and whether it stops when you talk over it.
+> Validate is clean on the livekit target and compile succeeded. I have not
+> heard it. Run `unmute dev ./my-agent` and listen for the greeting, the pause
+> before the first reply, and whether it stops when you talk over it.
 
 `prompting.md` has the five scenarios worth trying out loud.
 
@@ -105,7 +108,7 @@ When you finish a package, tell the user, in plain words:
    ask for.
 3. **The context that crosses every handoff, delegation, and group step.** This
    is the decision that gets made silently and goes wrong later. Name it.
-4. **What you actually checked.** "Validate is clean on both targets" is a
+4. **What you actually checked.** "Validate is clean on the livekit target" is a
    claim. "I wrote the package and did not run it" is also fine, and it is what
    you say when it is true.
 
@@ -153,14 +156,16 @@ my-agent/
 ```
 
 `unmute init <name>` scaffolds this. Start there rather than from an empty
-directory, then edit what it wrote.
+directory, then `cd` into it and edit what it wrote. The scaffold declares one
+target, `livekit`, so there is nothing for `--target` to choose between until
+you add a second one by hand.
 
 ## Getting started, in order
 
 Given a one-sentence brief from the user, do this:
 
-1. Ask nothing yet. Scaffold with `unmute init`, or write the four files by hand
-   using `references/package.md`.
+1. Ask nothing yet. Scaffold with `unmute init <name>` and `cd` into it, or
+   write the four files by hand using `references/package.md`.
 2. Bind the default models. Write the prompt with `references/prompting.md` open,
    because a prompt written for chat sounds wrong out loud.
 3. Add `end_call` so the agent can hang up. It is the one prebuilt tool that

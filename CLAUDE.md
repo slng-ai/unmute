@@ -43,6 +43,8 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | example READMEs name every transport; every `examples/` link resolves | `internal/generate/examples_test.go` |
 | the skill's tool kinds, vendors, providers and doc pointers match the code | `internal/skill/agreement_test.go` |
 | every command and flag the skill names exists | `internal/cli/skill_bundle_test.go` |
+| the docs-site CLI pages quote each command's `Usage:` line, not just its flags | `internal/cli/help_capture_test.go` |
+| the console's target menus lead with the right target: create with `scaffold.DefaultTarget`, maintain with the package's own | `internal/tui/default_target_test.go` |
 | checked-in Python is clean | CI `python`, `ruff check .` |
 | no known-vulnerable dependency or stdlib | CI `vuln`, `govulncheck ./...` |
 | release config still builds 6 platforms with version stamps | CI `release-config` |
