@@ -539,6 +539,9 @@ func authorFacingModelSurfaces(t *testing.T) map[string]string {
 	}
 	walk := func(root string, ext ...string) {
 		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if entry.IsDir() && root == repo("examples") && entry.Name() == "build" {
+				return fs.SkipDir
+			}
 			if err != nil || entry.IsDir() || !slices.Contains(ext, filepath.Ext(path)) {
 				return err
 			}

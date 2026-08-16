@@ -286,13 +286,13 @@ func (r sipRecord) list(keys ...string) []sipRecord {
 // 2026-07-23 against docs.livekit.io /reference/agents/agent-dispatch-service-api:
 //
 //	POST <server>/twirp/livekit.AgentDispatchService/CreateDispatch
-//	{"agent_name","room","metadata"} ; Bearer JWT with roomAdmin ; room auto-created.
+//	{"agent_name","room","metadata"} ; Bearer JWT with room-scoped roomAdmin ; room auto-created.
 func placeLiveKitDispatch(ctx context.Context, out io.Writer, targetName, to string, env []string) error {
 	room, err := randomRoomName("call")
 	if err != nil {
 		return err
 	}
-	token, err := mintLiveKitDispatchToken(liveKitSIPComposeKey, liveKitSIPComposeSecret, time.Now())
+	token, err := mintLiveKitDispatchToken(liveKitSIPComposeKey, liveKitSIPComposeSecret, room, time.Now())
 	if err != nil {
 		return err
 	}
@@ -320,19 +320,20 @@ func placeLiveKitDispatch(ctx context.Context, out io.Writer, targetName, to str
 	return nil
 }
 
-// mintLiveKitDispatchToken returns a short-lived HS256 JWT with server-wide
-// roomAdmin (the AgentDispatchService grant), reusing the hand-rolled JWT
-// approach from mintLiveKitToken. No room is scoped so it can create any room.
-func mintLiveKitDispatchToken(apiKey, apiSecret string, now time.Time) (string, error) {
+// mintLiveKitDispatchToken returns a short-lived HS256 JWT with roomAdmin
+// scoped to the AgentDispatchService request room, matching LiveKit's SDK.
+func mintLiveKitDispatchToken(apiKey, apiSecret, room string, now time.Time) (string, error) {
 	claims := struct {
 		Iss   string `json:"iss"`
 		Nbf   int64  `json:"nbf"`
 		Exp   int64  `json:"exp"`
 		Video struct {
-			RoomAdmin bool `json:"roomAdmin"`
+			RoomAdmin bool   `json:"roomAdmin"`
+			Room      string `json:"room"`
 		} `json:"video"`
 	}{Iss: apiKey, Nbf: now.Unix(), Exp: now.Add(10 * time.Minute).Unix()}
 	claims.Video.RoomAdmin = true
+	claims.Video.Room = room
 	return signJWT(apiSecret, claims)
 }
 

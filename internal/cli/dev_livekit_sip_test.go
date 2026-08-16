@@ -25,12 +25,13 @@ type fakeSIPAdmin struct {
 	rules      []map[string]any
 	requests   []string
 	bodies     map[string]string
+	auth       map[string]string
 	dispatches []map[string]any
 }
 
 func newFakeSIPAdmin(t *testing.T) (*fakeSIPAdmin, *httptest.Server) {
 	t.Helper()
-	fake := &fakeSIPAdmin{t: t, bodies: map[string]string{}}
+	fake := &fakeSIPAdmin{t: t, bodies: map[string]string{}, auth: map[string]string{}}
 	server := httptest.NewServer(fake)
 	t.Cleanup(server.Close)
 	restore := liveKitSIPAdminBase
@@ -60,6 +61,7 @@ func (f *fakeSIPAdmin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if dispatchMethod, ok := strings.CutPrefix(r.URL.Path, "/twirp/livekit.AgentDispatchService/"); ok {
 		f.requests = append(f.requests, dispatchMethod)
 		f.bodies[dispatchMethod] = string(body)
+		f.auth[dispatchMethod] = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if dispatchMethod == "CreateDispatch" {
 			f.dispatches = append(f.dispatches, payload)
 			write(map[string]any{"id": "AD_1", "agent_name": payload["agent_name"], "room": payload["room"]})
@@ -299,11 +301,12 @@ func TestMintLiveKitSIPAdminTokenCarriesSIPAdminGrant(t *testing.T) {
 	}
 }
 
-// V7: --to on a SIP plan places the call by dispatching the agent on the local
+// V5: --to on a SIP plan places the call by dispatching the agent on the local
 // server (no /telephony/outbound POST exists for this route). Exactly one
 // CreateDispatch fires, with agent_name = target, a fresh call- room, and
-// outbound metadata carrying the number; the SIP auth never appears in output.
-func TestPlaceLiveKitDispatchOutbound(t *testing.T) {
+// outbound metadata carrying the number. Its roomAdmin token is scoped to that
+// exact room, and the SIP auth never appears in output.
+func TestV5_PlaceLiveKitDispatchScopesRoomAdminToRequestRoom(t *testing.T) {
 	fake, _ := newFakeSIPAdmin(t)
 	var out strings.Builder
 	env := append(sipTestEnv(), `UNMUTE_CALL_START={"name":"Ada","attempts":2}`)
@@ -321,6 +324,26 @@ func TestPlaceLiveKitDispatchOutbound(t *testing.T) {
 	if !strings.HasPrefix(room, "call-") {
 		t.Errorf("room = %q, want a fresh call- room", room)
 	}
+	parts := strings.Split(fake.auth["CreateDispatch"], ".")
+	if len(parts) != 3 {
+		t.Fatalf("dispatch token has %d parts", len(parts))
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims struct {
+		Video struct {
+			RoomAdmin bool   `json:"roomAdmin"`
+			Room      string `json:"room"`
+		} `json:"video"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		t.Fatal(err)
+	}
+	if !claims.Video.RoomAdmin || claims.Video.Room != room {
+		t.Fatalf("dispatch grant = %+v, want roomAdmin scoped to request room %q", claims.Video, room)
+	}
 	metadata, _ := got["metadata"].(string)
 	for _, want := range []string{`"direction":"outbound"`, `"phone_number":"+15557778888"`, `"call_start":{"attempts":2,"name":"Ada"}`} {
 		if !strings.Contains(metadata, want) {
@@ -336,10 +359,10 @@ func TestPlaceLiveKitDispatchOutbound(t *testing.T) {
 	}
 }
 
-// The dispatch token is an HS256 JWT with the server-wide roomAdmin grant the
-// AgentDispatchService requires; no room is scoped so it can create any room.
+// The dispatch token is an HS256 JWT with the room-scoped roomAdmin grant the
+// AgentDispatchService requires.
 func TestMintLiveKitDispatchTokenCarriesRoomAdmin(t *testing.T) {
-	token, err := mintLiveKitDispatchToken("devkey", "secret", time.Unix(1_800_000_000, 0))
+	token, err := mintLiveKitDispatchToken("devkey", "secret", "call-test", time.Unix(1_800_000_000, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,13 +377,14 @@ func TestMintLiveKitDispatchTokenCarriesRoomAdmin(t *testing.T) {
 	var claims struct {
 		Iss   string `json:"iss"`
 		Video struct {
-			RoomAdmin bool `json:"roomAdmin"`
+			RoomAdmin bool   `json:"roomAdmin"`
+			Room      string `json:"room"`
 		} `json:"video"`
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		t.Fatal(err)
 	}
-	if claims.Iss != "devkey" || !claims.Video.RoomAdmin {
+	if claims.Iss != "devkey" || !claims.Video.RoomAdmin || claims.Video.Room != "call-test" {
 		t.Fatalf("claims = %+v", claims)
 	}
 }
