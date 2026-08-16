@@ -114,6 +114,11 @@ another handoff, not a return. If you want a step that runs and hands control
 back with an answer, that is a task. A handoff back to the entry agent continues
 the call and never repeats the call-start greeting.
 
+On LiveKit, a receiving agent cannot fire another agent transfer during its
+automatic entry turn. Ordinary tools still work, and transfer tools return on
+the next caller turn. Do not add prompt guards for reciprocal handoff loops;
+the generated driver already gates that boundary.
+
 The tool lists are the guardrail. Only `appointment_manager` holds
 `cancel_appointment`, so no caller can talk the booking agent into a
 cancellation.

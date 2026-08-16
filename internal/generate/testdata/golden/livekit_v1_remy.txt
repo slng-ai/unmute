@@ -71,7 +71,9 @@ the active agent. LiveKit finishes it before it activates the receiving agent. T
 happening. Without `announce`, the handoff stays silent.
 
 The opening greeting belongs to call start only. A later handoff back to the
-entry agent continues from the carried context and never repeats it.
+entry agent continues from the carried context and never repeats it. Transfer
+tools become available after that entry turn, so carried history cannot send
+the call straight back before the caller speaks again.
 
 ## Input variables
 
@@ -415,7 +417,7 @@ class Events(Agent):
         # opening (the prompt already says not to re-greet).
         self.session.generate_reply()
 
-    @function_tool
+    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)
     async def back_to_greeter(self, ctx: RunContext):
         """Caller wants something else, or to start over."""
         return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
@@ -460,12 +462,12 @@ class Greeter(Agent):
             return
         await self.session.say("Hi, this is Remy at Fern and Oak. Are you booking a table, or planning a private event?")
 
-    @function_tool
+    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)
     async def to_reservations(self, ctx: RunContext):
         """Caller wants to book a table for a normal dine-in visit."""
         return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
 
-    @function_tool
+    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)
     async def to_events(self, ctx: RunContext):
         """Caller wants to plan a private event, party, or large group booking."""
         return Events(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
@@ -484,7 +486,7 @@ class Reservations(Agent):
         # opening (the prompt already says not to re-greet).
         self.session.generate_reply()
 
-    @function_tool
+    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)
     async def back_to_greeter(self, ctx: RunContext):
         """Caller wants something else, or to start over."""
         return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
