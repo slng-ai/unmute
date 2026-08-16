@@ -145,6 +145,9 @@ Two of those cells mean different things:
 
 Do not blur those two when you explain a limit.
 
+Unmute does not support warm transfer on any Pipecat target. Warm transfer
+currently requires LiveKit `sip`.
+
 A transfer a route cannot do is refused at validation, naming the connection and
 the transport it declares:
 
@@ -182,10 +185,9 @@ pipecat: Pipecat cold transfer requires Daily SIP transport
 | a connection | possible, subject to the route table above |
 | no connection | **refused at validate**, before anything is written |
 
-A route is not the same as a phone channel. `examples/pipecat-human-transfer-daily`
-has only `web: realtime_audio` and transfers fine, because Daily's dial-out
-brings the person into the room the browser session is already in. What it does
-have is a connection.
+A route is not the same as a phone channel. A Pipecat `daily-sip` package can
+use web audio while Daily's dial-out brings the person into the room. What it
+still needs is a connection.
 
 So when a user asks a browser agent with no route to reach a person, offer what
 actually works instead: a tool that books a callback, raises a ticket, or emails
@@ -216,11 +218,9 @@ news.
 On the LiveKit `sip` route, no answer, a decline, voicemail, and a failed dial
 all come back as one failure, and `on_unavailable` decides what happens next.
 
-On the Pipecat `cloud-websocket` route there is one honest limit worth naming
-before anyone ships: when the dial ends, however it ends, the caller hears a
-handback line and returns to a **fresh** agent that does not remember the call.
-Knowing more would need a callback endpoint the user hosts, and that route
-exists to host nothing.
+On the Pipecat `cloud-websocket` route, when the destination leg ends, Twilio
+ends the original call. A decline or no answer does the same after the dial
+timeout. No fresh agent starts without the previous conversation context.
 
 ## What a target refuses
 
@@ -237,4 +237,3 @@ exists to host nothing.
 |---|---|---|
 | `examples/livekit-human-transfer` | LiveKit over a Twilio SIP trunk | cold and warm, side by side |
 | `examples/pipecat-human-transfer-twilio` | Pipecat Cloud, reached through a Twilio number | cold, with nothing hosted by the user |
-| `examples/pipecat-human-transfer-daily` | Pipecat over a Daily-provisioned number | cold, with no carrier account at all |

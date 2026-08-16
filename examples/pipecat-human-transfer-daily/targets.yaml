@@ -1,9 +1,0 @@
-# Pipecat on the Daily route: the one Pipecat transport with a native transfer
-# primitive. Cold transfer needs dial-out enabled on the Daily domain.
-targets:
-  pipecat:
-    provider: pipecat
-    version: "1.7.0"
-    # connections/daily.yaml declares the transport and nothing else: this route
-    # has no carrier and needs no credentials from you.
-    connection: daily

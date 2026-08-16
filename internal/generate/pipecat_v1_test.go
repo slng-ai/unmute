@@ -2317,11 +2317,9 @@ func TestUS3_NoPrerequisiteWithoutTheCapability(t *testing.T) {
 // joins the startup check, so a missing value fails the bot by name at boot
 // instead of arriving as a call nobody answers.
 func TestUS3_TransferDestinationIsInTheStartupCheck(t *testing.T) {
-	// The example, not the fixture: a destination may be a literal or the name of
-	// an env var read at call time, and only the env-name form has a credential to
-	// check. A committed package uses the env form, because any number a
-	// repository ships is a number nobody answers.
-	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "pipecat-human-transfer-daily"))
+	// The fixture uses an environment name because a committed phone number would
+	// be a number nobody answers.
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
 		t.Fatal(err)
 	}

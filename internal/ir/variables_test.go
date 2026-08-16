@@ -293,7 +293,7 @@ func TestSecretsCrossCheckNeverAsksForDriverSuppliedNames(t *testing.T) {
 func TestTelephonyExamplesDeclareEveryNameTheyWrite(t *testing.T) {
 	for _, example := range []string{
 		"twilio-telephony-hello", "livekit-human-transfer",
-		"pipecat-human-transfer-twilio", "pipecat-human-transfer-daily", "outbound-reminder",
+		"pipecat-human-transfer-twilio", "outbound-reminder",
 	} {
 		t.Run(example, func(t *testing.T) {
 			pkg, err := packagespec.Load(filepath.Join("..", "..", "examples", example))

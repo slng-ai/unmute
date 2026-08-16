@@ -34,18 +34,13 @@ path; that worker must connect to one of those two reachable telephony deploymen
   rather than the prebuilt's, because the prebuilt's own never briefs
   unprompted.
 
-Cold on Pipecat has two examples of its own, and neither hosts anything:
-[pipecat-human-transfer-daily](../pipecat-human-transfer-daily) on `transport: daily-sip` with a
-number from Daily, and
+Cold on Pipecat has its own example:
 [pipecat-human-transfer-twilio](../pipecat-human-transfer-twilio) on
 `transport: cloud-websocket` with a Twilio number you already own.
 
-**Warm is LiveKit-only, and the reason differs per Pipecat route** rather than
-being one blanket fact: on the Daily routes the platform documents a warm pattern
-and this project has not built it (feature 005); on `cloud-websocket` it would need
-a callback endpoint you host, which is the one cost that route exists to remove;
-on the carrier-websocket transports there is no transfer control at all. Each
-refusal says which it means. See the
+**Unmute does not support warm transfer on any Pipecat target.** Warm transfer
+currently requires LiveKit SIP. Each Pipecat route refusal says why that route
+cannot emit it. See the
 [transfer capability map](../../docs-site/transfers/overview.mdx) and
 [telephony route comparison](../../docs-site/telephony/overview.mdx).
 

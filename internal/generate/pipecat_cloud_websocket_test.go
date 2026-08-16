@@ -252,9 +252,6 @@ func TestCloudWebsocketRegionPicksTheEndpoint(t *testing.T) {
 	if !strings.Contains(readme, "--region eu-central") {
 		t.Error("the secret-set command does not carry the declared region, so the agent could not read its own secrets")
 	}
-	if !strings.Contains(artifactFile(t, regional, "bot.py"), `STREAM_URL = "wss://eu-central.api.pipecat.daily.co/ws/twilio"`) {
-		t.Error("the transfer's reconnect markup does not name the regional endpoint")
-	}
 	// And the README says the chain out loud, because an invariant nobody states is
 	// one an operator breaks by hand on the first region change.
 	for _, want := range []string{"One region, three places", "globally unique across regions", "region-scoped"} {
@@ -572,58 +569,38 @@ func TestCloudWebsocketTransferUpdatesTheLiveCall(t *testing.T) {
 	}
 }
 
-// TestCloudWebsocketTransferHandbackIsSequentialAndOutcomeNeutral: the handback
-// verbs follow the dial in one document, because branching would need a hosted
-// endpoint (D7) — and because they run however the dial ended, the line cannot
-// claim the dial failed. Twilio moves to the verb after <Dial> when the
-// destination hangs up just as it does on busy or no answer (Twilio <Dial>
-// documentation, re-read 2026-08-13), so a "we could not reach anyone" line lies
-// to every caller a completed transfer handed back. Live-observed, not reviewed.
-func TestCloudWebsocketTransferHandbackIsSequentialAndOutcomeNeutral(t *testing.T) {
+// TestCloudWebsocketColdTransferEndsOriginalCallAfterDial holds the cold-transfer
+// contract: after the destination leg ends, Twilio ends the original call. A
+// reconnect would start a fresh agent with no context and can fail when no
+// matching Pipecat Cloud deployment exists.
+func TestCloudWebsocketColdTransferEndsOriginalCallAfterDial(t *testing.T) {
 	artifact := cloudWebsocketArtifact(t, cloudWebsocketOptions{inbound: true, transfer: true, connection: true})
 	bot := artifactFile(t, artifact, "bot.py")
 	dial := strings.Index(bot, "<Dial answerOnBridge")
-	handback := strings.Index(bot, "<Say>Putting you back to the assistant.</Say>")
-	reconnect := strings.Index(bot, "<Connect><Stream")
-	if dial < 0 || handback < 0 || reconnect < 0 {
-		t.Fatal("the transfer markup is missing its dial, its handback line, or its reconnect")
+	hangup := strings.Index(bot, "<Hangup/>")
+	if dial < 0 || hangup < 0 {
+		t.Fatal("the transfer markup is missing its dial or final hangup")
 	}
-	if dial >= handback || handback >= reconnect {
-		t.Error("the handback verbs do not follow the dial, so a caller whose dial has ended is left in silence")
+	if dial >= hangup {
+		t.Error("the final hangup does not follow the destination dial")
 	}
-	// Nothing the caller *hears* may name an outcome the markup cannot know. Every
-	// spoken line is checked, not just the handback, and prose about the rule is
-	// not a spoken line.
-	for _, spoken := range regexp.MustCompile(`<Say>([^<]*)</Say>`).FindAllStringSubmatch(bot, -1) {
-		for _, lie := range []string{"could not reach", "nobody answered", "no one is available", "Sorry"} {
-			if strings.Contains(spoken[1], lie) {
-				t.Errorf("a spoken line claims %q, which is false whenever the destination answered and hung up first: %q", lie, spoken[1])
-			}
+	for _, forbidden := range []string{"Putting you back", "<Connect><Stream", "_service_host"} {
+		if strings.Contains(bot, forbidden) {
+			t.Errorf("the transfer reconnects after the dial (%q is still emitted)", forbidden)
 		}
-	}
-	// The reconnect names the same service host as the Bin: one helper, one value,
-	// no chance of the two disagreeing (data-model section 3).
-	if !strings.Contains(bot, `_pipecatCloudServiceHost" value="{_service_host()}`) {
-		t.Error("the reconnect does not name the service host, so the handback reaches nothing")
-	}
-	section := telephonySection(t, artifact)
-	binHost := strings.Contains(section, `value="pipecat.YOUR_ORGANIZATION"`)
-	botHost := strings.Contains(bot, `return "pipecat." + os.environ["PIPECAT_CLOUD_ORGANIZATION"]`)
-	if !binHost || !botHost {
-		t.Errorf("the Bin and the bot do not compose the same service host (bin=%v bot=%v)", binHost, botHost)
 	}
 }
 
-// TestCloudWebsocketTransferHonestyIsWritten: the two limits are in the emitted
-// README, in operator words, whenever a transfer is declared (FR-007, runbook
-// part six).
-func TestCloudWebsocketTransferHonestyIsWritten(t *testing.T) {
+// TestCloudWebsocketTransferCompletionIsWritten keeps the generated runbook in
+// agreement with the TwiML: the original call ends and Pipecat warm transfer is
+// unavailable.
+func TestCloudWebsocketTransferCompletionIsWritten(t *testing.T) {
 	section := telephonySection(t, cloudWebsocketArtifact(t, cloudWebsocketOptions{
 		inbound: true, transfer: true, connection: true,
 	}))
 	for _, want := range []string{
-		"comes back to a fresh agent", "does not remember", "however the dial ended",
-		"hangs up", "Daily carrier route",
+		"ends the original call", "No fresh agent starts",
+		"Warm transfer is not supported on any Pipecat target", "LiveKit SIP route",
 	} {
 		if !strings.Contains(section, want) {
 			t.Errorf("the transfer section does not state %q", want)
@@ -632,7 +609,7 @@ func TestCloudWebsocketTransferHonestyIsWritten(t *testing.T) {
 	// Absent when no transfer is declared: nobody needs a limit of a feature they
 	// did not ask for.
 	plain := telephonySection(t, cloudWebsocketArtifact(t, cloudWebsocketOptions{inbound: true}))
-	if strings.Contains(plain, "comes back to a fresh agent") {
+	if strings.Contains(plain, "No fresh agent starts") {
 		t.Error("a package with no transfer is told about the transfer's limits")
 	}
 }

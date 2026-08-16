@@ -77,6 +77,9 @@ mechanisms, which is why the answer differs per route:
 | Pipecat `carrier-websocket` | no | no | the transport carries media only, with no transfer control |
 | LiveKit `connector` | no | no | same |
 
+Unmute does not support warm transfer on any Pipecat target. Today, warm
+transfer requires the LiveKit `sip` route.
+
 Two of those cells mean different things, and the difference matters:
 
 - **no** means the platform does not ship the primitive.
@@ -114,11 +117,9 @@ carried a branch explaining, in a comment, that the usual cause of failure is "a
 session that never arrived by phone: an Agent Console run, a browser session".
 The compiler knew and shipped it anyway.
 
-A route is not the same as a phone channel, and the distinction is worth
-holding on to: `examples/pipecat-human-transfer-daily` declares only
-`web: realtime_audio` and transfers fine, because Daily's dial-out brings the
-person into the room the browser session is already in. What it has is a
-connection.
+A route is not the same as a phone channel. A Pipecat `daily-sip` package can
+declare only `web: realtime_audio` because Daily's dial-out brings the person
+into the room. What it still needs is a connection.
 
 ### The control has to be attached
 
@@ -146,10 +147,9 @@ over a secret nothing would ever read.
 On the LiveKit `sip` route, no answer, a decline, voicemail, and a failed dial
 all come back as one failure, and `on_unavailable` decides what happens next.
 
-On the Pipecat `cloud-websocket` route there is one honest limit: when the dial
-ends, however it ends, the caller hears a handback line and returns to a
-**fresh** agent that does not remember the call. Knowing more would need a
-callback endpoint you host, and that route exists to host nothing.
+On the Pipecat `cloud-websocket` route, when the destination leg ends, Twilio
+ends the original call. A decline or no answer also ends the call after the
+dial timeout. No fresh agent starts without the previous conversation context.
 
 ## Where to go next
 

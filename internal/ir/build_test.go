@@ -1117,6 +1117,17 @@ func TestBuildResolvesPipecatCloudWebsocketPlan(t *testing.T) {
 		}
 	})
 
+	t.Run("a transfer does not need the organization", func(t *testing.T) {
+		agent, err := Build(cloudWebsocket(t, true, false, true))
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan := agent.Targets["pipecat"].Telephony
+		if slices.Contains(plan.RequiredEnvironment, "PIPECAT_CLOUD_ORGANIZATION") {
+			t.Errorf("transfer-only required environment = %v; no reconnect names a service host", plan.RequiredEnvironment)
+		}
+	})
+
 	t.Run("inbound only does not ask for the organization", func(t *testing.T) {
 		agent, err := Build(cloudWebsocket(t, false, false, false))
 		if err != nil {

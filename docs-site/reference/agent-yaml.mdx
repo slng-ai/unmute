@@ -258,6 +258,8 @@ written on a cold transfer:
 [`destinations:`](#destinations) map above.
 
 Whether a route can carry the shape you asked for is decided by the connection.
+A warm transfer is supported only on LiveKit `sip`; Unmute does not support warm
+transfer on any Pipecat target.
 A warm transfer on a route with no leg to move is refused by name:
 
 ```text

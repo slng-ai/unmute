@@ -186,7 +186,7 @@ code owners, including schemas, capabilities, provider lists, docs-site CLI
 help, the shipped skill, and repository layout.
 
 For real conversations, use the
-[end-to-end example harness](../examples/E2E_HARNESS.md). It covers the part
+[end-to-end example harness prompt](HARNESS_TEST.md). It covers the part
 offline and SDK smoke tests cannot: a human speaks to the generated agent and
 checks the expected tool and handoff behavior.
 
