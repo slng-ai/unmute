@@ -53,6 +53,7 @@ const (
 	FieldTaskGroup             Field = "task_groups"
 	FieldTaskGroupReturn       Field = "task_groups.then.return"
 	FieldContextIsolated       Field = "task_groups.context_scope.isolated"
+	FieldTransferAnnounce      Field = "controls.agent_transfer.announce"
 	FieldTransferRequires      Field = "controls.agent_transfer.requires"
 	FieldContextNoToolCalls    Field = "context.include_tool_calls.false"
 	FieldContextVariableSubset Field = "context.variables.list"
@@ -270,6 +271,10 @@ func Default() Table {
 			),
 			FieldContextIsolated: field(
 				deny(Vapi, "Vapi cannot isolate task-group context"),
+			),
+			FieldTransferAnnounce: field(
+				deny(Vapi, "Vapi agent-transfer announcements are not emitted yet"),
+				deny(Deepgram, "Deepgram agent-transfer announcements are not emitted yet"),
 			),
 			FieldTransferRequires: field(
 				deny(Vapi, "Vapi has no machine-checked transfer guard"),

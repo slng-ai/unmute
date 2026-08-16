@@ -62,6 +62,16 @@ uv run agent.py console       # local terminal session
 uv run agent.py dev           # LiveKit development worker
 ```
 
+## Agent handoffs
+
+An `agent_transfer` with `announce:` gives the exact sentence spoken once by
+the active agent. LiveKit finishes it before it activates the receiving agent. The
+`requires:` guard runs first, so a refused handoff says no transfer is
+happening. Without `announce`, the handoff stays silent.
+
+The opening greeting belongs to call start only. A later handoff back to the
+entry agent continues from the carried context and never repeats it.
+
 ## Input variables
 
 This agent expects values supplied when the call starts:
@@ -181,7 +191,7 @@ setup: server, Redis, firewall ports, sizing, and scaling.
 
 Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
 `LANGFUSE_BASE_URL` in `.env`; all three are required. The trace name is
-`Greeter-livekit`; the LiveKit room name becomes the Langfuse
+`greeter-livekit`; the LiveKit room name becomes the Langfuse
 session ID.
 
 Starting the worker or exporting a synthetic span proves connectivity only.
@@ -437,13 +447,17 @@ class Events(Agent):
 
 
 class Greeter(Agent):
-    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, initial: bool = False) -> None:
+        self._initial = initial
         super().__init__(
             instructions=GREETER_PROMPT,
             chat_ctx=chat_ctx,
         )
 
     async def on_enter(self) -> None:
+        if not self._initial:
+            self.session.generate_reply()
+            return
         await self.session.say("Hi, this is Remy at Fern and Oak. Are you booking a table, or planning a private event?")
 
     @function_tool
@@ -624,7 +638,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # Input variables land before the session starts, so the greeting and the
     # prompts already see them (I.dispatch).
     _hydrate_call_start(session.userdata, _dispatched_call_start(_livekit_job_metadata(ctx.job.metadata)))
-    await session.start(agent=Greeter(), room=ctx.room)
+    await session.start(agent=Greeter(initial=True), room=ctx.room)
     await ctx.connect()
 
     async def _max_duration() -> None:

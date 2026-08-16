@@ -106,11 +106,15 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 
 	bot := artifactFile(t, artifact, "agent.py")
 	tracing := artifactFile(t, artifact, "tracing.py")
+	readme := artifactFile(t, artifact, "README.md")
+	if !strings.Contains(readme, "`greeter-livekit`") {
+		t.Error("README trace name must match the emitted Langfuse trace name")
+	}
 	for _, want := range []string{
 		"from tracing import setup_langfuse",
 		`"langfuse.session.id": ctx.room.name`,
 		`"langfuse.trace.name": "greeter" + "-" + "livekit"`,
-		"await session.start(agent=Greeter(), room=ctx.room)",
+		"await session.start(agent=Greeter(initial=True), room=ctx.room)",
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -1080,6 +1084,76 @@ func TestLiveKitV1HistoryResetAndToolCallShaping(t *testing.T) {
 	}
 }
 
+func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
+	toRes.Announce = "I’ll connect you to reservations now."
+	toRes.Requires = []string{"caller_phone"}
+	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
+	toRes.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}}
+	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
+	back.Context.History = ir.HistoryReset
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	start := strings.Index(botpy, "    async def to_reservations(self, ctx: RunContext):")
+	if start < 0 {
+		t.Fatal("agent.py missing to_reservations")
+	}
+	end := strings.Index(botpy[start+1:], "\n    @function_tool")
+	if end < 0 {
+		t.Fatal("agent.py missing the end of to_reservations")
+	}
+	method := botpy[start : start+1+end]
+	guardAt := strings.Index(method, "        if missing:")
+	announceAt := strings.Index(method, `        await ctx.session.say("I’ll connect you to reservations now.", allow_interruptions=False)`)
+	resetAt := strings.Index(method, "        ctx.userdata.visit_count = None")
+	returnAt := strings.Index(method, "        return Reservations(")
+	if guardAt < 0 || announceAt < 0 || resetAt < 0 || returnAt < 0 ||
+		guardAt >= announceAt || announceAt >= resetAt || resetAt >= returnAt {
+		t.Errorf("transfer must guard, finish its announcement, shape context, then hand off:\n%s", method)
+	}
+	if strings.Contains(method, "generate_reply(instructions=") {
+		t.Errorf("the exact announcement must not start another LLM turn:\n%s", method)
+	}
+
+	for _, want := range []string{
+		"def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, initial: bool = False) -> None:",
+		"        self._initial = initial",
+		"        if not self._initial:\n            self.session.generate_reply()\n            return",
+		"await session.start(agent=Greeter(initial=True), room=ctx.room)",
+		"return Greeter()",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	if strings.Contains(botpy, "await session.start(agent=Greeter(), room=ctx.room)") {
+		t.Error("the startup agent must be marked initial; transfer-created agents keep the false default")
+	}
+	backStart := strings.Index(botpy, "    async def back_to_greeter(self, ctx: RunContext):")
+	if backStart < 0 {
+		t.Fatal("agent.py missing back_to_greeter")
+	}
+	backEnd := strings.Index(botpy[backStart+1:], "\n    @function_tool")
+	if backEnd < 0 {
+		t.Fatal("agent.py missing the end of back_to_greeter")
+	}
+	if block := botpy[backStart : backStart+1+backEnd]; strings.Contains(block, "session.say(") {
+		t.Errorf("an omitted announce must stay silent:\n%s", block)
+	}
+}
+
 // TestLiveKitV1BuiltinEndCallTool covers the prebuilt end_call lowering:
 // the beta EndCallTool import, its construction with the mapped params in the
 // agent's super().__init__(tools=...), and that it is NOT a @function_tool
@@ -1459,6 +1533,7 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		// call, so one path serves telephony and a plain `dev --var` session alike.
 		`_hydrate_livekit_context(session.userdata, call_context)`,
 		`_hydrate_call_start(session.userdata, call_start)`,
+		`await session.start(agent=Intake(initial=True), room=ctx.room`,
 		`await _livekit_entry_greeting(session)`,
 		"result = await WarmTransferTask(",
 		`sip_call_to=os.environ["BILLING_PHONE_NUMBER"],`,
@@ -1466,6 +1541,9 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		if !strings.Contains(agentPy, want) {
 			t.Errorf("agent.py missing %q", want)
 		}
+	}
+	if strings.Contains(agentPy, "await session.start(agent=Intake(), room=ctx.room") {
+		t.Error("every telephony startup agent must be marked initial")
 	}
 	hydrateAt := strings.Index(agentPy, "_hydrate_livekit_context(session.userdata")
 	callStartAt := strings.Index(agentPy, "_hydrate_call_start(session.userdata")
@@ -1717,6 +1795,12 @@ func TestLiveKitConnectorGeneratesBridgeWithoutCloudOrSIP(t *testing.T) {
 	agentPy := artifactFile(t, artifact, "agent.py")
 	if !strings.Contains(agentPy, "_livekit_call_context(ctx.room.name, metadata)") {
 		t.Error("agent.py connector branch must build context from metadata")
+	}
+	if !strings.Contains(agentPy, "await session.start(agent=Intake(initial=True), room=ctx.room") {
+		t.Error("connector startup agent must be marked initial")
+	}
+	if strings.Contains(agentPy, "await session.start(agent=Intake(), room=ctx.room") {
+		t.Error("connector startup agent must not use the return-handoff default")
 	}
 	if strings.Contains(agentPy, "create_sip_participant") {
 		t.Error("connector agent.py must not create SIP participants")

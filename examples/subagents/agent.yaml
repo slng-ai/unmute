@@ -58,6 +58,7 @@ controls:
     kind: agent_transfer
     to: appointment_manager
     when: The caller wants to reschedule or cancel an existing appointment.
+    announce: "I’m connecting you with our appointment manager now."
     context:
       history: full
       variables: all
@@ -66,6 +67,7 @@ controls:
     kind: agent_transfer
     to: booking_desk
     when: The caller wants to make a new appointment instead.
+    announce: "I’m connecting you back to the booking desk for your new appointment."
     context:
       history: full
       variables: all

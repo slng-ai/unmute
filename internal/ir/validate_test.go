@@ -25,6 +25,22 @@ func TestValidateSafeCorePerTarget(t *testing.T) { // V5, V18
 	}
 }
 
+func TestValidateAgentTransferAnnouncePerTarget(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Controls["to_billing"].(*AgentTransfer).Announce = "I’ll connect you with billing."
+	for provider, wantError := range map[Provider]bool{
+		ProviderLiveKit:  false,
+		ProviderPipecat:  false,
+		ProviderVapi:     true,
+		ProviderDeepgram: true,
+	} {
+		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
+		if (err != nil) != wantError {
+			t.Errorf("%s: err=%v report=%#v", provider, err, report.PerTarget)
+		}
+	}
+}
+
 func TestValidateLanguage(t *testing.T) { // N16: language is validated per model
 	agent := safeAgent(t)
 	def := agent.Models["front_desk"]

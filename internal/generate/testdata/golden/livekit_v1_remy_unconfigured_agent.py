@@ -240,13 +240,17 @@ class Events(Agent):
 
 
 class Greeter(Agent):
-    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
+    def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, initial: bool = False) -> None:
+        self._initial = initial
         super().__init__(
             instructions=GREETER_PROMPT,
             chat_ctx=chat_ctx,
         )
 
     async def on_enter(self) -> None:
+        if not self._initial:
+            self.session.generate_reply()
+            return
         await self.session.say("Hi, this is Remy at Fern and Oak. Are you booking a table, or planning a private event?")
 
     @function_tool
@@ -417,7 +421,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # Input variables land before the session starts, so the greeting and the
     # prompts already see them (I.dispatch).
     _hydrate_call_start(session.userdata, _dispatched_call_start(_livekit_job_metadata(ctx.job.metadata)))
-    await session.start(agent=Greeter(), room=ctx.room)
+    await session.start(agent=Greeter(initial=True), room=ctx.room)
     await ctx.connect()
 
     async def _max_duration() -> None:

@@ -147,6 +147,7 @@ type Control struct {
 	Group    *string           `json:"group,omitempty" yaml:"group,omitempty"`
 	Assign   map[string]string `json:"assign,omitempty" yaml:"assign,omitempty"`
 	To       *string           `json:"to,omitempty" yaml:"to,omitempty"`
+	Announce *string           `json:"announce,omitempty" yaml:"announce,omitempty"`
 	Requires []string          `json:"requires,omitempty" yaml:"requires,omitempty"`
 	Context  *TransferContext  `json:"context,omitempty" yaml:"context,omitempty"`
 	// A human_transfer names its shape with a block, never a `mode:` field, so a

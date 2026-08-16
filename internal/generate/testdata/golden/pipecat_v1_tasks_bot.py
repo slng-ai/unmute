@@ -13,6 +13,8 @@ the typed results.
 from __future__ import annotations
 
 import asyncio
+import functools
+import inspect
 import json
 import os
 from dataclasses import dataclass
@@ -95,6 +97,68 @@ def require_env() -> None:
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+
+
+def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None):
+    """Keep every direct function call terminal, even on malformed input."""
+
+    def decorate(handler):
+        signature = inspect.signature(handler)
+        declared = set(signature.parameters) - {"self", "params"}
+
+        @functools.wraps(handler)
+        async def guarded(*args, **kwargs):
+            params = kwargs.get("params")
+            if params is None:
+                params_index = 1 if "self" in signature.parameters else 0
+                params = args[params_index]
+
+            unexpected = sorted(set(kwargs) - declared - {"params"})
+            if unexpected:
+                allowed = ", ".join(sorted(declared)) or "none"
+                await params.result_callback({
+                    "error": (
+                        f"Unexpected arguments for {params.function_name}: "
+                        f"{', '.join(unexpected)}. Allowed arguments: {allowed}. "
+                        "Retry with only allowed arguments."
+                    )
+                })
+                return
+
+            resolved = False
+            original_result_callback = params.result_callback
+
+            async def resolve(result, **callback_kwargs):
+                nonlocal resolved
+                resolved = True
+                return await original_result_callback(result, **callback_kwargs)
+
+            params.result_callback = resolve
+            try:
+                return await handler(*args, **kwargs)
+            except Exception:
+                logger.exception("tool failed before completing: {}", params.function_name)
+                if not resolved:
+                    await original_result_callback({
+                        "error": (
+                            f"{params.function_name} failed before completing. "
+                            "Do not claim success; retry only with corrected input."
+                        )
+                    })
+                    return
+                raise
+            finally:
+                params.result_callback = original_result_callback
+
+        return tool(
+            cancel_on_interruption=cancel_on_interruption,
+            timeout_secs=timeout_secs,
+        )(guarded)
+
+    if fn is not None:
+        return decorate(fn)
+    return decorate
+
 
 
 # Checked at import, which is what makes the container refuse to start rather
@@ -181,6 +245,7 @@ You are the front desk voice agent for Acme Support. This is a phone call, so ke
 # --- agents -----------------------------------------------------------------
 
 
+
 def build_billing_llm(state=None):
     return OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
@@ -210,7 +275,7 @@ class BillingAgent(TracedLLMWorker):
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
 
 
-    @tool
+    @_direct_tool
     async def get_invoice(self, params: FunctionCallParams, customer_id: str):
         """Fetch the most recent invoice for a customer id. Returns the invoice total and status.
 
@@ -226,7 +291,7 @@ class BillingAgent(TracedLLMWorker):
             response.raise_for_status()
             await params.result_callback(response.json())
 
-    @tool
+    @_direct_tool
     async def to_human(self, params: FunctionCallParams):
         """Transfer the caller to a human."""
         logger.info("human transfer fired: to_human (cold)")
@@ -304,7 +369,7 @@ class IntakeAgent(TracedLLMWorker):
         super().__init__("intake", llm=llm, pipeline=Pipeline([llm, build_intake_tts()]), bridged=())
 
 
-    @tool(cancel_on_interruption=False)
+    @_direct_tool(cancel_on_interruption=False)
     async def to_billing(self, params: FunctionCallParams):
         """Caller asks about billing, an invoice, or a refund."""
         await self.activate_worker(
@@ -317,7 +382,7 @@ class IntakeAgent(TracedLLMWorker):
             result_callback=params.result_callback,
         )
 
-    @tool
+    @_direct_tool
     async def lookup_customer(self, params: FunctionCallParams, email: str = "", phone: str = ""):
         """Look up a customer record by phone number or email. Returns the customer id and name.
 
@@ -334,7 +399,7 @@ class IntakeAgent(TracedLLMWorker):
             response.raise_for_status()
             await params.result_callback(response.json())
 
-    @tool
+    @_direct_tool
     async def run_collect(self, params: FunctionCallParams):
         """Collect the caller's account details."""
         self._run_collect_results = {}
@@ -396,7 +461,7 @@ class IntakeAgent(TracedLLMWorker):
         self.context.set_tools(tools)
         return {"status": "ok"}, None
 
-    @tool
+    @_direct_tool
     async def run_triage(self, params: FunctionCallParams):
         """Run the triage group."""
         self._run_triage_results = {}

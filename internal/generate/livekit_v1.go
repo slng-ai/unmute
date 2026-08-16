@@ -102,6 +102,7 @@ type livekitTransfer struct {
 	Method      string
 	When        string
 	TargetClass string
+	Announce    string
 	Requires    []string      // guard: refuse until these userdata fields are set (V7)
 	CtxExpr     string        // Python expr for chat_ctx=; "" = reset
 	Summary     *livekitChain // set for history: summary — _summarize before handoff
@@ -422,6 +423,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTaskGroup:             true, // beta.workflows TaskGroup (warn: experimental)
 	targetcap.FieldTaskGroupReturn:       true, // N13 snapshot/restore + task_results
 	targetcap.FieldContextIsolated:       true, // standalone-AgentTask sequence (T13)
+	targetcap.FieldTransferAnnounce:      true, // awaited outgoing reply before handoff (N44)
 	targetcap.FieldTransferRequires:      true, // generated guard naming unmet vars (V7)
 	targetcap.FieldContextNoToolCalls:    true, // copy(exclude_function_call=True)
 	targetcap.FieldContextVariableSubset: true, // uncarried userdata fields reset (D7)

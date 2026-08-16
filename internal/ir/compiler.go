@@ -206,6 +206,7 @@ type AgentTransfer struct {
 	Kind     ControlKind     `json:"kind" yaml:"kind"`
 	When     string          `json:"when,omitempty" yaml:"when,omitempty"`
 	To       string          `json:"to" yaml:"to"`
+	Announce string          `json:"announce,omitempty" yaml:"announce,omitempty"`
 	Requires []string        `json:"requires,omitempty" yaml:"requires,omitempty"`
 	Context  TransferContext `json:"context" yaml:"context"`
 }

@@ -13,6 +13,28 @@ uv run bot.py                             # web: open the URL it prints
 uv run --extra console bot.py console     # terminal: talk over local mic/speaker
 {{end}}
 ```
+{{- if gt (len .Agents) 1}}
+
+## Agent handoffs
+
+An `agent_transfer` with `announce:` gives the exact sentence spoken once by
+the active agent. Pipecat waits for that speech to stop before it activates the
+receiving worker. The `requires:` guard runs first, so a refused handoff says no
+transfer is happening. Without `announce`, the handoff stays silent.
+
+The opening greeting belongs to call start only. A later handoff back to the
+entry agent continues from the shared context and never repeats it.
+{{- end}}
+{{- if .NeedsFunctionCalls}}
+
+## Tool-call failures
+
+The generated direct-tool boundary keeps every call terminal. If the provider
+sends an argument outside the declared input schema, the tool does not run and
+the model receives one corrective result naming the allowed fields. If a
+handler fails before returning, the full exception stays in the log and the
+model receives one safe failure result. It must not claim success from either.
+{{- end}}
 {{if .Telephony}}
 This project uses the
 `pipecat/carrier-websocket/{{.Telephony.Carrier}}` route and contains only that

@@ -104,6 +104,8 @@ agents:
     kind: agent_transfer
     to: [[.To]]
     when: [[quote .When]]
+[[if .Announce]]    announce: [[quote .Announce]]
+[[end]]
 [[if .Requires]]    requires:
 [[range .Requires]]      - [[.]]
 [[end]][[end]]    context:

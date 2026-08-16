@@ -64,6 +64,20 @@ func TestBuiltinToolsPassOnCodeDriversOnly(t *testing.T) {
 	}
 }
 
+func TestAgentTransferAnnouncePassesOnGeneratedDriversOnly(t *testing.T) {
+	table := Default()
+	for _, provider := range []Provider{LiveKit, Pipecat} {
+		if got := table.Capability(FieldTransferAnnounce, provider); got.Tag != Core {
+			t.Errorf("agent transfer announce gated on %s: %#v", provider, got)
+		}
+	}
+	for _, provider := range []Provider{Vapi, Deepgram} {
+		if got := table.Capability(FieldTransferAnnounce, provider); got.Tag != Gated || got.Note == "" {
+			t.Errorf("agent transfer announce passed on %s: %#v", provider, got)
+		}
+	}
+}
+
 func TestTelephonyControlsResolveCarrierAndTransport(t *testing.T) {
 	table := Default()
 	tests := []struct {

@@ -229,6 +229,7 @@ type Handoff struct {
 	Source           string
 	To               string
 	When             string
+	Announce         string
 	Requires         []string
 	History          string
 	MaxMessages      int

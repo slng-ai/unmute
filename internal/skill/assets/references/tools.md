@@ -7,8 +7,8 @@ the model calls it. Both live in one file, `tools/<name>.yaml`.
 
 ```yaml tools/check_availability.yaml
 description: >-
-  List Sage and Stone slots for one service and date only after customer
-  identification returned a real, nonempty customer_id.
+  List Sage and Stone slots for one service and date. Call only after customer
+  identification succeeds. This tool accepts only service and date.
 
 input:
   type: object
@@ -34,6 +34,12 @@ The top is the contract. `description` and `input` are everything the model
 knows about this tool, so write the description as an instruction rather than a
 label, and let the schema do real work. The `enum` above means the model cannot
 ask for a service the salon does not offer.
+
+The schema is the complete argument list. Keep workflow prerequisites in the
+agent or task prompt; do not make their names look like extra tool inputs in the
+description. Generated Pipecat direct tools return a corrective result when a
+provider adds an undeclared argument, or when a handler fails before returning,
+so the model can retry instead of leaving the call stuck in progress.
 
 The block near the bottom says how the tool runs. **Every tool file has exactly
 one execution block.** Two is an error, and none is an error whose message is

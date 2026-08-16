@@ -5,6 +5,7 @@ Amended 2026-07-19 (N15): the `pipeline` and `voices` blocks are removed; models
 Amended 2026-07-20 (N16, N17, N18): the top-level `language` field is removed — language is per-model only, and no language kwarg is emitted when a model does not set one (N16); ElevenLabs is removed from the target set — the managed group is Vapi alone, and the `region`/`edition` instance fields plus the `unmute apply` command go with it, while ElevenLabs the model vendor stays in the Pipecat/LiveKit catalogues (N17); `deployment_region` is added to target instances (N18). N16 and N17 change the authoring shape; old files fail strict decode loudly. Dated pre-removal verification notes naming ElevenLabs are kept as history.
 Amended 2026-08-10 (N23, N24): variables gain a `description` and a third origin, `source: conversation`, saved mid-call by a generated `update_variables` tool; `{{variable}}` substitution becomes real in four named places; and a new top-level `secrets:` block declares runtime environment values by name, driving each build's `.env.example` and a startup check. Both are additive — every existing package keeps loading and compiling unchanged. Detail in sections 4.4 (variables) and 4.12 (secrets).
 Amended 2026-08-15 (N43): the LiveKit turn detector identity is the one model id that is checked rather than forwarded — it must be `turn-detector-mini` or `turn-detector`, the §4.2 example value `silero` is corrected, and Pipecat still forwards the field unchecked. A value check, not a shape change: no existing package fails decode.
+Amended 2026-08-15 (N44): `agent_transfer` gains optional exact spoken text in `announce`. LiveKit and Pipecat speak it once before the receiving agent takes control; omission stays silent. Additive: every existing package keeps loading and compiling unchanged.
 
 Amended 2026-08-12 (N32): `deployment_region` accepts one region or a list of them — the scalar form stays valid, a list of more than one is LiveKit only and gated elsewhere with each platform's own reason, and every declared region reaches the compile report. Additive: no existing package fails decode.
 Date: 2026-07-15.
@@ -231,6 +232,32 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
   compiled before compiles now; a package that failed at compile before now
   fails at validate, with the same words.
 
+- **N44 (2026-08-15).** **An agent handoff may announce itself before control
+  changes.** `kind: agent_transfer` gains one optional `announce:` string: a
+  short sentence that the active agent speaks exactly as written. It is speech,
+  not an instruction for the model to paraphrase.
+  Blank or whitespace-only text fails validation, and `{{variable}}` templates
+  are not part of this first shape and fail by name.
+
+  **Order is the contract.** The existing `requires:` guard runs first. If it
+  refuses, no announcement is made. After a passed guard, the active agent
+  speaks the authored sentence once and finishes it before the receiving agent
+  activates. The runtime adds no question or receiving-agent work. A
+  handoff with no `announce` keeps the old silent behavior. Returning to the
+  entry agent never replays the call-start greeting; that greeting belongs to
+  the first activation only.
+
+  **Reach.** LiveKit sends the exact sentence through `AgentSession.say` before
+  returning the next agent. Pipecat sends it through the source worker's
+  `TTSSpeakFrame` and waits for its stopped-speaking event before native worker
+  activation. Vapi and Deepgram fail validation on this field until their
+  drivers ship and prove the same spoken order. This is a driver gate rather
+  than a claim that either platform cannot announce a handoff.
+
+  **The authoring change is additive.** No existing package fails strict decode
+  and no existing silent handoff gains speech. A package starts speaking only
+  after its author adds `announce:`.
+
 ---
 
 ## 3. Package layout
@@ -426,6 +453,7 @@ A delegate hands work off; whether control comes back is decided by the target. 
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
 | `to` | yes | agent name | core | |
+| `announce` | no | non-empty, non-templated text | gated | Exact sentence LiveKit and Pipecat speak once after `requires` passes and before control changes. Omitted stays silent. |
 | `requires` | no | list of variable names | gated | A machine-checked guard. Generated on code targets; **fails on Vapi** (no mechanism). On a failed guard the model gets a refusal naming the unmet variables; that behavior is part of the contract. |
 | `context.history` | yes | `full \| messages \| last_n \| summary \| reset` | gated | See the history table below. |
 | `context.max_messages` | iff `last_n` | int | | Illegal with any other value. |
@@ -637,6 +665,15 @@ interruption: provider_default
 | `inject` | no | flat map of request key to scalar | gated (N23) | Values merged into the call and **never shown to the model**, so it can neither see nor overwrite them: the place a user id or a captured slot rides along. A string value may hold `{{variable}}` tokens; a value that is exactly one token keeps the variable's declared type. A key here may not also appear in `input.properties`. Legal on `webhook` and `local` only — the two kinds whose request unmute builds itself. Fails on Vapi and Deepgram. |
 | `interruption` | no, default `provider_default` | `continue \| cancel \| provider_default` | warn | Honored on Pipecat (`cancel_on_interruption`); LiveKit runs tools to completion, so non-default values warn there (2026-07-16). On managed targets only `provider_default` means anything; other values warn. Not legal on an `mcp` tool (N40). |
 | `effect` | no, default `returns_data` | `returns_data \| ends_conversation` | core | Fixed by the registry for a `builtin` tool (`end_call` implies `ends_conversation`); a conflicting value fails. Not legal on an `mcp` tool (N40). |
+
+The input schema is the tool's complete model-facing argument list. On the
+Pipecat direct-tool path, a provider call that includes an undeclared argument
+is returned to the model as one terminal corrective error; the handler does not
+run. A handler that fails before returning also produces one terminal safe
+error, while the full exception stays in the log. This prevents a malformed
+call from remaining `IN_PROGRESS` and prevents a later turn from claiming an
+invented result (compiler invariant V1, added 2026-08-15). Pipecat Flows keeps
+its own equivalent error contract.
 
 ### 5.2 Execution blocks
 

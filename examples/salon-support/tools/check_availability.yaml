@@ -1,6 +1,6 @@
 description: >-
-  List Sage and Stone slots for one service and date only after customer
-  identification returned a real, nonempty customer_id.
+  List Sage and Stone slots for one service and date. Call only after customer
+  identification succeeds. This tool accepts only service and date.
 
 input:
   type: object

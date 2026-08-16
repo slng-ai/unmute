@@ -14,6 +14,18 @@ cp .env.example .env          # then fill in the selected provider values
 uv run agent.py console       # local terminal session
 uv run agent.py dev           # LiveKit development worker
 ```
+{{- if gt (len .Agents) 1}}
+
+## Agent handoffs
+
+An `agent_transfer` with `announce:` gives the exact sentence spoken once by
+the active agent. LiveKit finishes it before it activates the receiving agent. The
+`requires:` guard runs first, so a refused handoff says no transfer is
+happening. Without `announce`, the handoff stays silent.
+
+The opening greeting belongs to call start only. A later handoff back to the
+entry agent continues from the carried context and never repeats it.
+{{- end}}
 {{- if .Telephony}}
 
 **Test in the browser before you test on a phone.** `unmute dev <source-dir>`
@@ -257,7 +269,7 @@ destination fired.
 
 Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
 `LANGFUSE_BASE_URL` in `.env`; all three are required. The trace name is
-`{{.EntryClass}}-{{.Project}}`; the LiveKit room name becomes the Langfuse
+`{{.EntryAgent}}-{{.Project}}`; the LiveKit room name becomes the Langfuse
 session ID.
 
 Starting the worker or exporting a synthetic span proves connectivity only.

@@ -195,6 +195,7 @@ type pipecatTransfer struct {
 	MethodName string
 	To         string // target worker name
 	When       string
+	Announce   string   // optional source-worker speech before activation
 	Reason     string   // developer message injected on activation
 	Requires   []string // variables that must be set before the handoff (guard)
 }
@@ -414,22 +415,23 @@ type pipecatData struct {
 
 	// Import needs: keep bot.py free of unused imports (only what a given spec
 	// actually exercises), so the emitted pipeline reads clean.
-	NeedsInspect        bool        // any local tool (isawaitable on the user handler, V13)
-	NeedsRender         bool        // any template site: the _render helper + re import
-	NeedsStateBind      bool        // any flow tool reading state (inject inside a task)
-	NeedsRefusal        bool        // any tool whose injected variables can be unset (V4)
-	NeedsHTTPX          bool        // any webhook tool (agent @tool or flows handler)
-	AuthKinds           authKindSet // webhook auth schemes in use: helpers + imports per scheme
-	NeedsFunctionCalls  bool        // any @tool/transfer/delegate (FunctionCallParams)
-	NeedsTurnStrategies bool        // interruption min-words strategy
-	NeedsEndFrame       bool
-	NeedsAppendFrame    bool
-	HasFlows            bool // any delegate (tasks run as Flows on the owner, C8)
-	HasIsolated         bool // any isolated group (ContextStrategy RESET import)
-	NeedsRoleRestore    bool // any non-ending delegate (V28)
-	NeedsLanguage       bool // any emitted service sets a language kwarg (Language enum import, N16)
-	Inline              bool // single agent, no bus: LLM inline in the pipeline (F3)
-	NeedsMCP            bool // any mcp tool source: MCPClient import + lifecycle (N40)
+	NeedsInspect             bool        // any local tool (isawaitable on the user handler, V13)
+	NeedsRender              bool        // any template site: the _render helper + re import
+	NeedsStateBind           bool        // any flow tool reading state (inject inside a task)
+	NeedsRefusal             bool        // any tool whose injected variables can be unset (V4)
+	NeedsHTTPX               bool        // any webhook tool (agent @tool or flows handler)
+	AuthKinds                authKindSet // webhook auth schemes in use: helpers + imports per scheme
+	NeedsFunctionCalls       bool        // any @tool/transfer/delegate (FunctionCallParams)
+	NeedsTurnStrategies      bool        // interruption min-words strategy
+	NeedsEndFrame            bool
+	NeedsAppendFrame         bool
+	HasFlows                 bool // any delegate (tasks run as Flows on the owner, C8)
+	HasTransferAnnouncements bool // target worker owns exact handoff speech before its reply
+	HasIsolated              bool // any isolated group (ContextStrategy RESET import)
+	NeedsRoleRestore         bool // any non-ending delegate (V28)
+	NeedsLanguage            bool // any emitted service sets a language kwarg (Language enum import, N16)
+	Inline                   bool // single agent, no bus: LLM inline in the pipeline (F3)
+	NeedsMCP                 bool // any mcp tool source: MCPClient import + lifecycle (N40)
 	// MCPParamsImports are the mcp.client.session_group parameter classes the
 	// emitted bot actually constructs, so the import lists neither less nor
 	// more than the file uses.
@@ -472,6 +474,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldTaskGroupReturn:      true, // snapshot/restore + results injection
 	targetcap.FieldContextIsolated:      true, // per-node ContextStrategy RESET
 	targetcap.FieldTransferRequires:     true, // guard before activate_worker
+	targetcap.FieldTransferAnnounce:     true, // native source messages before activation
 	targetcap.FieldGreetingUserFirst:    true,
 	targetcap.FieldGreetingModelWritten: true,
 	targetcap.FieldGreetingAbsent:       true,

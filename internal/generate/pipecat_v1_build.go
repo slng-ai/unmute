@@ -640,7 +640,19 @@ func setImportNeeds(data *pipecatData) {
 	if data.NeedsRoleRestore {
 		data.FrameImports = append(data.FrameImports, "LLMUpdateSettingsFrame")
 	}
-	if data.GreetingText != "" {
+	needsTTSSpeakFrame := data.GreetingText != ""
+	for _, agent := range data.Agents {
+		for _, transfer := range agent.Transfers {
+			if transfer.Announce != "" {
+				data.HasTransferAnnouncements = true
+				needsTTSSpeakFrame = true
+			}
+		}
+	}
+	if data.HasTransferAnnouncements {
+		data.FrameImports = append(data.FrameImports, "BotStartedSpeakingFrame", "BotStoppedSpeakingFrame")
+	}
+	if needsTTSSpeakFrame {
 		data.FrameImports = append(data.FrameImports, "TTSSpeakFrame")
 	}
 	slices.Sort(data.FrameImports)
@@ -808,7 +820,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 			// namespace, D8), so the LLM invokes the tool by its spec name.
 			built.Transfers = append(built.Transfers, pipecatTransfer{
 				MethodName: ref, To: c.To, When: transferReason(c),
-				Reason: transferReason(c), Requires: c.Requires,
+				Announce: c.Announce, Reason: transferReason(c), Requires: c.Requires,
 			})
 		case *ir.HumanTransfer:
 			tool, err := humanTransferTool(ref, name, c, target, env)

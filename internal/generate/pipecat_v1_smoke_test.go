@@ -171,11 +171,11 @@ asyncio.run(main())
 `
 
 // pipecatInlineSmokeScript proves the inline single-agent emission (F3) against
-// real pipecat-ai 1.5.0 + pipecat-slng: bot.py imports, has no bus scaffolding,
-// its service builders construct, and its module-level tool functions register
-// on LLMContext (the inline tool path). Construction-level, like the other
-// instantiate smokes.
+// real pipecat-ai 1.5.0 + pipecat-slng. Besides construction, it invokes the
+// real DirectFunctionWrapper with the malformed argument shape seen in the
+// live call and forces a local handler failure before result_callback.
 const pipecatInlineSmokeScript = `"""Smoke check: the inline single-agent bot imports and constructs, no bus."""
+import asyncio
 import json
 import os
 
@@ -183,6 +183,7 @@ for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
 import bot  # noqa: E402
+from pipecat.adapters.schemas.direct_function import DirectFunctionWrapper  # noqa: E402
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
 
 src = open("bot.py").read()
@@ -203,7 +204,138 @@ LLMContext(
         bot.cancel_appointment,
     ]
 )
+
+
+class Params:
+    function_name = "check_availability"
+
+    def __init__(self, callback):
+        self.result_callback = callback
+
+
+async def invoke(arguments):
+    results = []
+
+    async def result_callback(result, **_kwargs):
+        results.append(result)
+
+    await DirectFunctionWrapper(bot.check_availability).invoke(
+        arguments,
+        Params(result_callback),
+    )
+    assert len(results) == 1, results
+    return results[0]
+
+
+async def exercise_tool_boundary():
+    wrapper = DirectFunctionWrapper(bot.check_availability)
+    schema = wrapper.to_function_schema()
+    assert set(schema.properties) == {"date", "service"}, schema.properties
+
+    malformed = await invoke(
+        {"date": "2026-08-16", "service": "haircut", "customer_id": "cus_1042"}
+    )
+    assert "Unexpected arguments" in malformed["error"], malformed
+    assert "customer_id" in malformed["error"], malformed
+
+    original = bot.tools.check_availability.check_availability
+
+    def fail_before_result(service, date):
+        raise RuntimeError("private provider detail")
+
+    bot.tools.check_availability.check_availability = fail_before_result
+    try:
+        failed = await invoke({"date": "2026-08-16", "service": "haircut"})
+    finally:
+        bot.tools.check_availability.check_availability = original
+    assert "failed before completing" in failed["error"], failed
+    assert "private provider detail" not in failed["error"], failed
+
+    corrected = await invoke({"date": "2026-08-16", "service": "haircut"})
+    assert len(corrected["slots"]) == 3, corrected
+
+
+asyncio.run(exercise_tool_boundary())
 print("inline instantiation ok")
+`
+
+const pipecatHandoffAnnouncementSmokeScript = `"""V2: source playout finishes before receiver activation."""
+import asyncio
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot  # noqa: E402
+from pipecat.frames.frames import (  # noqa: E402
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    TTSSpeakFrame,
+)
+from pipecat.pipeline.worker import PipelineWorker  # noqa: E402
+
+
+class Params:
+    function_name = "to_appointment_manager"
+
+    async def result_callback(self, _result, **_kwargs):
+        pass
+
+
+async def exercise_handoff():
+    source = bot.BookingDeskAgent()
+    events = []
+    original_queue = PipelineWorker.queue_frame
+
+    async def capture_queue(worker, frame, *_args, **_kwargs):
+        if isinstance(frame, TTSSpeakFrame):
+            events.append(("speak", frame.text))
+            await worker.queue_frame(BotStartedSpeakingFrame())
+            events.append(("started",))
+            await worker.queue_frame(BotStoppedSpeakingFrame())
+            events.append(("stopped",))
+        elif isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame)):
+            events.append(("replayed", type(frame).__name__))
+
+    async def capture_activate(name, **kwargs):
+        assert "messages" not in kwargs, kwargs
+        activation = kwargs["args"]
+        assert activation.metadata is None
+        assert activation.run_llm is True
+        assert activation.messages == [
+            {
+                "role": "developer",
+                "content": "The caller wants to reschedule or cancel an existing appointment.",
+            }
+        ]
+        assert name == "appointment_manager"
+        source._active = False
+        events.append(("activate", name))
+
+    async def capture_flush(*_args, **_kwargs):
+        return True
+
+    PipelineWorker.queue_frame = capture_queue
+    source._active = True
+    source.activate_worker = capture_activate
+    source.flush_pipeline = capture_flush
+    try:
+        registered = source.llm._functions["to_appointment_manager"].handler
+        await asyncio.wait_for(registered.invoke({}, Params()), timeout=1.0)
+    finally:
+        PipelineWorker.queue_frame = original_queue
+
+    assert events == [
+        ("speak", "I’m connecting you with our appointment manager now."),
+        ("started",),
+        ("stopped",),
+        ("activate", "appointment_manager"),
+    ], events
+
+
+asyncio.run(exercise_handoff())
+print("handoff announcement smoke ok")
 `
 
 // TestSmokePipecatV1InlineInstantiates proves the inline single-agent shape (F3)
@@ -223,6 +355,10 @@ func TestSmokePipecatV1BuiltinEndCall(t *testing.T) {
 		agent.Tracing = nil
 		addBuiltinEndCall(agent)
 	}, pipecatInlineSmokeScript)
+}
+
+func TestSmokeV2PipecatAgentTransferAnnouncementWaitsForSourcePlayout(t *testing.T) {
+	runPipecatSmokeScript(t, "subagents", nil, nil, pipecatHandoffAnnouncementSmokeScript)
 }
 
 func examplePackagePath(name string) string {
