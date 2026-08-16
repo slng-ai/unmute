@@ -2205,8 +2205,8 @@ func editChannels(runner *fieldRunner, data *scaffold.Data) error {
 			} else {
 				phone.OnVoicemail = ""
 			}
-			if data.Target == string(targetcap.Pipecat) && data.Transport == "" {
-				data.Transport = "daily-sip"
+			if data.Transport == "" {
+				data.Transport = scaffold.DefaultTransport(data.Target)
 			}
 			savePhone()
 		case "controls":

@@ -560,6 +560,23 @@ found a new lifecycle bug there. Transfers now compile only where the
 platform ships the primitive, which for Pipecat is the Daily route
 (TRANSFERS.md); the deleted designs stay in git history.
 
+### What the interactive wizard fills in
+
+Adding a phone channel in `unmute init` pre-fills the connection's `transport`
+from the target: `daily-sip` on Pipecat, `sip` on LiveKit. That is a starting
+point, never a finished route. The wizard cannot supply a **carrier**, because
+Unmute does not provision carrier-side resources, so the package stays refused
+until you pick one. Naming the transport is what makes that refusal useful:
+
+```
+connections/phone.yaml:7: transport "sip" declares no carrier, and it has no
+carrier-less form. livekit supports: connector with twilio; sip with plivo,
+telnyx, twilio.
+```
+
+The one exception is Pipecat's Daily-provisioned form below, which is genuinely
+carrier-less and needs nothing further.
+
 ### Pipecat Daily route, two forms
 
 `transport: daily-sip` is where Pipecat telephony has a transfer primitive, and

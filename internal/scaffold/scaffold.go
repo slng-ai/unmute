@@ -308,6 +308,26 @@ type Capacity struct {
 	AvgSessionDuration  string
 }
 
+// DefaultTransport is the transport a wizard-built phone route starts from, per
+// target. It is a starting point and never a complete route: every route also
+// needs a carrier, which the wizard cannot supply because Unmute does not
+// provision carrier-side resources. The package therefore stays gated until the
+// author picks one.
+//
+// Naming the transport is what makes that refusal useful. With no transport the
+// author is told a transport is needed but not which ones exist; with one, the
+// refusal lists every carrier that works on it (internal/ir/build.go
+// validateRoute). Targets with no shipped driver return "" and are unaffected.
+func DefaultTransport(target string) string {
+	switch target {
+	case "pipecat":
+		return "daily-sip"
+	case "livekit":
+		return "sip"
+	}
+	return ""
+}
+
 // SetTarget selects an orchestrator and resets its target-dependent defaults.
 func (d *Data) SetTarget(provider string) {
 	d.Target = provider
@@ -374,14 +394,14 @@ func (d Data) withDefaults() Data {
 	if d.Instructions == "" {
 		d.Instructions = DefaultInstructions
 	}
-	// The Pipecat default route, filled in only once something in the package
-	// actually uses a phone route. It used to be set unconditionally in
-	// SetTarget, where on a browser-only package — which is every package this
-	// scaffold writes by default — its one observable effect was a DAILY_API_KEY
-	// line in the package-root .env.example, asking a first-time author for a
-	// credential nothing in their package reads (research D8).
-	if d.Transport == "" && d.Target == "pipecat" && d.UsesPhoneRoute() {
-		d.Transport = "daily-sip"
+	// Filled in only once something in the package actually uses a phone route.
+	// It used to be set unconditionally in SetTarget, where on a browser-only
+	// package — which is every package this scaffold writes by default — its one
+	// observable effect was a DAILY_API_KEY line in the package-root
+	// .env.example, asking a first-time author for a credential nothing in their
+	// package reads (research D8).
+	if d.Transport == "" && d.UsesPhoneRoute() {
+		d.Transport = DefaultTransport(d.Target)
 	}
 	if d.EntryAgent == "" {
 		d.EntryAgent = "assistant"
