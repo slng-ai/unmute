@@ -7,8 +7,10 @@ description: "Check a package against its targets before you compile or run it."
 $ unmute validate --help
 Validate a v1 agent package against its targets.
 
+With no package-dir, the package is the current directory, so you can cd into an agent and run this with no arguments.
+
 Usage:
-  unmute validate <package-dir> [flags]
+  unmute validate [package-dir] [flags]
 
 Flags:
   -h, --help             help for validate

@@ -118,40 +118,48 @@ func TestWriteDefaultFileSet(t *testing.T) {
 // writes it to disk. That is structurally why they can disagree — the root file
 // asked for DAILY_API_KEY and the build did not (reproduction.md F). A test is
 // the shortest thing that fails if the drift comes back (research D9).
+// Run for both shipped targets, not just the default. Keyed on DefaultTarget
+// alone this covered whichever target happened to be the default and silently
+// dropped the other the day that constant moved.
 func TestScaffoldAgreesWithItsOwnBuild(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "hello-agent")
-	if _, err := Write(dir, Data{Name: "hello-agent", Tools: DefaultTools()}); err != nil {
-		t.Fatal(err)
-	}
-	pkg, err := spec.Load(dir)
-	if err != nil {
-		t.Fatalf("the scaffold wrote a package the compiler cannot load: %v", err)
-	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatalf("the scaffold wrote a package the compiler cannot build: %v", err)
-	}
-	name := DefaultTarget
-	artifact, err := generate.Generate(agent, agent.Targets[name], targetcap.Default())
-	if err != nil {
-		t.Fatalf("the scaffold wrote a package the compiler cannot generate: %v", err)
-	}
+	for _, name := range []string{"pipecat", "livekit"} {
+		t.Run(name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "hello-agent")
+			data := Data{Name: "hello-agent", Tools: DefaultTools()}
+			data.SetTarget(name)
+			if _, err := Write(dir, data); err != nil {
+				t.Fatal(err)
+			}
+			pkg, err := spec.Load(dir)
+			if err != nil {
+				t.Fatalf("the scaffold wrote a package the compiler cannot load: %v", err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatalf("the scaffold wrote a package the compiler cannot build: %v", err)
+			}
+			artifact, err := generate.Generate(agent, agent.Targets[name], targetcap.Default())
+			if err != nil {
+				t.Fatalf("the scaffold wrote a package the compiler cannot generate: %v", err)
+			}
 
-	root, err := os.ReadFile(filepath.Join(dir, ".env.example"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var built []byte
-	for _, file := range artifact.Files {
-		if file.Path == ".env.example" {
-			built = file.Content
-		}
-	}
-	if built == nil {
-		t.Fatal("the build has no .env.example to agree with")
-	}
-	if got, want := envNames(string(root)), envNames(string(built)); !slices.Equal(got, want) {
-		t.Errorf("the package root asks for %v and build/%s asks for %v; one of them is lying to the author", got, name, want)
+			root, err := os.ReadFile(filepath.Join(dir, ".env.example"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var built []byte
+			for _, file := range artifact.Files {
+				if file.Path == ".env.example" {
+					built = file.Content
+				}
+			}
+			if built == nil {
+				t.Fatal("the build has no .env.example to agree with")
+			}
+			if got, want := envNames(string(root)), envNames(string(built)); !slices.Equal(got, want) {
+				t.Errorf("the package root asks for %v and build/%s asks for %v; one of them is lying to the author", got, name, want)
+			}
+		})
 	}
 }
 

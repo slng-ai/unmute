@@ -53,12 +53,12 @@ func TestInit_scaffoldsValidV1Package(t *testing.T) {
 			t.Errorf("missing scaffolded %s: %v", name, err)
 		}
 	}
-	// The scaffold must validate clean on its pipecat target.
+	// The scaffold must validate clean on its default target.
 	vout, err := run(t, "validate", dir)
 	if err != nil {
 		t.Fatalf("validate scaffold: %v\n%s", err, vout)
 	}
-	if !strings.Contains(vout, "✓ pipecat (pipecat)") {
+	if !strings.Contains(vout, "✓ livekit (livekit)") {
 		t.Fatalf("scaffold did not validate clean:\n%s", vout)
 	}
 }
@@ -85,7 +85,7 @@ func TestInit_seedsEndCallByDefault(t *testing.T) {
 	if !strings.Contains(string(agent), "- end_call") {
 		t.Errorf("entry agent must reference end_call:\n%s", agent)
 	}
-	// Still compiles clean on the default pipecat target.
+	// Still compiles clean on the default target.
 	vout, err := run(t, "validate", dir)
 	if err != nil {
 		t.Fatalf("validate scaffold with default end_call: %v\n%s", err, vout)

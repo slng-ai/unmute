@@ -355,7 +355,7 @@ informatively.
 ### Run them by voice, not by reading
 
 ```sh
-unmute dev ./my-agent --target pipecat
+unmute dev ./my-agent
 ```
 
 Have the conversation out loud. A transcript hides the things that go wrong in

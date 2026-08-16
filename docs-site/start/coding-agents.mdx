@@ -171,8 +171,16 @@ compiles, so it cannot quietly stop working.
     ```
 
     ```
-    ✓ pipecat (pipecat)
+    ✓ livekit (livekit)
+
+    Warnings:
+      livekit: LiveKit turn placement is a preference
     ```
+
+    The package is a directory beside you, so it is named on the command line.
+    Inside `salon` you could run `unmute validate` with no argument and get the
+    same result. The target name in the output is whichever one the assistant
+    put in `targets.yaml`; `livekit` here is what `unmute init` picks too.
 
     Ask the assistant to run this itself and fix what it finds. Reading a
     refusal is the fastest path it has, and the messages name the file and the
@@ -189,11 +197,11 @@ compiles, so it cannot quietly stop working.
     ```
 
     ```
-    compiled salon/build/pipecat
+    compiled salon/build/livekit
     building and starting the container...
 
-      ▸ http://localhost:8765/?agent=pipecat
-        ctrl-c to stop  ·  logs: salon/build/pipecat/dev.log
+      ▸ http://localhost:8765/?agent=livekit
+        ctrl-c to stop  ·  logs: salon/build/livekit/dev.log
     ```
 
     Open the link and speak. Docker has to be running, and this step is the

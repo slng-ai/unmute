@@ -6,6 +6,7 @@ Amended 2026-07-20 (N16, N17, N18): the top-level `language` field is removed �
 Amended 2026-08-10 (N23, N24): variables gain a `description` and a third origin, `source: conversation`, saved mid-call by a generated `update_variables` tool; `{{variable}}` substitution becomes real in four named places; and a new top-level `secrets:` block declares runtime environment values by name, driving each build's `.env.example` and a startup check. Both are additive — every existing package keeps loading and compiling unchanged. Detail in sections 4.4 (variables) and 4.12 (secrets).
 Amended 2026-08-15 (N43): the LiveKit turn detector identity is the one model id that is checked rather than forwarded — it must be `turn-detector-mini` or `turn-detector`, the §4.2 example value `silero` is corrected, and Pipecat still forwards the field unchecked. A value check, not a shape change: no existing package fails decode.
 Amended 2026-08-15 (N44): `agent_transfer` gains optional exact spoken text in `announce`. LiveKit and Pipecat speak it once before the receiving agent takes control; omission stays silent. Additive: every existing package keeps loading and compiling unchanged.
+Amended 2026-08-16 (N45): `unmute init` scaffolds LiveKit by default, and the package directory argument on `validate`, `compile`, and `dev` is optional (omitted means the current directory). The authoring surface does not change: `provider:` keeps its name and accepted set, and no existing package fails decode.
 
 Amended 2026-08-12 (N32): `deployment_region` accepts one region or a list of them — the scalar form stays valid, a list of more than one is LiveKit only and gated elsewhere with each platform's own reason, and every declared region reaches the compile report. Additive: no existing package fails decode.
 Date: 2026-07-15.
@@ -231,6 +232,34 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
   shape change: the field, its name, and its type are unchanged. A package that
   compiled before compiles now; a package that failed at compile before now
   fails at validate, with the same words.
+
+- **N45 (2026-08-16).** **`unmute init` scaffolds LiveKit by default, and the
+  package directory argument is optional.** Two behaviour changes, neither of
+  which touches the authoring surface, recorded here because a reader of this
+  document should not have to infer them from the code.
+
+  **The scaffold default.** `unmute init <name>` now writes a `targets.yaml`
+  whose single instance is `livekit` (`provider: livekit`, `version: "1.5.2"`,
+  `sdk_language: python`) and an `agent.yaml` whose turn block is
+  `detector: {provider: livekit, model: turn-detector-mini}` rather than
+  `vad: {provider: local, model: silero}`. The scaffolded `.env.example`
+  therefore carries `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and `LIVEKIT_URL`
+  alongside `OPENAI_API_KEY` and `SLNG_API_KEY`. **No authoring shape
+  changes**: `provider:` keeps its name and its accepted set
+  (`livekit | pipecat | vapi | deepgram`), and no existing package fails strict
+  decode. Pipecat remains fully supported and selectable; only the value the
+  scaffold pre-fills moved. Note the consequence for anyone switching a package
+  by hand: `targets.yaml` and the turn block in `agent.yaml` move together, or
+  validation fails with `turn model "silero" is not recognized` (N43).
+
+  **The command surface.** `unmute validate`, `unmute compile`, and `unmute dev`
+  take the package directory as an *optional* positional argument. Omitted, it
+  is the current working directory, so `unmute init x && cd x && unmute
+  validate` works. The current directory must itself hold `agent.yaml`; no
+  parent is searched, because `compile` writes `build/<target>/` inside the
+  package and an upward search would let a run from inside `build/<target>/`
+  rewrite the directory the author is standing in. An explicit argument always
+  wins and keeps its existing behaviour and error text exactly.
 
 - **N44 (2026-08-15).** **An agent handoff may announce itself before control
   changes.** `kind: agent_transfer` gains one optional `announce:` string: a

@@ -11,6 +11,10 @@ Console mode compiles the package and hands your terminal to the generated
 project's own console runner. You talk over your local microphone and speaker.
 There is no browser, no dev web server, and no container.
 
+That command names a package in another directory, and picks one of its two
+targets. Inside a package with a single target, the whole thing is
+`unmute dev --console`.
+
 ## What it needs
 
 [`uv`](https://docs.astral.sh/uv/) on your PATH. Nothing else. If `uv` is

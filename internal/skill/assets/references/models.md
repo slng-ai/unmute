@@ -39,10 +39,12 @@ models:
 On a LiveKit target, override the turn entry rather than changing the agent.
 
 **The override is keyed on the entry name in your own package, not on the name
-below.** Entry names are yours to choose, and `unmute init` chooses different
-ones from this file: it writes `assistant_model`, `assistant_voice`,
-`transcriber`, and `vad`. Copying this block onto a scaffolded package without
-changing `detector` to `vad` fails, cleanly but needlessly:
+below.** Entry names are yours to choose, and `unmute init` chooses its own: it
+writes `assistant_model`, `assistant_voice`, `transcriber`, and one turn entry
+named after the target it scaffolded. A scaffolded livekit package calls it
+`detector` and already binds LiveKit's own detector to it, so it needs no
+override at all. A pipecat package usually calls it `vad`. Overriding a name the
+package does not define fails, cleanly but needlessly:
 
 ```
 targets.yaml:11: target "livekit" overrides "detector", which is not a defined model

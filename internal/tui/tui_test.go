@@ -528,12 +528,18 @@ func TestRunCompileToggle(t *testing.T) {
 func TestRunSelectTarget(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var output bytes.Buffer
-	// Create, name, Target, LiveKit, Create agent, confirm.
+	// Create, name, Target, Pipecat, Create agent, confirm.
+	//
+	// The accessible renderer takes ordinals, so this input selects a menu
+	// entry by position. The target menu leads with scaffold.DefaultTarget
+	// (createTargetOptions), which is livekit, so `2` is now Pipecat — and
+	// picking the non-default is what actually exercises the menu. Any change
+	// to that ordering has to be reflected here; the ordinal is not a constant.
 	got, err := RunConsole(strings.NewReader("1\nagent\n1\n1\n2\n7\n\n"), &output, true, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Agent.Data.Target != "livekit" {
+	if got.Agent.Data.Target != "pipecat" {
 		t.Fatalf("target = %q", got.Agent.Data.Target)
 	}
 	if !strings.Contains(output.String(), "Vapi and Deepgram are unavailable") {
@@ -1018,12 +1024,13 @@ func TestRunHumanTransfersRequireTelephony(t *testing.T) {
 
 func TestRunTelephonyCreateGatedOnConnection(t *testing.T) {
 	t.Chdir(t.TempDir())
-	// The create wizard offers only code targets (Pipecat/LiveKit), and its
-	// Pipecat default is the Daily-provisioned route, which dials out and cannot
-	// receive. The wizard now writes a connection file, so what it still cannot
-	// supply is the carrier that route would need to serve a phone channel. So
-	// adding a telephony channel plus a human transfer builds the in-memory
-	// config, and Create is correctly gated until someone chooses a carrier.
+	// The create wizard offers only code targets (Pipecat/LiveKit), and it
+	// cannot supply everything a phone route needs on either of them. Create is
+	// correctly gated, and which field is missing depends on the target:
+	// Pipecat defaults the Daily-provisioned transport and is short a carrier;
+	// LiveKit defaults no transport at all and is short that. Both refusals name
+	// connections/phone.yaml and the field to add, so this asserts the gate
+	// itself plus the shape of the guidance, not one target's wording.
 	// (Managed targets like ElevenLabs, which slipped past this gate, no longer
 	// exist — and never had a real telephony route anyway, SCHEMA N17.)
 	// Drive: create → add telephony channel → add human transfer → Create (blocked)
@@ -1037,8 +1044,14 @@ func TestRunTelephonyCreateGatedOnConnection(t *testing.T) {
 	if got.Confirmed {
 		t.Fatalf("telephony agent must not be created on a route that cannot receive calls: %#v", got.Agent.Data)
 	}
-	if !strings.Contains(output.String(), "cannot receive them") {
-		t.Fatalf("wizard did not surface the telephony route gate:\n%s", output.String())
+	// The blocking assertion above is the gate and must not be weakened. This
+	// one holds it to a useful refusal: name the file, and name the field.
+	refusal := output.String()
+	if !strings.Contains(refusal, "connections/phone.yaml") {
+		t.Fatalf("the refusal must name the file to fix:\n%s", refusal)
+	}
+	if !strings.Contains(refusal, "carrier") && !strings.Contains(refusal, "transport") {
+		t.Fatalf("the refusal must name the missing field:\n%s", refusal)
 	}
 }
 

@@ -100,6 +100,16 @@ func TestDocsSiteCLIPagesQuoteHelp(t *testing.T) {
 		if err := root.Execute(); err != nil {
 			t.Fatal(err)
 		}
+		// The usage line, which says what the command's arguments are. Checking
+		// only flag lines left this ungated, so a page could keep advertising
+		// `validate <package-dir>` long after the argument became optional.
+		usage := usageLine(buf.String())
+		if usage == "" {
+			t.Fatalf("no Usage: line in `unmute %s--help`", commandPrefix(path))
+		}
+		if !strings.Contains(string(raw), usage) {
+			t.Errorf("%s does not quote the usage line %q from `unmute %s--help`", page, usage, commandPrefix(path))
+		}
 		for _, line := range strings.Split(buf.String(), "\n") {
 			trimmed := strings.TrimSpace(line)
 			if !strings.HasPrefix(trimmed, "-") || strings.HasPrefix(trimmed, "-h, --help") {
@@ -110,4 +120,18 @@ func TestDocsSiteCLIPagesQuoteHelp(t *testing.T) {
 			}
 		}
 	}
+}
+
+// usageLine returns the first line under cobra's "Usage:" heading, trimmed.
+// That is the line naming the command's arguments, which is exactly the claim
+// a docs page goes stale on when an argument becomes optional.
+func usageLine(help string) string {
+	lines := strings.Split(help, "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "Usage:" || i+1 >= len(lines) {
+			continue
+		}
+		return strings.TrimSpace(lines[i+1])
+	}
+	return ""
 }

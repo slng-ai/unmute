@@ -196,7 +196,7 @@ go test -tags smoke ./internal/generate -run TestSmokePipecatV1ServicesInstantia
 ## End-to-end manual verification
 
 The pipeline is `spec.Load → ir.Build → ir.Validate → generate.Generate`. This
-exercises it through the CLI, ending in a `bot.py` that compiles.
+exercises it through the CLI, ending in an `agent.py` that compiles.
 
 ```sh
 make build
@@ -207,39 +207,47 @@ bin/unmute init "$agent"
 find "$agent" -maxdepth 1 -type f | sort
 
 # 2. Validate against its declared targets
-bin/unmute validate "$agent"          # expect: pipecat-dev  pipecat  pass
+bin/unmute validate "$agent"          # expect: ✓ livekit (livekit), warning on stderr, exit 0
 
 # 3. Compile to the resolved target artifacts (writes build/<target>/)
 bin/unmute compile "$agent"
 find "$agent/build" -type f | sort
 
 # 4. Prove the emitted Python is valid
-uv run --no-project python -m py_compile "$agent/build/pipecat-dev/bot.py" \
-  && echo "bot.py: valid Python"
+uv run --no-project python -m py_compile "$agent/build/livekit/agent.py" \
+  && echo "agent.py: valid Python"
 
 # 5. Prove the dependency graph actually resolves (no bogus version pins)
-( cd "$agent/build/pipecat-dev" && uv pip compile pyproject.toml >/dev/null )
+( cd "$agent/build/livekit" && uv pip compile pyproject.toml >/dev/null )
 ```
+
+`unmute init` scaffolds a LiveKit package, and a scaffolded package declares
+exactly one target instance named after its provider (SCHEMA N15), so the
+instance is `livekit` and compile writes `build/livekit/` with `agent.py` as the
+entry point. Pipecat is still fully supported: run `bin/unmute init` with no
+name to pick it in the interactive picker, and the instance is then `pipecat`
+with `bot.py` as the entry point.
 
 Inspect the deterministic compile report:
 
 ```sh
-cat "$agent/build/pipecat-dev/compile-report.json"
+cat "$agent/build/livekit/compile-report.json"
 ```
 
-Run the agent locally in the browser (needs keys). The default scaffold uses
-SLNG for speech (one `SLNG_API_KEY`) and OpenAI for the LLM:
+Run the agent locally in the browser (needs keys). The scaffolded `.env.example`
+holds five names: `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`,
+`OPENAI_API_KEY` and `SLNG_API_KEY`. `unmute dev` supplies the three LiveKit
+values itself for a local run, so only the two model keys need filling in: SLNG
+for speech, OpenAI for the LLM.
 
 ```sh
 cp "$agent/.env.example" "$agent/.env"     # then fill in SLNG_API_KEY + OPENAI_API_KEY
-bin/unmute dev "$agent"                     # compiles, runs bot.py, opens the browser client
+bin/unmute dev "$agent"                     # compiles, runs agent.py, opens the browser client
 ```
 
-Compile a single target when a package declares several:
-
-```sh
-bin/unmute compile "$agent" --target pipecat-dev
-```
+A scaffolded package declares one target, so step 3 needs no `--target`. Pass
+`--target <name>` only against a package that declares several, like the ones
+under `examples/`.
 
 ## Run an example from the local build
 
@@ -460,10 +468,15 @@ rules the site is written under are in `docs-site/README.md`.
 
 Implemented: `init`, `validate`, `compile`, `dev`.
 
-- `compile <package-dir> [--target ...]` — code targets (e.g. Pipecat); writes
+- `compile [package-dir] [--target ...]` — code targets (e.g. Pipecat); writes
   `build/<target>/`.
-- `validate <package-dir> [--target ...]` — per-target pass/fail, warnings to
+- `validate [package-dir] [--target ...]` — per-target pass/fail, warnings to
   stderr (exit 0), gated features fail (exit 1).
+
+`validate`, `compile` and `dev` all take the package directory as an optional
+argument. With no argument they use the current directory, so you can `cd` into
+a package and run them bare. An explicit path still works and still wins, which
+is what every command run from the repository root against `examples/` uses.
 
 ## Verification-step cheat sheet
 
@@ -474,7 +487,7 @@ Implemented: `init`, `validate`, `compile`, `dev`.
 | Build | `make build` | `bin/unmute --version` prints |
 | Unit + golden | `make test` | all packages `ok` |
 | Python validity | `make smoke` | `ok` (or skipped if no `uv`) |
-| End-to-end | init → validate → compile → py_compile | `bot.py: valid Python` |
+| End-to-end | init → validate → compile → py_compile | `agent.py: valid Python` |
 | Example, web | `bin/unmute dev examples/salon-support --target pipecat` | the page at `:8765` connects and the agent answers |
 | Example, console | `bin/unmute dev --console examples/salon-support --target pipecat` | the terminal takes the mic and the agent answers |
 | Example, telephony | `bin/unmute dev --telephony examples/twilio-telephony-hello --target pipecat` | the printed number rings and the agent greets you |

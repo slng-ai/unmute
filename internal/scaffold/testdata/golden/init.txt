@@ -1,8 +1,11 @@
 === .env.example ===
 # Starter keys for the selected target. Copy this file to `.env` next to it,
-# fill in the values, then run `unmute dev .` from this directory. `.env` is
-# never committed. `unmute compile .` writes an exact per-target
+# fill in the values, then run `unmute dev` from this directory. `.env` is
+# never committed. `unmute compile` writes an exact per-target
 # build/<target>/.env.example from your spec.
+LIVEKIT_API_KEY=
+LIVEKIT_API_SECRET=
+LIVEKIT_URL=
 OPENAI_API_KEY=
 SLNG_API_KEY=
 
@@ -18,9 +21,10 @@ SLNG_API_KEY=
 build/
 
 === agent.yaml ===
-# Portable voice-agent spec. Edit this, then `unmute validate .` and
-# `unmute compile .`. Nothing here names an orchestrator — which runtime this
-# compiles to lives in targets.yaml, so the same agent runs on either one.
+# Portable voice-agent spec. Edit this, then run `unmute validate` and
+# `unmute compile` from this directory. Nothing here names an orchestrator —
+# which runtime this compiles to lives in targets.yaml, so the same agent runs
+# on either one.
 version: 1
 entry_agent: assistant
 
@@ -58,9 +62,9 @@ models:
       provider: slng
       model: "slng/deepgram/nova:3-en"
   turn:
-    vad:
-      provider: local
-      model: silero
+    detector:
+      provider: livekit
+      model: turn-detector-mini
 
 # Each agent is a prompt plus the models it thinks and speaks with. The
 # instructions file is sent to the model verbatim as its system prompt, so
@@ -134,9 +138,10 @@ Everything you say is read out loud.
 # Nothing here holds a secret. Where a model override or a connection does name
 # a credential, it names the environment variable and never the value.
 targets:
-  pipecat:
-    provider: pipecat
-    version: "1.5.0"
+  livekit:
+    provider: livekit
+    version: "1.5.2"
+    sdk_language: python
 
 === tools/end_call.yaml ===
 description: "End the call when the caller is finished or says goodbye."

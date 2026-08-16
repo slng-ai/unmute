@@ -149,11 +149,22 @@ Running an agent also needs Docker with Compose for the browser, or
 ## Use it
 
 ```sh
-unmute init my-agent                     # agent.yaml, instructions.md, targets.yaml, tools/, .env.example
-cp my-agent/.env.example my-agent/.env   # then fill in OPENAI_API_KEY and SLNG_API_KEY
-unmute validate my-agent
-unmute dev my-agent
+unmute init my-agent      # agent.yaml, instructions.md, targets.yaml, tools/, .env.example
+cd my-agent
+cp .env.example .env      # then fill in OPENAI_API_KEY and SLNG_API_KEY
+unmute validate
+unmute dev
 ```
+
+`validate`, `compile` and `dev` take the package directory as an optional
+argument. From inside the package you run them bare; from anywhere else you pass
+the path, as in `unmute dev my-agent`.
+
+The scaffold targets LiveKit, so `.env.example` holds five names:
+`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`, `OPENAI_API_KEY` and
+`SLNG_API_KEY`. `unmute dev` supplies the three LiveKit values itself for a local
+run, so only the two model keys need filling in. A deploy needs the real LiveKit
+values.
 
 `unmute dev` compiles the package, builds the container a deployment would run,
 starts it, and opens a browser page. Allow the microphone and say hello. The
@@ -174,19 +185,19 @@ of the browser, with no Docker in the way.
 One directory per target, under `build/`.
 
 ```
-build/pipecat/
-├── bot.py               # the agent
+build/livekit/
+├── agent.py             # the agent
 ├── pyproject.toml       # pinned dependencies
 ├── Dockerfile
 ├── compose.dev.yaml
-├── pcc-deploy.toml
 ├── .env.example         # exactly the variables this agent needs
 ├── README.md            # the runbook for this build
 └── compile-report.json
 ```
 
-LiveKit gets the same shape with `agent.py` as its entry point. Local Python tool
-handlers are copied in beside it.
+That is what the scaffold above compiles to. Pipecat gets the same shape with
+`bot.py` as its entry point, plus a `pcc-deploy.toml` for Pipecat Cloud. Local
+Python tool handlers are copied in beside the entry point on both.
 
 Treat `build/` as output. Edit the package and compile again. Anything you change
 inside `build/` is overwritten on the next compile.
