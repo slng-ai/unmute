@@ -35,6 +35,14 @@ the model receives one corrective result naming the allowed fields. If a
 handler fails before returning, the full exception stays in the log and the
 model receives one safe failure result. It must not claim success from either.
 {{- end}}
+{{- if .HasFlows}}
+
+## Task returns
+
+When a task returns, its internal turns stay out of the owner's conversation.
+The completed delegate call stays in that conversation with the typed result,
+so the same caller request does not start the task again.
+{{- end}}
 {{if .Telephony}}
 This project uses the
 `pipecat/carrier-websocket/{{.Telephony.Carrier}}` route and contains only that

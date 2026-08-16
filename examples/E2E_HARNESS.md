@@ -81,6 +81,15 @@ grep -rn "reasoning_effort" "examples/$EXAMPLE"/build/*/agent.py "examples/$EXAM
 
 ### 2. Start both targets
 
+Before starting, append the flags for the current example to **both** target
+commands. These values stand in for the production call-start payload; omitting
+them tests a default, not dispatch hydration.
+
+| Example | Required start flags |
+|---|---|
+| `salon-support` | `--var customer_name=Ada --var customer_id=cus_2002` |
+| `outbound-reminder` | `--var customer_id=cus_1042 --var name=Ada --var appointment_time="tomorrow at 3pm"` |
+
 ```sh
 bin/unmute dev "examples/$EXAMPLE" --target livekit --no-open
 bin/unmute dev "examples/$EXAMPLE" --target pipecat --port 8766 --bot-port 7861 --no-open
@@ -101,7 +110,7 @@ most of the file and none of the signal. Filter it out first:
 ```sh
 tail -F "examples/$EXAMPLE/build/livekit/dev.log" \
   | grep -v "livekit_server-1" \
-  | grep -E --line-buffered "APIStatusError|Timed out|McpError|Error in _llm|exception occurred|Traceback|executing tool|LLM metrics"
+  | grep -E --line-buffered "APIStatusError|Timed out|McpError|Error in _llm|exception occurred|Traceback|LLM metrics"
 ```
 
 ```sh
@@ -109,9 +118,14 @@ tail -F "examples/$EXAMPLE/build/pipecat/dev.log" \
   | grep -E --line-buffered "Error calling mcp|TypeError|Error code|ErrorFrame|Traceback|Calling function"
 ```
 
-`executing tool` on LiveKit and `Calling function` on Pipecat are the two lines
-that prove a tool ran, with the arguments the model chose. Those arguments are
-usually where the bug is.
+`Calling function` on Pipecat proves a tool ran, with the arguments the model
+chose. LiveKit Agents 1.6.10 `start` mode no longer writes tool names or
+arguments at its default INFO level; its log proves LLM activity and error
+absence, but not tool order. Also remember that neither target shows injected
+arguments to the model: injection is deliberately applied inside the generated
+handler after the model supplies only its public arguments. Use a deterministic
+tool result or inspect that handler when the injected value itself is under
+test.
 
 ### 4. Ask a human to make the call
 
@@ -166,7 +180,7 @@ These are failure signatures met in real runs, not invented ones.
 | `MCP error -32602: ... sources: Invalid input: expected array, received object` | An intermittent model slip on tool arguments, seen on both targets. The schema reaching the model is correct: raw `tools/list`, LiveKit and Pipecat all send byte identical JSON, and 35 out of 35 direct API calls got the shape right. | Nothing. The agent reads the error and retries correctly. Do not chase it unless it stops recovering. |
 | `TypeError: OpenAILLMSettings.__init__() got an unexpected keyword argument '<name>'` | A forwarded param landed as a Settings field on a Pipecat service whose dataclass has no such field. | The catalogue row needs `SettingsOverflow`, so the param rides `extra={...}` instead. See `internal/target/catalog_pipecat.go`. |
 | A task calls `finish` with `status: "failed"` and never calls its own tools | The task did not receive a value an earlier step assigned. It is obeying its own prompt, which usually says to give up when a prerequisite is missing. `assign:` writes a variable, and the only thing that reads one back is a `{{variable}}` reference in a prompt. Write the mapping and never reference it and the value goes nowhere. | Reference the variable in the task prompt that needs it. An unset variable renders as empty, never as the word `None`, so the prompt should say what empty means rather than leave the model to guess. |
-| The same delegate runs twice with no user speech in between, and the second task then finishes `failed` without calling its own tools | The subtlest one here, and it raises no exception. An awaited LiveKit `AgentTask` merges its own conversation turns back into the parent when it returns. The parent's next prompt then ends on the task's last assistant line with no tool record of that work, which reads as unfinished, so the model delegates again. The token counts are the tell: the parent prompt grows by the tool call and result pair plus the merged turns. | The owner's context must be snapshotted before the task and restored after it. All three delegate branches in the LiveKit template do this now. Pipecat was never affected, because it already snapshots and restores. |
+| The same delegate runs twice with no user speech in between | The owner lost the record that the first delegation completed, so the unchanged caller request looks unfinished. This has two observed causes. LiveKit can merge task turns over the owner's tool record. Pipecat 1.7.0 can restore a snapshot taken inside the delegate handler before the asynchronous owner tool call and result reach the context aggregator. The second run may fail or may repeat the caller questions and overwrite the first result. | Preserve the owner's completed tool call and result across the task boundary. LiveKit snapshots before the task and restores after it. On Pipecat, resolve the delegate with `run_llm=False`, drain that result into the owner context, and only then snapshot before the Flow rewrites the context. |
 
 Noise that is not a bug, and that a run should not stop for:
 
@@ -183,7 +197,7 @@ treat them as a starting point and correct them as you go.
 
 | Example | Targets | What it exercises | Spoken script | Pass looks like |
 |---|---|---|---|---|
-| `salon-support` | livekit, pipecat | Local Python tools, call start variables, secrets. The smallest package that talks. | "I'd like to book a haircut for tomorrow at 3pm." Answer any question it asks. | `check_availability` then `book_appointment`, each with real arguments, and a spoken confirmation. Zero 400s. |
+| `salon-support` | livekit, pipecat | Local Python tools, call start variables, secrets. The smallest package that talks. | Start both targets with `--var customer_name=Ada --var customer_id=cus_2002`. Confirm the greeting says "Hi Ada", then say "I'd like to book a haircut for tomorrow at 3pm." Answer any question it asks. | The exact personalized greeting, then `update_variables`, `check_availability`, and `book_appointment`. The booking receives `customer_id: cus_2002` through injection, and the caller hears a confirmation. Zero provider or runtime errors. |
 | `mcp-example` | livekit, pipecat | A remote MCP server as a tool source, with bearer auth and a `tools_filter`. | "Is there any really good Indian restaurant in Barcelona?" | `firecrawl_search` executes, takes roughly 6 to 8 seconds, and the prompt token count jumps sharply on the next turn as results land. One malformed retry is acceptable. |
 | `multi-task` | livekit, pipecat | Two delegated tasks, typed results, and `assign:` carrying a value from the first task to the second. | "I'd like to book an appointment." Give a full name, then a phone number, then agree to create the profile, then pick a time. | The chain `check_customer`, `lookup_customer`, `create_customer`, the task's finish tool, `manage_appointment`, `check_availability`, `book_appointment`. The critical detail: `book_appointment` must carry the `customer_id` the first task produced. |
 | `simple-prompt` | livekit, pipecat | One agent owning five tools, plus Langfuse tracing. The only package that configures a tracing provider. | "I'd like to book an appointment." Give a new phone number and full name, agree to create the profile, ask for a haircut tomorrow, then choose 3pm. | `lookup_customer`, `create_customer`, `check_availability`, then `book_appointment`, each once, and a trace visible in Langfuse. Needs the three `LANGFUSE_*` keys. |
@@ -245,6 +259,25 @@ When an example fails, this is the loop that worked.
 
 Fill this in as you go. "Verified" means a human spoke to it on that target and
 the pass criteria in the table were met.
+
+Fresh sweep started on 2026-08-16 from commit `82000bb`. Earlier passes do not
+count for this sweep; they are kept below as history.
+
+| Example | LiveKit | Pipecat | Notes |
+|---|---|---|---|
+| `salon-support` | verified | verified | Fresh human booking on both targets with `customer_name=Ada` and `customer_id=cus_2002`. Both containers received that exact call-start payload. Pipecat rendered "talking to Ada" in the prompt and "Hi Ada" in the greeting, saved `requested_service: haircut`, then called `check_availability` and `book_appointment` once each. Its result `apt_56f20a93a4` matches the fixture hash for `cus_2002` plus the selected 3 p.m. slot, proving customer injection rather than the `cus_1001` default. LiveKit completed seven LLM turns and the human heard the personalized greeting and completed booking; its INFO log exposes no tool payloads. Both logs contain zero provider or runtime errors. |
+| `mcp-example` | verified | verified | Fresh human search passed on both targets. Pipecat called `firecrawl_search` exactly once with Barcelona restaurant search arguments, completed in 6.09 seconds, and grew from 1,145 prompt tokens before the call to 166,124 after the results landed. LiveKit grew from 1,234 to 175,931 prompt tokens across its MCP result. Both spoke useful recommendations with zero malformed retries, MCP timeouts, provider errors, or runtime exceptions. |
+| `multi-task` | verified | verified | LiveKit completed the fresh human booking with one customer step followed by one appointment step, a spoken confirmation, and no provider or runtime failure during the call. Its generated boundary assigns the customer task's `customer_id` into session state before rendering the appointment task, but LiveKit 1.6.10 INFO logs do not expose the exact tool payload. The first Pipecat call exposed B2: restoring a snapshot taken before the owner tool result arrived erased the completed delegation and ran `check_customer` twice. After V2 moved the snapshot behind the drained result, the fresh human retest ran `check_customer`, `lookup_customer`, `create_customer`, both finish tools, `manage_appointment`, `check_availability`, and `book_appointment` exactly once each. Customer identification produced `cus_e0aad0a9`; the restored owner context retained that completed delegate call and typed result; `book_appointment` received the same exact ID and produced `apt_3d243c32aa`. Name and phone were asked once, the caller heard the booking confirmation, and there were zero provider or runtime failures during the call. |
+| `simple-prompt` | not run | not run | |
+| `subagents` | not run | not run | |
+| `task-groups` | not run | not run | |
+| `outbound-reminder` | not run | not run | Blocked until `SALON_API_URL`, `SALON_API_TOKEN`, and `SALON_API_SIGNING_KEY` are provided. |
+| `twilio-telephony-hello` | not run | not run | Browser calls prove the agent flow; the full pass also needs a telephony call. |
+| `livekit-human-transfer` | not run | n/a | LiveKit only. A full pass needs a real SIP trunk and transfer destinations. |
+| `pipecat-human-transfer-daily` | n/a | not run | Pipecat only. A full pass needs a deployed agent and Daily phone number. |
+| `pipecat-human-transfer-twilio` | n/a | not run | Pipecat only. A full pass needs Twilio credentials and a telephony call. |
+
+### Previous sweep
 
 | Example | LiveKit | Pipecat | Notes |
 |---|---|---|---|

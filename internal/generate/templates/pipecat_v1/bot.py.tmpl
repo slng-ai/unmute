@@ -817,9 +817,6 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
     async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
         self._{{$d.MethodName}}_results = {}
-        # Snapshot the owner's context; the flow rewrites it per node and the
-        # final step restores it (merge: results, N13).
-        self._{{$d.MethodName}}_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
         flow = FlowManager(
             llm=self.llm,
             context_aggregator=LLMContextAggregatorPair(self.context),
@@ -833,6 +830,10 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             {"status": "running the {{if $d.Task}}{{$d.Task}} task{{else}}{{$d.Group}} flow{{end}}"},
             properties=FunctionCallResultProperties(run_llm=False),
         )
+        # V2/B2: drain the resolved owner call before snapshotting. Otherwise
+        # restoration erases that call and the unchanged request delegates again.
+        await self.flush_pipeline()
+        self._{{$d.MethodName}}_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
         await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
 {{range $t := $d.StepTasks}}
     def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:

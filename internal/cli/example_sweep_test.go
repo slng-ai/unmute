@@ -61,11 +61,10 @@ const (
 var sweepIgnored = []string{".env", "livekit.toml", "livekit-sip.toml"}
 
 // sweepVars seeds input variables a greeting interpolates. salon-support's
-// greeting is "Hi {{customer_name}}" from source: call_start, so without these
-// it renders malformed and the session would fail for a reason that has nothing
-// to do with the code under test. multi-task declares the same two names but
-// neither is call_start and its greeting interpolates nothing, so it needs none
-// (research.md R5, closed).
+// defaults keep the greeting valid without these, but that would exercise the
+// fallback instead of the dispatch path this example exists to prove.
+// multi-task declares the same two names but neither is call_start and its
+// greeting interpolates nothing, so it needs none (research.md R5, closed).
 var sweepVars = map[string][]string{
 	"salon-support": {"customer_name=Robin", "customer_id=cus_0042"},
 }

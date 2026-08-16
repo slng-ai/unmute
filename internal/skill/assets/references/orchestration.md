@@ -161,7 +161,9 @@ controls:
 
 `result:` is the contract. The task must come back with those fields, and
 `record_status` can only be one of three values. That shape is what makes a task
-different from a longer prompt.
+different from a longer prompt. Its internal turns stay out of the agent's
+context, while the completed delegate call stays there so the same request does
+not run twice.
 
 `assign:` copies fields out of the result into package variables, so the rest of
 the call uses them without asking again. Declare each of those variables at the
