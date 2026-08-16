@@ -867,3 +867,48 @@ func TestWriteHumanTransferPutsDestinationInTheBlock(t *testing.T) {
 		t.Errorf("warm block = %+v", warm)
 	}
 }
+
+// A wizard-built phone route starts from a per-target transport. Neither value
+// completes a route on its own — the carrier is still missing and the wizard
+// cannot supply it — but naming the transport is what makes the resulting
+// refusal list the carriers that work.
+func TestDefaultTransportPerTarget(t *testing.T) {
+	for target, want := range map[string]string{
+		"pipecat":  "daily-sip",
+		"livekit":  "sip",
+		"vapi":     "",
+		"deepgram": "",
+	} {
+		if got := DefaultTransport(target); got != want {
+			t.Errorf("DefaultTransport(%q) = %q, want %q", target, got, want)
+		}
+	}
+}
+
+// withDefaults fills the transport in only for a package that actually uses a
+// phone route: on a browser-only package it would put a credential line in
+// .env.example that nothing reads.
+func TestPhoneRouteGetsItsTargetsTransport(t *testing.T) {
+	for _, target := range []string{"pipecat", "livekit"} {
+		t.Run(target, func(t *testing.T) {
+			browser := Data{Name: "agent", Channel: "web", Tools: DefaultTools()}
+			browser.SetTarget(target)
+			if got := browser.withDefaults().Transport; got != "" {
+				t.Errorf("a browser-only package must declare no transport, got %q", got)
+			}
+
+			// A telephony channel needs an explicit Channels entry: the bare
+			// Channel field defaults to realtime_audio, which is not a phone
+			// route (AllChannels).
+			phone := Data{
+				Name:     "agent",
+				Channels: []Channel{{Name: "phone", Kind: "telephony", Inbound: true}},
+				Tools:    DefaultTools(),
+			}
+			phone.SetTarget(target)
+			if got, want := phone.withDefaults().Transport, DefaultTransport(target); got != want {
+				t.Errorf("a phone package on %s got transport %q, want %q", target, got, want)
+			}
+		})
+	}
+}
