@@ -116,7 +116,7 @@ func TestPipecatV1MCPToolSource(t *testing.T) {
 		"from mcp.client.session_group import StreamableHttpParameters",
 		"from pipecat.services.mcp_service import MCPClient",
 		"self._mcp_clients = [",
-		`server_params=StreamableHttpParameters(url=os.environ["FIRECRAWL_MCP_URL"], headers=_bearer("FIRECRAWL_API_KEY")),`,
+		`server_params=StreamableHttpParameters(url=os.environ["FIRECRAWL_MCP_URL"], headers=_bearer("FIRECRAWL_API_KEY"), timeout=30),`,
 		`tools_filter=["firecrawl_search"],`,
 		"await client.start()",
 		"(await client.register_tools(self.llm)).standard_tools",
@@ -866,6 +866,150 @@ func TestV3PipecatToolsResolveCallback(t *testing.T) {
 	}
 }
 
+// A provider may send an argument outside the advertised direct-function
+// schema. Pipecat expands that mapping into keyword arguments before calling
+// the generated handler, so every direct tool needs one shared boundary that
+// turns both bad keywords and handler failures into exactly one safe result.
+// functools.wraps keeps the declared signature visible to Pipecat; Flow
+// handlers use their own callback contract and do not pass through this guard.
+func TestPipecatV1DirectToolGuard(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tasks["collect"] = ir.Task{
+		Instructions: "Collect the caller's email.",
+		Tools:        []string{"lookup_customer"},
+		Result:       map[string]ir.ResultField{"email": {Type: ir.PrimitiveString}},
+		Context:      ir.TaskContext{History: ir.HistoryFull},
+	}
+	agent.Controls["run_collect"] = &ir.Delegate{
+		Kind: ir.ControlDelegate, Task: "collect", When: "Collect account details.",
+	}
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "run_collect")
+	agent.Agents["intake"] = intake
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+
+	for _, want := range []string{
+		"def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None):",
+		"@functools.wraps(handler)",
+		"unexpected = sorted(set(kwargs) - declared - {\"params\"})",
+		"original_result_callback = params.result_callback",
+		"if not resolved:",
+		"await original_result_callback({",
+		"@_direct_tool(cancel_on_interruption=False)",
+		"@_direct_tool\n    async def lookup_customer(",
+		"@_direct_tool\n    async def run_collect(",
+		"async def _flow_tool_lookup_customer(",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing direct-tool guard %q", want)
+		}
+	}
+	if strings.Contains(bot, "@_direct_tool\n    async def _run_") {
+		t.Error("Flow handlers must keep Pipecat Flows' own result contract")
+	}
+	if regexp.MustCompile(`(?m)^\s*@tool(?:\(|$)`).MatchString(bot) {
+		t.Error("a generated direct tool bypasses the shared guard")
+	}
+	if !strings.Contains(bot, `async def lookup_customer(self, params: FunctionCallParams, email: str = "", phone: str = ""):`) {
+		t.Error("guard changed the generated tool's declared signature")
+	}
+}
+
+func TestV2PipecatV1AgentTransferAnnouncementWaitsForSourcePlayout(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transfer := agent.Controls["to_billing"].(*ir.AgentTransfer)
+	transfer.Requires = []string{"customer_id"}
+	transfer.Announce = "I’ll connect you with billing now."
+	agent.Conversation.Greeting = &ir.Greeting{SpeaksFirst: ir.SpeaksFirstUser}
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	start := strings.Index(bot, "    async def to_billing(")
+	if start < 0 {
+		t.Fatal("to_billing transfer method not emitted")
+	}
+	body := bot[start:]
+	if end := strings.Index(body[1:], "\n    async def "); end >= 0 {
+		body = body[:end+1]
+	}
+	requiresAt := strings.Index(body, "missing =")
+	announcementAt := strings.Index(body, `await self._announce_handoff("I’ll connect you with billing now.")`)
+	activateAt := strings.Index(body, "await self.activate_worker(")
+	if requiresAt < 0 || activateAt < 0 || announcementAt < 0 {
+		t.Fatalf("transfer method missing requires / exact source announcement / target activation:\n%s", body)
+	}
+	if requiresAt >= announcementAt || announcementAt >= activateAt {
+		t.Errorf("transfer must guard, finish the exact source announcement, then activate the receiver:\n%s", body)
+	}
+	if strings.Contains(body[:activateAt], "messages=[") {
+		t.Errorf("the source announcement must not start a second LLM turn:\n%s", body)
+	}
+	for _, want := range []string{
+		"class _HandoffWorker(",
+		"async def _announce_handoff(self, announcement: str) -> None:",
+		"await PipelineWorker.queue_frame(self, TTSSpeakFrame(announcement))",
+		"await asyncio.wait_for(self._handoff_finished.wait(), timeout=30.0)",
+		"isinstance(frame, BotStartedSpeakingFrame)",
+		"isinstance(frame, BotStoppedSpeakingFrame)",
+		"async def process_deferred_tool_frames(self, frames):",
+		"if not self.active:",
+		"return []",
+		"class IntakeAgent(_HandoffWorker):",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("announced handoff is missing source playout step %q", want)
+		}
+	}
+	if !regexp.MustCompile(`(?m)^from pipecat\.frames\.frames import .*BotStartedSpeakingFrame.*BotStoppedSpeakingFrame.*TTSSpeakFrame`).MatchString(bot) {
+		t.Error("an announced handoff must import playout and speech frames even without a text greeting")
+	}
+	if !strings.Contains(body, "run_llm=True") {
+		t.Error("receiver must answer normally after source playout completes")
+	}
+	if !strings.Contains(body, `"content": "Caller asks about billing, an invoice, or a refund."`) {
+		t.Error("target activation lost its existing transfer reason")
+	}
+
+	transfer.Announce = ""
+	silent, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate silent transfer: %v", err)
+	}
+	silentBot := artifactFile(t, silent, "bot.py")
+	silentStart := strings.Index(silentBot, "    async def to_billing(")
+	silentBody := silentBot[silentStart:]
+	if end := strings.Index(silentBody[1:], "\n    async def "); end >= 0 {
+		silentBody = silentBody[:end+1]
+	}
+	if strings.Contains(silentBody, "_announce_handoff(") || strings.Contains(silentBot, "class _HandoffWorker(") {
+		t.Error("omitted announce must preserve the ordinary silent handoff")
+	}
+	if !strings.Contains(silentBody, "run_llm=True") {
+		t.Error("a silent handoff must let the receiver answer on activation")
+	}
+}
+
 // TestF3PipecatSingleAgentInline: a single agent with no handoffs, tasks,
 // variables, tracing, or telephony collapses to the inline shape (F3) — the LLM
 // sits directly in the pipeline, tools are module-level direct functions in
@@ -888,7 +1032,6 @@ func TestF3PipecatSingleAgentInline(t *testing.T) {
 		"activate_worker",
 		"LLMWorkerActivationArgs",
 		"class AppointmentDeskAgent",
-		"@tool",
 	} {
 		if strings.Contains(bot, absent) {
 			t.Errorf("inline bot.py should not contain %q (bus scaffolding)", absent)

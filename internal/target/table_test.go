@@ -64,6 +64,20 @@ func TestBuiltinToolsPassOnCodeDriversOnly(t *testing.T) {
 	}
 }
 
+func TestAgentTransferAnnouncePassesOnGeneratedDriversOnly(t *testing.T) {
+	table := Default()
+	for _, provider := range []Provider{LiveKit, Pipecat} {
+		if got := table.Capability(FieldTransferAnnounce, provider); got.Tag != Core {
+			t.Errorf("agent transfer announce gated on %s: %#v", provider, got)
+		}
+	}
+	for _, provider := range []Provider{Vapi, Deepgram} {
+		if got := table.Capability(FieldTransferAnnounce, provider); got.Tag != Gated || got.Note == "" {
+			t.Errorf("agent transfer announce passed on %s: %#v", provider, got)
+		}
+	}
+}
+
 func TestTelephonyControlsResolveCarrierAndTransport(t *testing.T) {
 	table := Default()
 	tests := []struct {
@@ -379,7 +393,11 @@ func TestNoVendorVariableWearsTheUnmutePrefix(t *testing.T) {
 	unmuteEnv := regexp.MustCompile(`\bUNMUTE_[A-Z0-9_]+\b`)
 
 	root := filepath.Join("..", "..")
-	skip := map[string]bool{".git": true, "specs": true, "bin": true, "build": true, "node_modules": true}
+	// `.claude` holds git worktrees, which are whole other checkouts of this
+	// same repository. Walking them scans a stale copy of every file this walk
+	// already covers, so a worktree on disk fails the run for reasons that have
+	// nothing to do with the tree under test.
+	skip := map[string]bool{".git": true, ".claude": true, "specs": true, "bin": true, "build": true, "node_modules": true}
 	seen := 0
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {

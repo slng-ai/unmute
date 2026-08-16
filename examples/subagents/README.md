@@ -10,6 +10,7 @@ controls:
     kind: agent_transfer
     to: appointment_manager
     when: The caller wants to reschedule or cancel an existing appointment.
+    announce: "I’m connecting you with our appointment manager now."
     context:
       history: full
       variables: all
@@ -58,6 +59,12 @@ back. The second agent owns the call from that point, which is why this package
 declares a control in each direction: `to_appointment_manager` and
 `to_booking_desk`.
 
+**The handoff is spoken before it happens.** `announce` is the exact sentence
+the active agent speaks once before control changes. Leave it out for a silent
+handoff. A handoff back to
+`booking_desk` continues the conversation and never repeats the call-start
+greeting.
+
 **The tool lists differ on purpose.** `appointment_manager` is the only agent
 with `cancel_appointment`. A caller cannot be talked into a cancellation by the
 booking agent, because that agent has no way to perform one.
@@ -70,6 +77,11 @@ caller is not asked for their phone number twice.
 desk. [agents/appointment-manager.md](agents/appointment-manager.md) is the
 other one. Each is shorter and more specific than the single prompt in
 [simple-prompt](../simple-prompt/README.md).
+
+**A malformed tool call cannot look successful.** On Pipecat, an undeclared
+argument or an early handler failure returns one corrective tool result. The
+model may retry with the declared fields; it cannot leave the action in progress
+and continue from an invented result.
 
 ## Compare with
 

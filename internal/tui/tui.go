@@ -1455,6 +1455,7 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 			huh.NewOption("Trigger  ·  "+oneLine(handoff.When), "trigger"),
 			huh.NewOption("Required variables  ·  "+cmp.Or(strings.Join(handoff.Requires, ", "), "none"), "requires"),
 			huh.NewOption("Context  ·  "+cmp.Or(handoff.History, "full")+" · variables "+handoffVariablesLabel(*handoff), "context"),
+			huh.NewOption("Announcement  ·  "+cmp.Or(oneLine(handoff.Announce), "silent"), "announce"),
 			huh.NewOption("Delete handoff", "delete"),
 			huh.NewOption("← Back", actionBack),
 		}, true)
@@ -1496,6 +1497,10 @@ func editHandoffDetails(runner *fieldRunner, data *scaffold.Data, name string) e
 			}
 		case "context":
 			if err := editHandoffContextDetails(runner, data, handoff); err != nil {
+				return err
+			}
+		case "announce":
+			if _, err := runner.input("Announcement (optional)", "Exact sentence spoken before the handoff. Blank keeps it silent.", &handoff.Announce, func(string) error { return nil }); err != nil {
 				return err
 			}
 		case "delete":

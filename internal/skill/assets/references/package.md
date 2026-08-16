@@ -36,6 +36,8 @@ models:
     reasoning:
       provider: openai
       model: gpt-5.6-luna
+      params:
+        reasoning_effort: "none"
   speak:
     voice:
       provider: slng
@@ -120,6 +122,12 @@ Unmute keeps no list of valid model ids. `model:` and `voice:` are forwarded to
 the provider exactly as written, so a typo is a provider error at run time, not
 a compile error. The compile report says so out loud. Which `provider:` values
 are legal per role per target is in `models.md`.
+
+`params:` is the same passthrough for everything else the provider takes, and it
+is not checked either. Write `reasoning_effort: "none"` there on every think
+entry: OpenAI rejects a request that carries function tools without it, so a
+package with tools fails on every turn. `models.md` has the values and the
+reason.
 
 ## agents
 

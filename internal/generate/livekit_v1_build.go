@@ -731,7 +731,7 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 		case *ir.AgentTransfer:
 			transfer := livekitTransfer{
 				Method: ref, When: transferWhen(c), TargetClass: pyName(c.To),
-				Requires: c.Requires,
+				Announce: c.Announce, Requires: c.Requires,
 			}
 			if c.Context.History == ir.HistorySummary {
 				summarizer, err := livekitReasonLLM(agent, tgt, c.Context.Summarizer, env)

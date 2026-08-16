@@ -44,6 +44,8 @@ models:
     reasoning:
       provider: openai
       model: gpt-5.6-luna
+      params:
+        reasoning_effort: "none"
   speak:
     voice:
       provider: slng
@@ -113,6 +115,8 @@ models:
     reasoning:
       provider: openai
       model: gpt-5.6-luna
+      params:
+        reasoning_effort: "none"
 ```
 
 `provider` names the integration; `model` and `voice` are passed to that
@@ -123,6 +127,12 @@ The compile report says so out loud:
 ```
 pipecat: binding reason.reasoning provider=openai model=gpt-5.6-luna (forwarded as-is, not validated)
 ```
+
+`params:` is passthrough for anything else the provider takes, and it is not
+checked either. The one line here earns its place: `gpt-5.6-luna` is a reasoning
+model, and OpenAI refuses a request that carries function tools unless it sets
+`reasoning_effort`. This package has five tools, taken out of the listing above,
+so the line is doing real work. [The reasoning model](/models/llm) has the rest.
 
 <Note>
   You can define more entries than you use. Unused entries are legal

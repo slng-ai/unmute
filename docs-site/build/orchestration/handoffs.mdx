@@ -47,6 +47,7 @@ controls:
     kind: agent_transfer
     to: appointment_manager
     when: The caller wants to reschedule or cancel an existing appointment.
+    announce: "I’m connecting you with our appointment manager now."
     context:
       history: full
       variables: all
@@ -55,6 +56,7 @@ controls:
     kind: agent_transfer
     to: booking_desk
     when: The caller wants to make a new appointment instead.
+    announce: "I’m connecting you back to the booking desk for your new appointment."
     context:
       history: full
       variables: all
@@ -62,6 +64,11 @@ controls:
 
 `when` is the condition the model reads. Write it as the situation, not as an
 instruction to call a tool.
+
+`announce` is optional. Write the exact short sentence the active agent should
+speak. It is spoken once and finishes before the new agent takes over; the
+model does not paraphrase it. Leave it out for a silent handoff. A failed
+`requires` guard is checked first and never makes a false announcement.
 
 `context` decides what the new agent knows. It is the whole of what travels:
 
@@ -77,7 +84,8 @@ Without them, the caller gets asked for their phone number twice.
 The second agent owns the call from that point. Nothing returns to the first
 agent, and no result is passed back. That is the cost of this shape, and it is why
 the example declares a control in each direction: coming back is another handoff,
-not a return.
+not a return. The call-start greeting is only for the first entry; a handoff back
+continues from the conversation instead of greeting again.
 
 If you want a step that runs and hands control back with an answer, that is a
 [task](/build/orchestration/tasks).

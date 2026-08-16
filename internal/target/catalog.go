@@ -84,6 +84,15 @@ type CallSpec struct {
 	// params=soniox.STTOptions(...).
 	SettingsArg   string
 	SettingsClass string
+	// SettingsOverflow names the Settings field that carries provider-specific
+	// params the dataclass has no field of its own for. Pipecat's
+	// `ServiceSettings.extra` (services/settings.py:189) is merged verbatim into
+	// the request body (services/openai/base_llm.py:361), so a param the class
+	// never heard of still reaches the provider instead of raising
+	// `TypeError: unexpected keyword argument`. Empty means the entry has no
+	// overflow and every param stays a plain Settings field. Set it only where
+	// the service is known to merge the field, not merely to declare it.
+	SettingsOverflow string
 }
 
 // Entry is one (framework, role, vendor) integration.

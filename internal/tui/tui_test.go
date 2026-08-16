@@ -934,7 +934,7 @@ func TestRunAddAgentAndHandoff(t *testing.T) {
 	t.Chdir(t.TempDir())
 	input := "1\nagent\n" +
 		"5\n1\n2\nbilling\n1\nYou handle billing questions.\n7\n5\n" +
-		"5\n2\n1\nto_billing\n3\nCaller asks about billing.\n7\n3\n" +
+		"5\n2\n1\nto_billing\n3\nCaller asks about billing.\n8\n3\n" +
 		"7\n\n"
 	var output bytes.Buffer
 	got, err := RunConsole(strings.NewReader(input), &output, true, nil)
@@ -946,6 +946,33 @@ func TestRunAddAgentAndHandoff(t *testing.T) {
 	}
 	if len(got.Agent.Data.Handoffs) != 1 || got.Agent.Data.Handoffs[0].Source != "assistant" || got.Agent.Data.Handoffs[0].To != "billing" {
 		t.Fatalf("handoffs = %#v", got.Agent.Data.Handoffs)
+	}
+}
+
+func TestHandoffAnnouncementEditsAndRoundTrips(t *testing.T) {
+	data := scaffold.Data{Instructions: scaffold.DefaultInstructions}
+	data.SetTarget("pipecat")
+	data.Agents = []scaffold.Agent{{Name: "billing", Instructions: "Handle billing.", Reason: data.Reason, Speak: data.Speak}}
+	data.Handoffs = []scaffold.Handoff{{Name: "to_billing", Source: "assistant", To: "billing", When: "Billing", History: "full", AllVariables: true}}
+
+	var output bytes.Buffer
+	if err := editHandoffDetails(newRunner(strings.NewReader("6\nI’ll connect you to billing now.\n8\n"), &output, true), &data, "to_billing"); err != nil {
+		t.Fatal(err)
+	}
+	if got := data.Handoffs[0].Announce; got != "I’ll connect you to billing now." {
+		t.Fatalf("announcement = %q", got)
+	}
+
+	root := filepath.Join(t.TempDir(), "agent")
+	if _, err := scaffold.Write(root, data); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := loadMaintained(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reloaded.data.Handoffs[0].Announce; got != data.Handoffs[0].Announce {
+		t.Fatalf("round-trip announcement = %q", got)
 	}
 }
 

@@ -308,6 +308,12 @@ var pipecatCatalog = []Entry{
 			Model:    FieldSpec{Arg: "model", Required: true},
 			Endpoint: FieldSpec{Arg: "base_url"},
 			Params:   ParamsSettings,
+			// `reasoning_effort` is the param that needs this: OpenAI rejects
+			// function tools on /v1/chat/completions for a reasoning model
+			// unless the request carries reasoning_effort="none", and
+			// OpenAILLMSettings has no field for it (verified against
+			// pipecat-ai 1.5.0, 2026-08-15).
+			SettingsOverflow: "extra",
 		},
 	},
 	{
@@ -399,9 +405,10 @@ var pipecatCatalog = []Entry{
 		Import:  "from pipecat.services.openai.llm import OpenAILLMService",
 		Call: &CallSpec{
 			Class: "OpenAILLMService", APIKeyArg: "api_key",
-			Model:    FieldSpec{Arg: "model", Required: true},
-			Endpoint: FieldSpec{Arg: "base_url"},
-			Params:   ParamsSettings,
+			Model:            FieldSpec{Arg: "model", Required: true},
+			Endpoint:         FieldSpec{Arg: "base_url"},
+			Params:           ParamsSettings,
+			SettingsOverflow: "extra", // same class as the openai row above
 		},
 		RequiresEndpoint: true,
 		Notes:            []string{"OpenAI-compatible custom endpoint (the documented SLNG-as-reason path); api-key env follows the <PROVIDER>_API_KEY convention"},

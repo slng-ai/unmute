@@ -54,6 +54,81 @@ func TestBuildSafeCore(t *testing.T) {
 	}
 }
 
+func TestBuildAgentTransferAnnounce(t *testing.T) {
+	pkg := loadSafeCore(t)
+	want := "I’ll connect you with billing."
+	control := pkg.Agent.Controls["to_billing"]
+	control.Announce = &want
+	pkg.Agent.Controls["to_billing"] = control
+
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := agent.Controls["to_billing"].(*AgentTransfer).Announce; got != want {
+		t.Fatalf("announce = %q, want %q", got, want)
+	}
+}
+
+func TestBuildRejectsInvalidAgentTransferAnnounce(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		value  string
+		mutate func(*packagespec.Package, *string)
+		want   string
+	}{
+		{
+			name:  "blank",
+			value: " \t ",
+			mutate: func(pkg *packagespec.Package, value *string) {
+				control := pkg.Agent.Controls["to_billing"]
+				control.Announce = value
+				pkg.Agent.Controls["to_billing"] = control
+			},
+			want: "announce must not be blank",
+		},
+		{
+			name:  "template",
+			value: "I’ll connect you with {{destination}}.",
+			mutate: func(pkg *packagespec.Package, value *string) {
+				control := pkg.Agent.Controls["to_billing"]
+				control.Announce = value
+				pkg.Agent.Controls["to_billing"] = control
+			},
+			want: "announce does not support templates",
+		},
+		{
+			name:  "delegate",
+			value: "Please hold.",
+			mutate: func(pkg *packagespec.Package, value *string) {
+				task := "collect"
+				pkg.Agent.Controls["bad"] = packagespec.Control{Kind: "delegate", Task: &task, Announce: value}
+			},
+			want: `field "announce" is illegal with control kind "delegate"`,
+		},
+		{
+			name:  "human transfer",
+			value: "Please hold.",
+			mutate: func(pkg *packagespec.Package, value *string) {
+				pkg.Agent.Controls["bad"] = packagespec.Control{
+					Kind: "human_transfer", Announce: value,
+					Cold: &packagespec.ColdTransfer{Destination: "billing_line"},
+				}
+			},
+			want: `field "announce" is illegal with control kind "human_transfer"`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			test.mutate(pkg, &test.value)
+			_, err := Build(pkg)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("got %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestBuildResolvesExactTelephonyPlan(t *testing.T) { // telephony V2, V4-V6
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)

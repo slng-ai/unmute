@@ -75,8 +75,15 @@ spread into the tools= kwarg (docs/spec/prebuilt-tools.md). */ -}}
 MCPToolset per source, on the tools surface. An absent field emits no argument,
 so the SDK's own default stands: no transport_type means it reads the URL (a
 path ending in /mcp is streamable HTTP), no allowed_tools means every tool the
-server exposes, no headers means no authentication. */ -}}
-{{define "mcp_mounts"}}{{range $i, $s := .}}{{if $i}}, {{end}}mcp.MCPToolset(id={{pyq $s.Name}}, mcp_server=mcp.MCPServerHTTP(url=os.environ[{{pyq $s.URLEnv}}]{{if $s.Transport}}, transport_type={{pyq $s.Transport}}{{end}}{{if $s.Tools}}, allowed_tools=[{{range $j, $t := $s.Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]{{end}}{{if $s.Auth}}, headers={{$s.Auth.Expr}}{{end}})){{end}}{{end -}}
+server exposes, no headers means no authentication.
+
+The two timeouts are the exception, and they are written out because leaving
+them off makes the same package behave differently on the two targets.
+MCPServerHTTP defaults both to 5 seconds, which no web search or crawl answers
+inside; Pipecat's MCP client defaults to 30. 30 wins because it is the value one
+target already had, so this closes the gap without inventing a number. A tool
+slower than that needs `timeout:` on the mcp block, which does not exist yet. */ -}}
+{{define "mcp_mounts"}}{{range $i, $s := .}}{{if $i}}, {{end}}mcp.MCPToolset(id={{pyq $s.Name}}, mcp_server=mcp.MCPServerHTTP(url=os.environ[{{pyq $s.URLEnv}}]{{if $s.Transport}}, transport_type={{pyq $s.Transport}}{{end}}{{if $s.Tools}}, allowed_tools=[{{range $j, $t := $s.Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]{{end}}{{if $s.Auth}}, headers={{$s.Auth.Expr}}{{end}}, timeout={{mcpTimeout}}, client_session_timeout_seconds={{mcpTimeout}})){{end}}{{end -}}
 {{- /* tools_list is the whole tools= surface: prebuilt tools first, then the
 MCP sources, in the order the package lists them. */ -}}
 {{define "tools_list"}}{{template "prebuilt_list" .Prebuilt}}{{if and .Prebuilt .MCPServers}}, {{end}}{{template "mcp_mounts" .MCPServers}}{{end -}}
@@ -514,7 +521,10 @@ class IgnorePhrasesMixin:
 # --- agents ----------------------------------------------------------------
 {{range .Agents}}
 class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
-    def __init__(self{{if not $.SingleAgentMinimal}}, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN{{end}}) -> None:
+    def __init__(self{{if not $.SingleAgentMinimal}}, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN{{end}}{{if and .IsEntry (not $.SingleAgentMinimal)}}, initial: bool = False{{end}}) -> None:
+{{- if and .IsEntry (not $.SingleAgentMinimal)}}
+        self._initial = initial
+{{- end}}
         super().__init__(
             instructions={{.PromptConst}},
 {{- if not $.SingleAgentMinimal}}
@@ -536,6 +546,11 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         # The prompt names call variables, so it is rendered once the session
         # state exists (C11: rendered at session start, never re-rendered).
         await self.update_instructions({{.PromptExpr}})
+{{- end}}
+{{- if and .IsEntry (not $.SingleAgentMinimal)}}
+        if not self._initial:
+            self.session.generate_reply()
+            return
 {{- end}}
 {{- if .Greeting}}
 {{- if .Greeting.Say}}
@@ -561,6 +576,9 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         if missing:
             # requires guard (machine-checked): refuse and name the unmet variables.
             return "Cannot transfer yet; missing required information: " + ", ".join(missing)
+{{- end}}
+{{- if .Announce}}
+        await ctx.session.say({{pyq .Announce}}, allow_interruptions=False)
 {{- end}}
 {{- range .ResetVars}}
         ctx.userdata.{{.Name}} = {{.Default}}  # context.variables: not carried on this transfer
@@ -765,6 +783,14 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
     @function_tool
     async def {{.Method}}(self, ctx: RunContext) -> dict:
         {{triple .When}}
+        # N13: snapshot before the task, restore after. An awaited AgentTask
+        # merges its own turns into this agent's context when it returns
+        # (livekit/agents/voice/agent.py, merge on handoff-return), so without
+        # this the follow-up prompt ends on the task's last assistant line with
+        # no tool record of the work. That reads as unfinished, and the model
+        # runs the same flow again (B: multi-task delegated twice and booked
+        # nothing, 2026-08-15). The task-group branch below always did this.
+        owner_ctx = self.chat_ctx.copy()
 {{- if .Task.Summary}}
         summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Task.Summary}})
         result = await {{.Task.Class}}(chat_ctx=summary_ctx)
@@ -773,6 +799,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- else}}
         result = await {{.Task.Class}}()  # history: reset — the task starts fresh
 {{- end}}
+        await self.update_chat_ctx(owner_ctx)
 {{- range .Task.Assign}}
         ctx.userdata.{{.Var}} = result[{{pyq .Field}}]
 {{- end}}
@@ -785,6 +812,11 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         {{triple .When}}
         # context_scope: isolated — each step is a standalone AgentTask starting
         # fresh (C3/C4); the grouped form always shares context, so it is not used.
+        # Starting fresh says nothing about coming back: an AgentTask merges its
+        # own turns into this agent on return whatever context it began with, so
+        # the owner is snapshotted here and restored below, exactly as the
+        # single-task and grouped branches do.
+        owner_ctx = self.chat_ctx.copy()
         task_results: dict = {}
 {{- range .Steps}}
         task_results[{{pyq .ID}}] = await {{.Class}}()
@@ -792,6 +824,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- if eq .Then "return"}}
         # N13: standalone tasks never merge their turns back; hand the owner the
         # typed results only (merge: results).
+        await self.update_chat_ctx(owner_ctx)
         return task_results
 {{- else if eq .Then "transfer"}}
         # then: transfer — control moves on and does not return here.
@@ -970,7 +1003,7 @@ async def entrypoint(ctx: JobContext) -> None:
     _hydrate_call_start(session.userdata, _dispatched_call_start(metadata))
 {{- end}}
 {{- end}}
-    await session.start(agent={{.EntryClass}}(), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
+    await session.start(agent={{.EntryClass}}({{if not .SingleAgentMinimal}}initial=True{{end}}), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
     await _livekit_entry_greeting(session)
 {{- else}}
     metadata = _livekit_job_metadata(ctx.job.metadata)
@@ -992,7 +1025,7 @@ async def entrypoint(ctx: JobContext) -> None:
             or not 8 <= len(phone_number) <= 16
         ):
             raise RuntimeError("phone_number must be an E.164 number")
-        await session.start(agent={{.EntryClass}}(), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
+        await session.start(agent={{.EntryClass}}({{if not .SingleAgentMinimal}}initial=True{{end}}), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
         if not session.room_io:
             raise RuntimeError("session room_io is unavailable")
         session.room_io.set_participant("phone_user")
@@ -1026,7 +1059,7 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- end}}
 {{- end}}
     if not outbound_job:
-        await session.start(agent={{.EntryClass}}(), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
+        await session.start(agent={{.EntryClass}}({{if not .SingleAgentMinimal}}initial=True{{end}}), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
 {{- if .Outbound}}
     else:
         if amd_result.category == "machine-vm":
@@ -1052,7 +1085,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # prompts already see them (I.dispatch).
     _hydrate_call_start(session.userdata, _dispatched_call_start(_livekit_job_metadata(ctx.job.metadata)))
 {{- end}}
-    await session.start(agent={{.EntryClass}}(), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
+    await session.start(agent={{.EntryClass}}({{if not .SingleAgentMinimal}}initial=True{{end}}), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
     await ctx.connect()
 {{- if .Outbound}}
 

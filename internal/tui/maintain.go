@@ -242,6 +242,9 @@ func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
 		switch control.Kind {
 		case "agent_transfer":
 			value := scaffold.Handoff{Name: name, Source: cmp.Or(owners[name], "assistant"), When: control.When}
+			if control.Announce != nil {
+				value.Announce = *control.Announce
+			}
 			if control.To != nil {
 				value.To = *control.To
 			}

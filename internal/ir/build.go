@@ -621,6 +621,13 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 		if _, ok := agent.Agents[to]; !ok {
 			return nil, missing(pkg, "agent.yaml", "to", to)
 		}
+		announce := stringValue(raw.Announce)
+		if raw.Announce != nil && strings.TrimSpace(announce) == "" {
+			return nil, fmt.Errorf("announce must not be blank")
+		}
+		if HasTemplate(announce) {
+			return nil, fmt.Errorf("announce does not support templates")
+		}
 		for _, name := range raw.Requires {
 			if _, ok := agent.Variables[name]; !ok {
 				return nil, missing(pkg, "agent.yaml", "requires", name)
@@ -630,7 +637,7 @@ func buildControl(pkg *packagespec.Package, raw packagespec.Control, agent *Agen
 		if err != nil {
 			return nil, err
 		}
-		return &AgentTransfer{Kind: ControlAgentTransfer, When: raw.When, To: to, Requires: raw.Requires, Context: context}, nil
+		return &AgentTransfer{Kind: ControlAgentTransfer, When: raw.When, To: to, Announce: announce, Requires: raw.Requires, Context: context}, nil
 	case ControlHumanTransfer:
 		transfer, err := buildHumanTransfer(raw)
 		if err != nil {
@@ -684,12 +691,12 @@ func buildHumanTransfer(raw packagespec.Control) (Control, error) {
 func unexpectedControlField(raw packagespec.Control, kind ControlKind) string {
 	fields := map[string]bool{
 		"task": raw.Task != nil, "group": raw.Group != nil, "assign": raw.Assign != nil,
-		"to": raw.To != nil, "requires": raw.Requires != nil, "context": raw.Context != nil,
+		"to": raw.To != nil, "announce": raw.Announce != nil, "requires": raw.Requires != nil, "context": raw.Context != nil,
 		"cold": raw.Cold != nil, "warm": raw.Warm != nil,
 	}
 	allowed := map[ControlKind]map[string]bool{
 		ControlDelegate:      {"task": true, "group": true, "assign": true},
-		ControlAgentTransfer: {"to": true, "requires": true, "context": true},
+		ControlAgentTransfer: {"to": true, "announce": true, "requires": true, "context": true},
 		ControlHumanTransfer: {"cold": true, "warm": true},
 	}[kind]
 	for _, field := range slices.Sorted(maps.Keys(fields)) {

@@ -68,7 +68,7 @@ func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 			toolContracts := map[string]string{
 				"lookup_customer":    "before any availability",
 				"create_customer":    "explicitly gave permission",
-				"check_availability": "real, nonempty customer_id",
+				"check_availability": "This tool accepts only service and date",
 				"book_appointment":   "Never invent either ID",
 				"cancel_appointment": "explicit confirmation",
 			}

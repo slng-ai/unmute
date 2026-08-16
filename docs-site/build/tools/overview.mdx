@@ -8,8 +8,8 @@ model calls it. Both live in one file, `tools/<name>.yaml`.
 
 ```yaml tools/check_availability.yaml
 description: >-
-  List Sage and Stone slots for one service and date only after customer
-  identification returned a real, nonempty customer_id.
+  List Sage and Stone slots for one service and date. Call only after customer
+  identification succeeds. This tool accepts only service and date.
 
 input:
   type: object
@@ -35,6 +35,13 @@ The top of the file is the contract. `description` and `input` are everything th
 model knows about this tool, so write the description as an instruction rather
 than a label, and let the schema do real work: the `enum` above means the model
 cannot ask for a service the salon does not offer.
+
+The schema is also the whole argument list. Generated Pipecat tools turn an
+extra argument into a normal corrective tool result, so the model can retry
+with only the declared fields. A handler failure before any result is returned
+the same way, without exposing the private exception to the model or leaving a
+call stuck in progress. Keep workflow prerequisites in the prompt; do not make
+their names look like extra tool inputs in the description.
 
 The one block near the bottom is the execution: it says how the tool runs. Every
 tool file has exactly one.

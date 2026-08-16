@@ -106,11 +106,15 @@ func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 
 	bot := artifactFile(t, artifact, "agent.py")
 	tracing := artifactFile(t, artifact, "tracing.py")
+	readme := artifactFile(t, artifact, "README.md")
+	if !strings.Contains(readme, "`greeter-livekit`") {
+		t.Error("README trace name must match the emitted Langfuse trace name")
+	}
 	for _, want := range []string{
 		"from tracing import setup_langfuse",
 		`"langfuse.session.id": ctx.room.name`,
 		`"langfuse.trace.name": "greeter" + "-" + "livekit"`,
-		"await session.start(agent=Greeter(), room=ctx.room)",
+		"await session.start(agent=Greeter(initial=True), room=ctx.room)",
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -683,10 +687,25 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 		// V1/B1: the single-task delegate docstring carries the finality guidance
 		// so the owner LLM does not re-run the finished flow.
 		"Do not run this flow again for the same request.",
+		// N13: an awaited AgentTask merges its own turns into the owner on
+		// return, so the owner's context is snapshotted before and restored
+		// after. Without it the owner's next prompt ends on the task's last
+		// assistant line with no tool record of the work, reads as unfinished,
+		// and the model runs the whole flow a second time. The docstring above
+		// asks for that; only these two lines enforce it.
+		"owner_ctx = self.chat_ctx.copy()",
+		"await self.update_chat_ctx(owner_ctx)",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
 		}
+	}
+	// The restore must land between the task and the assignment, or the owner
+	// keeps the merged turns.
+	restore := strings.Index(botpy, "await self.update_chat_ctx(owner_ctx)")
+	assign := strings.Index(botpy, `ctx.userdata.caller_phone = result["date"]`)
+	if restore < 0 || assign < 0 || restore > assign {
+		t.Errorf("the owner context is restored at %d, after the assignment at %d", restore, assign)
 	}
 }
 
@@ -1062,6 +1081,76 @@ func TestLiveKitV1HistoryResetAndToolCallShaping(t *testing.T) {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
 		}
+	}
+}
+
+func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	toRes := agent.Controls["to_reservations"].(*ir.AgentTransfer)
+	toRes.Announce = "I’ll connect you to reservations now."
+	toRes.Requires = []string{"caller_phone"}
+	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
+	toRes.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}}
+	back := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
+	back.Context.History = ir.HistoryReset
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	start := strings.Index(botpy, "    async def to_reservations(self, ctx: RunContext):")
+	if start < 0 {
+		t.Fatal("agent.py missing to_reservations")
+	}
+	end := strings.Index(botpy[start+1:], "\n    @function_tool")
+	if end < 0 {
+		t.Fatal("agent.py missing the end of to_reservations")
+	}
+	method := botpy[start : start+1+end]
+	guardAt := strings.Index(method, "        if missing:")
+	announceAt := strings.Index(method, `        await ctx.session.say("I’ll connect you to reservations now.", allow_interruptions=False)`)
+	resetAt := strings.Index(method, "        ctx.userdata.visit_count = None")
+	returnAt := strings.Index(method, "        return Reservations(")
+	if guardAt < 0 || announceAt < 0 || resetAt < 0 || returnAt < 0 ||
+		guardAt >= announceAt || announceAt >= resetAt || resetAt >= returnAt {
+		t.Errorf("transfer must guard, finish its announcement, shape context, then hand off:\n%s", method)
+	}
+	if strings.Contains(method, "generate_reply(instructions=") {
+		t.Errorf("the exact announcement must not start another LLM turn:\n%s", method)
+	}
+
+	for _, want := range []string{
+		"def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, initial: bool = False) -> None:",
+		"        self._initial = initial",
+		"        if not self._initial:\n            self.session.generate_reply()\n            return",
+		"await session.start(agent=Greeter(initial=True), room=ctx.room)",
+		"return Greeter()",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	if strings.Contains(botpy, "await session.start(agent=Greeter(), room=ctx.room)") {
+		t.Error("the startup agent must be marked initial; transfer-created agents keep the false default")
+	}
+	backStart := strings.Index(botpy, "    async def back_to_greeter(self, ctx: RunContext):")
+	if backStart < 0 {
+		t.Fatal("agent.py missing back_to_greeter")
+	}
+	backEnd := strings.Index(botpy[backStart+1:], "\n    @function_tool")
+	if backEnd < 0 {
+		t.Fatal("agent.py missing the end of back_to_greeter")
+	}
+	if block := botpy[backStart : backStart+1+backEnd]; strings.Contains(block, "session.say(") {
+		t.Errorf("an omitted announce must stay silent:\n%s", block)
 	}
 }
 
@@ -1444,6 +1533,7 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		// call, so one path serves telephony and a plain `dev --var` session alike.
 		`_hydrate_livekit_context(session.userdata, call_context)`,
 		`_hydrate_call_start(session.userdata, call_start)`,
+		`await session.start(agent=Intake(initial=True), room=ctx.room`,
 		`await _livekit_entry_greeting(session)`,
 		"result = await WarmTransferTask(",
 		`sip_call_to=os.environ["BILLING_PHONE_NUMBER"],`,
@@ -1451,6 +1541,9 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 		if !strings.Contains(agentPy, want) {
 			t.Errorf("agent.py missing %q", want)
 		}
+	}
+	if strings.Contains(agentPy, "await session.start(agent=Intake(), room=ctx.room") {
+		t.Error("every telephony startup agent must be marked initial")
 	}
 	hydrateAt := strings.Index(agentPy, "_hydrate_livekit_context(session.userdata")
 	callStartAt := strings.Index(agentPy, "_hydrate_call_start(session.userdata")
@@ -1703,6 +1796,12 @@ func TestLiveKitConnectorGeneratesBridgeWithoutCloudOrSIP(t *testing.T) {
 	if !strings.Contains(agentPy, "_livekit_call_context(ctx.room.name, metadata)") {
 		t.Error("agent.py connector branch must build context from metadata")
 	}
+	if !strings.Contains(agentPy, "await session.start(agent=Intake(initial=True), room=ctx.room") {
+		t.Error("connector startup agent must be marked initial")
+	}
+	if strings.Contains(agentPy, "await session.start(agent=Intake(), room=ctx.room") {
+		t.Error("connector startup agent must not use the return-handoff default")
+	}
 	if strings.Contains(agentPy, "create_sip_participant") {
 		t.Error("connector agent.py must not create SIP participants")
 	}
@@ -1847,7 +1946,7 @@ func TestLiveKitV1MCPSelectionTransportAndScope(t *testing.T) {
 
 	// The stated transport and the selection ride the agent's mount, and only
 	// the agent's: a task-scoped source is offered inside that task alone.
-	if !strings.Contains(greeterBody, `mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="sse", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN")))`) {
+	if !strings.Contains(greeterBody, `mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="sse", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN"), timeout=30, client_session_timeout_seconds=30))`) {
 		t.Errorf("the agent's mount is not the source as declared:\n%s", greeterBody)
 	}
 	if strings.Contains(greeterBody, "browse_tables") {
@@ -1855,7 +1954,7 @@ func TestLiveKitV1MCPSelectionTransportAndScope(t *testing.T) {
 	}
 	// Nothing stated means nothing emitted: an empty allowed_tools would claim
 	// a selection the author never made (SC-004).
-	if !strings.Contains(taskBody, `mcp.MCPToolset(id="browse_tables", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"]))`) {
+	if !strings.Contains(taskBody, `mcp.MCPToolset(id="browse_tables", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], timeout=30, client_session_timeout_seconds=30))`) {
 		t.Errorf("the task's mount emits an argument the source never declared:\n%s", taskBody)
 	}
 	if strings.Contains(taskBody, "book_table") {
@@ -1939,7 +2038,7 @@ func TestLiveKitV1LocalAndMCPTools(t *testing.T) {
 		"async def fetch_notes(self, ctx: RunContext, topic: str) -> dict:",
 		"result = tools.fetch_notes.fetch_notes(topic=topic)",
 		"if inspect.isawaitable(result):",
-		`tools=[mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="streamable_http", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN")))],`,
+		`tools=[mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="streamable_http", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN"), timeout=30, client_session_timeout_seconds=30))],`,
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)

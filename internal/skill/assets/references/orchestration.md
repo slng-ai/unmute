@@ -82,6 +82,7 @@ controls:
     kind: agent_transfer
     to: appointment_manager
     when: The caller wants to reschedule or cancel an existing appointment.
+    announce: "I’m connecting you with our appointment manager now."
     context:
       history: full
       variables: all
@@ -90,6 +91,7 @@ controls:
     kind: agent_transfer
     to: booking_desk
     when: The caller wants to make a new appointment instead.
+    announce: "I’m connecting you back to the booking desk for your new appointment."
     context:
       history: full
       variables: all
@@ -101,10 +103,16 @@ tool list, and the call for good once it arrives.
 `when` is the condition the model reads. Write it as the situation, not as an
 instruction to call a tool.
 
+`announce` is optional. Give it the exact short sentence the caller should hear.
+The active agent speaks it once and finishes before the next agent takes over.
+Leave it out for a silent handoff. Do not duplicate the cue in the prompt; the
+control owns its order.
+
 **A handoff does not come back.** Nothing returns and no result is passed back.
 That is why the example declares a control in each direction: coming back is
 another handoff, not a return. If you want a step that runs and hands control
-back with an answer, that is a task.
+back with an answer, that is a task. A handoff back to the entry agent continues
+the call and never repeats the call-start greeting.
 
 The tool lists are the guardrail. Only `appointment_manager` holds
 `cancel_appointment`, so no caller can talk the booking agent into a

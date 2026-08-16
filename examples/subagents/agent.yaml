@@ -11,6 +11,10 @@ models:
     reasoning:
       provider: openai
       model: gpt-5.6-luna
+      params:
+        # A reasoning model answering with function tools on chat completions
+        # needs this exact value, or OpenAI returns 400 on every turn.
+        reasoning_effort: "none"
   speak:
     voice:
       provider: slng
@@ -54,6 +58,7 @@ controls:
     kind: agent_transfer
     to: appointment_manager
     when: The caller wants to reschedule or cancel an existing appointment.
+    announce: "I’m connecting you with our appointment manager now."
     context:
       history: full
       variables: all
@@ -62,6 +67,7 @@ controls:
     kind: agent_transfer
     to: booking_desk
     when: The caller wants to make a new appointment instead.
+    announce: "I’m connecting you back to the booking desk for your new appointment."
     context:
       history: full
       variables: all

@@ -469,7 +469,7 @@ func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
 				Name: "billing", Instructions: "You are the billing specialist.", Reason: data.Reason, Speak: data.Speak,
 			}}
 			data.Handoffs = []Handoff{{
-				Name: "to_billing", Source: "assistant", To: "billing", When: "The caller needs billing help.", History: "full", AllVariables: true,
+				Name: "to_billing", Source: "assistant", To: "billing", When: "The caller needs billing help.", Announce: "I’ll connect you to billing now.", History: "full", AllVariables: true,
 			}}
 			dir := filepath.Join(t.TempDir(), "agent")
 			if _, err := Write(dir, data); err != nil {
@@ -479,7 +479,7 @@ func TestPreflightAdditionalAgentAndHandoff(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{"billing:", "to_billing:", "history: full", "variables: all"} {
+			for _, want := range []string{"billing:", "to_billing:", `announce: "I’ll connect you to billing now."`, "history: full", "variables: all"} {
 				if !strings.Contains(string(agentYAML), want) {
 					t.Errorf("agent.yaml missing %q:\n%s", want, agentYAML)
 				}

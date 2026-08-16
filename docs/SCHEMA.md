@@ -5,6 +5,7 @@ Amended 2026-07-19 (N15): the `pipeline` and `voices` blocks are removed; models
 Amended 2026-07-20 (N16, N17, N18): the top-level `language` field is removed — language is per-model only, and no language kwarg is emitted when a model does not set one (N16); ElevenLabs is removed from the target set — the managed group is Vapi alone, and the `region`/`edition` instance fields plus the `unmute apply` command go with it, while ElevenLabs the model vendor stays in the Pipecat/LiveKit catalogues (N17); `deployment_region` is added to target instances (N18). N16 and N17 change the authoring shape; old files fail strict decode loudly. Dated pre-removal verification notes naming ElevenLabs are kept as history.
 Amended 2026-08-10 (N23, N24): variables gain a `description` and a third origin, `source: conversation`, saved mid-call by a generated `update_variables` tool; `{{variable}}` substitution becomes real in four named places; and a new top-level `secrets:` block declares runtime environment values by name, driving each build's `.env.example` and a startup check. Both are additive — every existing package keeps loading and compiling unchanged. Detail in sections 4.4 (variables) and 4.12 (secrets).
 Amended 2026-08-15 (N43): the LiveKit turn detector identity is the one model id that is checked rather than forwarded — it must be `turn-detector-mini` or `turn-detector`, the §4.2 example value `silero` is corrected, and Pipecat still forwards the field unchecked. A value check, not a shape change: no existing package fails decode.
+Amended 2026-08-15 (N44): `agent_transfer` gains optional exact spoken text in `announce`. LiveKit and Pipecat speak it once before the receiving agent takes control; omission stays silent. Additive: every existing package keeps loading and compiling unchanged.
 
 Amended 2026-08-12 (N32): `deployment_region` accepts one region or a list of them — the scalar form stays valid, a list of more than one is LiveKit only and gated elsewhere with each platform's own reason, and every declared region reaches the compile report. Additive: no existing package fails decode.
 Date: 2026-07-15.
@@ -231,6 +232,32 @@ A blank tag cell inherits the tag of its enclosing construct: a task field witho
   compiled before compiles now; a package that failed at compile before now
   fails at validate, with the same words.
 
+- **N44 (2026-08-15).** **An agent handoff may announce itself before control
+  changes.** `kind: agent_transfer` gains one optional `announce:` string: a
+  short sentence that the active agent speaks exactly as written. It is speech,
+  not an instruction for the model to paraphrase.
+  Blank or whitespace-only text fails validation, and `{{variable}}` templates
+  are not part of this first shape and fail by name.
+
+  **Order is the contract.** The existing `requires:` guard runs first. If it
+  refuses, no announcement is made. After a passed guard, the active agent
+  speaks the authored sentence once and finishes it before the receiving agent
+  activates. The runtime adds no question or receiving-agent work. A
+  handoff with no `announce` keeps the old silent behavior. Returning to the
+  entry agent never replays the call-start greeting; that greeting belongs to
+  the first activation only.
+
+  **Reach.** LiveKit sends the exact sentence through `AgentSession.say` before
+  returning the next agent. Pipecat sends it through the source worker's
+  `TTSSpeakFrame` and waits for its stopped-speaking event before native worker
+  activation. Vapi and Deepgram fail validation on this field until their
+  drivers ship and prove the same spoken order. This is a driver gate rather
+  than a claim that either platform cannot announce a handoff.
+
+  **The authoring change is additive.** No existing package fails strict decode
+  and no existing silent handoff gains speech. A package starts speaking only
+  after its author adds `announce:`.
+
 ---
 
 ## 3. Package layout
@@ -337,7 +364,7 @@ Think model fields:
 | `model` | yes | model identity forwarded to the provider, for example `gpt-5.6-luna` | core | |
 | `temperature` | no | number | core | Verified slots on all four (section 9): Vapi `assistant.model.temperature`, Deepgram `agent.think.provider.temperature`, constructor kwargs on Pipecat and LiveKit. |
 | `top_p`, `top_k` | no | number | warn | Lowered through the catalogue entry's documented slot; warned where the provider has none (verify per provider, section 9). |
-| `params` | no | open map, forwarded verbatim | core | Anything else the bound component accepts (`max_tokens` where a slot exists; never forwarded to Deepgram, which has no max-tokens slot). |
+| `params` | no | open map, forwarded verbatim | core | Anything else the bound component accepts (`max_tokens` where a slot exists; never forwarded to Deepgram, which has no max-tokens slot). A name the target's settings object has no field of its own for still reaches the provider, through that entry's overflow field (section 6.2 rule 3). `reasoning_effort` is the case to know: a reasoning model such as `gpt-5.6-luna` rejects a chat-completions request that carries function tools unless the request sets it, so every example here writes `reasoning_effort: "none"`. |
 | `description` | no | text | core | For humans only. |
 | `fallback` | no | ordered list of think model names | gated | Cycle-checked. Every model in a chain must land in the same slot kind and placement on the resolved target. All verified 2026-07-15. Deepgram: native (`agent.think` as an ordered provider array; mixed providers, per-entry params). LiveKit: native (`llm.FallbackAdapter`; STT/TTS adapters exist too). Pipecat: generated (the Pipecat driver v1 does not emit fallback yet — a maturity gate, not a platform limit; lifts when the driver emits it). Vapi: native (`model.fallbackModels`); entries are same-provider model IDs, so a **cross-provider chain fails on Vapi**; verified on OpenAI model schemas, others unverified. |
 
@@ -426,6 +453,7 @@ A delegate hands work off; whether control comes back is decided by the target. 
 | Field | Required | Values | Tag | Notes |
 |---|---|---|---|---|
 | `to` | yes | agent name | core | |
+| `announce` | no | non-empty, non-templated text | gated | Exact sentence LiveKit and Pipecat speak once after `requires` passes and before control changes. Omitted stays silent. |
 | `requires` | no | list of variable names | gated | A machine-checked guard. Generated on code targets; **fails on Vapi** (no mechanism). On a failed guard the model gets a refusal naming the unmet variables; that behavior is part of the contract. |
 | `context.history` | yes | `full \| messages \| last_n \| summary \| reset` | gated | See the history table below. |
 | `context.max_messages` | iff `last_n` | int | | Illegal with any other value. |
@@ -638,6 +666,15 @@ interruption: provider_default
 | `interruption` | no, default `provider_default` | `continue \| cancel \| provider_default` | warn | Honored on Pipecat (`cancel_on_interruption`); LiveKit runs tools to completion, so non-default values warn there (2026-07-16). On managed targets only `provider_default` means anything; other values warn. Not legal on an `mcp` tool (N40). |
 | `effect` | no, default `returns_data` | `returns_data \| ends_conversation` | core | Fixed by the registry for a `builtin` tool (`end_call` implies `ends_conversation`); a conflicting value fails. Not legal on an `mcp` tool (N40). |
 
+The input schema is the tool's complete model-facing argument list. On the
+Pipecat direct-tool path, a provider call that includes an undeclared argument
+is returned to the model as one terminal corrective error; the handler does not
+run. A handler that fails before returning also produces one terminal safe
+error, while the full exception stays in the log. This prevents a malformed
+call from remaining `IN_PROGRESS` and prevents a later turn from claiming an
+invented result (compiler invariant V1, added 2026-08-15). Pipecat Flows keeps
+its own equivalent error contract.
+
 ### 5.2 Execution blocks
 
 | Block | Fields | Gating |
@@ -728,7 +765,7 @@ Rules:
 
 1. Every used model, and `listen` on every open-listen target, must have an effective definition. Without one there is nothing to emit; the error names the model and the target.
 2. On a target whose role is integrated, the effective entry for that role carries settings for the built-in part only, and can never name an outside model.
-3. Definitions and overrides carry their settings as typed fields (sections 4.2, 4.3) plus `params:`, an open map for the bound component's own remaining settings (audio format, turn thresholds where the provider puts them). Forwarded as-is, **never validated**. They configure only the bound component; platform and telephony settings can never ride through them.
+3. Definitions and overrides carry their settings as typed fields (sections 4.2, 4.3) plus `params:`, an open map for the bound component's own remaining settings (audio format, turn thresholds where the provider puts them). Forwarded as-is, **never validated**. They configure only the bound component; platform and telephony settings can never ride through them. A param the target's settings object has no field of its own for is not dropped, and does not break the generated code: where the catalogue entry names an overflow field, that param rides the overflow field instead of becoming a settings argument, and reaches the provider all the same. Pipecat's OpenAI think rows overflow into `extra`, which the service merges into the request body verbatim. LiveKit names no overflow, because the param goes straight to the plugin constructor there. Either way `params:` stays verbatim passthrough, and neither the names nor the values are checked.
 4. Placement is derived from the effective entry's `provider` (`local` means `local`, anything else `api`; explicit `placement:` overrides) and gates per section 4.2.
 5. If a driver has no slot for a value (a third-party listen model on Deepgram), compilation fails: the value has nowhere to go. That is a structural fact, not a judgment about the model.
 6. Every forwarded model and param is listed in the compile or plan report, so what was sent is always inspectable. Some providers keep fields that do nothing, so run the agent to be sure. That is the contract.

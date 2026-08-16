@@ -63,6 +63,18 @@ A fact that is only true in generated output is a fact the reader never sees, an
 ## Layout
 `internal/` not `pkg/`. One file per command in `internal/cli/`. Hand-write cobra commands — **no `cobra-cli` generator**.
 
+## Subagent-driven development
+For complex or long-running tasks, use subagents by default when the work can be split into independent, bounded subtasks.
+
+- Keep the main agent focused on requirements, decisions, coordination, and final integration.
+- Delegate codebase exploration, documentation research, test and log analysis, reviews, and non-overlapping implementation.
+- Run independent read-only tasks in parallel.
+- Give each subagent a concrete scope and require a concise summary with file references, findings, and verification results.
+- Wait for all required subagents before integrating their work.
+- Avoid parallel edits to the same files or tightly coupled code paths.
+- Handle small or inherently sequential tasks directly.
+- If a suitable long-running task is not delegated, briefly state why.
+
 ## Skills
 - Ponytail for writing great code
 - GitHub Spec Kit for SDD (spec driven development) on any feature work: `/speckit-specify` → `specs/<nnn>-<slug>/spec.md`, then `/speckit-plan`, `/speckit-tasks`, `/speckit-implement`. Specs live in `specs/`, never in `docs/`.

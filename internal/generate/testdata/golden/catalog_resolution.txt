@@ -332,7 +332,7 @@ env:      SPEECHMATICS_API_KEY
 binding:  provider="*" as acme model=model-1 endpoint_env=ACME_BASE_URL
 class:    OpenAILLMService
 args:     api_key=os.environ["ACME_API_KEY"], base_url=os.environ["ACME_BASE_URL"]
-settings: model="model-1", sample_rate=24000
+settings: model="model-1", extra={"sample_rate": 24000}
 import:   from pipecat.services.openai.llm import OpenAILLMService
 install:  pipecat-ai[openai]
 env:      ACME_API_KEY, ACME_BASE_URL
@@ -386,7 +386,7 @@ env:      MISTRAL_API_KEY
 binding:  provider=openai model=model-1
 class:    OpenAILLMService
 args:     api_key=os.environ["OPENAI_API_KEY"]
-settings: model="model-1", sample_rate=24000
+settings: model="model-1", extra={"sample_rate": 24000}
 import:   from pipecat.services.openai.llm import OpenAILLMService
 install:  pipecat-ai[openai]
 env:      OPENAI_API_KEY
