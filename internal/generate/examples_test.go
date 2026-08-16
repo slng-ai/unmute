@@ -179,13 +179,11 @@ func TestDailyRouteWorkDoesNotReachOtherTargets(t *testing.T) {
 		//
 		// The runbook's *heading* would be the obvious third marker and it is the
 		// wrong one: the LiveKit SIP route heads its own runbook "Telephony setup"
-		// too (specs/005), so it names a shape both drivers share rather than
-		// anything this feature added.
+		// too, so it names a shape both drivers share rather than one route.
 		"telephony_helper.py", "_CALL_FORWARDED", "One piece runs outside the platform",
 	}
 	// _TRANSFER_RESULT used to be on that list and is not any more. It is the
-	// one-attempt-per-call guard, and specs/007 reuses the same discipline on the
-	// Pipecat Cloud websocket route deliberately (data-model section 6), so it now
+	// one-attempt-per-call guard shared by both Pipecat transfer routes, so it now
 	// marks "a route that emits a cold transfer" rather than "the Daily route".
 	// The Daily-only markers above are what still scopes this test.
 	root := filepath.Join("..", "..", "examples")
@@ -269,6 +267,20 @@ func TestPublicExamplePackages(t *testing.T) {
 		if strings.Contains(path, "/build/") || strings.HasSuffix(path, ".DS_Store") {
 			t.Errorf("forbidden committed example artifact: %s", path)
 		}
+	}
+}
+
+func TestRepositoryKeepsSpecsPrivateAndDocsFocused(t *testing.T) {
+	repo := filepath.Join("..", "..")
+	tracked, err := exec.Command("git", "-C", repo, "ls-files", "--", "specs", "docs").Output()
+	if err != nil {
+		t.Fatalf("list tracked specs and docs: %v", err)
+	}
+	if got, want := strings.TrimSpace(string(tracked)), "docs/ARCHITECTURE.md"; got != want {
+		t.Errorf("tracked specs and docs = %q, want only %q", got, want)
+	}
+	if err := exec.Command("git", "-C", repo, "check-ignore", "-q", "--", "specs/.unmute-ignore-probe/spec.md").Run(); err != nil {
+		t.Errorf("specs/ is not ignored: %v", err)
 	}
 }
 
@@ -435,52 +447,14 @@ func TestV16_ExampleDestinationsAreEnvironmentNames(t *testing.T) {
 	}
 }
 
-// TestV11_TransfersDocListsEveryRequiredEnv is SPEC V11/C9: docs/TRANSFERS.md
-// is the one place that answers "which secrets do I need", so its tables must
-// name every env var the transfer examples' generated .env.example requires.
-// A new required name that is not documented fails here, not on a live rig.
-func TestV11_TransfersDocListsEveryRequiredEnv(t *testing.T) {
-	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "TRANSFERS.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for example, provider := range map[string]ir.Provider{
-		"livekit-human-transfer":       ir.ProviderLiveKit,
-		"pipecat-human-transfer-daily": ir.ProviderPipecat,
-	} {
-		pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
-		if err != nil {
-			t.Fatal(err)
-		}
-		agent, err := ir.Build(pkg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
-		if err != nil {
-			t.Fatalf("%s: %v", example, err)
-		}
-		for _, line := range strings.Split(artifactFile(t, artifact, ".env.example"), "\n") {
-			name, _, found := strings.Cut(line, "=")
-			if !found || name == "" || strings.HasPrefix(name, "#") {
-				continue
-			}
-			if !strings.Contains(string(doc), name) {
-				t.Errorf("%s requires %s, which docs/TRANSFERS.md does not document (V11)", example, name)
-			}
-		}
-	}
-}
-
 // Every environment variable a telephony example's generated .env.example lists
 // must be accounted for in that example's own README and on the secrets
 // reference page. A reader who sets everything both pages name has a package
 // that runs; one who does not finds out on a live call, which is the failure
 // this check exists to make impossible (spec FR-005f, FR-027a).
 //
-// The shared page was docs/user/learn/07-phone-calls.md until that site retired
-// on 2026-08-14. Its successor is docs-site/reference/secrets.mdx, which is the
-// public page that answers "which variables does this agent need".
+// docs-site/reference/secrets.mdx is the public page that answers "which
+// variables does this agent need".
 //
 // DAILY_API_KEY is the case that forced this. It is exempt from `secrets:`
 // because no author writes it — the route's own runtime supplies it — and it is
@@ -625,9 +599,10 @@ func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
 // link that no longer resolves, and a README describing a route its package no
 // longer declares.
 
-// Every relative link an example page offers must resolve, and any link anywhere
-// in the docs that points into examples/ must resolve too. Deleting or renaming an
-// example fails this until every page that sends a reader there is fixed.
+// Every relative link an example page offers must resolve, and any link in the
+// architecture or docs site that points into examples/ must resolve too. Deleting
+// or renaming an example fails this until every page that sends a reader there is
+// fixed.
 func TestExampleAndDocLinksIntoExamplesResolve(t *testing.T) {
 	link := regexp.MustCompile(`\[[^\]]*\]\(([^)\s]+)`)
 	check := func(page string, onlyExamples bool) {
@@ -649,17 +624,23 @@ func TestExampleAndDocLinksIntoExamplesResolve(t *testing.T) {
 			}
 		}
 	}
-	for _, root := range []string{filepath.Join("..", "..", "examples"), filepath.Join("..", "..", "docs")} {
-		onlyExamples := strings.HasSuffix(root, "docs")
-		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	for _, source := range []struct {
+		root, extension string
+		onlyExamples    bool
+	}{
+		{filepath.Join("..", "..", "examples"), ".md", false},
+		{filepath.Join("..", "..", "docs"), ".md", true},
+		{filepath.Join("..", "..", "docs-site"), ".mdx", true},
+	} {
+		err := filepath.WalkDir(source.root, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
 			if entry.IsDir() && entry.Name() == "build" {
 				return fs.SkipDir
 			}
-			if !entry.IsDir() && strings.HasSuffix(path, ".md") {
-				check(path, onlyExamples)
+			if !entry.IsDir() && strings.HasSuffix(path, source.extension) {
+				check(path, source.onlyExamples)
 			}
 			return nil
 		})

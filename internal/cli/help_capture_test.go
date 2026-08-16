@@ -17,7 +17,7 @@ var updateHelpCapture = flag.Bool("update", false, "rewrite the captured CLI hel
 // remembered flag list, so a flag rename that nobody re-documents has to fail
 // a test rather than reach a reader (constitution III: a fact stated twice
 // gets an agreement test).
-var helpCapture = filepath.Join("..", "..", "specs", "008-mintlify-user-docs", "help.txt")
+var helpCapture = filepath.Join("testdata", "help.txt")
 
 // helpCommands are the command paths the docs document, in the order the
 // capture file lists them.

@@ -27,7 +27,7 @@ to them, and nothing on their pages applies here.
   dial) comes back as one failure, and `on_unavailable` decides what the
   caller gets. Since 2026-08-12 the prompt the supervisor hears is Unmute's
   rather than the prebuilt's, because the prebuilt's own never briefs
-  unprompted (SCHEMA N35).
+  unprompted.
 
 Cold on Pipecat has two examples of its own, and neither hosts anything:
 [pipecat-human-transfer-daily](../pipecat-human-transfer-daily) on `transport: daily-sip` with a
@@ -40,9 +40,9 @@ being one blanket fact: on the Daily routes the platform documents a warm patter
 and this project has not built it (feature 005); on `cloud-websocket` it would need
 a callback endpoint you host, which is the one cost that route exists to remove;
 on the carrier-websocket transports there is no transfer control at all. Each
-refusal says which it means. The full capability map, with sources, is in
-[docs/TRANSFERS.md](../../docs/TRANSFERS.md), and the route comparison is in
-[docs/TELEPHONY.md](../../docs/TELEPHONY.md).
+refusal says which it means. See the
+[transfer capability map](../../docs-site/transfers/overview.mdx) and
+[telephony route comparison](../../docs-site/telephony/overview.mdx).
 
 ## The authoring shape
 
@@ -151,7 +151,7 @@ is registered** and `lk sip outbound create` is not part of this example.
 
 Four variables were renamed and one was retired. The rename is because these are
 standard SIP trunk settings rather than one carrier's, and the same emitted code
-now dials through any SIP carrier with them (SCHEMA N33):
+now dials through any SIP carrier with them:
 
 ```
 TWILIO_SIP_ADDRESS          ->  SIP_TRUNK_HOSTNAME
@@ -163,9 +163,9 @@ LIVEKIT_SIP_OUTBOUND_TRUNK  ->  delete it, nothing reads it
 LIVEKIT_SIP_INBOUND_TRUNK   ->  delete it too, nothing reads it either
 ```
 
-Both trunk-ID variables are retired. The outbound one went with inline dialling
-(SCHEMA N33); the inbound one went when `telephony-setup.sh` started resolving
-the trunk by phone number (SCHEMA N36), so setting it changes nothing. The stored
+Both trunk-ID variables are retired. The outbound one went with inline dialling;
+the inbound one went when `telephony-setup.sh` started resolving the trunk by
+phone number, so setting it changes nothing. The stored
 outbound trunk itself can be deleted with `lk sip outbound delete` whenever
 convenient; leaving it costs nothing but a stale record. Keep the inbound trunk
 and its dispatch rule: incoming calls still need both, and the script reuses them. If you would rather not rename anything,
@@ -285,8 +285,8 @@ means the inbound trunk and the dispatch rule must exist and the rule must name
 **this** package's agent. That is what the six steps above set up, and it passed
 end to end on 2026-08-12: a call to `SIP_FROM_NUMBER` was answered by the deployed
 agent, the caller asked for billing, and the three cold log lines came back clean.
-The full walkthrough, including the failure drills and teardown, is in
-[docs/TRANSFERS.md](../../docs/TRANSFERS.md).
+The [LiveKit transfer guide](../../docs-site/transfers/livekit.mdx) has the full
+walkthrough, including the failure drills and teardown.
 
 ## What a working transfer looks and sounds like
 
@@ -325,5 +325,5 @@ One limit worth knowing before you test: `ring_timeout: 25s` bounds **ringing
 only**. Once the supervisor picks up, nothing bounds the consultation, and the
 caller is on hold for all of it. The agent is told to decline on the supervisor's
 behalf when they go quiet or never decide, which is a mitigation rather than a
-guarantee. [docs/TRANSFERS.md](../../docs/TRANSFERS.md) explains why there is no
-bound and what the alternatives cost.
+guarantee. The [LiveKit transfer guide](../../docs-site/transfers/livekit.mdx)
+explains why there is no bound and what the alternatives cost.

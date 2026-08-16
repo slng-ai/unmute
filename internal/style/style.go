@@ -1,5 +1,5 @@
 // Package style holds the SLNG brand theme: the single source of color for the
-// interactive console and the CLI (docs/spec/tui.md C14, I.theme). No other file
+// interactive console and the CLI. No other file
 // defines a color literal. NO_COLOR (no-color.org) drops all color, so helpers
 // then return plain text. Light and dark terminals both stay readable through
 // adaptive colors.

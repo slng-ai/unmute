@@ -10,14 +10,17 @@ examples/*/build/
 # Release artifacts: GoReleaser writes every build, archive, checksum and SBOM here
 dist/
 
-# Legacy single-file working spec. Feature specs now live in specs/<nnn>-<slug>/
-# (GitHub Spec Kit) and are committed there.
+# Local GitHub Spec Kit work. Codex copies it into new managed worktrees via
+# .worktreeinclude, but each checkout owns its copy after that.
+/specs/
+
+# Legacy single-file working spec.
 /SPEC.md
 
 # The maintainer's release runbook: a local working note, deliberately not
 # committed. The facts it depends on stay in the repo either way, in
 # .goreleaser.yaml, .github/workflows/release.yml and
-# specs/010-goreleaser-release-pipeline/. Nothing tracked may link to it.
+# release configuration. Nothing tracked may link to it.
 /RELEASING.md
 
 __pycache__/

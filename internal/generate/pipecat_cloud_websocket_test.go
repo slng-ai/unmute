@@ -14,7 +14,7 @@ import (
 )
 
 // The offline proofs for (pipecat, cloud-websocket, twilio): the route where the
-// operator hosts nothing (SCHEMA N38, specs/007-pipecat-native-websocket).
+// operator hosts nothing.
 //
 // The fixtures are safe_core on this route, so the plain Pipecat Cloud build in
 // pipecat_v1_test.go stays the baseline it already is. Each test names the
@@ -715,28 +715,27 @@ func TestCloudWebsocketSeamIsWordsNotShapes(t *testing.T) {
 	}
 }
 
-// TestTwilioRouteComparisonNamesEveryRoute: an author with a Twilio number and a
-// Pipecat target has three ways to connect them, and one section has to answer
-// which (spec FR-012, SC-007).
+// An author with a Twilio number and a Pipecat target has three ways to connect
+// them, and the public route overview must distinguish them.
 func TestTwilioRouteComparisonNamesEveryRoute(t *testing.T) {
-	doc := readRepoDoc(t, "docs", "TELEPHONY.md")
+	doc := readRepoDoc(t, "docs-site", "telephony", "overview.mdx")
 	for _, want := range []string{
 		"cloud-websocket", "daily-sip", "carrier-websocket",
 		// What each hosts, which is the deciding difference.
-		"nothing", "helper", "Recommendation",
+		"Nothing", "helper", "generated adapter",
 	} {
 		if !strings.Contains(doc, want) {
-			t.Errorf("docs/TELEPHONY.md's route comparison does not mention %q", want)
+			t.Errorf("docs-site/telephony/overview.mdx does not mention %q", want)
 		}
 	}
-	// The claim a reader most needs, stated once and plainly.
-	if !strings.Contains(doc, "no Pipecat route offers warm transfer") {
-		t.Error("the comparison does not state that no Pipecat route offers warm transfer today")
+	transfers := readRepoDoc(t, "docs-site", "transfers", "overview.mdx")
+	if !strings.Contains(transfers, "warm transfer compiles on (livekit, sip) trunks today") {
+		t.Error("the transfer overview does not state where warm transfer compiles today")
 	}
 }
 
-// readRepoDoc reads a document from the repository root, so a docs claim can be
-// asserted rather than assumed (Principle IV).
+// readRepoDoc reads a document from the repository root, so a public claim can be
+// asserted rather than assumed.
 func readRepoDoc(t *testing.T, parts ...string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(append([]string{"..", ".."}, parts...)...))

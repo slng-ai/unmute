@@ -3,11 +3,10 @@
 #
 #   pipecat: connections/twilio_voice.yaml — Twilio streams the call's audio to
 #            Pipecat Cloud, named by a static TwiML Bin. Nothing of yours is
-#            hosted, in production or ever (SCHEMA N38).
+#            hosted, in production or ever.
 #   livekit: connections/twilio_sip.yaml — a Twilio Elastic SIP Trunk carries the
 #            call into LiveKit SIP, the default multi-carrier LiveKit route and
-#            the only one with transfer and voicemail primitives
-#            (docs/TELEPHONY.md).
+#            the only one with transfer and voicemail primitives.
 #
 # A target names one connection and says nothing else about how a call reaches
 # it. Open either file to read that target's whole route: the mechanism, the
@@ -29,7 +28,7 @@ targets:
     # Pinned so both targets in this package say where they run. On this route the
     # one line also picks the regional stream address the TwiML Bin has to name,
     # and the region of the secret set the agent reads. `pipecat cloud regions
-    # list` prints yours; codes are forwarded as written (SCHEMA N32).
+    # list` prints yours; codes are forwarded as written.
     deployment_region: eu-central
 
   livekit:

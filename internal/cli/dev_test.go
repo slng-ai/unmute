@@ -184,8 +184,8 @@ func TestDevTelephonyRefusesOnTheDailyCarrierFormAndNamesTheHelper(t *testing.T)
 	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
-	// The fixture, not an example: feature 007 removed this route's public example
-	// and kept its guards (specs/007-pipecat-native-websocket T054).
+	// This is a fixture, not a public example: the route keeps its guards without
+	// recommending the carrier form to readers.
 	root := filepath.Join("..", "testdata", "daily_carrier")
 	cmd.SetArgs([]string{"dev", "--telephony", "--target", "pipecat", root})
 	if err := cmd.Execute(); err == nil {

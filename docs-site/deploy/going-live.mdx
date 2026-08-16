@@ -80,14 +80,43 @@ them as a starting point and then measure.
 
 ## Production concerns, both targets
 
-- **Redis** is needed for LiveKit SIP and for Pipecat telephony. A plain
-  browser deployment needs none.
+- **Redis** is needed for LiveKit SIP, a multi-node self-hosted LiveKit Server,
+  and Pipecat's `carrier-websocket` route. Pipecat `cloud-websocket` and
+  `daily-sip` do not use it.
 - **Separate environments.** Keep production and staging apart, and never point
   a development worker at a production server.
 - **Logs.** Workers and the Pipecat application log to stdout. Ship those logs,
   and keep the level at `INFO`: debug logging can expose phone numbers.
 - **Model providers.** Hosting the orchestrator yourself does not host the
   models. Speech and reasoning calls still go to the providers you bound.
+
+## Hosting the generated container yourself
+
+The managed-cloud pages are the supported deployment path, but the generated
+projects are ordinary containers and can run on infrastructure you control.
+
+For LiveKit, the agent worker connects out to LiveKit Server and needs no
+inbound port. The server is the public edge: it needs a trusted TLS domain,
+public WebRTC ports, and TURN for callers behind strict firewalls. Add LiveKit
+SIP beside it for phone calls, with public SIP signalling and RTP. An HTTPS
+tunnel is not enough for SIP.
+
+For Pipecat browser calls, expose the bot port over HTTPS and make WebRTC media
+reachable. Cross-network calls need STUN or TURN; the generated SmallWebRTC
+configuration does not add ICE servers today, so treat that as required work
+before a self-hosted browser deployment.
+
+Only Pipecat's `carrier-websocket` phone route runs the full phone agent on
+your infrastructure. Give it public HTTPS and WSS on port 443, WebSocket
+timeouts longer than the longest call, `UNMUTE_PUBLIC_URL`, and shared Redis.
+The `cloud-websocket` route hosts nothing of yours. The `daily-sip` carrier
+form emits only a small webhook helper; the deployed agent still exposes no
+inbound service.
+
+Scale by active sessions, not HTTP request rate. Keep each long-lived
+WebSocket on the replica that accepted it, and give shutdown enough time to
+drain the longest call. LiveKit distributes jobs to registered workers; do not
+put a load balancer in front of those workers.
 
 ## Phone routes
 

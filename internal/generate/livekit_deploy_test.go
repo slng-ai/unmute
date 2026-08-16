@@ -13,9 +13,8 @@ import (
 )
 
 // The LiveKit artifact has to be deployable on LiveKit Cloud with the commands
-// its own README prints. These assertions are the contract in
-// specs/001-livekit-cloud-deploy/contracts/artifacts.md, held here rather than
-// only in the golden, so a regeneration cannot quietly accept a broken artifact.
+// its own README prints. These assertions live outside the golden so a
+// regeneration cannot quietly accept a broken artifact.
 
 func livekitArtifact(t *testing.T, regions []string) Artifact {
 	t.Helper()

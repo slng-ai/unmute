@@ -185,8 +185,8 @@ provider keys from `.env.example`, then start the worker:
 python -m livekit.agents start agent.py
 ```
 
-See `docs/DEPLOYMENT.md` in the Unmute repository for the full self-hosted
-setup: server, Redis, firewall ports, sizing, and scaling.
+See `docs-site/deploy/going-live.mdx` in the Unmute repository for the full
+self-hosted setup: server, Redis, firewall ports, sizing, and scaling.
 
 ## Trace with Langfuse
 

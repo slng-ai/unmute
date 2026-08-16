@@ -264,7 +264,7 @@ type ToolMCP struct {
 }
 
 // ToolBuiltin is the `builtin:` block: a prebuilt-tool registry id plus its
-// optional closing line (docs/spec/prebuilt-tools.md).
+// optional closing line.
 type ToolBuiltin struct {
 	ID           string `json:"id" yaml:"id"`
 	Instructions string `json:"instructions,omitempty" yaml:"instructions,omitempty"`

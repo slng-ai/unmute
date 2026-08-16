@@ -10,7 +10,7 @@ the whole carrier side is a small piece of static markup that lives in the Twili
 console.
 
 Three existing fields select the route (`transport: cloud-websocket`, `carrier`,
-`connection`) and no new authoring field exists (SCHEMA N38).
+`connection`) and no new authoring field exists.
 
 ---
 
@@ -138,7 +138,7 @@ Two things bite when moving an agent that already exists: agent names are global
 unique **across** regions, and a secret set is region-scoped with a globally unique
 name. The generated README's **One region, three places** section spells out both.
 Region codes are forwarded exactly as written and never checked here, so a typo
-fails `pipecat cloud deploy` rather than compiling (SCHEMA N32).
+fails `pipecat cloud deploy` rather than compiling.
 
 ## Why outbound is declared, on a package about receiving calls
 
@@ -153,8 +153,9 @@ an inbound caller takes.
 refusal on this route names what it would take: acting on how the destination's
 leg ended needs a callback endpoint you host, which is the one cost this route
 exists to remove. Warm compiles on LiveKit SIP today, in
-[livekit-human-transfer](../livekit-human-transfer). The capability map with sources is
-[docs/TRANSFERS.md](../../docs/TRANSFERS.md).
+[livekit-human-transfer](../livekit-human-transfer). The
+[transfer overview](../../docs-site/transfers/overview.mdx) has the capability
+map and sources.
 
 **Session survival through a transfer.** However the dial ends, the caller hears
 one spoken line and meets a **fresh** agent that does not remember the call. That
@@ -162,8 +163,8 @@ is both endings: a dial that never connected, and a completed transfer the perso
 ended by hanging up first. Nothing in the markup can tell them apart without a
 callback endpoint, so the line names neither ("Putting you back to the
 assistant."). Both endings are written into the generated runbook, and the Daily
-carrier route is the one that keeps the session. The route comparison is in
-[docs/TELEPHONY.md](../../docs/TELEPHONY.md).
+carrier route is the one that keeps the session. The
+[telephony overview](../../docs-site/telephony/overview.mdx) compares the routes.
 
 **Caller-number variables.** A variable sourced from the caller's number, the
 called number, the call identifier, or the direction is refused on this route, by

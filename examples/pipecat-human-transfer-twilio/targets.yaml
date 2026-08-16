@@ -1,6 +1,6 @@
 # Pipecat on the platform's native carrier stream: your own Twilio number, a
 # small piece of static markup in the Twilio console, and Pipecat Cloud
-# terminating the call's audio itself (SCHEMA N38).
+# terminating the call's audio itself.
 #
 # One field selects it: connection. connections/twilio_voice.yaml declares the
 # transport, the carrier, and the three credentials, so the route is one file to
@@ -27,6 +27,5 @@ targets:
     #
     # Change it to your own region. `pipecat cloud regions list` prints what is
     # available to you; the codes are forwarded exactly as written and never
-    # checked here, so the platform CLI is what tells you a code is wrong
-    # (SCHEMA N32).
+    # checked here, so the platform CLI is what tells you a code is wrong.
     deployment_region: eu-central

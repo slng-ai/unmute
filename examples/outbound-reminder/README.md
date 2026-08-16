@@ -2,8 +2,9 @@
 
 An outbound reminder call for the Sage and Stone Salon, built to show every
 runtime-value kind in one small package. It compiles and runs on both shipped
-code targets, Pipecat and LiveKit, from the same source. The design is in
-[SCHEMA.md](../../docs/SCHEMA.md) sections 4.4 (variables) and 4.12 (secrets).
+code targets, Pipecat and LiveKit, from the same source. See the
+[variables](../../docs-site/reference/variables.mdx) and
+[secrets](../../docs-site/reference/secrets.mdx) references.
 
 Both targets here are **self-hosted** routes, chosen because this example is about
 runtime values rather than about telephony: Pipecat on `transport:
@@ -12,7 +13,7 @@ carrier-websocket` (the container answers the carrier itself) and LiveKit on
 room). Its `dialed_number` variable is why: `source: to_number` is filled by the
 carrier adapter, and those are the routes that emit one. The Pipecat routes that
 host nothing refuse that source by name, so a package needing it belongs here. The
-route comparison is in [docs/TELEPHONY.md](../../docs/TELEPHONY.md).
+[telephony overview](../../docs-site/telephony/overview.mdx) compares the routes.
 
 ## The four kinds, and where each shows up
 
@@ -154,5 +155,5 @@ same job twice rather than two different jobs: a process that answers your carri
 behind a public HTTPS origin, with the number's voice webhook pointed at it.
 `build/pipecat/README.md` and `build/livekit/README.md` each carry their own
 platform commands, required variables, and carrier steps. If you want a phone route
-with nothing to host, that is a different transport, and
-[docs/TELEPHONY.md](../../docs/TELEPHONY.md) compares them.
+with nothing to host, that is a different transport; compare them in the
+[telephony overview](../../docs-site/telephony/overview.mdx).

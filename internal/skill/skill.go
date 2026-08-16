@@ -6,8 +6,7 @@
 // destinations exist because no single directory serves every assistant: the
 // canonical bundle lands where Codex, Cursor, and GitHub Copilot read, and a
 // pointer lands where Claude Code reads. Verified against each vendor's own
-// documentation on 2026-08-15; the table lives in
-// specs/011-coding-agent-skill/research.md R2.
+// documentation on 2026-08-15.
 //
 // This package holds no cobra. The command in internal/cli/skill.go parses
 // flags and prints; everything decided here is a pure function of the embedded

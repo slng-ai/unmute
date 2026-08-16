@@ -84,7 +84,7 @@ Everything you say is read out loud.
 	// occurrences of two different identifiers that used to disagree across the
 	// scaffold, the examples, and both documentation trees (research D10).
 	// Authored as two fields, never a folded `openai/...` string: the value is
-	// forwarded to the SDK verbatim (docs/SCHEMA.md N15).
+	// forwarded to the SDK verbatim.
 	DefaultReasonModel = "gpt-5.6-luna"
 )
 
@@ -151,8 +151,7 @@ type Tool struct {
 	Name        string
 	Description string
 	Execution   string
-	// Builtin names a prebuilt-tool registry id; set only with execution:
-	// builtin (docs/spec/prebuilt-tools.md).
+	// Builtin names a prebuilt-tool registry id; set only with execution: builtin.
 	Builtin string
 	// Instructions is the prebuilt's optional closing/goodbye message.
 	Instructions string
@@ -178,7 +177,7 @@ type Tool struct {
 // DefaultTools are the prebuilt tools every new agent starts with: the
 // end_call prebuilt, attached to the entry agent. init and the create wizard
 // seed these so the tool is present by default yet fully editable and
-// removable (docs/spec/prebuilt-tools.md C9). Only valid on code targets;
+// removable. Only valid on code targets;
 // switching to a managed target surfaces the normal capability gate.
 func DefaultTools() []Tool {
 	return []Tool{{

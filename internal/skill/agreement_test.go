@@ -491,7 +491,7 @@ func TestNoUnmuteEnvOnTheBeginnerPath(t *testing.T) {
 
 // TestOneModelIdEverywhere holds every author-facing surface to the single model
 // identifier internal/scaffold owns. It fails on three things, not one: a stale
-// identifier, the combined provider/model form docs/SCHEMA.md N15 forbids, and a
+// identifier, a combined provider/model form, and a
 // temperature on a think model, which OpenAI's reference does not state this
 // model family accepts (research D10).
 func TestOneModelIdEverywhere(t *testing.T) {

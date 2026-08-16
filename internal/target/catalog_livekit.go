@@ -399,12 +399,9 @@ var livekitCatalog = []Entry{
 // fully local (no LiveKit Cloud credentials); turn-detector is Cloud.
 //
 // This set is the one field on which LiveKit does **not** forward a model
-// identity to the provider unchecked, which is why docs/SCHEMA.md needed a
-// dated amendment rather than a quiet code change: 4.3 says identities are
-// "forwarded to the provider as-is and never validated", and :317 offers
-// `silero` as the example value, which is a VAD rather than a turn detector and
-// fails here. Pipecat still forwards the value unchecked, so the same agent.yaml
-// is legal on one target and not the other, and the refusal names the target.
+// identity unchecked. `silero` is a VAD rather than a turn detector and fails
+// here. Pipecat still forwards the value unchecked, so the same agent.yaml is
+// legal on one target and not the other, and the refusal names the target.
 //
 // It lives in the catalogue rather than in the driver because ir.Validate asks
 // the same question: the check used to run only at generate time, so `silero`

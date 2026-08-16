@@ -129,8 +129,8 @@ func TestValidateOmitsPrerequisiteWithoutTheCapabilityThatNeedsIt(t *testing.T) 
 // problem and the fix.
 //
 // Note what is deliberately absent. A region *code* is never checked against a
-// list: docs/SCHEMA.md N18 and N32 say codes are forwarded exactly as written,
-// the platform CLI is the validator, and no list of codes lives in this
+// list: codes are forwarded exactly as written, the platform CLI is the
+// validator, and no list of codes lives in this
 // repository, because both platforms change theirs without notice. So the
 // refusals here are the three that are knowable without one: an empty entry, the
 // same region twice, and more than one region on a platform whose agent names are

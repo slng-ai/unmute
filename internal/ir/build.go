@@ -1190,8 +1190,8 @@ func buildTelephonyPlan(pkg *packagespec.Package, agent *Agent, resolved Target)
 		// what the thing they do not run is (data-model section 1).
 		services = []string{"application"}
 	} else if resolved.Provider == ProviderPipecat && resolved.Transport == "daily-sip" {
-		// The Daily carrier route keeps no shared control record (specs/004
-		// FR-027): the transfer guard is in-process because one process serves one
+		// The Daily carrier route keeps no shared control record: the transfer guard
+		// is in-process because one process serves one
 		// call, and the room, not a store, correlates the legs. So no redis, and
 		// none of the Pipecat reasons below, which each describe a Redis-backed
 		// record this route does not keep. Same Redis-free shape the LiveKit
@@ -1378,9 +1378,9 @@ func checkToolRefs(pkg *packagespec.Package, names []string) error {
 // the package rather than once per target, and this is the only stage that can
 // carry the file and line (research D1, D7).
 //
-// One carve-out, and it is the models map: docs/SCHEMA.md:287 calls it "a
-// palette: entries that nothing currently references are legal". That wording is
-// scoped to models: and to nothing else.
+// One carve-out, and it is the models map: it is a palette, so entries that
+// nothing currently references are legal. That rule is scoped to models and to
+// nothing else.
 func checkReachability(pkg *packagespec.Package) error {
 	agents, controls, tools := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	tasks, groups, destinations := map[string]bool{}, map[string]bool{}, map[string]bool{}

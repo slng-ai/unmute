@@ -2,3 +2,4 @@
 .env.local
 config/secrets.json
 .specify
+specs/

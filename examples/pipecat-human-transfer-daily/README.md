@@ -9,8 +9,8 @@ call.
 Nothing of yours is hosted on this route and there is no carrier account to set
 up: the number comes from Daily. If you would rather use a Twilio number you
 already own, that is [pipecat-human-transfer-twilio](../pipecat-human-transfer-twilio)
-on `transport: cloud-websocket`, which also hosts nothing. The route comparison is
-in [docs/TELEPHONY.md](../../docs/TELEPHONY.md).
+on `transport: cloud-websocket`, which also hosts nothing. The
+[telephony overview](../../docs-site/telephony/overview.mdx) compares the routes.
 
 Warm transfer is not here, and the reason is worth stating precisely because this
 file used to state it wrongly. Daily **does** document a warm pattern; this
@@ -18,7 +18,8 @@ project has not built it yet, because the pattern needs the generated bot to own
 the call's audio (a transfer coordinator, a hold-music mixer, a gate per leg).
 That is deliberate work rather than a default, tracked as feature 005. Warm
 compiles on LiveKit SIP today, in [livekit-human-transfer](../livekit-human-transfer). The
-capability map with sources is [docs/TRANSFERS.md](../../docs/TRANSFERS.md).
+[transfer overview](../../docs-site/transfers/overview.mdx) has the capability map
+and sources.
 
 ---
 
@@ -246,9 +247,8 @@ all and a second ask dialled again.
 
 ### 8. Record the result
 
-The run is not finished until [docs/TRANSFERS.md](../../docs/TRANSFERS.md) carries
-the dated outcome. Its Status table is per row, and the Pipecat Daily row is
-provisional until someone runs this as written.
+Record the dated outcome in the [end-to-end harness](../E2E_HARNESS.md#results).
+The Pipecat Daily row stays unverified until someone runs this as written.
 
 If a step above was wrong, **fix this file and that document before touching
 code**. That is the rule those documents set for themselves.

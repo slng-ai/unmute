@@ -12,11 +12,9 @@ import (
 	"github.com/slng-ai/unmute/internal/target"
 )
 
-// A generated LiveKit project briefs the colleague it dials for a warm transfer,
-// and writes one line per phase of every transfer it attempts (specs/003, 2026-08-12).
-// These are the contracts in specs/003-warm-transfer-briefing/contracts/, held
-// here for the same reason feature 002's are held in livekit_inline_trunk_test.go:
-// the behaviour they defend only appears on a live phone call. On 2026-08-12 a
+// A generated LiveKit project briefs the colleague it dials for a warm transfer
+// and writes one line per phase of every attempt. These checks stay close to the
+// generator because the behaviour only appears on a live phone call. On 2026-08-12 a
 // deployed agent dialled a manager, said nothing, then greeted them like a
 // stranger, and the deployment log carried not one line about it. Everything a
 // live call cannot reach has to be pinned offline.

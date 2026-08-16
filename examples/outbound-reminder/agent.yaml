@@ -1,5 +1,4 @@
-# Outbound appointment reminder showing every runtime-value kind in one place
-# (docs/SCHEMA.md sections 4.4 and 4.12):
+# Outbound appointment reminder showing every runtime-value kind in one place:
 #   input variables        customer_id, name, appointment_time (from the dispatch)
 #   system variable        dialed_number (runtime owned, source: to_number)
 #   conversation variable  reschedule_to (the model saves it mid call)

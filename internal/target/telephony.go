@@ -209,7 +209,7 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	}
 	// Twilio is the one SIP carrier anybody has called through. Both transfer shapes
 	// were run on a real trunk and a deployed agent on 2026-08-12, with dated
-	// evidence in docs/TRANSFERS.md, and each run found a defect no offline test had
+	// evidence in examples/E2E_HARNESS.md, and each run found a defect no offline test had
 	// (SCHEMA N33 and N35). The tag still says provisional because that tracks a
 	// credentialed smoke in CI, which no route here has; the note is what tracks
 	// whether a human made a call, and leaving the generic line on this row would
@@ -220,7 +220,7 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	for feature, evidence := range route.Features {
 		evidence.Verified = "2026-08-12"
 		evidence.Note = "live inbound, cold transfer and warm transfer run 2026-08-12 " +
-			"(docs/TRANSFERS.md); no credentialed smoke runs in CI on any route"
+			"(examples/E2E_HARNESS.md); no credentialed smoke runs in CI on any route"
 		route.Features[feature] = evidence
 	}
 	routes[sipTwilio] = route
@@ -256,8 +256,7 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		// call, so all five stay provisional. The note says what is missing rather
 		// than repeating the generic line, because on this route the gap is one
 		// specific thing: nobody has placed a call through a carrier trunk yet.
-		// A row loses provisional only against a dated line in
-		// specs/006-pipecat-carrier-telephony/tasks.md.
+		// A row loses provisional only against dated live evidence.
 		evidence.Note = "built and offline-proven; no call has been placed through a carrier trunk yet"
 		route.Features[feature] = evidence
 	}
@@ -325,10 +324,10 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		//
 		// The **note** tracks what anybody actually did. Live inbound and a live
 		// cold transfer were run on a deployed agent on 2026-08-13 (dated evidence
-		// in docs/TRANSFERS.md), so the previous note, "no call has been placed
+		// in examples/E2E_HARNESS.md), so the previous note, "no call has been placed
 		// through this endpoint yet", became false and is the kind of stale line a
 		// reader is right to trust. What is genuinely unrun is the decline path.
-		evidence.Note = "live inbound and cold transfer run 2026-08-13 (docs/TRANSFERS.md); " +
+		evidence.Note = "live inbound and cold transfer run 2026-08-13 (examples/E2E_HARNESS.md); " +
 			"the transfer's decline path is emitted and offline-proven but has not been run; " +
 			"no credentialed smoke runs in CI on any route"
 		route.Features[feature] = evidence

@@ -10,9 +10,8 @@ import (
 )
 
 // View composes the four SLNG regions: header (logo badge + breadcrumb +
-// target), body (sidebar + editor, or editor alone), and footer hint bar
-// (docs/spec/tui.md C16, V44). The logo badge shows on every interactive screen
-// (C15, V23).
+// target), body (sidebar + editor, or editor alone), and footer hint bar. The
+// logo badge shows on every interactive screen.
 func (m console) View() string {
 	if m.width == 0 || m.height == 0 {
 		return ""

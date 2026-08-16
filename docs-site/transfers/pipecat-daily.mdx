@@ -51,6 +51,13 @@ Warm is **not built yet** on this route. Daily documents the pattern, so the
 platform is not the limit; Unmute has not emitted it. That is a different
 statement from "the platform cannot", and the docs keep the two apart.
 
+The same cold transfer also works when a `daily-sip` connection names your own
+carrier. The destination leaves through that carrier's SIP trunk, but Daily
+stays in the call path, so both Daily legs keep billing until the call ends and
+the destination leg also incurs the carrier's charge. That form needs the same
+Daily dial-out permission. Its connection keys are listed in
+[connections/&lt;name&gt;.yaml](/reference/connections-yaml).
+
 ## Dial-out has to be granted
 
 `unmute validate` prints the prerequisite before you get anywhere near a call:

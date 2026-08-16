@@ -88,6 +88,11 @@ lk agent update-secrets --secrets-file .env --overwrite  # replaces the whole se
 Region is set at `create` and is immutable. Moving an agent means creating it in the
 new region and deleting the old one; the platform will not move it in place.
 
+When `deployment_region` is a list, the generated README prints one `create`
+command and one config file per region. All deployments keep the same dispatch
+name, so callers reach the nearest one. Use those generated commands rather
+than repeating the single-region command above by hand.
+
 ## Check it, and recover it
 
 ```sh

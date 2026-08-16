@@ -29,9 +29,9 @@ These are two genuinely different mechanisms, not two spellings of one thing:
 That difference decides what each can do. SIP is the route with cold transfer, warm
 transfer, and voicemail detection; it is also the documented default multi-carrier
 LiveKit route. The `cloud-websocket` route can do cold transfer by a different
-mechanism (it replaces the live call's markup) and cannot do warm at all.
-[docs/TELEPHONY.md](../../docs/TELEPHONY.md) has the route comparison and
-[docs/TRANSFERS.md](../../docs/TRANSFERS.md) has the transfer mechanisms.
+mechanism (it replaces the live call's markup) and cannot do warm at all. See
+the [telephony overview](../../docs-site/telephony/overview.mdx) and
+[transfer overview](../../docs-site/transfers/overview.mdx).
 
 **A previous version of this package used `transport: connector` for LiveKit**, our
 own Twilio Media Streams bridge. It is easier to test on a laptop and carries no
@@ -175,8 +175,8 @@ unmute dev examples/twilio-telephony-hello --telephony --target livekit --to +15
 Once the Compose graph is healthy the CLI dispatches the agent and the call goes out
 through your trunk. Your phone rings and the agent talks when you answer. If the
 call connects but you hear nothing, that is the RTP path back to the container
-rather than anything in the agent; the local SIP section of
-[docs/TELEPHONY.md](../../docs/TELEPHONY.md) covers it.
+rather than anything in the agent; the
+[local telephony guide](../../docs-site/dev/telephony.mdx) covers it.
 
 On **pipecat**, outbound runs against the deployed agent:
 
@@ -254,7 +254,7 @@ deploy and is **immutable**: moving one means creating the agent in the new regi
 and deleting the old one, because the platform will not move it in place.
 
 Both codes are forwarded exactly as written and never checked here, so a typo fails
-the platform CLI rather than the compile (SCHEMA N32). `pipecat cloud regions list`
+the platform CLI rather than the compile. `pipecat cloud regions list`
 prints the Pipecat ones; the LiveKit Cloud project settings list theirs.
 
 ## A note on route maturity
@@ -264,6 +264,6 @@ Both routes have real adapters, so `unmute validate`, `unmute compile`, and
 provisional-versus-verified status is internal maturity tracking, recorded in the
 generated `compile-report.json`, and it tracks whether a **credentialed smoke runs
 in CI**, which is a different question from whether anyone has made a phone call.
-Live-call evidence, dated, is in the Status table of
-[docs/TRANSFERS.md](../../docs/TRANSFERS.md). Test the behaviour you rely on
-yourself before you depend on it in production.
+The [transfer overview](../../docs-site/transfers/overview.mdx) explains the
+evidence level. Test the behaviour you rely on before depending on it in
+production.

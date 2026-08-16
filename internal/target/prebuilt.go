@@ -5,7 +5,7 @@ package target
 // The registry carries only what is portable across drivers: the default
 // description and the implied effect. Which providers host it is the
 // FieldToolBuiltin capability gate; which params it accepts is the closed set
-// of typed Tool fields (docs/spec/prebuilt-tools.md C5).
+// of typed Tool fields.
 type Prebuilt struct {
 	ID                 string
 	DefaultDescription string

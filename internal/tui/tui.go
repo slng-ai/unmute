@@ -125,8 +125,8 @@ func runCreate(runner *fieldRunner) (Result, bool, error) {
 // interactive renderer draws the wordmark hero instead (view.go).
 func homeTitle() string { return "SLNG//" }
 
-// sidebarSections is the fixed five-section tree shown in the console sidebar
-// (docs/spec/tui.md C10, C16, V44). Order matches editorSectionOptions.
+// sidebarSections is the fixed five-section tree shown in the console sidebar.
+// Order matches editorSectionOptions.
 var sidebarSections = []struct{ id, label string }{
 	{"identity", "Identity"},
 	{"models", "Models"},

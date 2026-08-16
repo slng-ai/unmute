@@ -21,7 +21,7 @@ var updatePipecatV1 = flag.Bool("update-pipecat", false, "rewrite the pipecat v1
 
 // TestPipecatV1BuiltinEndCallTool covers the prebuilt end_call lowering: a
 // bodyless @tool that speaks the goodbye then ends via EndFrame, with no
-// url_env, handler, or httpx POST (docs/spec/prebuilt-tools.md V7).
+// url_env, handler, or httpx POST.
 func TestPipecatV1BuiltinEndCallTool(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 	if err != nil {
@@ -2120,8 +2120,7 @@ func TestUS2_DailyProjectDeclaresNoServiceOrEndpoint(t *testing.T) {
 
 // The carrier form of the same route (SCHEMA N37) has a plan, and whose it is
 // matters. Processes, endpoints, and services on this route describe the
-// *operator-run helper*; the deployed agent still declares nothing of its own,
-// which is the shape rule specs/004 set and this feature had to keep.
+// *operator-run helper*; the deployed agent still declares nothing of its own.
 func TestUS2_DailyCarrierPlanBelongsToTheHelperNotTheAgent(t *testing.T) {
 	artifact := dailyCarrierArtifact(t, "twilio", true)
 	plan := artifact.Telephony

@@ -314,14 +314,13 @@ func TestTelephonyExamplesDeclareEveryNameTheyWrite(t *testing.T) {
 	}
 }
 
-// TestSecretsCheckRunsWithNoBlock walks the three shapes in
-// specs/013-first-five-minutes/reproduction.md section C. The guard tested the
+// TestSecretsCheckRunsWithNoBlock walks the three declaration shapes. The guard tested the
 // **declaration** list, so the package with the most to report — declares
 // nothing, references eight names — took the same early return as the package
 // with nothing to report. Its sibling, unusedConnectionWarning, guards on the
 // subject set and is correct; the shape to copy was already in the file.
 //
-// Severity stays a warning at exit 0, exactly as docs/SCHEMA.md N24 fixes it.
+// Severity stays a warning at exit 0 because undeclared names are an opt-in check.
 func TestSecretsCheckRunsWithNoBlock(t *testing.T) {
 	load := func(t *testing.T, mutate func(*packagespec.Package)) *Agent {
 		t.Helper()

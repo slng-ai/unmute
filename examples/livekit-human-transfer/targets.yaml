@@ -1,5 +1,5 @@
-# Transfers ride the platform's native primitives, so the target routes are
-# the ones where those primitives exist (docs/TRANSFERS.md):
+# Transfers ride the platform's native primitives, so use target routes where
+# those primitives exist:
 #
 #   livekit: Elastic SIP Trunking. Cold is a SIP REFER through the trunk
 #            (enable Call Transfer + PSTN Transfer on the Twilio trunk, see

@@ -219,7 +219,6 @@ word.
 | The injected tool | [tools/book_appointment.yaml](tools/book_appointment.yaml) |
 
 The reference pages are [variables](../../docs-site/reference/variables.mdx) and
-[secrets](../../docs-site/reference/secrets.mdx); the design is in
-[SCHEMA.md](../../docs/SCHEMA.md) sections 4.4 and 4.12.
+[secrets](../../docs-site/reference/secrets.mdx).
 For the same surface on a real outbound phone call, see
 [outbound-reminder](../outbound-reminder/), which needs Twilio and a booking API.

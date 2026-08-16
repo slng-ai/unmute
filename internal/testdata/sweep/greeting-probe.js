@@ -1,7 +1,7 @@
 // greeting-probe: drives one `unmute dev` browser session unattended and
 // reports whether the agent's voice actually arrived.
 //
-// Contract: specs/011-complexity-cleanup/contracts/sweep-report.md.
+// Output is one JSON line for the Go sweep harness to parse.
 //   argv:   <page-url> <timeout-seconds>
 //   stdout: one JSON line
 //   exit:   0 on inbound audio, 1 otherwise

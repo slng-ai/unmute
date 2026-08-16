@@ -3,7 +3,7 @@
 #
 # The same salon as ../pipecat-human-transfer-daily. What differs is how the call gets
 # here: Twilio streams the audio straight to Pipecat Cloud, so nothing in this
-# package has to be hosted by anybody (SCHEMA N38).
+# package has to be hosted by anybody.
 version: 1
 entry_agent: front_desk
 

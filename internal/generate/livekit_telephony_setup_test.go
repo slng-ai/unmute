@@ -11,10 +11,9 @@ import (
 	"github.com/slng-ai/unmute/internal/spec"
 )
 
-// Telephony setup is one runbook in the README and one emitted script
-// (specs/005-telephony-setup). None of it can be proven by a live call in CI, so
-// the operator-facing contracts are pinned here: contracts/runbook.md and
-// contracts/provisioning-script.md.
+// Telephony setup is one runbook in the README and one emitted script. None of
+// it can be proven by a live call in CI, so the operator-facing behaviour is
+// pinned here.
 
 // livekitSIPFixture builds a LiveKit SIP package on one carrier. inbound and
 // outbound are the phone channel's directions; cold selects safe_core's own cold
