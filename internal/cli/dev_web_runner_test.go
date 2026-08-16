@@ -88,8 +88,7 @@ func TestDevWebMissingDockerFailsWithInstallHint(t *testing.T) {
 	if err == nil ||
 		!strings.Contains(err.Error(), "docker compose is required to run") ||
 		!strings.Contains(err.Error(), "Docker Desktop") ||
-		!strings.Contains(err.Error(), "Compose plugin") ||
-		!strings.Contains(err.Error(), "--console") {
+		!strings.Contains(err.Error(), "Compose plugin") {
 		t.Fatalf("missing docker error = %v", err)
 	}
 }

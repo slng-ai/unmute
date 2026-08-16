@@ -13,11 +13,11 @@ Python project you own.
 targets:
   pipecat:
     provider: pipecat
-    version: "1.5.0"
+    version: "1.7.0"
 
   livekit:
     provider: livekit
-    version: "1.5.2"
+    version: "1.6.10"
     sdk_language: python
     models:
       detector:
@@ -138,7 +138,7 @@ Both run the same agent. The differences that usually decide it:
 | | Pipecat | LiveKit Agents |
 |---|---|---|
 | generated entry point | `bot.py` | `agent.py` |
-| local run | `uv run bot.py`, or `unmute dev` in Docker | `uv run agent.py dev`, or `unmute dev` in Docker with a local LiveKit server |
+| local run | `uv run bot.py`, or `unmute dev` in Docker | `uv run python -m livekit.agents start agent.py`, or `unmute dev` in Docker with a local LiveKit server |
 | phone routes | Daily provisioned numbers, your carrier over websockets, Pipecat Cloud carrier streams | SIP trunks, or a generated Twilio bridge |
 | transfers | cold, on two of its routes | cold and warm, on the SIP route |
 | turn detection in the examples | local Silero | LiveKit's own turn model |

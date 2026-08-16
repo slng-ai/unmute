@@ -26,7 +26,10 @@ services:
   application:
     build:
       context: .
-    command: ["python", "agent.py", "dev"]
+    # The worker runs through livekit-agents' supported module CLI. The older
+    # per-script run modes are deprecated upstream and print a warning on every
+    # run; the colored format is for a human watching `unmute dev`.
+    command: ["python", "-m", "livekit.agents", "start", "agent.py", "--log-format", "colored"]
     environment:
       - LIVEKIT_URL=ws://livekit_server:7880
       - LIVEKIT_API_KEY=devkey

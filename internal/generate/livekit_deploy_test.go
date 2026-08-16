@@ -111,8 +111,8 @@ func TestLiveKitContainerRequirements(t *testing.T) { // FR-011
 	if !strings.Contains(dockerfile, "WORKDIR /app") {
 		t.Error("Dockerfile has no explicit WORKDIR")
 	}
-	if !strings.Contains(dockerfile, `CMD ["python", "agent.py", "start"]`) {
-		t.Error("Dockerfile no longer launches the worker's start command directly")
+	if !strings.Contains(dockerfile, `CMD ["python", "-m", "livekit.agents", "start", "agent.py"]`) {
+		t.Error("Dockerfile no longer launches the worker through the supported module CLI")
 	}
 	ignore := artifactFile(t, artifact, ".dockerignore")
 	for _, want := range []string{".env\n", ".env.*", ".venv/", "__pycache__/"} {

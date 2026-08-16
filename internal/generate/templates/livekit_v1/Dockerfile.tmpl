@@ -14,5 +14,7 @@ RUN useradd --home-dir /app --shell /usr/sbin/nologin appuser \
 COPY --chown=appuser:appuser . .
 USER appuser
 
-# LiveKit Cloud / the worker runner start agent.py; `python agent.py dev` for local runs.
-CMD ["python", "agent.py", "start"]
+# LiveKit Cloud and the worker runner both start this image. The module CLI
+# (`python -m livekit.agents`) is the supported entry point; the older
+# per-script form goes through a CLI upstream has deprecated.
+CMD ["python", "-m", "livekit.agents", "start", "agent.py"]

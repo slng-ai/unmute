@@ -35,12 +35,11 @@ const (
 	liveKitDevSecret = "secret"
 )
 
-// devWebMissingDockerHint mirrors the cloudflared install hint's shape (what is
-// missing, how to install, the escape hatch). `unmute dev`'s default now runs
-// the deployable container, so Docker is required; --console is the no-Docker
-// path (SPEC C8, V8).
-const devWebMissingDockerHint = "docker compose is required to run `unmute dev`; " + composeInstallHint +
-	". Or run `unmute dev --console` to talk in the terminal over the local mic/speaker without Docker"
+// devWebMissingDockerHint mirrors the cloudflared install hint's shape: what is
+// missing and how to install it. There is no escape hatch to offer any more.
+// `unmute dev` runs the deployable container on every path, so Docker is
+// required, and saying so plainly beats naming a mode that no longer exists.
+const devWebMissingDockerHint = "docker compose is required to run `unmute dev`; " + composeInstallHint
 
 // runDevWeb is the default `unmute dev` runner (SPEC V1): generate the
 // deployable project, build and start it through compose.dev.yaml, then serve

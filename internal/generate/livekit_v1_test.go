@@ -499,7 +499,7 @@ func TestLiveKitV1MultiVendor(t *testing.T) {
 		}
 	}
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
-	if !strings.Contains(pyproject, `"livekit-agents[cartesia,deepgram,elevenlabs,openai]>=1.5"`) {
+	if !strings.Contains(pyproject, `"livekit-agents[cartesia,deepgram,elevenlabs,openai]==1.6.10"`) {
 		t.Errorf("pyproject.toml missing merged extras dep:\n%s", pyproject)
 	}
 	if strings.Contains(pyproject, "livekit-plugins-slng") {
@@ -906,59 +906,6 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 	}
 }
 
-// TestV4_LiveKitInferenceFact (parity V4/C2): the artifact flags exactly the
-// bindings that route through LiveKit Inference, so console mode knows when it
-// needs LiveKit creds. safe_core's default (native deepgram/elevenlabs/openai +
-// local turn-detector-mini) flags nothing; the Inference wildcard reason
-// (provider: livekit) and the cloud turn detector each flag.
-func TestV4_LiveKitInferenceFact(t *testing.T) {
-	load := func() *ir.Agent {
-		t.Helper()
-		pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		agent, err := ir.Build(pkg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return agent
-	}
-
-	agent := load()
-	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
-	if err != nil {
-		t.Fatalf("generate default: %v", err)
-	}
-	if len(artifact.LiveKitInference) != 0 {
-		t.Errorf("scaffold-default livekit must not route through Inference; got %v", artifact.LiveKitInference)
-	}
-
-	agent = load()
-	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
-	for profile := range tgt.Models.Reason {
-		tgt.Models.Reason[profile] = ir.Binding{Provider: "livekit", Model: "openai/gpt-4o-mini"}
-	}
-	artifact, err = Generate(agent, tgt, target.Default())
-	if err != nil {
-		t.Fatalf("generate wildcard reason: %v", err)
-	}
-	if !strings.Contains(strings.Join(artifact.LiveKitInference, " "), "reason") {
-		t.Errorf("provider: livekit reason must flag Inference; got %v", artifact.LiveKitInference)
-	}
-
-	agent = load()
-	tgt = targetByProvider(t, agent, ir.ProviderLiveKit)
-	tgt.Models.Turn = &ir.Binding{Provider: "livekit", Model: "turn-detector"}
-	artifact, err = Generate(agent, tgt, target.Default())
-	if err != nil {
-		t.Fatalf("generate cloud turn: %v", err)
-	}
-	if !strings.Contains(strings.Join(artifact.LiveKitInference, " "), "turn") {
-		t.Errorf("cloud turn-detector must flag Inference; got %v", artifact.LiveKitInference)
-	}
-}
-
 // TestLiveKitV1PerTaskModel covers the T14 lowering (B1/V1/V15): a task with
 // its own model profile gets llm= on the AgentTask, resolved through the
 // catalogue; a task on the entry agent's profile stays on the session LLM.
@@ -1346,10 +1293,16 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	if strings.Contains(botpy, "extra_instructions") {
 		t.Error("agent.py still passes the deprecated extra_instructions, which the prebuilt ignores once instructions is given")
 	}
-	// V10: a warm package pins the verified beta minor series, not <2.0.
+	// A warm package installs exactly the version its target declares. The old
+	// derived window (>=1.6,<1.7) is gone: the floor the beta prebuilt needs is
+	// gated at validate now, so a declared version is never quietly widened or
+	// narrowed on the author's behalf.
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
-	if !strings.Contains(pyproject, ">=1.6,<1.7") {
-		t.Errorf("warm pyproject.toml must pin the verified livekit-agents minor series (V10):\n%s", pyproject)
+	if !strings.Contains(pyproject, "==1.6.10") {
+		t.Errorf("warm pyproject.toml must pin the declared livekit-agents version exactly:\n%s", pyproject)
+	}
+	if strings.Contains(pyproject, ">=1.6,<1.7") {
+		t.Errorf("warm pyproject.toml still derives a version window instead of pinning:\n%s", pyproject)
 	}
 	// A warm transfer needs no platform-assigned trunk identity: it dials with
 	// the carrier's own trunk settings, passed inline (SCHEMA N33, 2026-08-12).
@@ -2049,11 +2002,12 @@ func TestLiveKitV1LocalAndMCPTools(t *testing.T) {
 	if strings.Contains(botpy, "mcp_servers=") {
 		t.Error("agent.py still emits the deprecated mcp_servers= parameter")
 	}
-	// The extra is what makes the import work at all, and the floor is where
-	// the emitted arguments are verified (research R2).
+	// The extra is what makes the import work at all, and it is a separate fact
+	// from the version: the extra is still added here, while the floor the
+	// emitted arguments need is gated at validate (target.CheckFeatureFloors).
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
-	if !strings.Contains(pyproject, "livekit-agents[mcp,") || !strings.Contains(pyproject, ">=1.6") {
-		t.Errorf("pyproject must carry the mcp extra on a >=1.6 floor:\n%s", pyproject)
+	if !strings.Contains(pyproject, "livekit-agents[mcp,") {
+		t.Errorf("pyproject must carry the mcp extra:\n%s", pyproject)
 	}
 	// A missing address or token is named before the agent dials (FR-009).
 	for _, want := range []string{`"BOOKINGS_MCP_URL"`, `"BOOKINGS_MCP_TOKEN"`} {
@@ -2177,19 +2131,24 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	}
 }
 
-// TestCheckLiveKitVersion pins the template-compatible range (>=1.5, <2.0):
-// beta.workflows TaskGroup + AgentTask + inference are present from 1.5.x.
+// TestCheckLiveKitVersion pins the supported range against the recorded window
+// in internal/target. The driver keeps its own check as a backstop; the fact it
+// checks against lives in one place.
 func TestCheckLiveKitVersion(t *testing.T) {
 	for _, tc := range []struct {
 		version string
 		ok      bool
 	}{
 		{"1.5.2", true},
-		{"1.5", true},
 		{"1.6.0", true},
+		{"1.6.10", true}, // the ceiling
+		// A declared version is an exact install pin, so half a version is no
+		// longer accepted and resolved on the author's behalf.
+		{"1.5", false},
 		{"1.2", false},
 		{"1.4.9", false},
 		{"0.0.108", false},
+		{"1.6.11", false}, // above the ceiling: unverified is unsupported
 		{"2.0.0", false},
 		{"", false},
 		{"latest", false},

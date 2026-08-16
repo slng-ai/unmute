@@ -18,7 +18,6 @@ from livekit.agents import (
     NotGivenOr,
     RunContext,
     TurnHandlingOptions,
-    cli,
     function_tool,
     inference,
     llm,
@@ -431,5 +430,7 @@ async def entrypoint(ctx: JobContext) -> None:
     asyncio.create_task(_max_duration())
 
 
-if __name__ == "__main__":
-    cli.run_app(server)
+# No __main__ block: this module is started through livekit-agents' supported
+# CLI, `python -m livekit.agents start agent.py`, which imports it and finds the
+# `server` above. The older per-script entry point goes through a CLI upstream
+# has deprecated and will remove.

@@ -185,12 +185,12 @@ container.
 ### Local
 
 `unmute dev` recompiles the target and starts the smallest topology the chosen
-mode needs.
+mode needs. Every mode runs in Docker Compose, so local development needs
+Docker.
 
 | Mode | What runs |
 |---|---|
-| Console | `agent.py console` only. No LiveKit Server, no Redis. |
-| Browser | A local or configured LiveKit Server, a separate `agent.py dev` worker, and a local UI/token helper. |
+| Browser | A local or configured LiveKit Server, a separate agent worker started with `python -m livekit.agents start agent.py --log-format colored`, and a local UI/token helper. |
 | Telephony (Twilio connector) | The generated bridge and Agent in one application container, plus a local `livekit-server --dev`. No Redis, no SIP. |
 | Telephony (SIP) | Agent, Redis, LiveKit Server, and LiveKit SIP together in Docker Compose. |
 
@@ -200,7 +200,8 @@ separate Agent worker joins the same room after dispatch.
 
 ### Deployment
 
-Deployment runs the same `agent.py`, started with `python agent.py start`. For
+Deployment runs the same `agent.py`, started with
+`python -m livekit.agents start agent.py`. For
 now we do not deploy on LiveKit Cloud: the worker connects to a self-hosted
 LiveKit Server. Worker replicas and LiveKit Server replicas are separate
 scaling units, so you size them independently.
@@ -304,9 +305,10 @@ same pipeline for that call.
 
 ### Local
 
+Both modes run in Docker Compose, so local development needs Docker.
+
 | Mode | What runs |
 |---|---|
-| Console | `bot.py console` only. No network server, no Redis. |
 | Browser | The `bot.py` WebRTC runtime plus a local UI/reverse proxy. No Redis. |
 | Telephony | The Pipecat telephony application and Redis together in Docker Compose. |
 
@@ -383,8 +385,8 @@ The pinned image is Valkey, an open-source server that speaks the Redis
 protocol. The service name and `REDIS_URL` keep the Redis name for familiarity.
 
 Redis never stores credentials, raw webhook bodies, audio, transcripts,
-prompts, model context, task state, or agent-handoff state. Normal console and
-browser development does not require Redis.
+prompts, model context, task state, or agent-handoff state. Normal browser
+development does not require Redis.
 
 ## Telephony runtime state
 

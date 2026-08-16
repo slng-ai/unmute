@@ -135,9 +135,9 @@ The first run is slow because Docker builds the image. Later runs reuse it.
 
 <AccordionGroup>
   <Accordion title="docker compose is required to run unmute dev">
-    Docker is not running, or Compose is missing. Start Docker, or talk to the
-    agent in the terminal instead with `unmute dev --console`, which needs
-    [uv](https://docs.astral.sh/uv/) and no Docker.
+    Docker is not running, or Compose is missing. Start Docker and run the
+    command again. Local development runs the agent in Docker Compose, so
+    there is no way to talk to it without Docker.
   </Accordion>
   <Accordion title="Missing required environment variables">
     The container starts, checks the keys the agent needs, and stops with the

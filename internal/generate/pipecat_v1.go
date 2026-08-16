@@ -658,6 +658,7 @@ type pipecatReportJSON struct {
 	Target      string                `json:"target"`
 	Provider    string                `json:"provider"`
 	Version     string                `json:"version"`
+	Supported   *reportSupported      `json:"supported,omitempty"`
 	EntryAgent  string                `json:"entry_agent"`
 	Agents      []string              `json:"agents"`
 	Files       []string              `json:"generated_files"`
@@ -685,7 +686,8 @@ func pipecatReport(agent *ir.Agent, data pipecatData, files []File, bindings []i
 		agents = append(agents, a.Name)
 	}
 	out, err := json.MarshalIndent(pipecatReportJSON{
-		Target: data.Project, Provider: "pipecat", Version: data.Version, EntryAgent: data.EntryAgent,
+		Target: data.Project, Provider: "pipecat", Version: data.Version,
+		Supported: supportedRange(targetcap.Pipecat), EntryAgent: data.EntryAgent,
 		Agents: agents, Files: generated,
 		// Forwarded without checking, so it must be readable back (constitution).
 		// A list of one on this target: several regions never reach generate.

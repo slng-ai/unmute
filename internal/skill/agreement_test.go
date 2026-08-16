@@ -2,6 +2,7 @@ package skill
 
 import (
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -602,4 +603,90 @@ func containsProvider(list []target.Provider, want target.Provider) bool {
 		}
 	}
 	return false
+}
+
+// TestOneFrameworkVersionEverywhere is the version half of the same rule as
+// TestOneModelIdEverywhere: what a release supports has one recorded home
+// (target.Window), and no page an author reads may contradict it.
+//
+// The repository has been burned by this exact drift. Before the support window
+// existed, the framework version lived in five unsynchronised places, and the
+// examples disagreed with the docs, which disagreed with the tests: examples
+// declared 1.6.4 while comments claimed verification against 1.6.9, because the
+// emitted LiveKit pin floated instead of honouring what an author declared.
+//
+// Matching is by shape, not by a list of files someone has to remember to
+// extend. Deliberately absent: goldens, internal/testdata fixtures, and specs/,
+// which record older versions as history and must not fight this test.
+func TestOneFrameworkVersionEverywhere(t *testing.T) {
+	windows := target.Windows()
+	if len(windows) == 0 {
+		t.Fatal("internal/target owns the support window; an empty table makes every check below vacuous")
+	}
+	ceilings := map[string]target.Provider{}
+	for provider, win := range windows {
+		if win.Ceiling == "" {
+			t.Fatalf("%s has no recorded ceiling", provider)
+		}
+		ceilings[win.Ceiling] = provider
+	}
+
+	// A dependency line naming a framework: the operator makes it a constraint
+	// rather than prose, so dated verification notes ("verified against
+	// livekit-agents 1.6.9") stay out of scope.
+	constraint := regexp.MustCompile(`(livekit-agents|pipecat-ai)(\[[^\]]*\])?(==|>=|<=|~=)([0-9][0-9.]*)`)
+	// A target's declared version in an authoring sample. Quoted and three-part,
+	// so `version: 1` (the package schema version) and a project's own
+	// `version = "0.1.0"` are not swept up.
+	declared := regexp.MustCompile(`version:\s*"(\d+\.\d+\.\d+)"`)
+
+	byPackage := map[string]target.Provider{}
+	for provider := range windows {
+		byPackage[target.FrameworkPackage(provider)] = provider
+	}
+
+	for name, content := range authorFacingVersionSurfaces(t) {
+		for _, hit := range constraint.FindAllStringSubmatch(content, -1) {
+			pkg, operator, version := hit[1], hit[3], hit[4]
+			provider, ok := byPackage[pkg]
+			if !ok {
+				continue
+			}
+			win := windows[provider]
+			if operator != "==" {
+				t.Errorf("%s writes %q; a target installs exactly the version it declares, so an author-facing sample pins with == (%s==%s)",
+					name, hit[0], pkg, win.Ceiling)
+				continue
+			}
+			if version != win.Ceiling {
+				t.Errorf("%s pins %s==%s; this release's %s ceiling is %s", name, pkg, version, pkg, win.Ceiling)
+			}
+		}
+		for _, hit := range declared.FindAllStringSubmatch(content, -1) {
+			if _, ok := ceilings[hit[1]]; !ok {
+				t.Errorf("%s declares version %q, which is no framework's ceiling; the supported ceilings are %s",
+					name, hit[1], strings.Join(sortedCeilings(windows), " and "))
+			}
+		}
+	}
+}
+
+func sortedCeilings(windows map[target.Provider]target.SupportWindow) []string {
+	var out []string
+	for _, provider := range slices.Sorted(maps.Keys(windows)) {
+		out = append(out, target.FrameworkPackage(provider)+" "+windows[provider].Ceiling)
+	}
+	return out
+}
+
+// authorFacingVersionSurfaces is everything an author reads or copies that could
+// name a framework version: the model-id surfaces plus the rest of the skill
+// bundle, which is what a coding assistant reads before it writes a package.
+func authorFacingVersionSurfaces(t *testing.T) map[string]string {
+	t.Helper()
+	out := authorFacingModelSurfaces(t)
+	for _, name := range []string{"references/telephony.md", "references/workflow.md", "references/conversation.md"} {
+		out["bundle/"+name] = bundleFile(t, name)
+	}
+	return out
 }

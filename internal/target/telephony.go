@@ -370,7 +370,7 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	route.Processes = []TelephonyProcess{{
 		// One container runs both roles: the agent worker (LiveKit) and the
 		// Twilio bridge web server. The bridge is what the carrier reaches.
-		Name: "application", Command: []string{"sh", "-c", "python agent.py start & exec python telephony_bridge.py"},
+		Name: "application", Command: []string{"sh", "-c", "python -m livekit.agents start agent.py & exec python telephony_bridge.py"},
 		Health: "/", Readiness: "/",
 	}}
 	route.PublicEndpoints = []TelephonyEndpointRule{

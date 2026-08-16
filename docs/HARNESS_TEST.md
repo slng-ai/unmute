@@ -32,7 +32,7 @@ release.
 
 - Docker with the Compose plugin. Every run builds and starts the deployable
   container.
-- `uv`, for `--console` runs and for any manual Python check.
+- `uv`, for any manual Python check.
 - A repository root `.env` with real keys. Validate and compile need no keys.
   Only `dev` reads credentials.
 - `make build` first, every time. The binary is what the harness tests, and a
@@ -215,8 +215,8 @@ treat them as a starting point and correct them as you go.
 | `pipecat-human-transfer-twilio` | pipecat | The same salon reached through Twilio streaming straight to Pipecat Cloud. | Derived, unverified. "Can you put me through to billing?" | `send_to_billing` fires. Runs `--telephony` locally with Twilio credentials. |
 
 Which telephony examples can run `dev --telephony` on your machine is a table in
-[docs/TESTING.md](TESTING.md#4-talk-to-it-web-console-telephony). Everything
-else runs in the browser and in `--console`.
+[docs/TESTING.md](TESTING.md#4-talk-to-it-web-telephony). Everything else runs
+in the browser.
 
 ## The fixing rules
 

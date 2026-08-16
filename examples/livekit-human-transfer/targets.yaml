@@ -12,7 +12,7 @@
 targets:
   livekit:
     provider: livekit
-    version: "1.6.4"
+    version: "1.6.10"
     sdk_language: python
     # The whole route lives in connections/twilio_sip.yaml: transport sip,
     # carrier twilio, and the four trunk credentials it needs.

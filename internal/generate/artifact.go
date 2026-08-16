@@ -22,13 +22,6 @@ type Artifact struct {
 	Apply     *ApplyPlan
 	Notes     GenerateReport
 	Telephony *TelephonyRuntimePlan
-
-	// LiveKitInference lists the bindings that route through LiveKit Inference
-	// (each a human-readable phrase). Non-empty means console mode needs
-	// LIVEKIT_API_KEY/SECRET even though it never connects to a room (C2/C7);
-	// nil means the target runs `console` on provider keys alone. Only the
-	// livekit driver sets it; the CLI reads it so it never re-derives the fact.
-	LiveKitInference []string
 }
 
 type File struct {
@@ -82,7 +75,6 @@ func Generate(agent *ir.Agent, resolved ir.Target, caps target.Table) (Artifact,
 		if err != nil {
 			return Artifact{}, fmt.Errorf("generate %s livekit: %w", resolved.Name, err)
 		}
-		artifact.LiveKitInference = emitted.LiveKitInference
 		artifact.Notes.Notes = append(artifact.Notes.Notes, emitted.Notes.Notes...)
 		artifact.Notes.Warnings = append(artifact.Notes.Warnings, emitted.Notes.Warnings...)
 		return artifact, nil

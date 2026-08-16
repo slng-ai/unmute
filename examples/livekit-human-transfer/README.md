@@ -195,10 +195,9 @@ To hear the agent before any carrier account exists, with no phone in the pictur
 
 ```sh
 bin/unmute dev examples/livekit-human-transfer              # browser, needs Docker
-bin/unmute dev --console examples/livekit-human-transfer    # terminal, local mic
 ```
 
-Neither transfer completes in that kind of session, and the two reasons are
+Neither transfer completes in a browser session, and the two reasons are
 different. **Cold** refers the caller's existing SIP leg out, so with no SIP leg
 there is nothing to act on: the tool logs `cold transfer skipped: no phone caller
 in the room` and the agent carries on. **Warm** dials the supervisor through

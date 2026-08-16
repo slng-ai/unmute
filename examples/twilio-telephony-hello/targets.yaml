@@ -20,7 +20,7 @@
 targets:
   pipecat:
     provider: pipecat
-    version: "1.5.0"
+    version: "1.7.0"
     # The connection is the whole route: open connections/twilio_voice.yaml to
     # see the transport and the carrier. Present because this agent places
     # outbound calls; a receive-only package on this route needs no connection
@@ -34,7 +34,7 @@ targets:
 
   livekit:
     provider: livekit
-    version: "1.6.4"
+    version: "1.6.10"
     sdk_language: python
     # A different connection from the pipecat target's, because a SIP trunk's
     # dial-out settings are not the account's REST credentials — and because

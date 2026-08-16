@@ -11,8 +11,7 @@ the LiveKit development worker.
 ```sh
 uv sync                       # or: pip install -e .
 cp .env.example .env          # then fill in the selected provider values
-uv run agent.py console       # local terminal session
-uv run agent.py dev           # LiveKit development worker
+uv run python -m livekit.agents start agent.py   # run the worker
 ```
 {{- if gt (len .Agents) 1}}
 
@@ -187,7 +186,7 @@ Build the generated `Dockerfile` into an image, set `LIVEKIT_URL`,
 provider keys from `.env.example`, then start the worker:
 
 ```sh
-python agent.py start
+python -m livekit.agents start agent.py
 ```
 
 See `docs/DEPLOYMENT.md` in the Unmute repository for the full self-hosted

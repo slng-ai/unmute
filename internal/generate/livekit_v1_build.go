@@ -352,8 +352,6 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.Notes = append(data.Notes, "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory")
 	}
 
-	data.InferenceUses = livekitInferenceUses(data)
-
 	data.PluginModules = collectLiveKitPlugins(data)
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
@@ -566,29 +564,6 @@ func buildLiveKitSIPTelephony(agent *ir.Agent, tgt ir.Target, env *envSet) (*liv
 	// the emitted telephony-setup.sh resolves them by phone number, so no
 	// environment name carries the ID (SCHEMA N36, 2026-08-12).
 	return telephony, nil
-}
-
-// livekitInferenceUses lists the bindings that route through LiveKit Inference,
-// which needs LIVEKIT_API_KEY/SECRET even in credless console mode (C2/C7): any
-// resolved service on the `inference.*` classes (the reason wildcard, provider:
-// livekit) and the cloud turn detector (turn-detector → v1; the mini runs
-// local, an absent binding auto-selects local, V18). Empty means console runs
-// on the bound providers' keys alone (the scaffold default).
-func livekitInferenceUses(data livekitData) []string {
-	set := map[string]bool{}
-	for _, svc := range livekitServices(data) {
-		if svc.Entry.Call != nil && strings.HasPrefix(svc.Entry.Call.Class, "inference.") {
-			set[fmt.Sprintf("%s provider %q", svc.Entry.Role, svc.Vendor)] = true
-		}
-	}
-	uses := sortedKeys(set)
-	if data.TurnVersion == "v1" {
-		uses = append(uses, "turn detection (cloud turn-detector)")
-	}
-	if len(uses) == 0 {
-		return nil
-	}
-	return uses
 }
 
 // livekitServices lists every resolved service in the template model.
@@ -1289,29 +1264,23 @@ func livekitDeps(data livekitData) []string {
 			packages[pinned(svc.Entry.Install.Package, svc.Entry.Install.Constraint)] = true
 		}
 	}
-	// A warm transfer imports the beta WarmTransferTask, and a beta API is
-	// allowed to move between minor releases (it already renamed its
-	// instructions type once). So a warm package pins the minor series the
-	// import was verified against instead of floating to <2.0 (SPEC V10, C3).
-	constraint := fmt.Sprintf(">=%d.%d", livekitVersionMajor, livekitVersionMinMinor)
-	// An MCP source raises the floor to where the emitted arguments are
-	// verified; a warm transfer's pinned series already sits at or above it, so
-	// the two compose by leaving the narrower one alone (N40).
 	if data.NeedsMCP {
-		constraint = fmt.Sprintf(">=%d.%d", livekitVersionMajor, livekitMCPVerifiedMinor)
-		extras["mcp"] = true // without the extra the emitted import fails
+		extras["mcp"] = true // without the extra the emitted import fails (N40)
 	}
-	if data.HasWarmTransfer {
-		constraint = fmt.Sprintf(">=%d.%d,<%d.%d", livekitVersionMajor, livekitWarmVerifiedMinor,
-			livekitVersionMajor, livekitWarmVerifiedMinor+1)
-	}
-	base := "livekit-agents" + constraint
+	// The author's declared version is the pin, exactly as it is on Pipecat.
+	// This used to be a derived constraint that a warm transfer or an MCP source
+	// silently raised, which meant a package could declare one version and
+	// install another without being told. Those floors are gated at validate now
+	// (target.CheckFeatureFloors), so what a target declares is what installs.
+	constraint := "==" + data.Version
+	pkg := targetcap.FrameworkPackage(targetcap.LiveKit)
+	base := pkg + constraint
 	if len(extras) > 0 {
-		base = fmt.Sprintf("livekit-agents[%s]%s", strings.Join(sortedKeys(extras), ","), constraint)
+		base = fmt.Sprintf("%s[%s]%s", pkg, strings.Join(sortedKeys(extras), ","), constraint)
 	}
 	deps := append([]string{
 		base,
-		pinned("livekit-plugins-silero", ">=1.6.1"),
+		pinned("livekit-plugins-silero", targetcap.SileroFloor),
 		"python-dotenv",
 		// httpx is unconditional, and not only for our own webhook tools.
 		// `livekit/agents/inference/llm.py` imports it while livekit-agents

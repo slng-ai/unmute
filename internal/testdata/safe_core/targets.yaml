@@ -9,7 +9,7 @@
 targets:
   livekit:
     provider: livekit
-    version: "1.5.2"            # framework pin; the driver checks its range (>=1.5, <2.0)
+    version: "1.6.10"
     sdk_language: python
     connection: twilio_sip      # cold_transfer needs SIP on LiveKit (SCHEMA N31)
     models:
@@ -27,7 +27,7 @@ targets:
 
   pipecat:
     provider: pipecat
-    version: "1.5.0"
+    version: "1.7.0"
     connection: daily_provisioned   # cold_transfer needs Daily SIP on Pipecat
     # no model overrides: the agent.yaml defaults (SLNG + OpenAI + deepgram STT
     # + local silero VAD) run as defined

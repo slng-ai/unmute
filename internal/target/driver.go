@@ -26,34 +26,149 @@ import (
 // optional, and ignores any suffix.
 var versionPattern = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
 
-// driverVersions is the framework version window each shipped driver's
-// templates compile against. Both windows are the same today; they are separate
-// entries so a divergence is a data change rather than a second checker.
-var driverVersions = map[Provider][2]int{
-	LiveKit: {1, 5}, // beta.workflows TaskGroup + AgentTask + inference, from 1.5.x
-	Pipecat: {1, 5},
+// exactVersionPattern is the whole of what a target may declare: three numbers,
+// nothing else. A declared version is an exact install pin, so half a version
+// (`1.6`) or a prerelease suffix (`1.6.11rc1`) is rejected rather than resolved
+// into something the author did not write.
+var exactVersionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+
+// SupportWindow is the framework version range one unmute release supports for
+// a shipped driver: the oldest version its templates compile against, the
+// newest a human has verified end to end by talking to every example, and the
+// date that verification happened.
+//
+// The ceiling is a claim about verification, not about upstream. A newer
+// release upstream is unsupported until a human proves it and a new unmute
+// ships, which is what ties the supported range to the unmute version.
+type SupportWindow struct {
+	Floor    string // oldest supported, inclusive
+	Ceiling  string // newest verified, inclusive
+	Verified string // ISO date the ceiling was verified by live call
 }
 
-// CheckVersion rejects a framework version outside a driver's
-// template-compatible range. A provider with no shipped driver has no template
-// range to be outside of, so it is not checked here.
+// supportWindows is the one recorded home for these facts (Principle III).
+// Validation, both drivers, the scaffold default, the compile report, and the
+// version output all read it; none of them keeps a copy. Raising a ceiling is
+// the whole of a routine framework upgrade: change it here, regenerate the
+// derived output, verify by live call, ship.
+//
+// Both windows currently start at 1.5, the first 1.x release of either
+// framework (the versions jump 0.0.108 -> 1.5.0 on Pipecat), and the emitted
+// code surface is unchanged across each range: verified against pipecat-ai
+// 1.5.0 -> 1.7.0 and livekit-agents 1.6.9 -> 1.6.10 on 2026-08-16.
+var supportWindows = map[Provider]SupportWindow{
+	LiveKit: {Floor: "1.5.0", Ceiling: "1.6.10", Verified: "2026-08-16"},
+	Pipecat: {Floor: "1.5.0", Ceiling: "1.7.0", Verified: "2026-08-16"},
+}
+
+// frameworkPackages is the distribution each driver installs, so an error
+// message and an emitted dependency name it the same way.
+var frameworkPackages = map[Provider]string{
+	LiveKit: "livekit-agents",
+	Pipecat: "pipecat-ai",
+}
+
+// Window returns the supported framework range for a provider. A provider with
+// no shipped driver has no window, and reports false.
+func Window(provider Provider) (SupportWindow, bool) {
+	win, ok := supportWindows[provider]
+	return win, ok
+}
+
+// Windows returns every supported range, keyed by provider, for reporting.
+func Windows() map[Provider]SupportWindow {
+	return maps.Clone(supportWindows)
+}
+
+// FrameworkPackage is the distribution name a driver installs ("" if none).
+func FrameworkPackage(provider Provider) string { return frameworkPackages[provider] }
+
+// CheckVersion rejects a framework version outside the range this unmute
+// supports. A provider with no shipped driver has no window to be outside of,
+// so it is not checked here.
+//
+// The whole triple is compared, not just the minor: a ceiling of 1.6.10 is
+// meaningless without the patch, and string order would get it backwards, since
+// "1.6.10" sorts below "1.6.4".
 func CheckVersion(provider Provider, version string) error {
-	bounds, ok := driverVersions[provider]
+	win, ok := supportWindows[provider]
 	if !ok {
 		return nil
 	}
-	major, minMinor := bounds[0], bounds[1]
 	if version == "" {
 		return fmt.Errorf("%s target requires a framework version", provider)
 	}
-	match := versionPattern.FindStringSubmatch(version)
-	if match == nil {
+	if !versionPattern.MatchString(version) {
 		return fmt.Errorf("%s version %q is not a semantic version", provider, version)
 	}
-	gotMajor, _ := strconv.Atoi(match[1])
-	gotMinor, _ := strconv.Atoi(match[2])
-	if gotMajor != major || gotMinor < minMinor {
-		return fmt.Errorf("%s version %q is outside the driver's template-compatible range (>=%d.%d, <%d.0)", provider, version, major, minMinor, major+1)
+	if !exactVersionPattern.MatchString(version) {
+		return fmt.Errorf("%s version %q must be three numbers, for example %q", provider, version, win.Ceiling)
+	}
+	got, _ := ParseVersion(version)
+	floor, _ := ParseVersion(win.Floor)
+	ceiling, _ := ParseVersion(win.Ceiling)
+	if slices.Compare(got[:], ceiling[:]) > 0 {
+		// Named separately from the floor case: the fix is upgrading unmute, not
+		// editing the package, and an author cannot guess that from a range alone.
+		return fmt.Errorf("%s version %q is newer than this unmute supports (>=%s, <=%s); a newer unmute may support it",
+			provider, version, win.Floor, win.Ceiling)
+	}
+	if slices.Compare(got[:], floor[:]) < 0 {
+		return fmt.Errorf("%s version %q is outside the supported range (>=%s, <=%s)", provider, version, win.Floor, win.Ceiling)
+	}
+	return nil
+}
+
+// FrameworkFeature is a package capability whose emitted code needs a minimum
+// framework version. The value is the phrase an error message uses, so the
+// author reads their own vocabulary rather than an internal flag name.
+type FrameworkFeature string
+
+const (
+	FeatureWarmTransfer FrameworkFeature = "a warm transfer"
+	FeatureMCPTools     FrameworkFeature = "an MCP tool source"
+)
+
+// featureFloors is where a feature's minimum framework version lives.
+//
+// These used to be applied by silently rewriting the emitted constraint, which
+// meant a package could declare 1.5.2, install 1.6.x, and never be told. With
+// the declared version now the exact pin, a floor it does not meet is a gated
+// error instead: the same fact, moved from an invisible correction to a loud
+// one (Principle II).
+//
+// Both entries are 1.6.0, the release each feature's emitted arguments were
+// verified against. Pipecat has none: its features vary by extra, never by
+// version.
+var featureFloors = map[Provider]map[FrameworkFeature]string{
+	LiveKit: {
+		FeatureWarmTransfer: "1.6.0",
+		FeatureMCPTools:     "1.6.0",
+	},
+}
+
+// CheckFeatureFloors rejects a declared version below the floor of any feature
+// the package actually uses. Features are reported in the order given, so the
+// caller decides which violation an author reads first.
+func CheckFeatureFloors(provider Provider, version string, used []FrameworkFeature) error {
+	floors := featureFloors[provider]
+	if len(floors) == 0 || version == "" {
+		return nil
+	}
+	got, ok := ParseVersion(version)
+	if !ok {
+		return nil // CheckVersion already reports an unreadable version
+	}
+	for _, feature := range used {
+		floor, ok := floors[feature]
+		if !ok {
+			continue
+		}
+		min, ok := ParseVersion(floor)
+		if ok && slices.Compare(got[:], min[:]) < 0 {
+			return fmt.Errorf("%s version %q is too old for %s, which needs %s >=%s",
+				provider, version, feature, FrameworkPackage(provider), floor)
+		}
 	}
 	return nil
 }
@@ -71,6 +186,11 @@ func ParseVersion(v string) ([3]int, bool) {
 	return out, true
 }
 
+// SileroFloor is the constraint the always-emitted session VAD plugin carries.
+// It is here rather than in the emitter so the floor validation checks and the
+// floor the driver emits cannot drift apart (FR-003).
+const SileroFloor = ">=1.6.1"
+
 // PinFloors is the pinnable package set for a driver, with each one's catalogue
 // floor. Empty for a driver that pins nothing.
 func PinFloors(provider Provider) map[string]string {
@@ -78,7 +198,7 @@ func PinFloors(provider Provider) map[string]string {
 		return nil
 	}
 	floors := DefaultCatalog().Packages(LiveKit)
-	floors["livekit-plugins-silero"] = ">=1.6.1" // always emitted (session VAD)
+	floors["livekit-plugins-silero"] = SileroFloor // always emitted (session VAD)
 	return floors
 }
 

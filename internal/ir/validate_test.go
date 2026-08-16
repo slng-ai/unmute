@@ -933,12 +933,28 @@ func TestValueChecksFailAtValidate(t *testing.T) {
 			want: `livekit version "banana" is not a semantic version`,
 		},
 		{
-			name:     "version is out of range, pipecat",
+			name:     "version is above the supported ceiling, pipecat",
 			provider: "pipecat",
 			mutate: func(pkg *packagespec.Package) {
 				setTargetField(pkg, "pipecat", func(t *packagespec.Target) { t.Version = "9.9.9" })
 			},
-			want: `pipecat version "9.9.9" is outside the driver's template-compatible range (>=1.5, <2.0)`,
+			want: `pipecat version "9.9.9" is newer than this unmute supports (>=1.5.0, <=1.7.0); a newer unmute may support it`,
+		},
+		{
+			name:     "version is below the supported floor, pipecat",
+			provider: "pipecat",
+			mutate: func(pkg *packagespec.Package) {
+				setTargetField(pkg, "pipecat", func(t *packagespec.Target) { t.Version = "1.4.9" })
+			},
+			want: `pipecat version "1.4.9" is outside the supported range (>=1.5.0, <=1.7.0)`,
+		},
+		{
+			name:     "version names only two parts, livekit",
+			provider: "livekit",
+			mutate: func(pkg *packagespec.Package) {
+				setTargetField(pkg, "livekit", func(t *packagespec.Target) { t.Version = "1.6" })
+			},
+			want: `livekit version "1.6" must be three numbers, for example "1.6.10"`,
 		},
 		{
 			// The sharpest of the eight: docs/SCHEMA.md 4.3 lists `voice` as
@@ -1716,5 +1732,82 @@ func TestValidatePipecatCloudWebsocketRefusesCallSources(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the refusal is missing %q, got:\n%s", want, joined)
 		}
+	}
+}
+
+// A feature whose emitted code needs a newer framework than the target declares
+// is a gated error, not a silent correction.
+//
+// This is the regression the exact pin created and this gate closes. Before it,
+// a package could declare 1.5.2, have the emitter quietly raise the constraint
+// to >=1.6, and install a version the author never wrote. Under an exact pin the
+// same package would install 1.5.2, which has neither MCPToolset nor
+// WarmTransferTask, and fail at import instead.
+func TestFeatureFloorsGateTheDeclaredVersion(t *testing.T) {
+	validateAt := func(t *testing.T, agent *Agent, version string) []string {
+		t.Helper()
+		target := targetFor(agent, ProviderLiveKit)
+		target.Version = version
+		report, _ := Validate(agent, []Target{target}, targetcap.Default())
+		if len(report.PerTarget) == 0 {
+			t.Fatal("no per-target rows in the report")
+		}
+		return report.PerTarget[0].Errors
+	}
+
+	t.Run("mcp below its floor fails and names the feature", func(t *testing.T) {
+		agent := mcpAgent(t, func(*Tool) {})
+		errs := strings.Join(validateAt(t, agent, "1.5.2"), "\n")
+		for _, want := range []string{"too old for an MCP tool source", "livekit-agents >=1.6.0", `"1.5.2"`} {
+			if !strings.Contains(errs, want) {
+				t.Errorf("errors missing %q:\n%s", want, errs)
+			}
+		}
+	})
+
+	t.Run("mcp at the ceiling passes", func(t *testing.T) {
+		agent := mcpAgent(t, func(*Tool) {})
+		for _, err := range validateAt(t, agent, "1.6.10") {
+			if strings.Contains(err, "too old for") {
+				t.Errorf("a supported version was rejected: %s", err)
+			}
+		}
+	})
+
+	t.Run("mcp exactly at its floor passes", func(t *testing.T) {
+		agent := mcpAgent(t, func(*Tool) {})
+		for _, err := range validateAt(t, agent, "1.6.0") {
+			if strings.Contains(err, "too old for") {
+				t.Errorf("the floor itself was rejected: %s", err)
+			}
+		}
+	})
+
+	// A package with neither feature is unaffected by the floors, so the whole
+	// supported range stays open to it.
+	t.Run("a package using no gated feature keeps the whole range", func(t *testing.T) {
+		agent := safeAgent(t)
+		for _, err := range validateAt(t, agent, "1.5.0") {
+			if strings.Contains(err, "too old for") {
+				t.Errorf("a package with no gated feature was floored: %s", err)
+			}
+		}
+	})
+}
+
+// UsedFrameworkFeatures is the one home for the version-relevant question, so
+// it has to answer it from the resolved package rather than from a driver.
+func TestUsedFrameworkFeatures(t *testing.T) {
+	if got := UsedFrameworkFeatures(nil); got != nil {
+		t.Errorf("UsedFrameworkFeatures(nil) = %v, want nil", got)
+	}
+	plain := safeAgent(t)
+	if got := UsedFrameworkFeatures(plain); len(got) != 0 {
+		t.Errorf("a package with no gated feature reports %v", got)
+	}
+	withMCP := mcpAgent(t, func(*Tool) {})
+	got := UsedFrameworkFeatures(withMCP)
+	if len(got) != 1 || got[0] != targetcap.FeatureMCPTools {
+		t.Errorf("an mcp package reports %v, want just the MCP tool source", got)
 	}
 }

@@ -135,7 +135,7 @@ on the LiveKit target:
 targets:
   livekit:
     provider: livekit
-    version: "1.5.2"
+    version: "1.6.10"
     sdk_language: python
     models:
       detector:

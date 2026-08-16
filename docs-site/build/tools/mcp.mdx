@@ -148,14 +148,19 @@ gate is a refusal rather than a warning:
 livekit: LiveKit MCP tools require sdk_language: python
 ```
 
-`examples/mcp-example` pins `version: "1.6.4"` on that target, because the emitted
-arguments are verified against the 1.6 series.
+An MCP source needs `livekit-agents` 1.6.0 or newer, because that is where the
+emitted arguments are verified. A target that declares an older version fails
+validation by name, rather than having its version quietly raised:
+
+```
+livekit: livekit version "1.5.2" is too old for an MCP tool source, which needs livekit-agents >=1.6.0
+```
 
 **Pipecat needs nothing extra.** It emits one client per source, started with the
 bot and closed on every shutdown path.
 
 Either way the dependency the project declares picks up the extra for you:
-`livekit-agents[mcp,openai]>=1.6` and `pipecat-ai[mcp,openai,runner,silero,webrtc]==1.5.0`.
+`livekit-agents[mcp,openai]==1.6.10` and `pipecat-ai[mcp,openai,runner,silero,webrtc]==1.7.0`.
 
 ## What the compile does with it
 

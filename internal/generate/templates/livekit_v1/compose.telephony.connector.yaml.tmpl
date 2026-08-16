@@ -9,7 +9,7 @@ services:
     stop_grace_period: "{{.DrainTimeoutSecs}}s"
     # Two roles in one container for local dev: the LiveKit worker plus the
     # Twilio bridge web server the carrier reaches. Split them in production.
-    command: ["sh", "-c", "python agent.py start & exec python telephony_bridge.py"]
+    command: ["sh", "-c", "python -m livekit.agents start agent.py & exec python telephony_bridge.py"]
     environment:
       - LIVEKIT_URL=ws://livekit_server:7880
       - LIVEKIT_API_KEY=devkey

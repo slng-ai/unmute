@@ -78,11 +78,11 @@ Three things to notice:
 targets:
   pipecat:
     provider: pipecat
-    version: "1.5.0"
+    version: "1.7.0"
 
   livekit:
     provider: livekit
-    version: "1.5.2"
+    version: "1.6.10"
     sdk_language: python
     models:
       detector:
@@ -177,8 +177,8 @@ agent speaks first, because `agent.yaml` says so.
 | `compile` | write the generated project for every target |
 | `dev` | compile, run locally, and talk to the agent |
 
-Add `--console` to `dev` and you talk over the terminal mic and speaker instead
-of the browser, with no Docker in the way.
+Add `--telephony` to `dev` and a real phone call reaches the same agent. Both
+modes run the agent in Docker Compose, so local development needs Docker.
 
 ## What compile writes
 

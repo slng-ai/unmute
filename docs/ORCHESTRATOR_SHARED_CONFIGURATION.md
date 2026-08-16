@@ -393,9 +393,10 @@ The portable profiles are abstract on purpose: the same source must compile to E
 targets:
   pipecat-dev:
     provider: pipecat
-    version: "1.5.0"           # framework pin, checked against the driver's
-                               # template-compatible range (a codegen check, not
-                               # model validation). Flows ships in core as
+    version: "1.7.0"           # framework pin: installed exactly as written,
+                               # and checked against the range this unmute
+                               # supports (a codegen check, not model
+                               # validation). Flows ships in core as
                                # pipecat.flows since 1.5.0; never pin the
                                # deprecated standalone pipecat-ai-flows.
     models:
@@ -574,7 +575,7 @@ Rows marked "verify" have conflicting sources; see the review, section 4. Do not
 9. `capacity.peak_sessions` must not exceed `max_sessions`. Both are required whenever `channels.phone` or a code target is configured.
 10. Conversation lifecycle fields are gated and range-checked per target (Voiceflow's inactivity timeout caps at 300 seconds; several providers document no `max_duration` at all). `minimum_words` warns on ElevenLabs; `ignore_phrases` fails on targets with neither a native phrase list nor generated code; interruption fields warn as lossy on Deepgram; `thinking_audio` fails on Deepgram and Vapi (no faithful lowering) and is native on LiveKit, Pipecat, ElevenLabs.
 11. Never lower to deprecated or retiring provider surfaces: Vapi Workflows (retire 2026-08-18), Cognigy AudioCodes and Generic Voice Nodes (removal around Q2 2026), Pipecat's deprecated summary context strategy, ElevenLabs Procedures (Alpha), and the standalone `pipecat-ai-flows` package (Flows lives in `pipecat-ai` core since 1.5.0).
-12. Model bindings are structure-checked only: every open role and every used model/voice profile must have a binding in the resolved target; integrated roles may carry a settings-only binding or none; bindings must agree with `placement`; `params` may only configure the bound component. Identities and `params` values are **never validated**; provider API and runtime errors are relayed verbatim, and every forwarded binding appears in the compile/plan report (section 4.2). Code targets pin framework and independently versioned packages (`version:` plus `pins:`), and the driver checks the pins against its template-compatible range; that is a codegen compatibility check, not model validation.
+12. Model bindings are structure-checked only: every open role and every used model/voice profile must have a binding in the resolved target; integrated roles may carry a settings-only binding or none; bindings must agree with `placement`; `params` may only configure the bound component. Identities and `params` values are **never validated**; provider API and runtime errors are relayed verbatim, and every forwarded binding appears in the compile/plan report (section 4.2). Code targets pin framework and independently versioned packages (`version:` plus `pins:`), the generated project installs exactly the `version:` written, and validation checks it against the range this unmute release supports and against the floor of every feature the package uses; that is a codegen compatibility check, not model validation.
 13. Warnings (stderr, exit 0) for experimental and beta lowerings: LiveKit `TaskGroup`, LiveKit warm-transfer task (Beta, Python only), fallback profiles carrying binding `params` on ElevenLabs (no per-entry param slot), Bolna BYO SIP trunks (Beta; keyed on the resolved carrier being a BYO trunk), Vocode hosted Beta surface, and `unbenchmarked` sizing coefficients.
 
 ---

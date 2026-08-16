@@ -153,8 +153,7 @@ func TestDevTelephonyRefusesOnTheDailyRouteAndNamesWhatWorks(t *testing.T) {
 	message := err.Error()
 	for _, want := range []string{
 		"daily-sip",                    // names the route
-		"--console",                    // names a mode that does work
-		"browser",                      // names the other one
+		"browser",                      // names the mode that does work
 		"deploy",                       // points at how to get a real phone call
 		"pipecat-human-transfer-daily", // names the package, so the fix is copy-pasteable
 	} {
@@ -198,7 +197,7 @@ func TestDevTelephonyRefusesOnTheDailyCarrierFormAndNamesTheHelper(t *testing.T)
 			"README",              // names where the two commands are written out
 			"tunnel",              // names the local test path rather than denying one
 			"twilio",              // names the carrier the target declared
-			"--console",           // still names a mode that works right now
+			"browser",             // still names a mode that works right now
 		} {
 			if !strings.Contains(message, want) {
 				t.Errorf("refusal missing %q:\n%s", want, message)
@@ -527,14 +526,23 @@ func TestSelectDevTargetRequiresNameForMultipleWithoutTTY(t *testing.T) {
 	}
 }
 
-// TestDevConsoleAndTelephonyRejected: console (native, host audio) and
-// telephony (containerized) are mutually exclusive and refused up front,
-// before any generation or Docker (SCHEMA §5.3).
-func TestDevConsoleAndTelephonyRejected(t *testing.T) {
+// TestDevConsoleRemoved: the flag is gone, and passing it explains itself.
+// It stays registered and hidden precisely so this message is possible: an
+// author with `--console` in their shell history gets told the mode moved,
+// not cobra's bare "unknown flag".
+func TestDevConsoleRemoved(t *testing.T) {
 	dir := copySafeCore(t)
-	_, err := run(t, "dev", dir, "--target", "pipecat", "--console", "--telephony")
-	if err == nil || !strings.Contains(err.Error(), "--console and --telephony cannot be used together") {
-		t.Fatalf("console+telephony error = %v", err)
+	_, err := run(t, "dev", dir, "--target", "pipecat", "--console")
+	if err == nil {
+		t.Fatal("--console must fail; it was removed")
+	}
+	for _, want := range []string{"--console was removed", "Docker", "browser"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("removed-flag error %q must mention %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "unknown flag") {
+		t.Errorf("removed-flag error fell through to cobra: %v", err)
 	}
 }
 
@@ -593,104 +601,6 @@ func TestSelectDevTargetRejectsUnknownInstance(t *testing.T) {
 	_, err := selectDevTarget(cmd, dir, "missing")
 	if err == nil || !strings.Contains(err.Error(), `target instance "missing" is not declared`) {
 		t.Fatalf("selectDevTarget() error = %v", err)
-	}
-}
-
-func TestConsolePlan(t *testing.T) {
-	for _, tc := range []struct {
-		provider ir.Provider
-		want     string // space-joined uv args
-		errSub   string
-	}{
-		{ir.ProviderPipecat, "run --extra console bot.py console", ""},
-		{ir.ProviderLiveKit, "run agent.py console", ""},
-		{ir.ProviderVapi, "", "not implemented"},
-	} {
-		got, err := consolePlan(tc.provider)
-		if tc.errSub != "" {
-			if err == nil || !strings.Contains(err.Error(), tc.errSub) {
-				t.Errorf("consolePlan(%s) err = %v, want contains %q", tc.provider, err, tc.errSub)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("consolePlan(%s): %v", tc.provider, err)
-		}
-		if strings.Join(got, " ") != tc.want {
-			t.Errorf("consolePlan(%s) = %v, want %q", tc.provider, got, tc.want)
-		}
-	}
-}
-
-func TestRequireInferenceCreds(t *testing.T) {
-	// Hermetic: force the ambient LiveKit creds empty so the machine's real
-	// env can't mask the missing case.
-	t.Setenv("LIVEKIT_API_KEY", "")
-	t.Setenv("LIVEKIT_API_SECRET", "")
-	uses := []string{`reason provider "livekit"`}
-
-	dir := t.TempDir()
-	err := requireInferenceCreds(dir, uses)
-	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_API_KEY") ||
-		!strings.Contains(err.Error(), "LIVEKIT_API_SECRET") || !strings.Contains(err.Error(), "reason") {
-		t.Fatalf("missing-creds error = %v", err)
-	}
-
-	if err := os.WriteFile(filepath.Join(dir, ".env"),
-		[]byte("LIVEKIT_API_KEY=k\nLIVEKIT_API_SECRET=s\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := requireInferenceCreds(dir, uses); err != nil {
-		t.Errorf("creds present in .env, want nil; got %v", err)
-	}
-}
-
-// TestDevConsoleRoutesRegardlessOfWebFlags: --console takes over the dispatch,
-// and the web-only flags are inert. A vapi target gives the console-specific
-// "console mode is not implemented" (not the web path's "dev runner is not
-// implemented"), even with --port passed, proving the route and the inertness.
-func TestDevConsoleRoutesRegardlessOfWebFlags(t *testing.T) {
-	dir := copySafeCore(t)
-	_, err := run(t, "dev", dir, "--target", "vapi", "--console", "--port", "1", "--no-open")
-	if err == nil || !strings.Contains(err.Error(), "console mode is not implemented") {
-		t.Fatalf("vapi console route error = %v", err)
-	}
-	// The web path for the same target uses the other wording.
-	_, err = run(t, "dev", dir, "--target", "vapi")
-	if err == nil || !strings.Contains(err.Error(), "its dev runner is not implemented") {
-		t.Fatalf("vapi web route error = %v", err)
-	}
-}
-
-// TestDevConsoleLiveKitInferenceRequiresCreds (V7, C7): a livekit console target
-// that routes a role through LiveKit Inference fails the preflight naming the
-// missing creds and the reason, before the TUI launches. Flips a scaffolded
-// agent's reason binding to provider: livekit (the Inference wildcard).
-func TestDevConsoleLiveKitInferenceRequiresCreds(t *testing.T) {
-	t.Setenv("LIVEKIT_API_KEY", "")
-	t.Setenv("LIVEKIT_API_SECRET", "")
-	data := scaffold.Data{Name: "agent"}
-	data.SetTarget("livekit")
-	dir := filepath.Join(t.TempDir(), "agent")
-	if _, err := scaffold.Write(dir, data); err != nil {
-		t.Fatal(err)
-	}
-	agentPath := filepath.Join(dir, "agent.yaml")
-	raw, err := os.ReadFile(agentPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	flipped := strings.ReplaceAll(string(raw), "provider: openai", "provider: livekit")
-	if flipped == string(raw) {
-		t.Fatal("expected an openai reason binding to flip to livekit inference")
-	}
-	if err := os.WriteFile(agentPath, []byte(flipped), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = run(t, "dev", dir, "--target", "livekit", "--console")
-	if err == nil || !strings.Contains(err.Error(), "LIVEKIT_API_KEY") || !strings.Contains(err.Error(), "Inference") {
-		t.Fatalf("console inference preflight error = %v", err)
 	}
 }
 

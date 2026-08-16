@@ -11,7 +11,7 @@ Pipecat route with a native transfer primitive.
 targets:
   pipecat:
     provider: pipecat
-    version: "1.5.0"
+    version: "1.7.0"
     connection: daily
 ```
 
@@ -88,7 +88,7 @@ generates.
 `unmute dev --telephony` refuses this route, and says why:
 
 ```
-unmute: dev examples/pipecat-human-transfer-daily: target "pipecat" runs on the Pipecat Daily route (transport daily-sip), where Daily carries the phone call to a deployed agent, so there is no local telephony topology to run; talk to this agent now with `unmute dev examples/pipecat-human-transfer-daily` in the browser or `unmute dev --console examples/pipecat-human-transfer-daily` in the terminal, and for a real phone call run `unmute compile examples/pipecat-human-transfer-daily` and follow the Deploy and Phone calls sections of the emitted README
+unmute: dev examples/pipecat-human-transfer-daily: target "pipecat" runs on the Pipecat Daily route (transport daily-sip), where Daily carries the phone call to a deployed agent, so there is no local telephony topology to run; talk to this agent now with `unmute dev examples/pipecat-human-transfer-daily` in the browser, and for a real phone call run `unmute compile examples/pipecat-human-transfer-daily` and follow the Deploy and Phone calls sections of the emitted README
 ```
 
 That is the honest answer: this route has nothing local to run. Talk to the

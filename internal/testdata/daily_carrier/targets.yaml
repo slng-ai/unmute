@@ -1,6 +1,6 @@
 targets:
   pipecat:
     provider: pipecat
-    version: "1.5.0"
+    version: "1.7.0"
     connection: twilio_sip_daily
     deployment_region: us-west
