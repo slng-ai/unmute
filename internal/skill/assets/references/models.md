@@ -81,10 +81,9 @@ say what you bound.
 A target and vendor may narrow this further. For example, validation rejects
 `language` when that integration has no language slot.
 
-## The think model needs `reasoning_effort`
+## The default OpenAI think model needs `reasoning_effort`
 
-Write it on the think entry of every package you create, and keep it on one you
-edit:
+Keep it on the scaffold's `gpt-5.6-luna` entry:
 
 ```yaml
       params:
@@ -95,8 +94,8 @@ edit:
 request that carries function tools unless the request also sets
 `reasoning_effort`. Leaving it out is not the same as leaving it alone: the
 server applies its own default and every turn comes back as HTTP 400. Nearly
-every agent has tools, so treat the line as part of the block rather than as
-tuning somebody asked for.
+every agent has tools. This is an OpenAI model setting, not a field to copy to
+other providers.
 
 This model takes `none`, `low`, `medium`, `high`, and `xhigh`. It rejects
 `minimal`. Use `none` unless the user asks for more thinking.
@@ -205,8 +204,8 @@ line has to name the one in use. With one entry each, nothing needs selecting.
 
 ## Where the keys live
 
-Every provider needs a credential, and it is an environment variable name in
-`secrets:`, never a value:
+Remote providers need credentials, listed as environment variable names in
+`secrets:`, never values. Local turn detection needs no credential:
 
 ```yaml
 secrets:

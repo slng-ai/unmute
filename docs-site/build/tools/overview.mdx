@@ -6,6 +6,9 @@ description: "What a tool is, the six ways one can run, and how you decide which
 A tool is two things: a contract the model sees, and something that runs when the
 model calls it. Both live in one file, `tools/<name>.yaml`.
 
+The file stem is the tool name. It must be lower snake case and cannot start with
+an underscore.
+
 ```yaml tools/check_availability.yaml expandable
 description: >-
   List Sage and Stone slots for one service and date. Call only after customer
@@ -88,22 +91,41 @@ pipecat: Pipecat provider-hosted tools are not proven by its driver
 They are listed here so you know the names mean nothing yet, and so a refusal you
 meet reads as a decision rather than a bug.
 
+Both blocks have no fields, but YAML still needs an explicit body: write
+`client: {}` or `provider_hosted: {}`.
+
+## Fields inside each execution block
+
+| Block | Field | Required | Values and defaults |
+|---|---|---|---|
+| `webhook` | `url_env` | yes | UPPER_SNAKE name holding the base URL |
+| `webhook` | `path` | no | path beginning with `/`; may contain `{{variable}}` tokens |
+| `webhook` | `auth` | no | bearer or API-key authentication |
+| `local` | `handler` | no | package Python path; omitted means `tools/<tool-name>.py` |
+| `mcp` | `url_env` | yes | UPPER_SNAKE name holding the server URL |
+| `mcp` | `transport` | no | `sse` or `streamable_http`; omitted lets the SDK infer it from the URL |
+| `mcp` | `auth` | no | bearer or API-key authentication |
+| `mcp` | `tools` | no | non-empty, unique server tool names; omitted means all tools |
+| `builtin` | `id` | yes | closed registry id; `end_call` is the only id today |
+| `builtin` | `instructions` | no | instruction applied by the prebuilt as it runs |
+| `client`, `provider_hosted` | none | — | explicit empty block only |
+
 ## Which fields the block allows
 
 The contract fields are shared, with one exception that matters:
 
 | Field | Required | Where it is legal |
 |---|---|---|
-| `description` | yes, except on `builtin:` and `mcp:` | everywhere else |
-| `input` | yes, except on `builtin:` and `mcp:` | everywhere else |
-| `output` | no | everywhere except `mcp:` |
-| `inject` | no | `webhook:` and `local:` only |
+| `description` | yes, except on `builtin:` and `mcp:` | optional on `builtin:`, illegal on `mcp:`, legal everywhere else |
+| `input` | yes on tool contracts | illegal on `builtin:` and `mcp:`, required everywhere else |
+| `output` | no | illegal on `builtin:` and `mcp:`; author-side only elsewhere, not sent to the model, not included in the compile report, and not enforced at run time |
+| `inject` | no | `webhook:` and `local:` only; values must be scalars |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` |
 
 An `mcp:` file carries none of them, because the server owns each tool's contract.
-A `builtin:` file needs no `description` or `input`, because the registry supplies
-both, and your `description` is added on top if you write one.
+A `builtin:` file takes no `input` or `output`. The registry supplies its contract
+and default description, and your `description` is added on top if you write one.
 
 ## The two behavior fields
 
@@ -170,10 +192,12 @@ name with an inline mapping of `description`, `input`, `output`, `local`, or
 `webhook`.
 
 **Task `result:` and tool `output:` are different contracts.** A tool's optional
-`output:` describes one tool call and stays in `tools/<name>.yaml`. A task's
-required `result:` describes what the whole delegated task returns to its caller
-after any tool calls. It may select or combine tool data, so design it for what
-the caller needs instead of copying a tool output schema by default.
+`output:` is an author-side description of one tool call. No generator sends it
+to the model, puts it in the compile report, or enforces it at run time today. A
+task's required `result:` is enforced and describes what the whole delegated task
+returns to its caller after any tool calls. It may select or combine tool data,
+so design it for what the caller needs instead of copying a tool output schema by
+default.
 
 A file in `tools/` that the package level list does not name is not loaded at all,
 and nothing complains. If a tool you wrote never seems to be offered, check that

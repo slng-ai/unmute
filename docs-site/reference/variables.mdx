@@ -25,20 +25,26 @@ variables:
 
 ## Sources
 
-| Source | Who supplies it | When |
+| Source | Who supplies it | Availability |
 |---|---|---|
-| `call_start` | the dispatch payload, or `--var` locally | before the first word |
+| `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
 | `conversation` | the model, through the generated `update_variables` tool | during the call |
-| `session_id` | the runtime | at session start |
-| `call_id` | the runtime | on a phone call |
-| `stream_id` | the runtime | on a phone call |
-| `direction` | the runtime | on a phone call |
-| `from_number` | the runtime | on a phone call |
-| `to_number` | the runtime | on a phone call |
-| `carrier` | the runtime | on a phone call |
-| `connection` | the runtime | on a phone call |
+| `session_id` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
+| `call_id` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
+| `stream_id` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `connector`; not LiveKit `sip` |
+| `direction` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
+| `from_number` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
+| `to_number` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
+| `carrier` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
+| `connection` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
 
-The last eight are system sources. You declare them; the runtime fills them in.
+The last eight are system sources. You declare them and the selected phone route
+must prove it can supply them. Pipecat `daily-sip` and `cloud-websocket` routes
+do not bind system sources today, so using one there is a validation error.
+
+For an inbound LiveKit or Pipecat telephony channel, every `call_start` variable
+needs a default. There is no dispatch payload to supply an unsolicited incoming
+call before its greeting.
 
 ## Where a variable can be used
 
@@ -87,11 +93,15 @@ An undeclared name is refused rather than accepted and dropped.
 
 Declaring any `source: conversation` variable creates a tool named
 `update_variables` in the generated project. You do not write it, and you do
-not list it. The model calls it when the caller says something worth keeping.
+not list it. The name is reserved: a package tool or control cannot also be named
+`update_variables`. The model calls it when the caller says something worth
+keeping.
 
 ## Passing a value into a tool
 
 ```yaml tools/book_appointment.yaml
+description: Book the selected appointment for the current customer.
+
 input:
   type: object
   properties:
@@ -103,11 +113,17 @@ input:
 inject:
   customer_id: "{{customer_id}}"
   service: "{{requested_service}}"
+
+local:
+  handler: tools/book_appointment.py
 ```
 
 `inject` values are not part of the model's schema, so the model can neither
 see them nor overwrite them. An `inject` key that also names an `input`
 property is a compile error, for exactly that reason.
+
+Each injected value must be a scalar. A string may contain `{{variable}}`
+tokens; maps and lists are refused.
 
 `inject` is legal on `webhook` and `local` tools: the two kinds whose request
 Unmute builds itself.

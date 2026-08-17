@@ -1,6 +1,6 @@
 ---
 name: unmute
-description: Build voice agents with the Unmute CLI. Use when the user asks for a voice agent, a phone agent, a voice assistant, a call bot, or mentions Unmute, agent.yaml, targets.yaml, unmute validate, or unmute dev.
+description: Creates, maintains, validates, compiles, and runs voice-agent packages with the Unmute CLI. Use for voice or phone agents, existing Unmute packages, agent.yaml, targets.yaml, connections/*.yaml, tools/*.yaml, or unmute init, validate, compile, and dev.
 metadata:
   unmute_version: "{{unmute_version}}"
 ---

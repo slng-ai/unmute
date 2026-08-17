@@ -104,22 +104,6 @@ the same set.
   project. Pipecat Cloud applies the same rule to names added outside the package.
 </Warning>
 
-## What is verified here, and what is not
-
-The commands above come from the runbook this repository generates, which is
-generated from the same package as the code. `pipecat cloud deploy`,
-`--min-agents`, `agent status`, and `regions list` match Pipecat Cloud's current
-deployment documentation, read 2026-08-14
-([deploy](https://docs.pipecat.ai/pipecat-cloud/fundamentals/deploy)). The
-`secrets set --file .env` form appears in Pipecat Cloud's own guides rather than on
-its secrets reference page, which documents only the key-value form; both were read
-2026-08-14.
-
-Nothing on this page was executed against a real Pipecat Cloud organization during
-writing, because that needs an account and a billable agent. Treat the sequence as
-correct and the output as unseen: your build's README and
-`pipecat cloud agent status` are what tell you the truth for your deployment.
-
 ## Where to go next
 
 <Columns cols={2}>

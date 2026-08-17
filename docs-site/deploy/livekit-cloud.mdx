@@ -117,19 +117,6 @@ python -m livekit.agents start agent.py
 On this path Redis is yours as well, because the managed SIP service is not in the
 picture.
 
-## What is verified here, and what is not
-
-The commands above come from the runbook this repository generates, which is
-generated from the same package as the code. They agree with LiveKit's own
-deployment and secrets documentation, read 2026-08-14
-([deployment](https://docs.livekit.io/deploy/agents/quickstart/),
-[secrets](https://docs.livekit.io/deploy/agents/secrets)).
-
-Nothing on this page was executed against a real LiveKit Cloud project during
-writing, because that needs an account and a billable agent. Treat the sequence as
-correct and the output as unseen: your build's README and `lk agent status` are what
-tell you the truth for your deployment.
-
 ## Where to go next
 
 <Columns cols={2}>

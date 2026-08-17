@@ -30,10 +30,12 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
       created my-agent/tools/end_call.yaml
       ```
 
-      `agent.yaml` is the agent, `instructions.md` is its prompt, and
-      `targets.yaml` selects LiveKit Agents as the runtime. `.env.example`
-      lists the keys to fill in. The scaffold uses SLNG speech models for
-      listening and speaking.
+      [`agent.yaml`](/reference/agent-yaml) is the agent,
+      `instructions.md` is its prompt, and
+      [`targets.yaml`](/reference/targets-yaml) selects LiveKit Agents as the
+      runtime. Their configuration pages list every supported key.
+      `.env.example` lists the keys to fill in. The scaffold uses SLNG speech
+      models for listening and speaking.
     </Accordion>
 
     <Tip>
@@ -53,7 +55,9 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
     ```
     </CodeGroup>
 
-    Open `.env` and fill in only `OPENAI_API_KEY` and `SLNG_API_KEY`.
+    Open `.env` and fill in only `OPENAI_API_KEY` and `SLNG_API_KEY`. The
+    [secrets guide](/reference/secrets) explains which names belong to the
+    package and which belong to its runtime.
 
     <Accordion title="Why the other keys stay empty">
       `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and `LIVEKIT_URL` point at a

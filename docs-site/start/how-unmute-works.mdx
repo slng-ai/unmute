@@ -10,10 +10,13 @@ and writes a project. Nothing of Unmute is left in the project it writes.
 
 <Steps>
   <Step title="Load">
-    Unmute reads `agent.yaml`, `targets.yaml`, your tool files, your
-    connections, your prompts, and your local Python handlers. YAML decoding is
-    strict: an unknown field is an error, not a shrug. Errors carry the file and
-    the line.
+    Unmute reads [`agent.yaml`](/reference/agent-yaml),
+    [`targets.yaml`](/reference/targets-yaml), your tool files, your
+    [connections](/reference/connections-yaml), your prompts, and your local
+    Python handlers. YAML decoding is strict: an unknown field is an error, not
+    a shrug. Errors carry the file and the line. The configuration pages also
+    list every [variable](/reference/variables) and [secret](/reference/secrets)
+    field.
   </Step>
   <Step title="Build">
     Names get resolved into one internal description of the agent. Model names
@@ -101,8 +104,7 @@ vendor document and the date it was checked:
 pipecat: telephony evidence inbound=provisional docs=https://docs.pipecat.ai/pipecat-cloud/guides/telephony/twilio-websocket verified=2026-08-13 smoke=false
 ```
 
-`provisional` means the route is implemented and compiles, and that no
-credentialed end to end test is recorded for it.
+See [the compile report](/reference/cli/compile#the-report) for each field.
 
 ## Warnings never fail quietly
 

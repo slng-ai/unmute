@@ -22,18 +22,13 @@ one and say plainly which you picked and what it cannot do.
 | Pipecat | `cloud-websocket` | Twilio | Pipecat Cloud terminates the carrier's media stream itself. Nothing of yours is hosted |
 | Pipecat | `carrier-websocket` | Twilio, Telnyx, Plivo | a generated adapter of yours terminates the carrier's media stream |
 | Pipecat | `carrier-websocket` | Exotel | no adapter, so this route is refused at validation |
-| Pipecat | `daily-sip` | none | Daily provisions the number and delivers the call to your deployed agent |
 | Pipecat | `daily-sip` | Twilio | your carrier forwards into the same Daily room through a helper you run |
 | LiveKit Agents | `sip` | Twilio, Telnyx, Plivo | a SIP trunk carries the call into LiveKit SIP |
 | LiveKit Agents | `sip` | Exotel | no adapter, so this route is refused at validation |
 | LiveKit Agents | `connector` | Twilio | a generated bridge turns Twilio Media Streams into a LiveKit room |
 
-**Every route that runs is marked `provisional` in the compile report.** That
-means implemented and compiling, with no credentialed end to end test running in
-CI for it. Some routes have dated live call evidence recorded in the repository,
-and the compile report prints the vendor document and the date it was last
-checked. Repeat that to the user. Do not present any route as more proven than
-the report says.
+The compile report marks each phone route and prints the vendor document and
+the date it was last checked. Read that report before describing the route.
 
 ## What the transport decides
 
@@ -108,12 +103,16 @@ Three shapes exist:
 |---|---|---|
 | full route | most connections | `transport`, `carrier`, and an `environment` map |
 | no credentials | receive only on Pipecat `cloud-websocket` | `transport` and `carrier`, nothing else |
-| no carrier | a Daily-provisioned number | `transport: daily-sip`, and that is the whole file |
+| no carrier | outbound dial-out through Daily | `transport: daily-sip`, and that is the whole file |
 
 The receive-only shape has an edge worth knowing: the moment the package places
 a call or hands one to a person, that same route needs `account_sid`,
 `auth_token`, and `from_number`, because both of those speak to Twilio's API in
 your name. The refusal says which behaviour asked for them.
+
+The no-carrier Daily shape is outbound-only. It can back a control that dials a
+person, but it cannot receive calls and is refused if the package declares a
+telephony channel.
 
 ### The environment keys, per route
 
@@ -125,7 +124,6 @@ A key from another route is refused, and the refusal carries the accepted set.
 | Pipecat | `carrier-websocket` | `twilio` | `account_sid`, `auth_token`, `from_number` |
 | Pipecat | `carrier-websocket` | `telnyx` | `api_key`, `public_key`, `connection_id`, `from_number` |
 | Pipecat | `carrier-websocket` | `plivo` | `auth_id`, `auth_token`, `from_number` |
-| Pipecat | `daily-sip` | none | none |
 | Pipecat | `daily-sip` | `twilio` | `account_sid`, `auth_token`, `sip_address`, `from_number` |
 | LiveKit Agents | `sip` | `twilio`, `telnyx`, `plivo` | `sip_address`, `sip_username`, `sip_password`, `from_number` |
 | LiveKit Agents | `connector` | `twilio` | `account_sid`, `auth_token`, `from_number` |

@@ -2428,34 +2428,25 @@ func TestUS4_ForwardedRegionIsInTheReport(t *testing.T) {
 	}
 }
 
-// US5: the emitted instructions describe how an outbound call is started and say
-// what identity the recipient sees, given the package cannot choose one.
-//
-// Documentation only on the *no-carrier* form, and deliberately so: there Daily
-// owns the number, outbound is started by the platform against the deployed
-// agent, and there is nothing for the package to declare.
-//
-// This comment used to say a phone channel was impossible on the Daily route
-// full stop, which SCHEMA N37 superseded: the carrier form declares one, because
-// naming a carrier gives the route a connection to dial with. That form is
-// covered by TestCarrierOutboundTrigger. The no-carrier form is unchanged, and
-// this test is its half.
-func TestUS5_OutboundInstructionsNameTheIdentityAndThePermission(t *testing.T) {
+// US5: the no-carrier Daily form exists only for dial-out controls. Its runbook
+// must not turn that narrow shape into an inbound phone route or an undeclared
+// generic outbound channel.
+func TestUS5_CarrierlessDailyInstructionsStayOutboundOnly(t *testing.T) {
 	readme := artifactFile(t, dailyArtifact(t), "README.md")
 	for _, want := range []string{
-		"Place an outbound call",
-		"https://api.pipecat.daily.co/v1/public/",
-		`"enable_dialout": true`,
-		"dialout_settings",
-		// The recipient's identity is the provider's choice, and saying so is the
-		// point: an author who assumes otherwise learns it from a stranger's
-		// caller display.
-		"recipient sees a number you did not choose",
-		"picks one of your purchased numbers at random",
+		"Carrierless Daily dial-out",
+		"outbound-only",
+		"cold-transfer control",
+		"cannot answer phone calls",
 		"international dial-out is",
 	} {
 		if !strings.Contains(readme, want) {
 			t.Errorf("README.md missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"Buy a phone number", "Attach the number", "Place an outbound call"} {
+		if strings.Contains(readme, forbidden) {
+			t.Errorf("README.md presents carrierless Daily as a broader phone route: %q", forbidden)
 		}
 	}
 }

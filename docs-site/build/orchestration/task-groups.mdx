@@ -80,18 +80,19 @@ Each name in `steps` is a task already declared in `tasks:`.
 
 Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
 
-| Field | Values | What it does |
+| Field | Required | Values and constraints |
 |---|---|---|
-| `context_scope` | `shared`, `isolated` | whether the steps see one running context or start clean |
-| `then` | `return`, `transfer`, `end` | what happens after the last step |
-| `then_target` | an agent name | required with `transfer`, illegal otherwise |
-| `merge` | `results` | how the steps' results are combined |
+| `steps` | yes | one or more declared task names, in order |
+| `context_scope` | yes | `shared` or `isolated` |
+| `then` | yes | `return`, `transfer`, or `end` |
+| `then_target` | with `then: transfer` | declared agent name; illegal for `return` and `end` |
+| `merge` | no | `results`; omitted also means `results` |
 
 ## Delegate to the group
 
 The complete example uses the same `delegate` control as a single task, with
 `group:` instead of `task:`. The agent lists that control by name. Each member
-task lists only the loaded tools it may call.
+task lists the loaded tools and controls it may call.
 
 The agent has one control and no domain tools at all.
 

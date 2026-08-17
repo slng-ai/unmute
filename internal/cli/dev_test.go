@@ -133,12 +133,10 @@ func TestDev_help(t *testing.T) {
 
 // FR-028: `--telephony` on the Daily route has nothing to offer, so it refuses.
 //
-// The refusal is the interesting part. Daily delivers phone calls through its own
-// infrastructure to a deployed agent, so there is no local topology to run, but
-// the author can still talk to this agent right now in two other modes. A silent
-// no-op here would be the flag that does nothing which Principle II forbids, and
-// a message saying telephony is unsupported would be false: Daily is the only
-// Pipecat telephony route there is.
+// The refusal is the interesting part. The carrierless Daily form dials out and
+// cannot receive calls, so there is no local topology to run, but the author can
+// still talk to this agent in the browser. A silent no-op here would be the flag
+// that does nothing which Principle II forbids.
 func TestDevTelephonyRefusesOnTheDailyRouteAndNamesWhatWorks(t *testing.T) {
 	cmd := newRootCmd()
 	var out, errOut bytes.Buffer
@@ -152,10 +150,11 @@ func TestDevTelephonyRefusesOnTheDailyRouteAndNamesWhatWorks(t *testing.T) {
 	}
 	message := err.Error()
 	for _, want := range []string{
-		"daily-sip", // names the route
-		"browser",   // names the mode that does work
-		"deploy",    // points at how to get a real phone call
-		"safe_core", // names the package the command received
+		"daily-sip",      // names the route
+		"outbound-only",  // names what the shape can do
+		"cannot receive", // names why --telephony cannot run it
+		"browser",        // names the mode that does work
+		"safe_core",      // names the package the command received
 	} {
 		if !strings.Contains(message, want) {
 			t.Errorf("refusal missing %q:\n%s", want, message)
@@ -163,7 +162,7 @@ func TestDevTelephonyRefusesOnTheDailyRouteAndNamesWhatWorks(t *testing.T) {
 	}
 	// It must not claim the route has no telephony. It is the only Pipecat
 	// telephony route there is.
-	for _, forbidden := range []string{"no resolved telephony route", "not supported", "unsupported"} {
+	for _, forbidden := range []string{"carries the phone call", "no resolved telephony route", "not supported", "unsupported"} {
 		if strings.Contains(message, forbidden) {
 			t.Errorf("refusal says %q, which is false for this route:\n%s", forbidden, message)
 		}

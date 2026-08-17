@@ -1,5 +1,5 @@
 ---
-title: "agent.yaml"
+title: "Agent configuration"
 description: "Every block of the agent file, and the tool files beside it."
 ---
 
@@ -11,27 +11,66 @@ line, not a shrug.
 
 Durations use Go duration syntax, for example `90s`, `15m`, or `1h30m`.
 
-## Top level
+```yaml agent.yaml
+version: 1
+entry_agent: greeter
 
-| Key | Required | What it is |
-|---|---|---|
-| `version` | yes | the schema version, `1` |
-| `entry_agent` | yes | which agent answers |
-| `models` | yes | the model palette, grouped by kind |
-| `listen` | when `models.listen` has 2 or more entries | which listen entry to use |
-| `turn` | when `models.turn` has 2 or more entries | which turn entry to use |
-| `variables` | no | per call values |
-| `secrets` | no | every environment variable name this package writes |
-| `destinations` | when a `human_transfer` is used | symbolic name to the environment variable holding a number |
-| `agents` | yes | one or more agents |
-| `tasks` | no | delegated steps |
-| `task_groups` | no | ordered sequences of tasks |
-| `controls` | no | delegate, agent transfer, human transfer |
-| `tools` | no | which tool files to load |
-| `conversation` | no | greeting, interruption, inactivity, limits |
-| `tracing` | no | tracing provider |
-| `channels` | yes | how people reach the agent |
-| `capacity` | for telephony or code targets | your traffic estimate |
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-luna
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  greeter:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 5
+  avg_session_duration: 3m
+```
+
+## All keys
+
+| Key | Type | Required | Default | Allowed values | Meaning |
+|---|---|---|---|---|---|
+| `version` | integer | yes | — | `1` | schema version |
+| `entry_agent` | string | yes | — | declared agent name | agent that answers |
+| `models` | map | yes | — | sections `think`, `speak`, `listen`, `turn` | model palette grouped by kind |
+| `listen` | string | with 2 or more listen chain heads | sole chain head | declared `models.listen` name | listen entry to use |
+| `turn` | string | with 2 or more turn entries | sole entry | declared `models.turn` name | turn entry to use |
+| `variables` | map | no | — | lower snake case names | per-call values |
+| `secrets` | list of strings | no | — | UPPER_SNAKE names | environment values the generated project reads |
+| `destinations` | map of strings | when `human_transfer` is used | — | lower snake case names to UPPER_SNAKE env names | phone destinations controls may use |
+| `agents` | map | yes | — | one or more lower snake case names | agent prompts, models, and callable names |
+| `tasks` | map | no | — | lower snake case names | delegated steps |
+| `task_groups` | map | no | — | lower snake case names | ordered task sequences |
+| `controls` | map | no | — | lower snake case names | delegates and transfers |
+| `tools` | list of strings | no | — | loaded tool file names | tool files to load |
+| `conversation` | object | no | — | keys below | greeting, interruption, inactivity, and limits |
+| `tracing` | object | no | — | `provider: langfuse` | tracing provider |
+| `channels` | map | yes | — | one or more channel definitions | how people reach the agent |
+| `capacity` | object | for telephony or code targets | — | positive values; constraints below | traffic estimate |
 
 ## `models`
 
@@ -59,6 +98,17 @@ Which fields are legal depends on the section:
 | `temperature`, `top_p`, `top_k` | `think` |
 | `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |
 | `fallback` | `think`, `listen` |
+
+| Field | Values and constraints |
+|---|---|
+| `provider` | a provider from the target's model catalogue; `local` also implies local placement |
+| `model`, `voice`, `params` | provider values, passed through as written |
+| `speed`, `temperature`, `top_p`, `top_k` | numeric provider values, forwarded as written |
+| `language` | BCP-47 tag such as `en` or `en-US` |
+| `endpoint_env` | UPPER_SNAKE environment variable name for a custom endpoint |
+| `placement` | `api` or `local`; when omitted, `provider: local` means local and another named model means API |
+| `fallback` | names in the same section; chains are flattened and cycles are refused |
+| `description` | author note |
 
 Entries you do not reference are legal alternates.
 
@@ -116,11 +166,12 @@ A list of UPPER_SNAKE environment variable names. Never values, and never usable
 in a `{{template}}`. That list is `examples/livekit-human-transfer`'s: two model
 keys, the four names its connection maps, and the two desks it can transfer to.
 
-The rule is: **every environment name you wrote anywhere in this package** goes
-here. Model and tool credentials, the names a connection's `environment:` maps
-to, and the numbers `destinations:` points at. Names the driver or the platform
-supplies for you, such as `REDIS_URL` or `DAILY_API_KEY`, are not yours to
-declare and are left out. See [secrets](/reference/secrets).
+Declare every environment name the generated project reads: names written in
+tool and connection fields, destination values, literal `os.environ` reads in
+local handlers, provider API keys inferred from the model catalogue, and the
+three Langfuse names when tracing is enabled. Names the driver or platform
+supplies, such as `REDIS_URL` or `DAILY_API_KEY`, stay out. See
+[secrets](/reference/secrets).
 
 ## `destinations`
 
@@ -184,16 +235,22 @@ tasks:
 | Field | What it is |
 |---|---|
 | `instructions` | the task's own prompt file |
-| `tools` | names of loaded tools the task may call; definitions never go here |
+| `tools` | names this task may call: loaded tool files and controls; definitions never go here |
 | `model` | optional override of the thinking model |
 | `result` | the typed result returned by the whole task, not a tool's `output` schema |
 | `context` | what the task sees, see below |
 
-**Task `result:` and tool `output:` are different contracts.** A task must
-declare `result:`, but do not copy an attached tool's `output:` into it by
-default. The tool output describes one call in `tools/<name>.yaml`; the task
-result describes what the calling agent receives after the task has made all of
-its calls.
+Every task needs a non-empty `result:`. Each result field is one of:
+
+- a primitive name: `string`, `number`, `integer`, or `boolean`,
+- an `{enum: [...]}` block with at least one string, or
+- a JSON Schema object for a nested shape.
+
+**Task `result:` and tool `output:` are different contracts.** A task result is
+enforced and describes what the calling agent receives after the task finishes.
+A tool's optional `output:` is only an author-side description of one call today;
+it is not sent to the model, emitted in the compile report, or enforced at run
+time.
 
 ### `context`
 
@@ -226,7 +283,7 @@ task_groups:
 | `context_scope` | `shared` or `isolated` |
 | `then` | `return`, `transfer`, or `end` |
 | `then_target` | an agent name, required with `transfer`, illegal otherwise |
-| `merge` | `results` |
+| `merge` | `results`; omitted also means `results` |
 
 When a task runs inside a group, the group's `context_scope` governs it. The
 member task's own `context` does not override the group.
@@ -251,6 +308,13 @@ controls:
 | `agent_transfer` | `to`, `when`, `announce`, `context`, `requires` |
 | `human_transfer` | `when`, and exactly one of `cold:` or `warm:` |
 
+A delegate needs exactly one of `task` or `group`. `assign` is legal only when
+delegating to one task, because each mapping reads `result.<field>` from that
+task.
+
+An `agent_transfer.context` block needs both `history` and `variables`. The
+`variables` value is `all` or a non-empty list of declared variable names.
+
 For `agent_transfer`, `announce` is optional exact spoken text. It is not a
 model instruction: write the short sentence the caller should hear. Omit it
 for a silent handoff.
@@ -264,8 +328,9 @@ written on a cold transfer:
 | `warm` | `destination`, `briefing`, `ring_timeout`, `on_unavailable` |
 
 `on_unavailable` is `return_to_caller` or `hangup`; omitted means
-`return_to_caller`. `ring_timeout` uses the platform default when omitted:
-30 seconds on LiveKit and 60 seconds on the Pipecat Twilio route.
+`return_to_caller`. `ring_timeout` must be a positive Go duration. When omitted,
+Pipecat uses 25 seconds. LiveKit leaves the value unset, so the LiveKit platform
+default applies.
 `destination` is a symbol resolved in the top level
 [`destinations:`](#destinations) map above.
 
@@ -306,20 +371,20 @@ exactly one execution block says how it runs.
 | Field | What it is |
 |---|---|
 | `description` | what the model reads |
-| `input` | JSON Schema of the parameters the model fills |
-| `output` | JSON Schema of the result, recorded in the compile report but not enforced at run time yet |
-| `inject` | hidden arguments, values may carry `{{variables}}`; legal on `webhook` and `local` |
+| `input` | JSON Schema of the parameters the model fills; required except on `builtin` and `mcp`, where it is illegal |
+| `output` | optional author-side JSON Schema of the result; illegal on `builtin` and `mcp`, and elsewhere not sent to the model, not emitted in the compile report, and not enforced at run time |
+| `inject` | hidden scalar arguments; string values may carry `{{variables}}`; legal on `webhook` and `local` |
 | `interruption` | `provider_default`, `continue`, `cancel` |
 | `effect` | `returns_data`, `ends_conversation` |
 
 | Execution block | Fields |
 |---|---|
-| `local` | `handler`, a Python file in the package |
-| `webhook` | `url_env`, `path`, `auth` |
-| `mcp` | `url_env`, `transport`, `auth`, `tools` |
-| `builtin` | `id`, `instructions` |
-| `client` | none |
-| `provider_hosted` | none |
+| `local` | optional `handler`; omitted means `tools/<tool-name>.py` |
+| `webhook` | required `url_env`; optional `path` and `auth`; a non-empty path starts with `/` |
+| `mcp` | required `url_env`; optional `transport`, `auth`, and non-empty unique `tools` entries |
+| `builtin` | required `id`; optional `instructions` |
+| `client` | no fields; write `client: {}`; gated on every target today |
+| `provider_hosted` | no fields; write `provider_hosted: {}`; gated on every target today |
 
 An `mcp` file is the block and nothing else. The six contract fields above are
 all illegal on one, because the server describes its own tools.
@@ -382,12 +447,12 @@ channels:
     outbound: true
 ```
 
-| Field | Values |
-|---|---|
-| `kind` | `realtime_audio` or `telephony` |
-| `inbound`, `outbound` | `true` or `false` |
-| `required_controls` | controls this channel requires |
-| `on_voicemail` | `hangup` or `leave_message`, requires `outbound: true` |
+| Field | Required | Values and constraints |
+|---|---|---|
+| `kind` | yes | `realtime_audio` or `telephony` |
+| `inbound`, `outbound` | for `telephony` | `true` or `false`; illegal on `realtime_audio` |
+| `required_controls` | no | `cold_transfer`, `warm_transfer`, `dtmf_send`, `dtmf_receive`, `hold`, `hangup`, `voicemail_detection`, or `ivr_navigation`; illegal on `realtime_audio` |
+| `on_voicemail` | no | `hangup` or `leave_message`; requires `kind: telephony` and `outbound: true` |
 
 ### Two rules a telephony channel brings with it
 
@@ -420,6 +485,10 @@ the compiler sizes workers from. One is a fine answer for a first line.
 Capacity is required for every code target, including both targets documented
 on this site. A telephony channel also makes `peak_starts_per_second` required.
 
+| Key | Required | What it is |
+|---|---|---|
+| `capacity` | for telephony or code targets | your traffic estimate |
+
 ```yaml
 capacity:
   peak_sessions: 5
@@ -429,13 +498,20 @@ capacity:
 
 | Field | What it is |
 |---|---|
-| `peak_sessions` | expected concurrent sessions at peak |
-| `max_sessions` | the ceiling you want to support |
+| `peak_sessions` | expected concurrent sessions at peak; must be positive |
+| `max_sessions` | the ceiling you want to support; must be positive and at least `peak_sessions` |
 | `peak_starts_per_second` | how fast calls arrive at peak. **Required and positive** as soon as any channel is `telephony`; optional otherwise |
-| `avg_session_duration` | a duration, for example `5m` |
+| `avg_session_duration` | a positive Go duration, for example `5m` |
 
 The compiler turns these into worker and quota numbers, marked
 `[unbenchmarked]`.
+
+## Reachability
+
+Models are a palette, so an unused model entry is legal. Other declarations must
+be reachable from `entry_agent`. An unused control, destination, tool, task,
+task group, or non-entry agent is a build error. Attach it to the reachable graph
+or remove it.
 
 ## Where to go next
 

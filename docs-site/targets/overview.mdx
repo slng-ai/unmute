@@ -3,9 +3,10 @@ title: "Targets"
 description: "What a target is, what targets.yaml holds, and how one package compiles to two runtimes."
 ---
 
-A target is one place your agent can run. Unmute ships two: **Pipecat** and
-**LiveKit Agents**. Both are code targets, which means `unmute compile` writes a
-Python project you own.
+A target is one place your agent can run. Unmute generates two:
+**Pipecat** and **LiveKit Agents**. Both are code targets, which means
+`unmute compile` writes a Python project you own. The configuration also accepts
+Vapi and Deepgram for validation only; no project is emitted for them.
 
 ## targets.yaml
 
@@ -32,10 +33,10 @@ is yours: a package with two Twilio setups might call them `pipecat_twilio` and
 
 | Field | What it does |
 |---|---|
-| `provider` | which runtime: `pipecat` or `livekit` |
-| `version` | the framework version to pin in the generated project |
+| `provider` | `pipecat` or `livekit`; `vapi` and `deepgram` validate only |
+| `version` | the exact framework version required for code targets |
 | `sdk_language` | the SDK language, `python` |
-| `pins` | extra package pins for the generated project |
+| `pins` | known LiveKit package pins; other providers do not consume them |
 | `models` | per target overrides of named model entries |
 | `connection` | the one connection file that declares this target's phone route |
 | `deployment_region` | where the platform deploys the agent, forwarded as written |
@@ -139,7 +140,7 @@ Both run the same agent. The differences that usually decide it:
 |---|---|---|
 | generated entry point | `bot.py` | `agent.py` |
 | local run | `uv run bot.py`, or `unmute dev` in Docker | `uv run python -m livekit.agents start agent.py`, or `unmute dev` in Docker with a local LiveKit server |
-| phone routes | Daily provisioned numbers, your carrier over websockets, Pipecat Cloud carrier streams | SIP trunks, or a generated Twilio bridge |
+| phone routes | your carrier through Daily or over websockets, Pipecat Cloud carrier streams | SIP trunks, or a generated Twilio bridge |
 | transfers | cold, on two of its routes | cold and warm, on the SIP route |
 | turn detection in the examples | local Silero | LiveKit's own turn model |
 | provider lists | see [Models](/models/stt) | see [Models](/models/stt) |

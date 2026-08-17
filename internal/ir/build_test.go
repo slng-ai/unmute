@@ -428,12 +428,12 @@ func TestBuildResolvesPipecatDailyCarrierPlan(t *testing.T) {
 			}
 		}
 	})
-	// The Daily-provisioned form receives no calls, so it declares no phone
+	// The carrierless form receives no calls, so it declares no phone
 	// channel and gets no telephony plan — and it now names a connection like
 	// every other route, because that is where its transport is written. A flat
 	// triple lookup would refuse it: this pairing has no row in the capability
 	// table at all (research R10).
-	t.Run("no carrier keeps the Daily-provisioned form", func(t *testing.T) {
+	t.Run("no carrier keeps the outbound-only form", func(t *testing.T) {
 		pkg := loadSafeCore(t)
 		pkg.Targets = map[string]packagespec.Target{"pipecat": pkg.Targets["pipecat"]}
 		agent, err := Build(pkg)

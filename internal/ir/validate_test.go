@@ -94,6 +94,20 @@ func TestValidateLanguageOnThinkModelRejected(t *testing.T) {
 	}
 }
 
+func TestValidateTurnModelRejectsSpeakAndThinkFields(t *testing.T) { // V22
+	agent := safeAgent(t)
+	def := agent.Models["vad"]
+	def.Voice = "not-a-turn-field"
+	temperature := 0.4
+	def.Temperature = &temperature
+	agent.Models["vad"] = def
+
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err == nil || !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), "turn model; voice, speed, and sampling fields do not apply") {
+		t.Fatalf("err=%v report=%#v", err, report.PerTarget)
+	}
+}
+
 // N16: a language set on a vendor whose integration has no language slot must
 // fail at VALIDATE, not just generate (C6: gate before any artifact). gemini
 // TTS is NoLanguage on livekit.

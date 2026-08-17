@@ -23,24 +23,21 @@ variables:
 
 ## Where values come from
 
-| Source | Who supplies it | When |
+| Source | Who supplies it | Availability |
 |---|---|---|
-| `call_start` | the dispatch payload, or `--var` locally | before the first word |
-| `conversation` | the model, through the generated `update_variables` tool | during the call |
-| `session_id` | the runtime | at session start |
-| `call_id` | the runtime | on a phone call |
-| `stream_id` | the runtime | on a phone call |
-| `direction` | the runtime | on a phone call |
-| `from_number` | the runtime | on a phone call |
-| `to_number` | the runtime | on a phone call |
-| `carrier` | the runtime | on a phone call |
-| `connection` | the runtime | on a phone call |
+| `call_start` | the dispatch payload, or `--var` locally | every channel, before the first word |
+| `conversation` | the model, through `update_variables` | during the call |
+| `session_id`, `call_id`, `direction`, `from_number`, `to_number`, `carrier`, `connection` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `sip` or `connector` |
+| `stream_id` | the phone adapter | Pipecat `carrier-websocket`; LiveKit `connector`, not `sip` |
 
-The last eight are system sources: you declare them, the runtime fills them in.
+The selected route must prove it supplies a system source. Pipecat `daily-sip`
+and `cloud-websocket` supply none today. An inbound code-target phone channel
+also requires a default for every `call_start` variable.
 
 Declaring any `source: conversation` variable creates a tool called
 `update_variables` in the generated project. You do not write it and you do not
-list it. The model calls it when the caller says something worth keeping.
+list it. The name is reserved for that generated tool. The model calls it when
+the caller says something worth keeping.
 
 ## Where a variable can be used
 
@@ -153,13 +150,12 @@ A list of `UPPER_SNAKE` environment variable **names**. There is no field
 anywhere in the schema that takes a key, a token, or a phone number as a value,
 and the compiler refuses one.
 
-A secret reaches a call through exactly three routes:
-
-| Route | Used by |
-|---|---|
-| an `*_env` field, such as `url_env` or `token_env` | webhook and MCP tools |
-| the generated auth helpers | the same |
-| `os.environ` inside a Python handler | local tools |
+A secret reaches a call only through an environment lookup. Declare every name
+the package owns: model provider keys, tracing keys, model `endpoint_env`, tool
+`*_env` fields, connection `environment:` values, `destinations:` values, and
+names read with `os.environ` in a local handler. The compiler also knows some
+runtime or platform names that are not author declarations; the generated
+runbook says who supplies those.
 
 **Secrets never flow through `{{...}}` templates.** Every template site renders
 into something spoken, prompted, traced, or logged, so a secret in one would end

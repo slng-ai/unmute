@@ -154,16 +154,14 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort,
 	}
 	plan := generate.TelephonyRuntimePlanFor(resolved)
 	if plan == nil {
-		// The Daily route is telephony, so the generic message would be false. It
-		// simply has nothing to run locally: Daily's own infrastructure carries the
-		// call to a deployed agent. Name the route, name the two modes that do work
-		// on it right now, and point at how a real phone call happens (FR-028).
+		// The carrierless Daily form dials out and cannot receive, so it has no
+		// telephony plan. Name that boundary instead of implying Daily supplies an
+		// inbound route the package cannot declare (FR-028).
 		if resolved.Transport == "daily-sip" {
-			return fmt.Errorf("dev %s: target %q runs on the Pipecat Daily route (transport daily-sip), "+
-				"where Daily carries the phone call to a deployed agent, so there is no local telephony "+
-				"topology to run; talk to this agent now with `unmute dev %s` in the browser, "+
-				"and for a real phone call run "+
-				"`unmute compile %s` and follow the Deploy and Phone calls sections of the emitted README",
+			return fmt.Errorf("dev %s: target %q uses a carrierless Pipecat Daily connection (transport daily-sip), "+
+				"which is outbound-only: it can dial a transfer destination but cannot receive calls, so there is no local "+
+				"telephony topology to run; talk to this agent now with `unmute dev %s` in the browser, "+
+				"and to deploy it run `unmute compile %s` and follow the Deploy and Human transfers sections of the emitted README",
 				root, resolved.Name, root, root)
 		}
 		return fmt.Errorf("dev %s: target %q has no resolved telephony route", root, resolved.Name)

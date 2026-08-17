@@ -62,7 +62,7 @@ also the list of what you could have written.
 |---|---|---|
 | `description` | yes, except on `builtin:` and `mcp:` | everywhere else |
 | `input` | yes, except on `builtin:` and `mcp:` | everywhere else |
-| `output` | no | everywhere except `mcp:` — but see below |
+| `output` | no | everywhere except `builtin:` and `mcp:` — but see below |
 | `inject` | no | `webhook:` and `local:` only |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` |
@@ -71,11 +71,10 @@ An `mcp:` file is the block and nothing else, because the server owns each
 tool's contract. A `builtin:` file needs no `description` or `input`, because
 the registry supplies both.
 
-**`output:` is a contract with the model, and nothing checks it.** Neither code
-driver emits it: the generated wrapper returns whatever the endpoint or the
-handler returned, unshaped. Declaring it documents your intent and costs
-nothing; relying on it to reshape a result does not work. A handler that returns
-the wrong shape compiles clean.
+**`output:` is author-side documentation, not a contract with the model.** The
+compiler checks that it is a JSON Schema object, but no generator sends it to
+the model, puts it in the compile report, or enforces it at run time. The
+generated wrapper returns whatever the endpoint or handler returned, unshaped.
 
 ### The two gated blocks
 
@@ -88,6 +87,8 @@ livekit: LiveKit client tools are not proven by its driver
 
 Do not write one, and do not offer one as an option. They are listed here so
 that a refusal a user meets reads as a decision rather than a bug.
+If you need to show the refusal, YAML requires `client: {}` or
+`provider_hosted: {}`; a bare empty block is itself invalid.
 
 ## Webhook tools
 
@@ -116,7 +117,7 @@ interruption: provider_default
 | Field | Required | What it is |
 |---|---|---|
 | `url_env` | yes | the `UPPER_SNAKE` name of a variable holding the base URL |
-| `path` | no | appended to that base URL, may carry `{{variable}}` tokens |
+| `path` | no | starts with `/`, is appended to that base URL, and may carry `{{variable}}` tokens |
 | `auth` | no | how the request authenticates |
 
 `url_env` holds a **name**, never a URL. Writing the address there is refused.
@@ -167,6 +168,9 @@ The API then receives `{"tracking_number": "..."}` in the body. Only put a
 block, and say to the user which shape the request ended up with, because they
 may need to change their endpoint to match.
 
+Every `inject` value must be a scalar: a string, number, boolean, or null. Maps
+and lists are refused.
+
 ### Authentication
 
 | Field | What it is |
@@ -204,8 +208,7 @@ output:
     - cancelled
     - customer_id
 
-local:
-  handler: tools/cancel_appointment.py
+local: {}
 ```
 
 ```python tools/cancel_appointment.py
@@ -222,7 +225,7 @@ The rules the function follows:
 |---|---|
 | the function name matches the tool name | that is how the generated code finds it |
 | its parameters match the `input` properties plus the `inject` keys | the call is built from both |
-| it returns a dict shaped like `output`, if you declared one | the result goes back to the model |
+| it returns the value your description and prompt expect | the result goes back to the model; `output` is not enforced |
 | it may be `async def` | the generated code awaits an awaitable result |
 | it imports nothing from Unmute | the generated project does not depend on Unmute at run time |
 
@@ -234,11 +237,15 @@ tests `if part_of_day is None:` compiles clean and misbehaves on the first call,
 and neither `validate` nor `compile` will say a word about it.
 
 A handler reaches a credential through `os.environ`, and the variable name goes
-in `secrets:` like any other. That is the third and last route a secret takes
-into a call.
+in `secrets:` like any other. Literal lookups are also inferred for generated
+environment instructions and startup checks.
 
 `unmute compile` copies the file into the generated project and imports it as a
 plain module.
+
+The `local.handler` field is optional. When it is absent, Unmute uses
+`tools/<tool-name>.py`, so the example above resolves to
+`tools/cancel_appointment.py`.
 
 ## MCP servers
 
@@ -260,7 +267,7 @@ mcp:
 | `url_env` | yes | the `UPPER_SNAKE` name of the variable holding the server address |
 | `transport` | no | `sse` or `streamable_http` |
 | `auth` | no | `bearer` with `token_env`, or `api_key` with `token_env` and an optional `header` |
-| `tools` | no | which of the server's tools to offer, absent means all of them |
+| `tools` | no | non-empty, unique server tool names to offer; absent means all of them |
 
 `url_env` is a name, never an address. `transport` is optional because both
 platforms guess it from the URL: a path ending in `/mcp` is streamable HTTP,
@@ -277,11 +284,13 @@ it.
 description: "End the call when the caller is finished or says goodbye."
 builtin:
   id: end_call
+  instructions: Thank the caller briefly, then end the call.
 ```
 
 **The registry is closed and has one row.**
 
-Builtin ids: `end_call`.
+Builtin ids: `end_call`. `builtin.instructions` is optional and tells the model
+what to do as the prebuilt runs without changing its fixed behavior.
 
 | id | Effect | Default description |
 |---|---|---|
