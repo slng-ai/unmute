@@ -399,6 +399,20 @@ var pipecatCatalog = []Entry{
 		},
 	},
 	{
+		Framework: Pipecat, Role: Reason, Vendor: "slng",
+		Verified: "2026-08-17", Docs: slngResponsesDocsURL,
+		Install: InstallSpec{Extra: "openai"},
+		Import:  "from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService, OpenAIResponsesLLMSettings",
+		Call: &CallSpec{
+			Class: "OpenAIResponsesHttpLLMService", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
+			Model:            FieldSpec{Arg: "model", Required: true, Form: FormVerbatim},
+			Params:           ParamsSettings,
+			SettingsClass:    "OpenAIResponsesLLMSettings",
+			SettingsOverflow: "extra",
+		},
+		Notes: []string{"HTTP Responses API with a compiler-owned regional base URL and request metadata; endpoint_env has no slot"},
+	},
+	{
 		Framework: Pipecat, Role: Reason, Vendor: "*",
 		Verified: "2026-07-15", Docs: "https://docs.pipecat.ai/api-reference/server/services/llm/openai",
 		Install: InstallSpec{Extra: "openai"},

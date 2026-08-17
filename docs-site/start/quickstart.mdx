@@ -131,6 +131,17 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
 
 The first run is slow because Docker builds the image. Later runs reuse it.
 
+## Optimize the reasoning path
+
+The scaffold uses OpenAI directly for reasoning. When you are ready to optimize
+and route that same role through SLNG, use the
+[Context Router guide](/models/context-router). You still choose and pay for the
+upstream model. The guide shows the complete `agent.yaml` block, both keys, all
+four router regions, stable prompt variables, and cache-aware identity.
+
+This is opt-in package configuration. `unmute init` does not change its default,
+and generated applications do not send cache warm-up requests.
+
 ## If something goes wrong
 
 <AccordionGroup>
@@ -156,7 +167,10 @@ The first run is slow because Docker builds the image. Later runs reuse it.
 
 ## Where to go next
 
-<Columns cols={2}>
+<Columns cols={3}>
+  <Card title="Context Router" icon="route" href="/models/context-router">
+    Optimize the LLM path with your own upstream model.
+  </Card>
   <Card title="How Unmute works" icon="settings" href="/start/how-unmute-works">
     What the compiler did between your files and that container.
   </Card>

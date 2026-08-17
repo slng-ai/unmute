@@ -92,7 +92,9 @@ MCP sources, in the order the package lists them. */ -}}
 {{end}}{{if or .Outbound .Telephony .CallStartVars}}import json
 {{end}}import logging
 import os
-{{if .NeedsRender}}import re
+{{if .HasSLNG}}import uuid
+from contextvars import ContextVar
+{{end}}{{if .NeedsRender}}import re
 {{end}}{{if or .HasWarmTransfer .HasColdTransfer}}import time
 {{end}}{{if .HasVars}}from dataclasses import dataclass
 {{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
@@ -106,7 +108,10 @@ import os
 {{- if .Outbound}}
     AMD,
 {{- end}}
-{{- if not .SingleAgentMinimal}}
+{{- if .HasSLNG}}
+    APIStatusError,
+{{- end}}
+{{- if or (not .SingleAgentMinimal) .HasSLNG}}
     NOT_GIVEN,
 {{- end}}
     Agent,
@@ -172,6 +177,48 @@ load_dotenv()
 # --- prompts ---------------------------------------------------------------
 {{range .Prompts}}
 {{.Const}} = {{triple .Body}}
+{{end}}{{if .SLNGSnapshotHelper}}
+{{.SLNGSnapshotHelper}}
+_SLNG_SESSION_ID: ContextVar[str | None] = ContextVar(
+    "_slng_session_id", default=None
+)
+_SLNG_ACTIVE_SCOPE: ContextVar[
+    list[tuple[str, str, dict[str, str]] | None] | None
+] = ContextVar(
+    "_slng_active_scope", default=None
+)
+
+
+def _activate_slng_scope(
+    agent_id: str,
+    prompt: str,
+    template_variables: dict[str, str],
+) -> None:
+    scope = (agent_id, prompt, template_variables)
+    carrier = _SLNG_ACTIVE_SCOPE.get()
+    if carrier is None:
+        _SLNG_ACTIVE_SCOPE.set([scope])
+    else:
+        carrier[0] = scope
+
+
+def _current_slng_scope() -> tuple[str, str, dict[str, str]]:
+    carrier = _SLNG_ACTIVE_SCOPE.get()
+    if carrier is None or carrier[0] is None:
+        raise RuntimeError("SLNG prompt scope is unavailable outside an active call")
+    return carrier[0]
+
+
+def _slng_prompt_context(chat_ctx, prompt: str):
+    """Keep raw placeholders only on the SLNG request's agent instructions."""
+    request_ctx = chat_ctx.copy()
+    index = request_ctx.index_by_id("lk.agent_task.instructions")
+    if index is not None:
+        instruction = request_ctx.items[index]
+        if instruction.type != "message":
+            raise RuntimeError("LiveKit instruction item is not a message")
+        request_ctx.items[index] = instruction.model_copy(update={"content": [prompt]})
+    return request_ctx
 {{end}}
 {{- if or .NeedsLastN .NeedsSummarize}}
 # --- context shaping ---------------------------------------------------------
@@ -541,6 +588,13 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         )
 
     async def on_enter(self) -> None:
+{{- if .SLNGScope}}
+        _activate_slng_scope(
+            {{pyq .SLNGScope.AgentID}},
+            {{.SLNGScope.PromptExpr}},
+            {{.SLNGScope.SnapshotExpr}},
+        )
+{{- end}}
 {{- if .PromptExpr}}
         # The prompt names call variables, so it is rendered once the session
         # state exists (C11: rendered at session start, never re-rendered).
@@ -790,6 +844,9 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         # runs the same flow again (B: multi-task delegated twice and booked
         # nothing, 2026-08-15). The task-group branch below always did this.
         owner_ctx = self.chat_ctx.copy()
+{{- if $.HasSLNG}}
+        owner_slng_scope = _current_slng_scope()
+{{- end}}
 {{- if .Task.Summary}}
         summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Task.Summary}})
         result = await {{.Task.Class}}(chat_ctx=summary_ctx)
@@ -797,6 +854,9 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         result = await {{.Task.Class}}(chat_ctx={{.Task.CtxExpr}})
 {{- else}}
         result = await {{.Task.Class}}()  # history: reset — the task starts fresh
+{{- end}}
+{{- if $.HasSLNG}}
+        _activate_slng_scope(*owner_slng_scope)
 {{- end}}
         await self.update_chat_ctx(owner_ctx)
 {{- range .Task.Assign}}
@@ -816,9 +876,15 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         # the owner is snapshotted here and restored below, exactly as the
         # single-task and grouped branches do.
         owner_ctx = self.chat_ctx.copy()
+{{- if $.HasSLNG}}
+        owner_slng_scope = _current_slng_scope()
+{{- end}}
         task_results: dict = {}
 {{- range .Steps}}
         task_results[{{pyq .ID}}] = await {{.Class}}()
+{{- end}}
+{{- if $.HasSLNG}}
+        _activate_slng_scope(*owner_slng_scope)
 {{- end}}
 {{- if eq .Then "return"}}
         # N13: standalone tasks never merge their turns back; hand the owner the
@@ -836,6 +902,9 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
     @function_tool
     async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{end}}:
         {{triple .When}}
+{{- if $.HasSLNG}}
+        owner_slng_scope = _current_slng_scope()
+{{- end}}
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
@@ -850,6 +919,9 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- if eq .Then "return"}}
         owner_ctx = self.chat_ctx.copy()
         result = await group
+{{- if $.HasSLNG}}
+        _activate_slng_scope(*owner_slng_scope)
+{{- end}}
         # N13: the flow's own turns must not land in the owner's context. The
         # TaskGroup merges them back on completion, so restore the pre-flow
         # context and hand the owner only the typed results (merge: results).
@@ -858,11 +930,17 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- else if eq .Then "transfer"}}
         owner_ctx = self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)
         await group
+{{- if $.HasSLNG}}
+        _activate_slng_scope(*owner_slng_scope)
+{{- end}}
         # then: transfer — control moves on and does not return here. N13: drop
         # the flow's turns by handing the target the pre-flow context.
         return {{.ThenClass}}(chat_ctx=owner_ctx)
 {{- else}}
         await group
+{{- if $.HasSLNG}}
+        _activate_slng_scope(*owner_slng_scope)
+{{- end}}
         # then: end — the flow is the last thing on the call; this does not return.
         self.session.shutdown()
 {{- end}}
@@ -877,6 +955,13 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict
         super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if or .Prebuilt .MCPServers}}, tools=[{{template "tools_list" .}}]{{end}})
 
     async def on_enter(self) -> None:
+{{- if .SLNGScope}}
+        _activate_slng_scope(
+            {{pyq .SLNGScope.AgentID}},
+            {{.SLNGScope.PromptExpr}},
+            {{.SLNGScope.SnapshotExpr}},
+        )
+{{- end}}
 {{- if .PromptExpr}}
         await self.update_instructions({{.PromptExpr}})
 {{- end}}
@@ -893,7 +978,65 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict
 {{- end}}
 
 # --- session ---------------------------------------------------------------
-def prewarm(proc: JobProcess) -> None:
+{{if .HasSLNG}}class _SLNGResponsesLLM(openai.responses.LLM):
+    """Add the compiler-owned SLNG request fields to every Responses call."""
+
+    def __init__(
+        self,
+        *,
+        slng_config,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._slng_config = slng_config
+
+    def chat(self, *, chat_ctx, extra_kwargs=NOT_GIVEN, **kwargs):
+        session_id = _SLNG_SESSION_ID.get()
+        carrier = _SLNG_ACTIVE_SCOPE.get()
+        scope = None if carrier is None else carrier[0]
+        if session_id is None or scope is None:
+            raise RuntimeError("SLNG request identity is unavailable outside an active call scope")
+        agent_id, prompt, template_variables = scope
+        request_extra = dict(extra_kwargs) if isinstance(extra_kwargs, dict) else {}
+        extra_headers = dict(request_extra.get("extra_headers", {}))
+        extra_headers.update(
+            {
+                "X-Slng-Agent-Id": agent_id,
+                "X-Slng-Session-Id": session_id,
+            }
+        )
+        extra_body = dict(request_extra.get("extra_body", {}))
+        extra_body.update(
+            {
+                "slng_config": self._slng_config,
+                "template_variables": template_variables,
+            }
+        )
+        request_extra["extra_headers"] = extra_headers
+        request_extra["extra_body"] = extra_body
+        stream = super().chat(
+            chat_ctx=_slng_prompt_context(chat_ctx, prompt),
+            extra_kwargs=request_extra,
+            **kwargs,
+        )
+        process_event = stream._process_event
+
+        def process_slng_event(event):
+            if getattr(event, "type", None) == "response.incomplete":
+                details = getattr(event.response, "incomplete_details", None)
+                reason = getattr(details, "reason", None) or "unknown reason"
+                raise APIStatusError(
+                    f"response.incomplete: {reason}",
+                    status_code=-1,
+                    retryable=False,
+                )
+            return process_event(event)
+
+        setattr(stream, "_process_event", process_slng_event)
+        return stream
+
+
+{{end}}def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
 
 
@@ -922,6 +1065,10 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- if .RequiredSecrets}}
     require_env()
 {{- end}}
+{{- if .HasSLNG}}
+    _SLNG_SESSION_ID.set(str(uuid.uuid4()))
+    _SLNG_ACTIVE_SCOPE.set([None])
+{{- end}}
     session = AgentSession{{if .HasVars}}[Userdata]{{end}}(
 {{- if .HasVars}}
         userdata=Userdata(),
@@ -946,8 +1093,7 @@ async def entrypoint(ctx: JobContext) -> None:
         user_away_timeout={{if .InactivityNudgeSecs}}{{.InactivityNudgeSecs}}{{else}}{{.InactivityEndSecs}}{{end}},
 {{- end}}
     )
-
-{{if .Tracing}}
+{{if not .HasSLNG}}{{"\n"}}{{end}}{{if .Tracing}}
     setup_langfuse(
         ctx,
         session,

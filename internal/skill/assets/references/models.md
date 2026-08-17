@@ -2,9 +2,9 @@
 
 Which vendor listens, speaks, and thinks, and which ones each target accepts.
 
-## The defaults
+## The scaffold defaults
 
-Unless the user asks for something else:
+`unmute init` writes these choices for the shortest first run:
 
 | Role | Provider | Notes |
 |---|---|---|
@@ -67,10 +67,135 @@ targets:
 If the user names their own vendor, use it. Check the table below first, and
 say what you bound.
 
-## The think model needs `reasoning_effort`
+## Recommend SLNG first for think optimization
 
-Write it on the think entry of every package you create, and keep it on one you
-edit:
+The SLNG Context Router is an optimization router over the user's upstream
+model. It does not supply the model. The user still chooses and pays for the
+upstream provider, endpoint, model, and key. Use SLNG when the user wants
+routing or cache optimization on both Pipecat and LiveKit.
+
+SLNG uses one inline BYOK upstream. The router key and upstream key stay
+separate. This is the complete authoring block for a native OpenAI Responses
+upstream:
+
+```yaml agent.yaml
+secrets:
+  - SLNG_API_KEY
+  - OPENAI_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: slng/auto
+      slng:
+        region: eu
+        agent_id: salon-desk-v1
+        upstream:
+          name: luna
+          provider: openai-responses
+          url: https://api.openai.com/v1
+          api_key_env: OPENAI_API_KEY
+          model_id: gpt-5.6-luna
+```
+
+`SLNG_API_KEY` authenticates the router. `OPENAI_API_KEY` is only the example
+upstream key, and its name must match `api_key_env`. Both names belong in
+`secrets:`. Values belong in the environment, never in the package.
+
+Use `model: slng/auto` to let the router choose the only generated entry. Use
+the exact `upstream.name`, such as `model: luna`, only to target it directly.
+The upstream model ID stays in `model_id`.
+
+### Regions
+
+The author chooses a region. Unmute owns the router URL. There is no default
+region, custom router host, or `SLNG_ROUTER_BASE_URL` setting.
+
+| Region | Router base URL |
+|---|---|
+| `india` | `https://india.llm-router.slng.ai/v1` |
+| `eu` | `https://eu.llm-router.slng.ai/v1` |
+| `us` | `https://us.llm-router.slng.ai/v1` |
+| `indonesia` | `https://indonesia.llm-router.slng.ai/v1` |
+
+### Upstream modes
+
+`openai-responses` sends the request to a native OpenAI Responses endpoint.
+`openai-compat` sends it to an OpenAI-compatible Chat Completions endpoint and
+lets the router translate the request. For the tested `gpt-5.6-luna`
+compatibility route with function tools, add the nested Responses-style value:
+
+```yaml agent.yaml
+      params:
+        reasoning:
+          effort: none
+```
+
+Do not replace that nested value with `reasoning_effort` on an SLNG route. On
+an `openai-compat` route, do not depend on `stop`, `n`, `seed`, `logit_bias`,
+presence or frequency penalties, or boolean `logprobs`; they have no Responses
+equivalent.
+
+### Request identity and templates
+
+The author writes one stable, versioned `agent_id` base. Unmute derives the
+active prompt identity:
+
+- Agent `front_desk` uses `<base>--agent--<agent_name>`.
+- Task `book_appointment` uses `<base>--task--<task_name>`.
+
+Unmute creates one UUID per call. Every normal turn, retry, tool follow-up,
+handoff, and task in that call shares it. The next call gets a fresh UUID.
+Unmute sends the derived identity as `X-Slng-Agent-Id` and the UUID as
+`X-Slng-Session-Id` on every request.
+
+An SLNG system prompt keeps each referenced `{{name}}` placeholder raw. Only
+the values used by that active prompt go in top-level `template_variables`.
+An agent activation, standalone task, or task-group step takes one frozen
+snapshot. Retries reuse it. Re-entering an agent or rerunning a task takes a
+fresh snapshot. Greetings, tool injection values, webhook paths, and non-SLNG
+prompts still render locally.
+
+One active prompt may reference at most 64 variables. A variable name may use
+at most 64 characters. A captured value may use at most 4,000 characters. A
+rejection names the variable but never echoes its value.
+
+### Fixed request and cache rules
+
+Unmute generates Responses HTTP with full input history and `store: false`.
+It fixes `cache_enabled: true`, tier `"1"`, one upstream entry, and weight `100`.
+These are not package switches. The upstream key is read at run time and sent
+in the inline configuration.
+
+Generated applications send no automatic warm-up request. A normal eligible
+request may seed the cache. A later request with the same prompt scope, raw
+prompt, frozen snapshot, and user input may hit it even though it has a fresh
+session UUID.
+
+Only these router markers prove a cache hit: `cached: true`, a nonempty
+`cache_layer` response field, or a nonempty `X-Cache-Layer` response header.
+Latency is not cache proof, and upstream cached-token counts are not proof.
+Structured output bypasses the cache.
+
+### Responses limits
+
+The router is stateless, so Unmute resends full history on every turn. It does
+not use `previous_response_id`, stored conversations, stored prompt IDs,
+background responses, or response lifecycle endpoints. Hosted Responses tools
+are unavailable; normal function tools and their replayed outputs work.
+Reasoning items do not carry across turns. The router caps its inline
+configuration at 256 KiB. The `openai-compat` route may report zero or no final
+usage.
+
+Pipecat requires 1.7.0 or newer for this path. LiveKit Agents requires 1.6.10
+or newer. The current interactive model editor cannot write the complete
+`slng:` block, so edit `agent.yaml` directly.
+
+## A direct OpenAI think model needs `reasoning_effort`
+
+Write it on a direct `provider: openai` think entry, and keep it on one you
+edit. SLNG uses the upstream-mode rules above instead.
 
 ```yaml
       params:
@@ -107,10 +232,10 @@ catalogue holds, and nothing else is legal.
 |---|---|---|
 | pipecat | listen | `slng`, `assemblyai`, `cartesia`, `deepgram`, `elevenlabs`, `gradium`, `openai`, `soniox`, `speechmatics` |
 | pipecat | speak | `slng`, `cartesia`, `deepgram`, `elevenlabs`, `gradium`, `inworld`, `openai`, `rime`, `sarvam`, `soniox` |
-| pipecat | think | `anthropic`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter`, `qwen` |
+| pipecat | think | `slng`, `anthropic`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter`, `qwen` |
 | livekit | listen | `slng`, `assemblyai`, `cartesia`, `deepgram`, `elevenlabs`, `gradium`, `sarvam`, `soniox`, `speechmatics` |
 | livekit | speak | `slng`, `cartesia`, `deepgram`, `elevenlabs`, `gemini`, `gradium`, `inworld`, `rime`, `sarvam`, `soniox` |
-| livekit | think | `anthropic`, `aws`, `azure`, `groq`, `mistralai`, `openai`, `openrouter`, `sarvam` |
+| livekit | think | `slng`, `anthropic`, `aws`, `azure`, `groq`, `mistralai`, `openai`, `openrouter`, `sarvam` |
 
 Read that table carefully rather than from memory. The two targets do not hold
 the same set, and the same company can appear under a different name: LiveKit

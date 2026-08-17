@@ -433,8 +433,23 @@ func convertModelDef(raw packagespec.ModelDef, kind ModelKind, fallback []string
 		Kind: kind, Provider: raw.Provider, Model: raw.Model, Voice: raw.Voice,
 		Speed: raw.Speed, Language: raw.Language, Temperature: raw.Temperature,
 		TopP: raw.TopP, TopK: raw.TopK, EndpointEnv: raw.EndpointEnv,
+		SLNG:      convertSLNG(raw.SLNG),
 		Placement: derivePlacement(raw), SemanticEndpointing: SemanticEndpointing(raw.SemanticEndpointing),
 		Params: raw.Params, Fallback: fallback, Description: raw.Description,
+	}
+}
+
+func convertSLNG(raw *packagespec.SLNGConfig) *SLNGConfig {
+	if raw == nil {
+		return nil
+	}
+	return &SLNGConfig{
+		Region:  raw.Region,
+		AgentID: raw.AgentID,
+		Upstream: SLNGUpstream{
+			Name: raw.Upstream.Name, Provider: raw.Upstream.Provider, URL: raw.Upstream.URL,
+			APIKeyEnv: raw.Upstream.APIKeyEnv, ModelID: raw.Upstream.ModelID,
+		},
 	}
 }
 
@@ -1296,7 +1311,7 @@ func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]pa
 func toBinding(def ModelDef) Binding {
 	return Binding{
 		Provider: def.Provider, Model: def.Model, Voice: def.Voice, Language: def.Language,
-		EndpointEnv: def.EndpointEnv, Placement: def.Placement,
+		EndpointEnv: def.EndpointEnv, SLNG: def.SLNG, Placement: def.Placement,
 		SemanticEndpointing: def.SemanticEndpointing, Params: foldParams(def),
 	}
 }

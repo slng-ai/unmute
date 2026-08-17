@@ -32,6 +32,7 @@ neither, because it is about an outbound workflow and runtime values on both.
 | Package | Structure | Responsibility split |
 |---|---|---|
 | [`simple-prompt`](simple-prompt/) | One agent and one large prompt | One agent owns every workflow and tool. **The tracing example**: the only package that sets `tracing.provider: langfuse`, so it is the only one that needs the three `LANGFUSE_*` values. |
+| [`slng-context-router`](slng-context-router/) | Two agents, delegated tasks, and SLNG reasoning | **The Context Router example.** Runs unchanged on Pipecat and LiveKit with inline BYOK, prompt-scoped identity, template-variable snapshots, and cache-probe instructions. |
 | [`multi-task`](multi-task/) | One agent and two independent tasks | One task owns customer records; another owns appointments. |
 | [`task-groups`](task-groups/) | One agent and three ordered tasks | Shared context moves through customer identification, slot selection, and finalization. |
 | [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |

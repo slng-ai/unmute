@@ -13,6 +13,7 @@ the typed results.
 from __future__ import annotations
 
 import asyncio
+import copy
 import functools
 import inspect
 import json
@@ -419,7 +420,7 @@ class IntakeAgent(TracedLLMWorker):
         # V2/B2: drain the resolved owner call before snapshotting. Otherwise
         # restoration erases that call and the unchanged request delegates again.
         await self.flush_pipeline()
-        self._run_collect_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
+        self._run_collect_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)
         await flow.initialize(self._run_collect_node_collect())
 
     def _run_collect_node_collect(self) -> NodeConfig:
@@ -482,7 +483,7 @@ class IntakeAgent(TracedLLMWorker):
         # V2/B2: drain the resolved owner call before snapshotting. Otherwise
         # restoration erases that call and the unchanged request delegates again.
         await self.flush_pipeline()
-        self._run_triage_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
+        self._run_triage_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)
         await flow.initialize(self._run_triage_node_collect())
 
     def _run_triage_node_collect(self) -> NodeConfig:

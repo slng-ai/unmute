@@ -43,9 +43,10 @@ var livekitV1Templates embed.FS
 // livekitService is one resolved binding: the rendered constructor plus its
 // catalogue entry (imports/deps) and vendor (report labeling).
 type livekitService struct {
-	Call   ServiceCall
-	Entry  targetcap.Entry
-	Vendor string
+	Call            ServiceCall
+	Entry           targetcap.Entry
+	Vendor          string
+	SLNGAgentIDBase string
 }
 
 // livekitChain is a resolved model plus its fallback chain (V4/T16): a
@@ -65,6 +66,7 @@ type livekitAgent struct {
 	Class          string
 	PromptConst    string
 	PromptExpr     string // render call when the prompt is templated, else ""
+	SLNGScope      *livekitSLNGScope
 	IsEntry        bool
 	LLM            *livekitChain   // set only when it differs from the session default
 	TTS            *livekitService // set only when it differs from the session default
@@ -75,6 +77,12 @@ type livekitAgent struct {
 	Transfers      []livekitTransfer
 	HumanTransfers []livekitHumanTransfer
 	Delegates      []livekitDelegate
+}
+
+type livekitSLNGScope struct {
+	AgentID      string
+	PromptExpr   string
+	SnapshotExpr string
 }
 
 // livekitGreeting drives the entry agent's on_enter: a fixed line, a
@@ -243,7 +251,8 @@ type livekitTask struct {
 	Name        string
 	Class       string
 	PromptConst string
-	PromptExpr  string        // render call when the prompt is templated, else ""
+	PromptExpr  string // render call when the prompt is templated, else ""
+	SLNGScope   *livekitSLNGScope
 	LLM         *livekitChain // per-task model override (B1); nil = session LLM
 	Result      []livekitArg  // finish() args + the completed result dict
 	Tools       []livekitTool
@@ -347,6 +356,8 @@ type livekitData struct {
 	PluginModules     []string // merged `from livekit.plugins import ...` names
 	Deps              []string
 	RequiredEnv       []string
+
+	SLNGSnapshotHelper string
 	// AuthorEnv is the half of RequiredEnv the author supplies. Everything else
 	// — the route's own values, which `unmute dev` sets locally and a platform
 	// or operator sets at deploy time — is absent from every author-facing file
@@ -363,6 +374,7 @@ type livekitData struct {
 	DevOptionalEnv []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
 	Notes          []string
 	Tracing        bool
+	HasSLNG        bool
 
 	NeedsTasks         bool        // AgentTask import
 	NeedsTaskGroups    bool        // beta.workflows TaskGroup import

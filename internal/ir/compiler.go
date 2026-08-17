@@ -40,6 +40,23 @@ const (
 	KindTurn   ModelKind = "turn"
 )
 
+// SLNGConfig is the resolved inline BYOK configuration for an SLNG-routed
+// model.
+type SLNGConfig struct {
+	Region   string       `json:"region" yaml:"region"`
+	AgentID  string       `json:"agent_id" yaml:"agent_id"`
+	Upstream SLNGUpstream `json:"upstream" yaml:"upstream"`
+}
+
+// SLNGUpstream is the resolved upstream endpoint sent to the SLNG router.
+type SLNGUpstream struct {
+	Name      string `json:"name" yaml:"name"`
+	Provider  string `json:"provider" yaml:"provider"`
+	URL       string `json:"url" yaml:"url"`
+	APIKeyEnv string `json:"api_key_env" yaml:"api_key_env"`
+	ModelID   string `json:"model_id" yaml:"model_id"`
+}
+
 // ModelDef is the resolved unified model definition (N15). provider+model carry
 // the vendor pairing; Placement is derived from provider unless set explicitly;
 // Kind is fixed in Build from where the model is referenced.
@@ -54,6 +71,7 @@ type ModelDef struct {
 	TopP                *float64            `json:"top_p,omitempty" yaml:"top_p,omitempty"`
 	TopK                *int                `json:"top_k,omitempty" yaml:"top_k,omitempty"`
 	EndpointEnv         string              `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
+	SLNG                *SLNGConfig         `json:"slng,omitempty" yaml:"slng,omitempty"`
 	Placement           Placement           `json:"placement" yaml:"placement"`
 	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
 	Params              map[string]any      `json:"params,omitempty" yaml:"params,omitempty"`
@@ -510,6 +528,7 @@ type Binding struct {
 	VoiceID             string              `json:"voice_id,omitempty" yaml:"voice_id,omitempty"`
 	Language            string              `json:"language,omitempty" yaml:"language,omitempty"`
 	EndpointEnv         string              `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
+	SLNG                *SLNGConfig         `json:"slng,omitempty" yaml:"slng,omitempty"`
 	Placement           Placement           `json:"placement,omitempty" yaml:"placement,omitempty"`
 	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
 	Params              map[string]any      `json:"params,omitempty" yaml:"params,omitempty"`

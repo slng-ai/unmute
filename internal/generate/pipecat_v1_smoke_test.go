@@ -17,6 +17,509 @@ import (
 	"github.com/slng-ai/unmute/internal/target"
 )
 
+const pipecatSLNGIdentitySmokeScript = `"""Capture generated SLNG settings through Pipecat's pinned Responses service."""
+import asyncio
+import copy
+import json
+import os
+import uuid
+from types import SimpleNamespace
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService
+
+captured_requests = []
+
+
+class CaptureResponses:
+    async def create(self, **kwargs):
+        captured_requests.append(copy.deepcopy(kwargs))
+        return SimpleNamespace(output_text="captured")
+
+
+class CaptureClient:
+    def __init__(self):
+        self.responses = CaptureResponses()
+
+
+def capture_client(*args, **kwargs):
+    return CaptureClient()
+
+
+OpenAIResponsesHttpLLMService._create_client = capture_client
+
+import bot
+from pipecat.frames.frames import LLMUpdateSettingsFrame
+
+assert captured_requests == []
+
+
+def request_metadata(worker, label):
+    params = worker.llm._build_response_params(
+        {"input": [{"role": "user", "content": label}]}
+    )
+    assert params["store"] is False
+    return (
+        copy.deepcopy(params["extra_headers"]),
+        copy.deepcopy(params["extra_body"]["template_variables"]),
+    )
+
+
+def apply_latest_settings(worker, frames):
+    frame = next(frame for frame in reversed(frames) if isinstance(frame, LLMUpdateSettingsFrame))
+    worker.llm._settings.apply_update(frame.delta)
+
+
+def capture_worker(worker):
+    frames = []
+
+    async def capture(frame, *args, **kwargs):
+        frames.append(frame)
+
+    async def flush():
+        return None
+
+    worker.queue_frame = capture
+    worker.flush_pipeline = flush
+    return frames
+
+
+async def activate(worker):
+    frames = capture_worker(worker)
+    await worker.on_activated(None)
+    apply_latest_settings(worker, frames)
+    return frames
+
+
+def without_session(request):
+    stable = copy.deepcopy(request)
+    session_id = stable["extra_headers"].pop("X-Slng-Session-Id")
+    return session_id, stable
+
+
+async def capture_cache_request(session_id):
+    before = len(captured_requests)
+    state = bot.State(account_tier="gold", caller_name="Ada", request_topic="refund")
+    worker = bot.FrontDeskAgent(
+        state=state,
+        context=bot.LLMContext(),
+        session_id=session_id,
+    )
+    await activate(worker)
+    assert len(captured_requests) == before
+
+    context = bot.LLMContext(messages=[{"role": "user", "content": "cache probe"}])
+    assert await worker.llm.run_inference(context) == "captured"
+    assert len(captured_requests) == before + 1
+    return captured_requests[-1]
+
+
+async def verify_cache_seed_probe():
+    seed = await capture_cache_request(str(uuid.uuid4()))
+    probe = await capture_cache_request(str(uuid.uuid4()))
+    seed_session, stable_seed = without_session(seed)
+    probe_session, stable_probe = without_session(probe)
+
+    assert uuid.UUID(seed_session).version == 4
+    assert uuid.UUID(probe_session).version == 4
+    assert seed_session != probe_session
+    assert stable_seed == stable_probe
+    assert stable_seed["instructions"] == bot.FRONT_DESK_PROMPT
+    assert "{{caller_name}}" in stable_seed["instructions"]
+    assert stable_seed["extra_headers"] == {
+        "X-Slng-Agent-Id": "router-fixture-v1--agent--front_desk"
+    }
+    assert stable_seed["extra_body"]["template_variables"] == {"caller_name": "Ada"}
+    assert stable_seed["input"] == [{"role": "user", "content": "cache probe"}]
+
+
+async def run():
+    await verify_cache_seed_probe()
+    state = bot.State(account_tier="gold", caller_name="Ada", request_topic="refund")
+    session_id = "11111111-1111-4111-8111-111111111111"
+    front = bot.FrontDeskAgent(
+        state=state,
+        context=bot.LLMContext(),
+        session_id=session_id,
+    )
+    front_frames = await activate(front)
+
+    normal = request_metadata(front, "normal")
+    state.caller_name = "changed-during-activation"
+    tool_result = request_metadata(front, "tool-result")
+    retry = request_metadata(front, "retry")
+    assert normal == tool_result == retry
+    assert normal == (
+        {
+            "X-Slng-Agent-Id": "router-fixture-v1--agent--front_desk",
+            "X-Slng-Session-Id": session_id,
+        },
+        {"caller_name": "Ada"},
+    )
+
+    # A standalone task freezes its own snapshot. Owner restoration must use
+    # the original activation snapshot even after the task changes call state.
+    state.request_topic = "standalone-start"
+    action = front._do_standalone_node_standalone()["pre_actions"][0]
+    assert action["type"] == "slng_settings"
+    await action["handler"](action, None)
+    apply_latest_settings(front, front_frames)
+    standalone = request_metadata(front, "standalone")
+    state.request_topic = "standalone-changed"
+    assert request_metadata(front, "standalone-retry") == standalone
+    assert standalone == (
+        {
+            "X-Slng-Agent-Id": "router-fixture-v1--task--standalone",
+            "X-Slng-Session-Id": session_id,
+        },
+        {"request_topic": "standalone-start"},
+    )
+    await front._restore_slng_owner()
+    apply_latest_settings(front, front_frames)
+    assert request_metadata(front, "owner-restored") == normal
+
+    # Handoff activation refreshes the target agent once and keeps that snapshot
+    # for every continuation and retry on the target.
+    state.account_tier = "gold"
+    specialist = bot.SpecialistAgent(
+        state=state,
+        context=bot.LLMContext(),
+        session_id=session_id,
+    )
+    specialist_frames = await activate(specialist)
+    handoff = request_metadata(specialist, "handoff")
+    state.account_tier = "platinum"
+    assert request_metadata(specialist, "handoff-retry") == handoff
+    assert handoff == (
+        {
+            "X-Slng-Agent-Id": "router-fixture-v1--agent--specialist",
+            "X-Slng-Session-Id": session_id,
+        },
+        {"account_tier": "gold"},
+    )
+
+    # The same task reused by two groups keeps one task-owned identity. Each
+    # fresh task start may capture new values, which then stay frozen for that run.
+    state.caller_name = "Group Caller"
+    state.request_topic = "first-group"
+    first_action = specialist._do_first_group_node_group_step()["pre_actions"][0]
+    await first_action["handler"](first_action, None)
+    apply_latest_settings(specialist, specialist_frames)
+    first_group = request_metadata(specialist, "first-group")
+    state.request_topic = "changed-within-first-group"
+    assert request_metadata(specialist, "first-group-retry") == first_group
+
+    state.request_topic = "second-group"
+    second_action = specialist._do_second_group_node_group_step()["pre_actions"][0]
+    await second_action["handler"](second_action, None)
+    apply_latest_settings(specialist, specialist_frames)
+    second_group = request_metadata(specialist, "second-group")
+    assert first_group[0] == second_group[0] == {
+        "X-Slng-Agent-Id": "router-fixture-v1--task--group_step",
+        "X-Slng-Session-Id": session_id,
+    }
+    assert first_group[1] == {
+        "caller_name": "Group Caller",
+        "request_topic": "first-group",
+    }
+    assert second_group[1] == {
+        "caller_name": "Group Caller",
+        "request_topic": "second-group",
+    }
+
+    other = bot.FrontDeskAgent(
+        state=state,
+        context=bot.LLMContext(),
+        session_id="22222222-2222-4222-8222-222222222222",
+    )
+    await activate(other)
+    assert request_metadata(other, "other-call")[0]["X-Slng-Session-Id"] != session_id
+
+
+asyncio.run(run())
+print("pipecat SLNG identity ok")
+`
+
+const pipecatSLNGResponsesStreamSmokeScript = `"""Exercise the generated service through Pipecat's pinned HTTP Responses stream."""
+import asyncio
+import json
+import os
+from collections import deque
+from importlib.metadata import version
+from types import SimpleNamespace
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot
+from openai.types.responses import (
+    ResponseCompletedEvent,
+    ResponseErrorEvent,
+    ResponseFailedEvent,
+    ResponseFunctionCallArgumentsDeltaEvent,
+    ResponseFunctionCallArgumentsDoneEvent,
+    ResponseFunctionToolCall,
+    ResponseIncompleteEvent,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
+    ResponseTextDeltaEvent,
+)
+from pipecat.frames.frames import LLMContextFrame
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.frame_processor import FrameDirection
+
+assert version("pipecat-ai") == "1.7.0"
+
+
+class FakeStream:
+    def __init__(self, events):
+        self.events = events
+        self.closed = False
+
+    def __aiter__(self):
+        return self._events()
+
+    async def _events(self):
+        for event in self.events:
+            yield event
+
+    async def close(self):
+        self.closed = True
+
+
+def text_delta(text, sequence):
+    return ResponseTextDeltaEvent.model_construct(
+        content_index=0,
+        delta=text,
+        item_id="message-1",
+        logprobs=[],
+        output_index=0,
+        sequence_number=sequence,
+        type="response.output_text.delta",
+    )
+
+
+def completed(usage, sequence):
+    return ResponseCompletedEvent.model_construct(
+        response=SimpleNamespace(usage=usage, model="slng/auto"),
+        sequence_number=sequence,
+        type="response.completed",
+    )
+
+
+def zero_usage():
+    return SimpleNamespace(
+        input_tokens=None,
+        input_tokens_details=None,
+        output_tokens=None,
+        output_tokens_details=None,
+        total_tokens=None,
+    )
+
+
+async def run():
+    state = bot.State(account_tier="gold", caller_name="Ada", request_topic="weather")
+    llm = bot.build_front_desk_llm(
+        state,
+        session_id="11111111-1111-4111-8111-111111111111",
+    )
+
+    tool_call = ResponseFunctionToolCall.model_construct(
+        arguments='{"city":"Pune"}',
+        call_id="call-1",
+        id="item-1",
+        name="get_weather",
+        type="function_call",
+    )
+    success = FakeStream(
+        [
+            text_delta("Hel", 1),
+            text_delta("lo", 2),
+            ResponseOutputItemAddedEvent.model_construct(
+                item=ResponseFunctionToolCall.model_construct(
+                    arguments="",
+                    call_id="call-1",
+                    id="item-1",
+                    name="get_weather",
+                    type="function_call",
+                ),
+                output_index=0,
+                sequence_number=3,
+                type="response.output_item.added",
+            ),
+            ResponseFunctionCallArgumentsDeltaEvent.model_construct(
+                delta='{"city":',
+                item_id="item-1",
+                output_index=0,
+                sequence_number=4,
+                type="response.function_call_arguments.delta",
+            ),
+            ResponseFunctionCallArgumentsDoneEvent.model_construct(
+                arguments='{"city":"Pune"}',
+                item_id="item-1",
+                name="get_weather",
+                output_index=0,
+                sequence_number=5,
+                type="response.function_call_arguments.done",
+            ),
+            ResponseOutputItemDoneEvent.model_construct(
+                item=tool_call,
+                output_index=0,
+                sequence_number=6,
+                type="response.output_item.done",
+            ),
+            completed(zero_usage(), 7),
+        ]
+    )
+    missing_usage = FakeStream([completed(None, 1)])
+    failed = FakeStream(
+        [
+            ResponseFailedEvent.model_construct(
+                response=SimpleNamespace(
+                    error=SimpleNamespace(message="router rejected the response")
+                ),
+                sequence_number=1,
+                type="response.failed",
+            )
+        ]
+    )
+    incomplete = FakeStream(
+        [
+            ResponseIncompleteEvent.model_construct(
+                response=SimpleNamespace(
+                    incomplete_details=SimpleNamespace(reason="max_output_tokens")
+                ),
+                sequence_number=1,
+                type="response.incomplete",
+            )
+        ]
+    )
+    errored = FakeStream(
+        [
+            ResponseErrorEvent.model_construct(
+                code="router_error",
+                message="router stream error",
+                param=None,
+                sequence_number=1,
+                type="error",
+            )
+        ]
+    )
+    streams = deque([success, missing_usage, failed, incomplete, errored])
+    requests = []
+    responses = getattr(llm._client.responses, "_slng_upstream", llm._client.responses)
+
+    async def create(**kwargs):
+        requests.append(kwargs)
+        return streams.popleft()
+
+    responses.create = create
+
+    texts = []
+    calls = []
+    usages = []
+    errors = []
+
+    async def no_op(*args, **kwargs):
+        return None
+
+    async def capture_text(text):
+        texts.append(text)
+
+    async def capture_calls(items):
+        calls.extend(items)
+
+    async def capture_usage(usage):
+        usages.append(usage)
+
+    async def capture_error(*, error_msg, **kwargs):
+        errors.append(error_msg)
+
+    llm.start_ttfb_metrics = no_op
+    llm.stop_ttfb_metrics = no_op
+    llm.start_processing_metrics = no_op
+    llm.stop_processing_metrics = no_op
+    llm.push_frame = no_op
+    llm.push_error = capture_error
+    llm._push_llm_text = capture_text
+    llm.run_function_calls = capture_calls
+    llm.start_llm_usage_metrics = capture_usage
+
+    history = LLMContext(
+        messages=[
+            {"role": "user", "content": "Weather in Pune?"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "call-prior",
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": '{"city":"Pune"}',
+                        },
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call-prior", "content": "31C"},
+            {"role": "user", "content": "Summarize it."},
+        ]
+    )
+    await llm._process_context(history)
+    assert texts == ["Hel", "lo"]
+    assert len(calls) == 1
+    assert calls[0].tool_call_id == "call-1"
+    assert calls[0].function_name == "get_weather"
+    assert calls[0].arguments == {"city": "Pune"}
+    assert success.closed
+    assert len(usages) == 1
+    assert usages[0].prompt_tokens == 0
+    assert usages[0].completion_tokens == 0
+    assert usages[0].total_tokens == 0
+    assert usages[0].cache_read_input_tokens == 0
+    assert usages[0].reasoning_tokens == 0
+    assert requests[0]["store"] is False
+    assert requests[0]["stream"] is True
+    assert requests[0]["input"] == [
+        {"role": "user", "content": "Weather in Pune?"},
+        {
+            "type": "function_call",
+            "call_id": "call-prior",
+            "name": "get_weather",
+            "arguments": '{"city":"Pune"}',
+        },
+        {"type": "function_call_output", "call_id": "call-prior", "output": "31C"},
+        {"role": "user", "content": "Summarize it."},
+    ]
+
+    await llm._process_context(LLMContext(messages=[{"role": "user", "content": "Again"}]))
+    assert missing_usage.closed
+    assert len(usages) == 1
+
+    for expected in (
+        "router rejected the response",
+        "max_output_tokens",
+        "router stream error",
+    ):
+        await llm.process_frame(
+            LLMContextFrame(
+                context=LLMContext(messages=[{"role": "user", "content": expected}])
+            ),
+            FrameDirection.DOWNSTREAM,
+        )
+        assert expected in errors[-1]
+
+    assert failed.closed and incomplete.closed and errored.closed
+
+    await llm._client.close()
+
+
+asyncio.run(run())
+print("pipecat SLNG Responses stream ok")
+`
+
 const telephonyDeepSmokeScript = `"""Exercise generated carrier ingress, serializer selection, and Redis admission."""
 import asyncio
 import base64
@@ -610,6 +1113,7 @@ print("smoke ok:", ", ".join(builders))
 
 const pipecatTaskRoleSmokeScript = `"""Smoke check: task role replaces, then restores, the owner role."""
 import asyncio
+import copy
 import json
 import os
 
@@ -619,7 +1123,7 @@ for name in json.load(open("compile-report.json"))["required_env"]:
 import bot  # noqa: E402
 from pipecat.flows import FlowManager  # noqa: E402
 from pipecat.frames.frames import Frame  # noqa: E402
-from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMSpecificMessage  # noqa: E402
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair  # noqa: E402
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor  # noqa: E402
 from pipecat.services.llm_service import LLMService  # noqa: E402
@@ -655,7 +1159,11 @@ for name in list(vars(bot)):
 async def main() -> None:
     global OWNER_PROMPT
     OWNER_PROMPT = original_owner_builder()._settings.system_instruction
-    context = LLMContext()
+    specific = LLMSpecificMessage(
+        llm="openai-responses",
+        message={"type": "reasoning", "id": "reasoning-smoke"},
+    )
+    context = LLMContext(messages=[{"role": "user", "content": "hello"}, specific])
     owner = bot.AppointmentDeskAgent(state=None, context=context, call_context=None)
     target = bot.AftercareAgent(state=None, context=context, call_context=None)
     runner = WorkerRunner(handle_sigint=False)
@@ -667,7 +1175,7 @@ async def main() -> None:
     owner._active = True
     owner._manage_appointment_results = {}
     owner._manage_appointment_snapshot = (
-        [dict(message) for message in context.get_messages()],
+        copy.deepcopy(context.get_messages()),
         context.tools,
     )
     flow = FlowManager(
@@ -686,6 +1194,9 @@ async def main() -> None:
         flow,
     )
     assert owner.llm._settings.system_instruction == OWNER_PROMPT
+    restored = context.get_messages()
+    assert isinstance(restored[1], LLMSpecificMessage)
+    assert restored[1].message == specific.message
     for _ in range(100):
         if target.active:
             break
@@ -1094,6 +1605,34 @@ func TestSmokePipecatV1ServicesInstantiate(t *testing.T) {
 	runPipecatSmoke(t, "safe_core", nil, nil)
 }
 
+// TestSmokePipecatSLNGRequestIdentity exercises the generated request settings
+// against Pipecat's pinned HTTP Responses service without sending network
+// traffic. It captures the exact extra_headers and template_variables that the
+// SDK would merge into normal, continuation, retry, handoff, and Flow requests.
+func TestSmokePipecatSLNGRequestIdentity(t *testing.T) {
+	runPipecatSmokeScriptAt(
+		t,
+		filepath.Join("..", "..", "examples", "slng-context-router"),
+		nil,
+		nil,
+		pipecatSLNGIdentitySmokeScript,
+	)
+}
+
+// TestSmokePipecatSLNGResponsesStream runs Pipecat's pinned HTTP Responses
+// parser with typed SDK events. The fake stream is offline; only the generated
+// service's real adapter, history lowering, event loop, metrics, and error
+// boundary are exercised.
+func TestSmokePipecatSLNGResponsesStream(t *testing.T) {
+	runPipecatSmokeScriptAt(
+		t,
+		filepath.Join("..", "..", "examples", "slng-context-router"),
+		nil,
+		nil,
+		pipecatSLNGResponsesStreamSmokeScript,
+	)
+}
+
 // TestSmokePipecatV1TaskGroupsInstantiate runs the generated FlowManager on
 // Pipecat 1.5.0 and observes task-role replacement, owner-role restoration,
 // and transfer activation (V28).
@@ -1304,10 +1843,15 @@ func runPipecatSmoke(t *testing.T, example string, mutate func(*ir.Target), muta
 
 func runPipecatSmokeScript(t *testing.T, example string, mutate func(*ir.Target), mutateAgent func(*ir.Agent), script string) {
 	t.Helper()
+	runPipecatSmokeScriptAt(t, examplePackagePath(example), mutate, mutateAgent, script)
+}
+
+func runPipecatSmokeScriptAt(t *testing.T, packagePath string, mutate func(*ir.Target), mutateAgent func(*ir.Agent), script string) {
+	t.Helper()
 	if _, err := exec.LookPath("uv"); err != nil {
 		t.Skip("uv not available")
 	}
-	pkg, err := spec.Load(examplePackagePath(example))
+	pkg, err := spec.Load(packagePath)
 	if err != nil {
 		t.Fatal(err)
 	}

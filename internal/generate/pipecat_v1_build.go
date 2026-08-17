@@ -78,6 +78,9 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		if serviceUsesLanguage(a.LLM) || serviceUsesLanguage(a.TTS) {
 			data.NeedsLanguage = true
 		}
+		if a.LLM.SLNG {
+			data.NeedsSLNG = true
+		}
 	}
 
 	// Task tools appear inside Flow nodes as module-level flows handlers; emit
@@ -588,6 +591,9 @@ func setImportNeeds(data *pipecatData) {
 			// raw EndFrame (V4/B2); only a non-ending delegate restores the role.
 			if d.Then != "end" {
 				data.NeedsRoleRestore = true
+				if !a.LLM.SLNG {
+					data.NeedsPlainRoleRestore = true
+				}
 			}
 			if d.Isolated {
 				data.HasIsolated = true
@@ -637,7 +643,7 @@ func setImportNeeds(data *pipecatData) {
 	if data.NeedsAppendFrame {
 		data.FrameImports = append(data.FrameImports, "LLMMessagesAppendFrame")
 	}
-	if data.NeedsRoleRestore {
+	if data.NeedsRoleRestore || data.NeedsSLNG {
 		data.FrameImports = append(data.FrameImports, "LLMUpdateSettingsFrame")
 	}
 	needsTTSSpeakFrame := data.GreetingText != ""
@@ -785,7 +791,15 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	// A templated prompt is rendered per session from the call state; an untouched
 	// one stays the bare module constant it always was.
 	prompt := promptExpr(promptConst, def.Instructions, pipecatStateExpr)
-	llm, err := agentLLMService(target.Models.Reason[def.Model], prompt, env)
+	binding := target.Models.Reason[def.Model]
+	snapshot := ""
+	activationSnapshot := ""
+	if binding.Provider == "slng" {
+		lowered := lowerSLNGPrompt(promptConst, def.Instructions, pipecatStateExpr)
+		prompt, snapshot = lowered.PromptExpr, lowered.SnapshotExpr
+		activationSnapshot = lowerSLNGPrompt(promptConst, def.Instructions, "self.state").SnapshotExpr
+	}
+	llm, err := agentLLMService(binding, prompt, name, snapshot, env)
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
@@ -795,7 +809,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	}
 	built := pipecatAgent{
 		Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions,
-		PromptConst: promptConst, PromptExpr: prompt, LLM: llm, TTS: tts,
+		PromptConst: promptConst, PromptExpr: prompt, SLNGSnapshot: activationSnapshot, LLM: llm, TTS: tts,
 	}
 
 	for _, ref := range def.Tools {
@@ -829,7 +843,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 			}
 			built.Tools = append(built.Tools, tool)
 		case *ir.Delegate:
-			delegate, err := buildDelegate(agent, ref, c, env)
+			delegate, err := buildDelegate(agent, binding, ref, c, env)
 			if err != nil {
 				return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 			}
@@ -842,7 +856,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 // buildDelegate lowers a delegate control to a Flow run on the owning worker
 // (C8): a single task is a one-node flow, a group a linear chain. Each step is
 // resolved here so the template emits its node inline.
-func buildDelegate(agent *ir.Agent, ref string, c *ir.Delegate, env *envSet) (pipecatDelegate, error) {
+func buildDelegate(agent *ir.Agent, binding ir.Binding, ref string, c *ir.Delegate, env *envSet) (pipecatDelegate, error) {
 	delegate := pipecatDelegate{MethodName: ref, When: delegateReason(c)}
 	steps := []string{c.Task}
 	if c.Task != "" {
@@ -861,7 +875,7 @@ func buildDelegate(agent *ir.Agent, ref string, c *ir.Delegate, env *envSet) (pi
 		steps = group.Steps
 	}
 	for _, step := range steps {
-		task, err := buildTask(agent, step, agent.Tasks[step], env)
+		task, err := buildTask(agent, binding, step, agent.Tasks[step], env)
 		if err != nil {
 			return pipecatDelegate{}, err
 		}
@@ -877,7 +891,7 @@ func buildDelegate(agent *ir.Agent, ref string, c *ir.Delegate, env *envSet) (pi
 // buildTask lowers a task to a Flow-node model: instructions, tools, and the
 // finish-function schema derived from the typed result (V1). The node runs on
 // the owning agent's LLM; per-task model is gated (no LLMSwitcher, B7).
-func buildTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (pipecatTask, error) {
+func buildTask(agent *ir.Agent, binding ir.Binding, name string, task ir.Task, env *envSet) (pipecatTask, error) {
 	if strings.TrimSpace(task.Instructions) == "" {
 		return pipecatTask{}, fmt.Errorf("task %q instructions must not be empty", name)
 	}
@@ -890,6 +904,13 @@ func buildTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (pipecat
 		PromptExpr:     promptExpr(pyQuote(task.Instructions), task.Instructions, "self.state"),
 		ResultProps:    pyLiteral(resultProperties(task.Result)),
 		ResultRequired: pyLiteral(anyStrings(sortedResultNames(task.Result))),
+	}
+	if binding.Provider == "slng" && binding.SLNG != nil {
+		lowered := lowerSLNGPrompt(pyQuote(task.Instructions), task.Instructions, "self.state")
+		built.PromptExpr = lowered.PromptExpr
+		built.SLNG = true
+		built.SLNGScopeID = binding.SLNG.AgentID + "--task--" + name
+		built.SLNGSnapshot = lowered.SnapshotExpr
 	}
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
@@ -1295,9 +1316,62 @@ func sttService(binding *ir.Binding, env *envSet) (pipecatService, error) {
 // agentLLMService builds an agent's LLM; the prompt nests into Settings as
 // system_instruction (the workers-model shape, driver-pipecat C2), referenced
 // through its module constant so builder and restore share one copy (V2).
-func agentLLMService(binding ir.Binding, promptRef string, env *envSet) (pipecatService, error) {
-	return resolvePipecatService(targetcap.Reason, binding, env,
+func agentLLMService(binding ir.Binding, promptRef, agentName, snapshotExpr string, env *envSet) (pipecatService, error) {
+	svc, err := resolvePipecatService(targetcap.Reason, binding, env,
 		pyKV{Key: "system_instruction", Value: promptRef})
+	if err != nil || binding.Provider != "slng" {
+		return svc, err
+	}
+	if binding.SLNG == nil {
+		return pipecatService{}, fmt.Errorf("SLNG reason binding is missing its slng block")
+	}
+	baseURL, ok := targetcap.SLNGRouterBaseURL(binding.SLNG.Region)
+	if !ok {
+		return pipecatService{}, fmt.Errorf("SLNG reason binding has unsupported region %q", binding.SLNG.Region)
+	}
+	env.addRead(binding.SLNG.Upstream.APIKeyEnv)
+	svc.Call.Args = append(svc.Call.Args, pyKV{Key: "base_url", Value: pyQuote(baseURL)})
+
+	var overflow string
+	for i, kv := range svc.Call.SettingsArgs {
+		if kv.Key != "extra" {
+			continue
+		}
+		overflow = kv.Value
+		svc.Call.SettingsArgs = append(svc.Call.SettingsArgs[:i], svc.Call.SettingsArgs[i+1:]...)
+		break
+	}
+	config := binding.SLNG
+	endpoint := fmt.Sprintf(`{"provider": %s, "url": %s, "api_key": %s, "model_id": %s}`,
+		pyQuote(config.Upstream.Provider), pyQuote(config.Upstream.URL), envRef(config.Upstream.APIKeyEnv), pyQuote(config.Upstream.ModelID))
+	routerConfig := fmt.Sprintf(`{"cache_enabled": True, "tiers": {"1": [{"model": %s, "weight": 100, "endpoint": %s}]}}`,
+		pyQuote(config.Upstream.Name), endpoint)
+	scopeID := config.AgentID + "--agent--" + agentName
+	svc.SLNGScopeID = scopeID
+	svc.Call.SettingsArgs = append(svc.Call.SettingsArgs, pyKV{Key: "extra", Value: slngExtraExpr(
+		overflow, routerConfig, pyQuote(scopeID), "session_id", snapshotExpr,
+	)})
+	for _, kv := range svc.Call.SettingsArgs {
+		switch kv.Key {
+		case "system_instruction":
+			kv.Value = "system_instruction"
+		case "extra":
+			kv.Value = slngExtraExpr(overflow, routerConfig, "scope_id", "self._slng_session_id", "template_variables")
+		}
+		svc.SLNGUpdateSettings = append(svc.SLNGUpdateSettings, kv)
+	}
+	svc.SLNG = true
+	return svc, nil
+}
+
+func slngExtraExpr(overflow, routerConfig, scopeID, sessionID, snapshot string) string {
+	headers := fmt.Sprintf(`{"X-Slng-Agent-Id": %s, "X-Slng-Session-Id": %s}`, scopeID, sessionID)
+	body := fmt.Sprintf(`{"slng_config": %s, "template_variables": %s}`, routerConfig, snapshot)
+	parts := []string{`"extra_headers": ` + headers, `"extra_body": ` + body}
+	if overflow != "" {
+		parts = append([]string{"**" + overflow}, parts...)
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
 }
 
 // serviceUsesLanguage reports whether a service emits a language kwarg, which

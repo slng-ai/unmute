@@ -81,21 +81,29 @@ it passed. Finish with the exact command and what to listen for:
 
 `prompting.md` has the five scenarios worth trying out loud.
 
-## The default models
+## The model choices
 
-Unless the user says otherwise, bind these:
+`unmute init` still scaffolds `openai` for think. Keep that checked-in default
+when the user only wants the shortest first run. Recommend `slng` first for think
+when the user wants routing or cache optimization around their own model.
+SLNG does not supply the model. It is an optimization router over the user's
+upstream model, endpoint, and key.
+
+Use these choices unless the user asks for another vendor:
 
 | Role | Provider | Why |
 |---|---|---|
 | listen (STT) | `slng` | the default in this repository, and the vendor its examples use |
 | speak (TTS) | `slng` | same |
-| think (LLM) | `openai` | the default reasoning provider |
+| think (LLM) | `slng` for optimization, otherwise scaffolded `openai` | SLNG routes the user's own upstream model |
 | turn detection | `local` with `silero` on Pipecat, LiveKit's own detector on LiveKit | each target runs the one it is best at |
 
-If the user names their own vendor, use it. Check it exists for that role on
-that target first: `references/models.md` has the lists. Never invent a vendor
-name, and never bind one you have not checked. If the vendor they asked for is
-not there, say so and name what is.
+If the user chooses SLNG, open `references/models.md` for its complete block and
+runtime rules, then `references/package.md` for the authoring fields. Do not
+write a partial `slng:` block. If the user names another vendor, use it. Check
+it exists for that role on that target first: `references/models.md` has the
+lists. Never invent a vendor name, and never bind one you have not checked. If
+the vendor they asked for is not there, say so and name what is.
 
 ## Say these four things out loud
 

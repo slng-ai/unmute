@@ -115,7 +115,7 @@ at an entry by name. Entries you never reference are legal alternates, so
 swapping a voice is a one line change.
 
 Fields on an entry: `provider`, `model`, `voice`, `speed`, `language`,
-`temperature`, `top_p`, `top_k`, `endpoint_env`, `placement`,
+`temperature`, `top_p`, `top_k`, `endpoint_env`, `slng`, `placement`,
 `semantic_endpointing`, `params`, `fallback`, `description`.
 
 Unmute keeps no list of valid model ids. `model:` and `voice:` are forwarded to
@@ -123,11 +123,41 @@ the provider exactly as written, so a typo is a provider error at run time, not
 a compile error. The compile report says so out loud. Which `provider:` values
 are legal per role per target is in `models.md`.
 
-`params:` is the same passthrough for everything else the provider takes, and it
-is not checked either. Write `reasoning_effort: "none"` there on every think
-entry: OpenAI rejects a request that carries function tools without it, so a
-package with tools fails on every turn. `models.md` has the values and the
-reason.
+`params:` is the same passthrough for everything else the provider takes. Write
+`reasoning_effort: "none"` there on a direct OpenAI think entry. An SLNG think
+entry uses the upstream-specific shape in `models.md` instead, and cannot
+replace compiler-owned identity, history, model, tool, or inline-body fields.
+
+### `slng` on a think entry
+
+`slng:` is valid only on a `models.think` entry whose `provider` is `slng`. It
+has three required fields:
+
+| Field | What it is |
+|---|---|
+| `region` | `india`, `eu`, `us`, or `indonesia`; Unmute derives the router URL |
+| `agent_id` | the stable, versioned base used to derive agent and task identities |
+| `upstream` | one inline BYOK upstream owned by the user |
+
+The `upstream` block also has five required fields:
+
+| Field | What it is |
+|---|---|
+| `name` | the router entry name; the outer model may target this exact name |
+| `provider` | `openai-responses` or `openai-compat` |
+| `url` | the upstream provider's absolute HTTP or HTTPS base URL |
+| `api_key_env` | the upstream key's environment name, separate from `SLNG_API_KEY` |
+| `model_id` | the model ID sent to the upstream provider |
+
+There is no partial form. Do not add a custom router host, default region,
+cache toggle, tier list, weight, raw inline configuration, or literal key.
+Unmute fixes the cache, tier, and one-upstream shape. Put both the router key
+name and the upstream key name in `secrets:`.
+
+The full copyable block, regional URLs, identity rules, template snapshots,
+cache proof, and Responses limits are in `models.md`. Read that section before
+authoring this entry; SLNG is a router over the user's model, not a model
+supplier.
 
 ## agents
 

@@ -20,6 +20,240 @@ import (
 
 var updatePipecatV1 = flag.Bool("update-pipecat", false, "rewrite the pipecat v1 golden")
 
+func TestPipecatSLNGEntryAgentGolden(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "slng-context-router"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := targetByProvider(t, agent, ir.ProviderPipecat)
+	binding := resolved.Models.Reason["reasoning"]
+	binding.Params = map[string]any{"reasoning": map[string]any{"effort": "none"}}
+	resolved.Models.Reason["reasoning"] = binding
+	artifact, err := Generate(agent, resolved, target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+
+	contract := pipecatSLNGGoldenContract(t, bot)
+	assertGoldenFile(t, filepath.Join("testdata", "golden", "slng_pipecat.py"), contract, *updatePipecatV1)
+
+	for _, want := range []string{
+		"from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService, OpenAIResponsesLLMSettings",
+		`FRONT_DESK_PROMPT = """You are the front desk assistant for {{caller_name}}.`,
+		`def _slng_snapshot(state, names: list[str]) -> dict[str, str]:`,
+		`raise RuntimeError(f"Template variable {name} exceeds 4000 characters")`,
+		`"template_variables": _slng_snapshot(state, ["caller_name"])`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py is missing %q", want)
+		}
+	}
+	if strings.Contains(bot, "_render(FRONT_DESK_PROMPT") {
+		t.Error("SLNG entry-agent prompt was rendered locally")
+	}
+	if strings.Count(contract, "extra=") != 1 {
+		t.Errorf("front-desk builder must emit one merged Settings.extra; got:\n%s", contract)
+	}
+	if got := strings.Count(contract, "OpenAIResponsesHttpLLMService("); got != 1 {
+		t.Errorf("front-desk builder constructs %d native Responses services, want one", got)
+	}
+	if got := strings.Count(contract, "_slng_http_service("); got != 1 {
+		t.Errorf("front-desk builder applies %d SLNG stream guards, want one", got)
+	}
+}
+
+func pipecatSLNGGoldenContract(t *testing.T, source string) string {
+	t.Helper()
+	section := func(start, end string) string {
+		t.Helper()
+		from := strings.Index(source, start)
+		if from < 0 {
+			t.Fatalf("bot.py missing golden start %q", start)
+		}
+		to := strings.Index(source[from:], end)
+		if to < 0 {
+			t.Fatalf("bot.py missing golden end %q after %q", end, start)
+		}
+		return strings.Trim(source[from:from+to], "\n")
+	}
+	dedentMethod := func(block string) string {
+		lines := strings.Split(block, "\n")
+		for i, line := range lines {
+			lines[i] = strings.TrimPrefix(line, "    ")
+		}
+		return strings.TrimSpace(strings.Join(lines, "\n"))
+	}
+	return "# ruff: noqa: F821, F841\n\n" + strings.Join([]string{
+		section("def build_front_desk_llm(", "\n\n"),
+		dedentMethod(section("    async def on_activated(self, args) -> None:", "    @_direct_tool")),
+		dedentMethod(section("    def _do_standalone_node_standalone(self) -> NodeConfig:", "    async def _do_standalone_finish_standalone")),
+		dedentMethod(section("    async def _do_standalone_finish_standalone", "def build_specialist_llm(")),
+		section("async def run_bot(", "    # turn: local"),
+	}, "\n\n") + "\n"
+}
+
+// TestPipecatSLNGCallIdentityAndPromptScopes pins the runtime ownership of the
+// router metadata. A call owns one UUID; agents refresh their own scope on
+// activation, and Flow nodes refresh a task scope before the node can run.
+// Request retries and tool continuations therefore reuse the service settings
+// instead of minting new identity or snapshots.
+func TestPipecatSLNGCallIdentityAndPromptScopes(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "slng-context-router"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slngTarget := targetByProvider(t, agent, ir.ProviderPipecat)
+	artifact, err := Generate(agent, slngTarget, target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+
+	if got := strings.Count(bot, "str(uuid.uuid4())"); got != 1 {
+		t.Fatalf("bot.py creates %d SLNG session UUIDs, want one inside run_bot", got)
+	}
+	if strings.Contains(bot, `session_id=""`) {
+		t.Fatal("SLNG builder or worker permits an empty session identity")
+	}
+	runBot := strings.Index(bot, "async def run_bot(")
+	if runBot < 0 {
+		t.Fatal("bot.py has no run_bot")
+	}
+	runBody := bot[runBot:]
+	requireEnv := strings.Index(runBody, "    require_env()")
+	session := strings.Index(runBody, "    session_id = str(uuid.uuid4())")
+	agents := strings.Index(runBody, "    agents = [")
+	if requireEnv < 0 || session < requireEnv || agents < session {
+		t.Fatalf("run_bot must create the session after env validation and before agents: require=%d session=%d agents=%d", requireEnv, session, agents)
+	}
+	for _, want := range []string{
+		"FrontDeskAgent(state=state, context=context, call_context=call_context, session_id=session_id)",
+		"SpecialistAgent(state=state, context=context, call_context=call_context, session_id=session_id)",
+		`"router-fixture-v1--agent--front_desk"`,
+		`"router-fixture-v1--agent--specialist"`,
+		`"router-fixture-v1--task--standalone"`,
+		"async def on_activated(self, args) -> None:",
+		"pre_actions=[{",
+		`"type": "slng_settings"`,
+		`"handler": self._slng_task_pre_action`,
+		"delta=self._slng_settings(",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py is missing SLNG lifecycle fragment %q", want)
+		}
+	}
+	if strings.Contains(bot, `"type": "function",
+                "handler": self._slng_task_pre_action`) {
+		t.Error("SLNG task activation uses Pipecat Flow's deferred function action and can deadlock inside a tool call")
+	}
+	// group_step is authored once and reused by two groups. Both nodes need a
+	// pre-action, but the router identity remains task-owned, not group-owned.
+	if got := strings.Count(bot, `"router-fixture-v1--task--group_step"`); got != 2 {
+		t.Errorf("reused group_step identity appears %d times, want two identical task scopes", got)
+	}
+	for _, forbidden := range []string{
+		"router-fixture-v1--task--first_group",
+		"router-fixture-v1--task--second_group",
+	} {
+		if strings.Contains(bot, forbidden) {
+			t.Errorf("bot.py contains forbidden group-owned identity %q", forbidden)
+		}
+	}
+	// Returning from every non-terminal task restores the owner's full settings,
+	// not only its role text. That puts the agent scope back before continuation
+	// or a subsequent handoff.
+	if strings.Contains(bot, "delta=LLMSettings(system_instruction=") {
+		t.Error("SLNG task return restores only the role instead of full router metadata")
+	}
+	if got := strings.Count(bot, "await self._restore_slng_owner()"); got != 3 {
+		t.Errorf("SLNG owner settings restored %d times, want once for each delegate", got)
+	}
+	restoreStart := strings.Index(bot, "    async def _restore_slng_owner(self) -> None:")
+	if restoreStart < 0 {
+		t.Fatal("bot.py has no SLNG owner restoration helper")
+	}
+	restoreBody := bot[restoreStart:]
+	if end := strings.Index(restoreBody, "\n    @_direct_tool"); end >= 0 {
+		restoreBody = restoreBody[:end]
+	}
+	if !strings.Contains(restoreBody, "self._slng_owner_template_variables") {
+		t.Error("owner restoration does not reuse the snapshot frozen on activation")
+	}
+	if strings.Contains(restoreBody, "_slng_snapshot(") {
+		t.Error("owner restoration recaptures task-mutated state instead of using the activation snapshot")
+	}
+
+	// The inline run_bot owns identity by the same rule. Build the existing
+	// single-agent inline example with the focused fixture's SLNG binding so this
+	// branch cannot accidentally construct the service before its UUID exists.
+	inlinePkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inlineAgent, err := ir.Build(inlinePkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inlineAgent.Tracing = nil
+	inlineTarget := targetByProvider(t, inlineAgent, ir.ProviderPipecat)
+	inlineDef := inlineAgent.Agents[inlineAgent.EntryAgent]
+	inlineTarget.Models.Reason[inlineDef.Model] = slngTarget.Models.Reason[agent.Agents[agent.EntryAgent].Model]
+	inlineArtifact, err := Generate(inlineAgent, inlineTarget, target.Default())
+	if err != nil {
+		t.Fatalf("generate inline SLNG package: %v", err)
+	}
+	inlineBot := artifactFile(t, inlineArtifact, "bot.py")
+	if got := strings.Count(inlineBot, "str(uuid.uuid4())"); got != 1 {
+		t.Errorf("inline bot creates %d SLNG session UUIDs, want one", got)
+	}
+	inlineRun := strings.Index(inlineBot, "async def run_bot(")
+	if inlineRun < 0 {
+		t.Fatal("inline bot has no run_bot")
+	}
+	inlineBody := inlineBot[inlineRun:]
+	inlineSession := strings.Index(inlineBody, "session_id = str(uuid.uuid4())")
+	inlineBuilder := strings.Index(inlineBody, "build_"+inlineAgent.EntryAgent+"_llm(")
+	if inlineSession < 0 || inlineBuilder < inlineSession {
+		t.Fatalf("inline run_bot must create identity before its SLNG builder: session=%d builder=%d", inlineSession, inlineBuilder)
+	}
+	if strings.Contains(inlineBot, "BusBridgeProcessor") {
+		t.Error("single-agent SLNG package left the inline Pipecat path")
+	}
+
+	// Pipecat reason fallback remains gated. A normal non-SLNG package keeps its
+	// existing local provider path and does not gain router lifecycle machinery.
+	if fallback := target.Default().Capability(target.FieldFallback, target.Pipecat); fallback.Tag != target.Gated || !strings.Contains(fallback.Note, "does not emit generated fallback") {
+		t.Fatalf("Pipecat reason fallback gate changed: %#v", fallback)
+	}
+	plainPkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainAgent, err := ir.Build(plainPkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainArtifact, err := Generate(plainAgent, targetByProvider(t, plainAgent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatalf("generate non-SLNG package: %v", err)
+	}
+	plainBot := artifactFile(t, plainArtifact, "bot.py")
+	for _, forbidden := range []string{"import uuid", "_slng_settings", "X-Slng-Agent-Id", "X-Slng-Session-Id"} {
+		if strings.Contains(plainBot, forbidden) {
+			t.Errorf("non-SLNG Pipecat output contains %q", forbidden)
+		}
+	}
+}
+
 // TestPipecatV1BuiltinEndCallTool covers the prebuilt end_call lowering: a
 // bodyless @tool that speaks the goodbye then ends via EndFrame, with no
 // url_env, handler, or httpx POST.
@@ -711,8 +945,10 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		t.Fatal("bot.py not emitted")
 	}
 	for _, want := range []string{
+		"import copy",
 		"from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame",
 		"from pipecat.services.settings import LLMSettings",
+		"copy.deepcopy(self.context.get_messages())",
 		`role_message="Ask for the caller's email, look them up, and confirm their account tier."`,
 		`task_messages=[{"role": "developer", "content": "Begin this step."}]`,
 		// The delegate resolves its call with run_llm=False so only the flow node
@@ -728,6 +964,9 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	}
 	if strings.Contains(bot, `task_messages=[{"role": "system"`) {
 		t.Error("bot.py still sends task instructions as a second system message")
+	}
+	if strings.Contains(bot, "[dict(m) for m in self.context.get_messages()]") {
+		t.Error("delegate snapshot still assumes every Pipecat context message is a mapping")
 	}
 	if got := strings.Count(bot, "await self.queue_frame(LLMUpdateSettingsFrame("); got != 2 {
 		t.Errorf("bot.py restores the owner role %d times, want 2", got)
@@ -1502,7 +1741,7 @@ func assertGoldenFile(t *testing.T, path, got string, update bool) {
 		t.Fatal(err)
 	}
 	if got != string(want) {
-		t.Fatalf("golden differs; rerun the test with its update flag")
+		t.Fatalf("golden differs; rerun the test with its update flag\n--- got ---\n%s", got)
 	}
 }
 

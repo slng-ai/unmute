@@ -79,6 +79,187 @@ func TestValidateLanguageOnThinkModelRejected(t *testing.T) {
 	}
 }
 
+func validIRSLNGConfig() *SLNGConfig {
+	return &SLNGConfig{
+		Region: "eu", AgentID: "salon-desk-v1",
+		Upstream: SLNGUpstream{
+			Name: "luna", Provider: "openai-responses", URL: "https://api.openai.com/v1",
+			APIKeyEnv: "OPENAI_API_KEY", ModelID: "gpt-5.6-luna",
+		},
+	}
+}
+
+func slngValidationAgent(t *testing.T, provider Provider) (*Agent, Target) {
+	t.Helper()
+	agent := safeAgent(t)
+	config := validIRSLNGConfig()
+	model := agent.Models["fast_reasoning"]
+	model.Provider, model.Model, model.SLNG = "slng", "slng/auto", config
+	agent.Models["fast_reasoning"] = model
+	agent.Secrets = append(agent.Secrets, "OPENAI_API_KEY", "SLNG_API_KEY")
+	target := targetFor(agent, provider)
+	binding := target.Models.Reason["fast_reasoning"]
+	binding.Provider, binding.Model, binding.SLNG = "slng", "slng/auto", config
+	target.Models.Reason["fast_reasoning"] = binding
+	return agent, target
+}
+
+func TestValidateSLNGFieldsFailClosed(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Agent, *Target)
+		want   string
+	}{
+		{name: "missing block", mutate: func(agent *Agent, target *Target) {
+			model := agent.Models["fast_reasoning"]
+			model.SLNG = nil
+			agent.Models["fast_reasoning"] = model
+			binding := target.Models.Reason["fast_reasoning"]
+			binding.SLNG = nil
+			target.Models.Reason["fast_reasoning"] = binding
+		}, want: `provider "slng" requires a complete slng block`},
+		{name: "missing region", mutate: func(_ *Agent, target *Target) {
+			target.Models.Reason["fast_reasoning"].SLNG.Region = ""
+		}, want: "slng.region must be one of india, eu, us, indonesia"},
+		{name: "unknown region", mutate: func(_ *Agent, target *Target) {
+			target.Models.Reason["fast_reasoning"].SLNG.Region = "europe"
+		}, want: "slng.region must be one of india, eu, us, indonesia"},
+		{name: "blank agent id", mutate: func(_ *Agent, target *Target) {
+			target.Models.Reason["fast_reasoning"].SLNG.AgentID = ""
+		}, want: "slng.agent_id must be nonempty"},
+		{name: "agent id has space", mutate: func(_ *Agent, target *Target) {
+			target.Models.Reason["fast_reasoning"].SLNG.AgentID = "salon desk-v1"
+		}, want: "visible ASCII without whitespace"},
+		{name: "agent id has unicode", mutate: func(_ *Agent, target *Target) {
+			target.Models.Reason["fast_reasoning"].SLNG.AgentID = "salon-déск-v1"
+		}, want: "visible ASCII without whitespace"},
+		{name: "missing upstream name", mutate: func(_ *Agent, target *Target) {
+			target.Models.Reason["fast_reasoning"].SLNG.Upstream.Name = ""
+		}, want: "slng.upstream.name must be nonempty"},
+		{name: "missing upstream model id", mutate: func(_ *Agent, target *Target) {
+			target.Models.Reason["fast_reasoning"].SLNG.Upstream.ModelID = ""
+		}, want: "slng.upstream.model_id must be nonempty"},
+		{name: "missing upstream provider", mutate: func(_ *Agent, target *Target) {
+			target.Models.Reason["fast_reasoning"].SLNG.Upstream.Provider = ""
+		}, want: "slng.upstream.provider must be openai-responses or openai-compat"},
+		{name: "unknown upstream provider", mutate: func(_ *Agent, target *Target) {
+			target.Models.Reason["fast_reasoning"].SLNG.Upstream.Provider = "azure"
+		}, want: "slng.upstream.provider must be openai-responses or openai-compat"},
+		{name: "request model mismatch", mutate: func(_ *Agent, target *Target) {
+			binding := target.Models.Reason["fast_reasoning"]
+			binding.Model = "gpt-5.6-luna"
+			target.Models.Reason["fast_reasoning"] = binding
+		}, want: "model must be slng/auto or match slng.upstream.name"},
+		{name: "custom router endpoint", mutate: func(_ *Agent, target *Target) {
+			binding := target.Models.Reason["fast_reasoning"]
+			binding.EndpointEnv = "SLNG_ROUTER_BASE_URL"
+			target.Models.Reason["fast_reasoning"] = binding
+		}, want: "endpoint_env is not supported for SLNG think"},
+		{name: "reserved param", mutate: func(_ *Agent, target *Target) {
+			binding := target.Models.Reason["fast_reasoning"]
+			binding.Params = map[string]any{"extra_body": map[string]any{"override": true}}
+			target.Models.Reason["fast_reasoning"] = binding
+		}, want: `params key "extra_body" is reserved`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			agent, target := slngValidationAgent(t, ProviderLiveKit)
+			test.mutate(agent, &target)
+			report, err := Validate(agent, []Target{target}, targetcap.Default())
+			if err == nil {
+				t.Fatal("expected validation failure")
+			}
+			errors := strings.Join(report.PerTarget[0].Errors, "\n")
+			if !strings.Contains(errors, test.want) {
+				t.Fatalf("errors =\n%s\nwant one containing %q", errors, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateSLNGUpstreamURLs(t *testing.T) {
+	for _, test := range []struct {
+		name, endpoint string
+		valid          bool
+	}{
+		{name: "https", endpoint: "https://api.openai.com/v1", valid: true},
+		{name: "http", endpoint: "http://localhost:8080/v1", valid: true},
+		{name: "relative", endpoint: "api.openai.com/v1"},
+		{name: "missing host", endpoint: "https:///v1"},
+		{name: "wrong scheme", endpoint: "ftp://api.openai.com/v1"},
+		{name: "embedded credentials", endpoint: "https://user:password@api.openai.com/v1"},
+		{name: "malformed", endpoint: "://"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			agent, target := slngValidationAgent(t, ProviderLiveKit)
+			target.Models.Reason["fast_reasoning"].SLNG.Upstream.URL = test.endpoint
+			report, _ := Validate(agent, []Target{target}, targetcap.Default())
+			errors := strings.Join(report.PerTarget[0].Errors, "\n")
+			gotError := strings.Contains(errors, "slng.upstream.url must be an absolute HTTP or HTTPS URL with a host and no credentials")
+			if gotError == test.valid {
+				t.Fatalf("valid=%v errors=\n%s", test.valid, errors)
+			}
+		})
+	}
+}
+
+func TestValidateSLNGPlacementAndSharedBaseID(t *testing.T) {
+	t.Run("block outside think", func(t *testing.T) {
+		agent := safeAgent(t)
+		model := agent.Models["front_desk"]
+		model.SLNG = validIRSLNGConfig()
+		agent.Models["front_desk"] = model
+		target := targetFor(agent, ProviderLiveKit)
+		report, _ := Validate(agent, []Target{target}, targetcap.Default())
+		if errors := strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(errors, "slng block is legal only on think models") {
+			t.Fatalf("errors =\n%s", errors)
+		}
+	})
+
+	t.Run("block with another provider", func(t *testing.T) {
+		agent := safeAgent(t)
+		model := agent.Models["fast_reasoning"]
+		model.SLNG = validIRSLNGConfig()
+		agent.Models["fast_reasoning"] = model
+		target := targetFor(agent, ProviderLiveKit)
+		report, _ := Validate(agent, []Target{target}, targetcap.Default())
+		if errors := strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(errors, `slng block requires provider "slng"`) {
+			t.Fatalf("errors =\n%s", errors)
+		}
+	})
+
+	t.Run("used bindings share one base", func(t *testing.T) {
+		agent, first := slngValidationAgent(t, ProviderLiveKit)
+		second := first.Models.Reason["fast_reasoning"]
+		copyConfig := *second.SLNG
+		copyConfig.AgentID = "another-base-v1"
+		second.SLNG = &copyConfig
+		first.Models.Reason["careful_reasoning"] = second
+		report, _ := Validate(agent, []Target{first}, targetcap.Default())
+		if errors := strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(errors, "used SLNG think bindings must share one slng.agent_id base") {
+			t.Fatalf("errors =\n%s", errors)
+		}
+	})
+
+	t.Run("selected target overrides share one base", func(t *testing.T) {
+		agent, livekit := slngValidationAgent(t, ProviderLiveKit)
+		pipecat := targetFor(agent, ProviderPipecat)
+		binding := pipecat.Models.Reason["fast_reasoning"]
+		binding.Provider, binding.Model = "slng", "slng/auto"
+		binding.SLNG = validIRSLNGConfig()
+		binding.SLNG.AgentID = "another-base-v1"
+		pipecat.Models.Reason["fast_reasoning"] = binding
+		// The identity is package-wide even when the caller selects one target.
+		report, _ := Validate(agent, []Target{livekit}, targetcap.Default())
+		for _, row := range report.PerTarget {
+			if errors := strings.Join(row.Errors, "\n"); !strings.Contains(errors, "used SLNG think bindings must share one slng.agent_id base") {
+				t.Fatalf("%s errors =\n%s", row.Provider, errors)
+			}
+		}
+	})
+}
+
 // N16: a language set on a vendor whose integration has no language slot must
 // fail at VALIDATE, not just generate (C6: gate before any artifact). gemini
 // TTS is NoLanguage on livekit.
@@ -1794,6 +1975,43 @@ func TestFeatureFloorsGateTheDeclaredVersion(t *testing.T) {
 	})
 }
 
+func TestSLNGResponsesFloorsUseResolvedTargetBindings(t *testing.T) {
+	agent := safeAgent(t)
+	for _, test := range []struct {
+		provider    Provider
+		below       string
+		floor       string
+		packageName string
+	}{
+		{provider: ProviderPipecat, below: "1.6.9", floor: "1.7.0", packageName: "pipecat-ai"},
+		{provider: ProviderLiveKit, below: "1.6.9", floor: "1.6.10", packageName: "livekit-agents"},
+	} {
+		t.Run(string(test.provider), func(t *testing.T) {
+			resolved := targetFor(agent, test.provider)
+			binding := resolved.Models.Reason["fast_reasoning"]
+			binding.Provider = "slng"
+			resolved.Models.Reason["fast_reasoning"] = binding
+
+			resolved.Version = test.below
+			report, _ := Validate(agent, []Target{resolved}, targetcap.Default())
+			errors := strings.Join(report.PerTarget[0].Errors, "\n")
+			for _, want := range []string{"too old for SLNG Responses routing", test.packageName + " >=" + test.floor} {
+				if !strings.Contains(errors, want) {
+					t.Errorf("errors missing %q:\n%s", want, errors)
+				}
+			}
+
+			resolved.Version = test.floor
+			report, _ = Validate(agent, []Target{resolved}, targetcap.Default())
+			for _, message := range report.PerTarget[0].Errors {
+				if strings.Contains(message, "too old for SLNG Responses routing") {
+					t.Errorf("the feature floor itself was rejected: %s", message)
+				}
+			}
+		})
+	}
+}
+
 // UsedFrameworkFeatures is the one home for the version-relevant question, so
 // it has to answer it from the resolved package rather than from a driver.
 func TestUsedFrameworkFeatures(t *testing.T) {
@@ -1808,5 +2026,13 @@ func TestUsedFrameworkFeatures(t *testing.T) {
 	got := UsedFrameworkFeatures(withMCP)
 	if len(got) != 1 || got[0] != targetcap.FeatureMCPTools {
 		t.Errorf("an mcp package reports %v, want just the MCP tool source", got)
+	}
+	target := targetFor(plain, ProviderPipecat)
+	binding := target.Models.Reason["fast_reasoning"]
+	binding.Provider = "slng"
+	target.Models.Reason["fast_reasoning"] = binding
+	got = usedResolvedFrameworkFeatures(plain, target)
+	if len(got) != 1 || got[0] != targetcap.FeatureSLNGResponses {
+		t.Errorf("an SLNG target reports %v, want just SLNG Responses routing", got)
 	}
 }

@@ -2,12 +2,74 @@ package ir
 
 import (
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	packagespec "github.com/slng-ai/unmute/internal/spec"
 )
+
+func slngTestConfig(region, name, provider, endpoint, keyEnv, modelID string) *packagespec.SLNGConfig {
+	return &packagespec.SLNGConfig{
+		Region: region, AgentID: "salon-desk-v1",
+		Upstream: packagespec.SLNGUpstream{
+			Name: name, Provider: provider, URL: endpoint, APIKeyEnv: keyEnv, ModelID: modelID,
+		},
+	}
+}
+
+func configureSLNGTestModels(pkg *packagespec.Package) {
+	model := pkg.Agent.Models.Think["fast_reasoning"]
+	model.Provider, model.Model = "slng", "slng/auto"
+	model.SLNG = slngTestConfig("eu", "luna", "openai-responses", "https://api.openai.com/v1", "OPENAI_API_KEY", "gpt-5.6-luna")
+	pkg.Agent.Models.Think["fast_reasoning"] = model
+
+	target := pkg.Targets["pipecat"]
+	if target.Models == nil {
+		target.Models = make(map[string]packagespec.ModelDef)
+	}
+	target.Models["fast_reasoning"] = packagespec.ModelDef{
+		Provider: "slng", Model: "router_luna",
+		SLNG: slngTestConfig("us", "router_luna", "openai-compat", "https://compat.example.com/v1", "COMPAT_API_KEY", "luna-compat"),
+	}
+	pkg.Targets["pipecat"] = target
+}
+
+func TestBuildCarriesSLNGThroughModelsBindingsAndCompleteOverrides(t *testing.T) {
+	pkg := loadSafeCore(t)
+	configureSLNGTestModels(pkg)
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantSource := &SLNGConfig{
+		Region: "eu", AgentID: "salon-desk-v1",
+		Upstream: SLNGUpstream{
+			Name: "luna", Provider: "openai-responses", URL: "https://api.openai.com/v1",
+			APIKeyEnv: "OPENAI_API_KEY", ModelID: "gpt-5.6-luna",
+		},
+	}
+	if got := agent.Models["fast_reasoning"].SLNG; !reflect.DeepEqual(got, wantSource) {
+		t.Fatalf("resolved model SLNG = %#v, want %#v", got, wantSource)
+	}
+	if got := agent.Targets["livekit"].Models.Reason["fast_reasoning"].SLNG; !reflect.DeepEqual(got, wantSource) {
+		t.Fatalf("unoverridden binding SLNG = %#v, want %#v", got, wantSource)
+	}
+
+	wantOverride := &SLNGConfig{
+		Region: "us", AgentID: "salon-desk-v1",
+		Upstream: SLNGUpstream{
+			Name: "router_luna", Provider: "openai-compat", URL: "https://compat.example.com/v1",
+			APIKeyEnv: "COMPAT_API_KEY", ModelID: "luna-compat",
+		},
+	}
+	got := agent.Targets["pipecat"].Models.Reason["fast_reasoning"]
+	if got.Model != "router_luna" || !reflect.DeepEqual(got.SLNG, wantOverride) {
+		t.Fatalf("complete override binding = %#v, want model and block %#v", got, wantOverride)
+	}
+}
 
 func TestBuildBuiltinToolResolvesRegistryDefaults(t *testing.T) {
 	pkg := loadSafeCore(t)

@@ -124,9 +124,30 @@ func TestLanguageLoweringUsesCataloguedSlot(t *testing.T) {
 	}
 }
 
+func TestSampleBindingUsesSLNGResponsesShapeForReason(t *testing.T) {
+	for _, framework := range []targetcap.Provider{targetcap.Pipecat, targetcap.LiveKit} {
+		entry, ok := defaultCatalog.Lookup(framework, targetcap.Reason, "slng")
+		if !ok {
+			t.Fatalf("%s Reason/slng catalog row is missing", framework)
+		}
+		binding, _ := sampleBinding(entry)
+		want := &ir.SLNGConfig{
+			Region: "eu", AgentID: "catalog-router-v1",
+			Upstream: ir.SLNGUpstream{
+				Name: "luna", Provider: "openai-responses", URL: "https://api.openai.com/v1",
+				APIKeyEnv: "OPENAI_API_KEY", ModelID: "gpt-5.6-luna",
+			},
+		}
+		if binding.Model != "slng/auto" || binding.SLNG == nil || *binding.SLNG != *want {
+			t.Errorf("%s Reason/slng sample = %#v, want model slng/auto and %#v", framework, binding, want)
+		}
+	}
+}
+
 // sampleBinding synthesizes the minimal binding that exercises an entry:
-// slng models keep the route form to show the prefix transform, wildcards get
-// an unlisted vendor (plus an endpoint where required).
+// SLNG listen/speak keep their route forms, SLNG reason carries its typed
+// Responses/BYOK shape, and wildcards get an unlisted vendor (plus an endpoint
+// where required).
 func sampleBinding(entry targetcap.Entry) (ir.Binding, string) {
 	binding := ir.Binding{Provider: entry.Vendor, Params: map[string]any{"sample_rate": 24000}}
 	label := entry.Vendor
@@ -136,8 +157,18 @@ func sampleBinding(entry targetcap.Entry) (ir.Binding, string) {
 	switch {
 	case entry.Vendor == "slng" && entry.Role == targetcap.Speak:
 		binding.Model = "slng/deepgram/aura:2-en"
-	case entry.Vendor == "slng":
+	case entry.Vendor == "slng" && entry.Role == targetcap.Listen:
 		binding.Model = "slng/deepgram/nova:3"
+	case entry.Vendor == "slng" && entry.Role == targetcap.Reason:
+		binding.Model = "slng/auto"
+		binding.Params = map[string]any{"temperature": 0.4}
+		binding.SLNG = &ir.SLNGConfig{
+			Region: "eu", AgentID: "catalog-router-v1",
+			Upstream: ir.SLNGUpstream{
+				Name: "luna", Provider: "openai-responses", URL: "https://api.openai.com/v1",
+				APIKeyEnv: "OPENAI_API_KEY", ModelID: "gpt-5.6-luna",
+			},
+		}
 	default:
 		binding.Model = "model-1"
 	}
@@ -157,6 +188,11 @@ func describeBinding(binding ir.Binding) string {
 	}
 	if binding.EndpointEnv != "" {
 		s += " endpoint_env=" + binding.EndpointEnv
+	}
+	if binding.SLNG != nil {
+		s += fmt.Sprintf(" slng.region=%s slng.agent_id=%s slng.upstream={name=%s provider=%s url=%s api_key_env=%s model_id=%s}",
+			binding.SLNG.Region, binding.SLNG.AgentID, binding.SLNG.Upstream.Name, binding.SLNG.Upstream.Provider,
+			binding.SLNG.Upstream.URL, binding.SLNG.Upstream.APIKeyEnv, binding.SLNG.Upstream.ModelID)
 	}
 	return s
 }

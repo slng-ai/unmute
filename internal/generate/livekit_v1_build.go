@@ -116,6 +116,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		}
 		data.Tasks = append(data.Tasks, built)
 	}
+	configureLiveKitSLNGScopes(agent, tgt, &data)
 	data.NeedsTasks = len(data.Tasks) > 0
 	data.NeedsFunctionTools = data.NeedsTasks
 	for _, a := range data.Agents {
@@ -660,8 +661,10 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 		IsEntry: name == agent.EntryAgent,
 	}
 	// A templated prompt is re-rendered from the session state on entry; an
-	// untouched one keeps the bare module constant.
-	if ir.HasTemplate(def.Instructions) {
+	// untouched one keeps the bare module constant. A mixed fallback chain keeps
+	// this local form for its non-SLNG attempts; the SLNG wrapper swaps a copy of
+	// the request context back to the raw prompt.
+	if ir.HasTemplate(def.Instructions) && livekitReasonHasNonSLNG(agent, tgt, def.Model) {
 		built.PromptExpr = promptExpr(promptConst(name), def.Instructions, "self.session.userdata")
 	}
 	if def.Model != entry.Model {
@@ -870,7 +873,8 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 
 func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *envSet) (livekitTask, error) {
 	built := livekitTask{Name: name, Class: pyName(name), PromptConst: promptConst(name)}
-	if ir.HasTemplate(task.Instructions) {
+	profile := cmp.Or(task.Model, agent.Agents[agent.EntryAgent].Model)
+	if ir.HasTemplate(task.Instructions) && livekitReasonHasNonSLNG(agent, tgt, profile) {
 		built.PromptExpr = promptExpr(promptConst(name), task.Instructions, "self.session.userdata")
 	}
 	// Per-task model (B1): AgentTask takes its own llm=, resolved through the
@@ -992,7 +996,86 @@ func livekitTTSService(binding ir.Binding, env *envSet) (livekitService, error) 
 }
 
 func livekitChainService(binding ir.Binding, env *envSet) (livekitService, error) {
-	return resolveLiveKitService(targetcap.Reason, binding, env)
+	service, err := resolveLiveKitService(targetcap.Reason, binding, env)
+	if err != nil {
+		return livekitService{}, err
+	}
+	if binding.SLNG != nil {
+		if err := configureLiveKitSLNGService(&service, binding, env); err != nil {
+			return livekitService{}, err
+		}
+	}
+	return service, nil
+}
+
+// configureLiveKitSLNGService turns a reason binding's normal catalogue call
+// into the one generated Responses wrapper. Identity and prompt scope stay in
+// ContextVars, so delayed constructors and fallback services share one call.
+func configureLiveKitSLNGService(service *livekitService, binding ir.Binding, env *envSet) error {
+	config := binding.SLNG
+	if config == nil {
+		return fmt.Errorf("SLNG binding is missing its inline configuration")
+	}
+	baseURL, ok := targetcap.SLNGRouterBaseURL(config.Region)
+	if !ok {
+		return fmt.Errorf("SLNG region %q has no router URL", config.Region)
+	}
+	env.addRead(config.Upstream.APIKeyEnv)
+	service.Call.Class = "_SLNGResponsesLLM"
+	service.SLNGAgentIDBase = config.AgentID
+	service.Call.Args = append(service.Call.Args,
+		pyKV{Key: "base_url", Value: pyQuote(baseURL)},
+		pyKV{Key: "use_websocket", Value: "False"},
+		pyKV{Key: "store", Value: "False"},
+		pyKV{Key: "slng_config", Value: livekitSLNGConfigExpr(config)},
+	)
+	return nil
+}
+
+func livekitReasonHasNonSLNG(agent *ir.Agent, tgt ir.Target, profile string) bool {
+	for _, name := range append([]string{profile}, agent.Models[profile].Fallback...) {
+		if tgt.Models.Reason[name].SLNG == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func configureLiveKitSLNGScopes(agent *ir.Agent, tgt ir.Target, data *livekitData) {
+	base := ""
+	for _, service := range livekitServices(*data) {
+		if service.SLNGAgentIDBase != "" {
+			base = service.SLNGAgentIDBase
+			break
+		}
+	}
+	if base == "" {
+		return
+	}
+	data.HasSLNG = true
+	data.SLNGSnapshotHelper = slngSnapshotHelperSource
+	for i := range data.Agents {
+		built := &data.Agents[i]
+		prompt := lowerSLNGPrompt(built.PromptConst, agent.Agents[built.Name].Instructions, "self.session.userdata")
+		built.SLNGScope = &livekitSLNGScope{
+			AgentID: base + "--agent--" + built.Name, PromptExpr: prompt.PromptExpr, SnapshotExpr: prompt.SnapshotExpr,
+		}
+	}
+	for i := range data.Tasks {
+		built := &data.Tasks[i]
+		prompt := lowerSLNGPrompt(built.PromptConst, agent.Tasks[built.Name].Instructions, "self.session.userdata")
+		built.SLNGScope = &livekitSLNGScope{
+			AgentID: base + "--task--" + built.Name, PromptExpr: prompt.PromptExpr, SnapshotExpr: prompt.SnapshotExpr,
+		}
+	}
+}
+
+func livekitSLNGConfigExpr(config *ir.SLNGConfig) string {
+	upstream := config.Upstream
+	return `{"cache_enabled": True, "tiers": {"1": [{"model": ` + pyQuote(upstream.Name) +
+		`, "weight": 100, "endpoint": {"provider": ` + pyQuote(upstream.Provider) +
+		`, "url": ` + pyQuote(upstream.URL) + `, "api_key": ` + envRef(upstream.APIKeyEnv) +
+		`, "model_id": ` + pyQuote(upstream.ModelID) + `}}]}}`
 }
 
 // livekitTurnVersion maps the target's turn: binding to the

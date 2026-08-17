@@ -25,6 +25,58 @@ func loadOutboundReminder(t *testing.T) *ir.Agent {
 	return agent
 }
 
+func TestSLNGPromptLoweringKeepsRawPromptAndExactSnapshot(t *testing.T) {
+	body := "Welcome {{name}}. Your slot is {{slot}}. Repeat: {{name}}."
+	for _, test := range []struct {
+		target, state, snapshot string
+	}{
+		{target: "pipecat", state: "state", snapshot: `_slng_snapshot(state, ["name", "slot"])`},
+		{target: "livekit", state: "self.session.userdata", snapshot: `_slng_snapshot(self.session.userdata, ["name", "slot"])`},
+	} {
+		t.Run(test.target, func(t *testing.T) {
+			got := lowerSLNGPrompt("WELCOME_PROMPT", body, test.state)
+			if got.PromptExpr != "WELCOME_PROMPT" {
+				t.Fatalf("SLNG prompt expression = %q, want raw prompt constant", got.PromptExpr)
+			}
+			if got.SnapshotExpr != test.snapshot {
+				t.Fatalf("SLNG snapshot expression = %q", got.SnapshotExpr)
+			}
+			if strings.Contains(got.SnapshotExpr, "unrelated") {
+				t.Fatalf("SLNG snapshot must contain only referenced variables: %s", got.SnapshotExpr)
+			}
+		})
+	}
+	task := lowerSLNGPrompt(pyQuote(body), body, "self.state")
+	if task.PromptExpr != `"Welcome {{name}}. Your slot is {{slot}}. Repeat: {{name}}."` {
+		t.Fatalf("SLNG task prompt lost its raw placeholders: %s", task.PromptExpr)
+	}
+}
+
+func TestSLNGPromptLoweringWithNoReferencesDoesNotReadState(t *testing.T) {
+	for _, state := range []string{"state", "self.session.userdata"} {
+		got := lowerSLNGPrompt("WELCOME_PROMPT", "Welcome to the salon.", state)
+		if got.PromptExpr != "WELCOME_PROMPT" {
+			t.Fatalf("SLNG prompt expression = %q, want raw prompt constant", got.PromptExpr)
+		}
+		if got.SnapshotExpr != "{}" {
+			t.Errorf("zero-reference SLNG prompt reads %q, want an empty snapshot", got.SnapshotExpr)
+		}
+	}
+}
+
+func TestSLNGLoweringLeavesEveryLocalRenderSiteUnchanged(t *testing.T) {
+	if got := promptExpr("WELCOME_PROMPT", "Welcome {{name}}.", "state"); got != `_render(WELCOME_PROMPT, state)` {
+		t.Fatalf("non-SLNG prompt expression = %q", got)
+	}
+	if got := injectExpr("customer/{{customer_id}}", "state"); got != `_render("customer/{{customer_id}}", state)` {
+		t.Fatalf("tool injection expression = %q", got)
+	}
+	tool := ir.Tool{URLEnv: "TOOL_URL", Path: "/customers/{{customer_id}}"}
+	if got := urlExpr(tool, "state"); got != `os.environ["TOOL_URL"].rstrip("/") + _render("/customers/{{customer_id}}", state, quote_values=True)` {
+		t.Fatalf("webhook path expression = %q", got)
+	}
+}
+
 func TestVariablesLowerOnBothDrivers(t *testing.T) {
 	agent := loadOutboundReminder(t)
 	cases := []struct {
@@ -51,6 +103,7 @@ func TestVariablesLowerOnBothDrivers(t *testing.T) {
 				`tools.reschedule_appointment.reschedule_appointment(`,
 				// The prompt and greeting render from the call state (V15).
 				`system_instruction=_render(REMINDER_PROMPT, state)`,
+				`_render("Hi {{name}}! This is Sage and Stone Salon calling about your appointment {{appointment_time}}. Does that time still work for you?", state)`,
 				`_dispatched_call_start(call_context)`,
 			},
 		},
@@ -68,6 +121,7 @@ func TestVariablesLowerOnBothDrivers(t *testing.T) {
 				`tools.confirm_appointment.confirm_appointment(`,
 				`tools.reschedule_appointment.reschedule_appointment(`,
 				`await self.update_instructions(_render(REMINDER_PROMPT, self.session.userdata))`,
+				`_render("Hi {{name}}! This is Sage and Stone Salon calling about your appointment {{appointment_time}}. Does that time still work for you?", session.userdata)`,
 				`_hydrate_call_start(session.userdata`,
 				// A required secret stops the session before it answers (V12).
 				`require_env()`,

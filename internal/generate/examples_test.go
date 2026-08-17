@@ -300,7 +300,7 @@ func TestPublicExamplePackages(t *testing.T) {
 	//
 	// A telephony example whose behaviour is one provider's names that provider
 	// first, because the route is the thing a reader is choosing between.
-	want := []string{"livekit-human-transfer", "mcp-example", "multi-task", "outbound-reminder", "pipecat-human-transfer-twilio", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
+	want := []string{"livekit-human-transfer", "mcp-example", "multi-task", "outbound-reminder", "pipecat-human-transfer-twilio", "salon-support", "simple-prompt", "slng-context-router", "subagents", "task-groups", "twilio-telephony-hello"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -697,6 +697,27 @@ func TestExampleAndDocLinksIntoExamplesResolve(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+func TestSimplePromptDocumentsSLNGOptInWithoutChangingDefault(t *testing.T) {
+	root := filepath.Join("..", "..", "examples", "simple-prompt")
+	pkg, err := spec.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning := pkg.Agent.Models.Think["reasoning"]
+	if reasoning.Provider != "openai" || reasoning.SLNG != nil {
+		t.Fatalf("simple-prompt default = provider %q, slng %t; want direct openai with no SLNG block", reasoning.Provider, reasoning.SLNG != nil)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"provider: slng", "model: slng/auto", "models/context-router.mdx"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("simple-prompt README is missing SLNG opt-in marker %q", want)
 		}
 	}
 }

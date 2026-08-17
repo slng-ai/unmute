@@ -2,11 +2,79 @@
 
 package generate
 
-import "testing"
+import (
+	"os/exec"
+	"testing"
+)
 
 // L4 smoke for the variables surface (variable_secrets_specs.md T12): the
 // emitted render helper, the refusal gate, and the generated capture tool are
 // exercised against the real SDK in a real venv. Opt-in (`make smoke`).
+
+func TestSmokeSLNGSnapshotRefreshLimitsAndTextConversion(t *testing.T) {
+	script := slngSnapshotHelperSource + `
+
+class PipecatState:
+    pass
+
+
+class LiveKitUserdata:
+    pass
+
+
+def check_state(state):
+    state.name = "Ada"
+    state.count = 7
+    state.confirmed = True
+    state.unrelated = "must not leave the process"
+
+    first = _slng_snapshot(state, ["name", "count", "confirmed", "task_value"])
+    assert first == {
+        "name": "Ada",
+        "count": "7",
+        "confirmed": "True",
+        "task_value": "",
+    }, first
+    assert "unrelated" not in first, first
+
+    state.name = "Grace"
+    state.task_value = "booked"
+    refreshed = _slng_snapshot(state, ["name", "task_value"])
+    assert refreshed == {"name": "Grace", "task_value": "booked"}, refreshed
+    assert first["name"] == "Ada" and first["task_value"] == "", first
+
+    calls = []
+
+    def sdk_call(snapshot):
+        calls.append(snapshot)
+
+    state.notes = "x" * 4000
+    assert len(_slng_snapshot(state, ["notes"])["notes"]) == 4000
+
+    value = "do-not-echo-" + ("x" * 4001)
+    state.notes = value
+    try:
+        snapshot = _slng_snapshot(state, ["notes"])
+        sdk_call(snapshot)
+    except RuntimeError as exc:
+        message = str(exc)
+        assert "notes" in message, message
+        assert value not in message, message
+    else:
+        raise AssertionError("oversized snapshot was accepted")
+    assert calls == [], calls
+
+
+# Exercise the same lowering against both generated targets' state shape.
+check_state(PipecatState())
+check_state(LiveKitUserdata())
+print("slng snapshot ok")
+`
+	cmd := exec.Command("python3", "-c", script)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("SLNG snapshot smoke failed: %v\n%s", err, output)
+	}
+}
 
 // pipecatVariablesSmokeScript imports the emitted bot, then drives the three
 // pieces directly: rendering with and without a value, the refusal that keeps a

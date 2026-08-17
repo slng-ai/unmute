@@ -225,6 +225,66 @@ func TestCompilePrintsBindingsAndSizing(t *testing.T) {
 	}
 }
 
+func TestCompileSLNGRouterReportsEnvironmentNamesWithoutSecretValues(t *testing.T) {
+	t.Setenv("SLNG_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	const routerValue = "router-secret-must-not-leak"
+	const upstreamValue = "upstream-secret-must-not-leak"
+	for _, target := range []string{"livekit", "pipecat"} {
+		t.Run(target, func(t *testing.T) {
+			dir := copySLNGRouter(t)
+			if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(
+				"SLNG_API_KEY="+routerValue+"\nOPENAI_API_KEY="+upstreamValue+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			stdout, stderr, err := runCompileCommand(t, "--target", target, dir)
+			if err != nil {
+				t.Fatalf("compile: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+			}
+			buildDir := filepath.Join(dir, "build", target)
+			envExample, err := os.ReadFile(filepath.Join(buildDir, ".env.example"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"SLNG_API_KEY=", "OPENAI_API_KEY="} {
+				if !strings.Contains(string(envExample), name) {
+					t.Errorf(".env.example missing %q:\n%s", name, envExample)
+				}
+			}
+			report, err := os.ReadFile(filepath.Join(buildDir, "compile-report.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{`"provider": "slng"`, `"region": "eu"`, `"api_key_env": "OPENAI_API_KEY"`} {
+				if !strings.Contains(string(report), want) {
+					t.Errorf("compile report missing %q:\n%s", want, report)
+				}
+			}
+
+			visible := stdout + stderr + string(report)
+			err = filepath.Walk(buildDir, func(path string, info os.FileInfo, walkErr error) error {
+				if walkErr != nil || info.IsDir() {
+					return walkErr
+				}
+				content, readErr := os.ReadFile(path)
+				if readErr != nil {
+					return readErr
+				}
+				visible += string(content)
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, secret := range []string{routerValue, upstreamValue} {
+				if strings.Contains(visible, secret) {
+					t.Fatalf("compile output leaked secret value %q", secret)
+				}
+			}
+		})
+	}
+}
+
 // gap #1: a gated target surfaces the provider-vocabulary diagnostic on the
 // compile path, not just "validation failed for N target(s)".
 func TestCompileSurfacesPerTargetDiagnostics(t *testing.T) {

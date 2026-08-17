@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -53,6 +54,7 @@ func TestCompilerGolden(t *testing.T) { // V4, V11, V14
 			}
 		}
 	}
+	writeSLNGIRGolden(t, &output)
 
 	path := filepath.Join("testdata", "golden", "compiler.txt")
 	if *updateCompilerGolden {
@@ -70,6 +72,32 @@ func TestCompilerGolden(t *testing.T) { // V4, V11, V14
 	if output.String() != string(want) {
 		t.Fatalf("compiler golden differs; run go test ./internal/ir -run TestCompilerGolden -update")
 	}
+}
+
+func writeSLNGIRGolden(t *testing.T, output *strings.Builder) {
+	t.Helper()
+	pkg := loadSafeCore(t)
+	configureSLNGTestModels(pkg)
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := struct {
+		Model     ModelDef `json:"model"`
+		Binding   Binding  `json:"pipecat_binding"`
+		Inherited Binding  `json:"livekit_binding"`
+	}{
+		Model:     agent.Models["fast_reasoning"],
+		Binding:   agent.Targets["pipecat"].Models.Reason["fast_reasoning"],
+		Inherited: agent.Targets["livekit"].Models.Reason["fast_reasoning"],
+	}
+	encoded, err := json.MarshalIndent(facts, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output.WriteString("\nCASE slng_ir\n")
+	output.Write(encoded)
+	output.WriteByte('\n')
 }
 
 type compilerGoldenCase struct {

@@ -94,6 +94,26 @@ func TestTurnDetectionDocsiteHasNoVendorList(t *testing.T) {
 	}
 }
 
+func TestContextRouterGuideIsLinkedAndNavigable(t *testing.T) {
+	root := filepath.Join("..", "..", "docs-site")
+	if _, err := os.Stat(filepath.Join(root, "models", "context-router.mdx")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"docs.json", filepath.Join("models", "llm.mdx")} {
+		raw, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := strings.Count(string(raw), "models/context-router")
+		if name == "docs.json" && count != 1 {
+			t.Errorf("%s names models/context-router %d times, want once", name, count)
+		}
+		if name != "docs.json" && count == 0 {
+			t.Errorf("%s does not link models/context-router", name)
+		}
+	}
+}
+
 func contains(list []string, want string) bool {
 	for _, item := range list {
 		if item == want {

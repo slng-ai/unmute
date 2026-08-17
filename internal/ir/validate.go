@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"maps"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -18,6 +19,14 @@ import (
 // name belongs, which a mixed-case pattern would accept (compiler.md V36).
 var envNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 var languagePattern = regexp.MustCompile(`^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$`)
+
+var slngReservedParams = map[string]bool{
+	"extra_body": true, "extra_headers": true, "slng_config": true,
+	"slng_agent_id": true, "slng_session_id": true, "store": true,
+	"previous_response_id": true, "conversation": true, "use_websocket": true,
+	"model": true, "input": true, "instructions": true, "stream": true,
+	"tools": true, "template_variables": true,
+}
 
 type ValidateReport struct {
 	PerTarget         []TargetValidation
@@ -69,6 +78,11 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	}
 	global, globalWarnings := validateStructure(agent)
 	global = append(global, validateConfiguredTargets(agent, caps)...)
+	baseTargets := make([]Target, 0, len(agent.Targets)+len(targets))
+	for _, name := range slices.Sorted(maps.Keys(agent.Targets)) {
+		baseTargets = append(baseTargets, agent.Targets[name])
+	}
+	global = append(global, validateSLNGBaseIDs(append(baseTargets, targets...))...)
 	globalWarnings = add(globalWarnings, undeclaredSecretWarning(agent))
 	globalWarnings = add(globalWarnings, unusedConnectionWarning(agent))
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
@@ -231,6 +245,7 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 	}
 	for _, name := range sortedKeys(agent.Models) {
 		m := agent.Models[name]
+		errors = append(errors, validateSLNGModel(name, m)...)
 		if m.Language == "" {
 			continue
 		}
@@ -522,6 +537,167 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 	return errors, schemas.notes
 }
 
+func validateSLNGModel(name string, model ModelDef) []string {
+	label := fmt.Sprintf("model %q", name)
+	if model.SLNG != nil && model.Kind != KindThink {
+		return []string{label + ": slng block is legal only on think models"}
+	}
+	if model.SLNG != nil && model.Provider != "slng" {
+		return []string{label + `: slng block requires provider "slng"`}
+	}
+	if model.Kind != KindThink || model.Provider != "slng" {
+		return nil
+	}
+	return validateSLNGConfig(label, model.Model, model.EndpointEnv, model.Params, model.SLNG, nil, false)
+}
+
+func validateSLNGConfig(label, model, endpointEnv string, params map[string]any, config *SLNGConfig, secrets []string, requireSecret bool) []string {
+	if config == nil {
+		return []string{label + `: provider "slng" requires a complete slng block`}
+	}
+	var errors []string
+	if !slices.Contains([]string{"india", "eu", "us", "indonesia"}, config.Region) {
+		errors = add(errors, label+": slng.region must be one of india, eu, us, indonesia")
+	}
+	if config.AgentID == "" {
+		errors = add(errors, label+": slng.agent_id must be nonempty")
+	} else if !slngHeaderSafe(config.AgentID) {
+		errors = add(errors, label+": slng.agent_id must contain visible ASCII without whitespace")
+	}
+	if strings.TrimSpace(config.Upstream.Name) == "" {
+		errors = add(errors, label+": slng.upstream.name must be nonempty")
+	}
+	if config.Upstream.Provider != "openai-responses" && config.Upstream.Provider != "openai-compat" {
+		errors = add(errors, label+": slng.upstream.provider must be openai-responses or openai-compat")
+	}
+	if !validSLNGURL(config.Upstream.URL) {
+		errors = add(errors, label+": slng.upstream.url must be an absolute HTTP or HTTPS URL with a host and no credentials")
+	}
+	if strings.TrimSpace(config.Upstream.ModelID) == "" {
+		errors = add(errors, label+": slng.upstream.model_id must be nonempty")
+	}
+	if !envNamePattern.MatchString(config.Upstream.APIKeyEnv) {
+		errors = add(errors, label+": slng.upstream.api_key_env must be an UPPER_SNAKE environment variable name")
+	} else if requireSecret && !slices.Contains(secrets, config.Upstream.APIKeyEnv) {
+		errors = add(errors, fmt.Sprintf(`%s: slng.upstream.api_key_env %q must be declared in secrets`, label, config.Upstream.APIKeyEnv))
+	}
+	if model != "slng/auto" && model != config.Upstream.Name {
+		errors = add(errors, label+": model must be slng/auto or match slng.upstream.name")
+	}
+	if endpointEnv != "" {
+		errors = add(errors, label+": endpoint_env is not supported for SLNG think")
+	}
+	for _, name := range slices.Sorted(maps.Keys(params)) {
+		if slngReservedParams[name] {
+			errors = add(errors, fmt.Sprintf(`%s: params key %q is reserved for the SLNG Responses integration`, label, name))
+		}
+	}
+	return errors
+}
+
+func slngHeaderSafe(value string) bool {
+	if strings.TrimSpace(value) != value {
+		return false
+	}
+	for i := range len(value) {
+		if value[i] < 0x21 || value[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+func validSLNGURL(value string) bool {
+	parsed, err := url.Parse(value)
+	return err == nil && parsed.IsAbs() && (strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")) &&
+		parsed.Hostname() != "" && parsed.User == nil
+}
+
+func validateSLNGBaseIDs(targets []Target) []string {
+	var base string
+	for _, target := range targets {
+		for _, name := range slices.Sorted(maps.Keys(target.Models.Reason)) {
+			binding := target.Models.Reason[name]
+			if binding.Provider != "slng" || binding.SLNG == nil || binding.SLNG.AgentID == "" {
+				continue
+			}
+			if base == "" {
+				base = binding.SLNG.AgentID
+			} else if base != binding.SLNG.AgentID {
+				return []string{"used SLNG think bindings must share one slng.agent_id base"}
+			}
+		}
+	}
+	return nil
+}
+
+func validateSLNGBindings(agent *Agent, resolved Target, row *TargetValidation) {
+	checkNonThink := func(label string, binding *Binding) {
+		if binding != nil && binding.SLNG != nil {
+			row.Errors = add(row.Errors, label+": slng block is legal only on think models")
+		}
+	}
+	checkNonThink("listen binding", resolved.Models.Listen)
+	for _, fallback := range resolved.Models.ListenFallbacks {
+		binding := fallback.Binding
+		checkNonThink("listen."+fallback.Name+" binding", &binding)
+	}
+	checkNonThink("turn binding", resolved.Models.Turn)
+	for _, name := range slices.Sorted(maps.Keys(resolved.Models.Speak)) {
+		binding := resolved.Models.Speak[name]
+		checkNonThink("speak."+name+" binding", &binding)
+	}
+	for _, name := range slices.Sorted(maps.Keys(resolved.Models.Reason)) {
+		binding := resolved.Models.Reason[name]
+		label := "reason." + name + " binding"
+		if binding.SLNG != nil && binding.Provider != "slng" {
+			row.Errors = add(row.Errors, label+`: slng block requires provider "slng"`)
+			continue
+		}
+		if binding.Provider == "slng" {
+			row.Errors = append(row.Errors, validateSLNGConfig(label, binding.Model, binding.EndpointEnv, binding.Params, binding.SLNG, agent.Secrets, true)...)
+		}
+	}
+	row.Errors = append(row.Errors, validateSLNGPromptLimits(agent, resolved)...)
+}
+
+func validateSLNGPromptLimits(agent *Agent, resolved Target) []string {
+	slngProfiles := make(map[string]bool)
+	for name, binding := range resolved.Models.Reason {
+		slngProfiles[name] = binding.Provider == "slng"
+	}
+	var errors []string
+	check := func(site, prompt string) {
+		refs := TemplateRefs(prompt)
+		if len(refs) > 64 {
+			errors = add(errors, fmt.Sprintf("%s may reference at most 64 template variables", site))
+		}
+		for _, name := range refs {
+			if len(name) > 64 {
+				errors = add(errors, fmt.Sprintf("%s template variable names must be at most 64 characters", site))
+				break
+			}
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(agent.Agents)) {
+		definition := agent.Agents[name]
+		if slngProfiles[definition.Model] {
+			check(fmt.Sprintf("agent %q SLNG prompt", name), definition.Instructions)
+		}
+	}
+	anySLNG := false
+	for _, used := range slngProfiles {
+		anySLNG = anySLNG || used
+	}
+	for _, name := range slices.Sorted(maps.Keys(agent.Tasks)) {
+		task := agent.Tasks[name]
+		if slngProfiles[task.Model] || (task.Model == "" && anySLNG) {
+			check(fmt.Sprintf("task %q SLNG prompt", name), task.Instructions)
+		}
+	}
+	return errors
+}
+
 // validateDriverValues asks the value questions a driver used to ask alone.
 //
 // Each of these let a package exit 0 from `unmute validate` and 1 from
@@ -565,11 +741,12 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		row.Errors = add(row.Errors, fmt.Sprintf("%s code target requires version", resolved.Provider))
 	}
 	validateDriverValues(resolved, provider, row)
+	validateSLNGBindings(agent, resolved, row)
 	// A feature whose emitted code needs a newer framework than the target
 	// declares. This used to be applied by quietly raising the emitted
 	// constraint, so the package installed a version it never named; now the
 	// declared version is the pin and the mismatch is a gated error instead.
-	if err := targetcap.CheckFeatureFloors(provider, resolved.Version, UsedFrameworkFeatures(agent)); err != nil {
+	if err := targetcap.CheckFeatureFloors(provider, resolved.Version, usedResolvedFrameworkFeatures(agent, resolved)); err != nil {
 		row.Errors = add(row.Errors, err.Error())
 	}
 	if agent.Tracing != nil {
@@ -1435,6 +1612,12 @@ func referencedEnvNames(agent *Agent) map[string]string {
 		}
 	}
 	for _, name := range sortedKeys(agent.Targets) {
+		for _, profile := range sortedKeys(agent.Targets[name].Models.Reason) {
+			binding := agent.Targets[name].Models.Reason[profile]
+			if binding.Provider == "slng" && binding.SLNG != nil {
+				note(binding.SLNG.Upstream.APIKeyEnv, fmt.Sprintf("agent.yaml models think %s slng.upstream.api_key_env", profile))
+			}
+		}
 		for _, key := range providerKeyEnvNames(agent, agent.Targets[name]) {
 			note(key.name, key.site)
 		}

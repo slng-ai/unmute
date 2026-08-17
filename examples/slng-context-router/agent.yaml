@@ -1,0 +1,141 @@
+version: 1
+entry_agent: front_desk
+
+secrets:
+  - SLNG_API_KEY
+  - OPENAI_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: slng/auto
+      slng:
+        region: eu
+        agent_id: router-fixture-v1
+        upstream:
+          name: luna
+          provider: openai-responses
+          url: https://api.openai.com/v1
+          api_key_env: OPENAI_API_KEY
+          model_id: gpt-5.6-luna
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+variables:
+  caller_name:
+    type: string
+    source: call_start
+  request_topic:
+    type: string
+    source: call_start
+  account_tier:
+    type: string
+    source: call_start
+
+agents:
+  front_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - to_specialist
+      - do_standalone
+
+  specialist:
+    instructions: agents/specialist.md
+    model: reasoning
+    voice: voice
+    tools:
+      - do_first_group
+      - do_second_group
+      - back_to_front_desk
+
+tasks:
+  standalone:
+    instructions: tasks/standalone.md
+    result:
+      summary: string
+    context:
+      history: full
+
+  group_step:
+    instructions: tasks/group_step.md
+    result:
+      summary: string
+    context:
+      history: full
+
+task_groups:
+  first_group:
+    steps:
+      - group_step
+    context_scope: shared
+    then: return
+    merge: results
+
+  second_group:
+    steps:
+      - group_step
+    context_scope: shared
+    then: return
+    merge: results
+
+controls:
+  to_specialist:
+    kind: agent_transfer
+    to: specialist
+    when: The caller needs specialist help.
+    context:
+      history: full
+      variables: all
+
+  back_to_front_desk:
+    kind: agent_transfer
+    to: front_desk
+    when: The caller is ready to return to the front desk.
+    context:
+      history: full
+      variables: all
+
+  do_standalone:
+    kind: delegate
+    task: standalone
+    when: The caller asks for a short standalone summary.
+
+  do_first_group:
+    kind: delegate
+    group: first_group
+    when: The caller asks for the first grouped review.
+
+  do_second_group:
+    kind: delegate
+    group: second_group
+    when: The caller asks for the second grouped review.
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hello. How can I help?"
+  interruption:
+    enabled: true
+
+channels:
+  web:
+    kind: realtime_audio
+
+capacity:
+  peak_sessions: 2
+  max_sessions: 4
+  avg_session_duration: 5m

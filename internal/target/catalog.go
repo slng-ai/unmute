@@ -8,6 +8,18 @@ import (
 	"strings"
 )
 
+const slngResponsesDocsURL = "https://github.com/slng-ai/llm-router/blob/main/docs/responses_api.md"
+
+// SLNGRouterBaseURL resolves the regional HTTP Responses base URL.
+func SLNGRouterBaseURL(region string) (string, bool) {
+	switch region {
+	case "india", "eu", "us", "indonesia":
+		return "https://" + region + ".llm-router.slng.ai/v1", true
+	default:
+		return "", false
+	}
+}
+
 // The provider catalogue: the universal map of (framework × role × vendor) to
 // the facts codegen needs — install path, import, constructor shape. Entries
 // describe integrations that already exist upstream in the framework; Unmute

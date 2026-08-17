@@ -46,17 +46,16 @@ mint a11y                                               # contrast and media alt
    attributed.** SLNG leads every vendor list it appears in, and only SLNG model
    ids are printed, because those are the ones proven in this repository. Facts
    about the SLNG Execution Layer are SLNG's: quoted, linked, and dated, never
-   asserted as measured here. Upstream documents three stages of that layer and
-   this site covers two of them: the routing stage between them is deliberately
-   not mentioned anywhere here, including in this file, and the sweep that keeps
-   it that way greps the whole directory (maintainer decision, 2026-08-14).
+   asserted as measured here. The Context Router page documents the separate
+   reasoning optimization path and makes clear that the upstream provider and
+   model remain the user's choice.
 9. **No provider-branded environment variable name is used as an invalid
    example.** A name that starts with a digit is the point; whose product it looks
    like is not. The neutral `2FACTOR_*` names are what the site uses.
 
 ## The structure
 
-Seven top-level groups, 50 pages: Get started, Build the agent, Develop and
+Seven top-level groups, 51 pages: Get started, Build the agent, Develop and
 test, Phone calls, Runtimes and models, Deploy, and Reference. Build the agent
 nests Tools and Orchestration; Phone calls nests Transfers; Runtimes and models
 nests Runtimes and Models; Reference nests CLI.

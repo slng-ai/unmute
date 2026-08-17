@@ -89,6 +89,322 @@ func TestLiveKitV1EmitsSlngPlugin(t *testing.T) {
 	}
 }
 
+func TestLiveKitV1SLNGEntryBinding(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "slng-context-router"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	agentpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		"class _SLNGResponsesLLM(openai.responses.LLM):",
+		"extra_kwargs=NOT_GIVEN",
+		"isinstance(extra_kwargs, dict)",
+		`api_key=os.environ["SLNG_API_KEY"]`,
+		`base_url="https://eu.llm-router.slng.ai/v1"`,
+		`model="slng/auto"`,
+		"use_websocket=False",
+		"store=False",
+		`"api_key": os.environ["OPENAI_API_KEY"]`,
+		`"provider": "openai-responses"`,
+		`"X-Slng-Agent-Id": agent_id`,
+		`"X-Slng-Session-Id": session_id`,
+		`"template_variables": template_variables`,
+		`_slng_snapshot(self.session.userdata, ["caller_name"]),`,
+		"You are the front desk assistant for {{caller_name}}.",
+	} {
+		if !strings.Contains(agentpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"_render(FRONT_DESK_PROMPT, self.session.userdata)",
+		"llm=inference.LLM(",
+		"SLNG_ROUTER_BASE_URL",
+	} {
+		if strings.Contains(agentpy, forbidden) {
+			t.Errorf("agent.py contains forbidden %q", forbidden)
+		}
+	}
+
+	got := livekitSLNGGoldenContract(t, agentpy)
+	assertGoldenFile(t, filepath.Join("testdata", "golden", "slng_livekit.py"), got, *updateLiveKitV1)
+}
+
+func livekitSLNGGoldenContract(t *testing.T, source string) string {
+	t.Helper()
+	section := func(start, end string) string {
+		t.Helper()
+		from := strings.Index(source, start)
+		if from < 0 {
+			t.Fatalf("agent.py missing golden start %q", start)
+		}
+		to := strings.Index(source[from:], end)
+		if to < 0 {
+			t.Fatalf("agent.py missing golden end %q after %q", end, start)
+		}
+		return strings.Trim(source[from:from+to], "\n")
+	}
+	dedentMethod := func(block string) string {
+		lines := strings.Split(block, "\n")
+		for i, line := range lines {
+			lines[i] = strings.TrimPrefix(line, "    ")
+		}
+		return strings.TrimSpace(strings.Join(lines, "\n"))
+	}
+	return "# ruff: noqa: F821\n\n" + strings.Join([]string{
+		section("FRONT_DESK_PROMPT =", "SPECIALIST_PROMPT ="),
+		section("def _slng_snapshot", "# --- required environment"),
+		section("class FrontDesk(", "    @function_tool"),
+		dedentMethod(section("    async def do_standalone(", "class Specialist(")),
+		section("class Standalone(", "    @function_tool"),
+		section("class _SLNGResponsesLLM", "def prewarm"),
+		section("async def entrypoint(", "    session = AgentSession"),
+		strings.TrimSpace(section("        llm=_SLNGResponsesLLM(", "        tts=")),
+	}, "\n\n") + "\n"
+}
+
+func TestLiveKitV1SLNGCallAndPromptScopeLifecycle(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "slng-context-router"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	python := artifactFile(t, artifact, "agent.py")
+
+	for _, want := range []string{
+		"from contextvars import ContextVar",
+		"import uuid",
+		`_SLNG_SESSION_ID: ContextVar[str | None] = ContextVar(`,
+		`_SLNG_ACTIVE_SCOPE: ContextVar[`,
+		`list[tuple[str, str, dict[str, str]] | None] | None`,
+		`_SLNG_SESSION_ID.set(str(uuid.uuid4()))`,
+		`_SLNG_ACTIVE_SCOPE.set([None])`,
+		`"router-fixture-v1--agent--front_desk",`,
+		`_slng_snapshot(self.session.userdata, ["caller_name"]),`,
+		`"router-fixture-v1--agent--specialist",`,
+		`_slng_snapshot(self.session.userdata, ["account_tier"]),`,
+		`"router-fixture-v1--task--standalone",`,
+		`_slng_snapshot(self.session.userdata, ["request_topic"]),`,
+		`"router-fixture-v1--task--group_step",`,
+		`_slng_snapshot(self.session.userdata, ["request_topic", "caller_name"]),`,
+		`session_id = _SLNG_SESSION_ID.get()`,
+		`scope = None if carrier is None else carrier[0]`,
+		`agent_id, prompt, template_variables = scope`,
+		`"template_variables": template_variables`,
+		`chat_ctx=_slng_prompt_context(chat_ctx, prompt)`,
+		`getattr(event, "type", None) == "response.incomplete"`,
+		`setattr(stream, "_process_event", process_slng_event)`,
+		`f"response.incomplete: {reason}"`,
+		`owner_slng_scope = _current_slng_scope()`,
+		`_activate_slng_scope(*owner_slng_scope)`,
+	} {
+		if !strings.Contains(python, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	if got := strings.Count(python, "class _SLNGResponsesLLM("); got != 1 {
+		t.Errorf("SLNG must have one Responses construction path, got %d wrappers", got)
+	}
+	if got := strings.Count(python, `"router-fixture-v1--task--group_step",`); got != 1 {
+		t.Errorf("reused task scope emitted %d activations, want one task class activation", got)
+	}
+	setAt := strings.Index(python, `_SLNG_SESSION_ID.set(str(uuid.uuid4()))`)
+	sessionAt := strings.Index(python, "session = AgentSession")
+	if setAt < 0 || sessionAt < 0 || setAt > sessionAt {
+		t.Errorf("call UUID must be set inside entrypoint before AgentSession: set=%d session=%d", setAt, sessionAt)
+	}
+	carrierAt := strings.Index(python, `_SLNG_ACTIVE_SCOPE.set([None])`)
+	if carrierAt < setAt || carrierAt > sessionAt {
+		t.Errorf("call scope carrier must be created after the UUID and before AgentSession: uuid=%d carrier=%d session=%d", setAt, carrierAt, sessionAt)
+	}
+}
+
+func TestLiveKitV1UnusedSLNGTaskDoesNotEnableRuntime(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+	config := &ir.SLNGConfig{
+		Region: "eu", AgentID: "unused-v1",
+		Upstream: ir.SLNGUpstream{
+			Name: "luna", Provider: "openai-responses", URL: "https://api.openai.com/v1",
+			APIKeyEnv: "UNUSED_UPSTREAM_KEY", ModelID: "gpt-5.6-luna",
+		},
+	}
+	agent.Secrets = append(agent.Secrets, "SLNG_API_KEY", "UNUSED_UPSTREAM_KEY")
+	agent.Models["unused_slng"] = ir.ModelDef{
+		Kind: ir.KindThink, Provider: "slng", Model: "slng/auto", SLNG: config, Placement: ir.PlacementAPI,
+	}
+	tgt.Models.Reason["unused_slng"] = ir.Binding{
+		Provider: "slng", Model: "slng/auto", SLNG: config, Placement: ir.PlacementAPI,
+	}
+	agent.Tasks["unused"] = ir.Task{
+		Instructions: "Unused task.", Model: "unused_slng",
+		Result:  map[string]ir.ResultField{"value": {Type: ir.PrimitiveString}},
+		Context: ir.TaskContext{History: ir.HistoryFull},
+	}
+
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	python := artifactFile(t, artifact, "agent.py")
+	for _, forbidden := range []string{"_SLNGResponsesLLM", "_SLNG_SESSION_ID", "ContextVar", "import uuid"} {
+		if strings.Contains(python, forbidden) {
+			t.Errorf("unused SLNG task enabled runtime token %q", forbidden)
+		}
+	}
+}
+
+func TestLiveKitV1SLNGDelayedModelsAndMixedFallback(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "slng-context-router"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+
+	slngModel := agent.Models["reasoning"]
+	slngModel.Fallback = []string{"direct"}
+	agent.Models["reasoning"] = slngModel
+	agent.Models["direct"] = ir.ModelDef{
+		Kind: ir.KindThink, Provider: "openai", Model: "gpt-4.1-mini", Placement: ir.PlacementAPI,
+	}
+	tgt.Models.Reason["direct"] = ir.Binding{
+		Provider: "openai", Model: "gpt-4.1-mini", Placement: ir.PlacementAPI,
+	}
+
+	alternate := slngModel
+	agent.Models["alternate"] = alternate
+	tgt.Models.Reason["alternate"] = tgt.Models.Reason["reasoning"]
+	specialist := agent.Agents["specialist"]
+	specialist.Model = "alternate"
+	agent.Agents["specialist"] = specialist
+	standalone := agent.Tasks["standalone"]
+	standalone.Model = "alternate"
+	standalone.Context.History = ir.HistorySummary
+	standalone.Context.Summarizer = "alternate"
+	agent.Tasks["standalone"] = standalone
+
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	python := artifactFile(t, artifact, "agent.py")
+	adapter := `llm.FallbackAdapter(llm=[_SLNGResponsesLLM(`
+	if got := strings.Count(python, adapter); got < 3 {
+		t.Errorf("delayed agent, task, and summarizer must reuse the SLNG wrapper; got %d adapters", got)
+	}
+	if !strings.Contains(python, `), openai.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-4.1-mini")])`) {
+		t.Error("mixed explicit fallback must keep its normal non-SLNG constructor")
+	}
+	if !strings.Contains(python, `_render(SPECIALIST_PROMPT, self.session.userdata)`) {
+		t.Error("mixed non-SLNG fallback must keep the locally rendered prompt")
+	}
+	if strings.Contains(python, "slng_agent_id=") || strings.Contains(python, "slng_session_id=") {
+		t.Error("delayed wrappers must read context-local identity instead of capturing constructor values")
+	}
+}
+
+func TestLiveKitV1SLNGFallbackPromptSemantics(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		primary    string
+		fallback   string
+		wantFirst  string
+		wantSecond string
+		wantLocal  bool
+	}{
+		{
+			name: "slng_to_non_slng", primary: "reasoning", fallback: "direct",
+			wantFirst: `_SLNGResponsesLLM(`, wantSecond: `openai.LLM(`, wantLocal: true,
+		},
+		{
+			name: "non_slng_to_slng", primary: "direct", fallback: "reasoning",
+			wantFirst: `openai.LLM(`, wantSecond: `_SLNGResponsesLLM(`, wantLocal: true,
+		},
+		{
+			name: "slng_to_slng", primary: "reasoning", fallback: "slng_second",
+			wantFirst: `_SLNGResponsesLLM(`, wantSecond: `_SLNGResponsesLLM(`, wantLocal: false,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join("..", "..", "examples", "slng-context-router"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+			slngModel := agent.Models["reasoning"]
+			agent.Models["slng_second"] = slngModel
+			tgt.Models.Reason["slng_second"] = tgt.Models.Reason["reasoning"]
+			agent.Models["direct"] = ir.ModelDef{
+				Kind: ir.KindThink, Provider: "openai", Model: "gpt-4.1-mini", Placement: ir.PlacementAPI,
+			}
+			tgt.Models.Reason["direct"] = ir.Binding{
+				Provider: "openai", Model: "gpt-4.1-mini", Placement: ir.PlacementAPI,
+			}
+			profile := agent.Models[test.primary]
+			profile.Fallback = []string{test.fallback}
+			agent.Models["case_profile"] = profile
+			tgt.Models.Reason["case_profile"] = tgt.Models.Reason[test.primary]
+			specialist := agent.Agents["specialist"]
+			specialist.Model = "case_profile"
+			agent.Agents["specialist"] = specialist
+
+			artifact, err := Generate(agent, tgt, target.Default())
+			if err != nil {
+				t.Fatal(err)
+			}
+			python := artifactFile(t, artifact, "agent.py")
+			body := pyClassBody(t, python, "class Specialist(")
+			adapterStart := strings.Index(body, "llm.FallbackAdapter(llm=[")
+			if adapterStart < 0 {
+				t.Fatal("missing Specialist fallback adapter")
+			}
+			adapter := body[adapterStart:]
+			first := strings.Index(adapter, test.wantFirst)
+			if first < 0 {
+				t.Fatalf("missing first fallback constructor %q", test.wantFirst)
+			}
+			second := strings.Index(adapter[first+len(test.wantFirst):], test.wantSecond)
+			if second < 0 {
+				t.Errorf("missing second fallback constructor %q after %q", test.wantSecond, test.wantFirst)
+			}
+			local := strings.Contains(body, `_render(SPECIALIST_PROMPT, self.session.userdata)`)
+			if local != test.wantLocal {
+				t.Errorf("local prompt rendering = %v, want %v", local, test.wantLocal)
+			}
+		})
+	}
+}
+
 func TestV22LiveKitSpeechTracingWiring(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {

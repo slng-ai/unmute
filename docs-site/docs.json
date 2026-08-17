@@ -140,6 +140,7 @@
           {
             "group": "Models",
             "pages": [
+              "models/context-router",
               "models/stt",
               "models/tts",
               "models/llm",

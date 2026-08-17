@@ -67,3 +67,38 @@ func TestInstalledTreeMatchesGolden(t *testing.T) {
 		t.Errorf("the installed tree no longer matches %s.\nRe-capture with:\n\tgo test ./internal/skill -run TestInstalledTreeMatchesGolden -update\n\ngot:\n%s\nwant:\n%s", goldenPath, got.String(), want)
 	}
 }
+
+func TestInstalledSLNGSkillNamesCredentialsWithoutValues(t *testing.T) {
+	const routerValue = "installed-router-secret-must-not-leak"
+	const upstreamValue = "installed-upstream-secret-must-not-leak"
+	t.Setenv("SLNG_API_KEY", routerValue)
+	t.Setenv("OPENAI_API_KEY", upstreamValue)
+
+	project := t.TempDir()
+	bundle := New("test")
+	plan, err := bundle.Plan(project, Canonical, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bundle.Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	var installed strings.Builder
+	for _, name := range []string{"SKILL.md", filepath.Join("references", "models.md"), filepath.Join("references", "package.md")} {
+		raw, err := os.ReadFile(filepath.Join(Canonical.Dir(project), name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		installed.Write(raw)
+	}
+	for _, name := range []string{"SLNG_API_KEY", "OPENAI_API_KEY", "api_key_env"} {
+		if !strings.Contains(installed.String(), name) {
+			t.Errorf("installed skill does not name %s", name)
+		}
+	}
+	for _, value := range []string{routerValue, upstreamValue} {
+		if strings.Contains(installed.String(), value) {
+			t.Error("installed skill contains an environment value")
+		}
+	}
+}

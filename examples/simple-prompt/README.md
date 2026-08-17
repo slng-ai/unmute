@@ -52,6 +52,46 @@ bin/unmute dev examples/simple-prompt --target pipecat
 Swap `--target pipecat` for `--target livekit` to run the identical agent on
 the other driver.
 
+## Optimize reasoning with the Context Router
+
+The checked-in package uses OpenAI directly for reasoning. Keep that default
+for the shortest first run. To route the same upstream model through SLNG,
+replace only the `models.think.reasoning` entry with:
+
+```yaml
+    reasoning:
+      provider: slng
+      model: slng/auto
+      slng:
+        region: eu
+        agent_id: sage-stone-v1
+        upstream:
+          name: luna
+          provider: openai-responses
+          url: https://api.openai.com/v1
+          api_key_env: OPENAI_API_KEY
+          model_id: gpt-5.6-luna
+```
+
+`SLNG_API_KEY` authenticates the router and `OPENAI_API_KEY` authenticates your
+upstream model. Both names are already in this example's `secrets` list. Choose
+`india`, `eu`, `us`, or `indonesia`; Unmute builds the router URL from that
+region. Use `model: luna` only when you want to target the inline entry instead
+of router selection.
+
+SLNG is the optimization layer, not the model provider. Unmute generates one
+cache-enabled inline tier, stable agent identity, and one session UUID per
+call. If `instructions.md` contains declared `{{name}}` variables, the raw
+placeholders reach the router and the matching values travel separately in
+`template_variables`. Generated applications do not send warm-up requests, and
+only an SLNG cache marker proves a hit.
+
+Both checked-in target versions meet the Context Router minimums. See the
+[complete Context Router guide](../../docs-site/models/context-router.mdx) for
+the `openai-compat` form, prompt scopes, cache rules, and limitations. For a
+package that already uses all of those features, run the dedicated
+[SLNG Context Router example](../slng-context-router/README.md).
+
 ## What to look at
 
 **One prompt carries the whole workflow.** The customer gate, the booking

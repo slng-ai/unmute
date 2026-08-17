@@ -1,7 +1,13 @@
 ---
 title: "What makes them fast"
-description: "A scaffolded package binds SLNG speech models by design, and those models run on SLNG's Execution Layer."
+description: "SLNG optimization paths for reasoning and the scaffolded speech models."
 ---
+
+For reasoning, the [SLNG Context Router](/models/context-router) is the
+recommended optimization path. It routes requests to the upstream LLM you
+choose and keeps stable prompt templates separate from per-call values. This is
+an explicit `agent.yaml` choice. It is different from the SLNG speech bindings
+that `unmute init` creates by default.
 
 `unmute init` binds SLNG for listening and speaking, and every shipped example does
 the same. That is a decision, not a placeholder: SLNG speech models run behind
@@ -90,6 +96,9 @@ what else each target can construct are on
 ## Where to go next
 
 <Columns cols={2}>
+  <Card title="Context Router" icon="route" href="/models/context-router">
+    Optimize reasoning over your own upstream model.
+  </Card>
   <Card title="SLNG models" icon="list" href="https://docs.slng.ai/models">
     The full catalog, with languages and regions.
   </Card>

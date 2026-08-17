@@ -1,0 +1,227 @@
+---
+title: "Optimize reasoning with the Context Router"
+description: "Route your own LLM through SLNG with stable prompts, scoped identity, and cache-aware requests."
+---
+
+The SLNG Context Router is an optimization layer for the model that thinks. It
+does not supply that model. You choose the upstream provider, endpoint, model,
+and key. Unmute sends that configuration to SLNG on each request so the router
+can optimize and route the call.
+
+Use this path when you want the same package to run on Pipecat and LiveKit while
+SLNG handles routing and response-cache eligibility around your own LLM.
+
+<Info>
+  `provider: slng` is the Unmute label that selects the Context Router
+  integration. The actual model provider is `slng.upstream.provider`.
+</Info>
+
+## Complete configuration
+
+This example uses OpenAI's Responses API as the upstream endpoint:
+
+```yaml agent.yaml
+secrets:
+  - SLNG_API_KEY
+  - OPENAI_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: slng/auto
+      slng:
+        region: eu
+        agent_id: salon-desk-v1
+        upstream:
+          name: luna
+          provider: openai-responses
+          url: https://api.openai.com/v1
+          api_key_env: OPENAI_API_KEY
+          model_id: gpt-5.6-luna
+```
+
+Put values in `.env`, never in `agent.yaml`:
+
+```dotenv
+SLNG_API_KEY=...
+OPENAI_API_KEY=...
+```
+
+The two keys have different jobs. `SLNG_API_KEY` authenticates the request to
+the router. `OPENAI_API_KEY` is the example upstream key. Its name comes from
+`api_key_env`, so use the matching environment name for your upstream.
+
+`model: slng/auto` lets the router choose the generated entry. It is the
+recommended form. Set `model` to the entry's `upstream.name`, such as `luna`,
+only when you need to target that entry directly. The upstream model ID stays
+in `upstream.model_id`.
+
+## Choose a region
+
+You choose a region, not a router URL. Unmute creates the URL:
+
+| `slng.region` | Generated base URL |
+|---|---|
+| `india` | `https://india.llm-router.slng.ai/v1` |
+| `eu` | `https://eu.llm-router.slng.ai/v1` |
+| `us` | `https://us.llm-router.slng.ai/v1` |
+| `indonesia` | `https://indonesia.llm-router.slng.ai/v1` |
+
+There is no `SLNG_ROUTER_BASE_URL`, default region, or custom router host. All
+four routes were live-checked with both supported upstream modes on 2026-08-17.
+
+## Upstream modes
+
+Unmute supports one inline upstream in this version:
+
+| Value | Use it for |
+|---|---|
+| `openai-responses` | A native OpenAI Responses endpoint. |
+| `openai-compat` | An endpoint that speaks OpenAI-compatible Chat Completions and is translated by the router. |
+
+For the tested `gpt-5.6-luna` compatibility route with function tools, add:
+
+```yaml agent.yaml
+      params:
+        reasoning:
+          effort: none
+```
+
+Some Chat Completions settings have no Responses equivalent on a translated
+route. Do not depend on `stop`, `n`, `seed`, `logit_bias`, presence or frequency
+penalties, or boolean `logprobs` there.
+
+## Identity is part of optimization
+
+You author one stable, versioned base:
+
+```yaml agent.yaml
+        agent_id: salon-desk-v1
+```
+
+Change the version after a meaningful prompt or agent-configuration change.
+Unmute derives the request identity from the prompt that is active:
+
+- Agent `front_desk` becomes `salon-desk-v1--agent--front_desk`.
+- Task `book_appointment` becomes `salon-desk-v1--task--book_appointment`.
+- The same task keeps that identity when reused in a task group.
+
+Generated code also creates one UUID for each call. Every normal turn, retry,
+tool follow-up, handoff, and task in that call uses the same session UUID. The
+next call gets a new one. Both values are sent on every request as
+`X-Slng-Agent-Id` and `X-Slng-Session-Id`.
+
+This separation matters. The agent ID groups one stable prompt scope. The
+session ID groups the turns of one call.
+
+## Keep templates stable
+
+Use normal Unmute variables in prompts:
+
+```md instructions.md
+You are the appointment assistant for {{salon_name}}.
+The caller is {{customer_name}}.
+```
+
+```yaml agent.yaml
+variables:
+  salon_name:
+    type: string
+    source: call_start
+  customer_name:
+    type: string
+    source: call_start
+```
+
+For an SLNG-backed system prompt, Unmute sends the raw placeholders to the
+router and puts only the values used by that prompt in the top-level
+`template_variables` request field. This keeps stable prompt text separate from
+per-call values.
+
+The snapshot follows the orchestration scope:
+
+- An entry or handoff agent captures its values when it activates.
+- A standalone task or task-group step captures its values when it starts.
+- Retries in that activation reuse the same snapshot.
+- Re-entering an agent or rerunning a task captures current values again.
+
+A task can therefore use a value saved by an earlier step. Greetings, tool
+injection values, webhook paths, and non-SLNG prompts still render locally.
+
+One active prompt may reference at most 64 variables. Names may contain at most
+64 characters, and a captured value may contain at most 4,000 characters.
+
+## How caching works
+
+Unmute always sends `cache_enabled: true`. There is no YAML switch to turn it
+off. That enables the request shape, but it does not promise a hit.
+
+A normal eligible request can seed the cache. A later request in a fresh
+session can hit when its prompt scope, raw prompt, template snapshot, and user
+input are suitable for reuse. You do not need to run sessions before serving
+users. Normal traffic can populate the cache naturally.
+
+Only a router marker proves a hit:
+
+- `cached: true`
+- a nonempty `cache_layer` response field
+- a nonempty `X-Cache-Layer` response header
+
+Latency alone is not evidence. Structured output bypasses the cache. Correct
+agent and session identity improves cache grouping, but it cannot make every
+answer eligible.
+
+Generated applications send no synthetic warm-up request. Unmute has no cache
+warming command. If SLNG manages pre-warming for your account, it remains an
+external operation.
+
+## What Unmute generates
+
+For both targets, Unmute generates HTTP Responses requests with:
+
+- the regional `/v1` base URL and outer `SLNG_API_KEY`;
+- one inline tier, one upstream entry, and weight `100`;
+- the nested upstream key read from `api_key_env` at run time;
+- `cache_enabled: true`, HTTP streaming, `store: false`, and full input history;
+- standard Responses function calls and function-call outputs;
+- the active identity headers and template snapshot on every request.
+
+Pipecat requires version 1.7.0 or newer for this integration. LiveKit Agents
+requires version 1.6.10 or newer. Packages that do not use SLNG reasoning keep
+their existing version rules.
+
+## Limits to know
+
+- The router is stateless. Full history is resent each turn.
+- `previous_response_id`, stored conversations, stored prompt IDs, background
+  responses, and response lifecycle endpoints are not used.
+- Hosted Responses tools are not available. Normal function tools work.
+- Reasoning items are not carried across turns.
+- Inline configuration is limited to one tier and one upstream in Unmute.
+- Structured output is not cached.
+- The `openai-compat` route may report zero or no terminal usage.
+
+The current interactive model editor cannot represent this complete block. It
+will tell you to edit `agent.yaml` instead of saving a partial configuration.
+`unmute init` still creates an OpenAI reasoning binding, so choosing the Context
+Router is an explicit edit.
+
+For the raw Responses protocol and its compatibility status, see SLNG's
+[Responses API guide](https://github.com/slng-ai/llm-router/blob/main/docs/responses_api.md)
+and [status page](https://github.com/slng-ai/llm-router/blob/main/docs/responses_api_status.md),
+verified against the integration on 2026-08-17.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Runnable example" icon="play" href="https://github.com/slng-ai/unmute/tree/main/examples/slng-context-router">
+    Run the same prompt-scoped package on Pipecat and LiveKit.
+  </Card>
+  <Card title="Variables" icon="braces" href="/build/variables">
+    How call values move through prompts and tools.
+  </Card>
+  <Card title="agent.yaml" icon="file-code" href="/reference/agent-yaml">
+    The complete model-field reference.
+  </Card>
+</Columns>

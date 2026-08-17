@@ -30,6 +30,18 @@ func UsedFrameworkFeatures(agent *Agent) []targetcap.FrameworkFeature {
 	return used
 }
 
+// usedResolvedFrameworkFeatures adds features selected by one target's
+// effective model overrides. Package-wide features remain target independent.
+func usedResolvedFrameworkFeatures(agent *Agent, resolved Target) []targetcap.FrameworkFeature {
+	used := UsedFrameworkFeatures(agent)
+	for _, binding := range resolved.Models.Reason {
+		if binding.Provider == "slng" {
+			return append(used, targetcap.FeatureSLNGResponses)
+		}
+	}
+	return used
+}
+
 // usesWarmTransfer reports whether any control is a human transfer in warm mode.
 // Cold transfers act on the caller's existing leg and need no prebuilt, so they
 // carry no floor.

@@ -5,6 +5,31 @@ description: "Which LLM vendors each target can construct, and what happens when
 
 The `think` role is the model that decides what to say and when to call a tool.
 
+The recommended optimization path is the
+[SLNG Context Router](/models/context-router). SLNG is not the model provider in
+that setup. It routes and optimizes requests to the upstream model you choose.
+
+```yaml agent.yaml
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: slng/auto
+      slng:
+        region: eu
+        agent_id: salon-desk-v1
+        upstream:
+          name: luna
+          provider: openai-responses
+          url: https://api.openai.com/v1
+          api_key_env: OPENAI_API_KEY
+          model_id: gpt-5.6-luna
+```
+
+The guide explains the separate router and upstream keys, four regions,
+derived request identity, stable prompt templates, and cache behavior. The
+scaffold below remains the simpler direct OpenAI starting point.
+
 ```yaml agent.yaml
 models:
   think:
@@ -15,16 +40,13 @@ models:
         reasoning_effort: "none"
 ```
 
-SLNG does not serve this role. It provides speech to text and text to speech, so
-the reasoning model is yours to choose.
-
 <Info>
   Model ids are forwarded to the vendor exactly as you write them. Unmute keeps no
   allowlist, so a typo surfaces as a provider error at run time. The compile report
   says so on every binding: `(forwarded as-is, not validated)`.
 </Info>
 
-## Why `reasoning_effort` is there
+## Why direct OpenAI uses `reasoning_effort`
 
 `gpt-5.6-luna` is a reasoning model, and OpenAI rejects a chat completions
 request that carries function tools unless the request also sets
@@ -35,6 +57,10 @@ alone: the server applies its own default, and every turn comes back as HTTP
 
 Every example in the repository writes `none`, and so does `unmute init`. Keep
 the line whenever the agent has tools.
+
+This section is for a direct `provider: openai` binding. The Context Router
+guide shows the separate nested setting used by its tested `openai-compat`
+route.
 
 <Note>
   On LiveKit the line matters for a second reason. `livekit-plugins-openai`
@@ -53,6 +79,7 @@ Pipecat merges into the request body as written.
 
 | Provider | Notes |
 |---|---|
+| `slng` | Context Router over your inline upstream model. [Configure it](/models/context-router). |
 | `anthropic` | |
 | `deepseek` | |
 | `google` | |
@@ -66,6 +93,7 @@ Pipecat merges into the request body as written.
 
 | Provider | Notes |
 |---|---|
+| `slng` | Context Router over your inline upstream model. [Configure it](/models/context-router). |
 | `anthropic` | |
 | `aws` | credentials come from the AWS SDK environment |
 | `azure` | |
@@ -101,7 +129,7 @@ models:
 Without `endpoint_env` it is refused, and the error lists what the role does take:
 
 ```text
-pipecat reason binding provider "my-gateway" has no slot; reason providers on pipecat: anthropic, deepseek, google, groq, mistral, openai, openrouter, qwen; an unlisted provider needs endpoint_env (an OpenAI-compatible endpoint)
+pipecat reason binding provider "my-gateway" has no slot; reason providers on pipecat: slng, anthropic, deepseek, google, groq, mistral, openai, openrouter, qwen; an unlisted provider needs endpoint_env (an OpenAI-compatible endpoint)
 ```
 
 **On LiveKit**, an unlisted reasoning provider routes through LiveKit Inference:
@@ -113,6 +141,9 @@ Writing `provider: livekit` passes your model string through verbatim.
 ## Where to go next
 
 <Columns cols={2}>
+  <Card title="Context Router" icon="route" href="/models/context-router">
+    Optimize and route your own upstream model.
+  </Card>
   <Card title="Turn detection" icon="mic" href="/models/turn-detection">
     Knowing when the caller has finished.
   </Card>

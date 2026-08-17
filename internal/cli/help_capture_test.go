@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 var updateHelpCapture = flag.Bool("update", false, "rewrite the captured CLI help text")
@@ -68,6 +70,21 @@ func TestHelpCaptureMatchesBinary(t *testing.T) {
 	if got != string(want) {
 		t.Errorf("command help no longer matches %s.\nRe-capture with:\n\tgo test ./internal/cli -run TestHelpCaptureMatchesBinary -update\nand update the docs-site CLI pages that quote it.\n\ngot:\n%s\nwant:\n%s", helpCapture, got, want)
 	}
+}
+
+func TestCommandTreeHasNoCacheWarmingCommand(t *testing.T) {
+	var walk func(*cobra.Command)
+	walk = func(parent *cobra.Command) {
+		for _, cmd := range parent.Commands() {
+			for _, name := range []string{"warm", "warmup", "prewarm", "cache-warm", "warm-cache"} {
+				if cmd.Name() == name {
+					t.Errorf("command tree exposes %q; generated apps must not create synthetic cache traffic", cmd.CommandPath())
+				}
+			}
+			walk(cmd)
+		}
+	}
+	walk(newRootCmd())
 }
 
 // TestDocsSiteCLIPagesQuoteHelp closes the loop: the capture is only useful if

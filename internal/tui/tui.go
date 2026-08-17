@@ -605,6 +605,9 @@ func editBinding(runner *fieldRunner, data *scaffold.Data, role targetcap.Role) 
 }
 
 func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, binding *scaffold.Binding) error {
+	if role == targetcap.Reason && binding.Provider == "slng" {
+		return showNotice(runner, "SLNG think is YAML-only", "The editor cannot represent the complete slng block yet. Edit agent.yaml directly.")
+	}
 	framework := targetcap.Provider(target)
 	catalog := targetcap.DefaultCatalog()
 	for {
@@ -659,6 +662,12 @@ func editBindingFor(runner *fieldRunner, target string, role targetcap.Role, bin
 				return err
 			}
 			if !back {
+				if role == targetcap.Reason && selected == "slng" {
+					if err := showNotice(runner, "SLNG think is YAML-only", "Add the complete slng block directly in agent.yaml; the provider was not changed."); err != nil {
+						return err
+					}
+					continue
+				}
 				routes := catalog.Distributors(framework, role, selected)
 				if len(routes) > 0 {
 					binding.Provider = routes[0]

@@ -69,6 +69,23 @@ type ModelSections struct {
 	Turn   map[string]ModelDef `json:"turn,omitempty" yaml:"turn,omitempty"`
 }
 
+// SLNGConfig configures one model to use the SLNG Context Router with an
+// inline BYOK upstream.
+type SLNGConfig struct {
+	Region   string       `json:"region" yaml:"region"`
+	AgentID  string       `json:"agent_id" yaml:"agent_id"`
+	Upstream SLNGUpstream `json:"upstream" yaml:"upstream"`
+}
+
+// SLNGUpstream identifies the single provider endpoint routed through SLNG.
+type SLNGUpstream struct {
+	Name      string `json:"name" yaml:"name"`
+	Provider  string `json:"provider" yaml:"provider"`
+	URL       string `json:"url" yaml:"url"`
+	APIKeyEnv string `json:"api_key_env" yaml:"api_key_env"`
+	ModelID   string `json:"model_id" yaml:"model_id"`
+}
+
 // ModelDef is the unified model definition (N15): one shape for every models
 // section entry and for per-target overrides. Which fields are legal is decided
 // by the section (kind). provider+model carry the same pairing the old target
@@ -84,6 +101,7 @@ type ModelDef struct {
 	TopP                *float64       `json:"top_p,omitempty" yaml:"top_p,omitempty"`
 	TopK                *int           `json:"top_k,omitempty" yaml:"top_k,omitempty"`
 	EndpointEnv         string         `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
+	SLNG                *SLNGConfig    `json:"slng,omitempty" yaml:"slng,omitempty"`
 	Placement           string         `json:"placement,omitempty" yaml:"placement,omitempty"`
 	SemanticEndpointing string         `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
 	Params              map[string]any `json:"params,omitempty" yaml:"params,omitempty"`

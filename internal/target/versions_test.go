@@ -135,6 +135,8 @@ func TestCheckFeatureFloors(t *testing.T) {
 		{name: "warm at floor", provider: LiveKit, version: "1.6.0", used: []FrameworkFeature{FeatureWarmTransfer}},
 		{name: "warm above floor", provider: LiveKit, version: "1.6.10", used: []FrameworkFeature{FeatureWarmTransfer}},
 		{name: "mcp above floor", provider: LiveKit, version: "1.6.4", used: []FrameworkFeature{FeatureMCPTools}},
+		{name: "slng livekit at floor", provider: LiveKit, version: "1.6.10", used: []FrameworkFeature{FeatureSLNGResponses}},
+		{name: "slng pipecat at floor", provider: Pipecat, version: "1.7.0", used: []FrameworkFeature{FeatureSLNGResponses}},
 
 		// The regression this gate exists for: before the pin became exact, this
 		// package compiled green and quietly installed a version it never declared.
@@ -149,6 +151,14 @@ func TestCheckFeatureFloors(t *testing.T) {
 		{
 			name: "names the package and floor", provider: LiveKit, version: "1.5.0",
 			used: []FrameworkFeature{FeatureWarmTransfer}, wantErr: "livekit-agents >=1.6.0",
+		},
+		{
+			name: "slng livekit below floor", provider: LiveKit, version: "1.6.9",
+			used: []FrameworkFeature{FeatureSLNGResponses}, wantErr: "livekit-agents >=1.6.10",
+		},
+		{
+			name: "slng pipecat below floor", provider: Pipecat, version: "1.6.9",
+			used: []FrameworkFeature{FeatureSLNGResponses}, wantErr: "pipecat-ai >=1.7.0",
 		},
 		// Pipecat features vary by extra, never by version.
 		{name: "pipecat has no floors", provider: Pipecat, version: "1.5.0", used: []FrameworkFeature{FeatureWarmTransfer}},

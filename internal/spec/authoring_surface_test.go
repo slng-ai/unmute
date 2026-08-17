@@ -7,6 +7,72 @@ import (
 	"testing"
 )
 
+func TestAuthoringSchemaCarriesCompleteSLNGBlock(t *testing.T) {
+	pkg, err := Load(writeSLNGAuthoringPackage(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, err := Schema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := schema.Resolve(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var complete map[string]any
+	if err := json.Unmarshal(encoded, &complete); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolved.Validate(complete); err != nil {
+		t.Fatalf("complete SLNG package does not match its derived schema: %v", err)
+	}
+
+	for _, test := range []struct {
+		name     string
+		override bool
+		field    string
+		upstream bool
+	}{
+		{name: "region", field: "region"},
+		{name: "agent id", field: "agent_id"},
+		{name: "upstream", field: "upstream"},
+		{name: "upstream name", field: "name", upstream: true},
+		{name: "upstream provider", field: "provider", upstream: true},
+		{name: "upstream url", field: "url", upstream: true},
+		{name: "upstream api key env", field: "api_key_env", upstream: true},
+		{name: "upstream model id", field: "model_id", upstream: true},
+		{name: "override region", field: "region", override: true},
+		{name: "override upstream", field: "upstream", override: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var candidate map[string]any
+			if err := json.Unmarshal(encoded, &candidate); err != nil {
+				t.Fatal(err)
+			}
+			var model map[string]any
+			if test.override {
+				model = candidate["targets"].(map[string]any)["pipecat"].(map[string]any)["models"].(map[string]any)["reasoning"].(map[string]any)
+			} else {
+				model = candidate["agent"].(map[string]any)["models"].(map[string]any)["think"].(map[string]any)["reasoning"].(map[string]any)
+			}
+			slng := model["slng"].(map[string]any)
+			if test.upstream {
+				delete(slng["upstream"].(map[string]any), test.field)
+			} else {
+				delete(slng, test.field)
+			}
+			if err := resolved.Validate(candidate); err == nil {
+				t.Fatalf("derived schema accepted SLNG without %s", test.field)
+			}
+		})
+	}
+}
+
 // FR-030 locks the authoring surface this feature deliberately did not grow.
 //
 // Pipecat Cloud telephony added a route, not a field. Two things were proposed

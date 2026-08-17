@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"go/parser"
 	"go/token"
 	"io"
@@ -1290,6 +1291,62 @@ func TestV24ProviderThenDistributorFlow(t *testing.T) {
 	if binding != want {
 		t.Fatalf("binding = %#v, want %#v", binding, want)
 	}
+}
+
+func TestSLNGThinkEditorRefusesPartialCreationAndDestructiveSave(t *testing.T) {
+	t.Run("provider selection points to agent yaml", func(t *testing.T) {
+		options := providerOptions(targetcap.LiveKit, targetcap.Reason)
+		selected := 0
+		for i, option := range options {
+			if option.Value == "slng" {
+				selected = i + 1
+				break
+			}
+		}
+		if selected == 0 {
+			t.Fatal("livekit reason providers do not offer slng")
+		}
+		binding := scaffold.Binding{Provider: "openai", Model: "gpt-5.6-luna"}
+		input := fmt.Sprintf("1\n%d\n1\n", selected)
+		var output bytes.Buffer
+		err := editBindingFor(newRunner(strings.NewReader(input), &output, true), "livekit", targetcap.Reason, &binding)
+		if !errors.Is(err, huh.ErrUserAborted) {
+			t.Fatalf("editor error = %v, want ErrUserAborted after the refusal", err)
+		}
+		if binding.Provider == "slng" {
+			t.Fatalf("editor saved a partial SLNG binding: %#v", binding)
+		}
+		for _, want := range []string{"SLNG", "agent.yaml", "complete slng block"} {
+			if !strings.Contains(output.String(), want) {
+				t.Errorf("refusal missing %q:\n%s", want, output.String())
+			}
+		}
+	})
+
+	t.Run("maintain save keeps existing package byte identical", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "agent")
+		if err := os.CopyFS(root, os.DirFS(filepath.Join("..", "..", "examples", "slng-context-router"))); err != nil {
+			t.Fatal(err)
+		}
+		before := packageBytes(t, root)
+		agent, err := loadMaintained(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent.data.Instructions += "\n\nThis edit must not be written."
+		var output bytes.Buffer
+		if err := saveMaintained(newRunner(strings.NewReader("1\n"), &output, true), &agent); err != nil {
+			t.Fatal(err)
+		}
+		if after := packageBytes(t, root); !reflect.DeepEqual(before, after) {
+			t.Fatal("refused SLNG maintain save changed package bytes")
+		}
+		for _, want := range []string{"SLNG", "agent.yaml", "not saved"} {
+			if !strings.Contains(output.String(), want) {
+				t.Errorf("save refusal missing %q:\n%s", want, output.String())
+			}
+		}
+	})
 }
 
 func TestV24ProviderBrandsAreUniqueAndExposeDistributors(t *testing.T) {

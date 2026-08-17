@@ -63,17 +63,68 @@ section:
 | `endpoint_env` | environment variable holding a custom endpoint |
 | `placement` | where the model runs |
 | `semantic_endpointing` | turn detection behavior |
+| `slng` | Context Router configuration for a `think` entry with `provider: slng` |
 | `params` | extra parameters forwarded verbatim |
 | `fallback` | other entry names to fall back to |
 | `description` | a note for humans |
 
 Entries you do not reference are legal alternates.
 
-`params` is passthrough. Nothing in it is checked, and a name the target's
-settings object has no field for is not dropped: it rides that target's overflow
-field and reaches the provider anyway. The `reasoning_effort` line above is the
+`params` is normally passthrough. A name the target's settings object has no
+field for is not dropped: it rides that target's overflow field and reaches the
+provider anyway. SLNG entries reserve the fields that own HTTP mode, history,
+identity, and the inline body, so `params` cannot replace them. The
+`reasoning_effort` line above is the
 case to know: a reasoning model such as `gpt-5.6-luna` refuses a request that
 carries function tools without it. [The reasoning model](/models/llm) says why.
+
+### SLNG Context Router
+
+An SLNG `think` entry routes your own upstream model through the Context Router:
+
+```yaml agent.yaml
+secrets:
+  - SLNG_API_KEY
+  - OPENAI_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: slng/auto
+      slng:
+        region: eu
+        agent_id: salon-desk-v1
+        upstream:
+          name: luna
+          provider: openai-responses
+          url: https://api.openai.com/v1
+          api_key_env: OPENAI_API_KEY
+          model_id: gpt-5.6-luna
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `slng.region` | yes | `india`, `eu`, `us`, or `indonesia`; Unmute creates the router URL |
+| `slng.agent_id` | yes | stable, versioned base used to derive prompt-scope identities |
+| `slng.upstream.name` | yes | label used by the generated single-entry router tier |
+| `slng.upstream.provider` | yes | `openai-responses` or `openai-compat` |
+| `slng.upstream.url` | yes | absolute HTTP or HTTPS base URL for your upstream |
+| `slng.upstream.api_key_env` | yes | environment name for your upstream key |
+| `slng.upstream.model_id` | yes | model ID sent to your upstream |
+
+The request model is either `slng/auto`, which is recommended, or the exact
+`upstream.name`. All used SLNG think entries in a package share one `agent_id`
+base. Bump its version after a meaningful prompt or configuration change.
+
+Unmute always generates one cache-enabled tier with one entry at weight `100`.
+Raw `slng_config`, a cache toggle, custom tier graphs, custom router hosts, and
+`SLNG_ROUTER_BASE_URL` are not authoring fields. The router key and upstream key
+stay separate and both names belong under `secrets`.
+
+See [Optimize reasoning with the Context Router](/models/context-router) for
+identity, template snapshots, cache evidence, runtime limits, and both upstream
+modes.
 
 ## variables
 

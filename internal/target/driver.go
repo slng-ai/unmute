@@ -125,8 +125,9 @@ func CheckVersion(provider Provider, version string) error {
 type FrameworkFeature string
 
 const (
-	FeatureWarmTransfer FrameworkFeature = "a warm transfer"
-	FeatureMCPTools     FrameworkFeature = "an MCP tool source"
+	FeatureWarmTransfer  FrameworkFeature = "a warm transfer"
+	FeatureMCPTools      FrameworkFeature = "an MCP tool source"
+	FeatureSLNGResponses FrameworkFeature = "SLNG Responses routing"
 )
 
 // featureFloors is where a feature's minimum framework version lives.
@@ -142,8 +143,12 @@ const (
 // version.
 var featureFloors = map[Provider]map[FrameworkFeature]string{
 	LiveKit: {
-		FeatureWarmTransfer: "1.6.0",
-		FeatureMCPTools:     "1.6.0",
+		FeatureWarmTransfer:  "1.6.0",
+		FeatureMCPTools:      "1.6.0",
+		FeatureSLNGResponses: "1.6.10",
+	},
+	Pipecat: {
+		FeatureSLNGResponses: "1.7.0",
 	},
 }
 

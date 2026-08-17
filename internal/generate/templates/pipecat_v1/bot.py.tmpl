@@ -31,11 +31,13 @@ the typed results.{{end}}
 from __future__ import annotations
 
 {{if or (not .Inline) .NeedsEndAfter .Inactivity}}import asyncio
+{{end}}{{if .HasFlows}}import copy
 {{end}}{{if .NeedsFunctionCalls}}import functools
 {{end}}{{if or .NeedsInspect .NeedsFunctionCalls}}import inspect
 {{end}}{{if or .HasFlows .CallStartVars}}import json
 {{end}}import os
 {{if .NeedsRender}}import re
+{{end}}{{if .NeedsSLNG}}import uuid
 {{end}}{{if .Telephony}}import sys
 {{end}}{{if .Variables}}from dataclasses import dataclass
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
@@ -66,7 +68,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 {{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
 {{end}}{{if .NeedsMCP}}from pipecat.services.mcp_service import MCPClient
-{{end}}{{if .NeedsRoleRestore}}from pipecat.services.settings import LLMSettings
+{{end}}{{if .NeedsPlainRoleRestore}}from pipecat.services.settings import LLMSettings
 {{end}}{{if .NeedsLanguage}}from pipecat.transcriptions.language import Language
 {{end}}from pipecat.transports.base_transport import BaseTransport, TransportParams
 {{if .DailyParams}}{{.DailyParams.Import}}
@@ -472,6 +474,60 @@ def _render(text: str, state, *, quote_values: bool = False) -> str:
         return quote(value, safe="") if quote_values else value
 
     return _TEMPLATE.sub(_one, text)
+{{end}}{{if .NeedsSLNG}}
+{{slngSnapshot}}
+
+class _SLNGResponsesStream:
+    """Delegate the native stream, making terminal router failures visible."""
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    def __aiter__(self):
+        return self._events()
+
+    async def _events(self):
+        async for event in self._stream:
+            event_type = getattr(event, "type", "")
+            detail = None
+            if event_type == "response.failed":
+                error = getattr(getattr(event, "response", None), "error", None)
+                detail = getattr(error, "message", None)
+            elif event_type == "response.incomplete":
+                incomplete = getattr(
+                    getattr(event, "response", None), "incomplete_details", None
+                )
+                detail = getattr(incomplete, "reason", None)
+            elif event_type == "error":
+                detail = getattr(event, "message", None)
+            if event_type in {"response.failed", "response.incomplete", "error"}:
+                suffix = f": {detail}" if detail else ""
+                raise RuntimeError(f"SLNG Responses stream ended with {event_type}{suffix}")
+            yield event
+
+    async def close(self):
+        await self._stream.close()
+
+
+class _SLNGResponsesProxy:
+    """Wrap only streaming create calls; delegate every other SDK operation."""
+
+    def __init__(self, upstream):
+        self._slng_upstream = upstream
+
+    def __getattr__(self, name):
+        return getattr(self._slng_upstream, name)
+
+    async def create(self, *args, **kwargs):
+        response = await self._slng_upstream.create(*args, **kwargs)
+        if kwargs.get("stream") is True:
+            return _SLNGResponsesStream(response)
+        return response
+
+
+def _slng_http_service(service):
+    service._client.responses = _SLNGResponsesProxy(service._client.responses)
+    return service
 {{end}}{{if .NeedsRefusal}}
 
 def _refusal(tool: str, state, needed: list[tuple[str, str]]) -> str:
@@ -547,8 +603,8 @@ class _HandoffWorker({{if and .Tracing .NeedsFunctionCalls}}TracedLLMWorker{{els
 {{end}}
 {{range .Agents}}
 
-def build_{{.Name}}_llm(state=None):
-    return {{template "svc" .LLM.Call}}
+def build_{{.Name}}_llm(state=None{{if .LLM.SLNG}}, *, session_id{{end}}):
+    return {{if .LLM.SLNG}}_slng_http_service({{end}}{{template "svc" .LLM.Call}}{{if .LLM.SLNG}}){{end}}
 
 
 def build_{{.Name}}_tts():
@@ -588,14 +644,50 @@ async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: 
 class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}}LLMWorker{{end}}):
     """Agent: {{.Name}}."""
 
-    def __init__(self, state=None, context=None, call_context=None) -> None:
-{{if $.Variables}}        self.state = state
+    def __init__(self, state=None, context=None, call_context=None{{if .LLM.SLNG}}, *, session_id{{end}}) -> None:
+{{if or $.Variables .LLM.SLNG}}        self.state = state
 {{end}}{{if $.HasFlows}}        self.context = context
 {{end}}{{if $.Telephony}}        self.call_context = call_context
+{{end}}{{if .LLM.SLNG}}        self._slng_session_id = session_id
 {{end}}
-        llm = build_{{.Name}}_llm({{if $.Variables}}state{{end}})
+        llm = build_{{.Name}}_llm({{if $.Variables}}state{{end}}{{if .LLM.SLNG}}{{if $.Variables}}, {{end}}session_id=session_id{{end}})
         super().__init__({{pyq .Name}}, llm=llm, pipeline=Pipeline([llm, build_{{.Name}}_tts()]), bridged=())
-{{if .MCPSources}}        # MCP tool sources. The clients are built here and connected in
+{{if .LLM.SLNG}}
+    def _slng_settings(self, system_instruction, scope_id, template_variables):
+        return {{.LLM.Call.SettingsClass}}(
+{{range .LLM.SLNGUpdateSettings}}            {{.Key}}={{.Value}},
+{{end}}        )
+
+    async def on_activated(self, args) -> None:
+        self._slng_owner_template_variables = {{.SLNGSnapshot}}
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=self._slng_settings(
+                {{.PromptExpr}},
+                {{pyq .LLM.SLNGScopeID}},
+                self._slng_owner_template_variables,
+            ),
+        ))
+        await super().on_activated(args)
+{{if .Delegates}}
+    async def _slng_task_pre_action(self, action, flow_manager) -> None:
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=self._slng_settings(
+                action["system_instruction"],
+                action["scope_id"],
+                action["template_variables"],
+            ),
+        ))
+
+    async def _restore_slng_owner(self) -> None:
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=self._slng_settings(
+                {{.PromptExpr}},
+                {{pyq .LLM.SLNGScopeID}},
+                self._slng_owner_template_variables,
+            ),
+        ))
+        await self.flush_pipeline()
+{{end}}{{end}}{{if .MCPSources}}        # MCP tool sources. The clients are built here and connected in
         # start_mcp() before this worker is ever activated, because the server
         # names its own tools and build_tools() has to be able to list them.
         self._mcp_clients = [
@@ -791,7 +883,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             response.raise_for_status()
             await params.result_callback(response.json())
 {{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.llm.push_frame(EndFrame())
-{{end}}{{end}}{{$agentPromptExpr := .PromptExpr}}{{range $d := .Delegates}}
+{{end}}{{end}}{{$agentPromptExpr := .PromptExpr}}{{$agentSLNG := .LLM.SLNG}}{{range $d := .Delegates}}
     @_direct_tool
     async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
@@ -812,7 +904,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # V2/B2: drain the resolved owner call before snapshotting. Otherwise
         # restoration erases that call and the unchanged request delegates again.
         await self.flush_pipeline()
-        self._{{$d.MethodName}}_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
+        self._{{$d.MethodName}}_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)
         await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
 {{range $t := $d.StepTasks}}
     def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
@@ -820,7 +912,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             name={{pyq $t.Name}},
             role_message={{$t.PromptExpr}},
             task_messages=[{"role": "developer", "content": "Begin this step."}],
-            functions=[
+{{if $t.SLNG}}            pre_actions=[{
+                "type": "slng_settings",
+                "handler": self._slng_task_pre_action,
+                "system_instruction": {{$t.PromptExpr}},
+                "scope_id": {{pyq $t.SLNGScopeID}},
+                "template_variables": {{$t.SLNGSnapshot}},
+            }],
+{{end}}            functions=[
 {{range $t.Tools}}                FlowsFunctionSchema(
                     name={{pyq .Name}},
                     description={{pyq .Description}},
@@ -849,11 +948,12 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{else}}        # then: {{$d.Then}} — restore the owner's pre-flow context (messages and
         # tools); only the typed results cross back (merge: results, N13).
         messages, tools = self._{{$d.MethodName}}_snapshot
-        await self.queue_frame(LLMUpdateSettingsFrame(
+{{if $agentSLNG}}        await self._restore_slng_owner()
+{{else}}        await self.queue_frame(LLMUpdateSettingsFrame(
             delta=LLMSettings(system_instruction={{$agentPromptExpr}}),
         ))
         await self.flush_pipeline()
-{{if eq $d.Then "transfer"}}        self.context.set_messages(messages)
+{{end}}{{if eq $d.Then "transfer"}}        self.context.set_messages(messages)
         self.context.set_tools(tools)
         await self.activate_worker(
             {{pyq $d.ThenTarget}},
@@ -924,11 +1024,12 @@ def build_stt():
 
 {{if .Inline}}{{$agent := index .Agents 0}}async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     require_env()
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+{{if .NeedsSLNG}}    session_id = str(uuid.uuid4())
+{{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     # Single agent, no handoffs: the LLM sits inline in the pipeline (no bus).
     # turn: local — on-device VAD (Silero); the turn binding is advisory.
-{{if $agent.MCPSources}}    llm = build_{{$agent.Name}}_llm()
+{{if $agent.MCPSources}}    llm = build_{{$agent.Name}}_llm({{if $agent.LLM.SLNG}}session_id=session_id{{end}})
     # MCP tool sources: connect, then register each server's tools on the LLM.
     # An unreachable server raises here and the bot exits saying so.
 {{range $agent.MCPSources}}    {{.Var}} = {{template "mcp_client" .}}
@@ -953,7 +1054,7 @@ def build_stt():
             transport.input(),
             build_stt(),
             user_aggregator,
-            {{if $agent.MCPSources}}llm{{else}}build_{{$agent.Name}}_llm(){{end}},
+            {{if $agent.MCPSources}}llm{{else}}build_{{$agent.Name}}_llm({{if $agent.LLM.SLNG}}session_id=session_id{{end}}){{end}},
             build_{{$agent.Name}}_tts(),
             transport.output(),
             assistant_aggregator,
@@ -1018,7 +1119,8 @@ def build_stt():
 
 {{else}}async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     require_env()
-{{if .DailyCarrier}}    # Validated before anything is built: a malformed call body fails by field
+{{if .NeedsSLNG}}    session_id = str(uuid.uuid4())
+{{end}}{{if .DailyCarrier}}    # Validated before anything is built: a malformed call body fails by field
     # name rather than mid-call. None means this is not a phone session.
     carrier_call = _carrier_session(runner_args)
 {{end}}{{if .CloudWebsocket}}    # Decided once, right after the transport exists: is this a phone call at all?
@@ -1040,7 +1142,7 @@ def build_stt():
 {{if .Telephony}}    call_context = telephony.normalized_context(runner_args)
 {{end}}{{if .Variables}}    state = build_state(call_context)
 {{else}}    state = None
-{{end}}    agents = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(state=state, context=context, call_context=call_context){{end}}]
+{{end}}    agents = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(state=state, context=context, call_context=call_context{{if $a.LLM.SLNG}}, session_id=session_id{{end}}){{end}}]
 {{- range $i, $a := .Agents}}{{if $a.MCPSources}}
     # {{$a.Name}} connects its MCP servers before anything activates it; an
     # unreachable server raises here and the bot exits saying so.

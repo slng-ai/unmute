@@ -381,6 +381,18 @@ var livekitCatalog = []Entry{
 		Notes: []string{"set the deployment endpoint via endpoint_env (azure_endpoint) or AZURE_OPENAI_ENDPOINT; api_version via params when required"},
 	},
 	{
+		Framework: LiveKit, Role: Reason, Vendor: "slng",
+		Verified: "2026-08-17", Docs: slngResponsesDocsURL,
+		Install: InstallSpec{Extra: "openai"},
+		Import:  "from livekit.plugins import openai",
+		Call: &CallSpec{
+			Class: "openai.responses.LLM", APIKeyArg: "api_key", APIKeyEnv: "SLNG_API_KEY",
+			Model:  FieldSpec{Arg: "model", Required: true, Form: FormVerbatim},
+			Params: ParamsKwargs,
+		},
+		Notes: []string{"HTTP Responses API with use_websocket=False, store=False, a compiler-owned regional base URL, and request metadata; endpoint_env has no slot"},
+	},
+	{
 		Framework: LiveKit, Role: Reason, Vendor: "*",
 		Verified: "2026-07-15", Docs: "https://docs.livekit.io/agents/models/llm/",
 		Install: InstallSpec{}, // LiveKit Inference ships with livekit-agents

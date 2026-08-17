@@ -55,6 +55,59 @@ func readmeEnvNames(content string) []string {
 	return slices.Compact(names)
 }
 
+func TestSLNGRouterUsesEnvironmentNamesWithoutValues(t *testing.T) {
+	const routerValue = "router-secret-must-not-leak"
+	const upstreamValue = "upstream-secret-must-not-leak"
+	t.Setenv("SLNG_API_KEY", routerValue)
+	t.Setenv("OPENAI_API_KEY", upstreamValue)
+
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "slng-context-router"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		provider ir.Provider
+		file     string
+	}{
+		{provider: ir.ProviderPipecat, file: "bot.py"},
+		{provider: ir.ProviderLiveKit, file: "agent.py"},
+	} {
+		t.Run(string(test.provider), func(t *testing.T) {
+			artifact, err := Generate(agent, targetByProvider(t, agent, test.provider), target.Default())
+			if err != nil {
+				t.Fatal(err)
+			}
+			envExample := artifactFile(t, artifact, ".env.example")
+			readmeNames := readmeEnvNames(artifactFile(t, artifact, "README.md"))
+			for _, name := range []string{"OPENAI_API_KEY", "SLNG_API_KEY"} {
+				if !slices.Contains(envFileNames(envExample), name) {
+					t.Errorf(".env.example does not name %s", name)
+				}
+				if !slices.Contains(readmeNames, name) {
+					t.Errorf("README does not name %s", name)
+				}
+			}
+			runtime := artifactFile(t, artifact, test.file)
+			for _, name := range []string{"OPENAI_API_KEY", "SLNG_API_KEY"} {
+				if !strings.Contains(runtime, `os.environ["`+name+`"]`) {
+					t.Errorf("%s does not read %s through the environment", test.file, name)
+				}
+			}
+			for _, file := range artifact.Files {
+				for _, value := range []string{routerValue, upstreamValue} {
+					if strings.Contains(string(file.Content), value) {
+						t.Errorf("%s contains an environment value", file.Path)
+					}
+				}
+			}
+		})
+	}
+}
+
 // TestEnvExampleListsOnlyAuthorNames holds FR-018: `build/<target>/.env.example`
 // contains only names the author supplies. Everything else is absent, not
 // relabelled and not commented out.

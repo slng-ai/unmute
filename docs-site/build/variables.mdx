@@ -122,6 +122,26 @@ moment of the call and passes them by keyword.
   the call begins.
 </Note>
 
+## Variables with the Context Router
+
+SLNG-backed system prompts work differently at the request boundary so their
+text stays stable. Keep writing the same `{{name}}` placeholders. Unmute sends
+the raw prompt to the Context Router and passes only that prompt's values in
+top-level `template_variables`.
+
+An agent snapshots its referenced values when it activates. A standalone task
+or task-group step snapshots them when it starts. Every turn and retry in that
+activation reuses the snapshot. Re-entering the agent or rerunning the task
+captures current values again.
+
+This rule applies only to an SLNG reasoning prompt. Greetings and tool
+`inject:` values still render locally, as shown above. A non-SLNG reasoning
+prompt also keeps its existing local rendering.
+
+Keeping the prompt and values separate gives the router a stable template for
+optimization and caching. It does not guarantee a cache hit. See
+[Context Router](/models/context-router) for identity and cache markers.
+
 ## What happens when the value is missing
 
 An injected variable with no value refuses the call rather than sending a half

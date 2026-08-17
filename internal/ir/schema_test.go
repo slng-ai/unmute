@@ -29,6 +29,14 @@ func TestSchemaDerivesUnionEnumsAndNameReferences(t *testing.T) { // V2
 		`"connections"`,
 		`"peak_starts_per_second"`,
 		`"session_id"`,
+		`"slng"`,
+		`"region"`,
+		`"agent_id"`,
+		`"upstream"`,
+		`"api_key_env"`,
+		`"model_id"`,
+		`"required":["region","agent_id","upstream"]`,
+		`"required":["name","provider","url","api_key_env","model_id"]`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("derived schema missing %s", want)

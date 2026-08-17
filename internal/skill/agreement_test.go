@@ -162,6 +162,143 @@ func TestModelsReferenceMatchesCatalog(t *testing.T) {
 	}
 }
 
+// TestSLNGSkillAuthoringContract holds the copyable SLNG block in the skill
+// against the typed authoring surface, the catalogue-owned router credential,
+// and the regional URL resolver. The skill must teach names, never key values.
+func TestSLNGSkillAuthoringContract(t *testing.T) {
+	models := bundleFile(t, "references/models.md")
+	pack := bundleFile(t, "references/package.md")
+	contract := models + "\n" + pack
+
+	for _, typ := range []reflect.Type{reflect.TypeOf(spec.SLNGConfig{}), reflect.TypeOf(spec.SLNGUpstream{})} {
+		for i := range typ.NumField() {
+			field := typ.Field(i)
+			name := strings.Split(field.Tag.Get("yaml"), ",")[0]
+			if name == "" || name == "-" {
+				continue
+			}
+			if !strings.Contains(contract, name+":") {
+				t.Errorf("the shipped skill does not show the SLNG authoring field %q from spec.%s", name, typ.Name())
+			}
+		}
+	}
+	for _, want := range []string{
+		"slng:",
+		"model: slng/auto",
+		"one inline BYOK upstream",
+		"openai-responses",
+		"openai-compat",
+	} {
+		if !strings.Contains(contract, want) {
+			t.Errorf("the shipped skill is missing the SLNG authoring contract %q", want)
+		}
+	}
+
+	const upstreamKey = "OPENAI_API_KEY"
+	routerKey := ""
+	for _, framework := range []target.Provider{target.Pipecat, target.LiveKit} {
+		entry, ok := target.DefaultCatalog().Lookup(framework, target.Reason, "slng")
+		if !ok || entry.Call == nil || entry.Call.APIKeyEnv == "" {
+			t.Fatalf("the %s SLNG reason catalogue entry has no router credential", framework)
+		}
+		if routerKey == "" {
+			routerKey = entry.Call.APIKeyEnv
+		} else if entry.Call.APIKeyEnv != routerKey {
+			t.Fatalf("SLNG router credential differs by target: %s and %s", routerKey, entry.Call.APIKeyEnv)
+		}
+	}
+	if routerKey == upstreamKey {
+		t.Fatalf("router and upstream credentials both use %s; they must stay separate", routerKey)
+	}
+	for _, want := range []string{routerKey, upstreamKey, "api_key_env: " + upstreamKey} {
+		if !strings.Contains(contract, want) {
+			t.Errorf("the shipped skill is missing separate credential name %q", want)
+		}
+	}
+
+	row := regexp.MustCompile(`^\| \x60([a-z]+)\x60 \| \x60(https://[^\x60]+)\x60 \|$`)
+	documented := map[string]string{}
+	for _, line := range strings.Split(models, "\n") {
+		if match := row.FindStringSubmatch(strings.TrimSpace(line)); match != nil {
+			documented[match[1]] = match[2]
+		}
+	}
+	if len(documented) != 4 {
+		t.Fatalf("references/models.md documents %d SLNG regions, want exactly 4", len(documented))
+	}
+	for _, region := range []string{"india", "eu", "us", "indonesia"} {
+		want, ok := target.SLNGRouterBaseURL(region)
+		if !ok {
+			t.Fatalf("target.SLNGRouterBaseURL does not recognise documented region %q", region)
+		}
+		if got := documented[region]; got != want {
+			t.Errorf("references/models.md documents %s as %q, want %q", region, got, want)
+		}
+	}
+}
+
+// TestSLNGSkillRuntimeContract holds the runtime rules that are easy for a
+// coding assistant to accidentally invent: identity scope, frozen templates,
+// cache proof, and the fixed inline router shape.
+func TestSLNGSkillRuntimeContract(t *testing.T) {
+	contract := bundleFile(t, "references/models.md") + "\n" + bundleFile(t, "references/package.md")
+	for _, want := range []string{
+		"<base>--agent--<agent_name>",
+		"<base>--task--<task_name>",
+		"one UUID per call",
+		"X-Slng-Agent-Id",
+		"X-Slng-Session-Id",
+		"{{name}}",
+		"template_variables",
+		"frozen snapshot",
+		"cache_enabled: true",
+		"tier `\"1\"`",
+		"weight `100`",
+		"no automatic warm-up request",
+		"cached: true",
+		"cache_layer",
+		"X-Cache-Layer",
+		"Latency is not cache proof",
+		"64 variables",
+		"64 characters",
+		"4,000 characters",
+		"Structured output bypasses the cache",
+		"store: false",
+	} {
+		if !strings.Contains(contract, want) {
+			t.Errorf("the shipped skill is missing the SLNG runtime contract %q", want)
+		}
+	}
+}
+
+// TestSLNGSkillRecommendationKeepsScaffoldDefault lets the skill recommend an
+// opt-in optimisation without changing what a plain `unmute init` produces.
+func TestSLNGSkillRecommendationKeepsScaffoldDefault(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "hello-agent")
+	if _, err := scaffold.Write(dir, scaffold.Data{Name: "hello-agent", Tools: scaffold.DefaultTools()}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := thinkBlocks(string(raw))
+	if len(blocks) != 1 || !strings.Contains(blocks[0], "provider: openai") {
+		t.Fatalf("unmute init must keep one OpenAI think binding; got %q", blocks)
+	}
+
+	entry := bundleFile(t, "SKILL.md")
+	for _, want := range []string{
+		"Recommend `slng` first for think",
+		"`unmute init` still scaffolds `openai` for think",
+		"SLNG does not supply the model",
+	} {
+		if !strings.Contains(entry, want) {
+			t.Errorf("SKILL.md is missing the SLNG decision rule %q", want)
+		}
+	}
+}
+
 // TestProvidersReferenceMatchesTargetSet holds the provider table in
 // references/package.md: the set comes from internal/target, and every row says
 // whether support means validation or generation.

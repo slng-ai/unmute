@@ -45,7 +45,7 @@ The last eight are system sources. You declare them; the runtime fills them in.
 | Site | Renders | Can name |
 |---|---|---|
 | `conversation.greeting.text` | once, at session start | a variable that already has a value |
-| an agent's instructions | once, at session start | a variable that already has a value |
+| an agent's instructions | on activation | a variable that already has a value |
 | a task's instructions | when that task starts | a variable that already has a value, or one assigned from a task result |
 | a tool's `inject:` value | on every tool call | any declared variable |
 | a webhook tool's `path` | on every tool call | any declared variable, URL encoded |
@@ -60,6 +60,17 @@ conversation.greeting.text references {{requested_service}}, which has no value 
 Task instructions use the live call state when the task begins. This lets a
 later task read a variable assigned from an earlier task result. If no earlier
 task assigned that value, the template renders an empty string.
+
+For an SLNG Context Router reasoning binding, "renders" describes what the
+model receives, not what Unmute puts in the system-prompt string. Unmute keeps
+the authored placeholders in that request and sends the active values through
+top-level `template_variables`. It snapshots only names used by the active
+prompt. Agent activation, standalone-task start, and each task-group step each
+create their own snapshot. Retries reuse it until that activation ends.
+
+Other sites keep local rendering. This includes greetings, tool `inject:`,
+webhook paths, and every non-SLNG reasoning prompt. See
+[Context Router](/models/context-router) for the full request and cache rules.
 
 An undeclared name is an error too. Invalid session-start and undeclared names
 are never silent empty strings.

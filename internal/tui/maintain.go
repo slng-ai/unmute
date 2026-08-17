@@ -23,10 +23,11 @@ import (
 )
 
 type maintainedAgent struct {
-	path    string
-	data    scaffold.Data
-	initial scaffold.Data
-	losses  []string
+	path         string
+	data         scaffold.Data
+	initial      scaffold.Data
+	losses       []string
+	hasSLNGThink bool
 }
 
 func discoverPackages(root string) ([]string, error) {
@@ -116,7 +117,21 @@ func loadMaintained(path string) (maintainedAgent, error) {
 	if err != nil {
 		return maintainedAgent{}, err
 	}
-	return maintainedAgent{path: pkg.Root, data: data, initial: data, losses: losses}, nil
+	return maintainedAgent{path: pkg.Root, data: data, initial: data, losses: losses, hasSLNGThink: packageHasSLNGThink(pkg)}, nil
+}
+
+func packageHasSLNGThink(pkg *packagespec.Package) bool {
+	for name, model := range pkg.Agent.Models.Think {
+		if model.Provider == "slng" || model.SLNG != nil {
+			return true
+		}
+		for _, target := range pkg.Targets {
+			if override, ok := target.Models[name]; ok && (override.Provider == "slng" || override.SLNG != nil) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func packageData(pkg *packagespec.Package) (scaffold.Data, error) {
@@ -583,6 +598,9 @@ func saveMaintained(runner *fieldRunner, agent *maintainedAgent) error {
 			return repairPreflight(runner, &agent.data, err)
 		}
 		return showNotice(runner, "No changes to save", "The package validates and every byte is unchanged.")
+	}
+	if agent.hasSLNGThink {
+		return showNotice(runner, "SLNG think is YAML-only", "This editor cannot preserve the complete slng block yet. Edit agent.yaml directly; your changes were not saved.")
 	}
 	root, err := os.MkdirTemp("", "unmute-maintain-save-")
 	if err != nil {

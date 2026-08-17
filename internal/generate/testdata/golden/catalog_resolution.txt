@@ -159,6 +159,14 @@ import:   from livekit.plugins import sarvam
 install:  livekit-agents[sarvam]
 env:      SARVAM_API_KEY
 
+=== livekit reason slng ===
+binding:  provider=slng model=slng/auto slng.region=eu slng.agent_id=catalog-router-v1 slng.upstream={name=luna provider=openai-responses url=https://api.openai.com/v1 api_key_env=OPENAI_API_KEY model_id=gpt-5.6-luna}
+class:    openai.responses.LLM
+args:     api_key=os.environ["SLNG_API_KEY"], model="slng/auto", temperature=0.4
+import:   from livekit.plugins import openai
+install:  livekit-agents[openai]
+env:      SLNG_API_KEY
+
 === livekit speak cartesia ===
 binding:  provider=cartesia model=model-1 voice=voice-1
 class:    cartesia.TTS
@@ -408,6 +416,15 @@ settings: model="model-1", sample_rate=24000
 import:   from pipecat.services.qwen.llm import QwenLLMService
 install:  pipecat-ai[qwen]
 env:      QWEN_API_KEY
+
+=== pipecat reason slng ===
+binding:  provider=slng model=slng/auto slng.region=eu slng.agent_id=catalog-router-v1 slng.upstream={name=luna provider=openai-responses url=https://api.openai.com/v1 api_key_env=OPENAI_API_KEY model_id=gpt-5.6-luna}
+class:    OpenAIResponsesHttpLLMService
+args:     api_key=os.environ["SLNG_API_KEY"]
+settings: model="slng/auto", temperature=0.4
+import:   from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService, OpenAIResponsesLLMSettings
+install:  pipecat-ai[openai]
+env:      SLNG_API_KEY
 
 === pipecat speak * ===
 binding:  provider="*" as acme model=model-1 voice=voice-1 endpoint_env=ACME_BASE_URL

@@ -407,3 +407,76 @@ func TestTemplateParsing(t *testing.T) {
 		t.Fatal("HasTemplate must be false without a token")
 	}
 }
+
+func TestValidateSLNGTemplateVariableCompileTimeLimits(t *testing.T) {
+	prompt := func(count, nameLength int) string {
+		var out strings.Builder
+		for i := range count {
+			name := strings.Repeat("v", nameLength)
+			if count > 1 {
+				name += string(rune('a'+i/26)) + string(rune('a'+i%26))
+			}
+			out.WriteString("{{")
+			out.WriteString(name)
+			out.WriteString("}} ")
+		}
+		return out.String()
+	}
+	validate := func(t *testing.T, instructions string, task bool) string {
+		t.Helper()
+		agent, target := slngValidationAgent(t, ProviderLiveKit)
+		if task {
+			agent.Tasks["limited"] = Task{
+				Instructions: instructions, Model: "fast_reasoning",
+				Result:  map[string]ResultField{"done": {Type: PrimitiveBoolean}},
+				Context: TaskContext{History: HistoryFull},
+			}
+		} else {
+			entry := agent.Agents[agent.EntryAgent]
+			entry.Instructions = instructions
+			agent.Agents[agent.EntryAgent] = entry
+		}
+		report, _ := Validate(agent, []Target{target}, targetcap.Default())
+		return strings.Join(report.PerTarget[0].Errors, "\n")
+	}
+
+	if errors := validate(t, prompt(64, 1), false); strings.Contains(errors, "at most 64 template variables") {
+		t.Fatalf("exact count limit was rejected:\n%s", errors)
+	}
+	if errors := validate(t, prompt(65, 1), false); !strings.Contains(errors, "at most 64 template variables") {
+		t.Fatalf("count over limit was accepted:\n%s", errors)
+	}
+	if errors := validate(t, prompt(1, 64), true); strings.Contains(errors, "template variable names must be at most 64 characters") {
+		t.Fatalf("exact name limit was rejected:\n%s", errors)
+	}
+	if errors := validate(t, prompt(1, 65), true); !strings.Contains(errors, "template variable names must be at most 64 characters") {
+		t.Fatalf("name over limit was accepted:\n%s", errors)
+	}
+}
+
+func TestSLNGUpstreamSecretReferenceFailsClosedAndNeverEchoesValues(t *testing.T) {
+	agent, target := slngValidationAgent(t, ProviderLiveKit)
+	agent.Secrets = slices.DeleteFunc(agent.Secrets, func(name string) bool { return name == "OPENAI_API_KEY" })
+	report, err := Validate(agent, []Target{target}, targetcap.Default())
+	if err == nil {
+		t.Fatal("an undeclared upstream api_key_env passed validation")
+	}
+	errors := strings.Join(report.PerTarget[0].Errors, "\n")
+	if !strings.Contains(errors, `slng.upstream.api_key_env "OPENAI_API_KEY" must be declared in secrets`) {
+		t.Fatalf("errors =\n%s", errors)
+	}
+	if site := referencedEnvNames(agent)["OPENAI_API_KEY"]; !strings.Contains(site, "slng.upstream.api_key_env") {
+		t.Fatalf("upstream secret reference site = %q", site)
+	}
+
+	const pastedValue = "sk-pretend-secret-value"
+	target.Models.Reason["fast_reasoning"].SLNG.Upstream.APIKeyEnv = pastedValue
+	report, _ = Validate(agent, []Target{target}, targetcap.Default())
+	errors = strings.Join(report.PerTarget[0].Errors, "\n")
+	if !strings.Contains(errors, "slng.upstream.api_key_env must be an UPPER_SNAKE environment variable name") {
+		t.Fatalf("errors =\n%s", errors)
+	}
+	if strings.Contains(errors, pastedValue) {
+		t.Fatalf("validation echoed a pasted key value: %s", errors)
+	}
+}

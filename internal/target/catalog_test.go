@@ -76,6 +76,94 @@ func TestSlngEverywhere(t *testing.T) {
 	}
 }
 
+func TestSLNGReasonCatalogRows(t *testing.T) {
+	const docs = "https://github.com/slng-ai/llm-router/blob/main/docs/responses_api.md"
+	tests := []struct {
+		framework     Provider
+		class         string
+		importLine    string
+		params        ParamsStyle
+		settingsClass string
+	}{
+		{
+			framework:     Pipecat,
+			class:         "OpenAIResponsesHttpLLMService",
+			importLine:    "from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService, OpenAIResponsesLLMSettings",
+			params:        ParamsSettings,
+			settingsClass: "OpenAIResponsesLLMSettings",
+		},
+		{
+			framework:  LiveKit,
+			class:      "openai.responses.LLM",
+			importLine: "from livekit.plugins import openai",
+			params:     ParamsKwargs,
+		},
+	}
+
+	cat := DefaultCatalog()
+	for _, tc := range tests {
+		t.Run(string(tc.framework), func(t *testing.T) {
+			entry, ok := cat.Lookup(tc.framework, Reason, "slng")
+			if !ok || entry.Wildcard() {
+				t.Fatalf("Reason/slng did not resolve to an exact row: %#v, %v", entry, ok)
+			}
+			if entry.Verified != "2026-08-17" || entry.Docs != docs {
+				t.Errorf("source metadata = %q, %q", entry.Verified, entry.Docs)
+			}
+			if entry.Call == nil {
+				t.Fatal("Reason/slng row has no call")
+			}
+			if entry.Call.Class != tc.class || entry.Import != tc.importLine {
+				t.Errorf("Responses integration = %q, %q", entry.Call.Class, entry.Import)
+			}
+			if entry.Call.APIKeyEnv != "SLNG_API_KEY" {
+				t.Errorf("API key environment = %q", entry.Call.APIKeyEnv)
+			}
+			if entry.Call.Model != (FieldSpec{Arg: "model", Required: true, Form: FormVerbatim}) {
+				t.Errorf("model field = %#v", entry.Call.Model)
+			}
+			if entry.Call.Params != tc.params || entry.Call.SettingsClass != tc.settingsClass {
+				t.Errorf("parameter shape = %q, settings class %q", entry.Call.Params, entry.Call.SettingsClass)
+			}
+
+			exact, wildcard := -1, -1
+			for i, candidate := range cat.Entries() {
+				if candidate.Framework != tc.framework || candidate.Role != Reason {
+					continue
+				}
+				switch candidate.Vendor {
+				case "slng":
+					exact = i
+				case "*":
+					wildcard = i
+				}
+			}
+			if exact < 0 || wildcard < 0 || exact >= wildcard {
+				t.Errorf("Reason/slng row index %d must precede wildcard index %d", exact, wildcard)
+			}
+		})
+	}
+}
+
+func TestSLNGRouterBaseURL(t *testing.T) {
+	for region, want := range map[string]string{
+		"india":     "https://india.llm-router.slng.ai/v1",
+		"eu":        "https://eu.llm-router.slng.ai/v1",
+		"us":        "https://us.llm-router.slng.ai/v1",
+		"indonesia": "https://indonesia.llm-router.slng.ai/v1",
+	} {
+		t.Run(region, func(t *testing.T) {
+			got, ok := SLNGRouterBaseURL(region)
+			if !ok || got != want {
+				t.Errorf("SLNGRouterBaseURL(%q) = %q, %v; want %q, true", region, got, ok, want)
+			}
+		})
+	}
+	if got, ok := SLNGRouterBaseURL("europe"); ok || got != "" {
+		t.Errorf("unsupported region = %q, %v; want empty, false", got, ok)
+	}
+}
+
 // TestCheckVendor pins the one vendor/endpoint rulebook shared by validation
 // and driver resolution: aliases, managed allowlists, unrestricted roles,
 // wildcard endpoint gating, and endpoint slotting.
@@ -124,7 +212,7 @@ func TestCatalogLookup(t *testing.T) {
 	if got := cat.Vendors(LiveKit, Speak); strings.Join(got, ",") != "cartesia,deepgram,elevenlabs,gemini,gradium,inworld,rime,sarvam,slng,soniox" {
 		t.Errorf("livekit speak vendors = %v", got)
 	}
-	if got := cat.RolesFor(Pipecat, "slng"); strings.Join(got, ",") != "listen,speak" {
+	if got := cat.RolesFor(Pipecat, "slng"); strings.Join(got, ",") != "listen,reason,speak" {
 		t.Errorf("slng roles on pipecat = %v", got)
 	}
 	if e, ok := cat.Lookup(LiveKit, Speak, "elevenlabs"); !ok || !e.VoiceRequired() {

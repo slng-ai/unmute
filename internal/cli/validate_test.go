@@ -222,6 +222,98 @@ func TestValidateRefusesAPastedMCPSecret(t *testing.T) {
 	}
 }
 
+func copySLNGRouter(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "agent")
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "..", "examples", "slng-context-router"))); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func replaceSLNGAgentYAML(t *testing.T, dir, old, replacement string) {
+	t.Helper()
+	path := filepath.Join(dir, "agent.yaml")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := strings.Replace(string(content), old, replacement, 1)
+	if updated == string(content) {
+		t.Fatalf("SLNG fixture anchor not found: %q", old)
+	}
+	if err := os.WriteFile(path, []byte(updated), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateCommandAcceptsSLNGRouterWithoutEnvironmentValues(t *testing.T) {
+	t.Setenv("SLNG_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	dir := copySLNGRouter(t)
+	for _, target := range []string{"livekit", "pipecat"} {
+		stdout, stderr, err := runValidateCommand(t, "--target", target, dir)
+		if err != nil {
+			t.Fatalf("%s validate: %v\nstdout:\n%s\nstderr:\n%s", target, err, stdout, stderr)
+		}
+		if !strings.Contains(stdout, "✓ "+target+" ("+target+")") {
+			t.Errorf("%s stdout = %q", target, stdout)
+		}
+	}
+}
+
+func TestValidateCommandRejectsInvalidSLNGAuthoring(t *testing.T) {
+	const block = `      slng:
+        region: eu
+        agent_id: router-fixture-v1
+        upstream:
+          name: luna
+          provider: openai-responses
+          url: https://api.openai.com/v1
+          api_key_env: OPENAI_API_KEY
+          model_id: gpt-5.6-luna
+`
+	for _, test := range []struct {
+		name, old, replacement, want string
+	}{
+		{name: "missing block", old: block, replacement: "", want: `requires a complete slng block`},
+		{name: "unsupported region", old: "        region: eu", replacement: "        region: europe", want: "slng.region must be one of"},
+		{name: "relative URL", old: "          url: https://api.openai.com/v1", replacement: "          url: api.openai.com/v1", want: "absolute HTTP or HTTPS URL"},
+		{name: "unsupported endpoint family", old: "          provider: openai-responses", replacement: "          provider: azure", want: "openai-responses or openai-compat"},
+		{name: "request model mismatch", old: "      model: slng/auto", replacement: "      model: gpt-5.6-luna", want: "match slng.upstream.name"},
+		{name: "unsafe agent ID", old: "        agent_id: router-fixture-v1", replacement: "        agent_id: router fixture v1", want: "visible ASCII without whitespace"},
+		{name: "undeclared upstream key", old: "  - OPENAI_API_KEY\n", replacement: "", want: "must be declared in secrets"},
+		{name: "custom router endpoint", old: "      model: slng/auto\n", replacement: "      model: slng/auto\n      endpoint_env: SLNG_ROUTER_BASE_URL\n", want: "endpoint_env is not supported"},
+		{name: "reserved request param", old: "      model: slng/auto\n", replacement: "      model: slng/auto\n      params: {extra_body: {override: true}}\n", want: `params key "extra_body" is reserved`},
+		{name: "block on speak", old: "      voice: \"aura-2-thalia-en\"\n", replacement: "      voice: \"aura-2-thalia-en\"\n" + block, want: "slng block is legal only on think models"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := copySLNGRouter(t)
+			replaceSLNGAgentYAML(t, dir, test.old, test.replacement)
+			stdout, stderr, err := runValidateCommand(t, "--target", "livekit", dir)
+			if err == nil {
+				t.Fatalf("invalid SLNG package passed validation: stdout=%q stderr=%q", stdout, stderr)
+			}
+			if !strings.Contains(stderr, test.want) {
+				t.Fatalf("stderr =\n%s\nwant %q", stderr, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateCommandNeverEchoesPastedSLNGUpstreamKey(t *testing.T) {
+	const pasted = "sk-pretend-upstream-secret"
+	dir := copySLNGRouter(t)
+	replaceSLNGAgentYAML(t, dir, "          api_key_env: OPENAI_API_KEY", "          api_key_env: "+pasted)
+	stdout, stderr, err := runValidateCommand(t, "--target", "livekit", dir)
+	if err == nil || !strings.Contains(stderr, "api_key_env must be an UPPER_SNAKE environment variable name") {
+		t.Fatalf("err=%v stdout=%q stderr=%q", err, stdout, stderr)
+	}
+	if strings.Contains(stdout, pasted) || strings.Contains(stderr, pasted) {
+		t.Fatal("validation echoed a pasted upstream key")
+	}
+}
+
 func runValidateCommand(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 	cmd := newRootCmd()

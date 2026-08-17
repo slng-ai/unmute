@@ -106,3 +106,61 @@ deepgram (deepgram): FAIL
   warning: declares a route no target names, so nothing uses it: connections/primary_phone.yaml
   warning: environment variables referenced but not declared in secrets: BILLING_PHONE_NUMBER (agent.yaml destinations billing_line), DEEPGRAM_API_KEY (agent.yaml models listen transcriber), ELEVEN_API_KEY (agent.yaml models speak front_desk), GET_INVOICE_URL (tools/get_invoice.yaml webhook.url_env), LOOKUP_CUSTOMER_URL (tools/lookup_customer.yaml webhook.url_env), OPENAI_API_KEY (agent.yaml models think careful_reasoning), SIP_AUTH_PASSWORD (connections/twilio_sip.yaml environment sip_password), SIP_AUTH_USERNAME (connections/twilio_sip.yaml environment sip_username), SIP_FROM_NUMBER (connections/twilio_sip.yaml environment from_number), SIP_TRUNK_HOSTNAME (connections/twilio_sip.yaml environment sip_address), SLNG_API_KEY (agent.yaml models speak front_desk), TWILIO_ACCOUNT_SID (connections/primary_phone.yaml environment account_sid), TWILIO_AUTH_TOKEN (connections/primary_phone.yaml environment auth_token), TWILIO_PHONE_NUMBER (connections/primary_phone.yaml environment from_number)
   error: Deepgram has no faithful thinking-audio lowering
+
+CASE slng_ir
+{
+  "model": {
+    "kind": "think",
+    "provider": "slng",
+    "model": "slng/auto",
+    "temperature": 0.4,
+    "slng": {
+      "region": "eu",
+      "agent_id": "salon-desk-v1",
+      "upstream": {
+        "name": "luna",
+        "provider": "openai-responses",
+        "url": "https://api.openai.com/v1",
+        "api_key_env": "OPENAI_API_KEY",
+        "model_id": "gpt-5.6-luna"
+      }
+    },
+    "placement": "api",
+    "description": "cheap and quick, greeting and routing"
+  },
+  "pipecat_binding": {
+    "provider": "slng",
+    "model": "router_luna",
+    "slng": {
+      "region": "us",
+      "agent_id": "salon-desk-v1",
+      "upstream": {
+        "name": "router_luna",
+        "provider": "openai-compat",
+        "url": "https://compat.example.com/v1",
+        "api_key_env": "COMPAT_API_KEY",
+        "model_id": "luna-compat"
+      }
+    },
+    "placement": "api"
+  },
+  "livekit_binding": {
+    "provider": "slng",
+    "model": "slng/auto",
+    "slng": {
+      "region": "eu",
+      "agent_id": "salon-desk-v1",
+      "upstream": {
+        "name": "luna",
+        "provider": "openai-responses",
+        "url": "https://api.openai.com/v1",
+        "api_key_env": "OPENAI_API_KEY",
+        "model_id": "gpt-5.6-luna"
+      }
+    },
+    "placement": "api",
+    "params": {
+      "temperature": 0.4
+    }
+  }
+}

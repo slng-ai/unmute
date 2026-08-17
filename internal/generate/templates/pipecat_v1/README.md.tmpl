@@ -139,6 +139,31 @@ In production the same values ride the runner's call-start payload as one flat
 JSON object, and the bot also reads them from the `UNMUTE_CALL_START`
 environment variable when the payload carries none.
 {{- end}}
+{{- if .NeedsSLNG}}
+
+## SLNG Context Router
+
+This project routes its reasoning model through the SLNG Context Router. SLNG
+is the optimization layer. The upstream provider, endpoint, model, and key come
+from the source package.
+
+- The source `slng.region` is compiled into the regional router URL. There is
+  no `SLNG_ROUTER_BASE_URL` at run time.
+- `SLNG_API_KEY` authenticates the router. Each upstream key is read separately
+  from the environment name listed below.
+- Every request carries one inline, cache-enabled tier with one upstream at
+  weight `100`. It uses HTTP Responses, full history, and `store: false`.
+- The generated agent ID is stable for the active agent or task prompt. One
+  generated session UUID stays fixed for the whole call.
+- SLNG system prompts keep `{{"{{name}}"}}` placeholders. Only values referenced
+  by the active prompt are snapshotted into `template_variables`.
+
+The application sends no startup cache-warming request. A normal eligible turn
+can seed the cache, and only `cached`, `cache_layer`, or `X-Cache-Layer` proves a
+later hit. Structured output bypasses caching. The router is stateless, so full
+history is resent each turn; stored responses, hosted tools, and response
+lifecycle operations are not available on this path.
+{{- end}}
 
 ## Required environment
 

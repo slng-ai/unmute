@@ -29,6 +29,41 @@ type neededVar struct {
 	Description string
 }
 
+type slngPromptLowering struct {
+	PromptExpr   string
+	SnapshotExpr string
+}
+
+const slngSnapshotHelperSource = `def _slng_snapshot(state, names: list[str]) -> dict[str, str]:
+    """Freeze the referenced prompt values without exposing oversized values."""
+    snapshot = {}
+    for name in names:
+        value = getattr(state, name, None)
+        text = "" if value is None else str(value)
+        if len(text) > 4000:
+            raise RuntimeError(f"Template variable {name} exceeds 4000 characters")
+        snapshot[name] = text
+    return snapshot
+`
+
+// lowerSLNGPrompt keeps the authored prompt constant raw and snapshots only
+// the variables that prompt references. The generated target owns when this
+// expression runs, so calling it on activation naturally refreshes the values.
+func lowerSLNGPrompt(constName, body, stateExpr string) slngPromptLowering {
+	refs := ir.TemplateRefs(body)
+	if len(refs) == 0 {
+		return slngPromptLowering{PromptExpr: constName, SnapshotExpr: "{}"}
+	}
+	quoted := make([]string, len(refs))
+	for i, name := range refs {
+		quoted[i] = pyQuote(name)
+	}
+	return slngPromptLowering{
+		PromptExpr:   constName,
+		SnapshotExpr: fmt.Sprintf("_slng_snapshot(%s, [%s])", stateExpr, strings.Join(quoted, ", ")),
+	}
+}
+
 // injectExpr renders one inject value as a Python expression. A value that is
 // exactly one token reads the state attribute directly, so an integer variable
 // stays an integer in the JSON body; a mixed string renders through the helper;

@@ -83,6 +83,119 @@ func TestLoadRejectsUnknownFieldWithPosition(t *testing.T) { // V3
 	}
 }
 
+func writeSLNGAuthoringPackage(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	files := map[string]string{
+		"agent.yaml": `version: 1
+entry_agent: intake
+secrets: [SLNG_API_KEY, OPENAI_API_KEY]
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: slng/auto
+      slng:
+        region: eu
+        agent_id: salon-desk-v1
+        upstream:
+          name: luna
+          provider: openai-responses
+          url: https://api.openai.com/v1
+          api_key_env: OPENAI_API_KEY
+          model_id: gpt-5.6-luna
+agents:
+  intake:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+channels:
+  web: { kind: realtime_audio }
+`,
+		"targets.yaml": `targets:
+  pipecat:
+    provider: pipecat
+    version: "1.7.0"
+    models:
+      reasoning:
+        provider: slng
+        model: router_luna
+        slng:
+          region: us
+          agent_id: salon-desk-v1
+          upstream:
+            name: router_luna
+            provider: openai-compat
+            url: https://compat.example.com/v1
+            api_key_env: COMPAT_API_KEY
+            model_id: luna-compat
+`,
+		"instructions.md": "Help the caller.\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestLoadSLNGAuthoringAndTargetOverride(t *testing.T) {
+	pkg, err := Load(writeSLNGAuthoringPackage(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &SLNGConfig{
+		Region: "eu", AgentID: "salon-desk-v1",
+		Upstream: SLNGUpstream{
+			Name: "luna", Provider: "openai-responses", URL: "https://api.openai.com/v1",
+			APIKeyEnv: "OPENAI_API_KEY", ModelID: "gpt-5.6-luna",
+		},
+	}
+	if got := pkg.Agent.Models.Think["reasoning"].SLNG; got == nil || *got != *want {
+		t.Fatalf("authoring SLNG block = %#v, want %#v", got, want)
+	}
+	override := pkg.Targets["pipecat"].Models["reasoning"].SLNG
+	if override == nil || override.Region != "us" || override.Upstream.Provider != "openai-compat" || override.Upstream.APIKeyEnv != "COMPAT_API_KEY" {
+		t.Fatalf("target override SLNG block = %#v", override)
+	}
+}
+
+func TestLoadRejectsMisplacedOrUnknownSLNGFields(t *testing.T) {
+	for _, test := range []struct {
+		name, file, old, replacement, want string
+	}{
+		{
+			name: "misplaced on agent", file: "agent.yaml", old: "    voice: voice\n",
+			replacement: "    voice: voice\n    slng: {}\n", want: "slng",
+		},
+		{
+			name: "unknown source field", file: "agent.yaml", old: "          model_id: gpt-5.6-luna\n",
+			replacement: "          model_id: gpt-5.6-luna\n        cache_enabled: true\n", want: "cache_enabled",
+		},
+		{
+			name: "unknown override field", file: "targets.yaml", old: "            model_id: luna-compat\n",
+			replacement: "            model_id: luna-compat\n          weight: 100\n", want: "weight",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := writeSLNGAuthoringPackage(t)
+			path := filepath.Join(dir, test.file)
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content = []byte(strings.Replace(string(content), test.old, test.replacement, 1))
+			if err := os.WriteFile(path, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("want strict-load error containing %q, got %v", test.want, err)
+			}
+		})
+	}
+}
+
 // TestLoadNeverPrintsAValueBack holds the repository's hardest rule at the one
 // place that used to break it. The decoder's source excerpt is genuinely the
 // best error in the tool — line, neighbours, and a caret under the column — and

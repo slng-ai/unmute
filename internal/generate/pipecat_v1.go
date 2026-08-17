@@ -46,12 +46,15 @@ func pyName(name string) string {
 // task job-workers need to drive the OpenAI SDK directly. Model/voice/params
 // are forwarded verbatim (C11); the catalogue only picks the code slot.
 type pipecatService struct {
-	Call      ServiceCall
-	Entry     targetcap.Entry
-	Vendor    string // resolved binding provider (report labeling)
-	APIKeyEnv string
-	BaseURL   string // env var name for base_url, empty if native
-	Model     string
+	Call               ServiceCall
+	Entry              targetcap.Entry
+	Vendor             string // resolved binding provider (report labeling)
+	APIKeyEnv          string
+	BaseURL            string // env var name for base_url, empty if native
+	Model              string
+	SLNG               bool
+	SLNGScopeID        string
+	SLNGUpdateSettings []pyKV
 }
 
 type pyKV struct {
@@ -62,17 +65,18 @@ type pyKV struct {
 // pipecatAgent is one LLMWorker: its class, worker name, LLM, TTS, prompt, and
 // the tools/transfers/delegates it exposes as @tool methods.
 type pipecatAgent struct {
-	Name        string // worker name (the agent's snake_case id)
-	Class       string // Python class name
-	Prompt      string
-	PromptConst string // module constant holding Prompt (dedup: builder + restore, V2)
-	PromptExpr  string // PromptConst, or a render call when the prompt is templated
-	LLM         pipecatService
-	TTS         pipecatService
-	Tools       []pipecatTool
-	Transfers   []pipecatTransfer
-	Delegates   []pipecatDelegate
-	MCPSources  []pipecatMCPSource
+	Name         string // worker name (the agent's snake_case id)
+	Class        string // Python class name
+	Prompt       string
+	PromptConst  string // module constant holding Prompt (dedup: builder + restore, V2)
+	PromptExpr   string // PromptConst, or a render call when the prompt is templated
+	SLNGSnapshot string // activation-time snapshot expression (self.state)
+	LLM          pipecatService
+	TTS          pipecatService
+	Tools        []pipecatTool
+	Transfers    []pipecatTransfer
+	Delegates    []pipecatDelegate
+	MCPSources   []pipecatMCPSource
 }
 
 // pipecatMCPSource is one MCP tool source this agent carries (N40): one
@@ -113,6 +117,9 @@ type pipecatTask struct {
 	Tools          []pipecatTool
 	ResultProps    string // Python literal: JSON-schema properties for finish args
 	ResultRequired string // Python literal: list of required finish arg names
+	SLNG           bool
+	SLNGScopeID    string
+	SLNGSnapshot   string
 }
 
 // pipecatDelegate is a delegate control: run a task or an ordered group of tasks
@@ -427,7 +434,9 @@ type pipecatData struct {
 	HasTransferAnnouncements bool // target worker owns exact handoff speech before its reply
 	HasIsolated              bool // any isolated group (ContextStrategy RESET import)
 	NeedsRoleRestore         bool // any non-ending delegate (V28)
+	NeedsPlainRoleRestore    bool // a non-SLNG owner needs generic LLMSettings
 	NeedsLanguage            bool // any emitted service sets a language kwarg (Language enum import, N16)
+	NeedsSLNG                bool // SLNG prompt snapshot helper and dynamic request metadata
 	Inline                   bool // single agent, no bus: LLM inline in the pipeline (F3)
 	NeedsMCP                 bool // any mcp tool source: MCPClient import + lifecycle (N40)
 	// MCPParamsImports are the mcp.client.session_group parameter classes the
@@ -632,7 +641,11 @@ func renderPipecatV1(name string, data pipecatData) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
 	}
-	tmpl, err := template.New(name).Funcs(template.FuncMap{"pyq": pyQuote, "pytriple": pyTriple, "join": strings.Join, "mcpTimeout": func() int { return mcpTimeoutSeconds }}).Parse(string(raw))
+	tmpl, err := template.New(name).Funcs(template.FuncMap{
+		"pyq": pyQuote, "pytriple": pyTriple, "join": strings.Join,
+		"mcpTimeout":   func() int { return mcpTimeoutSeconds },
+		"slngSnapshot": func() string { return slngSnapshotHelperSource },
+	}).Parse(string(raw))
 	if err != nil {
 		return nil, fmt.Errorf("pipecat template %s: %w", name, err)
 	}
