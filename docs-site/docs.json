@@ -2,6 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "Unmute by SLNG//",
+  "description": "Build portable voice agents and compile them to Pipecat or LiveKit Agents projects you own.",
   "colors": {
     "primary": "#8A7300",
     "light": "#F7E98A",
@@ -61,8 +62,8 @@
       {
         "group": "Get started",
         "icon": "rocket",
-        "root": "index",
         "pages": [
+          "index",
           "start/installation",
           "start/quickstart",
           "start/coding-agents",
@@ -76,6 +77,7 @@
           "build/your-first-agent",
           {
             "group": "Tools",
+            "icon": "wrench",
             "root": "build/tools/overview",
             "pages": [
               "build/tools/webhook",
@@ -87,6 +89,7 @@
           "build/variables",
           {
             "group": "Orchestration",
+            "icon": "git-branch",
             "root": "build/orchestration/overview",
             "pages": [
               "build/orchestration/handoffs",
@@ -100,8 +103,8 @@
       {
         "group": "Develop and test",
         "icon": "terminal",
-        "root": "dev/overview",
         "pages": [
+          "dev/overview",
           "dev/telephony",
           "dev/webhooks-and-tunnels"
         ]
@@ -109,13 +112,14 @@
       {
         "group": "Phone calls",
         "icon": "phone",
-        "root": "telephony/overview",
         "pages": [
+          "telephony/overview",
           "telephony/first-phone-call",
           "telephony/outbound-calls",
           "telephony/twilio",
           {
             "group": "Transfers",
+            "icon": "phone-forwarded",
             "root": "transfers/overview",
             "pages": [
               "transfers/livekit",
@@ -126,11 +130,12 @@
         ]
       },
       {
-        "group": "Runtimes and models",
+        "group": "Targets and models",
         "icon": "boxes",
         "pages": [
           {
-            "group": "Runtimes",
+            "group": "Targets",
+            "icon": "boxes",
             "root": "targets/overview",
             "pages": [
               "targets/pipecat",
@@ -139,6 +144,7 @@
           },
           {
             "group": "Models",
+            "icon": "brain",
             "pages": [
               "models/stt",
               "models/tts",
@@ -164,6 +170,7 @@
         "pages": [
           {
             "group": "CLI",
+            "icon": "terminal",
             "root": "reference/cli/overview",
             "pages": [
               "reference/cli/init",

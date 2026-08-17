@@ -7,6 +7,9 @@ A variable is a named value that lives for one call. Use it to greet someone by
 name, to remember what they asked for, and to hand a tool a value the model
 should never see.
 
+This page teaches the common workflow. For every type, source, and supported
+location, use the [Variables reference](/reference/variables).
+
 This page follows `examples/salon-support`, the smallest package with a full
 `variables:` block.
 
@@ -122,7 +125,7 @@ moment of the call and passes them by keyword.
   the call begins.
 </Note>
 
-## What happens when the value is missing
+### What happens when the value is missing
 
 An injected variable with no value refuses the call rather than sending a half
 formed request. The model gets told why:

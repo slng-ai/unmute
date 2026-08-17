@@ -57,15 +57,16 @@ mint a11y                                               # contrast and media alt
 ## The structure
 
 Seven top-level groups, 50 pages: Get started, Build the agent, Develop and
-test, Phone calls, Runtimes and models, Deploy, and Reference. Build the agent
-nests Tools and Orchestration; Phone calls nests Transfers; Runtimes and models
-nests Runtimes and Models; Reference nests CLI.
+test, Phone calls, Targets and models, Deploy, and Reference. Build the agent
+nests Tools and Orchestration; Phone calls nests Transfers; Targets and models
+nests Targets and Models; Reference nests CLI.
 
-Existing overview pages are clickable group roots for Get started, Tools,
-Orchestration, Develop and test, Phone calls, Transfers, Runtimes, and CLI. The
-site does not add automatic directory listings because those roots already have
-useful hand-written cards or tables. Every `.mdx` file must appear exactly once
-as either a page entry or a group root in `docs.json`.
+Top-level groups are section headers, not clickable roots. Their overview pages
+appear first in the group. Nested groups use clickable roots for Tools,
+Orchestration, Transfers, Targets, and CLI. The site does not add automatic
+directory listings because those roots already have useful hand-written cards
+or tables. Every `.mdx` file must appear exactly once as either a page entry or
+a nested group root in `docs.json`.
 
 ## Tests hold the parts that can be held
 
@@ -73,6 +74,7 @@ Prose rots. These facts cannot:
 
 | Test | What it holds |
 |---|---|
+| `internal/docsite/structure_test.go` | top-level groups stay visually separate; every page appears once; every page has unique frontmatter and a valid heading hierarchy |
 | `internal/cli/help_capture_test.go` | `internal/cli/testdata/help.txt` still matches the cobra tree, and every flag in it appears on the CLI page that documents that command (two tests) |
 | `internal/target/providers_docsite_test.go` | `models/{stt,tts,llm}.mdx` list exactly the catalog's vendors per target per role, with SLNG first; and `models/turn-detection.mdx` carries no vendor list, because the `turn` role has no catalog entries (two tests) |
 | `internal/spec/tools_docsite_test.go` | `build/tools/overview.mdx` names exactly the execution blocks the `Tool` struct has |
