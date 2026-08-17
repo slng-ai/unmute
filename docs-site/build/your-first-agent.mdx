@@ -85,7 +85,7 @@ capacity:
 
 Now each block.
 
-## entry_agent
+### entry_agent
 
 ```yaml
 entry_agent: appointment_desk
@@ -94,7 +94,7 @@ entry_agent: appointment_desk
 Which agent answers. A package can hold several agents; exactly one starts the
 call. The name has to be a key in the `agents:` map.
 
-## models
+### models
 
 Four kinds of model, grouped by what they do:
 
@@ -132,7 +132,7 @@ pipecat: binding reason.reasoning provider=openai model=gpt-5.6-luna (forwarded 
 checked either. The one line here earns its place: `gpt-5.6-luna` is a reasoning
 model, and OpenAI refuses a request that carries function tools unless it sets
 `reasoning_effort`. This package has five tools, taken out of the listing above,
-so the line is doing real work. [The reasoning model](/models/llm) has the rest.
+so the line is doing real work. [Reasoning model](/models/llm) has the rest.
 
 <Note>
   You can define more entries than you use. Unused entries are legal
@@ -143,7 +143,7 @@ The `listen` and `turn` sections have one entry each here, so nothing needs to
 select them. With two or more entries you add a top level `listen:` or `turn:`
 line naming the one to use.
 
-## agents
+### agents
 
 ```yaml
 agents:
@@ -157,7 +157,7 @@ An agent is a prompt plus the models it speaks and thinks with. `instructions`
 is a path to a Markdown file in the package. Writing the prompt in its own file
 means it reviews like prose, not like YAML.
 
-## secrets
+### secrets
 
 ```yaml
 secrets:
@@ -175,7 +175,7 @@ failing on the first spoken word.
   [secrets](/reference/secrets).
 </Warning>
 
-## conversation
+### conversation
 
 ```yaml
 conversation:
@@ -189,7 +189,7 @@ conversation:
 Who speaks first and what they say, plus whether the caller can talk over the
 agent.
 
-## channels and capacity
+### channels and capacity
 
 ```yaml
 channels:
