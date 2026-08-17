@@ -49,31 +49,34 @@ models:
         reasoning_effort: "none"
 ```
 
-Every entry takes the same fields, and which ones are legal depends on the
-section:
+Which fields are legal depends on the section:
 
-| Field | Meaning |
+| Field | Legal section |
 |---|---|
-| `provider` | the integration, for example `slng`, `openai`, `livekit`, `local` |
-| `model` | the model id, forwarded to the provider as written |
-| `voice` | the voice id, forwarded as written |
-| `speed` | speaking speed |
-| `language` | the agent language for this integration |
-| `temperature`, `top_p`, `top_k` | generation parameters |
-| `endpoint_env` | environment variable holding a custom endpoint |
-| `placement` | where the model runs |
-| `semantic_endpointing` | turn detection behavior |
-| `params` | extra parameters forwarded verbatim |
-| `fallback` | other entry names to fall back to |
-| `description` | a note for humans |
+| `provider`, `model`, `endpoint_env`, `placement`, `params`, `description` | `think`, `speak`, `listen`, `turn` |
+| `voice`, `speed` | `speak` |
+| `language` | `speak`, `listen` |
+| `temperature`, `top_p`, `top_k` | `think` |
+| `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |
+| `fallback` | `think`, `listen` |
 
 Entries you do not reference are legal alternates.
 
-`params` is passthrough. Nothing in it is checked, and a name the target's
-settings object has no field for is not dropped: it rides that target's overflow
-field and reaches the provider anyway. The `reasoning_effort` line above is the
-case to know: a reasoning model such as `gpt-5.6-luna` refuses a request that
-carries function tools without it. [Reasoning model](/models/llm) says why.
+The provider catalogue has two wildcard routes. Pipecat accepts an unlisted
+listen, speak, or think provider only with `endpoint_env`, through an
+OpenAI-compatible integration. LiveKit accepts an unlisted think provider
+through LiveKit Inference; its listen and speak provider lists are closed.
+Never invent a provider name for either route.
+
+`model`, `voice`, and `params` are passthrough. Unmute does not check their ids,
+keys, or values. A name the target's settings object has no field for is not
+dropped: it rides that target's overflow field and reaches the provider anyway.
+The `reasoning_effort` line above is the case to know: a reasoning model such as
+`gpt-5.6-luna` refuses a request that carries function tools without it.
+[Reasoning model](/models/llm) says why.
+
+Do not guess model ids, voice ids, or params. Use values the user supplied or
+values verified in the provider's own documentation.
 
 ## variables
 
@@ -321,6 +324,12 @@ exactly one execution block says how it runs.
 An `mcp` file is the block and nothing else. The six contract fields above are
 all illegal on one, because the server describes its own tools.
 
+| Field | Values |
+|---|---|
+| `transport` | `sse` or `streamable_http` |
+
+Builtin ids: `end_call`.
+
 `webhook.auth`:
 
 | Field | What it is |
@@ -349,7 +358,7 @@ conversation:
 | `interruption.ignore_phrases` | phrases that do not interrupt |
 | `inactivity.nudge_after`, `inactivity.end_after` | durations |
 | `max_duration` | a duration |
-| `thinking_audio` | audio played while the model works |
+| `thinking_audio` | `none` or `subtle` |
 
 ## tracing
 

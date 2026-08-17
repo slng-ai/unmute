@@ -97,7 +97,7 @@ That is `examples/simple-prompt`, and it runs in a browser.
 | `conversation` | no | greeting, interruption, inactivity, limits |
 | `tracing` | no | tracing provider |
 | `channels` | yes | how people reach the agent |
-| `capacity` | no | your traffic estimate |
+| `capacity` | for telephony or code targets | your traffic estimate |
 
 ## models
 
@@ -114,9 +114,16 @@ Entry names are yours and share one namespace across sections. An agent points
 at an entry by name. Entries you never reference are legal alternates, so
 swapping a voice is a one line change.
 
-Fields on an entry: `provider`, `model`, `voice`, `speed`, `language`,
-`temperature`, `top_p`, `top_k`, `endpoint_env`, `placement`,
-`semantic_endpointing`, `params`, `fallback`, `description`.
+Each section allows these fields:
+
+| Field | Legal section |
+|---|---|
+| `provider`, `model`, `endpoint_env`, `placement`, `params`, `description` | `think`, `speak`, `listen`, `turn` |
+| `voice`, `speed` | `speak` |
+| `language` | `speak`, `listen` |
+| `temperature`, `top_p`, `top_k` | `think` |
+| `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |
+| `fallback` | `think`, `listen` |
 
 Unmute keeps no list of valid model ids. `model:` and `voice:` are forwarded to
 the provider exactly as written, so a typo is a provider error at run time, not
@@ -128,6 +135,9 @@ is not checked either. Write `reasoning_effort: "none"` there on every think
 entry: OpenAI rejects a request that carries function tools without it, so a
 package with tools fails on every turn. `models.md` has the values and the
 reason.
+
+Do not guess model ids, voice ids, or params. Use values the user supplied or
+values verified in the provider's own documentation.
 
 ## agents
 
@@ -275,7 +285,7 @@ provider with different settings, for example `pipecat_twilio` and
 
 | Field | What it is |
 |---|---|
-| `provider` | `pipecat` or `livekit` |
+| `provider` | `livekit`, `pipecat`, `vapi`, or `deepgram`; the first two generate and run |
 | `version` | the framework version pinned in the generated project |
 | `pins` | extra package pins, name to version constraint |
 | `sdk_language` | `python` |

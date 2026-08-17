@@ -52,6 +52,21 @@ func TestValidateLanguage(t *testing.T) { // N16: language is validated per mode
 	}
 }
 
+func TestValidateTaskRequiresResultAndHistory(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Tasks["incomplete"] = Task{Instructions: "incomplete"}
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err == nil {
+		t.Fatal("task with no result or history must fail validation")
+	}
+	errors := strings.Join(report.PerTarget[0].Errors, "\n")
+	for _, want := range []string{`task "incomplete" result must not be empty`, `"incomplete" context.history is required`} {
+		if !strings.Contains(errors, want) {
+			t.Errorf("validation errors missing %q:\n%s", want, errors)
+		}
+	}
+}
+
 func TestValidateLangfuseTracingByTarget(t *testing.T) { // V25
 	agent := safeAgent(t)
 	agent.Tracing = &Tracing{Provider: "langfuse"}

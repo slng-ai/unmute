@@ -31,7 +31,7 @@ conversation:
 | `interruption.ignore_phrases` | phrases that do not interrupt |
 | `inactivity.nudge_after`, `inactivity.end_after` | durations |
 | `max_duration` | a duration |
-| `thinking_audio` | audio played while the model works |
+| `thinking_audio` | `none` or `subtle` |
 
 ## The greeting
 
@@ -103,14 +103,15 @@ on anything that will take real traffic.
   thinking_audio: subtle
 ```
 
-**LiveKit only today.** Pipecat refuses it by name:
+`none` disables thinking audio. `subtle` enables it and is **LiveKit only
+today**. Pipecat refuses `subtle` by name:
 
 ```
 pipecat: the Pipecat driver does not emit thinking audio yet
 ```
 
-So do not put it in a package that declares a Pipecat target, and do not offer
-it as a fix for a slow agent on Pipecat. Fix the latency instead.
+So do not use `subtle` in a package that declares a Pipecat target, and do not
+offer it as a fix for a slow agent on Pipecat. Fix the latency instead.
 
 ## Turn detection
 

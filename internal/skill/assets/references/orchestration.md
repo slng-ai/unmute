@@ -195,6 +195,8 @@ different from a longer prompt. Its internal turns stay out of the agent's
 context, while the completed delegate call stays there so the same request does
 not run twice.
 
+Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
+
 **Task `result:` and tool `output:` are different contracts.** Tool contracts
 live in `tools/<name>.yaml`; the task's `tools:` list contains names only. The
 task result describes the outcome returned after all of its tool calls. Keep
@@ -227,6 +229,53 @@ by what came before.
 ## Task group
 
 ```yaml agent.yaml
+tools:
+  - lookup_customer
+  - check_availability
+  - book_appointment
+
+agents:
+  appointment_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - manage_appointment
+
+tasks:
+  identify_customer:
+    instructions: tasks/identify-customer.md
+    tools:
+      - lookup_customer
+    result:
+      customer_id: string
+      summary: string
+    context:
+      history: full
+
+  select_appointment:
+    instructions: tasks/select-appointment.md
+    tools:
+      - check_availability
+    result:
+      selected_slot: string
+      summary: string
+    context:
+      history: full
+
+  finalize_appointment:
+    instructions: tasks/finalize-appointment.md
+    tools:
+      - book_appointment
+    result:
+      booking_status:
+        enum:
+          - booked
+          - cancelled
+      summary: string
+    context:
+      history: full
+
 task_groups:
   appointment_flow:
     steps:
@@ -246,8 +295,10 @@ controls:
 
 Each name in `steps` is a task already declared in `tasks:`. The order is a
 guarantee, not a request in a prompt. A group contains tasks, not other groups.
-The group's `context_scope` governs every member; a member task's own `context:`
-does not override it while that task runs in the group.
+The group's `context_scope` governs how the members relate while the group runs.
+It does not replace a member task's `context:` block. Every member still needs
+its own non-empty `result:` and `context.history` so it is a complete task on its
+own.
 
 | Field | Values | What it does |
 |---|---|---|
