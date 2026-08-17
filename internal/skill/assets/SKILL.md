@@ -48,6 +48,17 @@ task group, or handoff.
 Do this before tools and variables. They carry real actions and values; they do
 not replace Unmute's task state, group order, or handoff state.
 
+**Define each tool once.** Its contract and execution block live only in
+`tools/<name>.yaml`, with local code in `tools/<handler>.py` when needed. Every
+`tools:` list in `agent.yaml` contains names only: the top-level list loads tool
+files, and an agent or task list grants access to them. Never copy a tool's
+`description`, `input`, `output`, or execution block into `agent.yaml`.
+
+**Task `result:` and tool `output:` are different contracts.** The task result
+describes what the whole delegated task returns after any tool calls, so shape
+it for the calling agent instead of copying an attached tool's output schema by
+default.
+
 ## The build loop
 
 Every change goes through the same four steps. Do not skip step two.

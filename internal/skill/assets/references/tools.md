@@ -341,9 +341,24 @@ own cancel-on-interruption setting. LiveKit runs tools to completion, so a
 non-default value warns there. Read the warning to the user rather than dropping
 it.
 
-## Turning a tool on is two lists
+## Define once, attach by name
+
+**Define each tool once.** The full definition exists only in
+`tools/<name>.yaml`: `description`, `input`, optional `output` and `inject`, and
+one execution block. A local handler lives beside it in `tools/<handler>.py`.
+Do not put any of those fields in `agent.yaml`.
+
+Every `tools:` entry in `agent.yaml` is a string name:
+
+- the top-level list loads `tools/<name>.yaml`,
+- `agents.<name>.tools` grants an agent access, and
+- `tasks.<name>.tools` grants a task access.
 
 ```yaml agent.yaml
+tools:
+  - check_availability
+  - end_call
+
 agents:
   appointment_desk:
     instructions: instructions.md
@@ -352,16 +367,32 @@ agents:
     tools:
       - check_availability
       - end_call
-
-tools:
-  - check_availability
-  - end_call
 ```
 
-The package level list says which tool files to load. The list on the agent says
-which of those this agent may call. **That second list is the visibility scope,
-and it is the only thing between an agent and a tool it should not touch.** A
-task carries its own list for the same reason.
+For a task-scoped tool, attach the same loaded name to the task instead:
+
+```yaml agent.yaml
+tasks:
+  find_slot:
+    instructions: tasks/find-slot.md
+    tools:
+      - check_availability
+    result:
+      summary: string
+    context:
+      history: full
+```
+
+The agent and task lists are visibility scopes. Attach a tool only where it is
+called; do not grant it to both unless both really call it. Never replace a
+name with an inline mapping of `description`, `input`, `output`, `local`, or
+`webhook`.
+
+**Task `result:` and tool `output:` are different contracts.** A tool's optional
+`output:` describes one tool call and stays in `tools/<name>.yaml`. A task's
+required `result:` describes what the whole delegated task returns to its caller
+after any tool calls. It may select or combine tool data, so design it for what
+the caller needs instead of copying a tool output schema by default.
 
 A file in `tools/` that the package level list does not name is not loaded at
 all, and nothing complains. When a tool is never offered, check that list first.

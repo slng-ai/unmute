@@ -101,6 +101,37 @@ func TestToolsReferenceMatchesExecutionBlocks(t *testing.T) {
 	}
 }
 
+// TestToolOwnershipRuleStaysExplicit holds the two surfaces a coding agent can
+// follow against the public pages an author reads. Tool and task output schemas
+// are both maps, so prose is the only guard against copying one into the other.
+func TestToolOwnershipRuleStaysExplicit(t *testing.T) {
+	definitionRule := "Define each tool once."
+	for name, content := range map[string]string{
+		"SKILL.md":                           bundleFile(t, "SKILL.md"),
+		"references/tools.md":                bundleFile(t, "references/tools.md"),
+		"docs-site/build/tools/overview.mdx": trackedFile(t, "docs-site/build/tools/overview.mdx"),
+		"docs-site/reference/agent-yaml.mdx": trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+	} {
+		if !strings.Contains(content, definitionRule) {
+			t.Errorf("%s does not state %q", name, definitionRule)
+		}
+	}
+
+	resultRule := "Task `result:` and tool `output:` are different contracts."
+	for name, content := range map[string]string{
+		"SKILL.md":                                bundleFile(t, "SKILL.md"),
+		"references/orchestration.md":             bundleFile(t, "references/orchestration.md"),
+		"references/tools.md":                     bundleFile(t, "references/tools.md"),
+		"docs-site/build/orchestration/tasks.mdx": trackedFile(t, "docs-site/build/orchestration/tasks.mdx"),
+		"docs-site/build/tools/overview.mdx":      trackedFile(t, "docs-site/build/tools/overview.mdx"),
+		"docs-site/reference/agent-yaml.mdx":      trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+	} {
+		if !strings.Contains(content, resultRule) {
+			t.Errorf("%s does not state %q", name, resultRule)
+		}
+	}
+}
+
 // TestModelsReferenceMatchesCatalog holds references/models.md against the
 // provider catalogue, per target per role, and holds the one editorial rule the
 // documentation site is written under: SLNG leads every list it appears in.
