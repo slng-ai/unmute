@@ -3,18 +3,39 @@ title: "Choosing a structure"
 description: "Tools, tasks, task groups, or a second agent. Which split to reach for, and when."
 ---
 
-You now have four ways to organize an agent. They are not ranked. Each one solves
-a different failure, and each one costs something.
+You have four ways to organize an agent. Each one owns a different boundary.
+Choose from the brief before you write files.
 
 The repository ships the same salon workflow in all four shapes, so you can read
 them side by side.
 
-## Start with more tools, not another agent
+## Choose the native shape
 
-One agent with a clear prompt and the right tools goes a long way. Before you add
-a second agent, ask whether the problem is really the prompt or just the tool list.
-Every split you add costs clarity somewhere, so make each one buy something you
-can name.
+| The brief needs | Native shape | Do not invent |
+|---|---|---|
+| A real external or local action | `tool` | A task used only as an API wrapper |
+| One bounded step that returns | `task` | A second agent or progress flags |
+| Several steps in a fixed order | `task group` | Current-step variables or transition tools |
+| A lasting role or permission change | `agent handoff` | A returning task |
+| A runtime value needed across a boundary | `variable` | Conversation memory or workflow state |
+
+If none of these boundaries exists, keep one agent with a clear prompt and its
+real tools. You describe the job; the coding agent should choose the shape and
+tell you what it chose. You do not need to ask for a task or task group by name.
+
+A server-directed sequence is dynamic, even when its response calls the field
+`nextStep`. Put that loop in one task that asks the returned question and calls
+the real domain tools. If fixed stages surround the loop, those stages can be
+tasks in a task group. The server owns its dynamic order.
+
+## Do not rebuild the orchestrator
+
+- Do not create current-step, happy-path, completion, or routing variables.
+  Tasks, groups, handoffs, and an external server already hold that state.
+- Do not create advance, proceed, dispatcher, or transition tools. A tool does
+  real external or local work; a native control moves the conversation.
+- Keep a variable only when its value really crosses a boundary or feeds a later
+  tool call.
 
 ## The symptom decides the shape
 

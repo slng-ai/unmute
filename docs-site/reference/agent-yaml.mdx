@@ -219,6 +219,9 @@ task_groups:
 | `then_target` | an agent name, required with `transfer`, illegal otherwise |
 | `merge` | `results` |
 
+When a task runs inside a group, the group's `context_scope` governs it. The
+member task's own `context` does not override the group.
+
 ## controls
 
 Everything the model can trigger besides a tool. One `kind` per control.
@@ -235,7 +238,7 @@ controls:
 
 | Kind | Fields |
 |---|---|
-| `delegate` | `task` or `group`, `when`, `assign`, `requires` |
+| `delegate` | `task` or `group`, `when`, `assign` |
 | `agent_transfer` | `to`, `when`, `announce`, `context`, `requires` |
 | `human_transfer` | `when`, and exactly one of `cold:` or `warm:` |
 
