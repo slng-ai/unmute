@@ -112,10 +112,9 @@ second deployment cannot reach the first one's site.
    `/docs-site` with no trailing slash. Saving starts the first build. The
    Mintlify GitHub App must have `unmute` in its repository access list,
    otherwise nothing deploys on push.
-3. **Set visibility to Private before sharing any URL.** Authentication page,
-   visibility Private, then either Authenticated (Mintlify organization login,
-   on every plan) or password (Pro and Enterprise). Authentication works on a
-   custom domain or a `*.mintlify.site` subdomain, never on a custom subpath.
+3. **Keep the site public.** On the Authentication page, set site visibility
+   to Public and save the change. `docs.json` also marks every top-level group
+   as public, so accidentally enabling authentication does not hide the docs.
 4. **Add the custom domain in this deployment's own Custom domain page.** Add
    the two verification `TXT` records first and wait for both to show a green
    check, then switch the `CNAME`. Switching the `CNAME` early breaks HTTPS
@@ -135,4 +134,4 @@ that touches `docs-site/` deploys on its own. Pull requests get a Mintlify
 status check and, on Pro, a preview deployment, so a broken `docs.json` shows
 up before the merge rather than on the live site.
 
-Going public later is a deliberate decision, not a default.
+Public access is deliberate: do not enable authentication for this deployment.

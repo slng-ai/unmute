@@ -61,6 +61,7 @@
     "groups": [
       {
         "group": "Get started",
+        "public": true,
         "icon": "rocket",
         "pages": [
           "index",
@@ -72,6 +73,7 @@
       },
       {
         "group": "Build the agent",
+        "public": true,
         "icon": "bot",
         "pages": [
           "build/your-first-agent",
@@ -102,6 +104,7 @@
       },
       {
         "group": "Develop and test",
+        "public": true,
         "icon": "terminal",
         "pages": [
           "dev/overview",
@@ -111,6 +114,7 @@
       },
       {
         "group": "Phone calls",
+        "public": true,
         "icon": "phone",
         "pages": [
           "telephony/overview",
@@ -131,6 +135,7 @@
       },
       {
         "group": "Targets and models",
+        "public": true,
         "icon": "boxes",
         "pages": [
           {
@@ -157,6 +162,7 @@
       },
       {
         "group": "Deploy",
+        "public": true,
         "icon": "cloud-upload",
         "pages": [
           "deploy/going-live",
@@ -166,6 +172,7 @@
       },
       {
         "group": "Reference",
+        "public": true,
         "icon": "book-open",
         "pages": [
           {
