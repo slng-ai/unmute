@@ -50,7 +50,8 @@ difference is the thing people get wrong.
 | Site | Renders | Can name |
 |---|---|---|
 | `conversation.greeting.text` | once, at session start | a variable that already has a value |
-| an agent's or task's instructions | once, at session start | a variable that already has a value |
+| an agent's instructions | once, at session start | a variable that already has a value |
+| a task's instructions | when that task starts | a variable that already has a value, or one assigned from a task result |
 | a tool's `inject:` value | on every tool call | any declared variable |
 | a webhook tool's `path` | on every tool call | any declared variable, URL encoded |
 

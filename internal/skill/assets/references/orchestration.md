@@ -1,16 +1,38 @@
 # Orchestration
 
-Four ways to organize an agent. They are not ranked, and each one costs
-something. This is the area assistants get wrong most often, and the mistake is
-almost never the YAML. It is deciding what context crosses a boundary without
-saying so.
+Four ways to organize an agent. Each one owns a different boundary. Choose from
+the brief before you write files, then say what context crosses that boundary.
 
-## Start with more tools, not another agent
+## Choose the native shape
 
-One agent with a clear prompt and the right tools goes a long way. Before adding
-a second agent, ask whether the problem is the prompt or just the tool list.
-Every split costs clarity somewhere, so make each one buy something you can
-name.
+| The brief needs | Native shape | Do not invent |
+|---|---|---|
+| A real external or local action | `tool` | A task used only as an API wrapper |
+| One bounded step that returns | `task` | A second agent or progress flags |
+| Several steps in a fixed order | `task group` | Current-step variables or transition tools |
+| A lasting role or permission change | `agent handoff` | A returning task |
+| A runtime value needed across a boundary | `variable` | Conversation memory or workflow state |
+
+If none of these boundaries exists, keep one agent with a clear prompt and its
+real tools. The user describes the job; you choose the shape. Do not make them
+name an Unmute primitive.
+
+A server-directed sequence is dynamic, even when its response calls the field
+`nextStep`. Put the loop in one task that asks the returned question and calls
+the real domain tools. If fixed stages surround that loop, those stages can be
+tasks in a task group. Do not turn every possible server step into a group step:
+the server, not the package, owns that order.
+
+## Do not rebuild the orchestrator
+
+- Do not create `current_step`, happy-path, completion, or routing variables.
+  Tasks, groups, handoffs, and an external server already hold that state.
+- Do not create `advance`, `proceed`, dispatcher, or transition tools. A tool
+  performs real external or local work; a native control moves the conversation.
+- Do not copy every tool onto the entry agent. Each task or agent holds only the
+  tools it can use in that phase.
+- Keep a variable only when its value really crosses a boundary or feeds a later
+  tool call. Context is not a bag of variables to maintain by hand.
 
 ## The symptom decides the shape
 
@@ -38,7 +60,7 @@ is a guarantee. That is the difference you are buying.
 These are not exclusive. One agent can delegate a task in one phase and hand off
 in another.
 
-## Rung 1: one agent
+## One agent and tools
 
 ```yaml agent.yaml
 entry_agent: appointment_desk
@@ -56,7 +78,7 @@ agents:
 
 Context decision: none. The agent sees the whole conversation. Say that.
 
-## Rung 2: a handoff to a second agent
+## Agent handoff
 
 ```yaml agent.yaml
 entry_agent: booking_desk
@@ -133,7 +155,10 @@ cancellation.
 Leave them out and the caller gets asked for their phone number twice. Choose on
 purpose, and tell the user what you chose.
 
-## Rung 3: a delegated task
+`requires:` is legal on an `agent_transfer` control when variables must exist
+before the call leaves this agent. It is not legal on a delegate.
+
+## Delegated task
 
 ```yaml agent.yaml
 tasks:
@@ -193,7 +218,7 @@ task that needs something the agent could do has to hold that tool itself.
 the task needs. `history: reset` is right when the step must not be influenced
 by what came before.
 
-## Rung 4: a task group
+## Task group
 
 ```yaml agent.yaml
 task_groups:
@@ -214,7 +239,9 @@ controls:
 ```
 
 Each name in `steps` is a task already declared in `tasks:`. The order is a
-guarantee, not a request in a prompt.
+guarantee, not a request in a prompt. A group contains tasks, not other groups.
+The group's `context_scope` governs every member; a member task's own `context:`
+does not override it while that task runs in the group.
 
 | Field | Values | What it does |
 |---|---|---|
@@ -282,30 +309,6 @@ Two things the table does not cover, because they trip people up:
   but writing `{{customer_name}}` into its prompt for a value the first agent
   collected mid-call is refused. Rely on the history and say so in prose.
 
-## Guards the machine checks
-
-```yaml
-controls:
-  book_appointment:
-    kind: delegate
-    task: appointment_request
-    when: The caller wants to book, once you know who they are.
-    requires:
-      - customer_id
-```
-
-`requires:` is a machine-checked precondition on a control, not a sentence in a
-prompt the model can talk itself past. Use it wherever an order really matters
-and a task group would be too heavy.
-
-**Put it on the control that consumes the value, never on the one that produces
-it.** The example above guards booking, because booking needs a `customer_id`.
-Putting `requires: customer_id` on the identification control that creates
-`customer_id` would mean it could never fire at all.
-
-Note that `requires:` on a transfer is refused on Vapi, which has no
-machine-checked guard. On the two targets that generate, it works.
-
 ## Where a target refuses a shape
 
 Raise these **before** you write files, not after validate fails.
@@ -320,6 +323,16 @@ Raise these **before** you write files, not after validate fails.
 | `context_scope: isolated` | Vapi | Vapi cannot isolate task-group context |
 | `requires:` on a transfer | Vapi | Vapi has no machine-checked transfer guard |
 | a nested task result | Vapi | Vapi cannot enforce nested task results |
+
+### Task history by target
+
+| Target | Supported task history | Rejected task history |
+|---|---|---|
+| `pipecat` | `full` | `messages`, `last_n`, `summary`, `reset` |
+
+Pipecat emits full task history only. Choose another history mode only for a
+target that supports it; validation refuses the unsupported package instead of
+silently widening or dropping context.
 
 Two things follow from that table.
 

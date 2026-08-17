@@ -205,6 +205,139 @@ func TestProvidersReferenceMatchesTargetSet(t *testing.T) {
 	}
 }
 
+func trackedFile(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(path)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(content)
+}
+
+func nativeChoices(t *testing.T, name, content string) map[string][2]string {
+	t.Helper()
+	const heading = "## Choose the native shape\n"
+	start := strings.Index(content, heading)
+	if start < 0 {
+		t.Fatalf("%s has no %q section", name, strings.TrimSpace(heading))
+	}
+	section := content[start+len(heading):]
+	if end := strings.Index(section, "\n## "); end >= 0 {
+		section = section[:end]
+	}
+
+	row := regexp.MustCompile("^\\| ([^|]+) \\| `([^`]+)` \\| ([^|]+) \\|$")
+	choices := map[string][2]string{}
+	for _, line := range strings.Split(section, "\n") {
+		match := row.FindStringSubmatch(strings.TrimSpace(line))
+		if match == nil {
+			continue
+		}
+		shape := match[2]
+		if _, exists := choices[shape]; exists {
+			t.Fatalf("%s documents native shape %q twice", name, shape)
+		}
+		choices[shape] = [2]string{match[1], match[3]}
+	}
+	return choices
+}
+
+// TestOrchestrationDecisionTableMatchesPublicGuide holds the five choices a
+// coding agent makes before it writes files. The skill is the offline product
+// surface and the site is the public one, so neither may grow a private sixth
+// shape or give the same shape a different job.
+func TestOrchestrationDecisionTableMatchesPublicGuide(t *testing.T) {
+	skillChoices := nativeChoices(t, "references/orchestration.md", bundleFile(t, "references/orchestration.md"))
+	publicChoices := nativeChoices(t, "docs-site/build/orchestration/choosing-a-structure.mdx",
+		trackedFile(t, "docs-site/build/orchestration/choosing-a-structure.mdx"))
+
+	want := []string{"agent handoff", "task", "task group", "tool", "variable"}
+	if got := slices.Sorted(maps.Keys(skillChoices)); !slices.Equal(got, want) {
+		t.Errorf("references/orchestration.md native shapes = %v, want %v", got, want)
+	}
+	if !reflect.DeepEqual(skillChoices, publicChoices) {
+		t.Errorf("native-choice tables disagree:\n  skill:  %v\n  public: %v", skillChoices, publicChoices)
+	}
+}
+
+// TestEntryRoutesStructuredBriefBeforeScaffolding keeps architecture ahead of
+// file generation. If this checkpoint moves below the build loop, assistants
+// are already anchored on a one-agent scaffold when they discover ordering.
+func TestEntryRoutesStructuredBriefBeforeScaffolding(t *testing.T) {
+	entry := bundleFile(t, "SKILL.md")
+	checkpoint := strings.Index(entry, "## Choose the structure before files")
+	buildLoop := strings.Index(entry, "## The build loop")
+	if checkpoint < 0 || buildLoop < 0 || checkpoint > buildLoop {
+		t.Fatal("SKILL.md must route structured briefs through orchestration before the build loop")
+	}
+	section := entry[checkpoint:buildLoop]
+	for _, want := range []string{"required order", "separate roles", "next step", "references/orchestration.md"} {
+		if !strings.Contains(section, want) {
+			t.Errorf("SKILL.md structure checkpoint does not name %q", want)
+		}
+	}
+}
+
+// TestOrchestrationGuidanceMatchesCodeOwnedFacts holds the small set of facts
+// corrected with the native-choice guidance. Runtime code remains their owner.
+func TestOrchestrationGuidanceMatchesCodeOwnedFacts(t *testing.T) {
+	orchestration := bundleFile(t, "references/orchestration.md")
+	variables := bundleFile(t, "references/variables.md")
+	agentReference := trackedFile(t, "docs-site/reference/agent-yaml.mdx")
+
+	if !strings.Contains(variables, "| a task's instructions | when that task starts |") {
+		t.Error("references/variables.md must say task instructions render when the task starts")
+	}
+
+	delegateRow := regexp.MustCompile("(?m)^\\| `delegate` \\| (.*) \\|$").FindStringSubmatch(agentReference)
+	if delegateRow == nil || delegateRow[1] != "`task` or `group`, `when`, `assign`" {
+		t.Errorf("docs-site/reference/agent-yaml.mdx delegate fields = %q, want task/group, when, assign", delegateRow)
+	}
+	for _, match := range regexp.MustCompile("(?s)```yaml[^\\n]*\\n(.*?)```").FindAllStringSubmatch(orchestration, -1) {
+		if strings.Contains(match[1], "kind: delegate") && strings.Contains(match[1], "requires:") {
+			t.Error("references/orchestration.md puts requires on a delegate; code allows it on agent_transfer only")
+		}
+	}
+
+	historyRow := regexp.MustCompile("(?m)^\\| `pipecat` \\| (.*) \\| (.*) \\|$").FindStringSubmatch(orchestration)
+	if historyRow == nil {
+		t.Fatal("references/orchestration.md has no Pipecat task-history row")
+	}
+	code := regexp.MustCompile("`([^`]+)`")
+	read := func(cell string) []string {
+		var values []string
+		for _, match := range code.FindAllStringSubmatch(cell, -1) {
+			values = append(values, match[1])
+		}
+		slices.Sort(values)
+		return values
+	}
+	var supported, rejected []string
+	table := target.Default()
+	for _, history := range []target.History{
+		target.HistoryFull, target.HistoryMessages, target.HistoryLastN, target.HistorySummary, target.HistoryReset,
+	} {
+		if table.HistorySupport(history, target.Pipecat).Kind == target.HistoryFail {
+			rejected = append(rejected, string(history))
+		} else {
+			supported = append(supported, string(history))
+		}
+	}
+	slices.Sort(supported)
+	slices.Sort(rejected)
+	if got := read(historyRow[1]); !slices.Equal(got, supported) {
+		t.Errorf("references/orchestration.md Pipecat supported task history = %v, want %v", got, supported)
+	}
+	if got := read(historyRow[2]); !slices.Equal(got, rejected) {
+		t.Errorf("references/orchestration.md Pipecat rejected task history = %v, want %v", got, rejected)
+	}
+
+	warning := table.Capability(target.FieldTaskGroup, target.LiveKit).Note
+	if warning == "" || !strings.Contains(orchestration, "livekit: "+warning) {
+		t.Error("references/orchestration.md dropped the LiveKit task-group warning")
+	}
+}
+
 // sitePages lists every page path the documentation site carries, as the site
 // addresses them: the path under docs-site/ with the .mdx dropped.
 func sitePages(t *testing.T) []string {

@@ -28,14 +28,25 @@ covers its area properly. Open the reference you need, not all of them.
 | `references/workflow.md` | you are about to run a command, or an error came back and you need to read it |
 | `references/models.md` | you are choosing which vendor listens, speaks, or thinks |
 | `references/prompting.md` | you are writing any instructions file, greeting, task prompt, or tool description |
-| `references/tools.md` | the agent needs to do something: call an API, run Python, use an MCP server, or hang up |
-| `references/orchestration.md` | one prompt is not enough: handoffs, tasks, task groups, and what context crosses each boundary |
-| `references/variables.md` | a value has to travel through the call, or a credential has to reach a tool |
+| `references/tools.md` | after choosing the structure, a real action has to call an API, run Python, use an MCP server, or hang up |
+| `references/orchestration.md` | the brief has phases, required order, separate roles, permissions, or next-step behavior |
+| `references/variables.md` | after choosing the structure, a runtime value has to cross a boundary or reach a tool |
 | `references/conversation.md` | greeting, interruption, inactivity, turn detection, call limits |
 | `references/telephony.md` | the agent has to answer or place a real phone call |
 | `references/transfers.md` | the caller has to reach a person **on a phone call**. On a browser agent, see the note in that file and use a tool instead |
 | `references/deploy.md` | the package works and now it has to run somewhere |
 | `references/examples.md` | you want a working package that already does this |
+
+## Choose the structure before files
+
+Read the whole brief before you scaffold. If it names **required order**,
+**separate roles** or permissions, or a server's **next step**, open
+`references/orchestration.md` first. Choose the smallest native shape from the
+brief and tell the user what you chose. Do not ask them to know the words task,
+task group, or handoff.
+
+Do this before tools and variables. They carry real actions and values; they do
+not replace Unmute's task state, group order, or handoff state.
 
 ## The build loop
 
@@ -164,17 +175,18 @@ you add a second one by hand.
 
 Given a one-sentence brief from the user, do this:
 
-1. Ask nothing yet. Scaffold with `unmute init <name>` and `cd` into it, or
-   write the four files by hand using `references/package.md`.
-2. Bind the default models. Write the prompt with `references/prompting.md` open,
+1. Read the whole brief and choose its native structure. Open
+   `references/orchestration.md` first when it carries phases or boundaries.
+2. Scaffold with `unmute init <name>` and `cd` into it, or write the four files
+   by hand using `references/package.md`.
+3. Bind the default models. Write the prompt with `references/prompting.md` open,
    because a prompt written for chat sounds wrong out loud.
-3. Add `end_call` so the agent can hang up. It is the one prebuilt tool that
+4. Add `end_call` so the agent can hang up. It is the one prebuilt tool that
    exists.
-4. Validate. Fix. Validate again.
-5. Run it and tell the user how to talk to it.
-6. Only then ask what else it should do. Tools, a second agent, and a phone
-   number are all additions to a thing that already works.
+5. Validate. Fix. Validate again.
+6. Run it and tell the user how to talk to it.
 
-Start with one agent and more tools. Reach for a second agent or a task only
-when you can name what the split buys. `references/orchestration.md` has the
-rule for choosing.
+Use one agent when the brief has no boundary that buys a task, task group, or
+handoff. When the repository examples are available, compare a structured brief
+with `examples/multi-task` or `examples/task-groups`; `references/examples.md`
+explains what to do when they are not there.

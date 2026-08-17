@@ -220,9 +220,15 @@ The build above is one agent with two tools. Everything after it is a
 conversation with your assistant. What you get back depends on what your
 request carries.
 
+Describe required order, separate roles, and server-directed next steps in
+plain words. You do not need to ask for tasks or task groups by name. The
+assistant should infer the smallest Unmute structure before writing files and
+tell you what it chose.
+
 | You want | Say | It should tell you |
 |---|---|---|
 | a tool | what it does, where the data comes from, and whether there is an HTTP endpoint already | which of the four kinds it chose, and why |
+| an ordered workflow | which stages must happen in order and which parts are server-directed | which tasks and task groups it chose, and what context the steps share |
 | a second agent | what each one owns, and when control moves between them | what context crosses the handoff, and whether the handoff comes back |
 | a phone number | inbound, outbound, or both, and which carrier you have | which route, and what that route cannot do |
 
@@ -250,15 +256,16 @@ Six things that separate a good session from a frustrating one.
 4. **Trust the references over what the assistant remembers, and `unmute
    validate` over both.** Model memory of a fast moving schema is the single
    biggest source of confident wrong answers.
-5. **Ask what it decided.** Target, models, and the context across a handoff.
-   A silent default is the bug you find a week later.
+5. **Ask what it decided.** Structure, target, models, and the context across
+   each task, group, or handoff. A silent default is the bug you find a week
+   later.
 6. **Listen to the agent before you ship it.** A green check is not a good
    call.
 
 ## Where next
 
-- [Orchestration](/build/orchestration/overview) for when one agent and a
-  growing prompt stop being enough.
+- [Orchestration](/build/orchestration/overview) for tasks, task groups, and
+  handoffs.
 - [Tools](/build/tools/overview) for the four kinds in full.
 - [Telephony](/telephony/overview) for putting it on a real phone number.
 - [Deployment](/deploy/going-live) for getting it off your laptop.
