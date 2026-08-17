@@ -274,8 +274,8 @@ type pipecatDailyCarrier struct {
 	HasOutbound   bool
 	// AgentEnv and HelperEnv split the required environment by who reads it. The
 	// deployed agent reads AgentEnv; the operator-run helper reads HelperEnv and
-	// OptionalEnv where they run it, and none of the helper's own names belongs in
-	// the platform secret set (contracts/environment.md).
+	// OptionalEnv where they run it. The carrier auth token is deliberately in
+	// AgentEnv because both the bot and helper read that shared route credential.
 	AgentEnv  []string
 	HelperEnv []string
 	// CallEnv is what a *phone call* adds to the agent's own environment: the
@@ -602,8 +602,8 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 	} else {
 		outputs = append(outputs, struct{ tmpl, path string }{"pcc-deploy.toml", "pcc-deploy.toml"})
 	}
-	// Both Daily forms deploy to Pipecat Cloud, so both keep the manifest the
-	// branch above just emitted. The carrier form adds the one artifact the
+	// The Daily carrier route deploys to Pipecat Cloud, so it keeps the manifest
+	// the branch above just emitted and adds the one artifact the
 	// operator runs themselves.
 	if data.DailyCarrier != nil {
 		outputs = append(outputs, struct{ tmpl, path string }{"telephony_helper.py", "telephony_helper.py"})

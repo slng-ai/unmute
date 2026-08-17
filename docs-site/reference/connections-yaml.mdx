@@ -23,7 +23,7 @@ environment:
 | Key | Type | Required | Default | Allowed values | Meaning |
 |---|---|---|---|---|---|
 | `transport` | string | yes | — | `sip`, `connector`, `carrier-websocket`, `cloud-websocket`, `daily-sip`, as allowed by the target provider | mechanism that carries the call |
-| `carrier` | string | when the route has a carrier leg | — | `twilio`, `telnyx`, or `plivo`, as allowed by the route | carrier account behind the route |
+| `carrier` | string | yes | — | `twilio`, `telnyx`, or `plivo`, as allowed by the route | carrier account behind the route |
 | `environment` | map of strings | when the route needs account values | — | route keys listed below to UPPER_SNAKE env names | names holding the route's account values |
 
 The target names the file and says nothing else about telephony:
@@ -47,7 +47,7 @@ names on the right are yours, and they are names only. The compiler never reads
 the values, so a package with connections still validates and compiles with no
 credentials present anywhere.
 
-## The three shapes
+## The two shapes
 
 ### Full route
 
@@ -87,22 +87,6 @@ connections/twilio_voice.yaml: connection "twilio_voice" requires environment ke
   no connection environment at all
 ```
 
-### No carrier
-
-A carrierless Daily dial-out route. It is outbound dial-out only, so there is no
-carrier leg to name and no carrier credentials to hold.
-
-```yaml connections/daily.yaml
-transport: daily-sip
-```
-
-That is the whole connection. It cannot receive calls and cannot serve a
-`kind: telephony` channel; use it only in a package whose control dials a person.
-The `DAILY_API_KEY` the runtime reads comes from the route's own environment, not
-from your package, so it is not in `secrets:` and is still documented by the
-generated project. This route also needs dial-out enabled on the Daily domain.
-No compile-time check can see that permission, so the generated runbook says it.
-
 ## Which environment keys a route accepts
 
 | Target | `transport` | `carrier` | `environment` keys |
@@ -114,9 +98,6 @@ No compile-time check can see that permission, so the generated runbook says it.
 | Pipecat | `daily-sip` | `twilio` | `account_sid`, `auth_token`, `sip_address`, `from_number` |
 | LiveKit Agents | `sip` | `twilio`, `telnyx`, `plivo` | `sip_address`, `sip_username`, `sip_password`, `from_number` |
 | LiveKit Agents | `connector` | `twilio` | `account_sid`, `auth_token`, `from_number` |
-
-The carrierless `daily-sip` dial-out form above accepts no `environment` keys and
-is not a phone-channel route, so it is not a row in this table.
 
 The SIP route uses standard SIP names rather than one vendor's, because the same
 generated code dials through any SIP carrier with them.
@@ -191,8 +172,7 @@ does have:
 ```text
 connections/twilio_sip.yaml:21: transport "sip" with carrier "twilio" is not a route for
   provider pipecat. pipecat supports: carrier-websocket with plivo, telnyx, twilio;
-  cloud-websocket with twilio; daily-sip with no carrier (outbound dial-out only; it
-  cannot serve a phone channel), twilio.
+  cloud-websocket with twilio; daily-sip with twilio.
 ```
 
 **A value that is not an UPPER_SNAKE shell identifier**, because a deployment

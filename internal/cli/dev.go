@@ -117,8 +117,7 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort,
 		return fmt.Errorf("dev %s: %w", root, err)
 	}
 	resolved := targets[0]
-	// Both Daily forms refuse, and the two refusals say different true things.
-	// The carrier form has a plan, so it would otherwise fall through to the
+	// The Daily carrier route has a plan, so it would otherwise fall through to the
 	// generic "no executable telephony topology" line below, which is false: it has
 	// a topology, it just is not one this command can run for you.
 	if resolved.Provider == ir.ProviderPipecat && resolved.Transport == "daily-sip" && resolved.Carrier != "" {
@@ -155,16 +154,6 @@ func runDevTelephony(cmd *cobra.Command, root, targetName, publicValue, botPort,
 	}
 	plan := generate.TelephonyRuntimePlanFor(resolved)
 	if plan == nil {
-		// The carrierless Daily form dials out and cannot receive, so it has no
-		// telephony plan. Name that boundary instead of implying Daily supplies an
-		// inbound route the package cannot declare (FR-028).
-		if resolved.Transport == "daily-sip" {
-			return fmt.Errorf("dev %s: target %q uses a carrierless Pipecat Daily connection (transport daily-sip), "+
-				"which is outbound-only: it can dial a transfer destination but cannot receive calls, so there is no local "+
-				"telephony topology to run; talk to this agent now with `unmute dev %s` in the browser, "+
-				"and to deploy it run `unmute compile %s` and follow the Deploy and Human transfers sections of the emitted README",
-				root, resolved.Name, root, root)
-		}
 		return fmt.Errorf("dev %s: target %q has no resolved telephony route", root, resolved.Name)
 	}
 	// --to only makes sense for an outbound-capable target; reject before

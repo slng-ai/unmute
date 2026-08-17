@@ -350,9 +350,7 @@ type Capacity struct {
 // It is readable on its own — a target names it and declares nothing else about
 // how a call arrives.
 type Connection struct {
-	Transport string `json:"transport,omitempty" yaml:"transport,omitempty"`
-	// Carrier is empty on routes that have no carrier leg, which today is the
-	// Daily-provisioned `daily-sip` form alone.
+	Transport   string            `json:"transport,omitempty" yaml:"transport,omitempty"`
 	Carrier     string            `json:"carrier,omitempty" yaml:"carrier,omitempty"`
 	Kind        string            `json:"kind" yaml:"kind"`
 	Environment map[string]string `json:"environment" yaml:"environment"`

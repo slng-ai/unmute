@@ -31,6 +31,7 @@ func configuredLiveKitSIPWarmOnly(t *testing.T) (*ir.Agent, ir.Target) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	addColdHumanTransfer(pkg)
 	inbound, outbound := true, false
 	pkg.Agent.Channels["phone"] = spec.Channel{
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
@@ -99,8 +100,8 @@ func TestInlineTrunkWarmOnlyPackageBringsAPIIntoScope(t *testing.T) {
 // a cold-only package needs no trunk of either kind and must get no dial-out
 // helper (FR-007, SC-007).
 func TestInlineTrunkColdOnlyPackageGetsNoDialOutHelper(t *testing.T) {
-	agent := loadCompilerAgent(t)
-	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	agent, resolved := configuredLiveKitSIPCold(t)
+	artifact, err := Generate(agent, resolved, target.Default())
 	if err != nil {
 		t.Fatal(err)
 	}

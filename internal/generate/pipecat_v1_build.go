@@ -179,8 +179,14 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		case "plivo":
 			data.Deps = append(data.Deps, "plivo>=4,<5")
 		}
-		slices.Sort(data.Deps)
 	}
+	if data.DailyCarrier != nil {
+		// The operator-run ingress helper verifies Twilio's signature before its
+		// platform-keyed start request. This is the same selected carrier SDK used
+		// by the carrier-websocket route, not a new runtime dependency family.
+		data.Deps = append(data.Deps, "twilio>=9,<10")
+	}
+	slices.Sort(data.Deps)
 	data.RequiredEnv = env.sorted()
 	var supplied []string
 	if target.Telephony != nil {
@@ -360,12 +366,11 @@ func buildPipecatTelephony(agent *ir.Agent, resolved ir.Target, env *envSet) (*p
 }
 
 // buildPipecatDailyCarrier lowers the (pipecat, daily-sip, <carrier>) route: the
-// operator's own carrier forwards the call over SIP into the same per-call Daily
-// room the no-carrier form uses (SCHEMA N37).
+// operator's own carrier forwards the call over SIP into a per-call Daily room.
 //
-// Neither REDIS_URL nor UNMUTE_PUBLIC_URL is added. This route keeps no shared
-// control record, and the helper's public URL is the operator's to choose and
-// give to the carrier, so nothing here needs to know it.
+// No REDIS_URL is added: this route keeps no shared control record. The helper
+// does require its configured public origin so Twilio's signed URL is stable
+// behind tunnels and reverse proxies.
 func buildPipecatDailyCarrier(agent *ir.Agent, resolved ir.Target, env *envSet) (*pipecatDailyCarrier, error) {
 	plan := resolved.Telephony
 	if plan == nil || plan.Key.Provider != ir.ProviderPipecat || plan.Key.Transport != "daily-sip" {
@@ -396,15 +401,16 @@ func buildPipecatDailyCarrier(agent *ir.Agent, resolved ir.Target, env *envSet) 
 			carrier.HasOutbound = true
 		}
 	}
-	// The helper's own name, singular. DAILY_API_KEY is not one of them: the room
+	// The helper's own names. DAILY_API_KEY is not one of them: the room
 	// is the platform's to create, so the helper never calls Daily. It stays on
 	// the agent side, where a local `uv run bot.py` mints its own room with it.
 	//
 	// No outbound trigger token, because the helper has no endpoint that places a
-	// call: outbound is started against the platform with the same public key,
-	// exactly as it is on a Daily-provisioned number. A token guarding an endpoint
-	// that does not exist would be one more value to invent and keep.
-	carrier.HelperEnv = []string{"PIPECAT_CLOUD_API_KEY"}
+	// call: outbound is started against the platform with the same public key.
+	// The Twilio auth token stays agent-side too because the deployed bot uses it
+	// to forward the existing call; the helper reads that shared route value for
+	// signature validation rather than classifying it as helper-only here.
+	carrier.HelperEnv = []string{"PIPECAT_CLOUD_API_KEY", "UNMUTE_PUBLIC_URL"}
 	for _, name := range carrier.HelperEnv {
 		env.add(name)
 	}
@@ -1071,22 +1077,28 @@ func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target
 	if !ok {
 		return pipecatTool{}, fmt.Errorf("human transfer %q destination %q missing on target %q", name, c.Destination, target.Name)
 	}
-	// The Daily route carries the transfer whether the number is Daily's or the
-	// operator's: a carrier call arrives as a SIP dial-in participant in the same
-	// room, and Daily documents sipCallTransfer as working for dial-in legs with
+	if c.Mode == ir.TransferWarm {
+		return pipecatTool{}, fmt.Errorf("human transfer %q: this driver does not emit warm transfer yet (Daily documents the pattern; it needs the bot to own the call audio, tracked as feature 005); warm compiles on (livekit, sip) today", name)
+	}
+	if target.Telephony == nil {
+		return pipecatTool{}, fmt.Errorf("human transfer %q requires an active channels.phone Connection: a web-only session has no existing SIP sessionId or phone leg to transfer", name)
+	}
+	// The Daily route carries the transfer after the operator's carrier call
+	// arrives as a SIP dial-in participant in the same room. Daily documents
+	// sipCallTransfer as working for dial-in legs with
 	// SIP-to-SIP and SIP-to-PSTN both supported (research F4, 2026-08-12). Every
 	// other Pipecat route still has no primitive at all.
-	carrierLeg := target.Telephony != nil && target.Telephony.Key.Transport == "daily-sip"
+	carrierLeg := target.Telephony.Key.Transport == "daily-sip"
 	// The platform-terminated carrier route transfers by updating the live call's
 	// TwiML at the carrier, keyed on its CallSid (research F5, D7). Different
 	// primitive, same promise: the caller reaches a person and is never stranded
 	// silently.
-	cloudWebsocket := target.Telephony != nil && target.Telephony.Key.Transport == "cloud-websocket"
-	if target.Telephony != nil && !carrierLeg && !cloudWebsocket {
+	cloudWebsocket := target.Telephony.Key.Transport == "cloud-websocket"
+	if !carrierLeg && !cloudWebsocket {
 		return pipecatTool{}, fmt.Errorf("human transfer %q: the (%s, %s) route has no transfer primitive; Pipecat cold transfer rides the Daily route (transport daily-sip) or the platform's carrier stream (transport cloud-websocket)", name, target.Telephony.Key.Transport, target.Telephony.Key.Carrier)
 	}
 	if !cloudWebsocket {
-		// Every Daily form mints or joins a room with this key. The
+		// The carrier-backed Daily route mints or joins a room with this key. The
 		// platform-terminated route touches no Daily API at all, so demanding the key
 		// would make a working package fail its startup check on a value nothing reads.
 		env.add("DAILY_API_KEY")
@@ -1120,8 +1132,6 @@ func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target
 		}
 		tool.HangupOnUnavailable = c.OnUnavailable == ir.OnUnavailableHangup
 		return tool, nil
-	case ir.TransferWarm:
-		return pipecatTool{}, fmt.Errorf("human transfer %q: this driver does not emit warm transfer yet (Daily documents the pattern; it needs the bot to own the call audio, tracked as feature 005); warm compiles on (livekit, sip) today", name)
 	}
 	return pipecatTool{}, fmt.Errorf("human transfer %q mode %q has no Pipecat lowering", name, c.Mode)
 }

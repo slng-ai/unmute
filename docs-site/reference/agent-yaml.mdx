@@ -452,14 +452,17 @@ channels:
 | Field | Required | Values and constraints |
 |---|---|---|
 | `kind` | yes | `realtime_audio` or `telephony` |
-| `inbound`, `outbound` | for `telephony` | `true` or `false`; illegal on `realtime_audio` |
+| `inbound`, `outbound` | for `telephony` | `true` or `false`; at least one must be `true`; illegal on `realtime_audio` |
 | `required_controls` | no | `cold_transfer`, `warm_transfer`, `dtmf_send`, `dtmf_receive`, `hold`, `hangup`, `voicemail_detection`, or `ivr_navigation`; illegal on `realtime_audio` |
 | `on_voicemail` | no | `hangup` or `leave_message`; requires `kind: telephony` and `outbound: true` |
 
-### Two rules a telephony channel brings with it
+### Three rules a telephony channel brings with it
 
-Both are enforced, both fail validation, and both are easier to read here than
-to meet by trial and error.
+All three are enforced, fail validation, and are easier to read here than to
+meet by trial and error.
+
+**At least one direction must be enabled.** A channel with both `inbound: false`
+and `outbound: false` has no call leg and is refused.
 
 **A warm transfer needs `outbound: true`.** A warm transfer dials the
 destination itself, so the agent places a call, and a channel that only receives

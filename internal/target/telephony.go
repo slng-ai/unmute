@@ -237,9 +237,8 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 	// bridge is our own open-source implementation of the Media Streams
 	// protocol; LiveKit's hosted connector is Cloud-only.
 	// The Pipecat Daily route with a carrier leg (SCHEMA N37). The carrier owns
-	// the number and forwards the call over SIP into the same per-call Daily room
-	// a Daily-provisioned call joins, so the agent, the room, and the transfer
-	// primitive are the ones the no-carrier form already uses.
+	// the number and forwards the call over SIP into a per-call Daily room, so the
+	// agent and the transfer primitive share the existing SIP phone leg.
 	//
 	// No `source.*` features. The generated bot reads call sources out of a
 	// context table that only the carrier-websocket adapters fill, and this route
@@ -271,17 +270,16 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		Name: "telephony-helper", Command: []string{"uv", "run", "telephony_helper.py"},
 		Health: "/healthz", Readiness: "/healthz",
 	}}
-	// The helper answers incoming calls and nothing else. Dialling out is started
-	// against the platform directly, exactly as it is on a Daily-provisioned
-	// number, so there is no endpoint here that spends money and therefore no
-	// token to guard one.
+	// The helper answers signed incoming carrier calls and nothing else. Dialling
+	// out is started against the platform directly, so there is no outbound
+	// endpoint here.
 	route.PublicEndpoints = []TelephonyEndpointRule{
 		{Name: "inbound", Method: "POST", Path: "/call", AnyFeatures: []TelephonyFeature{TelephonyInbound}},
 		{Name: "health", Method: "GET", Path: "/healthz"},
 	}
-	// Only what the *deployed agent* reads. The helper's own names (the platform
-	// public key, the outbound trigger token, the two optional knobs) are a driver
-	// fact and are registered by the emitter, not here.
+	// Only what the *deployed agent* reads. The helper's own platform key, public
+	// signature origin, and two optional knobs are a driver fact registered by
+	// the emitter, not here. The Twilio auth token is shared with the agent.
 	route.RuntimeEnvironment = []TelephonyEnvironmentRule{{Name: "DAILY_API_KEY"}}
 	// No AutoWebhookEndpoint: the CLI never writes a carrier webhook on this
 	// route. Pointing the number at the helper is a dictated carrier action,
@@ -462,7 +460,7 @@ type routePrerequisiteRule struct {
 // routePrerequisites is the only home for these facts. The emitter, the docs,
 // and the validate report all read them from here (Principle III).
 var routePrerequisites = []routePrerequisiteRule{{
-	provider: Pipecat, transport: "daily-sip",
+	provider: Pipecat, transport: "daily-sip", carrier: "twilio",
 	prereq: RouteAccountPrerequisite{
 		Name: "daily_dialout",
 		Summary: "Ask Daily to enable dial-out on the domain the agent's rooms belong to: " +
@@ -477,11 +475,7 @@ var routePrerequisites = []routePrerequisiteRule{{
 
 // RouteAccountPrerequisites returns the account features a route needs.
 //
-// It takes the route triple rather than a resolved telephony plan, because the
-// Daily route has neither a connection nor a telephony channel and so never
-// gets a plan (ir/build.go sets one only when a connection is declared). Every
-// other route fact is reached through that plan, which is why this one needs
-// its own door.
+// It takes the route triple so validation and emitted runbooks read one source.
 func RouteAccountPrerequisites(provider Provider, transport, carrier string) []RouteAccountPrerequisite {
 	var out []RouteAccountPrerequisite
 	for _, rule := range routePrerequisites {

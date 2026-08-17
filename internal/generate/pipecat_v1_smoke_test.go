@@ -361,7 +361,7 @@ func TestSmokeV2PipecatAgentTransferAnnouncementWaitsForSourcePlayout(t *testing
 }
 
 func examplePackagePath(name string) string {
-	if name == "remy" || name == "safe_core" {
+	if name == "remy" || name == "safe_core" || name == "daily_carrier" {
 		return filepath.Join("..", "testdata", name)
 	}
 	return filepath.Join("..", "..", "examples", name)
@@ -397,7 +397,6 @@ func testSmokePipecatTelephonyTemplatesCompileWithoutCredentials(t *testing.T, c
 		t.Fatal(err)
 	}
 	enablePackageTelephony(pkg)
-	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Connection = "primary_phone"
 	setConnectionRoute(pkg, "primary_phone", "carrier-websocket", carrier)
@@ -453,7 +452,6 @@ func TestSmokePipecatTelephonyRuntimeContracts(t *testing.T) { // telephony V20
 				t.Fatal(err)
 			}
 			enablePackageTelephony(pkg)
-			dropHumanTransfer(pkg)
 			configured := pkg.Targets["pipecat"]
 			configured.Connection = "primary_phone"
 			setConnectionRoute(pkg, "primary_phone", "carrier-websocket", carrier)
@@ -1127,15 +1125,21 @@ const pipecatDailyTransferFailureSmokeScript = `"""Smoke check: Daily transfer f
 import asyncio
 import json
 import os
+from urllib.parse import urlencode
 
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
+os.environ["UNMUTE_PUBLIC_URL"] = "https://voice.example"
+os.environ["TWILIO_AUTH_TOKEN"] = "smoke-auth-token"
 
 import bot  # noqa: E402
+import telephony_helper as helper  # noqa: E402
 from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+from pipecat.transports.daily.transport import DailyTransportClient  # noqa: E402
+from twilio.request_validator import RequestValidator  # noqa: E402
 
 
-class FakeDailyTransport:
+class ProbeDailyTransport(bot.DailyTransport):
     def __init__(self, failure):
         self.failure = failure
         self.attempts = 0
@@ -1161,7 +1165,7 @@ class FakeLLM:
 
 
 class Params:
-    function_name = "to_human"
+    function_name = "send_to_billing"
 
     def __init__(self, llm):
         self.llm = llm
@@ -1171,34 +1175,110 @@ class Params:
         self.results.append(result)
 
 
+class HelperRequest:
+    def __init__(self, form, signature):
+        self._body = urlencode(form).encode()
+        self.headers = {"X-Twilio-Signature": signature}
+
+    async def body(self):
+        return self._body
+
+
 async def main() -> None:
-    bot.DailyTransport = FakeDailyTransport
+    assert helper._call_url() == "https://voice.example/call"
+    os.environ["UNMUTE_PUBLIC_URL"] = "https://voice.example/prefix/"
+    assert helper._call_url() == "https://voice.example/prefix/call"
+    for invalid_url in (
+        "http://voice.example",
+        "https://voice.example?query=yes",
+        "https://voice.example#fragment",
+        "https://user:password@voice.example",
+    ):
+        os.environ["UNMUTE_PUBLIC_URL"] = invalid_url
+        try:
+            helper._call_url()
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError(f"accepted invalid public URL: {invalid_url}")
+    os.environ["UNMUTE_PUBLIC_URL"] = "https://voice.example"
+
+    # The helper authenticates every field before the platform-keyed start. An
+    # invalid signature receives 403 and cannot start an agent; a valid signature
+    # over the same form reaches the start exactly once.
+    starts = []
+
+    async def fake_start_agent(_request, *, caller, call_sid):
+        starts.append((caller, call_sid))
+        return {"sessionId": "session-smoke"}
+
+    helper._start_agent = fake_start_agent
+    form = {
+        "CallSid": "CA-smoke",
+        "From": "+14155550100",
+        "ExtraSignedField": "must-be-validated",
+    }
+    rejected = await helper.inbound_call(HelperRequest(form, "invalid"))
+    assert rejected.status_code == 403
+    assert starts == []
+    signature = RequestValidator(os.environ["TWILIO_AUTH_TOKEN"]).compute_signature(
+        "https://voice.example/call", form
+    )
+    accepted = await helper.inbound_call(HelperRequest(form, signature))
+    assert accepted.status_code == 200
+    assert starts == [("+14155550100", "CA-smoke")]
+
+    # The supported SDK itself requires an existing phone session. This exact
+    # return is the premise behind rejecting browser and removed carrierless
+    # transfers before the generated tool announces anything.
+    client = DailyTransportClient.__new__(DailyTransportClient)
+    client._dial_out_session_id = ""
+    client._dial_in_session_id = ""
+    settings = {"toEndPoint": "sip:+15551234567@example.com"}
+    error = await DailyTransportClient.sip_call_transfer(client, settings)
+    assert error == "Can't transfer SIP call if 'sessionId' is not set"
+    assert "sessionId" not in settings
+
+    # A browser session on a carrier-backed package still has a DailyTransport,
+    # but no existing SIP leg. Refuse without an announcement or primitive.
+    browser_transport = ProbeDailyTransport(None)
+    browser_context = {"_transport": browser_transport, "_daily_sip_session": False}
+    browser_agent = bot.FrontDeskAgent(
+        state=None, context=LLMContext(), call_context=browser_context,
+    )
+    browser_params = Params(FakeLLM())
+    await browser_agent.send_to_billing(browser_params)
+    assert browser_params.results == [
+        {"failed": "this session is not a phone call, so it cannot be transferred"}
+    ]
+    assert browser_params.llm.pushes == 0
+    assert browser_transport.attempts == 0
 
     # An announcement failure happens before the carrier primitive. Release the
     # claim so a later model turn can retry the one operation that never began.
-    retry_transport = FakeDailyTransport(None)
-    retry_context = {"_transport": retry_transport}
-    retry_agent = bot.BillingAgent(
-        state=bot.State(), context=LLMContext(), call_context=retry_context,
+    retry_transport = ProbeDailyTransport(None)
+    retry_context = {"_transport": retry_transport, "_daily_sip_session": True}
+    retry_agent = bot.FrontDeskAgent(
+        state=None, context=LLMContext(), call_context=retry_context,
     )
-    await retry_agent.to_human(Params(FakeLLM(fail_on_push=1)))
+    await retry_agent.send_to_billing(Params(FakeLLM(fail_on_push=1)))
     assert "_transfer_result" not in retry_context
     assert retry_transport.attempts == 0
 
     retried = Params(FakeLLM())
-    await retry_agent.to_human(retried)
+    await retry_agent.send_to_billing(retried)
     assert retried.results == [{"transferred": True}]
     assert retry_transport.attempts == 1
 
     # The primitive fails, then even the failure announcement fails. The
     # claimed result must already be terminal, so replay cannot dial again.
-    transport = FakeDailyTransport(RuntimeError("daily transfer failed"))
-    call_context = {"_transport": transport}
-    agent = bot.BillingAgent(
-        state=bot.State(), context=LLMContext(), call_context=call_context,
+    transport = ProbeDailyTransport(RuntimeError("daily transfer failed"))
+    call_context = {"_transport": transport, "_daily_sip_session": True}
+    agent = bot.FrontDeskAgent(
+        state=None, context=LLMContext(), call_context=call_context,
     )
     first = Params(FakeLLM(fail_on_push=2))
-    await agent.to_human(first)
+    await agent.send_to_billing(first)
     terminal = {
         "failed": "The transfer could not be completed; the call is ending."
     }
@@ -1207,19 +1287,22 @@ async def main() -> None:
     assert type(first.llm.frames[-1]).__name__ == "EndFrame"
 
     replay = Params(FakeLLM())
-    await agent.to_human(replay)
+    await agent.send_to_billing(replay)
     assert replay.results == [terminal]
     assert transport.attempts == 1, "terminal failure was retried"
 
     # Cancellation is an ambiguous carrier outcome. Keep the synchronous claim
     # and replay it; never start a second primitive.
-    cancelled_transport = FakeDailyTransport(asyncio.CancelledError())
-    cancelled_context = {"_transport": cancelled_transport}
-    cancelled_agent = bot.BillingAgent(
-        state=bot.State(), context=LLMContext(), call_context=cancelled_context,
+    cancelled_transport = ProbeDailyTransport(asyncio.CancelledError())
+    cancelled_context = {
+        "_transport": cancelled_transport,
+        "_daily_sip_session": True,
+    }
+    cancelled_agent = bot.FrontDeskAgent(
+        state=None, context=LLMContext(), call_context=cancelled_context,
     )
     try:
-        await cancelled_agent.to_human(Params(FakeLLM()))
+        await cancelled_agent.send_to_billing(Params(FakeLLM()))
     except asyncio.CancelledError:
         pass
     else:
@@ -1230,7 +1313,7 @@ async def main() -> None:
     assert cancelled_context["_transfer_result"] == in_progress
 
     cancelled_replay = Params(FakeLLM())
-    await cancelled_agent.to_human(cancelled_replay)
+    await cancelled_agent.send_to_billing(cancelled_replay)
     assert cancelled_replay.results == [in_progress]
     assert cancelled_transport.attempts == 1, "cancelled transfer was retried"
     print("pipecat Daily transfer failure smoke ok")
@@ -1679,8 +1762,8 @@ func TestSmokePipecatV1SessionStateIsIsolated(t *testing.T) {
 // TestSmokePipecatV1DailyTransferFailureIsTerminal runs the claimed-result
 // contract through the supported Pipecat SDK's real direct-function wrapper.
 func TestSmokePipecatV1DailyTransferFailureIsTerminal(t *testing.T) {
-	runPipecatSmokeScript(t, "safe_core", nil, func(agent *ir.Agent) {
-		human := agent.Controls["to_human"].(*ir.HumanTransfer)
+	runPipecatSmokeScript(t, "daily_carrier", nil, func(agent *ir.Agent) {
+		human := agent.Controls["send_to_billing"].(*ir.HumanTransfer)
 		human.OnUnavailable = ir.OnUnavailableHangup
 	}, pipecatDailyTransferFailureSmokeScript)
 }
@@ -1817,7 +1900,7 @@ func TestSmokeV24PipecatSimplePromptStaticCheck(t *testing.T) {
 // turns a browser-session transfer request from an AttributeError into a named
 // failure the model can act on.
 func TestSmokeV24PipecatDailyTransferStaticCheck(t *testing.T) {
-	runPipecatSmokeScript(t, "safe_core", nil, nil, pipecatStaticCheckScript)
+	runPipecatSmokeScript(t, "daily_carrier", nil, nil, pipecatStaticCheckScript)
 }
 
 // TestSmokeV24PipecatExamplesStaticCheck holds raw Pipecat output to the bar

@@ -101,10 +101,9 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 			return nil, fmt.Errorf("%s: connection %q declares no transport. A connection is a phone route, and the "+
 				"transport is the mechanism that carries the call", pkg.Location(path, "environment:"), name)
 		}
-		// An empty environment is legal: two routes need no account values from
-		// the author at all — carrierless Daily dial-out, and receive-only
-		// (pipecat, cloud-websocket), where the platform
-		// terminates the carrier's stream itself (spec FR-009a).
+		// An empty environment is legal for receive-only
+		// (pipecat, cloud-websocket), where the platform terminates the carrier's
+		// stream itself (spec FR-009a).
 		for _, key := range sortedKeys(raw.Environment) {
 			value := raw.Environment[key]
 			if !namePattern.MatchString(key) {
@@ -873,34 +872,12 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 			"Add connection: <name> and a connections/<name>.yaml declaring the route",
 			pkg.Location("targets.yaml", name+":"), name)
 	}
-	// A carrier-less route has no carrier leg to receive on: the Daily form dials
-	// out only. It has no row in the
-	// capability table at all (research R10), so without this the author gets
-	// "unsupported telephony route (pipecat, daily-sip, )" from three separate
-	// capability lookups and no idea which line to change.
-	if _, carrierless := carrierlessTransports[transport]; carrierless && carrier == "" && telephony {
-		return Target{}, fmt.Errorf("%s: connection %q declares transport %s with no carrier, which places calls but "+
-			"cannot receive them, so it cannot serve a channels.phone entry. Give the connection a carrier, or drop "+
-			"the phone channel and reach this route through a control that dials",
-			pkg.Location(filepath.Join("connections", raw.Connection+".yaml"), "transport:"), raw.Connection, transport)
-	}
 	// A connection is used by a telephony channel or by a control that dials.
-	// The second half is what the Daily-provisioned route needs: it receives no
-	// calls and so declares no phone channel, but it still dials a person on a
-	// cold transfer, and that leg is the route (spec FR-016).
 	if !telephony && raw.Connection != "" && !packagePlacesCalls(pkg, agent) {
 		return Target{}, fmt.Errorf("%s: target %q names connection %q, but nothing in this package uses a phone "+
 			"route: declare a channels.phone entry, or a control that dials a person",
 			pkg.Location("targets.yaml", "connection:"), name, raw.Connection)
 	}
-	// Two guards stood here: `daily-sip` with a telephony channel and no carrier,
-	// and `daily-sip` with a carrier and no telephony channel. Both are now
-	// unrepresentable rather than merely unchecked. A target cannot name a route
-	// and omit its carrier, because the two travel together in one connection
-	// file; and the silent downgrade the second caught — a carrier quietly
-	// ignored because the connection was missing — needs a target that declares a
-	// carrier without a connection, which no longer parses. The invariant
-	// survives by construction, which is the better fix (research R2).
 	built := Target{
 		Name: name, Provider: Provider(raw.Provider), Version: raw.Version, Pins: raw.Pins,
 		SDKLanguage: raw.SDKLanguage, Transport: transport, Carrier: carrier, Connection: raw.Connection,
@@ -948,14 +925,6 @@ func packagePlacesCalls(pkg *packagespec.Package, agent *Agent) bool {
 	return false
 }
 
-// carrierlessTransports are transports with a form that has no carrier leg.
-// Today that is Daily dial-out only. These have no row in the capability table at all — the only Daily row
-// is the carrier leg, a different thing — so a flat triple lookup would refuse
-// them (research R10).
-var carrierlessTransports = map[string]string{
-	"daily-sip": "outbound dial-out only; it cannot serve a phone channel",
-}
-
 // connectionFileFor names the file a moved route field belongs in. A target that
 // names no connection has no file to point at yet, so it gets the instruction
 // instead of a path.
@@ -975,18 +944,10 @@ func orPlaceholder(transport string) string {
 
 // validateRoute checks that a connection declares a route the provider actually
 // has, and refuses with the routes it does have.
-//
-// It is deliberately not a flat triple lookup. A connection with no carrier is
-// valid only where the transport has a carrier-less form, and that form has no
-// row in the capability table; looking it up anyway refuses a working package
-// with a message that reads like a broken example (research R10).
 func validateRoute(pkg *packagespec.Package, connection, provider, transport, carrier string) error {
 	path := filepath.Join("connections", connection+".yaml")
 	if carrier == "" {
-		if _, ok := carrierlessTransports[transport]; ok {
-			return nil
-		}
-		return fmt.Errorf("%s: transport %q declares no carrier, and it has no carrier-less form. %s",
+		return fmt.Errorf("%s: transport %q declares no carrier. %s",
 			pkg.Location(path, "transport:"), transport, supportedRoutes(provider))
 	}
 	key := targetcap.TelephonyKey{Provider: targetcap.Provider(provider), Transport: transport, Carrier: carrier}
@@ -1006,11 +967,6 @@ func supportedRoutes(provider string) string {
 			continue
 		}
 		byTransport[key.Transport] = append(byTransport[key.Transport], key.Carrier)
-	}
-	for transport, note := range carrierlessTransports {
-		if _, ok := byTransport[transport]; ok {
-			byTransport[transport] = append(byTransport[transport], "no carrier ("+note+")")
-		}
 	}
 	if len(byTransport) == 0 {
 		return fmt.Sprintf("Provider %s has no phone routes.", provider)

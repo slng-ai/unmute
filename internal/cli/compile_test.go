@@ -2,11 +2,9 @@ package cli
 
 import (
 	"bytes"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -108,48 +106,6 @@ func copySafeCore(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return dir
-}
-
-// routeSafeCore puts the pipecat and livekit targets on real carrier routes.
-//
-// It writes one connection file per transport, because a connection declares
-// its own transport and these two targets never share one. That is the whole
-// authoring change in miniature: the targets each name a file, and the files
-// carry the route (spec FR-001, FR-008a).
-func routeSafeCore(t *testing.T, dir, pipecatTransport, livekitTransport string) {
-	t.Helper()
-	write := func(name, transport string, environment map[string]string) {
-		body := "transport: " + transport + "\ncarrier: twilio\nenvironment:\n"
-		for _, key := range slices.Sorted(maps.Keys(environment)) {
-			body += "  " + key + ": " + environment[key] + "\n"
-		}
-		path := filepath.Join(dir, "connections", name+".yaml")
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	twilioAPI := map[string]string{
-		"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
-		"from_number": "TWILIO_PHONE_NUMBER",
-	}
-	write("primary_phone", pipecatTransport, twilioAPI)
-	// The LiveKit instance already names twilio_sip, because cold transfer needs
-	// a route there (SCHEMA N31). Rewriting that file rather than adding a second
-	// one keeps the fixture free of a connection no target names, which is its
-	// own warning.
-	write("twilio_sip", livekitTransport, twilioAPI)
-
-	path := filepath.Join(dir, "targets.yaml")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configured := mustReplace(t, string(raw),
-		"    connection: daily_provisioned   # cold_transfer needs Daily SIP on Pipecat",
-		"    connection: primary_phone")
-	if err := os.WriteFile(path, []byte(configured), 0o600); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // mustReplace applies one fixture substitution and fails when the anchor is

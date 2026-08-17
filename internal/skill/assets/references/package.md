@@ -222,13 +222,14 @@ channels:
 | Field | Values |
 |---|---|
 | `kind` | `realtime_audio` or `telephony` |
-| `inbound`, `outbound` | `true` or `false` |
+| `inbound`, `outbound` | `true` or `false`; at least one must be `true` |
 | `required_controls` | `cold_transfer`, `warm_transfer`, `dtmf_send`, `dtmf_receive`, `hold`, `hangup`, `voicemail_detection`, or `ivr_navigation` |
 | `on_voicemail` | `hangup` or `leave_message`, requires `outbound: true` |
 
 `web: realtime_audio` is browser audio, which is what `unmute dev` serves.
 It takes only `kind`. A `telephony` channel requires both `inbound` and
-`outbound`, and it needs a connection file too. See `telephony.md`.
+`outbound`, at least one set to `true`, and it needs a connection file too. See
+`telephony.md`.
 
 ## capacity and tracing
 

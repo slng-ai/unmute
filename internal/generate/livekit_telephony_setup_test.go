@@ -25,6 +25,7 @@ func livekitSIPFixture(t *testing.T, carrier string, inbound, outbound, cold boo
 	if err != nil {
 		t.Fatal(err)
 	}
+	addColdHumanTransfer(pkg)
 	controls := []string{"hangup"}
 	if cold {
 		controls = append(controls, "cold_transfer")

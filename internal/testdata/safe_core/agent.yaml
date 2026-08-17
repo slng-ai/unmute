@@ -5,7 +5,7 @@
 # What it deliberately avoids, and why:
 #   - tasks / task_groups: delegate-and-return is unverified on Vapi
 #   - history other than `full`: fails on Pipecat
-#   - requires:, fallback:, thinking_audio:, warm transfer: each fails
+#   - requires:, fallback:, thinking_audio:, human transfer: each fails
 #     on at least one of the four
 #   - outbound calls: omitted; Deepgram's carrier-conditional lowering warns
 
@@ -72,7 +72,6 @@ agents:
     voice: specialist
     tools:
       - get_invoice
-      - to_human
 
 controls:
   to_billing:
@@ -82,20 +81,6 @@ controls:
     context:
       history: full       # the only history value that works on all four
       variables: all      # the only variables value managed targets accept
-
-  to_human:
-    kind: human_transfer
-    # The shape is a block, never a `mode:` field, and the block carries every
-    # parameter of the transfer (SCHEMA N25, N27).
-    cold:
-      destination: billing_line   # resolved by the destinations map below
-
-# Who this agent escalates to. The same desk answers whichever target places the
-# call, so it is declared once here rather than per target. A value is the
-# UPPER_SNAKE name of an environment variable holding the number: agent.yaml is
-# the portable half of a package, and a number is a deployment fact.
-destinations:
-  billing_line: BILLING_PHONE_NUMBER
 
 tools:
   - lookup_customer

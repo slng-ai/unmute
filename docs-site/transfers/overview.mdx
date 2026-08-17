@@ -72,7 +72,7 @@ mechanisms, which is why the answer differs per route:
 | Route | Cold | Warm | Mechanism |
 |---|---|---|---|
 | LiveKit `sip` | yes | **yes, the only one** | SIP REFER on the caller's existing leg, and LiveKit's `WarmTransferTask` for the held and briefed shape |
-| Pipecat `daily-sip` | yes | not built yet | Daily moves the caller's leg out of the room and the bot drops off |
+| Pipecat `daily-sip` + Twilio | yes, on a phone call | not built yet | Daily transfers the existing SIP phone leg |
 | Pipecat `cloud-websocket` | yes, differently | no, by trade | one request replaces the live call's markup at the carrier |
 | Pipecat `carrier-websocket` | no | no | the transport carries media only, with no transfer control |
 | LiveKit `connector` | no | no | same |
@@ -117,9 +117,9 @@ carried a branch explaining, in a comment, that the usual cause of failure is "a
 session that never arrived by phone: an Agent Console run, a browser session".
 The compiler knew and shipped it anyway.
 
-A route is not the same as a phone channel. A Pipecat `daily-sip` package can
-declare only `web: realtime_audio` because Daily's dial-out brings the person
-into the room. What it still needs is a connection.
+A Pipecat `daily-sip` transfer needs a Twilio connection and an active `channels.phone` route.
+A browser session has no SIP leg and gets a named
+failure before the agent announces a transfer.
 
 ## The control has to be attached
 
@@ -157,12 +157,9 @@ observe whether the person answers.
 
 ## Where to go next
 
-<Columns cols={3}>
+<Columns cols={2}>
   <Card title="LiveKit route" icon="phone-forwarded" href="/transfers/livekit">
     Cold and warm over a SIP trunk.
-  </Card>
-  <Card title="Pipecat on Daily" icon="phone" href="/transfers/pipecat-daily">
-    Cold, with no carrier account at all.
   </Card>
   <Card title="Pipecat on Twilio" icon="phone" href="/transfers/pipecat-twilio">
     Cold, with nothing hosted by you.

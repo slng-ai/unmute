@@ -134,7 +134,7 @@ Check this table **before** promising a shape.
 | Route | Cold | Warm | Mechanism |
 |---|---|---|---|
 | LiveKit `sip` | yes | **yes, the only one** | SIP REFER on the caller's existing leg, and LiveKit's warm transfer task for the held and briefed shape |
-| Pipecat `daily-sip` | yes | not built yet | Daily moves the caller's leg out of the room and the bot drops off |
+| Pipecat `daily-sip` + Twilio | yes, on a phone call | not built yet | Daily transfers the existing SIP phone leg |
 | Pipecat `cloud-websocket` | yes, differently | no, by trade | one request replaces the live call's markup at the carrier |
 | Pipecat `carrier-websocket` | no | no | the transport carries media only, with no transfer control |
 | LiveKit `connector` | no | no | same |
@@ -186,9 +186,9 @@ pipecat: Pipecat cold transfer requires Daily SIP transport
 | a connection | possible, subject to the route table above |
 | no connection | **refused at validate**, before anything is written |
 
-A route is not the same as a phone channel. A Pipecat `daily-sip` package can
-use web audio while Daily's dial-out brings the person into the room. What it
-still needs is a connection.
+A Pipecat `daily-sip` transfer needs a Twilio connection and an active phone
+channel. A browser session has no SIP leg and must fail before announcing a
+transfer.
 
 So when a user asks a browser agent with no route to reach a person, offer what
 actually works instead: a tool that books a callback, raises a ticket, or emails
