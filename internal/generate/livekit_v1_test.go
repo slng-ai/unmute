@@ -709,6 +709,271 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	}
 }
 
+// TestLiveKitV1SingleTaskAgentTransfer guards task-scoped handoff: the task
+// completes with a private sentinel carrying the target agent, and the delegate
+// returns that agent instead of treating the handoff as a typed task result.
+func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transfer := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
+	transfer.Announce = "I will take you back to Remy."
+	transfer.Requires = []string{"caller_phone"}
+	task := agent.Tasks["find_slot"]
+	task.Tools = append(task.Tools, "back_to_greeter")
+	agent.Tasks["find_slot"] = task
+	agent.Controls["do_find"] = &ir.Delegate{
+		Kind: ir.ControlDelegate, Task: "find_slot", When: "Find one slot.",
+	}
+	reservations := agent.Agents["reservations"]
+	reservations.Tools = append(reservations.Tools, "do_find")
+	agent.Agents["reservations"] = reservations
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		"class _TaskTransfer(Exception):",
+		"def __init__(self, agent: Agent) -> None:",
+		"self.agent = agent",
+		"class FindSlot(AgentTask[dict | _TaskTransfer]):",
+		"async def back_to_greeter(self, ctx: RunContext):",
+		`missing = [n for n, v in (("caller_phone", ctx.userdata.caller_phone), ) if v in (None, "")]`,
+		`await ctx.session.say("I will take you back to Remy.", allow_interruptions=False)`,
+		"self.complete(_TaskTransfer(Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))))",
+		"except _TaskTransfer as transfer:",
+		"return transfer.agent",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	delegate := strings.Index(botpy, "async def do_find(")
+	taskAwait := strings.Index(botpy[delegate:], "result = await FindSlot(")
+	catch := strings.Index(botpy[delegate:], "except _TaskTransfer as transfer:")
+	restore := strings.Index(botpy[delegate:], "await self.update_chat_ctx(owner_ctx)")
+	if delegate < 0 || taskAwait < 0 || catch < taskAwait || (restore >= 0 && catch > restore) {
+		t.Fatalf("task transfer must be caught immediately around the task await; delegate=%d await=%d catch=%d restore=%d", delegate, taskAwait, catch, restore)
+	}
+}
+
+// TestLiveKitV1SharedGroupTaskAgentTransfer guards the TaskGroup path. The
+// SDK propagates a task's exception and stops its loop when return_exceptions
+// is false, so the delegate catches the sentinel at the group await.
+func TestLiveKitV1SharedGroupTaskAgentTransfer(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := agent.Tasks["find_slot"]
+	task.Tools = append(task.Tools, "back_to_greeter")
+	agent.Tasks["find_slot"] = task
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	start := strings.Index(botpy, "async def do_reserve(")
+	if start < 0 {
+		t.Fatal("do_reserve delegate not emitted")
+	}
+	end := strings.Index(botpy[start:], "async def back_to_greeter(")
+	if end < 0 {
+		t.Fatal("could not bound do_reserve delegate")
+	}
+	block := botpy[start : start+end]
+	for _, want := range []string{
+		"group = TaskGroup(",
+		"try:\n            result = await group",
+		"except _TaskTransfer as transfer:\n            return transfer.agent",
+		"await self.update_chat_ctx(owner_ctx)",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("do_reserve missing %q", want)
+		}
+	}
+	if strings.Contains(block, "return_exceptions=True") {
+		t.Error("TaskGroup must propagate the transfer sentinel and stop remaining tasks")
+	}
+}
+
+func TestV43LiveKitSharedGroupCarriesTypedResults(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	start := strings.Index(botpy, "async def do_reserve(")
+	if start < 0 {
+		t.Fatal("do_reserve delegate not emitted")
+	}
+	block := botpy[start:]
+	for _, want := range []string{
+		"async def share_task_result(event: TaskCompletedEvent) -> None:",
+		"shared_ctx.add_message(",
+		`content="Completed task " + event.task_id + " result: " + json.dumps(event.result, sort_keys=True),`,
+		"on_task_completed=share_task_result,",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("shared task group does not carry typed results: missing %q", want)
+		}
+	}
+
+	group := agent.TaskGroups["reserve_group"]
+	group.ContextScope = ir.ContextIsolated
+	agent.TaskGroups["reserve_group"] = group
+	isolated, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	isolatedBot := artifactFile(t, isolated, "agent.py")
+	start = strings.Index(isolatedBot, "async def do_reserve(")
+	if start < 0 {
+		t.Fatal("isolated do_reserve delegate not emitted")
+	}
+	if strings.Contains(isolatedBot[start:], "share_task_result") {
+		t.Error("isolated task group must not carry a completed result into the next task")
+	}
+}
+
+func TestV44LiveKitSharedResultUpdatesWritableContext(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	start := strings.Index(botpy, "async def do_reserve(")
+	if start < 0 {
+		t.Fatal("do_reserve delegate not emitted")
+	}
+	block := botpy[start:]
+	for _, want := range []string{
+		"shared_ctx = group.chat_ctx.copy()",
+		"shared_ctx.add_message(",
+		"await group.update_chat_ctx(shared_ctx)",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("shared task result does not use a writable context: missing %q", want)
+		}
+	}
+	if strings.Contains(block, "group.chat_ctx.add_message(") {
+		t.Error("Agent.chat_ctx is read-only and must not be modified directly")
+	}
+}
+
+// TestLiveKitV1IsolatedGroupTaskAgentTransfer guards the standalone-task
+// sequence: one catch wraps the ordered awaits, so a transfer from an earlier
+// step returns its target and later steps are never started.
+func TestLiveKitV1IsolatedGroupTaskAgentTransfer(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := agent.Tasks["find_slot"]
+	task.Tools = append(task.Tools, "back_to_greeter")
+	agent.Tasks["find_slot"] = task
+	group := agent.TaskGroups["reserve_group"]
+	group.ContextScope = ir.ContextIsolated
+	agent.TaskGroups["reserve_group"] = group
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	start := strings.Index(botpy, "async def do_reserve(")
+	if start < 0 {
+		t.Fatal("do_reserve delegate not emitted")
+	}
+	block := botpy[start:]
+	for _, want := range []string{
+		"try:\n            task_results[\"find_slot\"] = await FindSlot()\n            task_results[\"confirm_booking\"] = await ConfirmBooking()",
+		"except _TaskTransfer as transfer:\n            return transfer.agent",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("do_reserve missing %q", want)
+		}
+	}
+	catch := strings.Index(block, "except _TaskTransfer as transfer:")
+	second := strings.Index(block, `task_results["confirm_booking"] = await ConfirmBooking()`)
+	if catch < second {
+		t.Fatalf("catch at %d must wrap the later step at %d", catch, second)
+	}
+}
+
+func TestLiveKitV1TaskRejectsOtherControlKinds(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		ref     string
+		control ir.Control
+	}{
+		{name: "delegate", ref: "do_reserve"},
+		{
+			name: "human transfer", ref: "to_manager",
+			control: &ir.HumanTransfer{
+				Kind: ir.ControlHumanTransfer, Destination: "manager", Mode: ir.TransferCold,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.control != nil {
+				agent.Controls[tc.ref] = tc.control
+			}
+			task := agent.Tasks["find_slot"]
+			task.Tools = append(task.Tools, tc.ref)
+			agent.Tasks["find_slot"] = task
+
+			_, err = buildLiveKitData(agent, targetByProvider(t, agent, ir.ProviderLiveKit))
+			want := `task "find_slot" references control "` + tc.ref + `": tasks support agent_transfer controls only`
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("want %q, got %v", want, err)
+			}
+		})
+	}
+}
+
 // TestV1LiveKitCompletedFlowEndsOnce guards F0/B1: a completed task/delegate
 // returns control once and the owner never re-runs a finished flow. Deterministic
 // proxies: finish() resolves via self.complete() only (`-> None`, no trailing
@@ -1383,9 +1648,10 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	}
 }
 
-// TestLiveKitV1RequiresGuard covers V7: a transfer with requires: emits a
-// machine-checked guard that refuses and names the unmet variables.
-func TestLiveKitV1RequiresGuard(t *testing.T) {
+// TestV33LiveKitRequiresGuardRejectsEmptyValues covers V7/V33: a transfer with
+// requires: emits a machine-checked guard that refuses both unset and empty
+// variables and names the unmet values.
+func TestV33LiveKitRequiresGuardRejectsEmptyValues(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
@@ -1403,7 +1669,7 @@ func TestLiveKitV1RequiresGuard(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		`missing = [n for n, v in (("caller_phone", ctx.userdata.caller_phone), ) if v is None]`,
+		`missing = [n for n, v in (("caller_phone", ctx.userdata.caller_phone), ) if v in (None, "")]`,
 		`return "Cannot transfer yet; missing required information: " + ", ".join(missing)`,
 	} {
 		if !strings.Contains(botpy, want) {
@@ -1644,6 +1910,25 @@ func TestLiveKitSIPEmitsTopologyAndHydratesContextBeforeGreeting(t *testing.T) {
 	}
 	if len(runtime.PublicEndpoints) != 0 {
 		t.Fatalf("LiveKit SIP must not report HTTP callback endpoints: %#v", runtime.PublicEndpoints)
+	}
+}
+
+// TestV32LiveKitSIPBuildsCallContextBeforeHydration covers the shared SIP
+// entry path. Waiting for the participant is not enough: variable hydration
+// needs the context derived from that participant and the job metadata.
+func TestV32LiveKitSIPBuildsCallContextBeforeHydration(t *testing.T) {
+	agent, resolved := configuredLiveKitSIP(t)
+	artifact, err := GenerateLiveKit(agent, resolved, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	agentPy := artifactFile(t, artifact, "agent.py")
+	waitAt := strings.Index(agentPy, "participant = await ctx.wait_for_participant()")
+	contextAt := strings.Index(agentPy, "call_context = _livekit_call_context(ctx.room.name, participant, metadata)")
+	hydrateAt := strings.Index(agentPy, "_hydrate_livekit_context(session.userdata, call_context)")
+	if waitAt < 0 || contextAt <= waitAt || hydrateAt <= contextAt {
+		t.Fatalf("LiveKit SIP must derive call context after participant join and before hydration")
 	}
 }
 

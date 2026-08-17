@@ -57,9 +57,10 @@ The agent has one control and no domain tools at all.
 ## Shared context is the point
 
 With `context_scope: shared`, the service the caller named in step one is still
-there in step two. Nothing is passed by hand. With `isolated`, each step starts
-from its own prompt, which is what you want when a step should not be
-influenced by what came before.
+there in step two. The exact typed result from every completed step is also put
+into the shared context before the next step starts, so later steps do not have
+to reconstruct IDs or confirmation flags from spoken wording. With `isolated`,
+each step starts from its own prompt and receives none of those earlier results.
 
 ## The LiveKit warning
 

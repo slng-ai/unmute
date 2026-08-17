@@ -1,0 +1,252 @@
+# One full salon project: verification task, booking task group, specialist
+# handoffs, cold manager transfer, local SQLite tools, Firecrawl MCP, browser
+# audio, and inbound-only phone routes on both code targets.
+version: 1
+entry_agent: concierge
+
+variables:
+  customer_id:
+    type: string
+    description: Verified customer ID. It is assigned by the verification task and never spoken.
+  customer_name:
+    type: string
+    description: Verified customer display name carried across specialist handoffs.
+
+secrets:
+  - OPENAI_API_KEY
+  - SLNG_API_KEY
+  - FIRECRAWL_MCP_URL
+  - FIRECRAWL_API_KEY
+  - MANAGER_PHONE_NUMBER
+  - TWILIO_ACCOUNT_SID
+  - TWILIO_AUTH_TOKEN
+  - TWILIO_PHONE_NUMBER
+  - SIP_TRUNK_HOSTNAME
+  - SIP_AUTH_USERNAME
+  - SIP_AUTH_PASSWORD
+  - SIP_FROM_NUMBER
+
+destinations:
+  manager_line: MANAGER_PHONE_NUMBER
+
+models:
+  think:
+    reasoning:
+      provider: openai
+      model: gpt-5.6-luna
+      params:
+        reasoning_effort: "none"
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-en"
+  turn:
+    detector:
+      provider: local
+      model: silero
+
+agents:
+  concierge:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - verify_customer
+      - to_booking
+      - to_complaints
+      - to_chat
+
+  booking_specialist:
+    instructions: agents/booking-specialist.md
+    model: reasoning
+    voice: voice
+    tools:
+      - manage_booking
+      - to_complaints
+      - to_chat
+      - to_concierge
+
+  complaint_specialist:
+    instructions: agents/complaint-specialist.md
+    model: reasoning
+    voice: voice
+    tools:
+      - record_complaint
+      - to_manager
+      - to_booking
+      - to_chat
+      - to_concierge
+
+  chat_with_me:
+    instructions: agents/chat-with-me.md
+    model: reasoning
+    voice: voice
+    tools:
+      - web_search
+      - to_booking
+      - to_complaints
+      - to_concierge
+
+tasks:
+  customer_verification:
+    instructions: tasks/verify-customer.md
+    tools:
+      - find_or_create_customer
+    result:
+      customer_id: string
+      customer_name: string
+      status:
+        enum:
+          - existing
+          - created
+          - name_mismatch
+          - invalid
+      summary: string
+    context:
+      history: full
+
+  prepare_booking:
+    instructions: tasks/prepare-booking.md
+    tools:
+      - list_bookings
+      - check_availability
+      - to_complaints
+      - to_chat
+    result:
+      action:
+        enum:
+          - create
+          - modify
+          - cancel
+          - none
+      booking_id: string
+      service: string
+      slot_id: string
+      confirmed: boolean
+    context:
+      history: full
+
+  apply_booking:
+    instructions: tasks/apply-booking.md
+    tools:
+      - create_booking
+      - modify_booking
+      - cancel_booking
+    result:
+      action: string
+      booking_id: string
+      status: string
+      summary: string
+    context:
+      history: full
+
+task_groups:
+  booking_flow:
+    steps:
+      - prepare_booking
+      - apply_booking
+    context_scope: shared
+    then: return
+    merge: results
+
+controls:
+  verify_customer:
+    kind: delegate
+    task: customer_verification
+    when: Verify the caller before any specialist handoff.
+    assign:
+      customer_id: result.customer_id
+      customer_name: result.customer_name
+
+  manage_booking:
+    kind: delegate
+    group: booking_flow
+    when: The verified caller wants to create, modify, or cancel a booking.
+
+  to_booking:
+    kind: agent_transfer
+    to: booking_specialist
+    when: The verified caller wants to create, modify, cancel, or review a booking.
+    requires:
+      - customer_id
+    context:
+      history: full
+      variables: all
+
+  to_complaints:
+    kind: agent_transfer
+    to: complaint_specialist
+    when: The verified caller has a complaint or service problem.
+    requires:
+      - customer_id
+    context:
+      history: full
+      variables: all
+
+  to_chat:
+    kind: agent_transfer
+    to: chat_with_me
+    when: The verified caller wants open-ended chat or current public information.
+    requires:
+      - customer_id
+    context:
+      history: full
+      variables: all
+
+  to_concierge:
+    kind: agent_transfer
+    to: concierge
+    when: The caller changes to a request owned by another specialist.
+    requires:
+      - customer_id
+    context:
+      history: full
+      variables: all
+
+  to_manager:
+    kind: human_transfer
+    when: The caller explicitly asks for a manager or is clearly and strongly frustrated.
+    cold:
+      destination: manager_line
+      ring_timeout: 30s
+      on_unavailable: return_to_caller
+
+tools:
+  - find_or_create_customer
+  - list_bookings
+  - check_availability
+  - create_booking
+  - modify_booking
+  - cancel_booking
+  - record_complaint
+  - web_search
+
+conversation:
+  greeting:
+    speaks_first: agent
+    text: "Hi, you’ve reached Sage and Stone Salon. How can I help today?"
+  interruption:
+    enabled: true
+  inactivity:
+    nudge_after: 15s
+    end_after: 45s
+  max_duration: 15m
+
+channels:
+  web:
+    kind: realtime_audio
+  phone:
+    kind: telephony
+    inbound: true
+    outbound: false
+
+capacity:
+  peak_sessions: 5
+  max_sessions: 10
+  peak_starts_per_second: 1
+  avg_session_duration: 5m

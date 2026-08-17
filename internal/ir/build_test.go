@@ -940,6 +940,32 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 	}
 }
 
+// V39: a reachable task may expose an agent transfer. This authoring shape was
+// already accepted by checkToolRefs and walked by checkReachability; both code
+// generators must preserve it instead of treating every task reference as a
+// business tool.
+func TestTaskScopedAgentTransferIsReachable(t *testing.T) {
+	pkg := loadSafeCore(t)
+	detachTool(pkg, "intake", "to_billing")
+	addTask(pkg, "route_request")
+	task := pkg.Agent.Tasks["route_request"]
+	task.Tools = []string{"to_billing"}
+	pkg.Agent.Tasks["route_request"] = task
+	name := "route_request"
+	pkg.Agent.Controls["run_route"] = packagespec.Control{Kind: "delegate", Task: &name}
+	intake := pkg.Agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "run_route")
+	pkg.Agent.Agents["intake"] = intake
+
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := agent.Controls["to_billing"].(*AgentTransfer); !ok {
+		t.Fatalf("task control = %T, want *AgentTransfer", agent.Controls["to_billing"])
+	}
+}
+
 // removeHumanTransfer takes the transfer out of a fixture completely: the
 // control, its attachment, and the destination it resolved to. Leaving the
 // destination behind is now an error, and rightly — its environment name reached

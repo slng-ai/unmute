@@ -330,6 +330,9 @@ func withoutRouteEnv(names []string, agent *ir.Agent, target ir.Target, env *env
 			route[name] = true
 		}
 	}
+	for _, name := range humanTransferEnv(agent, target, env) {
+		route[name] = true
+	}
 	for name := range route {
 		if env.alwaysRead(name) {
 			delete(route, name)
@@ -356,6 +359,30 @@ func withoutRouteEnv(names []string, agent *ir.Agent, target ir.Target, env *env
 		}
 	}
 	return out
+}
+
+// humanTransferEnv is read only while handling a phone call. Requiring these
+// names at process startup blocks the browser path even though that session has
+// no carrier leg to transfer. An always-on model or business tool wins when it
+// also reads the same name.
+func humanTransferEnv(agent *ir.Agent, target ir.Target, env *envSet) []string {
+	seen := map[string]bool{}
+	for _, control := range agent.Controls {
+		human, ok := control.(*ir.HumanTransfer)
+		if !ok {
+			continue
+		}
+		name := ir.DestinationEnv(target.Destinations[human.Destination])
+		if name != "" && !env.alwaysRead(name) {
+			seen[name] = true
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 // reportSupported is the framework range this unmute supports, recorded next to

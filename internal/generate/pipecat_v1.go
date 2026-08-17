@@ -111,6 +111,7 @@ type pipecatTask struct {
 	Prompt         string
 	PromptExpr     string // the node's role_message: the quoted prompt, or a render call when it names a variable
 	Tools          []pipecatTool
+	Transfers      []pipecatTransfer
 	ResultProps    string // Python literal: JSON-schema properties for finish args
 	ResultRequired string // Python literal: list of required finish arg names
 }
@@ -118,15 +119,16 @@ type pipecatTask struct {
 // pipecatDelegate is a delegate control: run a task or an ordered group of tasks
 // as a Flow on the owning worker, then return / transfer / end (C8, V2).
 type pipecatDelegate struct {
-	MethodName string
-	When       string
-	Task       string          // single-task delegate; "" if a group
-	Assign     []pipecatAssign // result.<field> -> variable
-	Group      string          // group delegate; "" if a single task
-	StepTasks  []pipecatTask   // resolved ordered steps (a single task is one step)
-	Then       string          // "return" | "transfer" | "end"
-	ThenTarget string          // target agent for then: transfer
-	Isolated   bool            // context_scope: isolated (per-node context RESET)
+	MethodName   string
+	When         string
+	Task         string          // single-task delegate; "" if a group
+	Assign       []pipecatAssign // result.<field> -> variable
+	Group        string          // group delegate; "" if a single task
+	StepTasks    []pipecatTask   // resolved ordered steps (a single task is one step)
+	Then         string          // "return" | "transfer" | "end"
+	ThenTarget   string          // target agent for then: transfer
+	Isolated     bool            // context_scope: isolated (per-node context RESET)
+	HasTransfers bool            // a step can abort the remaining Flow and hand off
 }
 
 type pipecatAssign struct {
@@ -395,7 +397,7 @@ type pipecatData struct {
 	// operator is told to set a variable no file ever mentioned (research D14).
 	SuppliedForYou []string
 	DevEnv         []string // provider creds the web dev image needs, without telephony/coordination env (compose.dev.yaml)
-	DevOptionalEnv []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
+	DevOptionalEnv []string // passed through when the host sets it, never required (logging/call-start overrides)
 	Notes          []string
 	Tracing        bool
 	// Telephony means the carrier-websocket route, and every site that reads it

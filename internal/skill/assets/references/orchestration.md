@@ -226,12 +226,14 @@ guarantee, not a request in a prompt.
 **Context decision, twice over:**
 
 - `context_scope: shared` means the service the caller named in step one is
-  still there in step two, with nothing passed by hand. This is what you want
-  most of the time.
+  still there in step two. Each completed step's exact typed result is also in
+  shared context before the next step starts, so never ask a later step to
+  reconstruct IDs or confirmation flags from spoken wording. This is what you
+  want most of the time.
 - `context_scope: isolated` means each step starts from its own prompt. It is
   one setting for the whole group, not per step, so choosing it makes **every**
-  step start clean. Reach for it only when the group is a set of independent
-  assessments that must not colour each other. An intake flow that must not ask
+  step start clean without earlier results. Reach for it only when the group is
+  a set of independent assessments that must not colour each other. An intake flow that must not ask
   the same question twice needs `shared`, and that is most groups.
 - `then: return` sends control back to the agent that delegated, with `merge:
   results` deciding what comes back. `then: transfer` needs `then_target` and

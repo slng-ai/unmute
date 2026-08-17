@@ -397,7 +397,7 @@ func TestCloudWebsocketPureInboundAsksForNothing(t *testing.T) {
 	// source, asserted equal (contracts/environment.md).
 	full := cloudWebsocketArtifact(t, cloudWebsocketOptions{inbound: true, outbound: true, transfer: true, connection: true})
 	checked := callRequiredEnv(t, artifactFile(t, full, "bot.py"))
-	want := []string{"PIPECAT_CLOUD_ORGANIZATION", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"}
+	want := []string{"BILLING_PHONE_NUMBER", "PIPECAT_CLOUD_ORGANIZATION", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"}
 	if !slices.Equal(checked, want) {
 		t.Errorf("the per-call check names %v, want %v", checked, want)
 	}

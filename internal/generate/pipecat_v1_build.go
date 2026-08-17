@@ -116,8 +116,9 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		}
 	}
 	data.Capture = buildPipecatCapture(agent)
+	data.DevOptionalEnv = []string{"UNMUTE_LOG_LEVEL"}
 	if len(data.CallStartVars) > 0 {
-		data.DevOptionalEnv = []string{"UNMUTE_CALL_START"}
+		data.DevOptionalEnv = append(data.DevOptionalEnv, "UNMUTE_CALL_START")
 	}
 	// Declared secrets join the startup check; a required one missing fails the
 	// bot before it answers a call (V12).
@@ -648,6 +649,16 @@ func setImportNeeds(data *pipecatData) {
 				needsTTSSpeakFrame = true
 			}
 		}
+		for _, delegate := range agent.Delegates {
+			for _, task := range delegate.StepTasks {
+				for _, transfer := range task.Transfers {
+					if transfer.Announce != "" {
+						data.HasTransferAnnouncements = true
+						needsTTSSpeakFrame = true
+					}
+				}
+			}
+		}
 	}
 	if data.HasTransferAnnouncements {
 		data.FrameImports = append(data.FrameImports, "BotStartedSpeakingFrame", "BotStoppedSpeakingFrame")
@@ -866,6 +877,7 @@ func buildDelegate(agent *ir.Agent, ref string, c *ir.Delegate, env *envSet) (pi
 			return pipecatDelegate{}, err
 		}
 		task.FinishName = "finish_" + ref + "_" + step
+		delegate.HasTransfers = delegate.HasTransfers || len(task.Transfers) > 0
 		delegate.StepTasks = append(delegate.StepTasks, task)
 	}
 	for i := range delegate.StepTasks[:len(delegate.StepTasks)-1] {
@@ -894,7 +906,23 @@ func buildTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (pipecat
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
 		if !ok {
-			return pipecatTask{}, fmt.Errorf("task %q references unknown tool %q", name, ref)
+			control, exists := agent.Controls[ref]
+			if !exists {
+				return pipecatTask{}, fmt.Errorf("task %q references unknown tool/control %q", name, ref)
+			}
+			transfer, supported := control.(*ir.AgentTransfer)
+			if !supported {
+				kind := ir.ControlDelegate
+				if _, human := control.(*ir.HumanTransfer); human {
+					kind = ir.ControlHumanTransfer
+				}
+				return pipecatTask{}, fmt.Errorf("task %q references %s control %q: tasks support agent_transfer controls only", name, kind, ref)
+			}
+			built.Transfers = append(built.Transfers, pipecatTransfer{
+				MethodName: ref, To: transfer.To, When: transferReason(transfer),
+				Announce: transfer.Announce, Reason: transferReason(transfer), Requires: transfer.Requires,
+			})
+			continue
 		}
 		// The capability table denies this combination, so a package never gets
 		// here; an IR built in code still must not fall through to the webhook

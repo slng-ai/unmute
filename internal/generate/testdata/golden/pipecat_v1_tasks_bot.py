@@ -17,6 +17,7 @@ import functools
 import inspect
 import json
 import os
+import sys
 from dataclasses import dataclass
 
 import httpx
@@ -60,12 +61,18 @@ from pipecat_slng import SlngTTSService
 
 load_dotenv()
 
+def _configure_logging() -> None:
+    logger.remove()
+    logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())
+
+
+_configure_logging()
+
 MAIN_NAME = "main"
 # Provider credentials only. The telephony route's environment (Redis, carrier
 # keys, the public URL) is required by telephony.py, not here, so a telephony
 # package still runs in the browser with nothing but model keys (V10/B3).
 REQUIRED_ENV = [
-    "BILLING_PHONE_NUMBER",
     "DAILY_API_KEY",
     "DEEPGRAM_API_KEY",
     "GET_INVOICE_URL",
@@ -666,6 +673,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
     @main.event_handler("on_pipeline_started")
     async def on_pipeline_started(worker, frame):
+        await runner.add_workers(*agents)
         pipeline_started.set()
 
     @transport.event_handler("on_client_connected")
@@ -681,7 +689,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     async def on_client_disconnected(transport, client):
         await runner.cancel()
 
-    await runner.add_workers(main, *agents)
+    await runner.add_workers(main)
 
     try:
         await runner.run()
@@ -692,6 +700,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
 
 async def bot(runner_args: RunnerArguments) -> None:
+    # Pipecat's development runner installs its own DEBUG sink after importing
+    # this module. Restore the package setting before any call work begins.
+    _configure_logging()
 
     transport = await create_transport(runner_args, transport_params)
     await run_bot(transport, runner_args)

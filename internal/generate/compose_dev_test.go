@@ -75,6 +75,7 @@ func TestPipecatDevComposeGolden(t *testing.T) {
 		`command: ["python", "bot.py", "--host", "0.0.0.0", "--port", "7860"]`,
 		"${UNMUTE_DEV_PORT:-7860}:7860",
 		"- OPENAI_API_KEY",
+		"- UNMUTE_LOG_LEVEL",
 		"healthcheck:",
 	} {
 		if !strings.Contains(compose, want) {
@@ -86,6 +87,19 @@ func TestPipecatDevComposeGolden(t *testing.T) {
 	for _, forbidden := range []string{"image: valkey/valkey:", "image: redis:", "REDIS_URL", "=sk-", "livekit_server"} {
 		if strings.Contains(compose, forbidden) {
 			t.Errorf("pipecat compose.dev.yaml contains %q:\n%s", forbidden, compose)
+		}
+	}
+}
+
+func TestPipecatDefaultsToInfoLogging(t *testing.T) {
+	bot := artifactFile(t, devArtifact(t, ir.ProviderPipecat), "bot.py")
+	for _, want := range []string{
+		"def _configure_logging() -> None:",
+		`logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())`,
+		"this module. Restore the package setting before any call work begins.\n    _configure_logging()",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing %q:\n%s", want, bot)
 		}
 	}
 }

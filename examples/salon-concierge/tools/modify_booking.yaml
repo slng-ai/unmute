@@ -1,0 +1,51 @@
+description: >-
+  Atomically move one confirmed active booking owned by the verified customer
+  to an exact available slot.
+
+input:
+  type: object
+  properties:
+    booking_id:
+      type: string
+      description: Exact booking ID returned by list_bookings
+    service:
+      type: string
+      enum:
+        - haircut
+        - hair-color
+        - blowout
+    slot_id:
+      type: string
+      description: Exact slot ID returned by check_availability
+  required:
+    - booking_id
+    - service
+    - slot_id
+
+inject:
+  customer_id: "{{customer_id}}"
+
+output:
+  type: object
+  properties:
+    booking_id:
+      type: string
+    status:
+      type: string
+      enum:
+        - modified
+        - invalid
+        - not_found
+        - slot_unavailable
+    summary:
+      type: string
+  required:
+    - booking_id
+    - status
+    - summary
+
+local:
+  handler: tools/salon.py
+
+interruption: provider_default
+effect: returns_data

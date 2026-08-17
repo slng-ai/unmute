@@ -38,6 +38,124 @@ func TestV3_OutboundReminderBusinessToolsAreSelfContained(t *testing.T) {
 	}
 }
 
+func TestV37SalonConciergeFeatureContract(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.Agent.EntryAgent != "concierge" {
+		t.Fatalf("entry agent = %q, want concierge", pkg.Agent.EntryAgent)
+	}
+	if got, want := slices.Sorted(maps.Keys(pkg.Agent.Agents)), []string{"booking_specialist", "chat_with_me", "complaint_specialist", "concierge"}; !slices.Equal(got, want) {
+		t.Fatalf("agents = %v, want %v", got, want)
+	}
+	if got, want := slices.Sorted(maps.Keys(pkg.Agent.Tasks)), []string{"apply_booking", "customer_verification", "prepare_booking"}; !slices.Equal(got, want) {
+		t.Fatalf("tasks = %v, want %v", got, want)
+	}
+
+	web, phone := pkg.Agent.Channels["web"], pkg.Agent.Channels["phone"]
+	if web.Kind != "realtime_audio" || phone.Kind != "telephony" || phone.Inbound == nil || !*phone.Inbound || phone.Outbound == nil || *phone.Outbound {
+		t.Fatalf("channels = %#v, want WebRTC and inbound-only phone", pkg.Agent.Channels)
+	}
+
+	verify := pkg.Agent.Controls["verify_customer"]
+	if verify.Kind != "delegate" || verify.Task == nil || *verify.Task != "customer_verification" ||
+		verify.Assign["customer_id"] != "result.customer_id" || verify.Assign["customer_name"] != "result.customer_name" {
+		t.Fatalf("verification control = %#v", verify)
+	}
+	group := pkg.Agent.TaskGroups["booking_flow"]
+	if !slices.Equal(group.Steps, []string{"prepare_booking", "apply_booking"}) || group.ContextScope != "shared" || group.Then != "return" || group.Merge != "results" {
+		t.Fatalf("booking group = %#v", group)
+	}
+	for _, forbidden := range []string{"manage_booking", "create_booking", "modify_booking", "cancel_booking"} {
+		if slices.Contains(pkg.Agent.Agents["concierge"].Tools, forbidden) {
+			t.Errorf("unverified concierge exposes booking action %q", forbidden)
+		}
+	}
+	for name, destination := range map[string]string{
+		"to_booking":    "booking_specialist",
+		"to_complaints": "complaint_specialist",
+		"to_chat":       "chat_with_me",
+	} {
+		control := pkg.Agent.Controls[name]
+		if control.Kind != "agent_transfer" || control.To == nil || *control.To != destination || !slices.Equal(control.Requires, []string{"customer_id"}) {
+			t.Errorf("handoff %q = %#v", name, control)
+		}
+	}
+	manager := pkg.Agent.Controls["to_manager"]
+	if manager.Kind != "human_transfer" || manager.Cold == nil || manager.Cold.Destination != "manager_line" || !strings.Contains(manager.When, "frustrated") {
+		t.Fatalf("manager transfer = %#v", manager)
+	}
+
+	if got, want := pkg.Agent.Agents["chat_with_me"].Tools, []string{"web_search", "to_booking", "to_complaints", "to_concierge"}; !slices.Equal(got, want) {
+		t.Fatalf("chat tools = %v, want %v", got, want)
+	}
+	for name, agent := range pkg.Agent.Agents {
+		if name != "chat_with_me" && slices.Contains(agent.Tools, "web_search") {
+			t.Errorf("agent %q exposes web_search", name)
+		}
+	}
+	for name, task := range pkg.Agent.Tasks {
+		if slices.Contains(task.Tools, "web_search") {
+			t.Errorf("task %q exposes web_search", name)
+		}
+	}
+	for name, tool := range pkg.Tools {
+		if name == "web_search" {
+			if tool.ExecutionKind() != "mcp" || tool.MCP.URLEnv != "FIRECRAWL_MCP_URL" {
+				t.Errorf("web_search = %#v, want Firecrawl MCP", tool)
+			}
+			continue
+		}
+		if tool.ExecutionKind() != "local" || tool.Local.Handler != "tools/salon.py" {
+			t.Errorf("tool %q = %#v, want shared local Python handler", name, tool)
+		}
+	}
+}
+
+func TestV38SalonComplaintHandoffKeepsVerifiedIdentity(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	booking := pkg.Agent.Agents["booking_specialist"]
+	if !slices.Contains(booking.Tools, "to_complaints") || !slices.Contains(booking.Tools, "to_chat") ||
+		!strings.Contains(resolved.Agents["booking_specialist"].Instructions, "complaint or asks for a manager") {
+		t.Fatalf("booking specialist must hand complaints off directly: %#v", booking.Tools)
+	}
+	prepare := pkg.Agent.Tasks["prepare_booking"]
+	if !slices.Contains(prepare.Tools, "to_complaints") || !slices.Contains(prepare.Tools, "to_chat") {
+		t.Fatalf("active booking task cannot change intent directly: %#v", prepare.Tools)
+	}
+	control := pkg.Agent.Controls["to_complaints"]
+	if control.Context == nil || control.Context.History != "full" || control.Context.Variables != "all" || !slices.Equal(control.Requires, []string{"customer_id"}) {
+		t.Fatalf("complaint handoff must carry verified identity: %#v", control)
+	}
+	for name, control := range pkg.Agent.Controls {
+		if control.Kind == "agent_transfer" && control.Announce != nil {
+			t.Errorf("internal handoff %q speaks an announcement", name)
+		}
+	}
+	for name, instructions := range map[string]string{
+		"concierge":             resolved.Agents["concierge"].Instructions,
+		"customer_verification": resolved.Tasks["customer_verification"].Instructions,
+	} {
+		if !strings.Contains(instructions, "Never ask for the name or phone again") || !strings.Contains(instructions, "Never repeat a full phone number") {
+			t.Errorf("%s does not make successful verification idempotent", name)
+		}
+	}
+	verification := resolved.Tasks["customer_verification"].Instructions
+	if !strings.Contains(verification, "details could not be verified together") ||
+		!strings.Contains(verification, "Do not say that a customer record") {
+		t.Error("verification mismatch wording leaks record existence")
+	}
+}
+
 func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 	// tracing is on exactly one example. It used to be on all four, which made
 	// the first package in the table impossible to run without a Langfuse
@@ -292,15 +410,15 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	// One telephony example per use case (spec 007 FR-016): warm+inbound on
-	// LiveKit (livekit-human-transfer), cold+inbound on Pipecat over Twilio with
-	// nothing hosted (pipecat-human-transfer-twilio), inbound+outbound
-	// (twilio-telephony-hello). Daily route guards remain against internal test
-	// fixtures instead of a public example.
+	// The focused telephony examples stay one per use case (spec 007 FR-016):
+	// warm+inbound on LiveKit (livekit-human-transfer), cold+inbound on Pipecat
+	// over Twilio with nothing hosted (pipecat-human-transfer-twilio), and
+	// inbound+outbound (twilio-telephony-hello). salon-concierge is the composite
+	// release fixture. Daily route guards remain against internal test fixtures.
 	//
 	// A telephony example whose behaviour is one provider's names that provider
 	// first, because the route is the thing a reader is choosing between.
-	want := []string{"livekit-human-transfer", "mcp-example", "multi-task", "outbound-reminder", "pipecat-human-transfer-twilio", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
+	want := []string{"livekit-human-transfer", "mcp-example", "multi-task", "outbound-reminder", "pipecat-human-transfer-twilio", "salon-concierge", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -538,6 +656,7 @@ func TestTelephonyExampleDocsAccountForEveryRequiredEnv(t *testing.T) {
 		"livekit-human-transfer":        {ir.ProviderLiveKit},
 		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
 		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
+		"salon-concierge":               {ir.ProviderPipecat, ir.ProviderLiveKit},
 	} {
 		t.Run(example, func(t *testing.T) {
 			readme, err := os.ReadFile(filepath.Join("..", "..", "examples", example, "README.md"))
@@ -592,13 +711,14 @@ func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
 		"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER",
 		"SIP_TRUNK_HOSTNAME", "SIP_AUTH_USERNAME", "SIP_AUTH_PASSWORD", "SIP_FROM_NUMBER",
 		"UNMUTE_PUBLIC_URL", "UNMUTE_OUTBOUND_TOKEN", "REDIS_URL",
-		"PIPECAT_CLOUD_ORGANIZATION",
+		"PIPECAT_CLOUD_ORGANIZATION", "MANAGER_PHONE_NUMBER",
 	}
 	for example, providers := range map[string][]ir.Provider{
 		"twilio-telephony-hello":        {ir.ProviderPipecat, ir.ProviderLiveKit},
 		"livekit-human-transfer":        {ir.ProviderLiveKit},
 		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
 		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
+		"salon-concierge":               {ir.ProviderPipecat, ir.ProviderLiveKit},
 	} {
 		t.Run(example, func(t *testing.T) {
 			pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))
@@ -636,6 +756,60 @@ func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// V40: the manager destination is useless to a browser session but mandatory
+// for a phone transfer. Keep it out of the shared startup check and require it
+// on the inbound phone path before the caller hears a greeting.
+func TestSalonTransferDestinationIsRequiredOnlyForPhoneCalls(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
+		artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
+		if err != nil {
+			t.Fatalf("%s: %v", provider, err)
+		}
+		entry := "bot.py"
+		if provider == ir.ProviderLiveKit {
+			entry = "agent.py"
+		}
+		source := artifactFile(t, artifact, entry)
+		start := strings.Index(source, "CALL_REQUIRED_ENV = [")
+		if start < 0 {
+			t.Fatalf("%s: %s has no phone-only environment check", provider, entry)
+		}
+		end := strings.Index(source[start:], "]")
+		if end < 0 || !strings.Contains(source[start:start+end], `"MANAGER_PHONE_NUMBER"`) {
+			t.Errorf("%s: phone-only environment check omits MANAGER_PHONE_NUMBER", provider)
+		}
+		greetingAt := strings.LastIndex(source, "await _livekit_entry_greeting(session)")
+		checkAt := strings.LastIndex(source, "require_call_env()")
+		if provider == ir.ProviderPipecat {
+			greetingAt = strings.LastIndex(source, "await run_bot(")
+			checkAt = strings.LastIndex(source, "_phone_session(runner_args)")
+		}
+		if checkAt < 0 || greetingAt < 0 || checkAt > greetingAt {
+			t.Errorf("%s: phone environment must be checked before the phone greeting starts", provider)
+		}
+		if provider == ir.ProviderLiveKit && !strings.Contains(source,
+			`if not outbound_job and participant.attributes.get("sip.callID"):`) {
+			t.Error("livekit: inbound destination check is not guarded by a real SIP participant")
+		}
+		if provider == ir.ProviderPipecat && !strings.Contains(source,
+			`getattr(runner_args, "transport_type", None) != "twilio"`) {
+			t.Error("pipecat: destination check is not guarded by a real carrier session")
+		}
+		readme := artifactFile(t, artifact, "README.md")
+		if !strings.Contains(readme, "human-transfer destination may stay unset") {
+			t.Errorf("%s: generated README does not explain that the browser path needs no transfer destination", provider)
+		}
 	}
 }
 

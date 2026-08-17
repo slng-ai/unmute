@@ -181,13 +181,14 @@ type livekitCallStart struct {
 // another agent, or end the call. N13: the flow's own turns never land in the
 // owner's context regardless of which path is taken.
 type livekitDelegate struct {
-	Method    string
-	When      string
-	Task      *livekitSingleTask // set for a single-task delegate; Steps empty
-	Steps     []livekitStep
-	Isolated  bool   // context_scope: isolated — standalone-AgentTask sequence, no TaskGroup (C3)
-	Then      string // "return" | "transfer" | "end"
-	ThenClass string // target Agent class, set only for then: transfer
+	Method          string
+	When            string
+	Task            *livekitSingleTask // set for a single-task delegate; Steps empty
+	Steps           []livekitStep
+	Isolated        bool   // context_scope: isolated — standalone-AgentTask sequence, no TaskGroup (C3)
+	Then            string // "return" | "transfer" | "end"
+	ThenClass       string // target Agent class, set only for then: transfer
+	CanTaskTransfer bool   // one member task can hand the caller directly to another agent
 }
 
 // livekitSingleTask is the task side of a single-task delegate: the AgentTask
@@ -249,6 +250,7 @@ type livekitTask struct {
 	Tools       []livekitTool
 	Prebuilt    []livekitTool // execution: builtin tools, rendered into super().__init__(tools=...)
 	MCPServers  []livekitMCPServer
+	Transfers   []livekitTransfer
 }
 
 type livekitTool struct {
@@ -341,6 +343,7 @@ type livekitData struct {
 	Secrets           []string              // declared secrets, for .env.example (V11)
 	ExtraEnv          []string              // env the route needs that the package never declared
 	RequiredSecrets   []string              // required secrets: a startup check refuses to run without them (V12)
+	CallRequiredEnv   []string              // human-transfer destinations checked only for a real phone call (V40)
 	LocalTools        []livekitLocalTool    // copied handler files (tools/<name>.py)
 	Pins              map[string]string     // plugin pins (C6): raise dep floors
 	Prompts           []livekitPrompt
@@ -384,6 +387,7 @@ type livekitData struct {
 	NeedsEndCallTool   bool        // beta.tools EndCallTool import (prebuilt end_call)
 	HasColdTransfer    bool        // get_job_context import
 	HasWarmTransfer    bool        // WarmTransferTask import + trunk env + room_options (B14)
+	HasTaskTransfers   bool        // _TaskTransfer sentinel + task delegate catch paths
 	Outbound           *livekitOutbound
 	Telephony          *livekitTelephony
 

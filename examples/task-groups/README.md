@@ -70,7 +70,9 @@ bin/unmute dev examples/task-groups --target pipecat
 
 **`context_scope: shared`** is the difference from two separate delegations.
 The three steps see one running context, so the service the caller named in
-step one is still there in step two without being passed by hand.
+step one is still there in step two without being passed by hand. Each step's
+exact typed result enters that context before the next step starts. An isolated
+group deliberately does not carry that result forward.
 
 **`merge: results`** collects each step's typed result into one result for the
 group, and `then: return` hands control back to the agent when the last step

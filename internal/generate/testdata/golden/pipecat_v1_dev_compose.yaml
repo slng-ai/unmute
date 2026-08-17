@@ -8,13 +8,14 @@ services:
       context: .
     command: ["python", "bot.py", "--host", "0.0.0.0", "--port", "7860"]
     environment:
-      - BILLING_PHONE_NUMBER
       - DAILY_API_KEY
       - DEEPGRAM_API_KEY
       - GET_INVOICE_URL
       - LOOKUP_CUSTOMER_URL
       - OPENAI_API_KEY
       - SLNG_API_KEY
+      # optional: set by `unmute dev --var`; absent otherwise
+      - UNMUTE_LOG_LEVEL
       # optional: set by `unmute dev --var`; absent otherwise
       - UNMUTE_CALL_START
     ports:

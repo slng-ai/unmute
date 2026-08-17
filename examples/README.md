@@ -7,18 +7,20 @@ help.
 
 The four structural packages contain the same five deterministic local Python
 tools for customer lookup and creation, availability, booking, and cancellation.
-The tools use no network or durable storage; they are fixtures for local LiveKit
-and Pipecat runs. `salon-support`, `outbound-reminder`, and the telephony
-packages carry their own smaller tool sets.
+Those tools use no network or durable storage. `salon-concierge` is the full
+integration example: it combines the structures with SQLite, MCP, handoffs, and
+inbound telephony. The other packages keep smaller tool sets on purpose.
 
 Use the [end-to-end example harness](../docs/HARNESS_TEST.md) when a change needs a real
 provider request and a human conversation, not only the automated checks.
 
-The telephony examples are **one per use case**: `twilio-telephony-hello` for
-inbound and outbound, `pipecat-human-transfer-twilio` for a cold transfer with
-nothing hosted, and `livekit-human-transfer` for cold and warm SIP transfer. The
-[telephony overview](../docs-site/telephony/overview.mdx) explains which route to
-pick.
+The focused telephony examples stay **one per use case**:
+`twilio-telephony-hello` for inbound and outbound,
+`pipecat-human-transfer-twilio` for a cold transfer with nothing hosted, and
+`livekit-human-transfer` for cold and warm SIP transfer. `salon-concierge` is
+the larger release-readiness package that combines inbound routes with the main
+orchestration features. The [telephony overview](../docs-site/telephony/overview.mdx)
+explains which route to pick.
 
 **Where a name starts with a provider, the provider is the point.** Putting a
 caller through to a person works differently on each platform (LiveKit does it over
@@ -36,6 +38,7 @@ neither, because it is about an outbound workflow and runtime values on both.
 | [`task-groups`](task-groups/) | One agent and three ordered tasks | Shared context moves through customer identification, slot selection, and finalization. |
 | [`subagents`](subagents/) | Two agents with handoffs | One agent books new visits; the other reschedules and cancels. |
 | [`salon-support`](salon-support/) | One agent, variables, browser only | **Start here.** The one you can run in a minute: web audio, local tools, no Twilio and no API to stand up. Shows a personalized greeting, a hidden tool parameter, and the model saving what the caller says. |
+| [`salon-concierge`](salon-concierge/) | Four agents, tasks, a task group, handoffs, local SQLite, MCP, and inbound phone routes | **Release-readiness example.** Verify once, manage stored bookings, answer or escalate complaints, cold-transfer to a manager, and research current questions through Firecrawl. Browser and inbound phone, both code targets, no outbound. |
 | [`twilio-telephony-hello`](twilio-telephony-hello/) | A minimal inbound and outbound phone agent | Real Twilio calls on the route each platform recommends: Pipecat on the platform's own carrier stream (`cloud-websocket`, Media Streams, nothing hosted by you) and LiveKit on a Twilio Elastic SIP Trunk (`sip`, the route with transfers and voicemail). Two mechanisms side by side, and between them you can hear both call directions on a laptop. |
 | [`livekit-human-transfer`](livekit-human-transfer/) | One phone agent, two ways to reach a person | Cold transfer hands the caller off and the agent drops out; warm transfer holds the caller, briefs a supervisor, then bridges the two. **LiveKit only**, over a Twilio SIP trunk: warm transfer compiles on no other route today. |
 | [`pipecat-human-transfer-twilio`](pipecat-human-transfer-twilio/) | Cold transfer and inbound, with nothing hosted | The same salon on Pipecat Cloud, reached through your own Twilio number. Your number points at static markup in the Twilio console; no server of yours is in the path. When the destination leg ends, Twilio ends the original call. Unmute does not support warm transfer on Pipecat. |

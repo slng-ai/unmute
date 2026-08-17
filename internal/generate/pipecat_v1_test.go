@@ -660,6 +660,189 @@ func TestV22PipecatToolCallsAreTraced(t *testing.T) {
 	}
 }
 
+// A task-scoped agent transfer is a Flow function, but it owns the same guard,
+// announcement, shared state, and handoff contract as an agent-level transfer.
+func TestPipecatV1TaskCanTransferToAnotherAgent(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tasks["verify"] = ir.Task{
+		Instructions: "Verify the caller, unless they need billing help.",
+		Tools:        []string{"to_billing"},
+		Result:       map[string]ir.ResultField{"verified": {Type: ir.PrimitiveBoolean}},
+	}
+	agent.Tasks["complete"] = ir.Task{
+		Instructions: "Complete the verification.",
+		Result:       map[string]ir.ResultField{"complete": {Type: ir.PrimitiveBoolean}},
+	}
+	agent.TaskGroups["verification"] = ir.TaskGroup{
+		Steps: []string{"verify", "complete"}, Then: ir.GroupReturn,
+	}
+	agent.Controls["run_verify"] = &ir.Delegate{
+		Kind: ir.ControlDelegate, Group: "verification", When: "Verify the caller.",
+	}
+	transfer := agent.Controls["to_billing"].(*ir.AgentTransfer)
+	transfer.Requires = []string{"customer_id"}
+	transfer.Announce = "I’ll connect you with billing now."
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "run_verify")
+	agent.Agents["intake"] = intake
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate task transfer: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		`name="to_billing"`,
+		"handler=self._run_verify_transfer_verify_to_billing",
+		"async def _run_verify_transfer_verify_to_billing(self, args, flow_manager):",
+		"self._run_verify_transferred = False",
+		`missing = [name for name in ["customer_id"]`,
+		`await self._announce_handoff("I’ll connect you with billing now.")`,
+		"messages, tools = self._run_verify_snapshot",
+		"for message in self.context.get_messages()[len(messages):]",
+		`if message.get("role") == "user"`,
+		"self.context.set_messages(messages + task_user_messages)",
+		"self.context.set_tools(tools)",
+		`await self.activate_worker(`,
+		`"billing",`,
+		`if self._run_verify_transferred:`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing task transfer %q", want)
+		}
+	}
+	transferAt := strings.Index(bot, "async def _run_verify_transfer_verify_to_billing")
+	finishAt := strings.Index(bot, "async def _run_verify_finish_verify")
+	nextAt := strings.Index(bot, "self._run_verify_node_complete()")
+	if transferAt < 0 || finishAt < transferAt || nextAt < finishAt {
+		t.Fatalf("task transfer/finish chain missing: transfer=%d finish=%d next=%d", transferAt, finishAt, nextAt)
+	}
+	transferBody := bot[transferAt:finishAt]
+	for _, want := range []string{
+		`missing = [name for name in ["customer_id"]`,
+		`await self._announce_handoff("I’ll connect you with billing now.")`,
+		"messages, tools = self._run_verify_snapshot",
+		"for message in self.context.get_messages()[len(messages):]",
+		`if message.get("role") == "user"`,
+		"self.context.set_messages(messages + task_user_messages)",
+		"self.context.set_tools(tools)",
+	} {
+		if !strings.Contains(transferBody, want) {
+			t.Errorf("task transfer handler missing %q", want)
+		}
+	}
+	if returned := strings.Index(transferBody, `return {"transferred": True}, None`); returned < 0 {
+		t.Error("task transfer must end the Flow instead of selecting the next task")
+	}
+	finishBody := bot[finishAt:nextAt]
+	if guard := strings.Index(finishBody, "if self._run_verify_transferred:"); guard < 0 {
+		t.Error("a stale finish call can still advance to the next task after transfer")
+	}
+	if _, err := exec.LookPath("python3"); err == nil {
+		path := filepath.Join(t.TempDir(), "bot.py")
+		if err := os.WriteFile(path, []byte(bot), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("python3", "-m", "py_compile", path).CombinedOutput(); err != nil {
+			t.Fatalf("task-transfer bot.py is not valid Python:\n%s", out)
+		}
+	}
+	if _, err := exec.LookPath("ruff"); err == nil {
+		cmd := exec.Command("ruff", "check", "--select", "F", "-")
+		cmd.Stdin = strings.NewReader(bot)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("task-transfer bot.py is not ruff F clean:\n%s", out)
+		}
+	}
+}
+
+func TestPipecatV1TaskRejectsNonAgentTransferControls(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		ref     string
+		control ir.Control
+		kind    ir.ControlKind
+	}{
+		{name: "delegate", ref: "nested_delegate", control: &ir.Delegate{Kind: ir.ControlDelegate, Task: "verify"}, kind: ir.ControlDelegate},
+		{name: "human transfer", ref: "to_human", kind: ir.ControlHumanTransfer},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.control != nil {
+				agent.Controls[test.ref] = test.control
+			}
+			agent.Tasks["verify"] = ir.Task{
+				Instructions: "Verify the caller.", Tools: []string{test.ref},
+			}
+			agent.Controls["run_verify"] = &ir.Delegate{
+				Kind: ir.ControlDelegate, Task: "verify", When: "Verify the caller.",
+			}
+			intake := agent.Agents["intake"]
+			intake.Tools = append(intake.Tools, "run_verify")
+			agent.Agents["intake"] = intake
+
+			_, err = GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+			want := `task "verify" references ` + string(test.kind) + ` control "` + test.ref + `": tasks support agent_transfer controls only`
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("GeneratePipecat error = %v, want %q", err, want)
+			}
+		})
+	}
+}
+
+func TestV43PipecatSharedGroupCarriesTypedResults(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	start := strings.Index(bot, "async def _manage_booking_finish_prepare_booking")
+	end := strings.Index(bot, "async def _manage_booking_finish_apply_booking")
+	if start < 0 || end < start {
+		t.Fatalf("could not bound first shared task handler: start=%d end=%d", start, end)
+	}
+	block := bot[start:end]
+	want := `return {"status": "ok", "result": self._manage_booking_results["prepare_booking"]}, self._manage_booking_node_apply_booking()`
+	if !strings.Contains(block, want) {
+		t.Errorf("shared task group does not return the exact typed result to the next task: missing %q", want)
+	}
+
+	group := agent.TaskGroups["booking_flow"]
+	group.ContextScope = ir.ContextIsolated
+	agent.TaskGroups["booking_flow"] = group
+	isolated, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	isolatedBot := artifactFile(t, isolated, "bot.py")
+	if !strings.Contains(isolatedBot, "context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET)") {
+		t.Error("isolated task group must reset context before the next task")
+	}
+}
+
 // TestPipecatV1TasksGolden exercises tasks, task groups, and delegates that
 // safe_core omits, including the task-only role boundary (V26).
 func TestPipecatV1TasksGolden(t *testing.T) {
@@ -2567,6 +2750,22 @@ func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
 	// absolute source order (agent-transfer handoffs also call activate_worker).
 	if !strings.Contains(bot, "async def activate_entry():") {
 		t.Errorf("bot.py missing activate_entry helper (entry activation must be centralised)")
+	}
+	started := strings.Index(bot, `@main.event_handler("on_pipeline_started")`)
+	if started < 0 {
+		t.Fatal("bot.py missing on_pipeline_started handler")
+	}
+	startedBlock := bot[started:]
+	register := strings.Index(startedBlock, "await runner.add_workers(*agents)")
+	ready := strings.Index(startedBlock, "pipeline_started.set()")
+	if register < 0 || ready < register {
+		t.Errorf("on_pipeline_started must register specialists before opening the activation gate (register=%d ready=%d)", register, ready)
+	}
+	if !strings.Contains(bot, "await runner.add_workers(main)") {
+		t.Error("runner must initially register only the main pipeline worker")
+	}
+	if strings.Contains(bot, "await runner.add_workers(main, *agents)") {
+		t.Error("specialists must not be registered before the main pipeline starts")
 	}
 	conn := strings.Index(bot, "async def on_client_connected(")
 	if conn == -1 {

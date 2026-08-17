@@ -13,6 +13,10 @@ uv run bot.py                             # web: open the URL it prints
 uv run --extra console bot.py console     # terminal: talk over local mic/speaker
 {{end}}
 ```
+
+Keep normal calls at `INFO`. Setting `UNMUTE_LOG_LEVEL=DEBUG` can include
+transcript text, tool arguments, and phone metadata; use it only in a controlled
+environment and delete diagnostic logs when the test is done.
 {{- if gt (len .Agents) 1}}
 
 ## Agent handoffs
@@ -42,6 +46,12 @@ model receives one safe failure result. It must not claim success from either.
 When a task returns, its internal turns stay out of the owner's conversation.
 The completed delegate call stays in that conversation with the typed result,
 so the same caller request does not start the task again.
+In a shared task group, each completed task's exact typed result enters the
+shared context before the next task starts. Isolated groups do not carry it.
+
+If a task calls an `agent_transfer`, it does not return: the active task and any
+remaining group steps stop, and the receiving agent continues with the shared
+variables and the caller's latest words.
 {{- end}}
 {{if .Telephony}}
 This project uses the
@@ -69,10 +79,6 @@ set to the status URL, then assign the phone number to that application.
 {{end}}The public origin must exactly match `UNMUTE_PUBLIC_URL` or signature
 validation will reject the request.
 
-Normal logs default to `INFO`. Setting `UNMUTE_LOG_LEVEL=DEBUG` also enables
-upstream Pipecat parser diagnostics, which may include caller phone numbers;
-use debug logging only in a controlled environment.
-
 This route remains provisional until its credentialed smoke passes.
 {{else}}
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner
@@ -90,13 +96,18 @@ at all.
 {{end}}{{end}}
 While iterating on the source spec, `unmute dev <source-dir>` recompiles this
 project and runs it for you behind a dev client.
-{{- if .Telephony}}
+{{- if or .Telephony .DailyCarrier .CloudWebsocket}}
 
 **Test in the browser before you test on a phone.** `unmute dev <source-dir>`
 opens a browser session with no carrier credentials set and none checked, even
 though this package declares a phone channel. Get the prompt and the models
 right there, then add `--telephony`, which is where the route values below start
 mattering. The browser loop is the shortest one this project has.
+{{- if .HasColdTransfer}}
+
+A human-transfer destination may stay unset for that browser test. The phone
+entry path checks it before an inbound caller hears the greeting.
+{{- end}}
 {{- end}}
 
 {{- if .NeedsMCP}}

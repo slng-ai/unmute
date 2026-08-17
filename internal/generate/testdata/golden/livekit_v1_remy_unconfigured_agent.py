@@ -23,7 +23,7 @@ from livekit.agents import (
     llm,
     metrics,
 )
-from livekit.agents.beta.workflows import TaskGroup
+from livekit.agents.beta.workflows import TaskGroup, TaskCompletedEvent
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import openai, silero, slng
 
@@ -215,9 +215,18 @@ class Events(Agent):
     @function_tool
     async def do_event(self, ctx: RunContext) -> dict:
         """The caller is ready to plan their event; run the events flow. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request."""
+        async def share_task_result(event: TaskCompletedEvent) -> None:
+            shared_ctx = group.chat_ctx.copy()
+            shared_ctx.add_message(
+                role="developer",
+                content="Completed task " + event.task_id + " result: " + json.dumps(event.result, sort_keys=True),
+            )
+            await group.update_chat_ctx(shared_ctx)
+
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
+            on_task_completed=share_task_result,
         )
         group.add(
             lambda: QualifyEvent(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
@@ -284,9 +293,18 @@ class Reservations(Agent):
     @function_tool
     async def do_reserve(self, ctx: RunContext) -> dict:
         """The caller is ready to book a table; run the reservation flow. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request."""
+        async def share_task_result(event: TaskCompletedEvent) -> None:
+            shared_ctx = group.chat_ctx.copy()
+            shared_ctx.add_message(
+                role="developer",
+                content="Completed task " + event.task_id + " result: " + json.dumps(event.result, sort_keys=True),
+            )
+            await group.update_chat_ctx(shared_ctx)
+
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
+            on_task_completed=share_task_result,
         )
         group.add(
             lambda: FindSlot(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),

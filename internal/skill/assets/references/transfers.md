@@ -46,11 +46,11 @@ controls:
 
 `on_unavailable` is `return_to_caller` or `hangup`.
 
-### The control's name goes in an agent's tool list, and that half is enforced
+### The control's name goes in an allowed tool list, and that half is enforced
 
-Declaring a control is half the job. Until some agent, task, or task group lists
-its name in `tools:`, no agent can reach it, and the build refuses with the file,
-the line, and the agents you could attach it to:
+Declaring a control is half the job. Until an allowed owner lists its name in
+`tools:`, no agent can reach it, and the build refuses with the file,
+the line, and the available attachment points:
 
 ```
 agent.yaml:47: control "send_to_billing" is declared but no agent reaches it; add it to the
@@ -67,6 +67,12 @@ Write the declaration and the attachment in the same edit. Before this was
 enforced, a forgotten attachment compiled at exit 0 and left the control out of
 the generated project, while its destination's environment name still reached
 `.env.example` and the startup check.
+
+An `agent_transfer` may be attached to a task. Use that when a caller can change
+intent while a delegated step is active. The transfer stops the task and any
+remaining group steps, and carries the configured history and variables to the
+new agent. Other control kinds are not task tools: keep `delegate` and
+`human_transfer` on agents.
 
 ### A warm transfer needs `outbound: true`, even on an inbound-only line
 
@@ -120,6 +126,10 @@ agent.yaml:60: destination "billing_line" is "+14155550123", a literal. agent.ya
 The model never sees a number and cannot dial one that is not listed. If the
 user gives you a real phone number, put its **name** in `destinations:` and its
 name in `secrets:`, and tell them to set the value in their environment.
+
+The destination is phone-only unless a model or business tool also reads the
+same environment name. It stays out of the browser startup check and is checked
+before an inbound phone greeting instead.
 
 Destinations sit at the top level of `agent.yaml` rather than on the target,
 because who this agent escalates to is the same desk whichever carrier reaches

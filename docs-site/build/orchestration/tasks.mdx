@@ -90,6 +90,23 @@ tools. The agent's own tools are not offered again until the task returns. That 
 the useful half of delegation, and also the part to plan for, because a task that
 needs something the agent could do has to hold that tool itself.
 
+That tool list may include an `agent_transfer`. Use this when the caller must be
+able to change direction while a task is active:
+
+```yaml agent.yaml
+tasks:
+  appointment_request:
+    instructions: tasks/appointment-request.md
+    tools:
+      - check_availability
+      - to_customer_care
+```
+
+Calling the transfer stops the task and any remaining steps in its group. The
+new agent receives the transfer's history and variables, including the caller's
+latest request. `delegate` and `human_transfer` controls are not task tools;
+attach those to an agent.
+
 ## Task or second agent
 
 | | Task | Second agent |

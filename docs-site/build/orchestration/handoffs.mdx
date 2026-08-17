@@ -70,6 +70,10 @@ speak. It is spoken once and finishes before the new agent takes over; the
 model does not paraphrase it. Leave it out for a silent handoff. A failed
 `requires` guard is checked first and never makes a false announcement.
 
+Prefer a silent handoff when the agents are internal roles behind one service.
+The caller can keep talking to the same salon, clinic, or support desk without
+hearing implementation details such as “I’m connecting you to another agent.”
+
 `context` decides what the new agent knows. It is the whole of what travels:
 
 | Field | What it does |
@@ -78,6 +82,10 @@ model does not paraphrase it. Leave it out for a silent handoff. A failed
 | `variables: all` | the values collected so far travel with the caller |
 
 Without them, the caller gets asked for their phone number twice.
+
+A task may list the same `agent_transfer` in its own `tools:`. Calling it stops
+that task and the rest of its task group, so a caller can raise a complaint in
+the middle of booking without waiting for the booking flow to return first.
 
 On LiveKit, transfer tools are hidden only during the receiving agent's first
 automatic turn. Normal tools remain available, and transfers return on the
