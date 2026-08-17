@@ -37,6 +37,12 @@ tasks:
 `record_status` can only be one of three values. That is what makes a task
 different from a longer prompt: the outcome has a shape.
 
+**Task `result:` and tool `output:` are different contracts.** Tool contracts
+live in `tools/<name>.yaml`; the task's `tools:` list contains names only. The
+task result describes the outcome returned after all of its tool calls. Keep
+only what the calling agent needs instead of copying an attached tool's output
+schema by default.
+
 `context: history: full` gives the task the conversation so far, which is
 usually what you want, because the caller has already said something the task
 needs.

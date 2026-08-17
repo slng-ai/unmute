@@ -157,7 +157,7 @@ agents:
 | `instructions` | path to a Markdown prompt in the package |
 | `model` | a `models.think` entry name |
 | `voice` | a `models.speak` entry name |
-| `tools` | names this agent may call: tool files and controls |
+| `tools` | names this agent may call: loaded tool files and controls; definitions never go here |
 
 ## tasks
 
@@ -181,10 +181,16 @@ tasks:
 | Field | What it is |
 |---|---|
 | `instructions` | the task's own prompt file |
-| `tools` | the tools the task may call |
+| `tools` | names of loaded tools the task may call; definitions never go here |
 | `model` | optional override of the thinking model |
-| `result` | the typed result, field name to type or `enum` |
+| `result` | the typed result returned by the whole task, not a tool's `output` schema |
 | `context` | what the task sees, see below |
+
+**Task `result:` and tool `output:` are different contracts.** A task must
+declare `result:`, but do not copy an attached tool's `output:` into it by
+default. The tool output describes one call in `tools/<name>.yaml`; the task
+result describes what the calling agent receives after the task has made all of
+its calls.
 
 ### context
 
@@ -283,6 +289,11 @@ tools:
 
 Which `tools/<name>.yaml` files to load. Availability is decided by the `tools`
 list on each agent and task.
+
+This top-level list and every agent or task list contain names only.
+**Define each tool once.** Put its full contract in `tools/<name>.yaml`; never
+inline `description`, `input`, `output`, `inject`, or an execution block under
+a `tools:` list in `agent.yaml`.
 
 ### Tool files
 

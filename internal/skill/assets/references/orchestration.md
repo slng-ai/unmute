@@ -195,6 +195,12 @@ different from a longer prompt. Its internal turns stay out of the agent's
 context, while the completed delegate call stays there so the same request does
 not run twice.
 
+**Task `result:` and tool `output:` are different contracts.** Tool contracts
+live in `tools/<name>.yaml`; the task's `tools:` list contains names only. The
+task result describes the outcome returned after all of its tool calls. Keep
+only what the calling agent needs instead of copying an attached tool's output
+schema by default.
+
 `assign:` copies fields out of the result into package variables, so the rest of
 the call uses them without asking again. Declare each of those variables at the
 top level.
