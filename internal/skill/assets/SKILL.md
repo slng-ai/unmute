@@ -59,6 +59,28 @@ describes what the whole delegated task returns after any tool calls, so shape
 it for the calling agent instead of copying an attached tool's output schema by
 default.
 
+Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
+
+Use block-style YAML sequences in assistant-authored packages. Do not use anchors or aliases.
+This keeps each definition complete where it is read. It is an
+authoring rule for clear assistant output, not a claim that the CLI rejects
+other valid YAML.
+
+## When the package already exists
+
+Do not start by rewriting it from the brief. Work in this order:
+
+1. **Inspect the existing package.** Read `agent.yaml`, `targets.yaml`, every
+   loaded tool file, and the prompt files used by its agents and tasks.
+2. **Run `unmute validate` before editing.** Record the errors and warnings so
+   the user can separate existing problems from your changes.
+3. **Fix invalid definitions.** Make the current package legal before changing
+   its structure.
+4. **Simplify.** Remove only structure the brief does not need, and keep the
+   smallest native shape that still does the job.
+5. **Run `unmute validate` again.** Fix every error and report every warning.
+6. **Run `unmute compile`.** Regenerate `build/` from the corrected package.
+
 ## The build loop
 
 Every change goes through the same four steps. Do not skip step two.

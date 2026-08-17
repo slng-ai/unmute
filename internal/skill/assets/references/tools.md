@@ -281,6 +281,8 @@ builtin:
 
 **The registry is closed and has one row.**
 
+Builtin ids: `end_call`.
+
 | id | Effect | Default description |
 |---|---|---|
 | `end_call` | `ends_conversation` | End the call when the caller is finished or says goodbye. |

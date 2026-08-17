@@ -67,6 +67,20 @@ targets:
 If the user names their own vendor, use it. Check the table below first, and
 say what you bound.
 
+## Fields by model section
+
+| Field | Legal section |
+|---|---|
+| `provider`, `model`, `endpoint_env`, `placement`, `params`, `description` | `think`, `speak`, `listen`, `turn` |
+| `voice`, `speed` | `speak` |
+| `language` | `speak`, `listen` |
+| `temperature`, `top_p`, `top_k` | `think` |
+| `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |
+| `fallback` | `think`, `listen` |
+
+A target and vendor may narrow this further. For example, validation rejects
+`language` when that integration has no language slot.
+
 ## The think model needs `reasoning_effort`
 
 Write it on the think entry of every package you create, and keep it on one you
@@ -100,8 +114,8 @@ the same GPT-5 family, and that is the same 400 once the agent has tools.
 
 ## The vendors, per target per role
 
-SLNG leads every list it appears in. These are the `provider:` values the
-catalogue holds, and nothing else is legal.
+SLNG leads every list it appears in. These are the built-in `provider:` values
+the catalogue holds.
 
 | Target | Role | Vendors |
 |---|---|---|
@@ -116,17 +130,27 @@ Read that table carefully rather than from memory. The two targets do not hold
 the same set, and the same company can appear under a different name: LiveKit
 takes `mistralai` where Pipecat takes `mistral`.
 
+The table is not a closed list where a target has a wildcard integration:
+
+- Pipecat accepts an unlisted listen, speak, or think provider only with
+  `endpoint_env`, through its OpenAI-compatible integration.
+- LiveKit accepts an unlisted think provider through LiveKit Inference. Its
+  listen and speak rows remain closed to the values above.
+
+A wildcard is a route, not proof that a name exists. On Pipecat, use it only
+when the user supplies an OpenAI-compatible endpoint. On LiveKit, use it only
+for a provider and model the user supplied or LiveKit Inference documents.
+Never invent a provider name.
+
 **Turn detection has no vendor list.** Neither target has catalogue entries for
 the `turn` role, because turn detection is a mechanism each target ships rather
 than a vendor you bind. Pipecat runs Silero locally; LiveKit runs its own turn
 detector. Use `provider: local` or `provider: livekit`. What each one does, and
 what to listen for when it is wrong, is in `conversation.md`.
 
-If a user asks for a vendor that is not in the row above, say plainly that it is
-not available for that role on that target, and name what is. Do not invent a
-provider value, do not guess at a spelling, and do not bind it anyway and hope.
-A provider the catalogue does not hold is refused at validation with the target
-named, so inventing one only moves the failure later.
+If a user asks for an unlisted vendor and no wildcard applies, say plainly that
+it is not available for that role on that target, and name what is. Do not guess
+at a spelling or bind it anyway and hope.
 
 ## Model ids are forwarded, not checked
 
@@ -148,6 +172,8 @@ pipecat: binding reason.reasoning provider=openai model=gpt-5.6-luna (forwarded 
 
 So when you pick a model id, pick one the user named or one from that vendor's
 own documentation. Do not invent an id that looks plausible.
+
+Do not guess model ids, voice ids, or params.
 
 Two families appear in this repository's own documentation, and only two: the
 SLNG listen and speak ids, and `gpt-5.6-luna` for think. They are the ones

@@ -147,6 +147,11 @@ compiles, so it cannot quietly stop working.
     `description` reads as an instruction about when to call it, not as a
     label. Local Python handlers are fixtures until you wire them up, and the
     assistant should have said so.
+
+    Use block-style YAML sequences in assistant-authored packages. Do not use anchors or aliases.
+    This makes every list and task definition readable where it appears. It is
+    a rule for assistant-written packages, not a claim that Unmute rejects
+    other valid YAML.
   </Step>
 
   <Step title="Add your keys">
@@ -213,6 +218,25 @@ compiles, so it cannot quietly stop working.
     agent is good, and the difference is only audible.
   </Step>
 </Steps>
+
+## Change an existing package
+
+An existing package needs a different order from a new build. Ask the assistant
+to keep current behavior until it has separated invalid definitions from
+unneeded structure:
+
+1. **Inspect the existing package.** Read the agent, target, prompt, and loaded
+   tool files before changing them.
+2. **Run `unmute validate` before editing.** Save the errors and warnings as the
+   baseline.
+3. **Fix invalid definitions.** Make the package legal before changing its
+   structure.
+4. **Simplify.** Remove only structure the requested behavior does not need.
+5. **Run `unmute validate` again.** Fix every error and report every warning.
+6. **Run `unmute compile`.** Regenerate `build/` from the corrected package.
+
+This order matters. If validation and simplification happen together, you
+cannot tell whether a failure was already present or came from the rewrite.
 
 ## Ask for more
 

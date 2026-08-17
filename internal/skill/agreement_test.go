@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/scaffold"
 	"github.com/slng-ai/unmute/internal/spec"
 	"github.com/slng-ai/unmute/internal/target"
@@ -132,6 +133,126 @@ func TestToolOwnershipRuleStaysExplicit(t *testing.T) {
 	}
 }
 
+func TestTaskAuthoringContractStaysExplicit(t *testing.T) {
+	const rule = "Every task, including a task inside a group, needs a non-empty `result:` and `context.history`."
+	for name, content := range map[string]string{
+		"SKILL.md":                                      bundleFile(t, "SKILL.md"),
+		"references/orchestration.md":                   bundleFile(t, "references/orchestration.md"),
+		"docs-site/build/orchestration/tasks.mdx":       trackedFile(t, "docs-site/build/orchestration/tasks.mdx"),
+		"docs-site/build/orchestration/task-groups.mdx": trackedFile(t, "docs-site/build/orchestration/task-groups.mdx"),
+	} {
+		if !strings.Contains(content, rule) {
+			t.Errorf("%s does not state %q", name, rule)
+		}
+	}
+}
+
+func TestCapacityRequirementMatchesPublicGuide(t *testing.T) {
+	const row = "| `capacity` | for telephony or code targets | your traffic estimate |"
+	for name, content := range map[string]string{
+		"references/package.md":              bundleFile(t, "references/package.md"),
+		"docs-site/reference/agent-yaml.mdx": trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+	} {
+		if !strings.Contains(content, row) {
+			t.Errorf("%s does not state the code-target capacity requirement", name)
+		}
+	}
+}
+
+func TestExistingPackageWorkflowPrecedesWriting(t *testing.T) {
+	steps := []string{
+		"Inspect the existing package",
+		"Run `unmute validate` before editing",
+		"Fix invalid definitions",
+		"Simplify",
+		"Run `unmute validate` again",
+		"Run `unmute compile`",
+	}
+	for name, content := range map[string]string{
+		"SKILL.md":                          bundleFile(t, "SKILL.md"),
+		"docs-site/start/coding-agents.mdx": trackedFile(t, "docs-site/start/coding-agents.mdx"),
+	} {
+		position := -1
+		for _, step := range steps {
+			next := strings.Index(content[position+1:], step)
+			if next < 0 {
+				t.Errorf("%s does not name maintenance step %q", name, step)
+				break
+			}
+			position += next + 1
+		}
+	}
+}
+
+func TestAssistantAuthoredYAMLUsesBlockSequences(t *testing.T) {
+	const rule = "Use block-style YAML sequences in assistant-authored packages. Do not use anchors or aliases."
+	for name, content := range map[string]string{
+		"SKILL.md":                          bundleFile(t, "SKILL.md"),
+		"docs-site/start/coding-agents.mdx": trackedFile(t, "docs-site/start/coding-agents.mdx"),
+	} {
+		if !strings.Contains(content, rule) {
+			t.Errorf("%s does not state %q", name, rule)
+		}
+	}
+
+	flowTools := regexp.MustCompile(`(?m)^\s*tools:\s*\[`)
+	for name, content := range authorFacingModelSurfaces(t) {
+		if flowTools.MatchString(content) {
+			t.Errorf("%s uses a flow-style tools list; assistant-facing examples use block sequences", name)
+		}
+	}
+	for name, content := range map[string]string{
+		"bundle/SKILL.md":                    bundleFile(t, "SKILL.md"),
+		"bundle/references/package.md":       bundleFile(t, "references/package.md"),
+		"bundle/references/tools.md":         bundleFile(t, "references/tools.md"),
+		"bundle/references/orchestration.md": bundleFile(t, "references/orchestration.md"),
+	} {
+		if flowTools.MatchString(content) {
+			t.Errorf("%s uses a flow-style tools list; assistant-facing examples use block sequences", name)
+		}
+	}
+}
+
+func TestToolClosedValuesMatchCode(t *testing.T) {
+	values := map[string][]string{
+		"type":         {string(ir.ToolAuthBearer), string(ir.ToolAuthAPIKey)},
+		"transport":    {ir.MCPTransportSSE, ir.MCPTransportStreamableHTTP},
+		"interruption": {string(ir.ToolProviderDefault), string(ir.ToolContinue), string(ir.ToolCancel)},
+		"effect":       {string(ir.ToolReturnsData), string(ir.ToolEndsConversation)},
+	}
+	for name, content := range map[string]string{
+		"references/tools.md":                bundleFile(t, "references/tools.md"),
+		"docs-site/reference/agent-yaml.mdx": trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+	} {
+		for field, want := range values {
+			if !tableRowHasExactValues(content, field, want) {
+				t.Errorf("%s has no %q row with exactly %v", name, field, want)
+			}
+		}
+	}
+}
+
+func tableRowHasExactValues(content, field string, want []string) bool {
+	want = slices.Clone(want)
+	slices.Sort(want)
+	code := regexp.MustCompile("`([^`]+)`")
+	for _, line := range strings.Split(content, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "| `"+field+"` |") {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, match := range code.FindAllStringSubmatch(line, -1) {
+			if match[1] != field {
+				seen[match[1]] = true
+			}
+		}
+		if slices.Equal(slices.Sorted(maps.Keys(seen)), want) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestModelsReferenceMatchesCatalog holds references/models.md against the
 // provider catalogue, per target per role, and holds the one editorial rule the
 // documentation site is written under: SLNG leads every list it appears in.
@@ -193,6 +314,71 @@ func TestModelsReferenceMatchesCatalog(t *testing.T) {
 	}
 }
 
+func TestModelWildcardGuidanceMatchesCatalog(t *testing.T) {
+	cat := target.DefaultCatalog()
+	skill := bundleFile(t, "references/models.md")
+	if !strings.Contains(skill, "unlisted listen, speak, or think provider") || !strings.Contains(skill, "endpoint_env") {
+		t.Error("references/models.md does not explain the three endpoint-gated Pipecat wildcards")
+	}
+	public := map[target.Role]string{
+		target.Listen: trackedFile(t, "docs-site/models/stt.mdx"),
+		target.Speak:  trackedFile(t, "docs-site/models/tts.mdx"),
+		target.Reason: trackedFile(t, "docs-site/models/llm.mdx"),
+	}
+	for _, role := range []target.Role{target.Listen, target.Speak, target.Reason} {
+		entry, ok := cat.Lookup(target.Pipecat, role, "*")
+		if !ok || !entry.Wildcard() || !entry.RequiresEndpoint {
+			t.Fatalf("Pipecat %s wildcard contract changed: %#v, %v", role, entry, ok)
+		}
+		if content := public[role]; !strings.Contains(content, "unlisted provider") || !strings.Contains(content, "endpoint_env") {
+			t.Errorf("public model page does not explain the endpoint-gated Pipecat %s wildcard", role)
+		}
+	}
+	livekit, ok := cat.Lookup(target.LiveKit, target.Reason, "*")
+	if !ok || !livekit.Wildcard() || livekit.RequiresEndpoint {
+		t.Fatalf("LiveKit reasoning wildcard contract changed: %#v, %v", livekit, ok)
+	}
+	for name, content := range map[string]string{"references/models.md": skill, "docs-site/models/llm.mdx": public[target.Reason]} {
+		if !strings.Contains(content, "LiveKit Inference") {
+			t.Errorf("%s does not explain the LiveKit reasoning wildcard", name)
+		}
+	}
+}
+
+func TestModelFieldAndPassthroughGuidanceStaysExact(t *testing.T) {
+	rows := []string{
+		"| `voice`, `speed` | `speak` |",
+		"| `language` | `speak`, `listen` |",
+		"| `temperature`, `top_p`, `top_k` | `think` |",
+		"| `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |",
+	}
+	for name, content := range map[string]string{
+		"references/package.md":              bundleFile(t, "references/package.md"),
+		"docs-site/reference/agent-yaml.mdx": trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+	} {
+		for _, row := range rows {
+			if !strings.Contains(content, row) {
+				t.Errorf("%s is missing model-field row %q", name, row)
+			}
+		}
+		if !strings.Contains(content, "Do not guess model ids, voice ids, or params.") {
+			t.Errorf("%s does not forbid guessing provider passthrough values", name)
+		}
+	}
+}
+
+func TestThinkingAudioValuesMatchCode(t *testing.T) {
+	want := []string{string(ir.ThinkingNone), string(ir.ThinkingSubtle)}
+	for name, content := range map[string]string{
+		"references/conversation.md":         bundleFile(t, "references/conversation.md"),
+		"docs-site/reference/agent-yaml.mdx": trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+	} {
+		if !tableRowHasExactValues(content, "thinking_audio", want) {
+			t.Errorf("%s has no thinking_audio row with exactly %v", name, want)
+		}
+	}
+}
+
 // TestProvidersReferenceMatchesTargetSet holds the provider table in
 // references/package.md: the set comes from internal/target, and every row says
 // whether support means validation or generation.
@@ -233,6 +419,25 @@ func TestProvidersReferenceMatchesTargetSet(t *testing.T) {
 		if cells[1] != want {
 			t.Errorf("references/package.md says %q generates %q, want %q", provider, cells[1], want)
 		}
+	}
+
+	fieldRow := regexp.MustCompile("(?m)^\\| `provider` \\| (.*) \\|$").FindStringSubmatch(raw)
+	if fieldRow == nil {
+		t.Fatal("references/package.md has no targets provider field row")
+	}
+	fieldProviderSet := map[string]bool{}
+	for _, match := range regexp.MustCompile("`([a-z]+)`").FindAllStringSubmatch(fieldRow[1], -1) {
+		fieldProviderSet[match[1]] = true
+	}
+	fieldProviders := slices.Collect(maps.Keys(fieldProviderSet))
+	wantProviders := make([]string, 0, len(target.Providers))
+	for _, provider := range target.Providers {
+		wantProviders = append(wantProviders, string(provider))
+	}
+	slices.Sort(fieldProviders)
+	slices.Sort(wantProviders)
+	if !slices.Equal(fieldProviders, wantProviders) {
+		t.Errorf("references/package.md provider field = %v, want %v", fieldProviders, wantProviders)
 	}
 }
 

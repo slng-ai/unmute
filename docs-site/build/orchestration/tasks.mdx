@@ -37,6 +37,8 @@ tasks:
 `record_status` can only be one of three values. That is what makes a task
 different from a longer prompt: the outcome has a shape.
 
+Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
+
 **Task `result:` and tool `output:` are different contracts.** Tool contracts
 live in `tools/<name>.yaml`; the task's `tools:` list contains names only. The
 task result describes the outcome returned after all of its tool calls. Keep

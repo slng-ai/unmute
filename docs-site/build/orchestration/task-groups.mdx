@@ -12,6 +12,53 @@ appointment, finalize it.
 ## Declare the group
 
 ```yaml agent.yaml
+tools:
+  - lookup_customer
+  - check_availability
+  - book_appointment
+
+agents:
+  appointment_desk:
+    instructions: instructions.md
+    model: reasoning
+    voice: voice
+    tools:
+      - manage_appointment
+
+tasks:
+  identify_customer:
+    instructions: tasks/identify-customer.md
+    tools:
+      - lookup_customer
+    result:
+      customer_id: string
+      summary: string
+    context:
+      history: full
+
+  select_appointment:
+    instructions: tasks/select-appointment.md
+    tools:
+      - check_availability
+    result:
+      selected_slot: string
+      summary: string
+    context:
+      history: full
+
+  finalize_appointment:
+    instructions: tasks/finalize-appointment.md
+    tools:
+      - book_appointment
+    result:
+      booking_status:
+        enum:
+          - booked
+          - cancelled
+      summary: string
+    context:
+      history: full
+
 task_groups:
   appointment_flow:
     steps:
@@ -21,9 +68,17 @@ task_groups:
     context_scope: shared
     then: return
     merge: results
+
+controls:
+  manage_appointment:
+    kind: delegate
+    group: appointment_flow
+    when: The caller wants to book, reschedule, or cancel an appointment.
 ```
 
-Each name in `steps` is a task you already declared in `tasks:`.
+Each name in `steps` is a task already declared in `tasks:`.
+
+Every task, including a task inside a group, needs a non-empty `result:` and `context.history`.
 
 | Field | Values | What it does |
 |---|---|---|
@@ -34,23 +89,9 @@ Each name in `steps` is a task you already declared in `tasks:`.
 
 ## Delegate to the group
 
-Same control kind as a single task, with `group:` instead of `task:`:
-
-```yaml agent.yaml
-controls:
-  manage_appointment:
-    kind: delegate
-    group: appointment_flow
-    when: The caller wants to book, reschedule, or cancel an appointment.
-
-agents:
-  appointment_desk:
-    instructions: instructions.md
-    model: reasoning
-    voice: voice
-    tools:
-      - manage_appointment
-```
+The complete example uses the same `delegate` control as a single task, with
+`group:` instead of `task:`. The agent lists that control by name. Each member
+task lists only the loaded tools it may call.
 
 The agent has one control and no domain tools at all.
 
@@ -60,6 +101,10 @@ With `context_scope: shared`, the service the caller named in step one is still
 there in step two. Nothing is passed by hand. With `isolated`, each step starts
 from its own prompt, which is what you want when a step should not be
 influenced by what came before.
+
+`context_scope` does not replace a task's `context:` block. It decides whether
+member tasks share the group's running context. Each task still declares
+`context.history` so the task is complete wherever it is used.
 
 ## The LiveKit warning
 
