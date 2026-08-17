@@ -2139,6 +2139,10 @@ func TestUS1_DailyTransportAcceptsInboundCallFields(t *testing.T) {
 	if !regexp.MustCompile(`(?m)^from [\w.]+ import (?:[\w, ]*\b)?` + regexp.QuoteMeta(daily) + `\b`).MatchString(bot) {
 		t.Errorf("bot.py builds %s for the daily key but never imports it", daily)
 	}
+	pyproject := artifactFile(t, artifact, "pyproject.toml")
+	if !regexp.MustCompile(`pipecat-ai\[[^]]*\bdaily\b[^]]*\]`).MatchString(pyproject) {
+		t.Error("the Daily route imports its transport without installing the pipecat-ai daily extra")
+	}
 }
 
 // Research D2: the fix is scoped to the Daily route. A package that is not on it

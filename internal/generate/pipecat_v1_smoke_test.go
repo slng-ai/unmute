@@ -1704,7 +1704,7 @@ print("daily inbound params ok")
 // It also covers FR-006, the empty-body path: a session carrying no call details
 // behaves exactly as it did before, which is every browser and console run.
 func TestSmokePipecatV1DailyInboundParamsAcceptCall(t *testing.T) {
-	runPipecatSmokeScript(t, "safe_core", nil, nil, pipecatDailyInboundSmokeScript)
+	runPipecatSmokeScript(t, "daily_carrier", nil, nil, pipecatDailyInboundSmokeScript)
 }
 
 // TestSmokePipecatV1ServicesInstantiate proves the safe_core emission end to
