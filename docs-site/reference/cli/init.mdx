@@ -85,21 +85,17 @@ targets:
     sdk_language: python
 ```
 
-That target is why `.env.example` lists five names, not two:
+`.env.example` lists the two values you supply:
 
 ```text
-LIVEKIT_API_KEY=
-LIVEKIT_API_SECRET=
-LIVEKIT_URL=
 OPENAI_API_KEY=
 SLNG_API_KEY=
 ```
 
-`OPENAI_API_KEY` and `SLNG_API_KEY` are the agent's own keys, the two
-`agent.yaml` declares under `secrets:`, and the two you fill in to run locally.
-The three `LIVEKIT_*` names are the connection to a LiveKit server, which is not
-the agent's to declare: `unmute dev` runs a local server and supplies them, and
-your platform supplies them at deploy time.
+The LiveKit worker also needs `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
+`LIVEKIT_API_SECRET`, but they are not values you fill in. `unmute dev` supplies
+them locally; LiveKit Cloud or a self-hosted operator supplies them at deploy
+time. They remain in `compile-report.json` and the runtime startup checks.
 
 <Note>
   The top level `.env.example` is a starter list. After `unmute compile`,

@@ -28,11 +28,12 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		return livekitData{}, err
 	}
 	env := newEnvSet()
+	platformEnv := []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"}
 	// LiveKit Cloud creds run the worker against a real room (dev/start) and
 	// any Inference-routed role; console mode needs only the bound providers'
 	// keys (B5/B6). SLNG and any native per-vendor plugin add their own
 	// api-key env as bindings are lowered.
-	for _, e := range []string{"LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"} {
+	for _, e := range platformEnv {
 		env.add(e)
 	}
 	turnVersion, err := livekitTurnVersion(tgt.Models.Turn)
@@ -370,10 +371,12 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// so they stay in the check. This is the same derivation the Pipecat driver
 	// already used for DevEnv.
 	data.RequiredSecrets = withoutRouteEnv(data.RequiredEnv, agent, tgt, env)
-	data.AuthorEnv = authorEnv(data.RequiredEnv, tgt.Telephony)
+	supplied := platformEnv
 	if tgt.Telephony != nil {
+		supplied = append(slices.Clone(supplied), tgt.Telephony.LocalEnvironment...)
 		data.SuppliedForYou = slices.Clone(tgt.Telephony.LocalEnvironment)
 	}
+	data.AuthorEnv = authorEnv(data.RequiredEnv, supplied)
 	return data, nil
 }
 

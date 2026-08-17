@@ -270,10 +270,8 @@ func orDefault(text, fallback string) string {
 }
 
 // authorEnv is the half of a target's required environment the author actually
-// supplies. The route already declares the other half
-// (LocallySuppliedEnvironment): `unmute dev` sets those locally, LiveKit Cloud
-// injects its own connection values into a deployed agent, and its managed SIP
-// service owns the Redis no emitted Python on that driver reads.
+// supplies. The driver passes the other half: `unmute dev` sets those locally,
+// while the platform or operator sets them on deploy.
 //
 // Both drivers read this one function, which is the fix rather than a new
 // concept: the classification already existed, the LiveKit template labelled it
@@ -286,13 +284,13 @@ func orDefault(text, fallback string) string {
 // compile-report.json's required_env, in the Compose interpolation defaults, and
 // in the emitted README's carrier setup, which says where each value comes from
 // rather than only naming it.
-func authorEnv(required []string, plan *ir.TelephonyPlan) []string {
-	if plan == nil {
+func authorEnv(required, supplied []string) []string {
+	if len(supplied) == 0 {
 		return slices.Clone(required)
 	}
 	out := make([]string, 0, len(required))
 	for _, name := range required {
-		if !slices.Contains(plan.LocalEnvironment, name) {
+		if !slices.Contains(supplied, name) {
 			out = append(out, name)
 		}
 	}
