@@ -40,6 +40,8 @@ user what you chose.
 
 **Define each tool once.** Its contract and execution block live only in
 `tools/<name>.yaml`; every `tools:` list in `agent.yaml` contains names only.
+An agent or task list may also name a control. Tasks may use only
+`agent_transfer`; validation rejects `delegate` and `human_transfer` there.
 
 **Task `result:` and tool `output:` are different contracts.** Shape a task
 result for its caller instead of copying a tool output.

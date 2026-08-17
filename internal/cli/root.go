@@ -37,7 +37,7 @@ func shouldRunConsole(in, out any) bool {
 
 // supportedFrameworks is the one line that tells an author what their installed
 // unmute supports, read from the recorded window rather than restated here. The
-// range is a property of the binary, so `--version` is where it belongs: a
+// version is a property of the binary, so `--version` is where it belongs: a
 // package that fails on one unmute and passes on another differs by this line.
 func supportedFrameworks() string {
 	windows := targetcap.Windows()
@@ -56,7 +56,7 @@ func supportedFrameworks() string {
 	parts := make([]string, 0, len(windows))
 	for _, provider := range providers {
 		win := windows[provider]
-		part := fmt.Sprintf("%s %s-%s", targetcap.FrameworkPackage(provider), win.Floor, win.Ceiling)
+		part := fmt.Sprintf("%s %s", targetcap.FrameworkPackage(provider), win.Ceiling)
 		if !shared {
 			part += fmt.Sprintf(" (verified %s)", win.Verified)
 		}

@@ -96,12 +96,22 @@ task lists the loaded tools and controls it may call.
 
 The agent has one control and no domain tools at all.
 
+A member task may also list an `agent_transfer` control. Calling it ends that
+task and skips the group's remaining steps, then hands the caller directly to
+the receiving agent. Tasks cannot list `delegate` or `human_transfer` controls;
+validation rejects those shapes before generation.
+
 ## Shared context is the point
 
 With `context_scope: shared`, the service the caller named in step one is still
 there in step two. Nothing is passed by hand. With `isolated`, each step starts
 from its own prompt, which is what you want when a step should not be
 influenced by what came before.
+
+In a shared group, each exact typed result enters the shared context before the
+next task starts. The later task uses that value instead of reconstructing it
+from conversation wording. An isolated group carries no results between steps.
+The final `merge: results` map is keyed by task name and returns to the owner.
 
 `context_scope` does not replace a task's `context:` block. It decides whether
 member tasks share the group's running context. Each task still declares

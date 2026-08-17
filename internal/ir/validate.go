@@ -279,6 +279,18 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		if len(task.Result) == 0 {
 			errors = add(errors, fmt.Sprintf("task %q result must not be empty", name))
 		}
+		for _, ref := range task.Tools {
+			var kind ControlKind
+			switch agent.Controls[ref].(type) {
+			case *Delegate:
+				kind = ControlDelegate
+			case *HumanTransfer:
+				kind = ControlHumanTransfer
+			}
+			if kind != "" {
+				errors = add(errors, fmt.Sprintf("task %q references control %q with kind %q; tasks may reference agent_transfer controls only", name, ref, kind))
+			}
+		}
 		for fieldName, field := range task.Result {
 			if field.Schema == nil && !validPrimitive(field.Type) {
 				errors = add(errors, fmt.Sprintf("task %q result %q has invalid type %q", name, fieldName, field.Type))
@@ -565,13 +577,6 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		row.Errors = add(row.Errors, fmt.Sprintf("%s code target requires version", resolved.Provider))
 	}
 	validateDriverValues(resolved, provider, row)
-	// A feature whose emitted code needs a newer framework than the target
-	// declares. This used to be applied by quietly raising the emitted
-	// constraint, so the package installed a version it never named; now the
-	// declared version is the pin and the mismatch is a gated error instead.
-	if err := targetcap.CheckFeatureFloors(provider, resolved.Version, UsedFrameworkFeatures(agent)); err != nil {
-		row.Errors = add(row.Errors, err.Error())
-	}
 	if agent.Tracing != nil {
 		applyCapability(caps, targetcap.FieldTracingLangfuse, provider, row)
 	}

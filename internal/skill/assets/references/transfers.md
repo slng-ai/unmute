@@ -48,9 +48,10 @@ controls:
 
 ### The control's name goes in an agent's tool list, and that half is enforced
 
-Declaring a control is half the job. Until some agent, task, or task group lists
-its name in `tools:`, no agent can reach it, and the build refuses with the file,
-the line, and the agents you could attach it to:
+Declaring a human transfer is half the job. Until a reachable agent lists its
+name in `tools:`, no agent can reach it, and the build refuses with the file,
+the line, and the agents you could attach it to. Human transfers are not task
+controls; validation rejects `human_transfer` in a task's list.
 
 ```
 agent.yaml:47: control "send_to_billing" is declared but no agent reaches it; add it to the

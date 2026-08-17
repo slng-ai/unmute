@@ -118,6 +118,9 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.Tasks = append(data.Tasks, built)
 	}
 	data.NeedsTasks = len(data.Tasks) > 0
+	for _, task := range data.Tasks {
+		data.HasTaskTransfers = data.HasTaskTransfers || len(task.Transfers) > 0
+	}
 	data.NeedsFunctionTools = data.NeedsTasks
 	for _, a := range data.Agents {
 		if len(a.Tools) > 0 || len(a.Transfers) > 0 || len(a.HumanTransfers) > 0 || len(a.Delegates) > 0 {
@@ -213,6 +216,10 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			if len(tool.Needed) > 0 {
 				data.NeedsRefusal = true
 			}
+		}
+		for _, transfer := range t.Transfers {
+			data.NeedsLastN = data.NeedsLastN || strings.HasPrefix(transfer.CtxExpr, "_last_n(")
+			data.NeedsSummarize = data.NeedsSummarize || transfer.Summary != nil
 		}
 	}
 
@@ -595,6 +602,11 @@ func livekitServices(data livekitData) []livekitService {
 		if t.LLM != nil {
 			services = append(services, t.LLM.services()...)
 		}
+		for _, transfer := range t.Transfers {
+			if transfer.Summary != nil {
+				services = append(services, transfer.Summary.services()...)
+			}
+		}
 	}
 	return services
 }
@@ -707,37 +719,9 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 		}
 		switch c := control.(type) {
 		case *ir.AgentTransfer:
-			transfer := livekitTransfer{
-				Method: ref, When: transferWhen(c), TargetClass: pyName(c.To),
-				Announce: c.Announce, Requires: c.Requires,
-			}
-			if c.Context.History == ir.HistorySummary {
-				summarizer, err := livekitReasonLLM(agent, tgt, c.Context.Summarizer, env)
-				if err != nil {
-					return livekitAgent{}, fmt.Errorf("agent %q transfer %q summarizer: %w", name, ref, err)
-				}
-				transfer.Summary = &summarizer
-			} else {
-				transfer.CtxExpr, _ = livekitCtxExpr(c.Context.TaskContext)
-			}
-			// context.variables (D7): a subset resets the fields the transfer
-			// does not carry; `all` carries the userdata untouched.
-			if !c.Context.Variables.All {
-				carried := map[string]bool{}
-				for _, n := range c.Context.Variables.Names {
-					carried[n] = true
-				}
-				for _, vname := range sortedVarNames(agent) {
-					if carried[vname] {
-						continue
-					}
-					v := agent.Variables[vname]
-					def := "None"
-					if v.Default != nil {
-						def = pyLiteral(v.Default)
-					}
-					transfer.ResetVars = append(transfer.ResetVars, livekitVar{Name: vname, PyType: pyType(v.Type), Default: def})
-				}
+			transfer, err := buildLiveKitTransfer(agent, tgt, ref, c, env)
+			if err != nil {
+				return livekitAgent{}, fmt.Errorf("agent %q: %w", name, err)
 			}
 			built.Transfers = append(built.Transfers, transfer)
 		case *ir.HumanTransfer:
@@ -770,6 +754,46 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 		}
 	}
 	return built, nil
+}
+
+// buildLiveKitTransfer is shared by agent and task tool surfaces. Both carry
+// the same conversation shape and shared session userdata into the target.
+func buildLiveKitTransfer(agent *ir.Agent, tgt ir.Target, ref string, control *ir.AgentTransfer, env *envSet) (livekitTransfer, error) {
+	transfer := livekitTransfer{
+		Method: ref, When: transferWhen(control), TargetClass: pyName(control.To),
+		Announce: control.Announce, Requires: control.Requires,
+	}
+	if control.Context.History == ir.HistorySummary {
+		summarizer, err := livekitReasonLLM(agent, tgt, control.Context.Summarizer, env)
+		if err != nil {
+			return livekitTransfer{}, fmt.Errorf("transfer %q summarizer: %w", ref, err)
+		}
+		transfer.Summary = &summarizer
+	} else {
+		transfer.CtxExpr, _ = livekitCtxExpr(control.Context.TaskContext)
+	}
+	// context.variables (D7): a subset resets the fields the transfer does not
+	// carry; `all` leaves the shared session userdata untouched.
+	if !control.Context.Variables.All {
+		carried := map[string]bool{}
+		for _, name := range control.Context.Variables.Names {
+			carried[name] = true
+		}
+		for _, name := range sortedVarNames(agent) {
+			if carried[name] {
+				continue
+			}
+			variable := agent.Variables[name]
+			def := "None"
+			if variable.Default != nil {
+				def = pyLiteral(variable.Default)
+			}
+			transfer.ResetVars = append(transfer.ResetVars, livekitVar{
+				Name: name, PyType: pyType(variable.Type), Default: def,
+			})
+		}
+	}
+	return transfer, nil
 }
 
 // appendMCPEnv adds the env names every mcp mount reads, in mount order,
@@ -837,7 +861,10 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 		// A single task always returns to the owner (SCHEMA 4.7); the AgentTask
 		// hands back the typed result only (C4/N13). The finality guidance stops
 		// the owner LLM re-running the finished flow (B1/V1).
-		return livekitDelegate{Method: ref, When: delegateWhen(c) + delegateReturnFinality, Task: single, Then: "return"}, nil
+		return livekitDelegate{
+			Method: ref, When: delegateWhen(c) + delegateReturnFinality, Task: single,
+			Then: "return", CanTaskTransfer: livekitTaskCanTransfer(agent, task),
+		}, nil
 	}
 	group, ok := agent.TaskGroups[c.Group]
 	if !ok {
@@ -867,8 +894,18 @@ func buildLiveKitDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Dele
 	}
 	for _, step := range group.Steps {
 		delegate.Steps = append(delegate.Steps, livekitStep{Class: pyName(step), ID: step, Desc: humanize(step)})
+		delegate.CanTaskTransfer = delegate.CanTaskTransfer || livekitTaskCanTransfer(agent, agent.Tasks[step])
 	}
 	return delegate, nil
+}
+
+func livekitTaskCanTransfer(agent *ir.Agent, task ir.Task) bool {
+	for _, ref := range task.Tools {
+		if _, ok := agent.Controls[ref].(*ir.AgentTransfer); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *envSet) (livekitTask, error) {
@@ -900,7 +937,20 @@ func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task,
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
 		if !ok {
-			return livekitTask{}, fmt.Errorf("task %q references unknown tool %q", name, ref)
+			control, exists := agent.Controls[ref]
+			if !exists {
+				return livekitTask{}, fmt.Errorf("task %q references unknown tool/control %q", name, ref)
+			}
+			transfer, supported := control.(*ir.AgentTransfer)
+			if !supported {
+				return livekitTask{}, fmt.Errorf("task %q references control %q: tasks support agent_transfer controls only", name, ref)
+			}
+			lowered, err := buildLiveKitTransfer(agent, tgt, ref, transfer, env)
+			if err != nil {
+				return livekitTask{}, fmt.Errorf("task %q: %w", name, err)
+			}
+			built.Transfers = append(built.Transfers, lowered)
+			continue
 		}
 		if tool.Execution == ir.ToolMCP {
 			built.MCPServers = append(built.MCPServers, livekitMCPSource(ref, tool, env))
@@ -1050,8 +1100,7 @@ func livekitCtxExpr(c ir.TaskContext) (expr string, needsLastN bool) {
 		return fmt.Sprintf("_last_n(self.chat_ctx, %d)", c.MaxMessages), true
 	default: // full
 		// exclude_handoff drops stale AgentHandoff markers from the carried
-		// history (upstream recipe idiom); exclude_config_update is intentionally
-		// omitted to stay within the >=1.5 floor (dl§C6).
+		// history (upstream recipe idiom).
 		if excludeCalls {
 			return "self.chat_ctx.copy(exclude_instructions=True, exclude_function_call=True, exclude_handoff=True)", false
 		}
@@ -1271,10 +1320,6 @@ func livekitDeps(data livekitData) []string {
 		extras["mcp"] = true // without the extra the emitted import fails (N40)
 	}
 	// The author's declared version is the pin, exactly as it is on Pipecat.
-	// This used to be a derived constraint that a warm transfer or an MCP source
-	// silently raised, which meant a package could declare one version and
-	// install another without being told. Those floors are gated at validate now
-	// (target.CheckFeatureFloors), so what a target declares is what installs.
 	constraint := "==" + data.Version
 	pkg := targetcap.FrameworkPackage(targetcap.LiveKit)
 	base := pkg + constraint

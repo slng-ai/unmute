@@ -170,8 +170,8 @@ asyncio.run(main())
 `
 
 // pipecatInlineSmokeScript proves the inline single-agent emission (F3) against
-// real pipecat-ai 1.5.0 + pipecat-slng. Besides construction, it invokes the
-// real DirectFunctionWrapper with the malformed argument shape seen in the
+// real pinned pipecat-ai 1.7.0 + pipecat-slng. Besides construction, it invokes
+// the real DirectFunctionWrapper with the malformed argument shape seen in the
 // live call and forces a local handler failure before result_callback.
 const pipecatInlineSmokeScript = `"""Smoke check: the inline single-agent bot imports and constructs, no bus."""
 import asyncio
@@ -700,6 +700,346 @@ async def main() -> None:
 asyncio.run(main())
 `
 
+const pipecatTaskTransferSmokeScript = `"""Smoke check: task transfer obeys Pipecat 1.7 Flow termination."""
+import asyncio
+import json
+import os
+import subprocess
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot  # noqa: E402
+from pipecat.bus import AsyncQueueBus, BusActivateWorkerMessage  # noqa: E402
+from pipecat.flows import FlowManager, NO_RESPONSE  # noqa: E402
+from pipecat.frames.frames import LLMSetToolsFrame  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair  # noqa: E402
+from pipecat.services.llm_service import FunctionCallParams  # noqa: E402
+from pipecat.utils.asyncio.task_manager import TaskManager  # noqa: E402
+
+
+async def main() -> None:
+    context = LLMContext()
+    owner = bot.IntakeAgent(
+        state=bot.State(customer_id=None, verified=False),
+        context=context,
+        call_context=None,
+    )
+    original_queue_frame = owner.queue_frame
+    original_queue_frames = owner.queue_frames
+    original_flush_pipeline = owner.flush_pipeline
+    activation_frames = []
+
+    async def capture_activation_frame(frame, *args, **kwargs):
+        activation_frames.append(frame)
+
+    owner.queue_frame = capture_activation_frame
+    owner.state.customer_id = "prompt-smoke"
+    await owner.on_activated({
+        "messages": [{"role": "developer", "content": "Continue."}],
+        "run_llm": True,
+    })
+    assert [type(frame).__name__ for frame in activation_frames] == [
+        "LLMUpdateSettingsFrame", "LLMSetToolsFrame", "LLMMessagesAppendFrame",
+    ], "owner prompt must be restored before activation tools and messages"
+    assert activation_frames[0].delta.system_instruction.endswith(
+        "Current customer: prompt-smoke."
+    ), "templated owner prompt did not render through self.state"
+    owner.queue_frame = original_queue_frame
+    owner.state.customer_id = None
+    flow = FlowManager(
+        llm=owner.llm,
+        context_aggregator=LLMContextAggregatorPair(context),
+        worker=owner,
+    )
+    owner_tools = context.tools
+    flow_frames = []
+
+    async def capture_flow_frames(frames, *args, **kwargs):
+        flow_frames.extend(frames)
+
+    owner.queue_frames = capture_flow_frames
+    await flow.initialize(owner._run_verify_node_verify())
+    owner.queue_frames = original_queue_frames
+    task_tools = next(
+        frame.tools for frame in flow_frames if isinstance(frame, LLMSetToolsFrame)
+    )
+    registered = task_tools.standard_tools
+    handlers = {function.name: function.handler for function in registered}
+    owner_messages = [{"role": "user", "content": "I need help."}]
+    task_messages = [
+        {"role": "developer", "content": "Begin this step."},
+        {"role": "user", "content": "This is really about billing."},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{
+                "id": "call-smoke",
+                "type": "function",
+                "function": {"name": "lookup_customer", "arguments": "{}"},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "call-smoke", "content": "found"},
+        {"role": "assistant", "content": "I can connect you."},
+    ]
+
+    def reset_task_context() -> None:
+        context.set_messages(owner_messages + task_messages)
+        context.set_tools(task_tools)
+        owner._run_verify_snapshot = ([dict(message) for message in owner_messages], owner_tools)
+        owner._run_verify_results = {}
+        owner._run_verify_active_step = "verify"
+
+    reset_task_context()
+    refused, next_node = await owner._run_verify_transfer_verify_to_billing({}, flow)
+    assert "still need" in refused["refused"]
+    assert next_node is None, "recoverable refusal must keep the task LLM active"
+    assert owner._run_verify_active_step == "verify"
+
+    announcements = []
+
+    async def announce(text):
+        announcements.append(text)
+
+    async def fail_activation(*args, **kwargs):
+        raise RuntimeError("activation failed")
+
+    owner._announce_handoff = announce
+    owner.activate_worker = fail_activation
+    owner.state.customer_id = "cus-smoke"
+    failed_transfer_frames = []
+
+    async def capture_failed_transfer_frame(frame, *args, **kwargs):
+        failed_transfer_frames.append(frame)
+
+    owner.queue_frame = capture_failed_transfer_frame
+    try:
+        await owner._run_verify_transfer_verify_to_billing({}, flow)
+    except RuntimeError as error:
+        assert str(error) == "activation failed"
+    else:
+        raise AssertionError("activation failure was swallowed")
+    assert owner._run_verify_active_step == "verify"
+    assert not failed_transfer_frames, "failed task handoff changed the active task prompt"
+    assert context.get_messages() == owner_messages + task_messages
+    assert context.tools is task_tools, "failed transfer did not restore the active Flow tools"
+    owner.queue_frame = original_queue_frame
+
+    activations = []
+
+    async def activate(name, *, args, deactivate_self):
+        activations.append((name, args, deactivate_self))
+
+    owner.activate_worker = activate
+    callbacks = []
+
+    async def result_callback(result, **kwargs):
+        callbacks.append((result, kwargs.get("properties")))
+
+    transition = handlers["to_billing"]
+    assert transition is not None
+    await transition(FunctionCallParams(
+        function_name="to_billing",
+        tool_call_id="transfer-smoke",
+        arguments={},
+        llm=owner.llm,
+        pipeline_worker=owner,
+        context=context,
+        result_callback=result_callback,
+    ))
+    assert callbacks[-1][0] == {"transferred": True}
+    assert callbacks[-1][1].run_llm is False, "NO_RESPONSE must suppress the source LLM"
+    assert len(activations) == 1
+    assert [message["role"] for message in context.get_messages()] == [
+        "user", "user", "assistant", "tool", "assistant",
+    ], "history: full lost task records or retained Flow developer controls"
+
+    already, next_node = await owner._run_verify_transfer_verify_to_billing({}, flow)
+    assert already == {"status": "already handled"}
+    assert next_node is NO_RESPONSE
+    assert len(activations) == 1, "a completed transfer ran twice"
+
+    callbacks.clear()
+    stale = handlers["finish_run_verify_verify"]
+    assert stale is not None
+    await stale(FunctionCallParams(
+        function_name="finish_run_verify_verify",
+        tool_call_id="finish-smoke",
+        arguments={"verified": True},
+        llm=owner.llm,
+        pipeline_worker=owner,
+        context=context,
+        result_callback=result_callback,
+    ))
+    assert callbacks[-1][0] == {"status": "already handled"}
+    assert callbacks[-1][1].run_llm is False
+    assert "verify" not in owner._run_verify_results
+
+    # The generated topology uses Pipecat's local AsyncQueueBus. Its activation
+    # dispatch must not overtake the Flow wrapper's result callback.
+    bus_events = []
+    activation_dispatched = asyncio.Event()
+
+    class BillingSubscriber:
+        name = "billing"
+
+        async def on_bus_message(self, message):
+            if isinstance(message, BusActivateWorkerMessage):
+                bus_events.append("activation-dispatched")
+                activation_dispatched.set()
+
+    bus = AsyncQueueBus()
+    await bus.setup(TaskManager())
+    await bus.subscribe(BillingSubscriber())
+    await bus.start()
+    try:
+        reset_task_context()
+
+        async def activate_on_bus(name, *, args, deactivate_self):
+            await bus.send(BusActivateWorkerMessage(
+                source=owner.name,
+                target=name,
+                args=args.to_dict(),
+            ))
+            bus_events.append("activation-enqueued")
+
+        async def bus_result_callback(result, **kwargs):
+            assert result == {"transferred": True}
+            assert kwargs["properties"].run_llm is False
+            bus_events.append("result-callback")
+
+        owner.activate_worker = activate_on_bus
+        await transition(FunctionCallParams(
+            function_name="to_billing",
+            tool_call_id="bus-order-smoke",
+            arguments={},
+            llm=owner.llm,
+            pipeline_worker=owner,
+            context=context,
+            result_callback=bus_result_callback,
+        ))
+        bus_events.append("wrapper-returned")
+        assert bus_events == [
+            "activation-enqueued", "result-callback", "wrapper-returned",
+        ], "local activation dispatched before the Flow result was committed"
+        await asyncio.wait_for(activation_dispatched.wait(), timeout=1)
+        assert bus_events[-1] == "activation-dispatched"
+    finally:
+        await bus.stop()
+
+    # Reverse the terminal-call order. Finishing first owns this step and makes
+    # a same-batch transfer stale; transfer-first above made finish stale.
+    reset_task_context()
+    owner.activate_worker = activate
+    callbacks.clear()
+    exact_result = {
+        "verified": True,
+        "label": "customer-smoke",
+    }
+    await handlers["finish_run_verify_verify"](FunctionCallParams(
+        function_name="finish_run_verify_verify",
+        tool_call_id="exact-result-smoke",
+        arguments=exact_result,
+        llm=owner.llm,
+        pipeline_worker=owner,
+        context=context,
+        result_callback=result_callback,
+    ))
+    expected = {"status": "ok", "result": exact_result}
+    assert callbacks[-1][0] == expected, "registered Flow handler changed the typed result"
+    assert callbacks[-1][1].run_llm is False, "next task must own the next LLM turn"
+    assert callbacks[-1][1].on_context_updated is not None
+    assert owner._run_verify_results["verify"] == exact_result
+    assert owner._run_verify_active_step == "complete"
+
+    callbacks.clear()
+    await transition(FunctionCallParams(
+        function_name="to_billing",
+        tool_call_id="stale-transfer-smoke",
+        arguments={},
+        llm=owner.llm,
+        pipeline_worker=owner,
+        context=context,
+        result_callback=result_callback,
+    ))
+    assert callbacks[-1][0] == {"status": "already handled"}
+    assert callbacks[-1][1].run_llm is False
+    assert len(activations) == 1, "a stale transfer activated after finish claimed the step"
+
+    # A failed final completion restores the task prompt and releases its claim
+    # only after messages, tools, and prompt are safe for a model retry.
+    prompt_restores = []
+    flush_count = 0
+
+    async def capture_prompt_restore(frame, *args, **kwargs):
+        prompt_restores.append(frame.delta.system_instruction)
+
+    async def fail_first_flush():
+        nonlocal flush_count
+        flush_count += 1
+        if flush_count == 1:
+            raise RuntimeError("role restore failed")
+
+    owner.queue_frame = capture_prompt_restore
+    owner.flush_pipeline = fail_first_flush
+    before_final_messages = [dict(message) for message in context.get_messages()]
+    before_final_tools = context.tools
+    try:
+        await owner._run_verify_finish_complete({"complete": True}, flow)
+    except RuntimeError as error:
+        assert str(error) == "role restore failed"
+    else:
+        raise AssertionError("final completion failure was swallowed")
+    assert owner._run_verify_active_step == "complete"
+    assert "complete" not in owner._run_verify_results
+    assert context.get_messages() == before_final_messages
+    assert context.tools is before_final_tools
+    assert prompt_restores[0].endswith("Current customer: cus-smoke.")
+    assert prompt_restores[1] == "Complete verification."
+
+    prompt_restores.clear()
+    flush_count = 0
+
+    async def fail_restore_and_rollback():
+        nonlocal flush_count
+        flush_count += 1
+        if flush_count == 1:
+            raise RuntimeError("owner prompt restore failed")
+        raise RuntimeError("task prompt rollback failed")
+
+    owner.flush_pipeline = fail_restore_and_rollback
+    try:
+        await owner._run_verify_finish_complete({"complete": True}, flow)
+    except RuntimeError as error:
+        assert str(error) == "owner prompt restore failed"
+        assert str(error.__cause__) == "task prompt rollback failed"
+    else:
+        raise AssertionError("rollback failure hid the original completion error")
+    assert owner._run_verify_active_step == "complete"
+    assert "complete" not in owner._run_verify_results
+
+    prompt_restores.clear()
+
+    async def flush_ok():
+        pass
+
+    owner.flush_pipeline = flush_ok
+    completed, next_node = await owner._run_verify_finish_complete({"complete": True}, flow)
+    assert completed == {"status": "ok"}
+    assert next_node is None
+    assert owner._run_verify_active_step is None
+    assert owner._run_verify_results["complete"] == {"complete": True}
+    assert prompt_restores[0].endswith("Current customer: cus-smoke.")
+    owner.queue_frame = original_queue_frame
+    owner.flush_pipeline = original_flush_pipeline
+    subprocess.run(["ruff", "check", "bot.py"], check=True)
+    print("task transfer smoke ok")
+
+
+asyncio.run(main())
+`
+
 const pipecatStaticCheckScript = `"""Smoke check: the generated project passes ty."""
 import subprocess
 
@@ -1099,7 +1439,7 @@ func TestSmokePipecatRegionalInfrastructureInstantiates(t *testing.T) {
 }
 
 // TestSmokePipecatV1TaskGroupsInstantiate runs the generated FlowManager on
-// Pipecat 1.5.0 and observes task-role replacement, owner-role restoration,
+// pinned Pipecat 1.7.0 and observes task-role replacement, owner-role restoration,
 // and transfer activation (V28).
 func TestSmokePipecatV1TaskGroupsInstantiate(t *testing.T) {
 	runPipecatSmokeScript(t, "task-groups", nil, func(agent *ir.Agent) {
@@ -1112,6 +1452,16 @@ func TestSmokePipecatV1TaskGroupsInstantiate(t *testing.T) {
 		group.ThenTarget = "aftercare"
 		agent.TaskGroups["appointment_flow"] = group
 	}, pipecatTaskRoleSmokeScript)
+}
+
+// TestSmokePipecatV1TaskTransferStopsFlow checks the generated handler against
+// the supported SDK's real NO_RESPONSE transition semantics.
+func TestSmokePipecatV1TaskTransferStopsFlow(t *testing.T) {
+	runPipecatSmokeScript(t, "safe_core", func(target *ir.Target) {
+		target.Version = "1.7.0"
+	}, func(agent *ir.Agent) {
+		addPipecatTaskTransferFixture(agent)
+	}, pipecatTaskTransferSmokeScript)
 }
 
 // TestSmokePipecatV1MultiVendorInstantiates covers the remaining official

@@ -660,6 +660,139 @@ func TestV22PipecatToolCallsAreTraced(t *testing.T) {
 	}
 }
 
+func addPipecatTaskTransferFixture(agent *ir.Agent) {
+	agent.Tasks["verify"] = ir.Task{
+		Instructions: "Verify the caller, unless they need billing help.",
+		Tools:        []string{"to_billing"},
+		Result: map[string]ir.ResultField{
+			"verified": {Type: ir.PrimitiveBoolean},
+			"label":    {Type: ir.PrimitiveString},
+		},
+		Context: ir.TaskContext{History: ir.HistoryFull},
+	}
+	agent.Tasks["complete"] = ir.Task{
+		Instructions: "Complete verification.",
+		Result:       map[string]ir.ResultField{"complete": {Type: ir.PrimitiveBoolean}},
+		Context:      ir.TaskContext{History: ir.HistoryFull},
+	}
+	agent.TaskGroups["verification"] = ir.TaskGroup{
+		Steps: []string{"verify", "complete"}, ContextScope: ir.ContextShared,
+		Then: ir.GroupReturn, Merge: ir.GroupMergeResults,
+	}
+	agent.Controls["run_verify"] = &ir.Delegate{
+		Kind: ir.ControlDelegate, Group: "verification", When: "Verify the caller.",
+	}
+	transfer := agent.Controls["to_billing"].(*ir.AgentTransfer)
+	transfer.Requires = []string{"customer_id"}
+	transfer.Announce = "I’ll connect you with billing now."
+	intake := agent.Agents["intake"]
+	intake.Instructions += "\nCurrent customer: {{customer_id}}."
+	intake.Tools = append(intake.Tools, "run_verify")
+	agent.Agents["intake"] = intake
+}
+
+// A task-scoped transfer is terminal for the current Flow. The pinned Pipecat
+// SDK treats NO_RESPONSE as stay-on-node without another LLM turn; None would
+// re-run the source node and allow the remaining group steps to continue.
+func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addPipecatTaskTransferFixture(agent)
+	verify := agent.Tasks["verify"]
+	verify.Result["details"] = ir.ResultField{Schema: map[string]any{"type": "object"}}
+	agent.Tasks["verify"] = verify
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate task transfer: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"from pipecat.flows import FlowManager, FlowsFunctionSchema, NodeConfig, NO_RESPONSE",
+		`name="to_billing"`,
+		"handler=self._run_verify_transfer_verify_to_billing",
+		"async def _run_verify_transfer_verify_to_billing(self, args, flow_manager):",
+		`self._run_verify_active_step = "verify"`,
+		`missing = [name for name in ["customer_id"]`,
+		`if self._run_verify_active_step != "verify":`,
+		`return {"status": "already handled"}, NO_RESPONSE`,
+		`async def on_activated(self, args) -> None:`,
+		`delta=LLMSettings(system_instruction=_render(INTAKE_PROMPT, self.state))`,
+		`task_start = len(messages) if flow_messages[:len(messages)] == messages else 0`,
+		`if message.get("role") in {"user", "assistant", "tool"}`,
+		`return {"transferred": True}, NO_RESPONSE`,
+		`return {"status": "ok", "result": self._run_verify_results["verify"]}, self._run_verify_node_complete()`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing task-transfer invariant %q", want)
+		}
+	}
+
+	transferAt := strings.Index(bot, "async def _run_verify_transfer_verify_to_billing")
+	finishAt := strings.Index(bot, "async def _run_verify_finish_verify")
+	nextFinishAt := strings.Index(bot, "async def _run_verify_finish_complete")
+	if transferAt < 0 || finishAt < transferAt || nextFinishAt < finishAt {
+		t.Fatalf("task transfer/finish chain missing: transfer=%d finish=%d next=%d", transferAt, finishAt, nextFinishAt)
+	}
+	transferBody := bot[transferAt:finishAt]
+	requiresAt := strings.Index(transferBody, "missing =")
+	stepClaimAt := strings.Index(transferBody, "self._run_verify_active_step = None")
+	tryAt := strings.Index(transferBody, "try:")
+	announceAt := strings.Index(transferBody, "await self._announce_handoff")
+	activateAt := strings.Index(transferBody, "await self.activate_worker")
+	releaseAt := strings.Index(transferBody, `self._run_verify_active_step = "verify"`)
+	restoreMessagesAt, restoreToolsAt := -1, -1
+	if releaseAt >= 0 {
+		restoreMessagesAt = strings.Index(transferBody[releaseAt:], "self.context.set_messages(flow_messages)")
+		restoreToolsAt = strings.Index(transferBody[releaseAt:], "self.context.set_tools(flow_tools)")
+	}
+	if requiresAt < 0 || stepClaimAt < requiresAt || tryAt < stepClaimAt || announceAt < tryAt || activateAt < announceAt || releaseAt < activateAt || restoreMessagesAt < 0 || restoreToolsAt < restoreMessagesAt {
+		t.Fatalf("task transfer must refuse, claim, attempt, then restore and release on failure: requires=%d step_claim=%d try=%d announce=%d activate=%d release=%d restore_messages=%d restore_tools=%d\n%s", requiresAt, stepClaimAt, tryAt, announceAt, activateAt, releaseAt, restoreMessagesAt, restoreToolsAt, transferBody)
+	}
+	if !strings.Contains(transferBody[:stepClaimAt], `return {"refused": f"Cannot transfer yet; still need: {', '.join(missing)}"}, None`) {
+		t.Error("a recoverable requires refusal must stay on the task and let its LLM respond")
+	}
+	finishBody := bot[finishAt:nextFinishAt]
+	stepGuardAt := strings.Index(finishBody, `if self._run_verify_active_step != "verify":`)
+	advanceAt := strings.Index(finishBody, `self._run_verify_active_step = "complete"`)
+	nextAt := strings.Index(finishBody, "self._run_verify_node_complete()")
+	if stepGuardAt < 0 || advanceAt < stepGuardAt || nextAt < advanceAt {
+		t.Fatalf("finish must reject stale calls and claim the next step before building its transition:\n%s", finishBody)
+	}
+	if !strings.Contains(finishBody[stepGuardAt:nextAt], `return {"status": "already handled"}, NO_RESPONSE`) {
+		t.Error("a stale finish call can still advance to the next task")
+	}
+
+	finalBody := bot[nextFinishAt:]
+	for _, want := range []string{
+		`return await self._run_verify_complete_complete()`,
+		`async def _run_verify_complete_complete(self):`,
+		`self._run_verify_active_step = "complete"`,
+		`self._run_verify_results.pop("complete", None)`,
+		`delta=LLMSettings(system_instruction="Complete verification.")`,
+	} {
+		if !strings.Contains(finalBody, want) {
+			t.Errorf("final task rollback missing %q", want)
+		}
+	}
+
+	if _, err := exec.LookPath("python3"); err == nil {
+		path := filepath.Join(t.TempDir(), "bot.py")
+		if err := os.WriteFile(path, []byte(bot), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("python3", "-m", "py_compile", path).CombinedOutput(); err != nil {
+			t.Fatalf("task-transfer bot.py is not valid Python:\n%s", out)
+		}
+	}
+}
+
 // TestPipecatV1TasksGolden exercises tasks, task groups, and delegates that
 // safe_core omits, including the task-only role boundary (V26).
 func TestPipecatV1TasksGolden(t *testing.T) {
@@ -729,8 +862,15 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	if strings.Contains(bot, `task_messages=[{"role": "system"`) {
 		t.Error("bot.py still sends task instructions as a second system message")
 	}
-	if got := strings.Count(bot, "await self.queue_frame(LLMUpdateSettingsFrame("); got != 2 {
-		t.Errorf("bot.py restores the owner role %d times, want 2", got)
+	activation := strings.Index(bot, "async def on_activated(self, args) -> None:")
+	if activation < 0 {
+		t.Fatal("bot.py missing the flow owner's activation hook")
+	}
+	activationBody := bot[activation:]
+	restoreOnEntry := strings.Index(activationBody, "await self.queue_frame(LLMUpdateSettingsFrame(")
+	activateBase := strings.Index(activationBody, "await super().on_activated(args)")
+	if restoreOnEntry < 0 || activateBase < restoreOnEntry {
+		t.Error("flow owner must restore its agent role before base activation installs tools and messages")
 	}
 	if got := strings.Count(bot, "await self.flush_pipeline()"); got != 4 {
 		t.Errorf("bot.py drains delegate results and owner role updates %d times, want 4", got)
@@ -750,8 +890,8 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		t.Fatalf("pipecat v1 tasks golden differs; run: go test ./internal/generate -run TestPipecatV1TasksGolden -update-pipecat")
 	}
 
-	// The restore is shared by return and transfer, while end needs neither the
-	// restore nor its imports (V12, V28).
+	// Return and transfer restore the owner's role before continuing. End goes
+	// straight to its terminal node; its only role restore is the re-entry hook.
 	delete(agent.Controls, "run_collect")
 	intake = agent.Agents["intake"]
 	intake.Tools = slices.DeleteFunc(intake.Tools, func(name string) bool { return name == "run_collect" })
@@ -785,11 +925,6 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 		t.Fatalf("generate end-only task group: %v", err)
 	}
 	endBot := artifactFile(t, endArtifact, "bot.py")
-	for _, forbidden := range []string{"LLMUpdateSettingsFrame", "LLMSettings"} {
-		if strings.Contains(endBot, forbidden) {
-			t.Errorf("end-only task group has unused restoration import %q", forbidden)
-		}
-	}
 	// then: end lowers to the Flows end_conversation post-action on a terminal
 	// node, not a raw EndFrame in the finish handler (V4/B2, dp§V2 doc-wins).
 	if !strings.Contains(endBot, `post_actions=[{"type": "end_conversation"}]`) {
@@ -808,6 +943,9 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	}
 	if strings.Contains(endFinishBody, "queue_frame(EndFrame())") {
 		t.Error("then: end finish handler still queues a raw EndFrame (B2)")
+	}
+	if strings.Contains(endFinishBody, "LLMUpdateSettingsFrame") {
+		t.Error("then: end finish handler restores a role that cannot run again")
 	}
 	if !strings.Contains(endFinishBody, "self._run_triage_end_node()") {
 		t.Error("then: end finish handler must return the terminal end node")
@@ -1891,18 +2029,18 @@ func TestPipecatListenAssemblyAI(t *testing.T) {
 	}
 }
 
-// TestCheckPipecatVersion pins the template-compatible range. The workers model
-// + Flows-in-core landed in 1.5.0 (the first 1.x release), so anything below is
-// rejected at compile time — this is the guard that the bogus `1.0.3` pin
-// (which never existed on PyPI) slipped past before.
+// TestCheckPipecatVersion pins the one SDK version exercised by the release
+// matrix; compatibility with untested versions is not implied.
 func TestCheckPipecatVersion(t *testing.T) {
 	for _, tc := range []struct {
 		version string
 		ok      bool
 	}{
-		{"1.5.0", true},
-		{"1.5.3", true},
-		{"1.6.0", true},
+		{"1.5.0", false},
+		{"1.5.3", false},
+		{"1.6.0", false},
+		{"1.6.9", false},
+		{"1.7.0", true},
 		{"1.0.3", false}, // never existed on PyPI; workers API not present
 		{"1.4.9", false},
 		{"1", false}, // too vague / pre-1.5

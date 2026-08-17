@@ -1,7 +1,7 @@
 package target
 
 // Pipecat entries. Contract: the pipecat_v1 driver templates, pipecat-ai
-// >=1.5.0 <2.0. Official services ship as pipecat-ai extras and take model/
+// ==1.7.0. Official services ship as pipecat-ai extras and take model/
 // voice/params nested in Class.Settings(...) (flat forms deprecated since
 // v0.0.105; verified against the per-service docs 2026-07-15). The SLNG
 // plugin is a standalone package with flat kwargs (verified against

@@ -42,6 +42,16 @@ model receives one safe failure result. It must not claim success from either.
 When a task returns, its internal turns stay out of the owner's conversation.
 The completed delegate call stays in that conversation with the typed result,
 so the same caller request does not start the task again.
+
+A task may list an `agent_transfer` control in its `tools:`. Calling it ends
+the active task and any remaining task-group steps, then hands the caller
+directly to the receiving agent. It does not return through the task owner.
+`delegate` and `human_transfer` controls are not legal inside a task; validation
+rejects them before this project is generated.
+
+In a group with `context_scope: shared`, each exact typed result enters the
+shared context before the next task starts. An isolated group carries no
+results between steps. The final `merge: results` map is keyed by task name.
 {{- end}}
 {{if .Telephony}}
 This project uses the

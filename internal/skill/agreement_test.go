@@ -147,6 +147,39 @@ func TestTaskAuthoringContractStaysExplicit(t *testing.T) {
 	}
 }
 
+func TestTaskTransferAndSharedResultDocsStayAligned(t *testing.T) {
+	transferDocs := map[string]string{
+		"references/orchestration.md":                      bundleFile(t, "references/orchestration.md"),
+		"docs-site/build/orchestration/tasks.mdx":          trackedFile(t, "docs-site/build/orchestration/tasks.mdx"),
+		"docs-site/build/orchestration/task-groups.mdx":    trackedFile(t, "docs-site/build/orchestration/task-groups.mdx"),
+		"docs-site/build/orchestration/handoffs.mdx":       trackedFile(t, "docs-site/build/orchestration/handoffs.mdx"),
+		"internal/generate/templates/livekit_v1/README.md": trackedFile(t, "internal/generate/templates/livekit_v1/README.md.tmpl"),
+		"internal/generate/templates/pipecat_v1/README.md": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
+	}
+	for name, content := range transferDocs {
+		if !strings.Contains(content, "agent_transfer") {
+			t.Errorf("%s does not document task-scoped agent_transfer", name)
+		}
+	}
+	for name, content := range map[string]string{
+		"references/orchestration.md":                      transferDocs["references/orchestration.md"],
+		"docs-site/build/orchestration/task-groups.mdx":    transferDocs["docs-site/build/orchestration/task-groups.mdx"],
+		"examples/task-groups/README.md":                   trackedFile(t, "examples/task-groups/README.md"),
+		"internal/generate/templates/livekit_v1/README.md": transferDocs["internal/generate/templates/livekit_v1/README.md"],
+		"internal/generate/templates/pipecat_v1/README.md": transferDocs["internal/generate/templates/pipecat_v1/README.md"],
+	} {
+		for rule, pattern := range map[string]*regexp.Regexp{
+			"intermediate result timing": regexp.MustCompile(`exact\s+typed\s+result\s+enters\s+(?:the\s+)?shared\s+context\s+before\s+the\s+next\s+task\s+starts`),
+			"final result map":           regexp.MustCompile("final\\s+`merge: results`\\s+map\\s+is\\s+keyed\\s+by\\s+task\\s+name"),
+			"isolated result boundary":   regexp.MustCompile(`(?i)isolated\s+group\s+carries\s+no\s+results\s+between\s+steps`),
+		} {
+			if !pattern.MatchString(content) {
+				t.Errorf("%s does not state the %s rule", name, rule)
+			}
+		}
+	}
+}
+
 func TestCapacityRequirementMatchesPublicGuide(t *testing.T) {
 	const row = "| `capacity` | for telephony or code targets | your traffic estimate |"
 	for name, content := range map[string]string{

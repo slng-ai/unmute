@@ -39,7 +39,7 @@ share models, or not.
 ## The handoff
 
 A handoff is a control. You declare it once and put its name in the tool list
-of the agent that may use it:
+of the agent or task that may use it:
 
 ```yaml agent.yaml
 controls:
@@ -78,6 +78,11 @@ model does not paraphrase it. Leave it out for a silent handoff. A failed
 | `variables: all` | the values collected so far travel with the caller |
 
 Without them, the caller gets asked for their phone number twice.
+
+When a task lists the handoff control, invoking it ends that task and any
+remaining task-group steps before the receiving agent takes over. It never
+returns through the agent that delegated the task. This is the direct path for
+a caller who changes intent while a focused task is active.
 
 On LiveKit, transfer tools are hidden only during the receiving agent's first
 automatic turn. Normal tools remain available, and transfers return on the

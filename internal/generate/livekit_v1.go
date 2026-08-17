@@ -26,18 +26,9 @@ import (
 //go:embed templates/livekit_v1/*.tmpl
 var livekitV1Templates embed.FS
 
-// beta.workflows (TaskGroup), AgentTask, and inference (LLM/TurnDetector) are
-// all present from livekit-agents 1.5.x (driver-livekit C7), which is why the
-// supported range starts there. That range, and the version each feature needs,
-// live in internal/target: the window in target.Window(LiveKit), the warm
-// transfer and MCP floors in target.CheckFeatureFloors. This driver holds no
-// copy of either, and emits the author's declared version as an exact pin.
-//
-// The floors exist because both surfaces are beta and moved inside the 1.x
-// line: the warm-transfer prebuilt renamed its instructions type
-// (InstructionParts became WorkflowInstructions), and the MCP arguments the
-// driver emits (transport_type, allowed_tools, headers) were verified at 1.6.x.
-// The `mcp` extra is separate from the version and still added here: without it
+// The supported livekit-agents version lives in target.Window(LiveKit). This
+// driver emits the author's declared version as an exact pin. The `mcp` extra
+// is separate from that version and still added here: without it
 // livekit/agents/llm/mcp.py raises ImportError on import (N40, research R2).
 
 // livekitService is one resolved binding: the rendered constructor plus its
@@ -181,13 +172,14 @@ type livekitCallStart struct {
 // another agent, or end the call. N13: the flow's own turns never land in the
 // owner's context regardless of which path is taken.
 type livekitDelegate struct {
-	Method    string
-	When      string
-	Task      *livekitSingleTask // set for a single-task delegate; Steps empty
-	Steps     []livekitStep
-	Isolated  bool   // context_scope: isolated — standalone-AgentTask sequence, no TaskGroup (C3)
-	Then      string // "return" | "transfer" | "end"
-	ThenClass string // target Agent class, set only for then: transfer
+	Method          string
+	When            string
+	Task            *livekitSingleTask // set for a single-task delegate; Steps empty
+	Steps           []livekitStep
+	Isolated        bool   // context_scope: isolated — standalone-AgentTask sequence, no TaskGroup (C3)
+	Then            string // "return" | "transfer" | "end"
+	ThenClass       string // target Agent class, set only for then: transfer
+	CanTaskTransfer bool   // one member task can hand the caller directly to another agent
 }
 
 // livekitSingleTask is the task side of a single-task delegate: the AgentTask
@@ -249,6 +241,7 @@ type livekitTask struct {
 	Tools       []livekitTool
 	Prebuilt    []livekitTool // execution: builtin tools, rendered into super().__init__(tools=...)
 	MCPServers  []livekitMCPServer
+	Transfers   []livekitTransfer
 }
 
 type livekitTool struct {
@@ -384,6 +377,7 @@ type livekitData struct {
 	NeedsEndCallTool   bool        // beta.tools EndCallTool import (prebuilt end_call)
 	HasColdTransfer    bool        // get_job_context import
 	HasWarmTransfer    bool        // WarmTransferTask import + trunk env + room_options (B14)
+	HasTaskTransfers   bool        // _TaskTransfer sentinel + task delegate catch paths
 	Outbound           *livekitOutbound
 	Telephony          *livekitTelephony
 

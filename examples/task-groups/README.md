@@ -72,9 +72,11 @@ bin/unmute dev examples/task-groups --target pipecat
 The three steps see one running context, so the service the caller named in
 step one is still there in step two without being passed by hand.
 
-**`merge: results`** collects each step's typed result into one result for the
-group, and `then: return` hands control back to the agent when the last step
-finishes.
+With `context_scope: shared`, each exact typed result enters the shared context
+before the next task starts. The later task does not have to reconstruct it
+from spoken wording. An isolated group carries no results between steps. The
+final `merge: results` map is keyed by task name, and `then: return` hands that
+map back to the agent when the last step finishes.
 
 **The order is the guarantee.** `select_appointment` cannot run before
 `identify_customer`, because the group declares the sequence. That is a

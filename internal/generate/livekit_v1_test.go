@@ -612,6 +612,9 @@ func TestLiveKitV1DelegateThenTransferAndEnd(t *testing.T) {
 	events := agent.TaskGroups["events_group"]
 	events.Then, events.ThenTarget = ir.GroupEnd, ""
 	agent.TaskGroups["events_group"] = events
+	confirm := agent.Tasks["confirm_booking"]
+	confirm.Tools = append(confirm.Tools, "back_to_greeter")
+	agent.Tasks["confirm_booking"] = confirm
 
 	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
 	if err != nil {
@@ -647,6 +650,9 @@ func TestLiveKitV1DelegateThenTransferAndEnd(t *testing.T) {
 		if strings.Contains(botpy, forbidden) {
 			t.Errorf("agent.py must not contain %q for a non-return delegate", forbidden)
 		}
+	}
+	if got := strings.Count(botpy, "except _TaskTransfer as transfer:\n            return transfer.agent"); got != 2 {
+		t.Errorf("transfer/end groups catch task handoffs %d times, want 2", got)
 	}
 }
 
@@ -706,6 +712,240 @@ func TestLiveKitV1SingleTaskDelegate(t *testing.T) {
 	assign := strings.Index(botpy, `ctx.userdata.caller_phone = result["date"]`)
 	if restore < 0 || assign < 0 || restore > assign {
 		t.Errorf("the owner context is restored at %d, after the assignment at %d", restore, assign)
+	}
+	if strings.Contains(botpy, "_terminal_claimed") {
+		t.Error("a task without transfers must not emit terminal-claim state")
+	}
+}
+
+// A task-scoped agent_transfer completes the task with a private exception so
+// the delegate returns the target agent instead of treating it as task data.
+func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transfer := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
+	transfer.Announce = "I will take you back to Remy."
+	transfer.Requires = []string{"caller_phone"}
+	task := agent.Tasks["find_slot"]
+	task.Tools = append(task.Tools, "back_to_greeter")
+	agent.Tasks["find_slot"] = task
+	agent.Controls["do_find"] = &ir.Delegate{
+		Kind: ir.ControlDelegate, Task: "find_slot", When: "Find one slot.",
+	}
+	reservations := agent.Agents["reservations"]
+	reservations.Tools = append(reservations.Tools, "do_find")
+	agent.Agents["reservations"] = reservations
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		"class _TaskTransfer(Exception):",
+		"class FindSlot(AgentTask[dict]):",
+		"self._terminal_claimed = False",
+		"def _claim_terminal(self) -> bool:",
+		"async def back_to_greeter(self, ctx: RunContext):",
+		"if not self._claim_terminal():\n            return",
+		`missing = [n for n, v in (("caller_phone", ctx.userdata.caller_phone), ) if v in (None, "")]`,
+		"if missing:\n            self._terminal_claimed = False",
+		`await ctx.session.say("I will take you back to Remy.", allow_interruptions=False)`,
+		"self.complete(_TaskTransfer(Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))))",
+		"except BaseException:\n            self._terminal_claimed = False\n            raise",
+		"except _TaskTransfer as transfer:",
+		"return transfer.agent",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	taskStart := strings.Index(botpy, "class FindSlot(AgentTask[dict]):")
+	if taskStart < 0 {
+		t.Fatal("FindSlot task not emitted")
+	}
+	taskEnd := strings.Index(botpy[taskStart:], "# --- session")
+	if taskEnd < 0 {
+		t.Fatal("could not bound FindSlot task")
+	}
+	taskBlock := botpy[taskStart : taskStart+taskEnd]
+	if got := strings.Count(taskBlock, "if not self._claim_terminal():"); got != 2 {
+		t.Errorf("transfer and finish claim the terminal %d times, want 2", got)
+	}
+	transferMethod := strings.Index(taskBlock, "async def back_to_greeter")
+	claim := -1
+	if transferMethod >= 0 {
+		if relative := strings.Index(taskBlock[transferMethod:], "if not self._claim_terminal():"); relative >= 0 {
+			claim = transferMethod + relative
+		}
+	}
+	announce := strings.Index(taskBlock, "await ctx.session.say")
+	if claim < 0 || announce < 0 || claim > announce {
+		t.Errorf("transfer terminal claim at %d must precede announcement await at %d", claim, announce)
+	}
+	delegate := strings.Index(botpy, "async def do_find(")
+	taskAwait := strings.Index(botpy[delegate:], "result = await FindSlot(")
+	catch := strings.Index(botpy[delegate:], "except _TaskTransfer as transfer:")
+	restore := strings.Index(botpy[delegate:], "await self.update_chat_ctx(owner_ctx)")
+	if delegate < 0 || taskAwait < 0 || catch < taskAwait || (restore >= 0 && catch > restore) {
+		t.Fatalf("task transfer must be caught around the task await; delegate=%d await=%d catch=%d restore=%d", delegate, taskAwait, catch, restore)
+	}
+
+	// The task path reuses the complete agent-transfer contract, including
+	// summary history and variable selection.
+	transfer.Context.History = ir.HistorySummary
+	transfer.Context.Summarizer = "reasoning"
+	agent.Variables["visit_count"] = ir.Variable{Type: ir.PrimitiveInteger}
+	transfer.Context.Variables = ir.VariableSelection{Names: []string{"caller_phone"}}
+	summaryArtifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate summary transfer: %v", err)
+	}
+	summaryBot := artifactFile(t, summaryArtifact, "agent.py")
+	for _, want := range []string{
+		"async def _summarize(source: llm.ChatContext",
+		"ctx.userdata.visit_count = None  # context.variables: not carried on this transfer",
+		"self.complete(_TaskTransfer(Greeter(chat_ctx=summary_ctx)))",
+	} {
+		if !strings.Contains(summaryBot, want) {
+			t.Errorf("summary task transfer missing %q", want)
+		}
+	}
+}
+
+func TestLiveKitV1SharedGroupTaskTransferAndResults(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := agent.Tasks["find_slot"]
+	task.Tools = append(task.Tools, "back_to_greeter")
+	agent.Tasks["find_slot"] = task
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	start := strings.Index(botpy, "async def do_reserve(")
+	if start < 0 {
+		t.Fatal("do_reserve delegate not emitted")
+	}
+	end := strings.Index(botpy[start:], "async def back_to_greeter(")
+	if end < 0 {
+		t.Fatal("could not bound do_reserve delegate")
+	}
+	block := botpy[start : start+end]
+	for _, want := range []string{
+		"group = TaskGroup(",
+		"summarize_chat_ctx=False,",
+		"try:\n            result = await group",
+		"except _TaskTransfer as transfer:\n            return transfer.agent",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("do_reserve missing %q", want)
+		}
+	}
+	for _, privileged := range []string{
+		`role="developer"`, `role="system"`, "add_message(",
+		"TaskCompletedEvent", "share_task_result", "on_task_completed=",
+	} {
+		if strings.Contains(block, privileged) {
+			t.Errorf("shared group contains custom result propagation %q", privileged)
+		}
+	}
+	if strings.Contains(block, "return_exceptions=True") {
+		t.Error("TaskGroup must propagate the transfer sentinel and stop remaining tasks")
+	}
+}
+
+func TestLiveKitV1IsolatedGroupTaskAgentTransfer(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := agent.Tasks["find_slot"]
+	task.Tools = append(task.Tools, "back_to_greeter")
+	agent.Tasks["find_slot"] = task
+	group := agent.TaskGroups["reserve_group"]
+	group.ContextScope = ir.ContextIsolated
+	agent.TaskGroups["reserve_group"] = group
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	botpy := artifactFile(t, artifact, "agent.py")
+	start := strings.Index(botpy, "async def do_reserve(")
+	if start < 0 {
+		t.Fatal("do_reserve delegate not emitted")
+	}
+	block := botpy[start:]
+	for _, want := range []string{
+		"try:\n            task_results[\"find_slot\"] = await FindSlot()\n            task_results[\"confirm_booking\"] = await ConfirmBooking()",
+		"except _TaskTransfer as transfer:\n            return transfer.agent",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("do_reserve missing %q", want)
+		}
+	}
+	catch := strings.Index(block, "except _TaskTransfer as transfer:")
+	second := strings.Index(block, `task_results["confirm_booking"] = await ConfirmBooking()`)
+	if catch < second {
+		t.Fatalf("catch at %d must wrap the later step at %d", catch, second)
+	}
+}
+
+func TestLiveKitV1TaskRejectsOtherControlKinds(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		ref     string
+		control ir.Control
+	}{
+		{name: "delegate", ref: "do_reserve"},
+		{
+			name: "human transfer", ref: "to_manager",
+			control: &ir.HumanTransfer{
+				Kind: ir.ControlHumanTransfer, Destination: "manager", Mode: ir.TransferCold,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			agent, err := ir.Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.control != nil {
+				agent.Controls[tc.ref] = tc.control
+			}
+			task := agent.Tasks["find_slot"]
+			task.Tools = append(task.Tools, tc.ref)
+			agent.Tasks["find_slot"] = task
+
+			_, err = buildLiveKitData(agent, targetByProvider(t, agent, ir.ProviderLiveKit))
+			want := `task "find_slot" references control "` + tc.ref + `": tasks support agent_transfer controls only`
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("want %q, got %v", want, err)
+			}
+		})
 	}
 }
 
@@ -1325,10 +1565,8 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	if strings.Contains(botpy, "extra_instructions") {
 		t.Error("agent.py still passes the deprecated extra_instructions, which the prebuilt ignores once instructions is given")
 	}
-	// A warm package installs exactly the version its target declares. The old
-	// derived window (>=1.6,<1.7) is gone: the floor the beta prebuilt needs is
-	// gated at validate now, so a declared version is never quietly widened or
-	// narrowed on the author's behalf.
+	// A warm package installs exactly the one supported version its target
+	// declares; it is never quietly widened or narrowed on the author's behalf.
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
 	if !strings.Contains(pyproject, "==1.6.10") {
 		t.Errorf("warm pyproject.toml must pin the declared livekit-agents version exactly:\n%s", pyproject)
@@ -1384,7 +1622,7 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 }
 
 // TestLiveKitV1RequiresGuard covers V7: a transfer with requires: emits a
-// machine-checked guard that refuses and names the unmet variables.
+// machine-checked guard that refuses unset and empty values.
 func TestLiveKitV1RequiresGuard(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
@@ -1403,7 +1641,7 @@ func TestLiveKitV1RequiresGuard(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
-		`missing = [n for n, v in (("caller_phone", ctx.userdata.caller_phone), ) if v is None]`,
+		`missing = [n for n, v in (("caller_phone", ctx.userdata.caller_phone), ) if v in (None, "")]`,
 		`return "Cannot transfer yet; missing required information: " + ", ".join(missing)`,
 	} {
 		if !strings.Contains(botpy, want) {
@@ -2034,9 +2272,8 @@ func TestLiveKitV1LocalAndMCPTools(t *testing.T) {
 	if strings.Contains(botpy, "mcp_servers=") {
 		t.Error("agent.py still emits the deprecated mcp_servers= parameter")
 	}
-	// The extra is what makes the import work at all, and it is a separate fact
-	// from the version: the extra is still added here, while the floor the
-	// emitted arguments need is gated at validate (target.CheckFeatureFloors).
+	// The extra is what makes the import work at all; it is separate from the
+	// globally supported framework version.
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
 	if !strings.Contains(pyproject, "livekit-agents[mcp,") {
 		t.Errorf("pyproject must carry the mcp extra:\n%s", pyproject)
@@ -2163,7 +2400,7 @@ func TestLiveKitV1ParityFixture(t *testing.T) {
 	}
 }
 
-// TestCheckLiveKitVersion pins the supported range against the recorded window
+// TestCheckLiveKitVersion pins the supported version against the recorded window
 // in internal/target. The driver keeps its own check as a backstop; the fact it
 // checks against lives in one place.
 func TestCheckLiveKitVersion(t *testing.T) {
@@ -2171,12 +2408,13 @@ func TestCheckLiveKitVersion(t *testing.T) {
 		version string
 		ok      bool
 	}{
-		{"1.5.2", true},
-		{"1.6.0", true},
-		{"1.6.10", true}, // the ceiling
+		{"1.6.10", true},
 		// A declared version is an exact install pin, so half a version is no
 		// longer accepted and resolved on the author's behalf.
 		{"1.5", false},
+		{"1.5.2", false},
+		{"1.6.0", false},
+		{"1.6.9", false},
 		{"1.2", false},
 		{"1.4.9", false},
 		{"0.0.108", false},

@@ -940,6 +940,24 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 	}
 }
 
+func TestTaskScopedAgentTransferIsReachable(t *testing.T) {
+	pkg := loadSafeCore(t)
+	detachTool(pkg, "intake", "to_billing")
+	addTask(pkg, "route_billing")
+	task := pkg.Agent.Tasks["route_billing"]
+	task.Tools = []string{"to_billing"}
+	pkg.Agent.Tasks["route_billing"] = task
+	taskName := "route_billing"
+	pkg.Agent.Controls["start_routing"] = packagespec.Control{Kind: "delegate", Task: &taskName}
+	intake := pkg.Agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "start_routing")
+	pkg.Agent.Agents["intake"] = intake
+
+	if _, err := Build(pkg); err != nil {
+		t.Fatalf("task-scoped agent transfer must reach its target: %v", err)
+	}
+}
+
 // removeHumanTransfer takes the transfer out of a fixture completely: the
 // control, its attachment, and the destination it resolved to. Leaving the
 // destination behind is now an error, and rightly — its environment name reached
