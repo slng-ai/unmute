@@ -1,12 +1,12 @@
 ---
 title: "Transfers on Pipecat over Daily"
-description: "Cold transfer on a Daily provisioned number, with no carrier account to set up."
+description: "Cold transfer through carrierless Daily dial-out, with no inbound phone route."
 sidebarTitle: "Pipecat + Daily"
 ---
 
-This page describes Pipecat's `daily-sip` transport. It is a Pipecat route with
-a native cold-transfer primitive, but Unmute does not ship a Daily transfer
-example or support warm transfer on Pipecat.
+This page describes the carrierless form of Pipecat's `daily-sip` transport. It
+can dial a cold-transfer destination, but it cannot receive calls. Unmute does
+not ship a Daily transfer example or support warm transfer on Pipecat.
 
 ```yaml targets.yaml
 targets:
@@ -25,13 +25,10 @@ destinations:
   billing_line: BILLING_PHONE_NUMBER
 ```
 
-That one-line connection is the whole route, and it is the shortest a connection
-gets. No `carrier:` line, because on this form Daily provisions the number and
-Daily's own infrastructure delivers the call to your deployed agent, so there is
-no carrier account to configure at all. No `environment:` either, for the same
-reason: the `DAILY_API_KEY` the runtime reads comes from the route, not from your
-package, so it is not in `secrets:` and it is still in the generated
-`.env.example`.
+That one-line connection is the whole outbound route. No `carrier:` line is
+needed because Daily dials the transfer destination. No `environment:` block is
+needed either: `DAILY_API_KEY` is a compiler-known runtime requirement, not a
+name authored in this connection. The generated runbook says who supplies it.
 
 ## The transfer
 
@@ -57,7 +54,7 @@ carrier. The destination leaves through that carrier's SIP trunk, but Daily
 stays in the call path, so both Daily legs keep billing until the call ends and
 the destination leg also incurs the carrier's charge. That form needs the same
 Daily dial-out permission. Its connection keys are listed in
-[connections/&lt;name&gt;.yaml](/reference/connections-yaml).
+[`connections/<name>.yaml`](/reference/connections-yaml).
 
 ## Dial-out has to be granted
 
@@ -86,22 +83,21 @@ channels:
     kind: realtime_audio
 ```
 
-The package declares web audio only. On this route the telephony belongs to
-Daily: the number, the dial-in webhook, and dial-out permission all live on the
-Daily domain, configured through Pipecat Cloud, not in anything Unmute
-generates.
+The package declares web audio only because the carrierless Daily shape cannot
+serve a phone channel. The conversation starts in the browser; the cold
+transfer control dials the destination through Daily. For inbound phone calls,
+use the `daily-sip` form that names a carrier.
 
 ## Running it
 
 `unmute dev --telephony` refuses this route, and says why:
 
 ```text wrap
-unmute: dev <package>: target "pipecat" runs on the Pipecat Daily route (transport daily-sip), where Daily carries the phone call to a deployed agent, so there is no local telephony topology to run; talk to this agent now with `unmute dev <package>` in the browser, and for a real phone call run `unmute compile <package>` and follow the Deploy and Phone calls sections of the emitted README
+unmute: dev <package>: target "pipecat" uses a carrierless Pipecat Daily connection (transport daily-sip), which is outbound-only: it can dial a transfer destination but cannot receive calls, so there is no local telephony topology to run; talk to this agent now with `unmute dev <package>` in the browser, and to deploy it run `unmute compile <package>` and follow the Deploy and Human transfers sections of the emitted README
 ```
 
-That is the honest answer: this route has nothing local to run. Talk to the
-agent in the browser to work on its behavior, and use the emitted runbook for
-the phone part.
+This route has no inbound topology to run. Talk to the agent in the browser and
+use the emitted runbook for deployment and the outbound transfer.
 
 ## Where to go next
 

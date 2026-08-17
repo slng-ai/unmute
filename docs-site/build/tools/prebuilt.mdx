@@ -15,6 +15,13 @@ builtin:
 That is the file `unmute init` scaffolds, so a new agent can hang up from its first
 run.
 
+## The block
+
+| Field | Required | What it is |
+|---|---|---|
+| `id` | yes | id from the closed registry below |
+| `instructions` | no | instruction the runtime gives the model as the prebuilt runs; for `end_call`, use it for a final line or action before ending |
+
 ## The registry, in full
 
 | id | Effect | Default description |
@@ -81,6 +88,17 @@ one; the shipped examples that declare a Pipecat target get the other.
 Write your own `description` when the agent needs a narrower instruction, for
 example telling it to confirm before hanging up. Yours is added on top of the
 default rather than replacing the tool's behavior.
+
+Use `builtin.instructions` when the model must do something at execution time:
+
+```yaml
+builtin:
+  id: end_call
+  instructions: Thank the caller briefly, then end the call.
+```
+
+It does not change the tool's id, parameters, or fixed
+`ends_conversation` effect.
 
 ## Turning it on
 

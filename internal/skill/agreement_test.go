@@ -605,16 +605,11 @@ func sitePages(t *testing.T) []string {
 
 // TestBundleNamesNoSitePage holds the inverse of what this test used to hold.
 //
-// The references once ended with a "Documentation:" line naming the site page
-// that owned their facts, and SKILL.md told the reader that page won any
-// disagreement. Verified 2026-08-15: the site is not published, so every one of
-// those paths resolved to nothing for a reader outside this repository, and an
-// assistant that hit a dead pointer could not tell a missing page from its own
-// mistake. An instruction nobody can follow is worse than no instruction, so
-// the pointers came out and `unmute validate` became the authority instead.
-//
-// This test keeps them out. When the site is public, the honest move is to put
-// the pointers back as absolute URLs and turn this test around again.
+// The references once ended with a "Documentation:" line naming a site path.
+// The installed bundle is version-matched to the CLI and must still work
+// offline, so its task references carry the needed facts and `unmute validate`
+// remains the final authority. This test keeps unresolved, versionless site
+// paths out of that offline contract.
 func TestBundleNamesNoSitePage(t *testing.T) {
 	pages := sitePages(t)
 
@@ -634,11 +629,11 @@ func TestBundleNamesNoSitePage(t *testing.T) {
 
 // TestEntryDocumentBudget holds the layering. SKILL.md is read on every task, so
 // it is a decision layer that routes to a reference, not a summary of all of
-// them. 500 lines is the documented guidance for an Agent Skills entry file.
+// them. Keep the entry under 100 lines and move detail into references.
 func TestEntryDocumentBudget(t *testing.T) {
 	lines := strings.Count(bundleFile(t, "SKILL.md"), "\n")
-	if lines >= 500 {
-		t.Errorf("SKILL.md is %d lines; the budget is under 500. Move detail into a reference rather than raising this number", lines)
+	if lines >= 100 {
+		t.Errorf("SKILL.md is %d lines; the budget is under 100. Move detail into a reference rather than raising this number", lines)
 	}
 }
 

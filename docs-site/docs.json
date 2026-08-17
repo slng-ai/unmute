@@ -103,6 +103,18 @@
         ]
       },
       {
+        "group": "Configuration files",
+        "public": true,
+        "icon": "file-code",
+        "pages": [
+          "reference/agent-yaml",
+          "reference/targets-yaml",
+          "reference/connections-yaml",
+          "reference/variables",
+          "reference/secrets"
+        ]
+      },
+      {
         "group": "Develop and test",
         "public": true,
         "icon": "terminal",
@@ -171,27 +183,16 @@
         ]
       },
       {
-        "group": "Reference",
+        "group": "CLI",
         "public": true,
-        "icon": "book-open",
+        "icon": "terminal",
         "pages": [
-          {
-            "group": "CLI",
-            "icon": "terminal",
-            "root": "reference/cli/overview",
-            "pages": [
-              "reference/cli/init",
-              "reference/cli/validate",
-              "reference/cli/compile",
-              "reference/cli/dev",
-              "reference/cli/skill"
-            ]
-          },
-          "reference/agent-yaml",
-          "reference/targets-yaml",
-          "reference/connections-yaml",
-          "reference/variables",
-          "reference/secrets"
+          "reference/cli/overview",
+          "reference/cli/init",
+          "reference/cli/validate",
+          "reference/cli/compile",
+          "reference/cli/dev",
+          "reference/cli/skill"
         ]
       }
     ]

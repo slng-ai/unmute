@@ -87,7 +87,7 @@ That is `examples/simple-prompt`, and it runs in a browser.
 | `listen` | when `models.listen` has two or more entries | which listen entry to use |
 | `turn` | when `models.turn` has two or more entries | which turn entry to use |
 | `variables` | no | per call values |
-| `secrets` | no | every environment variable name this package writes |
+| `secrets` | no | environment names the generated project reads |
 | `destinations` | when a `human_transfer` is used | symbol to the environment variable holding a number |
 | `agents` | yes | one or more agents |
 | `tasks` | no | delegated steps |
@@ -131,10 +131,9 @@ a compile error. The compile report says so out loud. Which `provider:` values
 are legal per role per target is in `models.md`.
 
 `params:` is the same passthrough for everything else the provider takes, and it
-is not checked either. Write `reasoning_effort: "none"` there on every think
-entry: OpenAI rejects a request that carries function tools without it, so a
-package with tools fails on every turn. `models.md` has the values and the
-reason.
+is not checked either. The scaffold's default OpenAI reasoning model needs
+`reasoning_effort: "none"` when it carries function tools. Do not copy that
+provider-specific value onto every think model. `models.md` has the rule.
 
 Do not guess model ids, voice ids, or params. Use values the user supplied or
 values verified in the provider's own documentation.
@@ -171,11 +170,11 @@ secrets:
 A list of `UPPER_SNAKE` environment variable names. Never values, and never
 usable in a `{{template}}`.
 
-The rule is: every environment name you wrote anywhere in this package goes
-here. Model and tool credentials, the names a connection's `environment:` maps
-to, and the numbers `destinations:` points at. Names the driver or the platform
-supplies for you, such as `REDIS_URL` or `DAILY_API_KEY`, are not yours to
-declare and are left out.
+Declare every environment name the generated project reads: provider and
+tracing keys inferred from the package, tool `*_env` names, connection
+`environment:` values, destinations, and names read by local handlers. Names
+the driver or platform supplies, such as `REDIS_URL` or `DAILY_API_KEY`, are not
+yours to declare and are left out.
 
 Every name must be a valid shell identifier: letters, digits, and underscores,
 never starting with a digit. A platform exports secrets through a shell, so a
@@ -219,12 +218,12 @@ channels:
 |---|---|
 | `kind` | `realtime_audio` or `telephony` |
 | `inbound`, `outbound` | `true` or `false` |
-| `required_controls` | controls this channel requires |
+| `required_controls` | `cold_transfer`, `warm_transfer`, `dtmf_send`, `dtmf_receive`, `hold`, `hangup`, `voicemail_detection`, or `ivr_navigation` |
 | `on_voicemail` | `hangup` or `leave_message`, requires `outbound: true` |
 
 `web: realtime_audio` is browser audio, which is what `unmute dev` serves.
-Phones are `telephony`, and they need a connection file too. See
-`telephony.md`.
+It takes only `kind`. A `telephony` channel requires both `inbound` and
+`outbound`, and it needs a connection file too. See `telephony.md`.
 
 ## capacity and tracing
 
@@ -254,7 +253,9 @@ pipecat: capacity.peak_starts_per_second must be positive for telephony
 
 Write it whenever you write a `telephony` channel, in the same edit. It has to
 be positive, and `1` is a fine starting number for a package nobody has measured
-yet.
+yet. `peak_sessions` and `max_sessions` must also be positive,
+`peak_sessions` cannot exceed `max_sessions`, and `avg_session_duration` must
+be a positive Go duration such as `5m`.
 
 `langfuse` is the only tracing provider today. It needs `LANGFUSE_BASE_URL`,
 `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_SECRET_KEY`, and those names go in
@@ -285,12 +286,12 @@ provider with different settings, for example `pipecat_twilio` and
 
 | Field | What it is |
 |---|---|
-| `provider` | `livekit`, `pipecat`, `vapi`, or `deepgram`; the first two generate and run |
-| `version` | the framework version pinned in the generated project |
-| `pins` | extra package pins, name to version constraint |
-| `sdk_language` | `python` |
-| `connection` | the connection file that declares this target's phone route |
-| `deployment_region` | one region as a string, or several as a list |
+| `provider` | `livekit`, `pipecat`, `vapi`, or `deepgram`; only the first two generate and run |
+| `version` | required exact `x.y.z` framework version for code targets |
+| `pins` | LiveKit-only known package pins, name to semantic version |
+| `sdk_language` | `python` when written |
+| `connection` | required for LiveKit or Pipecat telephony; illegal with no phone use |
+| `deployment_region` | one non-empty region, or a duplicate-free list; multiple regions are LiveKit-only |
 | `models` | per target overrides of named `models` entries |
 
 That is the whole list. A `models` override is keyed by the entry name from
@@ -313,3 +314,8 @@ Validation is deliberately wider than generation. A package can be checked
 against Vapi or Deepgram without a driver existing for them, and `unmute
 compile` fails by name for a provider with no driver. When you tell a user a
 target is supported, say which of the two you mean.
+
+LiveKit and Pipecat versions are exact three-part versions in this release's
+supported window. Unmute never widens the pin. `pins` accepts only packages the
+LiveKit driver knows; other providers do not consume it. A target's `models`
+map is keyed by an existing model entry name and takes the same model fields.

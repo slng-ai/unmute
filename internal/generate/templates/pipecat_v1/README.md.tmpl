@@ -899,91 +899,16 @@ indistinguishable by ear.
 {{- end}}
 | An `ERROR` line reading `BusBridge Trying to process LLMServiceMetadataFrame ... but StartFrame not received yet` | Harmless, and nothing of yours caused it. Both pipelines start at once; the transport pipeline's start waits on the transcriber's WebSocket, so the agent's LLM announces itself a moment before the bridge is ready and that announcement is dropped. It carries one flag, `is_realtime_service`, which is false for every model this project binds, and the processor that would read it ignores a false one. It appears when a provider connects slowly and not otherwise. |
 {{end}}{{if and (eq .Transport "daily-sip") (not .DailyCarrier)}}
-## Phone calls
+## Carrierless Daily dial-out
 
-This agent answers phone calls over Daily PSTN. Daily's own infrastructure
-carries the call and hands it to this deployed agent, so nothing here listens on
-a public port and there is no webhook server of yours in the path.
+This connection is outbound-only. It lets a cold-transfer control dial its
+declared destination through Daily, but it cannot answer phone calls or serve a
+`telephony` channel. Do not buy or attach a Daily number for this shape.
 
-### Buy a phone number
-
-Numbers come from your Daily account, with your Daily API key. That is a
-different key from the Pipecat Cloud one that starts sessions.
-
-```sh
-curl --request GET --url 'https://api.daily.co/v1/list-available-numbers?region=US' \
-  --header "Authorization: Bearer $DAILY_API_KEY"
-
-curl --request POST --url 'https://api.daily.co/v1/buy-phone-number' \
-  --header "Authorization: Bearer $DAILY_API_KEY" \
-  --header 'Content-Type: application/json' \
-  --data '{"number": "+1XXXXXXXXXX"}'
-```
-
-You get back an `id` and a `number`. Keep the `id`: outbound calling wants it as
-the `callerId`, not the number. `GET /v1/purchased-phone-numbers` lists them
-again.
-
-**A number cannot be released for 14 days after purchase**, and releasing is then
-permanent. Plan a test number knowing you own it for at least two weeks.
-
-### Attach the number to this agent
-
-Point it at this agent. Two ways, same result:
-
-- **Dashboard**: Pipecat Cloud, then Settings, then Telephony, and pick this
-  agent.
-- **Daily REST API**: set the domain's pinless dial-in to this agent's managed
-  webhook.
-
-```sh
-curl --location 'https://api.daily.co/v1' \
-  --header "Authorization: Bearer $DAILY_API_KEY" \
-  --header 'Content-Type: application/json' \
-  --data '{"properties": {"pinless_dialin": [
-      {"phone_number": "<your Daily number>",
-       "room_creation_api": "https://api.pipecat.daily.co/v1/public/webhooks/<org_id>/{{.Project}}/dialin"}
-  ]}}'
-```
-
-`<org_id>` is your Pipecat Cloud organisation id, from the dashboard. The webhook
-is the platform's own, so you do not run or host it.
-
-Attach the number after `agent status` reports `ready`. The webhook names this
-agent, so a number pointed at an agent that is not deployed yet gives the caller
-silence rather than an error you can see.
-
-### Place an outbound call
-
-Outbound is started by the platform against this deployed agent, not by anything
-in this project. Ask it to create a room with dial-out allowed and give it the
-number to dial:
-
-```sh
-curl --request POST \
-  --url https://api.pipecat.daily.co/v1/public/{{.Project}}/start \
-  --header "Authorization: Bearer $PIPECAT_CLOUD_API_KEY" \
-  --header 'Content-Type: application/json' \
-  --data '{"createDailyRoom": true,
-           "dailyRoomProperties": {"enable_dialout": true},
-           "body": {"dialout_settings": [{"phoneNumber": "+1..."}]}}'
-```
-
-Two things to know before the first call:
-
-- **The recipient sees a number you did not choose, unless you name one here.**
-  With no `callerId`, the platform picks one of your purchased numbers at random.
-  You can pin it in the call above by passing the purchased number's **id** (from
-  `GET /v1/purchased-phone-numbers`), not the number itself:
-
-  ```json
-  "dialout_settings": [{"phoneNumber": "+1...", "callerId": "<id of a number you own>"}]
-  ```
-
-  The source package cannot declare this, so it is a choice you make per call.
-  A `sipUri` works in place of `phoneNumber` for a SIP destination.
-- **Dial-out has to be enabled on the domain**, and international dial-out is
-  granted separately from domestic. See the prerequisites below.
+Talk to the agent through its web-audio channel. Before testing a real transfer,
+deploy the project, set the destination environment values listed above, and ask
+Daily to enable dial-out for the domain. The account prerequisite below has the
+request and provider documentation.
 {{end}}{{if .Prerequisites}}
 ## Account prerequisites
 

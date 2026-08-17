@@ -28,13 +28,15 @@ mint a11y                                               # contrast and media alt
    `internal/target/catalog_*.go` is the provider truth.
 2. **Every YAML snippet was run through `./bin/unmute validate`** in a scratch
    package, and every example the site names validates and compiles.
-3. **Only two targets exist here**: Pipecat and LiveKit Agents. Vapi and
-   Deepgram are never presented as targets or runtimes. ElevenLabs and Deepgram
-   appear only as model vendors, where the catalog lists them.
+3. **Only two targets generate and run here**: Pipecat and LiveKit Agents.
+   Vapi and Deepgram may appear in the configuration reference only as
+   validation-only provider values; never present them as deployable runtimes.
+   ElevenLabs and Deepgram also appear as model vendors where the catalog lists
+   them.
 4. **Plain language, short sentences, no em or en dashes as punctuation.**
-5. **No page presents a route as more proven than the compile report says.**
-   Telephony routes are `provisional`: implemented and compiling, with no
-   credentialed test in CI.
+5. **Pages state what the product does and what the CLI prints.** Notes about
+   how an author checked the documentation belong in the pull request, not the
+   user guide.
 6. **This is the only public documentation tree.** `docs/ARCHITECTURE.md`
    explains system boundaries for contributors; it is not a second user guide.
    Public package, target, telephony, transfer, deployment, and CLI guidance

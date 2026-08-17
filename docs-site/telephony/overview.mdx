@@ -71,10 +71,10 @@ targets:
 So one file is the whole route, and that is the file you open when you want to
 know how a call reaches this agent.
 
-A connection comes in three shapes: a full route like the one above, a
-receive-only route with no credentials at all, and a carrier-less route where the
-platform provisions the number.
-[connections/&lt;name&gt;.yaml](/reference/connections-yaml) has all three.
+A connection has a full route like the one above or a receive-only route with
+no credentials. A third carrierless `daily-sip` shape is outbound-only: it can
+dial a transfer destination but cannot serve a phone channel.
+[`connections/<name>.yaml`](/reference/connections-yaml) explains all three.
 
 One target selects exactly one route and one connection. To use two carriers, or
 two mechanisms, declare two targets with a connection file each. Each compiles to
@@ -87,18 +87,14 @@ its own `build/<target>/` directory.
 | Pipecat | `cloud-websocket` | Twilio | Pipecat Cloud terminates the carrier's media stream itself. Nothing of yours is hosted. |
 | Pipecat | `carrier-websocket` | Twilio, Telnyx, Plivo | a generated adapter of yours terminates the carrier's media stream |
 | Pipecat | `carrier-websocket` | Exotel | no adapter, so this route is refused at validation |
-| Pipecat | `daily-sip` | none | Daily provisions the number and delivers the call to your deployed agent |
 | Pipecat | `daily-sip` | Twilio | your carrier forwards into the same Daily room through a helper you run |
 | LiveKit Agents | `sip` | Twilio, Telnyx, Plivo | a SIP trunk carries the call into LiveKit SIP |
 | LiveKit Agents | `sip` | Exotel | no adapter, so this route is refused at validation |
 | LiveKit Agents | `connector` | Twilio | a generated bridge turns Twilio Media Streams into a LiveKit room |
 
 <Info>
-  Every route above that runs is marked `provisional` in the compile report.
-  That means the route is implemented and compiles, and that no credentialed
-  end to end test runs in CI for it yet. Several routes do have dated live call
-  evidence recorded in the repository. The compile report prints the vendor
-  document and the date it was last checked.
+  The compile report marks each phone route and prints the vendor document and
+  the date it was checked. [Read the report fields](/reference/cli/compile#the-report).
 </Info>
 
 ## What the transport decides

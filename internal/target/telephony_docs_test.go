@@ -44,3 +44,30 @@ func TestTelephonyDocsContract(t *testing.T) {
 		}
 	}
 }
+
+func TestCarrierlessDailyIsNotDocumentedAsInbound(t *testing.T) {
+	root := filepath.Join("..", "..")
+	for _, path := range []string{
+		"docs-site/telephony/overview.mdx",
+		"docs-site/targets/overview.mdx",
+		"docs-site/reference/connections-yaml.mdx",
+		"internal/generate/templates/pipecat_v1/README.md.tmpl",
+		"internal/skill/assets/references/telephony.md",
+	} {
+		raw, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(raw)
+		for _, forbidden := range []string{
+			"| Pipecat | `daily-sip` | none |",
+			"Daily provisions the number",
+			"Daily provisioned numbers",
+			"This agent answers phone calls over Daily PSTN",
+		} {
+			if strings.Contains(content, forbidden) {
+				t.Errorf("%s presents carrierless daily-sip as an inbound route: %q", path, forbidden)
+			}
+		}
+	}
+}

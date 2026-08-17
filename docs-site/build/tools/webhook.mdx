@@ -37,7 +37,7 @@ local Python fixtures so it can run without an operator-specific API.
 | Field | Required | What it is |
 |---|---|---|
 | `url_env` | yes | the UPPER_SNAKE name of an environment variable holding the base URL |
-| `path` | no | appended to that base URL; may carry `{{variable}}` tokens |
+| `path` | no | appended to that base URL; when present it starts with `/` and may carry `{{variable}}` tokens |
 | `auth` | no | how the request authenticates |
 
 `url_env` holds a **name**, so the base URL is a deployment choice rather than a
@@ -92,8 +92,9 @@ livekit: tool "confirm_appointment" auth header is not a bearer field: bearer al
 ```
 
 Every name you use here goes in `agent.yaml` under
-[`secrets:`](/reference/secrets), which is what puts it in the generated
-`.env.example` and the startup check.
+[`secrets:`](/reference/secrets). The compiler also infers these fields as
+required environment names, so leaving one out of `secrets:` warns without
+dropping it from generated environment instructions or checks.
 
 ## What the model fills in, and what it cannot
 
@@ -128,6 +129,9 @@ cannot invent a customer id.
 A value that is exactly one `{{token}}` keeps that variable's declared type, so a
 number stays a number.
 
+Every injected value must be a scalar. Strings, numbers, booleans, and null are
+legal; maps and lists are refused.
+
 ## Describing the result
 
 ```yaml
@@ -150,10 +154,11 @@ output:
     - slots
 ```
 
-`output` is optional. Declare it when the model should reason about the shape of
-what came back, for example to read slot times out loud. That one is
-`examples/salon-support`'s `check_availability`, and the shape is the same
-whichever execution block the tool uses.
+`output` is optional author documentation. The compiler checks that it is a JSON
+Schema object, but no generator sends it to the model, writes it to the compile
+report, or enforces the returned value at run time today. The example records the
+shape the API is expected to return; teach the model how to use that data in the
+tool description or prompt.
 
 ## Where to go next
 

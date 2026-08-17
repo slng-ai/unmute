@@ -41,7 +41,7 @@ result for you.
 Pick a phone route there and the scaffold writes one more file,
 `connections/<name>.yaml`, holding the transport, the carrier, and the
 environment variable names that route needs. The target only names it. See
-[connections/&lt;name&gt;.yaml](/reference/connections-yaml).
+[`connections/<name>.yaml`](/reference/connections-yaml).
 
 Outside a terminal, a name is required:
 
@@ -102,9 +102,9 @@ the agent's to declare: `unmute dev` runs a local server and supplies them, and
 your platform supplies them at deploy time.
 
 <Note>
-  The top level `.env.example` is a starter list. After `unmute compile`, the
-  exact list for a target is `build/<target>/.env.example`, derived from your
-  package.
+  The top level `.env.example` is a starter list. After `unmute compile`,
+  `build/<target>/.env.example` lists the values you supply for that target;
+  `compile-report.json` lists every required environment name.
 </Note>
 
 ## Where to go next

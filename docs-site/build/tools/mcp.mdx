@@ -43,7 +43,7 @@ That is `examples/mcp-example`, which compiles on both targets.
 | `url_env` | yes | the UPPER_SNAKE name of the environment variable holding the server address |
 | `transport` | no | `sse` or `streamable_http` |
 | `auth` | no | `bearer` with `token_env`, or `api_key` with `token_env` and an optional `header` |
-| `tools` | no | which of the server's tools to offer; absent means all of them |
+| `tools` | no | non-empty, unique server tool names to offer; absent means all of them |
 
 `url_env` is a name, never an address. Writing the URL there is refused:
 
@@ -62,6 +62,12 @@ livekit: tool "web_search" transport must be sse or streamable_http, not "websoc
 
 `auth` is the same shape webhook tools use, so there is nothing new to learn and
 no new code in the generated project.
+
+| Auth field | Required | Values and defaults |
+|---|---|---|
+| `type` | yes | `bearer` or `api_key` |
+| `token_env` | yes | UPPER_SNAKE environment variable name holding the token |
+| `header` | no | legal on `api_key` only; omitted means `X-API-Key` |
 
 ## The file is the block, and nothing else
 
@@ -115,6 +121,8 @@ offered, and the package still validates:
 ```
 
 Leave `tools` out and the agent gets everything the server exposes.
+An empty list entry or a name repeated twice is still an authoring error and is
+refused before the server is contacted.
 
 ## Where the source can be listed
 

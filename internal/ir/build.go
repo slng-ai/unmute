@@ -102,8 +102,8 @@ func Build(pkg *packagespec.Package) (*Agent, error) {
 				"transport is the mechanism that carries the call", pkg.Location(path, "environment:"), name)
 		}
 		// An empty environment is legal: two routes need no account values from
-		// the author at all — the Daily-provisioned number, which carries its own
-		// calls, and receive-only (pipecat, cloud-websocket), where the platform
+		// the author at all — carrierless Daily dial-out, and receive-only
+		// (pipecat, cloud-websocket), where the platform
 		// terminates the carrier's stream itself (spec FR-009a).
 		for _, key := range sortedKeys(raw.Environment) {
 			value := raw.Environment[key]
@@ -873,8 +873,8 @@ func buildTarget(pkg *packagespec.Package, name string, raw packagespec.Target, 
 			"Add connection: <name> and a connections/<name>.yaml declaring the route",
 			pkg.Location("targets.yaml", name+":"), name)
 	}
-	// A carrier-less route has no carrier leg to receive on: the Daily-provisioned
-	// number carries its own calls and dials out only. It has no row in the
+	// A carrier-less route has no carrier leg to receive on: the Daily form dials
+	// out only. It has no row in the
 	// capability table at all (research R10), so without this the author gets
 	// "unsupported telephony route (pipecat, daily-sip, )" from three separate
 	// capability lookups and no idea which line to change.
@@ -948,13 +948,12 @@ func packagePlacesCalls(pkg *packagespec.Package, agent *Agent) bool {
 	return false
 }
 
-// carrierlessTransports are the transports with a documented form that has no
-// carrier leg. Today that is the Daily-provisioned number, which carries its own
-// calls. These have no row in the capability table at all — the only Daily row
+// carrierlessTransports are transports with a form that has no carrier leg.
+// Today that is Daily dial-out only. These have no row in the capability table at all — the only Daily row
 // is the carrier leg, a different thing — so a flat triple lookup would refuse
 // them (research R10).
 var carrierlessTransports = map[string]string{
-	"daily-sip": "a Daily-provisioned number carries its own calls",
+	"daily-sip": "outbound dial-out only; it cannot serve a phone channel",
 }
 
 // connectionFileFor names the file a moved route field belongs in. A target that

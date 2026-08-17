@@ -1909,6 +1909,10 @@ func validateModelKind(name string, model ModelDef) []string {
 		if model.Voice != "" || model.Speed != nil || model.Temperature != nil || model.TopP != nil || model.TopK != nil {
 			errors = add(errors, fmt.Sprintf("model %q is a listen model; voice, speed, and sampling fields do not apply", name))
 		}
+	case KindTurn:
+		if model.Voice != "" || model.Speed != nil || model.Temperature != nil || model.TopP != nil || model.TopK != nil {
+			errors = add(errors, fmt.Sprintf("model %q is a turn model; voice, speed, and sampling fields do not apply", name))
+		}
 	}
 	if model.SemanticEndpointing != "" {
 		if model.Kind != KindTurn {

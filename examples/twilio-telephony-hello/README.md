@@ -260,13 +260,9 @@ Both codes are forwarded exactly as written and never checked here, so a typo fa
 the platform CLI rather than the compile. `pipecat cloud regions list`
 prints the Pipecat ones; the LiveKit Cloud project settings list theirs.
 
-## A note on route maturity
+## Check the route
 
 Both routes have real adapters, so `unmute validate`, `unmute compile`, and
-`unmute dev --telephony` run them with no warning and no error. The
-provisional-versus-verified status is internal maturity tracking, recorded in the
-generated `compile-report.json`, and it tracks whether a **credentialed smoke runs
-in CI**, which is a different question from whether anyone has made a phone call.
-The [transfer overview](../../docs-site/transfers/overview.mdx) explains the
-evidence level. Test the behaviour you rely on before depending on it in
-production.
+`unmute dev --telephony` can run them. Read the generated
+`compile-report.json` for the route status, vendor document, last-checked date,
+and smoke status. Test the call behavior you rely on before production.

@@ -40,13 +40,23 @@ Both files are real, from `examples/outbound-reminder`. All three appointment
 outcomes in that package are local fixtures so its live test can focus on the
 outbound phone call without a separate booking service.
 
+## The block
+
+| Field | Required | What it is |
+|---|---|---|
+| `handler` | no | Python file inside the package; omitted means `tools/<tool-name>.py` |
+
+The function inside that file still has the tool name. For a tool named
+`cancel_appointment`, omitting `handler` selects
+`tools/cancel_appointment.py`.
+
 ## The rules the function follows
 
 | Rule | Why |
 |---|---|
 | the function name matches the tool name | that is how the generated code finds it |
 | its parameters match the `input` properties plus the `inject` keys | the call is built from both |
-| it returns a dict shaped like `output`, if you declared one | the result goes back to the model |
+| it returns the value your description and prompt expect | the result goes back to the model; optional `output` is not enforced at run time |
 | it may be `async def` | the generated code awaits an awaitable result |
 | it imports nothing from Unmute | the generated project does not depend on Unmute at run time |
 
@@ -101,8 +111,10 @@ Warnings:
   pipecat: environment variables referenced but not declared in secrets: CRM_API_TOKEN (tools/sync_customer.py os.environ)
 ```
 
-So the generated startup check demands it, and the container stops early with the
-name instead of failing on a live call.
+The literal lookup also makes the compiler include the name in generated
+environment instructions and the startup check even if the declaration is
+missing. Declaring it removes the warning and keeps the explicit inventory
+complete.
 
 ## When to reach for this instead of a webhook
 

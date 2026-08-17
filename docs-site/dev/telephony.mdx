@@ -114,10 +114,10 @@ fails, you get a warning naming the number, not silence.
 | LiveKit `sip` + Twilio | Compose: agent, Redis, LiveKit Server, LiveKit SIP | no | nothing; the trunk records it creates are on the local server |
 | Pipecat `daily-sip` | refused, see below | not applicable | not applicable |
 
-The Daily route has nothing local to run, and says so instead of pretending:
+The carrierless Daily shape is outbound-only, so it has no inbound topology to run:
 
 ```text wrap
-unmute: dev <package>: target "pipecat" runs on the Pipecat Daily route (transport daily-sip), where Daily carries the phone call to a deployed agent, so there is no local telephony topology to run; talk to this agent now with `unmute dev <package>` in the browser, and for a real phone call run `unmute compile <package>` and follow the Deploy and Phone calls sections of the emitted README
+unmute: dev <package>: target "pipecat" uses a carrierless Pipecat Daily connection (transport daily-sip), which is outbound-only: it can dial a transfer destination but cannot receive calls, so there is no local telephony topology to run; talk to this agent now with `unmute dev <package>` in the browser, and to deploy it run `unmute compile <package>` and follow the Deploy and Human transfers sections of the emitted README
 ```
 
 ## The flags
@@ -176,11 +176,6 @@ must differ when two stacks run at once.
   SIP, network address translation on a laptop can block the call even when every
   health check passes.
 </Warning>
-
-Every route here is marked `provisional` in the compile report: implemented and
-compiling, with no credentialed end to end test in CI. Some routes do have dated
-live call evidence in the repository, and the compile report prints the vendor
-document and the date it was last checked.
 
 ## Where to go next
 
