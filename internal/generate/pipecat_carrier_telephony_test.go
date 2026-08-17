@@ -257,7 +257,7 @@ func TestCarrierCallIsForwardedOnce(t *testing.T) {
 	}
 	body := bot[handler:]
 	body = body[:strings.Index(body, "logger.info(\"carrier call")]
-	claim := strings.Index(body, "_CALL_FORWARDED = True")
+	claim := strings.Index(body, "call_forwarded = True")
 	request := strings.Index(body, "_forward_carrier_call(")
 	if claim < 0 || request < 0 {
 		t.Fatalf("the ready handler does not both claim the guard and forward:\n%s", body)
@@ -266,7 +266,7 @@ func TestCarrierCallIsForwardedOnce(t *testing.T) {
 		t.Errorf("the guard is claimed after the forwarding request, so a second ready signal can forward twice:\n%s", body)
 	}
 	// And the second event returns before doing anything.
-	early := strings.Index(body, "if _CALL_FORWARDED:")
+	early := strings.Index(body, "if call_forwarded:")
 	if early < 0 || early > claim {
 		t.Errorf("nothing stops a second ready event from re-entering the handler:\n%s", body)
 	}
@@ -483,8 +483,8 @@ func TestCarrierColdTransferDialsThroughTheOperatorTrunk(t *testing.T) {
 	}
 	// Pin the existing Daily transfer shape while adding the carrier form.
 	for _, want := range []string{
-		"_TRANSFER_RESULT",
-		`_TRANSFER_RESULT = {"transferred": True}`,
+		`self.call_context.get("_transfer_result")`,
+		`self.call_context["_transfer_result"] = {"transferred": True}`,
 	} {
 		for label, bot := range map[string]string{"carrier": carrier, "daily": daily} {
 			if !strings.Contains(bot, want) {

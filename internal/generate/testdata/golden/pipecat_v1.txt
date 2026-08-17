@@ -272,20 +272,6 @@ REQUIRED_ENV = [
 ]
 IGNORE_PHRASES = ["okay", "right", "uh-huh"]
 
-# Set once the transport exists, so an agent's cold-transfer @tool can reach it.
-_TRANSPORT: BaseTransport | None = None
-# One call gets one transfer attempt. Holds the first attempt's result so a
-# caller who asks twice replays it instead of firing a second one, and so a
-# transfer that failed can never come back to the model as a success.
-#
-# ponytail: a module-level value, not the shared control store the carrier
-# routes use for this. That store is deliberately absent here: this route
-# declares no Redis, and adding one to remember a fact that never outlives the
-# call would be an idle service. On this route one process serves one call, so
-# module scope is call scope. If that ever stops being true, this has to become
-# per-session state keyed on the call id.
-_TRANSFER_RESULT: dict | None = None
-
 
 def require_env() -> None:
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
@@ -463,6 +449,7 @@ class BillingAgent(LLMWorker):
 
     def __init__(self, state=None, context=None, call_context=None) -> None:
         self.state = state
+        self.call_context = call_context if call_context is not None else {}
 
         llm = build_billing_llm(state)
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
@@ -489,14 +476,14 @@ class BillingAgent(LLMWorker):
     async def to_human(self, params: FunctionCallParams):
         """Transfer the caller to a human."""
         logger.info("human transfer fired: to_human (cold)")
-        global _TRANSFER_RESULT
-        if _TRANSFER_RESULT is not None:
+        transfer_result = self.call_context.get("_transfer_result")
+        if transfer_result is not None:
             # Asked twice. Replay the first answer rather than dial again.
-            await params.result_callback(_TRANSFER_RESULT)
+            await params.result_callback(transfer_result)
             return
         # Claimed before the primitive runs, not after: a request arriving while
         # the first one is still in flight must not slip past the guard.
-        _TRANSFER_RESULT = {"in_progress": "A transfer is already under way; do not start another."}
+        self.call_context["_transfer_result"] = {"in_progress": "A transfer is already under way; do not start another."}
         # Daily SIP transfers via REFER, which keeps the bot on the call
         # until the transfer completes, so the bot speaks the announcement
         # itself (the official daily-pstn-cold-transfer pattern).
@@ -512,8 +499,9 @@ class BillingAgent(LLMWorker):
         # neither platform documents for a carrier interconnect leg. So Daily
         # stays anchored after a completed transfer and both legs keep billing
         # until the call ends; the README states that cost.
-        if isinstance(_TRANSPORT, DailyTransport):
-            error = await _TRANSPORT.sip_call_transfer({"toEndPoint": os.environ["BILLING_PHONE_NUMBER"]})
+        transport = self.call_context.get("_transport")
+        if isinstance(transport, DailyTransport):
+            error = await transport.sip_call_transfer({"toEndPoint": os.environ["BILLING_PHONE_NUMBER"]})
         else:
             # No phone call, so nothing to hand over: the browser and console
             # transports carry no transfer primitive. Failing here by name beats
@@ -525,11 +513,11 @@ class BillingAgent(LLMWorker):
             # transferred while they are still right here. on_unavailable
             # decides what the caller gets instead.
             logger.warning("cold transfer failed: {}", error)
-            _TRANSFER_RESULT = {"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."}
-            await params.result_callback(_TRANSFER_RESULT)
+            self.call_context["_transfer_result"] = {"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."}
+            await params.result_callback(self.call_context["_transfer_result"])
             return
-        _TRANSFER_RESULT = {"transferred": True}
-        await params.result_callback(_TRANSFER_RESULT)
+        self.call_context["_transfer_result"] = {"transferred": True}
+        await params.result_callback(self.call_context["_transfer_result"])
 
 
 
@@ -557,6 +545,7 @@ class IntakeAgent(LLMWorker):
 
     def __init__(self, state=None, context=None, call_context=None) -> None:
         self.state = state
+        self.call_context = call_context if call_context is not None else {}
 
         llm = build_intake_llm(state)
         super().__init__("intake", llm=llm, pipeline=Pipeline([llm, build_intake_tts()]), bridged=())
@@ -617,15 +606,14 @@ def build_stt():
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     require_env()
+    call_context = {}
 
-    global _TRANSPORT
-    _TRANSPORT = transport
+    call_context["_transport"] = transport
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
     # key, no network hop; the turn binding in targets.yaml is advisory.
     context = LLMContext()
-    call_context = None
     state = build_state(call_context)
     agents = [BillingAgent(state=state, context=context, call_context=call_context), IntakeAgent(state=state, context=context, call_context=call_context)]
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(

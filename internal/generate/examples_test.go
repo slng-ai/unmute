@@ -205,9 +205,9 @@ func TestDailyRouteWorkDoesNotReachOtherTargets(t *testing.T) {
 		// The runbook's *heading* would be the obvious third marker and it is the
 		// wrong one: the LiveKit SIP route heads its own runbook "Telephony setup"
 		// too, so it names a shape both drivers share rather than one route.
-		"telephony_helper.py", "_CALL_FORWARDED", "One piece runs outside the platform",
+		"telephony_helper.py", "call_forwarded", "One piece runs outside the platform",
 	}
-	// _TRANSFER_RESULT used to be on that list and is not any more. It is the
+	// _transfer_result used to be on that list and is not any more. It is the
 	// one-attempt-per-call guard shared by both Pipecat transfer routes, so it now
 	// marks "a route that emits a cold transfer" rather than "the Daily route".
 	// The Daily-only markers above are what still scopes this test. Public
