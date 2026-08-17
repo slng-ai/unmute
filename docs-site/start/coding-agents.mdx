@@ -1,13 +1,14 @@
 ---
 title: "Coding agents"
-description: "Install the Unmute skill, then build a voice agent by asking your coding assistant for one."
+description: "Optional setup for supported coding assistants, followed by one checked voice-agent build."
 ---
 
-Unmute ships a skill that teaches a coding assistant how to write an Unmute
-package: the schema, the model catalog, the tool kinds, how to shape a prompt
-for speech, and what each target refuses. Install it once, then describe the
-agent you want in a sentence and check what comes back. Setup takes about a
-minute. Getting to a voice you can talk to takes about fifteen.
+If you use a supported coding assistant, Unmute ships an optional skill that
+teaches it how to write an Unmute package: the schema, the model catalog, the
+tool kinds, how to shape a prompt for speech, and what each target refuses.
+Install it once, then describe the agent you want in a sentence and check what
+comes back. Setup takes about a minute. Getting to a voice you can talk to
+takes about fifteen.
 
 An assistant is not required. If you would rather write the YAML yourself, the
 [quickstart](/start/quickstart) is the same journey by hand, and it is the
@@ -25,7 +26,7 @@ From the root of your project:
 unmute skill install
 ```
 
-```text
+```text expandable
   .agents/skills/unmute/
     SKILL.md                         written
     references/conversation.md       written
@@ -77,7 +78,13 @@ flags are on the [skill command](/reference/cli/skill) page.
 ## Check it took
 
 A skill that silently did not load looks exactly like an assistant that is bad
-at Unmute, so prove it before you build anything. Ask:
+at Unmute, so prove it before you build anything.
+
+A tool is an action the voice agent can call, such as checking appointment
+slots or booking one. Its YAML file describes what the model may send and has
+exactly one execution block that says where the action runs.
+
+Ask:
 
 ```text
 In Unmute, what are the four ways a tool can run?
@@ -288,8 +295,17 @@ Six things that separate a good session from a frustrating one.
 
 ## Where to go next
 
-- [Orchestration](/build/orchestration/overview) for tasks, task groups, and
-  handoffs.
-- [Tools](/build/tools/overview) for the four kinds in full.
-- [Telephony](/telephony/overview) for putting it on a real phone number.
-- [Deployment](/deploy/going-live) for getting it off your laptop.
+<Columns cols={2}>
+  <Card title="Orchestration" icon="git-branch" href="/build/orchestration/overview">
+    Tasks, task groups, and handoffs.
+  </Card>
+  <Card title="Tools" icon="wrench" href="/build/tools/overview">
+    The four active kinds in full.
+  </Card>
+  <Card title="Telephony" icon="phone" href="/telephony/overview">
+    Put the agent on a real phone number.
+  </Card>
+  <Card title="Deployment" icon="cloud-upload" href="/deploy/going-live">
+    Get the agent off your laptop.
+  </Card>
+</Columns>

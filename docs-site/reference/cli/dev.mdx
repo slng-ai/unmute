@@ -3,7 +3,7 @@ title: "unmute dev"
 description: "Every flag, with defaults, requirements, and what each mode ignores."
 ---
 
-```text
+```text expandable wrap
 $ unmute dev --help
 Compile, run the agent locally, and talk to it in the browser.
 
@@ -98,7 +98,7 @@ the generated agent with `uv`, and Pipecat Daily has no local phone topology.
 
 ## Requirements between flags
 
-```text
+```text wrap
 unmute: dev: --public-url requires --telephony
 unmute: dev: --to requires --telephony
 unmute: dev: --to must be an E.164 number like +15551234567, got "4155550123"

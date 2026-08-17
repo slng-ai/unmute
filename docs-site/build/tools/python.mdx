@@ -6,7 +6,7 @@ description: "A handler of your own in the package: what it receives, what it re
 Some tools need code rather than a request. Write the function in your package and
 name it from the tool file.
 
-```yaml tools/cancel_appointment.yaml
+```yaml tools/cancel_appointment.yaml expandable wrap
 description: Cancel the appointment outright. Call it only when the customer says plainly that they want to cancel, never when they want a different time.
 
 input:
@@ -94,7 +94,7 @@ Only the **name** belongs in the file. Put that name in `agent.yaml` under
 `unmute validate` reads the handler, finds the names it looks up, and warns when
 `agent.yaml` forgot to declare one:
 
-```text
+```text wrap
 ✓ pipecat (pipecat)
 
 Warnings:

@@ -69,16 +69,23 @@ func collectPages(t *testing.T, current group, listed map[string]int) {
 	if current.Root != "" {
 		listed[current.Root]++
 	}
+	seenGroup := false
+	pageAfterGroup := false
 	for _, raw := range current.Pages {
 		var page string
 		if err := json.Unmarshal(raw, &page); err == nil {
 			listed[page]++
+			pageAfterGroup = seenGroup
 			continue
 		}
 		var child group
 		if err := json.Unmarshal(raw, &child); err != nil {
 			t.Fatalf("decode child of %q: %v", current.Name, err)
 		}
+		if pageAfterGroup {
+			t.Errorf("group %q puts nested group %q after a page that follows another nested group", current.Name, child.Name)
+		}
+		seenGroup = true
 		collectPages(t, child, listed)
 	}
 }

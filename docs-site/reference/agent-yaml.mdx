@@ -33,7 +33,7 @@ Durations use Go duration syntax, for example `90s`, `15m`, or `1h30m`.
 | `channels` | yes | how people reach the agent |
 | `capacity` | for telephony or code targets | your traffic estimate |
 
-## models
+## `models`
 
 Four sections. The section an entry sits in decides its kind: `think` (LLM),
 `speak` (TTS), `listen` (STT), `turn` (turn detection). Entry names share one
@@ -78,7 +78,7 @@ The `reasoning_effort` line above is the case to know: a reasoning model such as
 Do not guess model ids, voice ids, or params. Use values the user supplied or
 values verified in the provider's own documentation.
 
-## variables
+## `variables`
 
 ```yaml
 variables:
@@ -98,7 +98,7 @@ variables:
 
 Full detail on [variables](/reference/variables).
 
-## secrets
+## `secrets`
 
 ```yaml
 secrets:
@@ -122,7 +122,7 @@ to, and the numbers `destinations:` points at. Names the driver or the platform
 supplies for you, such as `REDIS_URL` or `DAILY_API_KEY`, are not yours to
 declare and are left out. See [secrets](/reference/secrets).
 
-## destinations
+## `destinations`
 
 ```yaml
 destinations:
@@ -143,7 +143,7 @@ agent.yaml:60: destination "billing_line" is a literal. agent.yaml is
 
 The model never sees a number, and cannot dial one that is not listed here.
 
-## agents
+## `agents`
 
 ```yaml
 agents:
@@ -162,7 +162,7 @@ agents:
 | `voice` | a `models.speak` entry name |
 | `tools` | names this agent may call: loaded tool files and controls; definitions never go here |
 
-## tasks
+## `tasks`
 
 ```yaml
 tasks:
@@ -195,7 +195,7 @@ default. The tool output describes one call in `tools/<name>.yaml`; the task
 result describes what the calling agent receives after the task has made all of
 its calls.
 
-### context
+### `context`
 
 Used by tasks and by transfer controls.
 
@@ -207,7 +207,7 @@ Used by tasks and by transfer controls.
 | `include_tool_calls` | `true` or `false` | whether tool calls travel too |
 | `variables` | `all` or a list of names | transfer controls only |
 
-## task_groups
+## `task_groups`
 
 ```yaml
 task_groups:
@@ -231,7 +231,7 @@ task_groups:
 When a task runs inside a group, the group's `context_scope` governs it. The
 member task's own `context` does not override the group.
 
-## controls
+## `controls`
 
 Everything the model can trigger besides a tool. One `kind` per control.
 
@@ -274,7 +274,7 @@ A warm transfer is supported only on LiveKit `sip`; Unmute does not support warm
 transfer on any Pipecat target.
 A warm transfer on a route with no leg to move is refused by name:
 
-```text
+```text wrap
 pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twilio) does
   not emit warm transfer: a warm handoff has to act on how the destination's leg ended,
   which on this route needs a callback endpoint you host, and hosting nothing is what
@@ -282,7 +282,7 @@ pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twi
   "twilio_voice" declares transport: cloud-websocket
 ```
 
-## tools
+## `tools`
 
 ```yaml
 tools:
@@ -338,7 +338,7 @@ Builtin ids: `end_call`.
 | `token_env` | environment variable holding the token |
 | `header` | header name, `api_key` only, defaults to `X-API-Key` |
 
-## conversation
+## `conversation`
 
 ```yaml
 conversation:
@@ -360,7 +360,7 @@ conversation:
 | `max_duration` | a duration |
 | `thinking_audio` | `none` or `subtle` |
 
-## tracing
+## `tracing`
 
 ```yaml
 tracing:
@@ -370,7 +370,7 @@ tracing:
 `langfuse` is the only provider today. It requires `LANGFUSE_BASE_URL`,
 `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_SECRET_KEY`.
 
-## channels
+## `channels`
 
 ```yaml
 channels:
@@ -415,7 +415,7 @@ capacity.peak_starts_per_second must be positive for telephony
 Calls arrive in bursts and each one starts a session, so a rate is the number
 the compiler sizes workers from. One is a fine answer for a first line.
 
-## capacity
+## `capacity`
 
 Capacity is required for every code target, including both targets documented
 on this site. A telephony channel also makes `peak_starts_per_second` required.

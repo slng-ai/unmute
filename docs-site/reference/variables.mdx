@@ -55,7 +55,7 @@ The last eight are system sources. You declare them; the runtime fills them in.
 "Already has a value" means `source: call_start`, a system source, or a
 `default`. Naming anything else in a session-start site is an error:
 
-```text
+```text wrap
 conversation.greeting.text references {{requested_service}}, which has no value when the prompt is built; give it source: call_start, a system source, or a default
 ```
 
@@ -77,7 +77,7 @@ variable receives a number and not a quoted string. `--var` is the local stand
 in for the dispatch payload production sends, so it accepts `call_start`
 variables only:
 
-```text
+```text wrap
 unmute: dev examples/salon-support: --var requested_service=haircut: "requested_service" has source conversation, so the model saves it mid-call through update_variables, not you
 ```
 

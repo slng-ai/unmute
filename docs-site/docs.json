@@ -77,6 +77,7 @@
         "icon": "bot",
         "pages": [
           "build/your-first-agent",
+          "build/variables",
           {
             "group": "Tools",
             "icon": "wrench",
@@ -88,7 +89,6 @@
               "build/tools/prebuilt"
             ]
           },
-          "build/variables",
           {
             "group": "Orchestration",
             "icon": "git-branch",

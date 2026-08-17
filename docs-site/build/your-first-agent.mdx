@@ -20,24 +20,24 @@ declares both targets and runs in the browser.
   that gets you talking in a minute.
 </Tip>
 
-## The agent, reduced
+## The agent file
 
-This is `examples/simple-prompt/agent.yaml` reduced, so the blocks this page
-explains are the only ones on screen. Taken out: the five `tools:` and the
-agent's tool list, which [Tools](/build/tools/overview) covers; the `tracing:`
-block and its three `LANGFUSE_*` secrets, which are about traces rather than
-about the agent; and the file's own opening comment. The `targets.yaml` below is
-reduced the same way and its two targets are shown in the order this page
-explains them. Everything else is the file as it is on disk — open the real one
-alongside if you want the whole thing.
+The small snippets below keep one block on screen at a time. Expand the full
+file when you want to see how they fit together. It is
+`examples/simple-prompt/agent.yaml` exactly as it appears in the repository.
 
-```yaml agent.yaml
+<Accordion title="Complete agent.yaml">
+```yaml
+# One agent owns every appointment workflow and tool.
 version: 1
 entry_agent: appointment_desk
 
 secrets:
   - OPENAI_API_KEY
   - SLNG_API_KEY
+  - LANGFUSE_BASE_URL
+  - LANGFUSE_PUBLIC_KEY
+  - LANGFUSE_SECRET_KEY
 
 models:
   think:
@@ -45,6 +45,8 @@ models:
       provider: openai
       model: gpt-5.6-luna
       params:
+        # A reasoning model answering with function tools on chat completions
+        # needs this exact value, or OpenAI returns 400 on every turn.
         reasoning_effort: "none"
   speak:
     voice:
@@ -65,6 +67,19 @@ agents:
     instructions: instructions.md
     model: reasoning
     voice: voice
+    tools:
+      - lookup_customer
+      - create_customer
+      - check_availability
+      - book_appointment
+      - cancel_appointment
+
+tools:
+  - lookup_customer
+  - create_customer
+  - check_availability
+  - book_appointment
+  - cancel_appointment
 
 conversation:
   greeting:
@@ -72,6 +87,9 @@ conversation:
     text: "Hi, this is Sage and Stone Salon. How can I help with your appointment?"
   interruption:
     enabled: true
+
+tracing:
+  provider: langfuse
 
 channels:
   web:
@@ -82,10 +100,11 @@ capacity:
   max_sessions: 10
   avg_session_duration: 5m
 ```
+</Accordion>
 
 Now each block.
 
-### entry_agent
+### `entry_agent`
 
 ```yaml
 entry_agent: appointment_desk
@@ -94,7 +113,7 @@ entry_agent: appointment_desk
 Which agent answers. A package can hold several agents; exactly one starts the
 call. The name has to be a key in the `agents:` map.
 
-### models
+### `models`
 
 Four kinds of model, grouped by what they do:
 
@@ -143,7 +162,7 @@ The `listen` and `turn` sections have one entry each here, so nothing needs to
 select them. With two or more entries you add a top level `listen:` or `turn:`
 line naming the one to use.
 
-### agents
+### `agents`
 
 ```yaml
 agents:
@@ -157,7 +176,7 @@ An agent is a prompt plus the models it speaks and thinks with. `instructions`
 is a path to a Markdown file in the package. Writing the prompt in its own file
 means it reviews like prose, not like YAML.
 
-### secrets
+### `secrets`
 
 ```yaml
 secrets:
@@ -175,7 +194,7 @@ failing on the first spoken word.
   [secrets](/reference/secrets).
 </Warning>
 
-### conversation
+### `conversation`
 
 ```yaml
 conversation:
@@ -189,7 +208,7 @@ conversation:
 Who speaks first and what they say, plus whether the caller can talk over the
 agent.
 
-### channels and capacity
+### `channels` and `capacity`
 
 ```yaml
 channels:
@@ -254,6 +273,6 @@ unmute dev examples/simple-prompt --target pipecat
 
 ## Where to go next
 
-<Card title="Tools" icon="wrench" href="/build/tools/overview">
-  Give the agent something to do besides talk.
+<Card title="Variables" icon="braces" href="/build/variables">
+  Personalize each call and pass values without exposing them to the model.
 </Card>
