@@ -80,9 +80,12 @@ Two things to expect at run time:
   tool list only exists once the connection is open, so nothing can check those
   names at compile time. If a tool is never called, check its spelling against
   the server's own list first.
-- **An unreachable server does not stop the agent.** LiveKit logs the toolset
-  that failed to set up and the session still starts, without that server's
-  tools. Read the worker log if a tool has gone missing.
+- **Every source must be available before the session starts.** The generated
+  entrypoint connects to each source and fetches its tool list before it starts
+  the agent. A connection or listing error stops that session before it greets
+  the caller. Closing every created check client is always attempted, and a
+  close failure also stops startup. The agent or task then opens a fresh client
+  with the same settings.
 {{- end}}
 {{- if .CallStartVars}}
 

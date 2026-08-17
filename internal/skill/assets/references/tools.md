@@ -278,6 +278,12 @@ Listing specific `tools:` is usually right. A whole server dropped into an
 agent's tool list is a large, unreviewed surface, and the model will use all of
 it.
 
+MCP sources are required at runtime. Pipecat connects them during bot setup;
+LiveKit probes every source before `AgentSession.start`, always attempts to close
+every created probe, and mounts a fresh client on the agent or task. A
+connection, tool-list, or close error stops the session before it greets the
+caller on either target.
+
 ## Prebuilt tools
 
 ```yaml tools/end_call.yaml

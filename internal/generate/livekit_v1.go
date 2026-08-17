@@ -336,6 +336,7 @@ type livekitData struct {
 	RequiredSecrets   []string              // required secrets: a startup check refuses to run without them (V12)
 	CallRequiredEnv   []string              // cold-transfer destinations checked only for a real phone call
 	LocalTools        []livekitLocalTool    // copied handler files (tools/<name>.py)
+	MCPServers        []livekitMCPServer    // unique mounted sources, used by the shared constructor + startup preflight
 	Pins              map[string]string     // plugin pins (C6): raise dep floors
 	Prompts           []livekitPrompt
 	EntryPromptExpr   string   // templated entry prompt rendered from session.userdata after outbound SIP hydration

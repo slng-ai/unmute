@@ -108,7 +108,7 @@ Same package, same conversation, two mechanisms:
 |---|---|---|
 | Emission | one `mcp.MCPToolset` on the agent's `tools=` | one `MCPClient`, started at setup |
 | Selection | `allowed_tools=["firecrawl_search"]` | `tools_filter=["firecrawl_search"]` |
-| Unreachable server | logged; the agent still starts, without those tools | `start()` raises and the bot exits saying why |
+| Unreachable server | the session fails before greeting | `start()` raises and the bot exits saying why |
 | Task scope | works | not supported: list the source on the agent |
 
 Both generated projects declare the SDK extra that carries the MCP client
@@ -120,5 +120,7 @@ Both generated projects declare the SDK extra that carries the MCP client
 The server's tool list only exists once the connection is open, so nothing can
 check the names in `tools:` at compile time. A name Firecrawl does not expose
 is simply never offered to the model. If searches never happen, check the
-spelling against Firecrawl's own tool list first, then the worker log: an MCP
-server that failed to connect says so there.
+spelling against Firecrawl's own tool list first, then the worker log. Either
+target refuses to start the session when Firecrawl cannot connect or list its
+tools. LiveKit always attempts to close every startup client, a close failure
+also stops startup, and the running agent gets a fresh client.
