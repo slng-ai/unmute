@@ -1105,8 +1105,8 @@ async def main() -> None:
     release_first.set()
     await asyncio.gather(first_task, second_task)
     assert [call_id for call_id, _ in updates] == ["call-a", "call-b"]
-    assert first_attempt.results == [{"transferred": True}]
-    assert second_attempt.results == [{"transferred": True}]
+    assert first_attempt.results == [{"transfer_started": True}]
+    assert second_attempt.results == [{"transfer_started": True}]
 
     first_replay = Params()
     await first.to_human(first_replay)
@@ -1118,6 +1118,122 @@ async def main() -> None:
     assert second.call_context is second_context
     subprocess.run(["ruff", "check", "bot.py"], check=True)
     print("pipecat session isolation smoke ok")
+
+
+asyncio.run(main())
+`
+
+const pipecatDailyTransferFailureSmokeScript = `"""Smoke check: Daily transfer failures become terminal per-call results."""
+import asyncio
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+
+
+class FakeDailyTransport:
+    def __init__(self, failure):
+        self.failure = failure
+        self.attempts = 0
+
+    async def sip_call_transfer(self, _settings):
+        self.attempts += 1
+        if self.failure is not None:
+            raise self.failure
+        return None
+
+
+class FakeLLM:
+    def __init__(self, fail_on_push=None):
+        self.fail_on_push = fail_on_push
+        self.pushes = 0
+        self.frames = []
+
+    async def push_frame(self, frame):
+        self.pushes += 1
+        self.frames.append(frame)
+        if self.pushes == self.fail_on_push:
+            raise RuntimeError("announcement failed")
+
+
+class Params:
+    function_name = "to_human"
+
+    def __init__(self, llm):
+        self.llm = llm
+        self.results = []
+
+    async def result_callback(self, result, **_kwargs):
+        self.results.append(result)
+
+
+async def main() -> None:
+    bot.DailyTransport = FakeDailyTransport
+
+    # An announcement failure happens before the carrier primitive. Release the
+    # claim so a later model turn can retry the one operation that never began.
+    retry_transport = FakeDailyTransport(None)
+    retry_context = {"_transport": retry_transport}
+    retry_agent = bot.BillingAgent(
+        state=bot.State(), context=LLMContext(), call_context=retry_context,
+    )
+    await retry_agent.to_human(Params(FakeLLM(fail_on_push=1)))
+    assert "_transfer_result" not in retry_context
+    assert retry_transport.attempts == 0
+
+    retried = Params(FakeLLM())
+    await retry_agent.to_human(retried)
+    assert retried.results == [{"transferred": True}]
+    assert retry_transport.attempts == 1
+
+    # The primitive fails, then even the failure announcement fails. The
+    # claimed result must already be terminal, so replay cannot dial again.
+    transport = FakeDailyTransport(RuntimeError("daily transfer failed"))
+    call_context = {"_transport": transport}
+    agent = bot.BillingAgent(
+        state=bot.State(), context=LLMContext(), call_context=call_context,
+    )
+    first = Params(FakeLLM(fail_on_push=2))
+    await agent.to_human(first)
+    terminal = {
+        "failed": "The transfer could not be completed; the call is ending."
+    }
+    assert call_context["_transfer_result"] == terminal
+    assert transport.attempts == 1
+    assert type(first.llm.frames[-1]).__name__ == "EndFrame"
+
+    replay = Params(FakeLLM())
+    await agent.to_human(replay)
+    assert replay.results == [terminal]
+    assert transport.attempts == 1, "terminal failure was retried"
+
+    # Cancellation is an ambiguous carrier outcome. Keep the synchronous claim
+    # and replay it; never start a second primitive.
+    cancelled_transport = FakeDailyTransport(asyncio.CancelledError())
+    cancelled_context = {"_transport": cancelled_transport}
+    cancelled_agent = bot.BillingAgent(
+        state=bot.State(), context=LLMContext(), call_context=cancelled_context,
+    )
+    try:
+        await cancelled_agent.to_human(Params(FakeLLM()))
+    except asyncio.CancelledError:
+        pass
+    else:
+        raise AssertionError("transfer cancellation was swallowed")
+    in_progress = {
+        "in_progress": "A transfer is already under way; do not start another."
+    }
+    assert cancelled_context["_transfer_result"] == in_progress
+
+    cancelled_replay = Params(FakeLLM())
+    await cancelled_agent.to_human(cancelled_replay)
+    assert cancelled_replay.results == [in_progress]
+    assert cancelled_transport.attempts == 1, "cancelled transfer was retried"
+    print("pipecat Daily transfer failure smoke ok")
 
 
 asyncio.run(main())
@@ -1558,6 +1674,15 @@ func TestSmokePipecatV1SessionStateIsIsolated(t *testing.T) {
 		inbound: true, transfer: true, connection: true,
 	})
 	runGeneratedPipecatSmokeScript(t, artifact, pipecatSessionIsolationSmokeScript)
+}
+
+// TestSmokePipecatV1DailyTransferFailureIsTerminal runs the claimed-result
+// contract through the supported Pipecat SDK's real direct-function wrapper.
+func TestSmokePipecatV1DailyTransferFailureIsTerminal(t *testing.T) {
+	runPipecatSmokeScript(t, "safe_core", nil, func(agent *ir.Agent) {
+		human := agent.Controls["to_human"].(*ir.HumanTransfer)
+		human.OnUnavailable = ir.OnUnavailableHangup
+	}, pipecatDailyTransferFailureSmokeScript)
 }
 
 // TestSmokePipecatV1MultiVendorInstantiates covers the remaining official

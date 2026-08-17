@@ -80,6 +80,9 @@ func cloudWebsocketTarget(t *testing.T, opts cloudWebsocketOptions) (*ir.Agent, 
 		// The env-name destination form: a route that composes markup out of the
 		// destination is exactly where a literal would show up in emitted output.
 		pkg.Agent.Destinations = map[string]string{"billing_line": "BILLING_PHONE_NUMBER"}
+		control := pkg.Agent.Controls["to_human"]
+		control.Cold.OnUnavailable = string(ir.OnUnavailableHangup)
+		pkg.Agent.Controls["to_human"] = control
 	} else {
 		pkg.Agent.Destinations = nil
 		dropHumanTransfer(pkg)
@@ -539,21 +542,33 @@ func TestCloudWebsocketTransferUpdatesTheLiveCall(t *testing.T) {
 		inbound: true, transfer: true, connection: true,
 	}), "bot.py")
 	for _, want := range []string{
+		`@_direct_tool(cancel_on_interruption=False)
+    async def to_human`,
 		`<Say>Connecting you to a colleague now.</Say>`, // the announcement, first
 		// Ringback rather than dead air, and the timeout renders from the
 		// control's ring_timeout rather than a hardcoded literal, so a declared
 		// value is honoured (Wave C, 2026-08-15). 25 is the default this fixture
 		// does not override.
 		`<Dial answerOnBridge="true" timeout="{ring_timeout}">`,
-		`os.environ["BILLING_PHONE_NUMBER"]`,        // an env name, never a literal
-		`/Calls/{call_id}.json`,                     // keyed on the live call
-		`data={"Twiml": twiml}`,                     // TwiML update, the platform's own mechanism
-		`phone_call["call_id"]`,                     // the id from the parsed handshake
-		`self.call_context.get("_transfer_result")`, // one attempt per call
+		`os.environ["BILLING_PHONE_NUMBER"]`,                  // an env name, never a literal
+		`/Calls/{call_id}.json`,                               // keyed on the live call
+		`data={"Twiml": twiml}`,                               // TwiML update, the platform's own mechanism
+		`if response.status < 200 or response.status >= 300:`, // only REST acceptance starts a transfer
+		`phone_call["call_id"]`,                               // the id from the parsed handshake
+		`self.call_context.get("_transfer_result")`,           // one attempt per call
+		`self.call_context["_transfer_result"] = {"transfer_started": True}`,
+		`failure_error = None`,
+		`logger.exception("failed to end call after transfer failure")`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("the emitted transfer is missing %q", want)
 		}
+	}
+	if strings.Contains(bot, `self.call_context["_transfer_result"] = {"transferred": True}`) {
+		t.Error("REST acceptance is reported as a completed transfer instead of transfer_started")
+	}
+	if strings.Contains(bot, "if response.status >= 400:") {
+		t.Error("carrier update accepts 3xx responses as transfer_started")
 	}
 	// The announcement must be inside the document, not spoken by the agent: the
 	// update tears the stream down, so an agent-spoken line is cut off by its own
@@ -601,6 +616,7 @@ func TestCloudWebsocketTransferCompletionIsWritten(t *testing.T) {
 	for _, want := range []string{
 		"ends the original call", "No fresh agent starts",
 		"Warm transfer is not supported on any Pipecat target", "LiveKit SIP route",
+		"on_unavailable: hangup", "transfer_started",
 	} {
 		if !strings.Contains(section, want) {
 			t.Errorf("the transfer section does not state %q", want)

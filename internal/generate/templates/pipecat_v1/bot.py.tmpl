@@ -306,7 +306,7 @@ async def _update_carrier_call(call_id: str, twiml: str) -> None:
     auth = aiohttp.BasicAuth(account_sid, os.environ[{{pyq .CloudWebsocket.AuthTokenEnv}}])
     async with aiohttp.ClientSession() as session:
         async with session.post(url, auth=auth, data={"Twiml": twiml}) as response:
-            if response.status >= 400:
+            if response.status < 200 or response.status >= 300:
                 raise RuntimeError(
                     f"carrier call update failed with {response.status}: {await response.text()}"
                 )
@@ -655,9 +655,6 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             # Asked twice. Replay the first answer rather than dial again.
             await params.result_callback(transfer_result)
             return
-        # Claimed before the primitive runs, not after: a request arriving while
-        # the first one is still in flight must not slip past the guard.
-        self.call_context["_transfer_result"] = {"in_progress": "A transfer is already under way; do not start another."}
 {{if $.CloudWebsocket}}        phone_call = self.call_context.get("_phone_call")
         if not phone_call or not phone_call.get("call_id"):
             # No phone call, so nothing to hand over: the browser and console
@@ -666,6 +663,18 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             self.call_context["_transfer_result"] = {"failed": "this session is not a phone call, so it cannot be transferred"}
             await params.result_callback(self.call_context["_transfer_result"])
             return
+{{else}}        transport = self.call_context.get("_transport")
+        if not isinstance(transport, {{$.DailyParams.Transport}}):
+            # No phone call, so nothing to hand over: the browser and console
+            # transports carry no transfer primitive. Refuse before announcing
+            # a transfer that cannot start.
+            self.call_context["_transfer_result"] = {"failed": "this session is not a phone call, so it cannot be transferred"}
+            await params.result_callback(self.call_context["_transfer_result"])
+            return
+{{end}}        # Claimed before any transfer work awaits: a request arriving while
+        # the first one is in flight must not slip past the guard.
+        self.call_context["_transfer_result"] = {"in_progress": "A transfer is already under way; do not start another."}
+{{if $.CloudWebsocket}}
         # The announcement is the first verb of the document below, spoken by your
         # carrier rather than by this agent. Applying the update replaces the call's
         # document, which tears this media stream down, so a line the agent started
@@ -680,66 +689,89 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             # here listening. Tell them, and never report a transfer that did not
             # happen.
             logger.warning("cold transfer failed: {}", exc)
-{{if .HangupOnUnavailable}}            await params.llm.push_frame(
-                LLMMessagesAppendFrame(
-                    [{"role": "developer", "content": "Tell the caller nobody can take the call right now, apologize, and say goodbye."}],
-                    run_llm=True,
+{{if .HangupOnUnavailable}}            self.call_context["_transfer_result"] = {"failed": "The transfer could not be completed; the call is ending."}
+            failure_error = None
+            try:
+                await params.llm.push_frame(
+                    LLMMessagesAppendFrame(
+                        [{"role": "developer", "content": "Tell the caller nobody can take the call right now, apologize, and say goodbye."}],
+                        run_llm=True,
+                    )
                 )
-            )
-            self.call_context["_transfer_result"] = {"failed": "The transfer could not be completed; the call is ending."}
-            await params.result_callback(self.call_context["_transfer_result"])
-            await params.llm.push_frame(EndFrame())
-{{else}}            await params.llm.push_frame(
+                await params.result_callback(self.call_context["_transfer_result"])
+            except BaseException as exc:
+                failure_error = exc
+            try:
+                await params.llm.push_frame(EndFrame())
+            except BaseException:
+                if failure_error is None:
+                    raise
+                logger.exception("failed to end call after transfer failure")
+            if failure_error is not None:
+                raise failure_error
+{{else}}            self.call_context["_transfer_result"] = {"failed": f"The transfer could not be completed ({exc}). Tell the caller and keep helping them."}
+            await params.llm.push_frame(
                 LLMMessagesAppendFrame(
                     [{"role": "developer", "content": "Tell the caller the transfer did not go through and that you will keep helping them."}],
                     run_llm=True,
                 )
             )
-            self.call_context["_transfer_result"] = {"failed": f"The transfer could not be completed ({exc}). Tell the caller and keep helping them."}
             await params.result_callback(self.call_context["_transfer_result"])
 {{end}}            return
         # The stream ends as your carrier applies the document. Recorded first so a
         # request that arrives in that window replays this rather than re-firing.
-        self.call_context["_transfer_result"] = {"transferred": True}
+        self.call_context["_transfer_result"] = {"transfer_started": True}
         await params.result_callback(self.call_context["_transfer_result"])
 {{else}}        # Daily SIP transfers via REFER, which keeps the bot on the call
         # until the transfer completes, so the bot speaks the announcement
         # itself (the official daily-pstn-cold-transfer pattern).
-        await params.llm.push_frame(
-            LLMMessagesAppendFrame(
-                [{"role": "developer", "content": "Tell the caller you are transferring them to a colleague now and to please hold, then wait."}],
-                run_llm=True,
+        try:
+            await params.llm.push_frame(
+                LLMMessagesAppendFrame(
+                    [{"role": "developer", "content": "Tell the caller you are transferring them to a colleague now and to please hold, then wait."}],
+                    run_llm=True,
+                )
             )
-        )
+        except BaseException:
+            # The carrier primitive has not started, so this claim is safe to
+            # release and a later model turn may retry.
+            self.call_context.pop("_transfer_result", None)
+            raise
         # sip_call_transfer, not sip_refer, and the choice is the same on both
         # Daily forms. REFER would take Daily out of the media path and stop its
         # billing, but it needs the originating SIP system to honour REFER, which
         # neither platform documents for a carrier interconnect leg. So Daily
         # stays anchored after a completed transfer and both legs keep billing
         # until the call ends; the README states that cost.
-        transport = self.call_context.get("_transport")
-        if isinstance(transport, {{$.DailyParams.Transport}}):
+        try:
             error = await transport.sip_call_transfer({"toEndPoint": {{.ColdDestination}}})
-        else:
-            # No phone call, so nothing to hand over: the browser and console
-            # transports carry no transfer primitive. Failing here by name beats
-            # raising, and beats telling the model the caller was transferred.
-            error = "this session is not a phone call, so it cannot be transferred"
+        except Exception as exc:
+            error = exc
         if error is not None:
-            # A failed transfer is a return value, not an exception, on this
-            # transport (T5). Ignoring it would tell the model the caller was
-            # transferred while they are still right here. on_unavailable
-            # decides what the caller gets instead.
+            # The transport can return or raise a failure (T5). Either way the
+            # claimed per-call result becomes terminal before on_unavailable is
+            # applied, so another tool call replays it instead of dialling again.
             logger.warning("cold transfer failed: {}", error)
-{{if .HangupOnUnavailable}}            await params.llm.push_frame(
-                LLMMessagesAppendFrame(
-                    [{"role": "developer", "content": "Tell the caller nobody can take the call right now, apologize, and say goodbye."}],
-                    run_llm=True,
+{{if .HangupOnUnavailable}}            self.call_context["_transfer_result"] = {"failed": "The transfer could not be completed; the call is ending."}
+            failure_error = None
+            try:
+                await params.llm.push_frame(
+                    LLMMessagesAppendFrame(
+                        [{"role": "developer", "content": "Tell the caller nobody can take the call right now, apologize, and say goodbye."}],
+                        run_llm=True,
+                    )
                 )
-            )
-            self.call_context["_transfer_result"] = {"failed": "The transfer could not be completed; the call is ending."}
-            await params.result_callback(self.call_context["_transfer_result"])
-            await params.llm.push_frame(EndFrame())
+                await params.result_callback(self.call_context["_transfer_result"])
+            except BaseException as exc:
+                failure_error = exc
+            try:
+                await params.llm.push_frame(EndFrame())
+            except BaseException:
+                if failure_error is None:
+                    raise
+                logger.exception("failed to end call after transfer failure")
+            if failure_error is not None:
+                raise failure_error
 {{else}}            self.call_context["_transfer_result"] = {"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."}
             await params.result_callback(self.call_context["_transfer_result"])
 {{end}}            return

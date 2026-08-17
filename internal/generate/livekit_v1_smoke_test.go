@@ -76,6 +76,125 @@ assert type(tts).__name__ == "TTS"
 print("regional SLNG smoke ok")
 `
 
+// This runs against the emitted livekit-agents pin. It checks the SDK metadata,
+// not only generated text, for both cold and warm human-transfer tools, then
+// proves a generic provider exception reaches cold on_unavailable.
+const livekitHumanTransferContractSmokeScript = `"""Smoke check: human-transfer runtime contracts."""
+import asyncio
+import json
+import os
+from types import SimpleNamespace
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import agent  # noqa: E402
+
+for tool in (
+    agent.FrontDesk.send_to_billing,
+    agent.FrontDesk.escalate_to_supervisor,
+):
+    assert tool.info.on_duplicate == "reject", tool.info
+
+
+class FailingSIP:
+    def __init__(self):
+        self.calls = 0
+
+    async def transfer_sip_participant(self, request):
+        self.calls += 1
+        raise RuntimeError("transport failed")
+
+
+class FakeSession:
+    async def say(self, *args, **kwargs):
+        pass
+
+
+async def main():
+    sip = FailingSIP()
+    caller = SimpleNamespace(
+        identity="caller",
+        kind=agent.rtc.ParticipantKind.PARTICIPANT_KIND_SIP,
+    )
+    job = SimpleNamespace(
+        room=SimpleNamespace(name="room", remote_participants={"caller": caller}),
+        api=SimpleNamespace(sip=sip),
+    )
+    agent.get_job_context = lambda: job
+    result = await agent.FrontDesk().send_to_billing(
+        SimpleNamespace(session=FakeSession())
+    )
+    assert sip.calls == 1
+    assert "transport failed" in result
+    assert "keep helping" in result
+
+
+asyncio.run(main())
+print("livekit human-transfer contract smoke ok")
+`
+
+const livekitColdHangupShutdownSmokeScript = `"""Smoke check: failed goodbye cannot skip cold hangup."""
+import asyncio
+import json
+import os
+from types import SimpleNamespace
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import agent  # noqa: E402
+
+
+class FailingSIP:
+    def __init__(self):
+        self.calls = 0
+
+    async def transfer_sip_participant(self, request):
+        self.calls += 1
+        raise RuntimeError("transfer failed")
+
+
+class FailingGoodbyeSession:
+    def __init__(self):
+        self.shutdown_called = False
+
+    async def say(self, *args, **kwargs):
+        pass
+
+    async def generate_reply(self, *args, **kwargs):
+        raise RuntimeError("goodbye failed")
+
+    def shutdown(self):
+        self.shutdown_called = True
+
+
+async def main():
+    sip = FailingSIP()
+    caller = SimpleNamespace(
+        identity="caller",
+        kind=agent.rtc.ParticipantKind.PARTICIPANT_KIND_SIP,
+    )
+    job = SimpleNamespace(
+        room=SimpleNamespace(name="room", remote_participants={"caller": caller}),
+        api=SimpleNamespace(sip=sip),
+    )
+    agent.get_job_context = lambda: job
+    session = FailingGoodbyeSession()
+    try:
+        await agent.FrontDesk().send_to_billing(SimpleNamespace(session=session))
+    except RuntimeError as error:
+        assert str(error) == "goodbye failed"
+    else:
+        raise AssertionError("failed goodbye did not propagate")
+    assert sip.calls == 1
+    assert session.shutdown_called
+
+
+asyncio.run(main())
+print("livekit cold hangup shutdown smoke ok")
+`
+
 // This runs against the exact livekit-agents pin emitted by the generator. It
 // proves the two SDK contracts the task lowering depends on: TaskGroup merges
 // one task's native finish call/output before starting the next task, and
@@ -599,6 +718,18 @@ func TestSmokeLiveKitV1RemyInstantiates(t *testing.T) {
 
 func TestSmokeLiveKitRegionalInfrastructureInstantiates(t *testing.T) {
 	runLiveKitSmokeScript(t, "regional-infrastructure", nil, nil, livekitRegionalSmokeScript)
+}
+
+func TestSmokeLiveKitV1HumanTransferContracts(t *testing.T) {
+	runLiveKitSmokeScript(t, "livekit-human-transfer", nil, nil, livekitHumanTransferContractSmokeScript)
+}
+
+func setLiveKitColdHangup(agent *ir.Agent) {
+	agent.Controls["send_to_billing"].(*ir.HumanTransfer).OnUnavailable = ir.OnUnavailableHangup
+}
+
+func TestSmokeLiveKitV1ColdHangupAlwaysShutsDown(t *testing.T) {
+	runLiveKitSmokeScript(t, "livekit-human-transfer", nil, setLiveKitColdHangup, livekitColdHangupShutdownSmokeScript)
 }
 
 func addLiveKitTaskTransfer(agent *ir.Agent) {

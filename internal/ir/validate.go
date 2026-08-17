@@ -1201,14 +1201,22 @@ func validateFallbacks(agent *Agent, resolved Target, caps targetcap.Table, row 
 // validateHumanTransfer checks the resolved shape against the route (SCHEMA
 // N25). A free-text briefing resolves nothing on its own: it rides the warm
 // control row, so there is no briefing capability left to apply. On a telephony
-// target the route table already resolved the control, so only the block's own
-// values are checked here.
+// target the route table already resolved the control. Route-specific fallback
+// limits are checked here after Build has resolved the default policy.
 func validateHumanTransfer(control *HumanTransfer, resolved Target, provider targetcap.Provider, caps targetcap.Table, row *TargetValidation) {
 	for _, err := range checkTransferBlock(control) {
 		row.Errors = add(row.Errors, err)
 	}
 	if control.Briefing != "" {
 		applyCapability(caps, targetcap.FieldTransferBriefing, provider, row)
+	}
+	cloudTwilio := resolved.Provider == ProviderPipecat && resolved.Transport == "cloud-websocket" && resolved.Carrier == "twilio"
+	if control.Mode == TransferCold && cloudTwilio && resolved.Telephony == nil {
+		row.Errors = add(row.Errors, "human transfer on (pipecat, cloud-websocket, twilio) requires channels.phone: a web session has no live Twilio CallSid or media stream to transfer")
+		return
+	}
+	if control.Mode == TransferCold && cloudTwilio && control.OnUnavailable == OnUnavailableReturn {
+		row.Errors = add(row.Errors, "human transfer on_unavailable: return_to_caller is not supported on (pipecat, cloud-websocket, twilio): this route cannot reconnect the original media stream; use on_unavailable: hangup")
 	}
 	if resolved.Telephony != nil {
 		return

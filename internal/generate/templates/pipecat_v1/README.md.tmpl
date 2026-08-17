@@ -784,6 +784,12 @@ This is deliberately a cold transfer. If the person hangs up first, the original
 call ends. If the destination declines or never answers, the original call also
 ends after the dial timeout. No fresh agent starts with an empty conversation.
 
+Pipecat `cloud-websocket` requires explicit `on_unavailable: hangup`; it cannot
+reconnect the original media stream. Omitting the field resolves to
+`return_to_caller`, so validation refuses it on this route. A successful carrier
+REST update means the transfer has started, not that the destination answered;
+the tool result is `transfer_started`.
+
 **Warm transfer is not supported on any Pipecat target in Unmute.** Use the
 LiveKit SIP route when the agent must brief the person before connecting the
 caller. See the telephony and transfer overviews in the Unmute documentation
@@ -845,9 +851,10 @@ within a couple of seconds, then this agent.
 **{{if .CloudWebsocket.HasInbound}}{{if .SecretSet}}7{{else}}6{{end}}{{else}}{{if .SecretSet}}5{{else}}4{{end}}{{end}}. Test an outgoing call**, per **Place an outbound call** above.
 {{end}}{{if .HasColdTransfer}}
 **{{if .CloudWebsocket.HasOutbound}}{{if .CloudWebsocket.HasInbound}}{{if .SecretSet}}8{{else}}7{{end}}{{else}}{{if .SecretSet}}6{{else}}5{{end}}{{end}}{{else}}{{if .SecretSet}}7{{else}}6{{end}}{{end}}. Test a transfer, both ways.** On a call, ask for the person this agent can
-hand you to. Expected: the spoken line, the destination ringing, and the agent
-gone once it answers. Then let the person **hang up first**: expected is the
-original call ending, with no new agent greeting. Then run it a third time with
+hand you to. Expected: the accepted update ends the agent's stream, then the
+carrier speaks the line and rings the destination. Let the person **hang up
+first**: expected is the original call ending, with no new agent greeting. Then
+run it a third time with
 the destination **declining or not answering**: expected is the original call
 ending after the dial finishes. Those last two runs cover the ordinary and
 failure paths.

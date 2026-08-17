@@ -1488,6 +1488,10 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
+		// LiveKit may execute parallel tool calls. Reject a duplicate while the
+		// first transfer is in flight so parallel requests cannot trigger two REFERs.
+		`@function_tool(on_duplicate="reject")
+    async def to_human(self, ctx: RunContext) -> str | None:`,
 		// `str | None` since 2026-08-12: a function tool's return value is fed
 		// back to the LLM, which then takes another turn. That is right while
 		// the caller is still listening and wrong once the session is over, so
@@ -1505,10 +1509,17 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 		// (spec FR-004d); _refer_uri adds the scheme at call time.
 		`transfer_to=_refer_uri(os.environ["BILLING_PHONE_NUMBER"]),`,
 		"await job_ctx.api.sip.transfer_sip_participant(request)",
+		// The pinned SDK can also surface transport exceptions such as
+		// aiohttp.ClientError and asyncio.TimeoutError. The try covers only the
+		// provider await, and Exception deliberately leaves cancellation alone.
+		"except Exception as error:",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("cold agent.py missing %q", want)
 		}
+	}
+	if strings.Contains(botpy, "except (api.SipCallError, api.ServerError) as error:") {
+		t.Error("cold agent.py lets generic transport failures bypass on_unavailable")
 	}
 	// A completed REFER takes the caller out of the room, so the session ends on
 	// its own and the tool returns nothing. A return value here would buy one
@@ -1536,6 +1547,8 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 	}
 	botpy = artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
+		`@function_tool(on_duplicate="reject")
+    async def to_human(self, ctx: RunContext) -> str | None:`,
 		"from livekit.agents.beta.workflows import WarmTransferTask, WorkflowInstructions",
 		`sip_call_to=os.environ["BILLING_PHONE_NUMBER"]`,
 		// The conversation is read into one local and that local is what is
@@ -1618,6 +1631,52 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 		if strings.Contains(botpy, forbidden) {
 			t.Errorf("warm agent.py emits %q, which no Connection declared", forbidden)
 		}
+	}
+}
+
+func TestLiveKitV1HumanTransferHangupAlwaysShutsDown(t *testing.T) {
+	coldAgent := loadCompilerAgent(t)
+	coldAgent.Controls["to_human"].(*ir.HumanTransfer).OnUnavailable = ir.OnUnavailableHangup
+	coldArtifact, err := Generate(
+		coldAgent,
+		targetByProvider(t, coldAgent, ir.ProviderLiveKit),
+		target.Default(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	warmAgent, warmTarget := configuredLiveKitSIP(t)
+	warmAgent.Controls["to_human"].(*ir.HumanTransfer).OnUnavailable = ir.OnUnavailableHangup
+	warmArtifact, err := GenerateLiveKit(warmAgent, warmTarget, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, test := range map[string]struct {
+		py          string
+		instruction string
+	}{
+		"cold": {
+			py:          artifactFile(t, coldArtifact, "agent.py"),
+			instruction: "Tell the caller the transfer failed and say goodbye.",
+		},
+		"warm": {
+			py:          artifactFile(t, warmArtifact, "agent.py"),
+			instruction: "Tell the caller nobody is available and say goodbye.",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want := fmt.Sprintf(`try:
+                await ctx.session.generate_reply(
+                    instructions=%q
+                )
+            finally:
+                ctx.session.shutdown()`, test.instruction)
+			if !strings.Contains(test.py, want) {
+				t.Errorf("%s hangup can skip shutdown when goodbye generation fails; missing:\n%s", name, want)
+			}
+		})
 	}
 }
 

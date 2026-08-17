@@ -86,6 +86,12 @@ local runner answers Twilio's webhook itself. The transfer stays at Twilio:
 after the destination leg ends, Twilio ends the original call. It does not need
 a deployed copy of the agent for a handback.
 
+Pipecat `cloud-websocket` requires explicit `on_unavailable: hangup`; it cannot
+reconnect the original media stream. Omitting the field resolves to
+`return_to_caller`, so validation refuses it on this route. A successful Twilio
+REST update means the transfer has started, not that the destination answered;
+the tool result is `transfer_started`.
+
 ## Deploy to Pipecat Cloud
 
 Authenticate once with `pipecat cloud auth login`, then four commands, in this

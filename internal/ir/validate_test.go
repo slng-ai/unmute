@@ -1701,7 +1701,76 @@ func cloudWebsocketPackage(t *testing.T) *packagespec.Package {
 			"from_number": "TWILIO_PHONE_NUMBER",
 		},
 	}}
+	control := pkg.Agent.Controls["to_human"]
+	control.Cold.OnUnavailable = string(OnUnavailableHangup)
+	pkg.Agent.Controls["to_human"] = control
 	return pkg
+}
+
+func TestValidatePipecatCloudWebsocketRequiresHangupOnUnavailable(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		policy      string
+		wantFailure bool
+	}{
+		{name: "omitted default", wantFailure: true},
+		{name: "explicit return", policy: string(OnUnavailableReturn), wantFailure: true},
+		{name: "explicit hangup", policy: string(OnUnavailableHangup)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pkg := cloudWebsocketPackage(t)
+			control := pkg.Agent.Controls["to_human"]
+			control.Cold.OnUnavailable = test.policy
+			pkg.Agent.Controls["to_human"] = control
+			agent, err := Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			human := agent.Controls["to_human"].(*HumanTransfer)
+			if test.policy == "" && human.OnUnavailable != OnUnavailableReturn {
+				t.Fatalf("omitted policy resolved to %q, want %q", human.OnUnavailable, OnUnavailableReturn)
+			}
+			report, err := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
+			if !test.wantFailure {
+				if err != nil {
+					t.Fatalf("hangup policy was rejected: %v\n%s", err, strings.Join(report.PerTarget[0].Errors, "\n"))
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("return_to_caller passed validation on a route that cannot reconnect the caller")
+			}
+			joined := strings.Join(report.PerTarget[0].Errors, "\n")
+			for _, want := range []string{"return_to_caller", "cannot reconnect the original media stream", "on_unavailable: hangup"} {
+				if !strings.Contains(joined, want) {
+					t.Errorf("validation error missing %q:\n%s", want, joined)
+				}
+			}
+		})
+	}
+}
+
+func TestValidatePipecatCloudWebsocketTransferNeedsPhoneSession(t *testing.T) {
+	pkg := cloudWebsocketPackage(t)
+	delete(pkg.Agent.Channels, "phone")
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := agent.Targets["pipecat"]
+	if resolved.Telephony != nil {
+		t.Fatal("web-only fixture unexpectedly has a telephony plan")
+	}
+	report, err := Validate(agent, []Target{resolved}, targetcap.Default())
+	if err == nil {
+		t.Fatal("web-only cloud-websocket transfer passed without a live carrier call")
+	}
+	joined := strings.Join(report.PerTarget[0].Errors, "\n")
+	for _, want := range []string{"cloud-websocket", "CallSid", "media stream", "channels.phone"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("validation error missing %q:\n%s", want, joined)
+		}
+	}
 }
 
 // The route where the operator hosts nothing has to validate with an **empty**

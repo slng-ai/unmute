@@ -2916,12 +2916,10 @@ func TestPipecatWebDevNeedsNoTelephonyEnv(t *testing.T) {
 	}
 }
 
-// T5: Daily's sip_call_transfer reports failure as a return value, never an
-// exception, so the generated cold tool must read it — an ignored error tells
-// the model the caller was transferred while they are still on the line. The
-// on_unavailable policy picks the branch: return_to_caller hands the model a
-// failure string; hangup says a goodbye and ends the call.
-func TestV1_DailyColdTransferHandlesTheReturnedError(t *testing.T) {
+// T5: Daily's sip_call_transfer can report failure as a return value or raise.
+// Both paths must resolve the per-call claim before applying on_unavailable;
+// otherwise every later request replays an in_progress result forever.
+func TestV1_DailyColdTransferHandlesPrimitiveFailures(t *testing.T) {
 	build := func(onUnavailable ir.OnUnavailable) string {
 		pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
 		if err != nil {
@@ -2942,12 +2940,16 @@ func TestV1_DailyColdTransferHandlesTheReturnedError(t *testing.T) {
 
 	returned := build(ir.OnUnavailableReturn)
 	for _, want := range []string{
+		`@_direct_tool(cancel_on_interruption=False)
+    async def to_human`,
 		// The primitive is a Daily transport method, so the tool narrows to that
 		// transport first; a browser or console session gets a named failure
 		// rather than an AttributeError.
-		"if isinstance(transport, DailyTransport):",
+		"if not isinstance(transport, DailyTransport):",
 		"this session is not a phone call, so it cannot be transferred",
-		"await transport.sip_call_transfer(",
+		`self.call_context.pop("_transfer_result", None)`,
+		"try:\n            error = await transport.sip_call_transfer(",
+		"except Exception as exc:\n            error = exc",
 		"if error is not None:",
 		"Tell the caller and keep helping them.",
 	} {
@@ -2958,17 +2960,36 @@ func TestV1_DailyColdTransferHandlesTheReturnedError(t *testing.T) {
 	if strings.Contains(returned, "the call is ending") {
 		t.Error("return_to_caller bot.py must not end the call on a failed transfer")
 	}
+	noPhoneAt := strings.Index(returned, "if not isinstance(transport, DailyTransport):")
+	claimAt := strings.Index(returned, `self.call_context["_transfer_result"] = {"in_progress":`)
+	announceAt := strings.Index(returned, "Tell the caller you are transferring them to a colleague now")
+	primitiveAt := strings.Index(returned, "await transport.sip_call_transfer(")
+	if noPhoneAt < 0 || claimAt < noPhoneAt || announceAt < claimAt || primitiveAt < announceAt {
+		t.Errorf("Daily transfer order = preflight %d, claim %d, announce %d, primitive %d", noPhoneAt, claimAt, announceAt, primitiveAt)
+	}
 
 	hangup := build(ir.OnUnavailableHangup)
 	for _, want := range []string{
 		"if error is not None:",
 		"nobody can take the call right now",
 		"The transfer could not be completed; the call is ending.",
+		"failure_error = None",
+		`logger.exception("failed to end call after transfer failure")`,
 		"await params.llm.push_frame(EndFrame())",
 	} {
 		if !strings.Contains(hangup, want) {
 			t.Errorf("hangup bot.py missing %q", want)
 		}
+	}
+	terminalAt := strings.Index(hangup, `self.call_context["_transfer_result"] = {"failed": "The transfer could not be completed; the call is ending."}`)
+	if terminalAt < 0 {
+		t.Fatal("hangup bot.py has no terminal failure assignment")
+	}
+	failureBody := hangup[terminalAt:]
+	goodbyeAt := strings.Index(failureBody, "Tell the caller nobody can take the call right now")
+	endAt := strings.Index(failureBody, "await params.llm.push_frame(EndFrame())")
+	if goodbyeAt < 0 || endAt < goodbyeAt {
+		t.Error("hangup failure does not record terminal state, announce, then attempt EndFrame")
 	}
 }
 

@@ -1062,10 +1062,9 @@ func pipecatDestinationExpr(destination string, env *envSet) string {
 }
 
 // humanTransferTool lowers a human_transfer to a @tool. Only cold exists on
-// Pipecat, and only via Daily's native `sip_call_transfer` (SPEC C4, V1):
-// the bot announces, Daily reroutes the leg, the bot drops out. Warm has no
-// Pipecat primitive; the gate rejects it before this runs, and the error here
-// is the defense in depth for a gate bug.
+// Pipecat. Daily uses `sip_call_transfer`; cloud-websocket replaces the live
+// carrier call's markup. Warm is rejected before this runs, and the error here
+// is defense in depth for a gate bug.
 func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target, env *envSet) (pipecatTool, error) {
 	_ = agent
 	destination, ok := target.Destinations[c.Destination]
@@ -1095,6 +1094,9 @@ func humanTransferTool(name, agent string, c *ir.HumanTransfer, target ir.Target
 	tool := pipecatTool{
 		Name: name, MethodName: name,
 		Description: orDefault(c.When, "Transfer the caller to a human."),
+		// The carrier operation is claimed synchronously and cannot be safely
+		// restarted if caller speech interrupts the tool while it is in flight.
+		Interruption: "continue",
 		// The author's ring_timeout, or the 25 seconds this template used to
 		// hardcode. It was hardcoded past a declared value: writing
 		// `ring_timeout: 7s` compiled green, emitted `timeout="25"`, and produced

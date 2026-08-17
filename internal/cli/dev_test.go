@@ -664,6 +664,9 @@ func TestDevTelephonyOnTheCloudWebsocketRouteReachesTheLocalFlow(t *testing.T) {
 	agentConfigured := mustReplace(t, string(agentRaw),
 		"channels:\n  web:\n    kind: realtime_audio\n\n",
 		"channels:\n  web:\n    kind: realtime_audio\n  phone:\n    kind: telephony\n    inbound: true\n    outbound: false\n    required_controls:\n      - cold_transfer\n      - hangup\n\n")
+	agentConfigured = mustReplace(t, agentConfigured,
+		"      destination: billing_line   # resolved by the destinations map below\n",
+		"      destination: billing_line   # resolved by the destinations map below\n      on_unavailable: hangup\n")
 	if err := os.WriteFile(agentPath, []byte(agentConfigured), 0o600); err != nil {
 		t.Fatal(err)
 	}

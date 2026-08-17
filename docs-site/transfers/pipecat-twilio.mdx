@@ -49,11 +49,18 @@ controls:
     when: The caller asks about an invoice, a refund, or a charge they do not recognise.
     cold:
       destination: billing_line
+      on_unavailable: hangup
 ```
 
 The mechanism is different from every other route. One request replaces the
 live call's instructions at Twilio, keyed on the call id: speak a line, dial
 the destination, done. The agent's part of the call ends there.
+
+Pipecat `cloud-websocket` requires explicit `on_unavailable: hangup`; it cannot
+reconnect the original media stream. Omitting the field resolves to
+`return_to_caller`, so validation refuses it on this route. A successful Twilio
+REST update means the transfer has started, not that the destination answered;
+the tool result is `transfer_started`.
 
 ## The transfer ends the call
 

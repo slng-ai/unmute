@@ -180,6 +180,23 @@ func TestTaskTransferAndSharedResultDocsStayAligned(t *testing.T) {
 	}
 }
 
+func TestPipecatCloudTransferFallbackDocsStayAligned(t *testing.T) {
+	const rule = "Pipecat `cloud-websocket` requires explicit `on_unavailable: hangup`; it cannot reconnect the original media stream."
+	for name, content := range map[string]string{
+		"references/transfers.md":                          bundleFile(t, "references/transfers.md"),
+		"docs-site/transfers/pipecat-twilio.mdx":           trackedFile(t, "docs-site/transfers/pipecat-twilio.mdx"),
+		"examples/pipecat-human-transfer-twilio/README.md": trackedFile(t, "examples/pipecat-human-transfer-twilio/README.md"),
+		"internal/generate/templates/pipecat_v1/README.md": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
+	} {
+		if !strings.Contains(strings.Join(strings.Fields(content), " "), rule) {
+			t.Errorf("%s does not state the cloud transfer fallback rule", name)
+		}
+		if !strings.Contains(content, "`transfer_started`") {
+			t.Errorf("%s does not distinguish REST acceptance from transfer completion", name)
+		}
+	}
+}
+
 func TestCapacityRequirementMatchesPublicGuide(t *testing.T) {
 	const row = "| `capacity` | for telephony or code targets | your traffic estimate |"
 	for name, content := range map[string]string{
