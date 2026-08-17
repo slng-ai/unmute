@@ -53,12 +53,44 @@ a guarantee. That is the difference you are buying.
 
 ## What each shape costs
 
-| Shape | Control | Context | Correcting a step | The cost |
-|---|---|---|---|---|
-| one agent and tools | stays with the agent for the whole call | the whole conversation | ask again | the prompt carries everything, and grows |
-| task | returns when the task finishes | what `context:` gives the task | delegate again | one more prompt and one more tool list to keep straight |
-| task group | returns when the group finishes | shared across the steps in the group | steps can be revisited inside the group | an order you have to be sure about |
-| handoff | leaves for good | only what `context:` carries over | another handoff back | nothing returns, so there is no result and no automatic way back |
+<Columns cols={2}>
+  <Card title="One agent and tools" icon="bot">
+    **Control:** stays with the agent for the whole call.
+
+    **Context:** the whole conversation.
+
+    **Correction:** ask again.
+
+    **Cost:** the prompt carries everything, and grows.
+  </Card>
+  <Card title="Task" icon="list-checks">
+    **Control:** returns when the task finishes.
+
+    **Context:** what `context:` gives the task.
+
+    **Correction:** delegate again.
+
+    **Cost:** one more prompt and tool list to keep straight.
+  </Card>
+  <Card title="Task group" icon="list-ordered">
+    **Control:** returns when the group finishes.
+
+    **Context:** shared across the steps in the group.
+
+    **Correction:** revisit a step inside the group.
+
+    **Cost:** an order you have to be sure about.
+  </Card>
+  <Card title="Handoff" icon="arrow-right-left">
+    **Control:** leaves for good.
+
+    **Context:** only what `context:` carries over.
+
+    **Correction:** another handoff back.
+
+    **Cost:** nothing returns, so there is no result or automatic way back.
+  </Card>
+</Columns>
 
 These are not exclusive. One agent can delegate a task in one phase and hand off in
 another.

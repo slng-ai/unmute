@@ -6,7 +6,7 @@ description: "Call your own API: a URL from the environment, a path that renders
 The everyday tool. The model decides to call it, Unmute builds the request, and
 your API answers.
 
-```yaml tools/confirm_appointment.yaml
+```yaml tools/confirm_appointment.yaml expandable wrap
 description: Confirm that the existing appointment stays as booked. Call it when the customer says the time works.
 
 input:
@@ -86,7 +86,7 @@ livekit: tool "confirm_appointment" auth token_env must be an UPPER_SNAKE enviro
 
 So is a field from the other scheme, and the message says why:
 
-```text
+```text wrap
 livekit: tool "confirm_appointment" auth header is not a bearer field: bearer always sends
   Authorization
 ```
@@ -115,7 +115,7 @@ can neither see them nor overwrite them. That is the place a customer id, a
 captured slot, or the number the call went out to rides along. A key cannot be in
 both lists, and the refusal explains the reason rather than just the rule:
 
-```text
+```text wrap
 tools/confirm_appointment.yaml:5: tool "confirm_appointment" injects "customer_id", which
   is also an input property; an injected value is hidden from the model, so it cannot
   double as a parameter the model fills in

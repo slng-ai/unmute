@@ -3,7 +3,7 @@ title: "CLI reference"
 description: "The command tree, exit codes, warnings, version, and shell completion."
 ---
 
-```text
+```text expandable wrap
 $ unmute --help
 Author-once, portable voice agents.
 
@@ -78,7 +78,7 @@ unmute validate my-agent
 The current directory must hold `agent.yaml` itself. No parent directory is
 searched, so a run from inside `build/` cannot rewrite the package above it:
 
-```text
+```text wrap
 unmute: validate: no agent.yaml in /Users/you/projects
   run `unmute validate` from inside an agent package, or name one: `unmute validate <package-dir>`
 ```

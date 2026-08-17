@@ -6,7 +6,7 @@ description: "What a tool is, the six ways one can run, and how you decide which
 A tool is two things: a contract the model sees, and something that runs when the
 model calls it. Both live in one file, `tools/<name>.yaml`.
 
-```yaml tools/check_availability.yaml
+```yaml tools/check_availability.yaml expandable
 description: >-
   List Sage and Stone slots for one service and date. Call only after customer
   identification succeeds. This tool accepts only service and date.
@@ -66,7 +66,7 @@ tools/check_availability.yaml:7: two execution blocks (local and webhook): a too
 
 None at all, where the message is also the list:
 
-```text
+```text wrap
 tools/check_availability.yaml: no execution block: add one of webhook, local, mcp, builtin,
   client, provider_hosted
 ```

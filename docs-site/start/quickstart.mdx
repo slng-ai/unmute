@@ -3,44 +3,38 @@ title: "Quickstart"
 description: "Scaffold an agent, add two keys, and talk to it in your browser."
 ---
 
-This page takes you from nothing to an agent you can talk to. It uses only
-`unmute init` and `unmute dev`.
-
 You need the `unmute` binary ([installation](/start/installation)), Docker
 running, and two API keys: one for the model that thinks (`OPENAI_API_KEY`) and
 one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
+
+<Note>
+  The coding skill is optional and unrelated to `SLNG_API_KEY`, which
+  authenticates the default speech models. This page uses the CLI directly;
+  [Coding agents](/start/coding-agents) shows the assistant workflow.
+</Note>
 
 <Steps>
   <Step title="Scaffold a package">
     ```sh
     unmute init my-agent
-    ```
-
-    ```text
-    created my-agent/agent.yaml
-    created my-agent/.env.example
-    created my-agent/.gitignore
-    created my-agent/instructions.md
-    created my-agent/targets.yaml
-    created my-agent/tools/end_call.yaml
-    ```
-
-    Six files. `agent.yaml` is the agent, `instructions.md` is its prompt,
-    `targets.yaml` picks the runtime, `tools/end_call.yaml` gives it a way to
-    hang up, `.env.example` lists the keys to fill in, and `.gitignore` keeps
-    your filled-in `.env` and the `build/` output out of git.
-
-    The scaffold binds **SLNG speech models by design**, for listening and for
-    speaking, which is why one `SLNG_API_KEY` covers both. See
-    [SLNG Execution Layer](/models/optimization) for what runs behind them. It picks
-    **LiveKit Agents** as the runtime, which is what `targets.yaml` says and
-    what you will see named in the output below.
-
-    Now move into the package, because everything after this runs inside it:
-
-    ```sh
     cd my-agent
     ```
+
+    <Accordion title="Files created by unmute init">
+      ```text
+      created my-agent/agent.yaml
+      created my-agent/.env.example
+      created my-agent/.gitignore
+      created my-agent/instructions.md
+      created my-agent/targets.yaml
+      created my-agent/tools/end_call.yaml
+      ```
+
+      `agent.yaml` is the agent, `instructions.md` is its prompt, and
+      `targets.yaml` selects LiveKit Agents as the runtime. `.env.example`
+      lists the keys to fill in. The scaffold uses SLNG speech models for
+      listening and speaking.
+    </Accordion>
 
     <Tip>
       Run `unmute init` with no name in a terminal and you get an interactive
@@ -49,45 +43,26 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
   </Step>
 
   <Step title="Add your keys">
-    ```sh
+    <CodeGroup>
+    ```sh Bash
     cp .env.example .env
     ```
 
-    Open `.env` and fill in `OPENAI_API_KEY` and `SLNG_API_KEY`. Those two are
-    the ones you supply, and they are the same two `agent.yaml` lists under
-    `secrets:`.
-
-    The file lists three more names, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`,
-    and `LIVEKIT_URL`. They point at a LiveKit server. `unmute dev` runs one
-    for you locally and fills them in itself, so leave them empty until you
-    deploy. That split is deliberate: `secrets:` is what your agent needs, and
-    the LiveKit connection belongs to wherever the agent happens to run.
-
-    `unmute dev` reads `.env` from the directory you run it in, then from the
-    package directory, so a package can override a shared key.
-  </Step>
-
-  <Step title="Check the package">
-    ```sh
-    unmute validate
+    ```powershell PowerShell
+    Copy-Item .env.example .env
     ```
+    </CodeGroup>
 
-    ```text
-    ✓ livekit (livekit)
+    Open `.env` and fill in only `OPENAI_API_KEY` and `SLNG_API_KEY`.
 
-    Warnings:
-      livekit: LiveKit turn placement is a preference
-    ```
+    <Accordion title="Why the other keys stay empty">
+      `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and `LIVEKIT_URL` point at a
+      LiveKit server. `unmute dev` runs one locally and fills them in, so leave
+      them empty until you deploy.
 
-    No argument, because you are standing in the package. `validate`,
-    `compile`, and `dev` all take the package directory as an optional
-    argument: leave it out and they use the current directory, name one and
-    that wins. So `unmute validate my-agent` from the parent directory prints
-    the same thing.
-
-    One line per target, and exit code 0. The warning is a real difference
-    worth reading, not a failure. If a field is wrong, this is where you find
-    out, with the file and the line.
+      `unmute dev` reads `.env` from the directory you run it in, then from the
+      package directory. A package can therefore override a shared key.
+    </Accordion>
   </Step>
 
   <Step title="Talk to it">
@@ -95,41 +70,45 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
     unmute dev
     ```
 
-    ```text
-    compiled build/livekit
-    building and starting the container...
+    Your browser opens automatically. Allow the microphone, press the button,
+    and say hello.
 
-      ▸ http://localhost:8765/?agent=livekit
-        ctrl-c to stop  ·  logs: build/livekit/dev.log
-    ```
+    <Accordion title="What unmute dev runs">
+      ```text
+      compiled build/livekit
+      building and starting the container...
 
-    `unmute dev` compiles the package, builds the container the deploy would
-    use, starts it, and serves a small web page against it. Your browser opens
-    at that URL. Allow the microphone, press the button, and say hello. The
-    agent speaks first, because `agent.yaml` says so:
+        ▸ http://localhost:8765/?agent=livekit
+          ctrl-c to stop  ·  logs: build/livekit/dev.log
+      ```
 
-    ```yaml
-    conversation:
-      greeting:
-        speaks_first: agent
-        text: "Hi there, I'm listening. What can I help you with?"
-    ```
+      `unmute dev` validates and compiles the package, builds its container,
+      starts it, and serves the browser page. The first run is slower because
+      Docker builds the image; later runs reuse it.
+    </Accordion>
 
     Press ctrl-c when you are done. The container is stopped and removed for
     you.
   </Step>
 </Steps>
 
-## What just happened
+## Validate, develop, and compile
 
-- `unmute init` wrote a package bound to SLNG speech models and an OpenAI
-  reasoning model, targeting LiveKit Agents.
-- `unmute dev` compiled that package into `build/livekit/`, a normal Python
-  project with a Dockerfile.
-- The container it ran is the same image a deployment would run. Local testing
-  is not a separate code path.
+The quickstart used `dev` because it is the shortest path to a conversation.
+The three commands serve different moments:
 
-The first run is slow because Docker builds the image. Later runs reuse it.
+| Command | What it does |
+|---|---|
+| `unmute validate` | checks the package against its targets without writing or running a build |
+| `unmute dev` | validates, compiles one target, runs it locally, and opens the browser |
+| `unmute compile` | writes the generated target projects without starting them |
+
+Run `unmute validate` whenever you change the package. A warning is a real
+difference worth reading, but it still exits 0. An error names the file and
+line and exits 1.
+
+All three commands take an optional package directory. With no argument they
+use the current directory.
 
 ## If something goes wrong
 
