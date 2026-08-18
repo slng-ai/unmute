@@ -76,6 +76,202 @@ assert type(tts).__name__ == "TTS"
 print("regional SLNG smoke ok")
 `
 
+// This runs the generated entrypoint against the exact supported SDK. It
+// proves required sources probe concurrently after the room connects, a setup
+// error survives a simultaneous cleanup error, every probe closes, and repeated
+// runtime mounts (including an inactive agent's) are fresh instances.
+const livekitRequiredMCPSmokeScript = `"""Smoke check: required MCP preflight and lifecycle."""
+import asyncio
+import json
+import os
+from importlib.metadata import version
+from types import SimpleNamespace
+
+assert version("livekit-agents") == "1.6.10"
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+os.environ["FIRECRAWL_MCP_URL"] = "https://required-first.invalid/mcp"
+os.environ["SECOND_MCP_URL"] = "https://required-second.invalid/mcp"
+
+import agent  # noqa: E402
+
+
+class FakeSession:
+    starts = []
+    greetings = []
+
+    def __init__(self, **kwargs):
+        pass
+
+    def on(self, event):
+        return lambda callback: callback
+
+    async def start(self, *, agent, room, **kwargs):
+        self.starts.append(agent)
+
+    async def say(self, *args, **kwargs):
+        self.greetings.append((args, kwargs))
+
+    def generate_reply(self, *args, **kwargs):
+        self.greetings.append((args, kwargs))
+
+
+class FakeContext:
+    def __init__(self):
+        self.proc = SimpleNamespace(userdata={"vad": object()})
+        self.room = SimpleNamespace(name="smoke-room")
+        self.connects = 0
+
+    async def connect(self):
+        self.connects += 1
+
+
+setup_servers = []
+closed_servers = []
+failure_logs = []
+active_setups = 0
+max_active_setups = 0
+setup_barrier = asyncio.Event()
+setup_release = asyncio.Event()
+setup_errors = {}
+close_errors = {}
+block_setup = False
+
+
+async def fake_initialize(self):
+    global active_setups, max_active_setups
+
+    setup_servers.append(self)
+    active_setups += 1
+    max_active_setups = max(max_active_setups, active_setups)
+    if active_setups == 2:
+        setup_barrier.set()
+    try:
+        await asyncio.wait_for(setup_barrier.wait(), timeout=1)
+        if block_setup:
+            await setup_release.wait()
+        if error := setup_errors.get(self.url):
+            raise RuntimeError(error)
+    finally:
+        active_setups -= 1
+
+
+async def fake_list_tools(self, *, tool_options=None):
+    return []
+
+
+async def fake_server_close(self):
+    closed_servers.append(self)
+    if error := close_errors.get(self.url):
+        raise RuntimeError(error)
+
+
+def fake_log(message, *args, exc_info=None):
+    failure_logs.append((message % args, str(exc_info[1])))
+
+
+agent.AgentSession = FakeSession
+agent.mcp.MCPServerHTTP.initialize = fake_initialize
+agent.mcp.MCPServerHTTP.list_tools = fake_list_tools
+agent.mcp.MCPServerHTTP.aclose = fake_server_close
+agent.logger.error = fake_log
+
+
+async def main():
+    global active_setups, block_setup, max_active_setups, setup_barrier, setup_release
+
+    setup_errors.update({
+        "https://required-second.invalid/mcp": "web_browse setup failed",
+        "https://required-first.invalid/mcp": "web_search setup failed",
+    })
+    close_errors.update({
+        "https://required-second.invalid/mcp": "web_browse cleanup failed",
+        "https://required-first.invalid/mcp": "web_search cleanup failed",
+    })
+    failed_ctx = FakeContext()
+    try:
+        await agent.entrypoint(failed_ctx)
+    except RuntimeError as error:
+        assert str(error) == "web_browse setup failed"
+    else:
+        raise AssertionError("unavailable required MCP did not fail the session")
+    assert len(setup_servers) == 2
+    assert set(closed_servers) == set(setup_servers)
+    assert max_active_setups == 2
+    assert failure_logs == [
+        ("MCP preflight setup failed for web_search", "web_search setup failed"),
+        ("MCP preflight cleanup failed for web_browse", "web_browse cleanup failed"),
+        ("MCP preflight cleanup failed for web_search", "web_search cleanup failed"),
+    ]
+    assert not FakeSession.starts
+    assert not FakeSession.greetings
+    assert failed_ctx.connects == 1
+
+    setup_servers.clear()
+    closed_servers.clear()
+    failure_logs.clear()
+    setup_errors.clear()
+    close_errors.clear()
+    active_setups = 0
+    max_active_setups = 0
+    setup_barrier = asyncio.Event()
+    setup_release = asyncio.Event()
+    block_setup = True
+    cancelled_ctx = FakeContext()
+    cancelled = asyncio.create_task(agent.entrypoint(cancelled_ctx))
+    await asyncio.wait_for(setup_barrier.wait(), timeout=1)
+    cancelled.cancel()
+    try:
+        await cancelled
+    except asyncio.CancelledError:
+        pass
+    else:
+        raise AssertionError("cancelled MCP preflight did not cancel the session")
+    assert len(setup_servers) == 2
+    assert set(closed_servers) == set(setup_servers)
+    assert max_active_setups == 2
+    assert not failure_logs
+    assert not FakeSession.starts
+    assert not FakeSession.greetings
+    assert cancelled_ctx.connects == 1
+
+    setup_servers.clear()
+    closed_servers.clear()
+    active_setups = 0
+    max_active_setups = 0
+    setup_barrier = asyncio.Event()
+    setup_release = asyncio.Event()
+    block_setup = False
+    ready_ctx = FakeContext()
+    await agent.entrypoint(ready_ctx)
+
+    assert len(setup_servers) == 2
+    assert set(closed_servers) == set(setup_servers)
+    assert max_active_setups == 2
+    assert len(FakeSession.starts) == 1
+    runtime_toolsets = [
+        tool
+        for tool in FakeSession.starts[0].tools
+        if isinstance(tool, agent.mcp.MCPToolset)
+    ]
+    assert len(runtime_toolsets) == 2
+    inactive_toolsets = [
+        tool for tool in agent.Inactive().tools if isinstance(tool, agent.mcp.MCPToolset)
+    ]
+    assert len(inactive_toolsets) == 1
+    all_runtime_toolsets = runtime_toolsets + inactive_toolsets
+    assert len({id(toolset._mcp_server) for toolset in all_runtime_toolsets}) == 3
+    assert all(
+        toolset._mcp_server not in closed_servers for toolset in all_runtime_toolsets
+    )
+    assert ready_ctx.connects == 1
+
+
+asyncio.run(main())
+print("livekit required MCP smoke ok")
+`
+
 // This runs against the emitted livekit-agents pin. It checks the SDK metadata,
 // not only generated text, for both cold and warm human-transfer tools, then
 // proves a generic provider exception reaches cold on_unavailable.
@@ -1007,6 +1203,7 @@ func TestSmokeV26LiveKitExamplesStaticCheck(t *testing.T) {
 		{name: "multi-task"},
 		{name: "task-groups"},
 		{name: "subagents"},
+		{name: "mcp-example"},
 		{name: "simple-prompt-tool-free-unconfigured", toolFree: true},
 		{name: "simple-prompt-tool-free-tracing", toolFree: true, tracing: true},
 	}
@@ -1120,6 +1317,21 @@ func addMCPSource(agent *ir.Agent) {
 // exactly the kwargs the template writes. Both are drift py_compile cannot see.
 func TestSmokeLiveKitV1MCPToolSourceInstantiates(t *testing.T) {
 	runLiveKitSmokeScript(t, "simple-prompt", nil, addMCPSource, livekitSmokeScript)
+}
+
+func TestSmokeLiveKitV1RequiredMCPPreflight(t *testing.T) {
+	runLiveKitSmokeScript(t, "mcp-example", nil, func(agent *ir.Agent) {
+		agent.Tools["web_browse"] = ir.Tool{
+			Execution: ir.ToolMCP, URLEnv: "SECOND_MCP_URL",
+			MCPTransport: ir.MCPTransportStreamableHTTP,
+		}
+		entry := agent.Agents[agent.EntryAgent]
+		entry.Tools = append(entry.Tools, "web_browse")
+		agent.Agents[agent.EntryAgent] = entry
+		inactive := entry
+		inactive.Tools = []string{"web_browse"}
+		agent.Agents["inactive"] = inactive
+	}, livekitRequiredMCPSmokeScript)
 }
 
 func TestLiveKitSIPGeneratedPythonCompiles(t *testing.T) { // telephony T10, V20

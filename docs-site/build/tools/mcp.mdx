@@ -206,19 +206,28 @@ REQUIRED_ENV = [
 }
 ```
 
-And the tool source itself, on the agent that listed it:
+And the tool source factory shared by startup validation and the agent that
+listed it:
 
 ```python
-mcp.MCPToolset(
-    id="web_search",
-    mcp_server=mcp.MCPServerHTTP(
-        url=os.environ["FIRECRAWL_MCP_URL"],
-        transport_type="streamable_http",
-        allowed_tools=["firecrawl_search"],
-        headers=_bearer("FIRECRAWL_API_KEY"),
-    ),
-)
+def _mcp_toolset(source: str) -> mcp.MCPToolset:
+    if source == "web_search":
+        return mcp.MCPToolset(
+            id="web_search",
+            mcp_server=mcp.MCPServerHTTP(
+                url=os.environ["FIRECRAWL_MCP_URL"],
+                transport_type="streamable_http",
+                allowed_tools=["firecrawl_search"],
+                headers=_bearer("FIRECRAWL_API_KEY"),
+                timeout=30,
+                client_session_timeout_seconds=30,
+            ),
+        )
 ```
+
+Before `AgentSession.start`, LiveKit creates temporary clients from this same
+factory and checks all distinct sources concurrently. Runtime agents and tasks
+then receive fresh clients; preflight clients are never reused.
 
 Leave a field out of the block and the generated call leaves out its argument,
 rather than passing a guess: no `transport` means no `transport_type`, no `tools`
@@ -226,11 +235,12 @@ means no `allowed_tools`, no `auth` means no `headers`.
 
 ## When the server is down
 
-The two platforms behave differently, and the generated README says so for your
-build:
+Both targets treat a listed MCP source as required:
 
-- **LiveKit** logs the toolset that failed and the agent still starts, without
-  those tools.
+- **LiveKit** connects and fetches the tools before `AgentSession.start`. A
+  failure stops the session before its greeting. Closing every created preflight
+  client is always attempted, and a close failure also stops startup. The agent
+  or task receives a fresh client from the same factory.
 - **Pipecat** raises on startup and the bot exits loudly.
 
 Neither one pretends the tools are there.

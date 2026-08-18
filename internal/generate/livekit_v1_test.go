@@ -2247,16 +2247,22 @@ func TestLiveKitV1MCPSelectionTransportAndScope(t *testing.T) {
 
 	// The stated transport and the selection ride the agent's mount, and only
 	// the agent's: a task-scoped source is offered inside that task alone.
-	if !strings.Contains(greeterBody, `mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="sse", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN"), timeout=30, client_session_timeout_seconds=30))`) {
-		t.Errorf("the agent's mount is not the source as declared:\n%s", greeterBody)
+	if !strings.Contains(agentpy, `return mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="sse", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN"), timeout=30, client_session_timeout_seconds=30))`) {
+		t.Errorf("the agent's source is not constructed as declared:\n%s", agentpy)
+	}
+	if !strings.Contains(greeterBody, `tools=[_mcp_toolset("book_table")]`) {
+		t.Errorf("the agent does not mount its source:\n%s", greeterBody)
 	}
 	if strings.Contains(greeterBody, "browse_tables") {
 		t.Errorf("a task-scoped source must not reach the agent:\n%s", greeterBody)
 	}
 	// Nothing stated means nothing emitted: an empty allowed_tools would claim
 	// a selection the author never made (SC-004).
-	if !strings.Contains(taskBody, `mcp.MCPToolset(id="browse_tables", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], timeout=30, client_session_timeout_seconds=30))`) {
-		t.Errorf("the task's mount emits an argument the source never declared:\n%s", taskBody)
+	if !strings.Contains(agentpy, `return mcp.MCPToolset(id="browse_tables", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], timeout=30, client_session_timeout_seconds=30))`) {
+		t.Errorf("the task's source emits an argument the source never declared:\n%s", agentpy)
+	}
+	if !strings.Contains(taskBody, `tools=[_mcp_toolset("browse_tables")]`) {
+		t.Errorf("the task does not mount its source:\n%s", taskBody)
 	}
 	if strings.Contains(taskBody, "book_table") {
 		t.Errorf("an agent-scoped source must not reach the task:\n%s", taskBody)
@@ -2273,12 +2279,108 @@ func TestLiveKitV1MCPSelectionTransportAndScope(t *testing.T) {
 	if got := strings.Count(agentpy, "mcp.MCPToolset("); got != 2 {
 		t.Errorf("%d mounts emitted, want one per source", got)
 	}
+	if !strings.Contains(agentpy, `sources = ("book_table", "browse_tables",)`) {
+		t.Errorf("the two distinct sources are not both preflighted:\n%s", agentpy)
+	}
 	// The compiler never reads a secret's value, so nothing it writes can carry
 	// one (SC-005).
 	for _, file := range artifact.Files {
 		if strings.Contains(string(file.Content), secret) {
 			t.Errorf("%s carries a secret value", file.Path)
 		}
+	}
+}
+
+// TestLiveKitV1MCPPreflightIsRequired protects the startup contract LiveKit's
+// own AgentActivity does not provide: every mounted MCP source must connect
+// before AgentSession.start can greet the caller. The factory is shared with
+// runtime mounts so the check cannot drift from the tool the agent later uses.
+func TestLiveKitV1MCPPreflightIsRequired(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tools["book_table"] = ir.Tool{
+		Execution: ir.ToolMCP, URLEnv: "BOOKINGS_MCP_URL",
+		MCPTransport: ir.MCPTransportStreamableHTTP,
+	}
+	greeter := agent.Agents["greeter"]
+	greeter.Tools = append(greeter.Tools, "book_table")
+	agent.Agents["greeter"] = greeter
+	// Mounting one source in two scopes must still preflight it only once.
+	task := agent.Tasks["find_slot"]
+	task.Tools = append(task.Tools, "book_table")
+	agent.Tasks["find_slot"] = task
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	agentpy := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		`def _mcp_toolset(source: str) -> mcp.MCPToolset:`,
+		`if source == "book_table":`,
+		`tools=[_mcp_toolset("book_table")]`,
+		`async def _preflight_mcp() -> None:`,
+		`async def probe(source: str):`,
+		`sources = ("book_table",)`,
+		`*(probe(source) for source in sources)`,
+		`return_exceptions=True`,
+		`*(("setup", source, error) for source, error in setup_failures)`,
+		`*(("cleanup", source, error) for source, error in close_failures)`,
+		`"MCP preflight %s failed for %s"`,
+	} {
+		if !strings.Contains(agentpy, want) {
+			t.Errorf("agent.py missing %q", want)
+		}
+	}
+	if got := strings.Count(agentpy, "mcp.MCPToolset("); got != 1 {
+		t.Errorf("MCP constructor emitted %d times, want one shared factory branch", got)
+	}
+	connect := strings.Index(agentpy, "    await ctx.connect()")
+	preflight := strings.Index(agentpy, "    await _preflight_mcp()")
+	start := strings.Index(agentpy, "    await session.start(")
+	if connect < 0 || preflight < connect || start < preflight {
+		t.Errorf("MCP preflight order must be connect, preflight, start: connect=%d preflight=%d start=%d", connect, preflight, start)
+	}
+}
+
+func TestLiveKitV1MCPPreflightConnectsOnceOnPhoneRoutes(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		build func(*testing.T) (*ir.Agent, ir.Target)
+	}{
+		{name: "sip", build: configuredLiveKitSIP},
+		{name: "connector", build: configuredLiveKitConnector},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent, resolved := tc.build(t)
+			agent.Tools["book_table"] = ir.Tool{
+				Execution: ir.ToolMCP, URLEnv: "BOOKINGS_MCP_URL",
+			}
+			entry := agent.Agents[agent.EntryAgent]
+			entry.Tools = append(entry.Tools, "book_table")
+			agent.Agents[agent.EntryAgent] = entry
+
+			artifact, err := GenerateLiveKit(agent, resolved, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			agentpy := artifactFile(t, artifact, "agent.py")
+			if got := strings.Count(agentpy, "    await ctx.connect()"); got != 1 {
+				t.Fatalf("ctx.connect() emitted %d times, want 1", got)
+			}
+			connect := strings.Index(agentpy, "    await ctx.connect()")
+			preflight := strings.Index(agentpy, "    await _preflight_mcp()")
+			start := strings.Index(agentpy, "    await session.start(")
+			if connect < 0 || preflight < connect || start < preflight {
+				t.Errorf("MCP preflight order must be connect, preflight, start: connect=%d preflight=%d start=%d", connect, preflight, start)
+			}
+		})
 	}
 }
 
@@ -2339,7 +2441,8 @@ func TestLiveKitV1LocalAndMCPTools(t *testing.T) {
 		"async def fetch_notes(self, ctx: RunContext, topic: str) -> dict:",
 		"result = tools.fetch_notes.fetch_notes(topic=topic)",
 		"if inspect.isawaitable(result):",
-		`tools=[mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="streamable_http", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN"), timeout=30, client_session_timeout_seconds=30))],`,
+		`return mcp.MCPToolset(id="book_table", mcp_server=mcp.MCPServerHTTP(url=os.environ["BOOKINGS_MCP_URL"], transport_type="streamable_http", allowed_tools=["reserve", "cancel"], headers=_bearer("BOOKINGS_MCP_TOKEN"), timeout=30, client_session_timeout_seconds=30))`,
+		`tools=[_mcp_toolset("book_table")],`,
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)

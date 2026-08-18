@@ -83,11 +83,12 @@ MCPServerHTTP defaults both to 5 seconds, which no web search or crawl answers
 inside; Pipecat's MCP client defaults to 30. 30 wins because it is the value one
 target already had, so this closes the gap without inventing a number. A tool
 slower than that needs `timeout:` on the mcp block, which does not exist yet. */ -}}
-{{define "mcp_mounts"}}{{range $i, $s := .}}{{if $i}}, {{end}}mcp.MCPToolset(id={{pyq $s.Name}}, mcp_server=mcp.MCPServerHTTP(url=os.environ[{{pyq $s.URLEnv}}]{{if $s.Transport}}, transport_type={{pyq $s.Transport}}{{end}}{{if $s.Tools}}, allowed_tools=[{{range $j, $t := $s.Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]{{end}}{{if $s.Auth}}, headers={{$s.Auth.Expr}}{{end}}, timeout={{mcpTimeout}}, client_session_timeout_seconds={{mcpTimeout}})){{end}}{{end -}}
+{{define "mcp_constructor"}}mcp.MCPToolset(id={{pyq .Name}}, mcp_server=mcp.MCPServerHTTP(url=os.environ[{{pyq .URLEnv}}]{{if .Transport}}, transport_type={{pyq .Transport}}{{end}}{{if .Tools}}, allowed_tools=[{{range $j, $t := .Tools}}{{if $j}}, {{end}}{{pyq $t}}{{end}}]{{end}}{{if .Auth}}, headers={{.Auth.Expr}}{{end}}, timeout={{mcpTimeout}}, client_session_timeout_seconds={{mcpTimeout}})){{end -}}
+{{define "mcp_mounts"}}{{range $i, $s := .}}{{if $i}}, {{end}}_mcp_toolset({{pyq $s.Name}}){{end}}{{end -}}
 {{- /* tools_list is the whole tools= surface: prebuilt tools first, then the
 MCP sources, in the order the package lists them. */ -}}
 {{define "tools_list"}}{{template "prebuilt_list" .Prebuilt}}{{if and .Prebuilt .MCPServers}}, {{end}}{{template "mcp_mounts" .MCPServers}}{{end -}}
-{{if .NeedsAsyncio}}import asyncio
+{{if or .NeedsAsyncio .NeedsMCP}}import asyncio
 {{end}}{{if .NeedsInspect}}import inspect
 {{end}}{{if or .Outbound .Telephony .CallStartVars}}import json
 {{end}}import logging
@@ -222,6 +223,73 @@ def _api_key(header: str, env: str) -> dict[str, str]:
 
 {{end}}
 {{end}}
+{{- if .NeedsMCP}}
+# --- required MCP tool sources ----------------------------------------------
+# LiveKit logs MCPToolset setup failures and still starts the AgentActivity.
+# These sources are required by the package, so probe fresh instances before
+# AgentSession.start; runtime agents/tasks get their own fresh instances below.
+def _mcp_toolset(source: str) -> mcp.MCPToolset:
+{{- range .MCPServers}}
+    if source == {{pyq .Name}}:
+        return {{template "mcp_constructor" .}}
+{{- end}}
+    raise ValueError(f"Unknown MCP tool source: {source}")
+
+
+async def _preflight_mcp() -> None:
+    async def probe(source: str):
+        try:
+            toolset = _mcp_toolset(source)
+        except BaseException as error:
+            return error, None
+
+        setup_error = None
+        try:
+            await toolset.setup()
+        except BaseException as error:
+            setup_error = error
+
+        close_error = None
+        try:
+            await toolset.aclose()
+        except BaseException as error:
+            close_error = error
+        return setup_error, close_error
+
+    sources = ({{range $i, $s := .MCPServers}}{{if $i}}, {{end}}{{pyq $s.Name}}{{end}},)
+    results = await asyncio.gather(
+        *(probe(source) for source in sources),
+        return_exceptions=True,
+    )
+    setup_failures = []
+    close_failures = []
+    for source, result in zip(sources, results):
+        if isinstance(result, BaseException):
+            setup_failures.append((source, result))
+            continue
+        setup_error, close_error = result
+        if setup_error is not None:
+            setup_failures.append((source, setup_error))
+        if close_error is not None:
+            close_failures.append((source, close_error))
+
+    failures = [
+        *(("setup", source, error) for source, error in setup_failures),
+        *(("cleanup", source, error) for source, error in close_failures),
+    ]
+    if failures:
+        _, _, selected = failures[0]
+        for stage, source, error in failures[1:]:
+            logger.error(
+                "MCP preflight %s failed for %s",
+                stage,
+                source,
+                exc_info=(type(error), error, error.__traceback__),
+            )
+        raise selected
+
+
+{{- end}}
 {{- if .HasColdTransfer}}
 # --- cold transfer destination -----------------------------------------------
 # TransferSIPParticipant's transfer_to is a URI, not a bare number: it becomes
@@ -1108,6 +1176,9 @@ async def entrypoint(ctx: JobContext) -> None:
 {{if .Telephony}}
 {{- if eq .Telephony.Transport "connector"}}
     await ctx.connect()
+{{- if .NeedsMCP}}
+    await _preflight_mcp()
+{{- end}}
     # The Twilio bridge placed or answered the call, joined this room with the
     # caller's audio, and dispatched this job. Direction (inbound or outbound)
     # is already resolved by the bridge, so the agent just runs the session.
@@ -1143,6 +1214,9 @@ async def entrypoint(ctx: JobContext) -> None:
         require_call_env()
 {{- end}}
     await ctx.connect()
+{{- if .NeedsMCP}}
+    await _preflight_mcp()
+{{- end}}
 
     if outbound_job:
 {{- if .Outbound}}
@@ -1238,8 +1312,14 @@ async def entrypoint(ctx: JobContext) -> None:
     # prompts already see them (I.dispatch).
     _hydrate_call_start(session.userdata, _dispatched_call_start(_livekit_job_metadata(ctx.job.metadata)))
 {{- end}}
-    await session.start(agent={{.EntryClass}}({{if not .SingleAgentMinimal}}initial=True{{end}}), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
+{{- if .NeedsMCP}}
     await ctx.connect()
+    await _preflight_mcp()
+{{- end}}
+    await session.start(agent={{.EntryClass}}({{if not .SingleAgentMinimal}}initial=True{{end}}), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
+{{- if not .NeedsMCP}}
+    await ctx.connect()
+{{- end}}
 {{- if .Outbound}}
 
     # channels.telephony outbound: a job dispatched with {"phone_number": ...}

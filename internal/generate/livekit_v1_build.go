@@ -173,9 +173,14 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// Local handler files ride the artifact (tools/<name>.py); mcp mounts and
 	// local wrappers pull their imports.
 	seenLocal := map[string]bool{}
+	seenMCP := map[string]bool{}
 	collectTools := func(tools []livekitTool, servers []livekitMCPServer) {
 		data.NeedsMCP = data.NeedsMCP || len(servers) > 0
 		for _, server := range servers {
+			if !seenMCP[server.Name] {
+				seenMCP[server.Name] = true
+				data.MCPServers = append(data.MCPServers, server)
+			}
 			if server.Auth != nil {
 				data.AuthKinds.add(server.Auth.Kind) // the same helper webhook auth uses (V8)
 			}
