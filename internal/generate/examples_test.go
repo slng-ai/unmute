@@ -38,8 +38,99 @@ func TestV3_OutboundReminderBusinessToolsAreSelfContained(t *testing.T) {
 	}
 }
 
+func TestSalonConciergeFeatureContract(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resolved.Tracing == nil || resolved.Tracing.Provider != "langfuse" {
+		t.Fatalf("tracing = %#v, want Langfuse", resolved.Tracing)
+	}
+	for _, name := range []string{"LANGFUSE_BASE_URL", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"} {
+		if !slices.Contains(resolved.Secrets, name) {
+			t.Errorf("secrets omit %s", name)
+		}
+	}
+	manager, ok := resolved.Controls["to_manager"].(*ir.HumanTransfer)
+	if !ok || manager.Mode != ir.TransferCold || manager.OnUnavailable != ir.OnUnavailableHangup {
+		t.Fatalf("manager transfer = %#v, want cold transfer with hangup fallback", resolved.Controls["to_manager"])
+	}
+
+	for name, control := range resolved.Controls {
+		transfer, ok := control.(*ir.AgentTransfer)
+		if !ok {
+			continue
+		}
+		if transfer.Announce != "" || transfer.Context.History != ir.HistoryFull ||
+			!transfer.Context.Variables.All || !slices.Equal(transfer.Requires, []string{"customer_id"}) {
+			t.Errorf("internal handoff %q must stay silent and carry verified context: %#v", name, transfer)
+		}
+	}
+
+	for name, agent := range resolved.Agents {
+		if (name == "chat_with_me") != slices.Contains(agent.Tools, "web_search") {
+			t.Errorf("agent %q has unexpected web_search access: %v", name, agent.Tools)
+		}
+	}
+	for name, task := range resolved.Tasks {
+		if slices.Contains(task.Tools, "web_search") {
+			t.Errorf("task %q exposes web_search", name)
+		}
+	}
+	for name, tool := range resolved.Tools {
+		if name == "web_search" {
+			if tool.Execution != ir.ToolMCP || tool.URLEnv != "FIRECRAWL_MCP_URL" ||
+				tool.Auth == nil || tool.Auth.Type != ir.ToolAuthBearer ||
+				tool.Auth.TokenEnv != "FIRECRAWL_API_KEY" ||
+				!slices.Equal(tool.MCPTools, []string{"firecrawl_search"}) {
+				t.Errorf("web_search = %#v, want Firecrawl MCP", tool)
+			}
+		} else if tool.Execution != ir.ToolLocal || tool.Handler != "tools/salon.py" {
+			t.Errorf("tool %q = %#v, want shared local Python handler", name, tool)
+		}
+	}
+	for _, name := range []string{"create_booking", "modify_booking", "cancel_booking"} {
+		tool := resolved.Tools[name]
+		properties := tool.Input["properties"].(map[string]any)
+		confirmed := properties["confirmed"].(map[string]any)
+		required := tool.Input["required"].([]any)
+		if confirmed["type"] != "boolean" || !slices.Contains(required, any("confirmed")) {
+			t.Errorf("tool %q must require boolean confirmed: %#v", name, tool.Input)
+		}
+	}
+
+	requireText := func(name, text string, wants ...string) {
+		t.Helper()
+		for _, want := range wants {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s omits %q", name, want)
+			}
+		}
+	}
+	requireText("verification", resolved.Tasks["customer_verification"].Instructions,
+		"Accumulate the full name and phone number across turns",
+		"A complete phone has 10 to 15 digits", "incomplete fragment",
+		"consume the one invalid-value retry",
+		"one initial customer lookup only after both the full name")
+	requireText("prepare booking", resolved.Tasks["prepare_booking"].Instructions,
+		"Only an unambiguous yes", "an unclear answer, silence, a topic change")
+	requireText("apply booking", resolved.Tasks["apply_booking"].Instructions,
+		"false, missing", "anything other than true", "Do not call a mutation",
+		"shared preparation result's exact `confirmed`")
+	requireText("chat", resolved.Agents["chat_with_me"].Instructions,
+		"required before the session greets the caller", "current information is unavailable")
+	requireText("complaints", resolved.Agents["complaint_specialist"].Instructions,
+		"no active phone leg", "reaches the carrier", "route may hang up")
+}
+
 func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
-	// tracing is on exactly one example. It used to be on all four, which made
+	// Among these four structural comparison packages, tracing stays on only
+	// simple-prompt. It used to be on all four, which made
 	// the first package in the table impossible to run without a Langfuse
 	// account: three third-party values before a first-time reader hears a word
 	// (research D12). Which one keeps it is a table row in examples/README.md,
@@ -68,7 +159,7 @@ func TestExampleMatrixCompilesForCodeTargets(t *testing.T) {
 				t.Fatalf("got agents/tasks/groups %d/%d/%d, want %d/%d/%d", len(agent.Agents), len(agent.Tasks), len(agent.TaskGroups), tc.agents, tc.tasks, tc.groups)
 			}
 			if tracing := agent.Tracing != nil && agent.Tracing.Provider == "langfuse"; tracing != tc.tracing {
-				t.Fatalf("tracing = %t, want %t: exactly one example configures it, and examples/README.md says which", tracing, tc.tracing)
+				t.Fatalf("tracing = %t, want %t: only simple-prompt in this comparison configures it", tracing, tc.tracing)
 			}
 			if len(agent.Tools) != 5 {
 				t.Fatalf("got %d tools, want 5", len(agent.Tools))
@@ -292,15 +383,15 @@ func TestPublicExamplePackages(t *testing.T) {
 			directories = append(directories, entry.Name())
 		}
 	}
-	// One telephony example per use case (spec 007 FR-016): warm+inbound on
-	// LiveKit (livekit-human-transfer), cold+inbound on Pipecat over Twilio with
-	// nothing hosted (pipecat-human-transfer-twilio), inbound+outbound
-	// (twilio-telephony-hello). Daily route guards remain against internal test
-	// fixtures instead of a public example.
+	// The focused telephony examples stay one per use case (spec 007 FR-016):
+	// warm+inbound on LiveKit (livekit-human-transfer), cold+inbound on Pipecat
+	// over Twilio with nothing hosted (pipecat-human-transfer-twilio), and
+	// inbound+outbound (twilio-telephony-hello). salon-concierge is the composite
+	// release fixture. Daily route guards remain against internal test fixtures.
 	//
 	// A telephony example whose behaviour is one provider's names that provider
 	// first, because the route is the thing a reader is choosing between.
-	want := []string{"livekit-human-transfer", "mcp-example", "multi-task", "outbound-reminder", "pipecat-human-transfer-twilio", "regional-infrastructure", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
+	want := []string{"livekit-human-transfer", "mcp-example", "multi-task", "outbound-reminder", "pipecat-human-transfer-twilio", "regional-infrastructure", "salon-concierge", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -538,6 +629,7 @@ func TestTelephonyExampleDocsAccountForEveryRequiredEnv(t *testing.T) {
 		"livekit-human-transfer":        {ir.ProviderLiveKit},
 		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
 		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
+		"salon-concierge":               {ir.ProviderPipecat, ir.ProviderLiveKit},
 	} {
 		t.Run(example, func(t *testing.T) {
 			readme, err := os.ReadFile(filepath.Join("..", "..", "examples", example, "README.md"))
@@ -593,12 +685,13 @@ func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
 		"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER",
 		"SIP_TRUNK_HOSTNAME", "SIP_AUTH_USERNAME", "SIP_AUTH_PASSWORD", "SIP_FROM_NUMBER",
 		"UNMUTE_PUBLIC_URL", "UNMUTE_OUTBOUND_TOKEN", "REDIS_URL",
-		"PIPECAT_CLOUD_ORGANIZATION",
+		"PIPECAT_CLOUD_ORGANIZATION", "MANAGER_PHONE_NUMBER",
 	}
 	for example, providers := range map[string][]ir.Provider{
 		"twilio-telephony-hello":        {ir.ProviderPipecat, ir.ProviderLiveKit},
 		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
 		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
+		"salon-concierge":               {ir.ProviderPipecat, ir.ProviderLiveKit},
 	} {
 		t.Run(example, func(t *testing.T) {
 			pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))

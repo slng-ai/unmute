@@ -4,8 +4,8 @@
 # Nothing external is needed, and that is the point of starting here. The channel
 # is web audio (no phone number), the tools are local Python fixtures (no API to
 # stand up), and there is no tracing provider to sign up for. Two model keys is
-# the whole list: `OPENAI_API_KEY` and `SLNG_API_KEY`. Tracing lives in
-# examples/simple-prompt, which is the one package that configures it.
+# the whole list: `OPENAI_API_KEY` and `SLNG_API_KEY`. The tracing examples are
+# examples/simple-prompt and examples/salon-concierge.
 version: 1
 entry_agent: support_desk
 
