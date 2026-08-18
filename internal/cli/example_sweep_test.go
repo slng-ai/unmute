@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goccy/go-yaml"
 	"github.com/slng-ai/unmute/internal/ir"
 )
 
@@ -107,7 +108,7 @@ type sweepExample struct {
 	Name     string
 	Dir      string
 	Targets  []string // code targets, sorted
-	Runnable bool     // no telephony channel: FR-031 makes carrier routes compile-only
+	Runnable bool     // has browser audio; phone-only packages stay compile-only
 }
 
 // TestExampleSweep is the whole layer: one root test, one subtest per example
@@ -124,9 +125,7 @@ func TestExampleSweep(t *testing.T) {
 		ByteDiff:    "unknown",
 	}
 
-	t.Run("preflight", func(t *testing.T) {
-		report.MissingSecrets = sweepPreflight(t, root, examples)
-	})
+	sweepToolingPreflight(t, root)
 
 	binary := buildUnmute(t, root)
 
@@ -134,6 +133,8 @@ func TestExampleSweep(t *testing.T) {
 		compileAll(t, binary, examples)
 		report.ByteDiff = compareToBaseline(t, root, examples)
 	})
+
+	report.MissingSecrets = sweepEnvironmentPreflight(t, root, examples)
 
 	for _, ex := range examples {
 		if !ex.Runnable {
@@ -175,9 +176,9 @@ func repoRoot(t *testing.T) string {
 }
 
 // discoverExamples derives the runnable set rather than hard-coding it, so an
-// example added later is classified without editing the harness. An example is
-// compile-only when it declares a telephony channel: those routes need a
-// carrier, and FR-031 keeps them out of the browser sweep.
+// example added later is classified without editing the harness. A browser
+// channel makes a package runnable even when it also has a phone route;
+// phone-only packages stay compile-only because their sessions need a carrier.
 func discoverExamples(t *testing.T, root string) []sweepExample {
 	t.Helper()
 	entries, err := os.ReadDir(filepath.Join(root, "examples"))
@@ -207,10 +208,11 @@ func discoverExamples(t *testing.T, root string) []sweepExample {
 		if err != nil {
 			t.Fatalf("load %s: %v", dir, err)
 		}
-		ex := sweepExample{Name: entry.Name(), Dir: dir, Runnable: true}
+		ex := sweepExample{Name: entry.Name(), Dir: dir}
 		for _, channel := range agent.Channels {
-			if channel.Kind == ir.ChannelTelephony {
-				ex.Runnable = false
+			if channel.Kind == ir.ChannelRealtimeAudio {
+				ex.Runnable = true
+				break
 			}
 		}
 		for _, target := range targets {
@@ -224,13 +226,31 @@ func discoverExamples(t *testing.T, root string) []sweepExample {
 	return out
 }
 
+func TestSweepDiscoveryUsesBrowserChannel(t *testing.T) {
+	root := repoRoot(t)
+	t.Chdir(root)
+	t.Setenv(sweepOnlyEnv, "livekit-human-transfer,salon-concierge,simple-prompt")
+	got := map[string]bool{}
+	for _, example := range discoverExamples(t, root) {
+		got[example.Name] = example.Runnable
+	}
+	for name, want := range map[string]bool{
+		"simple-prompt": true, "salon-concierge": true, "livekit-human-transfer": false,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got[name] != want {
+				t.Errorf("Runnable = %t, want %t", got[name], want)
+			}
+		})
+	}
+}
+
 // --- preflight ---------------------------------------------------------
 
-// sweepPreflight checks everything before the first container builds. Missing
-// tooling BLOCKS: it says nothing about the code under test, which is the same
-// rule L4 applies to uv. A missing secret FAILS: the sweep cannot deliver the
-// coverage it claims, and FR-035 forbids reporting that as anything else.
-func sweepPreflight(t *testing.T, root string, examples []sweepExample) []string {
+// sweepToolingPreflight checks tools before compile and before a container
+// builds. Missing tooling BLOCKS: it says nothing about the code under test,
+// which is the same rule L4 applies to uv.
+func sweepToolingPreflight(t *testing.T, root string) {
 	t.Helper()
 	docker, err := exec.LookPath("docker")
 	if err != nil {
@@ -256,13 +276,19 @@ func sweepPreflight(t *testing.T, root string, examples []sweepExample) []string
 	if os.Getenv(sweepBaselineEnv) == "" {
 		t.Fatalf("%s is unset: with no baseline tree there is nothing to compare against (FR-001)", sweepBaselineEnv)
 	}
+}
 
+// sweepEnvironmentPreflight runs after compile, when required_env exists.
+// Missing environment FAILS: the sweep cannot deliver the coverage it claims,
+// and FR-035 forbids reporting that as anything else.
+func sweepEnvironmentPreflight(t *testing.T, root string, examples []sweepExample) []string {
+	t.Helper()
 	present, err := parseDotenv(filepath.Join(root, ".env"))
 	if err != nil {
 		t.Fatalf("read root .env: %v", err)
 	}
 	var missing []string
-	for _, name := range declaredSecrets(t, root, examples) {
+	for _, name := range browserRequiredEnv(t, root, examples) {
 		if present[name] == "" && os.Getenv(name) == "" {
 			missing = append(missing, name)
 		}
@@ -291,10 +317,10 @@ func busyPorts() []string {
 	return busy
 }
 
-// declaredSecrets reads the compile report each example already emits, so the
-// required set is derived from the compiler rather than restated here. Only the
-// runnable examples count: the carrier ones never start a container.
-func declaredSecrets(t *testing.T, root string, examples []sweepExample) []string {
+// browserRequiredEnv starts with the compiler's required_env contract, then
+// keeps the bare host values passed into the browser application container.
+// This excludes phone-only and locally supplied values without restating names.
+func browserRequiredEnv(t *testing.T, root string, examples []sweepExample) []string {
 	t.Helper()
 	var names []string
 	for _, ex := range examples {
@@ -305,23 +331,83 @@ func declaredSecrets(t *testing.T, root string, examples []sweepExample) []strin
 			path := filepath.Join(root, ex.Dir, "build", target, "compile-report.json")
 			raw, err := os.ReadFile(path)
 			if err != nil {
-				continue // not compiled yet; the compile subtest covers it
+				t.Fatalf("read %s after compile: %v", path, err)
 			}
 			var report struct {
-				Secrets []struct {
-					Name string `json:"name"`
-				} `json:"secrets"`
+				RequiredEnv []string `json:"required_env"`
 			}
 			if err := json.Unmarshal(raw, &report); err != nil {
 				t.Fatalf("parse %s: %v", path, err)
 			}
-			for _, secret := range report.Secrets {
-				names = append(names, secret.Name)
+			composePath := filepath.Join(root, ex.Dir, "build", target, "compose.dev.yaml")
+			composeRaw, err := os.ReadFile(composePath)
+			if err != nil {
+				t.Fatalf("read %s: %v", composePath, err)
+			}
+			var compose struct {
+				Services struct {
+					Application struct {
+						Environment []string `yaml:"environment"`
+					} `yaml:"application"`
+				} `yaml:"services"`
+			}
+			if err := yaml.Unmarshal(composeRaw, &compose); err != nil {
+				t.Fatalf("parse %s: %v", composePath, err)
+			}
+			host := map[string]bool{}
+			for _, value := range compose.Services.Application.Environment {
+				if name, _, supplied := strings.Cut(value, "="); !supplied {
+					host[name] = true
+				}
+			}
+			for _, name := range report.RequiredEnv {
+				if host[name] {
+					names = append(names, name)
+				}
 			}
 		}
 	}
 	slices.Sort(names)
 	return slices.Compact(names)
+}
+
+func TestSweepBrowserRequiredEnv(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "example", "build", "target")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	report := `{"required_env":["FIRECRAWL_API_KEY","FIRECRAWL_MCP_URL","LANGFUSE_BASE_URL","LANGFUSE_PUBLIC_KEY","LANGFUSE_SECRET_KEY","LIVEKIT_URL","MANAGER_PHONE_NUMBER","OPENAI_API_KEY","SIP_AUTH_PASSWORD","SLNG_API_KEY","TWILIO_AUTH_TOKEN"],"secrets":[{"name":"DECLARED_BUT_UNUSED"}]}`
+	compose := `services:
+  application:
+    environment:
+      - LIVEKIT_URL=ws://livekit_server:7880
+      - FIRECRAWL_API_KEY
+      - FIRECRAWL_MCP_URL
+      - LANGFUSE_BASE_URL
+      - LANGFUSE_PUBLIC_KEY
+      - LANGFUSE_SECRET_KEY
+      - OPENAI_API_KEY
+      - SLNG_API_KEY
+      - UNMUTE_LOG_LEVEL
+`
+	for name, content := range map[string]string{
+		"compile-report.json": report, "compose.dev.yaml": compose,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := browserRequiredEnv(t, root, []sweepExample{{
+		Dir: "example", Targets: []string{"target"}, Runnable: true,
+	}})
+	want := []string{
+		"FIRECRAWL_API_KEY", "FIRECRAWL_MCP_URL", "LANGFUSE_BASE_URL",
+		"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "OPENAI_API_KEY", "SLNG_API_KEY",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("required browser env = %v, want %v", got, want)
+	}
 }
 
 // --- compile and byte comparison ---------------------------------------
