@@ -275,6 +275,7 @@ class BillingAgent(TracedLLMWorker):
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
 
 
+
     @_direct_tool
     async def get_invoice(self, params: FunctionCallParams, customer_id: str):
         """Fetch the most recent invoice for a customer id. Returns the invoice total and status.
@@ -367,6 +368,15 @@ class IntakeAgent(TracedLLMWorker):
 
         llm = build_intake_llm(state)
         super().__init__("intake", llm=llm, pipeline=Pipeline([llm, build_intake_tts()]), bridged=())
+
+    async def on_activated(self, args) -> None:
+        # A Flow replaces this worker's system instruction with its task role.
+        # Re-entry restores the owning agent before tools/messages run.
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(system_instruction=INTAKE_PROMPT),
+        ))
+        await super().on_activated(args)
+
 
 
     @_direct_tool(cancel_on_interruption=False)

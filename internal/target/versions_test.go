@@ -22,19 +22,14 @@ func TestSupportWindowsAreWellFormed(t *testing.T) {
 		if FrameworkPackage(provider) == "" {
 			t.Errorf("%s has a support window but no framework package name", provider)
 		}
-		floor, ok := ParseVersion(win.Floor)
-		if !ok {
+		if _, ok := ParseVersion(win.Floor); !ok {
 			t.Errorf("%s floor %q is not a version", provider, win.Floor)
-			continue
 		}
-		ceiling, ok := ParseVersion(win.Ceiling)
-		if !ok {
+		if _, ok := ParseVersion(win.Ceiling); !ok {
 			t.Errorf("%s ceiling %q is not a version", provider, win.Ceiling)
-			continue
 		}
-		if floor[0] > ceiling[0] || (floor[0] == ceiling[0] && floor[1] > ceiling[1]) ||
-			(floor[0] == ceiling[0] && floor[1] == ceiling[1] && floor[2] > ceiling[2]) {
-			t.Errorf("%s window is empty: floor %s is above ceiling %s", provider, win.Floor, win.Ceiling)
+		if win.Floor != win.Ceiling {
+			t.Errorf("%s must support one tested version, got %s through %s", provider, win.Floor, win.Ceiling)
 		}
 		// A ceiling with no verification date is a claim nobody stands behind.
 		if win.Verified == "" {
@@ -63,12 +58,8 @@ func TestCheckVersionAgainstWindow(t *testing.T) {
 		version  string
 		wantErr  string // "" means accepted
 	}{
-		{name: "livekit floor", provider: LiveKit, version: "1.5.0"},
-		{name: "livekit ceiling", provider: LiveKit, version: "1.6.10"},
-		{name: "livekit inside", provider: LiveKit, version: "1.6.4"},
-		{name: "pipecat floor", provider: Pipecat, version: "1.5.0"},
-		{name: "pipecat ceiling", provider: Pipecat, version: "1.7.0"},
-		{name: "pipecat inside", provider: Pipecat, version: "1.6.0"},
+		{name: "livekit exact", provider: LiveKit, version: "1.6.10"},
+		{name: "pipecat exact", provider: Pipecat, version: "1.7.0"},
 
 		// The bump this feature ships is exactly the case a string compare gets
 		// wrong: "1.6.10" sorts below "1.6.4" lexically.
@@ -77,7 +68,8 @@ func TestCheckVersionAgainstWindow(t *testing.T) {
 		{name: "major above ceiling", provider: Pipecat, version: "2.0.0", wantErr: "newer than this unmute supports"},
 		{name: "above ceiling names the fix", provider: Pipecat, version: "1.8.0", wantErr: "a newer unmute may support it"},
 
-		{name: "below floor", provider: Pipecat, version: "1.4.9", wantErr: "outside the supported range"},
+		{name: "below pipecat floor", provider: Pipecat, version: "1.6.9", wantErr: "outside the supported range (exactly 1.7.0)"},
+		{name: "below livekit floor", provider: LiveKit, version: "1.6.9", wantErr: "outside the supported range (exactly 1.6.10)"},
 		{name: "far below floor", provider: LiveKit, version: "0.0.108", wantErr: "outside the supported range"},
 
 		{name: "partial version", provider: LiveKit, version: "1.6", wantErr: "must be three numbers"},
@@ -108,82 +100,17 @@ func TestCheckVersionAgainstWindow(t *testing.T) {
 	}
 }
 
-// An out-of-range error has to name the range, or the author has to go looking
-// for what their unmute supports (FR-004).
-func TestCheckVersionErrorsNameTheRange(t *testing.T) {
+// An out-of-range error has to name the exact supported version, or the author
+// has to go looking for what their unmute supports (FR-004).
+func TestCheckVersionErrorsNameTheExactVersion(t *testing.T) {
 	win, _ := Window(LiveKit)
 	for _, version := range []string{"1.4.0", "1.9.9"} {
 		err := CheckVersion(LiveKit, version)
 		if err == nil {
 			t.Fatalf("CheckVersion(livekit, %q) accepted an out-of-range version", version)
 		}
-		if !strings.Contains(err.Error(), win.Floor) || !strings.Contains(err.Error(), win.Ceiling) {
-			t.Errorf("CheckVersion(livekit, %q) = %q, want it to name both %s and %s", version, err, win.Floor, win.Ceiling)
-		}
-	}
-}
-
-func TestCheckFeatureFloors(t *testing.T) {
-	cases := []struct {
-		name     string
-		provider Provider
-		version  string
-		used     []FrameworkFeature
-		wantErr  string
-	}{
-		{name: "no features", provider: LiveKit, version: "1.5.0"},
-		{name: "warm at floor", provider: LiveKit, version: "1.6.0", used: []FrameworkFeature{FeatureWarmTransfer}},
-		{name: "warm above floor", provider: LiveKit, version: "1.6.10", used: []FrameworkFeature{FeatureWarmTransfer}},
-		{name: "mcp above floor", provider: LiveKit, version: "1.6.4", used: []FrameworkFeature{FeatureMCPTools}},
-
-		// The regression this gate exists for: before the pin became exact, this
-		// package compiled green and quietly installed a version it never declared.
-		{
-			name: "warm below floor", provider: LiveKit, version: "1.5.2",
-			used: []FrameworkFeature{FeatureWarmTransfer}, wantErr: "too old for a warm transfer",
-		},
-		{
-			name: "mcp below floor", provider: LiveKit, version: "1.5.0",
-			used: []FrameworkFeature{FeatureMCPTools}, wantErr: "too old for an MCP tool source",
-		},
-		{
-			name: "names the package and floor", provider: LiveKit, version: "1.5.0",
-			used: []FrameworkFeature{FeatureWarmTransfer}, wantErr: "livekit-agents >=1.6.0",
-		},
-		// Pipecat features vary by extra, never by version.
-		{name: "pipecat has no floors", provider: Pipecat, version: "1.5.0", used: []FrameworkFeature{FeatureWarmTransfer}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := CheckFeatureFloors(tc.provider, tc.version, tc.used)
-			if tc.wantErr == "" {
-				if err != nil {
-					t.Fatalf("CheckFeatureFloors(%s, %q, %v) = %v, want accepted", tc.provider, tc.version, tc.used, err)
-				}
-				return
-			}
-			if err == nil {
-				t.Fatalf("CheckFeatureFloors(%s, %q, %v) accepted it, want %q", tc.provider, tc.version, tc.used, tc.wantErr)
-			}
-			if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("CheckFeatureFloors(%s, %q, %v) = %q, want it to contain %q", tc.provider, tc.version, tc.used, err, tc.wantErr)
-			}
-		})
-	}
-}
-
-// Every feature floor has to sit inside its provider's window, or it names a
-// version nobody can declare.
-func TestFeatureFloorsSitInsideTheWindow(t *testing.T) {
-	for provider, floors := range featureFloors {
-		if _, ok := Window(provider); !ok {
-			t.Errorf("%s has feature floors but no support window", provider)
-			continue
-		}
-		for feature, floor := range floors {
-			if err := CheckVersion(provider, floor); err != nil {
-				t.Errorf("%s floor for %s is %s, which its own window rejects: %v", provider, feature, floor, err)
-			}
+		if !strings.Contains(err.Error(), "exactly "+win.Ceiling) {
+			t.Errorf("CheckVersion(livekit, %q) = %q, want it to name exactly %s", version, err, win.Ceiling)
 		}
 	}
 }

@@ -76,6 +76,236 @@ assert type(tts).__name__ == "TTS"
 print("regional SLNG smoke ok")
 `
 
+// This runs against the exact livekit-agents pin emitted by the generator. It
+// proves the two SDK contracts the task lowering depends on: TaskGroup merges
+// one task's native finish call/output before starting the next task, and
+// propagates an exception result without starting later tasks.
+const livekitTaskGroupContractSmokeScript = `"""Smoke check: task-group result sharing and transfer propagation."""
+import asyncio
+import json
+import os
+import subprocess
+from types import SimpleNamespace
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+subprocess.run(["ruff", "check", "."], check=True)
+subprocess.run(["ty", "check", "agent.py"], check=True)
+
+import agent  # noqa: E402
+from livekit.agents import llm  # noqa: E402
+from livekit.agents.beta.workflows import TaskGroup  # noqa: E402
+
+
+class FakeTask:
+    def __init__(self, result=None, error=None, observed=None):
+        self.result = result
+        self.error = error
+        self.observed = observed
+        self.chat_ctx = llm.ChatContext.empty()
+        self.tools = []
+
+    async def update_chat_ctx(self, chat_ctx):
+        self.chat_ctx = chat_ctx
+        if self.observed is not None:
+            self.observed.extend(chat_ctx.items)
+
+    async def update_tools(self, tools):
+        self.tools = tools
+
+    def __await__(self):
+        async def run():
+            if self.error is not None:
+                raise self.error
+            if self.result is not None:
+                exact = json.dumps(self.result, sort_keys=True)
+                call_id = "task-result-" + str(id(self))
+                self.chat_ctx.insert(
+                    [
+                        llm.FunctionCall(
+                            call_id=call_id,
+                            name="finish",
+                            arguments=exact,
+                        ),
+                        llm.FunctionCallOutput(
+                            call_id=call_id,
+                            name="finish",
+                            output=exact,
+                            is_error=False,
+                        ),
+                    ]
+                )
+            return self.result
+
+        return run().__await__()
+
+
+class RecordingFindSlot(agent.FindSlot):
+    def __init__(self):
+        super().__init__()
+        self.completions = []
+
+    def complete(self, result):
+        self.completions.append(result)
+
+
+class RecordingTaskGroup(TaskGroup):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.completions = []
+
+    def complete(self, result):
+        self.completions.append(result)
+
+
+class BlockingSession:
+    def __init__(self):
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.announcements = 0
+
+    async def say(self, *args, **kwargs):
+        self.announcements += 1
+        self.started.set()
+        await self.release.wait()
+
+
+class FailingSession:
+    async def say(self, *args, **kwargs):
+        raise RuntimeError("announcement failed")
+
+
+async def main():
+    class RefuseSession:
+        async def say(self, *args, **kwargs):
+            raise AssertionError("an empty required value reached the announcement")
+
+    guard_task = RecordingFindSlot()
+    guard_ctx = SimpleNamespace(
+        userdata=SimpleNamespace(caller_phone=""),
+        session=RefuseSession(),
+    )
+    refusal = await guard_task.back_to_greeter(guard_ctx)
+    assert refusal == "Cannot transfer yet; missing required information: caller_phone"
+    assert not guard_task.completions
+    await guard_task.finish(
+        guard_ctx,
+        date="2026-08-18",
+        party_size=2,
+        time="15:00",
+    )
+    assert guard_task.completions == [
+        {"date": "2026-08-18", "party_size": 2, "time": "15:00"}
+    ]
+
+    transfer_session = BlockingSession()
+    transfer_ctx = SimpleNamespace(
+        userdata=SimpleNamespace(caller_phone="+15551234567"),
+        session=transfer_session,
+    )
+    transfer_first = RecordingFindSlot()
+    pending_transfer = asyncio.create_task(
+        transfer_first.back_to_greeter(transfer_ctx)
+    )
+    await transfer_session.started.wait()
+    await transfer_first.finish(
+        transfer_ctx,
+        date="2026-08-18",
+        party_size=2,
+        time="15:00",
+    )
+    assert not transfer_first.completions
+    transfer_session.release.set()
+    await pending_transfer
+    assert len(transfer_first.completions) == 1
+    assert isinstance(transfer_first.completions[0], agent._TaskTransfer)
+
+    finish_session = BlockingSession()
+    finish_ctx = SimpleNamespace(
+        userdata=SimpleNamespace(caller_phone="+15551234567"),
+        session=finish_session,
+    )
+    finish_first = RecordingFindSlot()
+    await finish_first.finish(
+        finish_ctx,
+        date="2026-08-18",
+        party_size=2,
+        time="15:00",
+    )
+    await finish_first.back_to_greeter(finish_ctx)
+    assert finish_first.completions == [
+        {"date": "2026-08-18", "party_size": 2, "time": "15:00"}
+    ]
+    assert finish_session.announcements == 0
+
+    failed_ctx = SimpleNamespace(
+        userdata=SimpleNamespace(caller_phone="+15551234567"),
+        session=FailingSession(),
+    )
+    failed_transfer = RecordingFindSlot()
+    try:
+        await failed_transfer.back_to_greeter(failed_ctx)
+    except RuntimeError as error:
+        assert str(error) == "announcement failed"
+    else:
+        raise AssertionError("failed announcement did not escape")
+    await failed_transfer.finish(
+        failed_ctx,
+        date="2026-08-18",
+        party_size=2,
+        time="15:00",
+    )
+    assert failed_transfer.completions == [
+        {"date": "2026-08-18", "party_size": 2, "time": "15:00"}
+    ]
+
+    observed = []
+
+    group = TaskGroup(
+        chat_ctx=llm.ChatContext.empty(),
+        summarize_chat_ctx=False,
+    )
+    group.add(lambda: FakeTask({"time": "15:00", "date": "2026-08-18"}), id="find_slot", description="Find slot")
+    group.add(lambda: FakeTask({"confirmed": True}, observed=observed), id="confirm", description="Confirm")
+    await group.on_enter()
+    exact = "{\"date\": \"2026-08-18\", \"time\": \"15:00\"}"
+    assert any(
+        isinstance(item, llm.FunctionCall)
+        and item.name == "finish"
+        and item.arguments == exact
+        for item in observed
+    )
+    assert any(
+        isinstance(item, llm.FunctionCallOutput)
+        and item.name == "finish"
+        and item.output == exact
+        for item in observed
+    )
+    assert all(
+        not isinstance(item, llm.ChatMessage)
+        or item.role not in ("developer", "system")
+        for item in observed
+    )
+
+    second_started = []
+    transfer = agent._TaskTransfer(agent.Greeter())
+    stopped = RecordingTaskGroup(
+        chat_ctx=llm.ChatContext.empty(),
+        summarize_chat_ctx=False,
+    )
+    stopped.add(lambda: FakeTask(error=transfer), id="transfer", description="Transfer")
+    stopped.add(lambda: second_started.append(True) or FakeTask({}), id="later", description="Must not start")
+    await stopped.on_enter()
+    assert not second_started
+    assert stopped.completions == [transfer]
+
+    print("livekit task-group contract smoke ok")
+
+
+asyncio.run(main())
+`
+
 // livekitRequestTracingSmokeScript drives a real AgentSession through fake
 // STT, LLM, and TTS services. The in-memory exporter must receive all three
 // speech-pipeline observations under the framework's session trace (V21/V22).
@@ -369,6 +599,21 @@ func TestSmokeLiveKitV1RemyInstantiates(t *testing.T) {
 
 func TestSmokeLiveKitRegionalInfrastructureInstantiates(t *testing.T) {
 	runLiveKitSmokeScript(t, "regional-infrastructure", nil, nil, livekitRegionalSmokeScript)
+}
+
+func addLiveKitTaskTransfer(agent *ir.Agent) {
+	transfer := agent.Controls["back_to_greeter"].(*ir.AgentTransfer)
+	transfer.Announce = "I will take you back to Remy."
+	transfer.Requires = []string{"caller_phone"}
+	task := agent.Tasks["find_slot"]
+	task.Tools = append(task.Tools, "back_to_greeter")
+	agent.Tasks["find_slot"] = task
+}
+
+func TestSmokeLiveKitV1TaskGroupContracts(t *testing.T) {
+	runLiveKitSmokeScript(t, "remy", func(target *ir.Target) {
+		target.Version = "1.6.10"
+	}, addLiveKitTaskTransfer, livekitTaskGroupContractSmokeScript)
 }
 
 // TestSmokeLiveKitV1MultiVendorInstantiates covers the per-vendor plugin

@@ -586,11 +586,6 @@ func setImportNeeds(data *pipecatData) {
 		}
 		for _, d := range a.Delegates {
 			data.HasFlows = true // tasks run as Flows on the owning worker (C8)
-			// then: end ends via the Flows end_conversation post-action, not a
-			// raw EndFrame (V4/B2); only a non-ending delegate restores the role.
-			if d.Then != "end" {
-				data.NeedsRoleRestore = true
-			}
 			if d.Isolated {
 				data.HasIsolated = true
 			}
@@ -633,14 +628,12 @@ func setImportNeeds(data *pipecatData) {
 		data.FrameImports = append(data.FrameImports, "EndFrame")
 	}
 	if data.HasFlows {
-		// delegate @tool resolves its call with run_llm=False (V7)
-		data.FrameImports = append(data.FrameImports, "FunctionCallResultProperties")
+		// The delegate call resolves with run_llm=False (V7), and every
+		// activation resets an agent that owns Flows to its owner prompt.
+		data.FrameImports = append(data.FrameImports, "FunctionCallResultProperties", "LLMUpdateSettingsFrame")
 	}
 	if data.NeedsAppendFrame {
 		data.FrameImports = append(data.FrameImports, "LLMMessagesAppendFrame")
-	}
-	if data.NeedsRoleRestore {
-		data.FrameImports = append(data.FrameImports, "LLMUpdateSettingsFrame")
 	}
 	needsTTSSpeakFrame := data.GreetingText != ""
 	for _, agent := range data.Agents {
@@ -648,6 +641,17 @@ func setImportNeeds(data *pipecatData) {
 			if transfer.Announce != "" {
 				data.HasTransferAnnouncements = true
 				needsTTSSpeakFrame = true
+			}
+		}
+		for _, delegate := range agent.Delegates {
+			for _, task := range delegate.StepTasks {
+				data.HasTaskTransfers = data.HasTaskTransfers || len(task.Transfers) > 0
+				for _, transfer := range task.Transfers {
+					if transfer.Announce != "" {
+						data.HasTransferAnnouncements = true
+						needsTTSSpeakFrame = true
+					}
+				}
 			}
 		}
 	}
@@ -797,7 +801,9 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	}
 	built := pipecatAgent{
 		Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions,
-		PromptConst: promptConst, PromptExpr: prompt, LLM: llm, TTS: tts,
+		PromptConst: promptConst, PromptExpr: prompt,
+		RuntimePromptExpr: promptExpr(promptConst, def.Instructions, "self.state"),
+		LLM:               llm, TTS: tts,
 	}
 
 	for _, ref := range def.Tools {
@@ -868,6 +874,7 @@ func buildDelegate(agent *ir.Agent, ref string, c *ir.Delegate, env *envSet) (pi
 			return pipecatDelegate{}, err
 		}
 		task.FinishName = "finish_" + ref + "_" + step
+		delegate.HasTransfers = delegate.HasTransfers || len(task.Transfers) > 0
 		delegate.StepTasks = append(delegate.StepTasks, task)
 	}
 	for i := range delegate.StepTasks[:len(delegate.StepTasks)-1] {
@@ -896,7 +903,19 @@ func buildTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (pipecat
 	for _, ref := range task.Tools {
 		tool, ok := agent.Tools[ref]
 		if !ok {
-			return pipecatTask{}, fmt.Errorf("task %q references unknown tool %q", name, ref)
+			control, exists := agent.Controls[ref]
+			if !exists {
+				return pipecatTask{}, fmt.Errorf("task %q references unknown tool/control %q", name, ref)
+			}
+			transfer, supported := control.(*ir.AgentTransfer)
+			if !supported {
+				return pipecatTask{}, fmt.Errorf("task %q references unsupported control %q: tasks support agent_transfer controls only", name, ref)
+			}
+			built.Transfers = append(built.Transfers, pipecatTransfer{
+				MethodName: ref, To: transfer.To, When: transferReason(transfer),
+				Announce: transfer.Announce, Reason: transferReason(transfer), Requires: transfer.Requires,
+			})
+			continue
 		}
 		// The capability table denies this combination, so a package never gets
 		// here; an IR built in code still must not fall through to the webhook

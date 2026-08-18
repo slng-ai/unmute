@@ -1,12 +1,27 @@
 package target
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestTargetVersionDocsiteMatchesWindows(t *testing.T) {
+	path := filepath.Join("..", "..", "docs-site", "reference", "targets-yaml.mdx")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for provider, window := range Windows() {
+		want := fmt.Sprintf("`%s` %s", FrameworkPackage(provider), window.Ceiling)
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("%s supported version drifted from %s: missing %q", provider, path, want)
+		}
+	}
+}
 
 // TestProvidersDocsiteMatchesCatalog binds the public Models pages to the
 // catalogue, the same way providers_doc_test.go binds the internal reference.

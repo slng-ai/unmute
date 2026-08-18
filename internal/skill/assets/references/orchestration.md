@@ -43,6 +43,7 @@ the server, not the package, owns that order.
 | the model calls a tool it should not have yet | move the tool. Lists are per agent and per task, so a tool the current step does not hold cannot be called at all |
 | you need a value out of a step and want to keep it | a task with `result:`, delegated with `assign:` |
 | two phases need different tools or different permissions | a handoff |
+| the caller changes intent while a task is active | put the destination's `agent_transfer` control on that task |
 | the caller needs a person | none of these. That is a human transfer, and what it can do depends on the phone route. See `transfers.md` |
 
 A prompt that says "always identify the caller first" is a request. A task group
@@ -136,6 +137,12 @@ another handoff, not a return. If you want a step that runs and hands control
 back with an answer, that is a task. A handoff back to the entry agent continues
 the call and never repeats the call-start greeting.
 
+The same `agent_transfer` control may appear in a task's `tools:` list. Calling
+it ends that task and any remaining task-group steps, then activates the target
+without returning through the owner. Tasks cannot list `delegate` or
+`human_transfer` controls; shared validation rejects those shapes before
+generation.
+
 On LiveKit, a receiving agent cannot fire another agent transfer during its
 automatic entry turn. Ordinary tools still work, and transfer tools return on
 the next caller turn. Do not add prompt guards for reciprocal handoff loops;
@@ -208,9 +215,12 @@ the call uses them without asking again. Declare each of those variables at the
 top level.
 
 **While a task runs, the caller is talking to the task**: its prompt, and only
-its tools. The agent's own tools are not offered again until the task returns.
-That is the useful half of delegation and also the part to plan for, because a
-task that needs something the agent could do has to hold that tool itself.
+the tools and controls in that task's own `tools:` list. The agent's list is not
+offered again until the task returns. Put an `agent_transfer` control on the
+task when a caller must be able to change intent mid-step; invoking it exits the
+task and any remaining group steps. That is the useful half of delegation and
+also the part to plan for, because anything the task may need has to appear in
+its own list.
 
 **Context decision:** `context:` on the task says what it sees at the start.
 
@@ -311,15 +321,19 @@ own.
 
 - `context_scope: shared` means the service the caller named in step one is
   still there in step two, with nothing passed by hand. This is what you want
-  most of the time.
+  most of the time. Each exact typed result enters the shared context before
+  the next task starts, so that task never has to reconstruct the value from
+  conversation wording.
 - `context_scope: isolated` means each step starts from its own prompt. It is
   one setting for the whole group, not per step, so choosing it makes **every**
-  step start clean. Reach for it only when the group is a set of independent
-  assessments that must not colour each other. An intake flow that must not ask
-  the same question twice needs `shared`, and that is most groups.
+  step start clean. An isolated group carries no results between steps. Reach
+  for it only when the group is a set of independent assessments that must not
+  colour each other. An intake flow that must not ask the same question twice
+  needs `shared`, and that is most groups.
 - `then: return` sends control back to the agent that delegated, with `merge:
-  results` deciding what comes back. `then: transfer` needs `then_target` and
-  hands the call to that agent instead. `then: end` finishes the call.
+  results` returning the final map keyed by task name. `then: transfer` needs
+  `then_target` and hands the call to that agent instead. `then: end` finishes
+  the call.
 
 Say which of these you chose and why. All four combinations validate, and only
 one of them is what the user meant.
@@ -338,7 +352,7 @@ answer out loud for each boundary the package actually has.
 | a delegated task | what comes back, and where does it land? | `result:` on the task, `assign:` on the control |
 | a task group | do the steps share context or each start clean? | `context_scope` |
 | a task group | what happens when the last step ends? | `then`, and `then_target` if it transfers |
-| a task group | what returns to the caller? | `merge: results` |
+| a task group | what reaches later shared steps and returns to the caller? | exact intermediate results enter shared context before the next step; the final `merge: results` map is keyed by task name |
 
 A boundary with no stated decision is a default nobody chose. Name it.
 
@@ -346,7 +360,7 @@ Two things the table does not cover, because they trip people up:
 
 - **A control is not a tool file.** Names under `controls:` go in an agent's or
   a task's `tools:` list, but never in the package-level `tools:` list, which
-  loads files from `tools/`.
+  loads files from `tools/`. A task may name only an `agent_transfer` control.
 - **Declaring a control without attaching it is a build error**, not dead
   config. Write both halves in the same edit. The refusal names the file, the
   line, and the agents you could attach it to:

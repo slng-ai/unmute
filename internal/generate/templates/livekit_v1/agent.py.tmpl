@@ -517,6 +517,15 @@ class IgnorePhrasesMixin:
         return _filtered()
 
 {{end}}
+{{if .HasTaskTransfers}}class _TaskTransfer(Exception):
+    """Internal signal that a task handed the caller to another agent."""
+
+    def __init__(self, agent: Agent) -> None:
+        super().__init__()
+        self.agent = agent
+
+
+{{end -}}
 # --- agents ----------------------------------------------------------------
 {{range .Agents}}
 class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
@@ -571,7 +580,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
     async def {{.Method}}(self, ctx: RunContext):
         {{triple .When}}
 {{- if .Requires}}
-        missing = [n for n, v in ({{range .Requires}}({{pyq .}}, ctx.userdata.{{.}}), {{end}}) if v is None]
+        missing = [n for n, v in ({{range .Requires}}({{pyq .}}, ctx.userdata.{{.}}), {{end}}) if v in (None, "")]
         if missing:
             # requires guard (machine-checked): refuse and name the unmet variables.
             return "Cannot transfer yet; missing required information: " + ", ".join(missing)
@@ -780,7 +789,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- range .Delegates}}
 {{- if .Task}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext) -> dict:
+    async def {{.Method}}(self, ctx: RunContext) -> dict{{if .CanTaskTransfer}} | Agent{{end}}:
         {{triple .When}}
         # N13: snapshot before the task, restore after. An awaited AgentTask
         # merges its own turns into this agent's context when it returns
@@ -790,13 +799,20 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         # runs the same flow again (B: multi-task delegated twice and booked
         # nothing, 2026-08-15). The task-group branch below always did this.
         owner_ctx = self.chat_ctx.copy()
+{{- if .CanTaskTransfer}}
+        try:
+{{- end}}
 {{- if .Task.Summary}}
-        summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Task.Summary}})
-        result = await {{.Task.Class}}(chat_ctx=summary_ctx)
+{{if .CanTaskTransfer}}    {{end}}        summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Task.Summary}})
+{{if .CanTaskTransfer}}    {{end}}        result = await {{.Task.Class}}(chat_ctx=summary_ctx)
 {{- else if .Task.CtxExpr}}
-        result = await {{.Task.Class}}(chat_ctx={{.Task.CtxExpr}})
+{{if .CanTaskTransfer}}    {{end}}        result = await {{.Task.Class}}(chat_ctx={{.Task.CtxExpr}})
 {{- else}}
-        result = await {{.Task.Class}}()  # history: reset — the task starts fresh
+{{if .CanTaskTransfer}}    {{end}}        result = await {{.Task.Class}}()  # history: reset — the task starts fresh
+{{- end}}
+{{- if .CanTaskTransfer}}
+        except _TaskTransfer as transfer:
+            return transfer.agent
 {{- end}}
         await self.update_chat_ctx(owner_ctx)
 {{- range .Task.Assign}}
@@ -806,8 +822,9 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         # the only return.
         return result
 {{- else if .Isolated}}
+{{- $canTaskTransfer := .CanTaskTransfer}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{end}}:
+    async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
         {{triple .When}}
         # context_scope: isolated — each step is a standalone AgentTask starting
         # fresh (C3/C4); the grouped form always shares context, so it is not used.
@@ -817,8 +834,15 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         # single-task and grouped branches do.
         owner_ctx = self.chat_ctx.copy()
         task_results: dict = {}
+{{- if .CanTaskTransfer}}
+        try:
+{{- end}}
 {{- range .Steps}}
-        task_results[{{pyq .ID}}] = await {{.Class}}()
+{{if $canTaskTransfer}}    {{end}}        task_results[{{pyq .ID}}] = await {{.Class}}()
+{{- end}}
+{{- if .CanTaskTransfer}}
+        except _TaskTransfer as transfer:
+            return transfer.agent
 {{- end}}
 {{- if eq .Then "return"}}
         # N13: standalone tasks never merge their turns back; hand the owner the
@@ -834,7 +858,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- end}}
 {{- else}}
     @function_tool
-    async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{end}}:
+    async def {{.Method}}(self, ctx: RunContext){{if eq .Then "return"}} -> dict{{if .CanTaskTransfer}} | Agent{{end}}{{end}}:
         {{triple .When}}
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
@@ -849,7 +873,14 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- end}}
 {{- if eq .Then "return"}}
         owner_ctx = self.chat_ctx.copy()
+{{- if .CanTaskTransfer}}
+        try:
+            result = await group
+        except _TaskTransfer as transfer:
+            return transfer.agent
+{{- else}}
         result = await group
+{{- end}}
         # N13: the flow's own turns must not land in the owner's context. The
         # TaskGroup merges them back on completion, so restore the pre-flow
         # context and hand the owner only the typed results (merge: results).
@@ -857,12 +888,26 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         return result.task_results
 {{- else if eq .Then "transfer"}}
         owner_ctx = self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)
+{{- if .CanTaskTransfer}}
+        try:
+            await group
+        except _TaskTransfer as transfer:
+            return transfer.agent
+{{- else}}
         await group
+{{- end}}
         # then: transfer — control moves on and does not return here. N13: drop
         # the flow's turns by handing the target the pre-flow context.
         return {{.ThenClass}}(chat_ctx=owner_ctx)
 {{- else}}
+{{- if .CanTaskTransfer}}
+        try:
+            await group
+        except _TaskTransfer as transfer:
+            return transfer.agent
+{{- else}}
         await group
+{{- end}}
         # then: end — the flow is the last thing on the call; this does not return.
         self.session.shutdown()
 {{- end}}
@@ -875,6 +920,15 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if or .Prebuilt .MCPServers}}, tools=[{{template "tools_list" .}}]{{end}})
+{{- if .Transfers}}
+        self._terminal_claimed = False
+
+    def _claim_terminal(self) -> bool:
+        if self._terminal_claimed:
+            return False
+        self._terminal_claimed = True
+        return True
+{{- end}}
 
     async def on_enter(self) -> None:
 {{- if .PromptExpr}}
@@ -884,11 +938,52 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict
         self.session.generate_reply()
 {{range .Tools}}{{template "method_tool" .}}{{end}}
 {{- if $.Capture}}{{template "capture_tool" $.Capture}}{{end}}
-    @function_tool
+{{range .Transfers}}
+    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)
+    async def {{.Method}}(self, ctx: RunContext):
+        {{triple .When}}
+        if not self._claim_terminal():
+            return
+{{- if .Requires}}
+        missing = [n for n, v in ({{range .Requires}}({{pyq .}}, ctx.userdata.{{.}}), {{end}}) if v in (None, "")]
+        if missing:
+            self._terminal_claimed = False
+            return "Cannot transfer yet; missing required information: " + ", ".join(missing)
+{{- end}}
+        try:
+{{- if .Announce}}
+            await ctx.session.say({{pyq .Announce}}, allow_interruptions=False)
+{{- end}}
+{{- range .ResetVars}}
+            ctx.userdata.{{.Name}} = {{.Default}}  # context.variables: not carried on this transfer
+{{- end}}
+{{- if .Summary}}
+            summary_ctx = await _summarize(self.chat_ctx, {{template "llmexpr" .Summary}})
+            self.complete(_TaskTransfer({{.TargetClass}}(chat_ctx=summary_ctx)))
+{{- else if .CtxExpr}}
+            self.complete(_TaskTransfer({{.TargetClass}}(chat_ctx={{.CtxExpr}})))
+{{- else}}
+            # history: reset — the target starts fresh.
+            self.complete(_TaskTransfer({{.TargetClass}}()))
+{{- end}}
+        except BaseException:
+            self._terminal_claimed = False
+            raise
+{{end}}    @function_tool
     async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}) -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
+{{- if .Transfers}}
+        if not self._claim_terminal():
+            return
+        try:
+            self.complete({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} })
+        except BaseException:
+            self._terminal_claimed = False
+            raise
+{{- else}}
         self.complete({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} })
+{{- end}}
 {{end}}
 {{- end}}
 

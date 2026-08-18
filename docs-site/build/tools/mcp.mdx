@@ -156,12 +156,12 @@ gate is a refusal rather than a warning:
 livekit: LiveKit MCP tools require sdk_language: python
 ```
 
-An MCP source needs `livekit-agents` 1.6.0 or newer, because that is where the
-emitted arguments are verified. A target that declares an older version fails
-validation by name, rather than having its version quietly raised:
+This Unmute release supports exactly `livekit-agents` 1.6.10. A target that
+names any other version fails the global version check rather than having its
+version quietly changed:
 
 ```text
-livekit: livekit version "1.5.2" is too old for an MCP tool source, which needs livekit-agents >=1.6.0
+livekit: livekit version "1.5.2" is outside the supported range (exactly 1.6.10)
 ```
 
 **Pipecat needs nothing extra.** It emits one client per source, started with the

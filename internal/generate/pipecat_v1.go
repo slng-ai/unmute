@@ -26,9 +26,8 @@ import (
 var pipecatV1Templates embed.FS
 
 // The driver's templates target the Pipecat workers model (LLMWorker /
-// activate_worker) + Flows-in-core, which landed in 1.5.0 — the first
-// 1.x release (versions jump 0.0.108 → 1.5.0). Range: >=1.5.0, <2.0.0, held in
-// internal/target/driver.go so ir.Validate reads the same window.
+// activate_worker) + Flows-in-core. The exact supported SDK version lives in
+// internal/target/driver.go so ir.Validate reads the same contract.
 
 // pyName turns a snake/kebab identifier into a safe Python class-name stem.
 func pyName(name string) string {
@@ -66,13 +65,16 @@ type pipecatAgent struct {
 	Class       string // Python class name
 	Prompt      string
 	PromptConst string // module constant holding Prompt (dedup: builder + restore, V2)
-	PromptExpr  string // PromptConst, or a render call when the prompt is templated
-	LLM         pipecatService
-	TTS         pipecatService
-	Tools       []pipecatTool
-	Transfers   []pipecatTransfer
-	Delegates   []pipecatDelegate
-	MCPSources  []pipecatMCPSource
+	PromptExpr  string // constructor expression: PromptConst, or _render(..., state)
+	// RuntimePromptExpr is the same prompt inside an agent method, where call
+	// state is reached through self rather than the constructor-local name.
+	RuntimePromptExpr string
+	LLM               pipecatService
+	TTS               pipecatService
+	Tools             []pipecatTool
+	Transfers         []pipecatTransfer
+	Delegates         []pipecatDelegate
+	MCPSources        []pipecatMCPSource
 }
 
 // pipecatMCPSource is one MCP tool source this agent carries (N40): one
@@ -111,6 +113,7 @@ type pipecatTask struct {
 	Prompt         string
 	PromptExpr     string // the node's role_message: the quoted prompt, or a render call when it names a variable
 	Tools          []pipecatTool
+	Transfers      []pipecatTransfer
 	ResultProps    string // Python literal: JSON-schema properties for finish args
 	ResultRequired string // Python literal: list of required finish arg names
 }
@@ -118,15 +121,16 @@ type pipecatTask struct {
 // pipecatDelegate is a delegate control: run a task or an ordered group of tasks
 // as a Flow on the owning worker, then return / transfer / end (C8, V2).
 type pipecatDelegate struct {
-	MethodName string
-	When       string
-	Task       string          // single-task delegate; "" if a group
-	Assign     []pipecatAssign // result.<field> -> variable
-	Group      string          // group delegate; "" if a single task
-	StepTasks  []pipecatTask   // resolved ordered steps (a single task is one step)
-	Then       string          // "return" | "transfer" | "end"
-	ThenTarget string          // target agent for then: transfer
-	Isolated   bool            // context_scope: isolated (per-node context RESET)
+	MethodName   string
+	When         string
+	Task         string          // single-task delegate; "" if a group
+	Assign       []pipecatAssign // result.<field> -> variable
+	Group        string          // group delegate; "" if a single task
+	StepTasks    []pipecatTask   // resolved ordered steps (a single task is one step)
+	Then         string          // "return" | "transfer" | "end"
+	ThenTarget   string          // target agent for then: transfer
+	Isolated     bool            // context_scope: isolated (per-node context RESET)
+	HasTransfers bool            // a step can abort the remaining Flow and hand off
 }
 
 type pipecatAssign struct {
@@ -424,9 +428,9 @@ type pipecatData struct {
 	NeedsEndFrame            bool
 	NeedsAppendFrame         bool
 	HasFlows                 bool // any delegate (tasks run as Flows on the owner, C8)
+	HasTaskTransfers         bool // a task can transfer; imports the public NO_RESPONSE sentinel
 	HasTransferAnnouncements bool // target worker owns exact handoff speech before its reply
 	HasIsolated              bool // any isolated group (ContextStrategy RESET import)
-	NeedsRoleRestore         bool // any non-ending delegate (V28)
 	NeedsLanguage            bool // any emitted service sets a language kwarg (Language enum import, N16)
 	Inline                   bool // single agent, no bus: LLM inline in the pipeline (F3)
 	NeedsMCP                 bool // any mcp tool source: MCPClient import + lifecycle (N40)

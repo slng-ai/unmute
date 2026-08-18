@@ -468,6 +468,7 @@ class BillingAgent(LLMWorker):
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
 
 
+
     @_direct_tool
     async def get_invoice(self, params: FunctionCallParams, customer_id: str):
         """Fetch the most recent invoice for a customer id. Returns the invoice total and status.
@@ -559,6 +560,7 @@ class IntakeAgent(LLMWorker):
 
         llm = build_intake_llm(state)
         super().__init__("intake", llm=llm, pipeline=Pipeline([llm, build_intake_tts()]), bridged=())
+
 
 
     @_direct_tool(cancel_on_interruption=False)
@@ -748,7 +750,7 @@ if __name__ == "__main__":
   "provider": "pipecat",
   "version": "1.7.0",
   "supported": {
-    "floor": "1.5.0",
+    "floor": "1.7.0",
     "ceiling": "1.7.0",
     "verified": "2026-08-16"
   },

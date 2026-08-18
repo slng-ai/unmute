@@ -53,7 +53,7 @@ import httpx
 {{end}}
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 {{if not .Inline}}from pipecat.bus import BusBridgeProcessor
-{{end}}{{if .HasFlows}}from pipecat.flows import {{if .HasIsolated}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig
+{{end}}{{if .HasFlows}}from pipecat.flows import {{if .HasIsolated}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig{{if .HasTaskTransfers}}, NO_RESPONSE{{end}}
 {{end}}{{if .FrameImports}}from pipecat.frames.frames import {{join .FrameImports ", "}}
 {{end}}from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -66,7 +66,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 {{if .NeedsFunctionCalls}}from pipecat.services.llm_service import FunctionCallParams
 {{end}}{{if .NeedsMCP}}from pipecat.services.mcp_service import MCPClient
-{{end}}{{if .NeedsRoleRestore}}from pipecat.services.settings import LLMSettings
+{{end}}{{if .HasFlows}}from pipecat.services.settings import LLMSettings
 {{end}}{{if .NeedsLanguage}}from pipecat.transcriptions.language import Language
 {{end}}from pipecat.transports.base_transport import BaseTransport, TransportParams
 {{if .DailyParams}}{{.DailyParams.Import}}
@@ -595,6 +595,15 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}
         llm = build_{{.Name}}_llm({{if $.Variables}}state{{end}})
         super().__init__({{pyq .Name}}, llm=llm, pipeline=Pipeline([llm, build_{{.Name}}_tts()]), bridged=())
+{{if .Delegates}}
+    async def on_activated(self, args) -> None:
+        # A Flow replaces this worker's system instruction with its task role.
+        # Re-entry restores the owning agent before tools/messages run.
+        await self.queue_frame(LLMUpdateSettingsFrame(
+            delta=LLMSettings(system_instruction={{.RuntimePromptExpr}}),
+        ))
+        await super().on_activated(args)
+{{end}}
 {{if .MCPSources}}        # MCP tool sources. The clients are built here and connected in
         # start_mcp() before this worker is ever activated, because the server
         # names its own tools and build_tools() has to be able to list them.
@@ -791,12 +800,13 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             response.raise_for_status()
             await params.result_callback(response.json())
 {{end}}{{if and .EndsCall (not .ColdDestination)}}        await params.llm.push_frame(EndFrame())
-{{end}}{{end}}{{$agentPromptExpr := .PromptExpr}}{{range $d := .Delegates}}
+{{end}}{{end}}{{$agentPromptExpr := .RuntimePromptExpr}}{{range $d := .Delegates}}
     @_direct_tool
     async def {{$d.MethodName}}(self, params: FunctionCallParams):
         """{{$d.When}}"""
         self._{{$d.MethodName}}_results = {}
-        flow = FlowManager(
+{{if $d.HasTransfers}}        self._{{$d.MethodName}}_active_step = {{pyq (index $d.StepTasks 0).Name}}
+{{end}}        flow = FlowManager(
             llm=self.llm,
             context_aggregator=LLMContextAggregatorPair(self.context),
             worker=self,
@@ -828,6 +838,13 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
                     required={{.InputRequired}},
                     handler={{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .Name}}, {{if .NeedsState}}self._bind_state(_flow_tool_{{.Name}}){{else}}_flow_tool_{{.Name}}{{end}}){{else}}{{if .NeedsState}}self._bind_state(_flow_tool_{{.Name}}){{else}}_flow_tool_{{.Name}}{{end}}{{end}},
                 ),
+{{end}}{{range $t.Transfers}}                FlowsFunctionSchema(
+                    name={{pyq .MethodName}},
+                    description={{pyq .When}},
+                    properties={},
+                    required=[],
+                    handler={{if and $.Tracing $.NeedsFunctionCalls}}self._trace_flow_tool({{pyq .MethodName}}, self._{{$d.MethodName}}_transfer_{{$t.Name}}_{{.MethodName}}){{else}}self._{{$d.MethodName}}_transfer_{{$t.Name}}_{{.MethodName}}{{end}},
+                ),
 {{end}}                FlowsFunctionSchema(
                     name={{pyq $t.FinishName}},
                     description="Record the result of this step and finish.",
@@ -839,11 +856,79 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{if $d.Isolated}}            context_strategy=ContextStrategyConfig(strategy=ContextStrategy.RESET),
 {{end}}        )
 
-    async def _{{$d.MethodName}}_finish_{{$t.Name}}(self, args, flow_manager):
-        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
-{{if $t.NextName}}        return {"status": "ok"}, self._{{$d.MethodName}}_node_{{$t.NextName}}()
-{{else}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
-{{end}}{{if eq $d.Then "end"}}        # then: end — hand to a terminal node whose end_conversation
+{{range $x := $t.Transfers}}    async def _{{$d.MethodName}}_transfer_{{$t.Name}}_{{$x.MethodName}}(self, args, flow_manager):
+        if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+            return {"status": "already handled"}, NO_RESPONSE
+{{if $x.Requires}}        missing = [name for name in [{{range $i, $r := $x.Requires}}{{if $i}}, {{end}}{{pyq $r}}{{end}}] if getattr(self.state, name, None) in (None, "")]
+        if missing:
+            return {"refused": f"Cannot transfer yet; still need: {', '.join(missing)}"}, None
+{{end}}        self._{{$d.MethodName}}_active_step = None
+        flow_messages = None
+        flow_tools = None
+        try:
+            flow_messages = [dict(message) for message in self.context.get_messages()]
+            flow_tools = self.context.tools
+{{if $x.Announce}}            await self._announce_handoff({{pyq $x.Announce}})
+{{end}}            messages, tools = self._{{$d.MethodName}}_snapshot
+            task_start = len(messages) if flow_messages[:len(messages)] == messages else 0
+            task_messages = [
+                dict(message)
+                for message in flow_messages[task_start:]
+                if message.get("role") in {"user", "assistant", "tool"}
+            ]
+            self.context.set_messages(messages + task_messages)
+            self.context.set_tools(tools)
+            await self.activate_worker(
+                {{pyq $x.To}},
+                args=LLMWorkerActivationArgs(
+                    messages=[{"role": "developer", "content": {{pyq $x.Reason}}}],
+                    run_llm=True,
+                ),
+                deactivate_self=True,
+            )
+        except BaseException:
+            self._{{$d.MethodName}}_active_step = {{pyq $t.Name}}
+            if flow_messages is not None:
+                self.context.set_messages(flow_messages)
+            if flow_tools is not None:
+                self.context.set_tools(flow_tools)
+            raise
+        return {"transferred": True}, NO_RESPONSE
+
+{{end}}    async def _{{$d.MethodName}}_finish_{{$t.Name}}(self, args, flow_manager):
+{{if $d.HasTransfers}}        if self._{{$d.MethodName}}_active_step != {{pyq $t.Name}}:
+            return {"status": "already handled"}, NO_RESPONSE
+        self._{{$d.MethodName}}_active_step = {{if $t.NextName}}{{pyq $t.NextName}}{{else}}None{{end}}
+{{end}}        self._{{$d.MethodName}}_results[{{pyq $t.Name}}] = dict(args)
+{{if $t.NextName}}        return {"status": "ok", "result": self._{{$d.MethodName}}_results[{{pyq $t.Name}}]}, self._{{$d.MethodName}}_node_{{$t.NextName}}()
+{{else}}{{if and $d.HasTransfers (ne $d.Then "end")}}        flow_messages = None
+        flow_tools = None
+        completion_started = False
+        try:
+            flow_messages = [dict(message) for message in self.context.get_messages()]
+            flow_tools = self.context.tools
+            completion_started = True
+            return await self._{{$d.MethodName}}_complete_{{$t.Name}}()
+        except BaseException as error:
+            self._{{$d.MethodName}}_active_step = {{pyq $t.Name}}
+            self._{{$d.MethodName}}_results.pop({{pyq $t.Name}}, None)
+            try:
+                if flow_messages is not None:
+                    self.context.set_messages(flow_messages)
+                if flow_tools is not None:
+                    self.context.set_tools(flow_tools)
+                if completion_started:
+                    await self.queue_frame(LLMUpdateSettingsFrame(
+                        delta=LLMSettings(system_instruction={{$t.PromptExpr}}),
+                    ))
+                    await self.flush_pipeline()
+            except BaseException as rollback_error:
+                raise error from rollback_error
+            raise
+
+    async def _{{$d.MethodName}}_complete_{{$t.Name}}(self):
+{{end}}{{if not (and $d.HasTransfers (ne $d.Then "end"))}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
+{{end}}{{end}}{{if eq $d.Then "end"}}        # then: end — hand to a terminal node whose end_conversation
         # post-action ends the call after the goodbye drains (V4/B2).
         return {"status": "ok"}, self._{{$d.MethodName}}_end_node()
 {{else}}        # then: {{$d.Then}} — restore the owner's pre-flow context (messages and
@@ -868,7 +953,8 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + " Continue with the caller in one short line.",
         }])
         self.context.set_tools(tools)
-{{end}}        return {"status": "ok"}, None
+{{end}}{{if and $d.HasTransfers (ne $d.Then "end")}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
+{{end}}{{end}}        return {"status": "ok"}, None
 {{end}}{{end}}{{end}}{{if eq $d.Then "end"}}
     def _{{$d.MethodName}}_end_node(self) -> NodeConfig:
         # Terminal node: speak a brief closing line, then end_conversation ends

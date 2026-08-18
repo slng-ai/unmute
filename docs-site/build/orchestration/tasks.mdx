@@ -93,10 +93,18 @@ Each task holds the tools its own step needs:
 Booking before identification is not a rule in a prompt here. It is
 unavailable.
 
-While a task runs, the caller is talking to the task: its prompt, and only its
-tools. The agent's own tools are not offered again until the task returns. That is
-the useful half of delegation, and also the part to plan for, because a task that
-needs something the agent could do has to hold that tool itself.
+While a task runs, the caller is talking to the task: its prompt, and only the
+tools and controls in that task's `tools:` list. The agent's own list is not
+offered again until the task returns.
+
+The one control a task may list is `agent_transfer`. Use it when the caller can
+change intent during the step and should go straight to another agent. Calling
+it ends the task and any remaining task-group steps; the destination takes over
+without returning through the task owner. `delegate` and `human_transfer`
+controls are rejected on tasks during validation.
+
+That scoping is the useful half of delegation, and also the part to plan for,
+because anything the task may need must appear in its own list.
 
 ## Task or second agent
 

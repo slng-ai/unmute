@@ -6,8 +6,9 @@ import (
 	"slices"
 )
 
-// LiveKit entries. Contract: the livekit_v1 driver templates, livekit-agents
-// >=1.5 <2.0, Python. Per-vendor plugins install as livekit-agents extras
+// LiveKit entries. Contract: the livekit_v1 driver templates, the supported
+// livekit-agents window owned by supportWindows, and Python. Per-vendor plugins
+// install as livekit-agents extras
 // (each wraps a livekit-plugins-<name> package); the SLNG plugin is pinned as
 // its own package to match the shipped driver. reason lowers to LiveKit
 // Inference (no provider key; billed through LiveKit Cloud), so its row is
