@@ -30,7 +30,6 @@ import (
 // browser reaches the published port on the host; the worker reaches it by the
 // compose network name (see compose.dev.yaml). Never production values.
 const (
-	liveKitLocalURL  = "ws://127.0.0.1:7880"
 	liveKitDevKey    = "devkey"
 	liveKitDevSecret = "secret"
 )
@@ -198,7 +197,11 @@ func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error
 	if err != nil {
 		return fmt.Errorf("dev %s: dev server: %w", run.root, err)
 	}
-	srv := &http.Server{Handler: devWebMux(run.provider, run.agentName, run.botPort)}
+	liveKitURL := "ws://127.0.0.1:7880"
+	if port := envValue(run.env, "LIVEKIT_HOST_PORT"); port != "" {
+		liveKitURL = "ws://127.0.0.1:" + port
+	}
+	srv := &http.Server{Handler: devWebMux(run.provider, run.agentName, run.botPort, liveKitURL)}
 	srvErr := make(chan error, 1)
 	go func() { srvErr <- srv.Serve(ln) }()
 
@@ -232,9 +235,9 @@ func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error
 // routing is the transport wiring: pipecat reverse-proxies the WebRTC offer to
 // the containerized bot; livekit serves the vendored SDK. Both share the same
 // static page and the /api/session bootstrap (SPEC V6).
-func devWebMux(provider ir.Provider, agentName, botPort string) http.Handler {
+func devWebMux(provider ir.Provider, agentName, botPort, liveKitURL string) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/session", devSessionHandler(provider, agentName))
+	mux.HandleFunc("/api/session", devSessionHandler(provider, agentName, liveKitURL))
 	switch provider {
 	case ir.ProviderPipecat:
 		// The offer (and any other bot API) proxies to the published bot port.
@@ -254,7 +257,7 @@ func devWebMux(provider ir.Provider, agentName, botPort string) http.Handler {
 // one web page switches on (SPEC I.session, V6). Pipecat gets the offer URL to
 // POST its WebRTC offer to; livekit gets the dev server URL and a fresh token
 // (a new room per request so agent dispatch fires at room creation).
-func devSessionHandler(provider ir.Provider, agentName string) http.HandlerFunc {
+func devSessionHandler(provider ir.Provider, agentName, liveKitURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch provider {
@@ -276,7 +279,7 @@ func devSessionHandler(provider ir.Provider, agentName string) http.HandlerFunc 
 				http.Error(w, fmt.Sprintf("mint token: %v", err), http.StatusInternalServerError)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]string{"kind": "livekit", "url": liveKitLocalURL, "token": token, "room": room})
+			_ = json.NewEncoder(w).Encode(map[string]string{"kind": "livekit", "url": liveKitURL, "token": token, "room": room})
 		default:
 			http.Error(w, "unsupported transport", http.StatusInternalServerError)
 		}

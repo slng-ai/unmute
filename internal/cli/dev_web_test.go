@@ -18,7 +18,7 @@ import (
 // webrtc-offer kind pointing at the proxied offer URL (SPEC I.session, V6).
 func TestDevSessionHandlerPipecat(t *testing.T) {
 	rr := httptest.NewRecorder()
-	devSessionHandler(ir.ProviderPipecat, "pipecat").ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/session", nil))
+	devSessionHandler(ir.ProviderPipecat, "pipecat", "").ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/session", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
 	}
@@ -34,10 +34,11 @@ func TestDevSessionHandlerPipecat(t *testing.T) {
 // TestDevSessionHandlerLiveKit: the livekit kind carries the dev server URL and
 // a fresh-room token whose agent dispatch names the target (SPEC I.session, V6).
 func TestDevSessionHandlerLiveKit(t *testing.T) {
+	liveKitURL := "ws://127.0.0.1:7883"
 	decode := func() map[string]string {
 		t.Helper()
 		rr := httptest.NewRecorder()
-		devSessionHandler(ir.ProviderLiveKit, "remy-dev").ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/session", nil))
+		devSessionHandler(ir.ProviderLiveKit, "remy-dev", liveKitURL).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/session", nil))
 		if rr.Code != http.StatusOK {
 			t.Fatalf("status = %d", rr.Code)
 		}
@@ -52,8 +53,8 @@ func TestDevSessionHandlerLiveKit(t *testing.T) {
 	if body["kind"] != "livekit" {
 		t.Errorf("kind = %q, want livekit", body["kind"])
 	}
-	if body["url"] != liveKitLocalURL {
-		t.Errorf("url = %q, want %q", body["url"], liveKitLocalURL)
+	if body["url"] != liveKitURL {
+		t.Errorf("url = %q, want %q", body["url"], liveKitURL)
 	}
 	if !strings.HasPrefix(body["room"], "unmute-") {
 		t.Errorf("room = %q, want unmute- prefix", body["room"])
@@ -89,7 +90,7 @@ func TestDevWebMuxServesOnePageBothTargets(t *testing.T) {
 		return rr
 	}
 
-	pipecat := devWebMux(ir.ProviderPipecat, "pipecat", "7860")
+	pipecat := devWebMux(ir.ProviderPipecat, "pipecat", "7860", "")
 	if rr := get(pipecat, "/"); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "unmute dev") {
 		t.Errorf("pipecat GET / = %d, body missing brand", rr.Code)
 	}
@@ -97,7 +98,7 @@ func TestDevWebMuxServesOnePageBothTargets(t *testing.T) {
 		t.Errorf("pipecat GET /api/session = %d: %s", rr.Code, rr.Body.String())
 	}
 
-	livekit := devWebMux(ir.ProviderLiveKit, "remy-dev", "7860")
+	livekit := devWebMux(ir.ProviderLiveKit, "remy-dev", "7860", "ws://127.0.0.1:7880")
 	if rr := get(livekit, "/"); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "unmute dev") {
 		t.Errorf("livekit GET / = %d, body missing brand", rr.Code)
 	}

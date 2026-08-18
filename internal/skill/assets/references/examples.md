@@ -31,6 +31,7 @@ read two side by side and see only the difference that matters.
 | a warm transfer | `examples/livekit-human-transfer` | LiveKit over a Twilio SIP trunk. Warm transfer compiles on no other route today |
 | a remote MCP server | `examples/mcp-example` | one tool file declares the server, its transport, its bearer token, and the one tool the agent may use |
 | an outbound workflow with runtime values | `examples/outbound-reminder` | input variables from the dispatch, a system variable from the route, a conversation variable the model saves, and local Python appointment fixtures |
+| keep the worker, STT, and TTS in a chosen geography | `examples/regional-infrastructure` | both runnable targets stay in Europe; its guide also explains LiveKit multi-region and Pipecat single-region deployment rules |
 
 ## How to use one, when you have them
 

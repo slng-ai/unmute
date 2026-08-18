@@ -91,6 +91,10 @@ pipecat cloud secrets set pipecat-<region>-secrets --file .env --region <region>
 pipecat cloud deploy pipecat-<region> --region <region> --secrets pipecat-<region>-secrets
 ```
 
+This setting places the worker only. SLNG speech compute has its own regional
+params. See [regional infrastructure](/models/regional-infrastructure) before
+making a data residency claim.
+
 ## Every name in `.env.example` is in the set
 
 On this platform the generated `.env.example` is usually one group, because one thing

@@ -12,11 +12,11 @@ services:
     # --node-ip advertises a host-reachable ICE candidate instead of the
     # container's internal IP. Verified against LiveKit self-hosting docs,
     # config-sample.yaml and the server CLI on 2026-07-22.
-    command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1", "--udp-port", "7882"]
+    command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1", "--rtc.tcp_port", "${LIVEKIT_TCP_HOST_PORT:-7881}", "--udp-port", "${LIVEKIT_UDP_HOST_PORT:-7882}"]
     ports:
       - "${LIVEKIT_HOST_PORT:-7880}:7880"
-      - "7881:7881"
-      - "7882:7882/udp"
+      - "${LIVEKIT_TCP_HOST_PORT:-7881}:${LIVEKIT_TCP_HOST_PORT:-7881}"
+      - "${LIVEKIT_UDP_HOST_PORT:-7882}:${LIVEKIT_UDP_HOST_PORT:-7882}/udp"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7880/"]
       interval: 2s

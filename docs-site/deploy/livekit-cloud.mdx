@@ -89,8 +89,14 @@ new region and deleting the old one; the platform will not move it in place.
 
 When `deployment_region` is a list, the generated README prints one `create`
 command and one config file per region. All deployments keep the same dispatch
-name, so callers reach the nearest one. Use those generated commands rather
-than repeating the single-region command above by hand.
+name. LiveKit normally routes callers to the nearest deployment, but it may use
+another declared region when the nearest one is at capacity. For strict worker
+locality, use separate agent names and explicit dispatch. Use the generated
+commands rather than repeating the single-region command above by hand.
+
+This setting places the worker only. LiveKit media and SLNG speech compute have
+their own controls. See [regional infrastructure](/models/regional-infrastructure)
+before making a data residency claim.
 
 ## Check it, and recover it
 

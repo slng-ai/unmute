@@ -163,6 +163,7 @@
             "group": "Models",
             "icon": "brain",
             "pages": [
+              "models/regional-infrastructure",
               "models/stt",
               "models/tts",
               "models/llm",

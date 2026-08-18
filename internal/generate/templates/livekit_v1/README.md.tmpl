@@ -13,6 +13,14 @@ uv sync                       # or: pip install -e .
 cp .env.example .env          # then fill in the selected provider values
 uv run python -m livekit.agents start agent.py   # run the worker
 ```
+
+`unmute dev` uses local LiveKit ports `7880`–`7882`. To run beside another
+LiveKit stack, move all three together:
+
+```sh
+LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
+  unmute dev <source-dir> --target {{.AgentName}}
+```
 {{- if gt (len .Agents) 1}}
 
 ## Agent handoffs
@@ -158,8 +166,10 @@ Region is chosen at the first deploy and is immutable. Moving one means creating
 the agent in the new region and deleting the old one; the platform will not move
 it in place.
 {{- if gt (len .DeploymentRegions) 1}} Each region is its own deployment with its
-own config file, and all of them keep the `{{.AgentName}}` dispatch name, so
-callers reach the nearest one.
+own config file, and all of them keep the `{{.AgentName}}` dispatch name.
+When the nearest deployment is at capacity, LiveKit may send a caller to another
+region. For strict locality, use separate agent names and explicit dispatch.
+Create one single-region target instance for each name.
 {{- end}}
 {{- else}}
 No region is declared, so the first deploy asks which one to use. Set
