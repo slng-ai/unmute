@@ -1040,6 +1040,89 @@ async def main() -> None:
 asyncio.run(main())
 `
 
+const pipecatSessionIsolationSmokeScript = `"""Smoke check: two workers cannot share call-local transfer state."""
+import asyncio
+import json
+import os
+import subprocess
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+
+
+class Params:
+    def __init__(self):
+        self.results = []
+
+    async def result_callback(self, result, **kwargs):
+        self.results.append(result)
+
+
+async def main() -> None:
+    updates = []
+    first_started = asyncio.Event()
+    second_updated = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def update_call(call_id, twiml):
+        updates.append((call_id, twiml))
+        if call_id == "call-a":
+            first_started.set()
+            await release_first.wait()
+        else:
+            second_updated.set()
+
+    bot._update_carrier_call = update_call
+    first_context = {"_phone_call": {"call_id": "call-a"}}
+    second_context = {"_phone_call": {"call_id": "call-b"}}
+    first = bot.BillingAgent(
+        state=bot.State(), context=LLMContext(), call_context=first_context,
+    )
+    second = bot.BillingAgent(
+        state=bot.State(), context=LLMContext(), call_context=second_context,
+    )
+
+    first_attempt = Params()
+    first_task = asyncio.create_task(first.to_human(first_attempt))
+    await first_started.wait()
+
+    # The claim is synchronous: a duplicate from the same session cannot start
+    # a second primitive while the first one is suspended.
+    in_progress = Params()
+    await first.to_human(in_progress)
+    assert len(updates) == 1
+    assert in_progress.results == [{
+        "in_progress": "A transfer is already under way; do not start another."
+    }]
+    assert "_transfer_result" not in second_context
+
+    second_attempt = Params()
+    second_task = asyncio.create_task(second.to_human(second_attempt))
+    await second_updated.wait()
+    release_first.set()
+    await asyncio.gather(first_task, second_task)
+    assert [call_id for call_id, _ in updates] == ["call-a", "call-b"]
+    assert first_attempt.results == [{"transferred": True}]
+    assert second_attempt.results == [{"transferred": True}]
+
+    first_replay = Params()
+    await first.to_human(first_replay)
+    assert first_replay.results == first_attempt.results
+    assert len(updates) == 2
+    assert first_context["_phone_call"]["call_id"] == "call-a"
+    assert second_context["_phone_call"]["call_id"] == "call-b"
+    assert first.call_context is first_context
+    assert second.call_context is second_context
+    subprocess.run(["ruff", "check", "bot.py"], check=True)
+    print("pipecat session isolation smoke ok")
+
+
+asyncio.run(main())
+`
+
 const pipecatStaticCheckScript = `"""Smoke check: the generated project passes ty."""
 import subprocess
 
@@ -1464,6 +1547,19 @@ func TestSmokePipecatV1TaskTransferStopsFlow(t *testing.T) {
 	}, pipecatTaskTransferSmokeScript)
 }
 
+// TestSmokePipecatV1SessionStateIsIsolated runs the emitted cloud-transfer
+// worker against Pipecat 1.7.0. One session replays its own result, while a
+// second session still transfers its own phone call.
+func TestSmokePipecatV1SessionStateIsIsolated(t *testing.T) {
+	if _, err := exec.LookPath("uv"); err != nil {
+		t.Skip("uv not available")
+	}
+	artifact := cloudWebsocketArtifact(t, cloudWebsocketOptions{
+		inbound: true, transfer: true, connection: true,
+	})
+	runGeneratedPipecatSmokeScript(t, artifact, pipecatSessionIsolationSmokeScript)
+}
+
 // TestSmokePipecatV1MultiVendorInstantiates covers the remaining official
 // entries in one venv: assemblyai listen, elevenlabs + cartesia speak.
 func TestSmokePipecatV1MultiVendorInstantiates(t *testing.T) {
@@ -1680,7 +1776,11 @@ func runPipecatSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 	if err != nil {
 		t.Fatal(err)
 	}
+	runGeneratedPipecatSmokeScript(t, artifact, script)
+}
 
+func runGeneratedPipecatSmokeScript(t *testing.T, artifact Artifact, script string) {
+	t.Helper()
 	dir := t.TempDir()
 	for _, file := range artifact.Files {
 		out := filepath.Join(dir, file.Path)

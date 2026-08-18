@@ -1555,7 +1555,7 @@ func TestPipecatTwilioTelephonyEmitsOnlySelectedAuthenticatedAdapter(t *testing.
 	for _, want := range []string{
 		`"twilio": lambda: FastAPIWebsocketParams`,
 		`telephony.configure_pipecat_env()`,
-		`call_context = telephony.normalized_context(runner_args)`,
+		`call_context.update(telephony.normalized_context(runner_args))`,
 		`agents = [BillingAgent(state=state, context=context, call_context=call_context), IntakeAgent(state=state, context=context, call_context=call_context)]`,
 		`logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())`,
 	} {
@@ -2212,14 +2212,78 @@ func artifactPaths(artifact Artifact) []string {
 	return paths
 }
 
+// Mutable call facts belong to one run_bot invocation. A module-level latch is
+// shared by concurrent sessions in the same process and can replay another
+// caller's transfer result or phone identity.
+func TestPipecatMutableCallStateIsRunLocal(t *testing.T) {
+	cases := []struct {
+		name string
+		bot  string
+		want []string
+	}{
+		{
+			name: "daily transfer",
+			bot:  artifactFile(t, dailyArtifact(t), "bot.py"),
+			want: []string{
+				"call_context = {}",
+				`call_context["_transport"] = transport`,
+				`self.call_context.get("_transfer_result")`,
+				`self.call_context.get("_transport")`,
+			},
+		},
+		{
+			name: "cloud websocket phone call",
+			bot: artifactFile(t, cloudWebsocketArtifact(t, cloudWebsocketOptions{
+				inbound: true, transfer: true, connection: true,
+			}), "bot.py"),
+			want: []string{
+				"call_context = {}",
+				`call_context["_phone_call"] = phone_call`,
+				"_pipeline_audio_rates(phone_call)",
+				`self.call_context.get("_phone_call")`,
+				`self.call_context.get("_transfer_result")`,
+			},
+		},
+		{
+			name: "daily carrier forward",
+			bot:  artifactFile(t, dailyCarrierArtifact(t, "twilio", false), "bot.py"),
+			want: []string{
+				"call_context = {}",
+				"call_forwarded = False",
+				"nonlocal call_forwarded",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if strings.Count(tc.bot, "    call_context = {}") != 1 {
+				t.Error("run_bot must create exactly one fresh call context")
+			}
+			if !strings.Contains(tc.bot, "call_context=call_context") {
+				t.Error("run_bot does not share its call context with the run's workers")
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(tc.bot, want) {
+					t.Errorf("bot.py missing run-local state use %q", want)
+				}
+			}
+			for _, forbidden := range []string{"_TRANSPORT", "_TRANSFER_RESULT", "_PHONE_CALL", "_CALL_FORWARDED"} {
+				if strings.Contains(tc.bot, forbidden) {
+					t.Errorf("bot.py still carries per-call module global %s", forbidden)
+				}
+			}
+		})
+	}
+}
+
 // FR-008 / contracts invariant 8: a second transfer request in the same call
 // produces no second attempt.
 //
 // The property is identical on every route; only the mechanism differs. The
-// carrier routes hold it in the shared control store. The Daily route has no
-// such store, must not gain one (contracts/artifacts.md forbids the service here
-// and the constitution forbids an idle one), and needs no such store, because one
-// process serves one call. So the assertion is written against the property.
+// carrier routes hold it in the shared control store. The Daily route keeps it
+// in the call context shared by one run's workers and must not gain Redis just
+// to remember a fact that never outlives the call.
 //
 // Before this feature there was no guard at all on this route: two requests in
 // one call fired two platform transfers.
@@ -2241,8 +2305,8 @@ func TestUS2_DailyTransferAttemptsOnce(t *testing.T) {
 	// A repeat request must not be told the transfer succeeded when it failed, so
 	// the failure paths have to record what they return.
 	for _, want := range []string{
-		`await params.result_callback(_TRANSFER_RESULT)`,
-		`_TRANSFER_RESULT = {"transferred": True}`,
+		`await params.result_callback(transfer_result)`,
+		`self.call_context["_transfer_result"] = {"transferred": True}`,
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing %q: a replayed answer must be the answer the attempt produced", want)
@@ -2383,7 +2447,7 @@ func TestUS2_RouteShapesDoNotShareCredentials(t *testing.T) {
 func TestUS2_NoTransferToolOnCarrierWebsocketRoutes(t *testing.T) {
 	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
 		bot := artifactFile(t, carrierWebsocketArtifact(t, carrier), "bot.py")
-		for _, forbidden := range []string{"sip_call_transfer", "sip_refer", "_TRANSFER_RESULT"} {
+		for _, forbidden := range []string{"sip_call_transfer", "sip_refer", `"_transfer_result"`} {
 			if strings.Contains(bot, forbidden) {
 				t.Errorf("%s bot.py emits %q: this transport has no transfer primitive", carrier, forbidden)
 			}
@@ -2881,9 +2945,9 @@ func TestV1_DailyColdTransferHandlesTheReturnedError(t *testing.T) {
 		// The primitive is a Daily transport method, so the tool narrows to that
 		// transport first; a browser or console session gets a named failure
 		// rather than an AttributeError.
-		"if isinstance(_TRANSPORT, DailyTransport):",
+		"if isinstance(transport, DailyTransport):",
 		"this session is not a phone call, so it cannot be transferred",
-		"await _TRANSPORT.sip_call_transfer(",
+		"await transport.sip_call_transfer(",
 		"if error is not None:",
 		"Tell the caller and keep helping them.",
 	} {

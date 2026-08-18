@@ -442,7 +442,7 @@ func callRequiredEnv(t *testing.T, bot string) []string {
 // keeps pipecat's defaults, because there 8 kHz would throw quality away.
 func TestCloudWebsocketRunsThePipelineAtTheCarriersRate(t *testing.T) {
 	bot := artifactFile(t, cloudWebsocketArtifact(t, cloudWebsocketOptions{inbound: true, transfer: true, connection: true}), "bot.py")
-	if !strings.Contains(bot, "_pipeline_audio_rates()") {
+	if !strings.Contains(bot, "_pipeline_audio_rates(phone_call)") {
 		t.Error("the pipeline does not take its sample rates from the session")
 	}
 	for _, want := range []string{`"audio_in_sample_rate": 8000`, `"audio_out_sample_rate": 8000`} {
@@ -452,7 +452,7 @@ func TestCloudWebsocketRunsThePipelineAtTheCarriersRate(t *testing.T) {
 	}
 	// Conditional on the session, not unconditional: this is the same file a
 	// browser dev run uses.
-	if !strings.Contains(bot, "if not _PHONE_CALL:\n        return {}") {
+	if !strings.Contains(bot, "if not phone_call:\n        return {}") {
 		t.Error("the rates are applied to every session, including browser ones")
 	}
 	// And no other route gains them.
@@ -545,11 +545,11 @@ func TestCloudWebsocketTransferUpdatesTheLiveCall(t *testing.T) {
 		// value is honoured (Wave C, 2026-08-15). 25 is the default this fixture
 		// does not override.
 		`<Dial answerOnBridge="true" timeout="{ring_timeout}">`,
-		`os.environ["BILLING_PHONE_NUMBER"]`, // an env name, never a literal
-		`/Calls/{call_id}.json`,              // keyed on the live call
-		`data={"Twiml": twiml}`,              // TwiML update, the platform's own mechanism
-		`_PHONE_CALL["call_id"]`,             // the id from the parsed handshake
-		"_TRANSFER_RESULT",                   // one attempt per call
+		`os.environ["BILLING_PHONE_NUMBER"]`,        // an env name, never a literal
+		`/Calls/{call_id}.json`,                     // keyed on the live call
+		`data={"Twiml": twiml}`,                     // TwiML update, the platform's own mechanism
+		`phone_call["call_id"]`,                     // the id from the parsed handshake
+		`self.call_context.get("_transfer_result")`, // one attempt per call
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("the emitted transfer is missing %q", want)
@@ -562,7 +562,7 @@ func TestCloudWebsocketTransferUpdatesTheLiveCall(t *testing.T) {
 		t.Error("the agent speaks the announcement itself; on this route the update cuts it off mid-word")
 	}
 	// The Daily primitive must not appear: it is the other route's mechanism.
-	for _, forbidden := range []string{"sip_call_transfer", "_TRANSPORT", "DailyTransport"} {
+	for _, forbidden := range []string{"sip_call_transfer", `"_transport"`, "DailyTransport"} {
 		if strings.Contains(bot, forbidden) {
 			t.Errorf("the emitted bot references %q, which belongs to the Daily route", forbidden)
 		}
@@ -663,7 +663,7 @@ func TestCloudWebsocketRefusesWarmTransferSayingWhatItWouldTake(t *testing.T) {
 // the change was made unconditionally (spec FR-014).
 func TestCloudWebsocketSeamIsWordsNotShapes(t *testing.T) {
 	markers := []string{
-		"_pipecatCloudServiceHost", "websocket_auth", "_phone_session", "_PHONE_CALL",
+		"_pipecatCloudServiceHost", "websocket_auth", "_phone_session", `"_phone_call"`,
 		"api.pipecat.daily.co/ws/twilio", "_transfer_twiml",
 	}
 	for name, artifact := range map[string]Artifact{
