@@ -82,18 +82,64 @@ This part differs by route, and it is the part to get right:
   silently, so the markup or webhook you set would simply never be consulted.
 </Warning>
 
-## The four SIP values: the LiveKit `sip` route
+## Set up the LiveKit SIP trunk in Twilio Console
 
-Here the call arrives over a Twilio Elastic SIP trunk, so the credentials are the
-trunk's rather than the account's. In the console: **Elastic SIP Trunking**,
-**Manage**, **Trunks**, then create one trunk that carries everything below.
+Here the call arrives over a Twilio Elastic SIP trunk. Configure it in the
+Twilio Console; Unmute does not create or attach these carrier resources.
+[Twilio's step-by-step guide](https://www.twilio.com/en-us/blog/elastic-sip-trunking-step-by-step-setup)
+shows the same Console screens.
+
+<Steps>
+  <Step title="Open the trunk">
+    In Twilio Console, go to **Elastic SIP Trunking**, **Manage**, **Trunks**.
+    Open the trunk used by LiveKit, or create one if none exists. Do not change a
+    shared trunk that is serving another route.
+  </Step>
+
+  <Step title="Set termination and authentication">
+    On **Termination**, choose a unique Termination SIP URI ending in
+    `pstn.twilio.com`. Under **Authentication**, select or create a Credential
+    List with a username and password. Save the trunk.
+  </Step>
+
+  <Step title="Point origination at LiveKit Cloud">
+    On **Origination**, select **Add new Origination URI**. Paste the SIP URI from
+    your LiveKit Cloud project settings and append `;transport=tcp`, for example
+    `sip:abc123def.sip.livekit.cloud;transport=tcp`. Keep it enabled, then add and
+    save it. Do not derive this value from `LIVEKIT_URL`: the project URL and SIP
+    address can have different subdomains.
+  </Step>
+
+  <Step title="Attach the phone number">
+    First record the number's current Voice routing so you can restore it later.
+    On the trunk's **Numbers** tab, choose **Associate a Number with this Trunk**,
+    select your existing voice-capable number, choose this SIP trunk for Voice,
+    and save. A number attached to a trunk ignores its normal voice webhook.
+  </Step>
+
+  <Step title="Allow calls to transfer">
+    In the trunk's **General settings** or **Features**, enable **Call Transfer
+    (SIP REFER)** and **PSTN Transfer**. Set the transfer target's caller ID to
+    **Transferee**, so the person receiving the transfer sees the original caller.
+    Save the trunk.
+  </Step>
+
+  <Step title="Test and restore the number">
+    Call the attached number. When testing is complete, return to **Numbers** and
+    disassociate it from the trunk, then restore the Voice routing you recorded.
+    Disassociating keeps the number in your Twilio account; it does not delete the
+    number or the existing trunk.
+  </Step>
+</Steps>
+
+### Copy the four SIP values
 
 | Connection key | The value | Where it is |
 |---|---|---|
-| `sip_address` | a domain you choose ending in `pstn.twilio.com`, for example `my-agent.pstn.twilio.com` | the trunk's **Termination** tab, as the Termination SIP URI |
+| `sip_address` | the complete domain ending in `pstn.twilio.com` | the trunk's **Termination** tab |
 | `sip_username` | the username in the trunk's credential list | Termination, **Authentication**, Credential Lists |
 | `sip_password` | that credential's password | the same credential list |
-| `from_number` | the number attached to the trunk | the trunk's **Numbers** tab |
+| `from_number` | the attached number in E.164 form | the trunk's **Numbers** tab |
 
 ```yaml connections/twilio_sip.yaml
 transport: sip
@@ -105,24 +151,8 @@ environment:
   from_number: SIP_FROM_NUMBER
 ```
 
-The termination domain is the whole address: there is no second value to hunt for.
-The names are plain SIP names rather than Twilio ones, because the same generated
-code dials through any SIP carrier with them.
-
-### Two more trunk settings that are not credentials
-
-**Origination**, which is how calls reach the agent rather than how the agent dials
-out. On the trunk's **Origination** tab, add an Origination URI pointing at your
-LiveKit project's SIP URI with `;transport=tcp` on the end, for example
-`sip:abc123def.sip.livekit.cloud;transport=tcp`. Read that URI from the LiveKit
-Cloud project settings; do **not** build it from `LIVEKIT_URL`, because the project
-URL subdomain and the SIP subdomain are different strings. Your build's generated
-README carries a command that derives it for you.
-
-**Call Transfer**, if the agent hands calls to a person. Under the trunk's
-**Features**: set Call Transfer (SIP REFER) to Enabled and tick Enable PSTN
-Transfer. Caller ID for the transfer target is a trunk setting, never something one
-call chooses.
+The names are plain SIP names rather than Twilio ones because the generated code
+can dial through any SIP carrier with them.
 
 ## Then declare the names
 
@@ -146,13 +176,12 @@ route table, and they match the connection files in
 `examples/twilio-telephony-hello`, `examples/outbound-reminder`,
 `examples/pipecat-human-transfer-twilio`, and `examples/livekit-human-transfer`.
 
-The console paths for Elastic SIP Trunking (Manage, Trunks, Termination SIP URI as
-`{example}.pstn.twilio.com`, Credential Lists, Origination SIP URI, and the Numbers
-tab) were checked against
-[Twilio's SIP Trunking documentation](https://www.twilio.com/docs/sip-trunking) on
-2026-08-14. The account dashboard location of the Account SID and auth token comes
-from this repository's generated runbooks; the Twilio pages read on that date name
-the two values without giving a console path for them.
+The Console workflow was checked against
+[Twilio's step-by-step Elastic SIP Trunking guide](https://www.twilio.com/en-us/blog/elastic-sip-trunking-step-by-step-setup)
+and [Twilio's SIP Trunking documentation](https://www.twilio.com/docs/sip-trunking)
+on 2026-08-18. The account dashboard location of the Account SID and auth token
+comes from this repository's generated runbooks; the Twilio pages name the two
+values without giving a console path for them.
 
 Your build's `build/<target>/README.md` is the authority for your route, because it
 was generated from your package and names your region and your number.

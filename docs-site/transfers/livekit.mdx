@@ -78,15 +78,9 @@ mitigation rather than a hard time limit.
 
 ## The trunk has to allow it
 
-Cold transfer is a SIP REFER, so the trunk must permit transfers. On Twilio, in
-the console under **Elastic SIP Trunking > Manage > Trunks > your trunk**,
-enable **Call Transfer (SIP REFER)** and tick **Enable PSTN Transfer**. With
-the Twilio CLI:
-
-```sh
-twilio api trunking v1 trunks update --sid <trunk-sid> \
-  --transfer-mode enable-all --transfer-caller-id from-transferee
-```
+Cold transfer is a SIP REFER, so the trunk must permit transfers. Follow the
+[Twilio Console setup](/telephony/twilio#set-up-the-livekit-sip-trunk-in-twilio-console)
+to enable Call Transfer (SIP REFER), PSTN Transfer, and the Transferee caller ID.
 
 Caller ID for the transfer target is that trunk setting, never per call.
 Transfers to emergency numbers are not supported, and the referred leg keeps

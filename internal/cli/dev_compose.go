@@ -140,7 +140,7 @@ type telephonyComposeRun struct {
 	onStop func(ctx context.Context) error
 }
 
-func runTelephonyCompose(ctx context.Context, run telephonyComposeRun) error {
+func runTelephonyCompose(ctx context.Context, run telephonyComposeRun) (returnErr error) {
 	dir, file, project := run.dir, run.file, run.project
 	env, output, stdout, stderr, logPath := run.env, run.output, run.stdout, run.stderr, run.logPath
 	cleanup := func() error {
@@ -195,7 +195,9 @@ func runTelephonyCompose(ctx context.Context, run telephonyComposeRun) error {
 			stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := run.onStop(stopCtx); err != nil {
-				fmt.Fprintf(stderr, "warning: %v\n", err)
+				restoreErr := fmt.Errorf("restore telephony carrier state: %w", err)
+				fmt.Fprintf(stderr, "warning: %v\n", restoreErr)
+				returnErr = errors.Join(returnErr, restoreErr)
 			}
 		}
 		if err := cleanup(); err != nil {

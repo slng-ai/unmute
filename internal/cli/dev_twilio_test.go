@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -25,7 +26,7 @@ func fakeTwilioAPI(t *testing.T, authToken, existingVoiceURL string, updates *ur
 			http.Error(w, "wrong PhoneNumber filter: "+got, http.StatusBadRequest)
 			return
 		}
-		_, _ = w.Write([]byte(`{"incoming_phone_numbers":[{"sid":"PN123","voice_url":"` + existingVoiceURL + `"}]}`))
+		_, _ = w.Write([]byte(`{"incoming_phone_numbers":[{"sid":"PN123","voice_url":"` + existingVoiceURL + `","voice_method":"POST"}]}`))
 	})
 	mux.HandleFunc("POST /2010-04-01/Accounts/account/IncomingPhoneNumbers/PN123.json", func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
@@ -44,7 +45,7 @@ func fakeTwilioAPI(t *testing.T, authToken, existingVoiceURL string, updates *ur
 }
 
 // V3: lookup by exact number, VoiceUrl set to the tunnel origin plus the
-// plan's inbound path, previous URL returned.
+// plan's inbound path, previous voice configuration returned.
 func TestConfigureTwilioVoiceWebhookLooksUpAndUpdates(t *testing.T) {
 	var updates url.Values
 	fakeTwilioAPI(t, "token", "https://old.example/hook", &updates)
@@ -53,8 +54,8 @@ func TestConfigureTwilioVoiceWebhookLooksUpAndUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if previous != "https://old.example/hook" {
-		t.Fatalf("previous voice URL = %q", previous)
+	if previous.URL != "https://old.example/hook" {
+		t.Fatalf("previous voice URL = %q", previous.URL)
 	}
 	if got := updates.Get("VoiceUrl"); got != "https://fake.trycloudflare.com/telephony/inbound" {
 		t.Fatalf("VoiceUrl = %q", got)
@@ -83,6 +84,242 @@ func TestConfigureTwilioVoiceWebhookReportsUnknownNumber(t *testing.T) {
 	_, err := configureTwilioVoiceWebhook(context.Background(), "account", "token", "+15550001111", "https://x.example/inbound")
 	if err == nil || !strings.Contains(err.Error(), "was not found on this Twilio account") {
 		t.Fatalf("unknown number error = %v", err)
+	}
+}
+
+func TestConfigureTwilioVoiceWebhookRejectsInvalidPreviousMethods(t *testing.T) {
+	for _, method := range []string{"", "DELETE"} {
+		name := method
+		if name == "" {
+			name = "empty"
+		}
+		t.Run(name, func(t *testing.T) {
+			posts := 0
+			mux := http.NewServeMux()
+			mux.HandleFunc("GET /2010-04-01/Accounts/account/IncomingPhoneNumbers.json", func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"incoming_phone_numbers":[{"sid":"PN123","voice_url":"https://old.example/hook","voice_method":"` + method + `"}]}`))
+			})
+			mux.HandleFunc("POST /2010-04-01/Accounts/account/IncomingPhoneNumbers/PN123.json", func(w http.ResponseWriter, _ *http.Request) {
+				posts++
+				_, _ = w.Write([]byte(`{"sid":"PN123"}`))
+			})
+			server := httptest.NewServer(mux)
+			defer server.Close()
+			restoreBase := twilioAPIBase
+			twilioAPIBase = server.URL
+			defer func() { twilioAPIBase = restoreBase }()
+
+			_, err := configureTwilioVoiceWebhook(
+				context.Background(),
+				"account",
+				"token",
+				"+15550001111",
+				"https://new.example/hook",
+			)
+			if err == nil || !strings.Contains(err.Error(), "unsupported prior VoiceMethod") {
+				t.Fatalf("invalid prior VoiceMethod error = %v", err)
+			}
+			if posts != 0 {
+				t.Fatalf("Twilio updates = %d, want zero", posts)
+			}
+		})
+	}
+}
+
+func TestConfigureTwilioVoiceWebhookRollsBackUncertainUpdate(t *testing.T) {
+	currentURL := "https://old.example/hook"
+	currentMethod := http.MethodGet
+	var writes []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /2010-04-01/Accounts/account/IncomingPhoneNumbers.json", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"incoming_phone_numbers":[{"sid":"PN123","voice_url":"` + currentURL + `","voice_method":"` + currentMethod + `"}]}`))
+	})
+	mux.HandleFunc("POST /2010-04-01/Accounts/account/IncomingPhoneNumbers/PN123.json", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		currentURL = r.PostForm.Get("VoiceUrl")
+		currentMethod = r.PostForm.Get("VoiceMethod")
+		writes = append(writes, currentMethod+" "+currentURL)
+		if len(writes) == 1 {
+			_, _ = w.Write([]byte(`{"sid":`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"sid":"PN123"}`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	restoreBase := twilioAPIBase
+	twilioAPIBase = server.URL
+	t.Cleanup(func() { twilioAPIBase = restoreBase })
+
+	_, err := configureTwilioVoiceWebhook(
+		context.Background(),
+		"account",
+		"token",
+		"+15550001111",
+		"https://new.example/hook",
+	)
+	if err == nil || !strings.Contains(err.Error(), "decode") {
+		t.Fatalf("uncertain update error = %v", err)
+	}
+	wantWrites := []string{
+		"POST https://new.example/hook",
+		"GET https://old.example/hook",
+	}
+	if !slices.Equal(writes, wantWrites) {
+		t.Fatalf("Twilio writes = %v, want %v", writes, wantWrites)
+	}
+	if currentURL != "https://old.example/hook" || currentMethod != http.MethodGet {
+		t.Fatalf("voice configuration after uncertain update = %s %s", currentMethod, currentURL)
+	}
+}
+
+func TestConfigureTwilioVoiceWebhookRollsBackServerError(t *testing.T) {
+	currentURL := "https://old.example/hook"
+	currentMethod := http.MethodGet
+	var writes []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /2010-04-01/Accounts/account/IncomingPhoneNumbers.json", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"incoming_phone_numbers":[{"sid":"PN123","voice_url":"` + currentURL + `","voice_method":"` + currentMethod + `"}]}`))
+	})
+	mux.HandleFunc("POST /2010-04-01/Accounts/account/IncomingPhoneNumbers/PN123.json", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		currentURL = r.PostForm.Get("VoiceUrl")
+		currentMethod = r.PostForm.Get("VoiceMethod")
+		writes = append(writes, currentMethod+" "+currentURL)
+		if len(writes) == 1 {
+			http.Error(w, "upstream failed after applying update", http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(`{"sid":"PN123"}`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	restoreBase := twilioAPIBase
+	twilioAPIBase = server.URL
+	t.Cleanup(func() { twilioAPIBase = restoreBase })
+
+	_, err := configureTwilioVoiceWebhook(
+		context.Background(),
+		"account",
+		"token",
+		"+15550001111",
+		"https://new.example/hook",
+	)
+	if err == nil || !strings.Contains(err.Error(), "502 Bad Gateway") {
+		t.Fatalf("uncertain server error = %v", err)
+	}
+	wantWrites := []string{
+		"POST https://new.example/hook",
+		"GET https://old.example/hook",
+	}
+	if !slices.Equal(writes, wantWrites) {
+		t.Fatalf("Twilio writes = %v, want %v", writes, wantWrites)
+	}
+	if currentURL != "https://old.example/hook" || currentMethod != http.MethodGet {
+		t.Fatalf("voice configuration after server error = %s %s", currentMethod, currentURL)
+	}
+}
+
+func TestConfigureTwilioVoiceWebhookReportsRollbackFailure(t *testing.T) {
+	posts := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /2010-04-01/Accounts/account/IncomingPhoneNumbers.json", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"incoming_phone_numbers":[{"sid":"PN123","voice_url":"https://old.example/hook","voice_method":"GET"}]}`))
+	})
+	mux.HandleFunc("POST /2010-04-01/Accounts/account/IncomingPhoneNumbers/PN123.json", func(w http.ResponseWriter, _ *http.Request) {
+		posts++
+		if posts == 1 {
+			_, _ = w.Write([]byte(`{"sid":`))
+			return
+		}
+		http.Error(w, "restore refused", http.StatusInternalServerError)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	restoreBase := twilioAPIBase
+	twilioAPIBase = server.URL
+	t.Cleanup(func() { twilioAPIBase = restoreBase })
+
+	_, err := configureTwilioVoiceWebhook(
+		context.Background(),
+		"account",
+		"token",
+		"+15550001111",
+		"https://new.example/hook",
+	)
+	if err == nil {
+		t.Fatal("uncertain update and failed rollback returned nil")
+	}
+	for _, want := range []string{"decode", "restore previous Twilio voice configuration", "500 Internal Server Error"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("combined error missing %q: %v", want, err)
+		}
+	}
+	if posts != 2 {
+		t.Fatalf("Twilio updates = %d, want failed update and rollback", posts)
+	}
+}
+
+// V14: the undo restores every voice field changed for the dev session.
+func TestAutoConfigureCarrierWebhookRestoresTwilioVoiceConfiguration(t *testing.T) {
+	currentURL := "https://old.example/hook"
+	currentMethod := http.MethodGet
+	updates := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /2010-04-01/Accounts/account/IncomingPhoneNumbers.json", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"incoming_phone_numbers":[{"sid":"PN123","voice_url":"` + currentURL + `","voice_method":"` + currentMethod + `"}]}`))
+	})
+	mux.HandleFunc("POST /2010-04-01/Accounts/account/IncomingPhoneNumbers/PN123.json", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		updates++
+		currentURL = r.PostForm.Get("VoiceUrl")
+		currentMethod = r.PostForm.Get("VoiceMethod")
+		_, _ = w.Write([]byte(`{"sid":"PN123"}`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	restoreBase := twilioAPIBase
+	twilioAPIBase = server.URL
+	t.Cleanup(func() { twilioAPIBase = restoreBase })
+
+	plan := pipecatTwilioPlan()
+	plan.AutoWebhookEndpoint = "inbound"
+	public, err := url.Parse("https://fake.trycloudflare.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	undo, err := autoConfigureCarrierWebhook(
+		context.Background(),
+		&strings.Builder{},
+		"phone",
+		plan,
+		public,
+		[]string{
+			"TWILIO_ACCOUNT_SID=account",
+			"TWILIO_AUTH_TOKEN=token",
+			"TWILIO_PHONE_NUMBER=+15550001111",
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := undo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if updates != 2 {
+		t.Fatalf("Twilio updates = %d, want set then restore", updates)
+	}
+	if currentURL != "https://old.example/hook" || currentMethod != http.MethodGet {
+		t.Fatalf("restored voice configuration = %s %s, want GET https://old.example/hook", currentMethod, currentURL)
 	}
 }
 

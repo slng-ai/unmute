@@ -36,8 +36,62 @@ Use this prompt to start a fresh manual release sweep:
 > generated README templates, public docs, and the bundled skill when emitted
 > behavior changes.
 >
-> Keep the current sweep checklist and evidence in the task or PR, not in this
-> prompt. Stop each development process before moving to the next package. At
-> the end, run the repository's full build, test, lint, Python, smoke, and
-> documentation gates, then report what passed, what was fixed, and any real
-> external prerequisite that remains.
+> Keep the current sweep checklist and evidence in the task or PR. A package
+> may also carry a small tracked release table when its own acceptance contract
+> requires one. Stop each development process before moving to the next
+> package. At the end, run the repository's full build, test, lint, Python,
+> smoke, and documentation gates, then report what passed, what was fixed, and
+> any real external prerequisite that remains.
+
+## Salon concierge release gate
+
+Reset the demo database before every evidence run. First run this phone-only
+script once per target with the manager answering and once per target with the
+manager declining or not answering. Wait for each response.
+
+1. “I need help with a complaint.”
+2. “My name is Alex Test.”
+3. “My phone number is plus one, five five five, zero one zero.” Pause, then
+   say: “Eight eight four four.”
+4. “My haircut was uneven and I want to speak to a manager.”
+
+An answered run needs observed two-way human audio. Carrier acceptance alone
+does not prove that the manager answered. An unavailable run must end without a
+new concierge greeting or a claim that the manager answered.
+
+Reset the demo database again. Then run this combined script once in the
+browser and once by inbound phone on each target:
+
+1. “I want to book a haircut tomorrow at three. My name is Robin Taylor.”
+2. “My number is five five five zero one zero.” Pause, then say: “Eight eight
+   four four.”
+3. After booking preparation starts: “Actually, my last haircut was uneven. I’d
+   like the salon to fix it.”
+4. Only after customer care says the complaint was saved: “I want to speak to a
+   manager.”
+
+Required action order:
+
+```text
+verify_customer
+find_or_create_customer       exactly once
+to_booking
+manage_booking
+get_current_date
+check_availability
+to_complaints                 from the active booking task
+record_complaint              exactly once
+to_manager                    exactly once
+```
+
+Expected state is one customer, zero bookings, and one complaint, with no
+second verification, apply task, or booking mutation. Browser runs must state
+that transfer needs an inbound call and start no carrier action. The inbound
+combined run must reach the same state and action order before its terminal
+transfer.
+
+Record the result in the package's
+[release evidence table](../examples/salon-concierge/README.md#release-evidence).
+Use only the date/revision, target/case, sanitized trace or session ID, ordered
+action counts, final SQLite counts/status, carrier child-leg or SIP outcome,
+and pass/fail result. Never paste raw traces or caller data.

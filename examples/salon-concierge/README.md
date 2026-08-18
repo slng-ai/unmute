@@ -209,6 +209,79 @@ browser and once through an inbound phone call on each target.
 | Established MCP failure | After a session starts, make a Firecrawl search fail. | Chat states that current information is unavailable and does not answer from memory. |
 | Transfer failure truth | Try a manager transfer in a browser, then test an unavailable manager on a phone call. | Browser says an inbound phone leg is required. A carrier failure is not described as a browser limit, and the terminal policy may hang up. |
 
+### Exact answered and unavailable transfer calls
+
+Reset the demo database before every evidence run. Use this phone-only script
+once per target with the manager answering and once per target with the manager
+declining or not answering. Wait for each response.
+
+1. “I need help with a complaint.”
+2. “My name is Alex Test.”
+3. “My phone number is plus one, five five five, zero one zero.” Pause, then
+   say: “Eight eight four four.”
+4. “My haircut was uneven and I want to speak to a manager.”
+
+An answered run needs observed two-way human audio. Carrier acceptance alone
+does not prove that the manager answered. An unavailable run must end without a
+new concierge greeting or a claim that the manager answered.
+
+### Exact combined booking-to-manager call
+
+Reset the demo database first. Run this once in the browser and once by inbound
+phone on each target. Wait for each response before speaking the next line.
+
+1. “I want to book a haircut tomorrow at three. My name is Robin Taylor.”
+2. “My number is five five five zero one zero.” Pause, then say: “Eight eight
+   four four.”
+3. After booking preparation starts: “Actually, my last haircut was uneven. I’d
+   like the salon to fix it.”
+4. Only after customer care says the complaint was saved: “I want to speak to a
+   manager.”
+
+The trace must show this order:
+
+```text
+verify_customer
+find_or_create_customer       exactly once
+to_booking
+manage_booking
+get_current_date
+check_availability
+to_complaints                 from the active booking task
+record_complaint              exactly once
+to_manager                    exactly once
+```
+
+The final demo state is one customer, zero bookings, and one complaint. There
+is no second verification, apply task, or booking mutation.
+
+| Target and channel | Test | Pass result |
+|---|---|---|
+| Pipecat browser | Combined | The caller hears that an inbound phone call is required; no carrier action starts. |
+| LiveKit browser | Combined | The caller hears that an inbound phone call is required; no carrier action starts. |
+| Pipecat inbound | Answered | Phone B rings once, two-way human audio works, and the original agent stays ended. `transfer_started` proves carrier acceptance, not that a person answered. |
+| Pipecat inbound | Unavailable | The call ends near the carrier timeout with no new greeting or claim that the manager answered. |
+| Pipecat inbound | Combined | The exact action order and final state above pass before the terminal transfer. |
+| LiveKit inbound | Answered | Phone B rings once, two-way human audio works, and the original agent stays ended. |
+| LiveKit inbound | Unavailable | The call ends under the terminal policy with no new greeting or claim that the manager answered. |
+| LiveKit inbound | Combined | The exact action order and final state above pass before the terminal transfer. |
+
+### Release evidence
+
+Record only sanitized IDs, counts, status, and carrier outcomes. Do not copy
+names, phone numbers, transcripts, tool arguments, credentials, or raw traces.
+
+| Date and revision | Target and case | Trace/session | Ordered evidence | Final state or carrier proof | Result |
+|---|---|---|---|---|---|
+| Pending | Pipecat browser combined | Pending | Pending | Pending | Pending |
+| Pending | LiveKit browser combined | Pending | Pending | Pending | Pending |
+| Pending | Pipecat inbound answered | Pending | Pending | Twilio child-leg status plus observed two-way audio | Pending |
+| Pending | Pipecat inbound unavailable | Pending | Pending | Twilio child-leg final status plus observed terminal timeout | Pending |
+| Pending | Pipecat inbound combined | Pending | Pending | SQLite counts/status plus Twilio child-leg status | Pending |
+| Pending | LiveKit inbound answered | Pending | Pending | SIP/worker status plus observed two-way audio | Pending |
+| Pending | LiveKit inbound unavailable | Pending | Pending | SIP/worker status plus observed terminal timeout | Pending |
+| Pending | LiveKit inbound combined | Pending | Pending | SQLite counts/status plus SIP/worker status | Pending |
+
 For longer real conversations, use the
 [end-to-end harness](../../docs/HARNESS_TEST.md). Feature references:
 [tasks](../../docs-site/build/orchestration/tasks.mdx),

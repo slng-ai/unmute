@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
@@ -41,7 +43,7 @@ const devCloudWebsocketWebhookPath = "/"
 // ends. The number's previous voice configuration is restored on every exit path,
 // interrupt included: a dev session that dies without restoring has left a real
 // phone line pointing at a dead tunnel.
-func execDevCloudWebsocket(cmd *cobra.Command, root, targetName string, plan *generate.TelephonyRuntimePlan, files []generate.File, opts devTelephonyOptions) error {
+func execDevCloudWebsocket(cmd *cobra.Command, root, targetName string, plan *generate.TelephonyRuntimePlan, files []generate.File, opts devTelephonyOptions) (returnErr error) {
 	printDevTelephonyPlan(cmd.OutOrStdout(), targetName, plan, nil)
 	childEnv := devChildEnv(root, cmd.ErrOrStderr())
 	// Everything the local run needs, by name. The carrier credentials are needed
@@ -113,10 +115,14 @@ func execDevCloudWebsocket(cmd *cobra.Command, root, targetName string, plan *ge
 		if restore == nil {
 			return
 		}
-		// A fresh context: the session's own is already cancelled by the interrupt
-		// that got us here, and a cancelled context cannot make an HTTPS request.
-		if err := restore(context.WithoutCancel(cmd.Context())); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not restore the number's voice configuration: %v\n", err)
+		// A fresh bounded context: the session's own is already cancelled by the
+		// interrupt that got us here, and a cancelled context cannot restore it.
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := restore(restoreCtx); err != nil {
+			restoreErr := fmt.Errorf("restore the number's voice configuration: %w", err)
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", restoreErr)
+			returnErr = errors.Join(returnErr, restoreErr)
 		}
 	}()
 	if !opts.noWebhook {
@@ -184,13 +190,13 @@ func setDevCarrierWebhook(ctx context.Context, out io.Writer, targetName string,
 	if err != nil {
 		return nil, fmt.Errorf("configure Twilio voice webhook: %w", err)
 	}
-	shown := previous
+	shown := previous.URL
 	if shown == "" {
 		shown = "unset"
 	}
 	fmt.Fprintf(out, "%s: Twilio voice webhook for %s set to %s (was: %s)\n", targetName, number, voiceURL, shown)
 	return func(restoreCtx context.Context) error {
-		if _, err := configureTwilioVoiceWebhook(restoreCtx, accountSID, authToken, number, previous); err != nil {
+		if err := restoreTwilioVoiceWebhook(restoreCtx, accountSID, authToken, previous); err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "%s: Twilio voice webhook for %s restored to %s\n", targetName, number, shown)
