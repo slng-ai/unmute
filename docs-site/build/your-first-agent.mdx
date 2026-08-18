@@ -43,7 +43,7 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-5.6-luna
+      model: gpt-5.6-terra
       params:
         # A reasoning model answering with function tools on chat completions
         # needs this exact value, or OpenAI returns 400 on every turn.
@@ -133,7 +133,7 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-5.6-luna
+      model: gpt-5.6-terra
       params:
         reasoning_effort: "none"
 ```
@@ -144,14 +144,15 @@ ids, so a typo shows up as a provider error at run time, not at compile time.
 The compile report says so out loud:
 
 ```text
-pipecat: binding reason.reasoning provider=openai model=gpt-5.6-luna (forwarded as-is, not validated)
+pipecat: binding reason.reasoning provider=openai model=gpt-5.6-terra (forwarded as-is, not validated)
 ```
 
-`params:` is passthrough for anything else the provider takes, and it is not
-checked either. The one line here earns its place: `gpt-5.6-luna` is a reasoning
-model, and OpenAI refuses a request that carries function tools unless it sets
+`params:` is normally passthrough for anything else the provider takes. The one
+line here earns its place: `gpt-5.6-terra` is a reasoning model, and OpenAI
+refuses a chat request that carries function tools unless it sets
 `reasoning_effort`. This package has five tools, taken out of the listing above,
-so the line is doing real work. [Reasoning model](/models/llm) has the rest.
+so the line is doing real work. The LiveKit Responses compiler directive is the
+narrow exception; [Reasoning model](/models/llm) has both forms.
 
 <Note>
   You can define more entries than you use. Unused entries are legal

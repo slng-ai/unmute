@@ -106,6 +106,24 @@ controls are rejected on tasks during validation.
 That scoping is the useful half of delegation, and also the part to plan for,
 because anything the task may need must appear in its own list.
 
+## Empty LiveKit task responses
+
+Generated LiveKit tasks retry up to twice when a full successful response has
+neither non-whitespace text nor a tool call. Each retry starts immediately in
+the same speech turn. It keeps the task state and model settings, and
+adds a distinct temporary recovery instruction to a fresh copy of the
+conversation context before each retry. After a task tool returns, recovery
+keeps only `finish` instead of the full tool list. Non-whitespace text or an
+allowed tool call stops recovery.
+Errors and cancellations keep LiveKit's normal behavior.
+
+If all three opening attempts are empty, the task speaks one fixed brief
+failure, runs no action, and stays active for the caller's next turn. If an
+empty reply follows a task tool, recovery can only call `finish`; it cannot run
+another operation. Exhausting that recovery asks the caller to check the current
+state before trying again. This applies only to generated LiveKit tasks. Normal
+LiveKit agents and Pipecat output are unchanged.
+
 ## Task or second agent
 
 | | Task | Second agent |

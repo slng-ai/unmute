@@ -69,7 +69,7 @@ func runCompile(cmd *cobra.Command, dir string, names []string) error {
 		case generate.ManagedTarget:
 			fmt.Fprintf(cmd.OutOrStdout(), "%s: managed target — run `unmute apply %s --target %s`\n", resolved.Name, dir, resolved.Name)
 		}
-		printContract(cmd.OutOrStdout(), resolved.Name, artifact.Notes)
+		printContract(cmd.OutOrStdout(), resolved.Name, resolved.Provider, artifact.Notes)
 		printTelephonyPlan(cmd.OutOrStdout(), resolved.Name, artifact.Telephony)
 	}
 	return nil
@@ -93,14 +93,31 @@ func printTelephonyPlan(out io.Writer, name string, plan *generate.TelephonyRunt
 	}
 }
 
-// printContract prints every forwarded binding/param and derived sizing line.
-// SCHEMA.md §6.2 rule 6 and §5.1 call this report "the contract": what was sent
-// is always inspectable, and no value here is validated (relayed verbatim).
-func printContract(out io.Writer, name string, notes generate.GenerateReport) {
+// printContract prints every resolved binding/param and derived sizing line.
+// Most provider values are relayed verbatim. The narrow LiveKit Responses mode
+// is a compiler directive, so its consumed/transformed params are named here.
+func printContract(out io.Writer, name string, provider ir.Provider, notes generate.GenerateReport) {
 	for _, fb := range notes.ForwardedBindings {
 		role := fb.Role
 		if fb.Profile != "" {
 			role += "." + fb.Profile
+		}
+		responses := provider == ir.ProviderLiveKit && fb.Role == "reason" &&
+			(fb.Binding.Provider == "" || fb.Binding.Provider == "openai") &&
+			fb.Binding.Params["api"] == "responses"
+		if responses {
+			fmt.Fprintf(out, "%s: binding %s %s (OpenAI Responses mode; api is consumed and reasoning_effort is lowered when present)\n", name, role, bindingSummary(fb.Binding))
+			for _, p := range fb.Params {
+				suffix := " (forwarded as-is, not validated)"
+				switch p.Name {
+				case "api":
+					suffix = " (compiler directive)"
+				case "reasoning_effort":
+					suffix = " (lowered to reasoning.effort)"
+				}
+				fmt.Fprintf(out, "%s:   param %s=%v%s\n", name, p.Name, p.Value, suffix)
+			}
+			continue
 		}
 		fmt.Fprintf(out, "%s: binding %s %s (forwarded as-is, not validated)\n", name, role, bindingSummary(fb.Binding))
 		for _, p := range fb.Params {

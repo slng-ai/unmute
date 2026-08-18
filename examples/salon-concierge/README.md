@@ -4,7 +4,7 @@ The full Sage and Stone Salon project. Use this example before a release when
 you want one package to exercise the main Unmute paths together:
 
 - a verification entry agent and a typed customer task;
-- a two-step booking task group for create, modify, and cancel;
+- a three-step draft, confirmation, and apply group for create, modify, and cancel;
 - agent handoffs with shared customer context;
 - a complaint agent with cold manager transfer;
 - a chat agent whose only business tool is Firecrawl MCP;
@@ -23,6 +23,12 @@ preparation task can also leave immediately for a complaint or current-informati
 request without applying a booking change. Every route keeps the verified identity
 and full history. No agent asks for the caller's name or phone again, or repeats
 the full phone number, unless the caller says the identity is wrong.
+
+On LiveKit, each shared booking result is labeled with its source task before
+the next task starts, so the apply step can identify the confirmed draft.
+That target overrides the shared reasoning profile with OpenAI's Responses API,
+low reasoning, and HTTP transport. Pipecat keeps Chat Completions with reasoning
+disabled. Both targets still use the same model ID.
 
 The complaint specialist records the case with a local Python tool. It calls a
 cold transfer when the caller asks for a manager or uses clearly and strongly
@@ -106,11 +112,34 @@ rules are approved. Keep `UNMUTE_LOG_LEVEL=INFO` for normal runs.
 
 ## Booking confirmation boundary
 
-No, an unclear answer, silence, a topic change, or an omitted confirmation yields
-`confirmed: false`; the apply step then performs zero mutation. This is a
+Selection, confirmation, and mutation are separate tasks. Selecting a time only
+finishes the draft step. The confirmation step then states the full proposal and
+asks a new yes-or-no question; nothing said before that question counts. A clear
+yes or matching “book it,” “move it,” or “cancel it” copies the exact draft into
+the apply step. One unclear or interrupted answer gets one full restatement;
+another unclear answer, an explicit no, or omitted confirmation yields zero
+mutation. A topic change exits without applying the stale draft. This is a
 model-and-workflow gate, not hard authorization. The local mutation functions do
 not authenticate a caller or independently prove consent. A production booking
 service must enforce authorization, consent, and idempotency at its own boundary.
+
+## Empty LiveKit task responses
+
+Generated LiveKit tasks retry up to twice when a full successful response has
+neither non-whitespace text nor a tool call. Each retry starts immediately in
+the same speech turn. It keeps the task state and model settings, and
+adds a distinct temporary recovery instruction to a fresh copy of the
+conversation context before each retry. After a task tool returns, recovery
+keeps only `finish` instead of the full tool list. Non-whitespace text or an
+allowed tool call stops recovery.
+Errors and cancellations keep LiveKit's normal behavior.
+
+If all three opening attempts are empty, the task speaks one fixed brief
+failure, runs no action, and stays active for the caller's next turn. If an
+empty reply follows a task tool, recovery can only call `finish`; it cannot run
+another operation. Exhausting that recovery asks the caller to check the current
+state before trying again. This applies only to generated LiveKit tasks. Normal
+LiveKit agents and Pipecat output are unchanged.
 
 ## Validate and compile
 
@@ -169,7 +198,7 @@ browser and once through an inbound phone call on each target.
 |---|---|---|
 | Unverified booking | “I want to book a haircut.” Do not give identity until asked. | Verification runs first. No booking action runs before it succeeds. |
 | Relative-date booking | Give a fake name and 10–15 digit phone number, say “Book a haircut tomorrow afternoon,” pick an offered time, then explicitly confirm the full booking. | The trace calls `get_current_date` before `check_availability`; the availability date is one day after the returned date, with no guessed-year invalid call. The customer is created once and exactly one active booking is saved with the offered slot. |
-| No confirmation | Prepare a create, modify, or cancel request, then say no, stay silent, or change topic instead of confirming. | Preparation returns `confirmed: false` and no booking row is created, changed, or cancelled. |
+| No confirmation | Prepare a create, modify, or cancel request, then say no, stay silent, or change topic instead of confirming. | No booking mutation runs. An explicit no or a second unclear answer finishes unconfirmed; silence waits for inactivity handling, and a topic change hands off without completing the booking. |
 | Neutral complaint | “My last haircut was uneven, but I’d like the salon to fix it.” | One complaint is recorded for the same customer, the booking remains active, and no manager transfer starts. |
 | Book then cancel | Ask to cancel the active booking and confirm. | The saved row is cancelled and no active booking remains. |
 | Mid-booking complaint | Begin another booking, then before confirmation say, “Actually, I need to complain about my last visit.” | Booking stops without a write; customer care receives the same identity, history, and latest request without another verification question or internal handoff announcement. |

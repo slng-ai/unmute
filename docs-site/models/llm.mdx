@@ -10,7 +10,7 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-5.6-luna
+      model: gpt-5.6-terra
       params:
         reasoning_effort: "none"
 ```
@@ -21,20 +21,23 @@ the reasoning model is yours to choose.
 <Info>
   Model ids are forwarded to the vendor exactly as you write them. Unmute keeps no
   allowlist, so a typo surfaces as a provider error at run time. The compile report
-  says so on every binding: `(forwarded as-is, not validated)`.
+  says so on ordinary bindings: `(forwarded as-is, not validated)`. The LiveKit
+  Responses mode below is the narrow exception: `api` selects the generated client
+  and `reasoning_effort` becomes the API's nested reasoning setting.
 </Info>
 
 ## Why `reasoning_effort` is there
 
-`gpt-5.6-luna` is a reasoning model, and OpenAI rejects a chat completions
+`gpt-5.6-terra` is a reasoning model, and OpenAI rejects a chat completions
 request that carries function tools unless the request also sets
 `reasoning_effort`. Leaving the line out is not the same as leaving the value
 alone: the server applies its own default, and every turn comes back as HTTP
 400. This model takes `none`, `low`, `medium`, `high`, and `xhigh`. It rejects
 `minimal`.
 
-Every example in the repository writes `none`, and so does `unmute init`. Keep
-the line whenever the agent has tools.
+Every shared example profile writes `none`, and so does `unmute init`. Keep the
+line whenever the agent has tools; a target-specific Responses override is the
+exception below.
 
 <Note>
   On LiveKit the line matters for a second reason. `livekit-plugins-openai`
@@ -43,11 +46,33 @@ the line whenever the agent has tools.
   the param yourself is what avoids it.
 </Note>
 
-One authoring line lowers correctly to both targets. LiveKit passes it as a
+One shared authoring line lowers correctly to both targets. LiveKit passes it as a
 constructor argument, `openai.LLM(..., reasoning_effort="none")`. Pipecat's
 settings class has no field for it, so it rides the service's `extra` field,
 `OpenAILLMService.Settings(..., extra={"reasoning_effort": "none"})`, which
 Pipecat merges into the request body as written.
+
+## LiveKit Responses API
+
+Override an OpenAI reasoning model inside one LiveKit target when that package
+needs the Responses API:
+
+```yaml targets.yaml
+models:
+  reasoning:
+    provider: openai
+    model: gpt-5.6-terra
+    params:
+      api: responses
+      reasoning_effort: low
+      use_websocket: false
+```
+
+Unmute emits `openai.responses.LLM` and turns `reasoning_effort` into the API's
+nested reasoning setting when it is present. Use that field instead of a raw
+`reasoning` map. Put this under the LiveKit target, not in the shared model
+profile: Pipecat keeps its normal OpenAI request shape. The salon concierge uses
+this exact override on its LiveKit target.
 
 ## Pipecat
 

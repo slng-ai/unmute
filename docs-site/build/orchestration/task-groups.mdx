@@ -109,9 +109,10 @@ from its own prompt, which is what you want when a step should not be
 influenced by what came before.
 
 In a shared group, each exact typed result enters the shared context before the
-next task starts. The later task uses that value instead of reconstructing it
-from conversation wording. An isolated group carries no results between steps.
-The final `merge: results` map is keyed by task name and returns to the owner.
+next task starts. LiveKit labels that result with its source task so the later
+task can identify it instead of reconstructing it from conversation wording.
+An isolated group carries no results between steps. The final `merge: results`
+map is keyed by task name and returns to the owner.
 
 `context_scope` does not replace a task's `context:` block. It decides whether
 member tasks share the group's running context. Each task still declares

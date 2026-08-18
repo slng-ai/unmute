@@ -19,7 +19,7 @@ input:
       description: Exact slot ID returned by check_availability
     confirmed:
       type: boolean
-      description: Exact true value from the shared preparation result
+      description: Exact true value from the shared confirm_booking result
   required:
     - booking_id
     - service

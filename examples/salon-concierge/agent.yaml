@@ -36,7 +36,7 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-5.6-luna
+      model: gpt-5.6-terra
       params:
         reasoning_effort: "none"
   speak:
@@ -131,6 +131,24 @@ tasks:
       booking_id: string
       service: string
       slot_id: string
+    context:
+      history: full
+
+  confirm_booking:
+    instructions: tasks/confirm-booking.md
+    tools:
+      - to_complaints
+      - to_chat
+    result:
+      action:
+        enum:
+          - create
+          - modify
+          - cancel
+          - none
+      booking_id: string
+      service: string
+      slot_id: string
       confirmed: boolean
     context:
       history: full
@@ -153,6 +171,7 @@ task_groups:
   booking_flow:
     steps:
       - prepare_booking
+      - confirm_booking
       - apply_booking
     context_scope: shared
     then: return

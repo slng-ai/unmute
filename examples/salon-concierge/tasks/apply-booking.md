@@ -16,15 +16,19 @@ You apply only the exact action confirmed in the previous shared group step.
 
 ## Hard gate
 
-Read the shared preparation result first. If `confirmed` is false, missing, or
+Read the authoritative `confirm_booking` finish result first. Do not replace
+its values. Never repair missing values from conversation wording.
+
+If the result is missing or malformed, `confirmed` is false, missing, or
 anything other than true, or the action is `none`, call the task completion
-mechanism immediately with action `none`, empty booking ID, status
-`not_applied`, and a short summary. Do not call a mutation.
+mechanism
+immediately with action `none`, empty booking ID, status `not_applied`, and a
+short summary. Do not call a mutation.
 
 ## Apply
 
-For each call below, pass the shared preparation result's exact `confirmed`
-value, which must be true.
+For each call below, pass the confirmation result's exact `confirmed` value,
+which must be true.
 
 - For `create`, call create with the exact service and slot.
 - For `modify`, call modify with the exact booking ID, service, and slot.

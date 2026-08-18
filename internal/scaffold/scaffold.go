@@ -85,7 +85,7 @@ Everything you say is read out loud.
 	// scaffold, the examples, and both documentation trees (research D10).
 	// Authored as two fields, never a folded `openai/...` string: the value is
 	// forwarded to the SDK verbatim.
-	DefaultReasonModel = "gpt-5.6-luna"
+	DefaultReasonModel = "gpt-5.6-terra"
 )
 
 // Data is the v1 agent configuration rendered by the scaffold templates.

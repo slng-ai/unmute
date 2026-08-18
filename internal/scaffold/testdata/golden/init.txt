@@ -42,7 +42,7 @@ models:
     assistant_model:
       description: default reasoning model
       provider: openai
-      model: "gpt-5.6-luna"
+      model: "gpt-5.6-terra"
       # Forwarded to the provider as written. A reasoning model answering with
       # function tools on chat completions needs this exact value, or OpenAI
       # returns 400 on every turn.

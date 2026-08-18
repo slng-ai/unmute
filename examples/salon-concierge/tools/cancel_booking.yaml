@@ -10,7 +10,7 @@ input:
       description: Exact booking ID returned by list_bookings
     confirmed:
       type: boolean
-      description: Exact true value from the shared preparation result
+      description: Exact true value from the shared confirm_booking result
   required:
     - booking_id
     - confirmed
