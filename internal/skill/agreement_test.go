@@ -243,6 +243,28 @@ func TestPipecatTracingProviderOwnershipStaysExplicit(t *testing.T) {
 	}
 }
 
+func TestPipecatMCPTracingDocsStayAligned(t *testing.T) {
+	const tracingRule = "With Langfuse tracing enabled, Pipecat MCP calls emit finite `tool:<name>` spans with tool arguments and, when completed, the result."
+	const collisionRule = "Pipecat refuses to start when an agent tool, task function, or MCP source on the same agent exposes the same name."
+	const cleanupRule = "Pipecat 1.7 has one cleanup limit: cancellation during `MCPClient.start()` may leave a partial transport open until async-generator or process cleanup; cancellation after `start()` returns is cleaned up normally."
+	for name, content := range map[string]string{
+		"references/tools.md":                                   bundleFile(t, "references/tools.md"),
+		"docs-site/build/tools/mcp.mdx":                         trackedFile(t, "docs-site/build/tools/mcp.mdx"),
+		"examples/mcp-example/README.md":                        trackedFile(t, "examples/mcp-example/README.md"),
+		"internal/generate/templates/pipecat_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
+	} {
+		if !strings.Contains(content, tracingRule) {
+			t.Errorf("%s does not state the Pipecat MCP tracing contract", name)
+		}
+		if !strings.Contains(content, collisionRule) {
+			t.Errorf("%s does not state the Pipecat MCP collision contract", name)
+		}
+		if !strings.Contains(content, cleanupRule) {
+			t.Errorf("%s does not state the Pipecat MCP cleanup limit", name)
+		}
+	}
+}
+
 func TestExistingPackageWorkflowPrecedesWriting(t *testing.T) {
 	steps := []string{
 		"Inspect the existing package",

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+{{if or .NeedsFunctionCalls .NeedsMCP}}import asyncio
+{{end}}
 import base64
-{{if .NeedsFunctionCalls}}import functools
+{{if or .NeedsFunctionCalls .NeedsMCP}}import functools
 {{end}}import json
 import os
 from collections.abc import Sequence
@@ -134,7 +136,7 @@ def flush_tracing(provider: TracerProvider) -> None:
     provider.force_flush()
 
 
-{{if .NeedsFunctionCalls}}# ponytail: Pipecat 1.7.0 has no standard-tool tracing hook. Remove this
+{{if or .NeedsFunctionCalls .NeedsMCP}}# ponytail: Pipecat 1.7.0 has no standard-tool tracing hook. Remove this
 # subclass when ordinary LLMWorker tools gain native spans.
 class TracedLLMWorker(LLMWorker):
     """Add the tool spans missing from Pipecat's standard LLM tracing."""
@@ -153,6 +155,9 @@ class TracedLLMWorker(LLMWorker):
                 span.set_attribute("tool.call_id", tool_call_id)
             try:
                 result = await call(span)
+            except asyncio.CancelledError:
+                span.set_attribute("tool.result_status", "cancelled")
+                raise
             except Exception:
                 span.set_attribute("tool.result_status", "error")
                 raise

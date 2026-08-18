@@ -280,9 +280,14 @@ it.
 
 MCP sources are required at runtime. Pipecat connects them during bot setup;
 LiveKit probes every source before `AgentSession.start`, always attempts to close
-every created probe, and mounts a fresh client on the agent or task. A
-connection, tool-list, or close error stops the session before it greets the
-caller on either target.
+every created probe, and mounts a fresh client on the agent or task. A connection
+or tool-list error stops the session before it greets the caller on either
+target. A LiveKit probe close error also stops startup. Pipecat cleanup errors
+surface during teardown after every close has been attempted.
+
+With Langfuse tracing enabled, Pipecat MCP calls emit finite `tool:<name>` spans with tool arguments and, when completed, the result.
+Pipecat refuses to start when an agent tool, task function, or MCP source on the same agent exposes the same name.
+Pipecat 1.7 has one cleanup limit: cancellation during `MCPClient.start()` may leave a partial transport open until async-generator or process cleanup; cancellation after `start()` returns is cleaned up normally.
 
 ## Prebuilt tools
 

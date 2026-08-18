@@ -502,8 +502,9 @@ func buildPipecatCloudWebsocket(agent *ir.Agent, resolved ir.Target, env *envSet
 func inlineEligible(data *pipecatData) bool {
 	// State (Variables) and model-written greeting both need machinery the inline
 	// shape lacks (module-level tools can't reach self.state; the greeting has no
-	// activate_worker to carry a developer message), so they keep the bus path.
-	if len(data.Agents) != 1 || data.Tracing || data.Telephony != nil || data.HasColdTransfer {
+	// activate_worker to carry a developer message). MCP also stays on the bus so
+	// startup, collision checks, and cleanup have one implementation.
+	if len(data.Agents) != 1 || data.Tracing || data.NeedsMCP || data.Telephony != nil || data.HasColdTransfer {
 		return false
 	}
 	// The carrier leg registers transport event handlers (the forward-once
@@ -850,6 +851,19 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 			built.Delegates = append(built.Delegates, delegate)
 		}
 	}
+	flowNames := map[string]bool{}
+	for _, delegate := range built.Delegates {
+		for _, step := range delegate.StepTasks {
+			flowNames[step.FinishName] = true
+			for _, tool := range step.Tools {
+				flowNames[tool.Name] = true
+			}
+			for _, transfer := range step.Transfers {
+				flowNames[transfer.MethodName] = true
+			}
+		}
+	}
+	built.FlowFunctionNames = sortedKeys(flowNames)
 	return built, nil
 }
 
