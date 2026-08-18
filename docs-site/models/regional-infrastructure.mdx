@@ -98,22 +98,42 @@ project's plugin floor to `1.6.7`; Unmute supplies the Pipecat floor. See the of
 [LiveKit SLNG plugin reference](https://docs.livekit.io/reference/python/livekit/plugins/slng/index.html)
 and [Pipecat SLNG source](https://github.com/slng-ai/pipecat-slng).
 
-## Three different locations
+## Why regional alignment matters
+
+A voice turn crosses several network boundaries: the caller enters through a
+media or telephony edge, the worker sends audio to STT, the worker calls the LLM
+and tools, and the result goes to TTS before audio returns to the caller. Every
+long-distance boundary adds network travel to the turn.
+
+Place the media or telephony ingress, worker, and speech models near the users
+and near one another when the platforms offer matching regions. Apply the same
+review to the LLM, tools, tracing, storage, and other remote services. This
+reduces network latency and avoids sending voice data through regions you did
+not intend.
+
+[Coval's voice latency guide](https://www.coval.ai/blog/how-to-measure-voice-ai-latency-the-complete-guide/)
+explains how network hops add to a cascaded voice pipeline.
+[FutureAGI's Pipecat latency guide](https://futureagi.com/blog/how-to-optimize-pipecat-latency-2026/)
+also recommends regional routing for the voice gateway, STT, and TTS.
+
+## Separate regional layers
 
 These settings solve different parts of the call:
 
 | Location | What runs there | How you choose it |
 |---|---|---|
-| media region | the LiveKit room and media server | LiveKit region pinning, outside the Unmute package |
+| media or telephony ingress | the first platform edge that receives the caller's audio | LiveKit realtime region pinning; Pipecat derives its regional WebSocket endpoint from `deployment_region`; carrier settings are separate |
 | worker region | the generated LiveKit or Pipecat process | `deployment_region` in `targets.yaml` |
 | speech region | SLNG speech to text and text to speech compute | `world_part_override` or `region_override` under each model's `params` |
 
 Setting one row does not set the others. The reasoning model, tools, tracing,
 carrier, database, and any other service also keep their own regional settings.
-Review each service before making a data residency claim.
-
-LiveKit documents [media region pinning](https://docs.livekit.io/deploy/admin/regions/region-pinning/)
-separately from [agent deployment regions](https://docs.livekit.io/deploy/admin/regions/agent-deployment/).
+Review each service before making a data residency claim. LiveKit documents
+[realtime region pinning](https://docs.livekit.io/deploy/admin/regions/region-pinning/),
+[realtime region groups](https://docs.livekit.io/deploy/admin/regions/endpoints/#region-groups),
+and [agent deployment regions](https://docs.livekit.io/deploy/admin/regions/agent-deployment/)
+separately. Pipecat documents its worker regions and matching regional
+WebSocket endpoints in its [regions guide](https://docs.pipecat.ai/pipecat-cloud/guides/regions).
 
 ## World part, exact region, or both
 
@@ -158,17 +178,44 @@ SLNG may spill between mapped, model-supported regions for capacity, but not
 outside the selected world part. Choose `region_override` for hard regional
 isolation.
 
-## World parts and regions
+## Regional alignment options
 
-| World part | Regions |
-|---|---|
-| `na` | `us-east-1` |
-| `eu` | `eu-north-1` |
-| `ap` | `ap-south-1`, `ap-southeast-2`, `asia-south1`, `asia-southeast2`, `australia-southeast1` |
+The codes below are not interchangeable. Each row groups the closest or
+same-world-part choices. Use each platform's location list to choose the
+shortest path for your users. A row does not promise the same data center or
+create a residency guarantee.
 
-Checked 2026-08-18. Availability is model-specific and can change. Check the
-official [region override guide](https://docs.slng.ai/region-override) and
-[models by region](https://docs.slng.ai/models/by-region) before deployment.
+| Geography | SLNG world part | SLNG exact model region | LiveKit worker | LiveKit realtime group | Pipecat worker / WebSocket |
+|---|---|---|---|---|---|
+| North America | `na` | `us-east-1` | `us-east` | `us` | `us-east` or `us-west` |
+| Europe | `eu` | `eu-north-1` | `eu-central` | `eu` | `eu-central` |
+| India | `ap` | `ap-south-1`, `asia-south1` | `ap-south` | `india` | `ap-south` |
+| Southeast Asia | `ap` | `asia-southeast2` | — | `asia` | — |
+| Australia | `ap` | `ap-southeast-2`, `australia-southeast1` | — | `aus` | — |
+
+A dash means the platform does not currently advertise a worker option near
+that SLNG model region. Availability is model-specific and can change. Check
+the official [SLNG region override guide](https://docs.slng.ai/region-override),
+[SLNG models by region](https://docs.slng.ai/models/by-region),
+[LiveKit agent regions](https://docs.livekit.io/deploy/admin/regions/agent-deployment/),
+[LiveKit realtime region groups](https://docs.livekit.io/deploy/admin/regions/endpoints/#region-groups),
+and [Pipecat regions](https://docs.pipecat.ai/pipecat-cloud/guides/regions)
+before deployment.
+
+The table intentionally excludes LiveKit SIP pinning and carrier-specific
+telephony regions because they use separate codes. They still affect latency:
+place the telephony ingress near the caller and align it with the media and
+worker regions. Pipecat's regional WebSocket endpoint should use the same region
+as its worker.
+
+### Other model providers
+
+SLNG uses `world_part_override` and `region_override`, but these names are not
+universal. Other STT, TTS, and LLM providers may offer a regional endpoint,
+project location, deployment, or provider-specific parameter. Not every
+provider or model supports regional pinning. Check that provider's documentation
+and configure every model separately; choosing a worker region does not pin the
+models it calls.
 
 ## One worker region or several
 

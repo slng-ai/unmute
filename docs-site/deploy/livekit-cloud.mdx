@@ -86,6 +86,7 @@ lk agent update-secrets --secrets-file .env --overwrite  # replaces the whole se
 
 Region is set at `create` and is immutable. Moving an agent means creating it in the
 new region and deleting the old one; the platform will not move it in place.
+See LiveKit's current [agent deployment regions](https://docs.livekit.io/deploy/admin/regions/agent-deployment/).
 
 When `deployment_region` is a list, the generated README prints one `create`
 command and one config file per region. All deployments keep the same dispatch
@@ -95,8 +96,11 @@ locality, use separate agent names and explicit dispatch. Use the generated
 commands rather than repeating the single-region command above by hand.
 
 This setting places the worker only. LiveKit media and SLNG speech compute have
-their own controls. See [regional infrastructure](/models/regional-infrastructure)
-before making a data residency claim.
+their own controls. LiveKit lists its realtime options under
+[region pinning](https://docs.livekit.io/deploy/admin/regions/region-pinning/) and
+[region groups](https://docs.livekit.io/deploy/admin/regions/endpoints/#region-groups).
+See [regional infrastructure](/models/regional-infrastructure) before making a
+data residency claim.
 
 ## Check it, and recover it
 
