@@ -81,7 +81,7 @@ func TestLiveKitV1EmitsSlngPlugin(t *testing.T) {
 		"slng.STT(",
 		"slng.TTS(",
 		"openai.LLM(", // native plugin, not Inference: console runs on OPENAI_API_KEY alone (B6/V19)
-		"from livekit.agents.beta.workflows import TaskGroup",
+		"from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -849,6 +849,7 @@ func TestLiveKitV1SharedGroupTaskTransferAndResults(t *testing.T) {
 	for _, want := range []string{
 		"group = TaskGroup(",
 		"summarize_chat_ctx=False,",
+		"on_task_completed=lambda event: _share_task_result(group, event),",
 		"try:\n            result = await group",
 		"except _TaskTransfer as transfer:\n            return transfer.agent",
 	} {
@@ -858,10 +859,9 @@ func TestLiveKitV1SharedGroupTaskTransferAndResults(t *testing.T) {
 	}
 	for _, privileged := range []string{
 		`role="developer"`, `role="system"`, "add_message(",
-		"TaskCompletedEvent", "share_task_result", "on_task_completed=",
 	} {
 		if strings.Contains(block, privileged) {
-			t.Errorf("shared group contains custom result propagation %q", privileged)
+			t.Errorf("shared group contains injected prompt context %q", privileged)
 		}
 	}
 	if strings.Contains(block, "return_exceptions=True") {
@@ -976,6 +976,22 @@ func TestV1LiveKitCompletedFlowEndsOnce(t *testing.T) {
 	}
 	if strings.Contains(botpy, `return "Done."`) {
 		t.Error(`finish must not return a value after self.complete() (stray post-completion output)`)
+	}
+	// LiveKit 1.6.10 resolves AgentTask before recording finish's tool output.
+	// Shared TaskGroups repair that exact output through the SDK callback, without
+	// returning from finish() and triggering another child-model turn.
+	for _, want := range []string{
+		"async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent) -> None:",
+		`finish_call_id = getattr(event.agent_task, "_finish_call_id", None)`,
+		"and not item.is_error",
+		"and item.call_id == finish_call_id",
+		"shared_ctx.remove(shared_output)",
+		"exclude_invalid_function_calls=False",
+		"on_task_completed=lambda event: _share_task_result(group, event)",
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("shared task result repair missing %q", want)
+		}
 	}
 	// Every then:return delegate (do_reserve, do_event here) states the result is
 	// final and the flow must not re-run.
@@ -1122,7 +1138,7 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 		`task_results["confirm_booking"] = await ConfirmBooking()`,
 		"return task_results",
 		// events_group stays shared, so TaskGroup is still imported and used
-		"from livekit.agents.beta.workflows import TaskGroup",
+		"from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup",
 	} {
 		if !strings.Contains(botpy, want) {
 			t.Errorf("agent.py missing %q", want)
@@ -1143,6 +1159,9 @@ func TestLiveKitV1IsolatedGroup(t *testing.T) {
 	botpy = artifactFile(t, artifact, "agent.py")
 	if strings.Contains(botpy, "TaskGroup") {
 		t.Error("all-isolated project must not import or use TaskGroup")
+	}
+	if strings.Contains(botpy, "_finish_call_id") {
+		t.Error("all-isolated project must not emit shared TaskGroup result state")
 	}
 }
 
