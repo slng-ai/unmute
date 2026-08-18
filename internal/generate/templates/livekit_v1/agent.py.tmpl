@@ -90,7 +90,7 @@ MCP sources, in the order the package lists them. */ -}}
 {{define "tools_list"}}{{template "prebuilt_list" .Prebuilt}}{{if and .Prebuilt .MCPServers}}, {{end}}{{template "mcp_mounts" .MCPServers}}{{end -}}
 {{if or .NeedsAsyncio .NeedsMCP}}import asyncio
 {{end}}{{if .NeedsInspect}}import inspect
-{{end}}{{if or .Outbound .Telephony .CallStartVars}}import json
+{{end}}{{if or .Outbound .Telephony .CallStartVars .NeedsTaskGroups}}import json
 {{end}}import logging
 import os
 {{if .NeedsRender}}import re
@@ -152,7 +152,7 @@ import os
 {{- end}}
 )
 {{- if or .NeedsTaskGroups .HasWarmTransfer}}
-from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskGroup{{end}}{{if and .NeedsTaskGroups .HasWarmTransfer}}, {{end}}{{if .HasWarmTransfer}}WarmTransferTask, WorkflowInstructions{{end}}
+from livekit.agents.beta.workflows import {{if .NeedsTaskGroups}}TaskCompletedEvent, TaskGroup{{end}}{{if and .NeedsTaskGroups .HasWarmTransfer}}, {{end}}{{if .HasWarmTransfer}}WarmTransferTask, WorkflowInstructions{{end}}
 {{- end}}
 {{- if .HasWarmTransfer}}
 from livekit.agents.llm import ToolError
@@ -615,6 +615,52 @@ class IgnorePhrasesMixin:
 
 
 {{end -}}
+{{if .NeedsTaskGroups}}async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent) -> None:
+    """Fill LiveKit's empty task tool output before the next shared task."""
+    finish_call_id = getattr(event.agent_task, "_finish_call_id", None)
+    if finish_call_id is None:
+        raise RuntimeError("completed task has no successful finish call")
+    task_output = next(
+        (
+            item
+            for item in reversed(event.agent_task.chat_ctx.items)
+            if isinstance(item, llm.FunctionCallOutput)
+            and item.name == "finish"
+            and not item.is_error
+            and item.call_id == finish_call_id
+        ),
+        None,
+    )
+    if task_output is None:
+        raise RuntimeError("completed task has no matching successful finish output")
+
+    shared_ctx = group.chat_ctx.copy()
+    shared_output = shared_ctx.get_by_id(task_output.id)
+    if shared_output is None:
+        raise RuntimeError("completed task finish output is absent from its group")
+    if not isinstance(shared_output, llm.FunctionCallOutput):
+        raise RuntimeError("completed task finish output has an invalid type")
+    if (
+        shared_output.name != task_output.name
+        or shared_output.call_id != task_output.call_id
+        or shared_output.is_error
+    ):
+        raise RuntimeError("completed task finish output changed identity")
+
+    shared_ctx.remove(shared_output)
+    shared_ctx.insert(
+        shared_output.model_copy(
+            update={"output": json.dumps(event.result, sort_keys=True)}
+        )
+    )
+
+    await group.update_chat_ctx(
+        shared_ctx,
+        exclude_invalid_function_calls=False,
+    )
+
+
+{{end -}}
 # --- agents ----------------------------------------------------------------
 {{range .Agents}}
 class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
@@ -955,6 +1001,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
+            on_task_completed=lambda event: _share_task_result(group, event),
         )
 {{- range .Steps}}
         group.add(
@@ -1012,6 +1059,9 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions={{.PromptConst}}, chat_ctx=chat_ctx{{if .LLM}}, llm={{template "llmexpr" .LLM}}{{end}}{{if or .Prebuilt .MCPServers}}, tools=[{{template "tools_list" .}}]{{end}})
+{{- if $.NeedsTaskGroups}}
+        self._finish_call_id: str | None = None
+{{- end}}
 {{- if .Transfers}}
         self._terminal_claimed = False
 
@@ -1069,12 +1119,28 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}AgentTask[dict
         if not self._claim_terminal():
             return
         try:
+{{- if $.NeedsTaskGroups}}
+            result = { {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }
+            self.complete(result)
+            # Record only after complete() succeeds: a rejected duplicate cannot
+            # replace the winner, and there is no await for the callback to race.
+            self._finish_call_id = ctx.function_call.call_id
+{{- else}}
             self.complete({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} })
+{{- end}}
         except BaseException:
             self._terminal_claimed = False
             raise
 {{- else}}
+{{- if $.NeedsTaskGroups}}
+        result = { {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }
+        self.complete(result)
+        # Record only after complete() succeeds: a rejected duplicate cannot
+        # replace the winner, and there is no await for the callback to race.
+        self._finish_call_id = ctx.function_call.call_id
+{{- else}}
         self.complete({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} })
+{{- end}}
 {{- end}}
 {{end}}
 {{- end}}

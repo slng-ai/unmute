@@ -567,7 +567,10 @@ import asyncio
 import json
 import os
 import subprocess
+from importlib.metadata import version
 from types import SimpleNamespace
+
+assert version("livekit-agents") == "1.6.10"
 
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
@@ -576,7 +579,11 @@ subprocess.run(["ruff", "check", "."], check=True)
 subprocess.run(["ty", "check", "agent.py"], check=True)
 
 import agent  # noqa: E402
-from livekit.agents import llm  # noqa: E402
+from livekit.agents import (  # noqa: E402
+    DEFAULT_API_CONNECT_OPTIONS,
+    AgentSession,
+    llm,
+)
 from livekit.agents.beta.workflows import TaskGroup  # noqa: E402
 
 
@@ -641,6 +648,123 @@ class RecordingTaskGroup(TaskGroup):
         self.completions.append(result)
 
 
+class ProbeStream(llm.LLMStream):
+    def __init__(self, llm_instance, *, chat_ctx, tools, delta):
+        super().__init__(
+            llm_instance,
+            chat_ctx=chat_ctx,
+            tools=tools,
+            conn_options=DEFAULT_API_CONNECT_OPTIONS,
+        )
+        self.delta = delta
+
+    async def _run(self):
+        self._event_ch.send_nowait(llm.ChatChunk(id="probe", delta=self.delta))
+
+
+class ProbeLLM(llm.LLM):
+    def __init__(self):
+        super().__init__()
+        self.step = 0
+        self.shared_result_seen = False
+        self.agent_turns = []
+
+    @property
+    def model(self):
+        return "task-group-probe"
+
+    @property
+    def provider(self):
+        return "test"
+
+    def chat(
+        self,
+        *,
+        chat_ctx,
+        tools=None,
+        conn_options=DEFAULT_API_CONNECT_OPTIONS,
+        **kwargs,
+    ):
+        del conn_options, kwargs
+        tools = tools or []
+        names = {getattr(getattr(tool, "info", None), "name", "") for tool in tools}
+        self.agent_turns.append("task" if "finish" in names else "owner")
+
+        if self.step == 0:
+            assert "do_reserve" in names
+            delta = llm.ChoiceDelta(
+                role="assistant",
+                tool_calls=[
+                    llm.FunctionToolCall(
+                        name="do_reserve",
+                        arguments="{}",
+                        call_id="owner-flow",
+                    )
+                ],
+            )
+        elif self.step == 1:
+            assert "finish" in names
+            delta = llm.ChoiceDelta(
+                role="assistant",
+                tool_calls=[
+                    llm.FunctionToolCall(
+                        name="finish",
+                        arguments=json.dumps(
+                            {
+                                "date": "2026-08-19",
+                                "party_size": "2",
+                                "time": "15:00",
+                            }
+                        ),
+                        call_id="find-slot-finish",
+                    )
+                ],
+            )
+        elif self.step == 2:
+            finish_tool = next(
+                tool for tool in tools if getattr(tool.info, "name", "") == "finish"
+            )
+            finish_schema = llm.utils.build_legacy_openai_schema(finish_tool)
+            assert set(
+                finish_schema["function"]["parameters"]["properties"]
+            ) == {"sent"}
+            expected = {
+                "date": "2026-08-19",
+                "party_size": 2,
+                "time": "15:00",
+            }
+            self.shared_result_seen = any(
+                isinstance(item, llm.FunctionCallOutput)
+                and item.name == "finish"
+                and item.output
+                and json.loads(item.output) == expected
+                for item in chat_ctx.items
+            )
+            assert self.shared_result_seen, (
+                "the second shared task did not receive the first task's exact result"
+            )
+            delta = llm.ChoiceDelta(
+                role="assistant",
+                tool_calls=[
+                    llm.FunctionToolCall(
+                        name="finish",
+                        arguments=json.dumps({"sent": True}),
+                        call_id="confirm-finish",
+                    )
+                ],
+            )
+        else:
+            delta = llm.ChoiceDelta(role="assistant", content="Reservation flow complete.")
+
+        self.step += 1
+        return ProbeStream(self, chat_ctx=chat_ctx, tools=tools, delta=delta)
+
+
+class ProbeReservations(agent.Reservations):
+    async def on_enter(self):
+        pass
+
+
 class BlockingSession:
     def __init__(self):
         self.started = asyncio.Event()
@@ -667,6 +791,7 @@ async def main():
     guard_ctx = SimpleNamespace(
         userdata=SimpleNamespace(caller_phone=""),
         session=RefuseSession(),
+        function_call=SimpleNamespace(call_id="guard-finish"),
     )
     refusal = await guard_task.back_to_greeter(guard_ctx)
     assert refusal == "Cannot transfer yet; missing required information: caller_phone"
@@ -685,6 +810,7 @@ async def main():
     transfer_ctx = SimpleNamespace(
         userdata=SimpleNamespace(caller_phone="+15551234567"),
         session=transfer_session,
+        function_call=SimpleNamespace(call_id="transfer-finish"),
     )
     transfer_first = RecordingFindSlot()
     pending_transfer = asyncio.create_task(
@@ -707,6 +833,7 @@ async def main():
     finish_ctx = SimpleNamespace(
         userdata=SimpleNamespace(caller_phone="+15551234567"),
         session=finish_session,
+        function_call=SimpleNamespace(call_id="first-finish"),
     )
     finish_first = RecordingFindSlot()
     await finish_first.finish(
@@ -724,6 +851,7 @@ async def main():
     failed_ctx = SimpleNamespace(
         userdata=SimpleNamespace(caller_phone="+15551234567"),
         session=FailingSession(),
+        function_call=SimpleNamespace(call_id="failed-transfer-finish"),
     )
     failed_transfer = RecordingFindSlot()
     try:
@@ -781,6 +909,82 @@ async def main():
     await stopped.on_enter()
     assert not second_started
     assert stopped.completions == [transfer]
+
+    original_tts = agent.slng.TTS
+    agent.slng.TTS = lambda **kwargs: None
+    probe_llm = ProbeLLM()
+    try:
+        async with AgentSession(
+            userdata=agent.Userdata(),
+            llm=probe_llm,
+            turn_handling={"turn_detection": "manual"},
+        ) as session:
+            await session.start(ProbeReservations())
+            await session.run(user_input="Reserve the prepared slot.")
+    finally:
+        agent.slng.TTS = original_tts
+    assert probe_llm.shared_result_seen
+    assert probe_llm.agent_turns == ["owner", "task", "task"], (
+        f"unexpected LLM turns: {probe_llm.agent_turns}"
+    )
+
+    result = {"sent": True}
+    successful_output = llm.FunctionCallOutput(
+        id="successful-output",
+        name="finish",
+        call_id="successful-finish",
+        output="",
+        is_error=False,
+    )
+    duplicate_error = llm.FunctionCallOutput(
+        id="duplicate-error",
+        name="finish",
+        call_id="duplicate-finish",
+        output="task already completed",
+        is_error=True,
+    )
+    duplicate_ctx = llm.ChatContext(
+        [
+            llm.FunctionCall(
+                id="successful-call",
+                name="finish",
+                call_id="successful-finish",
+                arguments=json.dumps(result),
+            ),
+            successful_output,
+            llm.FunctionCall(
+                id="duplicate-call",
+                name="finish",
+                call_id="duplicate-finish",
+                arguments=json.dumps(result),
+            ),
+            duplicate_error,
+        ]
+    )
+    duplicate_group = TaskGroup(
+        chat_ctx=duplicate_ctx.copy(),
+        summarize_chat_ctx=False,
+    )
+    await duplicate_group.update_chat_ctx(
+        duplicate_ctx.copy(),
+        exclude_invalid_function_calls=False,
+    )
+    await agent._share_task_result(
+        duplicate_group,
+        agent.TaskCompletedEvent(
+            agent_task=SimpleNamespace(
+                chat_ctx=duplicate_ctx,
+                _finish_call_id="successful-finish",
+            ),
+            task_id="confirm",
+            result=result,
+        ),
+    )
+    patched_output = duplicate_group.chat_ctx.get_by_id(successful_output.id)
+    assert isinstance(patched_output, llm.FunctionCallOutput)
+    assert json.loads(patched_output.output) == result
+    assert patched_output.model_copy(update={"output": ""}) == successful_output
+    assert duplicate_group.chat_ctx.get_by_id(duplicate_error.id) == duplicate_error
 
     print("livekit task-group contract smoke ok")
 

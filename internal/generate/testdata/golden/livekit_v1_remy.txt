@@ -251,7 +251,7 @@ from livekit.agents import (
     llm,
     metrics,
 )
-from livekit.agents.beta.workflows import TaskGroup
+from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import openai, silero, slng
 from tracing import setup_langfuse
@@ -424,6 +424,51 @@ def _hydrate_call_start(userdata, values: dict) -> None:
     return None
 
 
+async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent) -> None:
+    """Fill LiveKit's empty task tool output before the next shared task."""
+    finish_call_id = getattr(event.agent_task, "_finish_call_id", None)
+    if finish_call_id is None:
+        raise RuntimeError("completed task has no successful finish call")
+    task_output = next(
+        (
+            item
+            for item in reversed(event.agent_task.chat_ctx.items)
+            if isinstance(item, llm.FunctionCallOutput)
+            and item.name == "finish"
+            and not item.is_error
+            and item.call_id == finish_call_id
+        ),
+        None,
+    )
+    if task_output is None:
+        raise RuntimeError("completed task has no matching successful finish output")
+
+    shared_ctx = group.chat_ctx.copy()
+    shared_output = shared_ctx.get_by_id(task_output.id)
+    if shared_output is None:
+        raise RuntimeError("completed task finish output is absent from its group")
+    if not isinstance(shared_output, llm.FunctionCallOutput):
+        raise RuntimeError("completed task finish output has an invalid type")
+    if (
+        shared_output.name != task_output.name
+        or shared_output.call_id != task_output.call_id
+        or shared_output.is_error
+    ):
+        raise RuntimeError("completed task finish output changed identity")
+
+    shared_ctx.remove(shared_output)
+    shared_ctx.insert(
+        shared_output.model_copy(
+            update={"output": json.dumps(event.result, sort_keys=True)}
+        )
+    )
+
+    await group.update_chat_ctx(
+        shared_ctx,
+        exclude_invalid_function_calls=False,
+    )
+
+
 # --- agents ----------------------------------------------------------------
 
 class Events(Agent):
@@ -450,6 +495,7 @@ class Events(Agent):
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
+            on_task_completed=lambda event: _share_task_result(group, event),
         )
         group.add(
             lambda: QualifyEvent(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
@@ -519,6 +565,7 @@ class Reservations(Agent):
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
+            on_task_completed=lambda event: _share_task_result(group, event),
         )
         group.add(
             lambda: FindSlot(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True)),
@@ -544,6 +591,7 @@ class Reservations(Agent):
 class ConfirmBooking(AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions=CONFIRM_BOOKING_PROMPT, chat_ctx=chat_ctx)
+        self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:
         # The task's own instructions describe this step; let them drive the opening.
@@ -564,11 +612,16 @@ class ConfirmBooking(AgentTask[dict]):
     async def finish(self, ctx: RunContext, sent: bool) -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
-        self.complete({"sent": sent})
+        result = {"sent": sent}
+        self.complete(result)
+        # Record only after complete() succeeds: a rejected duplicate cannot
+        # replace the winner, and there is no await for the callback to race.
+        self._finish_call_id = ctx.function_call.call_id
 
 class FindSlot(AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions=FIND_SLOT_PROMPT, chat_ctx=chat_ctx)
+        self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:
         # The task's own instructions describe this step; let them drive the opening.
@@ -589,11 +642,16 @@ class FindSlot(AgentTask[dict]):
     async def finish(self, ctx: RunContext, date: str, party_size: int, time: str) -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
-        self.complete({"date": date, "party_size": party_size, "time": time})
+        result = {"date": date, "party_size": party_size, "time": time}
+        self.complete(result)
+        # Record only after complete() succeeds: a rejected duplicate cannot
+        # replace the winner, and there is no await for the callback to race.
+        self._finish_call_id = ctx.function_call.call_id
 
 class QualifyEvent(AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions=QUALIFY_EVENT_PROMPT, chat_ctx=chat_ctx)
+        self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:
         # The task's own instructions describe this step; let them drive the opening.
@@ -603,7 +661,11 @@ class QualifyEvent(AgentTask[dict]):
     async def finish(self, ctx: RunContext, date: str, headcount: int, occasion: str) -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
-        self.complete({"date": date, "headcount": headcount, "occasion": occasion})
+        result = {"date": date, "headcount": headcount, "occasion": occasion}
+        self.complete(result)
+        # Record only after complete() succeeds: a rejected duplicate cannot
+        # replace the winner, and there is no await for the callback to race.
+        self._finish_call_id = ctx.function_call.call_id
 
 
 # --- session ---------------------------------------------------------------
