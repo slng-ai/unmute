@@ -606,8 +606,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
                 _end_after(main, 45 - 15)
             )
 
-    @user_aggregator.event_handler("on_user_turn_resumed")
-    async def on_user_turn_resumed(aggregator):
+    @user_aggregator.event_handler("on_user_turn_started")
+    async def on_user_turn_started(aggregator, strategy):
         nonlocal _idle_end
         if _idle_end is not None and not _idle_end.done():
             _idle_end.cancel()

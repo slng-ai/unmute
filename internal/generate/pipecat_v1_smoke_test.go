@@ -301,6 +301,104 @@ asyncio.run(main())
 print("pipecat logging idempotence ok")
 `
 
+const pipecatIdleResumeSmokeScript = `"""Resumed speech cancels a pending idle hangup on Pipecat 1.7."""
+import asyncio
+import json
+import os
+from types import SimpleNamespace
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot  # noqa: E402
+from loguru import logger  # noqa: E402
+from pipecat.processors.frame_processor import FrameProcessor  # noqa: E402
+
+
+class Transport:
+    def input(self):
+        return FrameProcessor()
+
+    def output(self):
+        return FrameProcessor()
+
+    def event_handler(self, _name):
+        return lambda handler: handler
+
+
+captured = {}
+end_started = asyncio.Event()
+end_cancelled = asyncio.Event()
+result = {}
+real_pair = bot.LLMContextAggregatorPair
+
+
+def capture_pair(*args, **kwargs):
+    pair = real_pair(*args, **kwargs)
+    captured["user"] = pair.user()
+    return pair
+
+
+async def pending_end(*_args):
+    end_started.set()
+    try:
+        await asyncio.Event().wait()
+    except asyncio.CancelledError:
+        end_cancelled.set()
+        raise
+
+
+class Runner:
+    def __init__(self, **_kwargs):
+        pass
+
+    async def add_workers(self, *workers):
+        self.workers = workers
+
+    async def run(self):
+        user = captured["user"]
+
+        async def discard(*_args, **_kwargs):
+            pass
+
+        user.push_frame = discard
+        await user._call_event_handler("on_user_turn_idle")
+        await end_started.wait()
+        await user._call_event_handler("on_user_turn_started", object())
+        try:
+            await asyncio.wait_for(end_cancelled.wait(), timeout=0.25)
+            result["cancelled"] = True
+        except TimeoutError:
+            result["cancelled"] = False
+
+
+async def main():
+    bot.LLMContextAggregatorPair = capture_pair
+    bot.SileroVADAnalyzer = lambda: None
+    bot.build_stt = FrameProcessor
+    bot.build_appointment_desk_llm = FrameProcessor
+    bot.build_appointment_desk_tts = FrameProcessor
+    bot.WorkerRunner = Runner
+    bot._end_after = pending_end
+
+    messages = []
+    sink = logger.add(lambda message: messages.append(str(message)), format="{message}")
+    try:
+        await bot.run_bot(Transport(), SimpleNamespace(handle_sigint=False))
+    finally:
+        logger.remove(sink)
+
+    assert result["cancelled"], "a resumed user turn left the idle hangup pending"
+    assert not any(
+        "event handler on_user_turn_resumed not registered" in message
+        for message in messages
+    ), messages
+
+
+asyncio.run(main())
+print("pipecat idle resume smoke ok")
+`
+
 const pipecatHandoffAnnouncementSmokeScript = `"""V2: source playout finishes before receiver activation."""
 import asyncio
 import json
@@ -392,6 +490,17 @@ func TestSmokePipecatV1InlineInstantiates(t *testing.T) {
 
 func TestSmokePipecatV1LoggingIsConfiguredOnce(t *testing.T) {
 	runPipecatSmokeScript(t, "simple-prompt", nil, nil, pipecatLoggingSmokeScript)
+}
+
+// TestSmokePipecatV1UserTurnCancelsIdleHangup runs the public generated worker
+// against the supported SDK. Its real aggregator must accept the event and the
+// resumed turn must cancel the already-started inactivity hangup.
+func TestSmokePipecatV1UserTurnCancelsIdleHangup(t *testing.T) {
+	runPipecatSmokeScript(t, "simple-prompt", nil, func(agent *ir.Agent) {
+		agent.Tracing = nil
+		agent.Conversation.Interruption.MinimumWords = 1
+		agent.Conversation.Inactivity = &ir.Inactivity{NudgeAfter: "1s", EndAfter: "2s"}
+	}, pipecatIdleResumeSmokeScript)
 }
 
 // TestSmokePipecatV1BuiltinEndCall proves the emitted bodyless end_call @tool
