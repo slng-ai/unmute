@@ -81,6 +81,9 @@ func TestLiveKitReadmeDeploySection(t *testing.T) { // FR-003, FR-004, FR-005, F
 		"lk agent create --region eu-central --config livekit.eu-central.toml --secrets-file .env",
 		"lk agent deploy --config livekit.us-east.toml",
 		"lk agent deploy --config livekit.eu-central.toml",
+		"nearest deployment is at capacity",
+		"may send a caller to another",
+		"separate agent names and explicit dispatch",
 	} {
 		if !strings.Contains(several, want) {
 			t.Errorf("multi-region README missing %q", want)

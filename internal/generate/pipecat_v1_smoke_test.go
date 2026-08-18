@@ -1094,6 +1094,10 @@ func TestSmokePipecatV1ServicesInstantiate(t *testing.T) {
 	runPipecatSmoke(t, "safe_core", nil, nil)
 }
 
+func TestSmokePipecatRegionalInfrastructureInstantiates(t *testing.T) {
+	runPipecatSmoke(t, "regional-infrastructure", nil, nil)
+}
+
 // TestSmokePipecatV1TaskGroupsInstantiate runs the generated FlowManager on
 // Pipecat 1.5.0 and observes task-role replacement, owner-role restoration,
 // and transfer activation (V28).

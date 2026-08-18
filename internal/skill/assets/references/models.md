@@ -111,6 +111,49 @@ On LiveKit there is a second reason to be explicit. `livekit-plugins-openai`
 1.6.10 injects `reasoning_effort="minimal"` by itself for several older ids in
 the same GPT-5 family, and that is the same 400 once the agent has tools.
 
+## Keep SLNG speech models in region
+
+Put regional routing in the SLNG model's `params:`. The same YAML works for
+listen and speak models on both generated targets:
+
+```yaml agent.yaml
+models:
+  listen:
+    transcriber:
+      provider: slng
+      model: "slng/deepgram/nova:3-multi"
+      params:
+        world_part_override: eu
+        region_override: eu-north-1
+  speak:
+    voice:
+      provider: slng
+      model: "slng/deepgram/aura:2-en"
+      voice: "aura-2-thalia-en"
+      params:
+        world_part_override: eu
+        region_override: eu-north-1
+```
+
+`world_part_override` chooses a broad geography. `region_override` pins an
+exact SLNG model region. If both are present,
+`region_override` takes precedence over `world_part_override`. A world part is
+not a country boundary, so use the exact region when hard data isolation
+matters. Use a value from the
+[SLNG region reference](https://docs.slng.ai/region-override); Unmute forwards
+these provider params as written and does not validate them.
+
+The generated runtime also has to support these params:
+
+- LiveKit needs `livekit-plugins-slng` 1.6.7 or newer. See the
+  [SLNG LiveKit plugin guide](https://docs.slng.ai/agents/livekit-plugin).
+- Pipecat needs `pipecat-slng` 0.4.0 or newer. See the
+  [SLNG Pipecat plugin guide](https://docs.slng.ai/agents/pipecat-plugin).
+
+These settings choose where SLNG runs STT and TTS. They do not choose where the
+agent worker runs; set that separately with `deployment_region` in
+`targets.yaml`. See `package.md` for the deployment rules.
+
 ## The vendors, per target per role
 
 SLNG leads every list it appears in. These are the built-in `provider:` values

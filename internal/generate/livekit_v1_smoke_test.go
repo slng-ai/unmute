@@ -49,6 +49,33 @@ asyncio.run(_instantiate())
 print("smoke ok:", ", ".join(classes))
 `
 
+const livekitRegionalSmokeScript = `"""Smoke check: the installed SLNG plugin accepts both regional controls."""
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import agent  # noqa: F401, E402
+from livekit.plugins import slng  # noqa: E402
+
+stt = slng.STT(
+    api_key=os.environ["SLNG_API_KEY"],
+    model="slng/deepgram/nova:3-multi",
+    world_part_override="eu",
+)
+tts = slng.TTS(
+    api_key=os.environ["SLNG_API_KEY"],
+    model="slng/deepgram/aura:2-en",
+    voice="aura-2-thalia-en",
+    region_override="eu-north-1",
+    world_part_override="eu",
+)
+assert type(stt).__name__ == "STT"
+assert type(tts).__name__ == "TTS"
+print("regional SLNG smoke ok")
+`
+
 // livekitRequestTracingSmokeScript drives a real AgentSession through fake
 // STT, LLM, and TTS services. The in-memory exporter must receive all three
 // speech-pipeline observations under the framework's session trace (V21/V22).
@@ -338,6 +365,10 @@ asyncio.run(main())
 // livekit-plugins-slng. Opt-in (`make smoke` / -tags smoke) only.
 func TestSmokeLiveKitV1RemyInstantiates(t *testing.T) {
 	runLiveKitSmoke(t, "remy", nil)
+}
+
+func TestSmokeLiveKitRegionalInfrastructureInstantiates(t *testing.T) {
+	runLiveKitSmokeScript(t, "regional-infrastructure", nil, nil, livekitRegionalSmokeScript)
 }
 
 // TestSmokeLiveKitV1MultiVendorInstantiates covers the per-vendor plugin

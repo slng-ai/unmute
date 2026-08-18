@@ -163,6 +163,14 @@ The Compose project name comes from the package path and the target name, so a
 second `unmute dev` on the same package does not run beside the first. It
 recreates the same stack on the new port and takes it over.
 
+Two different LiveKit packages can run together when their server ports do not
+overlap. Move signaling, TCP fallback, and UDP media as one set:
+
+```sh
+LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
+  unmute dev examples/regional-infrastructure --target livekit --port 8766
+```
+
 ## The two ways to run
 
 Shown from inside the package. Anywhere else, name it first, as in

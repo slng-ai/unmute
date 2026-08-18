@@ -1,0 +1,19 @@
+# Agent-worker regions are separate from the STT and TTS regions in agent.yaml.
+targets:
+  livekit:
+    provider: livekit
+    version: "1.6.10"
+    sdk_language: python
+    # Version 1.6.7 added these SLNG regional overrides.
+    pins:
+      livekit-plugins-slng: "1.6.7"
+    deployment_region: eu-central
+    models:
+      detector:
+        provider: livekit
+        model: turn-detector-mini
+
+  pipecat:
+    provider: pipecat
+    version: "1.7.0"
+    deployment_region: eu-central

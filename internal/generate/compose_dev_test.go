@@ -101,9 +101,10 @@ func TestLiveKitDevComposeGolden(t *testing.T) {
 
 	for _, want := range []string{
 		"image: livekit/livekit-server:v1.13.4",
-		`command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1", "--udp-port", "7882"]`,
-		"7881:7881",
-		"7882:7882/udp",
+		`"--rtc.tcp_port", "${LIVEKIT_TCP_HOST_PORT:-7881}"`,
+		`"--udp-port", "${LIVEKIT_UDP_HOST_PORT:-7882}"`,
+		`"${LIVEKIT_TCP_HOST_PORT:-7881}:${LIVEKIT_TCP_HOST_PORT:-7881}"`,
+		`"${LIVEKIT_UDP_HOST_PORT:-7882}:${LIVEKIT_UDP_HOST_PORT:-7882}/udp"`,
 		`command: ["python", "-m", "livekit.agents", "start", "agent.py", "--log-format", "colored"]`,
 		"LIVEKIT_URL=ws://livekit_server:7880",
 		"LIVEKIT_API_SECRET=secret",

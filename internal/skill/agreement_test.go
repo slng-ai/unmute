@@ -367,6 +367,39 @@ func TestModelFieldAndPassthroughGuidanceStaysExact(t *testing.T) {
 	}
 }
 
+func TestRegionalGuidanceStaysExplicit(t *testing.T) {
+	models := bundleFile(t, "references/models.md")
+	for _, want := range []string{
+		"world_part_override",
+		"region_override",
+		"`region_override` takes precedence over `world_part_override`",
+		"https://docs.slng.ai/agents/livekit-plugin",
+		"1.6.7 or newer",
+		"https://docs.slng.ai/agents/pipecat-plugin",
+		"0.4.0 or newer",
+	} {
+		if !strings.Contains(models, want) {
+			t.Errorf("references/models.md does not state %q", want)
+		}
+	}
+
+	packageReference := bundleFile(t, "references/package.md")
+	for _, want := range []string{
+		"`deployment_region` chooses where the agent worker runs",
+		"A LiveKit target accepts one deployment region or a duplicate-free list.",
+		"Pipecat accepts exactly one.",
+		"For hard regional isolation, use one target instance per geography.",
+	} {
+		if !strings.Contains(packageReference, want) {
+			t.Errorf("references/package.md does not state %q", want)
+		}
+	}
+
+	if examples := bundleFile(t, "references/examples.md"); !strings.Contains(examples, "`examples/regional-infrastructure`") {
+		t.Error("references/examples.md does not route regional work to examples/regional-infrastructure")
+	}
+}
+
 func TestThinkingAudioValuesMatchCode(t *testing.T) {
 	want := []string{string(ir.ThinkingNone), string(ir.ThinkingSubtle)}
 	for name, content := range map[string]string{

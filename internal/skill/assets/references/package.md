@@ -17,6 +17,11 @@ What an author writes, file by file. This is the surface you work in.
 Nothing in `agent.yaml` is specific to a runtime. That lives in `targets.yaml`.
 Keeping them apart is what makes one package compile to two orchestrators.
 
+For parallel local LiveKit packages, give each stack a different three-port
+set with `LIVEKIT_HOST_PORT`, `LIVEKIT_TCP_HOST_PORT`, and
+`LIVEKIT_UDP_HOST_PORT`. Moving only the signaling port is not enough for
+browser WebRTC.
+
 YAML decoding is strict. An unknown field is an error with the file and the
 line, not a shrug. A field you half remember is worth checking rather than
 writing.
@@ -300,6 +305,24 @@ as defined, or runs its own better. Override the entry, never the agent.
 
 Transport, carrier, and destinations used to live here and no longer do. Writing
 any of them on a target is refused, and the refusal names the new home.
+
+## Deployment regions and model regions
+
+`deployment_region` chooses where the agent worker runs. It does not choose
+where SLNG runs STT or TTS. Those model regions belong in
+`params.world_part_override` or `params.region_override` on the SLNG listen and
+speak entries. Set both layers when the worker and speech data must stay in the
+same geography; `models.md` has the model YAML.
+
+A LiveKit target accepts one deployment region or a duplicate-free list.
+Pipecat accepts exactly one. Every deployment from one LiveKit target uses the
+same generated model params, so a multi-region deployment does not move STT or
+TTS with each worker.
+
+For hard regional isolation, use one target instance per geography. Give each
+target one deployment region and complete per-target listen and speak model
+overrides that pin the matching SLNG region. A target model override replaces
+the entry instead of merging it, so repeat every field that entry needs.
 
 ## Which targets do what
 
