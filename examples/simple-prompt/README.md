@@ -31,6 +31,11 @@ You need Docker running and the keys the generated `.env.example` lists:
 `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`, because this package sets
 `tracing: langfuse`.
 
+Traces can contain caller speech, model input and output, and tool arguments and results.
+Use only fake identities and fake customer data for release tests. Use a separate
+Langfuse project for those tests.
+Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
+
 ```sh
 bin/unmute validate examples/simple-prompt
 ```

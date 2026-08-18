@@ -209,6 +209,40 @@ func TestCapacityRequirementMatchesPublicGuide(t *testing.T) {
 	}
 }
 
+func TestTracingPrivacyWarningStaysExplicit(t *testing.T) {
+	const dataWarning = "Traces can contain caller speech, model input and output, and tool arguments and results."
+	const fakeDataRule = "Use only fake identities and fake customer data for release tests."
+	for name, content := range map[string]string{
+		"references/package.md":                                 bundleFile(t, "references/package.md"),
+		"docs-site/reference/agent-yaml.mdx":                    trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+		"docs/HARNESS_TEST.md":                                  trackedFile(t, "docs/HARNESS_TEST.md"),
+		"examples/simple-prompt/README.md":                      trackedFile(t, "examples/simple-prompt/README.md"),
+		"internal/generate/templates/livekit_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/livekit_v1/README.md.tmpl"),
+		"internal/generate/templates/pipecat_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
+	} {
+		if !strings.Contains(content, dataWarning) {
+			t.Errorf("%s does not warn what tracing records", name)
+		}
+		if !strings.Contains(content, fakeDataRule) {
+			t.Errorf("%s does not require fake release-test data", name)
+		}
+	}
+}
+
+func TestPipecatTracingProviderOwnershipStaysExplicit(t *testing.T) {
+	const rule = "Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first."
+	for name, content := range map[string]string{
+		"references/package.md":                                 bundleFile(t, "references/package.md"),
+		"docs-site/reference/agent-yaml.mdx":                    trackedFile(t, "docs-site/reference/agent-yaml.mdx"),
+		"examples/simple-prompt/README.md":                      trackedFile(t, "examples/simple-prompt/README.md"),
+		"internal/generate/templates/pipecat_v1/README.md.tmpl": trackedFile(t, "internal/generate/templates/pipecat_v1/README.md.tmpl"),
+	} {
+		if !strings.Contains(content, rule) {
+			t.Errorf("%s does not state Pipecat tracing provider ownership", name)
+		}
+	}
+}
+
 func TestExistingPackageWorkflowPrecedesWriting(t *testing.T) {
 	steps := []string{
 		"Inspect the existing package",

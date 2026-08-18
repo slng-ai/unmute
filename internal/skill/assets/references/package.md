@@ -267,6 +267,15 @@ be a positive Go duration such as `5m`.
 `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_SECRET_KEY`, and those names go in
 `secrets:` like any others.
 
+LiveKit uses the room name as the Langfuse session ID. Pipecat uses the runner
+session ID as both its conversation ID and the Langfuse session ID.
+Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
+
+Traces can contain caller speech, model input and output, and tool arguments and results.
+Use only fake identities and fake customer data for release tests. Use a separate
+Langfuse project for those tests, and do not send real customer data until its
+access and retention rules are approved.
+
 ## targets.yaml
 
 ```yaml targets.yaml

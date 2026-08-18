@@ -511,7 +511,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     require_env()
     call_context = {}
 
-    tracing_enabled = setup_langfuse_tracing()
+    trace_provider = setup_langfuse_tracing()
+    trace_attributes = {"langfuse.trace.name": TRACE_NAME}
+    if runner_args.session_id is not None:
+        trace_attributes["langfuse.session.id"] = runner_args.session_id
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
@@ -546,14 +549,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         pipeline,
         name=MAIN_NAME,
 
-        enable_tracing=tracing_enabled,
-        additional_span_attributes={"langfuse.trace.name": TRACE_NAME},
+        conversation_id=runner_args.session_id,
+        enable_tracing=True,
+        additional_span_attributes=trace_attributes,
 
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
 
-    if tracing_enabled:
-        enable_agent_tracing(main, agents)
+    enable_agent_tracing(main, agents)
 
 
     @user_aggregator.event_handler("on_user_turn_idle")
@@ -624,8 +627,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     try:
         await runner.run()
     finally:
-        if tracing_enabled:
-            flush_tracing()
+        await asyncio.to_thread(flush_tracing, trace_provider)
 
 
 
