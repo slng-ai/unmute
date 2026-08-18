@@ -1364,6 +1364,7 @@ os.environ["LANGFUSE_BASE_URL"] = f"http://127.0.0.1:{receiver.server_port}"
 
 import bot  # noqa: E402
 import tracing as tracing_config  # noqa: E402
+from loguru import logger  # noqa: E402
 from opentelemetry import trace  # noqa: E402
 from opentelemetry.sdk.trace import TracerProvider  # noqa: E402
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor  # noqa: E402
@@ -1522,7 +1523,54 @@ class SlowProvider:
         self.released_while_flushing = self.release.wait(timeout=1)
 
 
+async def assert_worker_start_failure_stops_runner() -> None:
+    runner = WorkerRunner()
+    runner_ready = asyncio.Event()
+    pipeline_started = asyncio.Event()
+    worker_start_error = None
+    main_worker = PipelineWorker(
+        Pipeline([Passthrough()]),
+        name="startup-failure-main",
+    )
+
+    class FailingWorker:
+        name = "startup-failure-agent"
+
+        async def attach(self, *, registry, bus) -> None:
+            raise RuntimeError("specialist startup probe")
+
+    @runner.event_handler("on_ready")
+    async def on_runner_ready(runner):
+        runner_ready.set()
+
+    @main_worker.event_handler("on_pipeline_started")
+    async def on_pipeline_started(worker, frame):
+        nonlocal worker_start_error
+        await runner_ready.wait()
+        try:
+            await runner.add_workers(FailingWorker())
+        except Exception as error:
+            worker_start_error = error
+            pipeline_started.set()
+            await runner.cancel(reason="agent worker startup failed")
+            return
+        pipeline_started.set()
+
+    await runner.add_workers(main_worker)
+    try:
+        await asyncio.wait_for(runner.run(), timeout=2)
+        if worker_start_error is not None:
+            raise worker_start_error
+    except RuntimeError as error:
+        assert str(error) == "specialist startup probe"
+    else:
+        raise AssertionError("specialist startup failure was swallowed")
+    assert pipeline_started.is_set()
+
+
 async def main() -> None:
+    await assert_worker_start_failure_stops_runner()
+
     original_get_provider = tracing_config.trace.get_tracer_provider
     tracing_config.trace.get_tracer_provider = lambda: TracerProvider()
     try:
@@ -1652,8 +1700,23 @@ async def main() -> None:
         )
         await request_agent.start_mcp()
 
+    runner_ready = asyncio.Event()
+    worker_start_error = None
+
+    @runner.event_handler("on_ready")
+    async def on_runner_ready(runner):
+        runner_ready.set()
+
     @main_worker.event_handler("on_pipeline_started")
     async def on_pipeline_started(worker, frame):
+        nonlocal worker_start_error
+        await runner_ready.wait()
+        try:
+            await runner.add_workers(request_agent)
+        except Exception as error:
+            worker_start_error = error
+            await runner.cancel(reason="agent worker startup failed")
+            return
         await main_worker.queue_frame(
             InputAudioRawFrame(
                 audio=b"\x00\x00" * 160,
@@ -1669,12 +1732,22 @@ async def main() -> None:
             ),
         )
 
-    await runner.add_workers(main_worker, request_agent)
+    error_lines = []
+    error_sink = logger.add(
+        lambda message: error_lines.append(str(message)),
+        level="ERROR",
+        format="{message}",
+    )
+    await runner.add_workers(main_worker)
     try:
         await asyncio.wait_for(runner.run(), timeout=10)
+        if worker_start_error is not None:
+            raise worker_start_error
     finally:
+        logger.remove(error_sink)
         if mcp_clients:
             await request_agent.close_mcp()
+    assert not any("StartFrame not received yet" in line for line in error_lines), error_lines
 
     cancel_parent = trace.get_tracer("unmute.smoke").start_span("cancel-parent")
     cancel_parent_context = trace.set_span_in_context(cancel_parent)

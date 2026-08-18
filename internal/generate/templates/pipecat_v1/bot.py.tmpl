@@ -36,7 +36,7 @@ from __future__ import annotations
 {{end}}{{if or .HasFlows .CallStartVars}}import json
 {{end}}import os
 {{if .NeedsRender}}import re
-{{end}}{{if or .Telephony .NeedsMCP}}import sys
+{{end}}{{if or .Telephony .NeedsMCP .Tracing}}import sys
 {{end}}{{if .Variables}}from dataclasses import dataclass
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
 {{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}
@@ -48,7 +48,7 @@ import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}{{if .Telephony}}import telephony
 {{end}}from dotenv import load_dotenv
-{{if or .Telephony .HasColdTransfer .DailyCarrier .CloudWebsocket .NeedsFunctionCalls .NeedsMCP}}from loguru import logger
+{{if or .Telephony .HasColdTransfer .DailyCarrier .CloudWebsocket .NeedsFunctionCalls .NeedsMCP .Tracing}}from loguru import logger
 {{end}}{{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
 {{end}}
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -1319,12 +1319,14 @@ def build_stt():
         async def on_dialout_warning(transport, data):
             logger.warning("dial-out warning: {}", data)
 {{end}}{{end}}
+    runner_ready = asyncio.Event()
     pipeline_started = asyncio.Event()
+    worker_start_error = None
     entry_started = False
 
     async def activate_entry():
         nonlocal entry_started
-        if entry_started:
+        if entry_started or worker_start_error is not None:
             return
         entry_started = True
         await main.activate_worker(
@@ -1341,8 +1343,21 @@ def build_stt():
 {{end}}
 {{if gt .MaxDurationSecs 0}}        asyncio.create_task(_end_after(main, {{.MaxDurationSecs}}))
 {{end}}
+    @runner.event_handler("on_ready")
+    async def on_runner_ready(runner):
+        runner_ready.set()
+
     @main.event_handler("on_pipeline_started")
     async def on_pipeline_started(worker, frame):
+        nonlocal worker_start_error
+        await runner_ready.wait()
+        try:
+            await runner.add_workers(*agents)
+        except Exception as error:
+            worker_start_error = error
+            pipeline_started.set()
+            await runner.cancel(reason="agent worker startup failed")
+            return
         pipeline_started.set()
 {{if or (eq .Transport "daily-sip") (eq .Transport "carrier-websocket") (eq .Transport "cloud-websocket")}}
     @transport.event_handler("on_client_connected")
@@ -1369,15 +1384,17 @@ def build_stt():
     async def on_client_disconnected(transport, client):
         await runner.cancel()
 
-{{if not .NeedsMCP}}    await runner.add_workers(main, *agents)
+{{if and (not .NeedsMCP) (not .Tracing)}}    await runner.add_workers(main)
 {{end}}{{if or .Tracing .NeedsMCP}}
     try:
 {{if .NeedsMCP}}        for agent in mcp_agents:
             await agent.start_mcp()
-        await runner.add_workers(main, *agents)
-{{end}}        await runner.run()
+{{end}}        await runner.add_workers(main)
+        await runner.run()
+        if worker_start_error is not None:
+            raise worker_start_error
     finally:
-{{if and .Tracing .NeedsMCP}}        primary_error = sys.exception()
+{{if .Tracing}}        primary_error = sys.exception()
         if primary_error is not None:
             try:
                 await asyncio.to_thread(flush_tracing, trace_provider)
@@ -1386,25 +1403,28 @@ def build_stt():
                     "Tracing flush failed while preserving the primary error ({})",
                     type(cleanup_error).__name__,
                 )
-            await _close_mcp(
+{{if .NeedsMCP}}            await _close_mcp(
                 (agent.close_mcp() for agent in mcp_agents),
                 suppress=True,
             )
-        else:
-            try:
+{{end}}        else:
+{{if .NeedsMCP}}            try:
                 await asyncio.to_thread(flush_tracing, trace_provider)
             finally:
                 await _close_mcp(
                     (agent.close_mcp() for agent in mcp_agents),
                     suppress=sys.exception() is not None,
                 )
-{{else if .Tracing}}        await asyncio.to_thread(flush_tracing, trace_provider)
+{{else}}            await asyncio.to_thread(flush_tracing, trace_provider)
+{{end}}
 {{else}}        await _close_mcp(
             (agent.close_mcp() for agent in mcp_agents),
             suppress=sys.exception() is not None,
         )
 {{end}}{{else}}
     await runner.run()
+    if worker_start_error is not None:
+        raise worker_start_error
 {{end}}
 {{end}}
 

@@ -925,7 +925,6 @@ indistinguishable by ear.
 {{- if .HasColdTransfer}}
 | The transfer never rings the destination | The per-call check refuses a missing destination by name at session start, so if the session started, read the agent log for the update request's response. |
 {{- end}}
-| An `ERROR` line reading `BusBridge Trying to process LLMServiceMetadataFrame ... but StartFrame not received yet` | Harmless, and nothing of yours caused it. Both pipelines start at once; the transport pipeline's start waits on the transcriber's WebSocket, so the agent's LLM announces itself a moment before the bridge is ready and that announcement is dropped. It carries one flag, `is_realtime_service`, which is false for every model this project binds, and the processor that would read it ignores a false one. It appears when a provider connects slowly and not otherwise. |
 {{end}}{{if .Prerequisites}}
 ## Account prerequisites
 
