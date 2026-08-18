@@ -94,6 +94,29 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 			t.Errorf("tool %q = %#v, want shared local Python handler", name, tool)
 		}
 	}
+	prepareBooking := resolved.Tasks["prepare_booking"]
+	if !slices.Contains(prepareBooking.Tools, "get_current_date") {
+		t.Errorf("prepare_booking tools = %v, want get_current_date", prepareBooking.Tools)
+	}
+	currentDate, ok := resolved.Tools["get_current_date"]
+	if !ok {
+		t.Fatal("tools omit get_current_date")
+	}
+	inputProperties, ok := currentDate.Input["properties"].(map[string]any)
+	if !ok || len(inputProperties) != 0 {
+		t.Errorf("get_current_date input properties = %#v, want empty object", currentDate.Input["properties"])
+	}
+	outputProperties, ok := currentDate.Output["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("get_current_date output properties = %#v, want object", currentDate.Output["properties"])
+	}
+	dateProperty, ok := outputProperties["date"].(map[string]any)
+	if !ok || dateProperty["type"] != "string" {
+		t.Errorf("get_current_date date output = %#v, want string", outputProperties["date"])
+	}
+	if required, ok := currentDate.Output["required"].([]any); !ok || !slices.Contains(required, any("date")) {
+		t.Errorf("get_current_date required output = %#v, want date", currentDate.Output["required"])
+	}
 	for _, name := range []string{"create_booking", "modify_booking", "cancel_booking"} {
 		tool := resolved.Tools[name]
 		properties := tool.Input["properties"].(map[string]any)
@@ -118,7 +141,8 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		"consume the one invalid-value retry",
 		"one initial customer lookup only after both the full name")
 	requireText("prepare booking", resolved.Tasks["prepare_booking"].Instructions,
-		"Only an unambiguous yes", "an unclear answer, silence, a topic change")
+		"Only an unambiguous yes", "an unclear answer, silence, a topic change",
+		"call `get_current_date` first", "Never guess the current date or year")
 	requireText("apply booking", resolved.Tasks["apply_booking"].Instructions,
 		"false, missing", "anything other than true", "Do not call a mutation",
 		"shared preparation result's exact `confirmed`")

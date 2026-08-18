@@ -1,0 +1,22 @@
+description: >-
+  Return the current booking date in YYYY-MM-DD form. Call this before
+  resolving a relative date such as today, tomorrow, or next Friday.
+
+input:
+  type: object
+  properties: {}
+
+output:
+  type: object
+  properties:
+    date:
+      type: string
+      description: Current booking date in YYYY-MM-DD form
+  required:
+    - date
+
+local:
+  handler: tools/salon.py
+
+interruption: provider_default
+effect: returns_data

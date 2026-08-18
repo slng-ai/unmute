@@ -117,6 +117,7 @@ tasks:
     instructions: tasks/prepare-booking.md
     tools:
       - list_bookings
+      - get_current_date
       - check_availability
       - to_complaints
       - to_chat
@@ -222,6 +223,7 @@ controls:
 tools:
   - find_or_create_customer
   - list_bookings
+  - get_current_date
   - check_availability
   - create_booking
   - modify_booking
