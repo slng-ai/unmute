@@ -978,16 +978,16 @@ func beginnerPath(t *testing.T) map[string]string {
 	return out
 }
 
-// TestNoUnmuteEnvOnTheBeginnerPath locks a state that already held when it was
-// written, and that is the point: an audit found zero hits across all of these
-// surfaces, and nothing was holding them there. A generated project must carry
-// no Unmute dependency (Principle I), and a variable named UNMUTE_ inside a
-// project Unmute is not part of is exactly that shape.
+// TestNoUnmuteEnvOnTheBeginnerPath keeps generated projects free of required
+// Unmute runtime environment. UNMUTE_LOG_LEVEL is the sole optional operator
+// knob; the generated process works without it.
 func TestNoUnmuteEnvOnTheBeginnerPath(t *testing.T) {
 	unmuteEnv := regexp.MustCompile(`\bUNMUTE_[A-Z0-9_]+\b`)
 	for name, content := range beginnerPath(t) {
-		if hit := unmuteEnv.FindString(content); hit != "" {
-			t.Errorf("%s names %s; nothing a beginner reads may ask them for an Unmute-branded variable", name, hit)
+		for _, hit := range unmuteEnv.FindAllString(content, -1) {
+			if hit != "UNMUTE_LOG_LEVEL" {
+				t.Errorf("%s names unexpected Unmute runtime environment %s", name, hit)
+			}
 		}
 	}
 }

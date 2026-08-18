@@ -116,9 +116,11 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		}
 	}
 	data.Capture = buildPipecatCapture(agent)
+	data.DevOptionalEnv = []string{"UNMUTE_LOG_LEVEL"}
 	if len(data.CallStartVars) > 0 {
-		data.DevOptionalEnv = []string{"UNMUTE_CALL_START"}
+		data.DevOptionalEnv = append(data.DevOptionalEnv, "UNMUTE_CALL_START")
 	}
+	slices.Sort(data.DevOptionalEnv)
 	// Declared secrets join the startup check; a required one missing fails the
 	// bot before it answers a call (V12).
 	for _, name := range requiredSecretEnv(agent, target, env) {

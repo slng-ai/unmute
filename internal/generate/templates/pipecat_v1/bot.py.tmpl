@@ -36,8 +36,8 @@ from __future__ import annotations
 {{end}}{{if or .HasFlows .CallStartVars}}import json
 {{end}}import os
 {{if .NeedsRender}}import re
-{{end}}{{if or .Telephony .NeedsMCP .Tracing}}import sys
-{{end}}{{if .Variables}}from dataclasses import dataclass
+{{end}}import sys
+{{if .Variables}}from dataclasses import dataclass
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
 {{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}
 import aiohttp
@@ -48,8 +48,8 @@ import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}{{if .Telephony}}import telephony
 {{end}}from dotenv import load_dotenv
-{{if or .Telephony .HasColdTransfer .DailyCarrier .CloudWebsocket .NeedsFunctionCalls .NeedsMCP .Tracing}}from loguru import logger
-{{end}}{{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
+from loguru import logger
+{{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
 {{end}}
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 {{if not .Inline}}from pipecat.bus import BusBridgeProcessor
@@ -91,10 +91,19 @@ from tracing import (
 {{end}}
 load_dotenv()
 
-{{if .Telephony}}logger.remove()
-logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())
+_LOGGING_CONFIGURED = False
 
-{{end}}MAIN_NAME = {{pyq .MainName}}
+
+def _configure_logging() -> None:
+    global _LOGGING_CONFIGURED
+    if _LOGGING_CONFIGURED:
+        return
+    logger.remove()
+    logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())
+    _LOGGING_CONFIGURED = True
+
+
+MAIN_NAME = {{pyq .MainName}}
 {{if .CloudWebsocket}}# What every session needs, whatever channel it arrives on. What a *phone call*
 # adds is CALL_REQUIRED_ENV below, checked separately, so this package still runs
 # in the browser with nothing but model keys (V10/B3).
@@ -1429,6 +1438,7 @@ def build_stt():
 {{end}}
 
 async def bot(runner_args: RunnerArguments) -> None:
+    _configure_logging()
 {{if .Telephony}}    require_env()
     telephony.configure_pipecat_env()
 {{end}}

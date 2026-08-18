@@ -400,7 +400,7 @@ type pipecatData struct {
 	// operator is told to set a variable no file ever mentioned (research D14).
 	SuppliedForYou []string
 	DevEnv         []string // provider creds the web dev image needs, without telephony/coordination env (compose.dev.yaml)
-	DevOptionalEnv []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
+	DevOptionalEnv []string // passed through when the host sets it, never required
 	Notes          []string
 	Tracing        bool
 	// Telephony means the carrier-websocket route, and every site that reads it

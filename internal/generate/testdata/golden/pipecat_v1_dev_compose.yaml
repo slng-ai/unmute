@@ -13,8 +13,10 @@ services:
       - LOOKUP_CUSTOMER_URL
       - OPENAI_API_KEY
       - SLNG_API_KEY
-      # optional: set by `unmute dev --var`; absent otherwise
+      # optional: passed through when set on the host; absent otherwise
       - UNMUTE_CALL_START
+      # optional: passed through when set on the host; absent otherwise
+      - UNMUTE_LOG_LEVEL
     ports:
       - "${UNMUTE_DEV_PORT:-7860}:7860"
     healthcheck:

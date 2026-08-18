@@ -124,6 +124,18 @@ func TestEnvExampleListsOnlyAuthorNames(t *testing.T) {
 	})
 }
 
+func TestPipecatLogLevelIsOptionalDevEnvironment(t *testing.T) {
+	artifact := exampleArtifact(t, "simple-prompt", ir.ProviderPipecat)
+	if compose := artifactFile(t, artifact, "compose.dev.yaml"); !strings.Contains(compose, "- UNMUTE_LOG_LEVEL") {
+		t.Errorf("compose.dev.yaml does not pass through UNMUTE_LOG_LEVEL:\n%s", compose)
+	}
+	for _, path := range []string{".env.example", "compile-report.json"} {
+		if content := artifactFile(t, artifact, path); strings.Contains(content, "UNMUTE_LOG_LEVEL") {
+			t.Errorf("%s treats optional UNMUTE_LOG_LEVEL as required:\n%s", path, content)
+		}
+	}
+}
+
 // TestDeclaredFieldsReachTheGeneratedProject holds the class of defect this
 // whole feature exists to remove, on the five instances Wave C's adversarial
 // agents found after the first fixes had landed: a field the author declares,

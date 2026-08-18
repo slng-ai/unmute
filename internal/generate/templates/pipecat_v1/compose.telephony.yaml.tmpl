@@ -12,7 +12,7 @@ services:
 {{- end}}
 {{- end}}
 {{- range .DevOptionalEnv}}
-      # optional: set by `unmute dev --var`; absent otherwise
+      # optional: passed through when set on the host; absent otherwise
       - {{.}}
 {{- end}}
     ports:

@@ -60,6 +60,18 @@ from pipecat_slng import SlngTTSService
 
 load_dotenv()
 
+_LOGGING_CONFIGURED = False
+
+
+def _configure_logging() -> None:
+    global _LOGGING_CONFIGURED
+    if _LOGGING_CONFIGURED:
+        return
+    logger.remove()
+    logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())
+    _LOGGING_CONFIGURED = True
+
+
 MAIN_NAME = "main"
 # Provider credentials only. The telephony route's environment (Redis, carrier
 # keys, the public URL) is required by telephony.py, not here, so a telephony
@@ -661,6 +673,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
 
 async def bot(runner_args: RunnerArguments) -> None:
+    _configure_logging()
 
     transport = await create_transport(runner_args, transport_params)
     await run_bot(transport, runner_args)

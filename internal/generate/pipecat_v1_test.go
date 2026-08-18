@@ -19,6 +19,30 @@ import (
 
 var updatePipecatV1 = flag.Bool("update-pipecat", false, "rewrite the pipecat v1 golden")
 
+func TestPipecatV1LoggingIsConfiguredAtFirstBot(t *testing.T) {
+	bot := artifactFile(t, exampleArtifact(t, "simple-prompt", ir.ProviderPipecat), "bot.py")
+	for _, want := range []string{
+		"import sys",
+		"from loguru import logger",
+		`logger.add(sys.stderr, level=os.getenv("UNMUTE_LOG_LEVEL", "INFO").upper())`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing logging structure %q", want)
+		}
+	}
+	if got := strings.Count(bot, "logger.remove()"); got != 1 {
+		t.Errorf("bot.py removes Loguru sinks %d times, want one guarded call", got)
+	}
+	if !strings.Contains(bot, "_LOGGING_CONFIGURED = False\n\n\ndef _configure_logging() -> None:\n    global _LOGGING_CONFIGURED\n    if _LOGGING_CONFIGURED:\n        return") {
+		t.Error("bot.py does not guard process-wide logging configuration")
+	}
+	const entry = "async def bot(runner_args: RunnerArguments) -> None:"
+	entryAt := strings.Index(bot, entry)
+	if entryAt < 0 || !strings.HasPrefix(strings.TrimSpace(bot[entryAt+len(entry):]), "_configure_logging()") {
+		t.Error("bot.py does not configure logging at the first bot entry")
+	}
+}
+
 // TestPipecatV1BuiltinEndCallTool covers the prebuilt end_call lowering: a
 // bodyless @tool that speaks the goodbye then ends via EndFrame, with no
 // url_env, handler, or httpx POST.

@@ -54,6 +54,10 @@ Fill in the blanks, then talk to it:
 bin/unmute dev examples/simple-prompt --target pipecat
 ```
 
+Pipecat logs default to `INFO`. Set `UNMUTE_LOG_LEVEL=DEBUG` only in a
+controlled environment because logs can contain caller speech, tool data, and
+phone details.
+
 Swap `--target pipecat` for `--target livekit` to run the identical agent on
 the other driver.
 
