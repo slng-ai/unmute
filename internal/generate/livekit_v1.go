@@ -334,9 +334,11 @@ type livekitData struct {
 	Secrets           []string              // declared secrets, for .env.example (V11)
 	ExtraEnv          []string              // env the route needs that the package never declared
 	RequiredSecrets   []string              // required secrets: a startup check refuses to run without them (V12)
+	CallRequiredEnv   []string              // cold-transfer destinations checked only for a real phone call
 	LocalTools        []livekitLocalTool    // copied handler files (tools/<name>.py)
 	Pins              map[string]string     // plugin pins (C6): raise dep floors
 	Prompts           []livekitPrompt
+	EntryPromptExpr   string   // templated entry prompt rendered from session.userdata after outbound SIP hydration
 	PluginModules     []string // merged `from livekit.plugins import ...` names
 	Deps              []string
 	RequiredEnv       []string

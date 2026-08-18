@@ -134,6 +134,173 @@ asyncio.run(main())
 print("livekit human-transfer contract smoke ok")
 `
 
+const livekitPhoneEnvironmentSmokeScript = `"""Smoke check: cold transfer env is required only on phone calls."""
+import importlib.metadata
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    if name != "BILLING_PHONE_NUMBER":
+        os.environ.setdefault(name, "smoke-placeholder")
+
+import agent  # noqa: E402
+
+assert importlib.metadata.version("livekit-agents") == "1.6.10"
+assert "BILLING_PHONE_NUMBER" not in agent.REQUIRED_ENV
+assert agent.CALL_REQUIRED_ENV == ["BILLING_PHONE_NUMBER"]
+agent.require_env()
+try:
+    agent.require_call_env()
+except RuntimeError as error:
+    assert "BILLING_PHONE_NUMBER" in str(error)
+else:
+    raise AssertionError("phone call started without its cold-transfer destination")
+
+print("livekit phone environment smoke ok")
+`
+
+const livekitOutboundHydrationSmokeScript = `"""Smoke check: outbound state is current before prompts and greeting."""
+import asyncio
+import importlib.metadata
+import json
+import os
+from types import SimpleNamespace
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+os.environ["SIP_TRUNK_HOSTNAME"] = "sip.example.invalid"
+os.environ["SIP_AUTH_USERNAME"] = "smoke-user"
+os.environ["SIP_AUTH_PASSWORD"] = "smoke-password"
+os.environ["SIP_FROM_NUMBER"] = "+15550001111"
+
+import agent  # noqa: E402
+
+assert importlib.metadata.version("livekit-agents") == "1.6.10"
+assert not hasattr(agent.FrontDesk, "send_to_billing"), "cold transfer still present"
+
+events = []
+original_update_instructions = agent.FrontDesk.update_instructions
+
+
+async def observed_update_instructions(self, instructions):
+    await original_update_instructions(self, instructions)
+    events.append(("instructions", instructions))
+
+
+agent.FrontDesk.update_instructions = observed_update_instructions
+
+
+class FakeRoomIO:
+    def set_participant(self, identity):
+        events.append(("select", identity))
+
+
+class FakeSession:
+    instances = []
+
+    def __class_getitem__(cls, _item):
+        return cls
+
+    def __init__(self, *, userdata, **_kwargs):
+        self.userdata = userdata
+        self.room_io = None
+        self.current_agent = None
+        self.user_state = "listening"
+        self.instances.append(self)
+
+    def on(self, _event):
+        return lambda callback: callback
+
+    async def start(self, *, agent, room, **_kwargs):
+        self.current_agent = agent
+        self.room_io = FakeRoomIO()
+        events.append((
+            "start",
+            self.userdata.campaign_id,
+            self.userdata.call_direction,
+            self.userdata.provider_call_id,
+        ))
+
+    async def say(self, text, **_kwargs):
+        events.append(("greeting", text, self.current_agent.instructions))
+
+    def generate_reply(self, **_kwargs):
+        events.append(("reply", self.current_agent.instructions))
+
+    def shutdown(self):
+        events.append(("shutdown",))
+
+
+class FakeAMD:
+    def __init__(self, *_args, **_kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    async def execute(self):
+        current = FakeSession.instances[0].current_agent
+        events.append(("amd", current.instructions))
+        return SimpleNamespace(category="human")
+
+
+class FakeSIP:
+    async def create_sip_participant(self, request):
+        events.append(("dial", request.sip_call_to, request.sip_number))
+
+
+class FakeContext:
+    def __init__(self):
+        self.proc = SimpleNamespace(userdata={"vad": object()})
+        self.job = SimpleNamespace(metadata=json.dumps({
+            "phone_number": "+15551234567",
+            "call_start": {"campaign_id": "summer"},
+        }))
+        self.room = SimpleNamespace(name="outbound-room")
+        self.api = SimpleNamespace(sip=FakeSIP())
+
+    async def connect(self):
+        events.append(("connect",))
+
+    async def wait_for_participant(self, **_kwargs):
+        events.append(("participant",))
+        return SimpleNamespace(
+            kind=agent.rtc.ParticipantKind.PARTICIPANT_KIND_SIP,
+            attributes={
+                "sip.callID": "call-123",
+                "sip.phoneNumber": "+15551234567",
+                "sip.trunkPhoneNumber": "+15550001111",
+            },
+        )
+
+    def shutdown(self, reason):
+        events.append(("context_shutdown", reason))
+
+
+agent.AgentSession = FakeSession
+agent.AMD = FakeAMD
+asyncio.run(agent.entrypoint(FakeContext()))
+
+session = FakeSession.instances[0]
+assert events[1] == ("start", "summer", "outbound", None), events
+assert session.userdata.provider_call_id == "call-123"
+assert session.userdata.call_direction == "outbound"
+greeting = next(event for event in events if event[0] == "greeting")
+assert greeting[2] == "Campaign summer; direction outbound; call call-123.", greeting
+amd = next(event for event in events if event[0] == "amd")
+assert amd[1] == "Campaign summer; direction outbound; call call-123.", amd
+refresh = next(event for event in events if event[0] == "instructions")
+assert refresh[1] == "Campaign summer; direction outbound; call call-123.", refresh
+assert events.index(amd) > next(i for i, event in enumerate(events) if event[0] == "participant")
+assert events.index(refresh) < events.index(amd), events
+assert events.index(greeting) > next(i for i, event in enumerate(events) if event[0] == "participant")
+
+print("livekit outbound hydration smoke ok")
+`
+
 const livekitColdHangupShutdownSmokeScript = `"""Smoke check: failed goodbye cannot skip cold hangup."""
 import asyncio
 import json
@@ -722,6 +889,47 @@ func TestSmokeLiveKitRegionalInfrastructureInstantiates(t *testing.T) {
 
 func TestSmokeLiveKitV1HumanTransferContracts(t *testing.T) {
 	runLiveKitSmokeScript(t, "livekit-human-transfer", nil, nil, livekitHumanTransferContractSmokeScript)
+}
+
+func TestSmokeLiveKitV1PhoneEnvironment(t *testing.T) {
+	runLiveKitSmokeScript(t, "livekit-human-transfer", nil, nil, livekitPhoneEnvironmentSmokeScript)
+}
+
+func configureLiveKitOutboundHydration(agent *ir.Agent) {
+	delete(agent.Controls, "send_to_billing")
+	entry := agent.Agents[agent.EntryAgent]
+	tools := entry.Tools[:0]
+	for _, tool := range entry.Tools {
+		if tool != "send_to_billing" {
+			tools = append(tools, tool)
+		}
+	}
+	entry.Tools = tools
+	entry.Instructions = "Campaign {{campaign_id}}; direction {{call_direction}}; call {{provider_call_id}}."
+	agent.Agents[agent.EntryAgent] = entry
+	agent.Variables["campaign_id"] = ir.Variable{
+		Type: ir.PrimitiveString, Source: ir.VariableSourceCallStart, Default: "manual",
+	}
+	agent.Variables["provider_call_id"] = ir.Variable{
+		Type: ir.PrimitiveString, Source: ir.VariableSourceCallID,
+	}
+	agent.Variables["call_direction"] = ir.Variable{
+		Type: ir.PrimitiveString, Source: ir.VariableSourceDirection,
+	}
+	for name, tgt := range agent.Targets {
+		if tgt.Provider != ir.ProviderLiveKit || tgt.Telephony == nil {
+			continue
+		}
+		tgt.Telephony.SystemSources = map[string]ir.VariableSource{
+			"provider_call_id": ir.VariableSourceCallID,
+			"call_direction":   ir.VariableSourceDirection,
+		}
+		agent.Targets[name] = tgt
+	}
+}
+
+func TestSmokeLiveKitV1OutboundHydration(t *testing.T) {
+	runLiveKitSmokeScript(t, "livekit-human-transfer", nil, configureLiveKitOutboundHydration, livekitOutboundHydrationSmokeScript)
 }
 
 func setLiveKitColdHangup(agent *ir.Agent) {

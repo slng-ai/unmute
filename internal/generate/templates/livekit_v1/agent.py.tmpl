@@ -101,7 +101,8 @@ import os
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}from dotenv import load_dotenv
 {{if .NeedsField}}from pydantic import Field
-{{end}}{{if or .Outbound .HasColdTransfer .HasWarmTransfer}}from livekit import api{{if .HasColdTransfer}}, rtc{{end}}
+{{end}}{{if or .Outbound .HasColdTransfer .HasWarmTransfer}}from livekit import api
+{{end}}{{if or .HasColdTransfer (and .Telephony (eq .Telephony.Transport "sip") .HasVars)}}from livekit import rtc
 {{end}}from livekit.agents import (
 {{- if .Outbound}}
     AMD,
@@ -330,6 +331,22 @@ def require_env() -> None:
         raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
 
 {{end}}
+{{- if .CallRequiredEnv}}
+# A browser session has no phone leg to cold-transfer. Check these only after
+# the entry path identifies a real carrier call, and before its greeting.
+CALL_REQUIRED_ENV = [
+{{- range .CallRequiredEnv}}
+    {{pyq .}},
+{{- end}}
+]
+
+
+def require_call_env() -> None:
+    missing = [name for name in CALL_REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError("Missing environment for a phone call: " + ", ".join(missing))
+
+{{end}}
 {{- if .NeedsRender}}
 # --- templates ---------------------------------------------------------------
 _TEMPLATE = re.compile(r"\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}")
@@ -453,14 +470,18 @@ def _livekit_call_context(room_name: str, participant, metadata: dict) -> dict:
     direction = metadata.get("direction") or expected_direction
     if direction != expected_direction:
         raise RuntimeError("call direction does not match the LiveKit job")
-    attributes = participant.attributes
-    remote_number = attributes.get("sip.phoneNumber")
+    attributes = participant.attributes if participant is not None else {}
+    remote_number = attributes.get("sip.phoneNumber") or metadata.get("phone_number")
     trunk_number = attributes.get("sip.trunkPhoneNumber")
+{{- if or .Telephony.HasOutbound .Telephony.HasWarm}}
+    if not trunk_number and direction == "outbound":
+        trunk_number = _sip_number()
+{{- end}}
     return {
         "session_id": room_name,
         "carrier": {{pyq .Telephony.Carrier}},
         "connection": {{pyq .Telephony.Connection}},
-        "call_id": attributes.get("sip.callID"),
+        "call_id": attributes.get("sip.callID") or metadata.get("call_id"),
         "direction": direction,
         "from_number": trunk_number if direction == "outbound" else remote_number,
         "to_number": remote_number if direction == "outbound" else trunk_number,
@@ -469,7 +490,7 @@ def _livekit_call_context(room_name: str, participant, metadata: dict) -> dict:
 
 
 {{- if .HasVars}}
-def _hydrate_livekit_context(userdata: Userdata, context: dict) -> None:
+def _hydrate_livekit_context(userdata: Userdata, context: dict, *, require_all: bool = True) -> None:
     missing = []
 {{- range .Telephony.SystemSources}}
     value = context.get({{pyq .Source}})
@@ -478,7 +499,7 @@ def _hydrate_livekit_context(userdata: Userdata, context: dict) -> None:
     else:
         userdata.{{.Variable}} = value
 {{- end}}
-    if missing:
+    if missing and require_all:
         raise RuntimeError("Missing LiveKit SIP context fields: " + ", ".join(missing))
 
 
@@ -1092,8 +1113,14 @@ async def entrypoint(ctx: JobContext) -> None:
     # is already resolved by the bridge, so the agent just runs the session.
     # Wait for the bridge participant so the caller audio track exists first.
     await ctx.wait_for_participant()
-{{- if .HasVars}}
+{{- if or .HasVars .CallRequiredEnv}}
     metadata = _livekit_job_metadata(ctx.job.metadata)
+{{- if .CallRequiredEnv}}
+    if metadata.get("call_id") and metadata.get("stream_id"):
+        require_call_env()
+{{- end}}
+{{- end}}
+{{- if .HasVars}}
     call_context = _livekit_call_context(ctx.room.name, metadata)
     _hydrate_livekit_context(session.userdata, call_context)
 {{- if .CallStartVars}}
@@ -1111,6 +1138,10 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- if .Outbound}}
     phone_number = metadata.get("phone_number")
 {{- end}}
+{{- if .CallRequiredEnv}}
+    if outbound_job:
+        require_call_env()
+{{- end}}
     await ctx.connect()
 
     if outbound_job:
@@ -1122,6 +1153,16 @@ async def entrypoint(ctx: JobContext) -> None:
             or not 8 <= len(phone_number) <= 16
         ):
             raise RuntimeError("phone_number must be an E.164 number")
+{{- if .HasVars}}
+        # Direction, dialled number, trunk number, and dispatched values are
+        # known before the session starts. on_enter renders its prompt here;
+        # call ID arrives with the SIP participant and is filled below.
+        call_context = _livekit_call_context(ctx.room.name, None, metadata)
+        _hydrate_livekit_context(session.userdata, call_context, require_all=False)
+{{- if .CallStartVars}}
+        _hydrate_call_start(session.userdata, call_start)
+{{- end}}
+{{- end}}
         await session.start(agent={{.EntryClass}}({{if not .SingleAgentMinimal}}initial=True{{end}}), room=ctx.room{{if .HasWarmTransfer}}, room_options=room_io.RoomOptions(delete_room_on_close=False){{end}})
         if not session.room_io:
             raise RuntimeError("session room_io is unavailable")
@@ -1137,22 +1178,37 @@ async def entrypoint(ctx: JobContext) -> None:
                     wait_until_answered=True,
                 )
             )
-            {{if .HasVars}}participant = {{end}}await ctx.wait_for_participant(identity="phone_user")
+            {{if or .HasVars .CallRequiredEnv}}participant = {{end}}await ctx.wait_for_participant(identity="phone_user")
+{{- if .HasVars}}
+            if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+                call_context = _livekit_call_context(ctx.room.name, participant, metadata)
+                _hydrate_livekit_context(session.userdata, call_context)
+{{- if .EntryPromptExpr}}
+                await session.current_agent.update_instructions({{.EntryPromptExpr}})
+{{- end}}
+{{- end}}
             amd_result = await detector.execute()
 {{- else}}
         raise RuntimeError("this LiveKit SIP route does not accept outbound jobs")
 {{- end}}
     else:
 {{- if .Telephony.HasInbound}}
-        {{if .HasVars}}participant = {{end}}await ctx.wait_for_participant()
+        {{if or .HasVars .CallRequiredEnv}}participant = {{end}}await ctx.wait_for_participant()
 {{- else}}
         raise RuntimeError("outbound LiveKit SIP job metadata requires phone_number")
 {{- end}}
 
+{{- if .CallRequiredEnv}}
+    if not outbound_job and participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+        require_call_env()
+{{- end}}
 {{- if .HasVars}}
-    _hydrate_livekit_context(session.userdata, call_context)
+    if not outbound_job and participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+        call_context = _livekit_call_context(ctx.room.name, participant, metadata)
+        _hydrate_livekit_context(session.userdata, call_context)
 {{- if .CallStartVars}}
-    _hydrate_call_start(session.userdata, call_start)
+    if not outbound_job:
+        _hydrate_call_start(session.userdata, call_start)
 {{- end}}
 {{- end}}
     if not outbound_job:

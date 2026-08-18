@@ -138,6 +138,13 @@ Cold transfer needs an existing SIP caller leg, so it cannot be tested from a
 browser session or the LiveKit Agent Console. Warm transfer can start there,
 because it dials the person itself.
 
+That difference also controls startup checks. A cold destination environment
+name is required only after a real SIP job is identified, before the greeting;
+it does not block WebRTC startup. Warm transfer is always available to the
+browser agent, so its destination and the selected connection's SIP address,
+username, password, and caller number remain required in `REQUIRED_ENV` and
+`compose.dev.yaml`.
+
 Keep `lk agent logs` open. A warm transfer prints the control, the conversation
 message count handed to the briefing, and then either `warm transfer merged`
 or `warm transfer unavailable`. A cold transfer prints either

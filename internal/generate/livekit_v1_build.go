@@ -295,6 +295,10 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	for _, t := range data.Tasks {
 		data.Prompts = append(data.Prompts, livekitPrompt{Const: t.PromptConst, Body: livekitTaskPrompt(agent.Tasks[t.Name], t.Result)})
 	}
+	entryInstructions := agent.Agents[agent.EntryAgent].Instructions
+	if ir.HasTemplate(entryInstructions) {
+		data.EntryPromptExpr = promptExpr(promptConst(agent.EntryAgent), entryInstructions, "session.userdata")
+	}
 
 	applyLiveKitConversation(agent.Conversation, &data)
 
@@ -320,19 +324,20 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			data.HasWarmTransfer = data.HasWarmTransfer || ht.Warm
 		}
 	}
-	// Snapshot the provider creds before telephony env is added: the web dev
-	// image (compose.dev.yaml) runs `agent.py dev` against a single-node dev
-	// livekit-server and needs no telephony env. LIVEKIT_URL/KEY/SECRET are in
-	// this set but the template hardcodes their dev values.
-	//
-	// The route's own names are removed rather than merely not added: `secrets:`
-	// now declares them (SCHEMA N41), so a package with a secrets block would
-	// otherwise demand carrier credentials for a browser session (FR-018).
-	data.DevEnv = withoutRouteEnv(env.sorted(), agent, tgt, env)
 	data.Telephony, err = buildLiveKitTelephony(agent, tgt, env)
 	if err != nil {
 		return livekitData{}, err
 	}
+	// Warm transfer dials from any session, including WebRTC, through the
+	// selected SIP connection. Cold transfer acts only on an existing phone leg.
+	if data.HasWarmTransfer && tgt.Telephony != nil {
+		for _, name := range tgt.Telephony.Environment {
+			env.addRead(name)
+		}
+	}
+	// The web dev image needs every always-read value, but not route values or a
+	// cold destination read only by a phone call.
+	data.DevEnv = withoutRouteEnv(env.sorted(), agent, tgt, env)
 	if data.Telephony != nil {
 		if agent.Capacity == nil || agent.Capacity.MaxSessions <= 0 {
 			return livekitData{}, fmt.Errorf("livekit telephony requires positive capacity.max_sessions")
@@ -370,14 +375,13 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// check meant to catch it — while docs-site/reference/secrets.mdx promised
 	// "the generated agent refuses to start without them" (research D3).
 	//
-	// All of them reach the environment, but the check skips the route's own
-	// names. One file serves every channel on this driver, so a check that
-	// demanded carrier credentials would refuse a browser or console session on a
-	// phone package. The route's values are still listed in .env.example, the
-	// compile report, and the runbook. An mcp source's names are not route names,
-	// so they stay in the check. This is the same derivation the Pipecat driver
-	// already used for DevEnv.
+	// All names reach the environment, but the browser check skips values read
+	// only by a phone call. Values a warm transfer reads from WebRTC stay because
+	// envSet records them as always-read. The full set remains in .env.example,
+	// the compile report, and the runbook. This is the same derivation the
+	// Pipecat driver already uses for DevEnv.
 	data.RequiredSecrets = withoutRouteEnv(data.RequiredEnv, agent, tgt, env)
+	data.CallRequiredEnv = humanTransferEnv(agent, tgt, env)
 	supplied := platformEnv
 	if tgt.Telephony != nil {
 		supplied = append(slices.Clone(supplied), tgt.Telephony.LocalEnvironment...)
@@ -731,14 +735,18 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 			}
 			ht := livekitHumanTransfer{
 				Method: ref, When: humanTransferWhen(c),
-				// Cold is a SIP REFER, whose destination must be a URI; warm
-				// dials a number. Two positions, two shapes, one destination.
-				ToExpr:      referURIExpr(dest, env),
-				DialExpr:    destinationExpr(dest, env),
 				Warm:        c.Mode == ir.TransferWarm,
 				Briefing:    c.Briefing,
 				RingTimeout: ringTimeoutSeconds(c.RingTimeout),
 				Hangup:      c.OnUnavailable == ir.OnUnavailableHangup,
+			}
+			if ht.Warm {
+				ht.DialExpr = destinationExpr(dest, env)
+				if name := ir.DestinationEnv(dest); name != "" {
+					env.addRead(name)
+				}
+			} else {
+				ht.ToExpr = referURIExpr(dest, env)
 			}
 			// A warm transfer needs no trunk environment name: the emitted
 			// _sip_trunk() passes the carrier's own settings inline, and the

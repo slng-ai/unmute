@@ -300,11 +300,11 @@ func authorEnv(required, supplied []string) []string {
 // withoutRouteEnv drops the names only a phone call reads, leaving the set a
 // browser session actually needs.
 //
-// A phone package must run in the browser with nothing but model keys
-// (spec FR-018). That held for free while connection environment names were
-// exempt from `secrets:`; now that they are declared there (SCHEMA N41) they
-// reach the startup check like any other secret, and a package with a secrets
-// block would demand carrier credentials before opening a browser session.
+// A phone package must run in the browser without values only a phone call
+// reads (spec FR-018). A warm transfer is not such a value: it can dial from
+// WebRTC, so its destination and SIP connection stay. This distinction became
+// necessary once connection names joined `secrets:` (SCHEMA N41) and therefore
+// reached the startup check like any other secret.
 //
 // The route is the authority on which names are its own, and the question is
 // asked of **every** connection in the package rather than only this target's.
@@ -328,10 +328,8 @@ func withoutRouteEnv(names []string, agent *ir.Agent, target ir.Target, env *env
 			route[name] = true
 		}
 	}
-	for name := range route {
-		if env.alwaysRead(name) {
-			delete(route, name)
-		}
+	for _, name := range humanTransferEnv(agent, target, env) {
+		route[name] = true
 	}
 	if plan := target.Telephony; plan != nil {
 		for _, name := range plan.Environment {
@@ -344,6 +342,11 @@ func withoutRouteEnv(names []string, agent *ir.Agent, target ir.Target, env *env
 			route[name] = true
 		}
 	}
+	for name := range route {
+		if env.alwaysRead(name) {
+			delete(route, name)
+		}
+	}
 	if len(route) == 0 {
 		return names
 	}
@@ -354,6 +357,28 @@ func withoutRouteEnv(names []string, agent *ir.Agent, target ir.Target, env *env
 		}
 	}
 	return out
+}
+
+// humanTransferEnv is read only while cold-transferring a phone call. A warm
+// transfer can dial from a browser session, so its destination stays always-on.
+func humanTransferEnv(agent *ir.Agent, target ir.Target, env *envSet) []string {
+	seen := map[string]bool{}
+	for _, control := range agent.Controls {
+		human, ok := control.(*ir.HumanTransfer)
+		if !ok || human.Mode != ir.TransferCold {
+			continue
+		}
+		name := ir.DestinationEnv(target.Destinations[human.Destination])
+		if name != "" && !env.alwaysRead(name) {
+			seen[name] = true
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 // reportSupported is the framework range this unmute supports, recorded next to

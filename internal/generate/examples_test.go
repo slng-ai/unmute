@@ -580,9 +580,10 @@ func TestTelephonyExampleDocsAccountForEveryRequiredEnv(t *testing.T) {
 }
 
 // US2 / FR-018: a phone package runs in the browser with nothing but model
-// keys. The emitted startup check is where that is decided, so it is where it
-// is asserted: the browser path's REQUIRED_ENV must carry no carrier credential
-// and no route variable, whichever route the package declares.
+// keys unless it exposes warm transfer there. The emitted startup check is
+// where that is decided, so it is where it is asserted for packages whose
+// browser tools do not dial through the route. The warm-transfer exception has
+// its exact five-name contract in livekit_phone_env_test.go.
 //
 // This already worked and nothing wrote it down, which is what made it safe to
 // move route resolution underneath it. It is the most common workflow in the
@@ -596,7 +597,6 @@ func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
 	}
 	for example, providers := range map[string][]ir.Provider{
 		"twilio-telephony-hello":        {ir.ProviderPipecat, ir.ProviderLiveKit},
-		"livekit-human-transfer":        {ir.ProviderLiveKit},
 		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
 		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
 	} {
