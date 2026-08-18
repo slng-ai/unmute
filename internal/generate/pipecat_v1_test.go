@@ -406,6 +406,8 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 		"additional_span_attributes=trace_attributes",
 		"enable_agent_tracing(main, agents)",
 		"await asyncio.to_thread(flush_tracing, trace_provider)",
+		"primary_error = sys.exception()",
+		"Tracing flush failed while preserving the primary error ({})",
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing %q", want)
@@ -442,6 +444,14 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 	}
 	if strings.Contains(bot, "\n        flush_tracing(trace_provider)\n") {
 		t.Error("provider flush must not block Pipecat's event loop")
+	}
+	addAt := strings.Index(bot, "await runner.add_workers(main)")
+	tryAt := -1
+	if addAt >= 0 {
+		tryAt = strings.LastIndex(bot[:addAt], "\n    try:\n")
+	}
+	if tryAt < 0 || addAt < tryAt {
+		t.Error("traced main registration must share tracing cleanup ownership")
 	}
 
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
@@ -776,7 +786,8 @@ func TestPipecatV1MCPLifecycleAndCollisionsFailClosed(t *testing.T) {
 		"{tool.__name__ for tool in super().build_tools()}",
 		"import sys",
 		"for agent in mcp_agents:",
-		"await runner.add_workers(main, *agents)",
+		"await runner.add_workers(main)",
+		"await runner.add_workers(*agents)",
 		"suppress=sys.exception() is not None",
 		"(agent.close_mcp() for agent in mcp_agents)",
 	} {
@@ -796,11 +807,14 @@ func TestPipecatV1MCPLifecycleAndCollisionsFailClosed(t *testing.T) {
 	if startAt >= 0 {
 		tryAt = strings.LastIndex(bot[:startAt], "\n    try:\n")
 	}
-	addAt := strings.Index(bot, "await runner.add_workers(main, *agents)")
+	addAt := strings.Index(bot, "await runner.add_workers(main)")
 	runAt := strings.Index(bot, "await runner.run()")
 	closeAt := strings.LastIndex(bot, "(agent.close_mcp() for agent in mcp_agents)")
 	if constructAt < 0 || tryAt < constructAt || startAt < tryAt || addAt < startAt || runAt < addAt || closeAt < runAt {
 		t.Error("MCP start, worker registration, and run must share cleanup ownership after construction")
+	}
+	if strings.Contains(bot, "await runner.add_workers(main, *agents)") {
+		t.Error("MCP specialists must not be registered before the main pipeline starts")
 	}
 }
 
@@ -2872,12 +2886,18 @@ func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
 	}
 	bot := artifactFile(t, artifact, "bot.py")
 	for _, want := range []string{
+		"runner_ready = asyncio.Event()",
 		"pipeline_started = asyncio.Event()",
+		"worker_start_error = None",
 		"entry_started = False",
 		"nonlocal entry_started",
-		"if entry_started:",
+		"if entry_started or worker_start_error is not None:",
+		`@runner.event_handler("on_ready")`,
+		"runner_ready.set()",
 		`@main.event_handler("on_pipeline_started")`,
 		"pipeline_started.set()",
+		"if worker_start_error is not None:",
+		"raise worker_start_error",
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing %q", want)
@@ -2890,6 +2910,29 @@ func TestV14_ActivationGatedOnPipelineStart(t *testing.T) {
 	// absolute source order (agent-transfer handoffs also call activate_worker).
 	if !strings.Contains(bot, "async def activate_entry():") {
 		t.Errorf("bot.py missing activate_entry helper (entry activation must be centralised)")
+	}
+	started := strings.Index(bot, `@main.event_handler("on_pipeline_started")`)
+	if started < 0 {
+		t.Fatal("bot.py missing on_pipeline_started handler")
+	}
+	startedBlock := bot[started:]
+	wait := strings.Index(startedBlock, "await runner_ready.wait()")
+	register := strings.Index(startedBlock, "await runner.add_workers(*agents)")
+	failure := strings.Index(startedBlock, "except Exception as error:")
+	store := strings.Index(startedBlock, "worker_start_error = error")
+	cancel := strings.Index(startedBlock, `await runner.cancel(reason="agent worker startup failed")`)
+	ready := strings.LastIndex(startedBlock, "pipeline_started.set()")
+	if wait < 0 || register < wait || ready < register {
+		t.Errorf("on_pipeline_started must wait for the runner, register specialists, then open the activation gate (wait=%d register=%d ready=%d)", wait, register, ready)
+	}
+	if failure < register || store < failure || cancel < store || strings.Count(startedBlock, "pipeline_started.set()") < 2 {
+		t.Errorf("specialist startup failure must be stored, release waiters, and cancel the runner (register=%d failure=%d store=%d cancel=%d)", register, failure, store, cancel)
+	}
+	if !strings.Contains(bot, "await runner.add_workers(main)") {
+		t.Error("runner must initially register only the main pipeline worker")
+	}
+	if strings.Contains(bot, "await runner.add_workers(main, *agents)") {
+		t.Error("specialists must not be registered before the main pipeline starts")
 	}
 	conn := strings.Index(bot, "async def on_client_connected(")
 	if conn == -1 {

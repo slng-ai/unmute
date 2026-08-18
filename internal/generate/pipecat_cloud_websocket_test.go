@@ -267,6 +267,9 @@ func TestCloudWebsocketRunbookContract(t *testing.T) {
 	section := telephonySection(t, cloudWebsocketArtifact(t, cloudWebsocketOptions{
 		inbound: true, outbound: true, transfer: true, connection: true,
 	}))
+	if strings.Contains(section, "StartFrame not received yet") {
+		t.Error("the runbook must not excuse a BusBridge startup race")
+	}
 	if !strings.Contains(section, "**four steps**") {
 		t.Error("the section does not state the count up front")
 	}

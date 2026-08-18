@@ -17,6 +17,7 @@ import functools
 import inspect
 import json
 import os
+import sys
 from dataclasses import dataclass
 
 import httpx
@@ -589,12 +590,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
             _idle_end.cancel()
             _idle_end = None
 
+    runner_ready = asyncio.Event()
     pipeline_started = asyncio.Event()
+    worker_start_error = None
     entry_started = False
 
     async def activate_entry():
         nonlocal entry_started
-        if entry_started:
+        if entry_started or worker_start_error is not None:
             return
         entry_started = True
         await main.activate_worker(
@@ -607,8 +610,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
         asyncio.create_task(_end_after(main, 1200))
 
+    @runner.event_handler("on_ready")
+    async def on_runner_ready(runner):
+        runner_ready.set()
+
     @main.event_handler("on_pipeline_started")
     async def on_pipeline_started(worker, frame):
+        nonlocal worker_start_error
+        await runner_ready.wait()
+        try:
+            await runner.add_workers(*agents)
+        except Exception as error:
+            worker_start_error = error
+            pipeline_started.set()
+            await runner.cancel(reason="agent worker startup failed")
+            return
         pipeline_started.set()
 
     @main.rtvi.event_handler("on_client_ready")
@@ -622,12 +638,25 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     async def on_client_disconnected(transport, client):
         await runner.cancel()
 
-    await runner.add_workers(main, *agents)
 
     try:
+        await runner.add_workers(main)
         await runner.run()
+        if worker_start_error is not None:
+            raise worker_start_error
     finally:
-        await asyncio.to_thread(flush_tracing, trace_provider)
+        primary_error = sys.exception()
+        if primary_error is not None:
+            try:
+                await asyncio.to_thread(flush_tracing, trace_provider)
+            except BaseException as cleanup_error:
+                logger.error(
+                    "Tracing flush failed while preserving the primary error ({})",
+                    type(cleanup_error).__name__,
+                )
+        else:
+            await asyncio.to_thread(flush_tracing, trace_provider)
+
 
 
 
