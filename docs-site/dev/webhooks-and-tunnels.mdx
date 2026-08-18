@@ -3,16 +3,18 @@ title: "Webhooks and tunnels"
 description: "How the public URL is made, how to bring your own, and how to keep the CLI away from your carrier settings."
 ---
 
-Routes where the carrier calls you back need a public HTTPS address. By
-default `unmute dev --telephony` makes one for you and points your number at
-it. Both halves can be turned off.
+Routes where the carrier calls the local agent over HTTPS or WSS need a public
+HTTPS address. By default `unmute dev --telephony` makes one and temporarily
+points supported carrier numbers at it. You can bring your own URL or leave the
+number untouched.
 
 ## The managed tunnel
 
 With no `--public-url`, the command needs `cloudflared` on your PATH. It starts
-a quick tunnel against the local application port, reads the assigned origin
-from the tunnel's output, and hands that origin to the generated app as
-`UNMUTE_PUBLIC_URL`.
+a quick tunnel against the local agent port, reads the assigned origin, and
+hands that origin to the local runtime. Compose callback routes receive it as
+`UNMUTE_PUBLIC_URL`; Pipecat `cloud-websocket` passes its host to the local
+Pipecat runner.
 
 ```text
 pipecat: managed tunnel https://random-words-here.trycloudflare.com (quick tunnel URLs rotate on every run)
@@ -58,16 +60,33 @@ unmute: dev: --public-url requires --telephony
 
 With the origin known, the command prints the exact callback URLs the carrier
 should use, one line each, for example the media websocket, the outbound
-trigger, and the status callback.
+trigger, and the status callback. Your URL must already forward to the port set
+by `--bot-port`, which defaults to `7860`.
+
+The inbound webhook path is route-specific:
+
+| Local route | Twilio voice webhook |
+|---|---|
+| Pipecat `cloud-websocket` | `POST /` |
+| Pipecat `carrier-websocket` | `POST /telephony/inbound` |
+| LiveKit `connector` | `POST /telephony/inbound` |
+
+LiveKit SIP is not in this table because an HTTPS origin cannot expose SIP or
+RTP.
 
 ## Leave the carrier alone
 
 By default, on carriers that support it, the CLI sets the number's voice
-webhook to this run's URL and prints the previous value:
+webhook to the route's exact inbound URL and prints the previous value. For a
+generated callback application:
 
 ```text wrap
-pipecat: Twilio voice webhook for +15551234567 set to https://random-words-here.trycloudflare.com/telephony/voice (was: https://example.com/old)
+pipecat: Twilio voice webhook for +15551234567 set to https://random-words-here.trycloudflare.com/telephony/inbound (was: https://example.com/old)
 ```
+
+Pipecat `cloud-websocket` instead sets it to the origin root, such as
+`https://random-words-here.trycloudflare.com/`, because the local Pipecat runner
+answers `POST /` itself.
 
 On exit it puts the old value back:
 
@@ -85,10 +104,11 @@ unmute dev ./agent --telephony --no-webhook
 ```
 
 ```text
-pipecat: --no-webhook, carrier number left untouched; this run is reachable at https://random-words-here.trycloudflare.com
+pipecat: --no-webhook, carrier number left untouched; point it at https://random-words-here.trycloudflare.com/ yourself
 ```
 
-Then point the number at that URL yourself. `--no-webhook` requires
+Then point the number at the exact inbound URL printed for the route. For
+Pipecat `cloud-websocket`, that is the origin root. `--no-webhook` requires
 `--telephony`.
 
 Use it when the number is shared, when your carrier is configured by

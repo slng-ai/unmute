@@ -182,7 +182,7 @@ func TelephonyRoutes() map[TelephonyKey]TelephonyRoute {
 		route := routes[key]
 		route.RequiredEnvironment = []string{"sip_address", "sip_username", "sip_password", "from_number"}
 		route.Processes = []TelephonyProcess{{
-			Name: "agent", Command: []string{"uv", "run", "agent.py", "dev"}, Health: "/", Readiness: "/",
+			Name: "agent", Command: []string{"uv", "run", "python", "-m", "livekit.agents", "start", "agent.py"}, Health: "/", Readiness: "/",
 		}}
 		// No trunk ID here. Dialling out needs no stored trunk: the emitted agent
 		// passes the carrier's trunk settings inline with every call, from the

@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -9,7 +10,13 @@ from uuid import uuid4
 # ponytail: one private, runtime-local SQLite file is enough for the demo; use a
 # shared service before multi-replica deployment or when worker-local state is
 # not enough.
-_DB_PATH = Path(tempfile.gettempdir()) / "unmute-salon-concierge" / "salon.db"
+_DB_PATH = (
+    Path(tempfile.gettempdir())
+    / "unmute-salon-concierge"
+    / str(os.getpid())
+    / "salon.db"
+)
+_DATABASE_SUFFIXES = ("", "-journal", "-wal", "-shm")
 _SERVICES = {"haircut", "hair-color", "blowout"}
 _TIMES = ("09:00", "11:30", "15:00")
 _SCHEMA = """
@@ -41,6 +48,14 @@ CREATE TABLE IF NOT EXISTS complaints (
     created_at TEXT NOT NULL
 );
 """
+
+
+def _reset_database():
+    for suffix in _DATABASE_SUFFIXES:
+        _DB_PATH.with_name(_DB_PATH.name + suffix).unlink(missing_ok=True)
+
+
+_reset_database()
 
 
 def _connect():
@@ -417,6 +432,12 @@ def _demo():
                 (complaint["complaint_id"],),
             ).fetchone()
         assert owner["customer_id"] == created["customer_id"]
+
+        for suffix in _DATABASE_SUFFIXES[1:]:
+            _DB_PATH.with_name(_DB_PATH.name + suffix).touch()
+        _reset_database()
+        for suffix in _DATABASE_SUFFIXES:
+            assert not _DB_PATH.with_name(_DB_PATH.name + suffix).exists()
     _DB_PATH = original_path
     print("salon SQLite check passed")
 

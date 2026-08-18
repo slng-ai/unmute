@@ -13,7 +13,7 @@ Usage:
   unmute dev [agent-dir] [flags]
 
 Flags:
-      --bot-port string     host port the container publishes the agent on (Compose UNMUTE_DEV_PORT; with --telephony, UNMUTE_TELEPHONY_PORT) (default "7860")
+      --bot-port string     host port for the local agent runtime (with Compose, UNMUTE_DEV_PORT or UNMUTE_TELEPHONY_PORT) (default "7860")
   -h, --help                help for dev
       --no-open             do not open the browser automatically
       --no-webhook          do not touch the carrier number's webhook configuration (requires --telephony; point it at the printed public URL yourself)
@@ -30,12 +30,15 @@ Flags:
 
 | Mode | Command | What runs |
 |---|---|---|
-| browser | `unmute dev ./agent` | a Docker Compose stack, plus a local page you talk through |
+| browser | `unmute dev ./agent` | Pipecat under `uv` or LiveKit under Compose, plus a local page |
 | telephony | `unmute dev ./agent --telephony` | the route's local topology, with no browser UI |
 
-Browser mode always needs Docker. Telephony mode depends on the route: most
-local topologies use Docker Compose, the Pipecat cloud-websocket route starts
-the generated agent with `uv`, and Pipecat Daily has no local phone topology.
+Pipecat browser mode needs `uv`; LiveKit browser mode needs Docker. Telephony
+mode depends on the route: most local topologies use Docker Compose, the
+Pipecat cloud-websocket route starts the generated agent with `uv`, and
+Pipecat Daily has no local phone topology. The Pipecat cloud-websocket route
+can receive a real Twilio call through its temporary HTTPS/WSS tunnel. A local
+LiveKit SIP stack does not expose public SIP or RTP by itself.
 
 ## Flags in detail
 
@@ -51,9 +54,8 @@ the generated agent with `uv`, and Pipecat Daily has no local phone topology.
 </ResponseField>
 
 <ResponseField name="--bot-port" type="string" default="7860">
-  The host port the agent uses. Passed to Compose as `UNMUTE_DEV_PORT`, or as
-  `UNMUTE_TELEPHONY_PORT` with a Compose phone route. The direct Pipecat route
-  uses it for the local `uv` process.
+  The host port the agent uses. Pipecat passes it to the local `uv` process.
+  Compose paths receive `UNMUTE_DEV_PORT` or `UNMUTE_TELEPHONY_PORT`.
 </ResponseField>
 
 <ResponseField name="--no-open">
@@ -74,13 +76,16 @@ the generated agent with `uv`, and Pipecat Daily has no local phone topology.
 </ResponseField>
 
 <ResponseField name="--telephony">
-  Run the target's resolved telephony route instead of the browser UI.
+  Run the target's resolved telephony route instead of the browser UI. This
+  starts the local pieces; it does not make a local SIP stack publicly
+  reachable.
 </ResponseField>
 
 <ResponseField name="--public-url" type="string">
   The exact public HTTPS origin for routes with carrier callbacks. Skips the
-  managed tunnel. Requires `--telephony`. Must be HTTPS, with an optional path
-  and nothing else.
+  managed tunnel, so the origin must already forward to the local agent port.
+  Requires `--telephony`. Must be HTTPS, with an optional path and nothing
+  else. It cannot expose LiveKit SIP or RTP.
 </ResponseField>
 
 <ResponseField name="--to" type="E.164">
@@ -92,8 +97,10 @@ the generated agent with `uv`, and Pipecat Daily has no local phone topology.
 
 <ResponseField name="--no-webhook">
   Do not touch the carrier number's webhook configuration. Requires
-  `--telephony`. The run's public URL is printed so you can point the number at
-  it yourself.
+  `--telephony`. On callback routes, point the number at the exact inbound URL
+  printed by the run. Pipecat `cloud-websocket` uses `POST /`; generated
+  Pipecat `carrier-websocket` and LiveKit `connector` apps use
+  `POST /telephony/inbound`.
 </ResponseField>
 
 ## Requirements between flags

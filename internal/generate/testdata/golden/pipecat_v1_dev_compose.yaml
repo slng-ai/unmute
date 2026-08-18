@@ -1,7 +1,7 @@
 # Generated local-development topology. Not a production deployment model.
-# `unmute dev` builds and runs this: the same image production deploys, driven
-# over WebRTC in the browser. No coordination store here; the web path does not
-# use one (the no-idle-sidecar rule).
+# Optional containerized topology for validating the same image production
+# deploys. `unmute dev` runs Pipecat on the host so browser WebRTC can reach its
+# ICE candidates. No coordination store here; the web path does not use one.
 services:
   application:
     build:

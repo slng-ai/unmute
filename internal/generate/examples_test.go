@@ -164,9 +164,46 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	}
 	requireText("verification", resolved.Tasks["customer_verification"].Instructions,
 		"Accumulate the full name and phone number across turns",
+		"The complete identity readback is the one exception",
 		"A complete phone has 10 to 15 digits", "incomplete fragment",
 		"consume the one invalid-value retry",
-		"one initial customer lookup only after both the full name")
+		"one initial customer lookup only after both the full name",
+		"Retain separate first name, surname, and phone values across turns",
+		"spell the complete first name one letter at a time",
+		"spell the complete surname one letter at a time",
+		"read every phone digit aloud",
+		"First name: N, I, C, O, L, A",
+		"Surname: C, R, O, O, N",
+		"Phone: plus three four",
+		"Only a new unambiguous yes after that complete readback counts",
+		"Do not call the customer action before that confirmation",
+		"call the customer action immediately and silently with the exact confirmed values")
+	requireText("concierge verification", resolved.Agents["concierge"].Instructions,
+		"Repeat the full phone only inside the required identity confirmation",
+		"new explicit yes after the complete readback")
+	if strings.Contains(resolved.Agents["concierge"].Instructions, "Never repeat a full phone number") ||
+		strings.Contains(resolved.Tasks["customer_verification"].Instructions, "Never repeat a full phone number") {
+		t.Error("verification prompts still forbid the required full phone readback")
+	}
+	verificationDelegate, ok := resolved.Controls["verify_customer"].(*ir.Delegate)
+	if !ok {
+		t.Fatalf("verify_customer = %#v, want delegate", resolved.Controls["verify_customer"])
+	}
+	requireText("verification delegate", verificationDelegate.When,
+		"new explicit yes", "spelling the full name", "reading every phone digit", "before lookup")
+	requireText("customer lookup", resolved.Tools["find_or_create_customer"].Description,
+		"exact confirmed first name and surname",
+		"only after the complete readback receives a new unambiguous yes",
+		"Never guess identity or use an unconfirmed value")
+	requireText("verification correction", resolved.Tasks["customer_verification"].Instructions,
+		"A no, a correction, an interruption, or an ambiguous answer remains unconfirmed",
+		"ask which field is wrong",
+		"Keep every field the caller did not correct",
+		"Any correction clears the earlier readback and confirmation",
+		"repeat the complete three-field readback",
+		"require a new explicit yes",
+		"A phrase such as ‘maybe,’ ‘I think so,’ or ‘yes, but’ is ambiguous",
+		"return to the complete readback and confirmation gate before the single retry")
 	requireText("prepare booking", resolved.Tasks["prepare_booking"].Instructions,
 		"Never ask for, interpret, or record confirmation",
 		"A service, booking, date, or time choice only selects a draft",
@@ -728,6 +765,30 @@ func TestTelephonyExampleDocsAccountForEveryRequiredEnv(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSalonConciergeTransferEnvironmentContract(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []ir.Provider{ir.ProviderPipecat, ir.ProviderLiveKit} {
+		artifact, err := Generate(agent, targetByProvider(t, agent, provider), target.Default())
+		if err != nil {
+			t.Fatalf("%s: %v", provider, err)
+		}
+		env := artifactFile(t, artifact, ".env.example")
+		if !strings.Contains(env, "MANAGER_PHONE_NUMBER=") {
+			t.Errorf("%s: .env.example does not require MANAGER_PHONE_NUMBER", provider)
+		}
+		if strings.Contains(env, "SUPERVISOR_PHONE_NUMBER=") {
+			t.Errorf("%s: .env.example still accepts the old SUPERVISOR_PHONE_NUMBER alias", provider)
+		}
 	}
 }
 

@@ -93,7 +93,7 @@ func execDevTelephony(cmd *cobra.Command, root, targetName string, plan *generat
 		required = slices.DeleteFunc(required, func(name string) bool { return name == "UNMUTE_OUTBOUND_TOKEN" })
 	}
 	if missing := missingEnvironment(required, childEnv); len(missing) > 0 {
-		return fmt.Errorf("missing telephony credentials/configuration: %s; see TELEPHONY.md#credentials for where to obtain them", strings.Join(missing, ", "))
+		return fmt.Errorf("missing telephony credentials/configuration: %s; fill the package .env from build/%s/.env.example", strings.Join(missing, ", "), targetName)
 	}
 	if err := composePreflight(cmd.Context(), childEnv); err != nil {
 		return err
@@ -256,6 +256,10 @@ func placeOutboundCall(ctx context.Context, out io.Writer, targetName, botPort, 
 // printDevCallLine prints the number to dial once an inbound route is live.
 func printDevCallLine(out io.Writer, plan *generate.TelephonyRuntimePlan, env []string) {
 	if !planHasTelephonyFeature(plan, "inbound") {
+		return
+	}
+	if plan.Route.Provider == ir.ProviderLiveKit && plan.Route.Transport == "sip" {
+		fmt.Fprint(out, "\n  local LiveKit SIP wiring is ready  ·  a real inbound call needs publicly reachable SIP and RTP ingress  ·  ctrl-c to stop\n\n")
 		return
 	}
 	number := envValue(env, plan.Environment["from_number"])

@@ -2,9 +2,12 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -39,6 +42,8 @@ import (
 // rather than a field on the plan.
 const devCloudWebsocketWebhookPath = "/"
 
+var cloudWebsocketAgentReady = waitForLocalAgentReady
+
 // execDevCloudWebsocket runs the local phone path and blocks until the session
 // ends. The number's previous voice configuration is restored on every exit path,
 // interrupt included: a dev session that dies without restoring has left a real
@@ -56,7 +61,7 @@ func execDevCloudWebsocket(cmd *cobra.Command, root, targetName string, plan *ge
 	if missing := missingEnvironment(required, childEnv); len(missing) > 0 {
 		return fmt.Errorf("missing telephony credentials/configuration: %s. This route hosts nothing in production, "+
 			"but pointing your number at this local session is a request to your carrier in your name, so the CLI needs "+
-			"them here; see TELEPHONY.md#credentials for where to obtain them", strings.Join(missing, ", "))
+			"them here; fill the package .env from build/%s/.env.example", strings.Join(missing, ", "), targetName)
 	}
 	if _, err := exec.LookPath("uv"); err != nil {
 		return fmt.Errorf("uv not found on PATH; the local phone path runs the compiled agent with uv (https://docs.astral.sh/uv/)")
@@ -106,6 +111,15 @@ func execDevCloudWebsocket(cmd *cobra.Command, root, targetName string, plan *ge
 		return err
 	}
 	defer stopBot(agent.cmd, agent.done)
+	spin := startSpinner(cmd.ErrOrStderr(), "waiting for the local Pipecat agent")
+	if err := cloudWebsocketAgentReady(ctx, opts.botPort, agent.done); err != nil {
+		spin.Stop()
+		if ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("local agent not ready: %w (see %s)", err, logPath)
+	}
+	spin.Stop()
 
 	// Restore is deferred before the number is ever touched, so every exit path
 	// after this point puts the number back: clean exit, an error below, or the
@@ -146,8 +160,7 @@ func execDevCloudWebsocket(cmd *cobra.Command, root, targetName string, plan *ge
 	return nil
 }
 
-// localAgent is the compiled agent running on this machine in the carrier's
-// stream mode.
+// localAgent is a compiled Pipecat agent running on this machine.
 type localAgent struct {
 	cmd  *exec.Cmd
 	done chan error
@@ -157,8 +170,12 @@ type localAgent struct {
 // The proxy argument is a bare hostname by the runner's own contract (research
 // F12), so the tunnel's host is passed rather than its URL.
 func startLocalCarrierAgent(ctx context.Context, dir, port, proxyHost string, env []string, sink io.Writer) (*localAgent, error) {
-	child := exec.CommandContext(ctx, "uv", "run", "bot.py",
+	return startLocalPipecatAgent(ctx, dir, env, sink,
 		"-t", "twilio", "-x", proxyHost, "--host", "0.0.0.0", "--port", port)
+}
+
+func startLocalPipecatAgent(ctx context.Context, dir string, env []string, sink io.Writer, args ...string) (*localAgent, error) {
+	child := exec.CommandContext(ctx, "uv", append([]string{"run", "bot.py"}, args...)...)
 	child.Dir = dir
 	child.Env = env
 	child.Stdout, child.Stderr = sink, sink
@@ -167,8 +184,50 @@ func startLocalCarrierAgent(ctx context.Context, dir, port, proxyHost string, en
 		return nil, fmt.Errorf("start the local agent: %w", err)
 	}
 	agent := &localAgent{cmd: child, done: make(chan error, 1)}
-	go func() { agent.done <- child.Wait() }()
+	go func() {
+		agent.done <- child.Wait()
+		close(agent.done)
+	}()
 	return agent, nil
+}
+
+// waitForLocalAgentReady prevents the browser or a carrier webhook from being
+// pointed at a process that has started but is not yet accepting sessions.
+func waitForLocalAgentReady(ctx context.Context, port string, done <-chan error) error {
+	readyCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	client := &http.Client{Timeout: time.Second}
+	endpoint := "http://" + net.JoinHostPort("127.0.0.1", port) + "/status"
+	for {
+		select {
+		case err := <-done:
+			if err == nil {
+				return errors.New("local agent exited before it was ready")
+			}
+			return fmt.Errorf("local agent exited before it was ready: %w", err)
+		case <-ticker.C:
+			request, err := http.NewRequestWithContext(readyCtx, http.MethodGet, endpoint, nil)
+			if err != nil {
+				return err
+			}
+			response, err := client.Do(request)
+			if err != nil {
+				continue
+			}
+			var status struct {
+				Status string `json:"status"`
+			}
+			decodeErr := json.NewDecoder(response.Body).Decode(&status)
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK && decodeErr == nil && status.Status == "ready" {
+				return nil
+			}
+		case <-readyCtx.Done():
+			return readyCtx.Err()
+		}
+	}
 }
 
 // setDevCarrierWebhook points the declared number at this session and returns the

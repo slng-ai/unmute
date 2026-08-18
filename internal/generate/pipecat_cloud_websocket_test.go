@@ -323,7 +323,13 @@ func TestCloudWebsocketRunbookContract(t *testing.T) {
 			t.Errorf("the runbook mentions %q, which exists nowhere on this route", forbidden)
 		}
 	}
-	for _, want := range []string{"cloudflared", "restored", "TwiML Bin is never touched"} {
+	for _, want := range []string{
+		"cloudflared",
+		"restored",
+		"TwiML Bin is never touched",
+		"waits for `/status` to report `ready`",
+		"webhook at the tunnel root (`/`)",
+	} {
 		if !strings.Contains(section[local:], want) {
 			t.Errorf("the local development subsection does not mention %q", want)
 		}

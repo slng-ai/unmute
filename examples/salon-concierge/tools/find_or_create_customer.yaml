@@ -1,16 +1,18 @@
 description: >-
-  Verify one salon customer from their full name and phone number. Reuse the
-  exact match or create a record for a new phone number. Never guess identity.
+  Look up or create one salon customer from the exact confirmed first name and
+  surname and phone. Use only after the complete readback receives a new
+  unambiguous yes. Reuse the exact match or create a record for a new phone
+  number. Never guess identity or use an unconfirmed value.
 
 input:
   type: object
   properties:
     name:
       type: string
-      description: Customer full name
+      description: Exact confirmed first name and surname joined as one full name
     phone:
       type: string
-      description: Customer phone number; 10 to 15 digits after punctuation is removed
+      description: Exact confirmed phone; 10 to 15 digits with no inferred country code
   required:
     - name
     - phone

@@ -1,12 +1,12 @@
 # pipecat-human-transfer-twilio
 
 A salon agent reached through **your own Twilio number**, with **nothing hosted
-by you**. Inbound calls, outbound calls, and a cold transfer to a person.
+by you in production**. Inbound calls, outbound calls, and a cold transfer to a
+person.
 
 Twilio streams the call's audio straight to Pipecat Cloud, which starts the
-deployed agent. There is no server of yours in the path, in production or ever:
-the whole carrier side is a small piece of static markup that lives in the Twilio
-console.
+deployed agent. There is no server of yours in the production path: the whole
+carrier side is a small piece of static markup that lives in the Twilio console.
 
 Three existing fields select the route (`transport: cloud-websocket`, `carrier`,
 `connection`) and no new authoring field exists.
@@ -70,7 +70,7 @@ trusting it. `build/` is disposable and gitignored.
 To hear the agent with no phone in the picture, and no accounts at all:
 
 ```sh
-bin/unmute dev examples/pipecat-human-transfer-twilio              # browser, needs Docker
+bin/unmute dev examples/pipecat-human-transfer-twilio              # browser, needs uv
 ```
 
 To take a real call on your own number **before** deploying anything:
@@ -79,12 +79,19 @@ To take a real call on your own number **before** deploying anything:
 bin/unmute dev --telephony examples/pipecat-human-transfer-twilio
 ```
 
-That runs this agent on your machine behind a cloudflared tunnel and borrows the
-declared number's voice configuration for the length of the session, putting the
-previous one back when you stop it. Your TwiML Bin is never touched, because the
-local runner answers Twilio's webhook itself. The transfer stays at Twilio:
+That runs the generated agent on your machine with `uv`, opens a temporary
+Cloudflare HTTPS/WSS tunnel, and borrows the declared number's voice
+configuration for the length of the session. The local runner answers Twilio at
+`POST /` and sends the call audio to `wss://<tunnel-host>/ws`. When you stop it,
+Unmute restores the previous voice configuration. Your TwiML Bin is never
+touched. The transfer stays at Twilio:
 after the destination leg ends, Twilio ends the original call. It does not need
 a deployed copy of the agent for a handback.
+
+Use `--public-url https://your-tunnel.example` to bring your own tunnel. Use
+`--no-webhook` to leave the number untouched, then point its voice webhook at
+the printed origin root yourself. These flags change the local test only; the
+production TwiML Bin path above stays the same.
 
 Pipecat `cloud-websocket` requires explicit `on_unavailable: hangup`; it cannot
 reconnect the original media stream. Omitting the field resolves to

@@ -181,7 +181,10 @@ controls:
   verify_customer:
     kind: delegate
     task: customer_verification
-    when: Verify the caller before any specialist handoff.
+    when: >-
+      Run identity confirmation before any specialist handoff. The task needs a
+      new explicit yes after spelling the full name and reading every phone digit
+      before lookup.
     assign:
       customer_id: result.customer_id
       customer_name: result.customer_name

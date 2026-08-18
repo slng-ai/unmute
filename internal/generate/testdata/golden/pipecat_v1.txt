@@ -74,8 +74,7 @@ not edit by hand — change the source spec and recompile.
 ```sh
 cp .env.example .env                      # then fill in your keys
 
-uv run bot.py                             # web: open the URL it prints
-uv run --extra console bot.py console     # terminal: talk over local mic/speaker
+uv run bot.py -t webrtc                   # web: open the URL it prints
 
 ```
 
@@ -102,8 +101,7 @@ handler fails before returning, the full exception stays in the log and the
 model receives one safe failure result. It must not claim success from either.
 
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner
-serves a WebRTC test client you can open in the browser. Console mode needs the
-`console` extra (pyaudio; `brew install portaudio` first on macOS).
+serves a WebRTC test client you can open in the browser.
 
 While iterating on the source spec, `unmute dev <source-dir>` recompiles this
 project and runs it for you behind a dev client.
@@ -831,9 +829,9 @@ if __name__ == "__main__":
 }
 === compose.dev.yaml ===
 # Generated local-development topology. Not a production deployment model.
-# `unmute dev` builds and runs this: the same image production deploys, driven
-# over WebRTC in the browser. No coordination store here; the web path does not
-# use one (the no-idle-sidecar rule).
+# Optional containerized topology for validating the same image production
+# deploys. `unmute dev` runs Pipecat on the host so browser WebRTC can reach its
+# ICE candidates. No coordination store here; the web path does not use one.
 services:
   application:
     build:

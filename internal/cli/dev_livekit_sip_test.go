@@ -433,7 +433,7 @@ func TestExecDevTelephonySIPCreatesRecordsBetweenInfraAndApp(t *testing.T) {
 	if strings.Contains(string(raw), "ST_in_1") {
 		t.Fatalf("a trunk ID reached the container environment:\n%s", raw)
 	}
-	if !strings.Contains(out.String(), "call +15550001111") {
-		t.Fatalf("call line missing:\n%s", out.String())
+	if strings.Contains(out.String(), "call +15550001111") || !strings.Contains(out.String(), "publicly reachable SIP and RTP ingress") {
+		t.Fatalf("local SIP run claimed the phone number was reachable:\n%s", out.String())
 	}
 }

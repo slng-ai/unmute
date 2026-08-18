@@ -51,14 +51,16 @@ use does not need Go.
 
 ## What you need to run an agent
 
-The browser dev loop needs Docker with Compose. Check it before the quickstart:
+The default LiveKit browser dev loop needs Docker with Compose. Check it before
+the quickstart:
 
 ```sh
 docker compose version
 ```
 
-You can write, validate, and compile a package without Docker. Phone routes
-have their own local requirements on the [phone routes](/dev/telephony) page.
+Pipecat browser development uses `uv` instead. You can write, validate, and
+compile a package without either runtime. Phone routes have their own local
+requirements on the [phone routes](/dev/telephony) page.
 
 <Accordion title="Advanced install options">
   **Verify a release archive**

@@ -18,7 +18,7 @@ examples/simple-prompt/build/pipecat/
 ├── pyproject.toml        # pinned dependencies
 ├── Dockerfile
 ├── .dockerignore
-├── compose.dev.yaml      # what `unmute dev` runs
+├── compose.dev.yaml      # an optional container run; `unmute dev` uses local uv
 ├── pcc-deploy.toml       # Pipecat Cloud deploy manifest
 ├── .env.example          # exactly the variables you supply
 ├── README.md             # the runbook for this build
@@ -58,7 +58,7 @@ The generated README says it:
 ```sh
 cp .env.example .env                      # then fill in your keys
 
-uv run bot.py                             # web: open the URL it prints
+uv run bot.py -t webrtc                   # web: open the URL it prints
 ```
 
 `uv` installs the pinned dependencies on the first run.

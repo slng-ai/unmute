@@ -580,7 +580,7 @@ func TestDevConsoleRemoved(t *testing.T) {
 	if err == nil {
 		t.Fatal("--console must fail; it was removed")
 	}
-	for _, want := range []string{"--console was removed", "Docker", "browser"} {
+	for _, want := range []string{"--console was removed", "browser"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("removed-flag error %q must mention %q", err, want)
 		}
@@ -594,6 +594,9 @@ func TestDevConsoleRemoved(t *testing.T) {
 // before target selection.
 func TestDevToFlagGuards(t *testing.T) {
 	dir := copySafeCore(t)
+	if _, err := run(t, "dev", dir, "--target", "pipecat", "--no-webhook"); err == nil || !strings.Contains(err.Error(), "--no-webhook requires --telephony") {
+		t.Fatalf("--no-webhook without --telephony error = %v", err)
+	}
 	if _, err := run(t, "dev", dir, "--target", "pipecat", "--to", "+15551234567"); err == nil || !strings.Contains(err.Error(), "--to requires --telephony") {
 		t.Fatalf("--to without --telephony error = %v", err)
 	}

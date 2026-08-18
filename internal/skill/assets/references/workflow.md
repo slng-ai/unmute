@@ -136,14 +136,25 @@ the honest behaviour, not a bug.
 unmute dev
 ```
 
-Opens the browser and runs the same image production would deploy. Local
-development runs in Docker, so Docker is required. Other flags:
+Opens the browser and runs the selected target locally. Pipecat runs under
+`uv` so browser WebRTC can reach it; LiveKit runs under Docker Compose with a
+local LiveKit server. Other flags:
 
 | Flag | What it does |
 |---|---|
-| none | browser audio, Docker, the deployable image |
-| `--telephony` | the generated Compose graph, so a real phone call can reach it |
+| none | browser audio; `uv` for Pipecat, Docker for LiveKit |
+| `--telephony` | the selected phone route; Pipecat `cloud-websocket` runs locally with `uv`, while other runnable routes use Compose |
 | `--var name=value` | seed a `call_start` variable, repeatable |
+
+For a local Pipecat `cloud-websocket` phone run, Unmute opens a temporary
+HTTPS/WSS tunnel, points the Twilio number at `POST /`, streams audio through
+`wss://<tunnel-host>/ws`, and restores the previous webhook on exit.
+`--no-webhook` leaves the number untouched; `--public-url` uses an HTTPS origin
+the user already forwards to the agent.
+
+A local LiveKit SIP run proves the trunk, dispatch, and worker wiring. It does
+not expose SIP signaling or RTP through the laptop. A real inbound call needs
+public SIP/RTP ingress; an HTTPS tunnel does not provide it.
 
 `--var` is the local stand-in for the dispatch payload production sends. Each
 value is parsed against the declared type, and an undeclared name is refused

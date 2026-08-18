@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -132,6 +134,41 @@ func TestReadyWatcher(t *testing.T) {
 	}
 	if s := sink.String(); !strings.Contains(s, "booting up") || !strings.Contains(s, "id=xyz") {
 		t.Errorf("passthrough lost data: %q", s)
+	}
+}
+
+func TestWaitForLocalAgentReadyRequiresReadyStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ready"}`))
+	}))
+	defer server.Close()
+	port := strings.TrimPrefix(server.URL, "http://127.0.0.1:")
+	if err := waitForLocalAgentReady(t.Context(), port, make(chan error)); err != nil {
+		t.Fatalf("waitForLocalAgentReady: %v", err)
+	}
+
+	done := make(chan error, 1)
+	done <- errors.New("boom")
+	if err := waitForLocalAgentReady(t.Context(), "1", done); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("early process exit = %v", err)
+	}
+}
+
+func TestRunDevPipecatRejectsBusyAgentPort(t *testing.T) {
+	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, _ := telephonyTestCommand(t)
+	err = runDevPipecat(t.Context(), cmd, t.TempDir(), devWebRun{root: "pkg", botPort: port})
+	if err == nil || !strings.Contains(err.Error(), "already in use") {
+		t.Fatalf("busy port error = %v", err)
 	}
 }
 

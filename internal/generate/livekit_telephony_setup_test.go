@@ -219,6 +219,9 @@ func TestTelephonySetupRunbookHoldsItsContract(t *testing.T) {
 		"### At LiveKit",
 		"bash telephony-setup.sh",
 		"lk cloud auth",
+		"proves the local trunk, dispatch, and worker wiring",
+		"publicly reachable SIP signaling and RTP ingress",
+		"laptop behind normal NAT",
 		// FR-007: what cold transfer needs, and what its failure line means.
 		"Cold transfer needs nothing at LiveKit",
 		"cannot be tested from the Agent Console",
