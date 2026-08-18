@@ -602,7 +602,7 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- end}}
 {{end}}
 {{- range .HumanTransfers}}
-    @function_tool
+    @function_tool(on_duplicate="reject")
     async def {{.Method}}(self, ctx: RunContext) -> str | None:
         {{triple .When}}
         # One line per firing, so a live test can see which control the model
@@ -661,18 +661,19 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
             )
         except ToolError as error:
 {{- if .Hangup}}
-            # on_unavailable: hangup. The goodbye is spoken here, so the session
-            # is over: no return value, or the LLM answers the tool and speaks
-            # again on the way out.
+            # on_unavailable: hangup. Attempt the goodbye here, and always shut
+            # down even if generating it fails or is cancelled.
             logger.info(
                 "warm transfer unavailable after %ds: %s",
                 int(time.monotonic() - started),
                 error,
             )
-            await ctx.session.generate_reply(
-                instructions="Tell the caller nobody is available and say goodbye."
-            )
-            ctx.session.shutdown()
+            try:
+                await ctx.session.generate_reply(
+                    instructions="Tell the caller nobody is available and say goodbye."
+                )
+            finally:
+                ctx.session.shutdown()
             return None
 {{- else}}
             # on_unavailable: return_to_caller. The caller is still here and the
@@ -755,19 +756,21 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
         started = time.monotonic()
         try:
             await job_ctx.api.sip.transfer_sip_participant(request)
-        except (api.SipCallError, api.ServerError) as error:
+        except Exception as error:
 {{- if .Hangup}}
-            # on_unavailable: hangup. The goodbye is spoken here and the session
-            # ends, so nothing is returned to the LLM.
+            # on_unavailable: hangup. Attempt the goodbye here, and always shut
+            # down even if generating it fails or is cancelled.
             logger.info(
                 "cold transfer failed after %ds: %s",
                 int(time.monotonic() - started),
                 error,
             )
-            await ctx.session.generate_reply(
-                instructions="Tell the caller the transfer failed and say goodbye."
-            )
-            ctx.session.shutdown()
+            try:
+                await ctx.session.generate_reply(
+                    instructions="Tell the caller the transfer failed and say goodbye."
+                )
+            finally:
+                ctx.session.shutdown()
             return None
 {{- else}}
             # on_unavailable: return_to_caller — the caller is still in the room,

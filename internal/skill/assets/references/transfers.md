@@ -222,6 +222,11 @@ all come back as one failure, and `on_unavailable` decides what happens next.
 On the Pipecat `cloud-websocket` route, when the destination leg ends, Twilio
 ends the original call. A decline or no answer does the same after the dial
 timeout. No fresh agent starts without the previous conversation context.
+Pipecat `cloud-websocket` requires explicit `on_unavailable: hangup`; it cannot
+reconnect the original media stream. Omitting the field resolves to
+`return_to_caller`, so validation refuses it on this route. A successful Twilio
+REST update means the transfer has started, not that the destination answered;
+the tool result is `transfer_started`.
 
 ## What a target refuses
 

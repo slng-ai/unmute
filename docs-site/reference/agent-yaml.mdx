@@ -331,6 +331,8 @@ written on a cold transfer:
 `return_to_caller`. `ring_timeout` must be a positive Go duration. When omitted,
 Pipecat uses 25 seconds. LiveKit leaves the value unset, so the LiveKit platform
 default applies.
+Pipecat `cloud-websocket` requires explicit `on_unavailable: hangup`; it cannot
+reconnect the original media stream.
 `destination` is a symbol resolved in the top level
 [`destinations:`](#destinations) map above.
 

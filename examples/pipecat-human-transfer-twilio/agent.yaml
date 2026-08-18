@@ -57,6 +57,9 @@ controls:
     when: The caller asks about an invoice, a refund, or a charge they do not recognise.
     cold:
       destination: billing_line
+      # Twilio replaces this call's live media instructions. It cannot return
+      # the caller to this agent if the destination is unavailable.
+      on_unavailable: hangup
 
 # Who this agent escalates to. A value is the UPPER_SNAKE name of an environment
 # variable holding an E.164 number or a sip: URI, read at call time. No phone

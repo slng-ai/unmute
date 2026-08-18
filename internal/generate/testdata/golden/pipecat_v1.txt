@@ -472,7 +472,7 @@ class BillingAgent(LLMWorker):
             response.raise_for_status()
             await params.result_callback(response.json())
 
-    @_direct_tool
+    @_direct_tool(cancel_on_interruption=False)
     async def to_human(self, params: FunctionCallParams):
         """Transfer the caller to a human."""
         logger.info("human transfer fired: to_human (cold)")
@@ -481,37 +481,46 @@ class BillingAgent(LLMWorker):
             # Asked twice. Replay the first answer rather than dial again.
             await params.result_callback(transfer_result)
             return
-        # Claimed before the primitive runs, not after: a request arriving while
-        # the first one is still in flight must not slip past the guard.
+        transport = self.call_context.get("_transport")
+        if not isinstance(transport, DailyTransport):
+            # No phone call, so nothing to hand over: the browser and console
+            # transports carry no transfer primitive. Refuse before announcing
+            # a transfer that cannot start.
+            self.call_context["_transfer_result"] = {"failed": "this session is not a phone call, so it cannot be transferred"}
+            await params.result_callback(self.call_context["_transfer_result"])
+            return
+        # Claimed before any transfer work awaits: a request arriving while
+        # the first one is in flight must not slip past the guard.
         self.call_context["_transfer_result"] = {"in_progress": "A transfer is already under way; do not start another."}
         # Daily SIP transfers via REFER, which keeps the bot on the call
         # until the transfer completes, so the bot speaks the announcement
         # itself (the official daily-pstn-cold-transfer pattern).
-        await params.llm.push_frame(
-            LLMMessagesAppendFrame(
-                [{"role": "developer", "content": "Tell the caller you are transferring them to a colleague now and to please hold, then wait."}],
-                run_llm=True,
+        try:
+            await params.llm.push_frame(
+                LLMMessagesAppendFrame(
+                    [{"role": "developer", "content": "Tell the caller you are transferring them to a colleague now and to please hold, then wait."}],
+                    run_llm=True,
+                )
             )
-        )
+        except BaseException:
+            # The carrier primitive has not started, so this claim is safe to
+            # release and a later model turn may retry.
+            self.call_context.pop("_transfer_result", None)
+            raise
         # sip_call_transfer, not sip_refer, and the choice is the same on both
         # Daily forms. REFER would take Daily out of the media path and stop its
         # billing, but it needs the originating SIP system to honour REFER, which
         # neither platform documents for a carrier interconnect leg. So Daily
         # stays anchored after a completed transfer and both legs keep billing
         # until the call ends; the README states that cost.
-        transport = self.call_context.get("_transport")
-        if isinstance(transport, DailyTransport):
+        try:
             error = await transport.sip_call_transfer({"toEndPoint": os.environ["BILLING_PHONE_NUMBER"]})
-        else:
-            # No phone call, so nothing to hand over: the browser and console
-            # transports carry no transfer primitive. Failing here by name beats
-            # raising, and beats telling the model the caller was transferred.
-            error = "this session is not a phone call, so it cannot be transferred"
+        except Exception as exc:
+            error = exc
         if error is not None:
-            # A failed transfer is a return value, not an exception, on this
-            # transport (T5). Ignoring it would tell the model the caller was
-            # transferred while they are still right here. on_unavailable
-            # decides what the caller gets instead.
+            # The transport can return or raise a failure (T5). Either way the
+            # claimed per-call result becomes terminal before on_unavailable is
+            # applied, so another tool call replays it instead of dialling again.
             logger.warning("cold transfer failed: {}", error)
             self.call_context["_transfer_result"] = {"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."}
             await params.result_callback(self.call_context["_transfer_result"])
