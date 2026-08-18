@@ -79,13 +79,10 @@ func cloudWebsocketTarget(t *testing.T, opts cloudWebsocketOptions) (*ir.Agent, 
 	if opts.transfer {
 		// The env-name destination form: a route that composes markup out of the
 		// destination is exactly where a literal would show up in emitted output.
-		pkg.Agent.Destinations = map[string]string{"billing_line": "BILLING_PHONE_NUMBER"}
+		addColdHumanTransfer(pkg)
 		control := pkg.Agent.Controls["to_human"]
 		control.Cold.OnUnavailable = string(ir.OnUnavailableHangup)
 		pkg.Agent.Controls["to_human"] = control
-	} else {
-		pkg.Agent.Destinations = nil
-		dropHumanTransfer(pkg)
 	}
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	agent, err := ir.Build(pkg)
@@ -146,7 +143,7 @@ func TestCloudWebsocketEmitsNoProcessArtifact(t *testing.T) {
 	}))
 	// The comparison is the plain Pipecat Cloud build of the same fixture: same
 	// agent, no telephony at all.
-	plain := artifactPaths(dailyArtifact(t))
+	plain := artifactPaths(plainPipecatArtifact(t))
 	if !slices.Equal(withPhone, plain) {
 		t.Errorf("this route's file list differs from a plain Pipecat Cloud build:\n  route: %v\n  plain: %v", withPhone, plain)
 	}
@@ -172,7 +169,6 @@ func TestCloudWebsocketManifestDeclaresWebsocketAuth(t *testing.T) {
 	// setting, and one leaking onto the Daily routes would be a real change.
 	for name, other := range map[string]Artifact{
 		"plain Pipecat Cloud": pipecatArtifact(t, nil),
-		"Daily, no carrier":   dailyArtifact(t),
 		"Daily with carrier":  dailyCarrierArtifact(t, "twilio", true),
 	} {
 		if strings.Contains(artifactFile(t, other, "pcc-deploy.toml"), "websocket_auth") {
@@ -460,9 +456,9 @@ func TestCloudWebsocketRunsThePipelineAtTheCarriersRate(t *testing.T) {
 	}
 	// And no other route gains them.
 	for name, other := range map[string]Artifact{
-		"Daily, no carrier":  dailyArtifact(t),
-		"Daily with carrier": dailyCarrierArtifact(t, "twilio", true),
-		"carrier-websocket":  carrierWebsocketArtifact(t, "twilio"),
+		"plain Pipecat Cloud": plainPipecatArtifact(t),
+		"Daily with carrier":  dailyCarrierArtifact(t, "twilio", true),
+		"carrier-websocket":   carrierWebsocketArtifact(t, "twilio"),
 	} {
 		if strings.Contains(artifactFile(t, other, "bot.py"), "audio_in_sample_rate") {
 			t.Errorf("the %s build gained a carrier sample rate", name)
@@ -642,10 +638,14 @@ func TestCloudWebsocketRefusesWarmTransferSayingWhatItWouldTake(t *testing.T) {
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
 		RequiredControls: []string{"warm_transfer"},
 	}
+	addColdHumanTransfer(pkg)
+	human := pkg.Agent.Controls["to_human"]
+	human.Cold = nil
+	human.Warm = &spec.WarmTransfer{Destination: "billing_line", Briefing: "Say who is calling and why."}
+	pkg.Agent.Controls["to_human"] = human
 	configured := pkg.Targets["pipecat"]
 	configured.Connection = "twilio_voice"
 	setConnectionRoute(pkg, "twilio_voice", "cloud-websocket", "twilio")
-	pkg.Agent.Destinations = map[string]string{"billing_line": "BILLING_PHONE_NUMBER"}
 	pkg.Targets = map[string]spec.Target{"pipecat": configured}
 	pkg.Connections = map[string]spec.Connection{"twilio_voice": {
 		Transport: "cloud-websocket", Carrier: "twilio", Environment: map[string]string{
@@ -684,7 +684,6 @@ func TestCloudWebsocketSeamIsWordsNotShapes(t *testing.T) {
 	}
 	for name, artifact := range map[string]Artifact{
 		"plain Pipecat Cloud": pipecatArtifact(t, nil),
-		"Daily, no carrier":   dailyArtifact(t),
 		"Daily with carrier":  dailyCarrierArtifact(t, "twilio", true),
 		"carrier-websocket":   carrierWebsocketArtifact(t, "twilio"),
 	} {

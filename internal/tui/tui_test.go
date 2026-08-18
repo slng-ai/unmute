@@ -1027,7 +1027,7 @@ func TestRunTelephonyCreateGatedOnConnection(t *testing.T) {
 	// The create wizard offers only code targets (Pipecat/LiveKit), and it
 	// cannot supply everything a phone route needs on either of them. Create is
 	// correctly gated, and which field is missing depends on the target:
-	// Pipecat defaults the Daily-provisioned transport and is short a carrier;
+	// Pipecat defaults the daily-sip transport and is short a supported carrier;
 	// LiveKit defaults no transport at all and is short that. Both refusals name
 	// connections/phone.yaml and the field to add, so this asserts the gate
 	// itself plus the shape of the guidance, not one target's wording.

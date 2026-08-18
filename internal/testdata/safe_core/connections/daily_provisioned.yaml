@@ -1,3 +1,0 @@
-# The Daily-provisioned route: no carrier leg, no credentials from the author.
-# cold_transfer needs Daily SIP on Pipecat, which is what this transport buys.
-transport: daily-sip

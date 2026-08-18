@@ -156,16 +156,18 @@ Set these before running (values are never written into the project):
 {{if .DailyCarrier}}
 Two groups, because two different things read them. The deployed agent reads the
 agent-side names, so those are what belong in the platform secret set. The helper
-you run reads the helper-side names, and the agent reads none of them.
+you run reads the helper-side names. It also reads the shared carrier auth token
+to verify every `/call` webhook before it starts an agent session.
 
 Agent side:
 
-{{range .DailyCarrier.AgentEnv}}- `{{.}}`
+{{range .DailyCarrier.AgentEnv}}- `{{.}}`{{if eq . $.DailyCarrier.AuthTokenEnv}} (shared with the helper for carrier signature validation){{end}}
 {{end}}
 Helper side:
 
 {{range .DailyCarrier.HelperEnv}}- `{{.}}`
-{{end}}
+{{end}}- `{{.DailyCarrier.AuthTokenEnv}}` (shared with the deployed agent)
+
 Helper side, optional:
 
 {{range .DailyCarrier.OptionalEnv}}- `{{.}}`
@@ -199,9 +201,10 @@ which overrides the manifest.
 {{- if .DailyCarrier}}
 
 The set only needs the agent-side names listed under **Required environment**.
-The helper-side names are read where you run the helper and the deployed agent
-never reads them, so delete their lines from the copy you upload if you would
-rather they never reach the platform.
+The helper-only names are read where you run the helper and the deployed agent
+never reads them, so delete those lines from the copy you upload. Keep the
+shared `{{.DailyCarrier.AuthTokenEnv}}` in the platform secret set: the bot uses
+it to forward the existing carrier call.
 {{- end}}
 {{- else}}
 This package declares no secrets, so there is no secret set to create:
@@ -300,8 +303,10 @@ Do these in the [Twilio Console](https://console.twilio.com), in this order.
 {{- if .DailyCarrier.HasInbound}}
 2. **Point the number at the helper.** Phone Numbers, Manage, Active Numbers,
    your number, Configure. Set "A call comes in" to a Webhook, method POST, at
-   `https://<your helper host>/call`. That host is what the tunnel command below
-   prints, so run it first and paste what it gives you.
+   `$UNMUTE_PUBLIC_URL/call`. `UNMUTE_PUBLIC_URL` is the exact HTTPS base URL
+   from the tunnel or production host (an optional path is allowed), with no
+   trailing slash. Twilio signs that URL; a different host, path, or scheme is
+   rejected before any agent session starts.
 {{- end}}
 {{- if or .DailyCarrier.HasOutbound .HasColdTransfer}}
 {{$trunk}}. **A trunk termination address, because this agent places calls.** Elastic SIP
@@ -364,22 +369,22 @@ Two commands, and they are only needed for **incoming** calls. Deploy the agent
 first: a call that lands before `agent status` reports `ready` gets the helper's
 failure line rather than a conversation.
 
-The first starts the helper, reading every value it needs from the `.env` you
-filled in:
-
-```sh
-uv run telephony_helper.py
-```
-
-The second gives it a public address, in a second terminal, so your carrier can
-reach it:
+The first gives the helper a public address:
 
 ```sh
 cloudflared tunnel --url http://localhost:7860
 ```
 
-The tunnel prints an HTTPS URL. That URL plus `/call` is what carrier action 2
-takes. Any tunnel works; `ngrok http 7860` is the same thing.
+Copy the printed HTTPS origin into `UNMUTE_PUBLIC_URL` in `.env`, then start the
+helper in a second terminal. It must know that exact origin because Twilio signs
+the full `$UNMUTE_PUBLIC_URL/call` URL:
+
+```sh
+uv run telephony_helper.py
+```
+
+Any tunnel works; `ngrok http 7860` is the same thing. If its URL changes, update
+both `.env` and carrier action 2 before restarting the helper.
 
 Check it is up with `curl https://<your helper host>/healthz`, which answers
 `{"status": "ok"}` and nothing else. It exists so you can tell "helper down" from
@@ -482,16 +487,18 @@ pipecat cloud agent status {{.Project}}
 Do not place a call until `status` reports `ready`. Deploying again updates the
 same agent rather than making a second one.
 {{if .DailyCarrier.HasInbound}}
-**{{if .SecretSet}}6{{else}}5{{end}}. Start the helper and expose it**, in two terminals, then point your number at
-the printed URL per carrier action 2. Only needed once per session; the number's
-setting only changes when the URL does.
-
-```sh
-uv run telephony_helper.py
-```
+**{{if .SecretSet}}6{{else}}5{{end}}. Expose and start the helper**, in two terminals, then point your number at
+the same signed URL per carrier action 2. Only needed once per session; update
+both `UNMUTE_PUBLIC_URL` and the carrier webhook when the tunnel URL changes.
 
 ```sh
 cloudflared tunnel --url http://localhost:7860
+```
+
+Copy the printed HTTPS origin into `UNMUTE_PUBLIC_URL` in `.env`, then:
+
+```sh
+uv run telephony_helper.py
 ```
 
 **{{if .SecretSet}}7{{else}}6{{end}}. Test an incoming call.** Ring your own number from a phone. Expected: you
@@ -540,6 +547,7 @@ What the caller hears, and what it means:
 | What happens | Where to look |
 |---|---|
 | Carrier error tone, or a recorded announcement | The webhook URL is wrong, or the helper is not reachable from the internet. Check `/healthz` through the tunnel URL, not through localhost. |
+| Twilio reports HTTP 403 | The webhook URL and `UNMUTE_PUBLIC_URL` differ, or the Twilio auth token is wrong. The helper validates the signature over every form field before it starts an agent. |
 | A working agent answers, but not this one | The number is still on a SIP trunk, so the trunk took the call and this project never saw it. The helper's log is empty, which is the tell. See **One number serves one target at a time**. If two of your agents share a greeting and a voice, they are indistinguishable by ear, so read the log rather than listening. |
 | The caller hears the hold line and nothing more | The agent never joined, or the forward failed. The helper's log names which: an agent that would not start logs the platform's own error text, and a forward that failed logs `forwarding carrier call ... failed`. |
 | The caller hears the failure line straight away | The agent would not start, and the helper's log carries the platform's own words for why. `PCC-1001` means the deployment is not in a ready state, so check `agent status` before anything else. A missing platform secret and a name that was never deployed both land here too. |
@@ -915,17 +923,6 @@ indistinguishable by ear.
 | The transfer never rings the destination | The per-call check refuses a missing destination by name at session start, so if the session started, read the agent log for the update request's response. |
 {{- end}}
 | An `ERROR` line reading `BusBridge Trying to process LLMServiceMetadataFrame ... but StartFrame not received yet` | Harmless, and nothing of yours caused it. Both pipelines start at once; the transport pipeline's start waits on the transcriber's WebSocket, so the agent's LLM announces itself a moment before the bridge is ready and that announcement is dropped. It carries one flag, `is_realtime_service`, which is false for every model this project binds, and the processor that would read it ignores a false one. It appears when a provider connects slowly and not otherwise. |
-{{end}}{{if and (eq .Transport "daily-sip") (not .DailyCarrier)}}
-## Carrierless Daily dial-out
-
-This connection is outbound-only. It lets a cold-transfer control dial its
-declared destination through Daily, but it cannot answer phone calls or serve a
-`telephony` channel. Do not buy or attach a Daily number for this shape.
-
-Talk to the agent through its web-audio channel. Before testing a real transfer,
-deploy the project, set the destination environment values listed above, and ask
-Daily to enable dial-out for the domain. The account prerequisite below has the
-request and provider documentation.
 {{end}}{{if .Prerequisites}}
 ## Account prerequisites
 

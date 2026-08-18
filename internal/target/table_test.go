@@ -89,7 +89,7 @@ func TestTelephonyControlsResolveCarrierAndTransport(t *testing.T) {
 		want      Tag
 	}{
 		{"pipecat cold missing Daily", ColdTransfer, Pipecat, "twilio", "", Gated},
-		{"pipecat cold Daily", ColdTransfer, Pipecat, "daily-sip", "", Core},
+		{"pipecat cold without phone plan", ColdTransfer, Pipecat, "daily-sip", "", Gated},
 		// Vapi and Deepgram have no route and no connection, so after the route
 		// moved into the connection file no author can write a carrier these
 		// rows would see. The four rows that conditioned on one lost the
@@ -292,8 +292,8 @@ func TestV1_TransfersCompileOnlyOnNativeRoutes(t *testing.T) {
 		}
 	}
 	table := Default()
-	if got := table.Control(ColdTransfer, Pipecat, "daily-sip", ""); got.Tag != Core {
-		t.Errorf("pipecat cold on daily-sip = %#v, want core", got)
+	if got := table.Control(ColdTransfer, Pipecat, "daily-sip", ""); got.Tag != Gated || !strings.Contains(got.Note, "active channels.phone Connection") {
+		t.Errorf("pipecat cold without a phone plan = %#v, want gated with the required phone leg named", got)
 	}
 	if got := table.Control(ColdTransfer, Pipecat, "carrier-websocket", "twilio"); got.Tag != Gated {
 		t.Errorf("pipecat cold off daily-sip = %#v, want gated", got)
@@ -308,29 +308,22 @@ func TestV1_TransfersCompileOnlyOnNativeRoutes(t *testing.T) {
 	}
 }
 
-// The Daily route has no telephony plan (ir/build.go builds one only for a
-// declared connection), so the prerequisite lookup has to work off the route
-// triple alone. This is the seam the whole feature reads.
-func TestRouteAccountPrerequisitesAreReachableWithoutAPlan(t *testing.T) {
+// Prerequisites are keyed by the exact route triple. The removed carrierless
+// shape has none; the supported Twilio route has the Daily account requirement.
+func TestRouteAccountPrerequisitesAreRouteScoped(t *testing.T) {
 	got := RouteAccountPrerequisites(Pipecat, "daily-sip", "")
+	if len(got) != 0 {
+		t.Fatalf("carrierless daily-sip prerequisites = %+v, want none for the rejected route", got)
+	}
+	got = RouteAccountPrerequisites(Pipecat, "daily-sip", "twilio")
 	if len(got) != 1 || got[0].Name != "daily_dialout" {
-		t.Fatalf("pipecat daily-sip prerequisites = %+v, want one daily_dialout", got)
+		t.Fatalf("pipecat daily-sip twilio prerequisites = %+v, want the one daily_dialout row", got)
 	}
-	if !got[0].Needs([]TelephonyFeature{TelephonyFeature(ColdTransfer)}) {
-		t.Error("daily_dialout must be needed by cold_transfer: a cold transfer dials the destination")
+	if !got[0].Needs([]TelephonyFeature{TelephonyFeature(ColdTransfer)}) || !got[0].Needs([]TelephonyFeature{TelephonyOutbound}) {
+		t.Error("daily_dialout must cover carrier-backed cold transfer and outbound calling")
 	}
-	if !got[0].Needs([]TelephonyFeature{TelephonyOutbound}) {
-		t.Error("daily_dialout must be needed by outbound calling")
-	}
-	// The other half of the rule: one that always applies is a banner.
 	if got[0].Needs([]TelephonyFeature{TelephonyInbound}) {
 		t.Error("daily_dialout must not apply to an inbound-only package")
-	}
-	// The rule matches any carrier on the transport, so the carrier form inherits
-	// it: dial-out approval is a Daily domain fact, and whose trunk carries the
-	// media does not change it (SCHEMA N37, research F2).
-	if got := RouteAccountPrerequisites(Pipecat, "daily-sip", "twilio"); len(got) != 1 || got[0].Name != "daily_dialout" {
-		t.Fatalf("pipecat daily-sip twilio prerequisites = %+v, want the one daily_dialout row", got)
 	}
 	for _, carrier := range []string{"twilio", "telnyx", "plivo"} {
 		if got := RouteAccountPrerequisites(Pipecat, "carrier-websocket", carrier); len(got) != 0 {
@@ -367,9 +360,16 @@ func TestRouteAccountPrerequisitesAreEvidenced(t *testing.T) {
 			if _, isControl := table.Controls[control]; !isControl {
 				continue
 			}
-			if got := table.Control(control, rule.provider, rule.transport, rule.carrier); got.Tag == Gated {
-				t.Errorf("prerequisite %q is needed by %q, which (%s, %s) refuses: %s",
-					p.Name, feature, rule.provider, rule.transport, got.Note)
+			tag := table.Control(control, rule.provider, rule.transport, rule.carrier).Tag
+			key := TelephonyKey{Provider: rule.provider, Transport: rule.transport, Carrier: rule.carrier}
+			if rule.carrier != "" {
+				if _, ok := TelephonyRoutes()[key]; ok {
+					tag = ResolveTelephonyFeature(key, feature).Tag
+				}
+			}
+			if tag == Gated {
+				t.Errorf("prerequisite %q is needed by %q, which (%s, %s) refuses",
+					p.Name, feature, rule.provider, rule.transport)
 			}
 		}
 	}

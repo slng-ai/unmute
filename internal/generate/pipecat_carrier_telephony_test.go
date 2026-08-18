@@ -14,37 +14,20 @@ import (
 // The (pipecat, daily-sip, twilio) contracts: the emitted helper
 // (contracts/forwarding-helper.md), the environment split
 // (contracts/environment.md), and the README runbook (contracts/runbook.md).
-//
-// Every fixture here is safe_core on the carrier form, so the no-carrier
-// comparisons in pipecat_v1_test.go stay the baseline they already are.
-
-// dailyCarrierArtifact is safe_core on the Daily route with a carrier leg. The
-// four Connection keys are the ones SCHEMA N37 fixed for this route, and the
-// phone channel is what the carrier form makes declarable.
+// dailyCarrierArtifact uses the focused Daily carrier fixture. The four
+// Connection keys are the ones SCHEMA N37 fixed for this route.
 func dailyCarrierArtifact(t *testing.T, carrier string, outbound bool) Artifact {
 	t.Helper()
-	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "daily_carrier"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbound := true
-	pkg.Agent.Channels["phone"] = spec.Channel{
-		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
-		RequiredControls: []string{"cold_transfer", "hangup"},
-	}
-	configured := pkg.Targets["pipecat"]
-	configured.Connection = "twilio_sip_daily"
-	// The env-name destination form, as the shipped example uses: it is the one
-	// that makes the runtime composition observable, and a committed fixture
-	// should not carry a dialable literal anyway.
-	pkg.Agent.Destinations = map[string]string{"billing_line": "BILLING_PHONE_NUMBER"}
-	pkg.Targets = map[string]spec.Target{"pipecat": configured}
-	pkg.Connections = map[string]spec.Connection{"twilio_sip_daily": {
-		Transport: "daily-sip", Carrier: carrier, Environment: map[string]string{
-			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
-			"sip_address": "SIP_TRUNK_HOSTNAME", "from_number": "SIP_FROM_NUMBER",
-		},
-	}}
+	phone := pkg.Agent.Channels["phone"]
+	phone.Outbound = &outbound
+	pkg.Agent.Channels["phone"] = phone
+	connection := pkg.Connections["twilio_sip_daily"]
+	connection.Carrier = carrier
+	pkg.Connections["twilio_sip_daily"] = connection
 	agent, err := ir.Build(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -69,8 +52,8 @@ func TestCarrierHelperIsEmittedExactlyWhenACarrierIsDeclared(t *testing.T) {
 	if !slices.Contains(paths, "telephony_helper.py") {
 		t.Fatalf("a carrier build emits no helper, so nothing answers the carrier: %v", paths)
 	}
-	if slices.Contains(artifactPaths(dailyArtifact(t)), "telephony_helper.py") {
-		t.Error("the no-carrier Daily build emits the helper; on that form Daily's own infrastructure delivers the call")
+	if slices.Contains(artifactPaths(plainPipecatArtifact(t)), "telephony_helper.py") {
+		t.Error("the plain Pipecat build emits the carrier helper")
 	}
 	// A carrier build still deploys to Pipecat Cloud.
 	if !slices.Contains(paths, "pcc-deploy.toml") {
@@ -101,7 +84,8 @@ func TestCarrierHelperIsEmittedExactlyWhenACarrierIsDeclared(t *testing.T) {
 	// The startup check names every required value, so a missing one stops the
 	// process rather than failing on a live call.
 	for _, want := range []string{
-		"REQUIRED_ENV = [", "PIPECAT_CLOUD_API_KEY_ENV", "raise SystemExit(1)",
+		"REQUIRED_ENV = [", "PIPECAT_CLOUD_API_KEY_ENV", "PUBLIC_URL_ENV",
+		"AUTH_TOKEN_ENV", "raise SystemExit(1)",
 	} {
 		if !strings.Contains(helper, want) {
 			t.Errorf("the helper's startup check is missing %q", want)
@@ -113,6 +97,31 @@ func TestCarrierHelperIsEmittedExactlyWhenACarrierIsDeclared(t *testing.T) {
 	if strings.Contains(helper, "DAILY_API_KEY") {
 		t.Error("the helper reads DAILY_API_KEY, so it can create rooms the platform never tells the agent about")
 	}
+	// The public endpoint can start an agent session with the compiled platform
+	// key, so it authenticates the complete carrier form before reading CallSid
+	// or reaching the start call.
+	for _, want := range []string{
+		"from twilio.request_validator import RequestValidator",
+		"from urllib.parse import parse_qsl, urlsplit",
+		"await request.body()",
+		"X-Twilio-Signature",
+		"RequestValidator(os.environ[AUTH_TOKEN_ENV]).validate(",
+		"_call_url(), form, signature",
+		"return Response(status_code=403)",
+	} {
+		if !strings.Contains(helper, want) {
+			t.Errorf("the helper's signed ingress is missing %q", want)
+		}
+	}
+	verify := strings.Index(helper, "RequestValidator(os.environ[AUTH_TOKEN_ENV]).validate")
+	callID := strings.Index(helper, `call_sid = form.get("CallSid", "")`)
+	start := strings.Index(helper, "started = await _start_agent")
+	if verify < 0 || callID < 0 || start < 0 || verify > callID || callID > start {
+		t.Error("the helper handles CallSid or starts an agent before carrier signature verification")
+	}
+	if pyproject := artifactFile(t, carrier, "pyproject.toml"); !strings.Contains(pyproject, `"twilio>=9,<10"`) {
+		t.Error("the signed Daily helper is missing the selected Twilio SDK dependency")
+	}
 }
 
 // T019 / contracts/environment.md: who reads which name. The split exists so a
@@ -123,9 +132,9 @@ func TestCarrierEnvironmentSplitsAgentSideFromHelperSide(t *testing.T) {
 	readme := artifactFile(t, carrier, "README.md")
 	report := artifactFile(t, carrier, "compile-report.json")
 
-	// One helper-side name, not two. There is no outbound trigger token because
-	// there is no endpoint here that places a call.
-	helperOnly := []string{"PIPECAT_CLOUD_API_KEY"}
+	// These names are read only where the helper runs. There is no outbound
+	// trigger token because there is no endpoint here that places a call.
+	helperOnly := []string{"PIPECAT_CLOUD_API_KEY", "UNMUTE_PUBLIC_URL"}
 	optional := []string{"DAILY_HOLD_AUDIO_URL", "DAILY_ROOM_GEO"}
 	agentSide := []string{"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "SIP_TRUNK_HOSTNAME", "DAILY_API_KEY"}
 
@@ -160,21 +169,30 @@ func TestCarrierEnvironmentSplitsAgentSideFromHelperSide(t *testing.T) {
 	if !strings.Contains(readme, "Agent side:") || !strings.Contains(readme, "Helper side:") {
 		t.Error("the README's required-environment section does not mark which side reads which name")
 	}
-	// The no-carrier build's env file must not have moved at all.
-	if got := artifactFile(t, dailyArtifact(t), ".env.example"); strings.Contains(got, "helper side") {
-		t.Errorf("the no-carrier .env.example grew carrier wording:\n%s", got)
+	required := readme[strings.Index(readme, "## Required environment"):]
+	required = required[:strings.Index(required, "## Deploy to Pipecat Cloud")]
+	helperAt := strings.Index(required, "Helper side:")
+	if helperAt < 0 || !strings.Contains(required[:helperAt], "TWILIO_AUTH_TOKEN") ||
+		!strings.Contains(required[helperAt:], "TWILIO_AUTH_TOKEN") {
+		t.Error("the shared Twilio auth token is not listed for both the agent and helper")
+	}
+	if !strings.Contains(required, "shared") {
+		t.Error("the README does not label the Twilio auth token as shared")
+	}
+	if got := artifactFile(t, plainPipecatArtifact(t), ".env.example"); strings.Contains(got, "helper side") {
+		t.Errorf("the plain Pipecat .env.example grew carrier wording:\n%s", got)
 	}
 }
 
 // T024 / contracts/runbook.md: the runbook exists once, states its own cost, and
-// keeps the carrier out of the platform half.
+// keeps the selected carrier protocol truthful in the platform half.
 func TestCarrierRunbookContract(t *testing.T) {
 	readme := artifactFile(t, dailyCarrierArtifact(t, "twilio", true), "README.md")
 	if got := strings.Count(readme, "## Telephony setup"); got != 1 {
 		t.Fatalf("the runbook appears %d times, want exactly once", got)
 	}
-	if strings.Contains(artifactFile(t, dailyArtifact(t), "README.md"), "## Telephony setup") {
-		t.Error("the no-carrier Daily README grew a carrier runbook")
+	if strings.Contains(artifactFile(t, plainPipecatArtifact(t), "README.md"), "## Telephony setup") {
+		t.Error("the plain Pipecat README grew a carrier runbook")
 	}
 	// The stated counts have to match what is rendered. Four carrier actions
 	// because this fixture declares outbound and a cold transfer; two commands.
@@ -195,11 +213,15 @@ func TestCarrierRunbookContract(t *testing.T) {
 		t.Error("the carrier part renders more actions than it states")
 	}
 
-	// The platform half must read correctly for any SIP-capable carrier.
+	// This route is granted only to Twilio, so the platform half names the exact
+	// signature protocol rather than pretending the helper is carrier-neutral.
 	platform := section[strings.Index(section, "### On this side"):]
-	for _, name := range []string{"Twilio", "twilio", "Telnyx", "Plivo"} {
+	if !strings.Contains(platform, "Twilio signs") {
+		t.Error("the platform part does not explain the selected carrier signature")
+	}
+	for _, name := range []string{"Telnyx", "Plivo"} {
 		if strings.Contains(platform, name) {
-			t.Errorf("the platform part names %q, so it would not read correctly for another carrier", name)
+			t.Errorf("the platform part names unselected carrier %q", name)
 		}
 	}
 
@@ -279,9 +301,9 @@ func TestCarrierCallIsForwardedOnce(t *testing.T) {
 //
 // The helper exists because an *incoming* call needs a room whose SIP address does
 // not exist yet. Dialling out has no such problem, so it takes one command against
-// the platform's start endpoint, exactly as it does on a Daily-provisioned number.
-// The helper therefore has no endpoint that spends money, and so needs no bearer
-// token to guard one: the value an operator never has to invent.
+// the platform's Daily start endpoint.
+// The helper therefore has no outbound endpoint or second bearer token. Its one
+// public call-start endpoint is authenticated by the carrier's webhook signature.
 func TestCarrierOutboundIsStartedAgainstThePlatformNotTheHelper(t *testing.T) {
 	artifact := dailyCarrierArtifact(t, "twilio", true)
 	helper := artifactFile(t, artifact, "telephony_helper.py")
@@ -437,7 +459,6 @@ func dailyCarrierArtifactWithoutTransfer(t *testing.T) Artifact {
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
 		RequiredControls: []string{"hangup"},
 	}
-	dropHumanTransfer(pkg)
 	phone := pkg.Agent.Channels["phone"]
 	phone.Inbound, phone.Outbound = &inbound, &outbound
 	pkg.Agent.Channels["phone"] = phone
@@ -462,10 +483,9 @@ func dailyCarrierArtifactWithoutTransfer(t *testing.T) Artifact {
 }
 
 // T039 / US3: on a carrier target the transfer leaves through the operator's own
-// trunk; on a Daily-only target it is byte-identical to today.
+// trunk.
 func TestCarrierColdTransferDialsThroughTheOperatorTrunk(t *testing.T) {
 	carrier := artifactFile(t, dailyCarrierArtifact(t, "twilio", true), "bot.py")
-	daily := artifactFile(t, dailyArtifact(t), "bot.py")
 
 	if !strings.Contains(carrier, `{"toEndPoint": _carrier_sip(os.environ["BILLING_PHONE_NUMBER"])}`) {
 		t.Error("the carrier transfer does not compose its destination at the trunk's termination address")
@@ -478,25 +498,17 @@ func TestCarrierColdTransferDialsThroughTheOperatorTrunk(t *testing.T) {
 	if !strings.Contains(carrier, `destination.startswith(("sip:", "sips:"))`) {
 		t.Error("a destination that is already a SIP URI would be composed a second time")
 	}
-	if strings.Contains(daily, "_carrier_sip") {
-		t.Error("the Daily-only transfer changed shape; it dials E.164 through Daily exactly as before")
-	}
-	// Pin the existing Daily transfer shape while adding the carrier form.
+	// Pin the one-attempt transfer shape.
 	for _, want := range []string{
 		`self.call_context.get("_transfer_result")`,
 		`self.call_context["_transfer_result"] = {"transferred": True}`,
 	} {
-		for label, bot := range map[string]string{"carrier": carrier, "daily": daily} {
-			if !strings.Contains(bot, want) {
-				t.Errorf("%s bot lost the at-most-one-attempt guard piece %q", label, want)
-			}
+		if !strings.Contains(carrier, want) {
+			t.Errorf("carrier bot lost the at-most-one-attempt guard piece %q", want)
 		}
 	}
-	// And the caller-stays-connected branch is still there on both.
-	for label, bot := range map[string]string{"carrier": carrier, "daily": daily} {
-		if !strings.Contains(bot, "The transfer could not be completed") {
-			t.Errorf("%s bot lost its transfer failure branch", label)
-		}
+	if !strings.Contains(carrier, "The transfer could not be completed") {
+		t.Error("carrier bot lost its transfer failure branch")
 	}
 }
 
@@ -580,13 +592,10 @@ func TestCarrierSeamIsWordsNotShapes(t *testing.T) {
 		}
 	}
 
-	// And the helper names no carrier at all: it is the same file whoever carries
-	// the call.
-	helper := artifactFile(t, base, "telephony_helper.py")
-	for _, name := range []string{"Twilio", "twilio", "Telnyx", "telnyx", "Plivo", "plivo"} {
-		if strings.Contains(helper, name) {
-			t.Errorf("the rendered helper names carrier %q", name)
-		}
+	// Ingress authentication is deliberately route-specific. The only granted
+	// Daily carrier route is Twilio, whose validator is part of this build.
+	if helper := artifactFile(t, base, "telephony_helper.py"); !strings.Contains(helper, "RequestValidator") {
+		t.Error("the selected Twilio helper lost carrier signature validation")
 	}
 }
 

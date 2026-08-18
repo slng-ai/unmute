@@ -39,7 +39,6 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.settings import LLMSettings
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.daily.transport import DailyParams, DailyTransport
 from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
@@ -65,8 +64,6 @@ MAIN_NAME = "main"
 # keys, the public URL) is required by telephony.py, not here, so a telephony
 # package still runs in the browser with nothing but model keys (V10/B3).
 REQUIRED_ENV = [
-    "BILLING_PHONE_NUMBER",
-    "DAILY_API_KEY",
     "DEEPGRAM_API_KEY",
     "GET_INVOICE_URL",
     "LANGFUSE_BASE_URL",
@@ -215,7 +212,7 @@ You are the billing specialist for Acme Support. This is a phone call, so keep e
 - The caller was handed to you because they have a billing question. The conversation so far is in your context.
 - Use `get_invoice` to look up the caller's invoices. It takes the customer id, which the earlier lookup already established.
 - Explain charges calmly and clearly, one item at a time.
-- If the caller is not satisfied or asks for a person, transfer them with `to_human`.
+- If the caller is not satisfied, explain what a human support team would need to review.
 """
 INTAKE_PROMPT = """# Intake agent (placeholder prompt)
 
@@ -256,7 +253,6 @@ class BillingAgent(TracedLLMWorker):
     def __init__(self, state=None, context=None, call_context=None) -> None:
         self.state = state
         self.context = context
-        self.call_context = call_context if call_context is not None else {}
 
         llm = build_billing_llm(state)
         super().__init__("billing", llm=llm, pipeline=Pipeline([llm, build_billing_tts()]), bridged=())
@@ -278,62 +274,6 @@ class BillingAgent(TracedLLMWorker):
             )
             response.raise_for_status()
             await params.result_callback(response.json())
-
-    @_direct_tool(cancel_on_interruption=False)
-    async def to_human(self, params: FunctionCallParams):
-        """Transfer the caller to a human."""
-        logger.info("human transfer fired: to_human (cold)")
-        transfer_result = self.call_context.get("_transfer_result")
-        if transfer_result is not None:
-            # Asked twice. Replay the first answer rather than dial again.
-            await params.result_callback(transfer_result)
-            return
-        transport = self.call_context.get("_transport")
-        if not isinstance(transport, DailyTransport):
-            # No phone call, so nothing to hand over: the browser and console
-            # transports carry no transfer primitive. Refuse before announcing
-            # a transfer that cannot start.
-            self.call_context["_transfer_result"] = {"failed": "this session is not a phone call, so it cannot be transferred"}
-            await params.result_callback(self.call_context["_transfer_result"])
-            return
-        # Claimed before any transfer work awaits: a request arriving while
-        # the first one is in flight must not slip past the guard.
-        self.call_context["_transfer_result"] = {"in_progress": "A transfer is already under way; do not start another."}
-        # Daily SIP transfers via REFER, which keeps the bot on the call
-        # until the transfer completes, so the bot speaks the announcement
-        # itself (the official daily-pstn-cold-transfer pattern).
-        try:
-            await params.llm.push_frame(
-                LLMMessagesAppendFrame(
-                    [{"role": "developer", "content": "Tell the caller you are transferring them to a colleague now and to please hold, then wait."}],
-                    run_llm=True,
-                )
-            )
-        except BaseException:
-            # The carrier primitive has not started, so this claim is safe to
-            # release and a later model turn may retry.
-            self.call_context.pop("_transfer_result", None)
-            raise
-        # sip_call_transfer, not sip_refer, and the choice is the same on both
-        # Daily forms. REFER would take Daily out of the media path and stop its
-        # billing, but it needs the originating SIP system to honour REFER, which
-        # neither platform documents for a carrier interconnect leg. So Daily
-        # stays anchored after a completed transfer and both legs keep billing
-        # until the call ends; the README states that cost.
-        try:
-            error = await transport.sip_call_transfer({"toEndPoint": os.environ["BILLING_PHONE_NUMBER"]})
-        except Exception as exc:
-            error = exc
-        if error is not None:
-            # The transport can return or raise a failure (T5). Either way the
-            # claimed per-call result becomes terminal before on_unavailable is
-            # applied, so another tool call replays it instead of dialling again.
-            logger.warning("cold transfer failed: {}", error)
-            self.call_context["_transfer_result"] = {"failed": f"The transfer could not be completed ({error}). Tell the caller and keep helping them."}
-            await params.result_callback(self.call_context["_transfer_result"])
-            return
-        self.call_context["_transfer_result"] = {"transferred": True}
-        await params.result_callback(self.call_context["_transfer_result"])
 
 
 
@@ -362,7 +302,6 @@ class IntakeAgent(TracedLLMWorker):
     def __init__(self, state=None, context=None, call_context=None) -> None:
         self.state = state
         self.context = context
-        self.call_context = call_context if call_context is not None else {}
 
         llm = build_intake_llm(state)
         super().__init__("intake", llm=llm, pipeline=Pipeline([llm, build_intake_tts()]), bridged=())
@@ -553,7 +492,7 @@ transport_params: dict = {
     # The runner assigns an inbound call's dial-in settings and Daily credentials
     # onto whatever this returns, so on the Daily route it has to be the params
     # class that declares them. The generic one rejects the assignment.
-    "daily": lambda: DailyParams(audio_in_enabled=True, audio_out_enabled=True),
+    "daily": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True),
 
 }
 
@@ -574,7 +513,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
     tracing_enabled = setup_langfuse_tracing()
 
-    call_context["_transport"] = transport
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     # turn: local — end-of-turn detection runs on-device (Silero VAD). No API
@@ -648,11 +586,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
             _idle_end.cancel()
             _idle_end = None
 
-    @transport.event_handler("on_dialout_answered")
-    async def on_dialout_answered(transport, data):
-        # Cold transfer: the human answered, so the bot leaves the call.
-        await main.queue_frame(EndFrame())
-
     pipeline_started = asyncio.Event()
     entry_started = False
 
@@ -675,12 +608,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     async def on_pipeline_started(worker, frame):
         pipeline_started.set()
 
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
-        # Telephony transports (carrier WebSocket, Daily SIP) have no RTVI
-        # client-ready handshake: the carrier opens a raw media WebSocket and
-        # the bot initiates once that connection is open and main's StartFrame
-        # has traversed (Pipecat Twilio dial-in flow; SPEC V2).
+    @main.rtvi.event_handler("on_client_ready")
+    async def on_client_ready(rtvi):
+        # Wait for both client media readiness and main's StartFrame before
+        # activating tools or emitting the greeting (SPEC V2).
         await pipeline_started.wait()
         await activate_entry()
 

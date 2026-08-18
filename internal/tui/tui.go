@@ -2228,7 +2228,7 @@ func editChannels(runner *fieldRunner, data *scaffold.Data) error {
 				savePhone()
 			}
 		case "transport":
-			if _, err := runner.input("Target transport (optional)", "Driver vocabulary; Pipecat cold transfer uses daily-sip.", &data.Transport, validateBasic); err != nil {
+			if _, err := runner.input("Target transport (optional)", "Pipecat cold transfer needs carrier-backed daily-sip or cloud-websocket with Twilio.", &data.Transport, validateBasic); err != nil {
 				return err
 			}
 		case "carrier":

@@ -1,5 +1,5 @@
 # One instance per primary target. The same portable source compiles to all four.
-# Each instance carries infrastructure only (provider, version, connection) plus
+# Each instance carries provider/version plus
 # a `models:` override map, keyed by model name, for the
 # entries this target cannot run as defined in agent.yaml (N15). An override
 # replaces the whole entry; overrides are forwarded to the provider as-is and
@@ -11,7 +11,6 @@ targets:
     provider: livekit
     version: "1.6.10"
     sdk_language: python
-    connection: twilio_sip      # cold_transfer needs SIP on LiveKit (SCHEMA N31)
     models:
       # override the vad entry: LiveKit runs its own turn model, not Silero
       vad:
@@ -28,7 +27,6 @@ targets:
   pipecat:
     provider: pipecat
     version: "1.7.0"
-    connection: daily_provisioned   # cold_transfer needs Daily SIP on Pipecat
     # no model overrides: the agent.yaml defaults (SLNG + OpenAI + deepgram STT
     # + local silero VAD) run as defined
 

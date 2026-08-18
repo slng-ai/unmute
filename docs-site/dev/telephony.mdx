@@ -112,13 +112,13 @@ fails, you get a warning naming the number, not silence.
 | Pipecat `carrier-websocket` + Twilio | Compose: agent, Redis | yes | sets the number's voice webhook for this run |
 | LiveKit `connector` + Twilio | Compose: agent, LiveKit Server; no Redis | yes | sets the number's voice webhook for this run |
 | LiveKit `sip` + Twilio | Compose: agent, Redis, LiveKit Server, LiveKit SIP | no | nothing; the trunk records it creates are on the local server |
-| Pipecat `daily-sip` | refused, see below | not applicable | not applicable |
+| Pipecat `daily-sip` + Twilio | refused; run the emitted `telephony_helper.py` | not applicable | nothing |
 
-The carrierless Daily shape is outbound-only, so it has no inbound topology to run:
-
-```text wrap
-unmute: dev <package>: target "pipecat" uses a carrierless Pipecat Daily connection (transport daily-sip), which is outbound-only: it can dial a transfer destination but cannot receive calls, so there is no local telephony topology to run; talk to this agent now with `unmute dev <package>` in the browser, and to deploy it run `unmute compile <package>` and follow the Deploy and Human transfers sections of the emitted README
-```
+The Daily route needs an existing carrier phone leg. Its generated README gives
+the two commands for the helper and tunnel; `unmute dev --telephony` does not
+host that public helper for you. Set `UNMUTE_PUBLIC_URL` to the helper's exact
+HTTPS base URL before it starts. The helper verifies Twilio's signed `/call`
+form before it uses the Pipecat Cloud key to start an agent session.
 
 ## The flags
 

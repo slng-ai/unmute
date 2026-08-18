@@ -90,12 +90,6 @@ func smokePipecatTelephonyArtifact(t *testing.T) generate.Artifact {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The carrier-websocket routes carry media only: SCHEMA N31 made human
-	// transfers native-route-only, so safe_core's cold transfer cannot ride this
-	// one and asking for it fails the build. This test is about the local Compose
-	// graph, not transfers, so the fixture drops the transfer and asks the route
-	// for nothing it does not have.
-	dropHumanTransfers(pkg)
 	enableSmokeTelephony(pkg, "hangup")
 	target := pkg.Targets["pipecat"]
 	target.Connection = "primary_phone"
@@ -168,26 +162,6 @@ func enableSmokeTelephony(pkg *spec.Package, requiredControls ...string) {
 	pkg.Agent.Channels["phone"] = spec.Channel{
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
 		RequiredControls: requiredControls,
-	}
-}
-
-// dropHumanTransfers removes safe_core's cold transfer, for a route that has no
-// transfer primitive. It removes the transfer completely: the control, every
-// attachment, and the destination it resolved to. All three have to go — a
-// dangling reference was always an error, and a destination nothing resolves to
-// is one now, because its environment name still reached .env.example and the
-// generated startup check for a control nothing could call.
-func dropHumanTransfers(pkg *spec.Package) {
-	for name, control := range pkg.Agent.Controls {
-		if control.Kind != "human_transfer" {
-			continue
-		}
-		delete(pkg.Agent.Controls, name)
-		delete(pkg.Agent.Destinations, control.TransferDestination())
-		for agentName, agent := range pkg.Agent.Agents {
-			agent.Tools = slices.DeleteFunc(agent.Tools, func(tool string) bool { return tool == name })
-			pkg.Agent.Agents[agentName] = agent
-		}
 	}
 }
 

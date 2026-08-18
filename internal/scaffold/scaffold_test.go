@@ -579,11 +579,9 @@ func TestPreflightTelephonyAndHumanTransfer(t *testing.T) {
 			}}
 			report, err := Preflight(data)
 			if provider == "pipecat" {
-				// The scaffold's Pipecat default is the Daily-provisioned route,
-				// which dials out and cannot receive, so a phone channel on it
-				// needs a carrier the wizard has not been given. The refusal
-				// names both ways out.
-				if err == nil || !strings.Contains(err.Error(), "cannot receive them") {
+				// The scaffold starts with daily-sip, but a carrier is still
+				// required. Preflight fails closed and names the supported route.
+				if err == nil || !strings.Contains(err.Error(), "daily-sip with twilio") {
 					t.Fatalf("Preflight() = %v", err)
 				}
 				return
@@ -598,19 +596,17 @@ func TestPreflightTelephonyAndHumanTransfer(t *testing.T) {
 	}
 }
 
-// A scaffolded package now carries a connection whenever anything in it uses a
-// phone route, so what is missing on the Pipecat default is the carrier rather
-// than the connection: the Daily-provisioned route places calls and cannot
-// receive them (research R10).
-func TestPreflightRejectsCarrierlessRouteOnAPhoneChannel(t *testing.T) {
+// A scaffolded Pipecat phone route starts with daily-sip, but remains incomplete
+// until the author selects a supported carrier.
+func TestPreflightRejectsIncompleteDailyRoute(t *testing.T) {
 	data := Data{Name: "agent"}
 	data.SetTarget("pipecat")
 	data.Channels = []Channel{{Name: "phone", Kind: "telephony", Outbound: true, OnVoicemail: "hangup"}}
 	_, err := Preflight(data)
 	if err == nil {
-		t.Fatal("a carrier-less route served a phone channel")
+		t.Fatal("an incomplete Daily route served a phone channel")
 	}
-	for _, want := range []string{"connections/phone.yaml", "no carrier", "Give the connection a carrier"} {
+	for _, want := range []string{"connections/phone.yaml", "declares no carrier", "daily-sip with twilio"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal is missing %q: %v", want, err)
 		}
@@ -893,10 +889,8 @@ func TestWriteHumanTransferPutsDestinationInTheBlock(t *testing.T) {
 	}
 }
 
-// A wizard-built phone route starts from a per-target transport. Neither value
-// completes a route on its own — the carrier is still missing and the wizard
-// cannot supply it — but naming the transport is what makes the resulting
-// refusal list the carriers that work.
+// A wizard-built phone route starts from a per-target transport. The carrier is
+// still missing, and naming the transport lets the refusal list what works.
 func TestDefaultTransportPerTarget(t *testing.T) {
 	for target, want := range map[string]string{
 		"pipecat":  "daily-sip",

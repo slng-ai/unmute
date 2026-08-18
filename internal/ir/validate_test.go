@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -80,6 +81,11 @@ func TestValidateTaskControlKinds(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			agent := safeAgent(t)
+			if test.control == "to_human" {
+				agent.Controls["to_human"] = &HumanTransfer{
+					Kind: ControlHumanTransfer, Mode: TransferCold, Destination: "billing_line", OnUnavailable: OnUnavailableReturn,
+				}
+			}
 			agent.Controls["run_check"] = &Delegate{Kind: ControlDelegate, Task: "routing"}
 			agent.Tasks["routing"] = Task{
 				Instructions: "Route the caller.",
@@ -387,11 +393,6 @@ func TestValidateCodeTelephonyRequiresResolvedPlan(t *testing.T) {
 func TestValidateTelephonyProvisionalRouteIsUsableAndQuiet(t *testing.T) {
 	pkg := loadSafeCore(t)
 	enableTelephony(pkg)
-	// The carrier-websocket routes carry no transfers (SPEC C1, V1), so the
-	// provisional-route fixture must not declare one: drop the control, its
-	// tool reference, its destination, and the channel's cold_transfer
-	// requirement.
-	removeHumanTransfer(pkg)
 	phone := pkg.Agent.Channels["phone"]
 	phone.RequiredControls = []string{"hangup"}
 	pkg.Agent.Channels["phone"] = phone
@@ -1308,6 +1309,7 @@ func reportFor(report ValidateReport, provider Provider) TargetValidation {
 func TestV12_WarmTransferRequiresOutboundDirection(t *testing.T) {
 	for _, outbound := range []bool{false, true} {
 		pkg := loadSafeCore(t)
+		addColdHumanTransfer(pkg)
 		enableTelephony(pkg)
 		phone := pkg.Agent.Channels["phone"]
 		phone.Outbound = &outbound
@@ -1335,8 +1337,9 @@ func TestV12_WarmTransferRequiresOutboundDirection(t *testing.T) {
 // target is refused by the control row; warm on a Pipecat carrier telephony
 // route is refused by the route table, with the supported routes named.
 func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
-	// Non-telephony Pipecat target (safe_core's daily-sip): the control row.
+	// Non-telephony Pipecat target: the control row.
 	pkg := loadSafeCore(t)
+	addColdHumanTransfer(pkg)
 	human := pkg.Agent.Controls["to_human"]
 	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
 	pkg.Agent.Controls["to_human"] = human
@@ -1360,6 +1363,7 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 
 	// Telephony route (carrier-websocket): the route table names the fix too.
 	pkg = loadSafeCore(t)
+	addColdHumanTransfer(pkg)
 	enableTelephony(pkg)
 	outbound := true
 	phone := pkg.Agent.Channels["phone"]
@@ -1383,9 +1387,9 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 	// route grants no warm feature, so the refusal must still arrive, and it must
 	// still say which thing it means.
 	pkg = dailyCarrierPackage(t)
-	human = pkg.Agent.Controls["to_human"]
+	human = pkg.Agent.Controls["send_to_billing"]
 	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
-	pkg.Agent.Controls["to_human"] = human
+	pkg.Agent.Controls["send_to_billing"] = human
 	phone = pkg.Agent.Channels["phone"]
 	phone.Outbound = &outbound
 	pkg.Agent.Channels["phone"] = phone
@@ -1403,23 +1407,82 @@ func TestV1_PipecatWarmTransferFailsWithSupportedRoutesNamed(t *testing.T) {
 	}
 }
 
-// dailyCarrierPackage is safe_core on (pipecat, daily-sip, twilio): the Daily
-// route with a carrier leg (SCHEMA N37), with the four Connection keys that
-// route accepts and nothing else.
 func dailyCarrierPackage(t *testing.T) *packagespec.Package {
 	t.Helper()
+	pkg, err := packagespec.Load(filepath.Join("..", "testdata", "daily_carrier"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pkg
+}
+
+func TestBuildRejectsCarrierlessPipecatDaily(t *testing.T) {
 	pkg := loadSafeCore(t)
-	enableTelephony(pkg)
-	target := pkg.Targets["pipecat"]
-	target.Connection = "twilio_sip_daily"
-	pkg.Targets = map[string]packagespec.Target{"pipecat": target}
+	addColdHumanTransfer(pkg)
+	pipecat := pkg.Targets["pipecat"]
+	pipecat.Connection = "daily_provisioned"
+	pkg.Targets = map[string]packagespec.Target{"pipecat": pipecat}
+	pkg.Connections = map[string]packagespec.Connection{
+		"daily_provisioned": {Transport: "daily-sip"},
+	}
+	_, err := Build(pkg)
+	if err == nil {
+		t.Fatal("carrierless Daily remained an accepted authoring route")
+	}
+	for _, want := range []string{"connections/daily_provisioned.yaml", `transport "daily-sip" declares no carrier`, "daily-sip with twilio"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("build error missing %q: %v", want, err)
+		}
+	}
+}
+
+func TestValidatePipecatDailyColdTransferNeedsPhoneLeg(t *testing.T) {
+	pkg := loadSafeCore(t)
+	addColdHumanTransfer(pkg)
+	pipecat := pkg.Targets["pipecat"]
+	pipecat.Connection = "twilio_sip_daily"
+	pkg.Targets = map[string]packagespec.Target{"pipecat": pipecat}
 	pkg.Connections = map[string]packagespec.Connection{"twilio_sip_daily": {
 		Transport: "daily-sip", Carrier: "twilio", Environment: map[string]string{
 			"account_sid": "TWILIO_ACCOUNT_SID", "auth_token": "TWILIO_AUTH_TOKEN",
 			"sip_address": "SIP_TRUNK_HOSTNAME", "from_number": "SIP_FROM_NUMBER",
 		},
 	}}
-	return pkg
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
+	if err == nil {
+		t.Fatal("web-only Daily accepted a cold transfer without an existing SIP phone leg")
+	}
+	joined := strings.Join(report.PerTarget[0].Errors, "\n")
+	for _, want := range []string{"channels.phone", "sessionId"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("validation error missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestValidatePipecatDailyColdTransferNeedsActivePhoneDirection(t *testing.T) {
+	pkg := dailyCarrierPackage(t)
+	disabled := false
+	phone := pkg.Agent.Channels["phone"]
+	phone.Inbound, phone.Outbound = &disabled, &disabled
+	pkg.Agent.Channels["phone"] = phone
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Validate(agent, []Target{agent.Targets["pipecat"]}, targetcap.Default())
+	if err == nil {
+		t.Fatal("cold transfer accepted a phone channel that can neither receive nor place a call")
+	}
+	if joined := strings.Join(report.PerTarget[0].Errors, "\n"); !strings.Contains(joined, "enable inbound or outbound") {
+		t.Fatalf("validation error did not name the missing phone direction:\n%s", joined)
+	}
 }
 
 // T016: the Daily carrier route validates Redis-free, and a plan that declares
@@ -1477,6 +1540,7 @@ func TestValidatePipecatDailyCarrierRefusesCallSources(t *testing.T) {
 	} {
 		t.Run(string(source), func(t *testing.T) {
 			pkg := dailyCarrierPackage(t)
+			pkg.Agent.Variables = map[string]packagespec.Variable{}
 			pkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(source)}
 			agent, err := Build(pkg)
 			if err != nil {
@@ -1496,6 +1560,7 @@ func TestValidatePipecatDailyCarrierRefusesCallSources(t *testing.T) {
 
 			// The same declaration passes where the fill path exists.
 			cwPkg := dailyCarrierPackage(t)
+			cwPkg.Agent.Variables = map[string]packagespec.Variable{}
 			cwPkg.Agent.Variables["caller_fact"] = packagespec.Variable{Type: "string", Source: string(source)}
 			cw := cwPkg.Targets["pipecat"]
 			cw.Connection = "primary_phone"
@@ -1572,6 +1637,7 @@ func TestValidateDeploymentRegions(t *testing.T) { // N32
 // unaffected, because it acts on the caller's existing leg and dials nobody.
 func TestWarmTransferWithoutAConnectionIsGated(t *testing.T) {
 	pkg := loadSafeCore(t)
+	addColdHumanTransfer(pkg)
 	human := pkg.Agent.Controls["to_human"]
 	human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
 	pkg.Agent.Controls["to_human"] = human
@@ -1605,6 +1671,7 @@ func TestColdTransferNeedsARoute(t *testing.T) {
 	browserOnly := func(t *testing.T, provider string) (*Agent, Target) {
 		t.Helper()
 		pkg := loadSafeCore(t)
+		addColdHumanTransfer(pkg)
 		only := pkg.Targets[provider]
 		only.Connection = "" // browser only: no route of any kind
 		pkg.Targets = map[string]packagespec.Target{provider: only}
@@ -1643,7 +1710,7 @@ func TestColdTransferNeedsARoute(t *testing.T) {
 		if len(errs) != 1 {
 			t.Fatalf("want exactly one error in the provider's own vocabulary, got %d:\n%s", len(errs), strings.Join(errs, "\n"))
 		}
-		if !strings.Contains(errs[0], "Pipecat cold transfer requires Daily SIP transport") {
+		if !strings.Contains(errs[0], "Pipecat cold transfer requires an active channels.phone Connection") {
 			t.Errorf("error = %q, want Pipecat's own wording", errs[0])
 		}
 	})
@@ -1656,6 +1723,7 @@ func TestColdTransferNeedsARoute(t *testing.T) {
 func TestSIPRouteRequiresEveryConnectionValue(t *testing.T) {
 	for _, missing := range []string{"sip_address", "sip_username", "sip_password", "from_number"} {
 		pkg := loadSafeCore(t)
+		addColdHumanTransfer(pkg)
 		enableTelephony(pkg)
 		human := pkg.Agent.Controls["to_human"]
 		human.Cold, human.Warm = nil, &packagespec.WarmTransfer{Destination: "billing_line"}
@@ -1691,6 +1759,7 @@ func TestSIPRouteRequiresEveryConnectionValue(t *testing.T) {
 func cloudWebsocketPackage(t *testing.T) *packagespec.Package {
 	t.Helper()
 	pkg := loadSafeCore(t)
+	addColdHumanTransfer(pkg)
 	enableTelephony(pkg)
 	target := pkg.Targets["pipecat"]
 	target.Connection = "twilio_voice"

@@ -23,11 +23,15 @@ from __future__ import annotations
 import os
 import sys
 from contextlib import asynccontextmanager
+{{if .DailyCarrier.HasInbound}}from urllib.parse import parse_qsl, urlsplit
+{{end}}
 
 import aiohttp
 from dotenv import load_dotenv
-from fastapi import FastAPI, {{if .DailyCarrier.HasInbound}}Form, {{end}}Request{{if .DailyCarrier.HasInbound}}, Response{{end}}
+from fastapi import FastAPI, Request{{if .DailyCarrier.HasInbound}}, Response{{end}}
 from loguru import logger
+{{if .DailyCarrier.HasInbound}}from twilio.request_validator import RequestValidator
+{{end}}
 
 load_dotenv()
 
@@ -40,12 +44,18 @@ AGENT_NAME = {{pyq .Project}}
 START_URL = f"https://api.pipecat.daily.co/v1/public/{AGENT_NAME}/start"
 
 PIPECAT_CLOUD_API_KEY_ENV = "PIPECAT_CLOUD_API_KEY"
+{{if .DailyCarrier.HasInbound}}PUBLIC_URL_ENV = "UNMUTE_PUBLIC_URL"
+AUTH_TOKEN_ENV = {{pyq .DailyCarrier.AuthTokenEnv}}
+{{end}}
 
 # Names only. A missing value fails at startup, by name, before the first call.
-# One name, because starting the agent is the only thing this process does: the
-# room is the platform's to create, so no Daily key is read here.
+# The platform key starts the agent. Inbound helpers also need the exact public
+# origin and carrier auth token to verify the webhook before using that key.
 REQUIRED_ENV = [
     PIPECAT_CLOUD_API_KEY_ENV,
+{{if .DailyCarrier.HasInbound}}    PUBLIC_URL_ENV,
+    AUTH_TOKEN_ENV,
+{{end}}
 ]
 
 # Optional. Unset is a supported state, not a missing value.
@@ -61,12 +71,33 @@ def require_env() -> None:
     """Refuse to serve half-configured. Names, one per line, never values."""
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if not missing:
+{{if .DailyCarrier.HasInbound}}        _call_url()
+{{end}}
         return
     print("telephony_helper: missing required environment values:", file=sys.stderr)
     for name in missing:
         print(f"  {name}", file=sys.stderr)
     print("Fill them in .env (see .env.example) and start again.", file=sys.stderr)
     raise SystemExit(1)
+
+
+{{if .DailyCarrier.HasInbound}}def _call_url() -> str:
+    """The exact URL Twilio signs, independent of proxy-added request headers."""
+    public_url = os.environ[PUBLIC_URL_ENV].rstrip("/")
+    parsed = urlsplit(public_url)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise RuntimeError(
+            "UNMUTE_PUBLIC_URL must be an HTTPS origin with an optional path"
+        )
+    return public_url + "/call"
+{{end}}
 
 
 @asynccontextmanager
@@ -164,21 +195,27 @@ async def _start_agent(request: Request, *, caller: str, call_sid: str) -> dict:
 
 
 @app.post("/call")
-async def inbound_call(
-    request: Request,
-    CallSid: str = Form(default=""),
-    From: str = Form(default=""),
-) -> Response:
+async def inbound_call(request: Request) -> Response:
     """The carrier's voice webhook: answer fast, hold audibly, start the agent."""
-    if not CallSid:
+    form = dict(parse_qsl((await request.body()).decode("utf-8"), keep_blank_values=True))
+    signature = request.headers.get("X-Twilio-Signature", "")
+    if not signature or not RequestValidator(os.environ[AUTH_TOKEN_ENV]).validate(
+        _call_url(), form, signature
+    ):
+        logger.warning("rejected inbound webhook with invalid carrier signature")
+        return Response(status_code=403)
+
+    call_sid = form.get("CallSid", "")
+    caller = form.get("From", "")
+    if not call_sid:
         logger.error("inbound webhook carried no call identifier field: CallSid")
         return _failure_answer()
     try:
-        started = await _start_agent(request, caller=From or "caller", call_sid=CallSid)
-        logger.info("inbound call {} started session {}", CallSid, started.get("sessionId"))
+        started = await _start_agent(request, caller=caller or "caller", call_sid=call_sid)
+        logger.info("inbound call {} started session {}", call_sid, started.get("sessionId"))
     except Exception as exc:
         # Named cause in the log, spoken failure to the caller.
-        logger.error("inbound call {} could not be set up: {}", CallSid, exc)
+        logger.error("inbound call {} could not be set up: {}", call_sid, exc)
         return _failure_answer()
     return _hold_answer()
 {{end}}
@@ -189,13 +226,11 @@ async def inbound_call(
 # exist yet: Daily makes one room per call and its SIP address comes with it, so
 # there is nothing static for a carrier to be pointed at. Dialling out has no such
 # problem, so it is started straight against the platform with one command the
-# README spells out, exactly as it is on a Daily-provisioned number.
+# README spells out, using Pipecat Cloud's Daily dial-out endpoint.
 #
-# That is also why this server needs no authentication. It is reachable from the
-# internet, because your carrier has to reach it, and everything it can do is
-# answer a call that a carrier already delivered. An endpoint here that spent money
-# would have to be guarded, and the guard would be one more value for you to invent
-# and keep. Not having the endpoint is better than having a well-guarded one.
+# The inbound endpoint is public because the carrier must reach it. It verifies
+# the carrier signature before starting a platform session. There is deliberately
+# no endpoint here that places a new outbound call.
 
 
 @app.get("/healthz")

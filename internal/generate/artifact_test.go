@@ -105,7 +105,6 @@ func TestTelephonyRuntimePlanAndCompileReportUseResolvedFacts(t *testing.T) { //
 		t.Fatal(err)
 	}
 	enablePackageTelephony(pkg)
-	dropHumanTransfer(pkg)
 	configured := pkg.Targets["pipecat"]
 	configured.Connection = "primary_phone"
 	setConnectionRoute(pkg, "primary_phone", "carrier-websocket", "twilio")

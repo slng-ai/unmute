@@ -1,11 +1,4 @@
-# The LiveKit-native transfer route. Cold transfer on LiveKit is a SIP REFER on
-# the caller's own leg, so it is supported on `(livekit, sip)` and nowhere else
-# (SCHEMA N31): a target with no route at all has no leg to hand over, and the
-# compiler now refuses that rather than emitting a tool that cannot work.
-#
-# The Pipecat instance names `daily_provisioned` for the same reason, which is
-# why this file exists: both targets carry the transfer, so both need a route
-# their provider can transfer on.
+# A LiveKit SIP route used by focused generation tests.
 transport: sip
 carrier: twilio
 environment:

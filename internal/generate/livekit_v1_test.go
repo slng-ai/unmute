@@ -1474,15 +1474,8 @@ func TestLiveKitV1ConversationShapingAndAgentTools(t *testing.T) {
 // cold is a SIP REFER through the job context with the resolved destination;
 // warm awaits the prebuilt WarmTransferTask and registers the trunk env.
 func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
-	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent, err := ir.Build(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	agent, resolved := configuredLiveKitSIPCold(t)
+	artifact, err := Generate(agent, resolved, target.Default())
 	if err != nil {
 		t.Fatalf("generate cold: %v", err)
 	}
@@ -1635,11 +1628,11 @@ func TestLiveKitV1HumanTransferColdAndWarm(t *testing.T) {
 }
 
 func TestLiveKitV1HumanTransferHangupAlwaysShutsDown(t *testing.T) {
-	coldAgent := loadCompilerAgent(t)
+	coldAgent, coldTarget := configuredLiveKitSIPCold(t)
 	coldAgent.Controls["to_human"].(*ir.HumanTransfer).OnUnavailable = ir.OnUnavailableHangup
 	coldArtifact, err := Generate(
 		coldAgent,
-		targetByProvider(t, coldAgent, ir.ProviderLiveKit),
+		coldTarget,
 		target.Default(),
 	)
 	if err != nil {
@@ -1986,6 +1979,7 @@ func configuredLiveKitSIP(t *testing.T) (*ir.Agent, ir.Target) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	addColdHumanTransfer(pkg)
 	enablePackageTelephony(pkg)
 	configured := pkg.Targets["livekit"]
 	configured.Connection = "primary_phone"
@@ -2016,6 +2010,32 @@ func configuredLiveKitSIP(t *testing.T) (*ir.Agent, ir.Target) {
 	return agent, agent.Targets["livekit"]
 }
 
+func configuredLiveKitSIPCold(t *testing.T) (*ir.Agent, ir.Target) {
+	t.Helper()
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	addColdHumanTransfer(pkg)
+	enablePackageTelephony(pkg)
+	configured := pkg.Targets["livekit"]
+	configured.Connection = "primary_phone"
+	setConnectionRoute(pkg, "primary_phone", "sip", "twilio")
+	pkg.Targets = map[string]spec.Target{"livekit": configured}
+	connection := pkg.Connections["primary_phone"]
+	connection.Environment = map[string]string{
+		"sip_address": "TWILIO_SIP_ADDRESS", "sip_username": "TWILIO_SIP_USERNAME",
+		"sip_password": "TWILIO_SIP_PASSWORD", "from_number": "TWILIO_PHONE_NUMBER",
+	}
+	pkg.Connections["primary_phone"] = connection
+
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return agent, agent.Targets["livekit"]
+}
+
 func configuredLiveKitConnector(t *testing.T) (*ir.Agent, ir.Target) {
 	t.Helper()
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
@@ -2026,7 +2046,6 @@ func configuredLiveKitConnector(t *testing.T) (*ir.Agent, ir.Target) {
 	// control, every reference to it, and the destination it resolved to.
 	// primary_phone already carries the Twilio account trio (account_sid,
 	// auth_token, from_number).
-	dropHumanTransferControl(pkg)
 	inbound, outbound := true, true
 	pkg.Agent.Channels["phone"] = spec.Channel{
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,

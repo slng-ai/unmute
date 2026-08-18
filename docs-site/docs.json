@@ -139,7 +139,6 @@
             "root": "transfers/overview",
             "pages": [
               "transfers/livekit",
-              "transfers/pipecat-daily",
               "transfers/pipecat-twilio"
             ]
           }

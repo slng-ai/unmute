@@ -165,53 +165,14 @@ func TestDev_help(t *testing.T) {
 	}
 }
 
-// FR-028: `--telephony` on the Daily route has nothing to offer, so it refuses.
-//
-// The refusal is the interesting part. The carrierless Daily form dials out and
-// cannot receive calls, so there is no local topology to run, but the author can
-// still talk to this agent in the browser. A silent no-op here would be the flag
-// that does nothing which Principle II forbids.
-func TestDevTelephonyRefusesOnTheDailyRouteAndNamesWhatWorks(t *testing.T) {
-	cmd := newRootCmd()
-	var out, errOut bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&errOut)
-	root := filepath.Join("..", "testdata", "safe_core")
-	cmd.SetArgs([]string{"dev", "--telephony", "--target", "pipecat", root})
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("--telephony on the Daily route must refuse, got exit 0")
-	}
-	message := err.Error()
-	for _, want := range []string{
-		"daily-sip",      // names the route
-		"outbound-only",  // names what the shape can do
-		"cannot receive", // names why --telephony cannot run it
-		"browser",        // names the mode that does work
-		"safe_core",      // names the package the command received
-	} {
-		if !strings.Contains(message, want) {
-			t.Errorf("refusal missing %q:\n%s", want, message)
-		}
-	}
-	// It must not claim the route has no telephony. It is the only Pipecat
-	// telephony route there is.
-	for _, forbidden := range []string{"carries the phone call", "no resolved telephony route", "not supported", "unsupported"} {
-		if strings.Contains(message, forbidden) {
-			t.Errorf("refusal says %q, which is false for this route:\n%s", forbidden, message)
-		}
-	}
-}
-
 // The carrier form of the Daily route refuses too, and it has to refuse for a
 // different reason, in different words. It *does* have a local telephony
 // topology: the emitted helper. What it does not have is a way for this command
 // to run that helper somewhere the operator's carrier can reach, which is the
 // whole point of the tunnel the README dictates.
 //
-// The no-carrier message would be false here ("no local telephony topology to
-// run"), and the generic "no executable telephony topology" line would be false
-// too, since this route resolves a plan with a process in it.
+// The generic "no executable telephony topology" line would be false here,
+// since this route resolves a plan with a process in it.
 func TestDevTelephonyRefusesOnTheDailyCarrierFormAndNamesTheHelper(t *testing.T) {
 	cmd := newRootCmd()
 	var out, errOut bytes.Buffer
@@ -496,13 +457,63 @@ func TestComposeIgnoresRetiredTrunkNamesAndStillGuardsLocalTopology(t *testing.T
 	}
 }
 
+// routeSafeCore turns the web-safe shared fixture into the focused two-target
+// phone package these dev tests need.
+func routeSafeCore(t *testing.T, dir, pipecatTransport, livekitTransport string, withColdTransfer bool) {
+	t.Helper()
+	writeConnection := func(name, transport string) {
+		body := "transport: " + transport + "\ncarrier: twilio\nenvironment:\n" +
+			"  account_sid: TWILIO_ACCOUNT_SID\n" +
+			"  auth_token: TWILIO_AUTH_TOKEN\n" +
+			"  from_number: TWILIO_PHONE_NUMBER\n"
+		if err := os.WriteFile(filepath.Join(dir, "connections", name+".yaml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeConnection("primary_phone", pipecatTransport)
+	writeConnection("twilio_sip", livekitTransport)
+
+	targetsPath := filepath.Join(dir, "targets.yaml")
+	targets, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured := mustReplace(t, string(targets),
+		"    sdk_language: python\n",
+		"    sdk_language: python\n    connection: twilio_sip\n")
+	configured = mustReplace(t, configured,
+		"    version: \"1.7.0\"\n    # no model overrides",
+		"    version: \"1.7.0\"\n    connection: primary_phone\n    # no model overrides")
+	if err := os.WriteFile(targetsPath, []byte(configured), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if !withColdTransfer {
+		return
+	}
+	agentPath := filepath.Join(dir, "agent.yaml")
+	agent, err := os.ReadFile(agentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuredAgent := mustReplace(t, string(agent),
+		"    tools:\n      - get_invoice\n",
+		"    tools:\n      - get_invoice\n      - to_human\n")
+	configuredAgent = mustReplace(t, configuredAgent,
+		"\ntools:\n  - lookup_customer",
+		"\n  to_human:\n    kind: human_transfer\n    cold:\n      destination: billing_line   # resolved by the destinations map below\n\ndestinations:\n  billing_line: BILLING_PHONE_NUMBER\n\ntools:\n  - lookup_customer")
+	if err := os.WriteFile(agentPath, []byte(configuredAgent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A provisional route is usable now: dev proceeds past validation instead of
 // failing closed on the credentialed-smoke gate. It stops later (here on
 // missing model credentials), never on the gate. Standalone --public-url still
 // requires --telephony.
 func TestDevTelephonyProvisionalRouteDoesNotFailClosed(t *testing.T) {
 	dir := copySafeCore(t)
-	routeSafeCore(t, dir, "carrier-websocket", "connector")
+	routeSafeCore(t, dir, "carrier-websocket", "connector", false)
 	agentPath := filepath.Join(dir, "agent.yaml")
 	agentRaw, err := os.ReadFile(agentPath)
 	if err != nil {
@@ -513,7 +524,7 @@ func TestDevTelephonyProvisionalRouteDoesNotFailClosed(t *testing.T) {
 	// instead of splicing `phone:` into the middle of the `web:` mapping.
 	agentConfigured := mustReplace(t, string(agentRaw),
 		"channels:\n  web:\n    kind: realtime_audio\n\n",
-		"channels:\n  web:\n    kind: realtime_audio\n  phone:\n    kind: telephony\n    inbound: true\n    outbound: false\n    required_controls:\n      - cold_transfer\n      - hangup\n\n")
+		"channels:\n  web:\n    kind: realtime_audio\n  phone:\n    kind: telephony\n    inbound: true\n    outbound: false\n    required_controls:\n      - hangup\n\n")
 	if err := os.WriteFile(agentPath, []byte(agentConfigured), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -595,7 +606,7 @@ func TestDevToFlagGuards(t *testing.T) {
 // process, naming the outbound requirement rather than the provisional gate.
 func TestDevToRejectsInboundOnlyTarget(t *testing.T) {
 	dir := copySafeCore(t)
-	routeSafeCore(t, dir, "carrier-websocket", "connector")
+	routeSafeCore(t, dir, "carrier-websocket", "connector", false)
 	agentPath := filepath.Join(dir, "agent.yaml")
 	agentRaw, err := os.ReadFile(agentPath)
 	if err != nil {
@@ -606,7 +617,7 @@ func TestDevToRejectsInboundOnlyTarget(t *testing.T) {
 	// instead of splicing `phone:` into the middle of the `web:` mapping.
 	agentConfigured := mustReplace(t, string(agentRaw),
 		"channels:\n  web:\n    kind: realtime_audio\n\n",
-		"channels:\n  web:\n    kind: realtime_audio\n  phone:\n    kind: telephony\n    inbound: true\n    outbound: false\n    required_controls:\n      - cold_transfer\n      - hangup\n\n")
+		"channels:\n  web:\n    kind: realtime_audio\n  phone:\n    kind: telephony\n    inbound: true\n    outbound: false\n    required_controls:\n      - hangup\n\n")
 	if err := os.WriteFile(agentPath, []byte(agentConfigured), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +666,7 @@ func TestDevTelephonyOnTheCloudWebsocketRouteReachesTheLocalFlow(t *testing.T) {
 	dir := copySafeCore(t)
 	// The phone channel below is package-wide, so the LiveKit target needs a route
 	// too or the build refuses before this command's dispatch is ever reached.
-	routeSafeCore(t, dir, "cloud-websocket", "connector")
+	routeSafeCore(t, dir, "cloud-websocket", "connector", true)
 	agentPath := filepath.Join(dir, "agent.yaml")
 	agentRaw, err := os.ReadFile(agentPath)
 	if err != nil {

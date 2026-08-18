@@ -22,7 +22,7 @@ func TestTelephonyDocsContract(t *testing.T) {
 			"no adapter, so this route is refused at validation",
 		},
 		"docs-site/reference/connections-yaml.mdx": {
-			"## The three shapes",
+			"## The two shapes",
 			"## Which environment keys a route accepts",
 			"account_sid",
 			"sip_address",
@@ -45,14 +45,16 @@ func TestTelephonyDocsContract(t *testing.T) {
 	}
 }
 
-func TestCarrierlessDailyIsNotDocumentedAsInbound(t *testing.T) {
+func TestCarrierlessDailyAuthoringIsNotDocumented(t *testing.T) {
 	root := filepath.Join("..", "..")
 	for _, path := range []string{
 		"docs-site/telephony/overview.mdx",
-		"docs-site/targets/overview.mdx",
+		"docs-site/dev/telephony.mdx",
+		"docs-site/transfers/overview.mdx",
 		"docs-site/reference/connections-yaml.mdx",
 		"internal/generate/templates/pipecat_v1/README.md.tmpl",
 		"internal/skill/assets/references/telephony.md",
+		"internal/skill/assets/references/transfers.md",
 	} {
 		raw, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
@@ -60,13 +62,34 @@ func TestCarrierlessDailyIsNotDocumentedAsInbound(t *testing.T) {
 		}
 		content := string(raw)
 		for _, forbidden := range []string{
-			"| Pipecat | `daily-sip` | none |",
-			"Daily provisions the number",
-			"Daily provisioned numbers",
-			"This agent answers phone calls over Daily PSTN",
+			"Carrierless Daily dial-out",
+			"carrierless Daily",
+			"no-carrier Daily",
+			"daily-sip with no carrier",
+			"can dial a transfer destination",
+			"control that dials a person",
+			"Cold, with no carrier",
+			"Which carrier**, or none at all?",
 		} {
 			if strings.Contains(content, forbidden) {
-				t.Errorf("%s presents carrierless daily-sip as an inbound route: %q", path, forbidden)
+				t.Errorf("%s presents the removed carrierless daily-sip route: %q", path, forbidden)
+			}
+		}
+	}
+
+	checks := map[string][]string{
+		"docs-site/transfers/overview.mdx":              {"Pipecat `daily-sip` + Twilio", "active `channels.phone` route"},
+		"docs-site/reference/connections-yaml.mdx":      {"| Pipecat | `daily-sip` | `twilio` |"},
+		"internal/skill/assets/references/transfers.md": {"Pipecat `daily-sip` + Twilio", "active phone"},
+	}
+	for path, terms := range checks {
+		raw, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, term := range terms {
+			if !strings.Contains(string(raw), term) {
+				t.Errorf("%s does not document %q", path, term)
 			}
 		}
 	}

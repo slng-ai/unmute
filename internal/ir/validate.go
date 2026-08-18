@@ -491,6 +491,8 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 		case ChannelTelephony:
 			if channel.Inbound == nil || channel.Outbound == nil {
 				errors = add(errors, fmt.Sprintf("channel %q inbound and outbound are required", name))
+			} else if !*channel.Inbound && !*channel.Outbound {
+				errors = add(errors, fmt.Sprintf("channel %q must enable inbound or outbound", name))
 			}
 			if channel.OnVoicemail != "" && (channel.Outbound == nil || !*channel.Outbound) {
 				errors = add(errors, fmt.Sprintf("channel %q on_voicemail requires outbound: true", name))
@@ -681,9 +683,8 @@ func validateRoutePrerequisites(agent *Agent, resolved Target, provider targetca
 // command and the artifact disagreeing about what an account has to be allowed to
 // do (Principle III).
 //
-// Keyed on the route triple rather than on the resolved telephony plan, because
-// the Daily route has no plan: it declares no connection and no telephony
-// channel, so every other route fact is unreachable there.
+// Keyed on the route triple so validation and emitters read the same route
+// contract without re-deriving it from the runtime plan.
 func RoutePrerequisites(agent *Agent, resolved Target, provider targetcap.Provider) []targetcap.RouteAccountPrerequisite {
 	candidates := targetcap.RouteAccountPrerequisites(provider, resolved.Transport, resolved.Carrier)
 	if len(candidates) == 0 {

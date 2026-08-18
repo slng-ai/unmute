@@ -296,14 +296,9 @@ func TestBuildRequiresTelephonyConnectionAndRejectsInverse(t *testing.T) {
 		}
 	})
 	// A connection nothing uses is refused, and the message names both ways to
-	// use one. safe_core dials on a cold transfer, so its own to_human control
-	// has to go before this package stops using a phone route at all (FR-016).
+	// use one.
 	t.Run("connection nothing uses", func(t *testing.T) {
 		pkg := loadSafeCore(t)
-		delete(pkg.Agent.Controls, "to_human")
-		billing := pkg.Agent.Agents["billing"]
-		billing.Tools = slices.DeleteFunc(slices.Clone(billing.Tools), func(name string) bool { return name == "to_human" })
-		pkg.Agent.Agents["billing"] = billing
 		target := pkg.Targets["livekit"]
 		target.Connection = "livekit_trunk"
 		pkg.Targets = map[string]packagespec.Target{"livekit": target}
@@ -355,9 +350,7 @@ func TestCollapsedDailyGuardsAreUnrepresentable(t *testing.T) {
 	}
 }
 
-// The Daily route's two forms (SCHEMA N37). With a carrier the three keys are
-// mutually required and the plan is Redis-free; with none the target keeps its
-// exact current meaning and carries no plan at all.
+// The carrier-backed Daily route resolves a Redis-free phone plan.
 func TestBuildResolvesPipecatDailyCarrierPlan(t *testing.T) {
 	dailyCarrier := func(t *testing.T) *packagespec.Package {
 		t.Helper()
@@ -407,45 +400,19 @@ func TestBuildResolvesPipecatDailyCarrierPlan(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
-	// Dropping the carrier does not half-describe a route any more: it selects
-	// the other Daily form, which dials out and cannot receive. So the refusal
-	// is about the phone channel, and it names both ways out. Without this the
-	// author gets "unsupported telephony route (pipecat, daily-sip, )" from three
-	// separate capability lookups, because the carrier-less form has no row in
-	// the table at all (research R10).
-	t.Run("a carrier-less route cannot serve a phone channel", func(t *testing.T) {
+	t.Run("carrier is required", func(t *testing.T) {
 		pkg := dailyCarrier(t)
 		conn := pkg.Connections["twilio_sip_daily"]
 		conn.Carrier, conn.Environment = "", nil
 		pkg.Connections["twilio_sip_daily"] = conn
 		_, err := Build(pkg)
 		if err == nil {
-			t.Fatal("a route that cannot receive calls served an inbound phone channel")
+			t.Fatal("carrierless daily-sip remained an accepted route")
 		}
-		for _, want := range []string{"cannot receive them", "Give the connection a carrier", "connections/twilio_sip_daily.yaml"} {
+		for _, want := range []string{`transport "daily-sip" declares no carrier`, "daily-sip with twilio", "connections/twilio_sip_daily.yaml"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("the refusal is missing %q: %v", want, err)
 			}
-		}
-	})
-	// The carrierless form receives no calls, so it declares no phone
-	// channel and gets no telephony plan — and it now names a connection like
-	// every other route, because that is where its transport is written. A flat
-	// triple lookup would refuse it: this pairing has no row in the capability
-	// table at all (research R10).
-	t.Run("no carrier keeps the outbound-only form", func(t *testing.T) {
-		pkg := loadSafeCore(t)
-		pkg.Targets = map[string]packagespec.Target{"pipecat": pkg.Targets["pipecat"]}
-		agent, err := Build(pkg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		built := agent.Targets["pipecat"]
-		if built.Telephony != nil || built.Carrier != "" {
-			t.Fatalf("the no-carrier Daily form gained a plan or a carrier: %#v", built)
-		}
-		if built.Transport != "daily-sip" || built.Connection != "daily_provisioned" {
-			t.Fatalf("route = %s via %q, want daily-sip via daily_provisioned", built.Transport, built.Connection)
 		}
 	})
 }
@@ -790,6 +757,7 @@ func TestBuildValidatesDestinationValues(t *testing.T) {
 	}
 
 	pkg := loadSafeCore(t)
+	addColdHumanTransfer(pkg)
 	pkg.Agent.Destinations["billing_line"] = "+14155550123"
 	_, err := Build(pkg)
 	if err == nil || !strings.Contains(err.Error(), "a literal") {
@@ -919,6 +887,7 @@ func TestUnreachableControlIsRefused(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			pkg := loadSafeCore(t)
+			addColdHumanTransfer(pkg)
 			test.mutate(pkg)
 			_, err := Build(pkg)
 			if test.want == "" {
@@ -958,14 +927,17 @@ func TestTaskScopedAgentTransferIsReachable(t *testing.T) {
 	}
 }
 
-// removeHumanTransfer takes the transfer out of a fixture completely: the
-// control, its attachment, and the destination it resolved to. Leaving the
-// destination behind is now an error, and rightly — its environment name reached
-// .env.example and the generated startup check for a control nothing could call.
-func removeHumanTransfer(pkg *packagespec.Package) {
-	delete(pkg.Agent.Controls, "to_human")
-	delete(pkg.Agent.Destinations, "billing_line")
-	detachTool(pkg, "billing", "to_human")
+func addColdHumanTransfer(pkg *packagespec.Package) {
+	pkg.Agent.Controls["to_human"] = packagespec.Control{
+		Kind: "human_transfer", Cold: &packagespec.ColdTransfer{Destination: "billing_line"},
+	}
+	if pkg.Agent.Destinations == nil {
+		pkg.Agent.Destinations = map[string]string{}
+	}
+	pkg.Agent.Destinations["billing_line"] = "BILLING_PHONE_NUMBER"
+	billing := pkg.Agent.Agents["billing"]
+	billing.Tools = append(billing.Tools, "to_human")
+	pkg.Agent.Agents["billing"] = billing
 }
 
 // detachTool removes one name from an agent's tools: list, leaving whatever it
@@ -1022,8 +994,8 @@ func TestBuildResolvesPipecatCloudWebsocketPlan(t *testing.T) {
 			Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
 			RequiredControls: controls,
 		}
-		if !transfer {
-			removeHumanTransfer(pkg)
+		if transfer {
+			addColdHumanTransfer(pkg)
 		}
 		target := pkg.Targets["pipecat"]
 		// Both shapes name a connection, because the connection is where the

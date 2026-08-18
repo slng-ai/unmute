@@ -10,7 +10,7 @@ interchangeable. Before writing anything, get three answers:
 
 1. **Which target**, Pipecat or LiveKit?
 2. **Which transport**, which is the mechanism that carries the call?
-3. **Which carrier**, or none at all?
+3. **Which carrier**?
 
 If the user only said "Twilio", ask which of the routes below they want, or pick
 one and say plainly which you picked and what it cannot do.
@@ -26,6 +26,12 @@ one and say plainly which you picked and what it cannot do.
 | LiveKit Agents | `sip` | Twilio, Telnyx, Plivo | a SIP trunk carries the call into LiveKit SIP |
 | LiveKit Agents | `sip` | Exotel | no adapter, so this route is refused at validation |
 | LiveKit Agents | `connector` | Twilio | a generated bridge turns Twilio Media Streams into a LiveKit room |
+
+The emitted Pipecat Daily helper is a public ingress, not an open start API. Set
+the exact public HTTPS base URL named by its generated runbook. The helper
+validates Twilio's signature over the complete `/call` form before using the
+Pipecat Cloud key; a missing or invalid signature returns 403 and starts no
+session.
 
 The compile report marks each phone route and prints the vendor document and
 the date it was last checked. Read that report before describing the route.
@@ -97,22 +103,17 @@ The setting names on the left are fixed by the route. The names on the right are
 yours and go in `secrets:`. The compiler never reads a value, so a package with
 connections validates and compiles with no credentials present anywhere.
 
-Three shapes exist:
+Two shapes exist:
 
 | Shape | When | Looks like |
 |---|---|---|
 | full route | most connections | `transport`, `carrier`, and an `environment` map |
 | no credentials | receive only on Pipecat `cloud-websocket` | `transport` and `carrier`, nothing else |
-| no carrier | outbound dial-out through Daily | `transport: daily-sip`, and that is the whole file |
 
 The receive-only shape has an edge worth knowing: the moment the package places
 a call or hands one to a person, that same route needs `account_sid`,
 `auth_token`, and `from_number`, because both of those speak to Twilio's API in
 your name. The refusal says which behaviour asked for them.
-
-The no-carrier Daily shape is outbound-only. It can back a control that dials a
-person, but it cannot receive calls and is refused if the package declares a
-telephony channel.
 
 ### The environment keys, per route
 

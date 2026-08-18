@@ -328,7 +328,8 @@ def _carrier_sip(destination: str) -> str:
     """
     if destination.startswith(("sip:", "sips:")):
         return destination
-    return f"sip:{destination}@{os.environ[{{pyq .DailyCarrier.SIPAddressEnv}}]}"
+    sip_address = os.environ[{{pyq .DailyCarrier.SIPAddressEnv}}]
+    return f"sip:{destination}@{sip_address}"
 
 
 # What a phone call adds to REQUIRED_ENV above, checked only on a phone call: a
@@ -344,8 +345,8 @@ def _carrier_session(runner_args: RunnerArguments) -> dict | None:
     """The call details the helper started this session with, validated.
 
     Returns None when this session is not a phone call at all: a browser or
-    console session carries no call details and must behave exactly as it does
-    on a package with no carrier. A body that claims to be a call but is missing
+    console session carries no call details and must behave like an ordinary
+    browser session. A body that claims to be a call but is missing
     a field fails here, by field name, rather than half-way through the call.
     """
     body = getattr(runner_args, "body", None)
@@ -664,10 +665,10 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             await params.result_callback(self.call_context["_transfer_result"])
             return
 {{else}}        transport = self.call_context.get("_transport")
-        if not isinstance(transport, {{$.DailyParams.Transport}}):
+        if not isinstance(transport, {{$.DailyParams.Transport}}) or not self.call_context.get("_daily_sip_session"):
             # No phone call, so nothing to hand over: the browser and console
-            # transports carry no transfer primitive. Refuse before announcing
-            # a transfer that cannot start.
+            # sessions have no existing SIP leg. Refuse before announcing a
+            # transfer that cannot start.
             self.call_context["_transfer_result"] = {"failed": "this session is not a phone call, so it cannot be transferred"}
             await params.result_callback(self.call_context["_transfer_result"])
             return
@@ -737,8 +738,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             # release and a later model turn may retry.
             self.call_context.pop("_transfer_result", None)
             raise
-        # sip_call_transfer, not sip_refer, and the choice is the same on both
-        # Daily forms. REFER would take Daily out of the media path and stop its
+        # sip_call_transfer, not sip_refer. REFER would take Daily out of the media path and stop its
         # billing, but it needs the originating SIP system to honour REFER, which
         # neither platform documents for a carrier interconnect leg. So Daily
         # stays anchored after a completed transfer and both legs keep billing
@@ -1116,6 +1116,7 @@ def build_stt():
 {{if .DailyCarrier}}    # Validated before anything is built: a malformed call body fails by field
     # name rather than mid-call. None means this is not a phone session.
     carrier_call = _carrier_session(runner_args)
+    call_context["_daily_sip_session"] = carrier_call is not None
 {{end}}{{if .CloudWebsocket}}    # Decided once, right after the transport exists: is this a phone call at all?
     # Everything a call needs is checked here, before the caller hears anything.
     # None means browser or console, which behave exactly as they do on a package

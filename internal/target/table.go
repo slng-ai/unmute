@@ -431,7 +431,7 @@ func Default() Table {
 		Controls: map[TelephonyControl]map[Provider]ControlCapability{
 			ColdTransfer: controls(
 				control(),
-				controlTransport("daily-sip", "Pipecat cold transfer requires Daily SIP transport"),
+				controlDeny("Pipecat cold transfer requires an active channels.phone Connection: a web-only session has no existing SIP sessionId or phone leg to transfer; use daily-sip or cloud-websocket with Twilio"),
 				control(),
 				// Whoever builds the Deepgram driver: this needs carrier Twilio in
 				// the generated bridge. It is a comment rather than a condition
@@ -493,10 +493,6 @@ func Default() Table {
 
 func control() ControlCapability {
 	return ControlCapability{Capability: Capability{Tag: Core}}
-}
-
-func controlTransport(transport, note string) ControlCapability {
-	return ControlCapability{Capability: Capability{Tag: Core}, Transport: transport, ConditionNote: note}
 }
 
 func controlDeny(note string) ControlCapability {

@@ -34,6 +34,7 @@ func configuredLiveKitSIPTwoWarm(t *testing.T) (*ir.Agent, ir.Target) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	addColdHumanTransfer(pkg)
 	inbound, outbound := true, false
 	pkg.Agent.Channels["phone"] = spec.Channel{
 		Kind: "telephony", Inbound: &inbound, Outbound: &outbound,
@@ -98,8 +99,8 @@ func TestWarmBriefingEmittedImports(t *testing.T) {
 		}
 	}
 
-	coldAgent := loadCompilerAgent(t)
-	coldArtifact, err := Generate(coldAgent, targetByProvider(t, coldAgent, ir.ProviderLiveKit), target.Default())
+	coldAgent, coldTarget := configuredLiveKitSIPCold(t)
+	coldArtifact, err := Generate(coldAgent, coldTarget, target.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,8 +199,8 @@ func TestWarmTransferLogContract(t *testing.T) {
 // contracts/transfer-log.md, the cold half. Behaviour must not change: only the
 // three lines are new (contract C11).
 func TestColdTransferLogContract(t *testing.T) {
-	agent := loadCompilerAgent(t)
-	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	agent, resolved := configuredLiveKitSIPCold(t)
+	artifact, err := Generate(agent, resolved, target.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,8 +263,8 @@ func TestTransferLogsCarryNoDestinationOrCredential(t *testing.T) {
 			return artifact
 		}},
 		{"cold only", func(t *testing.T) Artifact {
-			agent := loadCompilerAgent(t)
-			artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+			agent, resolved := configuredLiveKitSIPCold(t)
+			artifact, err := Generate(agent, resolved, target.Default())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -456,8 +457,8 @@ func TestWarmBriefingPersonaSaysWhatItMust(t *testing.T) {
 // hook. Cold refers the caller's own leg out and briefs nobody, so a persona in
 // its agent.py would be dead prose in every deployment that read it.
 func TestColdOnlyPackageGetsNoBriefing(t *testing.T) {
-	agent := loadCompilerAgent(t)
-	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	agent, resolved := configuredLiveKitSIPCold(t)
+	artifact, err := Generate(agent, resolved, target.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
