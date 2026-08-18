@@ -218,6 +218,11 @@ Starting the worker or exporting a synthetic span proves connectivity only.
 Complete at least one user turn before reviewing the trace. A traced request
 contains `llm_node` and `llm_request` generation observations in addition to
 the session and agent spans.
+
+Traces can contain caller speech, model input and output, and tool arguments and results.
+Use only fake identities and fake customer data for release tests. Use a separate
+Langfuse project for those tests, and do not send real customer data until its
+access and retention rules are approved.
 Do not edit this project by hand — it is regenerated from the agent spec.
 Change the spec and recompile.
 === agent.py ===

@@ -1124,7 +1124,10 @@ def build_stt():
     phone_call = _phone_session(runner_args)
     call_context["_phone_call"] = phone_call
 {{end}}{{if .Tracing}}
-    tracing_enabled = setup_langfuse_tracing()
+    trace_provider = setup_langfuse_tracing()
+    trace_attributes = {"langfuse.trace.name": TRACE_NAME}
+    if runner_args.session_id is not None:
+        trace_attributes["langfuse.session.id"] = runner_args.session_id
 {{end}}
 {{if and .HasColdTransfer (not .CloudWebsocket)}}    call_context["_transport"] = transport
 {{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
@@ -1168,14 +1171,14 @@ def build_stt():
         pipeline,
         name=MAIN_NAME,
 {{if .Tracing}}
-        enable_tracing=tracing_enabled,
-        additional_span_attributes={"langfuse.trace.name": TRACE_NAME},
+        conversation_id=runner_args.session_id,
+        enable_tracing=True,
+        additional_span_attributes=trace_attributes,
 {{end}}
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True{{if .CloudWebsocket}}, **_pipeline_audio_rates(phone_call){{end}}),
     )
 {{if .Tracing}}
-    if tracing_enabled:
-        enable_agent_tracing(main, agents)
+    enable_agent_tracing(main, agents)
 {{end}}
 {{if .Inactivity}}
     @user_aggregator.event_handler("on_user_turn_idle")
@@ -1328,8 +1331,7 @@ def build_stt():
     try:
         await runner.run()
     finally:
-{{if .Tracing}}        if tracing_enabled:
-            flush_tracing()
+{{if .Tracing}}        await asyncio.to_thread(flush_tracing, trace_provider)
 {{end}}{{range $i, $a := .Agents}}{{if $a.MCPSources}}        await agents[{{$i}}].close_mcp()
 {{end}}{{end}}{{else}}
     await runner.run()

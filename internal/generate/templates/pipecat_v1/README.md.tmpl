@@ -941,12 +941,20 @@ the call is what fails if the account cannot do it yet.
 
 Tracing is configured. Set `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, and
 `LANGFUSE_BASE_URL` in `.env`; all three are required. The trace name is
-`{{.EntryAgent}}-{{.Project}}`; one trace contains the full conversation.
+`{{.EntryAgent}}-{{.Project}}`; one trace contains the full conversation. The
+Pipecat runner session ID is also the Pipecat conversation ID and Langfuse
+session ID.
+Pipecat tracing owns the process OpenTelemetry provider and startup fails if another SDK provider is installed first.
 
 Starting the worker or exporting a synthetic span proves connectivity only.
 Complete at least one user turn before reviewing the trace. A traced request
 contains `conversation` and `turn` spans plus `llm` and `tts` generation
 observations.
+
+Traces can contain caller speech, model input and output, and tool arguments and results.
+Use only fake identities and fake customer data for release tests. Use a separate
+Langfuse project for those tests, and do not send real customer data until its
+access and retention rules are approved.
 
 {{end}}
 ## Agents

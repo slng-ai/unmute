@@ -396,22 +396,33 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 	tracing := artifactFile(t, artifact, "tracing.py")
 	for _, want := range []string{
 		"from tracing import (",
-		"enable_tracing=tracing_enabled",
-		`additional_span_attributes={"langfuse.trace.name": TRACE_NAME}`,
+		"trace_provider = setup_langfuse_tracing()",
+		`trace_attributes = {"langfuse.trace.name": TRACE_NAME}`,
+		"if runner_args.session_id is not None:",
+		`trace_attributes["langfuse.session.id"] = runner_args.session_id`,
+		"conversation_id=runner_args.session_id",
+		"enable_tracing=True",
+		"additional_span_attributes=trace_attributes",
 		"enable_agent_tracing(main, agents)",
-		"flush_tracing()",
+		"await asyncio.to_thread(flush_tracing, trace_provider)",
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing %q", want)
 		}
 	}
 	for _, want := range []string{
-		"def setup_langfuse_tracing() -> bool:",
+		"_TRACE_PROVIDER: TracerProvider | None = None",
+		"def setup_langfuse_tracing() -> TracerProvider:",
+		"if _TRACE_PROVIDER is not None:",
+		"existing_provider = trace.get_tracer_provider()",
+		"if isinstance(existing_provider, TracerProvider):",
+		"OpenTelemetry already has a TracerProvider",
 		`f"{base_url.rstrip('/')}/api/public/otel"`,
 		"setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter())",
 		"def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:",
 		"agent._tracing_context = main._tracing_context",
-		"trace_provider.force_flush()",
+		"def flush_tracing(provider: TracerProvider) -> None:",
+		"provider.force_flush()",
 	} {
 		if !strings.Contains(tracing, want) {
 			t.Errorf("tracing.py missing %q", want)
@@ -419,6 +430,17 @@ func TestV16PipecatRequestTracingWiring(t *testing.T) {
 	}
 	if !strings.Contains(tracing, "if not public_key or not secret_key or not base_url:") {
 		t.Error("configured tracing must reject missing credentials, including all three")
+	}
+	guardAt := strings.Index(tracing, "if isinstance(existing_provider, TracerProvider):")
+	setupAt := strings.Index(tracing, "setup_tracing(service_name=TRACE_NAME")
+	if guardAt < 0 || setupAt < 0 || guardAt > setupAt {
+		t.Error("preinstalled OpenTelemetry provider must fail before Pipecat setup")
+	}
+	if strings.Contains(bot, "tracing_enabled") {
+		t.Error("configured tracing must not keep an impossible disabled branch")
+	}
+	if strings.Contains(bot, "\n        flush_tracing(trace_provider)\n") {
+		t.Error("provider flush must not block Pipecat's event loop")
 	}
 
 	pyproject := artifactFile(t, artifact, "pyproject.toml")
@@ -510,7 +532,6 @@ func TestV23PipecatSpeechObservationsAreRich(t *testing.T) {
 		"def _patch_pipecat_tracing() -> None:",
 		"service_decorators.add_stt_span_attributes",
 		"service_decorators.add_tts_span_attributes",
-		"TTSService.append_to_audio_context",
 		`"langfuse.observation.input"`,
 		`"langfuse.observation.output"`,
 		`"langfuse.trace.input"`,
@@ -523,6 +544,11 @@ func TestV23PipecatSpeechObservationsAreRich(t *testing.T) {
 	} {
 		if !strings.Contains(tracing, want) {
 			t.Errorf("tracing.py missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"TTSAudioRawFrame", "TTSService", "append_to_audio_context", "Pipecat 1.5"} {
+		if strings.Contains(tracing, forbidden) {
+			t.Errorf("tracing.py contains obsolete Pipecat tracing workaround %q", forbidden)
 		}
 	}
 	if !strings.Contains(bot, "PipelineParams(enable_metrics=True, enable_usage_metrics=True)") {
@@ -565,14 +591,18 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 	for _, want := range []string{
 		"from collections.abc import Sequence",
 		"from opentelemetry.sdk.trace import TracerProvider",
+		"_TRACE_PROVIDER: TracerProvider | None = None",
 		`setattr(patched, "__langfuse_patch__", True)`,
 		`setattr(service_decorators, "add_llm_span_attributes", patched_llm)`,
-		`setattr(TTSService, "append_to_audio_context", patched_append_to_audio_context)`,
 		"if not public_key or not secret_key or not base_url:",
+		"def setup_langfuse_tracing() -> TracerProvider:",
+		"global _TRACE_PROVIDER",
+		"if _TRACE_PROVIDER is not None:",
+		"if not isinstance(provider, TracerProvider):",
 		"def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:",
 		"context = self._tracing_context",
 		"if not self._enable_tracing or context is None:",
-		"if isinstance(trace_provider, TracerProvider):",
+		"def flush_tracing(provider: TracerProvider) -> None:",
 	} {
 		if !strings.Contains(tracing, want) {
 			t.Errorf("tracing.py missing static-check-safe form %q", want)
@@ -583,6 +613,8 @@ func TestV24PipecatStaticCheckSurface(t *testing.T) {
 		"append_to_audio_context.__langfuse_patch__",
 		"TTSService.append_to_audio_context =",
 		"trace.get_tracer_provider().force_flush()",
+		"TTSAudioRawFrame",
+		"patched_append_to_audio_context",
 	} {
 		if strings.Contains(tracing, forbidden) {
 			t.Errorf("tracing.py contains ty-unsafe form %q", forbidden)

@@ -17,12 +17,11 @@ from pipecat.workers.llm import LLMWorker
 from pipecat.utils.tracing.setup import setup_tracing
 
 TRACE_NAME = {{pyq .EntryAgent}} + "-" + {{pyq .Project}}
+_TRACE_PROVIDER: TracerProvider | None = None
 
 
 def _patch_pipecat_tracing() -> None:
     """Expose Pipecat's system prompt, speech payloads, and metrics to Langfuse."""
-    from pipecat.frames.frames import TTSAudioRawFrame
-    from pipecat.services.tts_service import TTSService
     from pipecat.utils.tracing import service_decorators
 
     if getattr(service_decorators.add_stt_span_attributes, "__langfuse_patch__", False):
@@ -32,7 +31,7 @@ def _patch_pipecat_tracing() -> None:
         def patched(span, *args, **kwargs):
             set_attribute = span.set_attribute
 
-            # ponytail: Pipecat 1.5 emits speech data under generic keys that
+            # ponytail: Pipecat 1.7.0 emits speech data under generic keys that
             # Langfuse does not map. Remove when Pipecat emits Langfuse I/O.
             def mapped_set_attribute(key, value):
                 set_attribute(key, value)
@@ -89,25 +88,17 @@ def _patch_pipecat_tracing() -> None:
     setattr(patched_llm, "__langfuse_patch__", True)
     setattr(service_decorators, "add_llm_span_attributes", patched_llm)
 
-    original_append_to_audio_context = TTSService.append_to_audio_context
 
-    async def patched_append_to_audio_context(self, context_id, frame):
-        entry = getattr(self, "_tts_spans", {}).get(context_id)
-        if isinstance(frame, TTSAudioRawFrame) and entry and not entry.get("ttfb_recorded"):
-            started_at = getattr(getattr(self, "_metrics", None), "_start_ttfb_time", 0)
-            # ponytail: Pipecat 1.5 clears some TTS contexts while pushing the
-            # metric frame. Record TTFB at the actual first audio frame instead.
-            if started_at:
-                entry["span"].set_attribute(
-                    "metrics.ttfb", datetime.now(timezone.utc).timestamp() - started_at
-                )
-                entry["ttfb_recorded"] = True
-        return await original_append_to_audio_context(self, context_id, frame)
+def setup_langfuse_tracing() -> TracerProvider:
+    global _TRACE_PROVIDER
+    if _TRACE_PROVIDER is not None:
+        return _TRACE_PROVIDER
+    existing_provider = trace.get_tracer_provider()
+    if isinstance(existing_provider, TracerProvider):
+        raise RuntimeError(
+            "OpenTelemetry already has a TracerProvider; configure Pipecat Langfuse tracing first"
+        )
 
-    setattr(TTSService, "append_to_audio_context", patched_append_to_audio_context)
-
-
-def setup_langfuse_tracing() -> bool:
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
     base_url = os.getenv("LANGFUSE_BASE_URL")
@@ -124,24 +115,26 @@ def setup_langfuse_tracing() -> bool:
     _patch_pipecat_tracing()
     if not setup_tracing(service_name=TRACE_NAME, exporter=OTLPSpanExporter()):
         raise RuntimeError("Pipecat OpenTelemetry tracing is unavailable")
-    return True
+    provider = trace.get_tracer_provider()
+    if not isinstance(provider, TracerProvider):
+        raise RuntimeError("Pipecat did not install an SDK tracer provider")
+    _TRACE_PROVIDER = provider
+    return provider
 
 
 def enable_agent_tracing(main: PipelineWorker, agents: Sequence[LLMWorker]) -> None:
-    # ponytail: Pipecat 1.5 LLMWorker exposes no tracing kwargs. Share the main
+    # ponytail: Pipecat 1.7.0 LLMWorker exposes no tracing kwargs. Share the main
     # worker's context until its public constructor accepts them.
     for agent in agents:
         agent._enable_tracing = True
         agent._tracing_context = main._tracing_context
 
 
-def flush_tracing() -> None:
-    trace_provider = trace.get_tracer_provider()
-    if isinstance(trace_provider, TracerProvider):
-        trace_provider.force_flush()
+def flush_tracing(provider: TracerProvider) -> None:
+    provider.force_flush()
 
 
-{{if .NeedsFunctionCalls}}# ponytail: Pipecat 1.5 has no standard-tool tracing hook. Remove this
+{{if .NeedsFunctionCalls}}# ponytail: Pipecat 1.7.0 has no standard-tool tracing hook. Remove this
 # subclass when ordinary LLMWorker tools gain native spans.
 class TracedLLMWorker(LLMWorker):
     """Add the tool spans missing from Pipecat's standard LLM tracing."""

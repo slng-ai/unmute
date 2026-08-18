@@ -26,6 +26,10 @@ Use this prompt to start a fresh manual release sweep:
 > is optional: never require access to a maintainer project, and never send a
 > user's traces or credentials there by default.
 >
+> Traces can contain caller speech, model input and output, and tool arguments and results.
+> Use only fake identities and fake customer data for release tests. Use a
+> separate Langfuse project for the sweep.
+>
 > When something fails, reproduce it, find the shared root cause, add the
 > smallest regression test, fix the shared compiler/runtime path, rebuild, and
 > repeat the same live scenario on every affected target. Update source docs,
