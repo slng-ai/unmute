@@ -75,6 +75,7 @@ type pipecatAgent struct {
 	Transfers         []pipecatTransfer
 	Delegates         []pipecatDelegate
 	MCPSources        []pipecatMCPSource
+	FlowFunctionNames []string // task-node handlers sharing this worker's LLM registry
 }
 
 // pipecatMCPSource is one MCP tool source this agent carries (N40): one

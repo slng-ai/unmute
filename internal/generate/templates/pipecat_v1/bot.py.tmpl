@@ -36,7 +36,7 @@ from __future__ import annotations
 {{end}}{{if or .HasFlows .CallStartVars}}import json
 {{end}}import os
 {{if .NeedsRender}}import re
-{{end}}{{if .Telephony}}import sys
+{{end}}{{if or .Telephony .NeedsMCP}}import sys
 {{end}}{{if .Variables}}from dataclasses import dataclass
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
 {{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}
@@ -48,7 +48,7 @@ import httpx
 {{end}}{{range .LocalTools}}import tools.{{.Name}}
 {{end}}{{if .Telephony}}import telephony
 {{end}}from dotenv import load_dotenv
-{{if or .Telephony .HasColdTransfer .DailyCarrier .CloudWebsocket .NeedsFunctionCalls}}from loguru import logger
+{{if or .Telephony .HasColdTransfer .DailyCarrier .CloudWebsocket .NeedsFunctionCalls .NeedsMCP}}from loguru import logger
 {{end}}{{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
 {{end}}
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -75,13 +75,13 @@ from pipecat.runner.utils import create_transport
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 {{end}}{{if .NeedsUserMute}}from pipecat.turns.user_mute.always_user_mute_strategy import AlwaysUserMuteStrategy
-{{end}}{{if not .Inline}}from pipecat.workers.llm import {{if not (and .Tracing .NeedsFunctionCalls)}}LLMWorker, {{end}}LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
+{{end}}{{if not .Inline}}from pipecat.workers.llm import {{if not (and .Tracing (or .NeedsFunctionCalls .NeedsMCP))}}LLMWorker, {{end}}LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
 {{else if .NeedsFunctionCalls}}from pipecat.workers.llm import tool
 {{end}}from pipecat.workers.runner import WorkerRunner
 {{if .Tracing}}
 from tracing import (
     TRACE_NAME,
-{{if .NeedsFunctionCalls}}    TracedLLMWorker,
+{{if or .NeedsFunctionCalls .NeedsMCP}}    TracedLLMWorker,
 {{end}}    enable_agent_tracing,
     flush_tracing,
     setup_langfuse_tracing,
@@ -111,7 +111,59 @@ def require_env() -> None:
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
-{{if .NeedsFunctionCalls}}
+{{if .NeedsMCP}}
+
+async def _close_mcp(awaitables, *, suppress: bool = False) -> None:
+    failures = []
+    for awaitable in awaitables:
+        try:
+            await awaitable
+        except BaseException as failure:
+            failures.append(failure)
+    if suppress:
+        for failure in failures:
+            logger.error(
+                "MCP cleanup failed while preserving the primary error ({})",
+                type(failure).__name__,
+            )
+        return
+    for failure in failures[1:]:
+        logger.error(
+            "Additional MCP cleanup failure ({})",
+            type(failure).__name__,
+        )
+    if failures:
+        raise failures[0]
+
+
+async def _register_mcp_tools(clients, llm, reserved_names{{if .Tracing}}, trace_handler{{end}}):
+    discovered = []
+    names = set(reserved_names)
+    for client in clients:
+        await client.start()
+        tools = await client.get_tools_schema()
+        for schema in tools.standard_tools:
+            if schema.name in names:
+                raise RuntimeError(
+                    f"MCP tool name collision for {schema.name!r}; names must be unique "
+                    "across generated tools and MCP sources on one agent"
+                )
+            names.add(schema.name)
+        discovered.append((client, tools))
+
+    registered = []
+    for client, tools in discovered:
+        await client.register_tools_schema(tools, llm)
+{{if .Tracing}}        for schema in tools.standard_tools:
+            # ponytail: Pipecat 1.7.0 exposes no public MCP handler hook.
+            # Remove this private seam when MCPClient adds one.
+            llm.register_function(
+                schema.name,
+                trace_handler(client._tool_wrapper),
+            )
+{{end}}        registered.extend(tools.standard_tools)
+    return registered
+{{end}}{{if .NeedsFunctionCalls}}
 
 def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None):
     """Keep every direct function call terminal, even on malformed input."""
@@ -560,7 +612,7 @@ async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: 
 {{end}}{{if .EndsCall}}    await params.llm.push_frame(EndFrame())
 {{end}}{{end}}{{else}}
 
-class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.Tracing $.NeedsFunctionCalls}}TracedLLMWorker{{else}}LLMWorker{{end}}):
+class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.Tracing (or $.NeedsFunctionCalls $.NeedsMCP)}}TracedLLMWorker{{else}}LLMWorker{{end}}):
     """Agent: {{.Name}}."""
 
     def __init__(self, state=None, context=None, call_context=None) -> None:
@@ -570,7 +622,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
 {{end}}
         llm = build_{{.Name}}_llm({{if $.Variables}}state{{end}})
         super().__init__({{pyq .Name}}, llm=llm, pipeline=Pipeline([llm, build_{{.Name}}_tts()]), bridged=())
-{{if .Delegates}}
+{{if .MCPSources}}        # MCP tool sources. The clients are built here and connected in
+        # start_mcp() before this worker is ever activated, because the server
+        # names its own tools and build_tools() has to be able to list them.
+        self._mcp_clients = [
+{{range .MCPSources}}            {{template "mcp_client" .}},
+{{end}}        ]
+        self._mcp_tools: list = []
+{{end}}{{if .Delegates}}
     async def on_activated(self, args) -> None:
         # A Flow replaces this worker's system instruction with its task role.
         # Re-entry restores the owning agent before tools/messages run.
@@ -579,23 +638,19 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         ))
         await super().on_activated(args)
 {{end}}
-{{if .MCPSources}}        # MCP tool sources. The clients are built here and connected in
-        # start_mcp() before this worker is ever activated, because the server
-        # names its own tools and build_tools() has to be able to list them.
-        self._mcp_clients = [
-{{range .MCPSources}}            {{template "mcp_client" .}},
-{{end}}        ]
-        self._mcp_tools: list = []
-
-    async def start_mcp(self) -> None:
+{{if .MCPSources}}    async def start_mcp(self) -> None:
         """Connect every source and register its tools on this agent's LLM."""
-        for client in self._mcp_clients:
-            await client.start()
-            self._mcp_tools.extend((await client.register_tools(self.llm)).standard_tools)
+        self._mcp_tools = await _register_mcp_tools(
+            self._mcp_clients,
+            self.llm,
+            {tool.__name__ for tool in super().build_tools()}{{if .FlowFunctionNames}} | {
+{{range .FlowFunctionNames}}                {{pyq .}},
+{{end}}            }{{end}},
+{{if $.Tracing}}            self._track_tool_call,
+{{end}}        )
 
     async def close_mcp(self) -> None:
-        for client in self._mcp_clients:
-            await client.close()
+        await _close_mcp((client.close() for client in self._mcp_clients))
 
     def build_tools(self) -> list:
         """The @tool methods plus this agent's MCP tools, so the server's tools
@@ -1022,13 +1077,7 @@ def build_stt():
 
     # Single agent, no handoffs: the LLM sits inline in the pipeline (no bus).
     # turn: local — on-device VAD (Silero); the turn binding is advisory.
-{{if $agent.MCPSources}}    llm = build_{{$agent.Name}}_llm()
-    # MCP tool sources: connect, then register each server's tools on the LLM.
-    # An unreachable server raises here and the bot exits saying so.
-{{range $agent.MCPSources}}    {{.Var}} = {{template "mcp_client" .}}
-    await {{.Var}}.start()
-    {{.Var}}_tools = await {{.Var}}.register_tools(llm)
-{{end}}{{end}}    context = LLMContext({{if $agent.Tools}}tools=[{{range $i, $t := $agent.Tools}}{{if $i}}, {{end}}{{$t.MethodName}}{{end}}]{{range $agent.MCPSources}} + {{.Var}}_tools.standard_tools{{end}}{{else if $agent.MCPSources}}tools={{range $i, $s := $agent.MCPSources}}{{if $i}} + {{end}}{{$s.Var}}_tools.standard_tools{{end}}{{end}})
+    context = LLMContext({{if $agent.Tools}}tools=[{{range $i, $t := $agent.Tools}}{{if $i}}, {{end}}{{$t.MethodName}}{{end}}]{{end}})
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -1047,7 +1096,7 @@ def build_stt():
             transport.input(),
             build_stt(),
             user_aggregator,
-            {{if $agent.MCPSources}}llm{{else}}build_{{$agent.Name}}_llm(){{end}},
+            build_{{$agent.Name}}_llm(),
             build_{{$agent.Name}}_tts(),
             transport.output(),
             assistant_aggregator,
@@ -1103,12 +1152,7 @@ def build_stt():
         await runner.cancel()
 
     await runner.add_workers(worker)
-{{if $agent.MCPSources}}    try:
-        await runner.run()
-    finally:
-{{range $agent.MCPSources}}        await {{.Var}}.close()
-{{end}}{{else}}    await runner.run()
-{{end}}
+    await runner.run()
 
 {{else}}async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     require_env()
@@ -1139,11 +1183,10 @@ def build_stt():
 {{end}}{{if .Variables}}    state = build_state(call_context)
 {{else}}    state = None
 {{end}}    agents = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(state=state, context=context, call_context=call_context){{end}}]
-{{- range $i, $a := .Agents}}{{if $a.MCPSources}}
-    # {{$a.Name}} connects its MCP servers before anything activates it; an
-    # unreachable server raises here and the bot exits saying so.
-    await agents[{{$i}}].start_mcp(){{end}}{{end}}
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+{{if .NeedsMCP}}    mcp_agents = [
+{{range $i, $a := .Agents}}{{if $a.MCPSources}}        agents[{{$i}}],
+{{end}}{{end}}    ]
+{{end}}    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
@@ -1326,14 +1369,41 @@ def build_stt():
     async def on_client_disconnected(transport, client):
         await runner.cancel()
 
-    await runner.add_workers(main, *agents)
-{{if or .Tracing .NeedsMCP}}
+{{if not .NeedsMCP}}    await runner.add_workers(main, *agents)
+{{end}}{{if or .Tracing .NeedsMCP}}
     try:
-        await runner.run()
+{{if .NeedsMCP}}        for agent in mcp_agents:
+            await agent.start_mcp()
+        await runner.add_workers(main, *agents)
+{{end}}        await runner.run()
     finally:
-{{if .Tracing}}        await asyncio.to_thread(flush_tracing, trace_provider)
-{{end}}{{range $i, $a := .Agents}}{{if $a.MCPSources}}        await agents[{{$i}}].close_mcp()
-{{end}}{{end}}{{else}}
+{{if and .Tracing .NeedsMCP}}        primary_error = sys.exception()
+        if primary_error is not None:
+            try:
+                await asyncio.to_thread(flush_tracing, trace_provider)
+            except BaseException as cleanup_error:
+                logger.error(
+                    "Tracing flush failed while preserving the primary error ({})",
+                    type(cleanup_error).__name__,
+                )
+            await _close_mcp(
+                (agent.close_mcp() for agent in mcp_agents),
+                suppress=True,
+            )
+        else:
+            try:
+                await asyncio.to_thread(flush_tracing, trace_provider)
+            finally:
+                await _close_mcp(
+                    (agent.close_mcp() for agent in mcp_agents),
+                    suppress=sys.exception() is not None,
+                )
+{{else if .Tracing}}        await asyncio.to_thread(flush_tracing, trace_provider)
+{{else}}        await _close_mcp(
+            (agent.close_mcp() for agent in mcp_agents),
+            suppress=sys.exception() is not None,
+        )
+{{end}}{{else}}
     await runner.run()
 {{end}}
 {{end}}

@@ -119,10 +119,11 @@ func TestPipecatV1MCPToolSource(t *testing.T) {
 		`server_params=StreamableHttpParameters(url=os.environ["FIRECRAWL_MCP_URL"], headers=_bearer("FIRECRAWL_API_KEY"), timeout=30),`,
 		`tools_filter=["firecrawl_search"],`,
 		"await client.start()",
-		"(await client.register_tools(self.llm)).standard_tools",
+		"tools = await client.get_tools_schema()",
+		"await client.register_tools_schema(tools, llm)",
 		"return super().build_tools() + self._mcp_tools",
-		"await agents[1].start_mcp()", // intake is the entry agent; billing sorts first
-		"await agents[1].close_mcp()",
+		"await agent.start_mcp()",
+		"(agent.close_mcp() for agent in mcp_agents)",
 	} {
 		if !strings.Contains(bot, want) {
 			t.Errorf("bot.py missing %q:\n%s", want, bot)
@@ -691,6 +692,163 @@ func TestV22PipecatToolCallsAreTraced(t *testing.T) {
 	}
 }
 
+func TestV22PipecatMCPToolCallsAreTraced(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tools = map[string]ir.Tool{
+		"web_search": {
+			Execution: ir.ToolMCP, URLEnv: "FIRECRAWL_MCP_URL",
+			MCPTransport: ir.MCPTransportStreamableHTTP, MCPTools: []string{"firecrawl_search"},
+			Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+		},
+	}
+	entry := agent.Agents[agent.EntryAgent]
+	entry.Tools = []string{"web_search"}
+	agent.Agents[agent.EntryAgent] = entry
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	tracing := artifactFile(t, artifact, "tracing.py")
+	for _, want := range []string{
+		"class TracedLLMWorker(LLMWorker):",
+		"import functools",
+	} {
+		if !strings.Contains(tracing, want) {
+			t.Errorf("tracing.py missing MCP-only tracing form %q", want)
+		}
+	}
+	for _, want := range []string{
+		"    TracedLLMWorker,",
+		"class AppointmentDeskAgent(TracedLLMWorker):",
+		"tools = await client.get_tools_schema()",
+		"await client.register_tools_schema(tools, llm)",
+		"llm.register_function(",
+		"trace_handler(client._tool_wrapper)",
+		"self._mcp_tools = await _register_mcp_tools(",
+		"self._track_tool_call,",
+		"primary_error = sys.exception()",
+		"if primary_error is not None:",
+		"except BaseException as cleanup_error:",
+		"Tracing flush failed while preserving the primary error ({})",
+		"suppress=True",
+		"suppress=sys.exception() is not None",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing traced MCP form %q:\n%s", want, bot)
+		}
+	}
+	discoverAt := strings.Index(bot, "tools = await client.get_tools_schema()")
+	registerAt := strings.Index(bot, "await client.register_tools_schema(tools, llm)")
+	traceAt := strings.Index(bot, "trace_handler(client._tool_wrapper)")
+	if discoverAt < 0 || registerAt < discoverAt || traceAt < registerAt {
+		t.Error("MCP discovery, traced re-registration, and advertisement must stay ordered")
+	}
+}
+
+func TestPipecatV1MCPLifecycleAndCollisionsFailClosed(t *testing.T) {
+	agent := mcpPipecatAgent(t, ir.Tool{
+		URLEnv: "FIRECRAWL_MCP_URL", MCPTools: []string{"firecrawl_search"},
+	})
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"async def _close_mcp(awaitables, *, suppress: bool = False) -> None:",
+		"for awaitable in awaitables:",
+		"await awaitable",
+		"except BaseException as failure:",
+		"async def _register_mcp_tools(clients, llm, reserved_names",
+		"tools = await client.get_tools_schema()",
+		"if schema.name in names:",
+		"MCP tool name collision",
+		"await client.register_tools_schema(tools, llm)",
+		"{tool.__name__ for tool in super().build_tools()}",
+		"import sys",
+		"for agent in mcp_agents:",
+		"await runner.add_workers(main, *agents)",
+		"suppress=sys.exception() is not None",
+		"(agent.close_mcp() for agent in mcp_agents)",
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py missing MCP transaction form %q:\n%s", want, bot)
+		}
+	}
+	discoveryAt := strings.Index(bot, "tools = await client.get_tools_schema()")
+	collisionAt := strings.Index(bot, "if schema.name in names:")
+	registrationAt := strings.Index(bot, "await client.register_tools_schema(tools, llm)")
+	if discoveryAt < 0 || collisionAt < discoveryAt || registrationAt < collisionAt {
+		t.Error("all MCP names must be discovered and checked before any registration")
+	}
+	constructAt := strings.Index(bot, "main = PipelineWorker(")
+	startAt := strings.Index(bot, "for agent in mcp_agents:")
+	tryAt := -1
+	if startAt >= 0 {
+		tryAt = strings.LastIndex(bot[:startAt], "\n    try:\n")
+	}
+	addAt := strings.Index(bot, "await runner.add_workers(main, *agents)")
+	runAt := strings.Index(bot, "await runner.run()")
+	closeAt := strings.LastIndex(bot, "(agent.close_mcp() for agent in mcp_agents)")
+	if constructAt < 0 || tryAt < constructAt || startAt < tryAt || addAt < startAt || runAt < addAt || closeAt < runAt {
+		t.Error("MCP start, worker registration, and run must share cleanup ownership after construction")
+	}
+}
+
+func TestPipecatV1MCPReservesFlowFunctionNames(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addPipecatTaskTransferFixture(agent)
+	verify := agent.Tasks["verify"]
+	verify.Tools = append(verify.Tools, "get_invoice")
+	agent.Tasks["verify"] = verify
+	agent.Tools["web_search"] = ir.Tool{
+		Execution: ir.ToolMCP, URLEnv: "FIRECRAWL_MCP_URL",
+		MCPTransport: ir.MCPTransportStreamableHTTP, MCPTools: []string{"firecrawl_search"},
+		Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+	}
+	intake := agent.Agents["intake"]
+	intake.Tools = append(intake.Tools, "web_search")
+	agent.Agents["intake"] = intake
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderPipecat), target.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		`{tool.__name__ for tool in super().build_tools()} | {`,
+		`"finish_run_verify_complete",`,
+		`"finish_run_verify_verify",`,
+		`"get_invoice",`,
+		`"to_billing",`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("bot.py does not reserve Flow function %q against MCP collisions:\n%s", want, bot)
+		}
+	}
+	initAt := strings.Index(bot, "self._mcp_clients = [")
+	activationAt := strings.Index(bot, "async def on_activated(self, args) -> None:")
+	if initAt < 0 || activationAt < 0 || initAt > activationAt {
+		t.Error("a Flow-owning MCP worker must construct its clients before on_activated")
+	}
+}
+
 func addPipecatTaskTransferFixture(agent *ir.Agent) {
 	agent.Tasks["verify"] = ir.Task{
 		Instructions: "Verify the caller, unless they need billing help.",
@@ -1256,10 +1414,10 @@ func TestF3PipecatSingleAgentInline(t *testing.T) {
 	}
 }
 
-// TestPipecatV1MCPInline is the shape examples/mcp-example compiles to: one
-// agent, no bus, so the source's tools join the LLMContext directly and the
-// client's lifecycle rides run_bot rather than a worker class (N40).
-func TestPipecatV1MCPInline(t *testing.T) {
+// MCP always uses the worker topology, even with one untraced agent. Keeping one
+// lifecycle path prevents the inline optimization from growing a second MCP
+// transaction and collision implementation.
+func TestPipecatV1MCPUsesWorkerTopology(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
 	if err != nil {
 		t.Fatal(err)
@@ -1279,22 +1437,29 @@ func TestPipecatV1MCPInline(t *testing.T) {
 	def.Tools = append(def.Tools, "web_search")
 	agent.Agents[agent.EntryAgent] = def
 
-	bot := artifactFile(t, mustGeneratePipecatInline(t, agent), "bot.py")
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
 	for _, want := range []string{
-		"    llm = build_appointment_desk_llm()",
-		"    web_search_mcp = MCPClient(",
-		"    await web_search_mcp.start()",
-		"    web_search_mcp_tools = await web_search_mcp.register_tools(llm)",
-		"+ web_search_mcp_tools.standard_tools)",
-		"        await web_search_mcp.close()",
+		"from pipecat.bus import BusBridgeProcessor",
+		"class AppointmentDeskAgent(LLMWorker):",
+		"self._mcp_clients = [",
+		"self._mcp_tools = await _register_mcp_tools(",
+		"await agent.start_mcp()",
 	} {
 		if !strings.Contains(bot, want) {
-			t.Errorf("inline bot.py missing %q:\n%s", want, bot)
+			t.Errorf("MCP worker bot.py missing %q:\n%s", want, bot)
 		}
 	}
-	// The LLM is built once and used in the pipeline, never built twice.
-	if strings.Contains(bot, "build_appointment_desk_llm(),") {
-		t.Error("the inline pipeline must reuse the llm the MCP client registered on")
+	for _, absent := range []string{
+		"One agent, no handoffs: the LLM runs inline",
+		"web_search_mcp_tools.standard_tools",
+	} {
+		if strings.Contains(bot, absent) {
+			t.Errorf("MCP package must not use the retired inline path %q", absent)
+		}
 	}
 	if _, err := exec.LookPath("python3"); err == nil {
 		f := filepath.Join(t.TempDir(), "bot.py")
@@ -1302,7 +1467,7 @@ func TestPipecatV1MCPInline(t *testing.T) {
 			t.Fatal(err)
 		}
 		if out, err := exec.Command("python3", "-m", "py_compile", f).CombinedOutput(); err != nil {
-			t.Fatalf("inline bot.py with an MCP source is not valid Python:\n%s", out)
+			t.Fatalf("MCP worker bot.py is not valid Python:\n%s", out)
 		}
 	}
 }

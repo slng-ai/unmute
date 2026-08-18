@@ -115,6 +115,10 @@ Both generated projects declare the SDK extra that carries the MCP client
 (`livekit-agents[mcp,...]`, `pipecat-ai[mcp,...]`), so `uv sync` in either
 `build/` directory installs what the emitted imports need.
 
+With Langfuse tracing enabled, Pipecat MCP calls emit finite `tool:<name>` spans with tool arguments and, when completed, the result.
+Pipecat refuses to start when an agent tool, task function, or MCP source on the same agent exposes the same name.
+Pipecat 1.7 has one cleanup limit: cancellation during `MCPClient.start()` may leave a partial transport open until async-generator or process cleanup; cancellation after `start()` returns is cleaned up normally.
+
 ## If a tool never gets called
 
 The server's tool list only exists once the connection is open, so nothing can

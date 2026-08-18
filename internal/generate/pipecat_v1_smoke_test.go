@@ -1322,9 +1322,10 @@ async def main() -> None:
 asyncio.run(main())
 `
 
-const pipecatStaticCheckScript = `"""Smoke check: the generated project passes ty."""
+const pipecatStaticCheckScript = `"""Smoke check: the generated project passes Ruff and ty."""
 import subprocess
 
+subprocess.run(["ruff", "check", "."], check=True)
 subprocess.run(["ty", "check", "."], check=True)
 `
 
@@ -1393,6 +1394,13 @@ from pipecat.utils.tracing.service_decorators import traced_llm, traced_stt, tra
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs  # noqa: E402
 from pipecat.workers.runner import WorkerRunner  # noqa: E402
 
+tool_probe = {
+    "name": "lookup_customer",
+    "call_id": "call-smoke",
+    "arguments": {"phone": "+1555010101"},
+    "result": {"customer_id": "cus_1001"},
+}
+
 
 class FakeLLM(LLMService):
     def __init__(self) -> None:
@@ -1420,9 +1428,9 @@ class FakeLLM(LLMService):
             await self.run_function_calls(
                 [
                     FunctionCallFromLLM(
-                        function_name="lookup_customer",
-                        tool_call_id="call-smoke",
-                        arguments={"phone": "+1555010101"},
+                        function_name=tool_probe["name"],
+                        tool_call_id=tool_probe["call_id"],
+                        arguments=tool_probe["arguments"],
                         context=context,
                     )
                 ]
@@ -1593,6 +1601,56 @@ async def main() -> None:
     assert len(agent_types) == 1, agent_types
     request_agent = agent_types[0]()
     tracing_config.enable_agent_tracing(main_worker, [request_agent])
+    mcp_clients = getattr(request_agent, "_mcp_clients", [])
+    mcp_session = None
+    mcp_exit_stack = None
+    if mcp_clients:
+        from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
+
+        class FakeMCPSession:
+            def __init__(self) -> None:
+                self.calls = []
+
+            async def list_tools(self):
+                return ListToolsResult(
+                    tools=[
+                        Tool(
+                            name="firecrawl_search",
+                            description="Search the web.",
+                            inputSchema={
+                                "type": "object",
+                                "properties": {"query": {"type": "string"}},
+                                "required": ["query"],
+                            },
+                        )
+                    ]
+                )
+
+            async def call_tool(self, name, arguments=None):
+                self.calls.append((name, arguments))
+                return CallToolResult(
+                    content=[TextContent(type="text", text="fresh MCP result")]
+                )
+
+        class FakeExitStack:
+            def __init__(self) -> None:
+                self.closed = False
+
+            async def aclose(self) -> None:
+                self.closed = True
+
+        assert len(mcp_clients) == 1
+        mcp_session = FakeMCPSession()
+        mcp_exit_stack = FakeExitStack()
+        mcp_clients[0]._active_session = mcp_session
+        mcp_clients[0]._exit_stack = mcp_exit_stack
+        tool_probe.update(
+            name="firecrawl_search",
+            call_id="mcp-call-smoke",
+            arguments={"query": "latest salon trends"},
+            result="fresh MCP result",
+        )
+        await request_agent.start_mcp()
 
     @main_worker.event_handler("on_pipeline_started")
     async def on_pipeline_started(worker, frame):
@@ -1612,13 +1670,50 @@ async def main() -> None:
         )
 
     await runner.add_workers(main_worker, request_agent)
-    await asyncio.wait_for(runner.run(), timeout=10)
+    try:
+        await asyncio.wait_for(runner.run(), timeout=10)
+    finally:
+        if mcp_clients:
+            await request_agent.close_mcp()
+
+    cancel_parent = trace.get_tracer("unmute.smoke").start_span("cancel-parent")
+    cancel_parent_context = trace.set_span_in_context(cancel_parent)
+    cancel_trace_id = cancel_parent.context.trace_id
+    cancel_parent_id = cancel_parent.context.span_id
+
+    class FixedTraceContext:
+        def get_turn_context(self):
+            return cancel_parent_context
+
+        def get_conversation_context(self):
+            return None
+
+    async def cancelled_call(_span):
+        raise asyncio.CancelledError
+
+    original_context = request_agent._tracing_context
+    request_agent._tracing_context = FixedTraceContext()
+    try:
+        await request_agent._trace_tool(
+            "cancel_probe",
+            {"reason": "caller interruption"},
+            cancelled_call,
+            tool_call_id="cancel-call-smoke",
+        )
+    except asyncio.CancelledError:
+        pass
+    else:
+        raise AssertionError("tool cancellation was swallowed")
+    finally:
+        request_agent._tracing_context = original_context
+        cancel_parent.end()
     tracing_config.flush_tracing(provider)
 
     spans = memory.get_finished_spans()
     conversation = next(span for span in spans if span.name == "conversation")
     turn = next(span for span in spans if span.name == "turn")
-    tool_call = next(span for span in spans if span.name == "tool:lookup_customer")
+    tool_call = next(span for span in spans if span.name == f"tool:{tool_probe['name']}")
+    cancelled_tool = next(span for span in spans if span.name == "tool:cancel_probe")
     requests = {span.name: span for span in spans if span.name in {"stt", "llm", "tts"}}
     assert requests.keys() == {"stt", "llm", "tts"}
     assert requests["stt"].attributes["gen_ai.request.model"] == "probe-stt"
@@ -1660,10 +1755,29 @@ async def main() -> None:
     assert all(span.context.trace_id == conversation.context.trace_id for span in requests.values())
     assert tool_call.context.trace_id == conversation.context.trace_id
     assert tool_call.parent.span_id == turn.context.span_id
-    assert json.loads(tool_call.attributes["langfuse.observation.input"]) == {"phone": "+1555010101"}
-    assert json.loads(tool_call.attributes["langfuse.observation.output"])["customer_id"] == "cus_1001"
-    assert tool_call.attributes["tool.function_name"] == "lookup_customer"
-    assert tool_call.attributes["tool.call_id"] == "call-smoke"
+    assert json.loads(tool_call.attributes["langfuse.observation.input"]) == tool_probe["arguments"]
+    traced_result = json.loads(tool_call.attributes["langfuse.observation.output"])
+    if mcp_session:
+        assert traced_result == tool_probe["result"]
+        assert mcp_session.calls == [(tool_probe["name"], tool_probe["arguments"])]
+        assert mcp_exit_stack.closed
+        assert mcp_clients[0]._active_session is None
+        assert mcp_clients[0]._exit_stack is None
+    else:
+        assert traced_result["customer_id"] == tool_probe["result"]["customer_id"]
+    assert tool_call.attributes["tool.function_name"] == tool_probe["name"]
+    assert tool_call.attributes["tool.call_id"] == tool_probe["call_id"]
+    assert tool_call.end_time > tool_call.start_time
+    assert cancelled_tool.context.trace_id == cancel_trace_id
+    assert cancelled_tool.parent.span_id == cancel_parent_id
+    assert cancelled_tool.attributes["tool.function_name"] == "cancel_probe"
+    assert cancelled_tool.attributes["tool.call_id"] == "cancel-call-smoke"
+    assert cancelled_tool.attributes["tool.result_status"] == "cancelled"
+    assert json.loads(cancelled_tool.attributes["langfuse.observation.input"]) == {
+        "reason": "caller interruption"
+    }
+    assert "langfuse.observation.output" not in cancelled_tool.attributes
+    assert cancelled_tool.end_time > cancelled_tool.start_time
     assert all(span.end_time > span.start_time for span in requests.values())
     assert receiver.requests
     path, headers = receiver.requests[0]
@@ -1901,6 +2015,214 @@ for client in clients:
 print("smoke ok:", len(clients), "mcp client(s)")
 `
 
+const pipecatMCPTransactionSmokeScript = `"""Exercise generated MCP collision and cleanup paths against Pipecat 1.7."""
+import asyncio
+import inspect
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "https://mcp.example/mcp")
+
+import bot  # noqa: E402
+from mcp.types import ListToolsResult, Tool  # noqa: E402
+from pipecat.processors.aggregators.llm_context import LLMContext  # noqa: E402
+from pipecat.workers.llm import LLMWorker  # noqa: E402
+
+
+class FakeSession:
+    def __init__(self, names=(), error=None, entered=None, block=False):
+        self.names = names
+        self.error = error
+        self.entered = entered
+        self.block = block
+
+    async def list_tools(self):
+        if self.entered:
+            self.entered.set()
+        if self.block:
+            await asyncio.Event().wait()
+        if self.error:
+            raise self.error
+        return ListToolsResult(
+            tools=[
+                Tool(
+                    name=name,
+                    description=f"Schema for {name}.",
+                    inputSchema={"type": "object", "properties": {}},
+                )
+                for name in self.names
+            ]
+        )
+
+
+class FakeExitStack:
+    def __init__(self, error=None):
+        self.error = error
+        self.calls = 0
+
+    async def aclose(self):
+        self.calls += 1
+        if self.error:
+            raise self.error
+
+
+worker_types = [
+    value
+    for value in vars(bot).values()
+    if inspect.isclass(value)
+    and issubclass(value, LLMWorker)
+    and value.__module__ == "bot"
+    and value.__name__.endswith("Agent")
+]
+mcp_worker_type = next(worker_type for worker_type in worker_types if "start_mcp" in vars(worker_type))
+
+
+def new_worker(sessions, close_errors=None):
+    close_errors = close_errors or [None] * len(sessions)
+    worker = mcp_worker_type(state=None, context=LLMContext(), call_context=None)
+    clients = worker._mcp_clients
+    assert len(clients) == len(sessions), clients
+    stacks = []
+    for client, session, close_error in zip(clients, sessions, close_errors, strict=True):
+        stack = FakeExitStack(close_error)
+        client._active_session = session
+        client._exit_stack = stack
+        stacks.append(stack)
+    return worker, clients, stacks
+
+
+def allowed_name(client, index):
+    return client._tools_filter[0] if client._tools_filter else f"source_{index}"
+
+
+async def start_owned(worker):
+    try:
+        await worker.start_mcp()
+    except BaseException:
+        await bot._close_mcp((worker.close_mcp(),), suppress=True)
+        raise
+
+
+async def main():
+    messages = []
+    sink = bot.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        # A failure in the second source preserves that error, closes both clients,
+        # and never advertises the schema discovered from the first source.
+        probe, probe_clients, _ = new_worker([FakeSession(), FakeSession()])
+        allowed_names = [allowed_name(client, index) for index, client in enumerate(probe_clients)]
+        await probe.close_mcp()
+        first_name = allowed_names[0]
+        setup_error = RuntimeError("primary setup https://secret.example/token")
+        close_errors = [
+            RuntimeError("first close https://secret.example/one"),
+            RuntimeError("second close https://secret.example/two"),
+        ]
+        worker, clients, stacks = new_worker(
+            [FakeSession([first_name]), FakeSession(error=setup_error)],
+            close_errors,
+        )
+        try:
+            await start_owned(worker)
+        except RuntimeError as caught:
+            assert caught is setup_error
+        else:
+            raise AssertionError("second MCP source failure was swallowed")
+        assert [stack.calls for stack in stacks] == [1, 1]
+        assert not worker.llm.has_function(first_name)
+        assert all(client._active_session is None for client in clients)
+
+        # Cancellation during discovery also rolls back every already-started source.
+        entered = asyncio.Event()
+        worker, clients, stacks = new_worker(
+            [FakeSession([allowed_names[0]]), FakeSession(entered=entered, block=True)]
+        )
+        owner = asyncio.current_task()
+        assert owner is not None
+
+        async def cancel_owner():
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            owner.cancel()
+
+        canceller = asyncio.create_task(cancel_owner())
+        try:
+            await start_owned(worker)
+        except asyncio.CancelledError:
+            pass
+        else:
+            raise AssertionError("MCP startup cancellation was swallowed")
+        await canceller
+        assert [stack.calls for stack in stacks] == [1, 1]
+        assert all(client._active_session is None for client in clients)
+
+        # Local and remote names share one namespace and fail before registration.
+        local_sessions = []
+        for index, name in enumerate(allowed_names):
+            name = name if name == "firecrawl_search" else "lookup_customer"
+            local_sessions.append(FakeSession([name]))
+        worker, _, stacks = new_worker(local_sessions)
+        try:
+            await start_owned(worker)
+        except RuntimeError as caught:
+            assert "MCP tool name collision for 'lookup_customer'" in str(caught)
+        else:
+            raise AssertionError("local-to-MCP collision was accepted")
+        assert [stack.calls for stack in stacks] == [1, 1]
+
+        # Two MCP sources exposing the same selected name also fail before registration.
+        worker, _, stacks = new_worker(
+            [FakeSession(["firecrawl_search"]), FakeSession(["firecrawl_search"])]
+        )
+        try:
+            await start_owned(worker)
+        except RuntimeError as caught:
+            assert "MCP tool name collision for 'firecrawl_search'" in str(caught)
+        else:
+            raise AssertionError("MCP-to-MCP collision was accepted")
+        assert [stack.calls for stack in stacks] == [1, 1]
+        assert not worker.llm.has_function("firecrawl_search")
+
+        # Flow task handlers use the same Pipecat LLM registry as MCP handlers.
+        flow_sessions = [
+            FakeSession([name if name == "firecrawl_search" else "get_invoice"])
+            for name in allowed_names
+        ]
+        worker, _, stacks = new_worker(flow_sessions)
+        try:
+            await start_owned(worker)
+        except RuntimeError as caught:
+            assert "MCP tool name collision for 'get_invoice'" in str(caught)
+        else:
+            raise AssertionError("task-to-MCP collision was accepted")
+        assert [stack.calls for stack in stacks] == [1, 1]
+        assert not worker.llm.has_function("get_invoice")
+
+        # A close error cannot stop the next client from closing; the first error wins.
+        first_close = RuntimeError("first direct close https://secret.example/three")
+        second_close = RuntimeError("second direct close https://secret.example/four")
+        worker, _, stacks = new_worker(
+            [FakeSession(), FakeSession()], [first_close, second_close]
+        )
+        try:
+            await worker.close_mcp()
+        except RuntimeError as caught:
+            assert caught is first_close
+        else:
+            raise AssertionError("MCP close failure was swallowed")
+        assert [stack.calls for stack in stacks] == [1, 1]
+    finally:
+        bot.logger.remove(sink)
+
+    error_log = "".join(messages)
+    assert "RuntimeError" in error_log
+    assert "secret.example" not in error_log
+    print("pipecat MCP transaction smoke ok")
+
+
+asyncio.run(main())
+`
+
 // TestSmokePipecatV1MCPToolSourceInstantiates is the proof gate for N40 on this
 // driver, and for research R3's stale-checkout caveat: the reference checkout
 // is older than the pinned SDK, so the emitted MCPClient shape is only claimed
@@ -1926,14 +2248,64 @@ func TestSmokePipecatV1MCPToolSourceInstantiates(t *testing.T) {
 	}, mcpSmokeScript)
 }
 
+func TestSmokePipecatV1MCPTransactions(t *testing.T) {
+	runPipecatSmokeScript(t, "safe_core", nil, func(agent *ir.Agent) {
+		addPipecatTaskTransferFixture(agent)
+		verify := agent.Tasks["verify"]
+		verify.Tools = append(verify.Tools, "get_invoice")
+		agent.Tasks["verify"] = verify
+		agent.Tools["web_search"] = ir.Tool{
+			Execution: ir.ToolMCP, URLEnv: "FIRECRAWL_MCP_URL",
+			MCPTransport: ir.MCPTransportStreamableHTTP, MCPTools: []string{"firecrawl_search"},
+			Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+		}
+		agent.Tools["notes"] = ir.Tool{
+			Execution: ir.ToolMCP, URLEnv: "NOTES_MCP_URL",
+			MCPTransport: ir.MCPTransportStreamableHTTP,
+			Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+		}
+		intake := agent.Agents["intake"]
+		intake.Tools = append(intake.Tools, "web_search", "notes")
+		agent.Agents["intake"] = intake
+	}, pipecatMCPTransactionSmokeScript)
+}
+
 // TestSmokeV17PipecatSpeechTracing proves the generated OTLP setup exports the
 // native STT, LLM, and TTS tree under the named conversation trace (V21).
 func TestSmokeV17PipecatSpeechTracing(t *testing.T) {
 	runPipecatSmokeScript(t, "simple-prompt", nil, nil, pipecatRequestTracingSmokeScript)
 }
 
+func TestSmokeV17PipecatMCPToolTracing(t *testing.T) {
+	runPipecatSmokeScript(t, "simple-prompt", nil, func(agent *ir.Agent) {
+		agent.Tools["web_search"] = ir.Tool{
+			Execution: ir.ToolMCP, URLEnv: "FIRECRAWL_MCP_URL",
+			MCPTransport: ir.MCPTransportStreamableHTTP, MCPTools: []string{"firecrawl_search"},
+			Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+		}
+		entry := agent.Agents[agent.EntryAgent]
+		entry.Tools = append(entry.Tools, "web_search")
+		agent.Agents[agent.EntryAgent] = entry
+	}, pipecatRequestTracingSmokeScript)
+}
+
 func TestSmokeV24PipecatSimplePromptStaticCheck(t *testing.T) {
 	runPipecatSmokeScript(t, "simple-prompt", nil, nil, pipecatStaticCheckScript)
+}
+
+func TestSmokeV24PipecatTracedMCPOnlyStaticCheck(t *testing.T) {
+	runPipecatSmokeScript(t, "simple-prompt", nil, func(agent *ir.Agent) {
+		agent.Tools = map[string]ir.Tool{
+			"web_search": {
+				Execution: ir.ToolMCP, URLEnv: "FIRECRAWL_MCP_URL",
+				MCPTransport: ir.MCPTransportStreamableHTTP, MCPTools: []string{"firecrawl_search"},
+				Interruption: ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+			},
+		}
+		entry := agent.Agents[agent.EntryAgent]
+		entry.Tools = []string{"web_search"}
+		agent.Agents[agent.EntryAgent] = entry
+	}, pipecatStaticCheckScript)
 }
 
 // The Daily route needs its own ty run, because the transfer path is the one
