@@ -62,7 +62,7 @@ Usage:
   unmute dev [agent-dir] [flags]
 
 Flags:
-      --bot-port string     host port the container publishes the agent on (Compose UNMUTE_DEV_PORT; with --telephony, UNMUTE_TELEPHONY_PORT) (default "7860")
+      --bot-port string     host port for the local agent runtime (with Compose, UNMUTE_DEV_PORT or UNMUTE_TELEPHONY_PORT) (default "7860")
   -h, --help                help for dev
       --no-open             do not open the browser automatically
       --no-webhook          do not touch the carrier number's webhook configuration (requires --telephony; point it at the printed public URL yourself)

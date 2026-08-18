@@ -12,6 +12,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sync"
@@ -35,16 +36,15 @@ const (
 )
 
 // devWebMissingDockerHint mirrors the cloudflared install hint's shape: what is
-// missing and how to install it. There is no escape hatch to offer any more.
-// `unmute dev` runs the deployable container on every path, so Docker is
-// required, and saying so plainly beats naming a mode that no longer exists.
+// missing and how to install it. LiveKit needs its local server stack, so its
+// browser path still runs through Compose.
 const devWebMissingDockerHint = "docker compose is required to run `unmute dev`; " + composeInstallHint
 
 // runDevWeb is the default `unmute dev` runner (SPEC V1): generate the
-// deployable project, build and start it through compose.dev.yaml, then serve
-// one standardized WebRTC web UI against the containers, identically for
-// pipecat and livekit. The old host-uv web path is gone; local testing always
-// runs the image production deploys.
+// deployable project, start the target's local runtime, then serve one
+// standardized WebRTC web UI. Pipecat runs on the host because a browser cannot
+// reach the ephemeral UDP ICE candidates gathered inside Docker Desktop;
+// LiveKit still needs its local server stack in Compose.
 func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noOpen, verbose bool) error {
 	agent, targets, err := loadPackage(root, []string{targetName})
 	if err != nil {
@@ -82,13 +82,7 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Docker is required — the loud breaking change (SPEC C8, V8). This runs
-	// after generation, so a bad package still fails on its own terms first.
-	if err := preflightComposeCore(ctx, childEnv, devWebMissingDockerHint); err != nil {
-		return fmt.Errorf("dev %s: %w", root, err)
-	}
-
-	return runDevCompose(ctx, cmd, devWebRun{
+	run := devWebRun{
 		root:        root,
 		provider:    resolved.Provider,
 		agentName:   resolved.Name,
@@ -100,7 +94,61 @@ func runDevWeb(cmd *cobra.Command, root, targetName, uiPort, botPort string, noO
 		botPort:     botPort,
 		noOpen:      noOpen,
 		verbose:     verbose,
-	})
+	}
+	if resolved.Provider == ir.ProviderPipecat {
+		if _, err := pipecatLookPath("uv"); err != nil {
+			return fmt.Errorf("dev %s: uv not found on PATH; Pipecat WebRTC runs locally with uv (https://docs.astral.sh/uv/)", root)
+		}
+		return runDevPipecat(ctx, cmd, outDir, run)
+	}
+
+	if err := preflightComposeCore(ctx, childEnv, devWebMissingDockerHint); err != nil {
+		return fmt.Errorf("dev %s: %w", root, err)
+	}
+	return runDevCompose(ctx, cmd, run)
+}
+
+var startPipecatWebAgent = func(ctx context.Context, dir, port string, env []string, sink io.Writer) (*localAgent, error) {
+	return startLocalPipecatAgent(ctx, dir, env, sink,
+		"-t", "webrtc", "--host", "0.0.0.0", "--port", port)
+}
+
+var pipecatWebAgentReady = waitForLocalAgentReady
+var pipecatLookPath = exec.LookPath
+
+func runDevPipecat(ctx context.Context, cmd *cobra.Command, outDir string, run devWebRun) error {
+	portProbe, err := net.Listen("tcp", net.JoinHostPort("0.0.0.0", run.botPort))
+	if err != nil {
+		return fmt.Errorf("dev %s: local agent port %s is already in use: %w", run.root, run.botPort, err)
+	}
+	_ = portProbe.Close()
+
+	logFile, err := os.Create(run.logPath)
+	if err != nil {
+		return fmt.Errorf("dev %s: open log: %w", run.root, err)
+	}
+	defer func() { _ = logFile.Close() }()
+	var logSink io.Writer = logFile
+	if run.verbose {
+		logSink = io.MultiWriter(logFile, cmd.ErrOrStderr())
+	}
+
+	spin := startSpinner(cmd.ErrOrStderr(), "starting the local Pipecat agent")
+	agent, err := startPipecatWebAgent(ctx, outDir, run.botPort, run.env, logSink)
+	if err != nil {
+		spin.Stop()
+		return fmt.Errorf("dev %s: %w", run.root, err)
+	}
+	defer stopBot(agent.cmd, agent.done)
+	if err := pipecatWebAgentReady(ctx, run.botPort, agent.done); err != nil {
+		spin.Stop()
+		if ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("dev %s: local Pipecat agent not ready: %w (logs: %s)", run.root, err, run.logPath)
+	}
+	spin.Stop()
+	return serveDevWeb(ctx, cmd, run, agent.done)
 }
 
 type devWebRun struct {
@@ -192,6 +240,11 @@ func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error
 		}
 	}
 
+	return serveDevWeb(ctx, cmd, run, logsDone)
+}
+
+// serveDevWeb owns the target-neutral HTTP page once its runtime is ready.
+func serveDevWeb(ctx context.Context, cmd *cobra.Command, run devWebRun, runtimeDone <-chan error) error {
 	// Bind eagerly so a port collision fails here, before the banner.
 	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", run.uiPort))
 	if err != nil {
@@ -211,36 +264,39 @@ func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error
 		openBrowser(uiURL)
 	}
 
+	var returnErr error
 	select {
 	case <-ctx.Done():
 		fmt.Fprintln(cmd.ErrOrStderr(), "\nstopping...")
-	case err := <-logsDone:
-		if err != nil && !composeWasInterrupted(ctx, err) {
-			// the log stream died on its own; the stack is likely gone.
-			fmt.Fprintf(cmd.ErrOrStderr(), "\ncompose stack stopped; see %s\n", run.logPath)
+	case err := <-runtimeDone:
+		if err != nil && ctx.Err() == nil && !composeWasInterrupted(ctx, err) {
+			returnErr = fmt.Errorf("dev %s: local runtime stopped: %w (logs: %s)", run.root, err, run.logPath)
+		}
+		if ctx.Err() == nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "\nlocal runtime stopped; see %s\n", run.logPath)
 		}
 	case err := <-srvErr:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("dev %s: dev server: %w", run.root, err)
+			returnErr = fmt.Errorf("dev %s: dev server: %w", run.root, err)
 		}
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
-	return nil
+	return returnErr
 }
 
 // devWebMux is the one host dev server for both targets. The only per-target
 // routing is the transport wiring: pipecat reverse-proxies the WebRTC offer to
-// the containerized bot; livekit serves the vendored SDK. Both share the same
+// the local bot; livekit serves the vendored SDK. Both share the same
 // static page and the /api/session bootstrap (SPEC V6).
 func devWebMux(provider ir.Provider, agentName, botPort, liveKitURL string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/session", devSessionHandler(provider, agentName, liveKitURL))
 	switch provider {
 	case ir.ProviderPipecat:
-		// The offer (and any other bot API) proxies to the published bot port.
+		// The offer (and any other bot API) proxies to the selected bot port.
 		// /api/session is more specific, so it wins over this prefix.
 		bot, _ := url.Parse("http://" + net.JoinHostPort("127.0.0.1", botPort))
 		mux.Handle("/api/", httputil.NewSingleHostReverseProxy(bot))

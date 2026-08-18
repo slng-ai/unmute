@@ -21,8 +21,11 @@ then routes the full conversation silently. Every specialist can route directly
 to any other specialist without announcing the internal handoff. The booking
 preparation task can also leave immediately for a complaint or current-information
 request without applying a booking change. Every route keeps the verified identity
-and full history. No agent asks for the caller's name or phone again, or repeats
-the full phone number, unless the caller says the identity is wrong.
+and full history. During verification, the task spells the first name and surname,
+reads every phone digit, and waits for a new clear yes before the customer action.
+After verification, no specialist asks for or repeats those details unless the
+caller says the saved identity is wrong. This readback checks what speech recognition
+captured; it is not strong authentication such as an OTP.
 
 On LiveKit, each shared booking result is labeled with its source task before
 the next task starts, so the apply step can identify the confirmed draft.
@@ -48,18 +51,13 @@ invent an answer.
 
 ## Local data
 
-All eight local tool declarations point at [tools/salon.py](tools/salon.py). The
-generated project copies that source for each tool, and stateful calls open the
-same owner-only `salon.db` in the runtime temporary directory. It stays outside
-the generated project, so customer data cannot enter a later container build.
-Python's `sqlite3` module is in the standard library, so there is no extra
-package to install.
+All eight local tools share one process-specific SQLite database. The worker
+deletes that database and its sidecars at startup, so every new worker starts
+empty while verification, booking, and complaint tasks in that worker still
+share data. Concurrent workers use separate files.
 
-This is real local create, read, and update behavior, but it is demo storage.
-Only conversations handled by the same worker or container share the file.
-There is no persistence promise across restarts, redeploys, or replicas. Replace
-it with a shared service before using this package as a production booking
-system.
+This is disposable test storage. Restart `unmute dev` for a clean run; do not
+delete database files by hand. Use a shared database for a real deployment.
 
 Run its fast behavior check directly:
 
@@ -67,12 +65,8 @@ Run its fast behavior check directly:
 python3 examples/salon-concierge/tools/salon.py
 ```
 
-To reset the demo, stop the worker, delete
-`/tmp/unmute-salon-concierge/salon.db` inside that Linux worker or container,
-then start it again. The source uses Python's runtime temporary directory, so a
-non-Linux direct run may put `unmute-salon-concierge/salon.db` under a different
-temporary root. The self-check above uses a disposable database and never
-deletes the runtime file.
+`make smoke` also proves that both generated targets start clean and share data
+within one worker.
 
 ## What you need
 
@@ -167,40 +161,50 @@ bin/unmute dev examples/salon-concierge --target pipecat
 ```
 
 Use `--target livekit` to run the same browser journey on LiveKit. A browser
-session does not read Twilio or SIP credentials.
+session does not read Twilio or SIP credentials. Pipecat browser development
+uses `uv`; LiveKit uses Docker Compose.
 
-## Take an inbound call
+## Test the local phone runtimes
 
-Pipecat receives Twilio Media Streams on its hosted `cloud-websocket` route:
+Pipecat runs the generated phone-mode agent locally with `uv`:
 
 ```sh
 bin/unmute dev --telephony examples/salon-concierge --target pipecat
 ```
 
-LiveKit receives the same carrier through a Twilio Elastic SIP trunk:
+By default, the CLI opens an HTTPS/WSS tunnel and temporarily points the Twilio
+number at it. Add `--no-webhook` to leave Twilio untouched. A local-only check
+proves that `POST /` returns streaming TwiML and `/ws` accepts the WebSocket; it
+does not prove a carrier call or media path.
+
+LiveKit starts Redis, LiveKit Server, LiveKit SIP, and the agent locally:
 
 ```sh
 bin/unmute dev --telephony examples/salon-concierge --target livekit
 ```
 
-Follow each generated README's telephony setup before calling the number. The
-phone route accepts inbound calls and can redirect the active caller to the
-manager. It never starts an outbound conversation.
+The local check proves service health, trunk and dispatch setup, and worker
+registration. It does not make the laptop reachable from a carrier; a real call
+needs public SIP signaling and RTP. An HTTPS tunnel is not enough.
+
+The package environment must contain `MANAGER_PHONE_NUMBER`, matching
+`agent.yaml` and the generated `.env.example`. `SUPERVISOR_PHONE_NUMBER` is not
+an alias.
 
 ## Release conversation script
 
-Use a future date when testing bookings. Start with a fresh demo database, then
-run the first five rows in order in one conversation. Judge the called actions
-and saved state, not exact wording. Run the relative-date booking once in the
-browser and once through an inbound phone call on each target.
+Use a future date when testing bookings. Start a new worker, then run the first
+five rows in order in one conversation. Judge the called actions and saved state,
+not exact wording. Run the relative-date booking in the browser on both targets.
+Repeat it on an inbound phone route only when that route is separately reachable.
 
 | Check | What to say | Pass result |
 |---|---|---|
 | Unverified booking | “I want to book a haircut.” Do not give identity until asked. | Verification runs first. No booking action runs before it succeeds. |
-| Relative-date booking | Give a fake name and 10–15 digit phone number, say “Book a haircut tomorrow afternoon,” pick an offered time, then explicitly confirm the full booking. | The trace calls `get_current_date` before `check_availability`; the availability date is one day after the returned date, with no guessed-year invalid call. The customer is created once and exactly one active booking is saved with the offered slot. |
+| Relative-date booking | Give a fake first name, surname, and 10–15 digit phone number, confirm the complete identity readback, say “Book a haircut tomorrow afternoon,” pick an offered time, then explicitly confirm the full booking. | `find_or_create_customer` runs once after the identity yes and returns `created`. The trace then calls `get_current_date` before `check_availability`; the availability date is one day after the returned date, with no guessed-year invalid call. One `create_booking` returns `booked` for the offered slot. |
 | No confirmation | Prepare a create, modify, or cancel request, then say no, stay silent, or change topic instead of confirming. | No booking mutation runs. An explicit no or a second unclear answer finishes unconfirmed; silence waits for inactivity handling, and a topic change hands off without completing the booking. |
-| Neutral complaint | “My last haircut was uneven, but I’d like the salon to fix it.” | One complaint is recorded for the same customer, the booking remains active, and no manager transfer starts. |
-| Book then cancel | Ask to cancel the active booking and confirm. | The saved row is cancelled and no active booking remains. |
+| Neutral complaint | “My last haircut was uneven, but I’d like the salon to fix it.” | One `record_complaint` returns `recorded` for the same customer, no booking mutation runs, and no manager transfer starts. |
+| Book then cancel | Ask to cancel the active booking and confirm. | One `cancel_booking` returns `cancelled`; a later `list_bookings` has no active booking. |
 | Mid-booking complaint | Begin another booking, then before confirmation say, “Actually, I need to complain about my last visit.” | Booking stops without a write; customer care receives the same identity, history, and latest request without another verification question or internal handoff announcement. |
 | Modify | Book another appointment, then ask to move it to another future date. | The same booking is updated atomically after confirmation. |
 | Human transfer | On an inbound call say, “I want to speak to a manager.” | The active caller receives a cold transfer attempt. |
@@ -209,17 +213,37 @@ browser and once through an inbound phone call on each target.
 | Established MCP failure | After a session starts, make a Firecrawl search fail. | Chat states that current information is unavailable and does not answer from memory. |
 | Transfer failure truth | Try a manager transfer in a browser, then test an unavailable manager on a phone call. | Browser says an inbound phone leg is required. A carrier failure is not described as a browser limit, and the terminal policy may hang up. |
 
+### Verification stress checks
+
+Restart the worker before each case and run it in the browser on both targets.
+Repeat it on a phone route only when doing a separate carrier test. Every
+successful case must follow this order:
+
+```text
+verify_customer
+complete first-name, surname, and phone readback
+new clear caller confirmation
+find_or_create_customer       exactly once, with the confirmed values
+```
+
+Test details given at once, a yes spoken before the readback, an interrupted
+readback, a one-field correction, a fragmented phone number, an ambiguous
+answer, and an explicit no. No customer action may run before the final yes;
+the one later action must use the values that were read back. The Python
+self-check covers name mismatch, and `make smoke` covers the clean restart.
+
 ### Exact answered and unavailable transfer calls
 
-Reset the demo database before every evidence run. Use this phone-only script
-once per target with the manager answering and once per target with the manager
-declining or not answering. Wait for each response.
+Start a new worker for every evidence run. Use this phone-only script once per
+target with the manager answering and once per target with the manager declining
+or not answering. Wait for each response.
 
 1. “I need help with a complaint.”
 2. “My name is Alex Test.”
 3. “My phone number is plus one, five five five, zero one zero.” Pause, then
    say: “Eight eight four four.”
-4. “My haircut was uneven and I want to speak to a manager.”
+4. After the complete identity readback, say: “Yes, that is correct.”
+5. “My haircut was uneven and I want to speak to a manager.”
 
 An answered run needs observed two-way human audio. Carrier acceptance alone
 does not prove that the manager answered. An unavailable run must end without a
@@ -227,15 +251,16 @@ new concierge greeting or a claim that the manager answered.
 
 ### Exact combined booking-to-manager call
 
-Reset the demo database first. Run this once in the browser and once by inbound
-phone on each target. Wait for each response before speaking the next line.
+Start a new worker first. Run this once in the browser and once by inbound phone
+on each target. Wait for each response before speaking the next line.
 
 1. “I want to book a haircut tomorrow at three. My name is Robin Taylor.”
 2. “My number is five five five zero one zero.” Pause, then say: “Eight eight
    four four.”
-3. After booking preparation starts: “Actually, my last haircut was uneven. I’d
+3. After the complete identity readback, say: “Yes, that is correct.”
+4. After booking preparation starts: “Actually, my last haircut was uneven. I’d
    like the salon to fix it.”
-4. Only after customer care says the complaint was saved: “I want to speak to a
+5. Only after customer care says the complaint was saved: “I want to speak to a
    manager.”
 
 The trace must show this order:

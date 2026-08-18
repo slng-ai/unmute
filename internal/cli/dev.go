@@ -46,6 +46,9 @@ func newDevCmd() *cobra.Command {
 			if !telephony && publicURL != "" {
 				return errors.New("dev: --public-url requires --telephony")
 			}
+			if !telephony && noWebhook {
+				return errors.New("dev: --no-webhook requires --telephony")
+			}
 			if !telephony && to != "" {
 				return errors.New("dev: --to requires --telephony")
 			}
@@ -77,20 +80,20 @@ func newDevCmd() *cobra.Command {
 				return err
 			}
 			if console {
-				return errors.New("dev: --console was removed; local development runs in Docker. " +
+				return errors.New("dev: --console was removed. " +
 					"Run `unmute dev " + root + "` to talk to the agent in your browser")
 			}
 			if telephony {
 				return runDevTelephony(cmd, root, selected, publicURL, botPort, to, noWebhook, verbose)
 			}
-			// Default local mode: build and run the deployable container, served
-			// through one WebRTC web UI for both pipecat and livekit (SPEC V1).
+			// Default local mode: start the selected target's WebRTC runtime and
+			// serve one web UI for both Pipecat and LiveKit.
 			return runDevWeb(cmd, root, selected, uiPort, botPort, noOpen, verbose)
 		},
 	}
 
 	cmd.Flags().StringVar(&uiPort, "port", "8765", "port for the local dev UI")
-	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "host port the container publishes the agent on (Compose UNMUTE_DEV_PORT; with --telephony, UNMUTE_TELEPHONY_PORT)")
+	cmd.Flags().StringVar(&botPort, "bot-port", "7860", "host port for the local agent runtime (with Compose, UNMUTE_DEV_PORT or UNMUTE_TELEPHONY_PORT)")
 	cmd.Flags().StringVar(&targetName, "target", "", "target instance name (required without a TTY when multiple exist)")
 	cmd.Flags().StringArrayVar(&vars, "var", nil, "seed an input variable for this session: --var name=value (repeatable; the local stand-in for the dispatch payload)")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false, "do not open the browser automatically")
@@ -99,7 +102,7 @@ func newDevCmd() *cobra.Command {
 	// shell history and in older documentation, and cobra's bare "unknown flag"
 	// would leave an author guessing whether they misremembered the name or the
 	// mode itself went away.
-	cmd.Flags().BoolVar(&console, "console", false, "removed: local development runs in Docker")
+	cmd.Flags().BoolVar(&console, "console", false, "removed: use the browser dev loop")
 	_ = cmd.Flags().MarkHidden("console")
 	cmd.Flags().BoolVar(&telephony, "telephony", false, "run the selected target's resolved telephony route (no browser UI)")
 	cmd.Flags().StringVar(&publicURL, "public-url", "", "exact public HTTPS origin for routes with carrier callbacks (requires --telephony)")

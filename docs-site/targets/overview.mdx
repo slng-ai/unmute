@@ -139,7 +139,7 @@ Both run the same agent. The differences that usually decide it:
 | | Pipecat | LiveKit Agents |
 |---|---|---|
 | generated entry point | `bot.py` | `agent.py` |
-| local run | `uv run bot.py`, or `unmute dev` in Docker | `uv run python -m livekit.agents start agent.py`, or `unmute dev` in Docker with a local LiveKit server |
+| local run | `uv run bot.py -t webrtc`, or `unmute dev` under `uv` | `uv run python -m livekit.agents start agent.py`, or `unmute dev` in Docker with a local LiveKit server |
 | phone routes | your carrier through Daily or over websockets, Pipecat Cloud carrier streams | SIP trunks, or a generated Twilio bridge |
 | transfers | cold, on two of its routes | cold and warm, on the SIP route |
 | turn detection in the examples | local Silero | LiveKit's own turn model |

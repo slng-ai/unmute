@@ -15,6 +15,18 @@ func TestSmokeSalonConciergePipecatJourneys(t *testing.T) {
 	runPipecatSmokeScript(t, "salon-concierge", nil, nil, salonPipecatJourneysSmokeScript)
 }
 
+const salonStaleStoreSmokePrelude = `
+stale_database_path = (
+    Path(tempfile.gettempdir())
+    / "unmute-salon-concierge"
+    / str(os.getpid())
+    / "salon.db"
+)
+stale_database_path.parent.mkdir(parents=True, exist_ok=True)
+for suffix in ("", "-journal", "-wal", "-shm"):
+    stale_database_path.with_name(stale_database_path.name + suffix).write_bytes(b"stale")
+`
+
 const salonStoreSmokePrelude = `
 tool_names = (
     "cancel_booking",
@@ -23,6 +35,7 @@ tool_names = (
     "find_or_create_customer",
     "get_current_date",
     "list_bookings",
+    "modify_booking",
     "record_complaint",
 )
 database_dir = tempfile.TemporaryDirectory()
@@ -30,6 +43,9 @@ database_path = Path(database_dir.name) / "salon.db"
 tool_modules = {
     name: importlib.import_module(f"tools.{name}") for name in tool_names
 }
+assert {module._DB_PATH for module in tool_modules.values()} == {stale_database_path}
+for suffix in ("", "-journal", "-wal", "-shm"):
+    assert not stale_database_path.with_name(stale_database_path.name + suffix).exists()
 for module in tool_modules.values():
     module._DB_PATH = database_path
 
@@ -85,6 +101,7 @@ assert version("livekit-agents") == "1.6.10"
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
+` + salonStaleStoreSmokePrelude + `
 import agent  # noqa: E402
 from livekit.agents import llm  # noqa: E402
 ` + salonStoreSmokePrelude + `
@@ -316,6 +333,7 @@ assert version("pipecat-ai") == "1.7.0"
 for name in json.load(open("compile-report.json"))["required_env"]:
     os.environ.setdefault(name, "smoke-placeholder")
 
+` + salonStaleStoreSmokePrelude + `
 import bot  # noqa: E402
 from pipecat.flows import NO_RESPONSE  # noqa: E402
 from pipecat.frames.frames import Frame  # noqa: E402

@@ -129,6 +129,16 @@ func TestTelephonyRouteEnvironmentKeysHoldTheRenameLine(t *testing.T) {
 	}
 }
 
+func TestLiveKitSIPProcessUsesSupportedWorkerCommand(t *testing.T) {
+	route := TelephonyRoutes()[TelephonyKey{Provider: LiveKit, Transport: "sip", Carrier: "twilio"}]
+	if len(route.Processes) != 1 {
+		t.Fatalf("processes = %#v", route.Processes)
+	}
+	if got := strings.Join(route.Processes[0].Command, " "); got != "uv run python -m livekit.agents start agent.py" {
+		t.Fatalf("agent command = %q", got)
+	}
+}
+
 // TestPipecatCloudWebsocketRouteRow pins the row's defining difference from every
 // other telephony row: it declares no process and no public endpoint, because the
 // operator hosts nothing (spec FR-001, data-model section 1). A future edit that

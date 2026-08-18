@@ -11,8 +11,9 @@ belongs to.
 <Note>
   Unmute never buys a number, creates a trunk, or changes anything on your carrier
   account at compile time. The one exception is deliberate and temporary:
-  [`unmute dev --telephony`](/dev/telephony) points your number's voice webhook at
-  the local run and puts the previous value back when you stop it.
+  on supported HTTP callback routes, [`unmute dev --telephony`](/dev/telephony)
+  points your number's voice webhook at the local run and puts the previous
+  value back when you stop it.
 </Note>
 
 ## Which values you need depends on the route
@@ -72,9 +73,11 @@ This part differs by route, and it is the part to get right:
   address comes from the region in your `targets.yaml`.
 - **`carrier-websocket` and `connector`, in production**: the number's voice webhook
   points at the public URL of the service you host, as a POST.
-- **All three, locally**: `unmute dev --telephony` sets the voice webhook to its own
-  tunnel on every start and restores the previous value on exit, so you do not touch
-  the console to test.
+- **All three, locally**: `unmute dev --telephony` sets the voice webhook to its
+  own tunnel on every start and restores the previous value on exit, so you do
+  not touch the console to test. Pipecat `cloud-websocket` points at `POST /`,
+  which its local `uv` runner answers. Pipecat `carrier-websocket` and LiveKit
+  `connector` point at `POST /telephony/inbound` on the generated application.
 
 <Warning>
   Take the number off any SIP trunk before using it on one of these routes. A number

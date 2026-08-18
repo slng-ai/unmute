@@ -125,10 +125,10 @@ account, and what it puts back when you stop it are all on [running a phone
 route locally](/dev/telephony).
 
 <Warning>
-  A healthy local stack proves wiring, not reachability. A real call also needs
-  carrier credentials, a voice capable number, and the route's public ingress. For
-  SIP, network address translation on a laptop can block the call even when every
-  health check passes.
+  A healthy local runtime proves wiring, not reachability. A real call also needs
+  carrier credentials, a voice-capable number, and the route's public ingress.
+  The managed tunnel covers HTTPS and WSS routes. LiveKit SIP needs public SIP
+  signaling and RTP ingress; an HTTPS tunnel cannot provide either one.
 </Warning>
 
 ## Where to go next

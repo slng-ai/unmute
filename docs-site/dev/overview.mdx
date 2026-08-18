@@ -5,8 +5,8 @@ sidebarTitle: "Overview"
 ---
 
 `unmute dev` is the loop you live in while building an agent. One command
-compiles the package, builds the container a deployment would run, starts it,
-and serves a web page you can talk through.
+compiles the package, starts the target's local runtime, and serves a web page
+you can talk through.
 
 ```sh
 unmute dev examples/salon-support --target pipecat
@@ -14,7 +14,7 @@ unmute dev examples/salon-support --target pipecat
 
 ```text
 compiled examples/salon-support/build/pipecat
-building and starting the container...
+starting the local Pipecat agent...
 
   ▸ http://localhost:8765/?agent=pipecat
     ctrl-c to stop  ·  logs: examples/salon-support/build/pipecat/dev.log
@@ -31,27 +31,28 @@ directory you are standing in, and every path it prints is relative to there.
     The package is generated into `build/<target>/`. You do not run `unmute
     compile` first.
   </Step>
-  <Step title="Build and start">
-    `docker compose` builds the image from the generated `Dockerfile` and starts
-    the stack described by the generated `compose.dev.yaml`. On LiveKit that
-    stack also includes a local LiveKit server.
+  <Step title="Start the runtime">
+    Pipecat starts the generated `bot.py` directly with `uv`. This keeps its
+    WebRTC ICE candidates reachable from the host browser. LiveKit uses Docker
+    Compose because its stack also includes a local LiveKit server.
   </Step>
   <Step title="Wait for ready">
-    Pipecat is ready as soon as the container is up. LiveKit waits for the
-    worker to register, up to three minutes, so the browser only opens once a
-    call would actually be answered.
+    Pipecat waits for its `/status` response. LiveKit waits for the worker to
+    register, up to three minutes, so the browser only opens once a call would
+    actually be answered.
   </Step>
   <Step title="Serve the page">
     A small local web server hands your browser a WebRTC session against the
-    running container.
+    running target.
   </Step>
   <Step title="Clean up">
-    Ctrl-c stops and removes the stack. Data volumes are kept.
+    Ctrl-c stops the local Pipecat process or removes the LiveKit stack. LiveKit
+    data volumes are kept.
   </Step>
 </Steps>
 
-Docker is required. This mode runs the same container a deployment runs, and
-every local run goes through Docker Compose, so local development needs Docker.
+Pipecat browser development needs `uv`. LiveKit browser development needs
+Docker with Compose.
 
 ## Picking a target
 
@@ -77,7 +78,7 @@ unmute: dev examples/simple-prompt: target instance "nope" is not declared
 | Flag | Default | What it is |
 |---|---|---|
 | `--port` | `8765` | the local web page you talk through |
-| `--bot-port` | `7860` | the host port the agent container publishes |
+| `--bot-port` | `7860` | the host port the local agent runtime uses |
 
 Change both when a port is busy:
 
@@ -107,8 +108,8 @@ inside a scaffolded package, run with no argument, that reads:
     ctrl-c to stop  ·  logs: build/livekit/dev.log
 ```
 
-The file holds everything: the image build, the container's stdout, and the reason
-a start failed. It is rewritten on every run, so the file you are looking at is
+The file holds the local runtime's output and the reason a start failed. It is
+rewritten on every run, so the file you are looking at is
 always this run.
 
 To follow the same output in your terminal while it runs, add `--verbose`. The flag
@@ -159,9 +160,8 @@ something else.
 
 ## One run per package at a time
 
-The Compose project name comes from the package path and the target name, so a
-second `unmute dev` on the same package does not run beside the first. It
-recreates the same stack on the new port and takes it over.
+LiveKit's Compose project name comes from the package path and target name. A
+second Pipecat run instead fails clearly if the selected local port is busy.
 
 Two different LiveKit packages can run together when their server ports do not
 overlap. Move signaling, TCP fallback, and UDP media as one set:
@@ -178,8 +178,13 @@ Shown from inside the package. Anywhere else, name it first, as in
 
 | Command | You talk through | Needs |
 |---|---|---|
-| `unmute dev` | a local web page | Docker |
-| `unmute dev --telephony` | a real phone call | Docker for most routes, plus carrier credentials |
+| `unmute dev` | a local web page | `uv` for Pipecat; Docker for LiveKit |
+| `unmute dev --telephony` | the target's phone route | the route's runtime, carrier credentials, and reachable ingress |
+
+Pipecat `cloud-websocket` can receive a real Twilio call on your laptop through
+the managed HTTPS/WSS tunnel. A local LiveKit SIP stack proves its trunk,
+dispatch, and worker wiring, but a real inbound call still needs public SIP
+signaling and RTP ingress.
 
 ## Where to go next
 

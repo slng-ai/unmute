@@ -608,10 +608,36 @@ func TestExecDevCloudWebsocketRefusesMissingCredentialsByName(t *testing.T) {
 	}
 }
 
+func TestExecDevCloudWebsocketDoesNotTouchTwilioBeforeAgentReady(t *testing.T) {
+	root, _ := fakeTelephonyRoot(t,
+		"TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\nPIPECAT_CLOUD_ORGANIZATION=org\n")
+	fakeUV(t, root, "sleep 30\n")
+	var calls []string
+	fakeTwilioAPIRecording(t, "https://old.example/hook", false, &calls)
+	restoreReady := cloudWebsocketAgentReady
+	cloudWebsocketAgentReady = func(context.Context, string, <-chan error) error {
+		return errors.New("not ready")
+	}
+	t.Cleanup(func() { cloudWebsocketAgentReady = restoreReady })
+
+	cmd, _ := telephonyTestCommand(t)
+	err := execDevCloudWebsocket(cmd, root, "phone", cloudWebsocketPlan(), cloudWebsocketFiles,
+		devTelephonyOptions{botPort: "7861", publicValue: "https://voice.example.com"})
+	if err == nil || !strings.Contains(err.Error(), "local agent not ready") {
+		t.Fatalf("readiness failure = %v, want local-agent error", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("Twilio was touched before readiness: %v", calls)
+	}
+}
+
 // The borrowed-state rule: a dev session takes a real phone line and must give it
 // back on **every** exit path. Clean, agent-error, ctrl-c, and restore-error
 // paths all reach the same deferred restore.
 func TestExecDevCloudWebsocketRestoresTheNumberOnEveryExitPath(t *testing.T) {
+	restoreReady := cloudWebsocketAgentReady
+	cloudWebsocketAgentReady = func(context.Context, string, <-chan error) error { return nil }
+	t.Cleanup(func() { cloudWebsocketAgentReady = restoreReady })
 	cases := []struct {
 		name         string
 		agentBody    string

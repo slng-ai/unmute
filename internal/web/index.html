@@ -352,8 +352,10 @@ function stopMeter(){
 // ── shared teardown (either transport) ──────────────────
 function teardown(state, hint){
   stopMeter();
+  clearInterval(clientReadyTimer); clientReadyTimer = 0;
   if (dc){ try { dc.close(); } catch {} dc = null; }
   if (pc){ pc.close(); pc = null; }
+  pcId = null;
   if (mic){ mic.getTracks().forEach(t => t.stop()); mic = null; }
   if (room){ try { room.disconnect(); } catch {} room = null; }
   el.remote.srcObject = null;
@@ -440,11 +442,32 @@ async function waitForIce(pc){
   });
 }
 
+async function waitForPeer(pc){
+  if (pc.connectionState === "connected") return;
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => finish(new Error("WebRTC connection timed out")), 15000);
+    const check = () => {
+      if (pc.connectionState === "connected") finish();
+      else if (["failed","disconnected","closed"].includes(pc.connectionState))
+        finish(new Error("WebRTC connection " + pc.connectionState));
+    };
+    const finish = (err) => {
+      clearTimeout(timeout);
+      pc.removeEventListener("connectionstatechange", check);
+      err ? reject(err) : resolve();
+    };
+    pc.addEventListener("connectionstatechange", check);
+    check();
+  });
+}
+
 // RTVI 2 message types we render. bot-output carries a stable segment id, so
 // progress updates replace their segment instead of adding transcript rows.
 function handleRtvi(msg){
   const t = msg.type, d = msg.data || {};
-  if (t === "user-transcription"){
+  if (t === "bot-ready"){
+    clearInterval(clientReadyTimer); clientReadyTimer = 0;
+  } else if (t === "user-transcription"){
     const text = (d.text || "").trim();
     if (!text) return;
     if (d.final){ promotePartial(text); resetBotTurn(); }
@@ -454,6 +477,15 @@ function handleRtvi(msg){
   } else if (t === "bot-output"){
     setBotSegment(d.segment_id, d.text);
   }
+}
+
+let clientReadyTimer = 0;
+function sendClientReady(){
+  if (!dc || dc.readyState !== "open") return;
+  dc.send(JSON.stringify({
+    label:"rtvi-ai", type:"client-ready", id:"unmute-dev-ready",
+    data:{version:"2.0.0", about:{library:"unmute-dev", platform:"web"}},
+  }));
 }
 
 async function connectPipecat(session){
@@ -488,10 +520,10 @@ async function connectPipecat(session){
     // RTVI carries transcripts over the "chat" data channel; pipecat's server
     // expects the client to create it. JSON frames: {label:"rtvi-ai", type, data}.
     dc = pc.createDataChannel("chat", { ordered: true });
-    dc.addEventListener("open", () => dc.send(JSON.stringify({
-      label:"rtvi-ai", type:"client-ready", id:"unmute-dev-ready",
-      data:{version:"2.0.0", about:{library:"unmute-dev", platform:"web"}},
-    })));
+    dc.addEventListener("open", () => {
+      sendClientReady();
+      clientReadyTimer = setInterval(sendClientReady, 500);
+    });
     dc.addEventListener("message", e => {
       try {
         const msg = JSON.parse(e.data);
@@ -512,6 +544,7 @@ async function connectPipecat(session){
     const answer = await res.json();
     pcId = answer.pc_id || pcId;
     await pc.setRemoteDescription(answer);
+    await waitForPeer(pc);
 
     muted = false; el.body.classList.remove("muted");
     el.mute.disabled = false; el.mute.textContent = "mic on";

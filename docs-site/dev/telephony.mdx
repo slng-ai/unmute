@@ -9,8 +9,10 @@ unmute dev examples/twilio-telephony-hello --telephony --target pipecat
 ```
 
 With `--telephony`, `unmute dev` runs the route your connection declares instead
-of the browser UI. A real call from a real phone can reach the agent on your
-laptop.
+of the browser UI. Routes that receive carrier callbacks over HTTPS and WSS can
+reach a local agent through the managed tunnel. A local LiveKit SIP stack proves
+the wiring, but a real inbound SIP call still needs public SIP signaling and RTP
+ingress.
 
 This page is the mechanics: what runs, what it touches that is not yours, and what
 it undoes when you stop it. The route vocabulary itself, and which routes exist,
@@ -51,36 +53,55 @@ is on [Telephony](/telephony/overview).
     pipecat: managed tunnel https://<random>.trycloudflare.com (quick tunnel URLs rotate on every run)
     ```
 
+    Pipecat `cloud-websocket` runs without Compose and reports the same origin
+    with its local agent:
+
+    ```text
+    pipecat: local agent on port 7860, reachable at https://<random>.trycloudflare.com (quick tunnel URLs rotate on every run)
+    ```
+
     Quick tunnel URLs really do rotate on every run, which is why the next step
     happens on every start rather than once. `--public-url` skips this entirely and
     uses your own origin. The LiveKit SIP route needs no tunnel: SIP does not call
     back over HTTP.
   </Step>
-  <Step title="Start the local stack">
-    Docker Compose brings up the generated services. On LiveKit SIP that is the
-    agent, Redis, LiveKit Server, and LiveKit SIP, and the command creates the local
-    trunk and dispatch records against that local server itself, before the agent
-    starts, so an inbound call has somewhere to land.
+  <Step title="Start the local runtime">
+    Docker Compose brings up the generated services for Compose routes. On
+    LiveKit SIP that is the agent, Redis, LiveKit Server, and LiveKit SIP. The
+    command creates the local trunk and dispatch records against that local
+    server before the agent starts.
 
-    The Pipecat Cloud carrier-stream route is the exception: nothing of yours is
-    hosted on it in production, so locally there is no Compose stack either. The
-    compiled agent runs directly with `uv` in the carrier's stream mode.
+    Pipecat `cloud-websocket` is the exception. Pipecat Cloud terminates this
+    route in production, but a dev run starts the compiled `bot.py` on your
+    machine with `uv run bot.py -t twilio`. Twilio reaches that local process
+    through the temporary tunnel.
   </Step>
   <Step title="Point your number at this run">
     Where the carrier has an API for it, today Twilio, the number's voice webhook is
     set to this run's public URL and the previous value is printed:
 
     ```text
-    pipecat: Twilio voice webhook for +15551234567 set to https://<random>.trycloudflare.com/telephony/inbound (was: unset)
+    pipecat: Twilio voice webhook for +15551234567 set to https://<random>.trycloudflare.com/ (was: unset)
     ```
+
+    The path depends on the local runtime. Pipecat `cloud-websocket` answers
+    `POST /` itself and returns TwiML that streams the call to
+    `wss://<tunnel-host>/ws`. Generated Pipecat `carrier-websocket` and LiveKit
+    `connector` applications answer `POST /telephony/inbound`.
 
     This is the one thing the command changes outside your machine, and it changes it
     in your name, which is why the previous value is printed rather than assumed.
   </Step>
   <Step title="Print the call line">
+    Local HTTPS/WSS routes print the number you can call:
+
     ```text
     call +1XXXXXXXXXX  ·  ctrl-c to stop
     ```
+
+    A local LiveKit SIP stack instead says that its wiring is ready and that a
+    real inbound call still needs publicly reachable SIP and RTP ingress. It
+    does not claim that a laptop behind normal NAT can receive the call.
 
     On an outbound-capable route it also says whether dial-out is ready, and what to
     add to place a call.
@@ -98,11 +119,13 @@ Ctrl-c undoes the outward changes:
   ```
 
 - the tunnel is closed, so the URL stops existing,
-- the Compose stack is stopped and removed. Named data volumes are kept.
+- the local Pipecat process is stopped, or the Compose stack is stopped and
+  removed. Named data volumes are kept.
 
-The restore is armed before the number is ever touched, so it runs on every exit
-path: a clean ctrl-c, an error, or a crash after the change. If the restore itself
-fails, you get a warning naming the number, not silence.
+The restore is armed before the number is ever touched, so it runs on handled exit
+paths: a clean ctrl-c, cancellation, or a local-agent error while the CLI is still
+running. If the restore itself fails, you get a warning naming the number, not
+silence.
 
 ## What each route actually runs
 
@@ -125,8 +148,8 @@ form before it uses the Pipecat Cloud key to start an agent session.
 | Flag | What it does |
 |---|---|
 | `--telephony` | run the route instead of the browser UI |
-| `--no-webhook` | leave the carrier number alone; the run prints its public URL and you point something at it yourself |
-| `--public-url` | use your own HTTPS origin instead of a managed quick tunnel |
+| `--no-webhook` | on callback routes, leave the carrier number alone; point it at the printed inbound URL yourself |
+| `--public-url` | use your own HTTPS origin, already forwarding to the local agent, instead of a managed quick tunnel |
 | `--to <E.164>` | place one outbound call as soon as the stack is healthy |
 | `--verbose` | follow the run's log on stderr as well as writing it to the log file |
 | `--bot-port` | change the host port the agent publishes, default `7860` |
@@ -171,10 +194,11 @@ must differ when two stacks run at once.
 ## What a healthy local run proves
 
 <Warning>
-  A healthy local stack proves wiring, not reachability. A real call also needs
-  carrier credentials, a voice capable number, and the route's public ingress. For
-  SIP, network address translation on a laptop can block the call even when every
-  health check passes.
+  A healthy local runtime proves wiring, not reachability. A real call also needs
+  carrier credentials, a voice-capable number, and the route's public ingress.
+  The managed tunnel provides that ingress for HTTPS and WSS only. For SIP, the
+  carrier must reach public SIP signaling and RTP ports; a laptop behind normal
+  network address translation cannot provide that ingress by itself.
 </Warning>
 
 ## Where to go next

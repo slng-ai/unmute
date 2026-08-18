@@ -77,17 +77,23 @@ unmute dev examples/twilio-telephony-hello --telephony --target pipecat
 
 Watch for three things in the output:
 
-1. the managed tunnel origin, with a note that quick tunnel URLs rotate on every
-   run,
-2. the line saying your number's Twilio voice webhook was updated, and what it
+1. the line saying your number's Twilio voice webhook was updated, and what it
    was before,
+2. the local agent line with its temporary public origin and a note that quick
+   tunnel URLs rotate on every run,
 3. the call line: `call +1XXXXXXXXXX  ·  ctrl-c to stop`.
 
 Call that number. The agent answers and greets you. Speak, and it replies.
 
 Ctrl-c stops the run and puts your number's previous voice configuration back.
 Your TwiML Bin is never touched, because the local run answers Twilio's webhook
-itself.
+itself at `POST /` and sends the media stream through
+`wss://<tunnel-host>/ws`.
+
+Pass `--public-url https://your-tunnel.example` to use a tunnel you already run.
+Pass `--no-webhook` to leave the number untouched, then point its voice webhook
+at the printed origin root yourself. The first flag replaces the managed tunnel;
+the second replaces only the temporary Twilio update.
 
 ## One number, one target at a time
 

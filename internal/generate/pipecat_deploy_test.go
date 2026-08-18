@@ -107,7 +107,7 @@ func TestPipecatImageMeetsThePlatformContract(t *testing.T) {
 	// The invariant, not the spelling: every module the entrypoint imports has to
 	// be reachable inside the image. Asserting one COPY line's wording is what let
 	// `import tools.<name>` ship against an image with no tools/ directory, and
-	// `compose.dev.yaml` has no bind mount, so `unmute dev` runs the same image.
+	// `compose.dev.yaml` has no bind mount, so its optional container run uses the same image.
 	assertImportsAreCopied(t, artifact, build)
 	// A CMD replaces the base image's server with something the platform cannot
 	// call.

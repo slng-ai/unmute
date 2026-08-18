@@ -45,29 +45,35 @@ Use this prompt to start a fresh manual release sweep:
 
 ## Salon concierge release gate
 
-Reset the demo database before every evidence run. First run this phone-only
-script once per target with the manager answering and once per target with the
-manager declining or not answering. Wait for each response.
+Restart `unmute dev` before every independent run; the salon worker starts with
+an empty database. The local phone checks are documented in the package README.
+The real carrier checks below are separate: run them only on reachable phone
+routes.
+
+First run this script with the manager answering, then with the manager
+declining or not answering. Wait for each response.
 
 1. “I need help with a complaint.”
 2. “My name is Alex Test.”
 3. “My phone number is plus one, five five five, zero one zero.” Pause, then
    say: “Eight eight four four.”
-4. “My haircut was uneven and I want to speak to a manager.”
+4. After the complete identity readback, say: “Yes, that is correct.”
+5. “My haircut was uneven and I want to speak to a manager.”
 
 An answered run needs observed two-way human audio. Carrier acceptance alone
 does not prove that the manager answered. An unavailable run must end without a
 new concierge greeting or a claim that the manager answered.
 
-Reset the demo database again. Then run this combined script once in the
-browser and once by inbound phone on each target:
+Restart the worker. Then run this combined script in the browser on both targets
+and on each reachable phone route:
 
 1. “I want to book a haircut tomorrow at three. My name is Robin Taylor.”
 2. “My number is five five five zero one zero.” Pause, then say: “Eight eight
    four four.”
-3. After booking preparation starts: “Actually, my last haircut was uneven. I’d
+3. After the complete identity readback, say: “Yes, that is correct.”
+4. After booking preparation starts: “Actually, my last haircut was uneven. I’d
    like the salon to fix it.”
-4. Only after customer care says the complaint was saved: “I want to speak to a
+5. Only after customer care says the complaint was saved: “I want to speak to a
    manager.”
 
 Required action order:
@@ -88,7 +94,9 @@ Expected state is one customer, zero bookings, and one complaint, with no
 second verification, apply task, or booking mutation. Browser runs must state
 that transfer needs an inbound call and start no carrier action. The inbound
 combined run must reach the same state and action order before its terminal
-transfer.
+transfer. Run the package's
+[verification stress checks](../examples/salon-concierge/README.md#verification-stress-checks)
+before filling in release evidence.
 
 Record the result in the package's
 [release evidence table](../examples/salon-concierge/README.md#release-evidence).

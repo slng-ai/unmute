@@ -9,8 +9,7 @@ not edit by hand — change the source spec and recompile.
 cp .env.example .env                      # then fill in your keys
 {{if .Telephony}}uv run uvicorn telephony:app --host 0.0.0.0 --port 7860
 {{else}}
-uv run bot.py                             # web: open the URL it prints
-uv run --extra console bot.py console     # terminal: talk over local mic/speaker
+uv run bot.py -t webrtc                   # web: open the URL it prints
 {{end}}
 ```
 
@@ -86,14 +85,13 @@ validation will reject the request.
 This route remains provisional until its credentialed smoke passes.
 {{else}}
 `uv` installs the pinned dependencies on first run. The Pipecat dev runner
-serves a WebRTC test client you can open in the browser. Console mode needs the
-`console` extra (pyaudio; `brew install portaudio` first on macOS).
+serves a WebRTC test client you can open in the browser.
 {{if .DailyCarrier}}
-Those two are for talking to the agent right now, with no phone involved. For a
+That command is for talking to the agent right now, with no phone involved. For a
 real phone call through your own number, deploy first and then follow
 **Telephony setup** below.
 {{end}}{{if .CloudWebsocket}}
-Those two are for talking to the agent right now, with no phone involved. For a
+That command is for talking to the agent right now, with no phone involved. For a
 real phone call through your own number, see **Telephony setup** below: deploy,
 then a few actions in your carrier's console, and nothing running on your side
 at all.
@@ -734,6 +732,9 @@ reach it, points the declared number's voice configuration at that tunnel for th
 length of the session. The number's previous voice configuration is restored when
 the session ends, including when you stop it with ctrl-c. Call the number and you
 are talking to the code on your laptop.
+
+The command waits for `/status` to report `ready` before it points the number's
+webhook at the tunnel root (`/`).
 
 Two things worth knowing:
 
