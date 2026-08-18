@@ -26,7 +26,7 @@ var (
 
 const tunnelStartTimeout = 45 * time.Second
 
-var tunnelURLPattern = regexp.MustCompile(`https://[a-z0-9-]+\.trycloudflare\.com`)
+var tunnelURLPattern = regexp.MustCompile(`\|\s+(https://[a-z0-9-]+\.trycloudflare\.com)\s+\|`)
 
 const tunnelInstallHint = "cloudflared not found on PATH; the managed tunnel for carrier webhook routes needs it. " +
 	"Install it (macOS: `brew install cloudflared`; Linux: distribution package or a binary from " +
@@ -101,10 +101,10 @@ func (tw *tunnelURLWatcher) Write(p []byte) (int, error) {
 	tw.mu.Lock()
 	if !tw.done {
 		tw.buf = append(tw.buf, p...)
-		if match := tunnelURLPattern.Find(tw.buf); match != nil {
+		if match := tunnelURLPattern.FindSubmatch(tw.buf); match != nil {
 			tw.done = true
 			tw.buf = nil
-			origin := string(match)
+			origin := string(match[1])
 			fire := tw.fire
 			tw.mu.Unlock()
 			fire(origin)

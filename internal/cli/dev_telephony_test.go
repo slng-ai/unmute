@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -264,6 +266,33 @@ func TestComposeExecutorRunsInfraServicesThenHookThenFullGraph(t *testing.T) {
 	full := lines[1]
 	if !strings.HasSuffix(strings.Split(full, " | ")[0], "--wait") || !strings.Contains(full, "HOOK=one/two") {
 		t.Fatalf("full up did not carry hook-extended env: %q", full)
+	}
+}
+
+func TestComposeExecutorReturnsOnStopError(t *testing.T) {
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "docker")
+	body := "#!/bin/sh\ncase \"$*\" in *' logs '*) kill -INT $$;; esac\n"
+	if err := os.WriteFile(fake, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restoreCommand := composeCommand
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, fake, args...)
+	}
+	t.Cleanup(func() { composeCommand = restoreCommand })
+
+	var output bytes.Buffer
+	err := runTelephonyCompose(context.Background(), telephonyComposeRun{
+		dir: dir, file: filepath.Join(dir, "compose.telephony.yaml"), project: "unmute-test",
+		output: &output, stdout: &output, stderr: &output,
+		logPath: filepath.Join(dir, "telephony.log"),
+		onStop: func(context.Context) error {
+			return errors.New("Twilio restore refused")
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "Twilio restore refused") {
+		t.Fatalf("onStop error = %v, output:\n%s", err, output.String())
 	}
 }
 
@@ -580,28 +609,28 @@ func TestExecDevCloudWebsocketRefusesMissingCredentialsByName(t *testing.T) {
 }
 
 // The borrowed-state rule: a dev session takes a real phone line and must give it
-// back on **every** exit path. All three are exercised, because they are three
-// different code paths reaching one deferred restore, and the one that matters
-// most in practice (ctrl-c) is the one a test is least likely to cover.
+// back on **every** exit path. Clean, agent-error, ctrl-c, and restore-error
+// paths all reach the same deferred restore.
 func TestExecDevCloudWebsocketRestoresTheNumberOnEveryExitPath(t *testing.T) {
 	cases := []struct {
-		name      string
-		agentBody string
-		cancel    bool
-		wantErr   bool
+		name         string
+		agentBody    string
+		cancel       bool
+		restoreFails bool
+		wantErr      bool
 	}{
 		{name: "clean exit", agentBody: "exit 0\n"},
 		{name: "the agent fails", agentBody: "echo boom 1>&2\nexit 3\n", wantErr: true},
 		{name: "interrupted", agentBody: "sleep 30\n", cancel: true},
+		{name: "restore fails", agentBody: "exit 0\n", restoreFails: true, wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			root, _ := fakeTelephonyRoot(t,
 				"TWILIO_ACCOUNT_SID=account\nTWILIO_AUTH_TOKEN=token\nTWILIO_PHONE_NUMBER=+15550001111\nPIPECAT_CLOUD_ORGANIZATION=org\n")
 			fakeUV(t, root, tc.agentBody)
-			var updates url.Values
 			var calls []string
-			server := fakeTwilioAPIRecording(t, "token", "https://old.example/hook", &updates, &calls)
+			server := fakeTwilioAPIRecording(t, "https://old.example/hook", tc.restoreFails, &calls)
 			_ = server
 
 			cmd, out := telephonyTestCommand(t)
@@ -619,21 +648,22 @@ func TestExecDevCloudWebsocketRestoresTheNumberOnEveryExitPath(t *testing.T) {
 			err := execDevCloudWebsocket(cmd, root, "phone", cloudWebsocketPlan(), cloudWebsocketFiles,
 				devTelephonyOptions{botPort: "7861", publicValue: "https://voice.example.com"})
 			if tc.wantErr && err == nil {
-				t.Fatalf("a failing agent must surface an error:\n%s", out.String())
+				t.Fatalf("expected command error:\n%s", out.String())
 			}
 			if !tc.wantErr && err != nil {
 				t.Fatalf("execDevCloudWebsocket: %v\n%s", err, out.String())
 			}
-			// Two updates: the borrow and the restore, in that order, and the last
-			// value is what the number had before.
-			if len(calls) != 2 {
-				t.Fatalf("the number was updated %d time(s), want 2 (borrow and restore): %v", len(calls), calls)
+			if tc.restoreFails && !strings.Contains(err.Error(), "restore") {
+				t.Fatalf("restore failure was not returned: %v", err)
 			}
-			if calls[0] != "https://voice.example.com/" {
-				t.Errorf("the session pointed the number at %q, want the local runner's webhook path", calls[0])
+			// Two updates: borrow with POST, then restore the exact prior GET
+			// configuration on every exit path.
+			wantCalls := []string{
+				"POST https://voice.example.com/",
+				"GET https://old.example/hook",
 			}
-			if calls[1] != "https://old.example/hook" {
-				t.Errorf("the number was left pointing at %q, not what it had before", calls[1])
+			if !slices.Equal(calls, wantCalls) {
+				t.Fatalf("Twilio voice configuration writes = %v, want %v", calls, wantCalls)
 			}
 			printed := out.String()
 			for _, want := range []string{"restored on exit", "TwiML Bin is untouched", "borrowed +15550001111"} {
@@ -645,23 +675,28 @@ func TestExecDevCloudWebsocketRestoresTheNumberOnEveryExitPath(t *testing.T) {
 	}
 }
 
-// fakeTwilioAPIRecording is fakeTwilioAPI plus an ordered log of every VoiceUrl
-// the session wrote, which is how the borrow-and-restore pair is asserted.
-func fakeTwilioAPIRecording(t *testing.T, authToken, existingVoiceURL string, updates *url.Values, calls *[]string) *httptest.Server {
+// fakeTwilioAPIRecording keeps the current voice configuration and records each
+// URL+method write, so the borrow-and-restore pair is asserted as one value.
+func fakeTwilioAPIRecording(t *testing.T, existingVoiceURL string, restoreFails bool, calls *[]string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	current := existingVoiceURL
+	currentMethod := http.MethodGet
 	mux.HandleFunc("GET /2010-04-01/Accounts/account/IncomingPhoneNumbers.json", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"incoming_phone_numbers":[{"sid":"PN123","voice_url":"` + current + `"}]}`))
+		_, _ = w.Write([]byte(`{"incoming_phone_numbers":[{"sid":"PN123","voice_url":"` + current + `","voice_method":"` + currentMethod + `"}]}`))
 	})
 	mux.HandleFunc("POST /2010-04-01/Accounts/account/IncomingPhoneNumbers/PN123.json", func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		*updates = r.PostForm
 		current = r.PostForm.Get("VoiceUrl")
-		*calls = append(*calls, current)
+		currentMethod = r.PostForm.Get("VoiceMethod")
+		*calls = append(*calls, currentMethod+" "+current)
+		if restoreFails && len(*calls) == 2 {
+			http.Error(w, "restore refused", http.StatusInternalServerError)
+			return
+		}
 		_, _ = w.Write([]byte(`{"sid":"PN123"}`))
 	})
 	// Anything else is a request this route must never make: no call creation, no

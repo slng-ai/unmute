@@ -21,6 +21,7 @@ func TestTunnelURLWatcherExtractsOriginAcrossSplitWrites(t *testing.T) {
 	watcher := &tunnelURLWatcher{w: &sink, fire: func(origin string) { got = origin }}
 	lines := []string{
 		"2026-07-22T09:00:00Z INF Thank you for trying Cloudflare Tunnel...\n",
+		"failed to request quick Tunnel: Post \"https://api.trycloudflare.com/tunnel\": context deadline exceeded\n",
 		"2026-07-22T09:00:01Z INF +--------------------------------------------+\n",
 		"2026-07-22T09:00:01Z INF |  Your quick Tunnel has been created! Visit it at (it may take some time to be reachable):  |\n",
 		"2026-07-22T09:00:01Z INF |  https://drums-inputs-guam", "-tulsa.trycloudflare.com  |\n",
@@ -99,7 +100,7 @@ func TestStartQuickTunnelParsesURLAndStopKillsGroup(t *testing.T) {
 func TestStartQuickTunnelReportsEarlyExit(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "cloudflared")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho \"failed to request quick Tunnel\" 1>&2\nexit 1\n"), 0o755); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'failed to request quick Tunnel: Post \"https://api.trycloudflare.com/tunnel\": context deadline exceeded' 1>&2\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	restoreLook := tunnelLookPath

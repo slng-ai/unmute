@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -55,7 +56,7 @@ func autoConfigureCarrierWebhook(ctx context.Context, out io.Writer, targetName 
 		if err != nil {
 			return nil, fmt.Errorf("configure Twilio voice webhook: %w", err)
 		}
-		shown := previous
+		shown := previous.URL
 		if shown == "" {
 			shown = "unset"
 		}
@@ -64,7 +65,7 @@ func autoConfigureCarrierWebhook(ctx context.Context, out io.Writer, targetName 
 		// real phone line at a dead tunnel until the next run. Hand back the undo
 		// (V14/B7).
 		return func(restoreCtx context.Context) error {
-			if _, err := configureTwilioVoiceWebhook(restoreCtx, accountSID, authToken, number, previous); err != nil {
+			if err := restoreTwilioVoiceWebhook(restoreCtx, accountSID, authToken, previous); err != nil {
 				return err
 			}
 			fmt.Fprintf(out, "%s: Twilio voice webhook for %s restored to %s\n", targetName, number, shown)
@@ -76,42 +77,70 @@ func autoConfigureCarrierWebhook(ctx context.Context, out io.Writer, targetName 
 }
 
 // configureTwilioVoiceWebhook looks up the IncomingPhoneNumber by exact
-// number, sets its VoiceUrl, and returns the previous VoiceUrl.
-func configureTwilioVoiceWebhook(ctx context.Context, accountSID, authToken, number, voiceURL string) (string, error) {
+// number, sets its voice webhook for a dev session, and returns the complete
+// previous voice configuration for restoration.
+func configureTwilioVoiceWebhook(ctx context.Context, accountSID, authToken, number, voiceURL string) (twilioVoiceWebhook, error) {
 	list := fmt.Sprintf("%s/2010-04-01/Accounts/%s/IncomingPhoneNumbers.json?PhoneNumber=%s",
 		twilioAPIBase, url.PathEscape(accountSID), url.QueryEscape(number))
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, list, nil)
 	if err != nil {
-		return "", err
+		return twilioVoiceWebhook{}, err
 	}
 	request.SetBasicAuth(accountSID, authToken)
 	var lookup struct {
 		IncomingPhoneNumbers []struct {
-			SID      string `json:"sid"`
-			VoiceURL string `json:"voice_url"`
+			SID         string `json:"sid"`
+			VoiceURL    string `json:"voice_url"`
+			VoiceMethod string `json:"voice_method"`
 		} `json:"incoming_phone_numbers"`
 	}
 	if err := doTelephonyJSON(request, &lookup); err != nil {
-		return "", err
+		return twilioVoiceWebhook{}, err
 	}
 	if len(lookup.IncomingPhoneNumbers) == 0 {
-		return "", fmt.Errorf("phone number %s was not found on this Twilio account; buy or verify a Voice-capable number in the Twilio Console first", number)
+		return twilioVoiceWebhook{}, fmt.Errorf("phone number %s was not found on this Twilio account; buy or verify a Voice-capable number in the Twilio Console first", number)
 	}
 	record := lookup.IncomingPhoneNumbers[0]
+	if record.VoiceMethod != http.MethodGet && record.VoiceMethod != http.MethodPost {
+		return twilioVoiceWebhook{}, fmt.Errorf("phone number %s has unsupported prior VoiceMethod %q; expected GET or POST", number, record.VoiceMethod)
+	}
+	previous := twilioVoiceWebhook{PhoneNumberSID: record.SID, URL: record.VoiceURL, Method: record.VoiceMethod}
+	configured := twilioVoiceWebhook{PhoneNumberSID: record.SID, URL: voiceURL, Method: http.MethodPost}
+	if err := postTwilioVoiceWebhook(ctx, accountSID, authToken, configured); err != nil {
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if restoreErr := restoreTwilioVoiceWebhook(restoreCtx, accountSID, authToken, previous); restoreErr != nil {
+			return twilioVoiceWebhook{}, errors.Join(err, fmt.Errorf("restore previous Twilio voice configuration: %w", restoreErr))
+		}
+		return twilioVoiceWebhook{}, err
+	}
+	return previous, nil
+}
 
-	form := url.Values{"VoiceUrl": {voiceURL}, "VoiceMethod": {"POST"}}
+type twilioVoiceWebhook struct {
+	PhoneNumberSID string
+	URL            string
+	Method         string
+}
+
+func restoreTwilioVoiceWebhook(ctx context.Context, accountSID, authToken string, webhook twilioVoiceWebhook) error {
+	return postTwilioVoiceWebhook(ctx, accountSID, authToken, webhook)
+}
+
+func postTwilioVoiceWebhook(ctx context.Context, accountSID, authToken string, webhook twilioVoiceWebhook) error {
+	form := url.Values{"VoiceUrl": {webhook.URL}, "VoiceMethod": {webhook.Method}}
 	update := fmt.Sprintf("%s/2010-04-01/Accounts/%s/IncomingPhoneNumbers/%s.json",
-		twilioAPIBase, url.PathEscape(accountSID), url.PathEscape(record.SID))
-	request, err = http.NewRequestWithContext(ctx, http.MethodPost, update, strings.NewReader(form.Encode()))
+		twilioAPIBase, url.PathEscape(accountSID), url.PathEscape(webhook.PhoneNumberSID))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, update, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", err
+		return err
 	}
 	request.SetBasicAuth(accountSID, authToken)
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if err := doTelephonyJSON(request, &struct{}{}); err != nil {
-		return "", err
+		return err
 	}
-	return record.VoiceURL, nil
+	return nil
 }
 
 // doTelephonyJSON performs a request and decodes a JSON body into result,
@@ -127,10 +156,26 @@ func doTelephonyJSON(request *http.Request, result any) error {
 		return err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("%s %s: %s: %s", request.Method, request.URL.Path, response.Status, strings.TrimSpace(string(body)))
+		return &telephonyHTTPStatusError{
+			method: request.Method,
+			path:   request.URL.Path,
+			status: response.Status,
+			body:   strings.TrimSpace(string(body)),
+		}
 	}
 	if err := json.Unmarshal(body, result); err != nil {
 		return fmt.Errorf("decode %s response: %w", request.URL.Path, err)
 	}
 	return nil
+}
+
+type telephonyHTTPStatusError struct {
+	method string
+	path   string
+	status string
+	body   string
+}
+
+func (e *telephonyHTTPStatusError) Error() string {
+	return fmt.Sprintf("%s %s: %s: %s", e.method, e.path, e.status, e.body)
 }
