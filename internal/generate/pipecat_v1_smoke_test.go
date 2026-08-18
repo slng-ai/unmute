@@ -258,6 +258,49 @@ asyncio.run(exercise_tool_boundary())
 print("inline instantiation ok")
 `
 
+const pipecatLoggingSmokeScript = `"""Smoke check: a later session keeps active Loguru sinks."""
+import asyncio
+import json
+import os
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+import bot  # noqa: E402
+
+
+async def fake_create_transport(*_args, **_kwargs):
+    return object()
+
+
+async def fake_run_bot(*_args, **_kwargs):
+    pass
+
+
+async def main():
+    bot.create_transport = fake_create_transport
+    bot.run_bot = fake_run_bot
+    await bot.bot(object())
+
+    messages = []
+    sink = bot.logger.add(
+        lambda message: messages.append(str(message)),
+        level="INFO",
+        format="{message}",
+    )
+    try:
+        await bot.bot(object())
+        bot.logger.info("active sink survived")
+    finally:
+        bot.logger.remove(sink)
+
+    assert any("active sink survived" in message for message in messages), messages
+
+
+asyncio.run(main())
+print("pipecat logging idempotence ok")
+`
+
 const pipecatHandoffAnnouncementSmokeScript = `"""V2: source playout finishes before receiver activation."""
 import asyncio
 import json
@@ -345,6 +388,10 @@ func TestSmokePipecatV1InlineInstantiates(t *testing.T) {
 	runPipecatSmokeScript(t, "simple-prompt", nil, func(agent *ir.Agent) {
 		agent.Tracing = nil
 	}, pipecatInlineSmokeScript)
+}
+
+func TestSmokePipecatV1LoggingIsConfiguredOnce(t *testing.T) {
+	runPipecatSmokeScript(t, "simple-prompt", nil, nil, pipecatLoggingSmokeScript)
 }
 
 // TestSmokePipecatV1BuiltinEndCall proves the emitted bodyless end_call @tool

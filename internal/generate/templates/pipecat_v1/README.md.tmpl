@@ -13,6 +13,10 @@ uv run bot.py                             # web: open the URL it prints
 uv run --extra console bot.py console     # terminal: talk over local mic/speaker
 {{end}}
 ```
+
+Pipecat logs default to `INFO`. Set `UNMUTE_LOG_LEVEL=DEBUG` only in a
+controlled environment because logs can contain caller speech, tool data, and
+phone details.
 {{- if gt (len .Agents) 1}}
 
 ## Agent handoffs
@@ -78,10 +82,6 @@ set to the status URL, then assign the phone number to that application.
 {{end}}
 {{end}}The public origin must exactly match `UNMUTE_PUBLIC_URL` or signature
 validation will reject the request.
-
-Normal logs default to `INFO`. Setting `UNMUTE_LOG_LEVEL=DEBUG` also enables
-upstream Pipecat parser diagnostics, which may include caller phone numbers;
-use debug logging only in a controlled environment.
 
 This route remains provisional until its credentialed smoke passes.
 {{else}}

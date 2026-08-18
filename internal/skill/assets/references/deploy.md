@@ -81,8 +81,10 @@ agent. Present them as a starting point and tell the user to measure.
   deployment needs none.
 - **Separate environments.** Production and staging apart, and never a
   development worker pointed at a production server.
-- **Logs.** Workers and the Pipecat application log to stdout. Ship those logs
-  and keep the level at `INFO`, because debug logging can expose phone numbers.
+- **Logs.** Workers and the Pipecat application log to stdout. Ship those logs.
+  Pipecat logs default to `INFO`; set `UNMUTE_LOG_LEVEL=DEBUG` only in a
+  controlled environment because logs can contain caller speech, tool data,
+  and phone details.
 - **Model providers.** Hosting the orchestrator does not host the models. Speech
   and reasoning calls still go to the providers bound in the package, on the
   user's own accounts.

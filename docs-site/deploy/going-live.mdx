@@ -87,8 +87,10 @@ them as a starting point and then measure.
   `daily-sip` do not use it.
 - **Separate environments.** Keep production and staging apart, and never point
   a development worker at a production server.
-- **Logs.** Workers and the Pipecat application log to stdout. Ship those logs,
-  and keep the level at `INFO`: debug logging can expose phone numbers.
+- **Logs.** Workers and the Pipecat application log to stdout. Ship those logs.
+  Pipecat logs default to `INFO`; set `UNMUTE_LOG_LEVEL=DEBUG` only in a
+  controlled environment because logs can contain caller speech, tool data,
+  and phone details.
 - **Model providers.** Hosting the orchestrator yourself does not host the
   models. Speech and reasoning calls still go to the providers you bound.
 
