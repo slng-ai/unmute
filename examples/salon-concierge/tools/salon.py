@@ -59,6 +59,11 @@ def _now():
     return datetime.now(UTC).isoformat()
 
 
+def _booking_today() -> date:
+    """Return the calendar date used by booking validation."""
+    return date.today()
+
+
 def _normalize_name(name):
     return " ".join(str(name).split()).casefold()
 
@@ -74,7 +79,7 @@ def _slot_parts(slot_id):
         requested_date = date.fromisoformat(date_text)
     except (TypeError, ValueError):
         return None
-    if requested_date < date.today() or service not in _SERVICES or time not in _TIMES:
+    if requested_date < _booking_today() or service not in _SERVICES or time not in _TIMES:
         return None
     return date_text, service, time
 
@@ -140,6 +145,11 @@ def list_bookings(customer_id):
     return {"bookings": [dict(row) for row in rows]}
 
 
+def get_current_date() -> dict[str, str]:
+    """Return the current booking date for relative-date requests."""
+    return {"date": _booking_today().isoformat()}
+
+
 def check_availability(service, date):
     if service not in _SERVICES:
         return {"slots": [], "status": "invalid"}
@@ -147,7 +157,7 @@ def check_availability(service, date):
         requested_date = datetime.strptime(date, "%Y-%m-%d").date()
     except (TypeError, ValueError):
         return {"slots": [], "status": "invalid"}
-    if requested_date < datetime.now().date():
+    if requested_date < _booking_today():
         return {"slots": [], "status": "invalid"}
 
     with _connect() as database:
@@ -343,8 +353,10 @@ def _demo():
                 }
                 assert len({result["customer_id"] for result in concurrent}) == 1
 
-        first_date = (date.today() + timedelta(days=1)).isoformat()
-        second_date = (date.today() + timedelta(days=2)).isoformat()
+        current_date = get_current_date()["date"]
+        assert current_date == _booking_today().isoformat()
+        first_date = (date.fromisoformat(current_date) + timedelta(days=1)).isoformat()
+        second_date = (date.fromisoformat(current_date) + timedelta(days=2)).isoformat()
         first_slot = check_availability("haircut", first_date)["slots"][0]["slot_id"]
         omitted_create = create_booking(created["customer_id"], "haircut", first_slot)
         false_create = create_booking(

@@ -42,8 +42,8 @@ invent an answer.
 
 ## Local data
 
-All seven local tool declarations point at [tools/salon.py](tools/salon.py). The
-generated project copies that source for each tool, and every copy opens the
+All eight local tool declarations point at [tools/salon.py](tools/salon.py). The
+generated project copies that source for each tool, and stateful calls open the
 same owner-only `salon.db` in the runtime temporary directory. It stays outside
 the generated project, so customer data cannot enter a later container build.
 Python's `sqlite3` module is in the standard library, so there is no extra
@@ -162,12 +162,13 @@ manager. It never starts an outbound conversation.
 
 Use a future date when testing bookings. Start with a fresh demo database, then
 run the first five rows in order in one conversation. Judge the called actions
-and saved state, not exact wording.
+and saved state, not exact wording. Run the relative-date booking once in the
+browser and once through an inbound phone call on each target.
 
 | Check | What to say | Pass result |
 |---|---|---|
 | Unverified booking | “I want to book a haircut.” Do not give identity until asked. | Verification runs first. No booking action runs before it succeeds. |
-| Verified booking | Give a fake name and 10–15 digit phone number, pick an offered time, then explicitly confirm the full booking. | The customer is created once and exactly one active booking is saved with the offered slot. |
+| Relative-date booking | Give a fake name and 10–15 digit phone number, say “Book a haircut tomorrow afternoon,” pick an offered time, then explicitly confirm the full booking. | The trace calls `get_current_date` before `check_availability`; the availability date is one day after the returned date, with no guessed-year invalid call. The customer is created once and exactly one active booking is saved with the offered slot. |
 | No confirmation | Prepare a create, modify, or cancel request, then say no, stay silent, or change topic instead of confirming. | Preparation returns `confirmed: false` and no booking row is created, changed, or cancelled. |
 | Neutral complaint | “My last haircut was uneven, but I’d like the salon to fix it.” | One complaint is recorded for the same customer, the booking remains active, and no manager transfer starts. |
 | Book then cancel | Ask to cancel the active booking and confirm. | The saved row is cancelled and no active booking remains. |
