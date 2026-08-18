@@ -1,0 +1,44 @@
+description: >-
+  Verify one salon customer from their full name and phone number. Reuse the
+  exact match or create a record for a new phone number. Never guess identity.
+
+input:
+  type: object
+  properties:
+    name:
+      type: string
+      description: Customer full name
+    phone:
+      type: string
+      description: Customer phone number; 10 to 15 digits after punctuation is removed
+  required:
+    - name
+    - phone
+
+output:
+  type: object
+  properties:
+    customer_id:
+      type: string
+    customer_name:
+      type: string
+    status:
+      type: string
+      enum:
+        - existing
+        - created
+        - name_mismatch
+        - invalid
+    summary:
+      type: string
+  required:
+    - customer_id
+    - customer_name
+    - status
+    - summary
+
+local:
+  handler: tools/salon.py
+
+interruption: provider_default
+effect: returns_data

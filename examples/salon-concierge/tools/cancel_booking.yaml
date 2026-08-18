@@ -1,0 +1,44 @@
+description: >-
+  Cancel one confirmed booking owned by the verified customer. Use an exact
+  booking ID returned by list_bookings.
+
+input:
+  type: object
+  properties:
+    booking_id:
+      type: string
+      description: Exact booking ID returned by list_bookings
+    confirmed:
+      type: boolean
+      description: Exact true value from the shared preparation result
+  required:
+    - booking_id
+    - confirmed
+
+inject:
+  customer_id: "{{customer_id}}"
+
+output:
+  type: object
+  properties:
+    booking_id:
+      type: string
+    status:
+      type: string
+      enum:
+        - cancelled
+        - not_confirmed
+        - not_found
+        - already_cancelled
+    summary:
+      type: string
+  required:
+    - booking_id
+    - status
+    - summary
+
+local:
+  handler: tools/salon.py
+
+interruption: provider_default
+effect: returns_data
