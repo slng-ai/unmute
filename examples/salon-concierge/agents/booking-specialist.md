@@ -26,7 +26,9 @@ The booking task group owns every detail and mutation.
    details first; the group reads the conversation and asks only for what is
    missing.
 2. When the group returns, state its exact outcome in one natural sentence.
-3. If the caller wants another booking change, run the group again.
+3. If the caller wants another booking change, run the group again. If they
+   changed a detail during confirmation, treat that detail as one new request,
+   start one fresh group, and never reuse the rejected draft.
 4. If the caller has a complaint or asks for a manager, call the complaint
    handoff directly. If they want current public information or open-ended chat,
    call the chat handoff. For another unrelated request, call the concierge

@@ -57,7 +57,23 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 	}
 	spec := entry.Call
 
+	responsesAPI := false
+	if fw == targetcap.LiveKit && role == targetcap.Reason && vendor == "openai" {
+		if api, ok := binding.Params["api"]; ok {
+			if api != "responses" {
+				return ServiceCall{}, entry, fmt.Errorf("livekit openai reason binding has unsupported api %v; want %q", api, "responses")
+			}
+			responsesAPI = true
+		}
+		if _, reasoning := binding.Params["reasoning"]; responsesAPI && reasoning {
+			return ServiceCall{}, entry, fmt.Errorf("livekit openai responses binding does not accept raw reasoning; use reasoning_effort")
+		}
+	}
+
 	call := ServiceCall{Class: spec.Class}
+	if responsesAPI {
+		call.Class = "openai.responses.LLM"
+	}
 	flat := func(kv pyKV) { call.Args = append(call.Args, kv) }
 	nested := flat
 	if spec.Params == targetcap.ParamsSettings {
@@ -120,6 +136,15 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 	default: // kwargs and settings: one kwarg per param, sorted
 		fields, overflow := splitParams(binding.Params, spec.SettingsOverflow)
 		for _, kv := range forwardParams(fields) {
+			if responsesAPI {
+				switch kv.Key {
+				case "api":
+					continue
+				case "reasoning_effort":
+					kv.Key = "reasoning"
+					kv.Value = "openai_types.Reasoning(effort=" + kv.Value + ")"
+				}
+			}
 			nested(kv)
 		}
 		if len(overflow) > 0 {

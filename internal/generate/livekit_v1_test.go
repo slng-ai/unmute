@@ -591,6 +591,67 @@ func artifactHasFile(artifact Artifact, path string) bool {
 	return false
 }
 
+// TestLiveKitV1EmptyTaskResponseContract keeps empty-response recovery scoped
+// to generated tasks. Normal agents and packages without tasks retain the SDK
+// default, and only task-bearing runbooks describe the retry.
+func TestLiveKitV1EmptyTaskResponseContract(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate task package: %v", err)
+	}
+
+	const mixin = "_RetryEmptyTaskResponseMixin"
+	taskAgent := artifactFile(t, artifact, "agent.py")
+	for _, want := range []string{
+		"class " + mixin + ":",
+		"class FindSlot(" + mixin + ", AgentTask[dict]):",
+		"class QualifyEvent(" + mixin + ", AgentTask[dict]):",
+		"class ConfirmBooking(" + mixin + ", AgentTask[dict]):",
+		"self._response_tool_call_ids.difference_update(",
+	} {
+		if !strings.Contains(taskAgent, want) {
+			t.Errorf("task-bearing agent.py missing %q", want)
+		}
+	}
+	for _, normalAgent := range []string{"Events", "Greeter", "Reservations"} {
+		if strings.Contains(taskAgent, "class "+normalAgent+"("+mixin) {
+			t.Errorf("normal agent %s must not inherit %s", normalAgent, mixin)
+		}
+	}
+
+	const runbookHeading = "## Empty task responses"
+	if !strings.Contains(artifactFile(t, artifact, "README.md"), runbookHeading) {
+		t.Errorf("task-bearing README.md missing %q", runbookHeading)
+	}
+
+	minimalPkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	minimalAgent, err := ir.Build(minimalPkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	minimalArtifact, err := Generate(minimalAgent, targetByProvider(t, minimalAgent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate task-free package: %v", err)
+	}
+	if minimal := artifactFile(t, minimalArtifact, "agent.py"); strings.Contains(minimal, mixin) {
+		t.Errorf("task-free agent.py must not emit %s", mixin)
+	}
+	if minimalREADME := artifactFile(t, minimalArtifact, "README.md"); strings.Contains(minimalREADME, runbookHeading) {
+		t.Errorf("task-free README.md must not emit %q", runbookHeading)
+	}
+}
+
 // TestLiveKitV1DelegateThenTransferAndEnd covers the two non-return `then`
 // lowerings (SCHEMA §4.7, N13): the delegate must not return to the owner, so it
 // emits a handoff (transfer) or session shutdown (end) instead of the typed
@@ -749,7 +810,7 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 	botpy := artifactFile(t, artifact, "agent.py")
 	for _, want := range []string{
 		"class _TaskTransfer(Exception):",
-		"class FindSlot(AgentTask[dict]):",
+		"class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):",
 		"self._terminal_claimed = False",
 		"def _claim_terminal(self) -> bool:",
 		"async def back_to_greeter(self, ctx: RunContext):",
@@ -766,7 +827,7 @@ func TestLiveKitV1SingleTaskAgentTransfer(t *testing.T) {
 			t.Errorf("agent.py missing %q", want)
 		}
 	}
-	taskStart := strings.Index(botpy, "class FindSlot(AgentTask[dict]):")
+	taskStart := strings.Index(botpy, "class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):")
 	if taskStart < 0 {
 		t.Fatal("FindSlot task not emitted")
 	}
@@ -841,9 +902,9 @@ func TestLiveKitV1SharedGroupTaskTransferAndResults(t *testing.T) {
 	if start < 0 {
 		t.Fatal("do_reserve delegate not emitted")
 	}
-	end := strings.Index(botpy[start:], "async def back_to_greeter(")
+	end := strings.Index(botpy[start:], "# --- tasks")
 	if end < 0 {
-		t.Fatal("could not bound do_reserve delegate")
+		t.Fatal("could not bound do_reserve delegate before task classes")
 	}
 	block := botpy[start : start+end]
 	for _, want := range []string{
@@ -1475,7 +1536,7 @@ func TestLiveKitV1ConversationShapingAndAgentTools(t *testing.T) {
 		// Generated ignore-phrase filter (lowercased phrases).
 		`IGNORE_PHRASES = ["uh-huh", "ok"]`,
 		"stt.SpeechEventType.FINAL_TRANSCRIPT",
-		"class FindSlot(IgnorePhrasesMixin, AgentTask[dict]):",
+		"class FindSlot(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict]):",
 		// Thinking audio.
 		"background_audio = BackgroundAudioPlayer(",
 		"thinking_sound=BuiltinAudioClip.KEYBOARD_TYPING,  # thinking_audio: subtle",
@@ -2727,5 +2788,129 @@ func TestV19_NativeReasonBeatsInferenceWildcard(t *testing.T) {
 		if kv.Key == "model" && kv.Value != pyQuote("openai/gpt-4o-mini") {
 			t.Errorf("inference model = %s, want %s (verbatim, no livekit/ join)", kv.Value, pyQuote("openai/gpt-4o-mini"))
 		}
+	}
+}
+
+func TestLiveKitV1OpenAIResponsesMode(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tgt := targetByProvider(t, agent, ir.ProviderLiveKit)
+	binding := tgt.Models.Reason["reasoning"]
+	binding.Model = "gpt-5.6-terra"
+	binding.Params = map[string]any{
+		"api":              "responses",
+		"reasoning_effort": "low",
+		"use_websocket":    false,
+	}
+	tgt.Models.Reason["reasoning"] = binding
+
+	artifact, err := Generate(agent, tgt, target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	agentPy := artifactFile(t, artifact, "agent.py")
+	want := `openai.responses.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-5.6-terra", reasoning=openai_types.Reasoning(effort="low"), use_websocket=False)`
+	if !strings.Contains(agentPy, want) {
+		t.Errorf("agent.py missing Responses API constructor %q", want)
+	}
+	if !strings.Contains(agentPy, "from openai import types as openai_types") {
+		t.Error("agent.py does not import the public OpenAI Reasoning type")
+	}
+	readme := artifactFile(t, artifact, "README.md")
+	if !strings.Contains(readme, "OpenAI Responses API") {
+		t.Error("README.md omits the Responses API runbook note")
+	}
+	report := artifactFile(t, artifact, "compile-report.json")
+	if !strings.Contains(report, "reason: openai via openai.responses.LLM (livekit-agents[openai], verified 2026-08-18)") {
+		t.Error("compile report names the wrong OpenAI API class")
+	}
+
+	for _, tc := range []struct {
+		name   string
+		params map[string]any
+		want   string
+	}{
+		{
+			name:   "provider default reasoning",
+			params: map[string]any{"api": "responses"},
+			want:   `openai.responses.LLM(api_key=os.environ["OPENAI_API_KEY"], model="gpt-5.6-terra")`,
+		},
+		{
+			name: "reasoning-like user value",
+			params: map[string]any{
+				"api":  "responses",
+				"user": "openai_types.Reasoning(",
+			},
+			want: `user="openai_types.Reasoning("`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binding.Params = tc.params
+			tgt.Models.Reason["reasoning"] = binding
+			artifact, err := Generate(agent, tgt, target.Default())
+			if err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+			agentPy := artifactFile(t, artifact, "agent.py")
+			if !strings.Contains(agentPy, tc.want) {
+				t.Errorf("agent.py missing Responses API constructor %q", tc.want)
+			}
+			if strings.Contains(agentPy, "from openai import types as openai_types") {
+				t.Error("agent.py imports OpenAI Reasoning without using it")
+			}
+		})
+	}
+}
+
+func TestLiveKitV1OpenAIResponsesRejectsConflictingParams(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		params map[string]any
+		want   string
+	}{
+		{
+			name:   "unsupported api",
+			params: map[string]any{"api": "chat"},
+			want:   `unsupported api chat; want "responses"`,
+		},
+		{
+			name:   "non-string api",
+			params: map[string]any{"api": true},
+			want:   `unsupported api true; want "responses"`,
+		},
+		{
+			name: "two reasoning forms",
+			params: map[string]any{
+				"api":              "responses",
+				"reasoning":        map[string]any{"effort": "low"},
+				"reasoning_effort": "low",
+			},
+			want: "does not accept raw reasoning; use reasoning_effort",
+		},
+		{
+			name: "raw reasoning",
+			params: map[string]any{
+				"api":       "responses",
+				"reasoning": map[string]any{"effort": "low"},
+			},
+			want: "does not accept raw reasoning; use reasoning_effort",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := livekitChainService(ir.Binding{
+				Provider: "openai",
+				Model:    "gpt-5.6-terra",
+				Params:   tc.params,
+			}, newEnvSet())
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }

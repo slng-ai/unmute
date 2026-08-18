@@ -354,11 +354,13 @@ type livekitData struct {
 	// absent from .env.example (FR-018), so a startup check that hits one has to
 	// say where the value comes from rather than only that it is missing, or the
 	// operator is told to set a variable no file ever mentioned (research D14).
-	SuppliedForYou []string
-	DevEnv         []string // provider creds the web dev image needs (LIVEKIT_* are hardcoded in compose.dev.yaml)
-	DevOptionalEnv []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
-	Notes          []string
-	Tracing        bool
+	SuppliedForYou       []string
+	DevEnv               []string // provider creds the web dev image needs (LIVEKIT_* are hardcoded in compose.dev.yaml)
+	DevOptionalEnv       []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
+	Notes                []string
+	Tracing              bool
+	OpenAIResponses      bool
+	NeedsOpenAIReasoning bool
 
 	NeedsTasks         bool        // AgentTask import
 	NeedsTaskGroups    bool        // beta.workflows TaskGroup import

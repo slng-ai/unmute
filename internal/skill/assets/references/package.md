@@ -40,7 +40,7 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-5.6-luna
+      model: gpt-5.6-terra
       params:
         reasoning_effort: "none"
   speak:
@@ -135,8 +135,10 @@ the provider exactly as written, so a typo is a provider error at run time, not
 a compile error. The compile report says so out loud. Which `provider:` values
 are legal per role per target is in `models.md`.
 
-`params:` is the same passthrough for everything else the provider takes, and it
-is not checked either. The scaffold's default OpenAI reasoning model needs
+`params:` is normally the same passthrough. The narrow exception is
+`api: responses` on a LiveKit OpenAI reasoning binding: Unmute checks the
+directive, selects the Responses client, and maps `reasoning_effort` to nested
+reasoning. The scaffold's default OpenAI reasoning model needs
 `reasoning_effort: "none"` when it carries function tools. Do not copy that
 provider-specific value onto every think model. `models.md` has the rule.
 

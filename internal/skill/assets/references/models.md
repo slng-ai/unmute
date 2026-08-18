@@ -18,7 +18,7 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-5.6-luna
+      model: gpt-5.6-terra
       params:
         reasoning_effort: "none"
   speak:
@@ -83,14 +83,14 @@ A target and vendor may narrow this further. For example, validation rejects
 
 ## The default OpenAI think model needs `reasoning_effort`
 
-Keep it on the scaffold's `gpt-5.6-luna` entry:
+Keep it on the scaffold's `gpt-5.6-terra` entry:
 
 ```yaml
       params:
         reasoning_effort: "none"
 ```
 
-`gpt-5.6-luna` is a reasoning model, and OpenAI rejects a chat completions
+`gpt-5.6-terra` is a reasoning model, and OpenAI rejects a chat completions
 request that carries function tools unless the request also sets
 `reasoning_effort`. Leaving it out is not the same as leaving it alone: the
 server applies its own default and every turn comes back as HTTP 400. Nearly
@@ -100,12 +100,13 @@ other providers.
 This model takes `none`, `low`, `medium`, `high`, and `xhigh`. It rejects
 `minimal`. Use `none` unless the user asks for more thinking.
 
-You write the same line for both targets. On LiveKit it becomes a constructor
+You write the same line in a shared profile for both targets. On LiveKit it becomes a constructor
 argument to `openai.LLM`. On Pipecat the settings class has no field for it, so
 the compiler puts it in the service's `extra` field, which Pipecat merges into
-the request body as written. That is the general rule for `params:`: a name the
+the request body as written. That is the normal rule for `params:`: a name the
 target's settings object has no field for rides the target's overflow field
-instead of being dropped.
+instead of being dropped. The LiveKit Responses mode below is the narrow
+compiler-owned exception.
 
 On LiveKit there is a second reason to be explicit. `livekit-plugins-openai`
 1.6.10 injects `reasoning_effort="minimal"` by itself for several older ids in
@@ -154,6 +155,27 @@ These settings choose where SLNG runs STT and TTS. They do not choose where the
 agent worker runs; set that separately with `deployment_region` in
 `targets.yaml`. See `package.md` for the deployment rules.
 
+### LiveKit Responses API
+
+When a package needs OpenAI's Responses API on LiveKit, override the shared
+model inside that target:
+
+```yaml
+models:
+  reasoning:
+    provider: openai
+    model: gpt-5.6-terra
+    params:
+      api: responses
+      reasoning_effort: low
+      use_websocket: false
+```
+
+This emits `openai.responses.LLM` and, when present, maps `reasoning_effort` to
+the nested reasoning setting. Use that field instead of a raw `reasoning` map.
+Keep the override target-local so Pipecat retains its normal OpenAI request
+shape. The salon concierge is the working source example.
+
 ## The vendors, per target per role
 
 SLNG leads every list it appears in. These are the built-in `provider:` values
@@ -198,18 +220,20 @@ at a spelling or bind it anyway and hope.
 
 ```yaml
       provider: openai
-      model: gpt-5.6-luna
+      model: gpt-5.6-terra
 ```
 
 Unmute keeps no allowlist of model ids, with exactly one exception: a LiveKit
 `turn` model must be `turn-detector-mini` or `turn-detector`, because those are
-loaded by name rather than sent to a provider. Everywhere else `model:`,
-`voice:`, and `params:` go to the provider exactly as written. A typo becomes a
-provider error on the first call, not a compile error, and the compile report
-says so:
+loaded by name rather than sent to a provider. Everywhere else `model:` and
+`voice:` go to the provider exactly as written. Most `params:` do too. The
+narrow exception is the LiveKit OpenAI `api: responses` directive above, which
+selects the Responses client and maps `reasoning_effort` to nested reasoning. A
+model typo becomes a provider error on the first call, not a compile error, and
+the compile report says so:
 
 ```
-pipecat: binding reason.reasoning provider=openai model=gpt-5.6-luna (forwarded as-is, not validated)
+pipecat: binding reason.reasoning provider=openai model=gpt-5.6-terra (forwarded as-is, not validated)
 ```
 
 So when you pick a model id, pick one the user named or one from that vendor's
@@ -218,7 +242,7 @@ own documentation. Do not invent an id that looks plausible.
 Do not guess model ids, voice ids, or params.
 
 Two families appear in this repository's own documentation, and only two: the
-SLNG listen and speak ids, and `gpt-5.6-luna` for think. They are the ones
+SLNG listen and speak ids, and `gpt-5.6-terra` for think. They are the ones
 proven here. Any other id is the user's to name.
 
 ## Alternates and fallbacks

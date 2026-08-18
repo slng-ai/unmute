@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated
 import httpx
 from dotenv import load_dotenv
+
 from pydantic import Field
 from livekit.agents import (
     NOT_GIVEN,
@@ -227,7 +228,12 @@ async def _share_task_result(group: TaskGroup, event: TaskCompletedEvent) -> Non
     shared_ctx.remove(shared_output)
     shared_ctx.insert(
         shared_output.model_copy(
-            update={"output": json.dumps(event.result, sort_keys=True)}
+            update={
+                "output": json.dumps(
+                    {"task_id": event.task_id, "result": event.result},
+                    sort_keys=True,
+                )
+            }
         )
     )
 
@@ -355,10 +361,129 @@ class Reservations(Agent):
 
 
 # --- tasks -----------------------------------------------------------------
+class _RetryEmptyTaskResponseMixin:
+    _response_tool_call_ids: set[str]
 
-class ConfirmBooking(AgentTask[dict]):
+    async def llm_node(self, chat_ctx, tools, model_settings):
+        # Every generated user of this mixin is an AgentTask; narrow that
+        # invariant here so the emitted project type-checks without a new base.
+        assert isinstance(self, Agent)
+        completed_tool_call_ids = {
+            item.call_id
+            for item in chat_ctx.items
+            if isinstance(item, llm.FunctionCallOutput)
+            and item.call_id in self._response_tool_call_ids
+        }
+        post_tool = bool(completed_tool_call_ids)
+        finish_tool = llm.ToolContext(tools).get_function_tool("finish")
+        if finish_tool is None:
+            raise RuntimeError("task retry has no finish tool")
+        finish_only = False
+        request_tools: list[llm.Tool] = tools
+        request_chat_ctx = chat_ctx
+        for attempt in range(3):
+            has_response = False
+            async for chunk in Agent.default.llm_node(
+                self, request_chat_ctx, request_tools, model_settings
+            ):
+                if isinstance(chunk, str):
+                    has_response = has_response or bool(chunk.strip())
+                elif isinstance(chunk, llm.ChatChunk) and chunk.delta is not None:
+                    delta = chunk.delta
+                    tool_calls = delta.tool_calls or []
+                    if finish_only and tool_calls:
+                        allowed = [call for call in tool_calls if call.name == "finish"]
+                        if len(allowed) != len(tool_calls):
+                            logger.warning(
+                                "task post-tool reply tried another non-finish tool; "
+                                "ignoring it"
+                            )
+                            chunk = chunk.model_copy(
+                                update={
+                                    "delta": delta.model_copy(
+                                        update={"tool_calls": allowed}
+                                    )
+                                }
+                            )
+                            delta = chunk.delta
+                            if delta is None:
+                                raise RuntimeError("task retry lost its response delta")
+                            tool_calls = allowed
+                    self._response_tool_call_ids.update(
+                        call.call_id for call in tool_calls
+                    )
+                    has_response = has_response or bool(
+                        tool_calls or (delta.content or "").strip()
+                    )
+                yield chunk
+            if has_response:
+                self._response_tool_call_ids.difference_update(
+                    completed_tool_call_ids
+                )
+                return
+            if attempt < 2:
+                logger.warning("task response was empty; retrying %d/2", attempt + 1)
+
+                if attempt == 0 and post_tool:
+                    finish_only = True
+                    request_tools = [finish_tool]
+
+                # Copy the original each time. Responses API reuses a previous
+                # response when the context is unchanged, so each retry needs
+                # a distinct instruction as well as a fresh context object.
+                request_chat_ctx = chat_ctx.copy()
+                instructions_index = request_chat_ctx.index_by_id(
+                    "lk.agent_task.instructions"
+                )
+                if instructions_index is None:
+                    raise RuntimeError("task retry has no instruction message")
+                instructions = request_chat_ctx.items[instructions_index]
+                if not isinstance(instructions, llm.ChatMessage):
+                    raise RuntimeError("task retry instruction has an invalid type")
+                instruction_text = instructions.raw_text_content
+                if not instruction_text:
+                    raise RuntimeError("task retry instruction is empty")
+                if finish_only:
+                    recovery = (
+                        "The response after the tool result was empty. Use the tool "
+                        "result already in context. Do not repeat that operation or "
+                        "call another operation. Produce the task's next valid "
+                        "response now; call finish only if the task is complete."
+                        if attempt == 0
+                        else "The finish retry was also empty. This is the second "
+                        "retry. Use the existing tool result without repeating any "
+                        "operation. Produce the task's next valid response now; call "
+                        "finish only if the task is complete."
+                    )
+                else:
+                    recovery = (
+                        "The previous response was empty. Follow the current task "
+                        "instructions and produce its next valid response now."
+                        if attempt == 0
+                        else "The prior retry was also empty. This is the second "
+                        "retry. Follow the current task instructions and produce "
+                        "its next non-empty valid response now."
+                    )
+                request_chat_ctx.items[instructions_index] = instructions.model_copy(
+                    update={
+                        "content": [instruction_text + "\n\n" + recovery]
+                    }
+                )
+
+        logger.warning("task response stayed empty after two retries")
+        if finish_only:
+            yield (
+                "I couldn't finish after the last tool result. Please ask me to "
+                "check the current state before trying again."
+            )
+        else:
+            yield "Sorry, I couldn't complete that. Please try again."
+
+
+class ConfirmBooking(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions=CONFIRM_BOOKING_PROMPT, chat_ctx=chat_ctx)
+        self._response_tool_call_ids: set[str] = set()
         self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:
@@ -386,9 +511,10 @@ class ConfirmBooking(AgentTask[dict]):
         # replace the winner, and there is no await for the callback to race.
         self._finish_call_id = ctx.function_call.call_id
 
-class FindSlot(AgentTask[dict]):
+class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions=FIND_SLOT_PROMPT, chat_ctx=chat_ctx)
+        self._response_tool_call_ids: set[str] = set()
         self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:
@@ -416,9 +542,10 @@ class FindSlot(AgentTask[dict]):
         # replace the winner, and there is no await for the callback to race.
         self._finish_call_id = ctx.function_call.call_id
 
-class QualifyEvent(AgentTask[dict]):
+class QualifyEvent(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
         super().__init__(instructions=QUALIFY_EVENT_PROMPT, chat_ctx=chat_ctx)
+        self._response_tool_call_ids: set[str] = set()
         self._finish_call_id: str | None = None
 
     async def on_enter(self) -> None:

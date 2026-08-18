@@ -47,6 +47,14 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	livekitReason := targetByProvider(t, resolved, ir.ProviderLiveKit).Models.Reason["reasoning"]
+	if livekitReason.Params["api"] != "responses" || livekitReason.Params["reasoning_effort"] != "low" || livekitReason.Params["use_websocket"] != false {
+		t.Errorf("livekit reasoning params = %#v, want Responses API with low reasoning over HTTP", livekitReason.Params)
+	}
+	pipecatReason := targetByProvider(t, resolved, ir.ProviderPipecat).Models.Reason["reasoning"]
+	if _, ok := pipecatReason.Params["api"]; ok || pipecatReason.Params["reasoning_effort"] != "none" {
+		t.Errorf("pipecat reasoning params = %#v, want Chat Completions with reasoning disabled", pipecatReason.Params)
+	}
 
 	if resolved.Tracing == nil || resolved.Tracing.Provider != "langfuse" {
 		t.Fatalf("tracing = %#v, want Langfuse", resolved.Tracing)
@@ -98,6 +106,24 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	if !slices.Contains(prepareBooking.Tools, "get_current_date") {
 		t.Errorf("prepare_booking tools = %v, want get_current_date", prepareBooking.Tools)
 	}
+	if _, ok := prepareBooking.Result["confirmed"]; ok {
+		t.Error("prepare_booking result must not decide confirmation")
+	}
+	confirmBooking, ok := resolved.Tasks["confirm_booking"]
+	if !ok {
+		t.Fatal("tasks omit confirm_booking")
+	}
+	wantConfirmResult := []string{"action", "booking_id", "confirmed", "service", "slot_id"}
+	gotConfirmResult := slices.Sorted(maps.Keys(confirmBooking.Result))
+	if !slices.Equal(gotConfirmResult, wantConfirmResult) {
+		t.Errorf("confirm_booking result = %v, want %v", gotConfirmResult, wantConfirmResult)
+	}
+	if !slices.Equal(confirmBooking.Tools, []string{"to_complaints", "to_chat"}) {
+		t.Errorf("confirm_booking tools = %v, want topic-switch controls only", confirmBooking.Tools)
+	}
+	if got := resolved.TaskGroups["booking_flow"].Steps; !slices.Equal(got, []string{"prepare_booking", "confirm_booking", "apply_booking"}) {
+		t.Errorf("booking_flow steps = %v, want prepare -> confirm -> apply", got)
+	}
 	currentDate, ok := resolved.Tools["get_current_date"]
 	if !ok {
 		t.Fatal("tools omit get_current_date")
@@ -129,8 +155,9 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 
 	requireText := func(name, text string, wants ...string) {
 		t.Helper()
+		text = strings.Join(strings.Fields(text), " ")
 		for _, want := range wants {
-			if !strings.Contains(text, want) {
+			if !strings.Contains(text, strings.Join(strings.Fields(want), " ")) {
 				t.Errorf("%s omits %q", name, want)
 			}
 		}
@@ -141,11 +168,20 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		"consume the one invalid-value retry",
 		"one initial customer lookup only after both the full name")
 	requireText("prepare booking", resolved.Tasks["prepare_booking"].Instructions,
-		"Only an unambiguous yes", "an unclear answer, silence, a topic change",
+		"Never ask for, interpret, or record confirmation",
+		"A service, booking, date, or time choice only selects a draft",
 		"call `get_current_date` first", "Never guess the current date or year")
+	if strings.Contains(resolved.Tasks["prepare_booking"].Instructions, "`confirmed`") {
+		t.Error("prepare booking names the confirmation field owned by the next task")
+	}
+	requireText("confirm booking", confirmBooking.Instructions,
+		"authoritative `prepare_booking` finish result",
+		"Never call `finish` in this opening response",
+		"Nothing said before that question counts as confirmation",
+		"copy the draft exactly")
 	requireText("apply booking", resolved.Tasks["apply_booking"].Instructions,
 		"false, missing", "anything other than true", "Do not call a mutation",
-		"shared preparation result's exact `confirmed`")
+		"authoritative `confirm_booking` finish result", "Do not replace")
 	requireText("chat", resolved.Agents["chat_with_me"].Instructions,
 		"required before the session greets the caller", "current information is unavailable")
 	requireText("complaints", resolved.Agents["complaint_specialist"].Instructions,

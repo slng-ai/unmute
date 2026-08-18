@@ -451,6 +451,19 @@ func TestModelWildcardGuidanceMatchesCatalog(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesGuidanceMatchesExample(t *testing.T) {
+	for name, content := range map[string]string{
+		"references/models.md":     bundleFile(t, "references/models.md"),
+		"docs-site/models/llm.mdx": trackedFile(t, "docs-site/models/llm.mdx"),
+	} {
+		for _, want := range []string{"api: responses", "reasoning_effort: low", "use_websocket: false"} {
+			if !strings.Contains(content, want) {
+				t.Errorf("%s omits %q", name, want)
+			}
+		}
+	}
+}
+
 func TestModelFieldAndPassthroughGuidanceStaysExact(t *testing.T) {
 	rows := []string{
 		"| `voice`, `speed` | `speak` |",

@@ -181,6 +181,52 @@ func TestCompilePrintsBindingsAndSizing(t *testing.T) {
 	}
 }
 
+func TestPrintContractExplainsOpenAIResponsesLowering(t *testing.T) {
+	notes := generate.GenerateReport{ForwardedBindings: []ir.ForwardedBinding{{
+		Target:  "livekit",
+		Role:    "reason",
+		Profile: "reasoning",
+		Binding: ir.Binding{
+			Provider: "openai",
+			Model:    "gpt-5.6-terra",
+			Params: map[string]any{
+				"api":              "responses",
+				"reasoning_effort": "low",
+				"use_websocket":    false,
+			},
+		},
+		Params: []ir.ForwardedParam{
+			{Name: "api", Value: "responses"},
+			{Name: "reasoning_effort", Value: "low"},
+			{Name: "use_websocket", Value: false},
+		},
+	}}}
+
+	var out bytes.Buffer
+	printContract(&out, "livekit", ir.ProviderLiveKit, notes)
+	for _, want := range []string{
+		"OpenAI Responses mode; api is consumed and reasoning_effort is lowered when present",
+		"param api=responses (compiler directive)",
+		"param reasoning_effort=low (lowered to reasoning.effort)",
+		"param use_websocket=false (forwarded as-is, not validated)",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "binding reason.reasoning provider=openai model=gpt-5.6-terra (forwarded as-is, not validated)") {
+		t.Errorf("Responses binding is falsely reported as wholly forwarded:\n%s", out.String())
+	}
+
+	notes.ForwardedBindings[0].Binding.Params = map[string]any{"api": "responses"}
+	notes.ForwardedBindings[0].Params = []ir.ForwardedParam{{Name: "api", Value: "responses"}}
+	out.Reset()
+	printContract(&out, "livekit", ir.ProviderLiveKit, notes)
+	if !strings.Contains(out.String(), "reasoning_effort is lowered when present") || strings.Contains(out.String(), "param reasoning_effort") {
+		t.Errorf("default reasoning report is inaccurate:\n%s", out.String())
+	}
+}
+
 // gap #1: a gated target surfaces the provider-vocabulary diagnostic on the
 // compile path, not just "validation failed for N target(s)".
 func TestCompileSurfacesPerTargetDiagnostics(t *testing.T) {

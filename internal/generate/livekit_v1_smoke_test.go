@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/slng-ai/unmute/internal/ir"
@@ -733,15 +734,32 @@ class ProbeLLM(llm.LLM):
                 "party_size": 2,
                 "time": "15:00",
             }
+            expected_envelope = {"task_id": "find_slot", "result": expected}
             self.shared_result_seen = any(
                 isinstance(item, llm.FunctionCallOutput)
                 and item.name == "finish"
                 and item.output
-                and json.loads(item.output) == expected
+                and json.loads(item.output) == expected_envelope
                 for item in chat_ctx.items
             )
+            entries, format_data = chat_ctx.to_provider_format(format="mistralai")
+            assert format_data.instructions == agent.CONFIRM_BOOKING_PROMPT
+            assert json.loads(
+                next(
+                    entry["result"]
+                    for entry in entries
+                    if entry["type"] == "function.result"
+                    and entry["tool_call_id"] == "find-slot-finish"
+                )
+            ) == expected_envelope
             assert self.shared_result_seen, (
-                "the second shared task did not receive the first task's exact result"
+                "the second shared task did not receive the first task's exact result: "
+                + repr(
+                    [
+                        (type(item).__name__, getattr(item, "name", None))
+                        for item in chat_ctx.items
+                    ]
+                )
             )
             delta = llm.ChoiceDelta(
                 role="assistant",
@@ -982,11 +1000,530 @@ async def main():
     )
     patched_output = duplicate_group.chat_ctx.get_by_id(successful_output.id)
     assert isinstance(patched_output, llm.FunctionCallOutput)
-    assert json.loads(patched_output.output) == result
+    assert patched_output.name == "finish"
+    assert json.loads(patched_output.output) == {
+        "task_id": "confirm",
+        "result": result,
+    }
     assert patched_output.model_copy(update={"output": ""}) == successful_output
+    patched_call = duplicate_group.chat_ctx.get_by_id("successful-call")
+    assert isinstance(patched_call, llm.FunctionCall)
+    assert patched_call.name == "finish"
+    assert all(
+        not isinstance(item, llm.ChatMessage)
+        or item.role not in ("developer", "system")
+        for item in duplicate_group.chat_ctx.items
+    )
     assert duplicate_group.chat_ctx.get_by_id(duplicate_error.id) == duplicate_error
 
     print("livekit task-group contract smoke ok")
+
+
+asyncio.run(main())
+`
+
+const livekitEmptyTaskResponseSmokeScript = `"""Smoke check: empty task responses retry safely."""
+import asyncio
+import json
+import os
+import subprocess
+from importlib.metadata import version
+
+assert version("livekit-agents") == "1.6.10"
+
+for name in json.load(open("compile-report.json"))["required_env"]:
+    os.environ.setdefault(name, "smoke-placeholder")
+
+subprocess.run(["ruff", "check", "."], check=True)
+subprocess.run(["ty", "check", "agent.py"], check=True)
+
+import agent  # noqa: E402
+from livekit.agents import (  # noqa: E402
+    DEFAULT_API_CONNECT_OPTIONS,
+    Agent,
+    AgentSession,
+    llm,
+)
+
+
+PREPARED = {"date": "2026-08-19", "party_size": 2, "time": "15:00"}
+RETRY_INSTRUCTIONS = (
+    "The previous response was empty. Follow the current task instructions "
+    "and produce its next valid response now.",
+    "The prior retry was also empty. This is the second retry. Follow the "
+    "current task instructions and produce its next non-empty valid response now.",
+)
+POST_TOOL_RETRY_INSTRUCTIONS = (
+    "The response after the tool result was empty. Use the tool result already in "
+    "context. Do not repeat that operation or call another operation. Produce the "
+    "task's next valid response now; call finish only if the task is complete.",
+    "The finish retry was also empty. This is the second retry. Use the existing "
+    "tool result without repeating any operation. Produce the task's next valid "
+    "response now; call finish only if the task is complete.",
+)
+
+
+def chunk(*, content=None, tool_name=None, call_id=None):
+    delta = {"role": "assistant"}
+    if content is not None:
+        delta["content"] = content
+    if tool_name is not None:
+        delta["tool_calls"] = [
+            llm.FunctionToolCall(
+                name=tool_name,
+                arguments=json.dumps(PREPARED) if tool_name == "finish" else "{}",
+                call_id=call_id or f"{tool_name}-probe",
+            )
+        ]
+    return llm.ChatChunk(
+        id="probe",
+        delta=llm.ChoiceDelta(**delta),
+    )
+
+
+EMPTY = chunk()
+WHITESPACE = chunk(content=" \n\t")
+TOOL = chunk(tool_name="finish")
+TOUCH = chunk(tool_name="touch")
+MALICIOUS_TOUCH = chunk(tool_name="touch", call_id="touch-duplicate")
+
+
+class Case:
+    def __init__(self, name, streams, *, attempts, completions=0, touches=0):
+        self.name = name
+        self.streams = streams
+        self.expected_attempts = attempts
+        self.expected_completions = completions
+        self.expected_touches = touches
+        self.records = []
+        self.pending_ids = []
+        self.chat_kwargs = []
+        self.chat_calls = 0
+        self.empty_sent = asyncio.Event()
+        self.cancel_release = asyncio.Event()
+        self.tool_started = asyncio.Event()
+        self.tool_release = asyncio.Event()
+        self.idle_fired = asyncio.Event()
+        self.idle_timer = None
+
+
+class ProbeStream(llm.LLMStream):
+    def __init__(self, llm_instance, *, chat_ctx, tools, events, case):
+        super().__init__(
+            llm_instance,
+            chat_ctx=chat_ctx,
+            tools=tools,
+            conn_options=DEFAULT_API_CONNECT_OPTIONS,
+        )
+        self.events = events
+        self.case = case
+
+    async def _run(self):
+        for event in self.events:
+            if event == "cancel":
+                self.case.empty_sent.set()
+                await self.case.cancel_release.wait()
+                continue
+            if isinstance(event, BaseException):
+                raise event
+            self._event_ch.send_nowait(event)
+            if event is EMPTY:
+                self.case.empty_sent.set()
+
+
+class ProbeLLM(llm.LLM):
+    def __init__(self, case):
+        super().__init__()
+        self.case = case
+
+    @property
+    def model(self):
+        return "empty-task-probe"
+
+    @property
+    def provider(self):
+        return "test"
+
+    def chat(
+        self,
+        *,
+        chat_ctx,
+        tools=None,
+        conn_options=DEFAULT_API_CONNECT_OPTIONS,
+        **kwargs,
+    ):
+        del conn_options
+        self.case.chat_kwargs.append(dict(kwargs))
+        index = self.case.chat_calls
+        assert index < len(self.case.streams), (
+            f"{self.case.name}: unexpected LLM call {index + 1}"
+        )
+        self.case.chat_calls += 1
+        return ProbeStream(
+            self,
+            chat_ctx=chat_ctx,
+            tools=tools or [],
+            events=self.case.streams[index],
+            case=self.case,
+        )
+
+
+class ProbeFindSlot(agent.FindSlot):
+    def __init__(self, *, chat_ctx):
+        super().__init__(chat_ctx=chat_ctx)
+        self.handles = []
+        self.completions = []
+        self.touches = 0
+        self.touch_handles = []
+
+    @agent.function_tool
+    async def touch(self, ctx: agent.RunContext) -> dict:
+        self.touch_handles.append(ctx.speech_handle)
+        self.touches += 1
+        if active_case is not None and active_case.name == "post_tool_barge_in":
+            active_case.tool_started.set()
+            await active_case.tool_release.wait()
+        return {"status": "touched"}
+
+    async def on_enter(self):
+        self.handles.append(self.session.generate_reply())
+
+    def complete(self, result):
+        self.completions.append(result)
+        super().complete(result)
+
+
+def prepared_context():
+    exact = json.dumps(PREPARED, sort_keys=True)
+    shared = json.dumps(
+        {"task_id": "prepare_booking", "result": PREPARED},
+        sort_keys=True,
+    )
+    chat_ctx = llm.ChatContext(
+        [
+            llm.FunctionCall(
+                call_id="prepared-result",
+                name="finish",
+                arguments=exact,
+            ),
+            llm.FunctionCallOutput(
+                call_id="prepared-result",
+                name="finish",
+                output=shared,
+                is_error=False,
+            ),
+        ]
+    )
+    return chat_ctx
+
+
+def assert_prepared(chat_ctx):
+    outputs = [
+        item
+        for item in chat_ctx.items
+        if isinstance(item, llm.FunctionCallOutput)
+        and item.call_id == "prepared-result"
+    ]
+    assert len(outputs) == 1
+    assert json.loads(outputs[0].output) == {
+        "task_id": "prepare_booking",
+        "result": PREPARED,
+    }
+
+
+active_case = None
+original_default_llm_node = Agent.default.llm_node
+
+
+def recording_default_llm_node(task, chat_ctx, tools, model_settings):
+    assert active_case is not None
+    assert_prepared(chat_ctx)
+    active_case.records.append((chat_ctx, list(chat_ctx.items), tools, model_settings))
+    active_case.pending_ids.append(set(task._response_tool_call_ids))
+    post_tool_case = active_case.name.startswith("post_tool_")
+    if len(active_case.records) == (2 if post_tool_case else 1):
+        active_case.idle_timer = asyncio.get_running_loop().call_later(
+            0.05, active_case.idle_fired.set
+        )
+    elif len(active_case.records) > (2 if post_tool_case else 1):
+        assert not active_case.idle_fired.is_set(), (
+            f"{active_case.name}: retry waited for the idle path"
+        )
+    return original_default_llm_node(task, chat_ctx, tools, model_settings)
+
+
+Agent.default.llm_node = staticmethod(recording_default_llm_node)
+
+
+async def run_case(case):
+    global active_case
+    active_case = case
+    probe_llm = ProbeLLM(case)
+    task = ProbeFindSlot(chat_ctx=prepared_context())
+
+    async with AgentSession(
+        userdata=agent.Userdata(),
+        llm=probe_llm,
+        turn_handling={"turn_detection": "manual"},
+    ) as session:
+        session.output.set_audio_enabled(False)
+        await session.start(task)
+        assert len(task.handles) == 1, f"{case.name}: expected one speech handle"
+        handle = task.handles[0]
+
+        if case.name == "cancellation":
+            await asyncio.wait_for(case.empty_sent.wait(), timeout=2)
+            handle.interrupt(force=True)
+        elif case.name == "post_tool_barge_in":
+            await asyncio.wait_for(case.tool_started.wait(), timeout=2)
+            handle.interrupt()
+            case.tool_release.set()
+            await asyncio.wait_for(handle.wait_for_playout(), timeout=2)
+            assert handle.interrupted
+            assert case.chat_calls == 1, "interruption triggered an automatic follow-up"
+            committed = [
+                item
+                for item in task.chat_ctx.items
+                if isinstance(item, llm.FunctionCallOutput)
+                and item.call_id == "touch-probe"
+            ]
+            assert len(committed) == 1, "interrupted tool result was not committed"
+            caller_handle = session.generate_reply(user_input="Please finish that booking.")
+            assert caller_handle.id != handle.id
+            await asyncio.wait_for(caller_handle.wait_for_playout(), timeout=2)
+            assert caller_handle.exception() is None
+
+        await asyncio.wait_for(handle.wait_for_playout(), timeout=2)
+        if case.idle_timer is not None:
+            case.idle_timer.cancel()
+
+        assert len(case.records) == case.expected_attempts, (
+            f"{case.name}: expected {case.expected_attempts} wrapper stream attempts, "
+            f"got {len(case.records)}"
+        )
+        if case.expected_attempts >= 2 and not case.name.startswith("post_tool_"):
+            first = case.records[0]
+            first_choice = case.chat_kwargs[0].get("tool_choice")
+            assert first_choice not in ("none", "required"), (
+                f"{case.name}: task tool choice was forced on the first attempt"
+            )
+            first_instructions = first[0].get_by_id("lk.agent_task.instructions")
+            assert isinstance(first_instructions, llm.ChatMessage)
+            assert first_instructions.raw_text_content == agent.FIND_SLOT_PROMPT
+            first_snapshot = llm.ChatContext(first[1])
+            first_entries, first_format = first_snapshot.to_provider_format(
+                format="mistralai", inject_dummy_user_message=False
+            )
+            assert first_format.instructions == agent.FIND_SLOT_PROMPT
+            for index, retry in enumerate(case.records[1:], start=1):
+                retry_choice = case.chat_kwargs[index].get("tool_choice")
+                assert retry_choice == first_choice, (
+                    f"{case.name}: tool choice changed during retry"
+                )
+                assert case.records[index - 1][0] is not retry[0], (
+                    f"{case.name}: retry reused the empty request context"
+                )
+                assert len(retry[1]) == len(first[1]), (
+                    f"{case.name}: retry changed the task context shape"
+                )
+                retry_instructions = retry[0].get_by_id(
+                    "lk.agent_task.instructions"
+                )
+                assert isinstance(retry_instructions, llm.ChatMessage)
+                assert retry_instructions.raw_text_content == (
+                    agent.FIND_SLOT_PROMPT
+                    + "\n\n"
+                    + RETRY_INSTRUCTIONS[index - 1]
+                )
+                retry_snapshot = llm.ChatContext(retry[1])
+                retry_entries, retry_format = retry_snapshot.to_provider_format(
+                    format="mistralai", inject_dummy_user_message=False
+                )
+                assert first_entries == retry_entries
+                assert retry_format.instructions == (
+                    agent.FIND_SLOT_PROMPT
+                    + "\n\n"
+                    + RETRY_INSTRUCTIONS[index - 1]
+                )
+                assert first[2] is retry[2], f"{case.name}: tools changed"
+                assert first[3] is retry[3], (
+                    f"{case.name}: model settings changed"
+                )
+            assert not case.idle_fired.is_set()
+        assert task.completions == [PREPARED] * case.expected_completions
+        assert task.touches == case.expected_touches
+        assert task.touch_handles == [handle] * case.expected_touches
+        assert all(
+            recovery not in (message.raw_text_content or "")
+            for message in task.chat_ctx.messages()
+            for recovery in (*RETRY_INSTRUCTIONS, *POST_TOOL_RETRY_INSTRUCTIONS)
+        ), f"{case.name}: retry instruction leaked into task history"
+
+        if case.name == "provider_error":
+            error = handle.exception()
+            assert isinstance(error, RuntimeError)
+            assert str(error) == "provider failed after empty chunk"
+            assert case.empty_sent.is_set()
+        elif case.name == "cancellation":
+            assert handle.interrupted
+            assert case.empty_sent.is_set()
+        else:
+            assert handle.exception() is None
+
+        if case.name == "three_empty":
+            spoken = " ".join(
+                item.raw_text_content or ""
+                for item in handle.chat_items
+                if isinstance(item, llm.ChatMessage) and item.role == "assistant"
+            )
+            assert spoken.strip(), "three empty completions did not produce an audible failure"
+            assert session.current_agent is task
+            case.streams.append([chunk(content="Recovered on the new caller turn.")])
+            caller_handle = session.generate_reply(user_input="Please try again.")
+            assert caller_handle.id != handle.id
+            await asyncio.wait_for(caller_handle.wait_for_playout(), timeout=2)
+            assert session.current_agent is task
+            assert len(case.records) == 4
+        elif case.name.startswith("post_tool_"):
+            assert case.chat_calls == case.expected_attempts
+            assert "touch" in llm.ToolContext(case.records[0][2]).function_tools
+            assert "touch" in llm.ToolContext(case.records[1][2]).function_tools
+            if case.name == "post_tool_barge_in":
+                caller_items = case.records[1][1]
+                output_index = next(
+                    index
+                    for index, item in enumerate(caller_items)
+                    if isinstance(item, llm.FunctionCallOutput)
+                    and item.call_id == "touch-probe"
+                )
+                user_index = next(
+                    index
+                    for index, item in enumerate(caller_items)
+                    if isinstance(item, llm.ChatMessage)
+                    and item.role == "user"
+                    and item.raw_text_content == "Please finish that booking."
+                )
+                assert output_index < user_index
+                assert case.pending_ids == [
+                    set(),
+                    {"touch-probe"},
+                    {"touch-probe"},
+                    {"touch-probe"},
+                ]
+                assert "touch-probe" not in task._response_tool_call_ids
+            else:
+                last = case.records[1][1][-1]
+                assert isinstance(last, llm.FunctionCallOutput)
+                assert last.name == "touch"
+                if case.name == "post_tool_three_empty":
+                    assert case.pending_ids == [
+                        set(),
+                        {"touch-probe"},
+                        {"touch-probe"},
+                        {"touch-probe"},
+                    ]
+                    assert task._response_tool_call_ids == {"touch-probe"}
+            post_snapshot = llm.ChatContext(case.records[1][1])
+            post_entries, post_format = post_snapshot.to_provider_format(
+                format="mistralai", inject_dummy_user_message=False
+            )
+            assert post_format.instructions == agent.FIND_SLOT_PROMPT
+            for index, record in enumerate(case.records[2:]):
+                assert set(llm.ToolContext(record[2]).function_tools) == {"finish"}, (
+                    "a post-tool retry exposed a non-finish tool"
+                )
+                assert record[3] is case.records[1][3], (
+                    "post-tool retry changed model settings"
+                )
+                retry_instructions = record[0].get_by_id(
+                    "lk.agent_task.instructions"
+                )
+                assert isinstance(retry_instructions, llm.ChatMessage)
+                assert retry_instructions.raw_text_content == (
+                    agent.FIND_SLOT_PROMPT
+                    + "\n\n"
+                    + POST_TOOL_RETRY_INSTRUCTIONS[index]
+                )
+                retry_snapshot = llm.ChatContext(record[1])
+                retry_entries, retry_format = retry_snapshot.to_provider_format(
+                    format="mistralai", inject_dummy_user_message=False
+                )
+                assert retry_entries == post_entries
+                assert retry_format.instructions == (
+                    agent.FIND_SLOT_PROMPT
+                    + "\n\n"
+                    + POST_TOOL_RETRY_INSTRUCTIONS[index]
+                )
+            duplicate_items = [
+                item
+                for item in task.chat_ctx.items
+                if isinstance(item, (llm.FunctionCall, llm.FunctionCallOutput))
+                and item.call_id == "touch-duplicate"
+            ]
+            assert duplicate_items == [], "a filtered duplicate reached task history"
+            if case.expected_completions == 0:
+                spoken = " ".join(
+                    item.raw_text_content or ""
+                    for item in handle.chat_items
+                    if isinstance(item, llm.ChatMessage)
+                    and item.role == "assistant"
+                )
+                assert "check the current state" in spoken
+
+
+async def main():
+    cases = [
+        Case("empty_to_tool", [[EMPTY], [TOOL]], attempts=2, completions=1),
+        Case(
+            "two_empty_to_tool",
+            [[EMPTY], [EMPTY], [TOOL]],
+            attempts=3,
+            completions=1,
+        ),
+        Case("three_empty", [[EMPTY], [EMPTY], [EMPTY]], attempts=3),
+        Case(
+            "whitespace_only",
+            [[WHITESPACE], [chunk(content="Recovered from whitespace.")]],
+            attempts=2,
+        ),
+        Case("late_tool_chunk", [[EMPTY, TOOL]], attempts=1, completions=1),
+        Case("normal_text", [[chunk(content="Normal response.")]], attempts=1),
+        Case(
+            "post_tool_empty_to_finish",
+            [[TOUCH], [EMPTY], [MALICIOUS_TOUCH], [TOOL]],
+            attempts=4,
+            completions=1,
+            touches=1,
+        ),
+        Case(
+            "post_tool_barge_in",
+            [[TOUCH], [EMPTY], [MALICIOUS_TOUCH], [TOOL]],
+            attempts=4,
+            completions=1,
+            touches=1,
+        ),
+        Case(
+            "post_tool_three_empty",
+            [[TOUCH], [EMPTY], [EMPTY], [EMPTY]],
+            attempts=4,
+            touches=1,
+        ),
+        Case(
+            "provider_error",
+            [[EMPTY, RuntimeError("provider failed after empty chunk")]],
+            attempts=1,
+        ),
+        Case("cancellation", [[EMPTY, "cancel"]], attempts=1),
+    ]
+    original_tts = agent.slng.TTS
+    agent.slng.TTS = lambda **kwargs: None
+    try:
+        for case in cases:
+            await run_case(case)
+    finally:
+        agent.slng.TTS = original_tts
+        Agent.default.llm_node = staticmethod(original_default_llm_node)
+    print("livekit empty-task response smoke ok")
 
 
 asyncio.run(main())
@@ -1355,6 +1892,39 @@ func TestSmokeLiveKitV1TaskGroupContracts(t *testing.T) {
 	}, addLiveKitTaskTransfer, livekitTaskGroupContractSmokeScript)
 }
 
+func TestSmokeLiveKitV1EmptyTaskResponse(t *testing.T) {
+	runLiveKitSmokeScript(t, "remy", func(target *ir.Target) {
+		target.Version = "1.6.10"
+	}, addLiveKitTaskTransfer, livekitEmptyTaskResponseSmokeScript)
+}
+
+func TestSmokeLiveKitV1OpenAIResponsesMode(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		params map[string]any
+	}{
+		{
+			name: "reasoning effort",
+			params: map[string]any{
+				"api":              "responses",
+				"reasoning_effort": "low",
+				"use_websocket":    false,
+			},
+		},
+		{name: "provider default reasoning", params: map[string]any{"api": "responses"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runLiveKitSmokeScript(t, "remy", func(target *ir.Target) {
+				target.Version = "1.6.10"
+				binding := target.Models.Reason["reasoning"]
+				binding.Model = "gpt-5.6-terra"
+				binding.Params = tc.params
+				target.Models.Reason["reasoning"] = binding
+			}, addLiveKitTaskTransfer, livekitEmptyTaskResponseSmokeScript)
+		})
+	}
+}
+
 // TestSmokeLiveKitV1MultiVendorInstantiates covers the per-vendor plugin
 // entries in one venv: safe_core's deepgram listen + elevenlabs speak, with
 // one voice rebound to cartesia (per-agent tts= overrides run at
@@ -1601,6 +2171,8 @@ func runLiveKitSmokeScript(t *testing.T, example string, mutate func(*ir.Target)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("smoke check failed:\n%s", out)
+	} else if strings.Contains(string(out), "--- Logging error ---") {
+		t.Fatalf("smoke check logged an internal formatting error:\n%s", out)
 	} else {
 		t.Logf("%s", out)
 	}

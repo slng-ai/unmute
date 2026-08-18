@@ -222,6 +222,24 @@ task and any remaining group steps. That is the useful half of delegation and
 also the part to plan for, because anything the task may need has to appear in
 its own list.
 
+### Empty LiveKit task responses
+
+Generated LiveKit tasks retry up to twice when a full successful response has
+neither non-whitespace text nor a tool call. Each retry starts immediately in
+the same speech turn. It keeps the task state and model settings, and
+adds a distinct temporary recovery instruction to a fresh copy of the
+conversation context before each retry. After a task tool returns, recovery
+keeps only `finish` instead of the full tool list. Non-whitespace text or an
+allowed tool call stops recovery.
+Errors and cancellations keep LiveKit's normal behavior.
+
+If all three opening attempts are empty, the task speaks one fixed brief
+failure, runs no action, and stays active for the caller's next turn. If an
+empty reply follows a task tool, recovery can only call `finish`; it cannot run
+another operation. Exhausting that recovery asks the caller to check the current
+state before trying again. This applies only to generated LiveKit tasks. Normal
+LiveKit agents and Pipecat output are unchanged.
+
 **Context decision:** `context:` on the task says what it sees at the start.
 
 | Field | Values | Notes |
@@ -322,8 +340,8 @@ own.
 - `context_scope: shared` means the service the caller named in step one is
   still there in step two, with nothing passed by hand. This is what you want
   most of the time. Each exact typed result enters the shared context before
-  the next task starts, so that task never has to reconstruct the value from
-  conversation wording.
+  the next task starts. LiveKit labels it with the source task, so the next task
+  can identify the value instead of reconstructing it from conversation wording.
 - `context_scope: isolated` means each step starts from its own prompt. It is
   one setting for the whole group, not per step, so choosing it makes **every**
   step start clean. An isolated group carries no results between steps. Reach

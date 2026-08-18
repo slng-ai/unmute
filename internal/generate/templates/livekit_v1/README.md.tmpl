@@ -21,6 +21,15 @@ LiveKit stack, move all three together:
 LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
   unmute dev <source-dir> --target {{.AgentName}}
 ```
+{{- if .OpenAIResponses}}
+
+## OpenAI Responses API
+
+This target uses OpenAI's Responses API. Keep `api: responses` inside the
+LiveKit target's model override. When set, `reasoning_effort` is emitted as the
+Responses API's nested reasoning setting; other targets keep their own provider
+call. Use that field instead of a raw `reasoning` map.
+{{- end}}
 {{- if gt (len .Agents) 1}}
 
 ## Agent handoffs
@@ -46,8 +55,27 @@ directly to the receiving agent. It does not return through the task owner.
 rejects them before this project is generated.
 
 In a group with `context_scope: shared`, each exact typed result enters the
-shared context before the next task starts. An isolated group carries no
+shared context before the next task starts. The result is labeled with its
+source task so the next task can identify it. An isolated group carries no
 results between steps. The final `merge: results` map is keyed by task name.
+
+## Empty task responses
+
+Generated LiveKit tasks retry up to twice when a full successful response has
+neither non-whitespace text nor a tool call. Each retry starts immediately in
+the same speech turn. It keeps the task state and model settings, and
+adds a distinct temporary recovery instruction to a fresh copy of the
+conversation context before each retry. After a task tool returns, recovery
+keeps only `finish` instead of the full tool list. Non-whitespace text or an
+allowed tool call stops recovery.
+Errors and cancellations keep LiveKit's normal behavior.
+
+If all three opening attempts are empty, the task speaks one fixed brief
+failure, runs no action, and stays active for the caller's next turn. If an
+empty reply follows a task tool, recovery can only call `finish`; it cannot run
+another operation. Exhausting that recovery asks the caller to check the current
+state before trying again. This applies only to generated LiveKit tasks. Normal
+LiveKit agents and Pipecat output are unchanged.
 {{- end}}
 {{- if .Telephony}}
 

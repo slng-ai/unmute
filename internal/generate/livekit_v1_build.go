@@ -370,6 +370,15 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.Notes = append(data.Notes, "turn role lowers to LiveKit Inference turn detection; its binding placement is advisory")
 	}
 
+	for _, svc := range livekitServices(data) {
+		if svc.Call.Class != "openai.responses.LLM" {
+			continue
+		}
+		data.OpenAIResponses = true
+		for _, arg := range svc.Call.Args {
+			data.NeedsOpenAIReasoning = data.NeedsOpenAIReasoning || arg.Key == "reasoning" && strings.HasPrefix(arg.Value, "openai_types.Reasoning(")
+		}
+	}
 	data.PluginModules = collectLiveKitPlugins(data)
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
@@ -641,8 +650,12 @@ func livekitServiceNotes(data livekitData) []string {
 		if svc.Entry.Call == nil {
 			continue
 		}
+		verified := svc.Entry.Verified
+		if svc.Call.Class == "openai.responses.LLM" {
+			verified = "2026-08-18"
+		}
 		set[fmt.Sprintf("%s: %s via %s (%s, verified %s)",
-			svc.Entry.Role, svc.Vendor, svc.Entry.Call.Class, installLabel(svc.Entry), svc.Entry.Verified)] = true
+			svc.Entry.Role, svc.Vendor, svc.Call.Class, installLabel(svc.Entry), verified)] = true
 	}
 	return sortedKeys(set)
 }
