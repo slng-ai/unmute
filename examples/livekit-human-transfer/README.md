@@ -191,18 +191,22 @@ first deploy and every later one are different commands, and the build directory
 ships no `livekit.toml` because the platform writes that itself. Self-hosting the
 worker is documented there too.
 
-To hear the agent before any carrier account exists, with no phone in the picture:
+To test the conversation in a browser, with no caller phone leg in the room:
 
 ```sh
 bin/unmute dev examples/livekit-human-transfer              # browser, needs Docker
 ```
 
-Neither transfer completes in a browser session, and the two reasons are
-different. **Cold** refers the caller's existing SIP leg out, so with no SIP leg
-there is nothing to act on: the tool logs `cold transfer skipped: no phone caller
-in the room` and the agent carries on. **Warm** dials the supervisor through
-LiveKit's SIP service, so it is exercised against the deployed project, which is
-the Agent Console path below.
+The browser startup check does not require `BILLING_PHONE_NUMBER`: **cold**
+refers an existing SIP caller leg, so that destination is checked only after a
+real phone call arrives and before its greeting. With no SIP leg the tool logs
+`cold transfer skipped: no phone caller in the room` and the agent carries on.
+
+**Warm** can dial from a WebRTC session. The browser therefore still requires
+`SUPERVISOR_PHONE_NUMBER` plus `SIP_TRUNK_HOSTNAME`, `SIP_AUTH_USERNAME`,
+`SIP_AUTH_PASSWORD`, and `SIP_FROM_NUMBER`. Use real values against the deployed
+project to exercise the Agent Console path below; placeholder values are enough
+only for conversation testing where you do not invoke the warm tool.
 
 ## Deploy to LiveKit Cloud, and prove the cold transfer
 

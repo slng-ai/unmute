@@ -52,10 +52,13 @@ results between steps. The final `merge: results` map is keyed by task name.
 {{- if .Telephony}}
 
 **Test in the browser before you test on a phone.** `unmute dev <source-dir>`
-opens a browser session with no carrier credentials set and none checked, even
-though this package declares a phone channel. Get the prompt and the models
-right there, then add `--telephony`, which is where the route values below start
-mattering. The browser loop is the shortest one this project has.
+opens a browser session without checking a cold-transfer destination or other
+values that only a real phone call reads.{{if .HasWarmTransfer}} Warm transfer is
+the exception: it can dial from WebRTC, so its destination and the selected SIP
+address, username, password, and caller number are required there too.{{end}}
+Get the prompt and the models right there, then add `--telephony`. A missing
+cold-transfer destination fails a real phone job before its greeting, not the
+browser worker at startup. The browser loop is the shortest one this project has.
 {{- end}}
 
 {{- if .NeedsMCP}}

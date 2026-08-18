@@ -190,6 +190,13 @@ A Pipecat `daily-sip` transfer needs a Twilio connection and an active phone
 channel. A browser session has no SIP leg and must fail before announcing a
 transfer.
 
+On LiveKit, a cold destination environment name is call-only: it is checked
+after the worker identifies a real SIP job and before the greeting, so it does
+not block WebRTC startup. Warm transfer is different because it can dial from a
+browser session. Its destination plus the selected SIP connection's address,
+username, password, and caller number stay in browser `REQUIRED_ENV` and
+`compose.dev.yaml`.
+
 So when a user asks a browser agent with no route to reach a person, offer what
 actually works instead: a tool that books a callback, raises a ticket, or emails
 a desk. You will not have to guess, because writing the control anyway fails at
