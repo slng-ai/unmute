@@ -160,11 +160,12 @@ unmute dev
 argument. From inside the package you run them bare; from anywhere else you pass
 the path, as in `unmute dev my-agent`.
 
-The scaffold targets LiveKit, so `.env.example` holds five names:
-`LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL`, `OPENAI_API_KEY` and
-`SLNG_API_KEY`. `unmute dev` supplies the three LiveKit values itself for a local
-run, so only the two model keys need filling in. A deploy needs the real LiveKit
-values.
+The scaffold targets LiveKit, but `.env.example` lists only the values you
+supply: `OPENAI_API_KEY` and `SLNG_API_KEY`. `unmute dev` supplies
+`LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` for a local run;
+LiveKit Cloud or a self-hosted operator supplies them at deploy time.
+`.env.local` is also supported for local development and overrides `.env` in
+the same directory.
 
 `unmute dev` compiles the package, builds the container a deployment would run,
 starts it, and opens a browser page. Allow the microphone and say hello. The
@@ -190,7 +191,7 @@ build/livekit/
 ├── pyproject.toml       # pinned dependencies
 ├── Dockerfile
 ├── compose.dev.yaml
-├── .env.example         # exactly the variables this agent needs
+├── .env.example         # exactly the variables you supply
 ├── README.md            # the runbook for this build
 └── compile-report.json
 ```

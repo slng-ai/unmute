@@ -182,10 +182,12 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		slices.Sort(data.Deps)
 	}
 	data.RequiredEnv = env.sorted()
-	data.AuthorEnv = authorEnv(data.RequiredEnv, target.Telephony)
+	var supplied []string
 	if target.Telephony != nil {
-		data.SuppliedForYou = slices.Clone(target.Telephony.LocalEnvironment)
+		supplied = slices.Clone(target.Telephony.LocalEnvironment)
+		data.SuppliedForYou = slices.Clone(supplied)
 	}
+	data.AuthorEnv = authorEnv(data.RequiredEnv, supplied)
 	if data.DailyCarrier != nil {
 		// Whatever the helper reads is not the deployed agent's business, so the
 		// two groups are split here, once, and every surface reads the split

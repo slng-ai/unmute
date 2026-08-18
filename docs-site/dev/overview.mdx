@@ -134,11 +134,13 @@ winning:
 
 1. your shell environment
 2. `.env` in the directory you run the command from
-3. `.env` in the package directory
+3. `.env.local` in the directory you run the command from
+4. `.env` in the package directory
+5. `.env.local` in the package directory
 
-So a repository wide `.env` can hold shared keys while one package overrides a
-value. The generated `build/<target>/.env.example` lists exactly what this
-agent needs.
+So a repository wide `.env` can hold shared keys while `.env.local` overrides
+it, and one package can override both. The generated
+`build/<target>/.env.example` lists exactly what you supply.
 
 ## Seeding variables
 

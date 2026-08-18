@@ -587,24 +587,10 @@ func (d Data) TaskTools(name string) []string {
 	return names
 }
 
-// RequiredEnv returns the starter env names implied by the selected target
-// and catalogue entries. Values are never rendered.
+// RequiredEnv returns the starter env names the author supplies. Values are
+// never rendered.
 func (d Data) RequiredEnv() []string {
-	names := append(d.PlatformEnv(), d.DeclaredSecrets()...)
-	sort.Strings(names)
-	return names
-}
-
-// PlatformEnv is the orchestrator's own connection values: what `unmute dev`
-// supplies for a local run and what the platform supplies on a deploy. They are
-// kept out of the scaffolded `secrets:` block because a secrets list is what the
-// author declares, and declaring a value somebody else sets is the shape
-// docs-site/reference/secrets.mdx already separates into its own table.
-func (d Data) PlatformEnv() []string {
-	if targetcap.Provider(d.Target) != targetcap.LiveKit {
-		return nil
-	}
-	return []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL"}
+	return d.DeclaredSecrets()
 }
 
 // DeclaredSecrets is what the author supplies: each model provider's API key,

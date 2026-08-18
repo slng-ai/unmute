@@ -3,9 +3,6 @@
 # fill in the values, then run `unmute dev` from this directory. `.env` is
 # never committed. `unmute compile` writes an exact per-target
 # build/<target>/.env.example from your spec.
-LIVEKIT_API_KEY=
-LIVEKIT_API_SECRET=
-LIVEKIT_URL=
 OPENAI_API_KEY=
 SLNG_API_KEY=
 

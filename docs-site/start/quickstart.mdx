@@ -59,13 +59,16 @@ one for the SLNG speech models the scaffold uses (`SLNG_API_KEY`).
     [secrets guide](/reference/secrets) explains which names belong to the
     package and which belong to its runtime.
 
-    <Accordion title="Why the other keys stay empty">
+    <Accordion title="Where the LiveKit connection comes from">
       `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and `LIVEKIT_URL` point at a
-      LiveKit server. `unmute dev` runs one locally and fills them in, so leave
-      them empty until you deploy.
+      LiveKit server, so they are absent from `.env.example`. `unmute dev`
+      supplies them locally; LiveKit Cloud or a self-hosted operator supplies
+      them at deploy time.
 
-      `unmute dev` reads `.env` from the directory you run it in, then from the
-      package directory. A package can therefore override a shared key.
+      `unmute dev` reads your shell, then `.env` and `.env.local` in the current
+      directory, then `.env` and `.env.local` in the package directory. Later
+      files win, so `.env.local` is a supported local alternative that can
+      override `.env`.
     </Accordion>
   </Step>
 

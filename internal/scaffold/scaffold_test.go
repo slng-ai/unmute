@@ -2,6 +2,7 @@ package scaffold
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
@@ -122,6 +123,7 @@ func TestWriteDefaultFileSet(t *testing.T) {
 // alone this covered whichever target happened to be the default and silently
 // dropped the other the day that constant moved.
 func TestScaffoldAgreesWithItsOwnBuild(t *testing.T) {
+	want := []string{"OPENAI_API_KEY", "SLNG_API_KEY"}
 	for _, name := range []string{"pipecat", "livekit"} {
 		t.Run(name, func(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "hello-agent")
@@ -147,17 +149,40 @@ func TestScaffoldAgreesWithItsOwnBuild(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var built []byte
+			files := map[string][]byte{}
 			for _, file := range artifact.Files {
-				if file.Path == ".env.example" {
-					built = file.Content
-				}
+				files[file.Path] = file.Content
 			}
+			built := files[".env.example"]
 			if built == nil {
 				t.Fatal("the build has no .env.example to agree with")
 			}
-			if got, want := envNames(string(root)), envNames(string(built)); !slices.Equal(got, want) {
-				t.Errorf("the package root asks for %v and build/%s asks for %v; one of them is lying to the author", got, name, want)
+			if got := envNames(string(root)); !slices.Equal(got, want) {
+				t.Errorf("the package root asks for %v, want exactly %v", got, want)
+			}
+			if got := envNames(string(built)); !slices.Equal(got, want) {
+				t.Errorf("build/%s asks for %v, want exactly %v", name, got, want)
+			}
+
+			if name == "livekit" {
+				var report struct {
+					RequiredEnv []string `json:"required_env"`
+				}
+				if err := json.Unmarshal(files["compile-report.json"], &report); err != nil {
+					t.Fatal(err)
+				}
+				startupEnv := regexp.MustCompile(`(?s)REQUIRED_ENV = \[.*?\]`).Find(files["agent.py"])
+				if startupEnv == nil {
+					t.Fatal("agent.py has no REQUIRED_ENV startup check")
+				}
+				for _, platform := range []string{"LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL"} {
+					if !slices.Contains(report.RequiredEnv, platform) {
+						t.Errorf("compile-report.json lost runtime requirement %s: %v", platform, report.RequiredEnv)
+					}
+					if !bytes.Contains(startupEnv, []byte(platform)) {
+						t.Errorf("agent.py startup checks lost runtime requirement %s", platform)
+					}
+				}
 			}
 		})
 	}
@@ -316,7 +341,7 @@ func TestWrite_targetChoices(t *testing.T) {
 			// block YAML like everything else, with `1` still an integer rather
 			// than widened to `1.0`.
 			agentWant: []string{`voice: "aura-2-thalia-en"`, "      params:\n        speed: 1\n", "provider: slng", "listen:", "turn:"},
-			env:       []string{"LIVEKIT_API_KEY=", "LIVEKIT_API_SECRET=", "LIVEKIT_URL=", "SLNG_API_KEY="},
+			env:       []string{"OPENAI_API_KEY=", "SLNG_API_KEY="},
 		},
 	} {
 		t.Run(tc.target, func(t *testing.T) {

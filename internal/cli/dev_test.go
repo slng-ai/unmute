@@ -51,14 +51,14 @@ func TestParseDotenv(t *testing.T) {
 	}
 }
 
-func TestDevChildEnv_readsDotenv(t *testing.T) {
+func TestDevChildEnv_readsDotenvLocal(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("SLNG_API_KEY=sk-secret\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".env.local"), []byte("SLNG_API_KEY=sk-secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	env := devChildEnv(dir, &bytes.Buffer{})
 	if !contains(env, "SLNG_API_KEY=sk-secret") {
-		t.Errorf(".env value not passed to the child env; env = %v", env)
+		t.Errorf(".env.local value not passed to the child env; env = %v", env)
 	}
 }
 
@@ -69,20 +69,34 @@ func TestV14DevChildEnvReadsWorkingDirectoryThenPackageDotenv(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repo, ".env"), []byte(
-		"UNMUTE_TEST_REPO_ENV=repo\nUNMUTE_TEST_SHARED_ENV=repo\n"), 0o600); err != nil {
+		"UNMUTE_TEST_REPO_ENV=repo\nUNMUTE_TEST_CWD_LOCAL_WINS=repo-env\nUNMUTE_TEST_SHARED_ENV=repo-env\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".env.local"), []byte(
+		"UNMUTE_TEST_REPO_LOCAL_ENV=repo-local\nUNMUTE_TEST_CWD_LOCAL_WINS=repo-local\nUNMUTE_TEST_PACKAGE_WINS=repo-local\nUNMUTE_TEST_SHARED_ENV=repo-local\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".env"), []byte(
-		"UNMUTE_TEST_PACKAGE_ENV=package\nUNMUTE_TEST_SHARED_ENV=package\n"), 0o600); err != nil {
+		"UNMUTE_TEST_PACKAGE_ENV=package\nUNMUTE_TEST_PACKAGE_LOCAL_WINS=package-env\nUNMUTE_TEST_PACKAGE_WINS=package-env\nUNMUTE_TEST_SHARED_ENV=package-env\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, ".env.local"), []byte(
+		"UNMUTE_TEST_PACKAGE_LOCAL_ENV=package-local\nUNMUTE_TEST_PACKAGE_LOCAL_WINS=package-local\nUNMUTE_TEST_SHARED_ENV=package-local\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("UNMUTE_TEST_SHARED_ENV", "shell")
 	t.Chdir(repo)
 
 	env := devChildEnv(root, &bytes.Buffer{})
 	for _, want := range []string{
 		"UNMUTE_TEST_REPO_ENV=repo",
+		"UNMUTE_TEST_REPO_LOCAL_ENV=repo-local",
+		"UNMUTE_TEST_CWD_LOCAL_WINS=repo-local",
 		"UNMUTE_TEST_PACKAGE_ENV=package",
-		"UNMUTE_TEST_SHARED_ENV=package",
+		"UNMUTE_TEST_PACKAGE_LOCAL_ENV=package-local",
+		"UNMUTE_TEST_PACKAGE_WINS=package-env",
+		"UNMUTE_TEST_PACKAGE_LOCAL_WINS=package-local",
+		"UNMUTE_TEST_SHARED_ENV=package-local",
 	} {
 		if !contains(env, want) {
 			t.Errorf("dev child env missing %q", want)
@@ -90,14 +104,34 @@ func TestV14DevChildEnvReadsWorkingDirectoryThenPackageDotenv(t *testing.T) {
 	}
 }
 
-func TestDevChildEnv_missingFileIsFine(t *testing.T) {
+func TestDevChildEnv_missingFilesAreFine(t *testing.T) {
 	var warn bytes.Buffer
-	env := devChildEnv(t.TempDir(), &warn) // no .env present
+	env := devChildEnv(t.TempDir(), &warn) // no .env or .env.local present
 	if len(env) == 0 {
 		t.Fatal("expected the ambient environment when .env is absent")
 	}
 	if warn.Len() != 0 {
-		t.Errorf("a missing .env must not warn; got %q", warn.String())
+		t.Errorf("missing dotenv files must not warn; got %q", warn.String())
+	}
+}
+
+func TestDevChildEnv_readsPackageRootFilesOnce(t *testing.T) {
+	dir := t.TempDir()
+	tooLong := strings.Repeat("x", 64*1024+1)
+	for _, name := range []string{".env", ".env.local"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(tooLong), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(dir)
+
+	var warn bytes.Buffer
+	devChildEnv(dir, &warn)
+	for _, name := range []string{".env", ".env.local"} {
+		prefix := "warning: reading " + filepath.Join(dir, name) + ":"
+		if got := strings.Count(warn.String(), prefix); got != 1 {
+			t.Errorf("%s warned %d times, want once:\n%s", name, got, warn.String())
+		}
 	}
 }
 

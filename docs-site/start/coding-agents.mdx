@@ -163,12 +163,14 @@ compiles, so it cannot quietly stop working.
 
   <Step title="Add your keys">
     Create `salon/.env` with `OPENAI_API_KEY` for the model that thinks and
-    `SLNG_API_KEY` for the speech models. `unmute dev` reads `.env` from the
-    directory you run it in, then from the package directory.
+    `SLNG_API_KEY` for the speech models. `.env.local` is also supported for
+    local development. `unmute dev` reads your shell, then `.env` and
+    `.env.local` in the current directory, then both files in the package
+    directory. Later files win.
 
     Which names a package needs is not something to guess at. Every compile
-    writes `salon/build/<target>/.env.example` listing them, so compile once
-    and read that file.
+    writes `salon/build/<target>/.env.example` listing the values you supply,
+    so compile once and read that file.
 
     **Check:** no key, token, or phone number appears in any package file. A
     package carries environment variable names only, in `UPPER_SNAKE`, and the

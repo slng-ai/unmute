@@ -111,8 +111,10 @@ is touched.
 
 ## Environment
 
-The run's environment is your shell, then `.env` in the current directory, then
-`.env` in the package directory. Later files win.
+The run's environment is your shell, then `.env` and `.env.local` in the current
+directory, then `.env` and `.env.local` in the package directory. Later files
+win. When the current directory is the package directory, each file is read
+once.
 
 ## Cleanup
 

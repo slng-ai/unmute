@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -342,20 +343,24 @@ func selectDevTarget(cmd *cobra.Command, root, requested string) (string, error)
 }
 
 // devChildEnv builds the bot subprocess environment from the ambient env, the
-// current directory's .env, then the package-root .env. Later files win, so a
-// package can override shared repository credentials.
+// current directory's .env and .env.local, then the package-root pair. Later
+// files win, so a package can override shared repository credentials.
 func devChildEnv(root string, warn io.Writer) []string {
 	env := os.Environ()
-	packageEnv := filepath.Join(root, ".env")
-	files := []string{}
+	files := make([]string, 0, 4)
 	if cwd, err := os.Getwd(); err == nil {
-		files = append(files, filepath.Join(cwd, ".env"))
-		if absolute, err := filepath.Abs(packageEnv); err == nil {
-			packageEnv = absolute
+		for _, name := range []string{".env", ".env.local"} {
+			files = append(files, filepath.Join(cwd, name))
+		}
+		if absolute, err := filepath.Abs(root); err == nil {
+			root = absolute
 		}
 	}
-	if len(files) == 0 || files[0] != packageEnv {
-		files = append(files, packageEnv)
+	for _, name := range []string{".env", ".env.local"} {
+		file := filepath.Join(root, name)
+		if !slices.Contains(files, file) {
+			files = append(files, file)
+		}
 	}
 	for _, file := range files {
 		vals, err := parseDotenv(file)
