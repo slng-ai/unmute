@@ -71,7 +71,7 @@ no new code in the generated project.
 
 ## The file is the block, and nothing else
 
-Six fields that describe one tool to the model are illegal on an `mcp:` file.
+Seven fields that describe one tool to the model are illegal on an `mcp:` file.
 Each is refused on its own, with the file, the line, and the reason:
 
 ```text
@@ -84,8 +84,8 @@ tools/web_search.yaml:1: remove `input`: it is not legal on an `mcp:` tool, the 
   owns each tool's parameters
 ```
 
-The other four say the same thing about `output`, `inject`, `interruption`, and
-`effect`. In one place, so you can see the whole rule at once:
+The other five say the same thing about `output`, `inject`, `interruption`,
+`effect`, and `announce`. In one place, so you can see the whole rule at once:
 
 | Field | Why not here |
 |---|---|
@@ -95,6 +95,7 @@ The other four say the same thing about `output`, `inject`, `interruption`, and
 | `inject` | an MCP call has the server's own shape, with nothing to merge into |
 | `interruption` | MCP tools take the platform's default interruption policy |
 | `effect` | MCP tools return data; ending the call is a `builtin:` tool |
+| `announce` | the server owns each tool's speech |
 
 This is the whole point of the shape. One tool file describes one tool the model
 can call. An `mcp:` file is not that: it is a **source** of tools, and how many

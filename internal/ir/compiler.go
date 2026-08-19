@@ -279,6 +279,10 @@ type Tool struct {
 	MCPTools     []string         `json:"mcp_tools,omitempty" yaml:"mcp_tools,omitempty"`
 	Interruption ToolInterruption `json:"interruption,omitempty" yaml:"interruption,omitempty"`
 	Effect       ToolEffect       `json:"effect,omitempty" yaml:"effect,omitempty"`
+	// Announce is one fixed sentence spoken as the tool starts, so a slow call
+	// is not silence. Webhook and local only; blank means no announcement, so no
+	// driver has to interpret whitespace.
+	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
 }
 
 type ToolExecution string

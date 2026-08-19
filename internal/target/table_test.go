@@ -435,3 +435,39 @@ func TestNoVendorVariableWearsTheUnmutePrefix(t *testing.T) {
 		t.Fatal("found no UNMUTE_ names anywhere, so this test would pass for the wrong reason")
 	}
 }
+
+// TestToolAnnounceCapabilityRows: only the two code drivers emit a tool
+// announcement, and each provider that cannot gets a note saying why, because a
+// gated row with no note tells the author nothing. The task scope is its own row:
+// LiveKit reaches agent tools and task tools through one lowering, Pipecat does
+// not (FR-007, FR-014).
+func TestToolAnnounceCapabilityRows(t *testing.T) {
+	table := Default()
+	for provider, want := range map[Provider]Tag{
+		LiveKit: Core, Pipecat: Core, Vapi: Gated, Deepgram: Gated,
+	} {
+		got := table.Capability(FieldToolAnnounce, provider)
+		if got.Tag != want {
+			t.Errorf("%s announce tag = %q, want %q", provider, got.Tag, want)
+		}
+		if want == Gated && strings.TrimSpace(got.Note) == "" {
+			t.Errorf("%s announce is gated with no note", provider)
+		}
+	}
+	// Pipecat only: the task row exists for a driver that emits the field but
+	// cannot emit it in that scope. Vapi and Deepgram stay core here because the
+	// field row above already stops them, the same shape as FieldToolMCPTask.
+	for provider, want := range map[Provider]Tag{
+		LiveKit: Core, Pipecat: Gated, Vapi: Core, Deepgram: Core,
+	} {
+		got := table.Capability(FieldToolAnnounceTask, provider)
+		if got.Tag != want {
+			t.Errorf("%s task-scoped announce tag = %q, want %q", provider, got.Tag, want)
+		}
+	}
+	// The Pipecat note has to say where to put the tool instead, or the author
+	// only learns that something is wrong.
+	if note := table.Capability(FieldToolAnnounceTask, Pipecat).Note; !strings.Contains(note, "list it on the agent instead") {
+		t.Errorf("Pipecat task-scope note must name the fix: %q", note)
+	}
+}

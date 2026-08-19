@@ -192,6 +192,9 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			if tool.Auth != nil {
 				data.AuthKinds.add(tool.Auth.Kind) // one helper per scheme in use (V8)
 			}
+			if tool.Announce != "" {
+				data.HasToolAnnouncements = true
+			}
 			if !tool.Local || seenLocal[tool.Method] {
 				continue
 			}
@@ -1024,6 +1027,7 @@ func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variabl
 			Auth:             loweredAuth(tool.Auth),
 			Args:             args,
 			EndsConversation: tool.Effect == ir.ToolEndsConversation,
+			Announce:         tool.Announce,
 		}, nil
 	case ir.ToolLocal:
 		return livekitTool{
@@ -1032,6 +1036,7 @@ func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variabl
 			CallKwargs:       callKwargs(argNames, inject),
 			Args:             args,
 			EndsConversation: tool.Effect == ir.ToolEndsConversation,
+			Announce:         tool.Announce,
 		}, nil
 	case ir.ToolBuiltin:
 		// Prebuilt: no method, no args; the registry id picks the SDK helper.

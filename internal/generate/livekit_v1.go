@@ -260,6 +260,7 @@ type livekitTool struct {
 	Builtin          string // execution: builtin — prebuilt registry id (renders into tools=, not a method)
 	Instructions     string // builtin end_call closing message → end_instructions
 	EndsConversation bool   // effect: ends_conversation — shutdown after the call
+	Announce         string // one fixed sentence spoken as the tool starts; "" = silent
 }
 
 // livekitMCPServer is one MCP tool source an agent or task mounts (N40): one
@@ -383,8 +384,11 @@ type livekitData struct {
 	HasColdTransfer    bool        // get_job_context import
 	HasWarmTransfer    bool        // WarmTransferTask import + trunk env + room_options (B14)
 	HasTaskTransfers   bool        // _TaskTransfer sentinel + task delegate catch paths
-	Outbound           *livekitOutbound
-	Telephony          *livekitTelephony
+	// HasToolAnnouncements gates the README section only: the emitted speech is
+	// per-tool and needs no import, so nothing in agent.py reads this.
+	HasToolAnnouncements bool
+	Outbound             *livekitOutbound
+	Telephony            *livekitTelephony
 
 	// Conversation shaping (V16).
 	ThinkingAudio          bool // subtle → BackgroundAudioPlayer thinking sound
@@ -436,6 +440,8 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolMCPTask:           true, // the same mount on an AgentTask's tools surface
 	targetcap.FieldToolAuth:              true, // _bearer Authorization header off token_env
 	targetcap.FieldToolInterruption:      true, // warn: runs to completion
+	targetcap.FieldToolAnnounce:          true, // unawaited session.say() before the request
+	targetcap.FieldToolAnnounceTask:      true, // task tools share method_tool, so the same line
 	targetcap.FieldOutbound:              true, // SIP dial-out off job metadata
 	targetcap.FieldVoicemail:             true, // AMD machine-vm branches (N6)
 	targetcap.FieldTracingLangfuse:       true,

@@ -1129,3 +1129,29 @@ func TestBuildResolvesPipecatCloudWebsocketPlan(t *testing.T) {
 		}
 	})
 }
+
+// TestBuildToolAnnounceTrimsToASettledValue: one TrimSpace is the whole default
+// resolution, so a driver never has to decide what a whitespace-only line means
+// (FR-005). A real sentence survives byte for byte.
+func TestBuildToolAnnounceTrimsToASettledValue(t *testing.T) {
+	for _, tc := range []struct{ name, authored, want string }{
+		{"sentence kept", "Let me check the calendar.", "Let me check the calendar."},
+		{"surrounding space trimmed", "  Let me check.  ", "Let me check."},
+		{"whitespace only reads as absent", "   \n\t ", ""},
+		{"absent stays absent", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			tool := pkg.Tools["lookup_customer"]
+			tool.Announce = tc.authored
+			pkg.Tools["lookup_customer"] = tool
+			agent, err := Build(pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := agent.Tools["lookup_customer"].Announce; got != tc.want {
+				t.Errorf("announce = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

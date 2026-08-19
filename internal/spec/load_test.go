@@ -293,3 +293,23 @@ func TestLoadMCPUnknownField(t *testing.T) {
 		t.Fatalf("want an unknown-field error naming `transports`, got %v", err)
 	}
 }
+
+// TestLoadToolAnnounceRefusedOnMCPFile: an mcp file cannot carry a tool
+// announcement, because the server owns each of its tools and there is no
+// per-tool body here to speak before (N40). It is refused at load, with the
+// file, the line, and the reason, like every other contract key.
+//
+// It has its own function rather than a row in TestLoadToolShape's table so that
+// `go test -run Announce` selects it: -run matches the top-level name, and a
+// filter that matches nothing still exits 0.
+func TestLoadToolAnnounceRefusedOnMCPFile(t *testing.T) {
+	_, err := Load(writeToolPackage(t, "mcp:\n  url_env: PROBE_MCP_URL\nannounce: Let me check.\n"))
+	if err == nil {
+		t.Fatal("an mcp file carrying announce must be refused")
+	}
+	for _, want := range []string{"tools/probe.yaml:3", "remove `announce`", "the server owns each tool's speech"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error must contain %q: %v", want, err)
+		}
+	}
+}

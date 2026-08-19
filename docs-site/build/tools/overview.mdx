@@ -122,27 +122,81 @@ The contract fields are shared, with one exception that matters:
 | `inject` | no | `webhook:` and `local:` only; values must be scalars |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` |
+| `announce` | no | `webhook:` and `local:` only; a fixed sentence, no `{{variables}}` |
 
 An `mcp:` file carries none of them, because the server owns each tool's contract.
 A `builtin:` file takes no `input` or `output`. The registry supplies its contract
 and default description, and your `description` is added on top if you write one.
 
-## The two behavior fields
+## The three behavior fields
 
 ```yaml
 interruption: provider_default
 effect: returns_data
+announce: Let me check the calendar.
 ```
 
 | Field | Values | Default | Meaning |
 |---|---|---|---|
 | `interruption` | `provider_default`, `continue`, `cancel` | `provider_default` | what happens to the call if the caller speaks while the tool runs |
 | `effect` | `returns_data`, `ends_conversation` | `returns_data` | whether the conversation continues after the tool |
+| `announce` | any one sentence | absent, nothing is spoken | a fixed line the agent speaks as the tool starts, so a slow call is not silence |
 
-Both are optional and both are honored differently per target: Pipecat maps
+All three are optional, and each is honored differently per target. Pipecat maps
 `interruption` onto its own cancel-on-interruption setting, while LiveKit runs
 tools to completion, so a non-default value warns there. `effect` is fixed by the
 registry on a `builtin:` tool, and a conflicting value fails.
+
+### Using `announce:`
+
+The line is spoken once, as the tool starts, before the tool's own work. Nothing
+waits for it to finish playing, so the caller hears the tool's answer no later
+than they would without the line. It covers the wait, it does not add one.
+
+**Reach for it when the tool is slow enough that the silence reads as a dropped
+call.** A request to a service you do not control, a handler that queries a
+database or a calendar. If the tool answers instantly, the announcement is just a
+sentence in the way.
+
+**Do not put one on every tool.** Two tools firing back to back means the caller
+hears two announcements in a row, which is worse than the pause you were trying
+to cover.
+
+#### Writing the line
+
+The sentence is fixed, so it is spoken word for word every time that tool runs.
+Everything else follows from that.
+
+| Write this | Not this | Why |
+|---|---|---|
+| `Let me check the calendar.` | `Let me find you some great times!` | you do not know yet what you will find |
+| `One moment while I look that up.` | `I'm querying the availability API.` | the caller does not have your architecture |
+| `Give me one second.` | `Please hold while I retrieve your account details from our system.` | it should be shorter than the wait it covers |
+
+Pick something that still sounds fine the third time. If the model calls a tool
+repeatedly within one conversation, that is an argument for not announcing it at
+all.
+
+#### The mistake worth avoiding
+
+If your instructions already tell the agent to say it is checking something,
+delete that line when you add `announce:`. Otherwise the model speaks its own
+version, the tool speaks the fixed one, and the caller hears both.
+
+#### The rules
+
+| Rule | What happens if you break it |
+|---|---|
+| legal on `webhook:` and `local:` only | refused by tool name; an `mcp:` file is refused at load, with the line number |
+| a fixed sentence, no `{{variables}}` | refused by tool name |
+| a blank value reads as absent | nothing is spoken and nothing is emitted |
+| on Pipecat, list the tool on an agent, not on a task | refused by name, telling you to move it |
+
+It adds no new interruption rule: if the caller speaks over the line, the tool's
+own `interruption:` value decides what happens. LiveKit emits the line for a tool
+listed on an agent or on a task. A target whose driver has no lowering for the
+field fails validation with that driver's own reason, rather than dropping the
+line quietly.
 
 ## Define once, attach by name
 

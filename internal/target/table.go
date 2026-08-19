@@ -75,6 +75,8 @@ const (
 	FieldToolBuiltin           Field = "tools.execution.builtin"
 	FieldToolAuth              Field = "tools.auth"
 	FieldToolInterruption      Field = "tools.interruption.non_default"
+	FieldToolAnnounce          Field = "tools.announce"
+	FieldToolAnnounceTask      Field = "tasks.tools.announce"
 	FieldOutbound              Field = "channels.telephony.outbound"
 	FieldVoicemail             Field = "channels.telephony.on_voicemail"
 	FieldDeploymentMultiRegion Field = "deployment_region.multiple"
@@ -383,6 +385,18 @@ func Default() Table {
 			FieldToolInterruption: field(
 				warn(LiveKit, "LiveKit runs tool executions to completion; a per-tool interruption preference is not enforced"),
 				warn(Vapi, "Vapi uses provider-default tool interruption"),
+			),
+			FieldToolAnnounce: field(
+				deny(Vapi, "Vapi tool request-start messages are not emitted yet"),
+				deny(Deepgram, "the Deepgram driver does not emit tool announcements yet"),
+			),
+			// Scope, not kind: Pipecat emits an agent tool as a decorated
+			// function that holds FunctionCallParams, but a task tool as a bare
+			// flows handler with no speech seam. So a tool that announces fails
+			// by name when it is listed on a task, instead of going quiet there
+			// (same split as FieldToolMCPTask).
+			FieldToolAnnounceTask: field(
+				deny(Pipecat, "the Pipecat driver cannot announce a tool listed on a task: list it on the agent instead"),
 			),
 			FieldOutbound: field(
 				deny(Pipecat, "the Pipecat driver does not emit outbound calling yet"),

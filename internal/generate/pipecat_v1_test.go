@@ -3209,3 +3209,123 @@ func TestPipecatDoesNotClaimMultiRegion(t *testing.T) {
 		t.Errorf("deployment_region.multiple on pipecat = %q, want gated", tag)
 	}
 }
+
+// TestPipecatV1ToolAnnounceQueuesFrameWithoutWaiting: an announcing tool carries
+// the line on the decorator that already wraps every direct tool, the wrapper
+// queues it as a TTSSpeakFrame before the handler body runs, and nothing waits
+// for playout (FR-008, FR-009). The interruption argument still composes with it
+// in one list, and a package that announces nothing keeps today's output exactly
+// (FR-010).
+func TestPipecatV1ToolAnnounceQueuesFrameWithoutWaiting(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A user-first greeting so the only reason to import TTSSpeakFrame is the
+	// announcement itself.
+	agent.Conversation.Greeting = &ir.Greeting{SpeaksFirst: ir.SpeaksFirstUser}
+	silent, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate without announce: %v", err)
+	}
+	before := artifactFile(t, silent, "bot.py")
+	if strings.Contains(before, "announce") {
+		t.Errorf("a package that announces nothing must not mention announce at all")
+	}
+	if strings.Contains(before, "TTSSpeakFrame") {
+		t.Errorf("a package that announces nothing must not import TTSSpeakFrame")
+	}
+
+	webhook := agent.Tools["get_invoice"]
+	webhook.Announce = "Let me pull that invoice up."
+	agent.Tools["get_invoice"] = webhook
+	lookup := agent.Tools["lookup_customer"]
+	lookup.Announce = "Give me one second to find you."
+	lookup.Interruption = ir.ToolContinue
+	agent.Tools["lookup_customer"] = lookup
+
+	artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bot := artifactFile(t, artifact, "bot.py")
+	for _, want := range []string{
+		"def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None, announce=None):",
+		"await params.llm.push_frame(TTSSpeakFrame(announce))",
+		`    @_direct_tool(announce="Let me pull that invoice up.")`,
+		`    @_direct_tool(cancel_on_interruption=False, announce="Give me one second to find you.")`,
+	} {
+		if !strings.Contains(bot, want) {
+			t.Errorf("announcing package missing %q", want)
+		}
+	}
+	if !regexp.MustCompile(`(?m)^from pipecat\.frames\.frames import .*TTSSpeakFrame`).MatchString(bot) {
+		t.Error("an announcing tool must import TTSSpeakFrame")
+	}
+	// The announcement is queued, never waited on: no handle await, and none of
+	// the transfer announcement's playout-wait shape.
+	wrapper := pipecatDirectToolBody(t, bot)
+	pushAt := strings.Index(wrapper, "TTSSpeakFrame(announce)")
+	guardAt := strings.Index(wrapper, "unexpected = sorted(")
+	if pushAt < 0 || guardAt < 0 {
+		t.Fatalf("_direct_tool lost its announcement or its argument guard:\n%s", wrapper)
+	}
+	if guardAt >= pushAt {
+		t.Errorf("the announcement must come after the argument check, so a rejected call stays silent:\n%s", wrapper)
+	}
+	for _, absent := range []string{
+		"_announce_handoff",
+		"_handoff_finished",
+		"asyncio.wait_for",
+		"BotStoppedSpeakingFrame",
+	} {
+		if strings.Contains(wrapper, absent) {
+			t.Errorf("_direct_tool must not wait for playout, found %q:\n%s", absent, wrapper)
+		}
+	}
+}
+
+// TestPipecatV1ToolAnnounceOnInlinePath: the module-level emission site a minimal
+// single-agent package uses carries the same decorator, so both call sites are
+// held by a test rather than by one of them happening to be exercised.
+func TestPipecatV1ToolAnnounceOnInlinePath(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "..", "examples", "simple-prompt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent.Tracing = nil // the inline path is scoped to no-tracing
+	tool := agent.Tools["lookup_customer"]
+	tool.Announce = "Let me look that up."
+	agent.Tools["lookup_customer"] = tool
+
+	bot := artifactFile(t, mustGeneratePipecatInline(t, agent), "bot.py")
+	if !strings.Contains(bot, `@_direct_tool(announce="Let me look that up.")`) {
+		t.Error("the inline emission site lost the announcement")
+	}
+	if !strings.Contains(bot, "async def lookup_customer(params: FunctionCallParams") {
+		t.Error("expected the module-level inline tool, not the method form")
+	}
+}
+
+// pipecatDirectToolBody returns the generated _direct_tool wrapper, so an
+// assertion about it cannot be satisfied by a line elsewhere in bot.py.
+func pipecatDirectToolBody(t *testing.T, bot string) string {
+	t.Helper()
+	start := strings.Index(bot, "def _direct_tool(")
+	if start < 0 {
+		t.Fatal("_direct_tool wrapper not emitted")
+	}
+	body := bot[start:]
+	if end := strings.Index(body[1:], "\n\ndef "); end >= 0 {
+		body = body[:end+1]
+	}
+	return body
+}

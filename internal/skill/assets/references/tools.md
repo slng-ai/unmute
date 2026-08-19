@@ -66,6 +66,7 @@ also the list of what you could have written.
 | `inject` | no | `webhook:` and `local:` only |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` |
+| `announce` | no | `webhook:` and `local:` only |
 
 An `mcp:` file is the block and nothing else, because the server owns each
 tool's contract. A `builtin:` file needs no `description` or `input`, because
@@ -346,22 +347,62 @@ Use `inject` for anything the caller should not be able to change: the customer
 id, the channel, a tenant. A parameter in `input` is a parameter the model can
 invent.
 
-## The two behaviour fields
+## The three behaviour fields
 
 ```yaml
 interruption: provider_default
 effect: returns_data
+announce: Let me check the calendar.
 ```
 
 | Field | Values | Default | Meaning |
 |---|---|---|---|
 | `interruption` | `provider_default`, `continue`, `cancel` | `provider_default` | what happens to the call if the caller speaks while the tool runs |
 | `effect` | `returns_data`, `ends_conversation` | `returns_data` | whether the conversation continues after the tool |
+| `announce` | any one sentence | absent, nothing is spoken | a fixed line the agent speaks as the tool starts, so a slow call is not silence |
 
-Both are honoured differently per target. Pipecat maps `interruption` onto its
-own cancel-on-interruption setting. LiveKit runs tools to completion, so a
+All three are honoured differently per target. Pipecat maps `interruption` onto
+its own cancel-on-interruption setting. LiveKit runs tools to completion, so a
 non-default value warns there. Read the warning to the user rather than dropping
 it.
+
+### When to write `announce:`
+
+Write it on a tool that keeps the caller waiting: a webhook to a slow service, a
+handler that reads a calendar or a database. Do not write it on a fast tool, and
+do not write one on every tool. Two agents talking over each other is worse than
+a short pause.
+
+The sentence is fixed, so it is spoken word for word every time that tool runs.
+Write what the agent is **doing**, never what it expects to find, and keep it
+shorter than the wait it covers:
+
+| Write this | Not this |
+|---|---|
+| `Let me check the calendar.` | `Let me find you some great times!` |
+| `One moment while I look that up.` | `I'm querying the availability API.` |
+
+If the package instructions already tell the agent to say it is checking
+something, remove that instruction when you add `announce:`. Otherwise the model
+speaks its own version and the tool speaks the fixed one, and the caller hears
+both. This is the most common way to get it wrong.
+
+Rules that will fail the compile if you break them:
+
+- Legal on `webhook:` and `local:` only. Every other kind has no body to speak
+  before. An `mcp:` file is refused at load with the line number.
+- A fixed sentence. `{{variables}}` are refused, because a rendered line would
+  need a round trip, which is the delay the field exists to hide.
+- A blank value reads as absent. Nothing is spoken and nothing is emitted.
+- On Pipecat, list an announcing tool on an **agent**, not on a task. A task tool
+  is emitted as a flows handler with no seam to speak from, so it is refused by
+  name. LiveKit emits the same line in either place.
+- A target whose driver has no lowering for the field fails validation with that
+  driver's own reason. Read the error to the user rather than dropping the field.
+
+Nothing waits for the line to finish playing, on either driver. The tool's own
+work starts straight away, and the tool's `interruption:` value still decides
+what happens if the caller speaks over it.
 
 ## Define once, attach by name
 

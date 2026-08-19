@@ -19,6 +19,14 @@ agents and tasks share the shape (T15). */ -}}
         if refusal:
             return {"refused": refusal}
 {{- end}}
+{{- if .Announce}}
+        # Cover the wait: say() returns a SpeechHandle, so speech starts and the
+        # request goes out behind it. Deliberately not awaited: awaiting the
+        # handle holds the tool until playout finishes, which is the delay this
+        # line exists to hide. Announced after any refusal, so a refused call
+        # stays silent.
+        self.session.say({{pyq .Announce}})
+{{- end}}
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 {{.URLExpr}},
@@ -43,6 +51,10 @@ the file defines a callable named like the tool; sync or async). */ -}}
         refusal = _refusal({{pyq .Method}}, ctx.userdata, {{.NeededLiteral}})
         if refusal:
             return {"refused": refusal}
+{{- end}}
+{{- if .Announce}}
+        # Not awaited, on purpose: see the same line in webhook_tool.
+        self.session.say({{pyq .Announce}})
 {{- end}}
         result = tools.{{.Method}}.{{.Method}}({{.CallKwargs}})
         if inspect.isawaitable(result):

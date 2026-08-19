@@ -76,6 +76,20 @@ Two things worth knowing before you run it:
 `--var customer_name=Ada`. Restart without the flag and it says "Hi there": the
 variable declares `default: there`, so the greeting always has something to say.
 
+**The availability check speaks before it works.** Ask what times are open. The
+agent says "Let me check the calendar." the moment the tool starts, so you are
+not sitting in silence while the handler reads the calendar. That is one line in
+`tools/check_availability.yaml`:
+
+```yaml
+announce: Let me check the calendar.
+```
+
+It is a fixed sentence, not something the model writes, because asking the model
+for a line would cost the round trip the line is there to hide. The tool does not
+wait for the sentence to finish playing, so the slots arrive no later than they
+would without it.
+
 **The model never invents a customer id.** Ask to book something. When
 `book_appointment` runs, the agent supplies only the slot; the customer id
 arrives from the `customer_id` variable through the tool's `inject:` block, and

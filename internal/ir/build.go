@@ -541,6 +541,10 @@ func buildTool(name string, raw packagespec.Tool) Tool {
 	if tool.Effect == "" {
 		tool.Effect = ToolReturnsData
 	}
+	// ponytail: one TrimSpace is the whole default resolution. A blank or
+	// whitespace-only line reads as no announcement, so every driver sees a
+	// settled value and none has to decide what " " means.
+	tool.Announce = strings.TrimSpace(raw.Announce)
 	return tool
 }
 

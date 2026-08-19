@@ -379,6 +379,7 @@ exactly one execution block says how it runs.
 | `inject` | hidden scalar arguments; string values may carry `{{variables}}`; legal on `webhook` and `local` |
 | `interruption` | `provider_default`, `continue`, `cancel` |
 | `effect` | `returns_data`, `ends_conversation` |
+| `announce` | one fixed sentence spoken as the tool starts; no `{{variables}}`; legal on `webhook` and `local`; absent means nothing is spoken |
 
 | Execution block | Fields |
 |---|---|
@@ -389,7 +390,7 @@ exactly one execution block says how it runs.
 | `client` | no fields; write `client: {}`; gated on every target today |
 | `provider_hosted` | no fields; write `provider_hosted: {}`; gated on every target today |
 
-An `mcp` file is the block and nothing else. The six contract fields above are
+An `mcp` file is the block and nothing else. The seven contract fields above are
 all illegal on one, because the server describes its own tools.
 
 | Field | Values |

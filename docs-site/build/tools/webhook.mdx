@@ -25,12 +25,19 @@ webhook:
     type: bearer
     token_env: SALON_API_TOKEN
 
+announce: One moment while I confirm that.
 effect: returns_data
 interruption: provider_default
 ```
 
 This is a standalone webhook example. The shipped outbound live example uses
 local Python fixtures so it can run without an operator-specific API.
+
+`announce:` is the one line worth knowing about here, because a webhook is the
+tool most likely to keep the caller waiting. The agent speaks that exact sentence
+as the call starts and does not wait for it to finish, so the answer arrives no
+later than it would in silence. It is a fixed sentence, and `{{variables}}` are
+refused. Full rules in [the behavior fields](/build/tools/overview#the-three-behavior-fields).
 
 ## The block
 

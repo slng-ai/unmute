@@ -39,5 +39,10 @@ output:
 local:
   handler: tools/check_availability.py
 
+# Spoken as the tool starts, so the caller is not waiting in silence while the
+# handler reads the calendar. Fixed sentence, and the tool does not wait for it
+# to finish playing.
+announce: Let me check the calendar.
+
 interruption: provider_default
 effect: returns_data
