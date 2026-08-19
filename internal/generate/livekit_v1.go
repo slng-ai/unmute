@@ -342,8 +342,11 @@ type livekitData struct {
 	Prompts           []livekitPrompt
 	EntryPromptExpr   string   // templated entry prompt rendered from session.userdata after outbound SIP hydration
 	PluginModules     []string // merged `from livekit.plugins import ...` names
-	Deps              []string
-	RequiredEnv       []string
+	// Slng is the SLNG Context Router's module-level helpers. Empty on a package
+	// with no router think binding, and then none of it is emitted (FR-019).
+	Slng        slngHelpers
+	Deps        []string
+	RequiredEnv []string
 	// AuthorEnv is the half of RequiredEnv the author supplies. Everything else
 	// — the route's own values, which `unmute dev` sets locally and a platform
 	// or operator sets at deploy time — is absent from every author-facing file

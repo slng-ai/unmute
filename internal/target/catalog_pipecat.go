@@ -317,6 +317,30 @@ var pipecatCatalog = []Entry{
 		},
 	},
 	{
+		// The SLNG Context Router. Same class and same install as the openai row
+		// above, because the router speaks Chat Completions: what changes is the
+		// base URL, the key, and two identity headers.
+		//
+		// No Distributes: the router picks the model itself per turn, so naming
+		// a brand here would mislabel it in the interactive console (FR-021).
+		Framework: Pipecat, Role: Reason, Vendor: "slng",
+		Verified: SlngRouterVerified, Docs: SlngRouterDocs,
+		Install: InstallSpec{Extra: "openai"},
+		Import:  "from pipecat.services.openai.llm import OpenAILLMService",
+		Call: &CallSpec{
+			Class: "OpenAILLMService", APIKeyArg: "api_key", APIKeyEnv: SlngRouterKeyEnv,
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Endpoint: FieldSpec{Arg: "base_url"},
+			Params:   ParamsSettings,
+			// Settings.extra is merged verbatim into the request params
+			// (services/openai/base_llm.py:353, pipecat 1.7.0 source read
+			// 2026-08-19), so extra_headers and extra_body reach the SDK call
+			// without a new Python class.
+			SettingsOverflow: "extra",
+		},
+		Notes: []string{"SLNG Context Router over Chat Completions; params.world_part_override becomes base_url and the identity headers plus the inline slng_config ride Settings.extra"},
+	},
+	{
 		Framework: Pipecat, Role: Reason, Vendor: "anthropic",
 		Verified: "2026-07-17", Docs: "https://docs.pipecat.ai/api-reference/server/services/llm/anthropic",
 		Install: InstallSpec{Extra: "anthropic"},

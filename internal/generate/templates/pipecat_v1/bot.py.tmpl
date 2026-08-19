@@ -31,14 +31,16 @@ the typed results.{{end}}
 from __future__ import annotations
 
 {{if or (not .Inline) .NeedsEndAfter .Inactivity}}import asyncio
+{{end}}{{if .Slng.Vertex}}import base64
 {{end}}{{if .HasFlows}}import copy
 {{end}}{{if .NeedsFunctionCalls}}import functools
 {{end}}{{if or .NeedsInspect .NeedsFunctionCalls}}import inspect
-{{end}}{{if or .HasFlows .CallStartVars}}import json
+{{end}}{{if or .HasFlows .CallStartVars .Slng.Vertex}}import json
 {{end}}import os
 {{if .NeedsRender}}import re
 {{end}}import sys
-{{if .Variables}}from dataclasses import dataclass
+{{if .Slng.Any}}import uuid
+{{end}}{{if .Variables}}from dataclasses import dataclass
 {{end}}{{if .NeedsRender}}from urllib.parse import quote
 {{end}}{{if .DailyCarrier}}{{if .DailyCarrier.HasInbound}}
 import aiohttp
@@ -121,7 +123,79 @@ def require_env() -> None:
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
-{{if .NeedsMCP}}
+{{if .Slng.Any}}
+# --- SLNG Context Router ----------------------------------------------------
+# The router answers a repeated turn from its cache instead of calling the model.
+# That is why a router-bound system prompt below keeps its placeholders instead of
+# being rendered here: the router substitutes them from template_variables, so the
+# prompt it sees is identical on every call, which is what lets a turn repeat. The
+# agent id scopes that cache and is one value for this whole package. A first turn
+# never caches, and the router decides which later turns are repeatable, so a
+# repeat served by the model is expected rather than a fault.
+{{range .Slng.Configs}}
+
+def {{.Func}}() -> dict:
+    """The model configuration, sent inline in the body of every think request.
+
+    Credentials are read here rather than at import, so a missing one is reported
+    by require_env() alongside every other name instead of raising a KeyError
+    before anything has checked. No value is written into this file: each is the
+    name of an environment variable.
+    """
+    return {{.Body}}
+{{end}}{{if .Slng.Vertex}}
+
+def _slng_vertex_credentials(name: str) -> dict:
+    """A GCP service-account key, in whichever of three shapes the variable holds.
+
+    The key JSON, that JSON base64 encoded, or a path to the key file, decided in
+    that order because a base64 value can begin with "/" and look like a path.
+    This runs once at startup, so a malformed value fails before the agent answers
+    anything rather than mid-call.
+    """
+    raw = os.environ[name].strip()
+    if raw.startswith("{"):
+        return json.loads(raw)
+    try:
+        decoded = base64.b64decode(raw, validate=True).decode("utf-8").strip()
+    except (ValueError, UnicodeDecodeError):
+        decoded = ""
+    if decoded.startswith("{"):
+        return json.loads(decoded)
+    if os.path.isfile(raw):
+        with open(raw, encoding="utf-8") as handle:
+            return json.load(handle)
+    raise RuntimeError(
+        f"{name} must hold a GCP service-account key in one of three shapes: "
+        f"the key JSON, that JSON base64 encoded, or a path to the key file"
+    )
+{{end}}{{if .Slng.Variables}}
+
+_SLNG_VARIABLE_LIMIT = {{.Slng.Limit}}
+
+
+def _slng_template_variables(state, names) -> dict:
+    """The values the router substitutes into the prompt's placeholders.
+
+    A name with no value yet sends the empty string, never None and never the text
+    "None". A value over the router's limit is truncated with a warning rather
+    than dropped: an over-long value must not end a live call.
+    """
+    values = {}
+    for name in names:
+        value = getattr(state, name, None) if state is not None else None
+        text = "" if value is None else str(value)
+        if len(text) > _SLNG_VARIABLE_LIMIT:
+            logger.warning(
+                "template variable {} is {} characters; truncating to {} for the router",
+                name,
+                len(text),
+                _SLNG_VARIABLE_LIMIT,
+            )
+            text = text[:_SLNG_VARIABLE_LIMIT]
+        values[name] = text
+    return values
+{{end}}{{end}}{{if .NeedsMCP}}
 
 async def _close_mcp(awaitables, *, suppress: bool = False) -> None:
     failures = []
@@ -592,7 +666,7 @@ class _HandoffWorker({{if and .Tracing .NeedsFunctionCalls}}TracedLLMWorker{{els
 {{end}}
 {{range .Agents}}
 
-def build_{{.Name}}_llm(state=None):
+def build_{{.Name}}_llm(state=None{{if $.Slng.Any}}, *, slng_session_id{{end}}):
     return {{template "svc" .LLM.Call}}
 
 
@@ -633,12 +707,12 @@ async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: 
 class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.Tracing (or $.NeedsFunctionCalls $.NeedsMCP)}}TracedLLMWorker{{else}}LLMWorker{{end}}):
     """Agent: {{.Name}}."""
 
-    def __init__(self, state=None, context=None, call_context=None) -> None:
+    def __init__(self, state=None, context=None, call_context=None{{if $.Slng.Any}}, *, slng_session_id{{end}}) -> None:
 {{if $.Variables}}        self.state = state
 {{end}}{{if $.HasFlows}}        self.context = context
 {{end}}{{if or $.Telephony $.HasColdTransfer}}        self.call_context = call_context if call_context is not None else {}
 {{end}}
-        llm = build_{{.Name}}_llm({{if $.Variables}}state{{end}})
+        llm = build_{{.Name}}_llm({{if $.Variables}}state{{end}}{{if $.Slng.Any}}{{if $.Variables}}, {{end}}slng_session_id=slng_session_id{{end}})
         super().__init__({{pyq .Name}}, llm=llm, pipeline=Pipeline([llm, build_{{.Name}}_tts()]), bridged=())
 {{if .MCPSources}}        # MCP tool sources. The clients are built here and connected in
         # start_mcp() before this worker is ever activated, because the server
@@ -1091,7 +1165,13 @@ def build_stt():
 
 {{if .Inline}}{{$agent := index .Agents 0}}async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     require_env()
-    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
+{{if .Slng.Any}}    # One SLNG Context Router session id per call, passed as an argument from here
+    # on. It groups this call's think requests for support and scopes nothing:
+    # the agent id is what scopes the router's cache, so this may differ freely
+    # between calls. Not named session_id, because runner_args.session_id is a
+    # different thing this file also reads.
+    slng_session_id = str(uuid.uuid4())
+{{end}}    runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)
 
     # Single agent, no handoffs: the LLM sits inline in the pipeline (no bus).
     # turn: local — on-device VAD (Silero); the turn binding is advisory.
@@ -1114,7 +1194,7 @@ def build_stt():
             transport.input(),
             build_stt(),
             user_aggregator,
-            build_{{$agent.Name}}_llm(),
+            build_{{$agent.Name}}_llm({{if $.Slng.Any}}slng_session_id=slng_session_id{{end}}),
             build_{{$agent.Name}}_tts(),
             transport.output(),
             assistant_aggregator,
@@ -1175,7 +1255,13 @@ def build_stt():
 {{else}}async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     require_env()
     call_context = {}
-{{if .DailyCarrier}}    # Validated before anything is built: a malformed call body fails by field
+{{if .Slng.Any}}    # One SLNG Context Router session id per call, passed as an argument from here
+    # on. It groups this call's think requests for support and scopes nothing:
+    # the agent id is what scopes the router's cache, so this may differ freely
+    # between calls. Not named session_id, because runner_args.session_id is a
+    # different thing this file also reads.
+    slng_session_id = str(uuid.uuid4())
+{{end}}{{if .DailyCarrier}}    # Validated before anything is built: a malformed call body fails by field
     # name rather than mid-call. None means this is not a phone session.
     carrier_call = _carrier_session(runner_args)
     call_context["_daily_sip_session"] = carrier_call is not None
@@ -1200,7 +1286,7 @@ def build_stt():
 {{if .Telephony}}    call_context.update(telephony.normalized_context(runner_args))
 {{end}}{{if .Variables}}    state = build_state(call_context)
 {{else}}    state = None
-{{end}}    agents = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(state=state, context=context, call_context=call_context){{end}}]
+{{end}}    agents = [{{range $i, $a := .Agents}}{{if $i}}, {{end}}{{$a.Class}}(state=state, context=context, call_context=call_context{{if $.Slng.Any}}, slng_session_id=slng_session_id{{end}}){{end}}]
 {{if .NeedsMCP}}    mcp_agents = [
 {{range $i, $a := .Agents}}{{if $a.MCPSources}}        agents[{{$i}}],
 {{end}}{{end}}    ]

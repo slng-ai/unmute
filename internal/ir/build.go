@@ -433,6 +433,7 @@ func convertModelDef(raw packagespec.ModelDef, kind ModelKind, fallback []string
 		Speed: raw.Speed, Language: raw.Language, Temperature: raw.Temperature,
 		TopP: raw.TopP, TopK: raw.TopK, EndpointEnv: raw.EndpointEnv,
 		Placement: derivePlacement(raw), SemanticEndpointing: SemanticEndpointing(raw.SemanticEndpointing),
+		AgentID: raw.AgentID, Upstream: convertUpstream(raw.Upstream),
 		Params: raw.Params, Fallback: fallback, Description: raw.Description,
 	}
 }
@@ -1256,7 +1257,25 @@ func toBinding(def ModelDef) Binding {
 	return Binding{
 		Provider: def.Provider, Model: def.Model, Voice: def.Voice, Language: def.Language,
 		EndpointEnv: def.EndpointEnv, Placement: def.Placement,
-		SemanticEndpointing: def.SemanticEndpointing, Params: foldParams(def),
+		SemanticEndpointing: def.SemanticEndpointing,
+		AgentID:             def.AgentID, Upstream: def.Upstream,
+		Params: foldParams(def),
+	}
+}
+
+// convertUpstream carries the authored upstream block through unfolded. It is
+// not merged into Params: params reach the SDK verbatim, and every field here is
+// consumed by the compiler into the inline endpoint object instead.
+func convertUpstream(raw *packagespec.Upstream) *Upstream {
+	if raw == nil {
+		return nil
+	}
+	return &Upstream{
+		Provider: raw.Provider, URL: raw.URL, KeyEnv: raw.KeyEnv, AuthHeader: raw.AuthHeader,
+		Deployment: raw.Deployment, APIVersion: raw.APIVersion,
+		CredentialsEnv: raw.CredentialsEnv, Location: raw.Location, Project: raw.Project,
+		AccessKeyIDEnv: raw.AccessKeyIDEnv, SecretAccessKeyEnv: raw.SecretAccessKeyEnv,
+		SessionTokenEnv: raw.SessionTokenEnv, Region: raw.Region, ModelID: raw.ModelID,
 	}
 }
 

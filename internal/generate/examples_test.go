@@ -488,7 +488,12 @@ func TestPublicExamplePackages(t *testing.T) {
 	//
 	// A telephony example whose behaviour is one provider's names that provider
 	// first, because the route is the thing a reader is choosing between.
-	want := []string{"livekit-human-transfer", "mcp-example", "multi-task", "outbound-reminder", "pipecat-human-transfer-twilio", "regional-infrastructure", "salon-concierge", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
+	//
+	// optimized-salon-concierge is the second half of a matched pair: the same
+	// package with its think binding behind the SLNG Context Router, so the two
+	// can be measured against each other. It earns its own directory rather than
+	// a note in the salon README because the comparison is the deliverable.
+	want := []string{"livekit-human-transfer", "mcp-example", "multi-task", "optimized-salon-concierge", "outbound-reminder", "pipecat-human-transfer-twilio", "regional-infrastructure", "salon-concierge", "salon-support", "simple-prompt", "subagents", "task-groups", "twilio-telephony-hello"}
 	if !slices.Equal(directories, want) {
 		t.Fatalf("public example directories = %v, want %v", directories, want)
 	}
@@ -727,6 +732,7 @@ func TestTelephonyExampleDocsAccountForEveryRequiredEnv(t *testing.T) {
 		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
 		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
 		"salon-concierge":               {ir.ProviderPipecat, ir.ProviderLiveKit},
+		"optimized-salon-concierge":     {ir.ProviderPipecat, ir.ProviderLiveKit},
 	} {
 		t.Run(example, func(t *testing.T) {
 			readme, err := os.ReadFile(filepath.Join("..", "..", "examples", example, "README.md"))
@@ -813,6 +819,7 @@ func TestBrowserPathStartupCheckAsksForNoRouteEnvironment(t *testing.T) {
 		"pipecat-human-transfer-twilio": {ir.ProviderPipecat},
 		"outbound-reminder":             {ir.ProviderPipecat, ir.ProviderLiveKit},
 		"salon-concierge":               {ir.ProviderPipecat, ir.ProviderLiveKit},
+		"optimized-salon-concierge":     {ir.ProviderPipecat, ir.ProviderLiveKit},
 	} {
 		t.Run(example, func(t *testing.T) {
 			pkg, err := spec.Load(filepath.Join("..", "..", "examples", example))

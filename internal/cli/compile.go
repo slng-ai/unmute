@@ -119,6 +119,26 @@ func printContract(out io.Writer, name string, provider ir.Provider, notes gener
 			}
 			continue
 		}
+		// The SLNG Context Router consumes two authored things rather than
+		// forwarding them, so neither is silent: the region becomes the base URL,
+		// and the upstream block becomes the inline configuration the request
+		// body carries. The upstream line names the URL and the *name* of each
+		// credential variable, never a value (FR-004, FR-036).
+		if fb.Role == "reason" && fb.Binding.Router() {
+			if base, ok := target.SlngRouterBaseURL(routerRegion(fb.Binding)); ok {
+				fmt.Fprintf(out, "%s: binding %s %s (SLNG Context Router; world_part_override is consumed into base_url=%s)\n",
+					name, role, bindingSummary(fb.Binding), base)
+				for _, p := range fb.Params {
+					suffix := ""
+					if p.Name == "world_part_override" {
+						suffix = " (consumed as the router base URL)"
+					}
+					fmt.Fprintf(out, "%s:   param %s=%v%s\n", name, p.Name, p.Value, suffix)
+				}
+				fmt.Fprintf(out, "%s:   upstream %s (sent inline in the request body)\n", name, upstreamSummary(fb.Binding))
+				continue
+			}
+		}
 		fmt.Fprintf(out, "%s: binding %s %s (forwarded as-is, not validated)\n", name, role, bindingSummary(fb.Binding))
 		for _, p := range fb.Params {
 			fmt.Fprintf(out, "%s:   param %s=%v\n", name, p.Name, p.Value)
@@ -127,6 +147,38 @@ func printContract(out io.Writer, name string, provider ir.Provider, notes gener
 	for _, s := range notes.Sizing {
 		fmt.Fprintf(out, "%s: sizing %s=%s [%s] (%s)\n", name, s.Metric, s.Value, s.Status, s.Basis)
 	}
+}
+
+// routerRegion reads the authored router region off a binding's params.
+func routerRegion(b ir.Binding) string {
+	region, _ := b.Params["world_part_override"].(string)
+	return region
+}
+
+// upstreamSummary names the resolved upstream, its URL, and each credential
+// variable by name. A value never appears: the compiler checks that a credential
+// field is present, not that it is right, and the report is one of the surfaces
+// the constitution keeps free of secret values.
+func upstreamSummary(b ir.Binding) string {
+	if b.Upstream == nil {
+		return "unresolved"
+	}
+	fields, ok := target.SlngResolveUpstream(b.Upstream.Provider, b.Upstream.Fields())
+	if !ok {
+		return b.Upstream.Provider
+	}
+	parts := []string{b.Upstream.Provider}
+	for _, field := range fields {
+		switch {
+		case field.Wire == "provider":
+			continue
+		case field.Env:
+			parts = append(parts, field.Wire+"="+field.Value+" (env)")
+		default:
+			parts = append(parts, field.Wire+"="+field.Value)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // bindingSummary renders the forwarded identity fields of a binding for stdout.

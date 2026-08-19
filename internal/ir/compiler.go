@@ -56,9 +56,58 @@ type ModelDef struct {
 	EndpointEnv         string              `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 	Placement           Placement           `json:"placement" yaml:"placement"`
 	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
-	Params              map[string]any      `json:"params,omitempty" yaml:"params,omitempty"`
-	Fallback            []string            `json:"fallback,omitempty" yaml:"fallback,omitempty"`
-	Description         string              `json:"description,omitempty" yaml:"description,omitempty"`
+	// AgentID and Upstream are the SLNG Context Router's two authored fields,
+	// carried verbatim: the id scopes the router's cache and the block says
+	// which upstream serves the model. Neither folds into Params, because params
+	// reach the SDK verbatim and these two are consumed by the compiler.
+	AgentID     string         `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
+	Upstream    *Upstream      `json:"upstream,omitempty" yaml:"upstream,omitempty"`
+	Params      map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	Fallback    []string       `json:"fallback,omitempty" yaml:"fallback,omitempty"`
+	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
+// Upstream is the resolved model behind a router think binding. The union of
+// every provider's fields lives in one struct; which subset is legal is decided
+// by Provider through the table in internal/target.
+type Upstream struct {
+	Provider           string `json:"provider,omitempty" yaml:"provider,omitempty"`
+	URL                string `json:"url,omitempty" yaml:"url,omitempty"`
+	KeyEnv             string `json:"key_env,omitempty" yaml:"key_env,omitempty"`
+	AuthHeader         string `json:"auth_header,omitempty" yaml:"auth_header,omitempty"`
+	Deployment         string `json:"deployment,omitempty" yaml:"deployment,omitempty"`
+	APIVersion         string `json:"api_version,omitempty" yaml:"api_version,omitempty"`
+	CredentialsEnv     string `json:"credentials_env,omitempty" yaml:"credentials_env,omitempty"`
+	Location           string `json:"location,omitempty" yaml:"location,omitempty"`
+	Project            string `json:"project,omitempty" yaml:"project,omitempty"`
+	AccessKeyIDEnv     string `json:"access_key_id_env,omitempty" yaml:"access_key_id_env,omitempty"`
+	SecretAccessKeyEnv string `json:"secret_access_key_env,omitempty" yaml:"secret_access_key_env,omitempty"`
+	SessionTokenEnv    string `json:"session_token_env,omitempty" yaml:"session_token_env,omitempty"`
+	Region             string `json:"region,omitempty" yaml:"region,omitempty"`
+	ModelID            string `json:"model_id,omitempty" yaml:"model_id,omitempty"`
+}
+
+// Fields keys the authored values by the name an author writes, which is what
+// the provider table in internal/target is written against. Empty values are
+// dropped, so a caller sees exactly the keys the author set. One method here
+// keeps the authored spelling in one place instead of a switch per consumer.
+func (u *Upstream) Fields() map[string]string {
+	if u == nil {
+		return nil
+	}
+	out := map[string]string{}
+	for key, value := range map[string]string{
+		"url": u.URL, "key_env": u.KeyEnv, "auth_header": u.AuthHeader,
+		"deployment": u.Deployment, "api_version": u.APIVersion,
+		"credentials_env": u.CredentialsEnv, "location": u.Location, "project": u.Project,
+		"access_key_id_env": u.AccessKeyIDEnv, "secret_access_key_env": u.SecretAccessKeyEnv,
+		"session_token_env": u.SessionTokenEnv, "region": u.Region, "model_id": u.ModelID,
+	} {
+		if value != "" {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 type Placement string
@@ -516,5 +565,18 @@ type Binding struct {
 	EndpointEnv         string              `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 	Placement           Placement           `json:"placement,omitempty" yaml:"placement,omitempty"`
 	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
-	Params              map[string]any      `json:"params,omitempty" yaml:"params,omitempty"`
+	// AgentID and Upstream are set only on a SLNG Context Router think binding.
+	AgentID  string         `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
+	Upstream *Upstream      `json:"upstream,omitempty" yaml:"upstream,omitempty"`
+	Params   map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
 }
+
+// Router reports whether this binding selects the SLNG Context Router, which is
+// the one question every driver and every validation site asks.
+func (b Binding) Router() bool { return b.Provider == ProviderSlngRouter }
+
+// ProviderSlngRouter is the provider spelling that selects the router. It is the
+// same word the listen and speak roles use, because one SLNG key serves all
+// three roles; what differs is the accepted region set and this role's own
+// upstream block.
+const ProviderSlngRouter = "slng"

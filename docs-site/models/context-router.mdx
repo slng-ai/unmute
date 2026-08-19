@@ -1,0 +1,297 @@
+---
+title: "Context Router"
+description: "The optimization layer for thinking: repeated turns come back from a cache instead of calling your model."
+---
+
+The SLNG Context Router is an **optimization layer for the `think` role**. It sits
+between your agent and your reasoning model. On every turn it decides whether it
+has answered this turn before. If it has, it replies from its cache. If it has
+not, it calls your model and answers as normal.
+
+You keep your model, your provider, and your bill for the turns that reach the
+model. What you gain is speed on the turns that repeat.
+
+This is the one SLNG optimization you opt into. Listening and speaking are already
+optimised behind their bindings, as the
+[Execution Layer](/models/optimization) page explains. Thinking is not, until you
+make this change.
+
+## Start here
+
+Three edits, all to one binding:
+
+<Steps>
+  <Step title="Declare the key">
+    Add `SLNG_API_KEY` to `secrets:`. Your own model's key stays where it is.
+  </Step>
+  <Step title="Point think at slng">
+    Change the `think` binding to `provider: slng`, keeping the model you already
+    use.
+  </Step>
+  <Step title="Name the cache and the model behind it">
+    Add an `agent_id`, which is the name the cache is kept under, and an
+    `upstream`, which says where your model actually lives.
+  </Step>
+</Steps>
+
+Then compile and run as usual. Nothing else in your package changes.
+
+```yaml agent.yaml
+secrets:
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: gpt-5.6-luna
+      agent_id: salon-concierge-v1
+      upstream:
+        provider: openai
+      params:
+        world_part_override: eu
+        reasoning_effort: "none"
+```
+
+That is the whole edit. Everything else in your package stays as it is: prompts,
+tools, agents, tasks, task groups, greetings, channels, capacity.
+
+## How it decides
+
+The router remembers pairs: **what your agent said last, and what the caller said
+next**. When that same pair comes round again, it can answer from the cache.
+
+Two things follow, and both matter more than they look:
+
+**A first turn never caches.** There is no preceding pair yet, so the first turn
+of every call takes the full path to your model. Measure a conversation with no
+repeat in it and you will measure nothing.
+
+**Not every repeat caches, and that is by design.** The router judges which turns
+are worth treating as repeatable. Measured on 2026-08-19: two pairs identical in
+everything a client controls behaved differently, one answering from cache on its
+second send and the other going to the model eight times in a row while returning
+a byte-identical answer each time. A repeat served by the model is expected, not a
+fault, and nothing here promises otherwise.
+
+## Why one stable `agent_id`
+
+`agent_id` scopes the cache. Everything learned under one id is invisible to
+another.
+
+You write the value, and you own its version suffix. Change a prompt in a way that
+should make old answers wrong, and bump the suffix: `salon-concierge-v1` becomes
+`salon-concierge-v2`, and the router starts fresh. Fix a typo, and leave it alone,
+because throwing the cache away buys nothing.
+
+The compiler cannot make that judgement for you. It has no way to know whether a
+reworded sentence changes what a good answer looks like, so it never derives the
+id, never hashes your prompts into it, and never composes it out of an agent or
+task name. A package sends exactly one id, and compiling fails if two think
+profiles disagree about it.
+
+One consequence worth planning for: hit rates build over calls. A fresh id is a
+cold cache, so bump it deliberately rather than as housekeeping.
+
+## Regions
+
+`params.world_part_override` picks which router serves you.
+
+| Value | Endpoint |
+|---|---|
+| `eu` | `https://eu.context-router.slng.ai/v1` |
+| `us` | `https://us.context-router.slng.ai/v1` |
+| `india` | `https://india.context-router.slng.ai/v1` |
+| `indonesia` | `https://indonesia.context-router.slng.ai/v1` |
+
+<Warning>
+  These four are the router's own regions. SLNG **speech** uses world parts `na`,
+  `eu`, and `ap` under the same `world_part_override` key. One word covers all
+  three SLNG roles, and the accepted set is different per role, so `na` is right
+  for a `listen` or `speak` binding and wrong for this one. The compiler refuses a
+  value the router does not serve and names the four.
+</Warning>
+
+The key is consumed rather than forwarded: it becomes the base URL, and the
+compile report says so on its own line.
+
+## Your model, and who serves it
+
+The `upstream` block says where the router actually calls your model. It is
+required, and there is no default, because your provider's credentials travel with
+the request and a package has to name whose they are.
+
+| `provider` | You must write | You may write |
+|---|---|---|
+| `openai` | nothing else | `url`, `key_env` to override the defaults |
+| `openai-compat` | `url`, `key_env` | `auth_header` |
+| `azure` | `url`, `key_env`, `deployment`, `api_version` | nothing |
+| `vertex` | `credentials_env`, `location` | `project` |
+| `bedrock` | `access_key_id_env`, `secret_access_key_env`, `region`, `model_id` | `session_token_env` |
+
+Five spellings over four kinds of upstream. The OpenAI-compatible kind was
+validated against the live router on 2026-08-19, which covers both `openai` and
+`openai-compat`. **`azure`, `vertex` and `bedrock` come from the router team's
+published field list and have not been run here**, so treat your first call on one
+of those as the test.
+
+On `openai` the compiler supplies the URL and the `OPENAI_API_KEY` name, so the
+block is one line. Any other upstream writes its own:
+
+```yaml agent.yaml
+secrets:
+  - SLNG_API_KEY
+  - AZURE_OPENAI_API_KEY            # you wrote this name, so you declare it
+
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: gpt-5.6-luna
+      agent_id: salon-concierge-v1
+      upstream:
+        provider: azure
+        url: https://my-resource.cognitiveservices.azure.com/
+        key_env: AZURE_OPENAI_API_KEY
+        deployment: reasoning-deploy
+        api_version: 2024-12-01-preview
+      params:
+        world_part_override: eu
+        reasoning_effort: "none"
+```
+
+A key the router does not expect for that upstream is a compile error rather than
+a silent pass-through, because an unknown field comes back as a 400 on every think
+request.
+
+### Where your credentials go
+
+**The configuration travels inline, in the request body of every think request,
+so your upstream credentials are sent to SLNG.** That is a trust decision, and it is the
+price of not registering anything anywhere in advance.
+
+What the tooling guarantees is narrower and worth being precise about: a
+credential is always *named*, never written. A `*_env` field holds an environment
+variable name, the generated agent reads the value with `os.environ[...]` at run
+time, and no package, generated file, or compile report ever contains a value.
+Every name you write has to appear in `secrets:`, and every name joins the
+generated startup check, so a missing value stops the agent at boot rather than on
+the first turn of a live call.
+
+`auth_header` is a header **name**, not a secret. It exists for an
+`openai-compat` host that wants the key somewhere other than
+`Authorization: Bearer`, for example `auth_header: x-goog-api-key`. The value
+still comes from `key_env`. No field mixes a literal with an environment value,
+which is what keeps a package free of secrets.
+
+### A Vertex service-account key
+
+`credentials_env` names one variable, and its value may be the key JSON itself,
+that JSON base64 encoded, or a path to the key file. The agent works out which at
+startup, so a malformed value fails at boot with a message naming all three
+shapes.
+
+To produce the base64 form:
+
+```sh
+base64 < service-account.json | tr -d '\n'
+```
+
+Verified on macOS 2026-08-19: `base64` writes one line there already, and
+`tr -d '\n'` is what makes the same command produce one line on GNU coreutils,
+whose `base64` wraps its output by default. Paste the result into your `.env` as
+one line, and keep the key file itself out of your repository.
+
+## `reasoning_effort` is not optional in practice
+
+If your agent has tools, set it. The reasoning models in the GPT-5 family reject
+function tools on chat completions without it, and every tool turn comes back as:
+
+```
+400 Function tools with reasoning_effort are not supported ...
+To use function tools, use /v1/responses or set reasoning_effort to 'none'.
+```
+
+`"none"` works. This is the same trap a direct OpenAI think binding has, and
+[the reasoning model page](/models/llm) explains it there too. The compiler warns
+when your package has tools and the param is missing, rather than refusing,
+because it cannot know for certain which model family your upstream serves.
+
+## Personal prompts stay cacheable
+
+A prompt that names the caller is different on every call, which would mean
+nothing ever repeats. So a router-bound prompt keeps its placeholders and the
+values travel separately:
+
+```yaml agent.yaml
+variables:
+  customer_name:
+    type: string
+```
+
+```markdown instructions.md
+You are the concierge for Aurora Salon. The caller is {{customer_name}}.
+```
+
+The router receives that prompt with `{{customer_name}}` intact, plus a map of
+this call's values, and substitutes them itself. Every call sends the same prompt,
+so turns can still repeat.
+
+This applies to the system prompt only. Greetings, tool arguments, injected
+values, and webhook paths keep rendering locally exactly as before.
+
+Two details worth knowing:
+
+- A variable with no value yet sends an empty string, never the word "None".
+- A value over 4000 characters is truncated with a warning on stderr, and the call
+  continues. An over-long value is not a reason to drop a live call.
+
+## Checking that it is working
+
+Three response headers carry the whole story. They are the only way to see which
+path answered.
+
+| Header | Values | Meaning |
+|---|---|---|
+| `x-slng-response-source` | `llm`, `cache` | which path answered this turn |
+| `x-slng-cache-layer` | `l1_exact`, `l2_exact`, absent on the model path | which cache layer answered |
+| `x-slng-model` | a model id, present only on the model path | which model answered |
+| `x-slng-request-id` | always present, errors included | quote this to support |
+
+What to expect on a call where you repeat a turn: full latency on the first turn,
+then roughly 110 ms against 800 to 1500 ms when a repeat is served from cache.
+Tool turns always take the model path, both the request turn and the result turn.
+
+<Note>
+  Hit rates vary, so plan for the model path and treat cache hits as the upside.
+  Read `x-slng-response-source` rather than inferring from latency: fast is not
+  proof of a hit, and a repeat served by the model is expected rather than a
+  fault. On the turns that miss, the router is an extra hop in front of your own
+  model, so it costs a little rather than saving.
+</Note>
+
+Streamed responses report no usage on either path, so token savings cannot be read
+off the stream.
+
+If a repeat never caches, check in this order: is the agent id the same across the
+two calls, did at least two seconds pass since the turn it repeats, is it the
+second turn or later, and is it the exact pair of previous reply and current
+message. If all four hold, stop looking. The router decides, and some turns never
+cache.
+
+## The two salon examples
+
+[`examples/salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/salon-concierge)
+and
+[`examples/optimized-salon-concierge`](https://github.com/slng-ai/unmute/tree/main/examples/optimized-salon-concierge)
+are the same package, one with a direct think binding and one behind the router.
+Run the same conversation through both and the difference you measure is the
+router's.
+
+## Where to go next
+
+- [Reasoning model](/models/llm) for the `think` role and the vendors each target
+  can construct directly.
+- [Optimization](/models/optimization) for the other levers on latency and cost.
+- [Regional infrastructure](/models/regional-infrastructure) for how region works
+  across the three SLNG roles.

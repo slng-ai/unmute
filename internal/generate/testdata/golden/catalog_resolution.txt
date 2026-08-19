@@ -159,6 +159,14 @@ import:   from livekit.plugins import sarvam
 install:  livekit-agents[sarvam]
 env:      SARVAM_API_KEY
 
+=== livekit reason slng ===
+binding:  provider=slng model=gpt-5.6-luna
+class:    openai.LLM
+args:     api_key=os.environ["SLNG_API_KEY"], base_url="https://eu.context-router.slng.ai/v1", model="gpt-5.6-luna", extra_body={"slng_config": _slng_config_reasoning(), "template_variables": _slng_template_variables(state, ("salon_name",))}, extra_headers={"X-Slng-Agent-Id": "catalog-sample-v1", "X-Slng-Session-Id": slng_session_id}, sample_rate=24000
+import:   from livekit.plugins import openai
+install:  livekit-agents[openai]
+env:      OPENAI_API_KEY, SLNG_API_KEY
+
 === livekit speak cartesia ===
 binding:  provider=cartesia model=model-1 voice=voice-1
 class:    cartesia.TTS
@@ -408,6 +416,15 @@ settings: model="model-1", sample_rate=24000
 import:   from pipecat.services.qwen.llm import QwenLLMService
 install:  pipecat-ai[qwen]
 env:      QWEN_API_KEY
+
+=== pipecat reason slng ===
+binding:  provider=slng model=gpt-5.6-luna
+class:    OpenAILLMService
+args:     api_key=os.environ["SLNG_API_KEY"], base_url="https://eu.context-router.slng.ai/v1"
+settings: model="gpt-5.6-luna", extra={"extra_body": {"slng_config": _slng_config_reasoning(), "template_variables": _slng_template_variables(state, ("salon_name",))}, "extra_headers": {"X-Slng-Agent-Id": "catalog-sample-v1", "X-Slng-Session-Id": slng_session_id}, "sample_rate": 24000}
+import:   from pipecat.services.openai.llm import OpenAILLMService
+install:  pipecat-ai[openai]
+env:      OPENAI_API_KEY, SLNG_API_KEY
 
 === pipecat speak * ===
 binding:  provider="*" as acme model=model-1 voice=voice-1 endpoint_env=ACME_BASE_URL

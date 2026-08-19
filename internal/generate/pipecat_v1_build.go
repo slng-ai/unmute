@@ -64,6 +64,14 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 	}
 	data.STT = stt
 
+	// The router's module-level helpers, collected before any LLM resolves so
+	// every construction site can name its profile's configuration function.
+	// Empty on a package with no router binding, and then nothing is emitted.
+	data.Slng, err = slngHelpersFor(agent, target)
+	if err != nil {
+		return pipecatData{}, err
+	}
+
 	for _, name := range sortedAgentNames(agent) {
 		def := agent.Agents[name]
 		built, err := buildPipecatAgent(agent, target, name, def, env)
@@ -811,8 +819,10 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	promptConst := promptConstName(name)
 	// A templated prompt is rendered per session from the call state; an untouched
 	// one stays the bare module constant it always was.
-	prompt := promptExpr(promptConst, def.Instructions, pipecatStateExpr)
-	llm, err := agentLLMService(target.Models.Reason[def.Model], prompt, env)
+	profile, router := slngRouterBinding(agent, target, def.Model)
+	prompt := promptExpr(promptConst, def.Instructions, pipecatStateExpr, router)
+	llm, err := agentLLMService(target.Models.Reason[def.Model], prompt, env,
+		pipecatSlngSite(agent, target, profile))
 	if err != nil {
 		return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 	}
@@ -823,7 +833,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 	built := pipecatAgent{
 		Name: name, Class: pyName(name) + "Agent", Prompt: def.Instructions,
 		PromptConst: promptConst, PromptExpr: prompt,
-		RuntimePromptExpr: promptExpr(promptConst, def.Instructions, "self.state"),
+		RuntimePromptExpr: promptExpr(promptConst, def.Instructions, "self.state", router),
 		LLM:               llm, TTS: tts,
 	}
 
@@ -858,7 +868,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 			}
 			built.Tools = append(built.Tools, tool)
 		case *ir.Delegate:
-			delegate, err := buildDelegate(agent, ref, c, env)
+			delegate, err := buildDelegate(agent, target, ref, c, env)
 			if err != nil {
 				return pipecatAgent{}, fmt.Errorf("agent %q: %w", name, err)
 			}
@@ -884,7 +894,7 @@ func buildPipecatAgent(agent *ir.Agent, target ir.Target, name string, def ir.Ag
 // buildDelegate lowers a delegate control to a Flow run on the owning worker
 // (C8): a single task is a one-node flow, a group a linear chain. Each step is
 // resolved here so the template emits its node inline.
-func buildDelegate(agent *ir.Agent, ref string, c *ir.Delegate, env *envSet) (pipecatDelegate, error) {
+func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, env *envSet) (pipecatDelegate, error) {
 	delegate := pipecatDelegate{MethodName: ref, When: delegateReason(c)}
 	steps := []string{c.Task}
 	if c.Task != "" {
@@ -903,7 +913,7 @@ func buildDelegate(agent *ir.Agent, ref string, c *ir.Delegate, env *envSet) (pi
 		steps = group.Steps
 	}
 	for _, step := range steps {
-		task, err := buildTask(agent, step, agent.Tasks[step], env)
+		task, err := buildTask(agent, tgt, step, agent.Tasks[step], env)
 		if err != nil {
 			return pipecatDelegate{}, err
 		}
@@ -920,17 +930,21 @@ func buildDelegate(agent *ir.Agent, ref string, c *ir.Delegate, env *envSet) (pi
 // buildTask lowers a task to a Flow-node model: instructions, tools, and the
 // finish-function schema derived from the typed result (V1). The node runs on
 // the owning agent's LLM; per-task model is gated (no LLMSwitcher, B7).
-func buildTask(agent *ir.Agent, name string, task ir.Task, env *envSet) (pipecatTask, error) {
+func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *envSet) (pipecatTask, error) {
 	if strings.TrimSpace(task.Instructions) == "" {
 		return pipecatTask{}, fmt.Errorf("task %q instructions must not be empty", name)
 	}
+	_, taskRouter := slngRouterBinding(agent, tgt, task.Model)
 	built := pipecatTask{
 		Name: name, Prompt: task.Instructions,
 		// The node is built when the step is entered, not at session start, so a
 		// prompt naming a variable an earlier task assigned renders with that
 		// value. Left as a literal, the model would read "{{customer_id}}" and
 		// have nothing to book with (B: multi-task, 2026-08-15).
-		PromptExpr:     promptExpr(pyQuote(task.Instructions), task.Instructions, "self.state"),
+		// A router-bound task ships its placeholders intact like any other router
+		// prompt site: the flow node's role_message goes to the router as the
+		// system message, through the owning agent's LLM.
+		PromptExpr:     promptExpr(pyQuote(task.Instructions), task.Instructions, "self.state", taskRouter),
 		ResultProps:    pyLiteral(resultProperties(task.Result)),
 		ResultRequired: pyLiteral(anyStrings(sortedResultNames(task.Result))),
 	}
@@ -1032,6 +1046,12 @@ func delegateReason(c *ir.Delegate) string {
 // pipecatStateExpr is how emitted Pipecat code reaches the call state: an agent
 // @tool method has it on self, a flows handler receives it as a bound kwarg.
 const pipecatStateExpr = "state"
+
+// pipecatSessionIDExpr is the router session id inside a build_<agent>_llm call:
+// a parameter, never shared state. The name is not `session_id`, because this
+// template already reads runner_args.session_id for its Langfuse trace and that
+// is a different thing.
+const pipecatSessionIDExpr = "slng_session_id"
 
 // buildMCPSource lowers one mcp tool source to its client. Both env names are
 // registered, so the address and the token reach .env.example and the bot's
@@ -1324,8 +1344,8 @@ func apiKeyEnv(provider string) string {
 // resolvePipecatService resolves one binding through the catalogue.
 // extraSettings are nested Settings args the driver injects (the agents'
 // system_instruction); the task job-workers use the raw identity fields.
-func resolvePipecatService(role targetcap.Role, binding ir.Binding, env *envSet, extraSettings ...pyKV) (pipecatService, error) {
-	call, entry, err := resolveService(targetcap.Pipecat, role, binding, env, extraSettings...)
+func resolvePipecatService(role targetcap.Role, binding ir.Binding, env *envSet, site slngSite, extraSettings ...pyKV) (pipecatService, error) {
+	call, entry, err := resolveService(targetcap.Pipecat, role, binding, env, site, extraSettings...)
 	if err != nil {
 		return pipecatService{}, err
 	}
@@ -1351,14 +1371,29 @@ func sttService(binding *ir.Binding, env *envSet) (pipecatService, error) {
 	if binding == nil {
 		return pipecatService{}, fmt.Errorf("pipecat listen binding is missing a model")
 	}
-	return resolvePipecatService(targetcap.Listen, *binding, env)
+	return resolvePipecatService(targetcap.Listen, *binding, env, slngSite{})
+}
+
+// pipecatSlngSite is where the router's per-call values live on this target: a
+// uuid created once in run_bot and passed as an argument, and the call state the
+// agent already receives. Zero for a profile that is not a router binding.
+func pipecatSlngSite(agent *ir.Agent, tgt ir.Target, profile string) slngSite {
+	if profile == "" {
+		return slngSite{}
+	}
+	return slngSite{
+		SessionExpr: pipecatSessionIDExpr,
+		StateExpr:   pipecatStateExpr,
+		Names:       slngTemplateNames(agent, tgt, profile),
+		ConfigFunc:  slngConfigFunc(profile),
+	}
 }
 
 // agentLLMService builds an agent's LLM; the prompt nests into Settings as
 // system_instruction (the workers-model shape, driver-pipecat C2), referenced
 // through its module constant so builder and restore share one copy (V2).
-func agentLLMService(binding ir.Binding, promptRef string, env *envSet) (pipecatService, error) {
-	return resolvePipecatService(targetcap.Reason, binding, env,
+func agentLLMService(binding ir.Binding, promptRef string, env *envSet, site slngSite) (pipecatService, error) {
+	return resolvePipecatService(targetcap.Reason, binding, env, site,
 		pyKV{Key: "system_instruction", Value: promptRef})
 }
 
@@ -1377,7 +1412,7 @@ func serviceUsesLanguage(s pipecatService) bool {
 }
 
 func ttsService(binding ir.Binding, env *envSet) (pipecatService, error) {
-	return resolvePipecatService(targetcap.Speak, binding, env)
+	return resolvePipecatService(targetcap.Speak, binding, env, slngSite{})
 }
 
 func forwardParams(params map[string]any) []pyKV {
@@ -1399,10 +1434,17 @@ func forwardParams(params map[string]any) []pyKV {
 // --- small helpers ---------------------------------------------------------
 
 // pyLiteral renders a decoded YAML value as a Python literal.
+// pyExpr is a value already written as a Python expression, so pyLiteral emits
+// it verbatim instead of quoting it. It exists for the router's per-call values,
+// which are variable names and helper calls rather than constants.
+type pyExpr string
+
 func pyLiteral(v any) string {
 	switch value := v.(type) {
 	case nil:
 		return "None"
+	case pyExpr:
+		return string(value)
 	case bool:
 		if value {
 			return "True"

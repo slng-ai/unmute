@@ -112,6 +112,118 @@ On LiveKit there is a second reason to be explicit. `livekit-plugins-openai`
 1.6.10 injects `reasoning_effort="minimal"` by itself for several older ids in
 the same GPT-5 family, and that is the same 400 once the agent has tools.
 
+## The SLNG Context Router as the think provider
+
+`provider: slng` on a `think` entry puts the SLNG Context Router in front of the
+user's own model. It caches the turns the agent has answered before and serves
+them without calling the model, so a repeated turn returns in roughly a tenth of
+the time. The user keeps their model, their provider, and their bill for the turns
+that reach the model.
+
+```yaml agent.yaml
+secrets:
+  - SLNG_API_KEY
+
+models:
+  think:
+    reasoning:
+      provider: slng
+      model: gpt-5.6-luna
+      agent_id: salon-concierge-v1
+      upstream:
+        provider: openai
+      params:
+        world_part_override: eu
+        reasoning_effort: "none"
+```
+
+Four things are required and none has a default:
+
+- `model`, named directly. There is no auto-select spelling to write here.
+- `agent_id`, which scopes the router's cache. One stable value per package,
+  written by a human, carrying a version suffix they bump when a prompt change
+  should make old answers wrong. Never derive it, never hash prompts into it,
+  never compose it from an agent or task name: a split id splits the cache and
+  nothing fails, the agent is simply never fast. Two think profiles disagreeing
+  about it is a compile error. It must be printable ASCII with no whitespace,
+  because it becomes an HTTP header value.
+- `upstream`, saying who actually serves the model.
+- `params.world_part_override`, from the router's own region set: `eu`, `us`,
+  `india`, `indonesia`. **Not the speech world parts** `na`, `eu`, `ap`: the same
+  key, a different accepted set per role. The compiler consumes this into the
+  base URL and names the substitution in the compile report.
+
+`params.reasoning_effort: "none"` is not optional once the agent has tools, for
+the same reason as a direct OpenAI binding above. The compiler warns rather than
+refusing, because it cannot know the upstream model family for certain.
+
+`endpoint_env` has no slot on a router binding: the region owns the router URL and
+`upstream` owns the upstream one.
+
+### The upstream block
+
+| `provider` | required | optional |
+|---|---|---|
+| `openai` | nothing else | `url`, `key_env` |
+| `openai-compat` | `url`, `key_env` | `auth_header` |
+| `azure` | `url`, `key_env`, `deployment`, `api_version` | nothing |
+| `vertex` | `credentials_env`, `location` | `project` |
+| `bedrock` | `access_key_id_env`, `secret_access_key_env`, `region`, `model_id` | `session_token_env` |
+
+Five spellings over four kinds of upstream. The OpenAI-compatible kind was
+validated against the live router on 2026-08-19, covering `openai` and
+`openai-compat`; `azure`, `vertex` and `bedrock` come from the router team's
+published field list and have not been run. Say so if the user asks.
+
+Three rules keep a package free of secrets, and they are gates rather than
+advice:
+
+- A credential field is always named `*_env` and holds an **environment variable
+  name**. Writing a value there is a refusal, and the refusal does not echo the
+  value back.
+- Every name the author writes must appear in `secrets:`, or the build fails. A
+  name the compiler supplied, like `OPENAI_API_KEY` on `provider: openai`, needs
+  no line and is never demanded.
+- No field mixes a literal with an environment value, which is why `auth_header`
+  carries only a header name and the key still comes from `key_env`.
+
+A key the table does not expect for that provider is a refusal, not a
+pass-through, because the router answers an unknown endpoint field with a 400 on
+every think request.
+
+`vertex`'s `credentials_env` may hold the key JSON, that JSON base64 encoded, or a
+path to the key file. The generated agent decides which at startup and fails at
+boot on a malformed value.
+
+**Tell the user where their credentials go.** The model configuration travels
+inline in the body of every think request, so the upstream credentials are sent to
+SLNG on every turn. No package, generated file, or compile report holds a value,
+and every name joins the generated startup check, but the inline path is a trust
+decision the author is making rather than an implementation detail.
+
+### What the router does and does not promise
+
+- A first turn never caches. There is no preceding pair yet.
+- The cache key is the pair (previous assistant reply, current user message),
+  scoped by the agent id.
+- The router decides which turns are repeatable, and some repeats never cache. A
+  repeat served by the model is expected, not a fault. Do not promise the user
+  that every repeat is fast.
+- Tool turns always take the model path, both the request turn and the result
+  turn.
+- A router-bound system prompt keeps its `{{name}}` placeholders and the values
+  travel beside it, which is what makes a personalised prompt cacheable.
+  Greetings, tool arguments, injected values and webhook paths keep rendering
+  locally.
+- Streamed responses carry no usage on either path, so token savings cannot be
+  read off the stream.
+- Three response headers are the only way to check which path answered:
+  `x-slng-response-source`, `x-slng-cache-layer`, `x-slng-model`.
+
+Full page: [Context Router](https://docs.slng.ai/context-router/). The two salon
+examples, `salon-concierge` and `optimized-salon-concierge`, are the same package
+with and without it.
+
 ## Keep SLNG speech models in region
 
 Put regional routing in the SLNG model's `params:`. The same YAML works for
@@ -185,10 +297,10 @@ the catalogue holds.
 |---|---|---|
 | pipecat | listen | `slng`, `assemblyai`, `cartesia`, `deepgram`, `elevenlabs`, `gradium`, `openai`, `soniox`, `speechmatics` |
 | pipecat | speak | `slng`, `cartesia`, `deepgram`, `elevenlabs`, `gradium`, `inworld`, `openai`, `rime`, `sarvam`, `soniox` |
-| pipecat | think | `anthropic`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter`, `qwen` |
+| pipecat | think | `slng`, `anthropic`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter`, `qwen` |
 | livekit | listen | `slng`, `assemblyai`, `cartesia`, `deepgram`, `elevenlabs`, `gradium`, `sarvam`, `soniox`, `speechmatics` |
 | livekit | speak | `slng`, `cartesia`, `deepgram`, `elevenlabs`, `gemini`, `gradium`, `inworld`, `rime`, `sarvam`, `soniox` |
-| livekit | think | `anthropic`, `aws`, `azure`, `groq`, `mistralai`, `openai`, `openrouter`, `sarvam` |
+| livekit | think | `slng`, `anthropic`, `aws`, `azure`, `groq`, `mistralai`, `openai`, `openrouter`, `sarvam` |
 
 Read that table carefully rather than from memory. The two targets do not hold
 the same set, and the same company can appear under a different name: LiveKit

@@ -151,7 +151,79 @@ lk dispatch create --room <room> --agent-name {{.AgentName}} \
 ```
 {{- end}}
 
-## Deploy
+{{if .Slng.Any}}
+## SLNG Context Router
+
+This agent's thinking goes through the SLNG Context Router. It caches the turns
+this agent has already answered and serves them without calling the model, so a
+repeated turn comes back in roughly a tenth of the time.
+
+Every think request carries two identity headers:
+
+| Header | Value |
+|---|---|
+| `X-Slng-Agent-Id` | the id from the package, one value for this whole project. It scopes the cache. |
+| `X-Slng-Session-Id` | one uuid per call, created where the call begins. It groups this call's requests and scopes nothing. |
+
+The model configuration travels inline in the request body, which means **this
+agent sends the upstream provider's credentials to SLNG on every think request**.
+Each one is read from the environment at startup and no file in this project holds
+a value, but the credentials do leave for SLNG. Every name is in the startup check
+above, so a missing one stops the agent at boot rather than mid-call.
+
+The system prompt goes to the router with its `{{"{{"}}name{{"}}"}}` placeholders
+intact, and this call's values travel beside it. That is what lets a personalised
+prompt still repeat. A value over 4000 characters is truncated with a warning on
+stderr and the call continues: an over-long variable never ends a call.
+{{if .Slng.Vertex}}
+The Vertex credential variable may hold the key JSON, that JSON base64 encoded, or
+a path to the key file. The agent decides which at startup, in that order, and
+fails at boot naming all three shapes if it is none of them. To produce the base64
+form:
+
+```sh
+base64 < service-account.json | tr -d '\n'
+```
+{{end}}
+### Reading the response
+
+Three response headers say which path answered. They are the only way to check
+this is working:
+
+| Header | Values | Meaning |
+|---|---|---|
+| `x-slng-response-source` | `llm`, `cache` | which path answered |
+| `x-slng-cache-layer` | `l1_exact`, `l2_exact`, absent on the model path | which cache layer |
+| `x-slng-model` | a model id, present only on the model path | which model answered |
+| `x-slng-request-id` | always present, errors included | quote this to support |
+
+**The first turn of every call takes the model path.** There is no preceding turn
+to have cached. A conversation with no repeated turn in it will show no cache hits
+at all, and that is correct.
+
+**Not every repeated turn caches.** The router judges which turns are repeatable,
+so a repeat served by the model is expected rather than a fault.
+
+Tool turns always take the model path, both the request turn and the result turn.
+Streamed responses carry no usage on either path, so token savings cannot be read
+off the stream.
+
+### When it fails
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| every tool turn returns 400, `Function tools with reasoning_effort are not supported` | the reasoning models in the GPT-5 family reject function tools on chat completions without it | set `params.reasoning_effort: "none"` on the think binding |
+| every think request returns 400, `cannot be resolved: no org config found` | the request reached the router without its inline configuration | this agent always sends it, so the body was stripped or malformed in transit |
+| 400 starting `invalid slng_config:` | a malformed inline configuration | the message names the failing field; credentials are never echoed back |
+| 400 `inline slng_config is not enabled` | inline configuration is off for the organisation | ask your SLNG contact to enable it |
+| every think request returns 401 | the SLNG key is wrong or rotated | replace `SLNG_API_KEY` |
+| an upstream 401 or quota error inside a 400 body | the upstream credential is wrong or out of credit | replace the value behind that upstream's variable |
+| the agent refuses to start naming an environment variable | a declared credential has no value | set it. The startup check exists so this does not happen mid-call |
+| the agent refuses to start naming three accepted shapes | a Vertex credential is not JSON, not base64 of JSON, and not a readable file path | fix the value |
+| 422 `missing_template_variables` | a literal `{{"{{"}}` in the prompt that is not a placeholder | remove or rephrase it: the router reads any `{{"{{"}}` as a placeholder |
+| answers stay slow across deploys | the agent id changed between them | keep one stable id and bump it deliberately |
+
+{{end}}## Deploy
 
 Two supported paths: LiveKit Cloud with the `lk` CLI, or a worker you host
 yourself. Both run this project as generated.

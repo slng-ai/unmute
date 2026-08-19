@@ -3,6 +3,7 @@ package generate
 import (
 	"cmp"
 	"fmt"
+	"maps"
 
 	"github.com/slng-ai/unmute/internal/ir"
 	targetcap "github.com/slng-ai/unmute/internal/target"
@@ -38,9 +39,19 @@ type ServiceCall struct {
 // resolveService looks a binding's vendor up in the catalogue and builds its
 // call. extraSettings are driver-supplied nested args (the workers-model
 // system_instruction), inserted after model/voice. Every env var the call reads
-// registers on env.
+// registers on env. site carries the two expressions a SLNG Context Router
+// construction needs and is the zero value everywhere else.
 func resolveService(fw targetcap.Provider, role targetcap.Role,
-	binding ir.Binding, env *envSet, extraSettings ...pyKV) (ServiceCall, targetcap.Entry, error) {
+	binding ir.Binding, env *envSet, site slngSite, extraSettings ...pyKV) (ServiceCall, targetcap.Entry, error) {
+
+	// A router think binding consumes params.world_part_override into the base
+	// URL, so it must not also reach the client as a kwarg the SDK never heard
+	// of. binding is a value, so this is local to the call being built (D2).
+	router := role == targetcap.Reason && binding.Router()
+	region := slngRegion(binding)
+	if router {
+		binding.Params = slngConsumedParams(binding.Params)
+	}
 
 	vendor := binding.Provider
 	if vendor == "" {
@@ -97,6 +108,22 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 		env.addRead(binding.EndpointEnv)
 		flat(pyKV{Key: spec.Endpoint.Arg, Value: envRef(binding.EndpointEnv)})
 	}
+	if router {
+		// The region is the whole endpoint story here: one owner for the URL
+		// form, and a compile-time literal rather than a variable the operator
+		// could set to something else (D2).
+		url, ok := targetcap.SlngRouterBaseURL(region)
+		if !ok {
+			return ServiceCall{}, entry, fmt.Errorf("%s reason binding provider %q: %q is not a router region", fw, vendor, region)
+		}
+		flat(pyKV{Key: spec.Endpoint.Arg, Value: pyQuote(url)})
+		// Every upstream credential the request body carries joins the startup
+		// check, so a missing value fails at boot rather than on the first turn
+		// of a live call (FR-034b).
+		for _, name := range slngBindingCredentialEnvs(binding) {
+			env.addRead(name)
+		}
+	}
 	voice := cmp.Or(binding.Voice, binding.VoiceID)
 	if voice != "" {
 		if spec.Voice.Arg == "" {
@@ -135,6 +162,22 @@ func resolveService(fw targetcap.Provider, role targetcap.Role,
 		}
 	default: // kwargs and settings: one kwarg per param, sorted
 		fields, overflow := splitParams(binding.Params, spec.SettingsOverflow)
+		if router {
+			// Pipecat merges Settings.extra into the request params, so the two
+			// dicts ride there; LiveKit takes them as constructor kwargs. Either
+			// way they reach the same place in the request.
+			extras := slngRequestExtras(binding, site)
+			if spec.SettingsOverflow != "" {
+				if overflow == nil {
+					overflow = make(map[string]any, len(extras))
+				}
+				maps.Copy(overflow, extras)
+			} else {
+				for _, kv := range forwardParams(extras) {
+					flat(kv)
+				}
+			}
+		}
 		for _, kv := range forwardParams(fields) {
 			if responsesAPI {
 				switch kv.Key {

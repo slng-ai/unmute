@@ -296,3 +296,62 @@ func TestWriteArtifactFilesPreservesPlatformConfig(t *testing.T) {
 		t.Errorf("README.md = %q (err %v), want the regenerated content", got, err)
 	}
 }
+
+// FR-004 and the Principle II precedent the Responses branch set: a value the
+// compiler consumes rather than forwards is named in the report, so nothing is
+// substituted silently. Here that is two things, the region and the whole
+// upstream block.
+//
+// The second half is the constitution's rule that no report holds a secret
+// value: the upstream line names each credential *variable* and never reads it.
+func TestPrintContractNamesTheRouterRegionAndUpstream(t *testing.T) {
+	notes := generate.GenerateReport{ForwardedBindings: []ir.ForwardedBinding{{
+		Target:  "pipecat",
+		Role:    "reason",
+		Profile: "reasoning",
+		Binding: ir.Binding{
+			Provider: "slng",
+			Model:    "gpt-5.6-luna",
+			AgentID:  "salon-concierge-v1",
+			Upstream: &ir.Upstream{Provider: "openai"},
+			Params: map[string]any{
+				"world_part_override": "eu",
+				"reasoning_effort":    "none",
+			},
+		},
+		Params: []ir.ForwardedParam{
+			{Name: "reasoning_effort", Value: "none"},
+			{Name: "world_part_override", Value: "eu"},
+		},
+	}}}
+
+	var out bytes.Buffer
+	printContract(&out, "pipecat", ir.ProviderPipecat, notes)
+	for _, want := range []string{
+		"binding reason.reasoning provider=slng model=gpt-5.6-luna (SLNG Context Router; world_part_override is consumed into base_url=https://eu.context-router.slng.ai/v1)",
+		"param world_part_override=eu (consumed as the router base URL)",
+		"upstream openai url=https://api.openai.com/v1 api_key=OPENAI_API_KEY (env) (sent inline in the request body)",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("report missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "(forwarded as-is, not validated)") {
+		t.Errorf("a router binding is falsely reported as wholly forwarded:\n%s", out.String())
+	}
+
+	// An author-named credential is still named and never read. The test sets a
+	// value in the environment so a report that read one would show it.
+	t.Setenv("HOST_LLM_KEY", "sk-live-not-a-real-key")
+	notes.ForwardedBindings[0].Binding.Upstream = &ir.Upstream{
+		Provider: "openai-compat", URL: "https://host/v1", KeyEnv: "HOST_LLM_KEY",
+	}
+	out.Reset()
+	printContract(&out, "pipecat", ir.ProviderPipecat, notes)
+	if !strings.Contains(out.String(), "upstream openai-compat url=https://host/v1 api_key=HOST_LLM_KEY (env)") {
+		t.Errorf("report does not name the author's credential variable:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "sk-live-not-a-real-key") {
+		t.Errorf("the report read a credential value:\n%s", out.String())
+	}
+}
