@@ -373,6 +373,20 @@ handler that reads a calendar or a database. Do not write it on a fast tool, and
 do not write one on every tool. Two agents talking over each other is worse than
 a short pause.
 
+The sentence is fixed, so it is spoken word for word every time that tool runs.
+Write what the agent is **doing**, never what it expects to find, and keep it
+shorter than the wait it covers:
+
+| Write this | Not this |
+|---|---|
+| `Let me check the calendar.` | `Let me find you some great times!` |
+| `One moment while I look that up.` | `I'm querying the availability API.` |
+
+If the package instructions already tell the agent to say it is checking
+something, remove that instruction when you add `announce:`. Otherwise the model
+speaks its own version and the tool speaks the fixed one, and the caller hears
+both. This is the most common way to get it wrong.
+
 Rules that will fail the compile if you break them:
 
 - Legal on `webhook:` and `local:` only. Every other kind has no body to speak
@@ -380,11 +394,11 @@ Rules that will fail the compile if you break them:
 - A fixed sentence. `{{variables}}` are refused, because a rendered line would
   need a round trip, which is the delay the field exists to hide.
 - A blank value reads as absent. Nothing is spoken and nothing is emitted.
-- Only LiveKit and Pipecat emit it. A Vapi or Deepgram target fails with that
-  target's own note, because neither driver emits a tool announcement yet.
 - On Pipecat, list an announcing tool on an **agent**, not on a task. A task tool
   is emitted as a flows handler with no seam to speak from, so it is refused by
   name. LiveKit emits the same line in either place.
+- A target whose driver has no lowering for the field fails validation with that
+  driver's own reason. Read the error to the user rather than dropping the field.
 
 Nothing waits for the line to finish playing, on either driver. The tool's own
 work starts straight away, and the tool's `interruption:` value still decides
