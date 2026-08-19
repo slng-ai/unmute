@@ -76,6 +76,7 @@ For complex or long-running tasks, use subagents by default when the work can be
 - Avoid parallel edits to the same files or tightly coupled code paths.
 - Handle small or inherently sequential tasks directly.
 - If a suitable long-running task is not delegated, briefly state why.
+- Subagents run on Sonnet, not the main model. Set `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` in `~/.claude/settings.json` (`env`), or pass `model: "sonnet"` on each `Agent` call. Reach for Opus in a subagent only when Sonnet has already failed the task *(advisory)*.
 
 ## Skills
 - Ponytail for writing great code
