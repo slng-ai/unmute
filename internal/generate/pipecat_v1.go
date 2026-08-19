@@ -173,6 +173,31 @@ type pipecatTool struct {
 	// transfer says a goodbye and ends the call instead of returning the model
 	// a failure string (T5).
 	HangupOnUnavailable bool
+	// Announce is one fixed sentence spoken as the tool starts; "" = silent.
+	Announce string
+}
+
+// Decorator renders the whole @_direct_tool argument list, or "" when every
+// value is the default. Interruption and announce are the only two arguments a
+// tool contributes, so composing them here keeps each emission site one token
+// long instead of nesting template conditionals. With no announcement it returns
+// exactly the strings the template produced before the field existed, which is
+// what keeps every other package's output byte-identical.
+func (t pipecatTool) Decorator() string {
+	var args []string
+	switch t.Interruption {
+	case "cancel":
+		args = append(args, "cancel_on_interruption=True")
+	case "continue":
+		args = append(args, "cancel_on_interruption=False")
+	}
+	if t.Announce != "" {
+		args = append(args, "announce="+pyQuote(t.Announce))
+	}
+	if len(args) == 0 {
+		return ""
+	}
+	return "(" + strings.Join(args, ", ") + ")"
 }
 
 // pipecatLocalTool is a copied handler file: tools/<name>.py in the project.
@@ -431,10 +456,14 @@ type pipecatData struct {
 	HasFlows                 bool // any delegate (tasks run as Flows on the owner, C8)
 	HasTaskTransfers         bool // a task can transfer; imports the public NO_RESPONSE sentinel
 	HasTransferAnnouncements bool // target worker owns exact handoff speech before its reply
-	HasIsolated              bool // any isolated group (ContextStrategy RESET import)
-	NeedsLanguage            bool // any emitted service sets a language kwarg (Language enum import, N16)
-	Inline                   bool // single agent, no bus: LLM inline in the pipeline (F3)
-	NeedsMCP                 bool // any mcp tool source: MCPClient import + lifecycle (N40)
+	// HasToolAnnouncements gates the announce parameter and the queued frame
+	// inside _direct_tool, so a package where no tool announces emits the wrapper
+	// it emitted before this field existed, and never names an unimported frame.
+	HasToolAnnouncements bool
+	HasIsolated          bool // any isolated group (ContextStrategy RESET import)
+	NeedsLanguage        bool // any emitted service sets a language kwarg (Language enum import, N16)
+	Inline               bool // single agent, no bus: LLM inline in the pipeline (F3)
+	NeedsMCP             bool // any mcp tool source: MCPClient import + lifecycle (N40)
 	// MCPParamsImports are the mcp.client.session_group parameter classes the
 	// emitted bot actually constructs, so the import lists neither less nor
 	// more than the file uses.
@@ -491,6 +520,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolBuiltin:          true, // prebuilt end_call → bodyless end tool
 	targetcap.FieldToolAuth:             true, // _bearer Authorization header off token_env
 	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
+	targetcap.FieldToolAnnounce:         true, // TTSSpeakFrame queued before the handler body
 	targetcap.FieldTracingLangfuse:      true,
 	targetcap.FieldVariableConversation: true, // generated update_variables @tool writing State
 	targetcap.FieldToolInject:           true, // hidden request values merged from State

@@ -1937,3 +1937,106 @@ func TestValidatePipecatCloudWebsocketRefusesCallSources(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateToolAnnounceLegalExecutionOnly: the line needs a body to speak
+// before, so it follows inject's rule. Every other execution kind is refused by
+// tool name, and a webhook or local tool passes (FR-002).
+func TestValidateToolAnnounceLegalExecutionOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		execution ToolExecution
+		wantError bool
+	}{
+		{"webhook", ToolWebhook, false},
+		{"local", ToolLocal, false},
+		{"builtin", ToolBuiltin, true},
+		{"client", ToolClient, true},
+		{"provider_hosted", ToolProviderHosted, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := safeAgent(t)
+			tool := agent.Tools["lookup_customer"]
+			tool.Announce = "Let me look that up."
+			tool.Execution = tc.execution
+			if tc.execution == ToolLocal {
+				tool.Handler, tool.URLEnv = "tools/lookup_customer.py", ""
+			}
+			agent.Tools["lookup_customer"] = tool
+			report, _ := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+			joined := strings.Join(report.PerTarget[0].Errors, "\n")
+			const want = `tool "lookup_customer" announce is legal for webhook and local execution only`
+			if got := strings.Contains(joined, want); got != tc.wantError {
+				t.Errorf("announce refused = %v, want %v: %#v", got, tc.wantError, report.PerTarget[0].Errors)
+			}
+		})
+	}
+}
+
+// TestValidateToolAnnounceRejectsTemplates: a fixed sentence, same rule as the
+// transfer announcement. A rendered line would need its variable in scope at the
+// moment the tool fires, which this field does not promise (FR-004).
+func TestValidateToolAnnounceRejectsTemplates(t *testing.T) {
+	agent := safeAgent(t)
+	tool := agent.Tools["lookup_customer"]
+	tool.Announce = "Checking on {{customer_id}} now."
+	agent.Tools["lookup_customer"] = tool
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err == nil {
+		t.Fatal("a templated announce must be refused")
+	}
+	if !strings.Contains(strings.Join(report.PerTarget[0].Errors, "\n"), `tool "lookup_customer" announce does not support templates`) {
+		t.Errorf("error must name the tool and the reason: %#v", report.PerTarget[0].Errors)
+	}
+}
+
+// TestValidateToolAnnouncePerTarget: only the two code drivers emit the line, so
+// a managed provider fails with its own note rather than dropping it (FR-007).
+func TestValidateToolAnnouncePerTarget(t *testing.T) {
+	agent := safeAgent(t)
+	tool := agent.Tools["lookup_customer"]
+	tool.Announce = "Let me look that up."
+	agent.Tools["lookup_customer"] = tool
+	for provider, wantError := range map[Provider]bool{
+		ProviderLiveKit:  false,
+		ProviderPipecat:  false,
+		ProviderVapi:     true,
+		ProviderDeepgram: true,
+	} {
+		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
+		if (err != nil) != wantError {
+			t.Errorf("%s: err=%v report=%#v", provider, err, report.PerTarget)
+		}
+	}
+}
+
+// TestValidateToolAnnounceOnTaskScopePerTarget: scope, not kind. LiveKit reaches
+// agent tools and task tools through one lowering, so it emits the same line
+// either way. Pipecat emits a task tool as a flows handler with no speech seam,
+// so it refuses by name and says where to list the tool instead (FR-014).
+func TestValidateToolAnnounceOnTaskScopePerTarget(t *testing.T) {
+	const wantPipecat = "the Pipecat driver cannot announce a tool listed on a task: list it on the agent instead"
+	for provider, wantError := range map[Provider]bool{
+		ProviderLiveKit: false,
+		ProviderPipecat: true,
+	} {
+		agent := safeAgent(t)
+		tool := agent.Tools["lookup_customer"]
+		tool.Announce = "Let me look that up."
+		agent.Tools["lookup_customer"] = tool
+		agent.Tasks["verify_caller"] = Task{
+			Instructions: "Confirm who is calling.",
+			Tools:        []string{"lookup_customer"},
+			Result:       map[string]ResultField{"confirmed": {Type: PrimitiveBoolean}},
+			Context:      TaskContext{History: HistoryFull},
+		}
+
+		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
+		if (err != nil) != wantError {
+			t.Fatalf("%s: err=%v report=%#v", provider, err, report.PerTarget)
+		}
+		joined := strings.Join(report.PerTarget[0].Errors, "\n")
+		if got := strings.Contains(joined, wantPipecat); got != wantError {
+			t.Errorf("%s: task-scope refusal = %v, want %v: %#v", provider, got, wantError, report.PerTarget[0].Errors)
+		}
+	}
+}

@@ -667,6 +667,18 @@ func setImportNeeds(data *pipecatData) {
 	if data.HasTransferAnnouncements {
 		data.FrameImports = append(data.FrameImports, "BotStartedSpeakingFrame", "BotStoppedSpeakingFrame")
 	}
+	// An announcing tool queues the same frame from inside _direct_tool, so the
+	// import has to survive a package whose only speech is a tool line. Both
+	// tool lists are scanned: FlowTools is table-denied on Pipecat today, but the
+	// scan costs one loop and keeps the import honest if that ever changes.
+	for _, tools := range append([][]pipecatTool{data.FlowTools}, agentToolLists(data.Agents)...) {
+		for _, tool := range tools {
+			if tool.Announce != "" {
+				data.HasToolAnnouncements = true
+				needsTTSSpeakFrame = true
+			}
+		}
+	}
 	if needsTTSSpeakFrame {
 		data.FrameImports = append(data.FrameImports, "TTSSpeakFrame")
 	}
@@ -1054,6 +1066,7 @@ func buildTool(name string, tool ir.Tool, variables map[string]ir.Variable, env 
 		Local:      tool.Execution == ir.ToolLocal, HandlerSource: tool.HandlerSource,
 		Builtin: tool.Builtin, Instructions: tool.Instructions,
 		EndsCall: tool.Effect == ir.ToolEndsConversation, Interruption: interruptionValue(tool.Interruption),
+		Announce: tool.Announce,
 	}
 	built.Args = append(built.Args, inputFields(tool.Input)...)
 	argNames := make([]string, 0, len(built.Args))

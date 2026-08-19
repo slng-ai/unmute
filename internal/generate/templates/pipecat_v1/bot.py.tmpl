@@ -175,7 +175,7 @@ async def _register_mcp_tools(clients, llm, reserved_names{{if .Tracing}}, trace
     return registered
 {{end}}{{if .NeedsFunctionCalls}}
 
-def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None):
+def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None{{if $.HasToolAnnouncements}}, announce=None{{end}}):
     """Keep every direct function call terminal, even on malformed input."""
 
     def decorate(handler):
@@ -201,7 +201,15 @@ def _direct_tool(fn=None, *, cancel_on_interruption=True, timeout_secs=None):
                 })
                 return
 
-            resolved = False
+{{if $.HasToolAnnouncements}}            if announce:
+                # Cover the wait: TTSSpeakFrame is a DataFrame, so it is queued
+                # and speech starts while the handler body runs. Nothing waits
+                # for playout here, which is the point of the line. Queued after
+                # the argument check, so a rejected call stays silent, and an
+                # interruption discards it in line with cancel_on_interruption.
+                await params.llm.push_frame(TTSSpeakFrame(announce))
+
+{{end}}            resolved = False
             original_result_callback = params.result_callback
 
             async def resolve(result, **callback_kwargs):
@@ -592,7 +600,7 @@ def build_{{.Name}}_tts():
     return {{template "svc" .TTS.Call}}
 {{if $.Inline}}{{range .Tools}}
 
-@_direct_tool{{if eq .Interruption "cancel"}}(cancel_on_interruption=True){{else if eq .Interruption "continue"}}(cancel_on_interruption=False){{end}}
+@_direct_tool{{.Decorator}}
 async def {{.MethodName}}(params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}):
     """{{.Description}}{{if .Args}}
 
@@ -708,7 +716,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
             result_callback=params.result_callback,
         )
 {{end}}{{range .Tools}}
-    @_direct_tool{{if eq .Interruption "cancel"}}(cancel_on_interruption=True){{else if eq .Interruption "continue"}}(cancel_on_interruption=False){{end}}
+    @_direct_tool{{.Decorator}}
     async def {{.MethodName}}(self, params: FunctionCallParams{{range .Args}}, {{.Name}}: {{.PyType}}{{if not .Required}} = {{.PyDefault}}{{end}}{{end}}):
         """{{.Description}}{{if .Args}}
 

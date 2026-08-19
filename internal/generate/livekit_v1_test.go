@@ -2914,3 +2914,78 @@ func TestLiveKitV1OpenAIResponsesRejectsConflictingParams(t *testing.T) {
 		})
 	}
 }
+
+// TestLiveKitV1ToolAnnounceSpeaksBeforeTheWork: an announcing tool speaks the
+// exact authored line before it does its work, on both tool bodies, and never
+// awaits the handle. Awaiting would hold the request until playout finished,
+// which is the delay the field exists to hide (FR-008, FR-009). A tool with no
+// announcement keeps a body with no speech in it at all (FR-010).
+func TestLiveKitV1ToolAnnounceSpeaksBeforeTheWork(t *testing.T) {
+	pkg, err := spec.Load(filepath.Join("..", "testdata", "safe_core"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := ir.Build(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	webhook := agent.Tools["get_invoice"]
+	webhook.Announce = "Let me pull that invoice up."
+	agent.Tools["get_invoice"] = webhook
+	agent.Tools["fetch_notes"] = ir.Tool{
+		Description: "Fetch the caller's saved notes.",
+		Input:       map[string]any{"type": "object", "properties": map[string]any{"topic": map[string]any{"type": "string"}}, "required": []any{"topic"}},
+		Execution:   ir.ToolLocal, Handler: "tools/fetch_notes.py",
+		HandlerSource: "def fetch_notes(topic):\n    return {\"notes\": []}\n",
+		Interruption:  ir.ToolProviderDefault, Effect: ir.ToolReturnsData,
+		Announce: "One moment while I find your notes.",
+	}
+	def := agent.Agents["billing"]
+	def.Tools = append(def.Tools, "fetch_notes")
+	agent.Agents["billing"] = def
+
+	artifact, err := Generate(agent, targetByProvider(t, agent, ir.ProviderLiveKit), target.Default())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	agentpy := artifactFile(t, artifact, "agent.py")
+
+	for _, tc := range []struct{ method, line, work string }{
+		{"get_invoice", `self.session.say("Let me pull that invoice up.")`, "async with httpx.AsyncClient()"},
+		{"fetch_notes", `self.session.say("One moment while I find your notes.")`, "result = tools.fetch_notes.fetch_notes("},
+	} {
+		body := livekitMethodBody(t, agentpy, tc.method)
+		sayAt := strings.Index(body, tc.line)
+		workAt := strings.Index(body, tc.work)
+		if sayAt < 0 || workAt < 0 {
+			t.Fatalf("%s: missing exact announcement or the work it covers:\n%s", tc.method, body)
+		}
+		if sayAt >= workAt {
+			t.Errorf("%s: the announcement must start before the work:\n%s", tc.method, body)
+		}
+		if strings.Contains(body, "await self.session.say(") {
+			t.Errorf("%s: the announcement must not be awaited, it would block until playout:\n%s", tc.method, body)
+		}
+	}
+
+	// lookup_customer announces nothing, so its body stays speechless.
+	if silent := livekitMethodBody(t, agentpy, "lookup_customer"); strings.Contains(silent, ".say(") {
+		t.Errorf("a tool without announce must emit no speech:\n%s", silent)
+	}
+}
+
+// livekitMethodBody returns one emitted agent method, from its def line to the
+// next one, so an assertion about a tool body cannot be satisfied by a line
+// somewhere else in the file.
+func livekitMethodBody(t *testing.T, agentpy, method string) string {
+	t.Helper()
+	start := strings.Index(agentpy, "    async def "+method+"(")
+	if start < 0 {
+		t.Fatalf("method %s not emitted", method)
+	}
+	body := agentpy[start:]
+	if end := strings.Index(body[1:], "\n    async def "); end >= 0 {
+		body = body[:end+1]
+	}
+	return body
+}

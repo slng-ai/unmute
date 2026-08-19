@@ -374,6 +374,22 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 				errors = add(errors, fmt.Sprintf("tool %q inject is legal for webhook and local execution only", name))
 			}
 		}
+		// announce needs a body to speak before, so it follows inject's rule.
+		// Blank already resolved to empty in Build, so reaching here means the
+		// author wrote a real sentence.
+		if tool.Announce != "" {
+			switch tool.Execution {
+			case ToolWebhook, ToolLocal:
+			default:
+				errors = add(errors, fmt.Sprintf("tool %q announce is legal for webhook and local execution only", name))
+			}
+			// Fixed sentence, same rule as the transfer announcement: a
+			// rendered line would need the variable set to be in scope at the
+			// moment the tool fires, which is not a promise this field makes.
+			if HasTemplate(tool.Announce) {
+				errors = add(errors, fmt.Sprintf("tool %q announce does not support templates", name))
+			}
+		}
 		if tool.Execution == ToolBuiltin {
 			validateBuiltinTool(name, tool, &errors)
 			continue
@@ -1312,13 +1328,20 @@ func validateTools(agent *Agent, resolved Target, provider targetcap.Provider, c
 		if tool.Interruption != ToolProviderDefault {
 			applyCapability(caps, targetcap.FieldToolInterruption, provider, row)
 		}
+		if tool.Announce != "" {
+			applyCapability(caps, targetcap.FieldToolAnnounce, provider, row)
+		}
 	}
 	// Scoping an MCP source to a task is its own capability: the source is
-	// legal, the scope is what a driver may not be able to hold (N40).
+	// legal, the scope is what a driver may not be able to hold (N40). A tool
+	// announcement splits the same way, so both scope checks share this loop.
 	for _, task := range agent.Tasks {
 		for _, ref := range task.Tools {
 			if agent.Tools[ref].Execution == ToolMCP {
 				applyCapability(caps, targetcap.FieldToolMCPTask, provider, row)
+			}
+			if agent.Tools[ref].Announce != "" {
+				applyCapability(caps, targetcap.FieldToolAnnounceTask, provider, row)
 			}
 		}
 	}

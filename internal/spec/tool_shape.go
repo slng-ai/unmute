@@ -33,6 +33,7 @@ var contractToolKeys = map[string]string{
 	"inject":       "an MCP call has the server's own shape, with nothing to merge into",
 	"interruption": "MCP tools take the platform's default interruption policy",
 	"effect":       "MCP tools return data; ending the call is a `builtin:` tool",
+	"announce":     "the server owns each tool's speech",
 }
 
 // checkToolShape reports the file's shape errors before decoding, so a wrong

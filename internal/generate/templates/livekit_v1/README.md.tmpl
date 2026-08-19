@@ -89,6 +89,19 @@ cold-transfer destination fails a real phone job before its greeting, not the
 browser worker at startup. The browser loop is the shortest one this project has.
 {{- end}}
 
+{{- if .HasToolAnnouncements}}
+
+## Tools that speak first
+
+A tool with `announce:` speaks that exact sentence as it starts, so the caller
+is not waiting in silence while the call is in flight. The line is started, not
+awaited: the tool's own work starts straight away and the caller hears the
+answer no later than they would without the line. Any `requires:` guard runs
+first, so a refused call stays silent. If the caller speaks over the line,
+LiveKit still runs the tool to completion, which is what its per-tool
+`interruption:` warning is about.
+{{- end}}
+
 {{- if .NeedsMCP}}
 
 ## MCP tool sources

@@ -38,6 +38,17 @@ the model receives one corrective result naming the allowed fields. If a
 handler fails before returning, the full exception stays in the log and the
 model receives one safe failure result. It must not claim success from either.
 {{- end}}
+{{- if .HasToolAnnouncements}}
+
+## Tools that speak first
+
+A tool with `announce:` speaks that exact sentence as it starts, so the caller
+is not waiting in silence while the call is in flight. The line is queued, not
+awaited: the tool's own work starts straight away and the caller hears the
+answer no later than they would without the line. The argument check runs
+first, so a call the model got wrong stays silent. If the caller speaks over
+the line, the tool's `interruption:` value decides what happens.
+{{- end}}
 {{- if .HasFlows}}
 
 ## Task returns

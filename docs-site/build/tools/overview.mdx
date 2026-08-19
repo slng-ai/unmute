@@ -122,27 +122,55 @@ The contract fields are shared, with one exception that matters:
 | `inject` | no | `webhook:` and `local:` only; values must be scalars |
 | `interruption` | no | everywhere except `mcp:` |
 | `effect` | no | everywhere except `mcp:` |
+| `announce` | no | `webhook:` and `local:` only; a fixed sentence, no `{{variables}}` |
 
 An `mcp:` file carries none of them, because the server owns each tool's contract.
 A `builtin:` file takes no `input` or `output`. The registry supplies its contract
 and default description, and your `description` is added on top if you write one.
 
-## The two behavior fields
+## The three behavior fields
 
 ```yaml
 interruption: provider_default
 effect: returns_data
+announce: Let me check the calendar.
 ```
 
 | Field | Values | Default | Meaning |
 |---|---|---|---|
 | `interruption` | `provider_default`, `continue`, `cancel` | `provider_default` | what happens to the call if the caller speaks while the tool runs |
 | `effect` | `returns_data`, `ends_conversation` | `returns_data` | whether the conversation continues after the tool |
+| `announce` | any one sentence | absent, nothing is spoken | a fixed line the agent speaks as the tool starts, so a slow call is not silence |
 
-Both are optional and both are honored differently per target: Pipecat maps
+All three are optional, and each is honored differently per target. Pipecat maps
 `interruption` onto its own cancel-on-interruption setting, while LiveKit runs
 tools to completion, so a non-default value warns there. `effect` is fixed by the
 registry on a `builtin:` tool, and a conflicting value fails.
+
+### What `announce:` does
+
+The line is spoken once, as the tool starts, before the tool's own work. Nothing
+waits for it to finish playing, so the caller hears the tool's answer no later
+than they would without the line. That is the whole point: it covers the wait, it
+does not add one.
+
+Four things to know:
+
+- **It is a fixed sentence, not an instruction.** Asking the model to phrase a
+  line would cost a round trip, which is the exact delay this field hides.
+  `{{variables}}` are refused for the same reason.
+- **It is legal on `webhook:` and `local:` only.** Every other kind has no body
+  to speak before. An `mcp:` file is refused at load, with the line number,
+  because the server owns each of its tools.
+- **A blank value reads as absent.** Nothing is spoken and nothing is emitted.
+- **It adds no new interruption rule.** If the caller speaks over the line, the
+  tool's own `interruption:` value decides what happens.
+
+Only the two code targets emit it. On Vapi and Deepgram a tool that announces
+fails validation with that target's own note. On Pipecat the tool must be listed
+on an agent: a tool listed on a task is refused by name, because a task tool is
+emitted as a flows handler with no seam to speak from. LiveKit emits the same line
+in both places.
 
 ## Define once, attach by name
 

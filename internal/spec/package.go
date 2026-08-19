@@ -229,6 +229,15 @@ type Tool struct {
 
 	Interruption string `json:"interruption,omitempty" yaml:"interruption,omitempty"`
 	Effect       string `json:"effect,omitempty" yaml:"effect,omitempty"`
+
+	// Announce is one fixed sentence the agent speaks as the tool starts, so a
+	// slow call is not silence. Legal on webhook and local only: every other
+	// kind has no body to speak before (validate.go).
+	//
+	// ponytail: a plain string, not a pointer, because both execution-block
+	// agreement tests read every pointer field on Tool as an execution block.
+	// A pointer here would claim a seventh block that does not exist.
+	Announce string `json:"announce,omitempty" yaml:"announce,omitempty"`
 }
 
 // ToolWebhook is the `webhook:` block: an HTTP endpoint named by env var, with
