@@ -31,6 +31,7 @@ the typed results.{{end}}
 from __future__ import annotations
 
 {{if or (not .Inline) .NeedsEndAfter .Inactivity}}import asyncio
+{{end}}{{if .HasFlows}}import copy
 {{end}}{{if .NeedsFunctionCalls}}import functools
 {{end}}{{if or .NeedsInspect .NeedsFunctionCalls}}import inspect
 {{end}}{{if or .HasFlows .CallStartVars}}import json
@@ -894,7 +895,7 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         # V2/B2: drain the resolved owner call before snapshotting. Otherwise
         # restoration erases that call and the unchanged request delegates again.
         await self.flush_pipeline()
-        self._{{$d.MethodName}}_snapshot = ([dict(m) for m in self.context.get_messages()], self.context.tools)
+        self._{{$d.MethodName}}_snapshot = (copy.deepcopy(self.context.get_messages()), self.context.tools)
         await flow.initialize(self._{{$d.MethodName}}_node_{{(index $d.StepTasks 0).Name}}())
 {{range $t := $d.StepTasks}}
     def _{{$d.MethodName}}_node_{{$t.Name}}(self) -> NodeConfig:
