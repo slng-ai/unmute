@@ -1,0 +1,8 @@
+mcp:
+  url_env: FIRECRAWL_MCP_URL
+  transport: streamable_http
+  auth:
+    type: bearer
+    token_env: FIRECRAWL_API_KEY
+  tools:
+    - firecrawl_search

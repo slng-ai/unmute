@@ -75,20 +75,72 @@ type ModelSections struct {
 // bindings used; the typed generation fields are folded into the forwarded
 // params at Build time.
 type ModelDef struct {
-	Provider            string         `json:"provider,omitempty" yaml:"provider,omitempty"`
-	Model               string         `json:"model,omitempty" yaml:"model,omitempty"`
-	Voice               string         `json:"voice,omitempty" yaml:"voice,omitempty"`
-	Speed               *float64       `json:"speed,omitempty" yaml:"speed,omitempty"`
-	Language            string         `json:"language,omitempty" yaml:"language,omitempty"`
-	Temperature         *float64       `json:"temperature,omitempty" yaml:"temperature,omitempty"`
-	TopP                *float64       `json:"top_p,omitempty" yaml:"top_p,omitempty"`
-	TopK                *int           `json:"top_k,omitempty" yaml:"top_k,omitempty"`
-	EndpointEnv         string         `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
-	Placement           string         `json:"placement,omitempty" yaml:"placement,omitempty"`
-	SemanticEndpointing string         `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
-	Params              map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
-	Fallback            []string       `json:"fallback,omitempty" yaml:"fallback,omitempty"`
-	Description         string         `json:"description,omitempty" yaml:"description,omitempty"`
+	Provider            string   `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Model               string   `json:"model,omitempty" yaml:"model,omitempty"`
+	Voice               string   `json:"voice,omitempty" yaml:"voice,omitempty"`
+	Speed               *float64 `json:"speed,omitempty" yaml:"speed,omitempty"`
+	Language            string   `json:"language,omitempty" yaml:"language,omitempty"`
+	Temperature         *float64 `json:"temperature,omitempty" yaml:"temperature,omitempty"`
+	TopP                *float64 `json:"top_p,omitempty" yaml:"top_p,omitempty"`
+	TopK                *int     `json:"top_k,omitempty" yaml:"top_k,omitempty"`
+	EndpointEnv         string   `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
+	Placement           string   `json:"placement,omitempty" yaml:"placement,omitempty"`
+	SemanticEndpointing string   `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
+	// AgentID scopes the SLNG Context Router's cache. One stable value per
+	// package, authored by a human, carrying a version suffix they own and bump
+	// after a prompt change they judge meaningful. Never composed, never
+	// derived, never hashed: a split id splits the cache.
+	AgentID string `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
+	// Upstream says where the router actually calls the model and whose
+	// credentials pay for it. Required on a router think binding, because the
+	// configuration travels inline on every request.
+	Upstream    *Upstream      `json:"upstream,omitempty" yaml:"upstream,omitempty"`
+	Params      map[string]any `json:"params,omitempty" yaml:"params,omitempty"`
+	Fallback    []string       `json:"fallback,omitempty" yaml:"fallback,omitempty"`
+	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
+}
+
+// Upstream is the model behind a SLNG Context Router think binding: the
+// provider kind, its endpoint, and the environment variable names holding its
+// credentials.
+//
+// One struct holds the union of every provider's fields; which subset is legal
+// is decided by provider, and that per-provider truth lives in the table beside
+// the other provider facts (internal/target/slng_router.go). A new provider is
+// then a table row and a test, not a new type and a new branch.
+//
+// Every credential is named, never written: a *_env field holds an environment
+// variable name, the name has to appear in secrets:, and no field mixes a
+// literal with an environment value.
+type Upstream struct {
+	// Provider is one of openai, openai-compat, azure, vertex, bedrock.
+	Provider string `json:"provider,omitempty" yaml:"provider,omitempty"`
+	// URL is the upstream endpoint. Defaults on openai. On azure it is the
+	// resource root rather than the deployment URL.
+	URL string `json:"url,omitempty" yaml:"url,omitempty"`
+	// KeyEnv names the variable holding the provider key.
+	KeyEnv string `json:"key_env,omitempty" yaml:"key_env,omitempty"`
+	// AuthHeader is a header *name*, for an openai-compat host that wants the
+	// key somewhere other than Authorization: Bearer. The value still comes
+	// from KeyEnv.
+	AuthHeader string `json:"auth_header,omitempty" yaml:"auth_header,omitempty"`
+	// Deployment and APIVersion are azure's.
+	Deployment string `json:"deployment,omitempty" yaml:"deployment,omitempty"`
+	APIVersion string `json:"api_version,omitempty" yaml:"api_version,omitempty"`
+	// CredentialsEnv names the variable holding a GCP service-account key, as
+	// JSON, as base64 of that JSON, or as a path to the key file. The generated
+	// agent works out which at startup.
+	CredentialsEnv string `json:"credentials_env,omitempty" yaml:"credentials_env,omitempty"`
+	// Location and Project are vertex's; Project defaults to the key's own.
+	Location string `json:"location,omitempty" yaml:"location,omitempty"`
+	Project  string `json:"project,omitempty" yaml:"project,omitempty"`
+	// The bedrock set. SessionTokenEnv is for temporary credentials, and
+	// ModelID is the Bedrock model id, which differs from the entry label.
+	AccessKeyIDEnv     string `json:"access_key_id_env,omitempty" yaml:"access_key_id_env,omitempty"`
+	SecretAccessKeyEnv string `json:"secret_access_key_env,omitempty" yaml:"secret_access_key_env,omitempty"`
+	SessionTokenEnv    string `json:"session_token_env,omitempty" yaml:"session_token_env,omitempty"`
+	Region             string `json:"region,omitempty" yaml:"region,omitempty"`
+	ModelID            string `json:"model_id,omitempty" yaml:"model_id,omitempty"`
 }
 
 type Variable struct {

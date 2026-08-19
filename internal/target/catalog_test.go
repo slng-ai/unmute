@@ -124,7 +124,7 @@ func TestCatalogLookup(t *testing.T) {
 	if got := cat.Vendors(LiveKit, Speak); strings.Join(got, ",") != "cartesia,deepgram,elevenlabs,gemini,gradium,inworld,rime,sarvam,slng,soniox" {
 		t.Errorf("livekit speak vendors = %v", got)
 	}
-	if got := cat.RolesFor(Pipecat, "slng"); strings.Join(got, ",") != "listen,speak" {
+	if got := cat.RolesFor(Pipecat, "slng"); strings.Join(got, ",") != "listen,reason,speak" {
 		t.Errorf("slng roles on pipecat = %v", got)
 	}
 	if e, ok := cat.Lookup(LiveKit, Speak, "elevenlabs"); !ok || !e.VoiceRequired() {

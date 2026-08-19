@@ -49,7 +49,7 @@ func TestCatalogResolutionGolden(t *testing.T) {
 			entry.Call != nil && entry.Call.Language.Arg != "" && !entry.Call.NoLanguage {
 			binding.Language = "es-MX"
 		}
-		call, resolved, err := resolveService(entry.Framework, entry.Role, binding, env)
+		call, resolved, err := resolveService(entry.Framework, entry.Role, binding, env, sampleSlngSite(entry))
 		if err != nil {
 			t.Errorf("%s %s %s: resolve: %v", entry.Framework, entry.Role, entry.Vendor, err)
 			continue
@@ -104,7 +104,7 @@ func TestLanguageLoweringUsesCataloguedSlot(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			binding := tc.binding
 			binding.Language = tc.agentLang // per-model language (N16)
-			call, _, err := resolveService(tc.framework, tc.role, binding, newEnvSet())
+			call, _, err := resolveService(tc.framework, tc.role, binding, newEnvSet(), slngSite{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -127,6 +127,18 @@ func TestLanguageLoweringUsesCataloguedSlot(t *testing.T) {
 // sampleBinding synthesizes the minimal binding that exercises an entry:
 // slng models keep the route form to show the prefix transform, wildcards get
 // an unlisted vendor (plus an endpoint where required).
+// sampleSlngSite is the driver-supplied half of a router construction, spelled
+// the way Pipecat spells it: a session-id argument and the call state.
+func sampleSlngSite(entry targetcap.Entry) slngSite {
+	if entry.Vendor != "slng" || entry.Role != targetcap.Reason {
+		return slngSite{}
+	}
+	return slngSite{
+		SessionExpr: "slng_session_id", StateExpr: "state",
+		Names: []string{"salon_name"}, ConfigFunc: slngConfigFunc("reasoning"),
+	}
+}
+
 func sampleBinding(entry targetcap.Entry) (ir.Binding, string) {
 	binding := ir.Binding{Provider: entry.Vendor, Params: map[string]any{"sample_rate": 24000}}
 	label := entry.Vendor
@@ -136,6 +148,15 @@ func sampleBinding(entry targetcap.Entry) (ir.Binding, string) {
 	switch {
 	case entry.Vendor == "slng" && entry.Role == targetcap.Speak:
 		binding.Model = "slng/deepgram/aura:2-en"
+	case entry.Vendor == "slng" && entry.Role == targetcap.Reason:
+		// The router row needs the fields a router binding always carries: the
+		// region it consumes into the base URL, the agent id, and the upstream
+		// that serves the model. Without them this is not a legal binding, and
+		// resolution refuses it the same way validate would.
+		binding.Model = "gpt-5.6-luna"
+		binding.AgentID = "catalog-sample-v1"
+		binding.Upstream = &ir.Upstream{Provider: "openai"}
+		binding.Params["world_part_override"] = "eu"
 	case entry.Vendor == "slng":
 		binding.Model = "slng/deepgram/nova:3"
 	default:

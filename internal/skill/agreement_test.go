@@ -1011,9 +1011,16 @@ func TestNoUnmuteEnvOnTheBeginnerPath(t *testing.T) {
 // temperature on a think model, which OpenAI's reference does not state this
 // model family accepts (research D10).
 func TestOneModelIdEverywhere(t *testing.T) {
-	want := scaffold.DefaultReasonModel
-	if want == "" {
-		t.Fatal("internal/scaffold owns the identifier; an empty constant makes every check below vacuous")
+	// Two owned identifiers, both from internal/scaffold: the scaffold default
+	// and the one the router example names. The comparison stays exact, so a
+	// third identifier still fails. Widening the regexp, allowlisting a path, or
+	// skipping a file would each let a stale identifier back in, which is the
+	// ratchet rule (FR-032).
+	want := []string{scaffold.DefaultReasonModel, scaffold.RouterExampleModel}
+	for _, owned := range want {
+		if owned == "" {
+			t.Fatal("internal/scaffold owns the identifiers; an empty constant makes every check below vacuous")
+		}
 	}
 	// Every OpenAI chat identifier shape, so a stale one is caught by shape and
 	// not by a list somebody has to remember to extend.
@@ -1022,8 +1029,8 @@ func TestOneModelIdEverywhere(t *testing.T) {
 
 	for name, content := range authorFacingModelSurfaces(t) {
 		for _, hit := range identifier.FindAllString(content, -1) {
-			if hit != want {
-				t.Errorf("%s names the model %q; the one identifier is %q", name, hit, want)
+			if !slices.Contains(want, hit) {
+				t.Errorf("%s names the model %q; the owned identifiers are %v", name, hit, want)
 			}
 		}
 		if hit := combined.FindString(content); hit != "" {
@@ -1208,4 +1215,158 @@ func authorFacingVersionSurfaces(t *testing.T) map[string]string {
 		out["bundle/"+name] = bundleFile(t, name)
 	}
 	return out
+}
+
+// TestRouterSurfacesSayOnlyWhatWasMeasured holds the SLNG Context Router's
+// documentation against the four things Phase 0 either ruled out or could not
+// confirm. Prose rots quietly, and each of these was true of a shipped surface at
+// some point in this feature's history, so each gets a grep rather than a promise
+// to remember (FR-025, FR-025a, FR-025b, FR-034e).
+func TestRouterSurfacesSayOnlyWhatWasMeasured(t *testing.T) {
+	surfaces := routerFacingSurfaces(t)
+	if len(surfaces) == 0 {
+		t.Fatal("no surface mentions the router, which makes every check below vacuous")
+	}
+
+	// FR-025. The body fields and that header were removed from the router, and
+	// leak protection did not reproduce: a distinctive value supplied through
+	// template_variables and echoed verbatim still cached and hit on repeat. None
+	// of the three may appear anywhere shipped.
+	for name, content := range surfaces {
+		for _, banned := range []string{"cache_layer", "X-Cache-Layer", "leak protection"} {
+			// x-slng-cache-layer is the response *header*, which is real and
+			// documented; the removed body field and the removed X-Cache-Layer
+			// header are what stay out.
+			for _, hit := range findOutside(content, banned, "x-slng-cache-layer") {
+				t.Errorf("%s writes %q, which was removed or never reproduced: %s", name, banned, hit)
+			}
+		}
+		// FR-025a. The stored-org-configuration path never worked: two models
+		// registered against the org still came back "no org config found" in all
+		// four regions. The configuration travels inline now, so nothing shipped
+		// may send a reader somewhere to register anything.
+		//
+		// "dashboard" alone is not bannable: LiveKit and Pipecat both have one and
+		// the runbooks legitimately name them. What stays out is the pairing of a
+		// registration verb with the model or the config.
+		// The 400 the router returns when the inline configuration is missing does
+		// contain the words "no org config found", and the runbooks quote it as a
+		// symptom so a reader who sees it can search for it. Quoting an error is
+		// not sending someone to register anything, so the ban is on the
+		// instruction rather than on the string.
+		for _, banned := range []string{
+			"register the model", "register a model", "registered model",
+			"register it against", "configure the model against", "byok", "slng dashboard",
+		} {
+			if strings.Contains(strings.ToLower(content), banned) {
+				t.Errorf("%s mentions %q; the configuration travels inline and nothing is registered anywhere", name, banned)
+			}
+		}
+		// FR-025b. Measured 2026-08-19: two pairs identical in everything a client
+		// controls behaved differently, one caching on its second send and the
+		// other never caching across eight while returning a byte-identical answer
+		// each time. So a promise is banned outright, and a surface that explains
+		// the cache at all has to carry the caveat rather than merely avoid the
+		// promise. Requiring the caveat is the stronger half: a banned phrase list
+		// can always be paraphrased around.
+		for _, banned := range []string{
+			"always cached", "always fast", "guaranteed cache", "every repeated turn is fast",
+			"all repeats are fast", "will always come from",
+		} {
+			if strings.Contains(strings.ToLower(content), banned) {
+				t.Errorf("%s promises %q; the router judges which turns are repeatable and some never cache", name, banned)
+			}
+		}
+		// Any surface that mentions the cache at all carries a qualifier, however
+		// short. "caches repeated turns" is an over-claim in a one-line pointer
+		// just as much as in a page, and the shorter true version is no longer:
+		// "caches the turns it judges repeatable".
+		if strings.Contains(strings.ToLower(content), "cache") {
+			qualified := false
+			for _, marker := range []string{
+				"judges", "a fault", "never cache", "some repeats", "decides which",
+			} {
+				if strings.Contains(strings.ToLower(content), marker) {
+					qualified = true
+				}
+			}
+			if !qualified {
+				t.Errorf("%s mentions the cache with no qualifier; the router judges which turns are repeatable and a repeat served by the model is expected", name)
+			}
+		}
+	}
+
+	// FR-034e. Three of the four upstream provider kinds ship untested, so a
+	// surface that lists the providers has to say which one has a live
+	// measurement behind it. Otherwise it reads as though all five were run.
+	for name, content := range surfaces {
+		if !strings.Contains(content, "bedrock") {
+			continue // not a surface that lists the upstreams
+		}
+		if !strings.Contains(content, "validated") && !strings.Contains(content, "exercised") &&
+			!strings.Contains(content, "have not been run") {
+			t.Errorf("%s lists the upstream providers without saying which kind was validated live", name)
+		}
+	}
+}
+
+// routerFacingSurfaces is every shipped surface that mentions the router: the
+// docs site, the skill assets, the example READMEs, and both emitted README
+// templates. The templates are included as source, because a claim that is only
+// true in generated output is a claim the reader meets first.
+func routerFacingSurfaces(t *testing.T) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	repo := func(parts ...string) string {
+		return filepath.Join(append([]string{"..", ".."}, parts...)...)
+	}
+	add := func(path string) {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(content), "Context Router") || strings.Contains(string(content), "context-router") {
+			out[path] = string(content)
+		}
+	}
+	for _, root := range []string{repo("docs-site"), repo("examples"), repo("internal", "generate", "templates")} {
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if entry != nil && entry.IsDir() && entry.Name() == "build" {
+				return fs.SkipDir
+			}
+			if err != nil || entry.IsDir() {
+				return err
+			}
+			switch filepath.Ext(path) {
+			case ".md", ".mdx", ".tmpl":
+				add(path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"references/models.md", "references/package.md"} {
+		if content := bundleFile(t, name); strings.Contains(content, "Context Router") {
+			out["bundle/"+name] = content
+		}
+	}
+	return out
+}
+
+// findOutside returns each occurrence of needle that is not part of allowed, so a
+// removed field name can be banned while the live header that contains it stays.
+func findOutside(content, needle, allowed string) []string {
+	var hits []string
+	for _, line := range strings.Split(content, "\n") {
+		if !strings.Contains(line, needle) {
+			continue
+		}
+		if strings.Contains(strings.ToLower(line), allowed) {
+			continue
+		}
+		hits = append(hits, strings.TrimSpace(line))
+	}
+	return hits
 }

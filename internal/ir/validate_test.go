@@ -2040,3 +2040,379 @@ func TestValidateToolAnnounceOnTaskScopePerTarget(t *testing.T) {
 		}
 	}
 }
+
+// --- SLNG Context Router -----------------------------------------------------
+
+// routerAgent points safe_core's fast_reasoning think profile at the router and
+// rebuilds, because the resolved per-target bindings are fixed in Build. Its
+// sibling careful_reasoning stays on openai, so every case here is also a mixed
+// package: one router profile beside one direct one.
+func routerAgent(t *testing.T, mutate func(*packagespec.ModelDef)) *Agent {
+	t.Helper()
+	pkg := loadSafeCore(t)
+	pkg.Agent.Secrets = append(pkg.Agent.Secrets, "SLNG_API_KEY")
+	def := packagespec.ModelDef{
+		Provider: "slng", Model: "gpt-5.6-luna", AgentID: "safe-core-v1",
+		Upstream: &packagespec.Upstream{Provider: "openai"},
+		Params:   map[string]any{"world_part_override": "eu", "reasoning_effort": "none"},
+	}
+	if mutate != nil {
+		mutate(&def)
+	}
+	pkg.Agent.Models.Think["fast_reasoning"] = def
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	return agent
+}
+
+// routerErrors validates a router package on one code target and returns its
+// errors joined, so a case can assert on the words rather than the count.
+func routerErrors(t *testing.T, agent *Agent, provider Provider) string {
+	t.Helper()
+	report, _ := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
+	return strings.Join(report.PerTarget[0].Errors, "\n")
+}
+
+func TestValidateSlngRouterAcceptsTheSmallestLegalBinding(t *testing.T) {
+	agent := routerAgent(t, nil)
+	for _, provider := range []Provider{ProviderPipecat, ProviderLiveKit} {
+		if got := routerErrors(t, agent, provider); got != "" {
+			t.Errorf("%s refused a valid router binding:\n%s", provider, got)
+		}
+	}
+}
+
+// FR-003 and FR-005. The four regions are the router's own set, and `na` copied
+// off the regional infrastructure page is the likely mistake, so the refusal has
+// to say which vocabulary is which.
+func TestValidateSlngRouterRegion(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		params map[string]any
+		wants  []string
+	}{
+		{"missing", map[string]any{}, []string{"world_part_override", "eu, us, india, indonesia"}},
+		{"speech world part", map[string]any{"world_part_override": "na"}, []string{"na", "eu, us, india, indonesia", "speech"}},
+		{"unknown", map[string]any{"world_part_override": "atlantis"}, []string{"atlantis", "eu, us, india, indonesia"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := routerAgent(t, func(def *packagespec.ModelDef) { def.Params = tc.params })
+			got := routerErrors(t, agent, ProviderPipecat)
+			for _, want := range tc.wants {
+				if !strings.Contains(got, want) {
+					t.Errorf("refusal does not say %q:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
+// FR-007, at the validation layer. The shape rules themselves are held in
+// internal/target; this is the half that proves a bad id reaches a refusal.
+func TestValidateSlngRouterAgentID(t *testing.T) {
+	for _, tc := range []struct {
+		name, id, wants string
+	}{
+		{"missing", "", "agent_id is required"},
+		{"whitespace", "safe core v1", "printable ASCII"},
+		{"over long", strings.Repeat("v", targetcap.SlngAgentIDMaxLen+1), "the bound is"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := routerAgent(t, func(def *packagespec.ModelDef) { def.AgentID = tc.id })
+			got := routerErrors(t, agent, ProviderPipecat)
+			if !strings.Contains(got, tc.wants) {
+				t.Errorf("refusal does not say %q:\n%s", tc.wants, got)
+			}
+			if !strings.Contains(got, "think.fast_reasoning") {
+				t.Errorf("refusal does not name the profile:\n%s", got)
+			}
+		})
+	}
+}
+
+// FR-010, the rule with the worst silent cost: a second id splits one package's
+// cache and nothing fails, the agent is just never fast. The refusal names both
+// profiles and both values because the author has to know which line to change.
+func TestValidateSlngRouterOneAgentIDPerPackage(t *testing.T) {
+	pkg := loadSafeCore(t)
+	pkg.Agent.Secrets = append(pkg.Agent.Secrets, "SLNG_API_KEY")
+	router := func(id string) packagespec.ModelDef {
+		return packagespec.ModelDef{
+			Provider: "slng", Model: "gpt-5.6-luna", AgentID: id,
+			Upstream: &packagespec.Upstream{Provider: "openai"},
+			Params:   map[string]any{"world_part_override": "eu", "reasoning_effort": "none"},
+		}
+	}
+	pkg.Agent.Models.Think["fast_reasoning"] = router("safe-core-v1")
+	pkg.Agent.Models.Think["careful_reasoning"] = router("safe-core-careful-v1")
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	got := routerErrors(t, agent, ProviderPipecat)
+	for _, want := range []string{
+		"fast_reasoning", "careful_reasoning", "safe-core-v1", "safe-core-careful-v1", "one package sends one agent id",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("refusal does not say %q:\n%s", want, got)
+		}
+	}
+	// An *unused* second profile is refused too. It emits nothing today, so the
+	// per-target view never sees it, but pointing one agent at it is a one-word
+	// edit and the cost of finding out then is a latency graph rather than a
+	// compile error. Found by walking the quickstart refusals by hand.
+	pkg.Agent.Models.Think["careful_reasoning"] = router("safe-core-careful-v1")
+	pkg.Agent.Agents["billing"] = func() packagespec.AgentDef {
+		def := pkg.Agent.Agents["billing"]
+		def.Model = "fast_reasoning"
+		return def
+	}()
+	unused, err := Build(pkg)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if got := routerErrors(t, unused, ProviderPipecat); !strings.Contains(got, "one package sends one agent id") {
+		t.Errorf("an unused second router profile with a different id was accepted:\n%s", got)
+	}
+
+	// The same two profiles agreeing is the whole point of the rule, so it has
+	// to pass: this test cannot be satisfied by refusing every second profile.
+	pkg.Agent.Models.Think["careful_reasoning"] = router("safe-core-v1")
+	agreed, err := Build(pkg)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if got := routerErrors(t, agreed, ProviderPipecat); got != "" {
+		t.Errorf("two profiles carrying the same id were refused:\n%s", got)
+	}
+}
+
+// FR-034: no block, no provider inside it, or an unknown one, and every refusal
+// names the five accepted providers.
+func TestValidateSlngRouterUpstreamProvider(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		upstream *packagespec.Upstream
+		wants    string
+	}{
+		{"absent", nil, "needs an upstream block"},
+		{"no provider", &packagespec.Upstream{}, "needs a provider"},
+		{"unknown", &packagespec.Upstream{Provider: "anthropic"}, "not one the router accepts"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := routerAgent(t, func(def *packagespec.ModelDef) { def.Upstream = tc.upstream })
+			got := routerErrors(t, agent, ProviderPipecat)
+			if !strings.Contains(got, tc.wants) {
+				t.Errorf("refusal does not say %q:\n%s", tc.wants, got)
+			}
+			for _, provider := range targetcap.SlngUpstreamProviders() {
+				if !strings.Contains(got, provider) {
+					t.Errorf("refusal does not name %q:\n%s", provider, got)
+				}
+			}
+		})
+	}
+}
+
+// FR-034c: a missing required field and a field belonging to another provider are
+// both refused by name, because an unknown endpoint key comes back as a 400 on
+// every think request.
+func TestValidateSlngRouterUpstreamFields(t *testing.T) {
+	azure := func() *packagespec.Upstream {
+		return &packagespec.Upstream{
+			Provider: "azure", URL: "https://r.cognitiveservices.azure.com/",
+			KeyEnv: "AZURE_OPENAI_API_KEY", Deployment: "gpt-4o-deploy", APIVersion: "2024-12-01-preview",
+		}
+	}
+	for _, tc := range []struct {
+		name     string
+		upstream func() *packagespec.Upstream
+		wants    []string
+	}{
+		{"missing api_version", func() *packagespec.Upstream {
+			u := azure()
+			u.APIVersion = ""
+			return u
+		}, []string{"missing api_version", "azure requires"}},
+		{"another provider's field", func() *packagespec.Upstream {
+			u := azure()
+			u.Location = "europe-west4"
+			return u
+		}, []string{"location belongs to provider vertex", "azure requires"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := routerAgent(t, func(def *packagespec.ModelDef) {
+				def.Upstream = tc.upstream()
+			})
+			got := routerErrors(t, agent, ProviderPipecat)
+			for _, want := range tc.wants {
+				if !strings.Contains(got, want) {
+					t.Errorf("refusal does not say %q:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
+// FR-034a. The value is never echoed: what lands in a *_env field when it is
+// wrong is usually a pasted credential, and a refusal that quotes it puts the
+// secret in a terminal, a CI log and a bug report.
+func TestValidateSlngRouterCredentialIsANameNotAValue(t *testing.T) {
+	const pasted = "sk-live-9aa0not-a-real-key"
+	agent := routerAgent(t, func(def *packagespec.ModelDef) {
+		def.Upstream = &packagespec.Upstream{Provider: "openai", KeyEnv: pasted}
+	})
+	got := routerErrors(t, agent, ProviderPipecat)
+	if !strings.Contains(got, "upstream key_env is not an environment variable name") {
+		t.Errorf("refusal does not say what the field takes:\n%s", got)
+	}
+	if strings.Contains(got, pasted) {
+		t.Errorf("the refusal echoes the value back:\n%s", got)
+	}
+	report, _ := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if warnings := strings.Join(report.PerTarget[0].Warnings, "\n"); strings.Contains(warnings, pasted) {
+		t.Errorf("a warning echoes the value back:\n%s", warnings)
+	}
+}
+
+// FR-034b, both halves. A name the author wrote has to be declared, and a name
+// the compiler supplied is never demanded, which is the same boundary
+// TestSecretsCrossCheckNeverAsksForDriverSuppliedNames holds for provider keys.
+func TestValidateSlngRouterCredentialMustBeDeclared(t *testing.T) {
+	agent := routerAgent(t, func(def *packagespec.ModelDef) {
+		def.Upstream = &packagespec.Upstream{
+			Provider: "openai-compat", URL: "https://host/v1", KeyEnv: "HOST_LLM_KEY",
+		}
+	})
+	got := routerErrors(t, agent, ProviderPipecat)
+	for _, want := range []string{"upstream key_env names HOST_LLM_KEY", "secrets:"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("refusal does not say %q:\n%s", want, got)
+		}
+	}
+
+	// The other half: provider openai supplies OPENAI_API_KEY itself, so the
+	// author is never asked to declare it and never warned about it either.
+	supplied := routerAgent(t, nil)
+	if got := routerErrors(t, supplied, ProviderPipecat); strings.Contains(got, "upstream key_env") {
+		t.Errorf("the build asks for a name the compiler supplied:\n%s", got)
+	}
+	report, _ := Validate(supplied, []Target{targetFor(supplied, ProviderPipecat)}, targetcap.Default())
+	for _, warning := range report.PerTarget[0].Warnings {
+		if strings.Contains(warning, "upstream.key_env") {
+			t.Errorf("the cross-check names a compiler-supplied upstream credential: %s", warning)
+		}
+	}
+}
+
+// D2: two owners for one endpoint is one owner too many.
+func TestValidateSlngRouterRejectsEndpointEnv(t *testing.T) {
+	agent := routerAgent(t, func(def *packagespec.ModelDef) { def.EndpointEnv = "ROUTER_BASE_URL" })
+	got := routerErrors(t, agent, ProviderPipecat)
+	if !strings.Contains(got, "endpoint_env") || !strings.Contains(got, "world_part_override") {
+		t.Errorf("refusal does not name both owners:\n%s", got)
+	}
+}
+
+// The two router fields are the router's. On any other binding they have no slot,
+// and a slotless field is refused rather than dropped.
+func TestValidateSlngRouterFieldsHaveNoSlotElsewhere(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		set   func(*packagespec.ModelDef)
+		wants string
+	}{
+		{"agent_id", func(def *packagespec.ModelDef) { def.AgentID = "safe-core-v1" }, "sets agent_id"},
+		{"upstream", func(def *packagespec.ModelDef) { def.Upstream = &packagespec.Upstream{Provider: "openai"} }, "sets upstream"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg := loadSafeCore(t)
+			def := pkg.Agent.Models.Think["fast_reasoning"]
+			tc.set(&def)
+			pkg.Agent.Models.Think["fast_reasoning"] = def
+			agent, err := Build(pkg)
+			if err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			got := routerErrors(t, agent, ProviderPipecat)
+			if !strings.Contains(got, tc.wants) {
+				t.Errorf("refusal does not say %q:\n%s", tc.wants, got)
+			}
+		})
+	}
+}
+
+// FR-001 and FR-014: a target with no slng reason row refuses in its own
+// vocabulary rather than falling through to whatever its wildcard row is.
+func TestValidateSlngRouterNeedsARowOnTheTarget(t *testing.T) {
+	agent := routerAgent(t, nil)
+	for _, provider := range []Provider{ProviderVapi, ProviderDeepgram} {
+		if got := routerErrors(t, agent, provider); got == "" {
+			t.Errorf("%s accepted a router think binding with no catalogue row", provider)
+		}
+	}
+}
+
+// FR-037: a warning, on stderr, exit 0. Not a refusal, because the compiler
+// cannot know the upstream model family for certain.
+func TestValidateSlngRouterWarnsOnToolsWithoutReasoningEffort(t *testing.T) {
+	agent := routerAgent(t, func(def *packagespec.ModelDef) {
+		def.Params = map[string]any{"world_part_override": "eu"}
+	})
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderPipecat)}, targetcap.Default())
+	if err != nil {
+		t.Fatalf("the missing param must warn, never fail: %v %#v", err, report.PerTarget[0].Errors)
+	}
+	warnings := strings.Join(report.PerTarget[0].Warnings, "\n")
+	if !strings.Contains(warnings, "reasoning_effort") || !strings.Contains(warnings, "400") {
+		t.Errorf("the warning does not name the failure it prevents:\n%s", warnings)
+	}
+	// With the param set there is nothing to say.
+	quiet := routerAgent(t, nil)
+	report, _ = Validate(quiet, []Target{targetFor(quiet, ProviderPipecat)}, targetcap.Default())
+	if got := strings.Join(report.PerTarget[0].Warnings, "\n"); strings.Contains(got, "reasoning_effort") {
+		t.Errorf("warned about a param that is set:\n%s", got)
+	}
+}
+
+// The one target-shaped limit this feature adds, gated because a rule with no
+// gate is a wish. LiveKit builds an agent's or a task's own LLM inside its
+// constructor, where neither the call's session id nor the call state is in
+// scope, and it constructs agents from ten places. So a router profile that is
+// not the entry agent's has nowhere to put its per-call values there. Pipecat
+// builds one LLM per agent from a single place and has no such limit, which is
+// why the same package is legal on one target and not the other.
+func TestValidateSlngRouterSecondProfileIsLiveKitOnlyRefusal(t *testing.T) {
+	pkg := loadSafeCore(t)
+	pkg.Agent.Secrets = append(pkg.Agent.Secrets, "SLNG_API_KEY")
+	router := packagespec.ModelDef{
+		Provider: "slng", Model: "gpt-5.6-luna", AgentID: "safe-core-v1",
+		Upstream: &packagespec.Upstream{Provider: "openai"},
+		Params:   map[string]any{"world_part_override": "eu", "reasoning_effort": "none"},
+	}
+	// Both profiles are router bindings carrying the same id, so FR-010 is happy.
+	// careful_reasoning is the billing agent's, not the entry agent's.
+	pkg.Agent.Models.Think["fast_reasoning"] = router
+	pkg.Agent.Models.Think["careful_reasoning"] = router
+	agent, err := Build(pkg)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	got := routerErrors(t, agent, ProviderLiveKit)
+	for _, want := range []string{"careful_reasoning", "entry agent", "intake", "fast_reasoning"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the livekit refusal does not say %q:\n%s", want, got)
+		}
+	}
+	// The refusal names the target, because the same package compiles on the
+	// other one. An author who cannot see which target refused has to guess.
+	if !strings.Contains(got, "livekit") {
+		t.Errorf("the refusal does not name the target:\n%s", got)
+	}
+	if got := routerErrors(t, agent, ProviderPipecat); got != "" {
+		t.Errorf("pipecat refused a second router profile it can serve:\n%s", got)
+	}
+}

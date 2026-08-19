@@ -2763,7 +2763,7 @@ func TestV18_TurnBindingLowersToDetectorVersion(t *testing.T) {
 // Inference spelling with the model passed verbatim.
 func TestV19_NativeReasonBeatsInferenceWildcard(t *testing.T) {
 	env := newEnvSet()
-	svc, err := livekitChainService(ir.Binding{Provider: "openai", Model: "gpt-4.1-mini"}, env)
+	svc, err := livekitChainService(ir.Binding{Provider: "openai", Model: "gpt-4.1-mini"}, env, slngSite{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2777,7 +2777,7 @@ func TestV19_NativeReasonBeatsInferenceWildcard(t *testing.T) {
 		t.Error("openai reason binding registered LIVEKIT_API_KEY (wildcard leak)")
 	}
 
-	svc, err = livekitChainService(ir.Binding{Provider: "livekit", Model: "openai/gpt-4o-mini"}, newEnvSet())
+	svc, err = livekitChainService(ir.Binding{Provider: "livekit", Model: "openai/gpt-4o-mini"}, newEnvSet(), slngSite{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2907,7 +2907,7 @@ func TestLiveKitV1OpenAIResponsesRejectsConflictingParams(t *testing.T) {
 				Provider: "openai",
 				Model:    "gpt-5.6-terra",
 				Params:   tc.params,
-			}, newEnvSet())
+			}, newEnvSet(), slngSite{})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want %q", err, tc.want)
 			}

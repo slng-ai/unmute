@@ -15,8 +15,9 @@ models:
         reasoning_effort: "none"
 ```
 
-SLNG does not serve this role. It provides speech to text and text to speech, so
-the reasoning model is yours to choose.
+SLNG serves this role through the [Context Router](/models/context-router), which
+caches the turns it judges repeatable and calls your model for the rest. The model behind it is still
+yours to choose, and so is the provider that serves it.
 
 <Info>
   Model ids are forwarded to the vendor exactly as you write them. Unmute keeps no
@@ -78,6 +79,7 @@ this exact override on its LiveKit target.
 
 | Provider | Notes |
 |---|---|
+| `slng` | the [Context Router](/models/context-router): a cache in front of your own model, for the turns it judges repeatable |
 | `anthropic` | |
 | `deepseek` | |
 | `google` | |
@@ -91,6 +93,7 @@ this exact override on its LiveKit target.
 
 | Provider | Notes |
 |---|---|
+| `slng` | the [Context Router](/models/context-router): caching in front of your own model |
 | `anthropic` | |
 | `aws` | credentials come from the AWS SDK environment |
 | `azure` | |

@@ -425,6 +425,9 @@ type pipecatData struct {
 	// operator is told to set a variable no file ever mentioned (research D14).
 	SuppliedForYou []string
 	DevEnv         []string // provider creds the web dev image needs, without telephony/coordination env (compose.dev.yaml)
+	// Slng is the SLNG Context Router's module-level helpers. Empty on a package
+	// with no router think binding, and then none of it is emitted (FR-019).
+	Slng           slngHelpers
 	DevOptionalEnv []string // passed through when the host sets it, never required
 	Notes          []string
 	Tracing        bool

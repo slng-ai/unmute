@@ -125,6 +125,15 @@ These settings solve different parts of the call:
 | media or telephony ingress | the first platform edge that receives the caller's audio | LiveKit realtime region pinning; Pipecat derives its regional WebSocket endpoint from `deployment_region`; carrier settings are separate |
 | worker region | the generated LiveKit or Pipecat process | `deployment_region` in `targets.yaml` |
 | speech region | SLNG speech to text and text to speech compute | `world_part_override` or `region_override` under each model's `params` |
+| reasoning region | the [SLNG Context Router](/models/context-router), when the `think` role uses it | `world_part_override` under the think model's `params`, from the router's own set: `eu`, `us`, `india`, `indonesia` |
+
+The reasoning row shares a key with the speech row and not its values. SLNG
+speech serves the world parts `na`, `eu` and `ap`; the router serves `eu`, `us`,
+`india` and `indonesia`. One word covers all three SLNG roles because it answers
+the same question, and each role accepts the set it actually serves, so copying
+`na` from the speech table into a think binding is a compile error. The reasoning
+row applies only to a think binding whose provider is `slng`; a direct provider
+keeps its own regional settings.
 
 Setting one row does not set the others. The reasoning model, tools, tracing,
 carrier, database, and any other service also keep their own regional settings.

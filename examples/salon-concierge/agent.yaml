@@ -42,12 +42,20 @@ models:
   speak:
     voice:
       provider: slng
-      model: "slng/deepgram/aura:2-en"
-      voice: "aura-2-thalia-en"
+      model: "cartesia/sonic:3.5"
+      voice: "f786b574-daa5-4673-aa0c-cbe3e8534c02"
+      language: en
+      params:
+        # Speech world part. SLNG speech serves na, eu and ap; the Context
+        # Router's own regions are a different set under the same key.
+        world_part_override: eu
   listen:
     transcriber:
       provider: slng
-      model: "slng/deepgram/nova:3-en"
+      model: "slng/deepgram/nova:3-multi"
+      language: en
+      params:
+        world_part_override: eu
   turn:
     detector:
       provider: local

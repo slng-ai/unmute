@@ -304,8 +304,8 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.Prompts = append(data.Prompts, livekitPrompt{Const: t.PromptConst, Body: livekitTaskPrompt(agent.Tasks[t.Name], t.Result)})
 	}
 	entryInstructions := agent.Agents[agent.EntryAgent].Instructions
-	if ir.HasTemplate(entryInstructions) {
-		data.EntryPromptExpr = promptExpr(promptConst(agent.EntryAgent), entryInstructions, "session.userdata")
+	if _, router := slngRouterBinding(agent, tgt, agent.Agents[agent.EntryAgent].Model); ir.HasTemplate(entryInstructions) && !router {
+		data.EntryPromptExpr = promptExpr(promptConst(agent.EntryAgent), entryInstructions, "session.userdata", false)
 	}
 
 	applyLiveKitConversation(agent.Conversation, &data)
@@ -383,6 +383,11 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		}
 	}
 	data.PluginModules = collectLiveKitPlugins(data)
+	slng, err := slngHelpersFor(agent, tgt)
+	if err != nil {
+		return livekitData{}, err
+	}
+	data.Slng = slng
 	data.Deps = livekitDeps(data)
 	data.RequiredEnv = env.sorted()
 	// The startup check is derived from what the compiler knows it requires, not
@@ -701,8 +706,10 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 	}
 	// A templated prompt is re-rendered from the session state on entry; an
 	// untouched one keeps the bare module constant.
-	if ir.HasTemplate(def.Instructions) {
-		built.PromptExpr = promptExpr(promptConst(name), def.Instructions, "self.session.userdata")
+	// A router-bound prompt keeps its placeholders, so there is nothing to
+	// re-render on entry and the update_instructions call goes away with it.
+	if _, router := slngRouterBinding(agent, tgt, def.Model); ir.HasTemplate(def.Instructions) && !router {
+		built.PromptExpr = promptExpr(promptConst(name), def.Instructions, "self.session.userdata", false)
 	}
 	if def.Model != entry.Model {
 		llm, err := livekitReasonLLM(agent, tgt, def.Model, env)
@@ -939,8 +946,8 @@ func livekitTaskCanTransfer(agent *ir.Agent, task ir.Task) bool {
 
 func buildLiveKitTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *envSet) (livekitTask, error) {
 	built := livekitTask{Name: name, Class: pyName(name), PromptConst: promptConst(name)}
-	if ir.HasTemplate(task.Instructions) {
-		built.PromptExpr = promptExpr(promptConst(name), task.Instructions, "self.session.userdata")
+	if _, router := slngRouterBinding(agent, tgt, task.Model); ir.HasTemplate(task.Instructions) && !router {
+		built.PromptExpr = promptExpr(promptConst(name), task.Instructions, "self.session.userdata", false)
 	}
 	// Per-task model (B1): AgentTask takes its own llm=, resolved through the
 	// catalogue like any per-agent override. Same profile as the entry agent =
@@ -1056,8 +1063,8 @@ func buildLiveKitTool(name string, tool ir.Tool, variables map[string]ir.Variabl
 // named form (the SLNG plugin strips the slng/ prefix, Inference joins
 // provider/model).
 
-func resolveLiveKitService(role targetcap.Role, binding ir.Binding, env *envSet) (livekitService, error) {
-	call, entry, err := resolveService(targetcap.LiveKit, role, binding, env)
+func resolveLiveKitService(role targetcap.Role, binding ir.Binding, env *envSet, site slngSite) (livekitService, error) {
+	call, entry, err := resolveService(targetcap.LiveKit, role, binding, env, site)
 	if err != nil {
 		return livekitService{}, err
 	}
@@ -1068,15 +1075,15 @@ func livekitSTTService(binding *ir.Binding, env *envSet) (livekitService, error)
 	if binding == nil {
 		return livekitService{}, fmt.Errorf("livekit listen binding is missing a model")
 	}
-	return resolveLiveKitService(targetcap.Listen, *binding, env)
+	return resolveLiveKitService(targetcap.Listen, *binding, env, slngSite{})
 }
 
 func livekitTTSService(binding ir.Binding, env *envSet) (livekitService, error) {
-	return resolveLiveKitService(targetcap.Speak, binding, env)
+	return resolveLiveKitService(targetcap.Speak, binding, env, slngSite{})
 }
 
-func livekitChainService(binding ir.Binding, env *envSet) (livekitService, error) {
-	return resolveLiveKitService(targetcap.Reason, binding, env)
+func livekitChainService(binding ir.Binding, env *envSet, site slngSite) (livekitService, error) {
+	return resolveLiveKitService(targetcap.Reason, binding, env, site)
 }
 
 // livekitTurnVersion maps the target's turn: binding to the
@@ -1098,13 +1105,14 @@ func livekitTurnVersion(binding *ir.Binding) (string, error) {
 // Every profile in the chain must carry its own reason binding; validation
 // has already checked slot kind, placement, and cycles.
 func livekitReasonLLM(agent *ir.Agent, tgt ir.Target, profile string, env *envSet) (livekitChain, error) {
-	primary, err := livekitChainService(tgt.Models.Reason[profile], env)
+	site := livekitSlngSite(agent, tgt, profile)
+	primary, err := livekitChainService(tgt.Models.Reason[profile], env, site)
 	if err != nil {
 		return livekitChain{}, fmt.Errorf("model %q: %w", profile, err)
 	}
 	out := livekitChain{Primary: primary}
 	for _, fb := range agent.Models[profile].Fallback {
-		svc, err := livekitChainService(tgt.Models.Reason[fb], env)
+		svc, err := livekitChainService(tgt.Models.Reason[fb], env, livekitSlngSite(agent, tgt, fb))
 		if err != nil {
 			return livekitChain{}, fmt.Errorf("model %q fallback %q: %w", profile, fb, err)
 		}
@@ -1112,6 +1120,33 @@ func livekitReasonLLM(agent *ir.Agent, tgt ir.Target, profile string, env *envSe
 	}
 	return out, nil
 }
+
+// livekitSlngSite is where the router's per-call values live on this target: a
+// uuid created once in the entrypoint and the call state hoisted into a local
+// there, which is why ir.Validate holds every router profile to being the entry
+// agent's. Zero for a profile that is not a router binding.
+func livekitSlngSite(agent *ir.Agent, tgt ir.Target, profile string) slngSite {
+	if binding, ok := tgt.Models.Reason[profile]; !ok || !binding.Router() {
+		return slngSite{}
+	}
+	site := slngSite{
+		SessionExpr: livekitSessionIDExpr,
+		Names:       slngTemplateNames(agent, tgt, profile),
+		ConfigFunc:  slngConfigFunc(profile),
+	}
+	if len(agent.Variables) > 0 {
+		site.StateExpr = livekitSlngStateExpr
+	}
+	return site
+}
+
+// The two locals the entrypoint defines for the router. The session id is not
+// called `session_id`, because this template already writes "session_id":
+// room_name into the telephony call context and that is a different thing.
+const (
+	livekitSessionIDExpr = "slng_session_id"
+	livekitSlngStateExpr = "slng_state"
+)
 
 // livekitCtxExpr lowers a context block's history shaping (V5) to a Python
 // expression for the handed-over ChatContext. "" means history: reset — the

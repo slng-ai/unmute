@@ -295,6 +295,31 @@ var livekitCatalog = []Entry{
 		Notes: []string{"native plugin, not LiveKit Inference — a console run needs OPENAI_API_KEY only (B6); route through Inference deliberately with provider: livekit"},
 	},
 	{
+		// The SLNG Context Router, through the openai plugin and never
+		// inference.LLM: a router binding that fell through to the wildcard row
+		// would reach LiveKit Inference instead of the router (FR-014).
+		//
+		// extra_headers and extra_body are constructor kwargs on openai.LLM and
+		// are forwarded into every chat() call (livekit-plugins-openai llm.py
+		// :112-113 and :958-962, source read 2026-08-19 against 1.6.4 and 1.4.4).
+		// The LLM object is built once per job, and the session id is one value
+		// per call, so construction time is the right place and the plugin needs
+		// no subclass.
+		//
+		// No Distributes, for the same reason as the Pipecat row (FR-021).
+		Framework: LiveKit, Role: Reason, Vendor: "slng",
+		Verified: SlngRouterVerified, Docs: SlngRouterDocs,
+		Install: InstallSpec{Extra: "openai"},
+		Import:  "from livekit.plugins import openai",
+		Call: &CallSpec{
+			Class: "openai.LLM", APIKeyArg: "api_key", APIKeyEnv: SlngRouterKeyEnv,
+			Model:    FieldSpec{Arg: "model", Required: true},
+			Endpoint: FieldSpec{Arg: "base_url"},
+			Params:   ParamsKwargs,
+		},
+		Notes: []string{"SLNG Context Router over Chat Completions; params.world_part_override becomes base_url and the identity headers plus the inline slng_config ride extra_headers/extra_body"},
+	},
+	{
 		Framework: LiveKit, Role: Reason, Vendor: "anthropic",
 		Verified: "2026-07-17", Docs: "https://docs.livekit.io/agents/models/llm/anthropic/",
 		Install: InstallSpec{Extra: "anthropic"},

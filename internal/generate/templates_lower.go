@@ -150,8 +150,16 @@ func urlExpr(tool ir.Tool, stateExpr string) string {
 
 // promptExpr renders an agent's or task's system prompt: the module constant as
 // it always was, wrapped in a render call only when it carries a template.
-func promptExpr(constName, body, stateExpr string) string {
-	if !ir.HasTemplate(body) {
+//
+// raw is the one seam this feature adds. A prompt site bound to a SLNG Context
+// Router think profile ships its placeholders intact, because the router fills
+// them in from the template variable map that travels beside the prompt, and a
+// prompt that is identical across calls is the whole point (FR-015). Every other
+// site renders locally exactly as before, which is FR-017 by construction rather
+// than by care: greetings, tool arguments, inject values and webhook paths go
+// through their own lowering helpers and never reach this function.
+func promptExpr(constName, body, stateExpr string, raw bool) string {
+	if raw || !ir.HasTemplate(body) {
 		return constName
 	}
 	return fmt.Sprintf("_render(%s, %s)", constName, stateExpr)

@@ -166,6 +166,7 @@
               "models/stt",
               "models/tts",
               "models/llm",
+              "models/context-router",
               "models/turn-detection",
               "models/optimization"
             ]

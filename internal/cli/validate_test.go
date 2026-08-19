@@ -232,3 +232,55 @@ func runValidateCommand(t *testing.T, args ...string) (string, string, error) {
 	err := cmd.Execute()
 	return stdout.String(), stderr.String(), err
 }
+
+// FR-037. A warning, on stderr, exit 0: the compiler cannot know the upstream
+// model family for certain, so it says what it measured rather than refusing.
+// Warnings never become a silent downgrade, which is why this asserts the exit
+// code as well as the text.
+func TestValidateWarnsOnRouterToolsWithoutReasoningEffort(t *testing.T) {
+	dir := copySafeCore(t)
+	path := filepath.Join(dir, "agent.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// safe_core's entry agent already carries tools, which is the trap: the
+	// package validates, deploys, and then fails on every tool turn.
+	router := `  think:
+    fast_reasoning:
+      provider: slng
+      model: gpt-5.6-luna
+      agent_id: safe-core-router-v1
+      upstream:
+        provider: openai
+      params:
+        world_part_override: eu
+    careful_reasoning:
+`
+	text := mustReplace(t, string(raw), `  think:
+    fast_reasoning:
+      description: cheap and quick, greeting and routing
+      provider: openai
+      model: gpt-4o-mini
+      temperature: 0.4
+    careful_reasoning:
+`, router)
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, err := runValidateCommand(t, "--target", "pipecat", dir)
+	if err != nil {
+		t.Fatalf("a missing reasoning_effort must warn, never fail: %v\n%s", err, stderr)
+	}
+	for _, want := range []string{
+		"Warnings:\n", "reasoning_effort", "400", "Function tools with reasoning_effort are not supported",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("the warning does not say %q:\n%s", want, stderr)
+		}
+	}
+	if strings.Contains(stderr, "Errors:\n") {
+		t.Errorf("the warning was raised to an error:\n%s", stderr)
+	}
+}

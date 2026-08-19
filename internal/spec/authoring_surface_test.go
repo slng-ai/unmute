@@ -187,3 +187,42 @@ func TestCloudWebsocketRouteNeedsNoNewAuthoringField(t *testing.T) {
 		}
 	}
 }
+
+// The router think binding is authoring surface this feature does grow, and the
+// price is paid: the two fields derive from the Go structs rather than from a
+// hand-authored schema file, which is what keeps internal/spec the one owner of
+// what an author may write.
+func TestAuthoringSchemaCarriesTheRouterFields(t *testing.T) {
+	schema, err := Schema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	// agent_id scopes the router cache; upstream says who serves the model. Both
+	// hang off a models entry, so both have to reach the derived schema or an
+	// author's editor reports a valid package as invalid.
+	for _, name := range []string{"agent_id", "upstream"} {
+		if found := searchSchema(decoded, name); found == nil {
+			t.Errorf("derived authoring schema is missing the %q property", name)
+		}
+	}
+	// The block is typed, not a free map: every field an upstream provider can
+	// take is a named property, so a typo is a schema error in the editor rather
+	// than a 400 on the first turn of a call.
+	for _, name := range []string{
+		"provider", "url", "key_env", "auth_header", "deployment", "api_version",
+		"credentials_env", "location", "project", "access_key_id_env",
+		"secret_access_key_env", "session_token_env", "region", "model_id",
+	} {
+		if found := searchSchema(decoded, name); found == nil {
+			t.Errorf("derived authoring schema is missing the upstream %q property", name)
+		}
+	}
+}

@@ -69,6 +69,7 @@ func Validate(agent *Agent, targets []Target, caps targetcap.Table) (ValidateRep
 	}
 	global, globalWarnings := validateStructure(agent)
 	global = append(global, validateConfiguredTargets(agent, caps)...)
+	global = append(global, slngOneAgentIDPerPackage(agent)...)
 	globalWarnings = add(globalWarnings, undeclaredSecretWarning(agent))
 	globalWarnings = add(globalWarnings, unusedConnectionWarning(agent))
 	report := ValidateReport{PerTarget: make([]TargetValidation, 0, len(targets))}
@@ -1070,6 +1071,255 @@ func validateBindings(agent *Agent, resolved Target, caps targetcap.Table, row *
 		validatePlacement("reason."+name, &binding, row)
 		checkVendor(targetcap.Reason, &binding)
 	}
+	validateSlngRouter(agent, resolved, row)
+}
+
+// validateSlngRouter holds every rule a SLNG Context Router think binding
+// carries: the region, the agent id, one id per compiled package, the upstream
+// block and its credential shape.
+//
+// It runs per target rather than over agent.Models because "one agent id per
+// compiled package" is a property of what a target actually builds, and a
+// per-target override can turn a binding into a router binding or away from one.
+func validateSlngRouter(agent *Agent, resolved Target, row *TargetValidation) {
+	var routers []string
+	for _, name := range slices.Sorted(maps.Keys(resolved.Models.Reason)) {
+		binding := resolved.Models.Reason[name]
+		if !binding.Router() {
+			// Both fields are the router's. A field with no slot is refused
+			// rather than dropped, the same as every other slotless field.
+			if binding.AgentID != "" {
+				row.Errors = add(row.Errors, fmt.Sprintf("think.%s sets agent_id, which belongs to provider %q; this binding is provider %q", name, ProviderSlngRouter, binding.Provider))
+			}
+			if binding.Upstream != nil {
+				row.Errors = add(row.Errors, fmt.Sprintf("think.%s sets upstream, which belongs to provider %q; this binding is provider %q", name, ProviderSlngRouter, binding.Provider))
+			}
+			continue
+		}
+		routers = append(routers, name)
+		if binding.EndpointEnv != "" {
+			row.Errors = add(row.Errors, fmt.Sprintf("think.%s sets endpoint_env, but params.world_part_override already selects the router endpoint and upstream owns the upstream one", name))
+		}
+		row.Errors = append(row.Errors, slngRouterRegionErrors(name, binding)...)
+		if err := targetcap.ValidateSlngAgentID(binding.AgentID); err != nil {
+			row.Errors = add(row.Errors, fmt.Sprintf("think.%s %s", name, err))
+		}
+		row.Errors = append(row.Errors, slngUpstreamErrors(agent, name, binding)...)
+		if warning := slngReasoningEffortWarning(agent, name, binding); warning != "" {
+			row.Warnings = add(row.Warnings, warning)
+		}
+	}
+	// One target-shaped limit, named as such. LiveKit builds an agent's or a
+	// task's own LLM inside its constructor, where neither the call's session id
+	// nor the call state is in scope, and it constructs agents from ten places.
+	// The session LLM is built in the entrypoint, where both exist. So a router
+	// profile that is not the entry agent's has nowhere to put its per-call
+	// values on this target, and saying so before generation beats emitting an
+	// agent whose every think request is missing them (Principle II). Pipecat
+	// builds one LLM per agent from a single place and has no such limit.
+	if resolved.Provider == ProviderLiveKit && len(routers) > 0 {
+		entry := agent.Agents[agent.EntryAgent].Model
+		for _, profile := range routers {
+			if profile != entry {
+				row.Errors = add(row.Errors, fmt.Sprintf(
+					"livekit: think.%s is a %s router profile but not the entry agent's (%s uses think.%s). On livekit the router's per-call session id and variable values are only in scope where the session model is built, so every router profile in a package has to be the entry agent's. Point the agents and tasks that use think.%s at the entry profile, or keep this profile on a direct provider",
+					profile, ProviderSlngRouter, agent.EntryAgent, entry, profile))
+			}
+		}
+	}
+	// FR-001 and FR-014. A managed target forwards provider names into an API
+	// body and emits no client, so it cannot carry a regional base URL, two
+	// identity headers, or an inline configuration. Without this the binding
+	// passes the vendor rulebook (a managed row forwards any provider name) and
+	// the package compiles into an agent that never reaches the router.
+	if len(routers) > 0 {
+		fw := targetcap.Provider(resolved.Provider)
+		if entry, ok := targetcap.DefaultCatalog().Lookup(fw, targetcap.Reason, ProviderSlngRouter); !ok || entry.Wildcard() {
+			row.Errors = add(row.Errors, fmt.Sprintf(
+				"%s has no think slot for provider %q: the SLNG Context Router needs a regional base URL, the two identity headers and an inline configuration on every request, and this target emits no client to put them on. The targets that serve it are %s",
+				resolved.Provider, ProviderSlngRouter, strings.Join(slngRouterTargets(), " and ")))
+		}
+	}
+}
+
+// slngOneAgentIDPerPackage holds FR-010, the rule with the worst silent cost. A
+// second id splits one package's cache into two namespaces and hit rates never
+// build: nothing fails, the agent is simply never fast. So the refusal names both
+// profiles and both values, because the author has to know which line to change.
+//
+// It runs over the whole models palette rather than only the profiles a target
+// compiles, and over every target's resolved bindings as well. An unused second
+// profile emits nothing today, but pointing one agent at it is a one-word edit,
+// and finding out then means finding out from a latency graph.
+func slngOneAgentIDPerPackage(agent *Agent) []string {
+	// profile name -> id, first sighting wins, in name order.
+	var ids [][2]string
+	seen := map[string]bool{}
+	note := func(profile, id string) {
+		if id == "" || seen[profile] {
+			return
+		}
+		seen[profile] = true
+		ids = append(ids, [2]string{profile, id})
+	}
+	for _, name := range sortedKeys(agent.Models) {
+		if model := agent.Models[name]; model.Kind == KindThink && model.Provider == ProviderSlngRouter {
+			note(name, model.AgentID)
+		}
+	}
+	for _, target := range sortedKeys(agent.Targets) {
+		reason := agent.Targets[target].Models.Reason
+		for _, name := range slices.Sorted(maps.Keys(reason)) {
+			if binding := reason[name]; binding.Router() {
+				note(name, binding.AgentID)
+			}
+		}
+	}
+	var errors []string
+	for _, other := range ids[min(1, len(ids)):] {
+		if other[1] != ids[0][1] {
+			errors = add(errors, fmt.Sprintf(
+				"think.%s agent_id %q and think.%s agent_id %q differ; one package sends one agent id, because the id is what scopes the router's cache",
+				ids[0][0], ids[0][1], other[0], other[1]))
+		}
+	}
+	return errors
+}
+
+// slngRouterTargets names the targets whose catalogue carries a router think
+// row, read from the catalogue so the refusal cannot drift from the code.
+func slngRouterTargets() []string {
+	var out []string
+	for _, entry := range targetcap.DefaultCatalog().Entries() {
+		if entry.Role == targetcap.Reason && entry.Vendor == ProviderSlngRouter {
+			out = append(out, string(entry.Framework))
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// slngRouterRegionErrors holds FR-003 and FR-005. The refusal names the four
+// router regions and says they are the router's own set, because `na` copied
+// from the regional infrastructure page is the likely mistake.
+func slngRouterRegionErrors(profile string, binding Binding) []string {
+	regions := strings.Join(targetcap.SlngRouterRegions, ", ")
+	value, ok := binding.Params["world_part_override"]
+	if !ok {
+		return []string{fmt.Sprintf("think.%s needs params.world_part_override to pick a router region: one of %s", profile, regions)}
+	}
+	region, _ := value.(string)
+	if _, ok := targetcap.SlngRouterBaseURL(region); !ok {
+		return []string{fmt.Sprintf(
+			"think.%s params.world_part_override %q is not a router region: one of %s. These four are the router's own set; na, eu and ap are the SLNG *speech* world parts, which share this key and not its accepted values",
+			profile, region, regions)}
+	}
+	return nil
+}
+
+// slngUpstreamErrors holds FR-034 and its lettered siblings: the block is
+// present with a known provider, every field that provider requires is set, no
+// field belongs to another provider, and every credential names an environment
+// variable rather than holding one.
+func slngUpstreamErrors(agent *Agent, profile string, binding Binding) []string {
+	if binding.Upstream == nil {
+		return []string{fmt.Sprintf(
+			"think.%s needs an upstream block saying which upstream serves the model: one of %s. Nothing is assumed for you, because the configuration travels inline on every request and the credentials are yours",
+			profile, strings.Join(targetcap.SlngUpstreamProviders(), ", "))}
+	}
+	fields := binding.Upstream.Fields()
+	var errors []string
+	for _, text := range targetcap.ValidateSlngUpstream(binding.Upstream.Provider, fields) {
+		errors = add(errors, fmt.Sprintf("think.%s %s", profile, text))
+	}
+	upstream, known := targetcap.SlngUpstreamByName(binding.Upstream.Provider)
+	if !known {
+		return errors
+	}
+	for _, field := range upstream.Fields {
+		value, written := fields[field.Authored]
+		if !field.Credential || !written {
+			continue
+		}
+		if !envNamePattern.MatchString(value) {
+			// The offending text is never repeated back: what lands here is
+			// usually a pasted credential, and a refusal that quotes it puts the
+			// value in a terminal, a CI log and a bug report.
+			errors = add(errors, fmt.Sprintf(
+				"think.%s upstream %s is not an environment variable name: use upper case letters, digits and underscores, and do not start with a digit. This field names a variable and a package never holds a secret value",
+				profile, field.Authored))
+			continue
+		}
+		if !slices.Contains(agent.Secrets, value) {
+			// An error rather than the usual warning: this name is the one the
+			// upstream is paid with, it reaches the generated startup check
+			// through secrets:, and a package that forgets it fails on the first
+			// turn of a live call instead of at compile time (FR-034b).
+			errors = add(errors, fmt.Sprintf(
+				"think.%s upstream %s names %s, which secrets: does not declare; add it there so the generated agent checks for it at startup",
+				profile, field.Authored, value))
+		}
+	}
+	return errors
+}
+
+// slngReasoningEffortWarning holds FR-037: a warning, never a refusal, because
+// the compiler cannot know the upstream model family for certain. Warnings go to
+// stderr and keep exit 0, so it never hides a downgrade.
+func slngReasoningEffortWarning(agent *Agent, profile string, binding Binding) string {
+	if _, set := binding.Params["reasoning_effort"]; set {
+		return ""
+	}
+	if !slngProfileHasTools(agent, profile) {
+		return ""
+	}
+	return fmt.Sprintf(
+		"think.%s has tools and no params.reasoning_effort: measured 2026-08-19, every tool turn on the gpt-5.6 family then returns 400 through the router, \"Function tools with reasoning_effort are not supported\". Set reasoning_effort: \"none\" unless the upstream model is not one of those",
+		profile)
+}
+
+// slngProfileHasTools reports whether any agent or task bound to this think
+// profile carries tools. A task with no model of its own runs on the entry
+// agent's profile, which is where the trap usually hides.
+func slngProfileHasTools(agent *Agent, profile string) bool {
+	entry := agent.Agents[agent.EntryAgent].Model
+	for _, def := range agent.Agents {
+		if def.Model == profile && len(def.Tools) > 0 {
+			return true
+		}
+	}
+	for _, task := range agent.Tasks {
+		if cmp.Or(task.Model, entry) == profile && len(task.Tools) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// upstreamEnvNames lists the environment names a router upstream block names,
+// with the site that wrote each. Only author-written names: a compiler-supplied
+// default is never demanded of the author, the same rule
+// TestSecretsCrossCheckNeverAsksForDriverSuppliedNames already holds for
+// provider keys.
+func upstreamEnvNames(agent *Agent) map[string]string {
+	out := map[string]string{}
+	for _, name := range sortedKeys(agent.Models) {
+		model := agent.Models[name]
+		if model.Provider != ProviderSlngRouter || model.Upstream == nil {
+			continue
+		}
+		upstream, known := targetcap.SlngUpstreamByName(model.Upstream.Provider)
+		if !known {
+			continue
+		}
+		fields := model.Upstream.Fields()
+		for _, field := range upstream.Fields {
+			if value, written := fields[field.Authored]; field.Credential && written && envNamePattern.MatchString(value) {
+				out[value] = fmt.Sprintf("model %q upstream.%s", name, field.Authored)
+			}
+		}
+	}
+	return out
 }
 
 // checkSpeakRequiredFields enforces entry-declared field arity at validate
@@ -1453,6 +1703,13 @@ func referencedEnvNames(agent *Agent) map[string]string {
 	for _, name := range sortedKeys(agent.Models) {
 		note(agent.Models[name].EndpointEnv, fmt.Sprintf("model %q endpoint_env", name))
 	}
+	// A router upstream's credentials are *_env fields like any other, so they
+	// belong in the same reference set: it is what the compile report reads to
+	// say which site names each variable.
+	upstreams := upstreamEnvNames(agent)
+	for _, name := range slices.Sorted(maps.Keys(upstreams)) {
+		note(name, upstreams[name])
+	}
 	if agent.Tracing != nil {
 		for _, name := range []string{"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"} {
 			note(name, "tracing.provider: langfuse")
@@ -1566,8 +1823,15 @@ func unusedConnectionWarning(agent *Agent) string {
 // shape and was already in this file.
 func undeclaredSecretWarning(agent *Agent) string {
 	refs := referencedEnvNames(agent)
+	// A router upstream credential is the one group whose absence is an error
+	// rather than a warning (FR-034b, slngUpstreamErrors). Reporting it here as
+	// well would print the same missing name twice at two severities.
+	errored := upstreamEnvNames(agent)
 	var missing []string
 	for _, name := range slices.Sorted(maps.Keys(refs)) {
+		if errored[name] != "" {
+			continue
+		}
 		if !slices.Contains(agent.Secrets, name) {
 			missing = append(missing, fmt.Sprintf("%s (%s)", name, refs[name]))
 		}

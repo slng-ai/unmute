@@ -86,6 +86,15 @@ Everything you say is read out loud.
 	// Authored as two fields, never a folded `openai/...` string: the value is
 	// forwarded to the SDK verbatim.
 	DefaultReasonModel = "gpt-5.6-terra"
+	// RouterExampleModel is the second, and last, model identifier this
+	// repository teaches. It exists because the router example has to name a
+	// different model from the scaffold default to be worth reading: a matched
+	// pair that named one model would look like a copy of itself.
+	//
+	// Two owned identifiers, and a third still fails. It lives here beside the
+	// default rather than in the example, so a bump stays one edit and one test
+	// (research D10, FR-032).
+	RouterExampleModel = "gpt-5.6-luna"
 )
 
 // Data is the v1 agent configuration rendered by the scaffold templates.

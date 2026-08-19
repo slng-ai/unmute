@@ -100,12 +100,14 @@ slower than that needs `timeout:` on the mcp block, which does not exist yet. */
 {{- /* tools_list is the whole tools= surface: prebuilt tools first, then the
 MCP sources, in the order the package lists them. */ -}}
 {{define "tools_list"}}{{template "prebuilt_list" .Prebuilt}}{{if and .Prebuilt .MCPServers}}, {{end}}{{template "mcp_mounts" .MCPServers}}{{end -}}
-{{if or .NeedsAsyncio .NeedsMCP}}import asyncio
+{{if .Slng.Vertex}}import base64
+{{end}}{{if or .NeedsAsyncio .NeedsMCP}}import asyncio
 {{end}}{{if .NeedsInspect}}import inspect
-{{end}}{{if or .Outbound .Telephony .CallStartVars .NeedsTaskGroups}}import json
+{{end}}{{if or .Outbound .Telephony .CallStartVars .NeedsTaskGroups .Slng.Vertex}}import json
 {{end}}import logging
 import os
-{{if .NeedsRender}}import re
+{{if .Slng.Any}}import uuid
+{{end}}{{if .NeedsRender}}import re
 {{end}}{{if or .HasWarmTransfer .HasColdTransfer}}import time
 {{end}}{{if .HasVars}}from dataclasses import dataclass
 {{end}}{{if .TypingImports}}from typing import {{.TypingImports}}
@@ -411,7 +413,80 @@ def require_env() -> None:
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
         raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
+{{if .Slng.Any}}
 
+# --- SLNG Context Router ----------------------------------------------------
+# The router answers a repeated turn from its cache instead of calling the model.
+# That is why a router-bound system prompt below keeps its placeholders instead of
+# being rendered here: the router substitutes them from template_variables, so the
+# prompt it sees is identical on every call, which is what lets a turn repeat. The
+# agent id scopes that cache and is one value for this whole package. A first turn
+# never caches, and the router decides which later turns are repeatable, so a
+# repeat served by the model is expected rather than a fault.
+{{range .Slng.Configs}}
+
+def {{.Func}}() -> dict:
+    """The model configuration, sent inline in the body of every think request.
+
+    Credentials are read here rather than at import, so a missing one is reported
+    by require_env() alongside every other name instead of raising a KeyError
+    before anything has checked. No value is written into this file: each is the
+    name of an environment variable.
+    """
+    return {{.Body}}
+{{end}}{{if .Slng.Vertex}}
+
+def _slng_vertex_credentials(name: str) -> dict:
+    """A GCP service-account key, in whichever of three shapes the variable holds.
+
+    The key JSON, that JSON base64 encoded, or a path to the key file, decided in
+    that order because a base64 value can begin with "/" and look like a path.
+    This runs once at startup, so a malformed value fails before the agent answers
+    anything rather than mid-call.
+    """
+    raw = os.environ[name].strip()
+    if raw.startswith("{"):
+        return json.loads(raw)
+    try:
+        decoded = base64.b64decode(raw, validate=True).decode("utf-8").strip()
+    except (ValueError, UnicodeDecodeError):
+        decoded = ""
+    if decoded.startswith("{"):
+        return json.loads(decoded)
+    if os.path.isfile(raw):
+        with open(raw, encoding="utf-8") as handle:
+            return json.load(handle)
+    raise RuntimeError(
+        f"{name} must hold a GCP service-account key in one of three shapes: "
+        f"the key JSON, that JSON base64 encoded, or a path to the key file"
+    )
+{{end}}{{if .Slng.Variables}}
+
+_SLNG_VARIABLE_LIMIT = {{.Slng.Limit}}
+
+
+def _slng_template_variables(state, names) -> dict:
+    """The values the router substitutes into the prompt's placeholders.
+
+    A name with no value yet sends the empty string, never None and never the text
+    "None". A value over the router's limit is truncated with a warning rather
+    than dropped: an over-long value must not end a live call.
+    """
+    values = {}
+    for name in names:
+        value = getattr(state, name, None) if state is not None else None
+        text = "" if value is None else str(value)
+        if len(text) > _SLNG_VARIABLE_LIMIT:
+            logger.warning(
+                "template variable %s is %d characters; truncating to %d for the router",
+                name,
+                len(text),
+                _SLNG_VARIABLE_LIMIT,
+            )
+            text = text[:_SLNG_VARIABLE_LIMIT]
+        values[name] = text
+    return values
+{{end}}{{end}}
 {{end}}
 {{- if .CallRequiredEnv}}
 # A browser session has no phone leg to cold-transfer. Check these only after
@@ -1313,9 +1388,24 @@ async def entrypoint(ctx: JobContext) -> None:
 {{- if .RequiredSecrets}}
     require_env()
 {{- end}}
+{{- if .Slng.Any}}
+    # One SLNG Context Router session id per call, created where the call begins
+    # and passed as an argument from here on, so one worker process serving
+    # several jobs keeps them apart. It groups this call's think requests for
+    # support and scopes nothing: the agent id is what scopes the router's cache,
+    # so this may differ freely between calls. Not named session_id, because this
+    # file already writes a "session_id" into the telephony call context and that
+    # is a different thing.
+    slng_session_id = str(uuid.uuid4())
+{{- end}}
+{{- if and .Slng.Any .HasVars}}
+    # The call state is a local here rather than an inline argument, so the
+    # router's template variable snapshot can read it beside the llm kwarg.
+    slng_state = Userdata()
+{{- end}}
     session = AgentSession{{if .HasVars}}[Userdata]{{end}}(
 {{- if .HasVars}}
-        userdata=Userdata(),
+        userdata={{if .Slng.Any}}slng_state{{else}}Userdata(){{end}},
 {{- end}}
         stt={{template "sttexpr" .STT}},
         llm={{template "llmexpr" .SessionLLM}},
