@@ -1202,6 +1202,16 @@ func TestV2_PipecatDelegateSnapshotsCompletedOwnerCall(t *testing.T) {
 		if callback < 0 || flush < callback || snapshot < flush || initialize < snapshot {
 			t.Errorf("delegate %q must resolve, drain, snapshot, then initialize: callback=%d flush=%d snapshot=%d initialize=%d", name, callback, flush, snapshot, initialize)
 		}
+		// The snapshot must deep-copy history. The old shallow form,
+		// [dict(m) for m in self.context.get_messages()], silently drops any
+		// entry that is not a plain dict (pipecat's LLMSpecificMessage), so a
+		// delegate that returns to its caller comes back with degraded history.
+		if !bytes.Contains(body, []byte("copy.deepcopy(self.context.get_messages())")) {
+			t.Errorf("delegate %q must snapshot history with copy.deepcopy, not a shallow dict() copy", name)
+		}
+	}
+	if !bytes.Contains(bot, []byte("\nimport copy\n")) {
+		t.Error("a bot with flows must import copy for the delegate snapshot")
 	}
 }
 
