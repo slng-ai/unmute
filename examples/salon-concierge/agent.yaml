@@ -52,7 +52,7 @@ models:
   listen:
     transcriber:
       provider: slng
-      model: "slng/deepgram/nova:3-multi"
+      model: "gradium/stt:default"
       language: en
       params:
         world_part_override: eu
@@ -98,7 +98,6 @@ agents:
     model: reasoning
     voice: voice
     tools:
-      - web_search
       - to_booking
       - to_complaints
       - to_concierge
@@ -259,7 +258,6 @@ tools:
   - modify_booking
   - cancel_booking
   - record_complaint
-  - web_search
 
 conversation:
   greeting:
