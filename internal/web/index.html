@@ -173,6 +173,25 @@
     font-size:12.5px;letter-spacing:.04em;
   }
 
+  /* ── per-turn timings ─────────────────────────────────────
+     Reference, not content: quiet enough that reading the conversation is
+     unaffected, close enough that you never go looking. No thresholds and no
+     colour scale, because picking "slow" is a policy nobody asked for. */
+  .timing{display:flex;flex-wrap:wrap;gap:12px;margin-top:3px}
+  .timing span{
+    font-size:10.5px;letter-spacing:.06em;color:var(--faint);
+    display:flex;gap:4px;white-space:nowrap;
+  }
+  .timing b{color:var(--muted);font-weight:600}
+
+  /* a tool call is its own step in the timeline, between the two turns */
+  .toolrow{display:flex;align-items:baseline;gap:8px;max-width:100%}
+  .toolrow .tname{
+    font-size:12.5px;color:var(--muted);
+    word-wrap:break-word;overflow-wrap:anywhere;
+  }
+  .toolrow .ttime{font-size:10.5px;letter-spacing:.06em;color:var(--faint);white-space:nowrap}
+
   /* compact mode when conversation is active: shrink the stage out of the way */
   body[data-state="connected"] .state{font-size:22px}
   body[data-state="connected"] .stage{gap:14px}
@@ -516,7 +535,10 @@ function startEventStream(){
     try { ev = JSON.parse(e.data); } catch { return; }
     if (ev.t === "state") setRunState(ev.state);
     else if (ev.t === "log") pushLogRow({kind:"output", text: ev.text || "", flagged: !!ev.flagged});
-    else if (ev.t === "metric") pushLogRow({kind:"metric", text: metricText(ev.record), flagged:false});
+    else if (ev.t === "metric"){
+      pushLogRow({kind:"metric", text: metricText(ev.record), flagged:false});
+      attachRecord(ev.record);
+    }
   });
 }
 
@@ -533,6 +555,7 @@ function clearTranscript(){
   el.tlist.innerHTML = "";
   partialEl = null;
   botTurnEl = null;
+  heldRecord = null;
   botSegments.clear();
   el.body.dataset.hasHistory = "false";
 }
@@ -572,6 +595,76 @@ function resetBotTurn(){
   botTurnEl = null;
   botSegments.clear();
 }
+
+// ── per-turn timings ────────────────────────────────────
+// Records are matched to turns by nearest in time, not by an identifier plumbed
+// through the transport. A record usually lands within a moment of the turn it
+// describes, but it can beat the transcript row it belongs to, so one is held.
+// Under heavy interruption a line may land on a neighbouring turn; that is the
+// accepted cost of not threading an id through two SDKs for a local view.
+let heldRecord = null;
+
+function attachRecord(rec){
+  if (!rec || rec.kind !== "turn") return;   // the session record is log-only
+  if (botTurnEl) renderTurnTiming(botTurnEl, rec);
+  else heldRecord = rec;
+}
+
+function claimHeldRecord(turn){
+  if (!heldRecord) return;
+  const rec = heldRecord;
+  heldRecord = null;
+  renderTurnTiming(turn, rec);
+}
+
+function timingEntry(label, value){
+  const span = document.createElement("span");
+  const name = document.createElement("i");
+  name.textContent = label;
+  const amount = document.createElement("b");
+  amount.textContent = secs(value);       // an unreported value is a dash, never 0.00
+  span.append(name, amount);
+  return span;
+}
+
+function renderTurnTiming(turn, rec){
+  // Tools ran before the reply did, so they belong above it in the timeline.
+  for (const tool of rec.tools || []){
+    const row = document.createElement("div");
+    row.className = "toolrow";
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = "tool";
+    const name = document.createElement("span");
+    name.className = "tname";
+    name.textContent = tool.name;
+    const time = document.createElement("span");
+    time.className = "ttime";
+    time.textContent = secs(tool.seconds);
+    row.append(who, name, time);
+    turn.parentNode.insertBefore(row, turn);
+  }
+
+  const old = turn.querySelector(".timing");
+  if (old) old.remove();                  // a re-delivered record replaces, never stacks
+  const line = document.createElement("div");
+  line.className = "timing";
+  line.appendChild(timingEntry("e2e", rec.e2e));
+  for (const stage of rec.stages || []){
+    if (stage.ttfb == null && stage.total == null) continue;
+    line.appendChild(timingEntry(stage.kind, stage.ttfb != null ? stage.ttfb : stage.total));
+    // Sits immediately after its stage, so it does not repeat the stage's name.
+    if (stage.ttfb != null && stage.total != null)
+      line.appendChild(timingEntry("total", stage.total));
+  }
+  if (rec.interrupted){
+    const flag = document.createElement("span");
+    flag.textContent = "interrupted";
+    line.appendChild(flag);
+  }
+  turn.appendChild(line);
+  if (nearBottom()) el.tlist.scrollTop = el.tlist.scrollHeight;
+}
 function setBotSegment(id, text){
   text = (text || "").trim();
   if (!text) return;
@@ -581,7 +674,7 @@ function setBotSegment(id, text){
     if (!merged || part.startsWith(merged)) merged = part;
     else if (part !== merged && !merged.endsWith(part)) merged += " " + part;
   }
-  if (!botTurnEl) botTurnEl = pushTurn("bot", merged);
+  if (!botTurnEl){ botTurnEl = pushTurn("bot", merged); claimHeldRecord(botTurnEl); }
   else botTurnEl.querySelector(".said").textContent = merged;
 }
 

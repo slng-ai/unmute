@@ -97,8 +97,13 @@ so switching never interrupts a call.
 
 | View | What it is for |
 |---|---|
-| Conversation | the call: what was said, and the controls |
+| Conversation | the call: what was said, its timings, and the controls |
 | Logs | everything the run printed, plus one line per turn of latency measurements |
+
+Each agent turn carries its own numbers underneath it: end to end, time to first
+byte for each service, how long the reply took to stream out, and a row of its own
+for every tool the turn called. A number the target did not report shows as a dash,
+never as zero, so you can tell "not measured" from "instant".
 
 The logs view is in front while the target is starting, and the conversation
 view takes over once the agent is ready. If anything in the startup output looked
