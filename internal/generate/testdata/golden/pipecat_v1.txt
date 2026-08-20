@@ -96,7 +96,10 @@ UNMUTE_METRIC {"kind":"turn","seq":1,"e2e":1.057,"user_turn":0.412,"stages":[...
 Read them with `grep UNMUTE_METRIC` on the run's output. Times are seconds.
 `e2e` is from the caller falling silent to the agent starting to speak, `stages`
 carries the time to first byte for each service, and `tools` carries how long
-each tool took, including tools reached through a remote tool source.
+each tool took, including tools reached through a remote tool source. Controls
+are not listed there: a delegate or a transfer hands the conversation somewhere
+else rather than doing a unit of work, and a delegate does not return until the
+flow it started has finished, so its duration is that flow's, not a tool's.
 
 A measurement Pipecat does not report is left out of the line rather than sent
 as zero, so a field you do not see was not measured, not instant. Pipecat
@@ -913,6 +916,17 @@ from pipecat.observers.user_bot_latency_observer import (
 SENTINEL = "UNMUTE_METRIC"
 METRICS_ENV = "UNMUTE_DEV_METRICS"
 
+# Controls are not tools. A delegate or a transfer is the package handing the
+# conversation somewhere else rather than doing a unit of work and returning, and
+# a delegate does not return until the flow it started has finished, so its call
+# duration is that flow's duration. Reported beside real tool timings it reads as
+# one very slow tool, which is the opposite of the point.
+HANDOFF_CONTROLS = frozenset(
+    {
+        "to_billing",
+    }
+)
+
 # Processor names carry their own role ("DeepgramSTTService"), so the mapping
 # lives here once instead of the browser guessing which service a number is.
 _STAGE_KINDS = (("stt", "stt"), ("llm", "llm"), ("tts", "tts"))
@@ -970,6 +984,7 @@ def turn_record(breakdown: LatencyBreakdown, seq: int, e2e: float | None) -> dic
     tools = [
         {"name": call.function_name, "seconds": round(call.duration_secs, 4)}
         for call in breakdown.function_calls
+        if call.function_name not in HANDOFF_CONTROLS
     ]
     if tools:
         record["tools"] = tools

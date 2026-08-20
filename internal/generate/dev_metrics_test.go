@@ -126,3 +126,47 @@ func TestEveryComposeThatRunsAnAgentForwardsTheSwitch(t *testing.T) {
 		})
 	}
 }
+
+// A delegate and a transfer reach both targets as function tools, so both
+// producers would time them like tools. On LiveKit a delegate does not return
+// until the flow it started has finished, which reported a 51-second "tool". The
+// exclusion set is generated per package, so the check is that every control the
+// package declares is in it and every real tool is not.
+func TestHandoffControlsAreNotReportedAsTools(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		pkg      string
+		provider ir.Provider
+		handoffs []string
+		tools    []string
+	}{
+		{
+			"livekit", "remy", ir.ProviderLiveKit,
+			[]string{"to_reservations", "to_events", "back_to_greeter", "do_reserve", "do_event"},
+			[]string{"check_availability", "send_confirmation"},
+		},
+		{"pipecat", "safe_core", ir.ProviderPipecat, []string{"to_billing"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			producer := artifactFile(t, generateFor(t, tc.pkg, tc.provider), "dev_metrics.py")
+			set := producer[strings.Index(producer, "HANDOFF_CONTROLS"):]
+			set = set[:strings.Index(set, ")")]
+			for _, name := range tc.handoffs {
+				if !strings.Contains(set, `"`+name+`"`) {
+					t.Errorf("%s is a control but is not excluded, so its flow duration is reported as a tool", name)
+				}
+			}
+			// A real tool in the set would be worse than the bug: a measurement
+			// that silently disappears rather than one that reads oddly.
+			for _, name := range tc.tools {
+				if strings.Contains(set, `"`+name+`"`) {
+					t.Errorf("%s is a real tool and must still be timed", name)
+				}
+			}
+			// The set is only worth generating if something consults it.
+			if !strings.Contains(producer, "HANDOFF_CONTROLS\n") && !strings.Contains(producer, "in HANDOFF_CONTROLS") {
+				t.Error("producer never consults the exclusion set")
+			}
+		})
+	}
+}

@@ -360,6 +360,7 @@ type livekitData struct {
 	// operator is told to set a variable no file ever mentioned (research D14).
 	SuppliedForYou       []string
 	DevEnv               []string // provider creds the web dev image needs (LIVEKIT_* are hardcoded in compose.dev.yaml)
+	HandoffControls      []string // control names dev_metrics.py must not report as tools
 	DevOptionalEnv       []string // passed through when the host sets it, never required (UNMUTE_CALL_START)
 	Notes                []string
 	Tracing              bool

@@ -83,7 +83,10 @@ Read them with `grep UNMUTE_METRIC` on the run's output. Times are seconds.
 `e2e` is from the caller falling silent to the agent starting to speak, each
 entry in `stages` carries the time to first byte for that service and, for the
 voice, the total time the reply took to stream out. `tools` carries how long each
-tool took, including tools reached through a remote tool source.
+tool took, including tools reached through a remote tool source. Controls are not
+listed there: a delegate or a transfer hands the conversation somewhere else
+rather than doing a unit of work, and a delegate does not return until the flow
+it started has finished, so its duration is that flow's, not a tool's.
 
 A measurement LiveKit does not report is left out of the line rather than sent as
 zero, so a field you do not see was not measured, not instant.
@@ -1161,6 +1164,21 @@ from livekit.agents.voice import (
 SENTINEL = "UNMUTE_METRIC"
 METRICS_ENV = "UNMUTE_DEV_METRICS"
 
+# Controls are not tools. A delegate or a transfer is the package handing the
+# conversation somewhere else rather than doing a unit of work and returning, and
+# a delegate does not return until the flow it started has finished, so its call
+# duration is that flow's duration. Reported beside real tool timings it reads as
+# one very slow tool, which is the opposite of the point.
+HANDOFF_CONTROLS = frozenset(
+    {
+        "back_to_greeter",
+        "do_event",
+        "do_reserve",
+        "to_events",
+        "to_reservations",
+    }
+)
+
 
 def metrics_enabled() -> bool:
     """True when the dev loop asked for measurements."""
@@ -1279,8 +1297,12 @@ def install_dev_metrics(session: AgentSession) -> AgentSession:
         update = ev.update
         if update.type == "tool_call_started":
             call = update.function_call
+            if call.name in HANDOFF_CONTROLS:
+                return
             running_tools[call.call_id] = (call.name, ev.created_at)
         elif update.type == "tool_call_ended":
+            # A handoff was never recorded as started, so this pops nothing and
+            # needs no second check against the set.
             start = running_tools.pop(update.call_id, None)
             if start is not None:
                 name, started_at = start

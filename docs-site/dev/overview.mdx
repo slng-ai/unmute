@@ -105,6 +105,11 @@ byte for each service, how long the reply took to stream out, and a row of its o
 for every tool the turn called. A number the target did not report shows as a dash,
 never as zero, so you can tell "not measured" from "instant".
 
+Controls do not get a row. A delegate or a transfer reaches the framework as a
+function call, so it would otherwise be timed like a tool, and a delegate does not
+return until the flow it started has finished. A three-turn task would appear as
+one very slow tool, which is the opposite of what the numbers are for.
+
 The logs view is in front while the target is starting, and the conversation
 view takes over once the agent is ready. If anything in the startup output looked
 like a failure, the logs view stays in front instead, and the count of those

@@ -286,6 +286,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	// it and absent otherwise, which is exactly what the dev loop's measurement
 	// switch needs: the worker runs in a container, so inheriting the parent's
 	// environment is not enough, and a deployed artifact still declares nothing.
+	data.HandoffControls = handoffControls(agent)
 	data.DevOptionalEnv = []string{devmetrics.Env}
 	if len(data.CallStartVars) > 0 {
 		data.DevOptionalEnv = append(data.DevOptionalEnv, "UNMUTE_CALL_START")

@@ -45,6 +45,23 @@ from livekit.agents.voice import (
 SENTINEL = "UNMUTE_METRIC"
 METRICS_ENV = "UNMUTE_DEV_METRICS"
 
+# Controls are not tools. A delegate or a transfer is the package handing the
+# conversation somewhere else rather than doing a unit of work and returning, and
+# a delegate does not return until the flow it started has finished, so its call
+# duration is that flow's duration. Reported beside real tool timings it reads as
+# one very slow tool, which is the opposite of the point.
+{{- if .HandoffControls}}
+HANDOFF_CONTROLS = frozenset(
+    {
+{{- range .HandoffControls}}
+        {{pyq .}},
+{{- end}}
+    }
+)
+{{- else}}
+HANDOFF_CONTROLS: frozenset[str] = frozenset()
+{{- end}}
+
 
 def metrics_enabled() -> bool:
     """True when the dev loop asked for measurements."""
@@ -163,8 +180,12 @@ def install_dev_metrics(session: AgentSession) -> AgentSession:
         update = ev.update
         if update.type == "tool_call_started":
             call = update.function_call
+            if call.name in HANDOFF_CONTROLS:
+                return
             running_tools[call.call_id] = (call.name, ev.created_at)
         elif update.type == "tool_call_ended":
+            # A handoff was never recorded as started, so this pops nothing and
+            # needs no second check against the set.
             start = running_tools.pop(update.call_id, None)
             if start is not None:
                 name, started_at = start

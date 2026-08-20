@@ -31,7 +31,10 @@ UNMUTE_METRIC {"kind":"turn","seq":1,"e2e":1.057,"user_turn":0.412,"stages":[...
 Read them with `grep UNMUTE_METRIC` on the run's output. Times are seconds.
 `e2e` is from the caller falling silent to the agent starting to speak, `stages`
 carries the time to first byte for each service, and `tools` carries how long
-each tool took, including tools reached through a remote tool source.
+each tool took, including tools reached through a remote tool source. Controls
+are not listed there: a delegate or a transfer hands the conversation somewhere
+else rather than doing a unit of work, and a delegate does not return until the
+flow it started has finished, so its duration is that flow's, not a tool's.
 
 A measurement Pipecat does not report is left out of the line rather than sent
 as zero, so a field you do not see was not measured, not instant. Pipecat
