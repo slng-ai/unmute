@@ -131,6 +131,9 @@ Both routes here host something of yours, which is what makes deploying them the
 same job twice rather than two different jobs: a process that answers your carrier,
 behind a public HTTPS origin, with the number's voice webhook pointed at it.
 `build/pipecat/README.md` and `build/livekit/README.md` each carry their own
-platform commands, required variables, and carrier steps. If you want a phone route
+required variables and carrier steps. Only the LiveKit one offers a managed
+platform: the Pipecat `carrier-websocket` route has no Pipecat Cloud path, so its
+runbook has a **Deploy it yourself** section instead and the build emits no
+`pcc-deploy.toml`. If you want a phone route
 with nothing to host, that is a different transport; compare them in the
 [telephony overview](../../docs-site/telephony/overview.mdx).
