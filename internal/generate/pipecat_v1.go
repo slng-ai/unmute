@@ -612,6 +612,10 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 	// which Go's embed would skip).
 	outputs := []struct{ tmpl, path string }{
 		{"bot.py", "bot.py"},
+		// Always emitted, inert unless the dev loop sets devmetrics.Env. Emitting
+		// it only for `dev` would make build/<target>/ depend on which command
+		// last ran, so the dev loop would stop testing the file that ships.
+		{"dev_metrics.py", "dev_metrics.py"},
 		{"pyproject.toml", "pyproject.toml"},
 		{"Dockerfile", "Dockerfile"},
 		{"compose.dev.yaml", "compose.dev.yaml"},

@@ -1,0 +1,3 @@
+UNMUTE_METRIC {"kind":"turn","seq":1,"e2e":1.204,"user_turn":0.388,"transcription":0.18,"stages":[{"name":"deepgram","kind":"stt","model":"nova-3"},{"name":"openai","kind":"llm","model":"gpt-4o","ttfb":0.302},{"name":"cartesia","kind":"tts","model":"sonic-2","ttfb":0.377,"total":1.98}],"tools":[{"name":"check_availability","seconds":0.902}]}
+UNMUTE_METRIC {"kind":"turn","seq":2,"e2e":0.774,"user_turn":0.265,"transcription":0.161,"interrupted":true,"stages":[{"name":"openai","kind":"llm","model":"gpt-4o","ttfb":0.288}]}
+UNMUTE_METRIC {"kind":"session","first_speech":1.402}

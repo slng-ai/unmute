@@ -50,6 +50,8 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
 
+from dev_metrics import dev_metrics_observer
+
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat_slng import SlngTTSService
@@ -644,6 +646,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     main = PipelineWorker(
         pipeline,
         name=MAIN_NAME,
+        # The worker builds its own latency observer only when tracing is enabled,
+        # and does not re-expose its events, so this one is always ours.
+        observers=[dev_metrics_observer()],
 
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )

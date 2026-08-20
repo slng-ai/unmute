@@ -558,6 +558,10 @@ func livekitDeploys(regions []string) []livekitDeploy {
 func renderLiveKitFiles(data livekitData) ([]File, error) {
 	outputs := []struct{ tmpl, path string }{
 		{"agent.py", "agent.py"},
+		// Always emitted, inert unless the dev loop sets devmetrics.Env. Emitting
+		// it only for `dev` would make build/<target>/ depend on which command
+		// last ran, so the dev loop would stop testing the file that ships.
+		{"dev_metrics.py", "dev_metrics.py"},
 		{"pyproject.toml", "pyproject.toml"},
 		{"README.md", "README.md"},
 		{"env.example", ".env.example"},
