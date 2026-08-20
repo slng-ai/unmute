@@ -110,6 +110,9 @@ function call, so it would otherwise be timed like a tool, and a delegate does n
 return until the flow it started has finished. A three-turn task would appear as
 one very slow tool, which is the opposite of what the numbers are for.
 
+[Reading the latency numbers](/dev/latency) covers what each number means, where
+the time goes in a voice turn, and how to tell which part is slow.
+
 The logs view is in front while the target is starting, and the conversation
 view takes over once the agent is ready. If anything in the startup output looked
 like a failure, the logs view stays in front instead, and the count of those
@@ -230,5 +233,11 @@ signaling and RTP ingress.
   </Card>
   <Card title="dev reference" icon="book" href="/reference/cli/dev">
     Every flag, with defaults and requirements.
+  </Card>
+  <Card title="Latency" icon="gauge" href="/dev/latency">
+    What each number under a turn means, and which part to fix.
+  </Card>
+  <Card title="Turn detection" icon="ear" href="/models/turn-detection">
+    Often the largest number in a turn, and a setting you control.
   </Card>
 </Columns>

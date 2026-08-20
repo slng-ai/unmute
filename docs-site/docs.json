@@ -120,6 +120,7 @@
         "icon": "terminal",
         "pages": [
           "dev/overview",
+          "dev/latency",
           "dev/telephony",
           "dev/webhooks-and-tunnels"
         ]
