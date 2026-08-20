@@ -81,8 +81,9 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 {{end}}{{if not .Inline}}from pipecat.workers.llm import {{if not (and .Tracing (or .NeedsFunctionCalls .NeedsMCP))}}LLMWorker, {{end}}LLMWorkerActivationArgs{{if .NeedsFunctionCalls}}, tool{{end}}
 {{else if .NeedsFunctionCalls}}from pipecat.workers.llm import tool
 {{end}}from pipecat.workers.runner import WorkerRunner
-{{if .Tracing}}
-from tracing import (
+
+from dev_metrics import dev_metrics_observer
+{{if .Tracing}}from tracing import (
     TRACE_NAME,
 {{if or .NeedsFunctionCalls .NeedsMCP}}    TracedLLMWorker,
 {{end}}    enable_agent_tracing,
@@ -1203,6 +1204,7 @@ def build_stt():
     worker = PipelineWorker(
         pipeline,
         name=MAIN_NAME,
+        observers=[dev_metrics_observer()],
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
 {{if .Inactivity}}
@@ -1317,6 +1319,9 @@ def build_stt():
     main = PipelineWorker(
         pipeline,
         name=MAIN_NAME,
+        # The worker builds its own latency observer only when tracing is enabled,
+        # and does not re-expose its events, so this one is always ours.
+        observers=[dev_metrics_observer()],
 {{if .Tracing}}
         conversation_id=runner_args.session_id,
         enable_tracing=True,

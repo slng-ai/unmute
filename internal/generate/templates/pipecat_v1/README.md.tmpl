@@ -16,6 +16,29 @@ uv run bot.py -t webrtc                   # web: open the URL it prints
 Pipecat logs default to `INFO`. Set `UNMUTE_LOG_LEVEL=DEBUG` only in a
 controlled environment because logs can contain caller speech, tool data, and
 phone details.
+
+## Latency measurements
+
+`dev_metrics.py` prints one line per turn to stdout, so you can see where a slow
+reply went. It prints nothing unless `UNMUTE_DEV_METRICS` is set, and `unmute
+dev` sets it for you. Nothing is sent anywhere: the line goes to stdout and that
+is all.
+
+```text
+UNMUTE_METRIC {"kind":"turn","seq":1,"e2e":1.057,"user_turn":0.412,"stages":[...],"tools":[...]}
+```
+
+Read them with `grep UNMUTE_METRIC` on the run's output. Times are seconds.
+`e2e` is from the caller falling silent to the agent starting to speak, `stages`
+carries the time to first byte for each service, and `tools` carries how long
+each tool took, including tools reached through a remote tool source. Controls
+are not listed there: a delegate or a transfer hands the conversation somewhere
+else rather than doing a unit of work, and a delegate does not return until the
+flow it started has finished, so its duration is that flow's, not a tool's.
+
+A measurement Pipecat does not report is left out of the line rather than sent
+as zero, so a field you do not see was not measured, not instant. Pipecat
+reports no total streaming time per service here, only time to first byte.
 {{- if gt (len .Agents) 1}}
 
 ## Agent handoffs

@@ -163,6 +163,26 @@ rather than accepted and dropped.
 A dev run puts back every outward change it made when it exits, including on
 `ctrl-c`.
 
+**When the question is latency, do not guess.** A dev run measures every turn
+and shows the numbers under it in the browser: end to end, time to first byte per
+service, how long the reply took to stream out, and how long each tool took.
+Controls are left out of that last one on purpose: a delegate or a transfer hands
+the conversation on rather than doing work, and a delegate's call lasts as long as
+the whole flow it started. The
+same records are in the run's log, one JSON line per turn, so this answers "which
+part was slow" without reading the whole log:
+
+```sh
+grep '"kind":"turn"' build/<target>/dev.log
+```
+
+A value that is missing was not reported by that target rather than being zero.
+Nothing is sent anywhere; the measurements never leave the machine.
+
+The browser also has a second view carrying everything the run printed, and it
+opens before the runtime starts, so a container build that fails is something to
+read there rather than a silent exit.
+
 ## What to state when you finish
 
 Say what you actually did, in this order:

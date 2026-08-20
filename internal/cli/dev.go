@@ -19,6 +19,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/slng-ai/unmute/internal/devmetrics"
 	"github.com/slng-ai/unmute/internal/generate"
 	"github.com/slng-ai/unmute/internal/ir"
 	"github.com/slng-ai/unmute/internal/style"
@@ -368,6 +369,11 @@ func devChildEnv(root string, warn io.Writer) []string {
 			}
 		}
 	}
+	// The emitted agent's measurement producers are inert unless this is set. It
+	// goes here rather than in each runner so telephony gets it too, and after
+	// the dotenv files so the dev loop wins over a stale value on disk. The name
+	// is owned by devmetrics because two Python producers read the same string.
+	env = setChildEnv(env, devmetrics.Env, "1")
 	return env
 }
 

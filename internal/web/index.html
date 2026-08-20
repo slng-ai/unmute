@@ -34,6 +34,72 @@
     min-height:0; /* let transcript scroll inside flexbox */
   }
 
+  /* ── views ───────────────────────────────────────────────
+     Header and controls sit outside: a control that disappears when you switch
+     view is the same defect as a control labelled with its action. Switching is
+     state, never navigation — tearing the page down would end the call. */
+  .views{flex:1;min-height:0;display:flex;flex-direction:column}
+  .view{flex:1;min-height:0;display:none;flex-direction:column;gap:20px}
+  .view[data-active="true"]{display:flex}
+
+  /* ── view switch ──────────────────────────────────────────
+     A segmented control, not a rail: two destinations do not earn a permanent
+     vertical gutter, and the page is one centred column. */
+  .viewtabs{display:flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+  .vtab{
+    font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    display:flex;align-items:center;gap:6px;
+    padding:5px 10px;border:0;border-radius:6px;cursor:pointer;
+    background:transparent;color:var(--muted);
+    transition:background .18s var(--ease),color .18s var(--ease);
+  }
+  .vtab:hover{color:var(--text)}
+  .vtab[aria-selected="true"]{background:var(--surface-2);color:var(--text)}
+  .vtab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  /* the flagged count rides the tab, so it is visible from either view */
+  .badge{
+    font-size:10px;letter-spacing:0;padding:1px 5px;border-radius:99px;
+    background:var(--danger);color:var(--accent-ink);font-weight:700;
+  }
+  .badge[hidden]{display:none}
+
+  /* ── log view ────────────────────────────────────────────── */
+  .logtools{display:flex;gap:10px;align-items:center;flex:none}
+  #logfilter{
+    flex:1;min-width:0;font-family:var(--mono);font-size:13px;
+    padding:9px 12px;border-radius:9px;
+    border:1px solid var(--border);background:var(--surface);color:var(--text);
+  }
+  #logfilter::placeholder{color:var(--faint)}
+  #logfilter:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .kinds{display:flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+  .kind{
+    font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+    padding:5px 9px;border:0;border-radius:6px;cursor:pointer;
+    background:transparent;color:var(--muted);
+  }
+  .kind[aria-pressed="true"]{background:var(--surface-2);color:var(--text)}
+  .kind:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .logpane{
+    flex:1;min-height:0;display:flex;
+    border:1px solid var(--border);border-radius:12px;background:var(--surface);overflow:hidden;
+  }
+  .loglist{
+    flex:1;overflow:auto;overscroll-behavior:contain;padding:12px 14px;
+    font-size:12.5px;line-height:1.5;
+    scrollbar-width:thin;scrollbar-color:var(--border) transparent;
+  }
+  .loglist::-webkit-scrollbar{width:8px;height:8px}
+  .loglist::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .logrow{
+    display:block;white-space:pre-wrap;overflow-wrap:anywhere;
+    color:var(--muted);padding:1px 0;
+  }
+  .logrow.flagged{color:var(--danger)}
+  .logrow.metric{color:var(--accent)}
+  .logempty{color:var(--faint);font-size:12.5px;letter-spacing:.04em;padding:8px 0}
+
   /* ── top bar ─────────────────────────────────────────── */
   .bar{display:flex;align-items:center;justify-content:space-between;gap:16px}
   .status{display:flex;align-items:center;gap:10px;min-width:0}
@@ -107,6 +173,25 @@
     font-size:12.5px;letter-spacing:.04em;
   }
 
+  /* ── per-turn timings ─────────────────────────────────────
+     Reference, not content: quiet enough that reading the conversation is
+     unaffected, close enough that you never go looking. No thresholds and no
+     colour scale, because picking "slow" is a policy nobody asked for. */
+  .timing{display:flex;flex-wrap:wrap;gap:12px;margin-top:3px}
+  .timing span{
+    font-size:10.5px;letter-spacing:.06em;color:var(--faint);
+    display:flex;gap:4px;white-space:nowrap;
+  }
+  .timing b{color:var(--muted);font-weight:600}
+
+  /* a tool call is its own step in the timeline, between the two turns */
+  .toolrow{display:flex;align-items:baseline;gap:8px;max-width:100%}
+  .toolrow .tname{
+    font-size:12.5px;color:var(--muted);
+    word-wrap:break-word;overflow-wrap:anywhere;
+  }
+  .toolrow .ttime{font-size:10.5px;letter-spacing:.06em;color:var(--faint);white-space:nowrap}
+
   /* compact mode when conversation is active: shrink the stage out of the way */
   body[data-state="connected"] .state{font-size:22px}
   body[data-state="connected"] .stage{gap:14px}
@@ -128,7 +213,37 @@
   #mute[disabled]{opacity:.4;cursor:not-allowed}
   #connect{flex:1;background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
   #connect:hover:not([disabled]){background:oklch(0.92 0.165 96)}
-  #mute{flex:none}
+  /* Nothing to connect to yet: the page is served before the runtime exists. */
+  #connect[disabled]{opacity:.4;cursor:not-allowed}
+
+  /* ── microphone: a state readout, not a verb ──────────────
+     Uppercase and letter-spaced like .who so it reads as a status line rather
+     than a second action button sitting next to the real one. */
+  #mute{
+    flex:none;position:relative;overflow:hidden;
+    display:flex;align-items:center;gap:8px;
+    font-size:12.5px;letter-spacing:.1em;
+  }
+  .mic-glyph{font-size:10px;line-height:1}
+  #mute[data-mic="live"]{
+    background:var(--accent);color:var(--accent-ink);border-color:var(--accent);
+  }
+  #mute[data-mic="muted"]{
+    background:transparent;color:var(--muted);border-color:var(--border);font-weight:500;
+  }
+  #mute[data-mic="unavailable"]{
+    background:transparent;color:var(--faint);border-color:var(--border);font-weight:500;
+  }
+  #mute[data-mic="unavailable"] .mic-glyph{visibility:hidden}  /* keeps the width, drops the mark */
+
+  /* input level, inside the control it describes */
+  .mic-level{position:absolute;left:0;right:0;bottom:0;height:2px;pointer-events:none}
+  .mic-level i{
+    display:block;height:100%;width:100%;background:var(--accent-ink);opacity:.5;
+    transform:scaleX(0);transform-origin:left;transition:transform .07s linear;
+  }
+  /* The level is driven by an inline transform, which outranks any rule here, so
+     renderMic() zeroes it on leaving `live` rather than a selector doing it. */
 
   /* mic selector — shown only when ≥2 inputs exist (pipecat transport only) */
   .microw{
@@ -160,8 +275,7 @@
   body[data-state="error"] .dot{background:var(--danger)}
   body[data-state="error"] .state{color:var(--danger)}
 
-  /* muted: mic is off — dim the meter, flag the toggle */
-  body.muted #mute{color:var(--danger);border-color:var(--danger)}
+  /* muted: mic is off — dim the meter. The control dims itself via data-mic. */
   body.muted[data-state="connected"] .meter i{opacity:.5}
 
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
@@ -180,18 +294,43 @@
         <span class="dot" aria-hidden="true"></span>
         <span class="statusline">unmute dev<span class="sep">//</span><b id="agent">agent</b></span>
       </div>
+      <div class="viewtabs" role="tablist" aria-label="View">
+        <button class="vtab" type="button" role="tab" data-view="conversation" aria-selected="true">conversation</button>
+        <button class="vtab" type="button" role="tab" data-view="logs" aria-selected="false">
+          logs<span class="badge" id="flagcount" hidden>0</span>
+        </button>
+      </div>
       <img class="logo" src="logo.png" alt="SLNG">
     </header>
 
-    <section class="stage">
-      <div class="state" id="state" aria-live="polite" role="status">ready</div>
-      <div class="meter" id="meter" aria-hidden="true"></div>
-      <p class="hint" id="hint">press connect and talk to your agent</p>
-    </section>
+    <div class="views" id="views">
+      <div class="view" id="view-conversation" data-view="conversation" data-active="true">
+        <section class="stage">
+          <div class="state" id="state" aria-live="polite" role="status">ready</div>
+          <div class="meter" id="meter" aria-hidden="true"></div>
+          <p class="hint" id="hint">press connect and talk to your agent</p>
+        </section>
 
-    <section class="transcript" aria-label="Conversation transcript">
-      <div class="tlist" id="tlist" aria-live="polite" aria-atomic="false"></div>
-    </section>
+        <section class="transcript" aria-label="Conversation transcript">
+          <div class="tlist" id="tlist" aria-live="polite" aria-atomic="false"></div>
+        </section>
+      </div>
+
+      <div class="view" id="view-logs" data-view="logs">
+        <div class="logtools">
+          <input id="logfilter" type="search" placeholder="filter output" aria-label="Filter output" autocomplete="off">
+          <div class="kinds" role="group" aria-label="Kind">
+            <button class="kind" type="button" data-kind="all" aria-pressed="true">all</button>
+            <button class="kind" type="button" data-kind="output" aria-pressed="false">output</button>
+            <button class="kind" type="button" data-kind="metric" aria-pressed="false">metrics</button>
+            <button class="kind" type="button" data-kind="flagged" aria-pressed="false">problems</button>
+          </div>
+        </div>
+        <section class="logpane" aria-label="Run output">
+          <div class="loglist" id="loglist"></div>
+        </section>
+      </div>
+    </div>
 
     <footer class="controls">
       <label class="microw" id="microw" hidden>
@@ -201,7 +340,12 @@
       </label>
       <div class="btnrow">
         <button id="connect" type="button">connect</button>
-        <button id="mute" type="button" disabled>mic on</button>
+        <button id="mute" type="button" data-mic="unavailable" disabled
+                aria-live="polite" title="M to toggle, hold SPACE to talk">
+          <span class="mic-glyph" aria-hidden="true">○</span>
+          <span class="mic-text">MIC —</span>
+          <span class="mic-level" aria-hidden="true"><i id="miclevel"></i></span>
+        </button>
       </div>
     </footer>
   </main>
@@ -233,7 +377,13 @@ const el = {
   agent: document.getElementById("agent"),
   microw: document.getElementById("microw"),
   micsel: document.getElementById("micsel"),
+  micText: document.querySelector("#mute .mic-text"),
+  micGlyph: document.querySelector("#mute .mic-glyph"),
+  micLevel: document.getElementById("miclevel"),
   tlist: document.getElementById("tlist"),
+  loglist: document.getElementById("loglist"),
+  logfilter: document.getElementById("logfilter"),
+  flagcount: document.getElementById("flagcount"),
 };
 el.agent.textContent = AGENT;
 
@@ -247,10 +397,150 @@ let transport = null;                 // "webrtc-offer" | "livekit" while connec
 let pc = null, mic = null, pcId = null, dc = null;   // pipecat transport
 let room = null;                                     // livekit transport
 let audioCtx = null, analyser = null, micNode = null, remoteNode = null, raf = 0;
+let micAnalyser = null;                               // mic-only tap, drives the level in the control
 let muted = false, selectedDeviceId = null;
+let micState = "unavailable";                         // "unavailable" | "live" | "muted"
+let holding = false, heldWasMuted = false;            // hold-to-talk
 let partialEl = null; // live user partial; replaced/promoted on final
 let botTurnEl = null;
 const botSegments = new Map(); // RTVI segment id → latest text
+
+// ── views ───────────────────────────────────────────────
+// State, not navigation: tearing the page down would end the call, so there is
+// no router and no second document. The session controls live outside both views.
+let currentView = "conversation";
+let viewPinned = false;              // the author chose; stop moving it for them
+const tabs = Array.from(document.querySelectorAll(".vtab"));
+
+function showView(name, byUser){
+  if (byUser) viewPinned = true;
+  currentView = name;
+  for (const view of document.querySelectorAll(".view"))
+    view.dataset.active = String(view.dataset.view === name);
+  for (const tab of tabs)
+    tab.setAttribute("aria-selected", String(tab.dataset.view === name));
+  if (name === "logs") renderLog();
+}
+for (const tab of tabs)
+  tab.addEventListener("click", () => { tab.blur(); showView(tab.dataset.view, true); });
+
+// ── run output ──────────────────────────────────────────
+// The run's lifecycle drives what is in front, because the first thing worth
+// looking at before a runtime exists is the reason it does not exist yet.
+const LOG_MAX = 2000;
+const logRows = [];                  // {kind:"output"|"metric", text, flagged}
+let flagged = 0;
+let ready = false;
+
+function setRunState(state){
+  el.connect.disabled = !ready && state !== "ready";
+  if (state === "ready"){
+    ready = true;
+    el.connect.disabled = false;
+    // Move to the conversation once there is one to have, unless something went
+    // wrong on the way up, in which case the output is the more useful view.
+    if (!viewPinned && !flagged) showView("conversation");
+  } else if (state === "failed"){
+    ready = false;
+    el.connect.disabled = true;
+    setState("error", "error", "the agent did not start; see the output");
+    if (!viewPinned) showView("logs");
+  } else if (!viewPinned && currentView !== "logs"){
+    showView("logs");
+  }
+}
+
+function pushLogRow(row){
+  logRows.push(row);
+  if (logRows.length > LOG_MAX) logRows.shift();   // oldest end, as with the server's buffer
+  if (row.flagged){
+    flagged++;
+    el.flagcount.textContent = String(flagged);
+    el.flagcount.hidden = false;
+  }
+  if (currentView === "logs") renderLog();
+}
+
+// One compact line per record, so the log view answers "was it slow" without
+// leaving it.
+function metricText(rec){
+  if (!rec) return "";
+  if (rec.kind === "session")
+    return "session · first speech " + secs(rec.first_speech);
+  const parts = ["turn " + (rec.seq || "?")];
+  if (rec.e2e != null) parts.push("e2e " + secs(rec.e2e));
+  for (const stage of rec.stages || []){
+    // This line is about time, so a stage that reported none is left out of it.
+    // Which model was in use belongs beside the turn, not here.
+    if (stage.ttfb == null && stage.total == null) continue;
+    const bits = [stage.kind];
+    if (stage.ttfb != null) bits.push(secs(stage.ttfb));
+    if (stage.total != null) bits.push("total " + secs(stage.total));
+    parts.push(bits.join(" "));
+  }
+  for (const tool of rec.tools || []) parts.push(tool.name + " " + secs(tool.seconds));
+  if (rec.interrupted) parts.push("interrupted");
+  return parts.join("  ·  ");
+}
+function secs(v){ return v == null ? "—" : v.toFixed(2) + "s"; }
+
+function logMatches(row, needle, kind){
+  if (kind === "output" && row.kind !== "output") return false;
+  if (kind === "metric" && row.kind !== "metric") return false;
+  if (kind === "flagged" && !row.flagged) return false;
+  return !needle || row.text.toLowerCase().includes(needle);
+}
+
+function renderLog(){
+  const needle = el.logfilter.value.trim().toLowerCase();
+  const kind = document.querySelector(".kind[aria-pressed='true']").dataset.kind;
+  const atBottom = el.loglist.scrollHeight - el.loglist.scrollTop - el.loglist.clientHeight < 80;
+  const frag = document.createDocumentFragment();
+  let shown = 0;
+  for (const row of logRows){
+    if (!logMatches(row, needle, kind)) continue;
+    const line = document.createElement("span");
+    line.className = "logrow" + (row.flagged ? " flagged" : "") + (row.kind === "metric" ? " metric" : "");
+    line.textContent = row.text;
+    frag.appendChild(line);
+    shown++;
+  }
+  el.loglist.replaceChildren(frag);
+  if (!shown){
+    const empty = document.createElement("div");
+    empty.className = "logempty";
+    empty.textContent = logRows.length ? "nothing matches that filter" : "waiting for output…";
+    el.loglist.appendChild(empty);
+  }
+  if (atBottom) el.loglist.scrollTop = el.loglist.scrollHeight;
+}
+
+el.logfilter.addEventListener("input", renderLog);
+for (const button of document.querySelectorAll(".kind")){
+  button.addEventListener("click", () => {
+    for (const other of document.querySelectorAll(".kind"))
+      other.setAttribute("aria-pressed", String(other === button));
+    button.blur();
+    renderLog();
+  });
+}
+
+// EventSource, not a WebSocket: it reconnects on its own and replays with
+// Last-Event-ID, which is exactly the behaviour the server's buffer expects.
+function startEventStream(){
+  if (DEMO || !window.EventSource) return;
+  const es = new EventSource("/api/events");
+  es.addEventListener("message", (e) => {
+    let ev;
+    try { ev = JSON.parse(e.data); } catch { return; }
+    if (ev.t === "state") setRunState(ev.state);
+    else if (ev.t === "log") pushLogRow({kind:"output", text: ev.text || "", flagged: !!ev.flagged});
+    else if (ev.t === "metric"){
+      pushLogRow({kind:"metric", text: metricText(ev.record), flagged:false});
+      attachRecord(ev.record);
+    }
+  });
+}
 
 function setState(s, label, hint){
   el.body.dataset.state = s;
@@ -265,6 +555,7 @@ function clearTranscript(){
   el.tlist.innerHTML = "";
   partialEl = null;
   botTurnEl = null;
+  heldRecord = null;
   botSegments.clear();
   el.body.dataset.hasHistory = "false";
 }
@@ -304,6 +595,76 @@ function resetBotTurn(){
   botTurnEl = null;
   botSegments.clear();
 }
+
+// ── per-turn timings ────────────────────────────────────
+// Records are matched to turns by nearest in time, not by an identifier plumbed
+// through the transport. A record usually lands within a moment of the turn it
+// describes, but it can beat the transcript row it belongs to, so one is held.
+// Under heavy interruption a line may land on a neighbouring turn; that is the
+// accepted cost of not threading an id through two SDKs for a local view.
+let heldRecord = null;
+
+function attachRecord(rec){
+  if (!rec || rec.kind !== "turn") return;   // the session record is log-only
+  if (botTurnEl) renderTurnTiming(botTurnEl, rec);
+  else heldRecord = rec;
+}
+
+function claimHeldRecord(turn){
+  if (!heldRecord) return;
+  const rec = heldRecord;
+  heldRecord = null;
+  renderTurnTiming(turn, rec);
+}
+
+function timingEntry(label, value){
+  const span = document.createElement("span");
+  const name = document.createElement("i");
+  name.textContent = label;
+  const amount = document.createElement("b");
+  amount.textContent = secs(value);       // an unreported value is a dash, never 0.00
+  span.append(name, amount);
+  return span;
+}
+
+function renderTurnTiming(turn, rec){
+  // Tools ran before the reply did, so they belong above it in the timeline.
+  for (const tool of rec.tools || []){
+    const row = document.createElement("div");
+    row.className = "toolrow";
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = "tool";
+    const name = document.createElement("span");
+    name.className = "tname";
+    name.textContent = tool.name;
+    const time = document.createElement("span");
+    time.className = "ttime";
+    time.textContent = secs(tool.seconds);
+    row.append(who, name, time);
+    turn.parentNode.insertBefore(row, turn);
+  }
+
+  const old = turn.querySelector(".timing");
+  if (old) old.remove();                  // a re-delivered record replaces, never stacks
+  const line = document.createElement("div");
+  line.className = "timing";
+  line.appendChild(timingEntry("e2e", rec.e2e));
+  for (const stage of rec.stages || []){
+    if (stage.ttfb == null && stage.total == null) continue;
+    line.appendChild(timingEntry(stage.kind, stage.ttfb != null ? stage.ttfb : stage.total));
+    // Sits immediately after its stage, so it does not repeat the stage's name.
+    if (stage.ttfb != null && stage.total != null)
+      line.appendChild(timingEntry("total", stage.total));
+  }
+  if (rec.interrupted){
+    const flag = document.createElement("span");
+    flag.textContent = "interrupted";
+    line.appendChild(flag);
+  }
+  turn.appendChild(line);
+  if (nearBottom()) el.tlist.scrollTop = el.tlist.scrollHeight;
+}
 function setBotSegment(id, text){
   text = (text || "").trim();
   if (!text) return;
@@ -313,40 +674,61 @@ function setBotSegment(id, text){
     if (!merged || part.startsWith(merged)) merged = part;
     else if (part !== merged && !merged.endsWith(part)) merged += " " + part;
   }
-  if (!botTurnEl) botTurnEl = pushTurn("bot", merged);
+  if (!botTurnEl){ botTurnEl = pushTurn("bot", merged); claimHeldRecord(botTurnEl); }
   else botTurnEl.querySelector(".said").textContent = merged;
 }
 
-// ── meter: mic + agent mixed into one analyser ──────────
-function startMeter(remoteStream){
+// ── meters: one mixed (mic + agent) for the stage, one mic-only for the control ──
+// Two analysers off one context. The stage meter answers "is anything happening",
+// the level inside the microphone control answers "is it hearing me", and those
+// are different questions — a mixed reading rises when the agent talks.
+function ensureAudio(){
+  if (audioCtx) return;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   analyser = audioCtx.createAnalyser();
   analyser.fftSize = 64;
-  remoteNode = audioCtx.createMediaStreamSource(remoteStream);
-  remoteNode.connect(analyser);                       // agent voice
-  if (mic) reconnectMic(mic);                         // your voice (pipecat only)
+  micAnalyser = audioCtx.createAnalyser();
+  micAnalyser.fftSize = 64;
   const freq = new Uint8Array(analyser.frequencyBinCount);
+  const micFreq = new Uint8Array(micAnalyser.frequencyBinCount);
   const tick = () => {
     analyser.getByteFrequencyData(freq);
     for (let i = 0; i < BARS; i++){
       const v = (freq[Math.floor(i * freq.length / BARS)] || 0) / 255;
       bars[i].style.transform = `scaleY(${Math.max(0.08, v)})`;
     }
+    if (micNode && micState === "live"){
+      micAnalyser.getByteFrequencyData(micFreq);
+      let peak = 0;
+      for (const v of micFreq) if (v > peak) peak = v;
+      el.micLevel.style.transform = `scaleX(${Math.min(1, (peak / 255) * 1.6)})`;
+    }
     raf = requestAnimationFrame(tick);
   };
   tick();
 }
+function startMeter(remoteStream){
+  ensureAudio();
+  if (remoteNode) { try { remoteNode.disconnect(); } catch {} }
+  remoteNode = audioCtx.createMediaStreamSource(remoteStream);
+  remoteNode.connect(analyser);                       // agent voice
+  if (mic) reconnectMic(mic);                         // your voice, if it is already up
+}
+// Called on both transports. On livekit `mic` is a MediaStream wrapped around the
+// published track, so the level works there too rather than only on pipecat.
 function reconnectMic(stream){
-  if (!audioCtx) return;
+  ensureAudio();
   if (micNode) { try { micNode.disconnect(); } catch {} }
   micNode = audioCtx.createMediaStreamSource(stream);
   micNode.connect(analyser);                          // analyser only — never to destination (no feedback)
+  micNode.connect(micAnalyser);
 }
 function stopMeter(){
   cancelAnimationFrame(raf); raf = 0;
   if (audioCtx) audioCtx.close();
-  audioCtx = analyser = micNode = remoteNode = null;
+  audioCtx = analyser = micAnalyser = micNode = remoteNode = null;
   setBars(0.08);
+  el.micLevel.style.transform = "scaleX(0)";
 }
 
 // ── shared teardown (either transport) ──────────────────
@@ -359,8 +741,7 @@ function teardown(state, hint){
   if (mic){ mic.getTracks().forEach(t => t.stop()); mic = null; }
   if (room){ try { room.disconnect(); } catch {} room = null; }
   el.remote.srcObject = null;
-  el.mute.disabled = true; el.mute.textContent = "mic on";
-  el.body.classList.remove("muted"); muted = false;
+  setMicUnavailable();
   el.connect.textContent = "connect";
   transport = null;
   setPartial("");
@@ -368,13 +749,60 @@ function teardown(state, hint){
            state === "error" ? hint : "press connect and talk to your agent");
 }
 
-function toggleMute(){
-  muted = !muted;
-  el.body.classList.toggle("muted", muted);
-  el.mute.textContent = muted ? "muted" : "mic on";
+// ── microphone: the control names the state, styling carries the affordance ──
+const MIC_LABEL = {unavailable:"MIC —", live:"MIC LIVE", muted:"MIC MUTED"};
+function renderMic(){
+  el.mute.dataset.mic = micState;
+  el.mute.disabled = micState === "unavailable";
+  el.micText.textContent = MIC_LABEL[micState];
+  el.micGlyph.textContent = micState === "live" ? "●" : "○";
+  el.body.classList.toggle("muted", micState === "muted");
+  if (micState !== "live") el.micLevel.style.transform = "scaleX(0)";
+}
+function setMuted(v){
+  muted = v;
+  micState = v ? "muted" : "live";
+  renderMic();
   if (mic) mic.getAudioTracks().forEach(t => t.enabled = !muted);        // pipecat
   if (room) { try { room.localParticipant.setMicrophoneEnabled(!muted); } catch {} } // livekit
 }
+function setMicUnavailable(){
+  muted = false; micState = "unavailable"; holding = false;
+  renderMic();
+}
+function toggleMute(){
+  if (micState === "unavailable") return;             // inert, not silently ignored elsewhere
+  setMuted(!muted);
+}
+
+// ── keyboard: toggle key and hold-to-talk ────────────────
+// Push-to-talk is the only way to test barge-in deliberately instead of by
+// talking over yourself, so SPACE has to reach here even when a button holds
+// focus — otherwise it activates that button and ends the call.
+function typingTarget(t){
+  if (!t) return false;
+  const tag = (t.tagName || "").toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable;
+}
+document.addEventListener("keydown", (e) => {
+  if (typingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "m" || e.key === "M"){
+    e.preventDefault();
+    if (e.repeat) return;
+    toggleMute();
+  } else if (e.key === " "){
+    e.preventDefault();                               // stops button activation and page scroll
+    if (e.repeat || holding || micState === "unavailable") return;
+    holding = true; heldWasMuted = muted;
+    if (muted) setMuted(false);                       // reads exactly as a latched MIC LIVE
+  }
+});
+document.addEventListener("keyup", (e) => {
+  if (e.key !== " " || !holding) return;
+  e.preventDefault();
+  holding = false;
+  if (heldWasMuted && micState !== "unavailable") setMuted(true);
+});
 
 // ── bootstrap: ask the CLI which transport this target uses ──
 async function connect(){
@@ -389,6 +817,13 @@ async function connect(){
     session = await res.json();
   } catch (err) {
     return setState("error", "error", "could not reach the dev server");
+  }
+  if (session.ready === false){
+    // The page outlives its runtime in both directions now, so this is a real
+    // answer rather than an error: there is nothing to call yet.
+    setState("idle", "ready", "the agent is not running yet; see the output");
+    if (!viewPinned) showView("logs");
+    return;
   }
   transport = session.kind;
   if (session.kind === "livekit") return connectLivekit(session);
@@ -418,7 +853,9 @@ async function refreshMics(){
 
 el.micsel.addEventListener("change", async () => {
   selectedDeviceId = el.micsel.value || null;
-  if (!DEMO && el.body.dataset.state === "connected" && transport === "webrtc-offer") await swapMic();
+  if (DEMO || el.body.dataset.state !== "connected") return;
+  if (transport === "webrtc-offer") await swapMic();
+  else if (room) await swapMicLivekit();
 });
 
 async function swapMic(){
@@ -546,9 +983,8 @@ async function connectPipecat(session){
     await pc.setRemoteDescription(answer);
     await waitForPeer(pc);
 
-    muted = false; el.body.classList.remove("muted");
-    el.mute.disabled = false; el.mute.textContent = "mic on";
-    el.connect.textContent = "disconnect";
+    setMuted(false);
+    el.connect.textContent = "end call";
     setState("connected", "live", "talk to your agent");
   } catch (err) {
     teardown("error", String(err.message || err));
@@ -567,8 +1003,27 @@ function loadLiveKit(){
   });
 }
 
+// The publication holds the track the SDK is actually sending. Wrapping its
+// mediaStreamTrack feeds the same analyser path both transports use, so the input
+// level is not a pipecat-only feature.
+function attachLocalMic(){
+  const LK = window.LivekitClient;
+  if (!room || !LK) return;
+  try {
+    const pub = room.localParticipant.getTrackPublication(LK.Track.Source.Microphone);
+    const track = pub && pub.track && pub.track.mediaStreamTrack;
+    if (track) reconnectMic(new MediaStream([track]));
+  } catch { /* the level is a nicety; never break a call for it */ }
+}
+
+async function swapMicLivekit(){
+  try {
+    await room.switchActiveDevice("audioinput", selectedDeviceId);
+    attachLocalMic();                                 // the underlying track changed
+  } catch { /* keep the existing input on failure */ }
+}
+
 async function connectLivekit(session){
-  el.microw.hidden = true;                            // the SDK owns mic selection
   setState("connecting", "connecting", "loading the livekit client");
   const LK = await loadLiveKit();
   if (!LK) return teardown("error", "could not load the livekit client");
@@ -582,6 +1037,9 @@ async function connectLivekit(session){
     }
   });
   room.on(LK.RoomEvent.TrackUnsubscribed, () => { el.remote.srcObject = null; });
+  room.on(LK.RoomEvent.LocalTrackPublished, (pub) => {
+    if (pub && pub.kind === LK.Track.Kind.Audio) attachLocalMic();
+  });
   room.on(LK.RoomEvent.Disconnected, () => teardown("idle"));
   room.on(LK.RoomEvent.ParticipantConnected, (p) => setState("connected", "live", "talking to " + p.identity));
   // Transcriptions are optional across SDK builds; wire them when present.
@@ -602,32 +1060,37 @@ async function connectLivekit(session){
     setState("connecting", "connecting", "connecting to room");
     await room.connect(session.url, session.token);
     setState("connected", "live", "talk to your agent");
-    el.connect.textContent = "disconnect";
+    el.connect.textContent = "end call";
   } catch (err) {
     return teardown("error", String(err.message || err));
   }
   // Mic failure must not mask a successful join: you can still hear the agent.
   try {
     await room.localParticipant.setMicrophoneEnabled(true);
-    muted = false; el.body.classList.remove("muted");
-    el.mute.disabled = false; el.mute.textContent = "mic on";
+    setMuted(false);
+    attachLocalMic();                                 // in case the publish event already fired
+    await refreshMics();                              // labels resolve once permission is granted
   } catch (err) {
+    setMicUnavailable();                              // nothing to unmute, so not "muted"
     el.state.textContent = "live — microphone blocked; allow access and reconnect";
   }
 }
 
-el.connect.addEventListener("click", () =>
-  el.body.dataset.state === "connected" ? teardown("idle") : connect());
-el.mute.addEventListener("click", toggleMute);
+// blur() after every click: a button that keeps focus swallows the hold key.
+el.connect.addEventListener("click", () => {
+  el.connect.blur();
+  el.body.dataset.state === "connected" ? teardown("idle") : connect();
+});
+el.mute.addEventListener("click", () => { el.mute.blur(); toggleMute(); });
 if (!DEMO && navigator.mediaDevices && navigator.mediaDevices.addEventListener)
-  navigator.mediaDevices.addEventListener("devicechange", () => { if (transport === "webrtc-offer") refreshMics(); });
+  navigator.mediaDevices.addEventListener("devicechange", () => { if (transport) refreshMics(); });
 
 // ── demo-only visual preview (DEMO=true builds) ──────────
 function simulate(){
   clearTranscript();
   setState("connecting", "connecting", "negotiating with agent");
   setTimeout(() => {
-    el.mute.disabled = false; el.connect.textContent = "disconnect";
+    setMuted(false); el.connect.textContent = "end call";
     setState("connected", "live", "talk to your agent");
     pushTurn("bot", "Hi! I'm here to help. What can I do for you?");
     setTimeout(() => setPartial("hey what's the weather"), 800);
@@ -647,7 +1110,12 @@ function simulate(){
 }
 
 setBars(0.08);
+renderMic();
 setState("idle", "ready");
+// Nothing to call until the stream says otherwise. In DEMO builds there is no
+// stream, so the button stays live for the visual preview.
+if (!DEMO) el.connect.disabled = true;
+startEventStream();
 </script>
 </body>
 </html>

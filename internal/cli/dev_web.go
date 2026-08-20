@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -117,27 +118,30 @@ var pipecatWebAgentReady = waitForLocalAgentReady
 var pipecatLookPath = exec.LookPath
 
 func runDevPipecat(ctx context.Context, cmd *cobra.Command, outDir string, run devWebRun) error {
+	run = run.withStream()
 	portProbe, err := net.Listen("tcp", net.JoinHostPort("0.0.0.0", run.botPort))
 	if err != nil {
 		return fmt.Errorf("dev %s: local agent port %s is already in use: %w", run.root, run.botPort, err)
 	}
 	_ = portProbe.Close()
 
-	logFile, err := os.Create(run.logPath)
+	logSink, closeLog, err := openDevLog(cmd, run)
 	if err != nil {
-		return fmt.Errorf("dev %s: open log: %w", run.root, err)
+		return err
 	}
-	defer func() { _ = logFile.Close() }()
-	var logSink io.Writer = logFile
-	if run.verbose {
-		logSink = io.MultiWriter(logFile, cmd.ErrOrStderr())
+	defer closeLog()
+
+	web, err := startDevWebServer(cmd, run)
+	if err != nil {
+		return err
 	}
+	defer web.close()
 
 	spin := startSpinner(cmd.ErrOrStderr(), "starting the local Pipecat agent")
 	agent, err := startPipecatWebAgent(ctx, outDir, run.botPort, run.env, logSink)
 	if err != nil {
 		spin.Stop()
-		return fmt.Errorf("dev %s: %w", run.root, err)
+		return web.holdForFailure(ctx, cmd, run, fmt.Errorf("dev %s: %w", run.root, err))
 	}
 	defer stopBot(agent.cmd, agent.done)
 	if err := pipecatWebAgentReady(ctx, run.botPort, agent.done); err != nil {
@@ -145,10 +149,28 @@ func runDevPipecat(ctx context.Context, cmd *cobra.Command, outDir string, run d
 		if ctx.Err() != nil {
 			return nil
 		}
-		return fmt.Errorf("dev %s: local Pipecat agent not ready: %w (logs: %s)", run.root, err, run.logPath)
+		return web.holdForFailure(ctx, cmd, run,
+			fmt.Errorf("dev %s: local Pipecat agent not ready: %w (logs: %s)", run.root, err, run.logPath))
 	}
 	spin.Stop()
-	return serveDevWeb(ctx, cmd, run, agent.done)
+	run.stream.SetState(devStateReady)
+	return web.wait(ctx, cmd, run, agent.done)
+}
+
+// openDevLog opens the run's log and returns the sink both runners write to. The
+// file still receives every byte the process printed, measurement lines included:
+// a log that does not match the process makes the measurement path itself
+// undebuggable. The stream is a tee, not a filter.
+func openDevLog(cmd *cobra.Command, run devWebRun) (io.Writer, func(), error) {
+	logFile, err := os.Create(run.logPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dev %s: open log: %w", run.root, err)
+	}
+	writers := []io.Writer{logFile, run.stream}
+	if run.verbose {
+		writers = append(writers, cmd.ErrOrStderr())
+	}
+	return io.MultiWriter(writers...), func() { _ = logFile.Close() }, nil
 }
 
 type devWebRun struct {
@@ -163,6 +185,92 @@ type devWebRun struct {
 	botPort     string
 	noOpen      bool
 	verbose     bool
+	// stream carries the run's output to the page. Both runners tee their log
+	// sink into it, so startup output reaches the browser before there is a
+	// runtime to talk to.
+	stream *devStream
+}
+
+// withStream fills in the stream if the caller did not. Each runner establishes
+// this itself rather than trusting every call site to remember, because the only
+// symptom of forgetting is a nil dereference deep inside a startup path.
+func (r devWebRun) withStream() devWebRun {
+	if r.stream == nil {
+		r.stream = newDevStream()
+	}
+	return r
+}
+
+// devWebServer is the page, alive before the runtime it describes. Serving first
+// is the whole point of the inversion: a build that never finishes used to leave
+// the author with a terminal error and no browser, which is precisely when the
+// output is worth reading.
+type devWebServer struct {
+	srv   *http.Server
+	errCh chan error
+}
+
+// startDevWebServer binds, serves, prints the banner, and opens the browser. It
+// no longer waits for a runtime, so a port collision is still caught here but a
+// failing build is not.
+func startDevWebServer(cmd *cobra.Command, run devWebRun) (*devWebServer, error) {
+	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", run.uiPort))
+	if err != nil {
+		return nil, fmt.Errorf("dev %s: dev server: %w", run.root, err)
+	}
+	liveKitURL := "ws://127.0.0.1:7880"
+	if port := envValue(run.env, "LIVEKIT_HOST_PORT"); port != "" {
+		liveKitURL = "ws://127.0.0.1:" + port
+	}
+	srv := &http.Server{Handler: devWebMux(run.provider, run.agentName, run.botPort, liveKitURL, run.stream)}
+	web := &devWebServer{srv: srv, errCh: make(chan error, 1)}
+	go func() { web.errCh <- srv.Serve(ln) }()
+
+	uiURL := fmt.Sprintf("http://localhost:%s/?agent=%s", run.uiPort, url.QueryEscape(run.agentName))
+	fmt.Fprintf(cmd.OutOrStdout(), "\n  \033[1;32m▸\033[0m %s\n    ctrl-c to stop  ·  logs: %s\n\n", uiURL, run.logPath)
+	if !run.noOpen {
+		openBrowser(uiURL)
+	}
+	return web, nil
+}
+
+func (w *devWebServer) close() {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = w.srv.Shutdown(shutdownCtx)
+}
+
+// wait blocks until the run ends: an interrupt, the runtime stopping, or the
+// server itself failing.
+func (w *devWebServer) wait(ctx context.Context, cmd *cobra.Command, run devWebRun, runtimeDone <-chan error) error {
+	var returnErr error
+	select {
+	case <-ctx.Done():
+		fmt.Fprintln(cmd.ErrOrStderr(), "\nstopping...")
+	case err := <-runtimeDone:
+		if err != nil && ctx.Err() == nil && !composeWasInterrupted(ctx, err) {
+			returnErr = fmt.Errorf("dev %s: local runtime stopped: %w (logs: %s)", run.root, err, run.logPath)
+		}
+		if ctx.Err() == nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "\nlocal runtime stopped; see %s\n", run.logPath)
+		}
+	case err := <-w.errCh:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			returnErr = fmt.Errorf("dev %s: dev server: %w", run.root, err)
+		}
+	}
+	return returnErr
+}
+
+// holdForFailure keeps a failed run readable. The terminal still gets the error
+// and the log path and the command still exits non-zero: the page showing the
+// failure is additional, never a replacement for failing loudly.
+func (w *devWebServer) holdForFailure(ctx context.Context, cmd *cobra.Command, run devWebRun, cause error) error {
+	run.stream.SetState(devStateFailed)
+	fmt.Fprintf(cmd.ErrOrStderr(), "\n%v\n", cause)
+	fmt.Fprintf(cmd.ErrOrStderr(), "the browser is still showing the output; ctrl-c to stop\n")
+	<-ctx.Done()
+	return cause
 }
 
 // runDevCompose builds and starts the stack, waits for readiness, serves the UI,
@@ -170,15 +278,12 @@ type devWebRun struct {
 // volumes are preserved: `down` never passes --volumes. It reuses the same
 // compose seams telephony uses, so L2 tests stay hermetic.
 func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error {
-	logFile, err := os.Create(run.logPath)
+	run = run.withStream()
+	logSink, closeLog, err := openDevLog(cmd, run)
 	if err != nil {
-		return fmt.Errorf("dev %s: open log: %w", run.root, err)
+		return err
 	}
-	defer func() { _ = logFile.Close() }()
-	var logSink io.Writer = logFile
-	if run.verbose {
-		logSink = io.MultiWriter(logFile, cmd.ErrOrStderr())
-	}
+	defer closeLog()
 
 	// Teardown runs on every path, even a ctrl-c mid-build: a background context
 	// so cancellation of ctx cannot abort the `down` itself.
@@ -191,6 +296,14 @@ func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error
 		_ = down.Run()
 	}()
 
+	// Serve before building. The build is the part that fails, and its output is
+	// exactly what the author needs to see when it does.
+	web, err := startDevWebServer(cmd, run)
+	if err != nil {
+		return err
+	}
+	defer web.close()
+
 	spin := startSpinner(cmd.ErrOrStderr(), "building and starting the container")
 	up := composeCommand(ctx, "docker", composeArgs(run.composeFile, run.project, "up", "--build", "--detach", "--remove-orphans", "--wait")...)
 	up.Env = run.env
@@ -201,7 +314,8 @@ func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error
 		if composeWasInterrupted(ctx, upErr) {
 			return nil
 		}
-		return fmt.Errorf("dev %s: docker compose up: %w (logs: %s)", run.root, upErr, run.logPath)
+		return web.holdForFailure(ctx, cmd, run,
+			fmt.Errorf("dev %s: docker compose up: %w (logs: %s)", run.root, upErr, run.logPath))
 	}
 
 	// Stream compose logs to dev.log for the whole run. For livekit, watch for
@@ -233,67 +347,30 @@ func runDevCompose(ctx context.Context, cmd *cobra.Command, run devWebRun) error
 			return nil
 		case <-logsDone:
 			spin.Stop()
+			// The stack died during startup. That is a failure the page should
+			// show, but the log stream has ended, so there is nothing more to
+			// wait for: report it and exit rather than holding an idle page.
+			run.stream.SetState(devStateFailed)
 			return fmt.Errorf("dev %s: compose stack stopped before the worker registered (logs: %s)", run.root, run.logPath)
 		case <-time.After(3 * time.Minute):
 			spin.Stop()
-			return fmt.Errorf("dev %s: agent worker not ready after 3m (logs: %s)", run.root, run.logPath)
+			return web.holdForFailure(ctx, cmd, run,
+				fmt.Errorf("dev %s: agent worker not ready after 3m (logs: %s)", run.root, run.logPath))
 		}
 	}
 
-	return serveDevWeb(ctx, cmd, run, logsDone)
-}
-
-// serveDevWeb owns the target-neutral HTTP page once its runtime is ready.
-func serveDevWeb(ctx context.Context, cmd *cobra.Command, run devWebRun, runtimeDone <-chan error) error {
-	// Bind eagerly so a port collision fails here, before the banner.
-	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", run.uiPort))
-	if err != nil {
-		return fmt.Errorf("dev %s: dev server: %w", run.root, err)
-	}
-	liveKitURL := "ws://127.0.0.1:7880"
-	if port := envValue(run.env, "LIVEKIT_HOST_PORT"); port != "" {
-		liveKitURL = "ws://127.0.0.1:" + port
-	}
-	srv := &http.Server{Handler: devWebMux(run.provider, run.agentName, run.botPort, liveKitURL)}
-	srvErr := make(chan error, 1)
-	go func() { srvErr <- srv.Serve(ln) }()
-
-	uiURL := fmt.Sprintf("http://localhost:%s/?agent=%s", run.uiPort, url.QueryEscape(run.agentName))
-	fmt.Fprintf(cmd.OutOrStdout(), "\n  \033[1;32m▸\033[0m %s\n    ctrl-c to stop  ·  logs: %s\n\n", uiURL, run.logPath)
-	if !run.noOpen {
-		openBrowser(uiURL)
-	}
-
-	var returnErr error
-	select {
-	case <-ctx.Done():
-		fmt.Fprintln(cmd.ErrOrStderr(), "\nstopping...")
-	case err := <-runtimeDone:
-		if err != nil && ctx.Err() == nil && !composeWasInterrupted(ctx, err) {
-			returnErr = fmt.Errorf("dev %s: local runtime stopped: %w (logs: %s)", run.root, err, run.logPath)
-		}
-		if ctx.Err() == nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "\nlocal runtime stopped; see %s\n", run.logPath)
-		}
-	case err := <-srvErr:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			returnErr = fmt.Errorf("dev %s: dev server: %w", run.root, err)
-		}
-	}
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdownCtx)
-	return returnErr
+	run.stream.SetState(devStateReady)
+	return web.wait(ctx, cmd, run, logsDone)
 }
 
 // devWebMux is the one host dev server for both targets. The only per-target
 // routing is the transport wiring: pipecat reverse-proxies the WebRTC offer to
 // the local bot; livekit serves the vendored SDK. Both share the same
-// static page and the /api/session bootstrap (SPEC V6).
-func devWebMux(provider ir.Provider, agentName, botPort, liveKitURL string) http.Handler {
+// static page, the /api/session bootstrap (SPEC V6) and the event stream.
+func devWebMux(provider ir.Provider, agentName, botPort, liveKitURL string, stream *devStream) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/session", devSessionHandler(provider, agentName, liveKitURL))
+	mux.HandleFunc("/api/session", devSessionHandler(provider, agentName, liveKitURL, stream))
+	mux.HandleFunc("/api/events", devEventsHandler(stream))
 	switch provider {
 	case ir.ProviderPipecat:
 		// The offer (and any other bot API) proxies to the selected bot port.
@@ -313,12 +390,20 @@ func devWebMux(provider ir.Provider, agentName, botPort, liveKitURL string) http
 // one web page switches on (SPEC I.session, V6). Pipecat gets the offer URL to
 // POST its WebRTC offer to; livekit gets the dev server URL and a fresh token
 // (a new room per request so agent dispatch fires at room creation).
-func devSessionHandler(provider ir.Provider, agentName, liveKitURL string) http.HandlerFunc {
+// Since the page is served before the runtime exists, this has to be able to
+// answer that there is nothing to connect to yet. `ready: false` is the page's
+// instruction to keep the call control unavailable rather than offer a call that
+// cannot be placed; a ready answer carries exactly what it always did.
+func devSessionHandler(provider ir.Provider, agentName, liveKitURL string, stream *devStream) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if stream != nil && stream.State() != devStateReady {
+			_ = json.NewEncoder(w).Encode(map[string]any{"kind": providerSessionKind(provider), "ready": false})
+			return
+		}
 		switch provider {
 		case ir.ProviderPipecat:
-			_ = json.NewEncoder(w).Encode(map[string]string{"kind": "webrtc-offer", "offerUrl": "/api/offer"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"kind": "webrtc-offer", "offerUrl": "/api/offer", "ready": true})
 		case ir.ProviderLiveKit:
 			room, err := randomRoomName("unmute")
 			if err != nil {
@@ -335,11 +420,82 @@ func devSessionHandler(provider ir.Provider, agentName, liveKitURL string) http.
 				http.Error(w, fmt.Sprintf("mint token: %v", err), http.StatusInternalServerError)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]string{"kind": "livekit", "url": liveKitURL, "token": token, "room": room})
+			_ = json.NewEncoder(w).Encode(map[string]any{"kind": "livekit", "url": liveKitURL, "token": token, "room": room, "ready": true})
 		default:
 			http.Error(w, "unsupported transport", http.StatusInternalServerError)
 		}
 	}
+}
+
+// providerSessionKind is the transport name the page switches on. It is answered
+// even before readiness so the page knows which transport it will be joining.
+func providerSessionKind(provider ir.Provider) string {
+	if provider == ir.ProviderLiveKit {
+		return "livekit"
+	}
+	return "webrtc-offer"
+}
+
+// devEventsHandler streams the run to the page as server-sent events. One stream
+// carries every kind, because output lines and measurement records come off the
+// same writer and the page wants them in the writer's order.
+//
+// SSE rather than a WebSocket: the standard library has no WebSocket and the
+// dependency rules forbid adding one for this. An http.Flusher is enough, and
+// the browser's own reconnect carries Last-Event-ID for free.
+func devEventsHandler(stream *devStream) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok || stream == nil {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		// Localhost only, but the page is the only intended reader either way.
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		after := 0
+		if raw := r.Header.Get("Last-Event-ID"); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil {
+				after = n
+			}
+		}
+		backlog, live, cancel := stream.Subscribe(after)
+		defer cancel()
+
+		for _, ev := range backlog {
+			if !writeDevEvent(w, ev) {
+				return
+			}
+		}
+		flusher.Flush()
+
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case ev, open := <-live:
+				if !open {
+					return
+				}
+				if !writeDevEvent(w, ev) {
+					return
+				}
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+func writeDevEvent(w http.ResponseWriter, ev devEvent) bool {
+	payload, err := json.Marshal(ev)
+	if err != nil {
+		return true // skip one unencodable event rather than dropping the stream
+	}
+	_, err = fmt.Fprintf(w, "id: %d\ndata: %s\n\n", ev.Seq, payload)
+	return err == nil
 }
 
 // readyWatcher tees a stream to w while watching for a marker line; it fires

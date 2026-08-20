@@ -68,6 +68,32 @@ LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
   unmute dev <source-dir> --target livekit
 ```
 
+## Latency measurements
+
+`dev_metrics.py` prints one line per turn to stdout, so you can see where a slow
+reply went. It prints nothing unless `UNMUTE_DEV_METRICS` is set, and `unmute
+dev` sets it for you. Nothing is sent anywhere: the line goes to stdout and that
+is all.
+
+```text
+UNMUTE_METRIC {"kind":"turn","seq":1,"e2e":1.204,"user_turn":0.388,"stages":[...],"tools":[...]}
+```
+
+Read them with `grep UNMUTE_METRIC` on the run's output. Times are seconds.
+`e2e` is from the caller falling silent to the agent starting to speak, each
+entry in `stages` carries the time to first byte for that service and, for the
+voice, the total time the reply took to stream out. `tools` carries how long each
+tool took, including tools reached through a remote tool source. Controls are not
+listed there: a delegate or a transfer hands the conversation somewhere else
+rather than doing a unit of work, and a delegate does not return until the flow
+it started has finished, so its duration is that flow's, not a tool's.
+
+A measurement LiveKit does not report is left out of the line rather than sent as
+zero, so a field you do not see was not measured, not instant.
+
+This reads LiveKit session events, not OpenTelemetry spans, so it cannot
+interfere with a trace exporter you have configured.
+
 ## Agent handoffs
 
 An `agent_transfer` with `announce:` gives the exact sentence spoken once by
@@ -274,6 +300,8 @@ from livekit.agents import (
 from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import openai, silero, slng
+
+from dev_metrics import install_dev_metrics
 from tracing import setup_langfuse
 
 
@@ -849,6 +877,10 @@ async def entrypoint(ctx: JobContext) -> None:
     )
 
 
+    # Inert unless the dev loop set UNMUTE_DEV_METRICS. Reads session events, so
+    # it never touches the tracer provider an opt-in trace export would own.
+    install_dev_metrics(session)
+
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
         metrics.log_metrics(ev.metrics)
@@ -913,6 +945,7 @@ async def entrypoint(ctx: JobContext) -> None:
     "agent.py",
     "compile-report.json",
     "compose.dev.yaml",
+    "dev_metrics.py",
     "pyproject.toml",
     "tracing.py"
   ],
@@ -1071,8 +1104,10 @@ services:
       - OPENAI_API_KEY
       - SEND_CONFIRMATION_URL
       - SLNG_API_KEY
-      # optional: set by `unmute dev --var`; absent otherwise
+      # optional: set by `unmute dev`; absent otherwise
       - UNMUTE_CALL_START
+      # optional: set by `unmute dev`; absent otherwise
+      - UNMUTE_DEV_METRICS
     depends_on:
       livekit_server:
         condition: service_healthy
@@ -1081,6 +1116,235 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+=== dev_metrics.py ===
+"""Per-turn latency measurements for the local dev loop.
+
+Prints one JSON line per turn behind a sentinel the `unmute dev` server watches
+for, so the browser can show where a slow reply went without anything leaving
+this machine. No collector, no exporter, no network.
+
+Inert unless UNMUTE_DEV_METRICS is set. The dev loop sets it itself; a deployed
+artifact never does, so this file ships in every project and prints in none of
+them but yours.
+
+Everything here comes off session events. Two of them:
+
+* ``conversation_item_added`` carries a ChatMessage whose ``metrics`` is
+  LiveKit's own MetricsReport, so the numbers are the framework's rather than a
+  second opinion. User messages and assistant messages report different halves
+  of a turn, so the user half is held and spent by the assistant message that
+  answers it.
+* ``tool_execution_updated`` is a lifecycle: started, then ended, paired by
+  ``call_id``. It comes from the shared tool executor, so a tool reached through
+  a remote tool source is timed exactly like a local one.
+
+Deliberately not an OpenTelemetry SpanProcessor. LiveKit's set_tracer_provider
+installs LiveKit's own tracer rather than the OpenTelemetry global, so a second
+provider does not conflict loudly, it simply wins and silently stops whatever
+was installed first from receiving spans. Reading events instead means this file
+cannot break an opt-in trace export, at the cost of two numbers that live only
+on spans (the endpointing delay, and per-node span durations). That trade is
+worth it: a measurement feature that quietly disables your tracing is worse than
+one that reports slightly less.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+
+from livekit.agents.llm import ChatMessage
+from livekit.agents.voice import (
+    AgentSession,
+    ConversationItemAddedEvent,
+    ToolExecutionUpdatedEvent,
+)
+
+SENTINEL = "UNMUTE_METRIC"
+METRICS_ENV = "UNMUTE_DEV_METRICS"
+
+# Controls are not tools. A delegate or a transfer is the package handing the
+# conversation somewhere else rather than doing a unit of work and returning, and
+# a delegate does not return until the flow it started has finished, so its call
+# duration is that flow's duration. Reported beside real tool timings it reads as
+# one very slow tool, which is the opposite of the point.
+HANDOFF_CONTROLS = frozenset(
+    {
+        "back_to_greeter",
+        "do_event",
+        "do_reserve",
+        "to_events",
+        "to_reservations",
+    }
+)
+
+
+def metrics_enabled() -> bool:
+    """True when the dev loop asked for measurements."""
+    return os.environ.get(METRICS_ENV, "") not in ("", "0")
+
+
+def _emit(record: dict) -> None:
+    # flush is required, not tidiness: Python block-buffers stdout when it is not
+    # a tty, which is both dev paths, so an unflushed line can sit in the buffer
+    # until the process exits and arrive long after the turn it describes.
+    print(f"{SENTINEL} {json.dumps(record, separators=(',', ':'))}", flush=True)
+
+
+def _round(value: object) -> float | None:
+    """Seconds as a float, or None when the framework reported nothing."""
+    if isinstance(value, (int, float)):
+        return round(float(value), 4)
+    return None
+
+
+def _stage(name: str, kind: str, metadata: dict | None, ttfb=None, total=None) -> dict | None:
+    """One service in the turn. None when there is nothing to say about it."""
+    stage: dict = {"kind": kind}
+    metadata = metadata or {}
+    provider = metadata.get("model_provider")
+    stage["name"] = provider or name
+    if metadata.get("model_name"):
+        stage["model"] = metadata["model_name"]
+    ttfb_secs = _round(ttfb)
+    if ttfb_secs is not None:
+        stage["ttfb"] = ttfb_secs
+    total_secs = _round(total)
+    if total_secs is not None:
+        stage["total"] = total_secs
+    if "model" not in stage and "ttfb" not in stage and "total" not in stage:
+        return None
+    return stage
+
+
+def turn_record(
+    seq: int,
+    user_metrics: dict,
+    metrics: dict,
+    *,
+    interrupted: bool = False,
+    tools: list | None = None,
+) -> dict:
+    """Map one turn's two MetricsReports onto the record contract.
+
+    ``user_metrics`` is the user message's report and ``metrics`` the assistant's;
+    LiveKit splits a turn across the two. Pure so it can be checked against a
+    real MetricsReport without running a session. A measurement LiveKit did not
+    report is left out rather than set to zero, which would read as an unusually
+    fast stage.
+    """
+    record: dict = {"kind": "turn", "seq": seq}
+
+    for key, source in (
+        ("e2e", metrics.get("e2e_latency")),
+        ("user_turn", user_metrics.get("end_of_turn_delay")),
+        ("transcription", user_metrics.get("transcription_delay")),
+    ):
+        value = _round(source)
+        if value is not None:
+            record[key] = value
+    if interrupted:
+        record["interrupted"] = True
+
+    # The agent's own speech window is the total time the reply took to stream
+    # out, which answers "how long until it stopped talking".
+    started = metrics.get("started_speaking_at")
+    stopped = metrics.get("stopped_speaking_at")
+    speech_total = None
+    if isinstance(started, (int, float)) and isinstance(stopped, (int, float)):
+        speech_total = max(0.0, stopped - started)
+
+    stages = [
+        _stage("stt", "stt", user_metrics.get("stt_metadata")),
+        _stage("llm", "llm", metrics.get("llm_metadata"), ttfb=metrics.get("llm_node_ttft")),
+        _stage(
+            "tts",
+            "tts",
+            metrics.get("tts_metadata"),
+            ttfb=metrics.get("tts_node_ttfb"),
+            total=speech_total,
+        ),
+    ]
+    stages = [stage for stage in stages if stage is not None]
+    if stages:
+        record["stages"] = stages
+
+    if tools:
+        record["tools"] = list(tools)
+
+    return record
+
+
+def install_dev_metrics(session: AgentSession) -> AgentSession:
+    """Attach the printers to a session and return it.
+
+    Returns the session untouched when measurements are off, which keeps the
+    caller a single unconditional line.
+    """
+    if not metrics_enabled():
+        return session
+
+    session_started_at = time.time()
+    state: dict = {"seq": 0, "user": {}, "first_speech_sent": False}
+    # call_id -> (tool name, start timestamp). The executor emits started before
+    # ended for every tool, local or remote.
+    running_tools: dict[str, tuple[str, float]] = {}
+    finished_tools: list[dict] = []
+
+    @session.on("tool_execution_updated")
+    def _on_tool_execution(ev: ToolExecutionUpdatedEvent) -> None:
+        update = ev.update
+        if update.type == "tool_call_started":
+            call = update.function_call
+            if call.name in HANDOFF_CONTROLS:
+                return
+            running_tools[call.call_id] = (call.name, ev.created_at)
+        elif update.type == "tool_call_ended":
+            # A handoff was never recorded as started, so this pops nothing and
+            # needs no second check against the set.
+            start = running_tools.pop(update.call_id, None)
+            if start is not None:
+                name, started_at = start
+                finished_tools.append(
+                    {"name": name, "seconds": round(ev.created_at - started_at, 4)}
+                )
+
+    @session.on("conversation_item_added")
+    def _on_item_added(ev: ConversationItemAddedEvent) -> None:
+        item = ev.item
+        if not isinstance(item, ChatMessage):
+            return
+        metrics = dict(getattr(item, "metrics", None) or {})
+
+        if item.role == "user":
+            # The user half of the turn arrives first and is spent by the
+            # assistant message that answers it.
+            state["user"] = metrics
+            return
+        if item.role != "assistant":
+            return
+
+        user_metrics = state["user"]
+        state["user"] = {}
+        state["seq"] += 1
+        _emit(
+            turn_record(
+                state["seq"],
+                user_metrics,
+                metrics,
+                interrupted=item.interrupted,
+                tools=finished_tools,
+            )
+        )
+        finished_tools.clear()
+
+        started = metrics.get("started_speaking_at")
+        if not state["first_speech_sent"] and isinstance(started, (int, float)):
+            state["first_speech_sent"] = True
+            _emit({"kind": "session", "first_speech": round(started - session_started_at, 4)})
+
+    return session
 === pyproject.toml ===
 [project]
 name = "unmute-livekit"

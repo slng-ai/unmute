@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/slng-ai/unmute/internal/devmetrics"
 	"github.com/slng-ai/unmute/internal/ir"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
@@ -281,9 +282,16 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 	}
 	data.HasVars = len(data.Vars) > 0
 	data.Capture = buildLiveKitCapture(agent)
+	// A bare name in a compose environment block is forwarded when the host sets
+	// it and absent otherwise, which is exactly what the dev loop's measurement
+	// switch needs: the worker runs in a container, so inheriting the parent's
+	// environment is not enough, and a deployed artifact still declares nothing.
+	data.HandoffControls = handoffControls(agent)
+	data.DevOptionalEnv = []string{devmetrics.Env}
 	if len(data.CallStartVars) > 0 {
-		data.DevOptionalEnv = []string{"UNMUTE_CALL_START"}
+		data.DevOptionalEnv = append(data.DevOptionalEnv, "UNMUTE_CALL_START")
 	}
+	slices.Sort(data.DevOptionalEnv)
 	// Every mcp source's env names join the startup check as well. Declared
 	// secrets cover most packages, but the address and token a tool source
 	// names are required whether or not the package also declared them, and a

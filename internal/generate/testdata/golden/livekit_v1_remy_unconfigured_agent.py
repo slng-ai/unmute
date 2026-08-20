@@ -28,6 +28,8 @@ from livekit.agents.beta.workflows import TaskCompletedEvent, TaskGroup
 from livekit.agents.voice import MetricsCollectedEvent
 from livekit.plugins import openai, silero, slng
 
+from dev_metrics import install_dev_metrics
+
 
 logger = logging.getLogger("livekit")
 logger.setLevel(logging.INFO)
@@ -587,6 +589,10 @@ async def entrypoint(ctx: JobContext) -> None:
         user_away_timeout=15,
     )
 
+
+    # Inert unless the dev loop set UNMUTE_DEV_METRICS. Reads session events, so
+    # it never touches the tracer provider an opt-in trace export would own.
+    install_dev_metrics(session)
 
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:

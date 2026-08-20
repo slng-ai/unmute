@@ -427,10 +427,11 @@ type pipecatData struct {
 	DevEnv         []string // provider creds the web dev image needs, without telephony/coordination env (compose.dev.yaml)
 	// Slng is the SLNG Context Router's module-level helpers. Empty on a package
 	// with no router think binding, and then none of it is emitted (FR-019).
-	Slng           slngHelpers
-	DevOptionalEnv []string // passed through when the host sets it, never required
-	Notes          []string
-	Tracing        bool
+	Slng            slngHelpers
+	HandoffControls []string // control names dev_metrics.py must not report as tools
+	DevOptionalEnv  []string // passed through when the host sets it, never required
+	Notes           []string
+	Tracing         bool
 	// Telephony means the carrier-websocket route, and every site that reads it
 	// means that. The Daily carrier leg is DailyCarrier; see its doc comment.
 	Telephony    *pipecatTelephony
@@ -612,6 +613,10 @@ func renderPipecatFiles(data pipecatData) ([]File, error) {
 	// which Go's embed would skip).
 	outputs := []struct{ tmpl, path string }{
 		{"bot.py", "bot.py"},
+		// Always emitted, inert unless the dev loop sets devmetrics.Env. Emitting
+		// it only for `dev` would make build/<target>/ depend on which command
+		// last ran, so the dev loop would stop testing the file that ships.
+		{"dev_metrics.py", "dev_metrics.py"},
 		{"pyproject.toml", "pyproject.toml"},
 		{"Dockerfile", "Dockerfile"},
 		{"compose.dev.yaml", "compose.dev.yaml"},

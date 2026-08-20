@@ -182,3 +182,77 @@ func TestDevComposeTearsDownOnInterrupt(t *testing.T) {
 		t.Fatalf("interrupt did not tear the stack down:\n%s", raw)
 	}
 }
+
+// TestDevComposeHoldsAFailedBuildOpen: the whole point of serving before the
+// build is that a failed build is readable in the browser. So a failing `up`
+// must not exit immediately, and must still exit non-zero with the log path when
+// the author eventually stops it. Failing loudly is not negotiable; the page is
+// additional.
+func TestDevComposeHoldsAFailedBuildOpen(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "docker")
+	trace := filepath.Join(dir, "trace.log")
+	// up fails the way a missing secret or a bad dependency fails.
+	body := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TRACE_FILE\"\n" +
+		"case \"$*\" in *' up '*) echo 'ERROR: failed to solve' >&2; exit 17;; esac\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restore := composeCommand
+	composeCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, script, args...)
+	}
+	t.Cleanup(func() { composeCommand = restore })
+
+	cmd, out := telephonyTestCommand(t)
+	stream := newDevStream()
+	ctx, cancel := context.WithCancel(context.Background())
+	released := make(chan struct{})
+	go func() {
+		// Only cancel once the failure has actually been published, which proves
+		// the run was still alive and serving rather than already returned.
+		for stream.State() != devStateFailed {
+			time.Sleep(5 * time.Millisecond)
+		}
+		close(released)
+		cancel()
+	}()
+
+	err := runDevCompose(ctx, cmd, devWebRun{
+		root: dir, provider: ir.ProviderLiveKit, agentName: "livekit",
+		composeFile: filepath.Join(dir, "compose.dev.yaml"), project: "unmute-failed-build-test",
+		env:     []string{"TRACE_FILE=" + trace},
+		logPath: filepath.Join(dir, "dev.log"), uiPort: "0", botPort: "7860", noOpen: true,
+		stream: stream,
+	})
+
+	select {
+	case <-released:
+	default:
+		t.Fatal("run returned before publishing the failure, so the page never showed it")
+	}
+	if err == nil {
+		t.Fatal("a failed build must still exit non-zero")
+	}
+	if !strings.Contains(err.Error(), "docker compose up") || !strings.Contains(err.Error(), "dev.log") {
+		t.Errorf("error text lost its cause or the log path: %v", err)
+	}
+	if stream.State() != devStateFailed {
+		t.Errorf("state = %q, want %q", stream.State(), devStateFailed)
+	}
+	// Teardown still runs, and the build output still reached the log.
+	raw, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "down --remove-orphans") {
+		t.Errorf("a failed build did not tear the stack down:\n%s", raw)
+	}
+	logged, err := os.ReadFile(filepath.Join(dir, "dev.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logged), "failed to solve") {
+		t.Errorf("build failure missing from the log:\n%s\n%s", logged, out.String())
+	}
+}

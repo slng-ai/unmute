@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/slng-ai/unmute/internal/devmetrics"
 	"github.com/slng-ai/unmute/internal/ir"
 	targetcap "github.com/slng-ai/unmute/internal/target"
 )
@@ -124,7 +125,8 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		}
 	}
 	data.Capture = buildPipecatCapture(agent)
-	data.DevOptionalEnv = []string{"UNMUTE_LOG_LEVEL"}
+	data.HandoffControls = handoffControls(agent)
+	data.DevOptionalEnv = []string{"UNMUTE_LOG_LEVEL", devmetrics.Env}
 	if len(data.CallStartVars) > 0 {
 		data.DevOptionalEnv = append(data.DevOptionalEnv, "UNMUTE_CALL_START")
 	}

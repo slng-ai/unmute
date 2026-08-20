@@ -47,6 +47,7 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.llm import LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
 
+from dev_metrics import dev_metrics_observer
 from tracing import (
     TRACE_NAME,
     TracedLLMWorker,
@@ -562,6 +563,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     main = PipelineWorker(
         pipeline,
         name=MAIN_NAME,
+        # The worker builds its own latency observer only when tracing is enabled,
+        # and does not re-expose its events, so this one is always ours.
+        observers=[dev_metrics_observer()],
 
         conversation_id=runner_args.session_id,
         enable_tracing=True,

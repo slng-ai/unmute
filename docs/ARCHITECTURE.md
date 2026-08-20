@@ -130,6 +130,38 @@ and WebSocket front door. Routes that need shared call coordination use Redis
 for bounded records such as call correlation, idempotency, transfers, and
 admission counters.
 
+## Dev loop topology
+
+The dev server starts before the runtime it serves, not after it. The listener
+binds, the page is served, and the browser opens; only then does the target's
+runtime start. Startup output reaches the page through an in-memory buffer that
+replays on connect, so output produced before the browser finished loading is
+still there, and every connected page receives the same stream.
+
+That ordering is what makes a failed start readable: the process stays alive with
+the page up, while the terminal still prints the error and the log path and the
+command still exits non-zero. Serving first is additional information, never a
+softened failure. Every borrowed local resource is still released on every exit
+path, including an interrupt during a build.
+
+## Measurement boundary
+
+The emitted agent measures its own turns and prints one framed line per turn to
+stdout. The Go dev server reads those lines off the output it already relays. The
+line is the boundary: `internal/devmetrics` owns its shape in Go and is the only
+decoder, each target's `dev_metrics.py` is the producer, and neither imports the
+other. That makes it a contract two languages have to agree on, so it is written
+down and covered by an agreement test rather than inferred.
+
+Producers ship in every artifact and stay inert unless `UNMUTE_DEV_METRICS` is
+set, which only `unmute dev` does. Emitting them conditionally would make
+`build/<target>/` depend on which command last ran.
+
+Measurement stays inside the machine that produced it. There is no exporter, no
+collector, and no endpoint. Trace export to an external collector remains a
+separate opt-in feature, and the measurement path is built to read each
+framework's own events so that it cannot disturb it.
+
 ## State and deployment boundaries
 
 Redis never stores credentials, raw webhook bodies, audio, transcripts,
@@ -161,6 +193,7 @@ Start with these files rather than scanning the whole tree.
 | Driver dispatch and emitted artifacts | `internal/generate/artifact.go` |
 | LiveKit driver | `internal/generate/livekit_v1*.go`, `internal/generate/templates/livekit_v1/` |
 | Pipecat driver | `internal/generate/pipecat_v1*.go`, `internal/generate/templates/pipecat_v1/` |
+| Turn measurement contract | `internal/devmetrics/`, each driver's `dev_metrics.py.tmpl` |
 | Interactive console and styles | `internal/tui/`, `internal/style/` |
 | Package scaffolding | `internal/scaffold/` |
 | Shipped coding-agent skill | `internal/skill/assets/` |
@@ -202,4 +235,5 @@ checks the expected tool and handoff behavior.
 - Emit one artifact directory per target instance and one carrier route per
   telephony target.
 - Keep media and conversation state in the active process, never in Redis.
+- Measure locally. Nothing measured leaves the machine that produced it.
 - Scale from declared capacity and measured behavior, not authored agent count.

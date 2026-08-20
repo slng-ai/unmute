@@ -1,0 +1,3 @@
+UNMUTE_METRIC {"kind":"turn","seq":1,"e2e":1.057,"user_turn":0.412,"text_aggregation":0.042,"stages":[{"name":"DeepgramSTTService","kind":"stt","model":"nova-3","ttfb":0.11},{"name":"OpenAILLMService","kind":"llm","model":"gpt-4o","ttfb":0.284},{"name":"CartesiaTTSService","kind":"tts","model":"sonic-2","ttfb":0.361}],"tools":[{"name":"check_availability","seconds":0.834}]}
+UNMUTE_METRIC {"kind":"turn","seq":2,"e2e":0.918,"user_turn":0.301,"text_aggregation":0.038,"stages":[{"name":"DeepgramSTTService","kind":"stt","model":"nova-3","ttfb":0.104},{"name":"OpenAILLMService","kind":"llm","model":"gpt-4o","ttfb":0.259},{"name":"CartesiaTTSService","kind":"tts","model":"sonic-2","ttfb":0.344}]}
+UNMUTE_METRIC {"kind":"session","first_speech":1.284}

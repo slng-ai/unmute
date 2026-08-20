@@ -329,6 +329,26 @@ func authorEnv(required, supplied []string) []string {
 // that passed and a README that said the key was covered. So the env set records
 // which names the code reads on every session, and those are never stripped
 // however a connection happens to map them.
+// handoffControls names the controls that reach a target as function tools but
+// are not tools. A delegate or a transfer is the package handing the
+// conversation somewhere else, and a delegate does not return until the flow it
+// started has finished, so its call duration is that flow's duration. Reported
+// beside real tool timings it reads as one very slow tool.
+//
+// A name a package also uses for a real tool is left in: a collision then costs
+// one misleading row instead of a silently missing measurement.
+func handoffControls(agent *ir.Agent) []string {
+	names := make([]string, 0, len(agent.Controls))
+	for name := range agent.Controls {
+		if _, alsoATool := agent.Tools[name]; alsoATool {
+			continue
+		}
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
 func withoutRouteEnv(names []string, agent *ir.Agent, target ir.Target, env *envSet) []string {
 	route := map[string]bool{}
 	for _, connection := range agent.Connections {

@@ -36,14 +36,15 @@ directory you are standing in, and every path it prints is relative to there.
     WebRTC ICE candidates reachable from the host browser. LiveKit uses Docker
     Compose because its stack also includes a local LiveKit server.
   </Step>
+  <Step title="Serve the page">
+    A small local web server opens your browser straight away, before the
+    runtime is up. The page shows the startup output while it waits, so a build
+    that fails is something you read rather than guess at.
+  </Step>
   <Step title="Wait for ready">
     Pipecat waits for its `/status` response. LiveKit waits for the worker to
-    register, up to three minutes, so the browser only opens once a call would
-    actually be answered.
-  </Step>
-  <Step title="Serve the page">
-    A small local web server hands your browser a WebRTC session against the
-    running target.
+    register, up to three minutes. The call button stays unavailable until then,
+    and the page moves to the conversation view once a call would be answered.
   </Step>
   <Step title="Clean up">
     Ctrl-c stops the local Pipecat process or removes the LiveKit stack. LiveKit
@@ -89,11 +90,49 @@ unmute dev examples/salon-support --target pipecat --port 8790 --bot-port 7890
 The web page URL always carries the target name, for example
 `http://localhost:8765/?agent=pipecat`.
 
+## The two views
+
+The page has two views and one set of call controls that stays put across both,
+so switching never interrupts a call.
+
+| View | What it is for |
+|---|---|
+| Conversation | the call: what was said, its timings, and the controls |
+| Logs | everything the run printed, plus one line per turn of latency measurements |
+
+Each agent turn carries its own numbers underneath it: end to end, time to first
+byte for each service, how long the reply took to stream out, and a row of its own
+for every tool the turn called. A number the target did not report shows as a dash,
+never as zero, so you can tell "not measured" from "instant".
+
+Controls do not get a row. A delegate or a transfer reaches the framework as a
+function call, so it would otherwise be timed like a tool, and a delegate does not
+return until the flow it started has finished. A three-turn task would appear as
+one very slow tool, which is the opposite of what the numbers are for.
+
+[Reading the latency numbers](/dev/latency) covers what each number means, where
+the time goes in a voice turn, and how to tell which part is slow.
+
+The logs view is in front while the target is starting, and the conversation
+view takes over once the agent is ready. If anything in the startup output looked
+like a failure, the logs view stays in front instead, and the count of those
+lines sits on the tab so it is visible from either view. Pick a view yourself and
+the page stops moving it for you.
+
+Filter the output by typing, or narrow it to output, measurements, or problems.
+There is no log-level parsing behind those buttons, just a match on the text,
+which is why it does not break when a provider reformats a line.
+
+**A failed start is now visible in the browser.** The page stays up so you can
+read the output, the terminal still prints the error and the log path, and the
+command still exits non-zero.
+
 ## Logs
 
 **Every run writes its log into the build directory**, and prints the path when it
 starts. That file is the first place to look when the page loads but nothing
-speaks, and it is where a failure to start explains itself.
+speaks, and it is where a failure to start explains itself. It holds everything
+the process printed, measurement lines included, so it always matches the run.
 
 | Mode | Log file |
 |---|---|
@@ -194,5 +233,11 @@ signaling and RTP ingress.
   </Card>
   <Card title="dev reference" icon="book" href="/reference/cli/dev">
     Every flag, with defaults and requirements.
+  </Card>
+  <Card title="Latency" icon="gauge" href="/dev/latency">
+    What each number under a turn means, and which part to fix.
+  </Card>
+  <Card title="Turn detection" icon="ear" href="/models/turn-detection">
+    Often the largest number in a turn, and a setting you control.
   </Card>
 </Columns>

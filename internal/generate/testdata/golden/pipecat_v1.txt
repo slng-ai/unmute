@@ -82,6 +82,29 @@ Pipecat logs default to `INFO`. Set `UNMUTE_LOG_LEVEL=DEBUG` only in a
 controlled environment because logs can contain caller speech, tool data, and
 phone details.
 
+## Latency measurements
+
+`dev_metrics.py` prints one line per turn to stdout, so you can see where a slow
+reply went. It prints nothing unless `UNMUTE_DEV_METRICS` is set, and `unmute
+dev` sets it for you. Nothing is sent anywhere: the line goes to stdout and that
+is all.
+
+```text
+UNMUTE_METRIC {"kind":"turn","seq":1,"e2e":1.057,"user_turn":0.412,"stages":[...],"tools":[...]}
+```
+
+Read them with `grep UNMUTE_METRIC` on the run's output. Times are seconds.
+`e2e` is from the caller falling silent to the agent starting to speak, `stages`
+carries the time to first byte for each service, and `tools` carries how long
+each tool took, including tools reached through a remote tool source. Controls
+are not listed there: a delegate or a transfer hands the conversation somewhere
+else rather than doing a unit of work, and a delegate does not return until the
+flow it started has finished, so its duration is that flow's, not a tool's.
+
+A measurement Pipecat does not report is left out of the line rather than sent
+as zero, so a field you do not see was not measured, not instant. Pipecat
+reports no total streaming time per service here, only time to first byte.
+
 ## Agent handoffs
 
 An `agent_transfer` with `announce:` gives the exact sentence spoken once by
@@ -225,6 +248,8 @@ from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.llm import LLMWorker, LLMWorkerActivationArgs, tool
 from pipecat.workers.runner import WorkerRunner
+
+from dev_metrics import dev_metrics_observer
 
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -576,6 +601,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     main = PipelineWorker(
         pipeline,
         name=MAIN_NAME,
+        # The worker builds its own latency observer only when tracing is enabled,
+        # and does not re-expose its events, so this one is always ours.
+        observers=[dev_metrics_observer()],
 
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
     )
@@ -701,6 +729,7 @@ if __name__ == "__main__":
     "bot.py",
     "compile-report.json",
     "compose.dev.yaml",
+    "dev_metrics.py",
     "pcc-deploy.toml",
     "pyproject.toml"
   ],
@@ -846,6 +875,8 @@ services:
       # optional: passed through when set on the host; absent otherwise
       - UNMUTE_CALL_START
       # optional: passed through when set on the host; absent otherwise
+      - UNMUTE_DEV_METRICS
+      # optional: passed through when set on the host; absent otherwise
       - UNMUTE_LOG_LEVEL
     ports:
       - "${UNMUTE_DEV_PORT:-7860}:7860"
@@ -855,6 +886,146 @@ services:
       timeout: 3s
       retries: 30
       start_period: 10s
+=== dev_metrics.py ===
+"""Per-turn latency measurements for the local dev loop.
+
+Prints one JSON line per turn behind a sentinel the `unmute dev` server watches
+for, so the browser can show where a slow reply went without anything leaving
+this machine. No collector, no exporter, no network.
+
+Inert unless UNMUTE_DEV_METRICS is set. The dev loop sets it itself; a deployed
+artifact never does, so this file ships in every project and prints in none of
+them but yours.
+
+Measurements come from pipecat's own UserBotLatencyObserver, so the numbers are
+the ones the framework already computes rather than a second opinion. A stage
+pipecat does not report is left out of the record entirely: an absent measurement
+rendered as 0.00 reads as an unusually fast one.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+
+from pipecat.observers.user_bot_latency_observer import (
+    LatencyBreakdown,
+    UserBotLatencyObserver,
+)
+
+SENTINEL = "UNMUTE_METRIC"
+METRICS_ENV = "UNMUTE_DEV_METRICS"
+
+# Controls are not tools. A delegate or a transfer is the package handing the
+# conversation somewhere else rather than doing a unit of work and returning, and
+# a delegate does not return until the flow it started has finished, so its call
+# duration is that flow's duration. Reported beside real tool timings it reads as
+# one very slow tool, which is the opposite of the point.
+HANDOFF_CONTROLS = frozenset(
+    {
+        "to_billing",
+    }
+)
+
+# Processor names carry their own role ("DeepgramSTTService"), so the mapping
+# lives here once instead of the browser guessing which service a number is.
+_STAGE_KINDS = (("stt", "stt"), ("llm", "llm"), ("tts", "tts"))
+
+
+def metrics_enabled() -> bool:
+    """True when the dev loop asked for measurements."""
+    return os.environ.get(METRICS_ENV, "") not in ("", "0")
+
+
+def stage_kind(processor: str) -> str:
+    """Classify a pipecat processor name as stt, llm, tts, or other."""
+    lowered = processor.lower()
+    for needle, kind in _STAGE_KINDS:
+        if needle in lowered:
+            return kind
+    return "other"
+
+
+def _emit(record: dict) -> None:
+    # flush is required, not tidiness: Python block-buffers stdout when it is not
+    # a tty, which is both dev paths, so an unflushed line can sit in the buffer
+    # until the process exits and arrive long after the turn it describes.
+    print(f"{SENTINEL} {json.dumps(record, separators=(',', ':'))}", flush=True)
+
+
+def turn_record(breakdown: LatencyBreakdown, seq: int, e2e: float | None) -> dict:
+    """Map one pipecat breakdown onto the record contract.
+
+    Pure so it can be checked against a real LatencyBreakdown without running a
+    pipeline. A measurement pipecat did not report is left out rather than set to
+    zero, which would read as an unusually fast stage.
+    """
+    record: dict = {"kind": "turn", "seq": seq}
+
+    if e2e is not None:
+        record["e2e"] = round(e2e, 4)
+    if breakdown.user_turn_secs is not None:
+        record["user_turn"] = round(breakdown.user_turn_secs, 4)
+    if breakdown.text_aggregation is not None:
+        record["text_aggregation"] = round(breakdown.text_aggregation.duration_secs, 4)
+
+    stages = []
+    for ttfb in breakdown.ttfb:
+        stage = {"name": ttfb.processor, "kind": stage_kind(ttfb.processor)}
+        if ttfb.model:
+            stage["model"] = ttfb.model
+        stage["ttfb"] = round(ttfb.duration_secs, 4)
+        stages.append(stage)
+    if stages:
+        record["stages"] = stages
+
+    # Tools reached through a remote tool source are here too: pipecat registers
+    # them like any other function, so they emit the same frames.
+    tools = [
+        {"name": call.function_name, "seconds": round(call.duration_secs, 4)}
+        for call in breakdown.function_calls
+        if call.function_name not in HANDOFF_CONTROLS
+    ]
+    if tools:
+        record["tools"] = tools
+
+    return record
+
+
+def install_dev_metrics(observer: UserBotLatencyObserver) -> UserBotLatencyObserver:
+    """Attach the printers to an observer and return it, so it can be passed inline.
+
+    Returns the observer untouched when measurements are off, which keeps the
+    caller a single unconditional line.
+    """
+    if not metrics_enabled():
+        return observer
+
+    # on_latency_measured fires immediately before on_latency_breakdown inside the
+    # same pipecat handler, so the end-to-end number is stashed here and spent by
+    # the breakdown that follows it.
+    state: dict = {"seq": 0, "e2e": None}
+
+    @observer.event_handler("on_latency_measured")
+    async def _on_latency_measured(_observer, latency_seconds: float):
+        state["e2e"] = latency_seconds
+
+    @observer.event_handler("on_first_bot_speech_latency")
+    async def _on_first_bot_speech(_observer, latency_seconds: float):
+        _emit({"kind": "session", "first_speech": round(latency_seconds, 4)})
+
+    @observer.event_handler("on_latency_breakdown")
+    async def _on_latency_breakdown(_observer, breakdown: LatencyBreakdown):
+        state["seq"] += 1
+        _emit(turn_record(breakdown, state["seq"], state["e2e"]))
+        state["e2e"] = None
+
+    return observer
+
+
+def dev_metrics_observer() -> UserBotLatencyObserver:
+    """A latency observer wired to print, ready to pass to `observers=`."""
+    return install_dev_metrics(UserBotLatencyObserver())
 === pcc-deploy.toml ===
 agent_name = "pipecat"
 secret_set = "pipecat-secrets"

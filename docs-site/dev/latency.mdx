@@ -1,0 +1,239 @@
+---
+title: "Reading the latency numbers"
+description: "Where the time goes in a voice turn, what each number under a turn means, and what to change when one of them is too big."
+sidebarTitle: "Latency"
+---
+
+A voice agent is judged on one thing before anything else: how long the caller
+waits. When a call feels slow, "the agent is slow" is not something you can fix.
+You need to know which part was slow.
+
+`unmute dev` measures every turn and shows the numbers under it. This page
+explains what each number means, and what to change when one of them is too
+big.
+
+## Where the time goes
+
+A turn is a chain. Each link has to finish before the next one starts, so the
+caller waits for the sum, not for the slowest part.
+
+```text
+you stop talking
+  │
+  ├─ 1. the system decides you are finished        turn detection
+  ├─ 2. the last words become text                 speech to text
+  ├─ 3. the model starts writing                   LLM, first token
+  │      └─ if it calls a tool: the tool runs, then the model writes again
+  ├─ 4. the first audio comes back                 text to speech
+  ├─ 5. the audio reaches your browser or phone    network
+  │
+you hear the first word
+```
+
+Two things about that chain surprise people.
+
+**Nothing waits for the whole reply.** Every good voice stack streams. The
+agent starts speaking as soon as the first audio chunk exists, so what matters
+is time to the *first* byte at each step, not the time to finish. That is why
+almost every number here is a "first byte" number.
+
+**Turn detection is a real cost, and it is a setting.** Before anything else
+happens, something has to decide you stopped talking rather than paused for
+breath. That decision is a deliberate wait. It is often the largest single
+piece of a turn, and unlike the models, you control it directly. See
+[Turn detection](/models/turn-detection).
+
+### Tool calls double the model step
+
+A turn that calls a tool does not run the model once. It runs it twice:
+
+```text
+without a tool:   model writes the reply
+with a tool:      model decides to call the tool
+                    → the tool runs (your API, your database, an MCP server)
+                  → model reads the result and writes the reply
+```
+
+So a tool turn pays for two model calls plus the tool's own round trip. A tool
+that takes 400ms can easily add a second to the turn once the second model call
+is counted. This is the most common reason one turn in a conversation feels much
+slower than the rest, and it is why tool timings get their own rows.
+
+The tool row shows the tool's own time, never the second model call it forced,
+and that call is usually the larger half of the bill. Which leads somewhere
+useful: a tool that only saves the model a guess can cost more than it saves,
+while a tool that fetches something the model cannot know is worth it every
+time.
+
+## What is making your agent slow
+
+The numbers tell you which link in the chain is slow. This tells you what
+usually causes it, and what you can change.
+
+| What you see | What it usually is | Where to look |
+|---|---|---|
+| `user_turn` is the largest number | the deliberate wait before anything starts | [Turn detection](/models/turn-detection) |
+| `llm` is large on every turn | the model, or how much it thinks before the first token | [Thinking models](/models/llm) |
+| `llm` grows as the call goes on | the prompt and history the model re-reads every turn | [agent.yaml](/reference/agent-yaml) |
+| a tool row is large | the tool's own round trip, which is your code or your provider | [Tools](/build/tools/overview) |
+| every stage is slower than you expect | distance between the caller, the worker, and the models | [Regional infrastructure](/models/regional-infrastructure) |
+| only the first turn is slow | cold start, which a dev run pays and a warm deployment does not | |
+| `tts` is small but its total is large | the agent talked for a long time, which is not a wait | |
+
+Three of those are worth more than a row.
+
+### Turn detection is a wait you chose
+
+A flat number is the tell. If `user_turn` repeats to three decimals across
+turns, you are looking at a fixed wait rather than variance, and no model change
+will touch it.
+
+Two things set it. The detector you bind, and `semantic_endpointing`. On LiveKit
+the choice of detector also decides *where* the work happens:
+`turn-detector-mini` runs on your machine, and `turn-detector` runs in LiveKit
+Cloud, which puts a network round trip in front of every single turn. On Pipecat
+the job is Silero voice activity detection, on device, with no call at all.
+`semantic_endpointing` waits to judge whether you actually finished a thought,
+and both targets warn that its effect depends on the model you bound.
+
+### The model can think before it speaks
+
+On a reasoning model, `reasoning_effort` decides how much happens before the
+first token appears. The shared example profiles and `unmute init`
+write `none`. Raising it buys more reasoning and costs first-token time on every
+turn,
+so it is a trade rather than a setting to max out.
+
+### The prompt is re-read every turn
+
+Instructions are not sent once at the start. They go with every request, along
+with the conversation so far, so a long instructions file is a cost on turn
+twenty as much as on turn one. That is why `llm` tends to creep upward through a
+long call.
+
+For tasks and handoffs you control how much is carried across, with
+`context.history`, `max_messages`, and `summarizer`. Carrying the full history
+into a task is a choice, not a default you have to keep.
+
+## How Unmute measures it
+
+Each framework already instruments itself, and Unmute reads that rather than
+timing anything of its own. Pipecat's own latency observer, LiveKit's own
+metrics report. The numbers are the framework's, so they agree with what the
+framework's maintainers mean by them.
+
+<Steps>
+  <Step title="The agent prints one line per turn">
+    The generated project carries a `dev_metrics.py`. It prints one JSON line
+    per turn to standard output, behind a marker.
+  </Step>
+  <Step title="The dev server reads that line">
+    `unmute dev` is already reading the run's output for the logs view. It picks
+    the marked lines out and keeps them apart from the log text.
+  </Step>
+  <Step title="The page shows them under the turn">
+    Each reply in the conversation carries its own numbers underneath, and the
+    logs view has a measurements filter that shows one line per turn.
+  </Step>
+</Steps>
+
+Nothing leaves your machine. There is no collector, no exporter, no network
+call. The line goes to standard output and the local dev server reads it.
+
+The producer prints nothing unless `UNMUTE_DEV_METRICS` is set, and only
+`unmute dev` sets it. So the file ships in every project you compile and prints
+in none of them except your dev runs.
+
+You can also read the same lines straight from the run's log:
+
+```sh
+grep '"kind":"turn"' build/livekit/dev.log
+```
+
+## What each number means
+
+<Note>
+  A number that is missing was not reported by that target. It shows as a dash,
+  never as zero, so you can always tell "not measured" from "instant".
+</Note>
+
+| Number | What it measures |
+|---|---|
+| `e2e` | From you finishing speaking to the agent's first audio. This is the number the caller feels. |
+| `user_turn` | How much of that was the system deciding you were done. Turn detection, plus finalizing the transcript. |
+| `transcription` | How long the transcript took to arrive after your speech ended. LiveKit only. |
+| `stt` | The speech to text service. Pipecat reports its time to first byte; LiveKit names the model but reports no timing for it, and gives you `transcription` instead. |
+| `llm` | Time until the model's first token. On a tool turn Pipecat lists the model twice, once per call; LiveKit reports a single first-token time for the turn. |
+| `tts` | Time until the first audio chunk. LiveKit also reports a total, which is how long the reply took to speak, not part of the wait. |
+| `text_aggregation` | Time spent grouping the model's text into sentences before speaking. Pipecat only. |
+| tool rows | One row per tool the turn called, with how long the tool itself took. Tools reached through an MCP server or a remote source are timed the same way. |
+| `interrupted` | The reply was cut off because you spoke over it. LiveKit only. |
+| `first_speech` | A session number, not a turn number: how long from connecting to the agent's first word. |
+
+Controls do not get a tool row. A delegate or a transfer reaches the framework
+as a function call, so it would otherwise be timed like a tool, and a delegate
+does not return until the flow it started has finished. A three-turn task would
+appear as one very slow tool, which is the opposite of what the numbers are for.
+
+## Reading a slow turn
+
+Here is a real turn from `examples/salon-concierge` on LiveKit:
+
+```text
+turn 9 · e2e 6.21s · user_turn 2.50s · transcription 0.51s
+         stt slng · llm 1.12s · tts 0.43s (total 8.08s)
+         get_current_date 0.01s · check_availability 0.01s
+```
+
+Read it in order and the answer falls out.
+
+- **`user_turn` is 2.50s.** That is 40% of the wait, and it is larger than
+  every model in the chain put together. Six turns in that same call reported
+  2.50s and three reported about 0.6s, and the flatness is the tell: a number
+  that repeats to three decimals across turns is a configured wait being hit,
+  not variance. The shorter turns prove the faster path exists. Fix the setting,
+  not the models.
+- **`llm` is 1.12s and the tools are 0.01s.** The tools are not the problem.
+  Worth checking, because "it called a tool" is the first thing people blame.
+- **`tts total` is 8.08s, longer than `e2e`.** That is correct and not a bug.
+  The agent spoke for 8 seconds. The caller was not waiting during that, they
+  were listening. Only the 0.43s before the first audio was a wait.
+
+<Tip>
+  The method is the same every time: start with `e2e`, find the largest number
+  inside it, and read that row in
+  [What is making your agent slow](#what-is-making-your-agent-slow).
+</Tip>
+
+## What this does not measure
+
+Being clear about the edges, so you do not read a number as more than it is.
+
+- **The measurement sits inside the agent process.** The trip from the agent to
+  your browser or through a phone carrier is not in these numbers. A local dev
+  run has almost no network in it, and a real phone call has plenty, so expect a
+  deployed call to be slower than what you see here.
+- **The two targets do not report the same set.** LiveKit gives no per-service
+  time for speech to text, and Pipecat gives no total streaming time per
+  service. Neither is a gap in Unmute, it is what each framework measures. This
+  is worth knowing before you compare a Pipecat number with a LiveKit one.
+- **On a tool turn, LiveKit's `llm` covers one of the two model calls.** The
+  second call's time is inside `e2e` but not broken out, so on those turns the
+  parts add up to less than the whole.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Turn detection" icon="ear" href="/models/turn-detection">
+    The setting behind `user_turn`, which is often the largest number.
+  </Card>
+  <Card title="The dev loop" icon="terminal" href="/dev/overview">
+    The two views, the logs, and what `unmute dev` does in order.
+  </Card>
+  <Card title="SLNG Execution Layer" icon="zap" href="/models/optimization">
+    What the speech models a scaffolded package binds run on.
+  </Card>
+  <Card title="Tools" icon="wrench" href="/build/tools/overview">
+    Every kind of tool a turn can call, and what each costs you.
+  </Card>
+</Columns>
