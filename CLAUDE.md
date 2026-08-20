@@ -42,9 +42,13 @@ Standards here are not taste, they are things CI or a test can fail on. Writing 
 | L1–L3 green, zero Python, no data races | CI `test`, `go test -race ./...` |
 | no color literal outside `internal/style` | `internal/style/style_test.go` |
 | example READMEs name every transport; every `examples/` link resolves | `internal/generate/examples_test.go` |
+| every emitted task prompt names its finish call and an escape, every finish takes the reserved `unserved_request`, and the owner is told to read it | `internal/generate/task_prompt_test.go`, `internal/ir/validate_test.go` |
+| every emitted task prompt names its finish call and an escape, every finish takes the reserved `unserved_request`, and the owner is told to read it | `internal/generate/task_prompt_test.go`, `internal/ir/validate_test.go` |
 | the skill's tool kinds, vendors, providers and doc pointers match the code | `internal/skill/agreement_test.go` |
 | every command and flag the skill names exists | `internal/cli/skill_bundle_test.go` |
 | the docs-site CLI pages quote each command's `Usage:` line, not just its flags | `internal/cli/help_capture_test.go` |
+| a receiving agent's opening turn withholds its own handoffs, and no emitted tool carries the on-enter flag | `internal/generate/livekit_v1_test.go` |
+| an authored `endpointing_delay` reaches LiveKit's `min_delay` and Pipecat's `stop_secs`, and stays absent when unset | `internal/generate/endpointing_delay_test.go`, `internal/ir/validate_test.go` |
 | the console's target menus lead with the right target: create with `scaffold.DefaultTarget`, maintain with the package's own | `internal/tui/default_target_test.go` |
 | checked-in Python is clean | CI `python`, `ruff check .` |
 | no known-vulnerable dependency or stdlib | CI `vuln`, `govulncheck ./...` |

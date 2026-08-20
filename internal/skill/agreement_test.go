@@ -470,6 +470,7 @@ func TestModelFieldAndPassthroughGuidanceStaysExact(t *testing.T) {
 		"| `language` | `speak`, `listen` |",
 		"| `temperature`, `top_p`, `top_k` | `think` |",
 		"| `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |",
+		"| `endpointing_delay` | `turn`: a positive duration, how long to wait after speech stops before taking the turn |",
 	}
 	for name, content := range map[string]string{
 		"references/package.md":              bundleFile(t, "references/package.md"),

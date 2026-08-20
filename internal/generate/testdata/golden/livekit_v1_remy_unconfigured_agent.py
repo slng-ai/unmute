@@ -86,7 +86,9 @@ You are handling only the confirmation for this caller. Work one question per tu
 If the caller declines, send nothing and finish. Do not promise anything beyond the text message.
 
 
-When this step is complete, call `finish` with: sent."""
+When this step is complete, call `finish` with: sent.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with the closest result you have and their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that field and takes the caller from there."""
 
 FIND_SLOT_PROMPT = """# Find a table
 
@@ -100,7 +102,9 @@ You are handling only the table search for this caller. Work one question per tu
 Never promise a table that check_availability did not return. If nothing is open, say so plainly and offer the nearest alternatives it returned.
 
 
-When this step is complete, call `finish` with: date, party_size, time."""
+When this step is complete, call `finish` with: date, party_size, time.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with the closest result you have and their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that field and takes the caller from there."""
 
 QUALIFY_EVENT_PROMPT = """# Qualify a private event
 
@@ -113,7 +117,9 @@ You are handling only the event details for this caller. Work one question per t
 When you have all three, record them and finish. Do not quote prices, menus, or availability; the events team handles that after the call.
 
 
-When this step is complete, call `finish` with: date, headcount, occasion."""
+When this step is complete, call `finish` with: date, headcount, occasion.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with the closest result you have and their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that field and takes the caller from there."""
 
 # --- required environment ----------------------------------------------------
 # Everything this agent needs to run: the model providers' keys, the connection
@@ -258,16 +264,22 @@ class Events(Agent):
     async def on_enter(self) -> None:
         # This agent took over via handoff; let its own instructions drive the
         # opening (the prompt already says not to re-greet).
-        self.session.generate_reply()
+        # This opening turn withholds the agent's own handoffs (B3: an agent that can
+        # hand the call back before it has said anything ping-pongs). The framework's
+        # on-enter tool flag would hide them for the rest of the call instead, because
+        # its filter follows the context of everything this reply starts: a live call
+        # offered one specialist nothing but its delegate for ten turns while the
+        # caller asked for another one (B: salon handoffs, 2026-08-20).
+        self.session.generate_reply(tools=[t.id for t in self.tools if t.id not in {"back_to_greeter"}])
 
-    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)
+    @function_tool
     async def back_to_greeter(self, ctx: RunContext):
         """Caller wants something else, or to start over."""
         return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
 
     @function_tool
     async def do_event(self, ctx: RunContext) -> dict:
-        """The caller is ready to plan their event; run the events flow. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request."""
+        """The caller is ready to plan their event; run the events flow. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn with your own tools or a handoff. Never end the turn without it and never tell the caller you cannot."""
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
@@ -302,16 +314,22 @@ class Greeter(Agent):
 
     async def on_enter(self) -> None:
         if not self._initial:
-            self.session.generate_reply()
+        # This opening turn withholds the agent's own handoffs (B3: an agent that can
+        # hand the call back before it has said anything ping-pongs). The framework's
+        # on-enter tool flag would hide them for the rest of the call instead, because
+        # its filter follows the context of everything this reply starts: a live call
+        # offered one specialist nothing but its delegate for ten turns while the
+        # caller asked for another one (B: salon handoffs, 2026-08-20).
+            self.session.generate_reply(tools=[t.id for t in self.tools if t.id not in {"to_reservations", "to_events"}])
             return
         await self.session.say("Hi, this is Remy at Fern and Oak. Are you booking a table, or planning a private event?")
 
-    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)
+    @function_tool
     async def to_reservations(self, ctx: RunContext):
         """Caller wants to book a table for a normal dine-in visit."""
         return Reservations(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
 
-    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)
+    @function_tool
     async def to_events(self, ctx: RunContext):
         """Caller wants to plan a private event, party, or large group booking."""
         return Events(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
@@ -328,16 +346,22 @@ class Reservations(Agent):
     async def on_enter(self) -> None:
         # This agent took over via handoff; let its own instructions drive the
         # opening (the prompt already says not to re-greet).
-        self.session.generate_reply()
+        # This opening turn withholds the agent's own handoffs (B3: an agent that can
+        # hand the call back before it has said anything ping-pongs). The framework's
+        # on-enter tool flag would hide them for the rest of the call instead, because
+        # its filter follows the context of everything this reply starts: a live call
+        # offered one specialist nothing but its delegate for ten turns while the
+        # caller asked for another one (B: salon handoffs, 2026-08-20).
+        self.session.generate_reply(tools=[t.id for t in self.tools if t.id not in {"back_to_greeter"}])
 
-    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)
+    @function_tool
     async def back_to_greeter(self, ctx: RunContext):
         """Caller wants something else, or to start over."""
         return Greeter(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
 
     @function_tool
     async def do_reserve(self, ctx: RunContext) -> dict:
-        """The caller is ready to book a table; run the reservation flow. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request."""
+        """The caller is ready to book a table; run the reservation flow. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn with your own tools or a handoff. Never end the turn without it and never tell the caller you cannot."""
         group = TaskGroup(
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True),
             summarize_chat_ctx=False,
@@ -363,6 +387,14 @@ class Reservations(Agent):
 
 
 # --- tasks -----------------------------------------------------------------
+def _task_result(values: dict, unserved_request: str) -> dict:
+    """A step that could not serve a request names it on the way out, so the
+    agent that owns the step reads it off the result and takes it from there."""
+    if not unserved_request:
+        return values
+    return {**values, "unserved_request": unserved_request}
+
+
 class _RetryEmptyTaskResponseMixin:
     _response_tool_call_ids: set[str]
 
@@ -504,10 +536,10 @@ class ConfirmBooking(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
             return resp.json()
 
     @function_tool
-    async def finish(self, ctx: RunContext, sent: bool) -> None:
+    async def finish(self, ctx: RunContext, sent: bool, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
-        result = {"sent": sent}
+        result = _task_result({"sent": sent}, unserved_request)
         self.complete(result)
         # Record only after complete() succeeds: a rejected duplicate cannot
         # replace the winner, and there is no await for the callback to race.
@@ -535,10 +567,10 @@ class FindSlot(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
             return resp.json()
 
     @function_tool
-    async def finish(self, ctx: RunContext, date: str, party_size: int, time: str) -> None:
+    async def finish(self, ctx: RunContext, date: str, party_size: int, time: str, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
-        result = {"date": date, "party_size": party_size, "time": time}
+        result = _task_result({"date": date, "party_size": party_size, "time": time}, unserved_request)
         self.complete(result)
         # Record only after complete() succeeds: a rejected duplicate cannot
         # replace the winner, and there is no await for the callback to race.
@@ -555,10 +587,10 @@ class QualifyEvent(_RetryEmptyTaskResponseMixin, AgentTask[dict]):
         self.session.generate_reply()
 
     @function_tool
-    async def finish(self, ctx: RunContext, date: str, headcount: int, occasion: str) -> None:
+    async def finish(self, ctx: RunContext, date: str, headcount: int, occasion: str, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
-        result = {"date": date, "headcount": headcount, "occasion": occasion}
+        result = _task_result({"date": date, "headcount": headcount, "occasion": occasion}, unserved_request)
         self.complete(result)
         # Record only after complete() succeeds: a rejected duplicate cannot
         # replace the winner, and there is no await for the callback to race.

@@ -449,7 +449,7 @@ class IntakeAgent(LLMWorker):
     def _run_collect_node_collect(self) -> NodeConfig:
         return NodeConfig(
             name="collect",
-            role_message="Ask for the caller's email and confirm the account for {{customer_id}}.",
+            role_message="Ask for the caller's email and confirm the account for {{customer_id}}.\n\nWhen this step is complete, call `finish_run_collect_collect` with: tier.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_collect_collect` with the closest result you have and their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that field and takes the caller from there.",
             task_messages=[{"role": "developer", "content": "Begin this step."}],
             functions=[
                 FlowsFunctionSchema(
@@ -462,7 +462,7 @@ class IntakeAgent(LLMWorker):
                 FlowsFunctionSchema(
                     name="finish_run_collect_collect",
                     description="Record the result of this step and finish.",
-                    properties={"tier": {"type": "string"}},
+                    properties={"tier": {"type": "string"}, "unserved_request": {"description": "Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.", "type": "string"}},
                     required=["tier"],
                     handler=self._run_collect_finish_collect,
                 ),
@@ -480,7 +480,7 @@ class IntakeAgent(LLMWorker):
         await self.flush_pipeline()
         self.context.set_messages(messages + [{
             "role": "developer",
-            "content": "Task results: " + json.dumps(self._run_collect_results) + " Continue with the caller in one short line.",
+            "content": "Task results: " + json.dumps(self._run_collect_results) + " Continue with the caller in one short line. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn with your own tools or a handoff. Never end the turn without it and never tell the caller you cannot.",
         }])
         self.context.set_tools(tools)
         return {"status": "ok"}, None
@@ -511,7 +511,7 @@ class IntakeAgent(LLMWorker):
     def _run_triage_node_collect(self) -> NodeConfig:
         return NodeConfig(
             name="collect",
-            role_message="Ask for the caller's email and confirm the account for {{customer_id}}.",
+            role_message="Ask for the caller's email and confirm the account for {{customer_id}}.\n\nWhen this step is complete, call `finish_run_triage_collect` with: tier.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_triage_collect` with the closest result you have and their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that field and takes the caller from there.",
             task_messages=[{"role": "developer", "content": "Begin this step."}],
             functions=[
                 FlowsFunctionSchema(
@@ -524,7 +524,7 @@ class IntakeAgent(LLMWorker):
                 FlowsFunctionSchema(
                     name="finish_run_triage_collect",
                     description="Record the result of this step and finish.",
-                    properties={"tier": {"type": "string"}},
+                    properties={"tier": {"type": "string"}, "unserved_request": {"description": "Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.", "type": "string"}},
                     required=["tier"],
                     handler=self._run_triage_finish_collect,
                 ),
@@ -539,13 +539,13 @@ class IntakeAgent(LLMWorker):
     def _run_triage_node_confirm(self) -> NodeConfig:
         return NodeConfig(
             name="confirm",
-            role_message="Read the booking back and ask the caller to confirm.",
+            role_message="Read the booking back and ask the caller to confirm.\n\nWhen this step is complete, call `finish_run_triage_confirm` with: confirmed.\n\n`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish_run_triage_confirm` with the closest result you have and their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that field and takes the caller from there.",
             task_messages=[{"role": "developer", "content": "Begin this step."}],
             functions=[
                 FlowsFunctionSchema(
                     name="finish_run_triage_confirm",
                     description="Record the result of this step and finish.",
-                    properties={"confirmed": {"type": "boolean"}},
+                    properties={"confirmed": {"type": "boolean"}, "unserved_request": {"description": "Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.", "type": "string"}},
                     required=["confirmed"],
                     handler=self._run_triage_finish_confirm,
                 ),
@@ -564,7 +564,7 @@ class IntakeAgent(LLMWorker):
         await self.flush_pipeline()
         self.context.set_messages(messages + [{
             "role": "developer",
-            "content": "Task results: " + json.dumps(self._run_triage_results) + " Continue with the caller in one short line.",
+            "content": "Task results: " + json.dumps(self._run_triage_results) + " Continue with the caller in one short line. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn with your own tools or a handoff. Never end the turn without it and never tell the caller you cannot.",
         }])
         self.context.set_tools(tools)
         return {"status": "ok"}, None

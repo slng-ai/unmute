@@ -56,6 +56,9 @@ type ModelDef struct {
 	EndpointEnv         string              `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 	Placement           Placement           `json:"placement" yaml:"placement"`
 	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
+	// EndpointingDelay is the turn model's silence budget: how long after speech
+	// stops before the runtime takes the turn. Turn models only.
+	EndpointingDelay Duration `json:"endpointing_delay,omitempty" yaml:"endpointing_delay,omitempty"`
 	// AgentID and Upstream are the SLNG Context Router's two authored fields,
 	// carried verbatim: the id scopes the router's cache and the block says
 	// which upstream serves the model. Neither folds into Params, because params
@@ -565,6 +568,9 @@ type Binding struct {
 	EndpointEnv         string              `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 	Placement           Placement           `json:"placement,omitempty" yaml:"placement,omitempty"`
 	SemanticEndpointing SemanticEndpointing `json:"semantic_endpointing,omitempty" yaml:"semantic_endpointing,omitempty"`
+	// EndpointingDelay is the turn model's silence budget: how long after speech
+	// stops before the runtime takes the turn. Turn models only.
+	EndpointingDelay Duration `json:"endpointing_delay,omitempty" yaml:"endpointing_delay,omitempty"`
 	// AgentID and Upstream are set only on a SLNG Context Router think binding.
 	AgentID  string         `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
 	Upstream *Upstream      `json:"upstream,omitempty" yaml:"upstream,omitempty"`

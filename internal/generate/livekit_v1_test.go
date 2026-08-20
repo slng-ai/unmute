@@ -1032,7 +1032,16 @@ func TestV1LiveKitCompletedFlowEndsOnce(t *testing.T) {
 	botpy := artifactFile(t, artifact, "agent.py")
 
 	// finish() is the sole resolution: -> None, no value returned after complete().
-	if !strings.Contains(botpy, "async def finish(self, ctx: RunContext, sent: bool) -> None:") {
+	// The reserved unserved-request arg trails the task's own result args, so this
+	// reads the whole signature line rather than a fixed string.
+	finishLine := ""
+	for _, line := range strings.Split(botpy, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "async def finish(self, ctx: RunContext, sent: bool, unserved_request: ") {
+			finishLine = line
+			break
+		}
+	}
+	if finishLine == "" || !strings.HasSuffix(finishLine, ") -> None:") {
 		t.Error("finish must be typed -> None (complete() is the sole resolution)")
 	}
 	if strings.Contains(botpy, `return "Done."`) {
@@ -1397,7 +1406,10 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 	for _, want := range []string{
 		"def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN, initial: bool = False) -> None:",
 		"        self._initial = initial",
-		"        if not self._initial:\n            self.session.generate_reply()\n            return",
+		// Re-entry is a handoff arrival too, so its opening turn withholds the
+		// agent's own handoffs (B3) and keeps everything else.
+		"        if not self._initial:\n",
+		"            self.session.generate_reply(tools=[t.id for t in self.tools if t.id not in {\"to_reservations\", \"to_events\"}])\n            return",
 		"await session.start(agent=Greeter(initial=True), room=ctx.room)",
 		"return Greeter()",
 	} {
@@ -1421,10 +1433,19 @@ func TestLiveKitV1TransferAnnounceAndEntryGreeting(t *testing.T) {
 	}
 }
 
-// TestV3LiveKitAgentTransfersIgnoreOnEnter covers the B3/V3 loop guard:
-// transfer tools are hidden from a receiving agent's automatic on_enter turn,
-// while ordinary tools stay available there.
-func TestV3LiveKitAgentTransfersIgnoreOnEnter(t *testing.T) {
+// TestV3LiveKitAgentTransfersHiddenOnlyOnEnter covers the B3/V3 loop guard and
+// the bug the first version of it caused: a receiving agent's automatic opening
+// turn must not be able to hand the call back, and every turn after it must have
+// the handoffs again.
+//
+// The guard used to be the framework's IGNORE_ON_ENTER tool flag. That filter is
+// scoped to a context variable, and the opening reply's own tool calls inherit
+// it, so an agent whose opening reply ran a delegate never saw its handoffs
+// again: a live call offered the booking specialist only manage_booking for ten
+// straight turns while the caller asked for customer care (B: salon handoffs,
+// 2026-08-20). The opening reply now names the tools it may use instead, which
+// scopes the guard to the one turn it is meant for.
+func TestV3LiveKitAgentTransfersHiddenOnlyOnEnter(t *testing.T) {
 	pkg, err := spec.Load(filepath.Join("..", "testdata", "remy"))
 	if err != nil {
 		t.Fatal(err)
@@ -1442,14 +1463,31 @@ func TestV3LiveKitAgentTransfersIgnoreOnEnter(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	botpy := artifactFile(t, artifact, "agent.py")
+	if strings.Contains(botpy, "IGNORE_ON_ENTER") {
+		t.Error("the on-enter tool flag hides a handoff for the rest of the call; the opening reply must name its tools instead")
+	}
 	for _, method := range []string{"to_reservations", "to_events", "back_to_greeter"} {
-		want := "    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)\n    async def " + method + "("
+		want := "    @function_tool\n    async def " + method + "("
 		if !strings.Contains(botpy, want) {
-			t.Errorf("agent transfer %q must be hidden during on_enter", method)
+			t.Errorf("agent transfer %q must be an ordinary function tool", method)
 		}
 	}
 	if !strings.Contains(botpy, "    @function_tool\n    async def check_availability(") {
 		t.Error("ordinary tools must remain available during on_enter")
+	}
+	// Every agent that can be handed the call opens with an allowlist, and that
+	// allowlist excludes exactly its own handoffs.
+	openings := strings.Count(botpy, "self.session.generate_reply(tools=[t.id for t in self.tools if t.id not in {")
+	if openings == 0 {
+		t.Fatal("no agent opening reply names the tools it may use")
+	}
+	for _, want := range []string{
+		`if t.id not in {"to_reservations", "to_events"}`,
+		`if t.id not in {"back_to_greeter"}`,
+	} {
+		if !strings.Contains(botpy, want) {
+			t.Errorf("an opening reply does not withhold its handoffs: want %s", want)
+		}
 	}
 }
 

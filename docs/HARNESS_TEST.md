@@ -98,6 +98,31 @@ transfer. Run the package's
 [verification stress checks](../examples/salon-concierge/README.md#verification-stress-checks)
 before filling in release evidence.
 
+Restart the worker. Then run this compound-request script on both targets. The
+scripts above raise the second request while a step that can route it is active;
+this one asks for two things in one turn, so the second may still be owed when
+the apply step, which carries no handoff, takes over.
+
+1. “I want to book a haircut tomorrow at three. My name is Robin Taylor.”
+2. “My number is five five five zero one zero.” Pause, then say: “Eight eight
+   four four.”
+3. After the complete identity readback, say: “Yes, that is correct.”
+4. Answer the confirmation question with both requests in one turn: “Yes, go
+   ahead, and also record my complaint about the uneven haircut I got last
+   time.”
+5. Only if the agent does not raise the complaint itself: “So what about my
+   complaint?”
+
+Two outcomes pass. The confirmation step may leave for customer care on step 4,
+which saves no booking; or it may confirm, the apply step saves the booking and
+ends with its own finish, and the booking specialist raises the complaint on its
+own next turn. Either way `record_complaint` runs exactly once and the booking is
+saved zero or one time. A run fails when the agent answers in place with a line
+like “please contact the salon directly”: the apply step has no complaint route,
+so it must finish, name the request in its result, and let the specialist take
+it. Needing step 5 is a weak pass worth recording: the handback carried the
+request and the specialist ignored it.
+
 Record the result in the package's
 [release evidence table](../examples/salon-concierge/README.md#release-evidence).
 Use only the date/revision, target/case, sanitized trace or session ID, ordered

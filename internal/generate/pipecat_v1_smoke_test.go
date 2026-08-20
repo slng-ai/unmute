@@ -1150,7 +1150,8 @@ async def main() -> None:
     assert context.get_messages() == before_final_messages
     assert context.tools is before_final_tools
     assert prompt_restores[0].endswith("Current customer: cus-smoke.")
-    assert prompt_restores[1] == "Complete verification."
+    # The step's prompt continues with the compiler's finish contract.
+    assert prompt_restores[1].startswith("Complete verification.")
 
     prompt_restores.clear()
     flush_count = 0

@@ -127,6 +127,25 @@ models:
       model: silero
 ```
 
+### When the transcriber is slower than the turn
+
+`endpointing_delay` on the turn entry is how long the runtime waits after speech
+stops before it takes the turn. Raise it when a transcriber lands its final text
+after the turn is already committed: the agent answers half a sentence, the
+caller repeats themselves, and a task can be cancelled mid-step. LiveKit warns
+about exactly this in its logs ("consider raising `min_delay`"). It lowers to
+LiveKit's endpointing `min_delay` and to Pipecat's VAD `stop_secs`; the hosted
+stacks own turn taking, so they ignore it and say so at validation.
+
+```yaml agent.yaml
+models:
+  turn:
+    detector:
+      provider: local
+      model: silero
+      endpointing_delay: 1s
+```
+
 Neither target has a catalogue of turn vendors, because each ships its own
 mechanism rather than exposing a list to bind. Pipecat runs Silero locally.
 LiveKit runs its own turn detector, and the usual shape is to override the entry

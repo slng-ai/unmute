@@ -66,7 +66,9 @@ func TestGreetingDefaultIsModelWrittenOnEveryDriver(t *testing.T) {
 		}
 
 		py := generatedFile(t, agent, ir.ProviderLiveKit, "agent.py")
-		if want := `generate_reply(instructions="` + instruction + `")`; !strings.Contains(py, want) {
+		// An agent with handoffs also names the tools its opening turn may use, so
+		// this matches the instruction itself rather than the whole call.
+		if want := `generate_reply(instructions="` + instruction + `"`; !strings.Contains(py, want) {
 			t.Errorf("livekit agent.py missing %q", want)
 		}
 	})

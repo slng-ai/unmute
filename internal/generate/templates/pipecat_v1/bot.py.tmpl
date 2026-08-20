@@ -55,6 +55,9 @@ from loguru import logger
 {{if .NeedsMCP}}from mcp.client.session_group import {{join .MCPParamsImports ", "}}
 {{end}}
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+{{- if .EndpointingDelay}}
+from pipecat.audio.vad.vad_analyzer import VADParams
+{{- end}}
 {{if not .Inline}}from pipecat.bus import BusBridgeProcessor
 {{end}}{{if .HasFlows}}from pipecat.flows import {{if .HasIsolated}}ContextStrategy, ContextStrategyConfig, {{end}}FlowManager, FlowsFunctionSchema, NodeConfig{{if .HasTaskTransfers}}, NO_RESPONSE{{end}}
 {{end}}{{if .FrameImports}}from pipecat.frames.frames import {{join .FrameImports ", "}}
@@ -1099,14 +1102,14 @@ class {{.Class}}({{if $.HasTransferAnnouncements}}_HandoffWorker{{else if and $.
         await self.activate_worker(
             {{pyq $d.ThenTarget}},
             args=LLMWorkerActivationArgs(
-                messages=[{"role": "developer", "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + " Continue with the caller in one short line."}],
+                messages=[{"role": "developer", "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + {{pyq $.ResultsHint}}}],
                 run_llm=True,
             ),
             deactivate_self=True,
         )
 {{else}}        self.context.set_messages(messages + [{
             "role": "developer",
-            "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + " Continue with the caller in one short line.",
+            "content": "Task results: " + json.dumps(self._{{$d.MethodName}}_results) + {{pyq $.ResultsHint}},
         }])
         self.context.set_tools(tools)
 {{end}}{{if and $d.HasTransfers (ne $d.Then "end")}}{{range $d.Assign}}        self.state.{{.Var}} = self._{{$d.MethodName}}_results[{{pyq $d.Task}}][{{pyq .Field}}]
@@ -1180,7 +1183,7 @@ def build_stt():
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(),
+            vad_analyzer=SileroVADAnalyzer({{if .EndpointingDelay}}params=VADParams(stop_secs={{.EndpointingDelay}}){{end}}),
 {{if .Interrupt}}{{if gt .Interrupt.MinWords 0}}            user_turn_strategies=UserTurnStrategies(
                 start=[MinWordsUserTurnStartStrategy(min_words={{.Interrupt.MinWords}})],
                 stop=[SpeechTimeoutUserTurnStopStrategy()],
@@ -1295,7 +1298,7 @@ def build_stt():
 {{end}}    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(),
+            vad_analyzer=SileroVADAnalyzer({{if .EndpointingDelay}}params=VADParams(stop_secs={{.EndpointingDelay}}){{end}}),
 {{if .Interrupt}}{{if gt .Interrupt.MinWords 0}}            user_turn_strategies=UserTurnStrategies(
                 start=[MinWordsUserTurnStartStrategy(min_words={{.Interrupt.MinWords}})],
                 stop=[SpeechTimeoutUserTurnStopStrategy()],

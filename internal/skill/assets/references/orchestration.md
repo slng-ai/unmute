@@ -222,6 +222,32 @@ task and any remaining group steps. That is the useful half of delegation and
 also the part to plan for, because anything the task may need has to appear in
 its own list.
 
+**A task with no handoff still gets an escape, and you do not write it.** Every
+generated task prompt ends with the compiler's own rule: when the caller asks
+for something none of the step's tools can do, and no handoff on the step covers
+it, call the step's finish function right away with the closest result it has,
+instead of refusing. Do not repeat that instruction in a task's own file, and do
+not add a handoff to a step that must stay locked down just to give it a way out.
+
+That rule is narrow on purpose: it never excuses skipping the step's own work,
+the caller's original reason for being in the step is not an unserved request,
+and a handoff the step declares wins over it.
+
+The request itself travels in `unserved_request`, a reserved optional string on
+every generated finish. **Never declare it in a task's `result:`** — validation
+rejects a task result that claims the name. It arrives inside the returned
+result, and the owning agent is told to take that request next, so the caller
+does not repeat it. Only `then: return` hands the result to an owner on both
+targets: `then: end` ends the call, and on `then: transfer` only Pipecat passes
+the results to the receiving agent.
+
+### The opening turn cannot hand off again
+
+A receiving agent's automatic opening reply is offered every tool it has except
+its own handoffs, so two agents cannot bounce the call between them before the
+caller hears anything. Every later turn has the full list back, handoffs
+included. Do not add a prompt rule for this; it is in the emitted code.
+
 ### Empty LiveKit task responses
 
 Generated LiveKit tasks retry up to twice when a full successful response has
