@@ -36,6 +36,13 @@ session.
 The compile report marks each phone route and prints the vendor document and
 the date it was last checked. Read that report before describing the route.
 
+`carrier-websocket` is the one Pipecat route with no managed-platform path. That
+build emits no `pcc-deploy.toml`, its `Dockerfile` starts from plain Python, and
+its README says **Deploy it yourself**, not `pipecat cloud deploy`. Tell the user
+they need public HTTPS and WSS on port 443, the public origin the generated
+runbook names, WebSocket timeouts longer than the longest call, and one Redis
+shared by every replica. Every other Pipecat route deploys to Pipecat Cloud.
+
 ## What the transport decides
 
 The transport is not a detail. It decides what the agent can do on a call.

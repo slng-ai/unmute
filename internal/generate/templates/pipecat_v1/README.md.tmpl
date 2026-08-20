@@ -284,7 +284,31 @@ off the stream.
 | 422 `missing_template_variables` | a literal `{{"{{"}}` in the prompt that is not a placeholder | remove or rephrase it: the router reads any `{{"{{"}}` as a placeholder |
 | answers stay slow across deploys | the agent id changed between them | keep one stable id and bump it deliberately |
 
-{{end}}## Deploy to Pipecat Cloud
+{{end}}{{if .Telephony}}## Deploy it yourself
+
+This is the one Pipecat route with no managed-platform path, which is why this
+project has no deploy manifest and its `Dockerfile` starts from plain Python.
+The carrier connects to *your* adapter, so it has to be reachable.
+
+Build the generated `Dockerfile` into an image and run it behind:
+
+- **Public HTTPS and WSS on port 443.** The carrier posts to the inbound
+  endpoint and then opens the media socket, both on the same origin.
+- **`UNMUTE_PUBLIC_URL` set to that exact origin**, because signature validation
+  compares against it and a mismatch rejects every call.
+- **WebSocket idle timeouts longer than your longest call**, at every proxy in
+  front of the container.
+- **One Redis all replicas share** (`REDIS_URL`). The one-use media token is
+  minted on the inbound request and redeemed on the socket, and those two can
+  land on different replicas.
+
+`compose.telephony.yaml` is that shape for a single host. Scale by active
+sessions rather than request rate, and keep each socket on the replica that
+accepted it.
+
+See `docs-site/deploy/going-live.mdx` in the Unmute repository for the rest:
+sizing, logging, and the production concerns both targets share.
+{{else}}## Deploy to Pipecat Cloud
 
 Authenticate once first with `pipecat cloud auth login`. After that, one command
 does the first deploy and every later one: `pipecat cloud deploy` builds the image
@@ -354,6 +378,7 @@ No region is declared, so the agent goes to your organisation's default region
 explicit `--region` to both commands: a set in the wrong region cannot be read
 by the agent.{{end}} Set `deployment_region` on this target in `targets.yaml` to
 choose one, and `pipecat cloud regions list` to see what is available.
+{{- end}}
 {{- end}}
 {{if .DailyCarrier}}
 ## Telephony setup

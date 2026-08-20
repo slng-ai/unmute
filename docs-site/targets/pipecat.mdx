@@ -93,6 +93,12 @@ The secret set comes first, because the manifest already names it and a deploy
 cannot start without it. `pipecat cloud deploy` builds the image in the cloud
 from the generated `Dockerfile`.
 
+One route is the exception. A target on `transport: carrier-websocket` has no
+Pipecat Cloud path: it emits no `pcc-deploy.toml`, its `Dockerfile` starts from
+plain Python, and its README carries a **Deploy it yourself** section in place of
+the commands above. See
+[hosting the container yourself](/deploy/going-live#hosting-the-generated-container-yourself).
+
 <Warning>
   Do not edit files in `build/`. Change the source package and compile again.
   The generated README says the same thing in its first paragraph.
