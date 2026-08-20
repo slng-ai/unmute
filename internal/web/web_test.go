@@ -137,3 +137,50 @@ func TestPipecatWaitsForARealConnectionAndStartsFresh(t *testing.T) {
 		}
 	}
 }
+
+func TestPageShowsTheRunBeforeThereIsACall(t *testing.T) {
+	source := page(t)
+	for _, want := range []string{
+		`new EventSource("/api/events")`,                // the stream, not polling
+		`ev.t === "state"`,                              // lifecycle drives the view
+		`ev.t === "metric"`,                             // records are not littered through the log
+		`session.ready === false`,                       // answer, not error, before a runtime
+		`el.connect.disabled = true`,                    // no call to offer yet
+		`if (logRows.length > LOG_MAX) logRows.shift()`, // oldest end, like the server's buffer
+		`document.querySelector(".kind[aria-pressed='true']")`,
+		`el.flagcount`, // count visible from either view
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("log view missing %q", want)
+		}
+	}
+	// The views are one client-side state rendered two ways. A router or a second
+	// document would tear down the page, which ends the call.
+	for _, forbidden := range []string{
+		`location.hash`,
+		`window.location =`,
+		`history.pushState`,
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Errorf("view switching became navigation: %q", forbidden)
+		}
+	}
+}
+
+func TestPageKeepsTheControlsOutsideBothViews(t *testing.T) {
+	source := page(t)
+	// The controls have to sit outside the view container: a control that
+	// disappears when you switch view is the same defect as one labelled with its
+	// action, it makes the reader hold state the interface should show.
+	// The views container closes before the controls open, so the controls are its
+	// sibling rather than a child of either view.
+	if !strings.Contains(source, "      </div>\n    </div>\n\n    <footer class=\"controls\">") {
+		t.Error("the session controls are no longer a sibling of the views container")
+	}
+	if !strings.Contains(source, `id="view-conversation"`) || !strings.Contains(source, `id="view-logs"`) {
+		t.Error("expected exactly the two views")
+	}
+	if strings.Count(source, `class="view"`) != 2 {
+		t.Errorf("found %d views, want 2", strings.Count(source, `class="view"`))
+	}
+}

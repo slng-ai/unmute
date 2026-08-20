@@ -130,6 +130,20 @@ and WebSocket front door. Routes that need shared call coordination use Redis
 for bounded records such as call correlation, idempotency, transfers, and
 admission counters.
 
+## Dev loop topology
+
+The dev server starts before the runtime it serves, not after it. The listener
+binds, the page is served, and the browser opens; only then does the target's
+runtime start. Startup output reaches the page through an in-memory buffer that
+replays on connect, so output produced before the browser finished loading is
+still there, and every connected page receives the same stream.
+
+That ordering is what makes a failed start readable: the process stays alive with
+the page up, while the terminal still prints the error and the log path and the
+command still exits non-zero. Serving first is additional information, never a
+softened failure. Every borrowed local resource is still released on every exit
+path, including an interrupt during a build.
+
 ## Measurement boundary
 
 The emitted agent measures its own turns and prints one framed line per turn to

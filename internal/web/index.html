@@ -42,6 +42,64 @@
   .view{flex:1;min-height:0;display:none;flex-direction:column;gap:20px}
   .view[data-active="true"]{display:flex}
 
+  /* ── view switch ──────────────────────────────────────────
+     A segmented control, not a rail: two destinations do not earn a permanent
+     vertical gutter, and the page is one centred column. */
+  .viewtabs{display:flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+  .vtab{
+    font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+    display:flex;align-items:center;gap:6px;
+    padding:5px 10px;border:0;border-radius:6px;cursor:pointer;
+    background:transparent;color:var(--muted);
+    transition:background .18s var(--ease),color .18s var(--ease);
+  }
+  .vtab:hover{color:var(--text)}
+  .vtab[aria-selected="true"]{background:var(--surface-2);color:var(--text)}
+  .vtab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  /* the flagged count rides the tab, so it is visible from either view */
+  .badge{
+    font-size:10px;letter-spacing:0;padding:1px 5px;border-radius:99px;
+    background:var(--danger);color:var(--accent-ink);font-weight:700;
+  }
+  .badge[hidden]{display:none}
+
+  /* ── log view ────────────────────────────────────────────── */
+  .logtools{display:flex;gap:10px;align-items:center;flex:none}
+  #logfilter{
+    flex:1;min-width:0;font-family:var(--mono);font-size:13px;
+    padding:9px 12px;border-radius:9px;
+    border:1px solid var(--border);background:var(--surface);color:var(--text);
+  }
+  #logfilter::placeholder{color:var(--faint)}
+  #logfilter:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .kinds{display:flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+  .kind{
+    font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+    padding:5px 9px;border:0;border-radius:6px;cursor:pointer;
+    background:transparent;color:var(--muted);
+  }
+  .kind[aria-pressed="true"]{background:var(--surface-2);color:var(--text)}
+  .kind:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .logpane{
+    flex:1;min-height:0;display:flex;
+    border:1px solid var(--border);border-radius:12px;background:var(--surface);overflow:hidden;
+  }
+  .loglist{
+    flex:1;overflow:auto;overscroll-behavior:contain;padding:12px 14px;
+    font-size:12.5px;line-height:1.5;
+    scrollbar-width:thin;scrollbar-color:var(--border) transparent;
+  }
+  .loglist::-webkit-scrollbar{width:8px;height:8px}
+  .loglist::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .logrow{
+    display:block;white-space:pre-wrap;overflow-wrap:anywhere;
+    color:var(--muted);padding:1px 0;
+  }
+  .logrow.flagged{color:var(--danger)}
+  .logrow.metric{color:var(--accent)}
+  .logempty{color:var(--faint);font-size:12.5px;letter-spacing:.04em;padding:8px 0}
+
   /* ── top bar ─────────────────────────────────────────── */
   .bar{display:flex;align-items:center;justify-content:space-between;gap:16px}
   .status{display:flex;align-items:center;gap:10px;min-width:0}
@@ -136,6 +194,8 @@
   #mute[disabled]{opacity:.4;cursor:not-allowed}
   #connect{flex:1;background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
   #connect:hover:not([disabled]){background:oklch(0.92 0.165 96)}
+  /* Nothing to connect to yet: the page is served before the runtime exists. */
+  #connect[disabled]{opacity:.4;cursor:not-allowed}
 
   /* ── microphone: a state readout, not a verb ──────────────
      Uppercase and letter-spaced like .who so it reads as a status line rather
@@ -215,6 +275,12 @@
         <span class="dot" aria-hidden="true"></span>
         <span class="statusline">unmute dev<span class="sep">//</span><b id="agent">agent</b></span>
       </div>
+      <div class="viewtabs" role="tablist" aria-label="View">
+        <button class="vtab" type="button" role="tab" data-view="conversation" aria-selected="true">conversation</button>
+        <button class="vtab" type="button" role="tab" data-view="logs" aria-selected="false">
+          logs<span class="badge" id="flagcount" hidden>0</span>
+        </button>
+      </div>
       <img class="logo" src="logo.png" alt="SLNG">
     </header>
 
@@ -228,6 +294,21 @@
 
         <section class="transcript" aria-label="Conversation transcript">
           <div class="tlist" id="tlist" aria-live="polite" aria-atomic="false"></div>
+        </section>
+      </div>
+
+      <div class="view" id="view-logs" data-view="logs">
+        <div class="logtools">
+          <input id="logfilter" type="search" placeholder="filter output" aria-label="Filter output" autocomplete="off">
+          <div class="kinds" role="group" aria-label="Kind">
+            <button class="kind" type="button" data-kind="all" aria-pressed="true">all</button>
+            <button class="kind" type="button" data-kind="output" aria-pressed="false">output</button>
+            <button class="kind" type="button" data-kind="metric" aria-pressed="false">metrics</button>
+            <button class="kind" type="button" data-kind="flagged" aria-pressed="false">problems</button>
+          </div>
+        </div>
+        <section class="logpane" aria-label="Run output">
+          <div class="loglist" id="loglist"></div>
         </section>
       </div>
     </div>
@@ -281,6 +362,9 @@ const el = {
   micGlyph: document.querySelector("#mute .mic-glyph"),
   micLevel: document.getElementById("miclevel"),
   tlist: document.getElementById("tlist"),
+  loglist: document.getElementById("loglist"),
+  logfilter: document.getElementById("logfilter"),
+  flagcount: document.getElementById("flagcount"),
 };
 el.agent.textContent = AGENT;
 
@@ -301,6 +385,140 @@ let holding = false, heldWasMuted = false;            // hold-to-talk
 let partialEl = null; // live user partial; replaced/promoted on final
 let botTurnEl = null;
 const botSegments = new Map(); // RTVI segment id → latest text
+
+// ── views ───────────────────────────────────────────────
+// State, not navigation: tearing the page down would end the call, so there is
+// no router and no second document. The session controls live outside both views.
+let currentView = "conversation";
+let viewPinned = false;              // the author chose; stop moving it for them
+const tabs = Array.from(document.querySelectorAll(".vtab"));
+
+function showView(name, byUser){
+  if (byUser) viewPinned = true;
+  currentView = name;
+  for (const view of document.querySelectorAll(".view"))
+    view.dataset.active = String(view.dataset.view === name);
+  for (const tab of tabs)
+    tab.setAttribute("aria-selected", String(tab.dataset.view === name));
+  if (name === "logs") renderLog();
+}
+for (const tab of tabs)
+  tab.addEventListener("click", () => { tab.blur(); showView(tab.dataset.view, true); });
+
+// ── run output ──────────────────────────────────────────
+// The run's lifecycle drives what is in front, because the first thing worth
+// looking at before a runtime exists is the reason it does not exist yet.
+const LOG_MAX = 2000;
+const logRows = [];                  // {kind:"output"|"metric", text, flagged}
+let flagged = 0;
+let ready = false;
+
+function setRunState(state){
+  el.connect.disabled = !ready && state !== "ready";
+  if (state === "ready"){
+    ready = true;
+    el.connect.disabled = false;
+    // Move to the conversation once there is one to have, unless something went
+    // wrong on the way up, in which case the output is the more useful view.
+    if (!viewPinned && !flagged) showView("conversation");
+  } else if (state === "failed"){
+    ready = false;
+    el.connect.disabled = true;
+    setState("error", "error", "the agent did not start; see the output");
+    if (!viewPinned) showView("logs");
+  } else if (!viewPinned && currentView !== "logs"){
+    showView("logs");
+  }
+}
+
+function pushLogRow(row){
+  logRows.push(row);
+  if (logRows.length > LOG_MAX) logRows.shift();   // oldest end, as with the server's buffer
+  if (row.flagged){
+    flagged++;
+    el.flagcount.textContent = String(flagged);
+    el.flagcount.hidden = false;
+  }
+  if (currentView === "logs") renderLog();
+}
+
+// One compact line per record, so the log view answers "was it slow" without
+// leaving it.
+function metricText(rec){
+  if (!rec) return "";
+  if (rec.kind === "session")
+    return "session · first speech " + secs(rec.first_speech);
+  const parts = ["turn " + (rec.seq || "?")];
+  if (rec.e2e != null) parts.push("e2e " + secs(rec.e2e));
+  for (const stage of rec.stages || []){
+    // This line is about time, so a stage that reported none is left out of it.
+    // Which model was in use belongs beside the turn, not here.
+    if (stage.ttfb == null && stage.total == null) continue;
+    const bits = [stage.kind];
+    if (stage.ttfb != null) bits.push(secs(stage.ttfb));
+    if (stage.total != null) bits.push("total " + secs(stage.total));
+    parts.push(bits.join(" "));
+  }
+  for (const tool of rec.tools || []) parts.push(tool.name + " " + secs(tool.seconds));
+  if (rec.interrupted) parts.push("interrupted");
+  return parts.join("  ·  ");
+}
+function secs(v){ return v == null ? "—" : v.toFixed(2) + "s"; }
+
+function logMatches(row, needle, kind){
+  if (kind === "output" && row.kind !== "output") return false;
+  if (kind === "metric" && row.kind !== "metric") return false;
+  if (kind === "flagged" && !row.flagged) return false;
+  return !needle || row.text.toLowerCase().includes(needle);
+}
+
+function renderLog(){
+  const needle = el.logfilter.value.trim().toLowerCase();
+  const kind = document.querySelector(".kind[aria-pressed='true']").dataset.kind;
+  const atBottom = el.loglist.scrollHeight - el.loglist.scrollTop - el.loglist.clientHeight < 80;
+  const frag = document.createDocumentFragment();
+  let shown = 0;
+  for (const row of logRows){
+    if (!logMatches(row, needle, kind)) continue;
+    const line = document.createElement("span");
+    line.className = "logrow" + (row.flagged ? " flagged" : "") + (row.kind === "metric" ? " metric" : "");
+    line.textContent = row.text;
+    frag.appendChild(line);
+    shown++;
+  }
+  el.loglist.replaceChildren(frag);
+  if (!shown){
+    const empty = document.createElement("div");
+    empty.className = "logempty";
+    empty.textContent = logRows.length ? "nothing matches that filter" : "waiting for output…";
+    el.loglist.appendChild(empty);
+  }
+  if (atBottom) el.loglist.scrollTop = el.loglist.scrollHeight;
+}
+
+el.logfilter.addEventListener("input", renderLog);
+for (const button of document.querySelectorAll(".kind")){
+  button.addEventListener("click", () => {
+    for (const other of document.querySelectorAll(".kind"))
+      other.setAttribute("aria-pressed", String(other === button));
+    button.blur();
+    renderLog();
+  });
+}
+
+// EventSource, not a WebSocket: it reconnects on its own and replays with
+// Last-Event-ID, which is exactly the behaviour the server's buffer expects.
+function startEventStream(){
+  if (DEMO || !window.EventSource) return;
+  const es = new EventSource("/api/events");
+  es.addEventListener("message", (e) => {
+    let ev;
+    try { ev = JSON.parse(e.data); } catch { return; }
+    if (ev.t === "state") setRunState(ev.state);
+    else if (ev.t === "log") pushLogRow({kind:"output", text: ev.text || "", flagged: !!ev.flagged});
+    else if (ev.t === "metric") pushLogRow({kind:"metric", text: metricText(ev.record), flagged:false});
+  });
+}
 
 function setState(s, label, hint){
   el.body.dataset.state = s;
@@ -506,6 +724,13 @@ async function connect(){
     session = await res.json();
   } catch (err) {
     return setState("error", "error", "could not reach the dev server");
+  }
+  if (session.ready === false){
+    // The page outlives its runtime in both directions now, so this is a real
+    // answer rather than an error: there is nothing to call yet.
+    setState("idle", "ready", "the agent is not running yet; see the output");
+    if (!viewPinned) showView("logs");
+    return;
   }
   transport = session.kind;
   if (session.kind === "livekit") return connectLivekit(session);
@@ -794,6 +1019,10 @@ function simulate(){
 setBars(0.08);
 renderMic();
 setState("idle", "ready");
+// Nothing to call until the stream says otherwise. In DEMO builds there is no
+// stream, so the button stays live for the visual preview.
+if (!DEMO) el.connect.disabled = true;
+startEventStream();
 </script>
 </body>
 </html>
