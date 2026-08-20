@@ -401,7 +401,12 @@ let micAnalyser = null;                               // mic-only tap, drives th
 let muted = false, selectedDeviceId = null;
 let micState = "unavailable";                         // "unavailable" | "live" | "muted"
 let holding = false, heldWasMuted = false;            // hold-to-talk
-let partialEl = null; // live user partial; replaced/promoted on final
+// One open user row per spoken turn. The recognizer sends several finished
+// pieces per sentence, so the row accumulates them instead of pushing a row
+// each time. Finished text and live text are kept apart: pieces append to the
+// first, interim text replaces the second, and the row shows the two joined.
+let userTurnEl = null;
+let userFinished = "", userLive = "";
 let botTurnEl = null;
 const botSegments = new Map(); // RTVI segment id → latest text
 
@@ -553,7 +558,8 @@ function audioConstraint(){ return selectedDeviceId ? { deviceId: { exact: selec
 // ── transcript ──────────────────────────────────────────
 function clearTranscript(){
   el.tlist.innerHTML = "";
-  partialEl = null;
+  userTurnEl = null;
+  userFinished = userLive = "";
   botTurnEl = null;
   heldRecord = null;
   botSegments.clear();
@@ -574,22 +580,48 @@ function pushTurn(who, text, opts = {}){
   if (stick) el.tlist.scrollTop = el.tlist.scrollHeight;
   return turn;
 }
-function setPartial(text){
-  if (!text){ if (partialEl){ partialEl.remove(); partialEl = null; } return; }
-  if (!partialEl) partialEl = pushTurn("you", text, {partial:true});
+// Ordinary prose, so a piece that starts with punctuation closes up to the word
+// before it. ponytail: one condition, not a text processor — nothing else about
+// spacing or capitalisation is ours to fix.
+function joinSaid(a, b){
+  if (!a) return b;
+  if (!b) return a;
+  return /^[,.!?;:…]/.test(b) ? a + b : a + " " + b;
+}
+// A piece that restates or corrects what is already shown replaces it, rather
+// than piling on. Same shape as the merge setBotSegment does for agent output.
+function mergeFinished(done, piece){
+  if (!done) return piece;
+  if (piece.startsWith(done)) return piece;
+  if (done.endsWith(piece)) return done;
+  return joinSaid(done, piece);
+}
+function renderUserTurn(){
+  const text = joinSaid(userFinished, userLive);
+  if (!text){ if (userTurnEl){ userTurnEl.remove(); userTurnEl = null; } return; }
+  if (!userTurnEl) userTurnEl = pushTurn("you", text, {partial:true});
   else {
-    partialEl.querySelector(".said").textContent = text;
+    userTurnEl.querySelector(".said").textContent = text;
     if (nearBottom()) el.tlist.scrollTop = el.tlist.scrollHeight;
   }
 }
-function promotePartial(text){
-  if (partialEl){
-    partialEl.classList.remove("partial");
-    partialEl.querySelector(".said").textContent = text;
-    partialEl = null;
-  } else {
-    pushTurn("you", text);
-  }
+function setUserLive(text){
+  userLive = (text || "").trim();
+  renderUserTurn();
+}
+function addUserFinished(text){
+  text = (text || "").trim();
+  if (!text) return;
+  userFinished = mergeFinished(userFinished, text);
+  userLive = "";
+  renderUserTurn();
+}
+// The agent starting to speak is the only thing that ends a user turn: no
+// silence timer, and no per-transport end-of-speech signal to keep in step.
+function closeUserTurn(){
+  if (userTurnEl) userTurnEl.classList.remove("partial");
+  userTurnEl = null;
+  userFinished = userLive = "";
 }
 function resetBotTurn(){
   botTurnEl = null;
@@ -674,7 +706,9 @@ function setBotSegment(id, text){
     if (!merged || part.startsWith(merged)) merged = part;
     else if (part !== merged && !merged.endsWith(part)) merged += " " + part;
   }
-  if (!botTurnEl){ botTurnEl = pushTurn("bot", merged); claimHeldRecord(botTurnEl); }
+  // This is the one place an agent row is made, so it is the one place a user
+  // turn ends. Both transports get the same boundary with no branch of their own.
+  if (!botTurnEl){ closeUserTurn(); botTurnEl = pushTurn("bot", merged); claimHeldRecord(botTurnEl); }
   else botTurnEl.querySelector(".said").textContent = merged;
 }
 
@@ -744,7 +778,7 @@ function teardown(state, hint){
   setMicUnavailable();
   el.connect.textContent = "connect";
   transport = null;
-  setPartial("");
+  setUserLive("");
   setState(state, state === "error" ? "error" : "ready",
            state === "error" ? hint : "press connect and talk to your agent");
 }
@@ -907,8 +941,8 @@ function handleRtvi(msg){
   } else if (t === "user-transcription"){
     const text = (d.text || "").trim();
     if (!text) return;
-    if (d.final){ promotePartial(text); resetBotTurn(); }
-    else setPartial(text);
+    if (d.final){ addUserFinished(text); resetBotTurn(); }
+    else setUserLive(text);
   } else if (t === "bot-llm-started"){
     resetBotTurn();
   } else if (t === "bot-output"){
@@ -1049,8 +1083,8 @@ async function connectLivekit(session){
       for (const seg of segments){
         const text = (seg.text || "").trim();
         if (!text) continue;
-        if (who === "you" && !seg.final) setPartial(text);
-        else if (who === "you"){ promotePartial(text); resetBotTurn(); }
+        if (who === "you" && !seg.final) setUserLive(text);
+        else if (who === "you"){ addUserFinished(text); resetBotTurn(); }
         else setBotSegment(seg.id, text);
       }
     });
@@ -1093,8 +1127,8 @@ function simulate(){
     setMuted(false); el.connect.textContent = "end call";
     setState("connected", "live", "talk to your agent");
     pushTurn("bot", "Hi! I'm here to help. What can I do for you?");
-    setTimeout(() => setPartial("hey what's the weather"), 800);
-    setTimeout(() => promotePartial("hey what's the weather in Berlin"), 1700);
+    setTimeout(() => setUserLive("hey what's the weather"), 800);
+    setTimeout(() => addUserFinished("hey what's the weather in Berlin"), 1700);
     setTimeout(() => pushTurn("bot", "It's 14 degrees and partly cloudy in Berlin right now."), 2400);
     const t0 = performance.now();
     const tick = () => {
