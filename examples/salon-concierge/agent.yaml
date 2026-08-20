@@ -1,6 +1,6 @@
 # One full salon project: verification task, booking task group, specialist
-# handoffs, cold manager transfer, local SQLite tools, Firecrawl MCP, browser
-# audio, and inbound-only phone routes on both code targets.
+# handoffs, cold manager transfer, local SQLite tools, browser audio, and
+# inbound-only phone routes on both code targets.
 version: 1
 entry_agent: concierge
 
@@ -18,8 +18,6 @@ secrets:
   - LANGFUSE_BASE_URL
   - LANGFUSE_PUBLIC_KEY
   - LANGFUSE_SECRET_KEY
-  - FIRECRAWL_MCP_URL
-  - FIRECRAWL_API_KEY
   - MANAGER_PHONE_NUMBER
   - TWILIO_ACCOUNT_SID
   - TWILIO_AUTH_TOKEN

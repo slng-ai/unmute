@@ -7,7 +7,7 @@ you want one package to exercise the main Unmute paths together:
 - a three-step draft, confirmation, and apply group for create, modify, and cancel;
 - agent handoffs with shared customer context;
 - a complaint agent with cold manager transfer;
-- a chat agent whose only business tool is Firecrawl MCP;
+- a chat agent that answers open questions and hands off, with no tool of its own;
 - local Python tools backed by SQLite;
 - Langfuse tracing for release inspection;
 - browser audio and inbound phone calls on both code targets.
@@ -19,7 +19,7 @@ There is no outbound route. `channels.phone.outbound` is `false`.
 The concierge verifies the caller once, saves `customer_id` and `customer_name`,
 then routes the full conversation silently. Every specialist can route directly
 to any other specialist without announcing the internal handoff. The booking
-preparation task can also leave immediately for a complaint or current-information
+preparation task can also leave immediately for a complaint or a general
 request without applying a booking change. The apply step carries no handoff on
 purpose, so a request raised there ends that step first, with whatever the
 mutation actually returned, and names the request in `unserved_request`. The
@@ -45,13 +45,11 @@ inbound call. On an established phone call, a carrier failure is different: the
 explicit `hangup` policy ends the call because Pipecat `cloud-websocket` cannot
 return after carrier takeover.
 
-Only `chat_with_me` lists `web_search`. The other agents and every task use local
-Python tools or controls, so Firecrawl cannot be selected during verification,
-booking, or complaint work. Firecrawl is still a required startup dependency:
-missing credentials, an unreachable server, or a missing selected tool stops the
-session before its greeting. If a search fails after a conversation has started,
-the chat specialist states that current information is unavailable and does not
-invent an answer.
+Every tool in the package is a local Python handler, so nothing has to be
+reachable before the greeting. `chat_with_me` has no business tool at all: it
+answers from what it knows, says plainly when it cannot check something, and
+hands off for booking or complaint work. For a remote tool over MCP, see
+[`examples/mcp-example`](../mcp-example/).
 
 ## Local data
 
@@ -83,8 +81,6 @@ Common values:
 | `LANGFUSE_BASE_URL` | Langfuse API base URL |
 | `LANGFUSE_PUBLIC_KEY` | Langfuse project public key |
 | `LANGFUSE_SECRET_KEY` | Langfuse project secret key |
-| `FIRECRAWL_MCP_URL` | Firecrawl MCP address, normally `https://mcp.firecrawl.dev/v2/mcp` |
-| `FIRECRAWL_API_KEY` | bearer token for Firecrawl |
 
 `MANAGER_PHONE_NUMBER` is the cold-transfer destination in E.164 form. It is
 needed only for inbound phone manager transfers, may stay unset for browser
@@ -213,8 +209,7 @@ Repeat it on an inbound phone route only when that route is separately reachable
 | Modify | Book another appointment, then ask to move it to another future date. | The same booking is updated atomically after confirmation. |
 | Human transfer | On an inbound call say, “I want to speak to a manager.” | The active caller receives a cold transfer attempt. |
 | Frustration | On an inbound call repeat that the issue is unresolved and refuse to continue with the agent. | The complaint specialist starts the same manager transfer. |
-| MCP startup failure | Start a session with Firecrawl unavailable or the selected tool missing. | Startup stops before the greeting; no active specialist claims it can search. |
-| Established MCP failure | After a session starts, make a Firecrawl search fail. | Chat states that current information is unavailable and does not answer from memory. |
+| No claimed lookup | Ask the chat specialist something it cannot know, such as another salon's prices today. | It says plainly that it cannot check, offers what it does know, and never claims to have searched. |
 | Transfer failure truth | Try a manager transfer in a browser, then test an unavailable manager on a phone call. | Browser says an inbound phone leg is required. A carrier failure is not described as a browser limit, and the terminal policy may hang up. |
 
 ### Verification stress checks
@@ -316,6 +311,5 @@ For longer real conversations, use the
 [tasks](../../docs-site/build/orchestration/tasks.mdx),
 [task groups](../../docs-site/build/orchestration/task-groups.mdx),
 [handoffs](../../docs-site/build/orchestration/handoffs.mdx),
-[MCP](../../docs-site/build/tools/mcp.mdx),
 [transfers](../../docs-site/transfers/overview.mdx), and
 [telephony](../../docs-site/telephony/overview.mdx).

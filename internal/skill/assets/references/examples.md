@@ -22,7 +22,7 @@ read two side by side and see only the difference that matters.
 | What the user wants | Package | What it shows |
 |---|---|---|
 | the smallest thing that runs | `examples/salon-support` | **Start here.** One agent, browser audio, local tools, no Twilio and no API to stand up. A personalized greeting, a hidden tool parameter, and the model saving what the caller says. |
-| one full release-readiness project | `examples/salon-concierge` | verification task, booking task group, four-agent handoffs, SQLite tools, Firecrawl MCP, Langfuse tracing, cold manager transfer, browser audio, and inbound-only phone routes on both targets |
+| one full release-readiness project | `examples/salon-concierge` | verification task, booking task group, four-agent handoffs, SQLite tools, Langfuse tracing, cold manager transfer, browser audio, and inbound-only phone routes on both targets |
 | one agent, one prompt, every tool | `examples/simple-prompt` | the baseline for both targets |
 | a step with a definite typed answer | `examples/multi-task` | one agent, two tasks it delegates to, `result:` and `assign:` |
 | steps that must happen in a fixed order | `examples/task-groups` | three ordered tasks, `context_scope: shared`, and the LiveKit experimental warning |

@@ -24,8 +24,6 @@ secrets:
   - LANGFUSE_BASE_URL
   - LANGFUSE_PUBLIC_KEY
   - LANGFUSE_SECRET_KEY
-  - FIRECRAWL_MCP_URL
-  - FIRECRAWL_API_KEY
   - MANAGER_PHONE_NUMBER
   - TWILIO_ACCOUNT_SID
   - TWILIO_AUTH_TOKEN
@@ -108,7 +106,6 @@ agents:
     model: reasoning
     voice: voice
     tools:
-      - web_search
       - to_booking
       - to_complaints
       - to_concierge
@@ -269,7 +266,6 @@ tools:
   - modify_booking
   - cancel_booking
   - record_complaint
-  - web_search
 
 conversation:
   greeting:
