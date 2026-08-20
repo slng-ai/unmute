@@ -4,8 +4,8 @@ The [salon-concierge](../salon-concierge/README.md) project with its thinking
 behind the SLNG Context Router. Everything else is the same package: the same
 prompts, the same verification task, the same booking task group, the same
 specialist handoffs, the same cold manager transfer, the same local SQLite tools,
-the same Firecrawl MCP, the same browser audio, and the same inbound-only phone
-routes on both code targets.
+the same browser audio, and the same inbound-only phone routes on both code
+targets.
 
 The two exist as a matched pair. Run the same conversation through both and the
 difference you measure is the router's.
@@ -78,8 +78,6 @@ Common values:
 | `LANGFUSE_BASE_URL` | Langfuse API base URL |
 | `LANGFUSE_PUBLIC_KEY` | Langfuse project public key |
 | `LANGFUSE_SECRET_KEY` | Langfuse project secret key |
-| `FIRECRAWL_MCP_URL` | Firecrawl MCP address, normally `https://mcp.firecrawl.dev/v2/mcp` |
-| `FIRECRAWL_API_KEY` | bearer token for Firecrawl |
 
 One SLNG key serves all three SLNG roles here: listen, speak, and now think.
 `OPENAI_API_KEY` needs a value but no `secrets:` line, because the compiler

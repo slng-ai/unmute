@@ -189,6 +189,29 @@ func TestPageKeepsTheControlsOutsideBothViews(t *testing.T) {
 	}
 }
 
+func TestOneRowPerSpokenTurn(t *testing.T) {
+	source := page(t)
+	for _, want := range []string{
+		`function renderUserTurn()`,                              // one row, rendered from two strings
+		`const text = joinSaid(userFinished, userLive)`,          // finished text plus live text
+		`userFinished = mergeFinished(userFinished, text)`,       // a finished piece appends
+		`if (piece.startsWith(done)) return piece`,               // a correction replaces what is shown
+		`if (done.endsWith(piece)) return done`,                  // a repeat is dropped
+		"return /^[,.!?;:…]/.test(b) ? a + b : a + \" \" + b",    // no gap before punctuation
+		`if (!botTurnEl){ closeUserTurn(); botTurnEl = pushTurn`, // the agent's first row ends the turn
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("user turn accumulator missing %q", want)
+		}
+	}
+	// The defect this replaced: a finished piece with no live row waiting pushed a
+	// row of its own, so one sentence arrived as one row per recognizer fragment.
+	// See specs/017-stt-single-line/spec.md.
+	if strings.Contains(source, "pushTurn(\"you\", text);\n") {
+		t.Error("a finished transcript piece pushes its own row again")
+	}
+}
+
 func TestTurnsCarryTheirOwnTimings(t *testing.T) {
 	source := page(t)
 	for _, want := range []string{

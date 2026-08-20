@@ -80,9 +80,13 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		}
 	}
 
+	// Every tool here is a local Python handler, so nothing remote has to be
+	// reachable before the greeting. The MCP path is exercised by
+	// examples/mcp-example instead; this example used to carry a Firecrawl
+	// web_search tool and no longer does.
 	for name, agent := range resolved.Agents {
-		if (name == "chat_with_me") != slices.Contains(agent.Tools, "web_search") {
-			t.Errorf("agent %q has unexpected web_search access: %v", name, agent.Tools)
+		if slices.Contains(agent.Tools, "web_search") {
+			t.Errorf("agent %q still lists the removed web_search tool: %v", name, agent.Tools)
 		}
 	}
 	for name, task := range resolved.Tasks {
@@ -91,14 +95,7 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		}
 	}
 	for name, tool := range resolved.Tools {
-		if name == "web_search" {
-			if tool.Execution != ir.ToolMCP || tool.URLEnv != "FIRECRAWL_MCP_URL" ||
-				tool.Auth == nil || tool.Auth.Type != ir.ToolAuthBearer ||
-				tool.Auth.TokenEnv != "FIRECRAWL_API_KEY" ||
-				!slices.Equal(tool.MCPTools, []string{"firecrawl_search"}) {
-				t.Errorf("web_search = %#v, want Firecrawl MCP", tool)
-			}
-		} else if tool.Execution != ir.ToolLocal || tool.Handler != "tools/salon.py" {
+		if tool.Execution != ir.ToolLocal || tool.Handler != "tools/salon.py" {
 			t.Errorf("tool %q = %#v, want shared local Python handler", name, tool)
 		}
 	}
@@ -219,8 +216,10 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 	requireText("apply booking", resolved.Tasks["apply_booking"].Instructions,
 		"false, missing", "anything other than true", "Do not call a mutation",
 		"authoritative `confirm_booking` finish result", "Do not replace")
+	// The chat agent has no tool of its own, so the prompt's job is to stop it
+	// claiming a lookup it cannot perform.
 	requireText("chat", resolved.Agents["chat_with_me"].Instructions,
-		"required before the session greets the caller", "current information is unavailable")
+		"You have no way to look anything up", "say plainly that you cannot check it")
 	requireText("complaints", resolved.Agents["complaint_specialist"].Instructions,
 		"no active phone leg", "reaches the carrier", "route may hang up")
 }
