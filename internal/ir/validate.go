@@ -293,6 +293,9 @@ func validateStructure(agent *Agent) (errors, warnings []string) {
 			}
 		}
 		for fieldName, field := range task.Result {
+			if fieldName == UnservedResultField {
+				errors = add(errors, fmt.Sprintf("task %q result %q is reserved: every generated task finish already takes %s for a request the step cannot serve", name, fieldName, UnservedResultField))
+			}
 			if field.Schema == nil && !validPrimitive(field.Type) {
 				errors = add(errors, fmt.Sprintf("task %q result %q has invalid type %q", name, fieldName, field.Type))
 			}
@@ -622,6 +625,9 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		applyCapability(caps, targetcap.FieldTurnPlacement, provider, row)
 		if b.SemanticEndpointing != "" {
 			applyCapability(caps, targetcap.FieldSemanticEndpointing, provider, row)
+		}
+		if b.EndpointingDelay != "" {
+			applyCapability(caps, targetcap.FieldEndpointingDelay, provider, row)
 		}
 	}
 	for _, b := range resolved.Models.Speak {
@@ -2213,6 +2219,13 @@ func validateModelKind(name string, model ModelDef) []string {
 	case KindTurn:
 		if model.Voice != "" || model.Speed != nil || model.Temperature != nil || model.TopP != nil || model.TopK != nil {
 			errors = add(errors, fmt.Sprintf("model %q is a turn model; voice, speed, and sampling fields do not apply", name))
+		}
+	}
+	if model.EndpointingDelay != "" {
+		if model.Kind != KindTurn {
+			errors = add(errors, fmt.Sprintf("model %q endpointing_delay is a turn-model field", name))
+		} else {
+			errors = append(errors, validateDuration(fmt.Sprintf("model %q endpointing_delay", name), model.EndpointingDelay)...)
 		}
 	}
 	if model.SemanticEndpointing != "" {

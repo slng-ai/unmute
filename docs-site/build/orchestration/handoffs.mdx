@@ -111,6 +111,20 @@ A caller cannot talk the booking agent into a cancellation, because the booking
 agent has no way to perform one. Splitting agents is as much about splitting
 capability as it is about splitting prose.
 
+## The opening turn cannot hand off again
+
+A receiving agent speaks first, and that opening reply is offered every tool it
+has except its own handoffs. Without that, two agents whose prompts both say
+"send this elsewhere" bounce the call between them before the caller hears
+anything.
+
+It applies to the opening turn only. Every turn after it, the agent has its full
+list back, including the handoffs. That distinction is load-bearing: an earlier
+version leaned on LiveKit's own on-enter tool flag, whose filter follows the
+context of everything the opening reply starts, so an agent whose opening reply
+ran a delegate never saw its handoffs again. A live call offered one specialist
+nothing but its delegate for ten turns while the caller asked for another one.
+
 ## Try it
 
 ```sh

@@ -1155,3 +1155,34 @@ func TestBuildToolAnnounceTrimsToASettledValue(t *testing.T) {
 		})
 	}
 }
+
+// A target override replaces the vendor selection, not the silence budget: the
+// package sets endpointing_delay once for a slow transcriber, and a target that
+// swaps the detector must not drop it (B: fragmented STT, 2026-08-20).
+func TestTargetOverrideKeepsEndpointingDelay(t *testing.T) {
+	agent := &Agent{
+		Models: map[string]ModelDef{
+			"detector": {Kind: KindTurn, Provider: "local", Model: "silero", EndpointingDelay: "1500ms"},
+		},
+		Turn: "detector",
+	}
+	overrides := map[string]packagespec.ModelDef{
+		"detector": {Provider: "livekit", Model: "turn-detector-mini"},
+	}
+	bindings := resolveBindings(agent, map[string]bool{}, overrides)
+	if bindings.Turn == nil {
+		t.Fatal("no turn binding resolved")
+	}
+	if got := bindings.Turn.Model; got != "turn-detector-mini" {
+		t.Errorf("override must still replace the model: got %q", got)
+	}
+	if got := bindings.Turn.EndpointingDelay; got != "1500ms" {
+		t.Errorf("override dropped the endpointing delay: got %q", got)
+	}
+
+	// An override that states its own value still wins.
+	overrides["detector"] = packagespec.ModelDef{Provider: "livekit", Model: "turn-detector-mini", EndpointingDelay: "800ms"}
+	if got := resolveBindings(agent, map[string]bool{}, overrides).Turn.EndpointingDelay; got != "800ms" {
+		t.Errorf("override value must win: got %q", got)
+	}
+}

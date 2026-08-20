@@ -2416,3 +2416,55 @@ func TestValidateSlngRouterSecondProfileIsLiveKitOnlyRefusal(t *testing.T) {
 		t.Errorf("pipecat refused a second router profile it can serve:\n%s", got)
 	}
 }
+
+// The drivers add UnservedResultField to every task's finish themselves, so a
+// task result claiming the name would collide with the generated argument.
+func TestValidateRejectsReservedTaskResultField(t *testing.T) {
+	agent := safeAgent(t)
+	agent.Tasks["collect"] = Task{
+		Instructions: "collect",
+		Result: map[string]ResultField{
+			"done":              {Type: PrimitiveBoolean},
+			UnservedResultField: {Type: PrimitiveString},
+		},
+		Context: TaskContext{History: HistoryFull},
+	}
+	report, err := Validate(agent, []Target{targetFor(agent, ProviderLiveKit)}, targetcap.Default())
+	if err == nil {
+		t.Fatal("expected a validation error for the reserved result field")
+	}
+	text := strings.Join(report.PerTarget[0].Errors, "\n")
+	if !strings.Contains(text, UnservedResultField) || !strings.Contains(text, "is reserved") {
+		t.Errorf("error does not name the reserved field: %q", text)
+	}
+}
+
+// endpointing_delay is the silence budget a slow transcriber needs, and it only
+// means anything on a turn model.
+func TestValidateEndpointingDelayIsATurnFieldAndPositive(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		kind  ModelKind
+		value Duration
+		want  string
+	}{
+		{name: "turn model takes it", kind: KindTurn, value: "1s"},
+		{name: "listen model does not", kind: KindListen, value: "1s", want: "endpointing_delay is a turn-model field"},
+		{name: "zero is refused", kind: KindTurn, value: "0s", want: "endpointing_delay must be a positive Go duration"},
+		{name: "garbage is refused", kind: KindTurn, value: "soon", want: "endpointing_delay must be a positive Go duration"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := validateModelKind("slow_stt", ModelDef{Kind: tc.kind, EndpointingDelay: tc.value})
+			text := strings.Join(got, "\n")
+			if tc.want == "" {
+				if text != "" {
+					t.Fatalf("unexpected errors: %s", text)
+				}
+				return
+			}
+			if !strings.Contains(text, tc.want) {
+				t.Fatalf("want %q, got %q", tc.want, text)
+			}
+		})
+	}
+}

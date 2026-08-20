@@ -45,6 +45,7 @@ const (
 	FieldReasonLocal           Field = "models.placement.local"
 	FieldTurnPlacement         Field = "pipeline.turn.placement"
 	FieldSemanticEndpointing   Field = "pipeline.turn.semantic_endpointing"
+	FieldEndpointingDelay      Field = "pipeline.turn.endpointing_delay"
 	FieldFallback              Field = "models.fallback"
 	FieldListenFallback        Field = "models.listen.fallback"
 	FieldTask                  Field = "tasks"
@@ -245,6 +246,13 @@ func Default() Table {
 				warn(Pipecat, "Pipecat semantic endpointing depends on the bound model"),
 				warn(Vapi, "Vapi semantic endpointing is forwarded as a preference"),
 				warn(Deepgram, "Deepgram semantic endpointing depends on the bound listen model"),
+			),
+			// Both code drivers have a real silence budget to set: LiveKit's
+			// endpointing min_delay, Pipecat's VAD stop_secs. The hosted stacks
+			// own turn taking themselves, so the value has nowhere to land.
+			FieldEndpointingDelay: field(
+				warn(Vapi, "Vapi integrates turn detection; the endpointing delay is ignored"),
+				warn(Deepgram, "Deepgram integrates turn detection into listen; the endpointing delay is ignored"),
 			),
 			FieldFallback: field(deny(Pipecat, "the Pipecat driver does not emit generated fallback yet")),
 			// Listen (STT) fallback: native on LiveKit (stt.FallbackAdapter,

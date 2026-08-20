@@ -1,3 +1,10 @@
+{{define "opening_guard_note"}}        # This opening turn withholds the agent's own handoffs (B3: an agent that can
+        # hand the call back before it has said anything ping-pongs). The framework's
+        # on-enter tool flag would hide them for the rest of the call instead, because
+        # its filter follows the context of everything this reply starts: a live call
+        # offered one specialist nothing but its delegate for ten turns while the
+        # caller asked for another one (B: salon handoffs, 2026-08-20).
+{{end}}{{define "opening_tools"}}tools=[t.id for t in self.tools if t.id not in { {{- range $i, $t := .Transfers}}{{if $i}}, {{end}}{{pyq $t.Method}}{{end -}} }]{{end}}
 {{- /* svc renders any resolved ServiceCall inline (session/agent kwargs).
 Classes, kwargs, and model-route forms come from the provider catalogue
 (internal/target/catalog_livekit.go). */ -}}
@@ -788,26 +795,38 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{- end}}
 {{- if and .IsEntry (not $.SingleAgentMinimal)}}
         if not self._initial:
+{{- if .Transfers}}
+{{template "opening_guard_note" .}}            self.session.generate_reply({{template "opening_tools" .}})
+{{- else}}
             self.session.generate_reply()
+{{- end}}
             return
 {{- end}}
 {{- if .Greeting}}
 {{- if .Greeting.Say}}
         await self.session.say({{if .Greeting.Templated}}_render({{pyq .Greeting.Say}}, self.session.userdata){{else}}{{pyq .Greeting.Say}}{{end}})
 {{- else if .Greeting.RunLLM}}
+{{- if .Transfers}}
+{{template "opening_guard_note" .}}        self.session.generate_reply(instructions="Greet the caller and offer to help.", {{template "opening_tools" .}})
+{{- else}}
         self.session.generate_reply(instructions="Greet the caller and offer to help.")
+{{- end}}
 {{- else}}
         pass  # the caller speaks first
 {{- end}}
 {{- else}}
         # This agent took over via handoff; let its own instructions drive the
         # opening (the prompt already says not to re-greet).
+{{- if .Transfers}}
+{{template "opening_guard_note" .}}        self.session.generate_reply({{template "opening_tools" .}})
+{{- else}}
         self.session.generate_reply()
+{{- end}}
 {{- end}}
 {{- range .Tools}}{{template "method_tool" .}}{{end}}
 {{- if $.Capture}}{{template "capture_tool" $.Capture}}{{end}}
 {{range .Transfers}}
-    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)
+    @function_tool
     async def {{.Method}}(self, ctx: RunContext):
         {{triple .When}}
 {{- if .Requires}}
@@ -1151,6 +1170,14 @@ class {{.Class}}({{if $.IgnorePhrases}}IgnorePhrasesMixin, {{end}}Agent):
 {{end}}
 {{- if .NeedsTasks}}
 # --- tasks -----------------------------------------------------------------
+def _task_result(values: dict, {{.Unserved.Name}}: str) -> dict:
+    """A step that could not serve a request names it on the way out, so the
+    agent that owns the step reads it off the result and takes it from there."""
+    if not {{.Unserved.Name}}:
+        return values
+    return {**values, {{pyq .Unserved.Name}}: {{.Unserved.Name}}}
+
+
 class _RetryEmptyTaskResponseMixin:
     _response_tool_call_ids: set[str]
 
@@ -1292,11 +1319,15 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
         await self.update_instructions({{.PromptExpr}})
 {{- end}}
         # The task's own instructions describe this step; let them drive the opening.
+{{- if .Transfers}}
+{{template "opening_guard_note" .}}        self.session.generate_reply({{template "opening_tools" .}})
+{{- else}}
         self.session.generate_reply()
+{{- end}}
 {{range .Tools}}{{template "method_tool" .}}{{end}}
 {{- if $.Capture}}{{template "capture_tool" $.Capture}}{{end}}
 {{range .Transfers}}
-    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)
+    @function_tool
     async def {{.Method}}(self, ctx: RunContext):
         {{triple .When}}
         if not self._claim_terminal():
@@ -1327,7 +1358,7 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
             self._terminal_claimed = False
             raise
 {{end}}    @function_tool
-    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}) -> None:
+    async def finish(self, ctx: RunContext{{range .Result}}, {{.Name}}: {{.Anno}}{{end}}, {{$.Unserved.Name}}: {{$.Unserved.Anno}} = "") -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
 {{- if .Transfers}}
@@ -1335,26 +1366,26 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
             return
         try:
 {{- if $.NeedsTaskGroups}}
-            result = { {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }
+            result = _task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}})
             self.complete(result)
             # Record only after complete() succeeds: a rejected duplicate cannot
             # replace the winner, and there is no await for the callback to race.
             self._finish_call_id = ctx.function_call.call_id
 {{- else}}
-            self.complete({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} })
+            self.complete(_task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}}))
 {{- end}}
         except BaseException:
             self._terminal_claimed = False
             raise
 {{- else}}
 {{- if $.NeedsTaskGroups}}
-        result = { {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }
+        result = _task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}})
         self.complete(result)
         # Record only after complete() succeeds: a rejected duplicate cannot
         # replace the winner, and there is no await for the callback to race.
         self._finish_call_id = ctx.function_call.call_id
 {{- else}}
-        self.complete({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} })
+        self.complete(_task_result({ {{- range $i, $r := .Result}}{{if $i}}, {{end}}{{pyq $r.Name}}: {{$r.Name}}{{end -}} }, {{$.Unserved.Name}}))
 {{- end}}
 {{- end}}
 {{end}}
@@ -1417,11 +1448,21 @@ async def entrypoint(ctx: JobContext) -> None:
             turn_detection=inference.TurnDetector({{if .TurnVersion}}version={{pyq .TurnVersion}}{{end}}),
             interruption={"enabled": {{if .Interruption.Enabled}}True{{else}}False{{end}}{{if .Interruption.MinWords}}, "min_words": {{.Interruption.MinWords}}{{end}}},
             preemptive_generation={"enabled": True},
+{{- if .EndpointingDelay}}
+            # A transcriber slower than the 0.5s default lands its final text after
+            # the turn is already committed, and the agent answers a fragment.
+            endpointing={"min_delay": {{.EndpointingDelay}}},
+{{- end}}
         ),
 {{- else}}
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector({{if .TurnVersion}}version={{pyq .TurnVersion}}{{end}}),
             preemptive_generation={"enabled": True},
+{{- if .EndpointingDelay}}
+            # A transcriber slower than the 0.5s default lands its final text after
+            # the turn is already committed, and the agent answers a fragment.
+            endpointing={"min_delay": {{.EndpointingDelay}}},
+{{- end}}
         ),
 {{- end}}
         vad=ctx.proc.userdata["vad"],

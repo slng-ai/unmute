@@ -260,6 +260,11 @@ Shorter and narrower. A task has one job, its own tool list, and a typed
   when to use it.
 - **Say what to do when it cannot finish.** A task with no failure path invents
   one.
+- **Skip the finish contract and the off-topic escape.** The compiler appends
+  both to every task prompt: which fields `finish` takes, and to call it with
+  the caller's request in `unserved_request` instead of refusing when the step's
+  tools cannot serve it. `unserved_request` is reserved; do not put it in
+  `result:`.
 
 ```markdown
 Find out who is calling.

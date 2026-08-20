@@ -106,6 +106,30 @@ controls are rejected on tasks during validation.
 That scoping is the useful half of delegation, and also the part to plan for,
 because anything the task may need must appear in its own list.
 
+A task that lists no `agent_transfer` still has a way out. Every generated task
+prompt ends with one compiler-written rule: when the caller asks for something
+none of the step's tools can do, and no handoff on the step covers it, call the
+step's finish function right away with the closest result it has, and name that
+request in `unserved_request`. You do not write that rule in the task's own
+instructions. Without it, a locked-down step keeps refusing the same request
+instead of handing the caller on.
+
+The rule is narrow on purpose. It never excuses skipping the step's own work,
+the caller's original reason for being in the step is not an unserved request,
+and a handoff the step declares always wins over it. Loosely worded, a first
+step reads the caller's opening request as out of scope and bails on turn one.
+
+`unserved_request` is a reserved string field on every generated finish,
+optional and empty by default. You do not declare it in `result:`, and a task
+result that claims the name is a validation error. When it comes back filled,
+the returned result carries it, the owning agent is told to take that request
+next, and the caller does not have to ask twice.
+
+Only a `then: return` group hands the result to an owner on both targets. With
+`then: end` the call is over. With `then: transfer` the Pipecat handback still
+carries the results and the rule, while the LiveKit one gives the receiving
+agent the pre-flow context only, so the field goes unread there.
+
 ## Empty LiveKit task responses
 
 Generated LiveKit tasks retry up to twice when a full successful response has

@@ -447,14 +447,18 @@ type pipecatData struct {
 
 	// Import needs: keep bot.py free of unused imports (only what a given spec
 	// actually exercises), so the emitted pipeline reads clean.
-	NeedsInspect             bool        // any local tool (isawaitable on the user handler, V13)
-	NeedsRender              bool        // any template site: the _render helper + re import
-	NeedsStateBind           bool        // any flow tool reading state (inject inside a task)
-	NeedsRefusal             bool        // any tool whose injected variables can be unset (V4)
-	NeedsHTTPX               bool        // any webhook tool (agent @tool or flows handler)
-	AuthKinds                authKindSet // webhook auth schemes in use: helpers + imports per scheme
-	NeedsFunctionCalls       bool        // any @tool/transfer/delegate (FunctionCallParams)
-	NeedsTurnStrategies      bool        // interruption min-words strategy
+	NeedsInspect       bool        // any local tool (isawaitable on the user handler, V13)
+	NeedsRender        bool        // any template site: the _render helper + re import
+	NeedsStateBind     bool        // any flow tool reading state (inject inside a task)
+	NeedsRefusal       bool        // any tool whose injected variables can be unset (V4)
+	NeedsHTTPX         bool        // any webhook tool (agent @tool or flows handler)
+	AuthKinds          authKindSet // webhook auth schemes in use: helpers + imports per scheme
+	NeedsFunctionCalls bool        // any @tool/transfer/delegate (FunctionCallParams)
+	ResultsHint        string      // developer-message tail when a delegate hands its results back
+	// EndpointingDelay is the authored silence budget in seconds, "" when the
+	// package leaves the VAD default alone.
+	EndpointingDelay         string
+	NeedsTurnStrategies      bool // interruption min-words strategy
 	NeedsEndFrame            bool
 	NeedsAppendFrame         bool
 	HasFlows                 bool // any delegate (tasks run as Flows on the owner, C8)
@@ -504,6 +508,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldSpeakEndpoint:        true, // base_url on the TTS service
 	targetcap.FieldTurnPlacement:        true, // advisory (VAD/smart-turn supplied)
 	targetcap.FieldSemanticEndpointing:  true, // advisory
+	targetcap.FieldEndpointingDelay:     true, // VAD stop_secs
 	targetcap.FieldTask:                 true, // Flow node on the owning worker (C8)
 	targetcap.FieldTaskNestedResult:     true, // forwarded json_schema properties
 	targetcap.FieldTaskGroup:            true, // linear dynamic-flow chain

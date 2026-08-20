@@ -726,9 +726,12 @@ class ProbeLLM(llm.LLM):
                 tool for tool in tools if getattr(tool.info, "name", "") == "finish"
             )
             finish_schema = llm.utils.build_legacy_openai_schema(finish_tool)
-            assert set(
-                finish_schema["function"]["parameters"]["properties"]
-            ) == {"sent"}
+            finish_params = finish_schema["function"]["parameters"]
+            assert set(finish_params["properties"]) == {"sent", "unserved_request"}
+            # The reserved escape field stays optional through the SDK's own
+            # schema builder: a required one would have the model invent a
+            # request on every finish.
+            assert "unserved_request" not in finish_params.get("required", [])
             expected = {
                 "date": "2026-08-19",
                 "party_size": 2,

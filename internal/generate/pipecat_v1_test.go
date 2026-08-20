@@ -1002,7 +1002,9 @@ func TestPipecatV1TaskTransferStopsFlowAndPreservesFullHistory(t *testing.T) {
 		`async def _run_verify_complete_complete(self):`,
 		`self._run_verify_active_step = "complete"`,
 		`self._run_verify_results.pop("complete", None)`,
-		`delta=LLMSettings(system_instruction="Complete verification.")`,
+		// The prompt continues with the compiler's finish contract, so match its
+		// opening rather than the whole literal.
+		`delta=LLMSettings(system_instruction="Complete verification.`,
 	} {
 		if !strings.Contains(finalBody, want) {
 			t.Errorf("final task rollback missing %q", want)
@@ -1073,7 +1075,9 @@ func TestPipecatV1TasksGolden(t *testing.T) {
 	for _, want := range []string{
 		"from pipecat.frames.frames import EndFrame, FunctionCallResultProperties, LLMMessagesAppendFrame, LLMUpdateSettingsFrame, TTSSpeakFrame",
 		"from pipecat.services.settings import LLMSettings",
-		`role_message="Ask for the caller's email, look them up, and confirm their account tier."`,
+		// The compiler appends its finish contract, so this matches the
+		// authored opening only.
+		`role_message="Ask for the caller's email, look them up, and confirm their account tier.`,
 		`task_messages=[{"role": "developer", "content": "Begin this step."}]`,
 		// The delegate resolves its call with run_llm=False so only the flow node
 		// responds — no double assistant turn (V7/B4).

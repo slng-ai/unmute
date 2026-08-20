@@ -68,11 +68,15 @@ The caller is {{customer_id}}."""
 
 COLLECT_PROMPT = """Ask for the caller's email and confirm the account for {{customer_id}}.
 
-When this step is complete, call `finish` with: tier."""
+When this step is complete, call `finish` with: tier.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with the closest result you have and their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that field and takes the caller from there."""
 
 CONFIRM_PROMPT = """Read the booking back and ask the caller to confirm.
 
-When this step is complete, call `finish` with: confirmed."""
+When this step is complete, call `finish` with: confirmed.
+
+`unserved_request` is for a request this step cannot serve. Do this step's own work first, and never use it to skip that work: the caller's original reason for being here is not an unserved request. If a handoff here covers what they want, call that handoff instead. Only when no tool and no handoff here can serve what the caller is asking, call `finish` with the closest result you have and their request in `unserved_request`, in their own words, rather than refusing or explaining what you cannot do here. The agent that owns this step reads that field and takes the caller from there."""
 
 # --- required environment ----------------------------------------------------
 # Everything this agent needs to run: the model providers' keys, the connection
@@ -287,7 +291,13 @@ class Intake(IgnorePhrasesMixin, Agent):
 
     async def on_enter(self) -> None:
         if not self._initial:
-            self.session.generate_reply()
+        # This opening turn withholds the agent's own handoffs (B3: an agent that can
+        # hand the call back before it has said anything ping-pongs). The framework's
+        # on-enter tool flag would hide them for the rest of the call instead, because
+        # its filter follows the context of everything this reply starts: a live call
+        # offered one specialist nothing but its delegate for ten turns while the
+        # caller asked for another one (B: salon handoffs, 2026-08-20).
+            self.session.generate_reply(tools=[t.id for t in self.tools if t.id not in {"to_billing"}])
             return
         await self.session.say("Hi, you have reached Acme Support. How can I help you today?")
     @function_tool
@@ -302,14 +312,14 @@ class Intake(IgnorePhrasesMixin, Agent):
             return resp.json()
 
 
-    @function_tool(flags=llm.tool_context.ToolFlag.IGNORE_ON_ENTER)
+    @function_tool
     async def to_billing(self, ctx: RunContext):
         """Caller asks about billing, an invoice, or a refund."""
         return Billing(chat_ctx=self.chat_ctx.copy(exclude_instructions=True, exclude_handoff=True))
 
     @function_tool
     async def run_collect(self, ctx: RunContext) -> dict:
-        """Collect the caller's account details. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request."""
+        """Collect the caller's account details. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn with your own tools or a handoff. Never end the turn without it and never tell the caller you cannot."""
         # N13: snapshot before the task, restore after. An awaited AgentTask
         # merges its own turns into this agent's context when it returns
         # (livekit/agents/voice/agent.py, merge on handoff-return), so without
@@ -326,7 +336,7 @@ class Intake(IgnorePhrasesMixin, Agent):
 
     @function_tool
     async def run_triage(self, ctx: RunContext) -> dict:
-        """Run the triage group. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request."""
+        """Run the triage group. When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request. A result carrying `unserved_request` means a step could not serve that request and handed it back. The caller is still owed it: after one short line about the result, act on that request in the same turn with your own tools or a handoff. Never end the turn without it and never tell the caller you cannot."""
         # context_scope: isolated — each step is a standalone AgentTask starting
         # fresh (C3/C4); the grouped form always shares context, so it is not used.
         # Starting fresh says nothing about coming back: an AgentTask merges its
@@ -344,6 +354,14 @@ class Intake(IgnorePhrasesMixin, Agent):
 
 
 # --- tasks -----------------------------------------------------------------
+def _task_result(values: dict, unserved_request: str) -> dict:
+    """A step that could not serve a request names it on the way out, so the
+    agent that owns the step reads it off the result and takes it from there."""
+    if not unserved_request:
+        return values
+    return {**values, "unserved_request": unserved_request}
+
+
 class _RetryEmptyTaskResponseMixin:
     _response_tool_call_ids: set[str]
 
@@ -484,10 +502,10 @@ class Collect(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
             return resp.json()
 
     @function_tool
-    async def finish(self, ctx: RunContext, tier: str) -> None:
+    async def finish(self, ctx: RunContext, tier: str, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
-        self.complete({"tier": tier})
+        self.complete(_task_result({"tier": tier}, unserved_request))
 
 class Confirm(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict]):
     def __init__(self, chat_ctx: NotGivenOr[llm.ChatContext] = NOT_GIVEN) -> None:
@@ -499,10 +517,10 @@ class Confirm(_RetryEmptyTaskResponseMixin, IgnorePhrasesMixin, AgentTask[dict])
         self.session.generate_reply()
 
     @function_tool
-    async def finish(self, ctx: RunContext, confirmed: bool) -> None:
+    async def finish(self, ctx: RunContext, confirmed: bool, unserved_request: Annotated[str, Field(description="Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it.")] = "") -> None:
         """Record the result of this step and finish. complete() is the sole
         resolution; do not relay anything after it."""
-        self.complete({"confirmed": confirmed})
+        self.complete(_task_result({"confirmed": confirmed}, unserved_request))
 
 
 # --- session ---------------------------------------------------------------

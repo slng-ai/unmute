@@ -97,6 +97,7 @@ Which fields are legal depends on the section:
 | `language` | `speak`, `listen` |
 | `temperature`, `top_p`, `top_k` | `think` |
 | `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |
+| `endpointing_delay` | `turn`: a positive duration, how long to wait after speech stops before taking the turn |
 | `fallback` | `think`, `listen` |
 
 | Field | Values and constraints |
@@ -246,6 +247,11 @@ Every task needs a non-empty `result:`. Each result field is one of:
 - a primitive name: `string`, `number`, `integer`, or `boolean`,
 - an `{enum: [...]}` block with at least one string, or
 - a JSON Schema object for a nested shape.
+
+`unserved_request` is reserved and a result declaring it is a validation error.
+Every generated task finish already takes it, optional and empty by default, for
+a request the step could not serve. See
+[tasks](/build/orchestration/tasks).
 
 **Task `result:` and tool `output:` are different contracts.** A task result is
 enforced and describes what the calling agent receives after the task finishes.

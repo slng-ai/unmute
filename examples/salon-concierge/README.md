@@ -20,7 +20,11 @@ The concierge verifies the caller once, saves `customer_id` and `customer_name`,
 then routes the full conversation silently. Every specialist can route directly
 to any other specialist without announcing the internal handoff. The booking
 preparation task can also leave immediately for a complaint or current-information
-request without applying a booking change. Every route keeps the verified identity
+request without applying a booking change. The apply step carries no handoff on
+purpose, so a request raised there ends that step first, with whatever the
+mutation actually returned, and names the request in `unserved_request`. The
+booking specialist reads that off the returned result and routes the caller
+without being asked twice. The apply step never refuses in place. Every route keeps the verified identity
 and full history. During verification, the task spells the first name and surname,
 reads every phone digit, and waits for a new clear yes before the customer action.
 After verification, no specialist asks for or repeats those details unless the

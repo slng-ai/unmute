@@ -433,7 +433,8 @@ func convertModelDef(raw packagespec.ModelDef, kind ModelKind, fallback []string
 		Speed: raw.Speed, Language: raw.Language, Temperature: raw.Temperature,
 		TopP: raw.TopP, TopK: raw.TopK, EndpointEnv: raw.EndpointEnv,
 		Placement: derivePlacement(raw), SemanticEndpointing: SemanticEndpointing(raw.SemanticEndpointing),
-		AgentID: raw.AgentID, Upstream: convertUpstream(raw.Upstream),
+		EndpointingDelay: Duration(raw.EndpointingDelay),
+		AgentID:          raw.AgentID, Upstream: convertUpstream(raw.Upstream),
 		Params: raw.Params, Fallback: fallback, Description: raw.Description,
 	}
 }
@@ -1222,7 +1223,15 @@ func resolveBindings(agent *Agent, used map[string]bool, overrides map[string]pa
 	effective := func(name string) ModelDef {
 		def := agent.Models[name]
 		if override, ok := overrides[name]; ok {
-			def = convertModelDef(override, def.Kind, def.Fallback)
+			replaced := convertModelDef(override, def.Kind, def.Fallback)
+			// A target override replaces the vendor selection, but the silence
+			// budget is not part of it: every target that runs this package wants
+			// the same wait for the same transcriber. Dropping it silently undoes
+			// the one fix for a slow STT (B: fragmented STT, 2026-08-20).
+			if replaced.EndpointingDelay == "" {
+				replaced.EndpointingDelay = def.EndpointingDelay
+			}
+			def = replaced
 		}
 		return def
 	}
@@ -1257,8 +1266,8 @@ func toBinding(def ModelDef) Binding {
 	return Binding{
 		Provider: def.Provider, Model: def.Model, Voice: def.Voice, Language: def.Language,
 		EndpointEnv: def.EndpointEnv, Placement: def.Placement,
-		SemanticEndpointing: def.SemanticEndpointing,
-		AgentID:             def.AgentID, Upstream: def.Upstream,
+		SemanticEndpointing: def.SemanticEndpointing, EndpointingDelay: def.EndpointingDelay,
+		AgentID: def.AgentID, Upstream: def.Upstream,
 		Params: foldParams(def),
 	}
 }

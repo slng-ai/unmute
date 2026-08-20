@@ -48,6 +48,11 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		EntryClass:       pyName(agent.EntryAgent),
 		Transport:        target.Transport,
 		Tracing:          agent.Tracing != nil && agent.Tracing.Provider == "langfuse",
+		ResultsHint:      pipecatResultsHint,
+		// The VAD's stop_secs is this driver's silence budget: the same knob
+		// LiveKit calls endpointing min_delay. A transcriber slower than the
+		// default answers half a sentence (B: fragmented STT, 2026-08-20).
+		EndpointingDelay: pipecatEndpointingDelay(target.Models.Turn),
 	}
 	// Read through the same door validate uses, so the command and the emitted
 	// project cannot disagree about what the account has to be allowed to do.
@@ -915,11 +920,10 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 		steps = group.Steps
 	}
 	for _, step := range steps {
-		task, err := buildTask(agent, tgt, step, agent.Tasks[step], env)
+		task, err := buildTask(agent, tgt, step, agent.Tasks[step], env, "finish_"+ref+"_"+step)
 		if err != nil {
 			return pipecatDelegate{}, err
 		}
-		task.FinishName = "finish_" + ref + "_" + step
 		delegate.HasTransfers = delegate.HasTransfers || len(task.Transfers) > 0
 		delegate.StepTasks = append(delegate.StepTasks, task)
 	}
@@ -932,13 +936,17 @@ func buildDelegate(agent *ir.Agent, tgt ir.Target, ref string, c *ir.Delegate, e
 // buildTask lowers a task to a Flow-node model: instructions, tools, and the
 // finish-function schema derived from the typed result (V1). The node runs on
 // the owning agent's LLM; per-task model is gated (no LLMSwitcher, B7).
-func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *envSet) (pipecatTask, error) {
+func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *envSet, finishName string) (pipecatTask, error) {
 	if strings.TrimSpace(task.Instructions) == "" {
 		return pipecatTask{}, fmt.Errorf("task %q instructions must not be empty", name)
 	}
 	_, taskRouter := slngRouterBinding(agent, tgt, task.Model)
+	// The node's finish function is the only way out of the step, and its name is
+	// per-step here, so the prompt has to name it (livekitTaskPrompt does the
+	// same for a plain `finish`).
+	prompt := task.Instructions + taskFinishContract(finishName, sortedResultNames(task.Result))
 	built := pipecatTask{
-		Name: name, Prompt: task.Instructions,
+		Name: name, FinishName: finishName, Prompt: prompt,
 		// The node is built when the step is entered, not at session start, so a
 		// prompt naming a variable an earlier task assigned renders with that
 		// value. Left as a literal, the model would read "{{customer_id}}" and
@@ -946,7 +954,7 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 		// A router-bound task ships its placeholders intact like any other router
 		// prompt site: the flow node's role_message goes to the router as the
 		// system message, through the owning agent's LLM.
-		PromptExpr:     promptExpr(pyQuote(task.Instructions), task.Instructions, "self.state", taskRouter),
+		PromptExpr:     promptExpr(pyQuote(prompt), prompt, "self.state", taskRouter),
 		ResultProps:    pyLiteral(resultProperties(task.Result)),
 		ResultRequired: pyLiteral(anyStrings(sortedResultNames(task.Result))),
 	}
@@ -980,8 +988,18 @@ func buildTask(agent *ir.Agent, tgt ir.Target, name string, task ir.Task, env *e
 
 // resultProperties builds the finish function's JSON-schema properties from a
 // task's typed result. Forwarded verbatim for nested schemas (C11).
+//
+// The reserved unserved-request property rides along, optional (it is absent
+// from ResultRequired), so a step can hand back a request it cannot serve
+// instead of refusing in place. ir.Validate rejects a task result that claims
+// the name.
 func resultProperties(result map[string]ir.ResultField) map[string]any {
-	properties := map[string]any{}
+	properties := map[string]any{
+		ir.UnservedResultField: map[string]any{
+			"type":        "string",
+			"description": ir.UnservedResultDescription,
+		},
+	}
 	for _, name := range sortedResultNames(result) {
 		field := result[name]
 		switch {
@@ -1041,9 +1059,27 @@ func transferReason(c *ir.AgentTransfer) string {
 // straight from `when:`, which is optional, so every Pipecat delegate written
 // without one emitted `""""""` — a control present in the file and unreachable
 // at run time (Wave C, 2026-08-15).
+// pipecatEndpointingDelay renders the turn binding's silence budget as seconds
+// for VADParams(stop_secs=...). Empty leaves SileroVADAnalyzer on its default.
+func pipecatEndpointingDelay(binding *ir.Binding) string {
+	if binding == nil || binding.EndpointingDelay == "" {
+		return ""
+	}
+	duration, err := time.ParseDuration(string(binding.EndpointingDelay))
+	if err != nil {
+		return "" // ir.Validate already rejected it; never emit a broken literal
+	}
+	return strconv.FormatFloat(duration.Seconds(), 'f', -1, 64)
+}
+
 func delegateReason(c *ir.Delegate) string {
 	return orDefault(c.When, "Run this flow. It returns its result to you when it finishes.")
 }
+
+// pipecatResultsHint is the developer message that hands a delegate's results
+// back to the owning agent. LiveKit says the same thing in the delegate tool's
+// docstring; here there is no tool to describe, so it rides the handback.
+const pipecatResultsHint = " Continue with the caller in one short line. " + unservedOwnerRule
 
 // pipecatStateExpr is how emitted Pipecat code reaches the call state: an agent
 // @tool method has it on self, a flows handler receives it as a bound kwarg.

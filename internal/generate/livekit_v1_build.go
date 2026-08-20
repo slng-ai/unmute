@@ -50,6 +50,7 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		EntryAgent:        agent.EntryAgent,
 		EntryClass:        pyName(agent.EntryAgent),
 		TurnVersion:       turnVersion,
+		EndpointingDelay:  livekitEndpointingDelay(tgt.Models.Turn),
 		Pins:              tgt.Pins,
 		Tracing:           agent.Tracing != nil && agent.Tracing.Provider == "langfuse",
 	}
@@ -119,6 +120,11 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 		data.Tasks = append(data.Tasks, built)
 	}
 	data.NeedsTasks = len(data.Tasks) > 0
+	data.Unserved = livekitArg{
+		Name: ir.UnservedResultField, PyType: "str",
+		Desc: ir.UnservedResultDescription,
+		Anno: pyAnno("str", nil, ir.UnservedResultDescription),
+	}
 	for _, task := range data.Tasks {
 		data.HasTaskTransfers = data.HasTaskTransfers || len(task.Transfers) > 0
 	}
@@ -160,6 +166,11 @@ func buildLiveKitData(agent *ir.Agent, tgt ir.Target) (livekitData, error) {
 			scanArgs(tool.Args)
 		}
 		scanArgs(t.Result)
+	}
+	if data.NeedsTasks {
+		// Every task's finish takes the reserved arg, and it carries a
+		// description, so a package whose own args carry none still imports both.
+		scanArgs([]livekitArg{data.Unserved})
 	}
 	data.NeedsField = needAnnotated
 	var typingNames []string
@@ -773,7 +784,7 @@ func buildLiveKitAgent(agent *ir.Agent, tgt ir.Target, name string, def, entry i
 				Method: ref, When: humanTransferWhen(c),
 				Warm:        c.Mode == ir.TransferWarm,
 				Briefing:    c.Briefing,
-				RingTimeout: ringTimeoutSeconds(c.RingTimeout),
+				RingTimeout: durationSeconds(c.RingTimeout),
 				Hangup:      c.OnUnavailable == ir.OnUnavailableHangup,
 			}
 			if ht.Warm {
@@ -1094,6 +1105,18 @@ func livekitChainService(binding ir.Binding, env *envSet, site slngSite) (liveki
 	return resolveLiveKitService(targetcap.Reason, binding, env, site)
 }
 
+// livekitEndpointingDelay renders the turn binding's silence budget as seconds
+// for EndpointingOptions.min_delay. A transcriber slower than LiveKit's 0.5s
+// default sends its final text after the turn is committed, and the agent
+// answers half a sentence (B: fragmented STT, 2026-08-20).
+func livekitEndpointingDelay(binding *ir.Binding) string {
+	if binding == nil || binding.EndpointingDelay == "" {
+		return ""
+	}
+	// ir.Validate already refused anything unparseable or non-positive.
+	return durationSeconds(binding.EndpointingDelay)
+}
+
 // livekitTurnVersion maps the target's turn: binding to the
 // inference.TurnDetector version (V18, B5). turn-detector-mini runs fully
 // local — no LiveKit Cloud creds; an absent binding emits no version kwarg,
@@ -1238,10 +1261,10 @@ func referURI(destination string) string {
 	return "tel:" + destination
 }
 
-// ringTimeoutSeconds renders a validated ring_timeout as the float literal both
-// LiveKit APIs take. Empty stays empty so the emitted call omits the argument
-// and the platform default applies (SCHEMA N25).
-func ringTimeoutSeconds(value ir.Duration) string {
+// durationSeconds renders a validated authored duration as the float literal the
+// LiveKit APIs take. Empty stays empty so the emitted call omits the argument and
+// the platform default applies (SCHEMA N25).
+func durationSeconds(value ir.Duration) string {
 	if value == "" {
 		return ""
 	}
@@ -1259,7 +1282,7 @@ func delegateWhen(c *ir.Delegate) string {
 // delegateReturnFinality is appended to a then:return delegate docstring so the
 // owner LLM treats the returned result as the final outcome and does not re-run
 // the finished flow (B1/V1; mirrors the upstream flow-entry docstring idiom).
-const delegateReturnFinality = " When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request."
+const delegateReturnFinality = " When this flow finishes it returns its result to you. That result is the final outcome for this request: relay it to the caller and continue. Do not run this flow again for the same request. " + unservedOwnerRule
 
 func humanize(name string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(name, "_", " "), "-", " ")
@@ -1341,15 +1364,11 @@ func pyAnno(base string, enum []string, desc string) string {
 }
 
 func livekitTaskPrompt(task ir.Task, result []livekitArg) string {
-	body := task.Instructions
-	if len(result) > 0 {
-		names := make([]string, len(result))
-		for i, r := range result {
-			names[i] = r.Name
-		}
-		body += "\n\nWhen this step is complete, call `finish` with: " + strings.Join(names, ", ") + "."
+	names := make([]string, len(result))
+	for i, r := range result {
+		names[i] = r.Name
 	}
-	return body
+	return task.Instructions + taskFinishContract("finish", names)
 }
 
 func livekitGreetingFor(c *ir.Conversation) *livekitGreeting {

@@ -14,6 +14,18 @@ import (
 // control claiming it would shadow the generated one (V7).
 const CaptureToolName = "update_variables"
 
+// UnservedResultField is the one result field the drivers add themselves. Every
+// generated task finish takes it, optional and empty by default, so a step can
+// name the request it could not serve on its way out instead of refusing in
+// place. The owning agent reads it off the returned result and routes. The name
+// is reserved: a task result claiming it would collide with the generated
+// argument (B: salon compound request, 2026-08-20).
+const UnservedResultField = "unserved_request"
+
+// UnservedResultDescription is what the model reads when it decides whether to
+// fill the field, so it says both what goes in it and when to leave it out.
+const UnservedResultDescription = "Leave empty unless the caller asked for something this step cannot serve. Then put that request here in one short plain sentence, in the caller's own terms, so the agent that owns this step can take it."
+
 // systemSources are the runtime-owned variable sources: their value exists
 // before the greeting, so a session-start template may reference them (V2).
 var systemSources = []VariableSource{

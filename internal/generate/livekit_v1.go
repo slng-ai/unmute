@@ -327,21 +327,24 @@ type livekitData struct {
 	SessionLLM        livekitChain
 	SessionTTS        livekitService
 	TurnVersion       string
-	Agents            []livekitAgent
-	Tasks             []livekitTask
-	Vars              []livekitVar
-	CallStartVars     []livekitCallStartVar // dispatched input variables (I.dispatch)
-	Capture           *livekitCapture       // generated update_variables tool; nil without conversation variables
-	Secrets           []string              // declared secrets, for .env.example (V11)
-	ExtraEnv          []string              // env the route needs that the package never declared
-	RequiredSecrets   []string              // required secrets: a startup check refuses to run without them (V12)
-	CallRequiredEnv   []string              // cold-transfer destinations checked only for a real phone call
-	LocalTools        []livekitLocalTool    // copied handler files (tools/<name>.py)
-	MCPServers        []livekitMCPServer    // unique mounted sources, used by the shared constructor + startup preflight
-	Pins              map[string]string     // plugin pins (C6): raise dep floors
-	Prompts           []livekitPrompt
-	EntryPromptExpr   string   // templated entry prompt rendered from session.userdata after outbound SIP hydration
-	PluginModules     []string // merged `from livekit.plugins import ...` names
+	// EndpointingDelay is the authored silence budget in seconds, "" when the
+	// package leaves the runtime default alone.
+	EndpointingDelay string
+	Agents           []livekitAgent
+	Tasks            []livekitTask
+	Vars             []livekitVar
+	CallStartVars    []livekitCallStartVar // dispatched input variables (I.dispatch)
+	Capture          *livekitCapture       // generated update_variables tool; nil without conversation variables
+	Secrets          []string              // declared secrets, for .env.example (V11)
+	ExtraEnv         []string              // env the route needs that the package never declared
+	RequiredSecrets  []string              // required secrets: a startup check refuses to run without them (V12)
+	CallRequiredEnv  []string              // cold-transfer destinations checked only for a real phone call
+	LocalTools       []livekitLocalTool    // copied handler files (tools/<name>.py)
+	MCPServers       []livekitMCPServer    // unique mounted sources, used by the shared constructor + startup preflight
+	Pins             map[string]string     // plugin pins (C6): raise dep floors
+	Prompts          []livekitPrompt
+	EntryPromptExpr  string   // templated entry prompt rendered from session.userdata after outbound SIP hydration
+	PluginModules    []string // merged `from livekit.plugins import ...` names
 	// Slng is the SLNG Context Router's module-level helpers. Empty on a package
 	// with no router think binding, and then none of it is emitted (FR-019).
 	Slng        slngHelpers
@@ -368,6 +371,7 @@ type livekitData struct {
 	NeedsOpenAIReasoning bool
 
 	NeedsTasks         bool        // AgentTask import
+	Unserved           livekitArg  // the reserved finish arg: a request the step could not serve
 	NeedsTaskGroups    bool        // beta.workflows TaskGroup import
 	NeedsFunctionTools bool        // RunContext + function_tool imports
 	TypingImports      string      // `from typing import ...` names (Annotated/Literal), "" if none (V2)
@@ -416,6 +420,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldReasonLocal:           true,
 	targetcap.FieldTurnPlacement:         true, // advisory (Inference turn detection supplied)
 	targetcap.FieldSemanticEndpointing:   true, // advisory
+	targetcap.FieldEndpointingDelay:      true, // endpointing min_delay
 	targetcap.FieldFallback:              true, // llm.FallbackAdapter (V4)
 	targetcap.FieldListenFallback:        true, // stt.FallbackAdapter (T16)
 	targetcap.FieldTask:                  true, // AgentTask; single delegate awaits it (T12)
