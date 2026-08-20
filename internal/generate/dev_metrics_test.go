@@ -92,3 +92,37 @@ func generateFor(t *testing.T, pkgName string, provider ir.Provider) Artifact {
 	}
 	return artifact
 }
+
+// The switch reaching the producer is a second, separate contract. A LiveKit
+// worker runs inside a container and a Pipecat phone route can too, so setting
+// the variable on the child process is not enough: a container receives only
+// what its compose service declares. This shipped once with the producer wired
+// correctly and the variable never arriving, which looks exactly like a target
+// that reports nothing, so the compose files are pinned here.
+func TestEveryComposeThatRunsAnAgentForwardsTheSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		pkg      string
+		provider ir.Provider
+		composes []string
+	}{
+		{"pipecat", "safe_core", ir.ProviderPipecat, []string{"compose.dev.yaml"}},
+		{"livekit", "remy", ir.ProviderLiveKit, []string{"compose.dev.yaml"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			artifact := generateFor(t, tc.pkg, tc.provider)
+			for _, name := range tc.composes {
+				compose := artifactFile(t, artifact, name)
+				// Bare name, no value: compose forwards the host's value when it
+				// is set and omits the variable entirely when it is not, which is
+				// what keeps a deployed artifact silent.
+				if !strings.Contains(compose, "\n      - "+devmetrics.Env+"\n") {
+					t.Errorf("%s does not forward %s, so the producer inside the container stays inert", name, devmetrics.Env)
+				}
+				if strings.Contains(compose, devmetrics.Env+"=") {
+					t.Errorf("%s pins a value for %s; it must pass through so it is absent when unset", name, devmetrics.Env)
+				}
+			}
+		})
+	}
+}

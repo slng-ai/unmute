@@ -1101,8 +1101,10 @@ services:
       - OPENAI_API_KEY
       - SEND_CONFIRMATION_URL
       - SLNG_API_KEY
-      # optional: set by `unmute dev --var`; absent otherwise
+      # optional: set by `unmute dev`; absent otherwise
       - UNMUTE_CALL_START
+      # optional: set by `unmute dev`; absent otherwise
+      - UNMUTE_DEV_METRICS
     depends_on:
       livekit_server:
         condition: service_healthy

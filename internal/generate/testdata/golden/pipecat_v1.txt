@@ -872,6 +872,8 @@ services:
       # optional: passed through when set on the host; absent otherwise
       - UNMUTE_CALL_START
       # optional: passed through when set on the host; absent otherwise
+      - UNMUTE_DEV_METRICS
+      # optional: passed through when set on the host; absent otherwise
       - UNMUTE_LOG_LEVEL
     ports:
       - "${UNMUTE_DEV_PORT:-7860}:7860"
