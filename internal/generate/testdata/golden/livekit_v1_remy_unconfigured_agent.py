@@ -402,6 +402,32 @@ class _RetryEmptyTaskResponseMixin:
         # Every generated user of this mixin is an AgentTask; narrow that
         # invariant here so the emitted project type-checks without a new base.
         assert isinstance(self, Agent)
+        # ponytail: keyed on the SDK's own marker rather than the placeholder
+        # wording, and the emitted-code test is what catches it changing.
+        #
+        # The delegate that started this task is still running, so the framework
+        # injects that call plus a placeholder output reading "The tool call is
+        # still in progress." into the context (voice/generation.py,
+        # _inject_running_tool_calls). For the agent that made the call that is
+        # right: it stops the model re-issuing a call already in flight. A task
+        # is a different agent with a different prompt, and its opening turn
+        # reads an unfinished tool call it never made: it then answers with
+        # nothing, or apologises for a failure that did not happen, which the
+        # caller hears as the agent breaking. Reproduced on 3 of 3 scripted
+        # salon calls (B: task opened silent after delegate, 2026-08-21).
+        running_placeholders = {
+            item.call_id
+            for item in chat_ctx.items
+            if isinstance(item, llm.FunctionCall)
+            and item.extra.get("__lk_running_placeholder__")
+        }
+        if running_placeholders:
+            chat_ctx = chat_ctx.copy()
+            chat_ctx.items = [
+                item
+                for item in chat_ctx.items
+                if getattr(item, "call_id", None) not in running_placeholders
+            ]
         completed_tool_call_ids = {
             item.call_id
             for item in chat_ctx.items

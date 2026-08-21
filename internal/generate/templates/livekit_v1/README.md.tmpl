@@ -109,6 +109,14 @@ results between steps. The final `merge: results` map is keyed by task name.
 
 ## Empty task responses
 
+Before it generates anything, a generated task drops the delegate call that
+started it from its own copy of the conversation. That call is still running
+while the task runs, so LiveKit adds it plus a placeholder result reading "The
+tool call is still in progress." This is right for the agent that made the call:
+it stops the model re-issuing a call already in flight. It is wrong for a task,
+which is a different agent reading an unfinished call it never made, and which
+then opens with nothing or apologises for a failure that did not happen.
+
 Generated LiveKit tasks retry up to twice when a full successful response has
 neither non-whitespace text nor a tool call. Each retry starts immediately in
 the same speech turn. It keeps the task state and model settings, and
