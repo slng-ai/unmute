@@ -114,6 +114,20 @@ func TestSalonConciergeFeatureContract(t *testing.T) {
 		t.Errorf("transcriber model = %q, want deepgram/nova:3: a slower final transcript costs 2s of endpointing per turn", transcriber.Model)
 	}
 
+	// The third turn-latency choice, and the one with the clearest number behind
+	// it. The SLNG plugin opens a fresh websocket per TTS segment unless a warm
+	// one is held, and that handshake was the larger half of every turn's time to
+	// first audio: 778ms mean waiting for a usable socket against 376ms of actual
+	// synthesis. Measured live 2026-08-21 with standby_used true on 9 of 9
+	// segments, the socket wait fell to 172ms after the first turn, time to first
+	// audio from 1187ms to 524ms, and mean silence from 3.430s to 2.925s. Off by
+	// default in the plugin, so an author gets the slow path unless it is asked
+	// for by name.
+	voice := resolved.Models["voice"]
+	if voice.Params["warm_standby_enabled"] != true {
+		t.Errorf("voice params = %#v, want warm_standby_enabled: a cold TTS socket costs ~610ms of every turn", voice.Params)
+	}
+
 	// This example is the release-readiness package, so it carries the provider
 	// that needs a real call to prove: Coval correlates a trace to the call that
 	// produced it, and only a live call exercises that.

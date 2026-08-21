@@ -46,6 +46,15 @@ models:
         # Speech world part. SLNG speech serves na, eu and ap; the Context
         # Router's own regions are a different set under the same key.
         world_part_override: eu
+        # Hold a TTS socket open ahead of the turn. Off by default in the SLNG
+        # plugin, and the connection it saves is most of the wait: a fresh
+        # websocket to the gateway cost 778ms mean while the gateway's own
+        # synthesis took 376ms, so the handshake was the larger half of every
+        # turn's time to first audio. Measured 2026-08-21, standby_used true on
+        # 9 of 9 segments: the wait for a usable socket fell from 778ms to 172ms
+        # after the first turn, time to first audio from 1187ms to 524ms, and
+        # mean silence from 3.430s to 2.925s.
+        warm_standby_enabled: true
   listen:
     transcriber:
       provider: slng
