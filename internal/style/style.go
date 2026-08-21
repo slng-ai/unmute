@@ -1,4 +1,4 @@
-// Package style holds the SLNG brand theme: the single source of color for the
+// Package style holds the Unmute brand theme: the single source of color for the
 // interactive console and the CLI. No other file
 // defines a color literal. NO_COLOR (no-color.org) drops all color, so helpers
 // then return plain text. Light and dark terminals both stay readable through
@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Brand and semantic color tokens (hex). accent is SLNG yellow, ink SLNG black.
+// Brand and semantic color tokens (hex). accent is Unmute yellow, ink Unmute black.
 // warn is amber, kept apart from brand yellow so a warning never reads as
 // branding (C14, V43).
 const (
@@ -34,7 +34,7 @@ var (
 // text with no escape sequences (C14, V43).
 func NoColor() bool { return os.Getenv("NO_COLOR") != "" }
 
-// Badge renders the SLNG logo chip: ink text on an accent fill, bounded to its
+// Badge renders the Unmute logo chip: ink text on an accent fill, bounded to its
 // own width and never a full row (C15, V23). NO_COLOR returns the plain text.
 func Badge(s string) string {
 	if NoColor() {
@@ -48,7 +48,7 @@ func Badge(s string) string {
 		Render(s)
 }
 
-// Accented renders text in the SLNG accent color, foreground only. Used for the
+// Accented renders text in the Unmute accent color, foreground only. Used for the
 // Home hero wordmark and highlights.
 func Accented(s string) string {
 	if NoColor() {

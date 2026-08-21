@@ -9,7 +9,7 @@ import (
 	"github.com/slng-ai/unmute/internal/style"
 )
 
-// View composes the four SLNG regions: header (logo badge + breadcrumb +
+// View composes the four Unmute regions: header (logo badge + breadcrumb +
 // target), body (sidebar + editor, or editor alone), and footer hint bar. The
 // logo badge shows on every interactive screen.
 func (m console) View() string {
@@ -37,25 +37,30 @@ func (m console) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, header, m.renderBody(bodyH), footer)
 }
 
-// heroArt is the SLNG wordmark drawn large for the Home screen. Rendered in the
-// accent color; NO_COLOR falls back to plain "SLNG//" text (C15, V23).
-const heroArt = `███████╗██╗     ███╗   ██╗ ██████╗    ██╗██╗
-██╔════╝██║     ████╗  ██║██╔════╝   ██╔╝██║
-███████╗██║     ██╔██╗ ██║██║  ███╗ ██╔╝██╔╝
-╚════██║██║     ██║╚██╗██║██║   ██║██╔╝██╔╝
-███████║███████╗██║ ╚████║╚██████╔╝██╔╝██╔╝
-╚══════╝╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝ ╚═╝`
+// heroArt is the Unmute wordmark drawn large for the Home screen. Rendered in
+// the accent color; NO_COLOR falls back to plain "UNMUTE//" text (C15, V23).
+const heroArt = `██╗   ██╗███╗   ██╗███╗   ███╗██╗   ██╗████████╗███████╗   ██╗██╗
+██║   ██║████╗  ██║████╗ ████║██║   ██║╚══██╔══╝██╔════╝  ██╔╝██║
+██║   ██║██╔██╗ ██║██╔████╔██║██║   ██║   ██║   █████╗   ██╔╝██╔╝
+██║   ██║██║╚██╗██║██║╚██╔╝██║██║   ██║   ██║   ██╔══╝  ██╔╝██╔╝
+╚██████╔╝██║ ╚████║██║ ╚═╝ ██║╚██████╔╝   ██║   ███████╗██╔╝██╔╝
+ ╚═════╝ ╚═╝  ╚═══╝╚═╝     ╚═╝ ╚═════╝    ╚═╝   ╚══════╝╚═╝ ╚═╝  `
 
-func heroLogo() string {
-	if style.NoColor() {
-		return "SLNG//"
+// heroArtWidth is the drawn wordmark's column count. "UNMUTE//" needs more room
+// than the mark it replaced, and more than minWidth, so heroLogo falls back to
+// plain text on a terminal too narrow to hold it without wrapping.
+const heroArtWidth = 65
+
+func heroLogo(width int) string {
+	if style.NoColor() || width < heroArtWidth {
+		return "UNMUTE//"
 	}
 	return style.Accented(heroArt)
 }
 
 func (m console) renderHome(h int) string {
 	block := lipgloss.JoinVertical(lipgloss.Center,
-		heroLogo(),
+		heroLogo(m.width),
 		"",
 		style.Dim("Author-once, portable voice agents"),
 		"",
@@ -78,7 +83,7 @@ func (m console) renderChoices() string {
 }
 
 func (m console) renderHeader() string {
-	left := style.Badge(" SLNG// ")
+	left := style.Badge(" UNMUTE// ")
 	if m.req != nil && m.req.ctx.breadcrumb != "" {
 		left += "  " + style.Dim(m.req.ctx.breadcrumb)
 	}

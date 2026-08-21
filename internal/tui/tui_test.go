@@ -81,15 +81,15 @@ func TestRunQuit(t *testing.T) {
 func TestV23HomeHeroShowsWordmark(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	view := renderField(t, 90, 24, fieldReq{kind: kindSelect, ctx: viewCtx{hero: true}, choices: []choice{{"Create a new agent", actionCreate}, {"Quit", actionQuit}}})
-	if !strings.Contains(view, "SLNG//") {
-		t.Fatalf("home hero omits SLNG wordmark:\n%s", view)
+	if !strings.Contains(view, "UNMUTE//") {
+		t.Fatalf("home hero omits Unmute wordmark:\n%s", view)
 	}
 }
 
 func TestV23HeaderBadgeShownOnEditorScreens(t *testing.T) {
 	view := renderField(t, 90, 24, fieldReq{kind: kindSelect, title: "Models", backable: true, ctx: viewCtx{breadcrumb: "Create › Models"}, choices: []choice{{"Listen", "listen"}, {"← Back", actionBack}}})
-	if !strings.Contains(view, "SLNG//") {
-		t.Fatalf("editor header omits SLNG badge:\n%s", view)
+	if !strings.Contains(view, "UNMUTE//") {
+		t.Fatalf("editor header omits Unmute badge:\n%s", view)
 	}
 }
 
@@ -100,7 +100,7 @@ func TestV26LogoRendersInsideProgram(t *testing.T) {
 		"editor": renderField(t, 90, 24, fieldReq{kind: kindSelect, title: "Models", backable: true, choices: []choice{{"Listen", "l"}, {"← Back", actionBack}}}),
 	}
 	for name, view := range screens {
-		if !strings.Contains(view, "SLNG//") {
+		if !strings.Contains(view, "UNMUTE//") {
 			t.Fatalf("%s screen omits logo:\n%s", name, view)
 		}
 	}
@@ -271,7 +271,7 @@ func TestV44LayoutHasHeaderSidebarEditorFooter(t *testing.T) {
 		choices: []choice{{"Listen", "listen"}, {"← Back", actionBack}},
 	}
 	view := renderField(t, 100, 24, req)
-	for _, want := range []string{"SLNG//", "SECTIONS", "Identity", "Lifecycle", "Models", "Listen", "back"} {
+	for _, want := range []string{"UNMUTE//", "SECTIONS", "Identity", "Lifecycle", "Models", "Listen", "back"} {
 		if !strings.Contains(strings.ToLower(view), strings.ToLower(want)) {
 			t.Errorf("layout missing %q:\n%s", want, view)
 		}
@@ -1871,5 +1871,26 @@ func TestAdvancedTargetFormSplitsRegions(t *testing.T) { // N32
 	}
 	if got := strings.Join(data.DeploymentRegions, ","); got != "us-east,eu-central" {
 		t.Fatalf("regions = %q, want both split and trimmed", got)
+	}
+}
+
+// TestHeroArtFitsAndMatchesItsWidth guards the drawn wordmark. heroArtWidth is
+// what heroLogo compares the terminal against, so a redraw that changes the art
+// without changing the constant would silently wrap or silently over-fall-back.
+func TestHeroArtFitsAndMatchesItsWidth(t *testing.T) {
+	widest := 0
+	for _, row := range strings.Split(heroArt, "\n") {
+		if w := len([]rune(row)); w > widest {
+			widest = w
+		}
+	}
+	if widest != heroArtWidth {
+		t.Errorf("heroArt is %d columns but heroArtWidth says %d; update the constant", widest, heroArtWidth)
+	}
+	if got := heroLogo(heroArtWidth - 1); got != "UNMUTE//" {
+		t.Errorf("below heroArtWidth heroLogo = %q, want the plain fallback", got)
+	}
+	if !strings.Contains(heroLogo(heroArtWidth), "█") {
+		t.Error("at heroArtWidth heroLogo should draw the art, not fall back")
 	}
 }

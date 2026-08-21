@@ -27,14 +27,14 @@ func (u ui) accent(s string) string {
 	return u.r.NewStyle().Foreground(lipgloss.Color(style.Accent)).Bold(true).Render(s)
 }
 
-// header is the SLNG run header: the bounded logo badge plus a title.
+// header is the Unmute run header: the bounded logo badge plus a title.
 func (u ui) header(title string) string {
 	badge := u.r.NewStyle().
 		Foreground(lipgloss.Color(style.Ink)).
 		Background(lipgloss.Color(style.Accent)).
 		Bold(true).
 		Padding(0, 1).
-		Render("SLNG//")
+		Render("UNMUTE//")
 	return badge + " " + u.muted(title)
 }
 

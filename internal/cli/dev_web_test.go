@@ -196,7 +196,7 @@ func TestRunDevPipecatRejectsBusyAgentPort(t *testing.T) {
 }
 
 func TestDevWebAssetsEmbedded(t *testing.T) {
-	for _, name := range []string{"index.html", "logo.png", "livekit-client.umd.js"} {
+	for _, name := range []string{"index.html", "logo.svg", "livekit-client.umd.js"} {
 		info, err := fs.Stat(web.FS, name)
 		if err != nil {
 			t.Errorf("web asset %q not embedded: %v", name, err)
