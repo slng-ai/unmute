@@ -83,7 +83,7 @@ LIVEKIT_HOST_PORT=7890 LIVEKIT_TCP_HOST_PORT=7891 LIVEKIT_UDP_HOST_PORT=7892 \
 The generated README in each build directory contains the deployment commands
 for that platform.
 
-Read [regional infrastructure](../../docs-site/models/regional-infrastructure.mdx)
+Read [regional infrastructure](../../docs-site/optimization/regional-infrastructure.mdx)
 for media placement and the full residency checklist. Reference pages:
 [agent.yaml](../../docs-site/reference/agent-yaml.mdx),
 [targets.yaml](../../docs-site/reference/targets-yaml.mdx),

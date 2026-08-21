@@ -12,6 +12,12 @@ You need to know which part was slow.
 explains what each number means, and what to change when one of them is too
 big.
 
+<Note>
+  This page is about **reading** the numbers. For the settings that move them,
+  with what each one measured, see
+  [Optimizing your agent](/optimization/overview).
+</Note>
+
 ## Where the time goes
 
 A turn is a chain. Each link has to finish before the next one starts, so the
@@ -76,7 +82,7 @@ usually causes it, and what you can change.
 | `llm` is large on every turn | the model, or how much it thinks before the first token | [Thinking models](/models/llm) |
 | `llm` grows as the call goes on | the prompt and history the model re-reads every turn | [agent.yaml](/reference/agent-yaml) |
 | a tool row is large | the tool's own round trip, which is your code or your provider | [Tools](/build/tools/overview) |
-| every stage is slower than you expect | distance between the caller, the worker, and the models | [Regional infrastructure](/models/regional-infrastructure) |
+| every stage is slower than you expect | distance between the caller, the worker, and the models | [Regional infrastructure](/optimization/regional-infrastructure) |
 | only the first turn is slow | cold start, which a dev run pays and a warm deployment does not | |
 | `tts` is small but its total is large | the agent talked for a long time, which is not a wait | |
 
@@ -230,7 +236,7 @@ Being clear about the edges, so you do not read a number as more than it is.
   <Card title="The dev loop" icon="terminal" href="/dev/overview">
     The two views, the logs, and what `unmute dev` does in order.
   </Card>
-  <Card title="SLNG Execution Layer" icon="zap" href="/models/optimization">
+  <Card title="SLNG Execution Layer" icon="zap" href="/optimization/execution-layer">
     What the speech models a scaffolded package binds run on.
   </Card>
   <Card title="Tools" icon="wrench" href="/build/tools/overview">

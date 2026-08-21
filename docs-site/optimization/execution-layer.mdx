@@ -89,13 +89,13 @@ what else each target can construct are on
 [speech to text](/models/stt) and [text to speech](/models/tts).
 
 To keep SLNG speech compute in a world part or exact region, add regional params
-to each binding. [Regional infrastructure](/models/regional-infrastructure)
+to each binding. [Regional infrastructure](/optimization/regional-infrastructure)
 shows the YAML and keeps speech placement separate from worker and media placement.
 
 ## The third role
 
 Everything above is about listening and speaking. Thinking has its own SLNG path,
-the [Context Router](/models/context-router), and it is the one place where the
+the [Context Router](/optimization/context-router), and it is the one place where the
 optimisation is something you opt into rather than something already behind the
 binding. It caches the turns your agent has answered before and serves them
 without calling your model, so a repeat it judges cacheable comes back in roughly
@@ -110,7 +110,7 @@ inline. The page explains all three.
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="Context Router" icon="gauge" href="/models/context-router">
+  <Card title="Context Router" icon="gauge" href="/optimization/context-router">
     The optimization you opt into: cache repeated turns on the `think` role.
   </Card>
   <Card title="SLNG models" icon="list" href="https://docs.slng.ai/models">
@@ -119,7 +119,7 @@ inline. The page explains all three.
   <Card title="Speech to text" icon="mic" href="/models/stt">
     Every vendor each target can use for listening.
   </Card>
-  <Card title="Regional infrastructure" icon="globe-2" href="/models/regional-infrastructure">
+  <Card title="Regional infrastructure" icon="earth" href="/optimization/regional-infrastructure">
     Keep SLNG speech compute in the intended region.
   </Card>
 </Columns>

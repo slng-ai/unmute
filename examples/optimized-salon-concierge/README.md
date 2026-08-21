@@ -60,7 +60,7 @@ one you discover by reading generated Python. The accepted upstreams are
 kind, which covers the first two, was validated against the live router on
 2026-08-19; the other three come from the router team's published field list and
 have not been run here. See
-[the router page](../../docs-site/models/context-router.mdx) for each one's
+[the router page](../../docs-site/optimization/context-router.mdx) for each one's
 fields.
 
 `reasoning_effort: "none"` is not optional in practice. This agent has tools, and

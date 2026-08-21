@@ -3,6 +3,7 @@
 .agents/skills/unmute/references/conversation.md
 .agents/skills/unmute/references/deploy.md
 .agents/skills/unmute/references/examples.md
+.agents/skills/unmute/references/latency.md
 .agents/skills/unmute/references/models.md
 .agents/skills/unmute/references/orchestration.md
 .agents/skills/unmute/references/package.md

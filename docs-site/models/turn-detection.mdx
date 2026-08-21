@@ -3,6 +3,10 @@ title: "Turn detection"
 description: "How each target decides the caller has finished speaking, and why it is not a vendor list."
 ---
 
+<Note>
+  The silence window is the floor charged on every turn. [Optimizing your agent](/optimization/overview) has the measured values, and why the minimum is the wrong choice.
+</Note>
+
 Two different jobs hide behind the phrase "turn detection", and the two targets do
 them differently. Worth keeping apart:
 
@@ -119,7 +123,7 @@ documents support for it, and expect nothing from it otherwise.
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="SLNG Execution Layer" icon="zap" href="/models/optimization">
+  <Card title="SLNG Execution Layer" icon="zap" href="/optimization/execution-layer">
     The SLNG Execution Layer behind the speech models.
   </Card>
   <Card title="Targets" icon="boxes" href="/targets/overview">
