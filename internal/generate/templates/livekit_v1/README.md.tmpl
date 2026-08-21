@@ -80,9 +80,21 @@ would otherwise bounce the call before the caller hears anything. Every later
 turn has the full list back.
 {{- if .EndpointingDelay}}
 
-The session waits {{.EndpointingDelay}}s after speech stops before it takes the
-turn, from the package's `endpointing_delay`. Raise it further if the transcriber
-still lands its final text after the turn is committed.
+## Turn taking
+
+The prewarmed Silero VAD waits {{.EndpointingDelay}}s of silence before it reports
+end of speech, from the package's `endpointing_delay`. That window is the floor on
+every turn: nothing downstream can start earlier, because the transcriber is only
+asked to finalise once the VAD says the caller stopped.
+
+Lower it to answer sooner, at the cost of cutting off a caller who pauses
+mid-sentence. Raise it to give them more room. The runtime refuses anything under
+0.25s, so `unmute compile` rejects it rather than letting the worker raise on its
+first call.
+
+This does not set `turn_handling`'s endpointing `min_delay`, and that is
+deliberate: `min_delay` cannot fire before the VAD reports end of speech, so any
+value below this window would be unreachable there.
 {{- end}}
 
 ## Tasks and task groups

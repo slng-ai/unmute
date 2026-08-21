@@ -527,7 +527,7 @@ type pipecatData struct {
 	AuthKinds          authKindSet // webhook auth schemes in use: helpers + imports per scheme
 	NeedsFunctionCalls bool        // any @tool/transfer/delegate (FunctionCallParams)
 	ResultsHint        string      // developer-message tail when a delegate hands its results back
-	// EndpointingDelay is the authored silence budget in seconds, "" when the
+	// EndpointingDelay is the authored silence window in seconds, "" when the
 	// package leaves the VAD default alone.
 	EndpointingDelay         string
 	NeedsTurnStrategies      bool // interruption min-words strategy

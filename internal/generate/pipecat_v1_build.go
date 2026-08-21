@@ -51,7 +51,7 @@ func buildPipecatData(agent *ir.Agent, target ir.Target) (pipecatData, error) {
 		Tracing:         agent.Tracing != nil,
 		TracingProvider: tracingProviderOf(agent),
 		ResultsHint:     pipecatResultsHint,
-		// The VAD's stop_secs is this driver's silence budget: the same knob
+		// The VAD's stop_secs is this driver's silence window: the same knob
 		// LiveKit calls endpointing min_delay. A transcriber slower than the
 		// default answers half a sentence (B: fragmented STT, 2026-08-20).
 		EndpointingDelay: pipecatEndpointingDelay(target.Models.Turn),
@@ -1173,7 +1173,7 @@ func transferReason(c *ir.AgentTransfer) string {
 // straight from `when:`, which is optional, so every Pipecat delegate written
 // without one emitted `""""""` — a control present in the file and unreachable
 // at run time (Wave C, 2026-08-15).
-// pipecatEndpointingDelay renders the turn binding's silence budget as seconds
+// pipecatEndpointingDelay renders the turn binding's silence window as seconds
 // for VADParams(stop_secs=...). Empty leaves SileroVADAnalyzer on its default.
 func pipecatEndpointingDelay(binding *ir.Binding) string {
 	if binding == nil || binding.EndpointingDelay == "" {

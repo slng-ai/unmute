@@ -1442,7 +1442,16 @@ class {{.Class}}(_RetryEmptyTaskResponseMixin, {{if $.IgnorePhrases}}IgnorePhras
 
 # --- session ---------------------------------------------------------------
 def prewarm(proc: JobProcess) -> None:
+{{- if .EndpointingDelay}}
+    # The silence window is what the runtime actually waits before it treats the
+    # caller as finished, so it is the only place an authored endpointing_delay
+    # can do anything. turn_handling's own endpointing min_delay cannot fire
+    # before the VAD reports end of speech, which makes any value under this
+    # window unreachable. Floor is 0.25s; the turn detector raises below it.
+    proc.userdata["vad"] = silero.VAD.load(min_silence_duration={{.EndpointingDelay}})
+{{- else}}
     proc.userdata["vad"] = silero.VAD.load()
+{{- end}}
 
 
 {{- if .Telephony}}
@@ -1497,21 +1506,11 @@ async def entrypoint(ctx: JobContext) -> None:
             turn_detection=inference.TurnDetector({{if .TurnVersion}}version={{pyq .TurnVersion}}{{end}}),
             interruption={"enabled": {{if .Interruption.Enabled}}True{{else}}False{{end}}{{if .Interruption.MinWords}}, "min_words": {{.Interruption.MinWords}}{{end}}},
             preemptive_generation={"enabled": True},
-{{- if .EndpointingDelay}}
-            # A transcriber slower than the 0.5s default lands its final text after
-            # the turn is already committed, and the agent answers a fragment.
-            endpointing={"min_delay": {{.EndpointingDelay}}},
-{{- end}}
         ),
 {{- else}}
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector({{if .TurnVersion}}version={{pyq .TurnVersion}}{{end}}),
             preemptive_generation={"enabled": True},
-{{- if .EndpointingDelay}}
-            # A transcriber slower than the 0.5s default lands its final text after
-            # the turn is already committed, and the agent answers a fragment.
-            endpointing={"min_delay": {{.EndpointingDelay}}},
-{{- end}}
         ),
 {{- end}}
         vad=ctx.proc.userdata["vad"],

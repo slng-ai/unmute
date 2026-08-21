@@ -589,6 +589,16 @@ func validateDriverValues(resolved Target, provider targetcap.Provider, row *Tar
 	}
 }
 
+// livekitVADSilenceFloor is the shortest VAD silence window livekit-agents will
+// accept with a streaming turn detector bound. Below it,
+// _check_vad_silence_requirement raises ValueError rather than degrading
+// (voice/audio_recognition.py:885-903, guarding inference/eot/base.py's
+// MIN_SILENCE_DURATION_MS = 200 plus a 50ms margin).
+const (
+	livekitVADSilenceFloor     = 250 * time.Millisecond
+	livekitVADSilenceFloorText = "250ms"
+)
+
 func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *TargetValidation) {
 	provider := targetcap.Provider(resolved.Provider)
 	if !slices.Contains(targetcap.Providers, provider) {
@@ -628,6 +638,19 @@ func validateTarget(agent *Agent, resolved Target, caps targetcap.Table, row *Ta
 		}
 		if b.EndpointingDelay != "" {
 			applyCapability(caps, targetcap.FieldEndpointingDelay, provider, row)
+			// The window is what the runtime actually waits, so the runtime's own
+			// floor is a compile error rather than a first-call crash: with a
+			// streaming turn detector bound, livekit-agents raises ValueError
+			// below 250ms (voice/audio_recognition.py:885-903, guarding
+			// MIN_SILENCE_DURATION_MS = 200 plus 50). LiveKit always has that
+			// detector, because a target with no turn binding is already refused.
+			if provider == targetcap.LiveKit {
+				if d, err := time.ParseDuration(string(b.EndpointingDelay)); err == nil && d < livekitVADSilenceFloor {
+					row.Errors = append(row.Errors, fmt.Sprintf(
+						"endpointing_delay %s is below the %s floor livekit-agents enforces on the VAD silence window; it would raise on the first call",
+						b.EndpointingDelay, livekitVADSilenceFloorText))
+				}
+			}
 		}
 	}
 	for _, b := range resolved.Models.Speak {

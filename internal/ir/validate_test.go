@@ -2467,8 +2467,8 @@ func TestValidateRejectsReservedTaskResultField(t *testing.T) {
 	}
 }
 
-// endpointing_delay is the silence budget a slow transcriber needs, and it only
-// means anything on a turn model.
+// endpointing_delay is the window of silence that has to pass before the runtime
+// treats the caller as finished, and it only means anything on a turn model.
 func TestValidateEndpointingDelayIsATurnFieldAndPositive(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -2570,4 +2570,58 @@ func removeService(services []string, drop string) []string {
 		}
 	}
 	return kept
+}
+
+// TestValidateEndpointingDelayLiveKitFloor is the compile-time half of a runtime
+// crash. livekit-agents refuses a VAD silence window under 250ms when a
+// streaming turn detector is bound: _check_vad_silence_requirement raises
+// ValueError (voice/audio_recognition.py:885-903, against
+// MIN_SILENCE_DURATION_MS = 200 plus 50 in inference/eot/base.py). A package
+// that authors 200ms builds fine and then dies when the worker takes its first
+// call, which is the worst possible moment to find out.
+//
+// The floor is unconditional on LiveKit because the driver already refuses a
+// target with no turn binding ("missing open turn binding"), so the streaming
+// detector the SDK checks against is always there. Pipecat has no documented
+// floor and is left alone.
+func TestValidateEndpointingDelayLiveKitFloor(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		provider  Provider
+		value     Duration
+		wantError bool
+	}{
+		{name: "at the floor is allowed", provider: ProviderLiveKit, value: "250ms"},
+		{name: "above the floor is allowed", provider: ProviderLiveKit, value: "300ms"},
+		{name: "the runtime default is allowed", provider: ProviderLiveKit, value: "550ms"},
+		{name: "below the floor is refused", provider: ProviderLiveKit, value: "200ms", wantError: true},
+		{name: "far below is refused", provider: ProviderLiveKit, value: "10ms", wantError: true},
+		{name: "pipecat has no floor to enforce", provider: ProviderPipecat, value: "10ms"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := safeAgent(t)
+			tgt := targetFor(agent, tc.provider)
+			if tgt.Models.Turn == nil {
+				t.Fatalf("%s target has no turn binding to configure", tc.provider)
+			}
+			turn := *tgt.Models.Turn
+			turn.EndpointingDelay = tc.value
+			tgt.Models.Turn = &turn
+			report, err := Validate(agent, []Target{tgt}, targetcap.Default())
+			if (err != nil) != tc.wantError {
+				t.Fatalf("err = %v, wantError = %v: errors=%#v", err, tc.wantError, reportFor(report, tc.provider).Errors)
+			}
+			if !tc.wantError {
+				return
+			}
+			text := strings.Join(reportFor(report, tc.provider).Errors, "\n")
+			// The message has to carry both numbers, because the author needs to
+			// know what they wrote and what the runtime will accept.
+			for _, want := range []string{string(tc.value), "250ms"} {
+				if !strings.Contains(text, want) {
+					t.Errorf("error does not name %q: %q", want, text)
+				}
+			}
+		})
+	}
 }

@@ -335,8 +335,11 @@ type livekitData struct {
 	SessionLLM        livekitChain
 	SessionTTS        livekitService
 	TurnVersion       string
-	// EndpointingDelay is the authored silence budget in seconds, "" when the
-	// package leaves the runtime default alone.
+	// EndpointingDelay is the authored VAD silence window in seconds, "" when
+	// the package leaves the runtime default alone. It renders into the
+	// prewarmed Silero VAD, not into turn_handling's endpointing: min_delay
+	// cannot fire before the VAD reports end of speech, so a value below the
+	// window is unreachable there.
 	EndpointingDelay string
 	Agents           []livekitAgent
 	Tasks            []livekitTask
@@ -434,7 +437,7 @@ var livekitEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldReasonLocal:           true,
 	targetcap.FieldTurnPlacement:         true, // advisory (Inference turn detection supplied)
 	targetcap.FieldSemanticEndpointing:   true, // advisory
-	targetcap.FieldEndpointingDelay:      true, // endpointing min_delay
+	targetcap.FieldEndpointingDelay:      true, // prewarmed VAD min_silence_duration
 	targetcap.FieldFallback:              true, // llm.FallbackAdapter (V4)
 	targetcap.FieldListenFallback:        true, // stt.FallbackAdapter (T16)
 	targetcap.FieldTask:                  true, // AgentTask; single delegate awaits it (T12)

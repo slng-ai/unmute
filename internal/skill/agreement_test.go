@@ -470,7 +470,7 @@ func TestModelFieldAndPassthroughGuidanceStaysExact(t *testing.T) {
 		"| `language` | `speak`, `listen` |",
 		"| `temperature`, `top_p`, `top_k` | `think` |",
 		"| `semantic_endpointing` | `turn`: `required`, `preferred`, or `off` |",
-		"| `endpointing_delay` | `turn`: a positive duration, how long to wait after speech stops before taking the turn |",
+		"| `endpointing_delay` | `turn`: a positive duration, the window of silence before the caller counts as finished. The floor on every turn. LiveKit refuses under `250ms`; defaults differ per target (LiveKit `550ms`, Pipecat `200ms`) |",
 	}
 	for name, content := range map[string]string{
 		"references/package.md":              bundleFile(t, "references/package.md"),

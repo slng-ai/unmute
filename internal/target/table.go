@@ -248,9 +248,17 @@ func Default() Table {
 				warn(Vapi, "Vapi semantic endpointing is forwarded as a preference"),
 				warn(Deepgram, "Deepgram semantic endpointing depends on the bound listen model"),
 			),
-			// Both code drivers have a real silence budget to set: LiveKit's
-			// endpointing min_delay, Pipecat's VAD stop_secs. The hosted stacks
-			// own turn taking themselves, so the value has nowhere to land.
+			// One window, two places to set it: LiveKit's prewarmed Silero VAD
+			// (min_silence_duration, floored at 250ms because the turn detector
+			// raises below that) and Pipecat's VADParams stop_secs. Not
+			// interchangeable defaults, which matters when a package moves
+			// between the two: LiveKit's Silero defaults to 0.55s and Pipecat's
+			// stop_secs to 0.2s, so the same unset package hears a different
+			// agent. LiveKit's turn_handling endpointing min_delay is
+			// deliberately NOT the destination; it cannot fire before the VAD
+			// reports end of speech, so anything under the window is inert
+			// there. The hosted stacks own turn taking, so the value has
+			// nowhere to land.
 			FieldEndpointingDelay: field(
 				warn(Vapi, "Vapi integrates turn detection; the endpointing delay is ignored"),
 				warn(Deepgram, "Deepgram integrates turn detection into listen; the endpointing delay is ignored"),
