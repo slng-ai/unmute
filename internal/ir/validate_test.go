@@ -2037,16 +2037,19 @@ func TestValidateToolAnnouncePerTarget(t *testing.T) {
 	}
 }
 
-// TestValidateToolAnnounceOnTaskScopePerTarget: scope, not kind. LiveKit reaches
-// agent tools and task tools through one lowering, so it emits the same line
-// either way. Pipecat emits a task tool as a flows handler with no speech seam,
-// so it refuses by name and says where to list the tool instead (FR-014).
+// TestValidateToolAnnounceOnTaskScopePerTarget: scope, not kind. Both code
+// drivers reach a task tool's speech seam, they just reach it differently.
+// LiveKit lowers agent tools and task tools through one path and emits the same
+// session.say either way; Pipecat emits a task tool as a flows handler and
+// queues the frame through FlowManager.worker.
+//
+// This used to assert that Pipecat refused with "cannot announce a tool listed
+// on a task: list it on the agent instead". That was a gap in this compiler
+// written as a limit of the provider, and asserting it kept a working feature
+// switched off. Now neither driver refuses, and the assertion is that neither
+// does.
 func TestValidateToolAnnounceOnTaskScopePerTarget(t *testing.T) {
-	const wantPipecat = "the Pipecat driver cannot announce a tool listed on a task: list it on the agent instead"
-	for provider, wantError := range map[Provider]bool{
-		ProviderLiveKit: false,
-		ProviderPipecat: true,
-	} {
+	for _, provider := range []Provider{ProviderLiveKit, ProviderPipecat} {
 		agent := safeAgent(t)
 		tool := agent.Tools["lookup_customer"]
 		tool.Announce = "Let me look that up."
@@ -2059,12 +2062,12 @@ func TestValidateToolAnnounceOnTaskScopePerTarget(t *testing.T) {
 		}
 
 		report, err := Validate(agent, []Target{targetFor(agent, provider)}, targetcap.Default())
-		if (err != nil) != wantError {
-			t.Fatalf("%s: err=%v report=%#v", provider, err, report.PerTarget)
+		if err != nil {
+			t.Fatalf("%s: announcing a task tool must validate: %v %#v", provider, err, report.PerTarget[0].Errors)
 		}
 		joined := strings.Join(report.PerTarget[0].Errors, "\n")
-		if got := strings.Contains(joined, wantPipecat); got != wantError {
-			t.Errorf("%s: task-scope refusal = %v, want %v: %#v", provider, got, wantError, report.PerTarget[0].Errors)
+		if strings.Contains(joined, "list it on the agent instead") {
+			t.Errorf("%s: the old task-scope refusal is back: %#v", provider, report.PerTarget[0].Errors)
 		}
 	}
 }

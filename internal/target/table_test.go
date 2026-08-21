@@ -464,20 +464,16 @@ func TestToolAnnounceCapabilityRows(t *testing.T) {
 			t.Errorf("%s announce is gated with no note", provider)
 		}
 	}
-	// Pipecat only: the task row exists for a driver that emits the field but
-	// cannot emit it in that scope. Vapi and Deepgram stay core here because the
-	// field row above already stops them, the same shape as FieldToolMCPTask.
-	for provider, want := range map[Provider]Tag{
-		LiveKit: Core, Pipecat: Gated, Vapi: Core, Deepgram: Core,
-	} {
-		got := table.Capability(FieldToolAnnounceTask, provider)
-		if got.Tag != want {
-			t.Errorf("%s task-scoped announce tag = %q, want %q", provider, got.Tag, want)
+	// The task row carries no override: a driver that can announce at all can
+	// announce in either scope. Pipecat used to be gated here with "list it on
+	// the agent instead", which was a gap in this compiler written as a limit of
+	// the provider; a task tool is a flows handler and FlowManager.worker is the
+	// documented seam for queueing a frame from inside one. Vapi and Deepgram
+	// stay core because the field row above already stops them, the same shape as
+	// FieldToolMCPTask.
+	for _, provider := range Providers {
+		if got := table.Capability(FieldToolAnnounceTask, provider); got.Tag != Core {
+			t.Errorf("%s task-scoped announce tag = %q, want %q", provider, got.Tag, Core)
 		}
-	}
-	// The Pipecat note has to say where to put the tool instead, or the author
-	// only learns that something is wrong.
-	if note := table.Capability(FieldToolAnnounceTask, Pipecat).Note; !strings.Contains(note, "list it on the agent instead") {
-		t.Errorf("Pipecat task-scope note must name the fix: %q", note)
 	}
 }

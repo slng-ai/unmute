@@ -408,13 +408,20 @@ func Default() Table {
 				deny(Deepgram, "the Deepgram driver does not emit tool announcements yet"),
 			),
 			// Scope, not kind: Pipecat emits an agent tool as a decorated
-			// function that holds FunctionCallParams, but a task tool as a bare
-			// flows handler with no speech seam. So a tool that announces fails
-			// by name when it is listed on a task, instead of going quiet there
-			// (same split as FieldToolMCPTask).
-			FieldToolAnnounceTask: field(
-				deny(Pipecat, "the Pipecat driver cannot announce a tool listed on a task: list it on the agent instead"),
-			),
+			// function that holds FunctionCallParams, but a task tool as a flows
+			// handler, which holds a FlowManager instead. Both have a seam:
+			// FlowManager.worker is the documented way to queue a frame from
+			// inside a handler, verified on pipecat-ai 1.7.0, the pinned version,
+			// where flows ships bundled as pipecat.flows rather than the
+			// standalone pipecat_flows package.
+			//
+			// This row used to read deny(Pipecat, "cannot announce a tool listed
+			// on a task: list it on the agent instead"). That was a gap in this
+			// compiler stated as a limit of the provider, and it blocked a
+			// feature that worked. The scope stays a named field because the two
+			// drivers reach the seam differently and a third might not have one,
+			// so it keeps somewhere to say so.
+			FieldToolAnnounceTask: field(),
 			FieldOutbound: field(
 				deny(Pipecat, "the Pipecat driver does not emit outbound calling yet"),
 				warn(Deepgram, "Deepgram outbound calling uses carrier-conditional generated AMD"),

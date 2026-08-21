@@ -33,14 +33,24 @@ models:
   think:
     reasoning:
       provider: openai
-      model: gpt-5.6-terra
+      model: gpt-5.6-luna
       params:
         reasoning_effort: "none"
+  # speak:
+  #   voice:
+  #     provider: slng
+  #     # UNDER TEST. Swapped from cartesia/sonic:3.5 while chasing intermittent
+  #     # first-segment failures on the gateway: segments sent their text, waited
+  #     # 11.3s, received zero audio and errored. Voice ids are model-specific
+  #     # here, and gradium rejects a cartesia uuid with "Embeddings not found".
+  #     model: "gradium/tts:default"
+  #     voice: "4SZHfMpw-p46Ywgs"
+  #     language: en
   speak:
     voice:
       provider: slng
-      model: "cartesia/sonic:3.5"
-      voice: "f786b574-daa5-4673-aa0c-cbe3e8534c02"
+      model: "deepgram/aura:2"
+      voice: "aura-2-thalia-en"
       language: en
       params:
         # Speech world part. SLNG speech serves na, eu and ap; the Context
@@ -81,6 +91,11 @@ models:
     detector:
       provider: local
       model: silero
+      # UNDER TEST at 400ms on a TTS that works. 250ms moved the floor 0.577s to
+      # ~0.30s but the agent re-asked a question, which is what a split
+      # utterance looks like. The earlier retest was wasted on cartesia
+      # segments that returned no audio at all.
+      endpointing_delay: 400ms
 
 agents:
   concierge:

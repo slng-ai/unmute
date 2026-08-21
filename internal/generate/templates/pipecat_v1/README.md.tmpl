@@ -72,6 +72,12 @@ awaited: the tool's own work starts straight away and the caller hears the
 answer no later than they would without the line. The argument check runs
 first, so a call the model got wrong stays silent. If the caller speaks over
 the line, the tool's `interruption:` value decides what happens.
+
+You will see the line in two shapes in `bot.py`, because a tool listed on an
+agent and the same tool listed on a task are emitted differently. An agent tool
+holds `FunctionCallParams` and pushes the frame through `params.llm`; a task tool
+is a flows handler and queues it through `flow_manager.worker`. Same frame, same
+contract, and nothing waits for playout in either.
 {{- end}}
 {{- if .HasFlows}}
 

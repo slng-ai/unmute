@@ -602,6 +602,7 @@ var pipecatEmittedFields = map[targetcap.Field]bool{
 	targetcap.FieldToolAuth:             true, // _bearer Authorization header off token_env
 	targetcap.FieldToolInterruption:     true, // cancel_on_interruption
 	targetcap.FieldToolAnnounce:         true, // TTSSpeakFrame queued before the handler body
+	targetcap.FieldToolAnnounceTask:     true, // same frame, queued via FlowManager.worker
 	targetcap.FieldTracingLangfuse:      true,
 	targetcap.FieldTracingCoval:         true, // tracing.py routes Pipecat's own spans to Coval
 	targetcap.FieldVariableConversation: true, // generated update_variables @tool writing State

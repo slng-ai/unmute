@@ -3246,6 +3246,70 @@ func TestPipecatDoesNotClaimMultiRegion(t *testing.T) {
 	}
 }
 
+// TestPipecatV1TaskToolAnnounceQueuesFrameFromFlowManager is the gate on the
+// scope half of tool announcements. An agent tool reaches the pipeline through
+// FunctionCallParams; a task tool is a flows handler and reaches it through
+// FlowManager.worker, which is the documented seam for queueing a frame from
+// inside a handler (verified against pipecat-ai 1.7.0, the pinned version, where
+// flows ships as pipecat.flows rather than the standalone pipecat_flows).
+//
+// This case exists because the capability table used to deny Pipecat here with
+// "cannot announce a tool listed on a task", which was a gap in this compiler
+// written as a limit of the provider. It blocked a working feature, and nothing
+// failed when the claim was wrong. This is what fails now.
+func TestPipecatV1TaskToolAnnounceQueuesFrameFromFlowManager(t *testing.T) {
+	load := func(t *testing.T, announce string) string {
+		t.Helper()
+		pkg, err := spec.Load(filepath.Join("..", "..", "examples", "salon-concierge"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		agent, err := ir.Build(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// check_availability is listed on the booking task, never on an agent,
+		// so it can only be reached through the flows-handler path.
+		tool := agent.Tools["check_availability"]
+		tool.Announce = announce
+		agent.Tools["check_availability"] = tool
+		artifact, err := GeneratePipecat(agent, targetByProvider(t, agent, ir.ProviderPipecat), nil, nil)
+		if err != nil {
+			t.Fatalf("generate with announce %q: %v", announce, err)
+		}
+		return artifactFile(t, artifact, "bot.py")
+	}
+
+	bot := load(t, "Let me check the calendar.")
+	want := `await flow_manager.worker.queue_frame(TTSSpeakFrame("Let me check the calendar."))`
+	if !strings.Contains(bot, want) {
+		t.Errorf("a task tool must announce through FlowManager.worker: want %s", want)
+	}
+	if !regexp.MustCompile(`(?m)^from pipecat\.frames\.frames import .*TTSSpeakFrame`).MatchString(bot) {
+		t.Error("an announcing task tool must import TTSSpeakFrame")
+	}
+	// The line is queued, never awaited for playout: the whole point is that
+	// speech starts while the handler body runs.
+	handler := bot[strings.Index(bot, "async def _flow_tool_check_availability"):]
+	handler = handler[:strings.Index(handler, "\n\n\nasync def ")+1]
+	for _, absent := range []string{"BotStoppedSpeakingFrame", "asyncio.wait_for", "_handoff_finished"} {
+		if strings.Contains(handler, absent) {
+			t.Errorf("the flows-handler announcement must not wait for playout, found %q:\n%s", absent, handler)
+		}
+	}
+
+	// Unset must leave this handler exactly as it was, so no existing package
+	// gains a frame it never asked for. Scoped to this tool's own handler:
+	// salon-concierge announces on several other task tools, so the package as a
+	// whole still queues frames.
+	silent := load(t, "")
+	quiet := silent[strings.Index(silent, "async def _flow_tool_check_availability"):]
+	quiet = quiet[:strings.Index(quiet, "\n\n\nasync def ")+1]
+	if strings.Contains(quiet, "queue_frame(TTSSpeakFrame") {
+		t.Errorf("a task tool that announces nothing must queue no frame:\n%s", quiet)
+	}
+}
+
 // TestPipecatV1ToolAnnounceQueuesFrameWithoutWaiting: an announcing tool carries
 // the line on the decorator that already wraps every direct tool, the wrapper
 // queues it as a TTSSpeakFrame before the handler body runs, and nothing waits

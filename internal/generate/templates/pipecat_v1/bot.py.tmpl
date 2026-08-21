@@ -1359,6 +1359,13 @@ async def _flow_tool_{{.Name}}(args, flow_manager{{if .NeedsState}}, state=None{
 {{if .Needed}}    refusal = _refusal({{pyq .Name}}, state, {{.NeededLiteral}})
     if refusal:
         return {"refused": refusal}
+{{end}}{{if .Announce}}    # Cover the wait, same contract as _direct_tool: TTSSpeakFrame is a
+    # DataFrame, so it is queued and speech starts while the handler body runs.
+    # A flows handler holds a FlowManager rather than FunctionCallParams, and
+    # FlowManager.worker is the documented seam for queueing a frame from inside
+    # a handler (pipecat.flows.manager, pipecat-ai 1.7.0). Queued after the
+    # refusal check, so a refused call stays silent.
+    await flow_manager.worker.queue_frame(TTSSpeakFrame({{pyq .Announce}}))
 {{end}}{{if .Local}}    result = tools.{{.Name}}.{{.Name}}(**dict(args){{range .Inject}}, {{.Key}}={{.Expr}}{{end}})
     if inspect.isawaitable(result):
         result = await result
