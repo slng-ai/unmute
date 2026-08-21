@@ -218,18 +218,16 @@ Shown from inside the package. Anywhere else, name it first, as in
 | Command | You talk through | Needs |
 |---|---|---|
 | `unmute dev` | a local web page | `uv` for Pipecat; Docker for LiveKit |
-| `unmute dev --telephony` | the target's phone route | the route's runtime, carrier credentials, and reachable ingress |
+| `unmute dev --telephony` | the target's phone route | Docker, or `uv` on Pipecat `cloud-websocket`; no carrier account |
 
-Pipecat `cloud-websocket` can receive a real Twilio call on your laptop through
-the managed HTTPS/WSS tunnel. A local LiveKit SIP stack proves its trunk,
-dispatch, and worker wiring, but a real inbound call still needs public SIP
-signaling and RTP ingress.
+Which plane each route gets, what a local call proves, and what it cannot tell
+you are on [call your agent locally](/dev/local-telephony).
 
 ## Where to go next
 
 <Columns cols={2}>
-  <Card title="A phone route locally" icon="phone" href="/dev/telephony">
-    What `--telephony` runs, and what it puts back.
+  <Card title="Call your agent locally" icon="phone" href="/dev/local-telephony">
+    One command, a real phone codec, and no carrier account.
   </Card>
   <Card title="dev reference" icon="book" href="/reference/cli/dev">
     Every flag, with defaults and requirements.

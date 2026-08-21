@@ -197,7 +197,7 @@ Once the Compose graph is healthy the CLI dispatches the agent and the call goes
 through your trunk. Your phone rings and the agent talks when you answer. If the
 call connects but you hear nothing, that is the RTP path back to the container
 rather than anything in the agent; the
-[local telephony guide](../../docs-site/dev/telephony.mdx) covers it.
+[local telephony guide](../../docs-site/dev/local-telephony.mdx) covers it.
 
 On **pipecat**, outbound runs against the deployed agent:
 

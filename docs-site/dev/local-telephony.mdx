@@ -1,5 +1,5 @@
 ---
-title: "Calling your agent locally"
+title: "Call your agent locally"
 description: "Place a real phone call to your agent on your own machine, with no carrier account, and read what the run tells you."
 ---
 
@@ -13,7 +13,10 @@ That runs your telephony route locally. **No carrier account. No phone number.
 No tunnel. Nothing leaves your machine.** You talk to your agent over a real
 phone codec, and you can ask it to transfer you.
 
-This page is what the run does, what it proves, and what it does not.
+This is the only page you need for local phone testing. It covers what the run
+starts, what you can test with it, and what it cannot tell you. A real call
+through your own account is the same command with one flag added, and it is [at
+the end](#when-you-do-want-a-real-call).
 
 ## "Twilio" here is a protocol, not a company
 
@@ -35,108 +38,19 @@ You will see this on the route line:
 pipecat: local telephony plane=media-websocket  ·  no carrier involved
 ```
 
-Nothing on this page touches your carrier. Getting a local call working comes
-first, and everything below assumes it. A real call through your own account is
-one flag on this same command, and it has [its own section at the
-end](#when-you-do-want-a-real-call).
+## Which plane your route gets
 
-## Transfers: what compiles, and what completes locally
+The route your connection declares decides the plane. You do not choose it, and
+the run prints which one it picked.
 
-The question people hit first. Transfer support is a property of the **route**,
-not of the local plane, and the compiler refuses a shape a route cannot emit.
-
-| Route | Cold transfer | Warm transfer |
-|---|---|---|
-| LiveKit `sip` | compiles · up to the `REFER` | compiles · completes locally |
-| Pipecat `sip` | compiles · up to the `REFER` | **refused at compile** |
-| LiveKit `connector` | **refused at compile** | **refused at compile** |
-| Pipecat `cloud-websocket` | compiles · up to the handoff | **refused at compile** |
-| Pipecat `carrier-websocket` | **refused at compile** | **refused at compile** |
-| Pipecat `daily-sip` | compiles · no local plane | **refused at compile** |
-
-Every row above was checked by compiling it, not by reading the code.
-
-**Warm is the only shape that finishes on your machine**, and only on LiveKit
-`sip`. A cold transfer cannot, on either `sip` route, and the reason is not a
-gap in the product: a cold transfer hands the destination's address to the
-*caller* and steps out, so completing it is the caller's job. Locally the caller
-is your softphone and the destination is a container, and a host softphone
-cannot route the plane's network. [Why cold and warm
-differ](#why-cold-and-warm-differ) has the detail. `make rig` completes that leg
-because there every leg is a container; it is a target in the Unmute repository
-rather than something the installed CLI offers, so reaching for it means working
-from a clone.
-
-### Testing the decision
-
-There is a third thing to test that needs no destination at all, and it is the
-one that usually needs the work: **whether the agent hands over when you want it
-to, and only then.** That is a test of your prompt, not of your telephony, so it
-behaves the same on every route and every plane. Talk to the agent and watch for
-one line:
-
-```text
-transfer requested  shape=cold
-```
-
-Run it in both directions. A transfer that never fires when a caller clearly
-asks for a person is the obvious failure. A transfer that fires because somebody
-sounded annoyed, or asked a question the agent should have answered itself, is
-the expensive one, and you will only find it by trying to provoke it. Neither
-case needs anyone to pick up, so you can iterate on wording in seconds.
-
-<Note>
-  A **warm** transfer also needs `channels.phone.outbound: true`, on any route.
-  It places a call to its destination, so a package that declares no outbound
-  direction is refused with exactly that sentence. Cold needs no such thing.
-</Note>
-
-A refusal is a compile error naming the reason and where the shape does work:
-
-```text
-pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twilio)
-does not emit warm transfer: a warm handoff has to act on how the destination's leg
-ended, which on this route needs a callback endpoint you host, and hosting nothing is
-what this route is for; warm transfer compiles on (livekit, sip) trunks today.
-Connection "route" declares transport: cloud-websocket
-```
-
-It always names where the shape *does* work, so a refusal is a redirection
-rather than a dead end.
-
-<Warning>
-  A model will happily *say* it is transferring you when the package declares no
-  transfer at all. Check the package: a `human_transfer` control with a `cold:`
-  or `warm:` block is the only thing that makes a transfer real. If your agent
-  announces a handoff and nothing happens, look there before you look at the
-  plane.
-</Warning>
-
-For **both** planes a local cold transfer proves the handoff and never proves
-that a person answered. That last step is the one thing no local run can
-witness, and the run says so on the way out:
-
-```text
-pipecat: cold transfer to +15551234567  ·  destination_reached
-pipecat: the carrier announced "Connecting you to a colleague now." to the caller
-pipecat: the document ended the caller's original leg after the dial
-pipecat: recording .../destination_heard.wav  ·  3.9s the destination heard
-pipecat: a local run proves the handoff, never that a person answered
-```
-
-## Two planes, one command
-
-Which plane you get depends on the route your connection declares. You do not
-choose it, and the run prints which one it picked.
-
-| Route | Plane | Who calls | What runs locally |
-|---|---|---|---|
-| LiveKit `sip` | `sip` | you, from a softphone | a real SIP stack in containers |
-| Pipecat `sip` | `sip` | you, from a softphone | the same stack, with a Pipecat agent in it |
-| Pipecat `carrier-websocket` | `media-websocket` | the run, and you speak | the agent in Docker; the carrier is the command |
-| Pipecat `cloud-websocket` | `media-websocket` | the run, and you speak | the agent under `uv` on the host; the carrier is the command |
-| LiveKit `connector` | `media-websocket` | the run, and you speak | the agent in Docker; the carrier is the command |
-| Pipecat `daily-sip` | none | — | refused: this route needs an existing carrier phone leg |
+| Route | Plane | Who dials | What runs locally | What you can test |
+|---|---|---|---|---|
+| LiveKit `sip` | `sip` | you, from a softphone | a real SIP stack in containers | inbound, outbound, cold and warm transfer |
+| Pipecat `sip` | `sip` | you, from a softphone | the same stack, with a Pipecat agent in it | inbound, cold transfer |
+| Pipecat `carrier-websocket` | `media-websocket` | the run, and you speak | the agent in Docker | inbound, outbound |
+| Pipecat `cloud-websocket` | `media-websocket` | the run, and you speak | the agent under `uv` on the host | inbound, cold transfer |
+| LiveKit `connector` | `media-websocket` | the run, and you speak | the agent in Docker | inbound, outbound |
+| Pipecat `daily-sip` | none | nobody | nothing: the run refuses this route | nothing locally, see [the Daily route](#the-daily-route) |
 
 The difference that matters day to day is **who dials**.
 
@@ -146,12 +60,74 @@ The difference that matters day to day is **who dials**.
   carrier, so it places the call itself and connects your microphone to it. If
   you have no audio tools, it plays a recorded fixture instead and says which.
 
+<Note>
+  The Pipecat `cloud-websocket` route runs the generated agent directly with
+  `uv` instead of Docker. Install `uv` and check it with `uv --version` before
+  starting that route. Every other local phone route uses Docker Compose.
+</Note>
+
+## What the run does, in order
+
+<Steps>
+  <Step title="Compile and print the plan">
+    The package is generated into `build/<target>/`, and the resolved route is
+    printed: the transport, the carrier, the local services it needs, the plane
+    it chose, and the carrier steps no command can do for you.
+
+    ```text wrap
+    pipecat: telephony route provider=pipecat transport=carrier-websocket carrier=twilio coordination=shared
+    pipecat: setup: get the Account SID and Auth Token from the Twilio Console account dashboard and select a Voice-capable number
+    pipecat: local services: application, redis
+    pipecat: local telephony plane=media-websocket  ·  no carrier involved
+    compiled examples/outbound-reminder/build/pipecat
+    ```
+
+    Those `setup:` lines print on **every** run, including one that never touches
+    your carrier. They are what going live still needs, and a healthy local call
+    is not evidence about any of them.
+  </Step>
+  <Step title="Check the credentials you have to supply">
+    Only the ones that are yours, and that is fewer than you might expect: the
+    plane supplies every carrier credential itself, so it never asks you for one.
+    A missing name stops the run before Docker is touched, and the message says
+    which name and why this route needs it.
+
+    The plane's values also **override** anything already in your environment. If
+    it cannot replace a credential the route declares, it refuses rather than let
+    your own account details reach the agent.
+  </Step>
+  <Step title="Start the local runtime">
+    Docker Compose brings up the generated services. On either `sip` route that
+    is the agent, Redis, LiveKit Server and LiveKit SIP, and the command creates
+    the trunk and dispatch records against that local server before the agent
+    starts.
+
+    Pipecat `cloud-websocket` is the exception: it starts the compiled `bot.py`
+    on your machine with `uv` rather than under Compose.
+  </Step>
+  <Step title="Place the call, or say how to">
+    On the `media-websocket` plane the command is the carrier, so it places the
+    call itself and connects your microphone to it.
+
+    On the `sip` plane there is a real phone to pick up, so it prints an address
+    and a per-run credential to dial with, and waits.
+  </Step>
+</Steps>
+
+## Stopping puts things back
+
+Ctrl-c stops the local Pipecat process, or stops and removes the Compose stack.
+Named data volumes are kept. There is nothing else to undo, because nothing
+outside the machine was changed. Under
+[`--carrier`](#when-you-do-want-a-real-call) there is one thing, and it is put
+back too.
+
 ---
 
 ## The media-websocket plane
 
-The Pipecat routes and the LiveKit `connector` route. The command speaks the
-carrier's media protocol over loopback and is the caller.
+The Pipecat websocket routes and the LiveKit `connector` route. The command
+speaks the carrier's media protocol over loopback and is the caller.
 
 ```sh
 unmute dev examples/salon-concierge --telephony --target pipecat
@@ -231,7 +207,8 @@ pipecat: the agent would not place the call: POST /telephony/outbound: 422:
 {"detail":{"missing":["appointment_time","customer_id","name"],"invalid":[]}}
 ```
 
-Supply them in `UNMUTE_CALL_START` as a JSON object.
+Supply them with `--var`, or in `UNMUTE_CALL_START` as a JSON object. [Outbound
+calls](/telephony/outbound-calls) covers how those values are declared.
 
 ### What it proves, and what it does not
 
@@ -257,10 +234,10 @@ containers on your machine, which you dial from a softphone. Both run the same
 plane, so everything below applies to either.
 
 Pipecat `sip` is the self-hosted answer: no managed platform anywhere in it, and
-the only route in the table with none. It emits no deployment manifest and builds
-on a plain Python image, because in production you run the same four containers
-you run locally. Its trade is warm transfer, which this project has not built on
-Pipecat.
+the only route with none. It emits no deployment manifest and builds on a plain
+Python image, because in production you run the same four containers you run
+locally. It also **receives calls only**, so `outbound: true` is refused on it by
+name.
 
 The two routes differ in one place, and it is the place that decides whether an
 inbound call is answered. LiveKit SIP starts ringing as soon as the caller is in
@@ -363,22 +340,6 @@ above, and the same softphone dials it.
 | **Cold** transfer, third leg | no, use `make rig` | Whether the caller actually reached the destination. A cold transfer hands the address to the *caller*, and a softphone on your machine cannot route the plane's container network |
 | Reachability from the phone network | **no** | Nothing. A carrier reaches you over publicly routable SIP and RTP, and a laptop behind NAT provides neither |
 | Audio delay a caller will hear | **no** | Nothing. Local delay is a loopback. `--carrier` delay is the public internet reaching your machine. Neither is the delay a deployed agent has |
-
-#### Why cold and warm differ
-
-This is the one piece of SIP that decides most of the table.
-
-- A **warm** transfer is dialled by the plane. It calls the destination, plays
-  hold music to your caller, briefs the destination, then merges the two calls.
-  Your softphone only ever talks to the plane, so a softphone can test the
-  whole thing.
-- A **cold** transfer is a SIP `REFER`. The plane hands your softphone the
-  destination's address and steps out. Your softphone must then dial it itself.
-  The destinations run on the plane's own container network, which macOS and
-  Windows cannot route to, so the last leg fails there with a timeout.
-
-That failure is not a defect and the run says so. In production the caller is a
-carrier, and routing the `REFER` target is exactly the carrier's job.
 
 ### Reading the run
 
@@ -561,16 +522,187 @@ on the plane's network need different ones.
 
 `unmute dev --telephony` picks `softphone` for you. `make rig` uses `headless`,
 which is also why it is safe in continuous integration: it publishes nothing and
-needs no credentials of any kind.
+needs no credentials of any kind. It is a target in the Unmute repository rather
+than something the installed CLI offers, so reaching for it means working from a
+clone.
 
 ---
+
+## Transfers
+
+Transfer support is a property of the **route**, not of the local plane, and the
+compiler refuses a shape a route cannot emit. What cold and warm mean is on
+[transfers](/transfers/overview). This is what completes on your machine.
+
+| Route | Cold, locally | Warm, locally |
+|---|---|---|
+| LiveKit `sip` | up to the `REFER` | yes, end to end |
+| Pipecat `sip` | up to the `REFER` | **refused at compile** |
+| LiveKit `connector` | **refused at compile** | **refused at compile** |
+| Pipecat `cloud-websocket` | up to the handoff | **refused at compile** |
+| Pipecat `carrier-websocket` | **refused at compile** | **refused at compile** |
+| Pipecat `daily-sip` | no local plane | **refused at compile** |
+
+Every row above was checked by compiling it, not by reading the code.
+
+**Warm is the only shape that finishes on your machine**, and only on LiveKit
+`sip`. A cold transfer cannot, on either `sip` route, and the reason is not a
+gap in the product: a cold transfer hands the destination's address to the
+*caller* and steps out, so completing it is the caller's job. Locally the caller
+is your softphone and the destination is a container, and a host softphone
+cannot route the plane's network. [Why cold and warm
+differ](#why-cold-and-warm-differ) has the detail.
+
+A refusal is a compile error naming the reason and where the shape does work:
+
+```text
+pipecat: telephony warm_transfer: telephony route (pipecat, cloud-websocket, twilio)
+does not emit warm transfer: a warm handoff has to act on how the destination's leg
+ended, which on this route needs a callback endpoint you host, and hosting nothing is
+what this route is for; warm transfer compiles on (livekit, sip) trunks today.
+Connection "route" declares transport: cloud-websocket
+```
+
+It always names where the shape *does* work, so a refusal is a redirection
+rather than a dead end.
+
+<Note>
+  A **warm** transfer also needs `channels.phone.outbound: true`, on any route.
+  It places a call to its destination, so a package that declares no outbound
+  direction is refused with exactly that sentence. Cold needs no such thing.
+</Note>
+
+### Testing the decision
+
+There is a third thing to test that needs no destination at all, and it is the
+one that usually needs the work: **whether the agent hands over when you want it
+to, and only then.** That is a test of your prompt, not of your telephony, so it
+behaves the same on every route and every plane. Talk to the agent and watch for
+one line:
+
+```text
+transfer requested  shape=cold
+```
+
+Run it in both directions. A transfer that never fires when a caller clearly
+asks for a person is the obvious failure. A transfer that fires because somebody
+sounded annoyed, or asked a question the agent should have answered itself, is
+the expensive one, and you will only find it by trying to provoke it. Neither
+case needs anyone to pick up, so you can iterate on wording in seconds.
+
+<Warning>
+  A model will happily *say* it is transferring you when the package declares no
+  transfer at all. Check the package: a `human_transfer` control with a `cold:`
+  or `warm:` block is the only thing that makes a transfer real. If your agent
+  announces a handoff and nothing happens, look there before you look at the
+  plane.
+</Warning>
+
+### Why cold and warm differ
+
+This is the one piece of SIP that decides most of the table.
+
+- A **warm** transfer is dialled by the plane. It calls the destination, plays
+  hold music to your caller, briefs the destination, then merges the two calls.
+  Your softphone only ever talks to the plane, so a softphone can test the
+  whole thing.
+- A **cold** transfer is a SIP `REFER`. The plane hands your softphone the
+  destination's address and steps out. Your softphone must then dial it itself.
+  The destinations run on the plane's own container network, which macOS and
+  Windows cannot route to, so the last leg fails there with a timeout.
+
+That failure is not a defect and the run says so. In production the caller is a
+carrier, and routing the `REFER` target is exactly the carrier's job.
+
+On the `media-websocket` plane a cold transfer stops one step later, at the
+handoff, and the run says that too:
+
+```text
+pipecat: cold transfer to +15551234567  ·  destination_reached
+pipecat: the carrier announced "Connecting you to a colleague now." to the caller
+pipecat: the document ended the caller's original leg after the dial
+pipecat: recording .../destination_heard.wav  ·  3.9s the destination heard
+pipecat: a local run proves the handoff, never that a person answered
+```
+
+---
+
+## The flags
+
+| Flag | What it does |
+|---|---|
+| `--telephony` | run the route instead of the browser UI |
+| `--carrier` | reach the route through your own carrier: managed tunnel, webhook rewrite, restore on exit |
+| `--to <E.164>` | place one outbound call once the stack is healthy. On a local plane the number reaches this machine and is never dialled, and the run says so |
+| `--var name=value` | stand in for a value a production call would arrive with, repeatable |
+| `--public-url` | your own HTTPS origin instead of a managed quick tunnel (requires `--carrier`) |
+| `--no-webhook` | leave the carrier number's webhook alone; point it at the printed URL yourself (requires `--carrier`) |
+| `--bot-port` | change the host port the agent publishes, default `7860` |
+| `--verbose` | follow the run's log on stderr as well as writing it to the log file |
+
+`--to` requires `--telephony`, and `--public-url` and `--no-webhook` require
+`--carrier`. Each says so rather than being ignored:
+
+```text
+unmute: dev: --to requires --telephony
+```
+
+`--to` takes one E.164 number and checks it before anything starts:
+
+```text
+unmute: dev: --to must be an E.164 number like +15551234567, got "4155550123"
+```
+
+Those are the flags a phone route uses. Every flag `unmute dev` takes is on [the
+dev reference](/reference/cli/dev).
+
+## Where the log is
+
+Everything the stack prints goes to `build/<target>/telephony.log`, and the path
+is printed with the ready line. It is also printed when the stack fails to start,
+which is where the reason lives:
+
+```text
+telephony Compose failed to start. logs: pkg/build/livekit/telephony.log
+unmute: dev pkg: start Docker Compose topology: exit status 1
+```
 
 ## Running two at once
 
 Both planes publish host ports, and a run whose ports are already taken refuses
-before it starts anything, naming the port and the flag that moves it. Give each
-run its own with `--bot-port`, and on LiveKit SIP also set `LIVEKIT_HOST_PORT`,
-`LIVEKIT_SIP_HOST_PORT` and `LIVEKIT_RTP_HOST_PORT_RANGE`.
+before it starts anything, naming the port and the flag that moves it:
+
+```text
+unmute: dev: port 7860 is already in use, and this run needs it for the local
+agent. Another `unmute dev` is probably still up: stop it, or move this one with
+--bot-port. Left alone, this run would reach the other one's agent and report its
+answers as yours
+```
+
+That last sentence is why the refusal exists. Two runs on the same agent port do
+not collide loudly: the second reaches the first one's agent, which looks exactly
+like a bug in your own package.
+
+Give each run its own port with `--bot-port`, and on either `sip` route also set
+`LIVEKIT_HOST_PORT`, `LIVEKIT_SIP_HOST_PORT` and `LIVEKIT_RTP_HOST_PORT_RANGE`.
+The local RTP range defaults to `10000-10100`. A container from some other
+project holding one of those ports is caught by the same check, and if you get
+past it, Compose says so in its own words:
+
+```text wrap
+Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint unmute-pkg-livekit-e7f5b2b6-livekit_server-1: Bind for 0.0.0.0:7880 failed: port is already allocated
+```
+
+## The Daily route
+
+`daily-sip` needs an existing carrier phone leg, so it has no local plane and
+`--telephony` refuses it. Its generated README gives the two commands for the
+helper and the tunnel; `unmute dev` does not host that public helper for you.
+Set `UNMUTE_PUBLIC_URL` to the helper's exact HTTPS base URL before it starts.
+The helper verifies Twilio's signed `/call` form before it uses the Pipecat Cloud
+key to start an agent session.
+
+---
 
 ## When you do want a real call
 
@@ -581,13 +713,10 @@ the same command with one flag added:
 unmute dev <your-package> --telephony --carrier
 ```
 
-That flag brings a managed tunnel, points your number's webhook at this run, and
-puts the webhook back the way it was when you stop. Two flags adjust it, and both
-need `--carrier`: `--public-url` uses a tunnel of your own instead of the managed
-one, and `--no-webhook` leaves your number's configuration untouched so you can
-point it yourself. [Running a phone route locally](/dev/telephony) covers both.
-
-It also says what its delay means:
+`--carrier` is the only mode that changes anything outside your machine. It
+starts a public tunnel, points your number at this run, and puts the number back
+the way it was on the way out. It also says what its audio delay means, because
+this is the mode where people start timing things:
 
 ```text
 livekit: --carrier: this places a real call through your carrier.
@@ -595,6 +724,143 @@ livekit: audio delay in this mode is an artifact of reaching your machine from
 livekit: the public network. It is not the delay a deployed agent has.
 ```
 
+<Warning>
+  A healthy local runtime proves wiring, not reachability. A real call also needs
+  carrier credentials, a voice-capable number, and the route's public ingress.
+  The managed tunnel provides that ingress for HTTPS and WSS only. For SIP, the
+  carrier must reach public SIP signalling and RTP ports; a laptop behind normal
+  network address translation cannot provide that ingress by itself.
+</Warning>
+
+[Inbound calls](/telephony/inbound-calls) is the walkthrough for a first real
+call, on the route that works from a laptop.
+
+### The managed tunnel
+
+With no `--public-url`, the command needs `cloudflared` on your PATH. It starts
+a quick tunnel against the local agent port, reads the assigned origin, and
+hands that origin to the local runtime. Compose callback routes receive it as
+`UNMUTE_PUBLIC_URL`; Pipecat `cloud-websocket` passes its host to the local
+Pipecat runner.
+
+```text
+pipecat: managed tunnel https://random-words-here.trycloudflare.com (quick tunnel URLs rotate on every run)
+```
+
+Quick tunnel URLs really do rotate on every run, which is why your number's
+webhook is rewritten on every start rather than once.
+
+If `cloudflared` is missing:
+
+```text wrap
+cloudflared not found on PATH; the managed tunnel for carrier webhook routes needs it. Install it (macOS: `brew install cloudflared`; Linux: distribution package or a binary from https://github.com/cloudflare/cloudflared/releases) or pass --public-url to bring your own tunnel (ngrok included)
+```
+
+cloudflared is the only tunnel client the CLI manages. It is Apache 2.0
+licensed and needs no account for quick tunnels, so one client means one output
+parser and one failure mode. Any other tunnel is welcome; you run it and pass
+its origin.
+
+<Note>
+  Both `sip` routes need carrier reachable SIP signalling and RTP media, not
+  HTTPS. A tunnel is neither required nor sufficient there, so those routes start
+  no tunnel at all.
+</Note>
+
+### Bring your own URL
+
+```sh
+unmute dev ./agent --telephony --carrier --public-url https://your-tunnel.example
+```
+
+`--public-url` skips tunnel management entirely. It must be an HTTPS origin,
+with an optional path, and nothing else:
+
+```text
+unmute: dev examples/twilio-telephony-hello: --public-url must be an HTTPS origin with an optional path, got "http://x.example"
+```
+
+A trailing slash is trimmed for you. With the origin known, the command prints
+the exact callback URLs the carrier should use, one line each, for example the
+media websocket, the outbound trigger, and the status callback. Your URL must
+already forward to the port set by `--bot-port`, which defaults to `7860`.
+
+The inbound webhook path is route-specific:
+
+| Route | Twilio voice webhook |
+|---|---|
+| Pipecat `cloud-websocket` | `POST /` |
+| Pipecat `carrier-websocket` | `POST /telephony/inbound` |
+| LiveKit `connector` | `POST /telephony/inbound` |
+
+Neither `sip` route is in this table, because an HTTPS origin cannot expose SIP
+or RTP.
+
+### Leave your number alone
+
+By default, on carriers that support it, today Twilio, the CLI sets the number's
+voice webhook to the route's exact inbound URL and prints the previous value:
+
+```text wrap
+pipecat: Twilio voice webhook for +15551234567 set to https://random-words-here.trycloudflare.com/telephony/inbound (was: https://example.com/old)
+```
+
+Pipecat `cloud-websocket` instead gets the origin root, such as
+`https://random-words-here.trycloudflare.com/`, because the local Pipecat runner
+answers `POST /` itself.
+
+This is the one thing the command changes outside your machine, and it changes it
+in your name, which is why the previous value is printed rather than assumed. On
+exit it puts the old value back:
+
+```text
+pipecat: Twilio voice webhook for +15551234567 restored to https://example.com/old
+```
+
+The restore is armed before the number is ever touched, so it runs on handled
+exit paths: a clean ctrl-c, cancellation, or a local-agent error while the CLI is
+still running. If the restore itself fails you get a warning naming the number,
+not silence. That undo matters: a dev URL dies with the process, so leaving it on
+a real phone line would aim that line at a dead tunnel.
+
+To keep the CLI away from your carrier settings:
+
+```sh
+unmute dev ./agent --telephony --carrier --no-webhook
+```
+
+```text
+pipecat: --no-webhook, carrier number left untouched; point it at https://random-words-here.trycloudflare.com/ yourself
+```
+
+Then point the number at the exact inbound URL printed for the route. Use it when
+the number is shared, when your carrier is configured by infrastructure code, or
+when you simply want no outward change made for you.
+
+### What the run never does
+
+- It does not buy or create carrier resources.
+- It does not touch a TwiML Bin or any static markup you own.
+- It does not install a tunnel client for you.
+- It does not leave a webhook pointing at a finished run.
+
 Going live still needs every step the run prints under `setup:`. A healthy local
 call is not evidence about any of them, which is why those steps print on every
-default run.
+run.
+
+## Where to go next
+
+<Columns cols={2}>
+  <Card title="Inbound calls" icon="phone-incoming" href="/telephony/inbound-calls">
+    A first real call, on the route that works from a laptop.
+  </Card>
+  <Card title="Outbound calls" icon="phone-outgoing" href="/telephony/outbound-calls">
+    Make the agent dial out, and give the call its values.
+  </Card>
+  <Card title="Transfers" icon="phone-forwarded" href="/transfers/overview">
+    What cold and warm mean, and which route emits which.
+  </Card>
+  <Card title="dev reference" icon="book" href="/reference/cli/dev">
+    Every flag, with defaults and requirements.
+  </Card>
+</Columns>

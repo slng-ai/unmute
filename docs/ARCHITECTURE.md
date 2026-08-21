@@ -209,7 +209,7 @@ belong to the operator.
 Public run instructions are kept with the behavior they explain:
 
 - [local development](../docs-site/dev/overview.mdx)
-- [telephony development](../docs-site/dev/telephony.mdx)
+- [telephony development](../docs-site/dev/local-telephony.mdx)
 - [targets](../docs-site/targets/overview.mdx)
 - [deployment](../docs-site/deploy/going-live.mdx)
 

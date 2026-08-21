@@ -24,6 +24,18 @@
   },
   "redirects": [
     {
+      "source": "/dev/telephony",
+      "destination": "/dev/local-telephony"
+    },
+    {
+      "source": "/dev/webhooks-and-tunnels",
+      "destination": "/dev/local-telephony"
+    },
+    {
+      "source": "/telephony/first-phone-call",
+      "destination": "/telephony/inbound-calls"
+    },
+    {
       "source": "/build/choosing-a-structure",
       "destination": "/build/orchestration/choosing-a-structure"
     },
@@ -45,7 +57,7 @@
     },
     {
       "source": "/telephony/webhooks-and-tunnels",
-      "destination": "/dev/webhooks-and-tunnels"
+      "destination": "/dev/local-telephony"
     },
     {
       "source": "/build/tools",
@@ -124,9 +136,7 @@
         "pages": [
           "dev/overview",
           "dev/local-telephony",
-          "dev/latency",
-              "dev/telephony",
-          "dev/webhooks-and-tunnels"
+          "dev/latency"
         ]
       },
       {
@@ -145,8 +155,8 @@
         "icon": "phone",
         "pages": [
           "telephony/overview",
-          "telephony/first-phone-call",
           "telephony/outbound-calls",
+          "telephony/inbound-calls",
           "telephony/twilio",
           {
             "group": "Transfers",
